@@ -42,6 +42,7 @@ export interface StatusAgentEntry {
 
 /** Review round from mission card history. */
 export interface StatusReviewRound {
+  readonly integrationRepairAssessment?: import('../../domain/integration-approval-restoration.js').IntegrationRepairAssessment;
   /** Round number. */
   readonly number: number;
   /** Reviewer agent. */

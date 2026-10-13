@@ -81,6 +81,17 @@ export type ADR0053ConceptName =
  * any new durable file read or write must be registered here or the build fails.
  */
 export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
+  // Release-normalized manifest snapshots are generated comparison inputs in
+  // an isolated temporary directory, removed in finally; never review authority.
+  {
+    id: 'mission-patch-comparison-write',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/review/mission-patch-comparison.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
   {
     id: 'active-verification-proof-read',
     concept: 'LargeArtifacts',

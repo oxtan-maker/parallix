@@ -1,7 +1,7 @@
 import { configureRepairCheckpoints } from '../application/ports/repair-checkpoint.js';
 import { RepairCheckpointService } from '../application/repair-checkpoint-service.js';
 import { resolveProcessConfiguration } from './config.js';
-import { createReviewClassification } from './review-classification.js';
+import { createReviewClassification, createIntegrationApprovalRestoration } from './review-classification.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import * as path from 'node:path';
 
@@ -262,7 +262,7 @@ export async function createProductionApplicationServices(
     reviewLoopMechanisms: (reviewSlug: string, target: ReviewLoopTarget, bindings: ReviewLoopBindings = {}) => createReviewLoopPorts(reviewSlug, target, {
       ...bindings,
       configuration: options.configuration,
-      classification: createReviewClassification(reviewSlug, target.worktree ?? rootDir, options.configuration.decision, options.configuration),
+      classification: createReviewClassification(reviewSlug, target.worktree ?? rootDir, options.configuration.decision, options.configuration), restoration: createIntegrationApprovalRestoration(target.worktree ?? rootDir, options.configuration),
       performHandoffFn: handoffWithMissionServices!,
       ...reviewLoopBindings(mission.store, mission.lifecycle, sessionMarkerPort),
     }),

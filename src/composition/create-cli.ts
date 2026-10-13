@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { commandInvocation } from './command-invocation.js';
-import { createReviewClassification } from './review-classification.js';
+import { createReviewClassification, createIntegrationApprovalRestoration } from './review-classification.js';
 import { resolveConfiguration, resolveProcessConfiguration } from './config.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 
@@ -439,7 +439,7 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
           reviewLoopMechanisms: (request: StartReviewRound, observers: ReviewLoopObservers) => createReviewLoopPorts(request.slug, request, {
             ...observers,
             configuration,
-            classification: createReviewClassification(request.slug, resolveWorktree(request.slug) ?? rootDir, configuration.decision, configuration),
+            classification: createReviewClassification(request.slug, resolveWorktree(request.slug) ?? rootDir, configuration.decision, configuration), restoration: createIntegrationApprovalRestoration(resolveWorktree(request.slug) ?? rootDir, configuration),
             performHandoffFn: performHandoffWithMissionServices(missionServicesFn as HandoffMissionServicesPort, configuration),
             ...reviewLoopBindings(services.mission!.store, services.mission!.lifecycle, reviewerSessionPort),
           }),

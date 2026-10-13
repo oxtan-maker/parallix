@@ -1,3 +1,4 @@
+import { weeklyDecisionWindows } from '../../../../src/application/services/decision-window.js';
 /**
  * Statistics contract for the metrics slice (TASK-2622.13 consolidation).
  *
@@ -513,4 +514,31 @@ test('px stats reports integration-repair rows as unavailable without telemetry 
   const { renderIntegrationRepairStatistics } = await import('../../../../src/application/presentation/integration-repair-statistics.js');
   const { windows } = await repairStatisticsFixture();
   assert.match(renderIntegrationRepairStatistics(null, [windows.current, windows.previous]), /\| This week[^\n]*unavailable/);
+});
+
+import { integrationRestorationStatistics, integrationRepairFacts, type IntegrationRepairRoundFact } from '../../../../src/application/review-loop/integration-restoration-statistics.js';
+import { renderIntegrationRestorationStatistics } from '../../../../src/application/presentation/integration-restoration-statistics.js';
+
+test('restoration stats select periods, separate sources and label observed and estimated denominators (TASK-2734)', () => {
+  const windows = weeklyDecisionWindows('2026-10-06');
+  const fact = (id: string, overrides: Partial<IntegrationRepairRoundFact> = {}): IntegrationRepairRoundFact => ({ id,
+    assessedAt: '2026-10-05T12:00:00Z', outcome: 'restored', restored: true, observedWrong: false,
+    normalReviewMs: null, normalReviewCostUsd: null, ...overrides });
+  const facts = [fact('restore-1'), fact('restore-2', { observedWrong: true }),
+    fact('old', { assessedAt: '2026-09-27T12:00:00Z' }),
+    fact('normal-1', { outcome: 'mission-change-differs', restored: false, normalReviewMs: 100, normalReviewCostUsd: 0.2 }),
+    fact('normal-2', { outcome: 'gate-evidence-missing', restored: false, normalReviewMs: 300, normalReviewCostUsd: 0.4 }),
+    fact('failed', { outcome: 'gate-failed', restored: false }), fact('error', { outcome: 'comparison-error', restored: false })];
+  const stats = integrationRestorationStatistics(facts, windows.current);
+  assert.equal(stats.rounds, 6); assert.equal(stats.restores, 2); assert.equal(stats.share, 1 / 3);
+  assert.deepEqual(stats.fallbacks, { 'mission-change-differs': 1, 'gate-evidence-missing': 1, 'gate-failed': 1, 'comparison-error': 1 });
+  assert.deepEqual([stats.observedWrong, stats.observed, stats.unobserved], [1, 1, 1]);
+  assert.equal(stats.medianNormalReviewMs, 200); assert.ok(Math.abs(stats.medianNormalReviewCostUsd! - 0.3) < 1e-9);
+  assert.equal(stats.estimatedAvoidedMs, 400);
+  assert.equal(integrationRestorationStatistics([fact('restore-1')], windows.current).medianNormalReviewMs, null);
+  const report = renderIntegrationRestorationStatistics(facts, [windows.current, windows.previous]);
+  assert.match(report, /Estimated avoided review work/); assert.match(report, /1\/1 observed; 1\/2 unobserved/);
+  assert.match(report, /cost: \$0.3000 \(n=2\)/);
+  assert.match(renderIntegrationRestorationStatistics([fact('restore-1')], [windows.current]), /0\/0 observed; 1\/1 unobserved/);
+  assert.match(renderIntegrationRestorationStatistics(null, [windows.current]), /unavailable/);
 });

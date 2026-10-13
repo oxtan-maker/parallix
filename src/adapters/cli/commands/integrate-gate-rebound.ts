@@ -242,6 +242,7 @@ export interface IntegrationGateRouteOptions {
   // TASK-2625: when the verify rerun goes green against the fixed tree, record
   // a durable, sha-keyed whitelist of the validated hooks so a later integrate
   // can skip them. Injected so tests exercise the routing without a database.
+  recordIntegrationValidationFailureFn?: (_input: { missionId: string; sha: string; hooks: readonly string[] }) => Promise<void> | void;
   recordIntegrationValidationFn?: (_input: {
     missionId: string;
     sha: string;
@@ -361,6 +362,9 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
             }
           }
           return { ok: true, command: failedGate.command, diagnostic: '' };
+        }
+        if (opts.recordIntegrationValidationFailureFn && tree.commit) {
+          try { await opts.recordIntegrationValidationFailureFn({ missionId: missionId(slug), sha: tree.commit, hooks: [rerun.failedGate?.key ?? failedGate.key] }); } catch { /* missing failure history never proves green */ }
         }
         return {
           ok: false,

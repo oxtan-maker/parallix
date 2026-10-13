@@ -261,3 +261,48 @@ it('bounded panel telemetry survives persistence without multiplying workflow co
     assert.equal((await store.calls('parallix')).length, 2);
   });
 });
+
+import { applyReviewerCommand, revokeApprovedDecision, currentReviewRound, startReview, changeRevision, reviewFindingId, ConfiguredReviewerEligibility } from '../../../src/domain/review.js';
+import { agentFamily } from '../../../src/domain/agents.js';
+import { integrationRestorationStatistics } from '../../../src/application/review-loop/integration-restoration-statistics.js';
+
+it('restoration audit and period stats survive SQLite reload and later human corrections before landing (TASK-2734)', async () => {
+  await withStatisticsDatabase(async ({ db }) => {
+    const store = new SqliteMissionStore(db), telemetry = new SqliteReviewClassificationStore(db);
+    const assessedAt = '2026-10-05T12:00:00Z';
+    const reviewer = agentFamily('codex'), implementer = agentFamily('custom');
+    let review = startReview({ change: { kind: 'pull-request', provider: 'forgejo', id: '1', url: null,
+      sourceBranch: 'mission/task-9734', targetBranch: 'main' }, revision: changeRevision('approved'), baseline: changeRevision('base') },
+    reviewer, implementer, '2026-10-04T12:00:00Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' }));
+    review = applyReviewerCommand(review, { type: 'approve', decidedAt: '2026-10-04T13:00:00Z', comment: 'reviewed', source: { kind: 'provider', provider: 'forgejo' } });
+    review = revokeApprovedDecision(review, 1, { revokedAt: '2026-10-05T10:00:00Z', revokedBy: 'parallix', reason: 'gate failed', cause: { kind: 'integration-gate-failure', gate: 'unit' } });
+    const source = { kind: 'mechanical-restoration' as const, approvedRevision: 'approved', candidateRevision: 'approved', failedGate: 'unit',
+      validationRevision: 'approved', validatedAt: '2026-10-05T11:00:00Z', validationReference: 'operational_history:42' };
+    const current = currentReviewRound(review);
+    review = { ...review, rounds: [review.rounds[0], { ...current, integrationRepairAssessment: {
+      assessedAt, outcome: 'restored', approvedRevision: 'approved', candidateRevision: 'approved', failedGate: 'unit', source } }] };
+    review = applyReviewerCommand(review, { type: 'approve', decidedAt: assessedAt, comment: 'mechanical', source });
+    const mission = { ...fixtureMission('task-9734', { repositoryId: REPO }), status: 'integration' as const, closedAt: null, review };
+    let version = await store.save(mission, null);
+    const reader = new SqliteClassifierStatisticsReader(db, telemetry, REPO);
+    const window = weeklyDecisionWindows('2026-10-06', 'UTC').current;
+    const first = await reader.read();
+    assert.equal(first.decisions.length, 1, 'only the original reviewer decision, never the restoration');
+    assert.equal(first.attempts.length, 0, 'mechanical source does not become classifier telemetry');
+    const s = integrationRestorationStatistics(first.integrationRepairs!, window);
+    assert.deepEqual([s.restores, s.observed, s.unobserved, s.observedWrong], [1, 0, 1, 0]);
+    assert.equal(s.medianNormalReviewCostUsd, null);
+    const corrected = revokeApprovedDecision(review, 2, { revokedAt: '2026-10-12T10:00:00Z', revokedBy: 'human', reason: 'incorrect restore', cause: { kind: 'operator' } });
+    version = await store.save({ ...mission, status: 'review', review: corrected }, version);
+    const correctedStats = integrationRestorationStatistics((await reader.read()).integrationRepairs!, window);
+    assert.deepEqual([correctedStats.observedWrong, correctedStats.observed, correctedStats.unobserved], [1, 1, 0]);
+    // A later requested change also observes the restore, without double-counting the revocation.
+    const requested = applyReviewerCommand(corrected, { type: 'request-changes', decidedAt: '2026-10-12T11:00:00Z', comment: 'wrong',
+      findings: [{ id: reviewFindingId('F1'), summary: 'correct the repair', location: null }] });
+    version = await store.save({ ...mission, status: 'active', review: requested }, version);
+    assert.equal(integrationRestorationStatistics((await reader.read()).integrationRepairs!, window).observedWrong, 1);
+    // Ignore corrections after recorded landing; no correctness is inferred from landing itself.
+    await store.save({ ...mission, status: 'done', closedAt: '2026-10-10T12:00:00Z', review: requested }, version);
+    assert.equal(integrationRestorationStatistics((await reader.read()).integrationRepairs!, window).unobserved, 1);
+  });
+});

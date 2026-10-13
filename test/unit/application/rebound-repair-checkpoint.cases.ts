@@ -3,6 +3,7 @@ import { DeclaredGateRunner } from '../../../src/application/handoff-declared-ga
 import { makePorts, makeRecorder } from '../../helpers/handoff-ports.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { buildTypedMissionRecoveryAdvice } from '../../../src/application/typed-mission-recovery-advice.js';
 import { rebound, type ReboundContext, type ReboundReason } from '../../../src/application/rebound-kernel.js';
 import type { RepairCheckpointPort } from '../../../src/application/ports/repair-checkpoint.js';
 
@@ -43,6 +44,32 @@ export function repairCheckpointCases(): void {
       assert.match(prompt, /px checkpoint report-invalid-contract --name CP-2/);
       assert.match(prompt, /Complete every remaining planned checkpoint before handoff/);
     }
+  });
+
+  test('repair launch authorizes evidence for unfinished original CP-3 and harness CP-5 within the locked contract (TASK-2726)', async () => {
+    const prompts: string[] = [];
+    await rebound(reason, context({
+      repairCheckpoints: port({ open: async () => ({ name: 'CP-5', version: 9 }) }),
+      startAgent: async (_step, options) => { prompts.push((options.prompt as (_agent: string) => string)('codex')); return { result: { status: 0 } }; },
+    }));
+    const [prompt] = prompts;
+    assert.match(prompt, /px checkpoint record --name CP-5/);
+    assert.match(prompt, /--name <CP-N>[^.]*planned checkpoint[^.]*CP-3[^.]*without recorded evidence/);
+    assert.match(prompt, /locked (scope|contract)[^.]*success criteri/i);
+    assert.doesNotMatch(prompt, /Write only authorized repair evidence to CP-5/);
+    assert.match(prompt, /earlier evidence is no longer accurate, re-record that checkpoint with corrected fresh evidence/);
+    assert.match(prompt, /report-invalid-contract --name CP-5/);
+    assert.match(prompt, /independent review|self-approv/i);
+  });
+
+  test('typed recovery advice authorizes unfinished CP-3 beside CP-5 and keeps safeguards (TASK-2726)', () => {
+    const advice = buildTypedMissionRecoveryAdvice('task-2726', 'CP-5');
+    assert.match(advice, /still lack evidence \(for example an original CP-3 alongside CP-5\)/);
+    assert.match(advice, /Retain valid earlier evidence for unaffected criteria without restatement/);
+    assert.match(advice, /fresh verifiable current-round evidence/);
+    assert.match(advice, /earlier evidence is no longer accurate, re-record that checkpoint with corrected fresh evidence/);
+    assert.match(advice, /Never edit locked scope or criteria, weaken or bypass gates, or self-approve/);
+    assert.match(advice, /report-invalid-contract.*stop for the operator/);
   });
 
   test('repair checkpoint persistence failure prevents any launch or rerun (TASK-2695)', async () => {

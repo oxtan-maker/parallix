@@ -1,8 +1,8 @@
 ---
 id: TASK-2733
 title: make parallix more descriptive in which commands it runs
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-12 13:37'
 labels: []
 dependencies: []

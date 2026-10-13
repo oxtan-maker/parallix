@@ -165,7 +165,12 @@ runs after the squash, for example to build and install a local package.
 Repositories may choose to run tests in that hook.
 
 Captured external commands show terminal progress and completion marks with
-elapsed time. Redirected logs receive static start and completion lines.
+elapsed time. Bash commands identify the shell payload or script being invoked,
+so checks such as `bash -c "npm test"` and `bash -lc "npm run build"` are
+distinguishable. Named verification labels retain their purpose and include the
+invoked command. Multiline payloads are escaped onto one line, and recognized
+credential-bearing text is redacted; direct Git arguments remain hidden.
+Redirected logs receive one static completion row per displayed command.
 
 ```json
 {
@@ -597,6 +602,23 @@ the buckets at least 0.60, 0.40 to 0.60 and below 0.40. Observed wrong clears
 count a restored approval later revoked by a human or followed by changes requested
 on the same mission; clears whose mission is still open without either signal are
 shown as unobserved, so a zero always carries its denominator.
+
+Weekly and range reports show integration-repair rounds, actual mechanical
+restores, restore share and fallback counts beside the classifier report.
+Restores are separate from reviewer and classifier decisions. Historical
+rounds without a recorded restoration assessment remain explicitly unrecorded.
+An observed wrong restore means a later human revocation or request for changes
+before landing; it is attributed to the restore's period even when the
+correction comes later. The report gives observed and unobserved denominators.
+Silence and landing leave a restore unobserved, so zero observed errors does
+not establish correctness.
+
+Avoided review work is an estimate: actual restores multiplied by the median
+measured normal integration-repair re-review duration and cost in the same
+period. Duration and cost have separate sample counts. Round cost is available
+only when the reviewer launch supplied a measurement and no unmeasured model
+call or recovery makes that cost incomplete. Missing measurements display
+unavailable; cumulative mission usage is not allocated to individual rounds.
 
 Weekly and range reports also show the [bug-labeled mission trend](metric-contract.md#bug-labeled-mission-trend):
 counts and shares for the current and previous rolling seven-day local-time delivery

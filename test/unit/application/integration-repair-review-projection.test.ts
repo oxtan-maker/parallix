@@ -181,3 +181,43 @@ test('task-2704: a repair with no recorded baseline declares that its range may 
   assert.match(integrationRepairReviewBrief(facts), /may include changes landed on main/);
   assert.match(integrationRepairPrComment(facts), /may include changes landed on main/);
 });
+
+import { tryRestoreIntegrationApproval } from '../../../src/application/review-loop/restore-integration-approval.js';
+import type { LoopContext, ReviewRound as LoopRound } from '../../../src/application/review-loop/round.js';
+import { projectReviewHistory } from '../../../src/application/projections/mission-board.js';
+
+test('restoration dispatch falls back on changed patches, missing evidence, baseline loss and Git errors (TASK-2734)', async () => {
+  for (const reason of ['mission-change-differs', 'gate-evidence-missing', 'gate-failed', 'comparison-error', 'missing-baseline']) {
+    let review = reviewWithRepairHistory();
+    review = { ...review, rounds: review.rounds.map(r => ({ ...r, subject: { ...r.subject,
+      ...(reason === 'missing-baseline' ? {} : { baseline: changeRevision('base') }) } })) as unknown as Review['rounds'] };
+    let persisted = mission('review', review), transitions = 0;
+    const context = { slug: 'task-2620', state: { round: 2 }, ports: {
+      missionStore: { load: async () => ({ kind: 'found', mission: persisted, version: 1 }), save: async (m: Mission) => { persisted = m; return 2; } },
+      preReview: { head: () => 'candidate' }, output: { log() {} },
+      lifecycle: { transition: async () => { transitions++; throw new Error('fallback cannot approve'); } },
+      restoration: { now: () => '2026-09-20T12:00:00Z', clock: () => 0,
+        samePatch: async () => { if (reason === 'comparison-error') { throw new Error('git'); } return reason !== 'mission-change-differs'; },
+        validation: async () => reason === 'gate-evidence-missing' ? null : { missionId: 'task-2620', sha: 'candidate', baseline: 'base', hooks: ['unit'],
+          createdAt: '2026-09-20T11:10:00Z', reference: 'operational_history:1', failed: reason === 'gate-failed' },
+      },
+    } } as unknown as LoopContext;
+    assert.equal(await tryRestoreIntegrationApproval(context, { verifiedRevision: 'candidate' } as LoopRound), null);
+    assert.equal(transitions, 0);
+    assert.equal(persisted.review!.rounds.at(-1)?.integrationRepairAssessment?.outcome,
+      reason === 'missing-baseline' ? 'comparison-error' : reason);
+  }
+});
+
+test('mechanical approval history keeps provenance when a human revokes it (TASK-2734)', () => {
+  const source = { kind: 'mechanical-restoration' as const, approvedRevision: 'a', candidateRevision: 'a1b2c3', failedGate: 'unit',
+    validationRevision: 'a1b2c3', validationReference: 'operational_history:7', validatedAt: '2026-09-20T11:10:00Z' };
+  let review = reviewWithRepairHistory();
+  const current = currentReviewRound(review);
+  review = { ...review, rounds: [...review.rounds.slice(0, -1), { ...current, integrationRepairAssessment: {
+    assessedAt: '2026-09-20T12:00:00Z', approvedRevision: 'a', candidateRevision: 'a1b2c3', failedGate: 'unit', outcome: 'restored', source } }] as unknown as Review['rounds'] };
+  review = applyReviewerCommand(review, { type: 'approve', decidedAt: '2026-09-20T12:00:00Z', comment: 'Restored', source });
+  review = revokeApprovedDecision(review, 2, { revokedAt: '2026-09-20T13:00:00Z', revokedBy: 'human', reason: 'wrong', cause: { kind: 'operator' } });
+  assert.equal(projectReviewHistory(review)[1].integrationRepairAssessment?.source?.validationReference, 'operational_history:7');
+  assert.equal(projectReviewHistory(review)[1].revocation?.by, 'human');
+});

@@ -1,3 +1,5 @@
+import { GitMissionPatchComparison } from '../adapters/review/mission-patch-comparison.js';
+import { SqliteIntegrationValidationReader } from '../adapters/sqlite/integration-validation-reader.js';
 import type { DecisionConfiguration, ParallixConfiguration } from '../application/ports/configuration.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
@@ -37,6 +39,19 @@ export function createReviewClassification(slug: string, worktree: string,
       return postReview(missionBranchName(slug, worktree), token,
         route === 'clear' ? 'approve' : 'request-changes', summary,
         { forgejoUser: 'jev', rootDir: worktree, configuration }).ok;
+    },
+  };
+}
+
+/** Integration restoration has separate mechanisms and no model dependency. */
+export function createIntegrationApprovalRestoration(worktree: string, configuration?: ParallixConfiguration): import('../application/ports/integration-approval-restoration.js').IntegrationApprovalRestorationPort {
+  const comparison = new GitMissionPatchComparison(worktree);
+  return {
+    samePatch: (a, b) => comparison.samePatch(a, b),
+    now: () => new Date().toISOString(), clock: () => performance.now(),
+    async validation(missionId) {
+      const { db } = await initOperatorState({ configuration });
+      return new SqliteIntegrationValidationReader(db).read(missionId);
     },
   };
 }

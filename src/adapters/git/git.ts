@@ -3,6 +3,7 @@ import type { SpawnSyncOptions } from 'node:child_process';
 import * as fsMod from 'node:fs';
 import * as pathMod from 'node:path';
 import { withCommandProgress } from './command-progress.js';
+import { commandProgressLabel } from './command-identity.js';
 
 interface GitOptions {
   progressLabel?: string;
@@ -55,7 +56,7 @@ export function run(command: string, args: string[], options: GitOptions = {}): 
   const execute = () => spawnSync(command, args, spawnOptions);
   const result = options.stdio === 'ignore' || args.includes('--help')
     ? execute()
-    : withCommandProgress(progressLabel ?? `External command: ${pathMod.basename(command)}`, execute, {
+    : withCommandProgress(commandProgressLabel(command, args, progressLabel), execute, {
       ...(options.stdio === 'inherit' ? { animate: false as const } : {}),
     });
   if (result.error && result.status === null) {

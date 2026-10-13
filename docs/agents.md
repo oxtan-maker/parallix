@@ -636,7 +636,15 @@ then stops. After correcting the reported issue, an operator can re-record the
 affected checkpoint with `px checkpoint record --force` and valid evidence
 (see `px checkpoint --help`). This clears its reported blocker while preserving
 unrelated proof; evidence validation, version checks, and the required harness
-rerun still apply. The first report ends automatic retries; an unrelated passing check
+rerun still apply. A checkpoint repair is bounded: within the locked scope and success criteria, the
+agent may record evidence both for the harness-created repair checkpoint and for
+any other planned checkpoint (for example an original CP-3) that still lacks
+evidence, because handoff requires every planned checkpoint. Valid earlier
+evidence for unaffected criteria is retained without restatement; affected
+criteria need fresh verifiable evidence from the current round. If the fix shows earlier evidence is no longer accurate, the agent re-records that checkpoint with corrected evidence. The agent cannot
+edit locked scope or criteria, weaken gates, or approve its own work; independent
+review still decides.
+The first report ends automatic retries; an unrelated passing check
 cannot establish repair success. A repair that changes tracked files must be
 committed before the automatic re-run; a repair outside the repository needs
 no commit. When the cause is external and the implementer cannot repair it,
@@ -677,8 +685,11 @@ A red integration gate withdraws the approval and returns the mission to
 implementer is told the mission was approved at revision A, which gate failed,
 its command and its captured output. `agent-smoke` is retried once on the
 unchanged tree first; if it still fails, the environment failure goes back to
-the human without spending the repair budget. A repair that changes the
-approved revision is reviewed again through `px review <slug> --continue`, and
+the human without spending the repair budget. A repair enters a fresh round through `px review <slug> --continue`.
+Before model dispatch, an unchanged baseline-relative mission patch with
+recorded green validation of the failed gate can restore prior approval
+mechanically. See [integration repair eligibility](operator-setup.md).
+A substantive change or unavailable comparison/evidence takes normal review, and
 the reviewer's prompt carries the failed gate, its output, and the repair range
 A..B; the reviewer decides how much to review. On approval the mission stops in
 the integration lane. Parallix never merges an approval a human has not seen:

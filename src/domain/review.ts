@@ -62,7 +62,8 @@ export interface ReviewedRevision {
 
 export type ReviewApprovalSource =
   | { readonly kind: 'provider'; readonly provider: string }
-  | { readonly kind: 'local' };
+  | { readonly kind: 'local' }
+  | import('./integration-approval-restoration.js').MechanicalApprovalSource;
 
 /**
  * Why an approval was withdrawn, as a typed fact rather than reason text.
@@ -337,6 +338,7 @@ export function stageLaunchWindowsFrom(source: unknown): readonly StageLaunchWin
 }
 
 export interface ReviewRound {
+  readonly integrationRepairAssessment?: import('./integration-approval-restoration.js').IntegrationRepairAssessment;
   readonly number: number;
   readonly subject: ReviewedRevision;
   readonly reviewer: AgentFamily;

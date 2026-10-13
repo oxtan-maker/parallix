@@ -47,3 +47,11 @@ function resolveStageTelemetry({ worktree, result, sinceMs = 0 }: StageTelemetry
 }
 
 export { resolveStageTelemetry };
+
+/** Legacy normalization uses zero for absent cost; only an explicit measured zero is usable. */
+export function measuredReviewCost(telemetry: unknown): number | null {
+  if (!telemetry || typeof telemetry !== 'object') { return null; }
+  const data = telemetry as Record<string, unknown>, cost = data.cost_usd;
+  if (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0) { return null; }
+  return cost > 0 || data.cost_measured === true ? cost : null;
+}

@@ -250,6 +250,8 @@ export const MISSION_REVIEW_ROUNDS_AUTHORITY = {
   decided_at: MISSION_VALUE_AUTHORITY,
   decision_comment: MISSION_VALUE_AUTHORITY,
   classifier_source: MISSION_VALUE_AUTHORITY,
+  integration_repair_assessment: MISSION_VALUE_AUTHORITY,
+  mechanical_source: MISSION_VALUE_AUTHORITY,
   approval_source_kind: MISSION_VALUE_AUTHORITY,
   approval_source_provider: MISSION_VALUE_AUTHORITY,
   responded_at: MISSION_VALUE_AUTHORITY,

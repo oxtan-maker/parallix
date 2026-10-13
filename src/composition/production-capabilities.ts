@@ -1,5 +1,5 @@
 import { MissionEditService } from '../application/mission-edit-service.js';
-import { createReviewClassification } from './review-classification.js';
+import { createReviewClassification, createIntegrationApprovalRestoration } from './review-classification.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
 import type { TuiCapabilities } from '../application/tui-capabilities.js';
@@ -222,13 +222,13 @@ function createBoardHandoffWorkflow(
         await resumeActiveBoardHandoff(existing, store, lifecycle, slug);
         await reviewLoop(
           { slug, isContinue: true, maxAttempts: existing.mission.review.rounds.length + 1 },
-          createReviewLoopPorts(slug, {}, { configuration, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd(), configuration.decision, configuration) }),
+          createReviewLoopPorts(slug, {}, { configuration, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd(), configuration.decision, configuration), restoration: createIntegrationApprovalRestoration(resolveWorktree(slug) ?? process.cwd(), configuration) }),
         );
         return;
       }
       const result = await handoff(slug);
       if (!result.ok) { throw new Error(result.error ?? 'handoff workflow aborted'); }
-      await reviewLoop({ slug }, createReviewLoopPorts(slug, {}, { configuration, performHandoffFn: reviewHandoff, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd(), configuration.decision, configuration) }));
+      await reviewLoop({ slug }, createReviewLoopPorts(slug, {}, { configuration, performHandoffFn: reviewHandoff, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd(), configuration.decision, configuration), restoration: createIntegrationApprovalRestoration(resolveWorktree(slug) ?? process.cwd(), configuration) }));
     },
   };
 }

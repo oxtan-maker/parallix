@@ -121,7 +121,7 @@ export interface GateStepRequest {
   seams: IntegrateSeams;
 }
 
-export function createIntegrationGateStep({ gates, landing, verification }: IntegrateWorkflowPorts) {
+export function createIntegrationGateStep({ gates, landing, verification, git: gitPort }: IntegrateWorkflowPorts) {
   /**
    * Decide which of the configured preIntegration gates to run, applying the
    * TASK-2625 skip: when a durable, sha-keyed marker records that this mission
@@ -342,12 +342,16 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
       // persist the sha-keyed whitelist of validated hooks so a later integrate
       // can skip them. Keyed on the fix commit the rerun ran against. Inert
       // when the operational-history store is unavailable (older callers).
+      recordIntegrationValidationFailureFn: async (input: { missionId: string; sha: string; hooks: readonly string[] }) => {
+        await missionServices?.operationalHistory?.recordIntegrationValidation({ ...input, failed: true });
+      },
       recordIntegrationValidationFn: context.missionHeadSha
         ? (input: { missionId: string; sha: string; hooks: readonly string[] }) => {
             const history = (missionServices as { operationalHistory?: OperationalHistoryService | null | undefined } | null | undefined)?.operationalHistory;
             if (!history) { return; }
             return history.recordIntegrationValidation(
-              buildIntegrationValidationMarker(input.missionId, input.sha, input.hooks),
+              { ...buildIntegrationValidationMarker(input.missionId, input.sha, input.hooks),
+                baseline: context.baseBranch ? gitPort.git(['-C', checkout, 'rev-parse', context.baseBranch]).stdout?.trim() : undefined },
             );
           }
         : undefined,

@@ -1,3 +1,5 @@
+import { parseIntegrationRepairAssessment, parseMechanicalApprovalSource } from '../../domain/integration-restoration-record.js';
+import { mechanicalSource } from './integration-repair-serialization.js';
 import { agentFamily } from '../../domain/agents.js';
 import { assertClassifierReviewSource, clearingLabel } from '../../domain/classifier-review.js';
 import type { CheckpointData, GoalCheckRow } from '../../domain/checkpoint.js';
@@ -111,6 +113,8 @@ export interface MissionReviewRoundRecord {
   readonly decided_at: string | null;
   readonly decision_comment: string | null;
   readonly classifier_source?: string | null;
+  readonly integration_repair_assessment?: string | null;
+  readonly mechanical_source?: string | null;
   readonly approval_source_kind: string | null;
   readonly approval_source_provider: string | null;
   readonly revoked_at: string | null;
@@ -407,8 +411,17 @@ function resolutionsFor(
     });
 }
 
+function mechanicalDecisionFor(row: MissionReviewRoundRecord, stored: ReviewerDecision | null): ReviewerDecision | null {
+  if (!row.mechanical_source) { return stored; }
+  if (!row.integration_repair_assessment || stored?.kind !== 'approved' || row.classifier_source) { throw new Error('Invalid persisted mechanical source'); }
+  const assessment = parseIntegrationRepairAssessment(row.integration_repair_assessment);
+  const source = parseMechanicalApprovalSource(row.mechanical_source);
+  if (JSON.stringify(source) !== JSON.stringify(mechanicalSource(assessment, row.revision))) { throw new Error('Invalid persisted mechanical source'); }
+  return { ...stored, source };
+}
+
 function classifierDecisionFor(row: MissionReviewRoundRecord, records: MissionReviewRecords): ReviewerDecision | null {
-  const decision = decisionFor(row, records);
+  const decision = mechanicalDecisionFor(row, decisionFor(row, records));
   if (!decision || !row.classifier_source) { return decision; }
   const source = JSON.parse(row.classifier_source) as import('../../domain/classifier-review.js').ClassifierReviewSource;
   assertClassifierReviewSource(source);
@@ -456,6 +469,7 @@ function reviewRoundFrom(
   const itemDispositions = parseItemDispositions(row.item_dispositions);
 
   return {
+    ...(row.integration_repair_assessment ? { integrationRepairAssessment: parseIntegrationRepairAssessment(row.integration_repair_assessment) } : {}),
     number: requiredInteger(row.round_number, 'review round number', 1),
     subject: { change, revision: changeRevision(row.revision), ...(row.review_baseline ? { baseline: changeRevision(row.review_baseline) } : {}) },
     reviewer: agentFamily(row.reviewer),

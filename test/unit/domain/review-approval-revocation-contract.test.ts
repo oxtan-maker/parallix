@@ -461,3 +461,21 @@ describe("stand down", { concurrency: false }, () => {
     assert.match(text, /superseded by revision b2b2b2b \(px rebase, 2026-09-22T01:00:00Z\)/);
   });
 });
+
+import { revokeApprovedDecision } from '../../../src/domain/review.js';
+
+test('a human can revoke mechanical restoration without erasing its source or inheriting its assessment (TASK-2734)', () => {
+  const reviewer = agentFamily('codex'), implementer = agentFamily('custom');
+  let review = startReview({ change: { kind: 'local-branch', sourceBranch: 'mission/task-2734', targetBranch: 'main' },
+    revision: changeRevision('candidate') }, reviewer, implementer, '2026-10-01T10:00:00Z',
+  ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' }));
+  const source = { kind: 'mechanical-restoration' as const, approvedRevision: 'approved', candidateRevision: 'candidate', failedGate: 'unit',
+    validationRevision: 'candidate', validationReference: 'operational_history:42', validatedAt: '2026-10-01T11:00:00Z' };
+  review = { ...review, rounds: [{ ...review.rounds[0], integrationRepairAssessment: { assessedAt: '2026-10-01T12:00:00Z',
+    approvedRevision: 'approved', candidateRevision: 'candidate', failedGate: 'unit', outcome: 'restored', source } }] };
+  review = applyReviewerCommand(review, { type: 'approve', decidedAt: '2026-10-01T12:00:00Z', comment: 'restored', source });
+  const revoked = revokeApprovedDecision(review, 1, { revokedAt: '2026-10-01T13:00:00Z', revokedBy: 'human', reason: 'correction', cause: { kind: 'operator' } });
+  assert.equal(reviewStatus(revoked), 'awaiting-review');
+  assert.deepEqual(revoked.rounds[0].decision?.kind === 'approved' && revoked.rounds[0].decision.source, source);
+  assert.equal(revoked.rounds[1].integrationRepairAssessment, undefined);
+});

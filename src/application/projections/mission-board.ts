@@ -165,6 +165,7 @@ export interface MissionCard {
 
 /** One past round, flattened for display and for handing to the next reviewer. */
 export interface ReviewRoundSummary {
+  readonly integrationRepairAssessment?: import('../../domain/integration-approval-restoration.js').IntegrationRepairAssessment;
   readonly number: number;
   readonly reviewer: AgentFamily;
   readonly implementer: AgentFamily;
@@ -257,6 +258,7 @@ export function projectReviewHistory(review: Review | null): readonly ReviewRoun
         : summary ? parseResolutionDispositions(summary.content) : [];
 
     return {
+      ...(round.integrationRepairAssessment ? { integrationRepairAssessment: round.integrationRepairAssessment } : {}),
       number: round.number,
       reviewer: round.reviewer,
       implementer: round.implementer,

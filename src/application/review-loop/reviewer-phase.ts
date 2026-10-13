@@ -1,3 +1,4 @@
+import { tryRestoreIntegrationApproval, observeNormalIntegrationRepair } from './restore-integration-approval.js';
 import { observeGeneralReview } from '../review-classification/observe-review.js';
 import { tryClassifyReview } from '../review-classification/classify-review.js';
 /**
@@ -72,6 +73,7 @@ async function launchReviewer(context: LoopContext, round: ReviewRound): Promise
   if (await stopIfControllerSuperseded(context, 'reviewer-launch fallback')) { return 'stop'; }
   await adoptLaunchedAgent(context, 'reviewer', identities.reviewer, launch);
   await ports.agents.recordStage('reviewer', context.state, identities, launch);
+  round.normalReviewCostUsd = ports.agents.measuredCost?.(launch) ?? null;
   return null;
 }
 
@@ -247,6 +249,14 @@ export async function runReviewerPhase(context: LoopContext, round: ReviewRound)
     // opened. Pin routing to the revision that passed the complete setup.
     round.verifiedRevision = context.ports.preReview.head() ?? undefined;
     await pinReviewBaseline(context, round);
+    const restored = await tryRestoreIntegrationApproval(context, round);
+    if (restored === 'stop') { return { outcome: 'stop' }; }
+    if (restored === 'APPROVED') {
+      await applyReviewerOutcome(context, restored);
+      return { outcome: 'stop' };
+    }
+    round.integrationRepair = await integrationRepairBrief(context);
+    const repairReviewStarted = context.ports.restoration?.clock();
     const cycleStarted = context.ports.classification?.clock();
     const classified = await tryClassifyReview(context, round, cycleStarted);
     if (classified === 'stop') { return { outcome: 'stop' }; }
@@ -262,6 +272,7 @@ export async function runReviewerPhase(context: LoopContext, round: ReviewRound)
     if (recovered.step) { return { outcome: 'stop' }; }
     reviewState = recovered.reviewState;
     await observeGeneralReview(context, reviewerStarted, reviewState, cycleStarted);
+    if (repairReviewStarted !== undefined) { await observeNormalIntegrationRepair(context, round, repairReviewStarted); }
   }
   if (await applyReviewerOutcome(context, reviewState)) { return { outcome: 'stop' }; }
   return { reviewState };

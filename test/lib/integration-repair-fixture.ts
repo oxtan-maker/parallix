@@ -64,6 +64,8 @@ function git(cwd: string, args: string[]): string {
  */
 export async function openRepairFixture(options: {
   slug: string;
+  gateCommand?: string;
+  recordBaseline?: boolean;
   extraGates?: Array<{ key: string; command: string; order: number; retries?: number }>;
   /** `undecided-review`: a review-lane mission whose round awaits a reviewer decision. */
   state?: 'approved-integration' | 'undecided-review';
@@ -85,7 +87,7 @@ export async function openRepairFixture(options: {
       gates: {
         requirePreIntegration: true,
         preIntegration: [
-          { key: 'unit', command: GATE_COMMAND, order: 1 },
+          { key: 'unit', command: options.gateCommand ?? GATE_COMMAND, order: 1 },
           ...(options.extraGates ?? []),
         ],
       },
@@ -116,12 +118,16 @@ export async function openRepairFixture(options: {
   await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
   const store = new SqliteMissionStore(database);
   const undecided = options.state === 'undecided-review';
-  const seeded = seedMission(slug, undecided ? pendingReview(slug, approvedRevision) : approvedReview(slug, approvedRevision));
+  let seeded = seedMission(slug, undecided ? pendingReview(slug, approvedRevision) : approvedReview(slug, approvedRevision));
+  if (options.recordBaseline) {
+    const baseline = changeRevision(git(repo, ['rev-parse', 'main']));
+    seeded = { ...seeded, review: { ...seeded.review!, rounds: seeded.review!.rounds.map(r => ({ ...r, subject: { ...r.subject, baseline } })) as unknown as Review['rounds'] } } as Mission;
+  }
   // The board lists the missions of the repository it runs in, so a mission
   // the board must see carries that repository's canonical identity.
   await store.save(undecided
     ? { ...seeded, status: 'review', rawStatus: 'review', repositoryId: resolveCanonicalRepositoryId(repo) } as Mission
-    : seeded, null);
+    : { ...seeded, repositoryId: resolveCanonicalRepositoryId(repo) }, null);
 
   return {
     root, repo, worktree, slug, approvedRevision, database,

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GitReviewEvidence } from '../../../src/adapters/review/review-evidence.js';
@@ -93,5 +93,57 @@ test('rebased main fix is retained as failure-path provenance (TASK-2732)', asyn
     assert.equal(state.mainCommits[0].revision, main);
     assert.deepEqual(state.mainCommits[0].paths, ['failure.ts']);
     assert.match(state.mainCommits[0].diff, /fixed-by-main/);
+  } finally { rmSync(repo, { recursive: true, force: true }); }
+});
+
+import { GitMissionPatchComparison } from '../../../src/adapters/review/mission-patch-comparison.js';
+
+test('approval patch equality survives rebases and spaced bookkeeping but retains manifest edits (TASK-2734)', async () => {
+  const repo = mkdtempSync(join(tmpdir(), 'px-restore-patch-'));
+  try {
+    const git = (...args: string[]) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
+    const commit = (file: string, text: string, message: string) => { writeFileSync(join(repo, file), text); git('add', '-A'); git('commit', '-qm', message); return git('rev-parse', 'HEAD'); };
+    git('init', '-q', '-b', 'main');
+    const pkg = { name: 'fixture', version: '1.2.3' };
+    const json = (v: unknown) => JSON.stringify(v, null, 2) + '\n';
+    const base = commit('package.json', json(pkg), 'base');
+    git('checkout', '-qb', 'mission');
+    const approved = commit('file with spaces.txt', 'approved\n', 'feature');
+    const comparison = new GitMissionPatchComparison(repo);
+    assert.equal(await comparison.samePatch({ baseline: base, revision: approved }, { baseline: base, revision: approved }), true);
+    git('checkout', '-q', 'main');
+    const advanced = commit('main.txt', 'main only\n', 'advance');
+    git('checkout', '-q', 'mission'); git('rebase', '-q', 'main');
+    const rebased = git('rev-parse', 'HEAD');
+    mkdirSync(join(repo, 'backlog', 'tasks'), { recursive: true });
+    commit('backlog/tasks/task with spaces.md', 'lane transition\n', 'bookkeeping');
+    assert.equal(await comparison.samePatch({ baseline: base, revision: approved }, { baseline: advanced, revision: git('rev-parse', 'HEAD') }), true);
+    assert.notEqual(git('rev-parse', 'HEAD'), rebased);
+    const bumped = commit('package.json', json({ ...pkg, version: '1.2.4' }), 'hook\n\nParallix-Bookkeeping: pre-commit-hook');
+    assert.equal(await comparison.samePatch({ baseline: base, revision: approved }, { baseline: advanced, revision: bumped }), true);
+    const changed = commit('package.json', json({ ...pkg, version: '1.2.4', scripts: { test: 'false' } }), 'config edit');
+    assert.equal(await comparison.samePatch({ baseline: base, revision: approved }, { baseline: advanced, revision: changed }), false);
+    const spaceChanged = commit('file with spaces.txt', 'repair\n', 'repair');
+    assert.equal(await comparison.samePatch({ baseline: advanced, revision: changed }, { baseline: advanced, revision: spaceChanged }), false);
+    await assert.rejects(comparison.samePatch({ baseline: base, revision: approved }, { baseline: 'f'.repeat(40), revision: spaceChanged }));
+  } finally { rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('release exception preserves approved manifest edits and rejects ordinary version edits (TASK-2734)', async () => {
+  const repo = mkdtempSync(join(tmpdir(), 'px-release-boundary-'));
+  try {
+    const git = (...args: string[]) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
+    const json = (value: unknown) => JSON.stringify(value, null, 2) + '\n';
+    const commit = (value: unknown, message: string) => { writeFileSync(join(repo, 'package.json'), json(value)); git('add', '-A'); git('commit', '-qm', message); return git('rev-parse', 'HEAD'); };
+    git('init', '-q', '-b', 'main');
+    const pkg = { name: 'fixture', version: '1.2.3', scripts: { test: 'test' } };
+    const base = commit(pkg, 'base');
+    const mission = { ...pkg, scripts: { test: 'npm test' } };
+    const approved = commit(mission, 'approved mission config');
+    const bumped = commit({ ...mission, version: '1.2.4' }, 'hook\n\nParallix-Bookkeeping: pre-commit-hook');
+    const compare = new GitMissionPatchComparison(repo);
+    assert.equal(await compare.samePatch({ baseline: base, revision: approved }, { baseline: base, revision: bumped }), true);
+    const ordinary = commit({ ...mission, version: '1.2.5' }, 'ordinary version edit');
+    assert.equal(await compare.samePatch({ baseline: base, revision: approved }, { baseline: base, revision: ordinary }), false);
   } finally { rmSync(repo, { recursive: true, force: true }); }
 });

@@ -233,10 +233,11 @@ export interface ReviewAgentLaunch {
 export interface ReviewAgentLaunchResult {
   /** The family the launcher actually ran (differs after a capacity fallback). */
   readonly agent?: string | null;
-  readonly result?: { status?: number | null; startedAt?: string; endedAt?: string; [key: string]: unknown } | null;
+  readonly result?: { telemetry?: { provider?: string; cost_usd?: number }; status?: number | null; startedAt?: string; endedAt?: string; [key: string]: unknown } | null;
 }
 
 export interface ReviewAgentPort {
+  measuredCost?(_launch: ReviewAgentLaunchResult | null | undefined): number | null;
   /** Launch a role; throws when the launcher cannot start it. */
   launch(_launch: ReviewAgentLaunch): Promise<ReviewAgentLaunchResult | null | undefined>;
   /** The full prompt a dry run prints for a role. */
@@ -334,6 +335,7 @@ export interface ReviewControllerLock {
  * ------------------------------------------------------------------ */
 
 export interface ReviewLoopPorts {
+  readonly restoration?: import('./integration-approval-restoration.js').IntegrationApprovalRestorationPort;
   readonly branch: string;
   /** The mission worktree, quoted in repair prompts. */
   readonly worktree: string;

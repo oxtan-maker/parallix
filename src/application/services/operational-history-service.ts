@@ -1,5 +1,5 @@
 import type { OperationalHistoryEntry, OperationalHistoryRepository } from '../ports/operation-history.js';
-import { INTEGRATION_VALIDATION_EVENT_TYPE } from '../integrate/validation-marker.js';
+import { INTEGRATION_VALIDATION_EVENT_TYPE, INTEGRATION_VALIDATION_FAILED_EVENT_TYPE } from '../integrate/validation-marker.js';
 
 /**
  * Application boundary for operational history recording and querying.
@@ -75,10 +75,12 @@ export class OperationalHistoryService {
     missionId: string;
     sha: string;
     hooks: readonly string[];
+    baseline?: string;
+    failed?: boolean;
   }): Promise<void> {
     await this.append(
-      INTEGRATION_VALIDATION_EVENT_TYPE,
-      JSON.stringify({ missionId: marker.missionId, sha: marker.sha, hooks: [...marker.hooks] }),
+      marker.failed ? INTEGRATION_VALIDATION_FAILED_EVENT_TYPE : INTEGRATION_VALIDATION_EVENT_TYPE,
+      JSON.stringify({ missionId: marker.missionId, sha: marker.sha, hooks: [...marker.hooks], ...(marker.baseline ? { baseline: marker.baseline } : {}), ...(marker.failed ? { failed: true } : {}) }),
     );
   }
 

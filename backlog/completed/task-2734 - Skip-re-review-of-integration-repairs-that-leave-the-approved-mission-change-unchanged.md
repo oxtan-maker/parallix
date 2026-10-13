@@ -3,8 +3,8 @@ id: TASK-2734
 title: >-
   Skip re-review of integration repairs that leave the approved mission change
   unchanged
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-12 13:40'
 updated_date: '2026-10-12 13:40'
 labels:

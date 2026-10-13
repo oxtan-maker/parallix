@@ -572,3 +572,16 @@ describe("continue invalidates a BLOCKED/PARKED stop —", () => {
     });
   });
 });
+
+it('flat review state preserves the exact mechanically restored subject and decision source (TASK-2734)', () => {
+  const reviewer = agentFamily('codex'), implementer = agentFamily('custom');
+  let review = startReview({ change: { kind: 'local-branch', sourceBranch: 'mission/task-2734', targetBranch: 'main' },
+    revision: changeRevision('candidate'), baseline: changeRevision('main-base') }, reviewer, implementer, '2026-10-01T10:00:00Z',
+  ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' }));
+  const source = { kind: 'mechanical-restoration' as const, approvedRevision: 'approved', candidateRevision: 'candidate', failedGate: 'unit',
+    validationRevision: 'candidate', validationReference: 'operational_history:42', validatedAt: '2026-10-01T11:00:00Z' };
+  review = applyReviewerCommand(review, { type: 'approve', decidedAt: '2026-10-01T12:00:00Z', comment: 'restored', source });
+  const mapped = applyReviewStateToReview(review, { round: 1, phase: 'approved', disposition: 'APPROVED' });
+  assert.deepEqual(currentReviewRound(mapped).subject, currentReviewRound(review).subject);
+  assert.deepEqual(currentReviewRound(mapped).decision, currentReviewRound(review).decision);
+});

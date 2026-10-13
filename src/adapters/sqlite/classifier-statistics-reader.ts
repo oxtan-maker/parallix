@@ -1,3 +1,6 @@
+import { SqliteMissionStore } from './mission-store.js';
+import { integrationRepairFacts } from '../../application/review-loop/integration-restoration-statistics.js';
+import { repositoryId } from '../../domain/repository.js';
 import type { ClassifierStatisticsInput, PrDecisionFact } from '../../application/review-classification/statistics.js';
 import type { ClassifierStatisticsReadPort, ReviewClassificationTelemetryPort } from '../../application/ports/review-classification-telemetry.js';
 import { assertClassifierReviewSource, WEAKENING_DECISION_SOURCE, type ClassifierReviewSource } from '../../domain/classifier-review.js';
@@ -12,14 +15,15 @@ export class SqliteClassifierStatisticsReader implements ClassifierStatisticsRea
   async read(): Promise<ClassifierStatisticsInput> {
     const repository = this._repository;
     const rows = await this._db.query<{ mission_id: string; round_number: number; decided_at: string | null;
-      decision_kind: string; classifier_source: string | null; change_kind: string }>(
-      `SELECT r.mission_id, r.round_number, r.decided_at, r.decision_kind, r.classifier_source, r.change_kind
+      decision_kind: string; classifier_source: string | null; mechanical_source: string | null; change_kind: string }>(
+      `SELECT r.mission_id, r.round_number, r.decided_at, r.decision_kind, r.classifier_source, r.mechanical_source, r.change_kind
        FROM mission_review_rounds r JOIN missions m ON m.id = r.mission_id
        WHERE m.repository_id = ? AND r.decision_kind IS NOT NULL`, [repository]);
     const decisions: PrDecisionFact[] = [];
     let partial = false;
     for (const row of rows) {
       if (row.change_kind !== 'pull-request') { continue; }
+      if (row.mechanical_source) { continue; }
       if (!row.decided_at) { partial = true; continue; }
       let source: ClassifierReviewSource | null = null;
       if (row.classifier_source) {
@@ -45,7 +49,8 @@ export class SqliteClassifierStatisticsReader implements ClassifierStatisticsRea
       family: row.stage === 'review' ? row.reviewer_agent ?? 'unavailable' : row.implementer_agent ?? row.implementer ?? 'unavailable',
       provider: row.provider ?? null, model: row.model ?? null,
     }));
-    return { decisions, missions: cohorts, agentModels, attempts: await this._telemetry.calls(repository),
+    const integrationRepairs = integrationRepairFacts(await new SqliteMissionStore(this._db).loadByRepository(repositoryId(repository)));
+    return { integrationRepairs, decisions, missions: cohorts, agentModels, attempts: await this._telemetry.calls(repository),
       applied: decisions.filter(d => d.source === 'classifier').map(d => ({ decisionId: d.id, decidedAt: d.decidedAt, route: d.outcome })),
       repairClears, observations: await this._telemetry.observations(repository), coverage: partial ? 'partial' : 'complete' };
   }

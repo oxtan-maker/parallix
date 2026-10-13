@@ -1,8 +1,8 @@
 ---
 id: TASK-2730
 title: Allow repair prompts to complete required checkpoint evidence
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-10-12 08:10'
 labels:
   - bug

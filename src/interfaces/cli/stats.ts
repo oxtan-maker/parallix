@@ -1,3 +1,4 @@
+import { renderIntegrationRestorationStatistics } from '../../application/presentation/integration-restoration-statistics.js';
 import { renderClassifierStatistics } from '../../application/presentation/classifier-statistics.js';
 import { renderIntegrationRepairStatistics } from '../../application/presentation/integration-repair-statistics.js';
 import * as fmt from '../../application/presentation/cli-format.js';
@@ -81,6 +82,8 @@ export function createStatsCommand(useCase: Pick<StatsCommandUseCase<StatsRow>, 
           const windows = [result.selection.current.window, result.selection.previous.window] as const;
           report += `\n\n${renderClassifierStatistics(result.classifierStatistics ?? null, windows)}\n\n${renderIntegrationRepairStatistics(result.classifierStatistics ?? null, windows)}`;
         }
+        report += `\n\n${renderIntegrationRestorationStatistics(result.classifierStatistics?.integrationRepairs ?? null,
+          [result.selection.current.window, ...(result.selection.previous ? [result.selection.previous.window] : [])])}`;
       }
     } catch (failure) {
       error(fmt.status('FAIL', failure instanceof Error ? failure.message : String(failure)));

@@ -331,10 +331,24 @@ launching the implementer, Parallix withdraws the old approval and preserves it
 in review history. If the launcher falls back to another agent family during
 that repair, its identity is persisted against the live current review round,
 not the integration context's earlier snapshot. Once the repair passes its
-gates, a fresh round reviews the repaired commit. Change requests return to
-implementation until review approves the new revision; integration then
-restarts with fresh review and gate state. An older mission stranded by a gate
+gates, the fresh round compares the approved and candidate mission patches,
+each against its recorded main baseline. An unchanged patch can restore the
+prior approval mechanically before any reviewer or classifier runs, provided
+recorded green integration validation names the failed gate and covers the
+candidate or an equivalent mission patch. The validation must follow the
+withdrawal and precede restoration. Backlog task records and the integrate
+hook's release-version-only bump are excluded from comparison; other manifest,
+configuration and source changes remain substantive. Missing revisions,
+baselines or gate evidence, a failed validation, and Git errors require normal
+review. Change requests return to implementation until review approves the new
+revision. Both restored and reviewed approvals stop in the integration lane;
+a human runs `px integrate <slug>` to land. An older mission stranded by a gate
 rebound is recovered through the same path.
+
+`px status <slug>` retains the withdrawn approval and labels the new decision's
+source as `mechanical-restoration`, with both revisions, the failed gate and a
+validation citation. This is a restoration of prior review authority, not a
+new model verdict. Initial reviews and integration gates are still required.
 
 If the review loop escalates to a human, run `px review <slug> --continue` to
 resume its persisted review. This clears the recorded stop and grants another
@@ -356,7 +370,8 @@ approves that round with `px review <slug> --submit-review approve`; the one
 command records the approval and moves the mission to integration. An approve
 is still refused while the round awaits implementation, so the requested
 changes and their findings stay intact, and a round reopened by an
-integration-gate repair must go back through review first.
+integration-gate repair must pass normal review or the unchanged-patch
+restoration check first.
 
 ## Summary Checklist
 

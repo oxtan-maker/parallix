@@ -1,3 +1,4 @@
+import { measuredReviewCost } from '../agents/stage-telemetry.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import { CLASSIFIER_FORGEJO_USER } from './setup-review-repository.js';
@@ -52,6 +53,7 @@ const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 /** The production review authority a composition root binds for one loop. */
 export interface ReviewLoopBindings {
+  readonly restoration?: import('../../application/ports/integration-approval-restoration.js').IntegrationApprovalRestorationPort;
   readonly configuration?: ParallixConfiguration;
   readonly rebaseWorkflowOptions?: Pick<import('../rebase/rebase-workflow-adapter.js').RebaseCommandOptions, 'createPrFn' | 'readTokenFn' | 'resolveForgejoUserFn'>;
   readonly classification?: import('../../application/ports/review-classification.js').ReviewClassificationPorts;
@@ -213,6 +215,7 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
     ? `${buildCompactReviewPrompt({ reviewer: facts.reviewer, branch, implementer: facts.implementer, focus, attempt: facts.attempt, repoRoot: worktree, missionPath, actualReviewer: actual, reviewBaseline: facts.reviewBaseline, integrationRepair: facts.integrationRepair } as never)}${facts.humanFeedback ? `\n\nHuman review correction (authoritative): ${facts.humanFeedback}` : ''}`
     : `${buildCompactActOnReviewPrompt({ implementer: facts.implementer, branch, attempt: facts.attempt, reviewOutcome: facts.reviewOutcome, repoRoot: worktree, missionPath, actualImplementer: actual, reviewBaseline: facts.reviewBaseline } as never)}${facts.humanFeedback ? `\n\nHuman review correction (authoritative): ${facts.humanFeedback}` : ''}`;
   return {
+    measuredCost: launch => measuredReviewCost(launch?.result?.telemetry),
     async launch({ role, agent, exclude, prompt, recovery }) {
       const phase = role === 'reviewer' ? 'review' : 'review-response';
       return await startAgent(role === 'reviewer' ? 'review' : 'act-on-review', { configuration: bindings.configuration,
@@ -306,6 +309,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
     branch,
     worktree,
     classification: bindings.classification,
+    restoration: bindings.restoration,
     polling: { intervalMs: resolvePollIntervalMs(bindings.configuration), timeoutMs: resolvePollTimeoutMs(target.pollTimeoutSeconds || 0, bindings.configuration) },
     missionStore,
     lifecycle: lifecycleService,

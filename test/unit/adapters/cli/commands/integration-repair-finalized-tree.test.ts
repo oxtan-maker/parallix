@@ -102,3 +102,44 @@ test('fresh repair reruns the authorized integration gates on the committed tree
   assert.equal((await routeIntegrationGateFailure(args)).route, 'fixed');
   assert.equal(runs, 1);
 });
+
+import { GitMissionPatchComparison, releaseVersionOnly } from '../../../../../src/adapters/review/mission-patch-comparison.js';
+
+test('patch comparison fails closed on Git errors and only accepts release-version fields (TASK-2734)', async () => {
+  const compare = new GitMissionPatchComparison('/fixture', async () => { throw new Error('git unavailable'); });
+  await assert.rejects(compare.samePatch({ baseline: 'a'.repeat(40), revision: 'b'.repeat(40) }, { baseline: 'a'.repeat(40), revision: 'c'.repeat(40) }));
+  const json = (v: unknown) => JSON.stringify(v, null, 2) + '\n';
+  const pkg = { name: 'fixture', version: '1.2.3', dependencies: { x: '1' } };
+  assert.equal(releaseVersionOnly(json(pkg), json({ ...pkg, version: '1.2.4' }), 'package.json'), true);
+  assert.equal(releaseVersionOnly(json(pkg), json({ ...pkg, version: '1.3.0' }), 'package.json'), false);
+  assert.equal(releaseVersionOnly(json(pkg), json({ ...pkg, version: '1.2.4', dependencies: { x: '2' } }), 'package.json'), false);
+  assert.equal(releaseVersionOnly(json(pkg), JSON.stringify({ ...pkg, version: '1.2.4' }), 'package.json'), false);
+});
+
+import { parseIntegrationRepairAssessment, parseMechanicalApprovalSource } from '../../../../../src/domain/integration-restoration-record.js';
+import { mechanicalSource } from '../../../../../src/adapters/sqlite/integration-repair-serialization.js';
+
+test('restoration provenance rejects malformed, future and mismatched persisted evidence (TASK-2734)', () => {
+  const source = { kind: 'mechanical-restoration', approvedRevision: 'a', candidateRevision: 'b', failedGate: 'unit',
+    validationRevision: 'b', validationReference: 'operational_history:1', validatedAt: '2026-10-01T11:00:00Z' };
+  const assessment = { assessedAt: '2026-10-01T12:00:00Z', approvedRevision: 'a', candidateRevision: 'b',
+    failedGate: 'unit', outcome: 'restored', source };
+  const parsed = parseIntegrationRepairAssessment(JSON.stringify(assessment));
+  assert.equal(mechanicalSource(parsed, 'b').validationReference, 'operational_history:1');
+  assert.throws(() => mechanicalSource(parsed, 'other'));
+  assert.throws(() => mechanicalSource({ ...parsed, source: { ...parsed.source!, validatedAt: parsed.assessedAt } }, 'b'));
+  assert.throws(() => parseMechanicalApprovalSource('{}'));
+  assert.throws(() => parseIntegrationRepairAssessment(JSON.stringify({ ...assessment, outcome: 'unknown' })));
+  assert.throws(() => parseIntegrationRepairAssessment(JSON.stringify({ ...assessment, normalReviewMs: -1 })));
+});
+
+
+import { measuredReviewCost } from '../../../../../src/adapters/agents/stage-telemetry.js';
+
+test('normal repair review cost excludes unavailable legacy zero while retaining measured zero (TASK-2734)', () => {
+  assert.equal(measuredReviewCost(undefined), null);
+  assert.equal(measuredReviewCost({ cost_usd: 0 }), null);
+  assert.equal(measuredReviewCost({ cost_usd: 0, cost_measured: true }), 0);
+  assert.equal(measuredReviewCost({ cost_usd: 0.03 }), 0.03);
+  assert.equal(measuredReviewCost({ cost_usd: -1 }), null);
+});

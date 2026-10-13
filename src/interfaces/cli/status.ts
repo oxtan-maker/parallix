@@ -106,6 +106,10 @@ function logReviewRounds(missionData: StatusMissionData, log: (_msg: string) => 
   }
   for (const round of missionData.reviewHistory) {
     log(`  Round ${round.number} [${round.reviewer} -> ${round.implementer}]: ${round.disposition ?? 'pending'}`);
+    if (round.integrationRepairAssessment) {
+      const a = round.integrationRepairAssessment;
+      log(`    integration repair source: ${a.source?.kind ?? 'normal-review'}; ${a.outcome}; approved ${a.approvedRevision}; candidate ${a.candidateRevision}; failed gate ${a.failedGate ?? 'unknown'}${a.source ? `; validated ${a.source.validationRevision} at ${a.source.validatedAt}; ${a.source.validationReference}` : ''}`);
+    }
     if (round.comment) { log(`    comment: ${round.comment}`); }
     if (round.revocation) { log(`    revoked by ${round.revocation.by}: ${round.revocation.reason} (${round.revocation.at})`); }
     if (round.supersession) { log(`    superseded by revision ${round.supersession.revision} (${round.supersession.by}, ${round.supersession.at})`); }

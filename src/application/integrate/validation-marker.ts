@@ -24,6 +24,7 @@ export * from '../../domain/integration-validation-policy.js';
  * mission. Keyed on the mission id (stored in `event_data.missionId`) so rows
  * for different missions never collide.
  */
+export const INTEGRATION_VALIDATION_FAILED_EVENT_TYPE = 'integration.integration-validation-failed';
 export const INTEGRATION_VALIDATION_EVENT_TYPE = 'integration.integration-validation';
 
 /**

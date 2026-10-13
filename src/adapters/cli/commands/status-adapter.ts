@@ -205,6 +205,7 @@ export function createStatusBoardAdapter(options: {
           integrationRepair: recorded ? latestIntegrationRepair(recorded.mission) : null,
           reviewHistory: ((card as any)?.reviewHistory || []).map((r: any) => ({
             number: r.number,
+            integrationRepairAssessment: r.integrationRepairAssessment as import('../../../domain/integration-approval-restoration.js').IntegrationRepairAssessment | undefined,
             reviewer: r.reviewer,
             implementer: r.implementer,
             disposition: r.disposition ?? 'pending',

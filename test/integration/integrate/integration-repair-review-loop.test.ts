@@ -71,7 +71,7 @@ test('task-2620: a red integration gate repairs once, re-reviews, and stops in t
         { baseCwd: fixture.worktree, log: () => '', error: () => '' });
         assert.equal(recorded, 0, 'the repair agent records fresh proof through the CLI');
       }
-      return { status: 0, stdout: '', stderr: '' };
+      return { status: 0, stdout: '', stderr: '', telemetry: { provider: 'fixture', cost_usd: 0.02 } };
     })(),
   }));
 
@@ -89,6 +89,8 @@ test('task-2620: a red integration gate repairs once, re-reviews, and stops in t
     'the authorized gate rerun verifies the incident checkpoint (TASK-2695)');
   // The repaired revision was re-reviewed and approved through the live route.
   assert.equal(reviewStatus(mission.review!), 'approved', 'the repaired revision was re-reviewed and approved');
+  assert.ok(mission.review!.rounds.at(-1)!.integrationRepairAssessment!.normalReviewMs! > 0);
+  assert.equal(mission.review!.rounds.at(-1)!.integrationRepairAssessment!.normalReviewCostUsd, 0.02);
   // The run stops cleanly in the integration lane: no auto-merge, no `done`.
   assert.equal(code, 0, 'the run stops cleanly without failing');
   assert.equal(mission.status, 'integration', 'the repaired-and-re-approved mission stays in the integration lane for the human');
@@ -110,7 +112,7 @@ test('task-2620: a red integration gate repairs once, re-reviews, and stops in t
   assert.match(review, /review scope is yours/i, 'the reviewer decides the scope');
   // AC13: px status shows the previous failure, repair range and re-review outcome.
   const status: string[] = [];
-  const previousLogger = setLogger({ log: (line: string) => { status.push(line); }, error: () => {} });
+  const previousLogger = setLogger({ log: (line: string) => { status.push(String(line)); }, error: () => {} });
   try { await run(['status', fixture.slug], { baseCwd: fixture.worktree }); } finally { setLogger(previousLogger); }
   assert.match(status.join('\n'), new RegExp(`Previous integration failed at integration gate unit .*repair range ${fixture.approvedRevision}\.\.${repairedRevision}; re-review approved`));
 
@@ -148,4 +150,52 @@ test('task-2620 AC1: px lead forwards an undecided review round to review --cont
   const approvals = mission.review!.rounds.filter((round) => round.decision?.kind === 'approved');
   assert.equal(approvals.length, 1, 'the only approval is the one the forwarded reviewer recorded');
   assert.notEqual(mission.status, 'done', 'lead did not integrate');
+});
+
+import { projectReviewHistory } from '../../../src/application/projections/mission-board.js';
+import { SqliteClassifierStatisticsReader } from '../../../src/adapters/sqlite/classifier-statistics-reader.js';
+import { SqliteReviewClassificationStore } from '../../../src/adapters/sqlite/review-classification-store.js';
+
+test('unchanged validated integration repair restores mechanical approval without model dispatch and stops for human landing (TASK-2734)', async (t) => {
+  const fixture = await openRepairFixture({ slug: 'task-9734', recordBaseline: true,
+    gateCommand: 'test -f "$PARALLIX_HOME/green" || { echo "AssertionError: transient fixture failure" >&2; exit 1; }' });
+  t.after(() => fixture.close());
+  let reviews = 0, repairs = 0;
+  setCommandPathProbe(() => '/fixture-agent');
+  setLauncherHealthProbe(() => ({ ok: true }));
+  setWorkflowLaunchPort(({ prompt, worktree }: { prompt: string; worktree?: string }) => ({
+    invocation: { command: 'fixture-agent', args: [], options: { cwd: worktree } },
+    resultPromise: (async () => {
+      if (/^Mode: review\./m.test(prompt)) { reviews++; throw new Error('reviewer must not launch'); }
+      repairs++;
+      fs.writeFileSync(path.join(process.env.PARALLIX_HOME!, 'green'), 'ok');
+      const checkpoint = /Harness-created repair checkpoint: (CP-\d+);/.exec(prompt)?.[1];
+      assert.ok(checkpoint);
+      assert.equal(await run(['checkpoint', 'record', '--slug', fixture.slug, '--name', checkpoint,
+        '--criterion', 'feature ships', '--evidence', 'feature.txt; transient gate fixed', '--next', 'Revalidate and restore when patch unchanged'],
+      { baseCwd: fixture.worktree, log: () => '', error: () => '' }), 0);
+      return { status: 0, stdout: '', stderr: '' };
+    })(),
+  }));
+  assert.equal(await integrate(fixture.slug, fixture.worktree), 0);
+  const mission = await fixture.load();
+  assert.equal(repairs, 1); assert.equal(reviews, 0);
+  assert.equal(mission.status, 'integration');
+  const restored = mission.review!.rounds.at(-1)!;
+  assert.equal(restored.decision?.kind, 'approved');
+  assert.equal(restored.integrationRepairAssessment?.outcome, 'restored');
+  assert.equal(restored.decision?.kind === 'approved' && restored.decision.source.kind, 'mechanical-restoration');
+  const history = projectReviewHistory(mission.review!);
+  assert.equal(history.at(-1)?.integrationRepairAssessment?.source?.approvedRevision, fixture.approvedRevision);
+  assert.equal(history.at(-1)?.integrationRepairAssessment?.source?.candidateRevision, restored.subject.revision);
+  const telemetry = new SqliteReviewClassificationStore(fixture.database);
+  assert.equal((await telemetry.calls(String(mission.repositoryId))).length, 0, 'no classifier calls');
+  const stats = await new SqliteClassifierStatisticsReader(fixture.database, telemetry, String(mission.repositoryId)).read();
+  assert.equal(stats.decisions.filter(d => d.source === 'classifier').length, 0);
+  const status: string[] = [];
+  const logger = setLogger({ log: line => { status.push(String(line)); }, error: () => {} });
+  try { await run(['status', fixture.slug], { baseCwd: fixture.worktree }); } finally { setLogger(logger); }
+  assert.match(status.join('\n'), /integration repair source: mechanical-restoration; restored/);
+  assert.match(status.join('\n'), /operational_history:\d+/);
+  assert.equal((await fixture.laneEvents()).at(-1)?.to_status, 'integration');
 });

@@ -9,6 +9,7 @@ export interface PrDecisionFact {
   readonly outcome: 'clear' | 'implementer';
 }
 export interface ClassifierStatisticsInput {
+  readonly integrationRepairs?: readonly import('../review-loop/integration-restoration-statistics.js').IntegrationRepairRoundFact[];
   readonly decisions: readonly PrDecisionFact[];
   readonly attempts: readonly ClassifierCallMeasurement[];
   readonly observations: readonly ClassifierObservation[];
