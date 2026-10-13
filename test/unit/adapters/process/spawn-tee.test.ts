@@ -544,3 +544,14 @@ test('spawnAndTee never passes decision-provider credentials to a launched child
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
 });
+
+test('spawnAndTee passes the requested host presentation to the terminal host and keeps raw output in the tail (TASK-2735)', async () => {
+  const contexts = [];
+  const terminalHost = { host: (_launch, context) => { contexts.push(context.presentation); return { command: 'sh', args: ['/state/host.sh'], cleanup: () => {} }; } };
+  await withMockSpawn({ stdoutChunks: ['{"type":"result"}\n'], status: 0 }, async (observed) => {
+    const result = await spawnAndTee('agent-cli', [], { stdoutSink: noopSink(), stderrSink: noopSink(), terminalHost, hostPresentation: 'claude-stream' });
+    assert.equal(result.stdout, '{"type":"result"}\n');
+    assert.equal(observed[0].options.hostPresentation, undefined, 'the option is not forwarded to child_process.spawn');
+  });
+  assert.deepEqual(contexts, ['claude-stream']);
+});

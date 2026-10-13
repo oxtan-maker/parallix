@@ -8,6 +8,9 @@ export { AgentStreamView as ClaudeStreamView, colorEnabled, type RenderSink, typ
 /** Escape hatch: restore the previous verbatim JSONL passthrough (ADR 0056). */
 export const RAW_STREAM_ENV = 'PARALLIX_CLAUDE_RAW_STREAM';
 
+/** Private CLI entry flag: render a Claude JSONL stream from stdin inside a hosted terminal pane. */
+export const CLAUDE_STREAM_PRESENTER_FLAG = '--claude-stream-presenter';
+
 export function rawStreamRequested(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): boolean {
   return configuration.agents.claudeRawStream;
 }

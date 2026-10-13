@@ -192,7 +192,13 @@ Set `PARALLIX_CLAUDE_RAW_STREAM=1` to turn rendering off and write Claude's
 streaming events to the terminal verbatim, as before. Use it when a script
 consumes Parallix stdout, or to inspect activity the rendered view does not
 display. `PARALLIX_CLAUDE_RAW_STREAM=0` and leaving it unset both mean
-"render". The rationale, and the library alternatives that were rejected, are
+"render".
+
+The same default applies in the hosted tmux mission terminal: the operation
+pane that `px attach`, the web terminal and the retained console transcript
+show carries the rendered view, while Parallix still receives the unmodified
+JSONL for telemetry, session ids and the retained run record. With the raw
+opt-in, the hosted pane shows the verbatim events too. The rationale, and the library alternatives that were rejected, are
 recorded in [ADR 0056](adr/0056-claude-stream-json-output-rendering.md).
 
 ## Launch output watchdog

@@ -181,7 +181,10 @@ test('resolveWorktree finds the expected path for the current mission', () => {
 });
 
 test('resolveWorktree returns null for a non-existent mission slug', () => {
-  const worktree = resolveWorktree('task-nonexistent-9999');
+  const worktree = resolveWorktree('task-nonexistent-9999', {
+    cwd: '/tmp/mission-unrelated',
+    gitFn: () => ({ stdout: 'worktree /tmp/mission-unrelated\nHEAD cafe1234\nbranch refs/heads/main\n' })
+  });
   assert.equal(worktree, null);
 });
 

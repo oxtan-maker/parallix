@@ -2,7 +2,7 @@ import type { ParallixConfiguration } from "../../application/ports/configuratio
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import { spawnAndTee } from '../process/spawn-tee.js';
 import { extractClaudeTelemetryFromStdout } from './claude-telemetry.js';
-import { createClaudeRenderSink } from './claude-stream-view.js';
+import { createClaudeRenderSink, rawStreamRequested } from './claude-stream-view.js';
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
 import type { MissionId } from '../../domain/mission.js';
 import type { SessionRole } from '../../domain/session.js';
@@ -147,6 +147,8 @@ function startClaudeAgent({ configuration = DEFAULT_CONFIGURATION, prompt, workt
     const teeWithTail = {
       maxTailBytes: CLAUDE_TELEMETRY_TAIL_BYTES,
       stdoutSink: sink,
+      // A hosted terminal shows the same readable view; raw bytes still reach the tail and capture.
+      ...(rawStreamRequested(configuration) ? {} : { hostPresentation: 'claude-stream' }),
       ...invocation.options,
       ...teeOptions,
       configuration

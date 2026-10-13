@@ -309,3 +309,22 @@ test('read-only terminal capture selects command panes and fails closed (TASK-26
   assert.equal(reader.read('task-1').kind, 'unavailable');
   assert.ok(calls.every(args => args.includes('list-windows') || args.includes('capture-pane')));
 });
+
+test('a presented launch draws the readable view on the pane and relays raw bytes to the host separately (TASK-2735)', () => {
+  const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-pres-'), 'state') };
+  const { fn } = fakeSpawnSync('');
+  const configuration = resolveConfiguration({ ...environment, ...env });
+  const plain = prepareTmuxLaunch({ identity: identity(), spawnIndex: 0, command: 'claude', args: [], cwd: '/work', env: {} }, { configuration, spawnSyncFn: fn });
+  const presented = prepareTmuxLaunch({ identity: identity(), spawnIndex: 1, command: 'claude', args: [], cwd: '/work', env: {}, presenter: { command: 'px', args: ['--claude-stream-presenter'] } }, { configuration, spawnSyncFn: fn });
+  const files = (launch) => { const scratch = path.dirname(launch.args[0]); return { host: fs.readFileSync(launch.args[0], 'utf8'), pane: fs.readFileSync(path.join(scratch, 'pane.sh'), 'utf8') }; };
+  const [before, after] = [files(plain), files(presented)];
+  assert.doesNotMatch(before.pane, /presenter/, 'unpresented launches keep the verbatim pane');
+  assert.match(before.host, /tee -a/);
+  assert.match(after.pane, /tee .*raw.* < .*agent\.out.* \| 'px' '--claude-stream-presenter' &/);
+  assert.match(after.pane, /wait "\$presenter"/, 'the pane drains the presenter before reporting the exit status');
+  assert.match(after.pane, /status=\$\?\nwait/, 'the command status is captured before waiting');
+  assert.match(after.host, /cat '[^']*\/raw' &/, 'the host relays the raw stream to the supervisor');
+  assert.doesNotMatch(after.host, /tee -a/, 'the transcript receives only the rendered pane');
+  plain.cleanup();
+  presented.cleanup();
+});

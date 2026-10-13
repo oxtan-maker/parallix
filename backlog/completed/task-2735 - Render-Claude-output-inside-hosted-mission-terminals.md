@@ -1,8 +1,8 @@
 ---
 id: TASK-2735
 title: Render Claude output inside hosted mission terminals
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-10-12 13:45'
 labels:
   - bug

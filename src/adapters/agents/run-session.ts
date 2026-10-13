@@ -18,6 +18,8 @@ import type { RunCapture } from '../filesystem/run-history-store.js';
 import type { OutputCapture, TerminalHost } from '../process/spawn-tee.js';
 import { prepareTmuxLaunch, probeTmux, reconcileOrphanSessions, missionSocketPath } from '../process/tmux-host.js';
 import type { TmuxProbe } from '../process/tmux-host.js';
+import { CLAUDE_STREAM_PRESENTER_FLAG } from './claude-stream-view.js';
+import { cliInvocation, type CliInvocation } from '../process/cli-invocation.js';
 
 /**
  * One agent launch's run session (TASK-2643): its identity, durable history
@@ -48,6 +50,13 @@ export interface RunSessionDeps {
   readonly configuration?: ParallixConfiguration;
   /** tmux command seam; unit tests pass a double so they never run tmux. */
   readonly spawnSyncFn?: typeof spawnSync;
+  /** This CLI's re-entry point, used to run the hosted stream presenter; defaults to the running entry. */
+  readonly cli?: CliInvocation;
+}
+
+/** The hosted pane renders agent output through this CLI's private presenter entry. */
+function presenterInvocation(cli: CliInvocation = cliInvocation(process.argv[1])): { command: string; args: string[] } {
+  return { command: cli.command, args: [...cli.args, CLAUDE_STREAM_PRESENTER_FLAG] };
 }
 
 export interface RunSession {
@@ -169,7 +178,8 @@ export function openRunSession(input: RunSessionInput, deps: RunSessionDeps = {}
   let spawnIndex = 0;
   const terminalHost: TerminalHost | undefined = useTmux && !inheritedTerminal ? {
     host: (launch, context) => {
-      const hosted = prepareTmuxLaunch({ identity, spawnIndex: spawnIndex++, command: launch.command, args: launch.args, cwd: context.cwd, env: context.env }, { configuration, ...(deps.spawnSyncFn ? { spawnSyncFn: deps.spawnSyncFn } : {}) });
+      const presenter = context.presentation === 'claude-stream' ? presenterInvocation(deps.cli) : undefined;
+      const hosted = prepareTmuxLaunch({ identity, spawnIndex: spawnIndex++, command: launch.command, args: launch.args, cwd: context.cwd, env: context.env, ...(presenter ? { presenter } : {}) }, { configuration, ...(deps.spawnSyncFn ? { spawnSyncFn: deps.spawnSyncFn } : {}) });
       capture?.addTmuxSession(hosted.sessionName);
       input.log(fmt.status('INFO', `Agent terminal: attach with ${fmt.command(`px attach ${input.slug}`)} (detach with Ctrl-b d).`));
       return hosted;

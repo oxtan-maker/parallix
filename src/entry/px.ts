@@ -4,11 +4,14 @@ import { run } from '../composition/create-cli.js';
 import { cliInvocation, pinChildCli } from '../composition/child-cli.js';
 import { resolveProcessConfiguration } from '../composition/config.js';
 import { runPiWorker } from '../composition/pi-worker.js';
+import { runClaudeStreamPresenter, CLAUDE_STREAM_PRESENTER_FLAG } from '../composition/claude-presenter.js';
 
 export * from '../composition/create-cli.js';
 
 if (process.argv[2] === '--pi-session-worker') {
   runPiWorker();
+} else if (process.argv[2] === CLAUDE_STREAM_PRESENTER_FLAG) {
+  runClaudeStreamPresenter();
 } else {
   const configuration = resolveProcessConfiguration();
   const childEnvironment = { ...configuration.forwardedEnvironment };

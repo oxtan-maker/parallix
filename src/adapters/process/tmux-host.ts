@@ -63,6 +63,11 @@ export interface TmuxLaunchInput {
   readonly env: Readonly<Record<string, string | undefined>>;
   /** The harness process supervising this launch; defaults to this process. */
   readonly supervisorPid?: number;
+  /**
+   * Renders the command's output into the visible pane. The pane then shows
+   * the rendered view while the supervisor still receives the raw bytes.
+   */
+  readonly presenter?: { readonly command: string; readonly args: readonly string[] };
 }
 
 export interface TmuxLaunch {
@@ -98,15 +103,25 @@ function commandScript(socketPath: string, scratch: string, command: string, arg
   ].join('\n');
 }
 
-function paneScript(socketPath: string, windowName: string, scratch: string): string {
+function paneScript(socketPath: string, windowName: string, scratch: string, presenter?: TmuxLaunchInput['presenter']): string {
   const t = `tmux -S ${shellQuote(socketPath)}`;
+  const agentOut = shellQuote(path.join(scratch, 'agent.out'));
+  // Agent output goes to a private fifo: `tee` forwards the raw bytes to the
+  // host's raw channel while the presenter draws the readable view on the pane.
+  const run = presenter
+    ? [`mkfifo ${agentOut}`,
+      `tee ${shellQuote(path.join(scratch, 'raw'))} < ${agentOut} | ${[presenter.command, ...presenter.args].map(shellQuote).join(' ')} &`,
+      'presenter=$!',
+      `sh ${shellQuote(path.join(scratch, 'command.sh'))} > ${agentOut} 2>&1`,
+      'status=$?',
+      'wait "$presenter"']
+    : [`sh ${shellQuote(path.join(scratch, 'command.sh'))}`, 'status=$?'];
   return [
     '#!/bin/sh',
     `${t} wait-for ${shellQuote(`${windowName}-go`)}`,
     `. ${shellQuote(path.join(scratch, 'pane.env'))}`,
     `rm -f ${shellQuote(path.join(scratch, 'pane.env'))}`,
-    `sh ${shellQuote(path.join(scratch, 'command.sh'))}`,
-    'status=$?',
+    ...run,
     `printf '%s' "$status" > ${shellQuote(path.join(scratch, 'status'))}`,
     `${t} set-option -w -t "$TMUX_PANE" @px_host_pid ''`,
     `${t} set-option -w -t "$TMUX_PANE" @px_supervisor_pid ''`,
@@ -130,7 +145,7 @@ function consolePxScript(command: string | undefined): string {
     `PARALLIX_CONSOLE_PX=1 exec /bin/bash -ic 'unset PARALLIX_CONSOLE_PX; exec "$@"' bash ${quoted} "$@"`, ''].join('\n');
 }
 
-function hostScript(socketPath: string, sessionName: string, windowName: string, scratch: string, cwd: string, supervisorPid: number, consoleBin: string, capturePath: string, terminalStateDir: string, configuration: ParallixConfiguration): string {
+function hostScript(socketPath: string, sessionName: string, windowName: string, scratch: string, cwd: string, supervisorPid: number, consoleBin: string, capturePath: string, terminalStateDir: string, configuration: ParallixConfiguration, presented: boolean): string {
   // The tmux server, and every window it later launches, must not inherit operation credentials.
   // The retained console is the operator's own interactive shell and reads their rc files like any terminal.
   const cleanEnv = Object.entries(configuration.terminal.hostEnvironment).filter(([, value]) => value !== undefined && value !== '')
@@ -138,6 +153,7 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
   const stateRoot = path.dirname(path.dirname(socketPath));
   const t = `env -i ${cleanEnv} PARALLIX_TERMINAL_STATE_DIR=${shellQuote(stateRoot)} tmux -S ${shellQuote(socketPath)}`;
   const fifo = shellQuote(path.join(scratch, 'out'));
+  const raw = shellQuote(path.join(scratch, 'raw'));
   const status = shellQuote(path.join(scratch, 'status'));
   const capture = shellQuote(capturePath);
   const name = shellQuote(sessionName);
@@ -153,6 +169,7 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
     `  ${t} kill-window -t ${target} 2>/dev/null`,
     '  [ -z "$completion" ] || kill "$completion" 2>/dev/null',
     '  [ -z "$relay" ] || kill "$relay" 2>/dev/null',
+    '  [ -z "$rawrelay" ] || kill "$rawrelay" 2>/dev/null',
     '}',
 
     "trap 'cleanup INT; exit 130' INT",
@@ -165,6 +182,8 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
     "trap ':' PIPE",
     `rm -f ${fifo} ${status}`,
     `mkfifo ${fifo} || exit 70`,
+    // Presented launches relay the raw stream to the supervisor separately from the pane's readable view.
+    ...(presented ? [`mkfifo ${raw} || exit 70`, `cat ${raw} &`, 'rawrelay=$!'] : []),
     // -A would attach when the session exists and require a caller TTY.
     // Concurrent creators may lose new-session; recheck the exact session.
     `${t} has-session -t ${shellQuote(`=${sessionName}`)} 2>/dev/null || ${t} -f /dev/null new-session -d -s ${name} -n console -x 200 -y 50 -c ${shellQuote(cwd)} ${shellQuote(`PARALLIX_TERMINAL_STATE_DIR=${shellQuote(terminalStateDir)} PATH=${consoleBin}:$PATH exec "\${SHELL:-/bin/sh}" -i`)} 2>/dev/null || ${t} has-session -t ${shellQuote(`=${sessionName}`)} || exit 70`,
@@ -173,7 +192,7 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
     `${t} set-option -w -t ${target} @px_host_pid "$$" >/dev/null`,
     `${t} set-option -w -t ${target} @px_supervisor_pid ${supervisorPid} >/dev/null`,
     `${t} pipe-pane -t ${target} -o ${shellQuote(`cat > ${fifo}`)} || { cleanup; exit 70; }`,
-    `cat ${fifo} | tee -a ${capture} &`,
+    presented ? `cat ${fifo} >> ${capture} &` : `cat ${fifo} | tee -a ${capture} &`,
     'relay=$!',
     `${t} select-window -t ${target}`,
     `${t} wait-for -S ${shellQuote(`${windowName}-go`)}`,
@@ -182,6 +201,7 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
     'wait "$completion"',
     `${t} pipe-pane -t ${target}`,
     'wait "$relay"',
+    ...(presented ? ['wait "$rawrelay"'] : []),
     `if [ -s ${status} ]; then`,
     `  result=$(cat ${status})`,
     `  printf '\n[mission terminal command exit code: %s]\n' "$result" >> ${capture}`,
@@ -228,8 +248,8 @@ export function prepareTmuxLaunch(input: TmuxLaunchInput, options: { configurati
   fs.writeFileSync(path.join(consoleBin, 'px'), consolePxScript(commandPath), { mode: 0o700 });
   writeEnvFile(path.join(scratch, 'pane.env'), { ...input.env, PWD: input.cwd, PARALLIX_MISSION_TERMINAL: input.identity.missionId, PARALLIX_MISSION_SOCKET: socketPath });
   fs.writeFileSync(path.join(scratch, 'command.sh'), commandScript(socketPath, scratch, input.command, input.args), { mode: 0o700 });
-  fs.writeFileSync(path.join(scratch, 'pane.sh'), paneScript(socketPath, windowName, scratch), { mode: 0o700 });
-  fs.writeFileSync(path.join(scratch, 'host.sh'), hostScript(socketPath, sessionName, windowName, scratch, input.cwd, input.supervisorPid ?? process.pid, consoleBin, missionTerminalCapturePath(input.identity, configuration), terminalStateRoot(configuration), configuration), { mode: 0o700 });
+  fs.writeFileSync(path.join(scratch, 'pane.sh'), paneScript(socketPath, windowName, scratch, input.presenter), { mode: 0o700 });
+  fs.writeFileSync(path.join(scratch, 'host.sh'), hostScript(socketPath, sessionName, windowName, scratch, input.cwd, input.supervisorPid ?? process.pid, consoleBin, missionTerminalCapturePath(input.identity, configuration), terminalStateRoot(configuration), configuration, Boolean(input.presenter)), { mode: 0o700 });
   const spawnSyncFn = options.spawnSyncFn ?? childProcess.spawnSync;
   let started = false;
   return {

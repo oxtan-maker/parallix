@@ -54,11 +54,19 @@ interface SpawnTeeOptions {
   terminalHost?: TerminalHost;
   /** Optional durable sink that receives every output chunk, before any tail bound. */
   capture?: OutputCapture;
+  /**
+   * Ask the terminal host to render the launch's stdout readably in its visible
+   * terminal. The sinks, tail and capture still receive the raw bytes.
+   */
+  hostPresentation?: HostPresentation;
   [key: string]: unknown;
 }
 
+/** Readable presentation a host should give the launch's stdout inside its visible terminal. */
+export type HostPresentation = 'claude-stream';
+
 export interface TerminalHost {
-  host(_launch: { command: string; args: string[] }, _context: { cwd: string; env: Record<string, string> }): { command: string; args: string[]; cleanup(): void };
+  host(_launch: { command: string; args: string[] }, _context: { cwd: string; env: Record<string, string>; presentation?: HostPresentation }): { command: string; args: string[]; cleanup(): void };
 }
 
 export interface OutputCapture {
@@ -124,6 +132,7 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
       onSpawn,
       terminalHost,
       capture,
+      hostPresentation,
     ...spawnOptions
   } = options;
 
@@ -145,7 +154,7 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     const confined = wrapWithBubblewrap(command, args, resolvedCwd, configuration);
     let hosted: ReturnType<TerminalHost['host']> | null = null;
     try {
-      hosted = terminalHost ? terminalHost.host(confined, { cwd: resolvedCwd, env }) : null;
+      hosted = terminalHost ? terminalHost.host(confined, { cwd: resolvedCwd, env, ...(hostPresentation ? { presentation: hostPresentation } : {}) }) : null;
     } catch (err) {
       const now = new Date().toISOString();
       resolve({ status: null, signal: null, stdout: '', stderr: '', error: err, startedAt: now, endedAt: now });

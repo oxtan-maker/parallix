@@ -28,6 +28,8 @@ import { buildBubblewrapArgs, resolveSandboxProfile } from '../../../src/adapter
 import { missionRunsDir, runHistoryFileSystem } from '../../../src/adapters/filesystem/run-history-store.js';
 import { listRuns, searchRuns } from '../../../src/application/run-history.js';
 import { attachRun } from '../../../src/adapters/cli/commands/run-history.js';
+import { startClaudeAgent } from '../../../src/adapters/agents/claude.js';
+import { CLAUDE_STREAM_FIXTURE } from '../../fixtures/claude-stream-json.js';
 import { createTmuxTerminalReader } from '../../../src/adapters/process/tmux-terminal-reader.js';
 
 const sink = { write: () => true };
@@ -82,7 +84,7 @@ function fixture(): Fixture {
 function session(fx: Fixture, worktree: string, slug: string, family = 'codex', role = 'execute') {
   return openRunSession(
     { worktree, slug, role, family, attempt: 1, log: () => {} },
-    { interactive: true, config: () => ({ host: 'tmux', whenUnavailable: 'fail' }), repositoryKey: () => 'itrepo', configuration: resolveConfiguration(fx.env) },
+    { interactive: true, config: () => ({ host: 'tmux', whenUnavailable: 'fail' }), repositoryKey: () => 'itrepo', configuration: resolveConfiguration(fx.env), cli: { command: process.execPath, args: ['--import', path.join(REPO_ROOT, 'node_modules/tsx/dist/loader.mjs'), path.join(REPO_ROOT, 'src/entry/px.ts')] } },
   )!;
 }
 
@@ -772,5 +774,70 @@ test('a host whose harness pipe is gone still stops its command when the termina
     assert.notEqual(await exited, 'SIGPIPE', 'the host survives reporting the hung-up job to its closed stderr');
     waitFor(() => { try { process.kill(agentPid, 0); return false; } catch { return true; } });
     launch.cleanup();
+  } finally { fx.cleanup(); }
+});
+
+test('hosted Claude launch shows readable presentation in the live pane and transcript while the raw stream stays intact (TASK-2735)', { timeout: 20000 }, async () => {
+  const fx = fixture();
+  try {
+    const worktree = fx.worktree('task-claude');
+    const run = session(fx, worktree, 'task-claude', 'claude');
+    const bin = path.join(fx.root, 'bin');
+    fs.mkdirSync(bin);
+    const stream = path.join(fx.root, 'stream.jsonl');
+    const release = path.join(fx.root, 'release');
+    fs.writeFileSync(stream, CLAUDE_STREAM_FIXTURE);
+    fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/sh\ncat ${shellQuote(stream)}\nwhile [ ! -e ${shellQuote(release)} ]; do sleep 0.05; done\n`, { mode: 0o700 });
+    const { resultPromise } = startClaudeAgent({
+      prompt: 'p', worktree, configuration: resolveConfiguration(fx.env),
+      env: { PATH: `${bin}${path.delimiter}${process.env.PATH}` },
+      teeOptions: { ...run.teeOptions, stdoutSink: sink, stderrSink: sink },
+    });
+    const reader = createTmuxTerminalReader({ resolveMissionWorktree: () => worktree, repositoryKey: () => 'itrepo', configuration: resolveConfiguration(fx.env) });
+    const paneText = () => { const live = reader.read('task-claude'); return live.kind === 'live' ? live.output : ''; };
+    const deadline = Date.now() + 4000;
+    while (!paneText().includes('Checking the launcher wiring') && Date.now() < deadline) { childProcess.spawnSync('sleep', ['0.05']); }
+    const pane = paneText();
+    fs.writeFileSync(release, '');
+    const result: any = await resultPromise;
+    run.finish(result);
+    assert.match(pane, /Checking the launcher wiring/, 'live pane shows assistant text');
+    assert.match(pane, /ls src\/adapters/, 'live pane shows tool activity');
+    assert.doesNotMatch(pane, /stream_event|"type":"assistant"/, 'live pane carries no JSON envelopes');
+    const transcript = fs.readFileSync(missionTerminalCapturePath(run.identity, resolveConfiguration(fx.env)), 'utf8');
+    assert.match(transcript, /Checking the launcher wiring/);
+    assert.doesNotMatch(transcript, /stream_event/);
+    assert.equal(result.sessionId, 'sess-2461', 'session id is extracted from the raw stream');
+    assert.ok(result.stdout.includes('"type":"stream_event"'), 'telemetry tail keeps the raw JSONL');
+    for (const line of CLAUDE_STREAM_FIXTURE.split('\n').filter(l => l.startsWith('{'))) { assert.ok(result.stdout.includes(line), 'raw record intact'); }
+  } finally { fx.cleanup(); }
+});
+
+test('presented Claude launch keeps the agent exit status and stops the agent on cancellation (TASK-2735)', { timeout: 20000 }, async () => {
+  const fx = fixture();
+  try {
+    const worktree = fx.worktree('task-claude-x');
+    const bin = path.join(fx.root, 'bin');
+    fs.mkdirSync(bin);
+    const pidFile = path.join(fx.root, 'agent.pid');
+    const failing = session(fx, worktree, 'task-claude-x', 'claude');
+    fs.writeFileSync(path.join(bin, 'claude'), '#!/bin/sh\necho plain-diagnostic\nexit 7\n', { mode: 0o700 });
+    const env = { PATH: `${bin}${path.delimiter}${process.env.PATH}` };
+    const exited: any = await startClaudeAgent({ prompt: 'p', worktree, configuration: resolveConfiguration(fx.env), env, teeOptions: { ...failing.teeOptions, stdoutSink: sink, stderrSink: sink } }).resultPromise;
+    failing.finish(exited);
+    assert.equal(exited.status, 7);
+    assert.match(exited.stdout, /plain-diagnostic/, 'non-JSON output still reaches the raw stream');
+    const cancelled = session(fx, worktree, 'task-claude-x', 'claude');
+    fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/sh\necho $$ > ${shellQuote(pidFile)}\nexec sleep 30\n`, { mode: 0o700 });
+    let hostPid = 0;
+    const { resultPromise } = startClaudeAgent({ prompt: 'p', worktree, configuration: resolveConfiguration(fx.env), env,
+      teeOptions: { ...cancelled.teeOptions, stdoutSink: sink, stderrSink: sink, onSpawn: (child: { pid?: number }) => { hostPid = child.pid ?? 0; } } });
+    waitFor(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() !== '', 8000);
+    const agentPid = Number(fs.readFileSync(pidFile, 'utf8'));
+    process.kill(hostPid, 'SIGTERM');
+    const result: any = await resultPromise;
+    cancelled.finish(result);
+    assert.equal(result.status, 143);
+    waitFor(() => { try { process.kill(agentPid, 0); return false; } catch { return true; } });
   } finally { fx.cleanup(); }
 });

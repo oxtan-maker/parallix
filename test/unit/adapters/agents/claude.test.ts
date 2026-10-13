@@ -396,3 +396,18 @@ test('first and later fresh repair ignore historical session IDs (TASK-2700)', (
     }
   }
 });
+
+test('startClaudeAgent asks the terminal host for readable presentation unless raw output is requested (TASK-2735)', async () => {
+  const seen = [];
+  claude.__setSpawnAndTeeForTest((_command, _args, options) => {
+    seen.push(options.hostPresentation);
+    return Promise.resolve({ status: 0, stdout: '', stderr: '' });
+  });
+  try {
+    await claude.startClaudeAgent({ configuration: resolveConfiguration({}), prompt: 'fixture', worktree: '/tmp' }).resultPromise;
+    await claude.startClaudeAgent({ configuration: resolveConfiguration({ PARALLIX_CLAUDE_RAW_STREAM: '1' }), prompt: 'fixture', worktree: '/tmp' }).resultPromise;
+  } finally {
+    claude.__setSpawnAndTeeForTest(null);
+  }
+  assert.deepEqual(seen, ['claude-stream', undefined]);
+});
