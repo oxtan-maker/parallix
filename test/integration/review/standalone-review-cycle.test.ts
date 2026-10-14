@@ -126,7 +126,7 @@ function assertNoForgejoApiCalls(ports, forgejo) {
 function capturePrompt() {
   const captured: { prompt: string | null } = { prompt: null };
   mock.method(agentsModule, 'startAgent', async (step, agentOpts) => {
-    if (step === 'review' && typeof agentOpts.prompt === 'function') { captured.prompt = agentOpts.prompt('codex'); }
+    if (step === 'review' && typeof agentOpts.prompt === 'function') { captured.prompt = await agentOpts.prompt('codex'); }
     return { agent: agentOpts.agent };
   });
   return captured;

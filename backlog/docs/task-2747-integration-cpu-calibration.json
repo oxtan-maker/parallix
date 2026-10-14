@@ -1,0 +1,2306 @@
+{
+  "revision": "b7abdef874f7a31a20f1b58860036b24775e4458",
+  "command": "PARALLIX_TEST_CPU_PROFILE_DIR=/tmp/task-2747-cpu PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt",
+  "note": "CPU includes waited children and cleanup. Finite covered limits preserve early CI population (maximum 3500 ms). Plain limits, suite budgets, assertions and wall deadlines unchanged. The unprofiled reproduction also measured stats-population at 258 ms against 250 ms.",
+  "calibration": [
+    {
+      "file": "integration/agents/mistral.test.ts",
+      "previousMs": 150,
+      "limitMs": 200,
+      "measuredPeakCpuMs": 108.842,
+      "marginPercent": 83.8,
+      "cases": [
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "resolveVibeCommand returns bare \"vibe\"",
+          "profile": "covered",
+          "cpuMs": 3.834,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "extractVibeSessionId returns null for no match",
+          "profile": "covered",
+          "cpuMs": 0.476,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "extractVibeSessionId returns null (vibe has no stdout resume hint)",
+          "profile": "covered",
+          "cpuMs": 0.623,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "buildVibeInvocation includes --prompt flag",
+          "profile": "covered",
+          "cpuMs": 1.099,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "buildVibeInvocation includes --trust flag",
+          "profile": "covered",
+          "cpuMs": 0.75,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "buildVibeInvocation includes --yolo flag for non-interactive tool-call approval",
+          "profile": "covered",
+          "cpuMs": 0.727,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "buildVibeInvocation includes --output text flag",
+          "profile": "covered",
+          "cpuMs": 0.75,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "buildVibeInvocation includes explicit workdir and temp-dir access",
+          "profile": "covered",
+          "cpuMs": 0.903,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "buildVibeInvocation does not include resume flags",
+          "profile": "covered",
+          "cpuMs": 0.875,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "buildVibeInvocation sets cwd to worktree",
+          "profile": "covered",
+          "cpuMs": 1.056,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "buildVibeInvocation merges env",
+          "profile": "covered",
+          "cpuMs": 0.629,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "startVibeAgent returns invocation and resultPromise with bare name",
+          "profile": "covered",
+          "cpuMs": 108.842,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "ensureVibeHome copies config and rewrites session logging to the worktree",
+          "profile": "covered",
+          "cpuMs": 3.347,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "mistral module exports expected functions",
+          "profile": "covered",
+          "cpuMs": 0.478,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "buildVibeInvocation sets VIBE_ACTIVE_MODEL env when model is provided",
+          "profile": "covered",
+          "cpuMs": 1.066,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "buildVibeInvocation omits VIBE_ACTIVE_MODEL env when model is null/undefined",
+          "profile": "covered",
+          "cpuMs": 1.189,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "processResult returns telemetry null for null input",
+          "profile": "covered",
+          "cpuMs": 0.809,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "processResult returns telemetry null for empty object input (isolated FS)",
+          "profile": "covered",
+          "cpuMs": 0.587,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "processResult populates telemetry with correct field names when meta.json exists",
+          "profile": "covered",
+          "cpuMs": 1.214,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "processResult preserves sessionId when present in input",
+          "profile": "covered",
+          "cpuMs": 0.629,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "processResult returns null telemetry when session has all-zero stats",
+          "profile": "covered",
+          "cpuMs": 0.697,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "processResult returns null telemetry when no session directories exist",
+          "profile": "covered",
+          "cpuMs": 0.43,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "processResult picks valid session when newer one has zero stats",
+          "profile": "covered",
+          "cpuMs": 1.168,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "getVibeProviderModel returns correct fallback identity",
+          "profile": "covered",
+          "cpuMs": 0.319,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "processResult preserves extra result fields",
+          "profile": "covered",
+          "cpuMs": 0.707,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "processResult accepts telemetry when session start_time is within invocation window",
+          "profile": "covered",
+          "cpuMs": 1.07,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "processResult rejects telemetry when session is too old (outside 120-min window)",
+          "profile": "covered",
+          "cpuMs": 0.759,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "processResult rejects telemetry when session start_time is in the future",
+          "profile": "covered",
+          "cpuMs": 0.572,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "processResult rejects telemetry when meta.json has no start_time field",
+          "profile": "covered",
+          "cpuMs": 0.68,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/mistral.test.ts",
+          "name": "processResult accepts telemetry when no invocationStart is provided (backward compat)",
+          "profile": "covered",
+          "cpuMs": 1.285,
+          "limitMs": 150
+        }
+      ]
+    },
+    {
+      "file": "integration/integrate/integration-repair-review-loop.test.ts",
+      "previousMs": 3350,
+      "limitMs": 3500,
+      "measuredPeakCpuMs": 3133.285,
+      "marginPercent": 11.7,
+      "cases": [
+        {
+          "file": "integration/integrate/integration-repair-review-loop.test.ts",
+          "name": "task-2620: a red integration gate repairs once, re-reviews, and stops in the integration lane",
+          "profile": "covered",
+          "cpuMs": 3133.285,
+          "limitMs": 3350
+        },
+        {
+          "file": "integration/integrate/integration-repair-review-loop.test.ts",
+          "name": "task-2620 AC1: px lead forwards an undecided review round to review --continue and records no approval",
+          "profile": "covered",
+          "cpuMs": 1387.672,
+          "limitMs": 3350
+        },
+        {
+          "file": "integration/integrate/integration-repair-review-loop.test.ts",
+          "name": "unchanged validated integration repair restores mechanical approval without model dispatch and stops for human landing (TASK-2734)",
+          "profile": "covered",
+          "cpuMs": 3055.232,
+          "limitMs": 3350
+        }
+      ]
+    },
+    {
+      "file": "integration/lifecycle/lifecycle-history.test.ts",
+      "previousMs": 200,
+      "limitMs": 275,
+      "measuredPeakCpuMs": 162.819,
+      "marginPercent": 68.9,
+      "cases": [
+        {
+          "file": "integration/lifecycle/lifecycle-history.test.ts",
+          "name": "full lifecycle lane history > records a gap-free ordered lane history from backlog entry to closure",
+          "profile": "covered",
+          "cpuMs": 162.819,
+          "limitMs": 200
+        },
+        {
+          "file": "integration/lifecycle/lifecycle-history.test.ts",
+          "name": "defect A: historical flow excludes missions before intake > leaves a Thursday-intaked mission absent from Monday, Tuesday and Wednesday",
+          "profile": "covered",
+          "cpuMs": 76.539,
+          "limitMs": 200
+        },
+        {
+          "file": "integration/lifecycle/lifecycle-history.test.ts",
+          "name": "defect A: historical flow excludes missions before intake > never reports a completed mission before the week it was intaked",
+          "profile": "covered",
+          "cpuMs": 64.037,
+          "limitMs": 200
+        },
+        {
+          "file": "integration/lifecycle/lifecycle-history.test.ts",
+          "name": "defect E: legacy lifecycle-entry fallback stays inside its repository > reads only its own repository history for a colliding mission id",
+          "profile": "covered",
+          "cpuMs": 53.587,
+          "limitMs": 200
+        },
+        {
+          "file": "integration/lifecycle/lifecycle-history.test.ts",
+          "name": "defect E: legacy lifecycle-entry fallback stays inside its repository > reports the lane age as unavailable when no row can be attributed to this repository",
+          "profile": "covered",
+          "cpuMs": 59.307,
+          "limitMs": 200
+        }
+      ]
+    },
+    {
+      "file": "integration/mission/handoff.test.ts",
+      "previousMs": 150,
+      "limitMs": 200,
+      "measuredPeakCpuMs": 105.957,
+      "marginPercent": 88.8,
+      "cases": [
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "evidence shell commands require an existing file argument",
+          "profile": "covered",
+          "cpuMs": 12.073,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "evidence accepts git commands inside escaped-backtick markdown cells",
+          "profile": "covered",
+          "cpuMs": 0.893,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "verifyHandoff fails when mission directory is not found",
+          "profile": "covered",
+          "cpuMs": 38.386,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff uses provided worktree and fails hard on Backlog missing",
+          "profile": "covered",
+          "cpuMs": 13.396,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff skips commit in Step 4 when Backlog transition already committed",
+          "profile": "covered",
+          "cpuMs": 105.957,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff refreshes the review tracking ref and lease-updates the rebased PR branch after its Backlog transition",
+          "profile": "covered",
+          "cpuMs": 52.912,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff falls back to magnus and persists bootstrap failure summary",
+          "profile": "covered",
+          "cpuMs": 33.206,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff fails hard when git commit fails in Step 4",
+          "profile": "covered",
+          "cpuMs": 41.924,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "verifyHandoff accepts a typed mission without MISSION.md",
+          "profile": "covered",
+          "cpuMs": 8.677,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff fails when MISSION.md is missing from mission directory",
+          "profile": "covered",
+          "cpuMs": 9.998,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff succeeds with ## Goal Check Table heading variant",
+          "profile": "covered",
+          "cpuMs": 59.511,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff fails when MISSION.md is uncommitted",
+          "profile": "covered",
+          "cpuMs": 14.312,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff fails when no checkpoint documents exist",
+          "profile": "covered",
+          "cpuMs": 9.797,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "legacy handoff fails closed without synthesizing or committing checkpoint evidence",
+          "profile": "covered",
+          "cpuMs": 10.86,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff fails when the latest checkpoint document is uncommitted",
+          "profile": "covered",
+          "cpuMs": 12.259,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff fails when final checkpoint is missing Goal Check section",
+          "profile": "covered",
+          "cpuMs": 8.335,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff fails when final checkpoint has Goal Check section but no evidence rows",
+          "profile": "covered",
+          "cpuMs": 11.652,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff fails when final checkpoint has header-only goal-check table (no evidence rows)",
+          "profile": "covered",
+          "cpuMs": 10.194,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff fails when final checkpoint has separator-only goal-check table",
+          "profile": "covered",
+          "cpuMs": 10.952,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff fails when final checkpoint evidence row is placeholder prose only",
+          "profile": "covered",
+          "cpuMs": 9.125,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff fails when final checkpoint evidence row is shell output only",
+          "profile": "covered",
+          "cpuMs": 12.948,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff accepts final checkpoint evidence row with a real file:line reference",
+          "profile": "covered",
+          "cpuMs": 40.542,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff accepts file:line evidence with supporting shell context in the same cell",
+          "profile": "covered",
+          "cpuMs": 42.457,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff calls rebaseBeforeReviewRound before Forgejo PR creation",
+          "profile": "covered",
+          "cpuMs": 55.636,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff fails when rebase returns ok=false with no shared-file conflicts",
+          "profile": "covered",
+          "cpuMs": 13.178,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff fails when rebase returns sharedFileConflicts=true",
+          "profile": "covered",
+          "cpuMs": 10.792,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff proceeds normally when rebase is a no-op (branch already up-to-date)",
+          "profile": "covered",
+          "cpuMs": 51.428,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "runDeclaredGates returns skipped when no ## Gates section exists",
+          "profile": "covered",
+          "cpuMs": 3.333,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "runDeclaredGates runs recorded gates and never reads the mission document",
+          "profile": "covered",
+          "cpuMs": 28.15,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "runDeclaredGates falls back to the mission document when nothing is recorded",
+          "profile": "covered",
+          "cpuMs": 27.68,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "a failing recorded gate blocks handoff exactly as a failing document gate does",
+          "profile": "covered",
+          "cpuMs": 22.63,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "runDeclaredGates returns skipped when ## Gates section is empty",
+          "profile": "covered",
+          "cpuMs": 3.909,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "runDeclaredGates executes passing gates and reports count",
+          "profile": "covered",
+          "cpuMs": 57.135,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "runDeclaredGates fails when a gate command exits non-zero",
+          "profile": "covered",
+          "cpuMs": 17.024,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "runDeclaredGates skips when mission directory does not exist",
+          "profile": "covered",
+          "cpuMs": 0.912,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "runDeclaredGates handles checkbox prefixes [- [ ] and - [x])",
+          "profile": "covered",
+          "cpuMs": 53.263,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "captureNelAtHandoff returns error when primary branch not detected",
+          "profile": "covered",
+          "cpuMs": 1.047,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "captureNelAtHandoff records the NEL through the Mission store and writes no nel-record.json",
+          "profile": "covered",
+          "cpuMs": 18.662,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "captureNelAtHandoff reports a refused Mission write and leaves no legacy record",
+          "profile": "covered",
+          "cpuMs": 15.83,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff stops before review transitions when NEL persistence fails",
+          "profile": "covered",
+          "cpuMs": 18.188,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff no longer stages or commits a legacy NEL record before transitioning Backlog",
+          "profile": "covered",
+          "cpuMs": 38.387,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "captureNelAtHandoff reads predicted bucket from MISSION.md Refinement Signals",
+          "profile": "covered",
+          "cpuMs": 19.557,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff captures verification gate stdout/stderr on non-zero exit (SC1)",
+          "profile": "covered",
+          "cpuMs": 33.214,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "runDeclaredGates captures stdout and stderr on gate failure (SC2)",
+          "profile": "covered",
+          "cpuMs": 25.931,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates passes for valid commands with existing files",
+          "profile": "covered",
+          "cpuMs": 1.629,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates fails for non-existent file with validation-failed reason",
+          "profile": "covered",
+          "cpuMs": 1.27,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates fails for unclosed single quotes with validation-failed reason",
+          "profile": "covered",
+          "cpuMs": 2.684,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates fails for unclosed double quotes with validation-failed reason",
+          "profile": "covered",
+          "cpuMs": 1.138,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates fails for unmatched parentheses with validation-failed reason",
+          "profile": "covered",
+          "cpuMs": 0.961,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates fails for unmatched braces with validation-failed reason",
+          "profile": "covered",
+          "cpuMs": 0.814,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates fails for unmatched brackets with validation-failed reason",
+          "profile": "covered",
+          "cpuMs": 0.645,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates fails on first invalid command in mixed valid/invalid set",
+          "profile": "covered",
+          "cpuMs": 1.647,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates passes for shell builtins without file paths",
+          "profile": "covered",
+          "cpuMs": 0.781,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates skips URL patterns",
+          "profile": "covered",
+          "cpuMs": 1.168,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates passes for commands with flags",
+          "profile": "covered",
+          "cpuMs": 0.886,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "runDeclaredGates fails with validation-failed before executing invalid file reference",
+          "profile": "covered",
+          "cpuMs": 4.493,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "runDeclaredGates fails with validation-failed before executing syntax error",
+          "profile": "covered",
+          "cpuMs": 2.185,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates passes glob patterns (no false positive on /*)",
+          "profile": "covered",
+          "cpuMs": 1.379,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates passes directory references with trailing slash",
+          "profile": "covered",
+          "cpuMs": 1.034,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates passes apostrophe inside double-quoted string",
+          "profile": "covered",
+          "cpuMs": 1.667,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates passes double apostrophe inside double-quoted string",
+          "profile": "covered",
+          "cpuMs": 1.1,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates passes mixed prose with embedded path",
+          "profile": "covered",
+          "cpuMs": 0.965,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates passes command with valid ./ path and quoted arg",
+          "profile": "covered",
+          "cpuMs": 0.735,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates still catches genuinely unclosed single quote",
+          "profile": "covered",
+          "cpuMs": 1.51,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates still catches genuinely unclosed double quote",
+          "profile": "covered",
+          "cpuMs": 0.782,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates passes escaped quote inside double-quoted string",
+          "profile": "covered",
+          "cpuMs": 0.875,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates fails for non-existent file still works with tokenized paths",
+          "profile": "covered",
+          "cpuMs": 0.869,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates passes command with absolute path that exists",
+          "profile": "covered",
+          "cpuMs": 0.939,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates fails for non-existent absolute path",
+          "profile": "covered",
+          "cpuMs": 0.81,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates rejects outcome prose with command-only remediation",
+          "profile": "covered",
+          "cpuMs": 1.023,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "runDeclaredGates rejects Markdown command followed by prose",
+          "profile": "covered",
+          "cpuMs": 1.16,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "runDeclaredGates rejects explanatory dash suffixes",
+          "profile": "covered",
+          "cpuMs": 1.712,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "runDeclaredGates executes bare, backticked, checked, and unchecked command forms",
+          "profile": "covered",
+          "cpuMs": 81.565,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "validateDeclaredGates preserves quoted arguments, pipelines, redirects, and compound commands",
+          "profile": "covered",
+          "cpuMs": 0.889,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff attempts agent relaunch when gatekeeper posts pushback",
+          "profile": "covered",
+          "cpuMs": 22.243,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff respects bounded retry limit of 2 for gatekeeper pushback",
+          "profile": "covered",
+          "cpuMs": 14.909,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff consumes full retry budget when relaunch succeeds but pushback persists",
+          "profile": "covered",
+          "cpuMs": 44.509,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff succeeds after successful agent relaunch",
+          "profile": "covered",
+          "cpuMs": 68.479,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/mission/handoff.test.ts",
+          "name": "performHandoff relaunch prompt lists all missing artifact types",
+          "profile": "covered",
+          "cpuMs": 14.544,
+          "limitMs": 150
+        }
+      ]
+    },
+    {
+      "file": "integration/packaging/npm-pack-install-smoke.test.ts",
+      "previousMs": 1000,
+      "limitMs": 1250,
+      "measuredPeakCpuMs": 924.242,
+      "marginPercent": 35.2,
+      "cases": [
+        {
+          "file": "integration/packaging/npm-pack-install-smoke.test.ts",
+          "name": "task-2285 install: the tarball contains only the bundle payload and release metadata",
+          "profile": "covered",
+          "cpuMs": 2.361,
+          "limitMs": 1000
+        },
+        {
+          "file": "integration/packaging/npm-pack-install-smoke.test.ts",
+          "name": "task-2285 install: SC4 \u2014 no node_modules anywhere in the installed package",
+          "profile": "covered",
+          "cpuMs": 3.362,
+          "limitMs": 1000
+        },
+        {
+          "file": "integration/packaging/npm-pack-install-smoke.test.ts",
+          "name": "task-2285 install: SC3 \u2014 px --version reports the bundle as the payload root",
+          "profile": "covered",
+          "cpuMs": 362.544,
+          "limitMs": 1000
+        },
+        {
+          "file": "integration/packaging/npm-pack-install-smoke.test.ts",
+          "name": "task-2285 install: SC3 \u2014 px --help prints the command surface",
+          "profile": "covered",
+          "cpuMs": 366.956,
+          "limitMs": 1000
+        },
+        {
+          "file": "integration/packaging/npm-pack-install-smoke.test.ts",
+          "name": "task-2285 install: SC3 \u2014 representative headless JSON command emits parseable JSON",
+          "profile": "covered",
+          "cpuMs": 396.859,
+          "limitMs": 1000
+        },
+        {
+          "file": "integration/packaging/npm-pack-install-smoke.test.ts",
+          "name": "task-2285 install: SC3 \u2014 embedded assets load from the bundle payload root",
+          "profile": "covered",
+          "cpuMs": 339.464,
+          "limitMs": 1000
+        },
+        {
+          "file": "integration/packaging/npm-pack-install-smoke.test.ts",
+          "name": "task-2285 install: SC3 \u2014 explicit TUI falls back cleanly on a non-TTY stdin/stdout",
+          "profile": "covered",
+          "cpuMs": 924.242,
+          "limitMs": 1000
+        },
+        {
+          "file": "integration/packaging/npm-pack-install-smoke.test.ts",
+          "name": "task-2285 install: SC3 \u2014 node:sqlite resolves at startup from the installed bundle",
+          "profile": "covered",
+          "cpuMs": 393.086,
+          "limitMs": 1000
+        },
+        {
+          "file": "integration/packaging/npm-pack-install-smoke.test.ts",
+          "name": "task-2285 install: the local (non-global) install layout runs the same bundle",
+          "profile": "covered",
+          "cpuMs": 299.284,
+          "limitMs": 1000
+        },
+        {
+          "file": "integration/packaging/npm-pack-install-smoke.test.ts",
+          "name": "task-2285 install: SC7 \u2014 the installed bin is byte-identical to the built bundle",
+          "profile": "covered",
+          "cpuMs": 9.185,
+          "limitMs": 1000
+        },
+        {
+          "file": "integration/packaging/npm-pack-install-smoke.test.ts",
+          "name": "task-2285 install: bare `px` on a non-TTY prints help (SC3)",
+          "profile": "covered",
+          "cpuMs": 341.625,
+          "limitMs": 1000
+        }
+      ]
+    },
+    {
+      "file": "integration/stats/stats-population.test.ts",
+      "previousMs": 250,
+      "limitMs": 350,
+      "measuredPeakCpuMs": 179.153,
+      "marginPercent": 95.4,
+      "cases": [
+        {
+          "file": "integration/stats/stats-population.test.ts",
+          "name": "defect D: lifecycle `done` is the only completion definition > reports exactly the lifecycle-completed missions as outcomes",
+          "profile": "covered",
+          "cpuMs": 100.962,
+          "limitMs": 250
+        },
+        {
+          "file": "integration/stats/stats-population.test.ts",
+          "name": "defect D: lifecycle `done` is the only completion definition > gives the shared CLI mission-flow report the same population as the board",
+          "profile": "covered",
+          "cpuMs": 179.153,
+          "limitMs": 250
+        }
+      ]
+    },
+    {
+      "file": "integration/verification/rebound-gate-recovery.test.ts",
+      "previousMs": 250,
+      "limitMs": 350,
+      "measuredPeakCpuMs": 270.581,
+      "marginPercent": 29.4,
+      "cases": [
+        {
+          "file": "integration/verification/rebound-gate-recovery.test.ts",
+          "name": "task-2413: publication verifier failure preserves the structured root failure",
+          "profile": "covered",
+          "cpuMs": 142.583,
+          "limitMs": 250
+        },
+        {
+          "file": "integration/verification/rebound-gate-recovery.test.ts",
+          "name": "task-2413: raw spawn capture safely bounds verifier output above the Node default buffer",
+          "profile": "covered",
+          "cpuMs": 270.581,
+          "limitMs": 250
+        },
+        {
+          "file": "integration/verification/rebound-gate-recovery.test.ts",
+          "name": "task-2413: a materially changed failure is reclassified from its own evidence, not the prior class",
+          "profile": "covered",
+          "cpuMs": 3.952,
+          "limitMs": 250
+        },
+        {
+          "file": "integration/verification/rebound-gate-recovery.test.ts",
+          "name": "task-2413: a deterministic gate failure is not masked as a transient/no-output pass",
+          "profile": "covered",
+          "cpuMs": 100.557,
+          "limitMs": 250
+        },
+        {
+          "file": "integration/verification/rebound-gate-recovery.test.ts",
+          "name": "task-2413: only adapter-declared verifier markers receive a transient rerun",
+          "profile": "covered",
+          "cpuMs": 1.484,
+          "limitMs": 250
+        },
+        {
+          "file": "integration/verification/rebound-gate-recovery.test.ts",
+          "name": "task-2413: a slow unit-test gate retries before it can be mistaken for a Git hook failure",
+          "profile": "covered",
+          "cpuMs": 1.638,
+          "limitMs": 250
+        },
+        {
+          "file": "integration/verification/rebound-gate-recovery.test.ts",
+          "name": "task-2413: an exhausted slow-test retry launches a repair with the exact gate evidence, not an invented suite",
+          "profile": "covered",
+          "cpuMs": 35.87,
+          "limitMs": 250
+        },
+        {
+          "file": "integration/verification/rebound-gate-recovery.test.ts",
+          "name": "task-2413: fresh structured evidence reclassifies recovery instead of retaining a stale gate policy",
+          "profile": "covered",
+          "cpuMs": 18.196,
+          "limitMs": 250
+        },
+        {
+          "file": "integration/verification/rebound-gate-recovery.test.ts",
+          "name": "task-2413: launcher failure uses its own budget and never pretends code repair was attempted",
+          "profile": "covered",
+          "cpuMs": 12.611,
+          "limitMs": 250
+        }
+      ]
+    },
+    {
+      "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+      "previousMs": 150,
+      "limitMs": 225,
+      "measuredPeakCpuMs": 146.751,
+      "marginPercent": 53.3,
+      "cases": [
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "SQLite Mission aggregate integration > migrates stored success criteria as incomplete and keeps their text (TASK-2631)",
+          "profile": "covered",
+          "cpuMs": 146.751,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "SQLite Mission aggregate integration > persists completed success criteria by position (TASK-2631)",
+          "profile": "covered",
+          "cpuMs": 71.037,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "SQLite Mission aggregate integration > uses normalized domain-shaped tables and keeps repository observations separate",
+          "profile": "covered",
+          "cpuMs": 64.156,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "SQLite Mission aggregate integration > round trips every checked Mission, CheckpointData, and Review value through real rows",
+          "profile": "covered",
+          "cpuMs": 70.554,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "SQLite Mission aggregate integration > use case persists a revoked approval and opens a reviewable round",
+          "profile": "covered",
+          "cpuMs": 73.038,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "SQLite Mission aggregate integration > persists an integration-gate rebound cause with its failed gate (TASK-2620)",
+          "profile": "covered",
+          "cpuMs": 70.482,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "SQLite Mission aggregate integration > refuses an invalid brief before it can make a Mission unloadable",
+          "profile": "covered",
+          "cpuMs": 50.797,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "SQLite Mission aggregate integration > refuses a duplicate declared gate before it can make a Mission unloadable",
+          "profile": "covered",
+          "cpuMs": 53.868,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "SQLite Mission aggregate integration > reopens the brief, the declared gates and checkpoint evidence without repository files",
+          "profile": "covered",
+          "cpuMs": 55.096,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "SQLite Mission aggregate integration > omits blank goal checks instead of failing Mission loads (TASK-2633)",
+          "profile": "covered",
+          "cpuMs": 68.797,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "SQLite Mission aggregate integration > loadByRepository returns each mission of the repository exactly as load does and follows later writes and removals (TASK-2681)",
+          "profile": "covered",
+          "cpuMs": 76.2,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "SQLite Mission aggregate integration > loads legacy requested-changes rounds that have no persisted findings",
+          "profile": "covered",
+          "cpuMs": 53.032,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "SQLite Mission aggregate integration > round trips null optionals, pre-closure done, and closed Mission variants",
+          "profile": "covered",
+          "cpuMs": 67.752,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "SQLite Mission aggregate integration > uses exact version compare-and-swap and rejects stale transitions without appending events",
+          "profile": "covered",
+          "cpuMs": 61.875,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "SQLite Mission aggregate integration > commits a Mission transition and LaneTransitionEvent atomically",
+          "profile": "covered",
+          "cpuMs": 50.902,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "SQLite Mission aggregate integration > replaces KnownRepository cache data without changing Mission identity or version",
+          "profile": "covered",
+          "cpuMs": 47.975,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "SQLite Mission aggregate integration > upgrades 0003 data and fails closed on checksum mismatch or interruption",
+          "profile": "covered",
+          "cpuMs": 49.471,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "SQLite Mission aggregate integration > backs up and restores committed Mission rows",
+          "profile": "covered",
+          "cpuMs": 57.757,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "SQLite Mission aggregate integration > keeps application and UI code behind ports and leaves production authority unchanged",
+          "profile": "covered",
+          "cpuMs": 23.705,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "retains persisted report membership through migration and recovery at local boundaries (TASK-2688)",
+          "profile": "covered",
+          "cpuMs": 73.026,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "re-saves migrated historical closures without rewriting preserved values (TASK-2688)",
+          "profile": "covered",
+          "cpuMs": 60.964,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "retains checkpoint records and recording metadata after reload (TASK-2742)",
+          "profile": "covered",
+          "cpuMs": 79.398,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "replays each review-start checkpoint state after later records and reopening (TASK-2742)",
+          "profile": "covered",
+          "cpuMs": 80.43,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/sqlite/sqlite-mission-store.integration.test.ts",
+          "name": "keeps criterion identity through edits and replays round-time coverage (TASK-2742)",
+          "profile": "covered",
+          "cpuMs": 96.838,
+          "limitMs": 150
+        }
+      ],
+      "committedGateDiagnostic": "/tmp/task-2747-committed-repair-gate.log: 151 ms over 150 ms"
+    }
+  ],
+  "freshDiagnosticRepair": {
+    "revisionBeforeRepair": "12a8daffba180f4cf91392f7e6cef17696c6c247",
+    "cause": "Covered runs discarded the checkout-local tsx compiler cache along with raw coverage, repeating dynamic TypeScript compilation. Retained gate CPU breaches also lacked margin in three smaller suites. Cache persistence does not reuse test results or coverage.",
+    "unchanged": "Early CI membership, 3500 ms repair-loop limit, plain limits, suite budgets, assertions, coverage instrumentation and wall deadlines remain unchanged.",
+    "profiles": {
+      "fresh-cpu": [
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "TASK-2613: a base-tracked task file lands its removal and completed record together",
+          "profile": "covered",
+          "cpuMs": 245.397,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "TASK-2613: a later landing drops the stale copy of an earlier landed task",
+          "profile": "covered",
+          "cpuMs": 402.561,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "TASK-2613: landing moves the task file to backlog/completed as done in the landed squash",
+          "profile": "covered",
+          "cpuMs": 297.068,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "a later mission removes a base-tracked stale copy while preserving completed history (TASK-2712)",
+          "profile": "covered",
+          "cpuMs": 312.935,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "a mission explicitly deleting an inherited archive path can land without losing completed history (TASK-2712)",
+          "profile": "covered",
+          "cpuMs": 410.452,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "archive paths inherited from base block landing before main advances (TASK-2712)",
+          "profile": "covered",
+          "cpuMs": 303.268,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "archive paths reintroduced by a mission block landing before main advances (TASK-2712)",
+          "profile": "covered",
+          "cpuMs": 340.852,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "failed archive-list payload operation blocks landing and cleans the squash (TASK-2712)",
+          "profile": "covered",
+          "cpuMs": 331.865,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "failed rm payload operation blocks landing and cleans the squash (TASK-2712)",
+          "profile": "covered",
+          "cpuMs": 326.321,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: a later REQUEST_CHANGES by the assigned reviewer supersedes the APPROVED",
+          "profile": "covered",
+          "cpuMs": 33.071,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: active approved review aborts when no current provider approval exists",
+          "profile": "covered",
+          "cpuMs": 99.881,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: active approved review aborts when the current approval is by an unrelated user",
+          "profile": "covered",
+          "cpuMs": 91.774,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: active approved review by assigned reviewer recovers to integration",
+          "profile": "covered",
+          "cpuMs": 115.974,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: buildIntegrationContext derives reviewerUser from the recorded review round, not the implementer",
+          "profile": "covered",
+          "cpuMs": 95.697,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: buildIntegrationContext passes the authoritative store to the default readReviewState reader",
+          "profile": "covered",
+          "cpuMs": 140.3,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: buildIntegrationContext without the authoritative store does not derive the reviewer from the round",
+          "profile": "covered",
+          "cpuMs": 277.576,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: getLatestReviewDecision recognizes an APPROVED by the assigned reviewer",
+          "profile": "covered",
+          "cpuMs": 57.439,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: getLatestReviewDecision rejects an APPROVED by an unrelated reviewer",
+          "profile": "covered",
+          "cpuMs": 41.285,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-repair-review-loop.test.ts",
+          "name": "task-2620 AC1: px lead forwards an undecided review round to review --continue and records no approval",
+          "profile": "covered",
+          "cpuMs": 972.841,
+          "limitMs": 3500
+        },
+        {
+          "file": "integration/integrate/integration-repair-review-loop.test.ts",
+          "name": "task-2620: a red integration gate repairs once, re-reviews, and stops in the integration lane",
+          "profile": "covered",
+          "cpuMs": 2493.622,
+          "limitMs": 3500
+        },
+        {
+          "file": "integration/integrate/integration-repair-review-loop.test.ts",
+          "name": "unchanged validated integration repair restores mechanical approval without model dispatch and stops for human landing (TASK-2734)",
+          "profile": "covered",
+          "cpuMs": 2171.974,
+          "limitMs": 3500
+        },
+        {
+          "file": "integration/sqlite/mission-classification-update.test.ts",
+          "name": "classification set discovers the version itself and records the value",
+          "profile": "covered",
+          "cpuMs": 195.58,
+          "limitMs": 200
+        },
+        {
+          "file": "integration/sqlite/mission-classification-update.test.ts",
+          "name": "classification set still rejects a value that is not one of the allowed labels",
+          "profile": "covered",
+          "cpuMs": 77.052,
+          "limitMs": 200
+        },
+        {
+          "file": "integration/sqlite/mission-classification-update.test.ts",
+          "name": "other write verbs resolve the version without --expected-version",
+          "profile": "covered",
+          "cpuMs": 84.776,
+          "limitMs": 200
+        }
+      ],
+      "cache-cold-cpu": [
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "TASK-2613: a base-tracked task file lands its removal and completed record together",
+          "profile": "covered",
+          "cpuMs": 255.977,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "TASK-2613: a later landing drops the stale copy of an earlier landed task",
+          "profile": "covered",
+          "cpuMs": 382.557,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "TASK-2613: landing moves the task file to backlog/completed as done in the landed squash",
+          "profile": "covered",
+          "cpuMs": 287.035,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "a later mission removes a base-tracked stale copy while preserving completed history (TASK-2712)",
+          "profile": "covered",
+          "cpuMs": 410.023,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "a mission explicitly deleting an inherited archive path can land without losing completed history (TASK-2712)",
+          "profile": "covered",
+          "cpuMs": 373.546,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "archive paths inherited from base block landing before main advances (TASK-2712)",
+          "profile": "covered",
+          "cpuMs": 346.335,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "archive paths reintroduced by a mission block landing before main advances (TASK-2712)",
+          "profile": "covered",
+          "cpuMs": 308.609,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "failed archive-list payload operation blocks landing and cleans the squash (TASK-2712)",
+          "profile": "covered",
+          "cpuMs": 272.273,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "failed rm payload operation blocks landing and cleans the squash (TASK-2712)",
+          "profile": "covered",
+          "cpuMs": 259.927,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: a later REQUEST_CHANGES by the assigned reviewer supersedes the APPROVED",
+          "profile": "covered",
+          "cpuMs": 34.672,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: active approved review aborts when no current provider approval exists",
+          "profile": "covered",
+          "cpuMs": 105.623,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: active approved review aborts when the current approval is by an unrelated user",
+          "profile": "covered",
+          "cpuMs": 94.282,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: active approved review by assigned reviewer recovers to integration",
+          "profile": "covered",
+          "cpuMs": 129.536,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: buildIntegrationContext derives reviewerUser from the recorded review round, not the implementer",
+          "profile": "covered",
+          "cpuMs": 92.983,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: buildIntegrationContext passes the authoritative store to the default readReviewState reader",
+          "profile": "covered",
+          "cpuMs": 145.781,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: buildIntegrationContext without the authoritative store does not derive the reviewer from the round",
+          "profile": "covered",
+          "cpuMs": 248.928,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: getLatestReviewDecision recognizes an APPROVED by the assigned reviewer",
+          "profile": "covered",
+          "cpuMs": 60.094,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: getLatestReviewDecision rejects an APPROVED by an unrelated reviewer",
+          "profile": "covered",
+          "cpuMs": 32.597,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-repair-review-loop.test.ts",
+          "name": "task-2620 AC1: px lead forwards an undecided review round to review --continue and records no approval",
+          "profile": "covered",
+          "cpuMs": 844.731,
+          "limitMs": 3500
+        },
+        {
+          "file": "integration/integrate/integration-repair-review-loop.test.ts",
+          "name": "task-2620: a red integration gate repairs once, re-reviews, and stops in the integration lane",
+          "profile": "covered",
+          "cpuMs": 2388.737,
+          "limitMs": 3500
+        },
+        {
+          "file": "integration/integrate/integration-repair-review-loop.test.ts",
+          "name": "unchanged validated integration repair restores mechanical approval without model dispatch and stops for human landing (TASK-2734)",
+          "profile": "covered",
+          "cpuMs": 1774.312,
+          "limitMs": 3500
+        },
+        {
+          "file": "integration/sqlite/mission-classification-update.test.ts",
+          "name": "classification set discovers the version itself and records the value",
+          "profile": "covered",
+          "cpuMs": 173.742,
+          "limitMs": 200
+        },
+        {
+          "file": "integration/sqlite/mission-classification-update.test.ts",
+          "name": "classification set still rejects a value that is not one of the allowed labels",
+          "profile": "covered",
+          "cpuMs": 80.019,
+          "limitMs": 200
+        },
+        {
+          "file": "integration/sqlite/mission-classification-update.test.ts",
+          "name": "other write verbs resolve the version without --expected-version",
+          "profile": "covered",
+          "cpuMs": 86.755,
+          "limitMs": 200
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "a parallel failure reports its key and does not launch queued gates",
+          "profile": "covered",
+          "cpuMs": 8.522,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "a parallel gate waits for its declared artifact producer",
+          "profile": "covered",
+          "cpuMs": 3.911,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "buildGateEnv inherits the invoking environment and sets the three contract keys",
+          "profile": "covered",
+          "cpuMs": 0.374,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "buildGateEnv scrubs BASH_ENV and threads real-agent selection",
+          "profile": "covered",
+          "cpuMs": 0.394,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "clean-tree gates reuse only an exact successful proof and never cache failures",
+          "profile": "covered",
+          "cpuMs": 280.109,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured failing handoff gate blocks and receives the phase contract",
+          "profile": "covered",
+          "cpuMs": 1.568,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured failing integration gate blocks and receives the phase contract",
+          "profile": "covered",
+          "cpuMs": 1.081,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured failing integration gate blocks the phase",
+          "profile": "covered",
+          "cpuMs": 1.272,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured failing pre-handoff gate blocks handoff and receives the phase contract",
+          "profile": "covered",
+          "cpuMs": 3.702,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured failing review gate blocks and receives the phase contract",
+          "profile": "covered",
+          "cpuMs": 1.125,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured failing review gate blocks the phase",
+          "profile": "covered",
+          "cpuMs": 2.888,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured passing gate for handoff executes once and receives the phase contract",
+          "profile": "covered",
+          "cpuMs": 1.551,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured passing gate for integration executes once and receives the phase contract",
+          "profile": "covered",
+          "cpuMs": 1.193,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured passing gate for review executes once and receives the phase contract",
+          "profile": "covered",
+          "cpuMs": 1.096,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured passing handoff gate executes once and permits the phase",
+          "profile": "covered",
+          "cpuMs": 1.284,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured passing integration gate executes once and permits the phase",
+          "profile": "covered",
+          "cpuMs": 0.919,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured passing review gate executes once and permits the phase",
+          "profile": "covered",
+          "cpuMs": 1.395,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "dry run resolves the integration plan without executing any gate",
+          "profile": "covered",
+          "cpuMs": 0.521,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "gate dependencies reject missing keys and cycles",
+          "profile": "covered",
+          "cpuMs": 0.509,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "gate loading rejects an invalid dependency instead of selecting no gates",
+          "profile": "covered",
+          "cpuMs": 1.999,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "loadPhaseGates returns [] when the workflow config declares no gates",
+          "profile": "covered",
+          "cpuMs": 1.993,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "loadRequirePreIntegration defaults to false and honours the opt-in flag",
+          "profile": "covered",
+          "cpuMs": 2.042,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "parallel gates overlap within the configured bound",
+          "profile": "covered",
+          "cpuMs": 2.293,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "parallel success output stays isolated while results retain each complete log",
+          "profile": "covered",
+          "cpuMs": 1.059,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "parallel unit gate retains failed assertions after a passing group for repair prompts (TASK-2637.03)",
+          "profile": "covered",
+          "cpuMs": 6.82,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "this repository exposes the full independent gate width and orders Sonar after fresh coverage",
+          "profile": "covered",
+          "cpuMs": 3.07,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "this repository starts every independent check while Sonar waits for coverage",
+          "profile": "covered",
+          "cpuMs": 104.729,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "unconfigured repository runs no gate for the handoff phase",
+          "profile": "covered",
+          "cpuMs": 2.154,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "unresolved dependencies fail closed even for injected gates",
+          "profile": "covered",
+          "cpuMs": 0.966,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "validateRepositoryGates rejects a malformed gates block",
+          "profile": "covered",
+          "cpuMs": 0.708,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "validateRepositoryGates rejects an unknown gate reuse policy",
+          "profile": "covered",
+          "cpuMs": 0.33,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "validateRepositoryGates rejects an unknown gates key and a non-boolean requirePreIntegration",
+          "profile": "covered",
+          "cpuMs": 1.154,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "validateWorkflowConfig rejects a malformed gates block",
+          "profile": "covered",
+          "cpuMs": 0.443,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "workflow config surfaces configured gates through the effective config",
+          "profile": "covered",
+          "cpuMs": 0.939,
+          "limitMs": 600
+        }
+      ],
+      "cache-warm-cpu": [
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "TASK-2613: a base-tracked task file lands its removal and completed record together",
+          "profile": "covered",
+          "cpuMs": 225.849,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "TASK-2613: a later landing drops the stale copy of an earlier landed task",
+          "profile": "covered",
+          "cpuMs": 337.607,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "TASK-2613: landing moves the task file to backlog/completed as done in the landed squash",
+          "profile": "covered",
+          "cpuMs": 255.865,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "a later mission removes a base-tracked stale copy while preserving completed history (TASK-2712)",
+          "profile": "covered",
+          "cpuMs": 335.311,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "a mission explicitly deleting an inherited archive path can land without losing completed history (TASK-2712)",
+          "profile": "covered",
+          "cpuMs": 306.651,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "archive paths inherited from base block landing before main advances (TASK-2712)",
+          "profile": "covered",
+          "cpuMs": 317.271,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "archive paths reintroduced by a mission block landing before main advances (TASK-2712)",
+          "profile": "covered",
+          "cpuMs": 312.012,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "failed archive-list payload operation blocks landing and cleans the squash (TASK-2712)",
+          "profile": "covered",
+          "cpuMs": 260.183,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-backlog-closeout.test.ts",
+          "name": "failed rm payload operation blocks landing and cleans the squash (TASK-2712)",
+          "profile": "covered",
+          "cpuMs": 263.193,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: a later REQUEST_CHANGES by the assigned reviewer supersedes the APPROVED",
+          "profile": "covered",
+          "cpuMs": 27.327,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: active approved review aborts when no current provider approval exists",
+          "profile": "covered",
+          "cpuMs": 93.05,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: active approved review aborts when the current approval is by an unrelated user",
+          "profile": "covered",
+          "cpuMs": 94.673,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: active approved review by assigned reviewer recovers to integration",
+          "profile": "covered",
+          "cpuMs": 110.386,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: buildIntegrationContext derives reviewerUser from the recorded review round, not the implementer",
+          "profile": "covered",
+          "cpuMs": 87.318,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: buildIntegrationContext passes the authoritative store to the default readReviewState reader",
+          "profile": "covered",
+          "cpuMs": 130.498,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: buildIntegrationContext without the authoritative store does not derive the reviewer from the round",
+          "profile": "covered",
+          "cpuMs": 285.721,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: getLatestReviewDecision recognizes an APPROVED by the assigned reviewer",
+          "profile": "covered",
+          "cpuMs": 48.482,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+          "name": "task-2420: getLatestReviewDecision rejects an APPROVED by an unrelated reviewer",
+          "profile": "covered",
+          "cpuMs": 23.952,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/integrate/integration-repair-review-loop.test.ts",
+          "name": "task-2620 AC1: px lead forwards an undecided review round to review --continue and records no approval",
+          "profile": "covered",
+          "cpuMs": 759.769,
+          "limitMs": 3500
+        },
+        {
+          "file": "integration/integrate/integration-repair-review-loop.test.ts",
+          "name": "task-2620: a red integration gate repairs once, re-reviews, and stops in the integration lane",
+          "profile": "covered",
+          "cpuMs": 2304.844,
+          "limitMs": 3500
+        },
+        {
+          "file": "integration/integrate/integration-repair-review-loop.test.ts",
+          "name": "unchanged validated integration repair restores mechanical approval without model dispatch and stops for human landing (TASK-2734)",
+          "profile": "covered",
+          "cpuMs": 1639.472,
+          "limitMs": 3500
+        },
+        {
+          "file": "integration/sqlite/mission-classification-update.test.ts",
+          "name": "classification set discovers the version itself and records the value",
+          "profile": "covered",
+          "cpuMs": 176.377,
+          "limitMs": 200
+        },
+        {
+          "file": "integration/sqlite/mission-classification-update.test.ts",
+          "name": "classification set still rejects a value that is not one of the allowed labels",
+          "profile": "covered",
+          "cpuMs": 77.507,
+          "limitMs": 200
+        },
+        {
+          "file": "integration/sqlite/mission-classification-update.test.ts",
+          "name": "other write verbs resolve the version without --expected-version",
+          "profile": "covered",
+          "cpuMs": 81.158,
+          "limitMs": 200
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "a parallel failure reports its key and does not launch queued gates",
+          "profile": "covered",
+          "cpuMs": 3.93,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "a parallel gate waits for its declared artifact producer",
+          "profile": "covered",
+          "cpuMs": 2.647,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "buildGateEnv inherits the invoking environment and sets the three contract keys",
+          "profile": "covered",
+          "cpuMs": 0.842,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "buildGateEnv scrubs BASH_ENV and threads real-agent selection",
+          "profile": "covered",
+          "cpuMs": 0.441,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "clean-tree gates reuse only an exact successful proof and never cache failures",
+          "profile": "covered",
+          "cpuMs": 276.689,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured failing handoff gate blocks and receives the phase contract",
+          "profile": "covered",
+          "cpuMs": 5.544,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured failing integration gate blocks and receives the phase contract",
+          "profile": "covered",
+          "cpuMs": 5.57,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured failing integration gate blocks the phase",
+          "profile": "covered",
+          "cpuMs": 0.925,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured failing pre-handoff gate blocks handoff and receives the phase contract",
+          "profile": "covered",
+          "cpuMs": 2.084,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured failing review gate blocks and receives the phase contract",
+          "profile": "covered",
+          "cpuMs": 9.806,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured failing review gate blocks the phase",
+          "profile": "covered",
+          "cpuMs": 3.182,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured passing gate for handoff executes once and receives the phase contract",
+          "profile": "covered",
+          "cpuMs": 1.464,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured passing gate for integration executes once and receives the phase contract",
+          "profile": "covered",
+          "cpuMs": 1.01,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured passing gate for review executes once and receives the phase contract",
+          "profile": "covered",
+          "cpuMs": 1.284,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured passing handoff gate executes once and permits the phase",
+          "profile": "covered",
+          "cpuMs": 2.268,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured passing integration gate executes once and permits the phase",
+          "profile": "covered",
+          "cpuMs": 0.811,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "configured passing review gate executes once and permits the phase",
+          "profile": "covered",
+          "cpuMs": 16.21,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "dry run resolves the integration plan without executing any gate",
+          "profile": "covered",
+          "cpuMs": 2.01,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "gate dependencies reject missing keys and cycles",
+          "profile": "covered",
+          "cpuMs": 0.292,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "gate loading rejects an invalid dependency instead of selecting no gates",
+          "profile": "covered",
+          "cpuMs": 1.86,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "loadPhaseGates returns [] when the workflow config declares no gates",
+          "profile": "covered",
+          "cpuMs": 1.616,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "loadRequirePreIntegration defaults to false and honours the opt-in flag",
+          "profile": "covered",
+          "cpuMs": 1.475,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "parallel gates overlap within the configured bound",
+          "profile": "covered",
+          "cpuMs": 1.654,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "parallel success output stays isolated while results retain each complete log",
+          "profile": "covered",
+          "cpuMs": 1.398,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "parallel unit gate retains failed assertions after a passing group for repair prompts (TASK-2637.03)",
+          "profile": "covered",
+          "cpuMs": 3.658,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "this repository exposes the full independent gate width and orders Sonar after fresh coverage",
+          "profile": "covered",
+          "cpuMs": 2.507,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "this repository starts every independent check while Sonar waits for coverage",
+          "profile": "covered",
+          "cpuMs": 53.457,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "unconfigured repository runs no gate for the handoff phase",
+          "profile": "covered",
+          "cpuMs": 3.658,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "unresolved dependencies fail closed even for injected gates",
+          "profile": "covered",
+          "cpuMs": 1.18,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "validateRepositoryGates rejects a malformed gates block",
+          "profile": "covered",
+          "cpuMs": 0.627,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "validateRepositoryGates rejects an unknown gate reuse policy",
+          "profile": "covered",
+          "cpuMs": 0.199,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "validateRepositoryGates rejects an unknown gates key and a non-boolean requirePreIntegration",
+          "profile": "covered",
+          "cpuMs": 0.336,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "validateWorkflowConfig rejects a malformed gates block",
+          "profile": "covered",
+          "cpuMs": 0.265,
+          "limitMs": 600
+        },
+        {
+          "file": "integration/verification/repository-gates.test.ts",
+          "name": "workflow config surfaces configured gates through the effective config",
+          "profile": "covered",
+          "cpuMs": 0.676,
+          "limitMs": 600
+        }
+      ],
+      "opencode-cpu": [
+        {
+          "file": "integration/agents/opencode-export.test.ts",
+          "name": "captureOpencodeExport returns the full stdout JSON on clean exit",
+          "profile": "covered",
+          "cpuMs": 77.382,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/opencode-export.test.ts",
+          "name": "captureOpencodeExport times out and kills a non-exiting export child",
+          "profile": "covered",
+          "cpuMs": 2.093,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/opencode-export.test.ts",
+          "name": "captureOpencodeExport fails explicitly when output exceeds maxBytes",
+          "profile": "covered",
+          "cpuMs": 53.487,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/opencode-export.test.ts",
+          "name": "captureOpencodeExport resolves null when spawn throws",
+          "profile": "covered",
+          "cpuMs": 2.079,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/opencode-export.test.ts",
+          "name": "captureOpencodeExport removes its owned temporary directory after launch error and timeout",
+          "profile": "covered",
+          "cpuMs": 7.563,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/opencode-export.test.ts",
+          "name": "captureOpencodeExport retains only its owned temporary directory when opted in",
+          "profile": "covered",
+          "cpuMs": 59.304,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/opencode-export.test.ts",
+          "name": "captureOpencodeExport resolves null on child error event",
+          "profile": "covered",
+          "cpuMs": 2.032,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/opencode-export.test.ts",
+          "name": "captureOpencodeExport returns null for missing session id",
+          "profile": "covered",
+          "cpuMs": 0.864,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/agents/opencode-export.test.ts",
+          "name": "captureOpencodeExport captures full output with large payloads (regression for pipe-buffer truncation)",
+          "profile": "covered",
+          "cpuMs": 53.554,
+          "limitMs": 150
+        }
+      ]
+    },
+    "coveredMargins": [
+      {
+        "file": "integration/integrate/integration-backlog-closeout.test.ts",
+        "limitMs": 750,
+        "retainedGatePeakCpuMs": 610,
+        "marginOverRetainedPeakPercent": 23.0
+      },
+      {
+        "file": "integration/integrate/integration-provider-approval-recovery.test.ts",
+        "limitMs": 450,
+        "retainedGatePeakCpuMs": 365,
+        "marginOverRetainedPeakPercent": 23.3
+      },
+      {
+        "file": "integration/sqlite/mission-classification-update.test.ts",
+        "limitMs": 250,
+        "retainedGatePeakCpuMs": 209,
+        "marginOverRetainedPeakPercent": 19.6
+      },
+      {
+        "file": "integration/agents/opencode-export.test.ts",
+        "limitMs": 200,
+        "committedGatePeakCpuMs": 160,
+        "marginOverCommittedPeakPercent": 25,
+        "diagnostic": "/tmp/task-2747-fresh-committed-gate.log: the only failure on ce2525a03d was 160 ms > 150 ms; 2635 passed."
+      }
+    ]
+  }
+}

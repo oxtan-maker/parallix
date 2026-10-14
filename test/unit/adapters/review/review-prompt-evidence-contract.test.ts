@@ -1,3 +1,4 @@
+import { buildHandoffControls } from '../../../../src/adapters/review/handoff-controls.js';
 // review prompt evidence contract.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
 import { assembleStagePrompt } from '../../../../src/adapters/assets/runtime-assets.js';
@@ -46,14 +47,15 @@ describe("context compaction", { concurrency: false }, () => {
     assert.doesNotMatch(prompt, /compact the aborted working context/);
   }
 
-  test('task-2317: successful declared-gate instruction compacts only after success and retains failed-gate diagnostics', () => {
+  test('execute uses mutation readback and preserves failed-gate diagnostics (TASK-2747)', () => {
     // The compaction requirement is a lifecycle mechanic, so it lives in the
     // mandatory core half of the split execute prompt (task-2465).
     const executePrompt = assembleStagePrompt('execute', { contextCompaction: true });
 
-    assert.match(executePrompt, /Immediately after \*\*each successful mission-declared Gate\*\*, compact/i);
-    assert.match(executePrompt, /Retain a failed gate's failure diagnostic/i);
-    assert.match(executePrompt, /locked mission goal and scope plus committed checkpoint or successful-gate evidence/i);
+    assert.match(executePrompt, /Successful mutation output is authoritative readback/);
+    assert.doesNotMatch(executePrompt, /Immediately after recording|each successful mission-declared Gate/);
+    assert.match(executePrompt, /Retain a failed gate's diagnostic/i);
+    assert.match(executePrompt, /recover the locked goal, scope, criteria, checkpoint plan and recorded evidence/i);
   });
 
   function withEnabledPolicy(run: (root: string) => void): void {
@@ -78,7 +80,7 @@ describe("context compaction", { concurrency: false }, () => {
     assert.match(prompt, /current review round and disposition; unresolved findings and implementer resolutions; and the exact revision under review/i);
   }));
 
-  test('task-2317: reviewer round-2 prompt compacts after rebase and reloads the rewritten baseline', () => withEnabledPolicy(repoRoot => {
+  test('review round-2 uses the fresh launch snapshot and rewritten baseline (TASK-2747)', () => withEnabledPolicy(repoRoot => {
     const prompt = buildCompactReviewPrompt({
       reviewer: 'claude',
       implementer: 'codex',
@@ -88,9 +90,10 @@ describe("context compaction", { concurrency: false }, () => {
       repoRoot,
     });
 
-    assert.match(prompt, /When `2` is 2 or later, before beginning this review round compact/i);
-    assert.match(prompt, /exact post-rebase revision and review baseline shown by `git diff post-rebase-baseline-sha\.\.HEAD`/i);
-    assert.match(prompt, /independent of the mission.s declared gates/i);
+    assert.match(prompt, /authoritative status snapshot supplied at launch/);
+    assert.doesNotMatch(prompt, /before beginning this review round compact/i);
+    assert.match(prompt, /git diff post-rebase-baseline-sha\.\.HEAD/);
+    assert.match(prompt, /Handoff owns declared gates/);
   }));
 
   test('repairable gate-error bounce reloads fresh authority and retains diagnostic plus retry state (TASK-2700)', async () => {
@@ -714,19 +717,14 @@ test('checkpoint, successful-gate and review lifecycle prompts share default-on 
       const review = buildCompactReviewPrompt({ reviewer: 'codex', implementer: 'claude', branch: 'mission/task-2737', attempt: 2, repoRoot: root, reviewBaseline: 'baseline' });
       const repair = buildCompactActOnReviewPrompt({ implementer: 'claude', branch: 'mission/task-2737', attempt: 2, repoRoot: root });
       for (const prompt of [execute, review, repair]) {
-        if (enabled !== false) { assert.match(prompt, /compact (?:your working|the prior-round working|the implementation) context/); }
-        else { assert.doesNotMatch(prompt, /compact (?:your working|the prior-round working|the implementation) context/i); }
         assert.match(prompt, /Repository opinion retained/);
-        assert.match(prompt, /locked mission goal|mission goal, scope/);
         assert.doesNotMatch(prompt, /\{\{/);
       }
-      if (enabled !== false) {
-        assert.match(execute, /Immediately after recording a checkpoint's evidence, compact your working context/);
-        assert.match(execute, /each successful mission-declared Gate\*\*, compact your working context/);
-      }
-      assert.match(execute, /Immediately after recording a checkpoint's evidence/);
-      assert.match(execute, /each successful mission-declared Gate/);
-      assert.match(execute, /Retain a failed gate's failure diagnostic while repairing it/);
+      assert.equal(execute.includes('Context recovery after runner compaction:'), enabled !== false);
+      assert.doesNotMatch(execute, /Immediately after recording|each successful mission-declared Gate/);
+      assert.doesNotMatch(review, /before beginning this review round compact/);
+      assert.equal(/compact the implementation context/.test(repair), enabled !== false);
+      assert.match(execute, /Retain a failed gate's diagnostic while repairing it/);
       assert.match(execute, /every success criterion is marked complete/);
       assert.match(execute, /do not change the Backlog task's status/);
       assert.match(review, /unresolved findings and implementer resolutions/);
@@ -751,6 +749,28 @@ test('self-development and shipped templates inherit the consumer default-on pro
     }
   }
   checkTemplates(path.join(root, 'templates'));
-  assert.match(buildExecutePrompt('task-2737', '', { rootDir: root }), /compact (?:your working|the prior-round working|the implementation) context/i);
+  assert.match(buildExecutePrompt('task-2737', '', { rootDir: root }), /Context recovery after runner compaction:/);
   assert.match(buildCompactActOnReviewPrompt({ implementer: 'codex', branch: 'mission/task-2737', attempt: 2, repoRoot: root }), /compact (?:your working|the prior-round working|the implementation) context/i);
+});
+
+
+test('review cites existing handoff gate proofs with validated SHA and keeps substantive task review (TASK-2747)', () => {
+  const sha = 'a'.repeat(40);
+  const commands: string[] = [];
+  const controls = buildHandoffControls('/fixture', ['npm test', 'npm test'], {
+    repositoryCommand: 'npm test', readProof: (command) => {
+      commands.push(command); return { ok: true, proof: { status: 'passed', verifiedCommit: sha, verifiedAt: '2026-10-14T00:00:00Z' } };
+    },
+  });
+  assert.deepEqual(commands, ['npm test']);
+  assert.match(controls, /Handoff gate `npm test`: status passed, exitCode 0/);
+  assert.ok(controls.includes(`validated SHA ${sha}`));
+  assert.match(controls, /Cite this result; do not rerun it/);
+  const absent = buildHandoffControls('/fixture', ['npm test'], { repositoryCommand: '', readProof: () => ({ ok: false }) });
+  assert.doesNotMatch(absent, /status passed|validated SHA/);
+  assert.match(absent, /handoff owns declared gate execution/);
+  const prompt = assembleStagePrompt('review');
+  assert.match(prompt, /status, assignee and lifecycle bookkeeping transitions are expected/);
+  assert.match(prompt, /does not exempt substantive task description, scope, acceptance criteria/);
+  assert.match(prompt, /two to three lines/);
 });

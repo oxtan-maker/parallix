@@ -361,11 +361,16 @@ default; there is no environment, per-user, per-agent or per-stage override for
 this policy. An opinion override does not replace the core policy. Inspect
 repository configuration with `px config` and the public schema.
 
-Enabled prompts request compaction after recorded checkpoints and successful
-mission gates, before review rounds after the first, and before acting on review
-findings, including missions with no gates. Both policies retain authoritative
-mission-state reloads, durable evidence, failed-gate diagnostics and review
-rules. Failed gates retain their diagnostics during repair.
+Execute prompts use launch snapshots and successful mutation output as readback;
+checkpoints and checks do not require additional status reads or prompted
+compaction. The enabled policy adds recovery guidance for Claude and Codex,
+which compact natively, and for Pi when its runtime reports automatic compaction
+enabled. The guidance applies when context is lost after compaction. Runners without a
+confirmed compaction capability receive no execute compaction instruction.
+Review starts from its fresh launch snapshot. Act-on-review prompts retain the
+configured context action before findings are addressed. A conflict or missing
+Mission context still requires a fresh authoritative status read, and failed
+gates retain their diagnostics during repair.
 
 This policy controls Parallix's instructions, not the provider's automatic
 near-context-limit safeguards. Those remain governed by the agent runtime's

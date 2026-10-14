@@ -1,3 +1,4 @@
+import { renderGraphifyLaunchGuidance } from '../../agents/launch-prompt-context.js';
 import type { ProgressEvent, ApplicationOutcome } from '../../../application/contracts.js';
 import type { Log, Exit, ActiveOptions, ActiveExecution, LaunchOptions } from './active-adapter-types.js';
 import { unquoteGitStatusPath } from '../../git/porcelain-path.js';
@@ -203,6 +204,7 @@ async function selectLaunchAndRecord(opts: LaunchOptions) {
   try {
    ({ agent: actual, result } = await startAgentFn('active', {
       configuration: opts.configuration,
+      missionStore: opts.missionStore,
       prompt,
       worktree,
       agent: preselected,
@@ -353,7 +355,7 @@ function resolveExecuteTaskPath(slug: string, rootDir: string) {
 function buildExecutePrompt(slug: string, checkpointContext: string, options: { rootDir?: string } = {}) {
   const { rootDir = process.cwd() } = options;
   const promptConfiguration = resolvePromptConfiguration(rootDir);
-  const template = assembleStagePrompt('execute', promptConfiguration);
+  const template = renderGraphifyLaunchGuidance(assembleStagePrompt('execute', promptConfiguration), rootDir);
   const year = getMissionYear(slug, rootDir) || String(new Date().getFullYear());
   const missionPath = path.join(missionDirForSlug(rootDir, slug), 'MISSION.md');
   const missionDir = path.dirname(missionPath);

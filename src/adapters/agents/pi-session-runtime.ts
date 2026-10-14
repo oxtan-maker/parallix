@@ -1,3 +1,5 @@
+import { renderRunnerContextRecovery } from './launch-prompt-context.js';
+import { resolvePromptConfiguration } from '../config/product-config.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
@@ -209,7 +211,7 @@ async function runPiSession(
       renderer.render([{ kind: 'diagnostic', text: created.modelFallbackMessage, isError: false }]);
     }
     unsubscribe = subscribePiEvents(session, watchdog, renderer, state);
-    await session.prompt(prompt);
+    await session.prompt(renderRunnerContextRecovery(prompt, session.autoCompactionEnabled === true && resolvePromptConfiguration(sdkOptions.cwd).contextCompaction));
     if (state.settleError) { throw new Error(state.settleError); }
     const result = piResult(session, state, null, attempts, startedAt, usage.baseline);
     if (!state.assistantText && result.stdout) { renderer.render([{ kind: 'text', text: result.stdout, agent: null }]); }

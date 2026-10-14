@@ -125,6 +125,7 @@ describe('Context CLI', () => {
           brief,
           declaredGates: found.mission.declaredGates ?? [],
           successCriteria: found.mission.successCriteria ?? [],
+          completedSuccessCriteria: found.mission.completedSuccessCriteria ?? [],
           checkpoints: found.mission.checkpoints.map(({ name, firstLine, goalCheck }) => ({ name, description: firstLine, recorded: goalCheck.length > 0 })),
           predictedNelBucket: found.mission.predictedNelBucket ?? null,
           latestCheckpoint: latest
@@ -279,6 +280,27 @@ describe('Context CLI', () => {
       ]), 1);
       assert.match(errors.join('\n'), /--criterion and --evidence must pair up/);
       assert.equal((await statusJson()).latestCheckpoint.name, 'CP-1', 'the rejected write changed nothing');
+
+      // TASK-2747: evidence and named completion are one durable CLI write.
+      const beforeComplete = await statusJson();
+      const evidenceArgs = ['checkpoint', 'record', '--slug', SLUG, '--name', 'CP-1',
+        '--criterion', 'Stale writes change nothing', '--evidence', '`npm test`',
+        '--next', 'Verify the second checkpoint', '--complete-criteria'];
+      assert.equal(await invoke([...evidenceArgs, '--expected-version', String(version)]), 1);
+      assert.deepEqual(await statusJson(), beforeComplete, 'conflict cannot partly complete');
+      const unknownArgs = [...evidenceArgs];
+      unknownArgs[unknownArgs.indexOf('--criterion') + 1] = 'unknown';
+      assert.equal(await invoke(unknownArgs), 1);
+      assert.deepEqual(await statusJson(), beforeComplete, 'unknown criterion cannot partly record');
+      const outputStart = output.length;
+      assert.equal(await invoke(evidenceArgs), 0, errors.join('\n'));
+      const readback = JSON.parse(output.slice(outputStart).join(''));
+      assert.deepEqual(readback.completedSuccessCriteria, [0]);
+      assert.equal(readback.checkpoint.name, 'CP-1');
+      const completed = await statusJson();
+      assert.equal(completed.version, beforeComplete.version + 1);
+      assert.deepEqual(completed.completedSuccessCriteria, [0]);
+      assert.equal(readback.version, completed.version);
 
       // --- assignment set and clear -----------------------------------------
       current = (await statusJson()).version;

@@ -28,6 +28,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { pinnedCliBootstrap } from '../../../src/adapters/agents/launch-prompt-context.js';
 import { pinChildCli } from '../../../src/adapters/storage/child-cli.js';
 
 import { agentFamily } from '../../../src/domain/agents.js';
@@ -896,11 +897,43 @@ test('native child CLI wrapper forwards commands without repeating the executabl
   try {
     const binary = path.join(root, 'native-px');
     fs.writeFileSync(binary, '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o700 });
-    const wrapper = pinChildCli(binary, { node: binary, native: true, stateHome: root, env: {} });
+    const childEnvironment: NodeJS.ProcessEnv = { PATH: '/stale/global/bin' };
+    const wrapper = pinChildCli(binary, { node: binary, native: true, stateHome: root, env: childEnvironment });
+    assert.equal(childEnvironment.PATH?.split(path.delimiter)[0], path.dirname(wrapper));
+    const short = spawnSync('px', ['status', 'task-2747'], { env: childEnvironment, encoding: 'utf8' });
+    assert.equal(short.status, 0, short.stderr);
+    assert.deepEqual(short.stdout.trim().split('\n'), ['status', 'task-2747']);
     const result = spawnSync(wrapper, ['verdict', 'approve', '--actor', 'reviewer'], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(result.stdout.trim().split('\n'), ['verdict', 'approve', '--actor', 'reviewer']);
     const scriptWrapper = pinChildCli(binary, { node: '/node', nodeArgs: ['--import', 'tsx'], native: false, stateHome: root, env: {} });
     assert.ok(fs.readFileSync(scriptWrapper, 'utf8').includes(`'/node' '--import' 'tsx' '${binary}'`));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test('pinned short px survives login and interactive profile shadows (TASK-2747)', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pinned-cli-'profile-"));
+  try {
+    const binary = path.join(root, 'native-px');
+    fs.writeFileSync(binary, '#!/bin/sh\nprintf "bundled:%s\\n" "$*"\n', { mode: 0o700 });
+    const wrapper = pinChildCli(binary, { node: binary, native: true, stateHome: root, env: {} });
+    const profile = path.join(root, 'profile');
+    fs.writeFileSync(profile, 'export PATH=/usr/bin:/bin\npx() { echo global-function; }\nalias px="echo global-alias"\n');
+    // Private profiles model nvm/PATH and px aliases without changing the operator's home.
+    for (const mode of ['-lc', '-ic']) {
+      const body = `source "$PROFILE"\n${pinnedCliBootstrap(wrapper)}\npx status task-2747`;
+      const result = spawnSync('/bin/bash', ['--noprofile', '--norc', mode, body], {
+        env: { ...process.env, PROFILE: profile }, encoding: 'utf8', timeout: 5000,
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stdout.trim(), 'bundled:status task-2747');
+      // A nested shell needs its own bootstrap after its own profiles load.
+      const nested = spawnSync('/bin/bash', ['-c', 'exec /bin/bash --noprofile --norc "$MODE" "$BODY"'], {
+        env: { ...process.env, PROFILE: profile, MODE: mode, BODY: body }, encoding: 'utf8', timeout: 5000,
+      });
+      assert.equal(nested.status, 0, nested.stderr);
+      assert.equal(nested.stdout.trim(), 'bundled:status task-2747');
+    }
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

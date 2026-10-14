@@ -27,6 +27,7 @@ export interface DraftMissionServices {
   lifecycle: Pick<MissionLifecycleService, 'transition'>;
 }
 export interface DraftAdapterDependencies extends Record<string, unknown> {
+  missionStore?: Pick<MissionStore, 'load'>;
   readonly configuration?: ParallixConfiguration;
   exitFn?: DraftExit; logFn?: DraftLog; errorFn?: DraftLog;
   missionServicesFn?: DraftWorkflowContext['missionServicesFn'];

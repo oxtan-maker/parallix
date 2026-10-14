@@ -125,3 +125,10 @@ test('checkpoint history and round reads expose immutable evidence without write
     assert.equal(versions[0]?.checkpoint.goalCheck[0]?.evidence, 'original');
   } finally { process.stdout.write = original; }
 });
+
+
+test('checkpoint help documents optional atomic named completion (TASK-2747)', () => {
+  assert.match(CHECKPOINT_HELP, /\[--complete-criteria\]/);
+  assert.match(CHECKPOINT_HELP, /complete exactly the criteria named by the supplied rows in the same atomic/);
+  assert.match(CHECKPOINT_HELP, /Without that flag, record only evidence as before/);
+});

@@ -1,3 +1,5 @@
+import { fixtureMission } from '../../../fixtures/mission-builders.js';
+import { missionVersion } from '../../../../src/application/domain-ports.js';
 import { resolveConfiguration } from '../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 // review launch fallback contract.
@@ -6,6 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { nativeRunnerRecoveryEnabled } from '../../../../src/adapters/agents/launch-prompt-context.js';
 import { fakeLauncher } from '../../../lib/agent-mock.js';
 import { eligibleAgentsForStep, startAgent } from '../../../../src/adapters/agents/agents.js';
 import { setBubblewrapProbeForTest } from '../../../../src/adapters/process/bubblewrap.js';
@@ -200,4 +203,62 @@ test('startAgent act-on-review fallback selects vibe when implementer hits limit
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
+});
+
+
+for (const step of ['draft', 'active', 'review']) {
+  test(`${step} launches with authoritative snapshot and short pinned px (TASK-2747)`, async () => {
+    const mission = fixtureMission('task-2747', { brief: { goal: 'Short launches', why: 'Fewer calls', scope: 'Prompts', outOfScope: [] }, successCriteria: ['works'] });
+    let reads = 0;
+    const result = await startAgent(step, {
+      configuration: resolveConfiguration({ ...environment, PARALLIX_CLI_COMMAND: '/bundled cli/px', PATH: '/global/bin' }),
+      agent: 'claude', slug: 'task-2747', prompt: 'Run px checkpoint record\nContext recovery after runner compaction: recover',
+      missionStore: { load: async () => { reads++; return { kind: 'found', mission, version: missionVersion(7) }; } },
+      isAgentBlockedFn: () => false, assertAgentSupportedFn: () => {}, detectLimitHitFn: () => null,
+      resolveAgentModelFn: () => null, log: () => {},
+      launchAgentFn: ({ prompt, env }) => {
+        assert.match(prompt, /current as of launch/);
+        assert.match(prompt, /"version": 7/);
+        assert.match(prompt, /"goal": "Short launches"/);
+        assert.match(prompt, /"successCriteria"/);
+        assert.match(prompt, /"checkpoints"/);
+        assert.match(prompt, /Run px checkpoint record/);
+        assert.match(prompt, /command '\/bundled cli\/px'/);
+        assert.match(prompt, /inside the final shell body/);
+        assert.doesNotMatch(prompt, /Context recovery after runner compaction:/);
+        assert.equal(env.PATH, '/bundled cli:/global/bin');
+        return { invocation: { command: 'mock', args: [], options: {} }, resultPromise: Promise.resolve({ status: 0 }) };
+      },
+    });
+    assert.equal(reads, 1);
+    assert.equal(result.result.status, 0);
+  });
+}
+
+for (const step of ['draft', 'active', 'review']) {
+  for (const family of ['claude', 'codex', 'qwen', 'vibe', 'custom']) {
+    test(`${family} ${step} preserves recovery policy and pinned bootstrap (TASK-2747)`, async () => {
+      await startAgent(step, {
+        configuration: resolveConfiguration({ ...environment, PARALLIX_CLI_COMMAND: '/bundled/px' }),
+        agent: family, prompt: `${step === 'active' ? 'Mode: execute after lock.' : `Mode: ${step}.`}\nRun px checkpoint record`,
+        isAgentBlockedFn: () => false, assertAgentSupportedFn: () => {}, detectLimitHitFn: () => null,
+        resolveAgentModelFn: () => null, log: () => {},
+        launchAgentFn: ({ prompt }) => {
+          assert.equal(prompt.includes('Context recovery after runner compaction:'), step === 'active' && ['claude', 'codex'].includes(family));
+          assert.match(prompt, /command '\/bundled\/px'/);
+          return { invocation: { command: 'mock', args: [], options: {} }, resultPromise: Promise.resolve({ status: 0 }) };
+        },
+      });
+    });
+  }
+}
+
+test('repository opt-out disables known native runner recovery (TASK-2747)', () => {
+  const root = registeredMkdtemp('task-2747-recovery-');
+  try {
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { prompts: { contextCompaction: false } } }));
+    for (const family of ['claude', 'codex']) {
+      assert.equal(nativeRunnerRecoveryEnabled(family, root), false);
+    }
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

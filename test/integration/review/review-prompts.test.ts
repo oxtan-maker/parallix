@@ -391,7 +391,7 @@ test('all four builders substitute {{artifactDir}} (no literal placeholder leaks
   }
 });
 
-test('task-2337: review prompt uses px status for history and px verdict for the decision', () => {
+test('review prompt uses launch snapshot for history and px verdict for the decision (TASK-2747)', () => {
   const prompt = buildCompactReviewPrompt({
     reviewer: 'codex',
     branch: 'mission/task-2337',
@@ -399,6 +399,7 @@ test('task-2337: review prompt uses px status for history and px verdict for the
     attempt: 5
   });
 
-  assert.match(prompt, /review history: `px status task-2337`/);
+  assert.match(prompt, /review history: the launch snapshot reports/);
+  assert.match(prompt, /Read px status task-2337 only for missing context or a conflict/);
   assert.match(prompt, /px verdict request-changes --slug task-2337/);
 });

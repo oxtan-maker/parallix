@@ -142,6 +142,7 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
     private readonly _operatorBlocklist: OperatorBlocklistOverlay | null = null,
     private readonly _sessionMarkerPort: SessionMarkerPort | null = null,
     private readonly _configuration: ParallixConfiguration = DEFAULT_CONFIGURATION,
+    private readonly _missionStore?: Pick<MissionTransitionStore, 'load'>,
   ) {}
 
   async prepare(request: { readonly slug: string; readonly worktree: string }): Promise<AgentLaunchPlan> {
@@ -173,6 +174,7 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
       agentConfig: request.plan.agentConfig as object,
       taskResolution: request.taskResolution,
       prompt: request.plan.prompt,
+      missionStore: this._missionStore,
       sessionMarkerPort: this._sessionMarkerPort,
       onAgentLaunched: request.onAgentChanged,
       onActivated: request.onActivated,
@@ -319,6 +321,7 @@ export function createExecuteMissionPorts(
       options.operatorBlocklist ?? null,
       options.sessionMarkerPort ?? null,
       options.configuration,
+      options.missionTransitionStore,
     ),
     missionTransitions: options.missionTransitionStore,
     telemetry: new ExecuteTelemetryAdapter(resolved),

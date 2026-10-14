@@ -300,13 +300,15 @@ describe("Pi progress streaming", () => {
           } });
           pi.__setCreateAgentSessionForTest(async options => {
             received = options;
-            return { session: { ...f.session, prompt: async (prompt: string) => { receivedPrompt = prompt; } } };
+            return { session: { ...f.session, autoCompactionEnabled: nativeEnabled, prompt: async (prompt: string) => { receivedPrompt = prompt; } } };
           });
           const prompt = buildExecutePrompt('task-2737', 'CP-1 recorded; CP-2 pending', { rootDir: root });
           const result = await pi.startPiAgent({ ...f.options, worktree: root, prompt, resume: true }).resultPromise;
           assert.equal(result.status, 0);
           assert.equal(result.sessionId, 'pi-session');
-          assert.ok(receivedPrompt.endsWith(prompt));
+          assert.match(receivedPrompt, /CP-1 recorded; CP-2 pending/);
+          assert.equal(receivedPrompt.includes('Context recovery after runner compaction:'), contextCompaction && nativeEnabled);
+          assert.doesNotMatch(receivedPrompt, /Immediately after recording|each successful mission-declared Gate/);
           assert.deepEqual(received, { cwd: root, sessionManager: manager }, 'no runtime settings override from prompt policy');
           assert.equal(fs.readFileSync(path.join(root, '.pi/settings.json'), 'utf8'), settings);
         }

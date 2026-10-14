@@ -1,3 +1,6 @@
+import { readAgentLaunchContext } from '../../application/agent-launch-context.js';
+import { nativeRunnerRecoveryEnabled, pinnedAgentPath, renderPinnedCliGuidance, renderRunnerContextRecovery } from './launch-prompt-context.js';
+import type { MissionStore } from '../../application/domain-ports.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import { monotonicNowMs } from '../../application/lifecycle-timing.js';
@@ -62,6 +65,7 @@ interface LaunchResultLike {
 interface StartAgentOptions {
   configuration?: ParallixConfiguration;
   prompt: string | Function;
+  missionStore?: Pick<MissionStore, 'load'>;
   worktree?: string;
   agent?: string;
   env?: {[key: string]: string};
@@ -573,7 +577,8 @@ async function prepareLaunch(state: StartAgentLoopState, deps: StartAgentLoopDep
   // Enforce the agent family as the Forgejo identity (ADR 0029 / architecture migration).
   // FORGEJO_USER is set last so the harness-selected identity always wins;
   // a caller-supplied env.FORGEJO_USER cannot override it.
-  const agentEnv = { ...deps.env, FORGEJO_USER: chosen };
+  const agentEnv = { ...deps.env, FORGEJO_USER: chosen,
+    PATH: pinnedAgentPath(deps.configuration.agents.cliCommand, deps.configuration.agents.searchPath) };
 
   // Decide whether to resume the agent's prior session for this (slug, role).
   // Only honored when the caller passed slug+role+worktree AND the previous
@@ -609,11 +614,15 @@ async function prepareLaunch(state: StartAgentLoopState, deps: StartAgentLoopDep
   // currently chosen agent name (architecture migration). This ensures that if startAgent
   // falls back to a different family after a limit hit, the fallback agent
   // receives a prompt tailored to its own identity.
-  let actualPrompt = typeof opts.prompt === 'function' ? opts.prompt(chosen) : opts.prompt;
-  if (deps.configuration.agents.cliCommand) {
-    const cli = "'" + deps.configuration.agents.cliCommand.replaceAll("'", "'\\''") + "'";
-    actualPrompt = actualPrompt.replace(/\bpx (?=[a-z-])/g, `${cli} `);
+  let actualPrompt = typeof opts.prompt === 'function' ? await opts.prompt(chosen) : opts.prompt;
+  actualPrompt = renderRunnerContextRecovery(actualPrompt, nativeRunnerRecoveryEnabled(chosen, worktree || process.cwd()));
+  if (opts.missionStore && slug) {
+    actualPrompt = `${await readAgentLaunchContext(opts.missionStore, slug)}
+
+${actualPrompt}`;
   }
+
+  actualPrompt = renderPinnedCliGuidance(actualPrompt, deps.configuration.agents.cliCommand);
 
   // Resolve the per-family model override (adapters.agents.models[chosen]).
   // null when the family is not configured, in which case the launcher omits

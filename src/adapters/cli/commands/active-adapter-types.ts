@@ -26,6 +26,7 @@ export interface ActiveExecution extends Pick<ActiveOptions, 'controller' | 'con
   rootDir: string; renderProgress: (_event: Pick<ProgressEvent, 'phase' | 'agent'>) => void; operationId: string; slug: string; agent: string | null; reviewer: string | null;
 }
 export interface LaunchOptions {
+  missionStore?: Pick<import('../../../application/domain-ports.js').MissionStore, 'load'>;
   configuration?: ParallixConfiguration;
   slug: string; worktree: string; prompt: string; preselectedAgent?: string | null;
   agentConfig: AgentConfig;

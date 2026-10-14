@@ -177,7 +177,7 @@ Usage: px checkpoint check  [--slug <slug>] [--json]
        px checkpoint unplan [--slug <slug>] --name <CP-N>
        px checkpoint record [--slug <slug>] --name <CP-N> --next <text>
                             --criterion <text> --evidence <text> [--criterion ... --evidence ...]
-                            [--force]
+                            [--complete-criteria] [--force]
 
 Report an invalid locked contract: px checkpoint report-invalid-contract --name <CP-N>
   --command <exact failing command> --diagnostic <text> --authority-reason <text>
@@ -192,7 +192,11 @@ pair up in the order given, so the counts must match. Each row must cite a
 repository-relative path, a quoted test name, a recognized command or an ADR,
 and the final planned checkpoint needs one row per success criterion; handoff
 applies the same checks. \`px status\` shows which checkpoints have evidence;
-the first without is where a relaunched agent resumes. An operator may use
+the first without is where a relaunched agent resumes. Add --complete-criteria
+to complete exactly the criteria named by the supplied rows in the same atomic
+write. Unknown criterion text, invalid evidence or a conflict changes nothing.
+Without that flag, record only evidence as before. Successful output is readback.
+An operator may use
 \`record --force\` to clear a reported invalid-contract blocker while recording
 corrected evidence. It retains unrelated proof and still validates evidence and
 the write version; it does not mark the repair verified or skip its required check.
@@ -407,12 +411,15 @@ export function createCheckpointCommand(services: MissionCheckpointService, reso
       fail(`--criterion and --evidence must pair up: got ${criteria.length} criteria and ${evidence.length} evidence values`);
     }
     const req = request(args, 'checkpoint-record', resolveSlug, 'checkpoint:record');
+    const completeCriteria = args.includes('--complete-criteria');
     const goalCheck: GoalCheckRow[] = criteria.map((criterion, index) => ({
       criterion, evidence: evidence[index] as string,
     }));
     const outcome = await services.record({
       ...req,
       force: args.includes('--force'),
+      completeCriteria,
+      capabilities: completeCriteria ? new Set([...req.capabilities, 'mission:context'] as const) : req.capabilities,
       checkpoint: {
         missionId: req.missionId,
         name: required(args, '--name'),
@@ -421,7 +428,8 @@ export function createCheckpointCommand(services: MissionCheckpointService, reso
       },
     });
     const value = unwrap(outcome, 'checkpoint record');
-    output({ checkpoint: value.checkpoint, replaced: value.replaced, version: value.version });
+    output({ checkpoint: value.checkpoint, replaced: value.replaced, version: value.version,
+      completedSuccessCriteria: value.mission.completedSuccessCriteria ?? [] });
   };
 }
 

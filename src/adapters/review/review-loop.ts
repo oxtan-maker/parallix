@@ -211,16 +211,21 @@ function providerPort(slug: string, branch: string, worktree: string, target: Re
 /** Role prompts and launches through the configured agent launcher. */
 function agentPort(slug: string, branch: string, worktree: string, missionPath: string | undefined, target: ReviewLoopTarget, bindings: ReviewLoopBindings, writeState: typeof writeReviewState, log: (_msg: string) => void, error: (_msg: string) => void): ReviewAgentPort {
   const focus = target.focus ?? 'all';
-  const rolePrompt = (role: ReviewAgentLaunch['role'], facts: ReviewPromptFacts, actual: string): string => role === 'reviewer'
-    ? `${buildCompactReviewPrompt({ reviewer: facts.reviewer, branch, implementer: facts.implementer, focus, attempt: facts.attempt, repoRoot: worktree, missionPath, actualReviewer: actual, reviewBaseline: facts.reviewBaseline, integrationRepair: facts.integrationRepair } as never)}${facts.humanFeedback ? `\n\nHuman review correction (authoritative): ${facts.humanFeedback}` : ''}`
-    : `${buildCompactActOnReviewPrompt({ implementer: facts.implementer, branch, attempt: facts.attempt, reviewOutcome: facts.reviewOutcome, repoRoot: worktree, missionPath, actualImplementer: actual, reviewBaseline: facts.reviewBaseline } as never)}${facts.humanFeedback ? `\n\nHuman review correction (authoritative): ${facts.humanFeedback}` : ''}`;
+  const rolePrompt = async (role: ReviewAgentLaunch['role'], facts: ReviewPromptFacts, actual: string): Promise<string> => {
+    const loaded = await bindings.missionStore?.load(missionId(slug));
+    const declaredGates = loaded?.kind === 'found' ? loaded.mission.declaredGates ?? [] : undefined;
+    return role === 'reviewer'
+    ? `${buildCompactReviewPrompt({ reviewer: facts.reviewer, branch, implementer: facts.implementer, focus, attempt: facts.attempt, repoRoot: worktree, missionPath, actualReviewer: actual, reviewBaseline: facts.reviewBaseline, integrationRepair: typeof facts.integrationRepair === 'string' ? facts.integrationRepair : undefined, declaredGates, configuration: bindings.configuration })}${facts.humanFeedback ? `\n\nHuman review correction (authoritative): ${facts.humanFeedback}` : ''}`
+    : `${buildCompactActOnReviewPrompt({ implementer: facts.implementer, branch, attempt: facts.attempt, reviewOutcome: typeof facts.reviewOutcome === 'string' ? facts.reviewOutcome : undefined, repoRoot: worktree, missionPath, actualImplementer: actual, reviewBaseline: facts.reviewBaseline })}${facts.humanFeedback ? `\n\nHuman review correction (authoritative): ${facts.humanFeedback}` : ''}`;
+  };
   return {
     measuredCost: launch => measuredReviewCost(launch?.result?.telemetry),
     async launch({ role, agent, exclude, prompt, recovery }) {
       const phase = role === 'reviewer' ? 'review' : 'review-response';
       return await startAgent(role === 'reviewer' ? 'review' : 'act-on-review', { configuration: bindings.configuration,
         agent,
-        prompt: (actual: string) => [prompt ? rolePrompt(role, prompt, actual) : null, recovery ? String(recovery.prompt(actual)) : null].filter(part => part !== null).join('\n\n'),
+        missionStore: bindings.missionStore ?? undefined,
+        prompt: async (actual: string) => [prompt ? await rolePrompt(role, prompt, actual) : null, recovery ? String(recovery.prompt(actual)) : null].filter(part => part !== null).join('\n\n'),
         worktree, slug, role, exclude: [...exclude],
         ...(recovery?.sessionPolicy === undefined ? {} : { sessionPolicy: recovery.sessionPolicy }),
         // A bare repair launch is not review work the board reports.

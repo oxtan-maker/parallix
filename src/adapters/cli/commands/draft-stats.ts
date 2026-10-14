@@ -306,13 +306,13 @@ async function recordDraftRefinement(ctx: DraftWorkflowContext): Promise<{ ok: t
  * missing instead of starting the contract over.
  */
 async function repairDraftContract(slug: string, worktree: string, agent: string, refusal: string, {
-  configuration,
+  configuration, missionStore,
   startDraftAgentFn = startDraftAgent,
   logFn = fmt.log.plain,
   errorFn = fmt.log.plainError,
-}: Pick<DraftAdapterDependencies, "configuration" | "startDraftAgentFn" | "logFn" | "errorFn"> = {}) {
+}: Pick<DraftAdapterDependencies, "configuration" | "missionStore" | "startDraftAgentFn" | "logFn" | "errorFn"> = {}) {
   const prompt = buildContractRepairPrompt(slug, { rootDir: worktree, worktree, refusal });
-  const { agent: actualAgent, result } = await startDraftAgentFn({ configuration, prompt, worktree, agent });
+  const { agent: actualAgent, result } = await startDraftAgentFn({ configuration, prompt, worktree, agent, slug, missionStore });
   if (result.error) {
     errorFn(fmt.status('FAIL', `Could not relaunch draft agent (${fmt.agent(actualAgent)}): ${result.error.message}`));
     return false;
@@ -745,6 +745,8 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
       const { agent: actualAgent, result } = await startDraftAgentFn({
         configuration: merged.configuration,
         prompt,
+        slug: ctx.slug,
+        missionStore: (await draftMissionServices(ctx)).store,
         worktree: ctx.targetWorktree,
         agent
       });
@@ -807,6 +809,7 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
           exitFn,
           readAgentConfigOrExitFn,
           configuration: merged.configuration,
+          missionStore: (await draftMissionServices(ctx)).store,
           selectAgentFn: merged.selectAgentFn,
           startDraftAgentFn: merged.startDraftAgentFn,
         });
@@ -864,7 +867,7 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
       let refined = await recordDraftRefinement(ctx);
       for (let attempt = 1; refined.ok === false && refined.contractIncomplete && attempt <= DRAFT_CONTRACT_REPAIR_ATTEMPTS; attempt += 1) {
         logFn(fmt.status('WARN', `${refined.message} Sending it back to the draft agent (attempt ${attempt}/${DRAFT_CONTRACT_REPAIR_ATTEMPTS}).`));
-        const repaired = await repairDraftContractFn(ctx.slug, ctx.targetWorktree, ctx.actualAgent || ctx.agent, refined.message, { configuration: merged.configuration, startDraftAgentFn: merged.startDraftAgentFn, logFn, errorFn });
+        const repaired = await repairDraftContractFn(ctx.slug, ctx.targetWorktree, ctx.actualAgent || ctx.agent, refined.message, { configuration: merged.configuration, missionStore: (await draftMissionServices(ctx)).store, startDraftAgentFn: merged.startDraftAgentFn, logFn, errorFn });
         if (!repaired) { break; }
         try {
           enforceDraftCommitSafetyFn({ slug: ctx.slug, worktree: ctx.targetWorktree, logFn, plumbingLogFn });
@@ -904,19 +907,19 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
   };
 }
 async function restartDraftAgent(slug: string, worktree: string, {
-  configuration,
+  configuration, missionStore,
   selectAgentFn = selectAgent,
   startDraftAgentFn = startDraftAgent,
   readAgentConfigOrExitFn = readAgentConfigOrExit,
   logFn = fmt.log.plain,
   errorFn = fmt.log.plainError
-}: Pick<DraftAdapterDependencies, "selectAgentFn" | "startDraftAgentFn" | "readAgentConfigOrExitFn" | "logFn" | "errorFn" | "exitFn" | "configuration"> = {}) {
+}: Pick<DraftAdapterDependencies, "selectAgentFn" | "startDraftAgentFn" | "readAgentConfigOrExitFn" | "logFn" | "errorFn" | "exitFn" | "configuration" | "missionStore"> = {}) {
   const agentConfig = readAgentConfigOrExitFn(undefined, { configuration: configuration });
   const agent = selectAgentFn('draft', { config: agentConfig, configuration: configuration });
 
   const prompt = buildRestartPrompt(slug, { rootDir: worktree, worktree });
   logFn('Relaunching draft agent to repair mission type labels...');
-  const { agent: actualAgent, result } = await startDraftAgentFn({ configuration, prompt, worktree, agent });
+  const { agent: actualAgent, result } = await startDraftAgentFn({ configuration, prompt, worktree, agent, slug, missionStore });
   logFn(`Restart draft agent family: ${fmt.agent(actualAgent)}`);
 
   if (result.error) {

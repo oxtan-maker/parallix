@@ -1,8 +1,8 @@
 ---
 id: TASK-2747
 title: Cut agent paperwork turns in Parallix launch prompts and evidence commands
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-14 14:06'
 labels:
   - ai_sdlc

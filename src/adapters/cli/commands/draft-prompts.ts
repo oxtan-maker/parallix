@@ -1,3 +1,4 @@
+import { renderGraphifyLaunchGuidance } from '../../agents/launch-prompt-context.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -26,7 +27,7 @@ function resolveClassificationInstructions(taskPath: string) {
 function buildDraftPrompt(slug: string, { rootDir = process.cwd(), worktree = null }: { rootDir?: string; worktree?: string | null } = {}) {
   const promptRoot = worktree || rootDir;
   const overridePath = resolvePromptOverride(promptRoot);
-  const template = assembleStagePrompt('draft', { overridePath });
+  const template = renderGraphifyLaunchGuidance(assembleStagePrompt('draft', { overridePath }), promptRoot);
   const year = getMissionYear(slug, promptRoot) || String(new Date().getFullYear());
   const missionPath = path.join(missionDirForSlug(promptRoot, slug), 'MISSION.md');
   const missionDir = path.dirname(missionPath);
@@ -99,7 +100,7 @@ function buildRestartPrompt(slug: string, { rootDir = process.cwd(), worktree = 
   return `${buildDraftPrompt(slug, { rootDir, worktree })}
 
 Focused repair:
-- read \`px status ${slug}\`, then use \`px classification set --value <ai_sdlc|user_value>\`
+- use the launch snapshot, then use \`px classification set --value <ai_sdlc|user_value>\`
 - choose exactly one of \`ai_sdlc\` or \`user_value\`; unknown must be resolved before draft completion
 - classification is Mission state: do not repair it by editing a provider task
 `;
@@ -118,7 +119,7 @@ The harness tried to finish this draft and the mission contract was refused:
 
 ${refusal}
 
-What is already recorded stays recorded. Read it back with \`px status ${slug}\`, record only the missing parts listed above, one foreground command per write, then read it back again and confirm every required part is reported before you finish.
+What is already recorded stays recorded in the launch snapshot. Record only the missing parts listed above, one foreground command per write, and check each successful output as readback before finishing. Recover missing context or a conflict with px status ${slug}.
 `;
 }
 

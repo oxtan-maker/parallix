@@ -1,5 +1,5 @@
 import { evaluateMissionEvidence } from './mission-evidence-readiness.js';
-import { criterionContract, identifyGoalCheckRows } from '../domain/mission-success-criteria.js';
+import { completeNamedCriteria, criterionContract, identifyGoalCheckRows } from '../domain/mission-success-criteria.js';
 import { RepairCheckpointService } from './repair-checkpoint-service.js';
 /**
  * Checkpoint use case.
@@ -41,6 +41,8 @@ const REQUIRED_CAPABILITY: Capability = 'checkpoint:record';
 
 export interface RecordCheckpointRequest extends MissionCommandRequest {
   readonly checkpoint: CheckpointData;
+  /** Atomically complete only the criteria explicitly evidenced in this request. */
+  readonly completeCriteria?: boolean;
   /** Explicit operator override of a reported blocker; evidence checks still apply. */
   readonly force?: boolean;
 }
@@ -139,26 +141,8 @@ export class MissionCheckpointService {
   async record(
     request: RecordCheckpointRequest,
   ): Promise<ApplicationOutcome<RecordCheckpointResult>> {
-    const guard = missingCapability<RecordCheckpointResult>(request, REQUIRED_CAPABILITY);
-    if (guard) {
-      return guard;
-    }
-    if (request.checkpoint.missionId !== request.missionId) {
-      return failure(
-        'validation',
-        `checkpoint ${request.checkpoint.name} belongs to mission `
-        + `${request.checkpoint.missionId}, not ${request.missionId}`,
-      );
-    }
-    if (!isHandoffReadyCheckpoint(request.checkpoint)) {
-      return failure(
-        'validation',
-        `checkpoint ${request.checkpoint.name} needs a CP-N name, at least one Goal Check row, and a next action`,
-      );
-    }
-    try { assertGoalCheckRows(request.checkpoint.goalCheck); } catch (error) {
-      return failure('validation', error instanceof Error ? error.message : 'checkpoint evidence rejected');
-    }
+    const invalid = this.validateRecordRequest(request);
+    if (invalid) { return invalid; }
     const rootDir = this._evidence?.rootFor(request.missionId) ?? null;
 
     const loaded = await loadForCommand<RecordCheckpointResult>(this._store, request);
@@ -207,6 +191,7 @@ export class MissionCheckpointService {
       updated = {
         ...mission,
         checkpoints: recordCheckpoint(mission.checkpoints, merged),
+        ...(request.completeCriteria ? { completedSuccessCriteria: completeNamedCriteria(mission, request.checkpoint.goalCheck) } : {}),
       } as Mission;
     } catch (error) {
       return failure(
@@ -226,7 +211,7 @@ export class MissionCheckpointService {
         {
           mission: updated,
           version: nextVersion,
-          checkpoint: request.checkpoint,
+          checkpoint: merged,
           replaced,
         },
         [
@@ -242,6 +227,34 @@ export class MissionCheckpointService {
     } catch (error) {
       return writeFailure<RecordCheckpointResult>(error);
     }
+  }
+
+  private validateRecordRequest(request: RecordCheckpointRequest): ApplicationOutcome<RecordCheckpointResult> | null {
+    const guard = missingCapability<RecordCheckpointResult>(request, REQUIRED_CAPABILITY);
+    if (guard) {
+      return guard;
+    }
+    if (request.checkpoint.missionId !== request.missionId) {
+      return failure(
+        'validation',
+        `checkpoint ${request.checkpoint.name} belongs to mission `
+        + `${request.checkpoint.missionId}, not ${request.missionId}`,
+      );
+    }
+    if (!isHandoffReadyCheckpoint(request.checkpoint)) {
+      return failure(
+        'validation',
+        `checkpoint ${request.checkpoint.name} needs a CP-N name, at least one Goal Check row, and a next action`,
+      );
+    }
+    try { assertGoalCheckRows(request.checkpoint.goalCheck); } catch (error) {
+      return failure('validation', error instanceof Error ? error.message : 'checkpoint evidence rejected');
+    }
+    if (request.completeCriteria) {
+      const completionGuard = missingCapability<RecordCheckpointResult>(request, 'mission:context');
+      if (completionGuard) { return completionGuard; }
+    }
+    return null;
   }
 
   /**

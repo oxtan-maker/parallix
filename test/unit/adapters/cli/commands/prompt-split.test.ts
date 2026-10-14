@@ -118,7 +118,7 @@ function assertLaunchKeepsEveryLine(stage: string, launch: string) {
 // Non-placeholder lines in order (placeholder lines carry `{{...}}` and are
 // substituted at launch, so they are excluded from the order comparison).
 function nonPlaceholderSeq(s: string): string[] {
-  return s.split('\n').filter(l => !/\{\{/.test(l) && l.trim().length > 0);
+  return s.split('\n').filter(l => !/\{\{/.test(l) && !l.includes('Graphify-first:') && l.trim().length > 0);
 }
 function isOrderedSubsequence(sub: string[], full: string[]): boolean {
   let i = 0;
@@ -285,4 +285,39 @@ test('execute core requires readiness and an operator stop for recorded contract
   assert.match(core, /primary stop reason even when evidence is incomplete/);
   assert.match(core, /without fabricated evidence or repeated evidence-only repair/);
   assert.match(core, /only an explicit operator decision can clear the recorded blocker/);
+});
+
+test('launch modes include Graphify guidance only for an existing graph (TASK-2747)', () => {
+  const root = registeredMkdtemp('launch-graph-');
+  const prompts = () => [buildDraftPrompt('task-2747', { rootDir: root }),
+    buildExecutePrompt('task-2747', '', { rootDir: root }),
+    buildCompactReviewPrompt({ reviewer: 'codex', branch: 'mission/task-2747', implementer: 'claude', attempt: 1, repoRoot: root })];
+  try {
+    for (const prompt of prompts()) { assert.doesNotMatch(prompt, /Graphify-first:|check if `graphify-out/); }
+    fs.mkdirSync(path.join(root, 'graphify-out'));
+    fs.writeFileSync(path.join(root, 'graphify-out', 'graph.json'), '{}');
+    for (const prompt of prompts()) {
+      assert.match(prompt, /Graphify-first:.*exists at launch/);
+      assert.doesNotMatch(prompt, /check if `graphify-out/);
+    }
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test('launch prompts inline runnable writes and short endings without help discovery (TASK-2747)', () => {
+  const draft = assembleStagePrompt('draft');
+  const execute = assembleStagePrompt('execute');
+  const review = assembleStagePrompt('review');
+  for (const prompt of [draft, execute, review]) {
+    assert.match(prompt, /two to three lines/);
+    assert.doesNotMatch(prompt, /--help/);
+  }
+  assert.match(draft, /px mission author --goal .*--why .*--scope .*--criterion .*--checkpoint CP-1 .*--gate .*--predicted Small --classification ai_sdlc/);
+  assert.match(draft, /successful output is the authoritative readback/);
+  assert.match(execute, /px checkpoint record --name .*--criterion .*--evidence .*--next .*--complete-criteria/);
+  assert.match(execute, /px mission mark-complete --slug .*--criterion <index>/);
+  assert.match(execute, /Read `px status .*write reports a conflict/);
+  assert.doesNotMatch(execute, /Reload status after each write|Immediately after/);
+  assert.match(execute, /handoff owns the authoritative execution of mission-declared Gates/);
+  assert.match(execute, /permitted only to diagnose a concrete failure/);
 });

@@ -1,6 +1,7 @@
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 import { clearCustomAdmissionStateCache } from '../../../src/adapters/sqlite/custom-admission-state.js';
+import { pinnedCliBootstrap } from '../../../src/adapters/agents/launch-prompt-context.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
@@ -1387,7 +1388,8 @@ test('startAgent harness identity wins over caller-supplied FORGEJO_USER', async
 });
 
 test('startAgent supports a function for prompt and calls it with chosen agent', async () => {
-  const result = await startAgent('review', { configuration: resolveConfiguration(process.env),
+  const configuration = resolveConfiguration({ ...process.env, PARALLIX_CLI_COMMAND: '/fixture/pinned-cli/px' });
+  const result = await startAgent('review', { configuration,
     prompt: (chosen) => `You are ${chosen}.`,
     worktree: '/tmp/mission-task-1051',
     agent: 'codex',
@@ -1397,7 +1399,9 @@ test('startAgent supports a function for prompt and calls it with chosen agent',
 
   assert.equal(result.agent, 'codex');
   assert.ok(result.invocation);
-  assert.equal(result.invocation.args.includes('You are codex.'), true);
+  const prompt = result.invocation.args.at(-1);
+  assert.ok(prompt.startsWith('You are codex.\n\nPinned CLI shell bootstrap:'));
+  assert.ok(prompt.endsWith(`\n${pinnedCliBootstrap(configuration.agents.cliCommand!)}\n` + '```'));
 });
 
 test('startAgent reroutes when the selected agent has no launcher (missing binary)', async () => {
@@ -1691,6 +1695,7 @@ test('resolveOpencodeCommand returns bare opencode', () => {
 // ---------- session-reuse threading ----------
 
 test('startAgent passes resume:false to claude on the first launch and writes a marker', async () => {
+  const configuration = resolveConfiguration({ ...process.env, PARALLIX_CLI_COMMAND: '/fixture/pinned-cli/px' });
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'startagent-resume-'));
   try {
     let writes = 0;
@@ -1706,7 +1711,7 @@ test('startAgent passes resume:false to claude on the first launch and writes a 
       delete: () => {}
     };
 
-    const result = await startAgent('active', { configuration: resolveConfiguration(process.env),
+    const result = await startAgent('active', { configuration,
       prompt: 'Execute the mission.',
       worktree: tmpRoot,
       agent: 'claude',
@@ -1718,15 +1723,17 @@ test('startAgent passes resume:false to claude on the first launch and writes a 
     });
 
     assert.equal(result.agent, 'claude');
-    assert.deepEqual(result.invocation.args, [
+    assert.deepEqual(result.invocation.args.slice(0, -1), [
       '--dangerously-skip-permissions',
       '--output-format',
       'stream-json',
       '--verbose',
       '--include-partial-messages',
-      '-p',
-      'Execute the mission.'
+      '-p'
     ]);
+    const prompt = result.invocation.args.at(-1);
+    assert.ok(prompt.startsWith('Execute the mission.\n\nPinned CLI shell bootstrap:'));
+    assert.ok(prompt.endsWith(`\n${pinnedCliBootstrap(configuration.agents.cliCommand!)}\n` + '```'));
     assert.equal(writes, 1);
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -1761,6 +1768,7 @@ test('startAgent rejects instead of reporting launch success when session persis
 });
 
 test('startAgent passes resume:true to claude when a matching marker exists', async () => {
+  const configuration = resolveConfiguration({ ...process.env, PARALLIX_CLI_COMMAND: '/fixture/pinned-cli/px' });
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'startagent-resume-hit-'));
   try {
     const sessionMarkerPort = {
@@ -1775,7 +1783,7 @@ test('startAgent passes resume:true to claude when a matching marker exists', as
       delete: () => {}
     };
 
-    const result = await startAgent('act-on-review', { configuration: resolveConfiguration(process.env),
+    const result = await startAgent('act-on-review', { configuration,
       prompt: 'Address review.',
       worktree: tmpRoot,
       agent: 'claude',
@@ -1786,16 +1794,18 @@ test('startAgent passes resume:true to claude when a matching marker exists', as
       log: () => {}
     });
 
-    assert.deepEqual(result.invocation.args, [
+    assert.deepEqual(result.invocation.args.slice(0, -1), [
       '--dangerously-skip-permissions',
       '--continue',
       '--output-format',
       'stream-json',
       '--verbose',
       '--include-partial-messages',
-      '-p',
-      'Address review.'
+      '-p'
     ]);
+    const prompt = result.invocation.args.at(-1);
+    assert.ok(prompt.startsWith('Address review.\n\nPinned CLI shell bootstrap:'));
+    assert.ok(prompt.endsWith(`\n${pinnedCliBootstrap(configuration.agents.cliCommand!)}\n` + '```'));
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }

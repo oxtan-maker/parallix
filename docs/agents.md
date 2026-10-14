@@ -656,6 +656,27 @@ Before a dedicated repair launch, Parallix persists an incident-associated repai
 checkpoint and names it in the prompt. The agent records fresh evidence there
 with `px checkpoint record`; a relaunch requires another fresh write.
 Every planned checkpoint must have evidence before handoff.
+With `px checkpoint record --name CP-1 --criterion '<exact criterion text>'
+--evidence '<verifiable evidence>' --next '<specific next action>' --complete-criteria`,
+recording and completion are one atomic write. Repeat the criterion/evidence pair
+for each criterion verified. Only the supplied rows complete criteria; retained
+repair rows keep their previous completion state. Invalid evidence, unknown
+criterion text or a competing write changes nothing. Omitting the flag retains
+evidence-only recording.
+
+Draft, execute and review agents receive authoritative Mission snapshots current
+as of launch and a short `px` command that resolves to the launching CLI. The
+snapshot replaces the initial status read; successful mutation output is readback.
+The launch prompt supplies a shell bootstrap to prefix each invocation using
+`px`, inside the final shell body after login or interactive profiles load. It
+restores the pinned PATH and overrides profile aliases or functions, including
+when an agent starts a nested shell.
+Use `px status` to recover missing context or a version conflict. Graphify guidance
+is supplied only when the graph exists at launch. Handoff runs declared gates;
+agents use focused checks to develop changes or investigate concrete failures.
+Reviewers cite the recorded gate result and validated SHA, and review substantive
+Backlog edits while recognizing Parallix-owned status and assignee transitions.
+
 A repair checkpoint records only the criteria it fixes; earlier valid rows for the
 other criteria are retained, not rewritten. Handoff then measures coverage across
 every recorded checkpoint by criterion identity, so a repair that covers its

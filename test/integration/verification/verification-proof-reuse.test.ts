@@ -1,3 +1,4 @@
+import { buildHandoffControls } from '../../../src/adapters/review/handoff-controls.js';
 /**
  * TASK-2413 CP-2: verification-proof reuse and invalidation.
  *
@@ -532,6 +533,11 @@ for (const scenario of ['bookkeeping', 'source', 'test', 'config', 'manifest', '
       }
       const reusable = readActiveVerificationProof(command, root);
       assert.equal(reusable.ok, scenario === 'bookkeeping');
+      const controls = buildHandoffControls(root, [command], { repositoryCommand: command });
+      assert.equal(controls.includes('status passed'), scenario === 'bookkeeping', 'review gate facts retain the existing freshness decision (TASK-2747)');
+      if (scenario === 'bookkeeping' && reusable.ok && reusable.proof) {
+        assert.ok(controls.includes(`validated SHA ${reusable.proof.verifiedCommit}`));
+      }
       const output: string[] = [];
       const previous = process.cwd();
       try {

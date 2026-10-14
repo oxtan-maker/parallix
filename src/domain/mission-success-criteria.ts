@@ -71,3 +71,18 @@ export function identifyGoalCheckRows(rows: readonly import('./checkpoint.js').G
   return rows.map(row => ({ ...row, criterionId: row.criterionId !== undefined ? row.criterionId
     : criteria.find(criterion => criterion.text === row.criterion)?.id || null }));
 }
+
+
+/** Complete exactly the supplied exact criterion texts; never retained repair rows. */
+export function completeNamedCriteria(mission: import('./mission.js').Mission, rows: readonly import('./checkpoint.js').GoalCheckRow[]): readonly number[] {
+  const criteria = mission.successCriteria ?? [];
+  const indexes = rows.map(row => {
+    const index = criteria.indexOf(row.criterion);
+    if (index < 0) { throw new MissionSuccessCriteriaViolation(`Unknown success criterion: ${row.criterion}. Use the exact recorded criterion text`); }
+    if (row.criterionId !== undefined && row.criterionId !== null && row.criterionId !== mission.successCriterionIds?.[index]) {
+      throw new MissionSuccessCriteriaViolation(`Criterion identity does not match its recorded text: ${row.criterion}`);
+    }
+    return index;
+  });
+  return completedCriteria([...(mission.completedSuccessCriteria ?? []), ...indexes], criteria.length);
+}
