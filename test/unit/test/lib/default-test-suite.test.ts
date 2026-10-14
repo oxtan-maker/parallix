@@ -15,6 +15,17 @@ import { mkdtemp } from '../../../helpers/temp-dir.js';
 
 const REPO_ROOT = path.join(import.meta.dirname, '..', '..', '..', '..');
 
+function withGitHubActions<T>(github: boolean, callback: () => T): T {
+  const previous = process.env.GITHUB_ACTIONS;
+  if (github) process.env.GITHUB_ACTIONS = 'true'; else delete process.env.GITHUB_ACTIONS;
+  try {
+    return callback();
+  } finally {
+    if (previous === undefined) delete process.env.GITHUB_ACTIONS;
+    else process.env.GITHUB_ACTIONS = previous;
+  }
+}
+
 // Regression group from the original runner-plan suite
 {
 function selectedFiles(args, version = process.version) {
@@ -70,15 +81,25 @@ test('default test runner routes registered integration tests out of the default
   assert.equal(pkg.scripts['test:integration:prebuilt'], 'PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration');
 });
 
-test('focused real-agent smoke uses waited-child CPU accounting (TASK-2739)', () => {
-  const plan = buildTestRunPlan({ executionRoot: REPO_ROOT,
-    requestedArgs: ['test/e2e/agents/real-agent-smoke.test.ts'],
-    probeNodeVersion: () => 'v24.15.0', probeTestConcurrency: () => true });
-  assert.equal(plan.runsIntegrationSuite, true);
-  assert.equal(plan.runsIntegrationCiSuite, false);
-  assert.ok(plan.nodeArgs.some(arg => arg.endsWith('/integration-cpu-hook.mjs')));
-  assert.ok(plan.nodeArgs.some(arg => arg.endsWith('/bootstrap-e2e-parallix-home.ts')));
-});
+for (const github of [false, true]) {
+  test(`focused real-agent smoke ${github ? 'suspends hosted CPU hooks' : 'uses waited-child CPU accounting'} (TASK-2739)`, () => {
+    const previous = process.env.GITHUB_ACTIONS;
+    withGitHubActions(github, () => {
+      const suite = path.join(REPO_ROOT, 'test/e2e/agents/real-agent-smoke.test.ts');
+      const plan = buildTestRunPlan({ executionRoot: REPO_ROOT,
+        requestedArgs: [suite],
+        probeNodeVersion: () => 'v24.15.0', probeTestConcurrency: () => true });
+      assert.equal(plan.runsIntegrationSuite, true);
+      assert.equal(plan.runsIntegrationCiSuite, false);
+      assert.deepEqual(plan.testFiles, [suite]);
+      assert.deepEqual(plan.nodeArgs.slice(plan.nodeArgs.indexOf('--test') + 1), [suite]);
+      assert.equal(plan.nodeArgs.some(arg => arg.endsWith('/integration-cpu-hook.mjs')), !github);
+      assert.ok(!plan.nodeArgs.some(arg => arg.endsWith('/cpu-test-hook.mjs')));
+      assert.ok(plan.nodeArgs.some(arg => arg.endsWith('/bootstrap-e2e-parallix-home.ts')));
+    });
+    assert.equal(process.env.GITHUB_ACTIONS, previous);
+  });
+}
 
 test('default test runner selects a Node version that supports node:test', () => {
   const runner = fs.readFileSync(path.join(import.meta.dirname, '..', '..', '..', 'lib', 'test-run-plan.ts'), 'utf8');
@@ -123,17 +144,6 @@ test('default test runner classifies the TUI boundary contract as integration an
 // Regression group from test/unit-cpu-hosted-policy.test.ts
 {
 const BUDGET_REPORTER_PATH = 'unit-test-budget-reporter.mjs';
-
-function withGitHubActions<T>(github: boolean, callback: () => T): T {
-  const previous = process.env.GITHUB_ACTIONS;
-  if (github) process.env.GITHUB_ACTIONS = 'true'; else delete process.env.GITHUB_ACTIONS;
-  try {
-    return callback();
-  } finally {
-    if (previous === undefined) delete process.env.GITHUB_ACTIONS;
-    else process.env.GITHUB_ACTIONS = previous;
-  }
-}
 
 test('TASK-2423: GitHub default plan omits the unit-test budget reporter', () => {
   const plan = withGitHubActions(true, () => buildTestRunPlan({

@@ -1,8 +1,8 @@
 ---
 id: TASK-2748
 title: fix regression
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-14 18:01'
 labels: []
 dependencies: []
