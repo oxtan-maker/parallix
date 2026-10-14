@@ -47,6 +47,7 @@ async function land(
   beforeStagedTreeRead?: () => void,
   tierGuards: { ok: boolean, error?: string } = { ok: true },
   failCleanup = false,
+  duringGuard?: () => void,
 ): Promise<void> {
   let stagedTreeRead = false;
   let hookRuns = 0;
@@ -68,7 +69,7 @@ async function land(
     missionPaths: { softResetTrailingBacklogNoise: () => false },
     productConfig: { isForgejoReviewEnabled: () => false },
     checkout: {},
-    gates: { isIntendedPayloadAtHead: () => false, runStagedTierGuards: () => tierGuards },
+    gates: { isIntendedPayloadAtHead: () => false, runStagedTierGuards: () => { duringGuard?.(); return tierGuards; } },
     landing: {
       createAbort: () => new Error('abort'),
       classifyHookFailure: () => ({ isHookFailure: false }),
@@ -147,4 +148,16 @@ test('TASK-2630: rejected squash reports cleanup failure with retry guidance', a
       `cleanup failure gives actionable recovery: ${JSON.stringify(failures)}`);
     assert.ok(failures.some(message => message.includes(root)), 'recovery identifies the affected checkout');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test('a payload path resurrected during final guards cannot land (TASK-2712)', async (t) => {
+  for (const method of ['debug', 'pass', 'plain', 'fail', 'info'] as const) { t.mock.method(fmt.log, method, () => {}); }
+  const { root, oldPath } = fixture(false);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const before = git(root, ['rev-parse', 'HEAD']);
+  await assert.rejects(() => land(root, undefined, { ok: true }, false, () => {
+    fs.writeFileSync(path.join(root, oldPath), 'resurrected\n');
+  }), /abort/);
+  assert.equal(git(root, ['rev-parse', 'HEAD']), before);
 });

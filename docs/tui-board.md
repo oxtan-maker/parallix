@@ -84,6 +84,20 @@ Web cards show the available commands alongside Cancel. When no command can
 run, one unavailable control explains why. Commands that can run together remain
 individually accessible.
 
+Web cards show the entire checkpoint plan in order, including checkpoints with
+no evidence yet. Completed checkpoints are green; future checkpoints are dim.
+On an active mission, the first checkpoint without recorded evidence is green,
+using the same color as the current review indicator and completed checkpoints.
+That current checkpoint uses the review indicator's blink while the board reports
+working activity, and stays steady when work stops. Reduced-motion settings
+disable the animation. Hover an indicator to read its name and planned
+description. Missions without a checkpoint plan show no indicators.
+
+Click the latest recorded checkpoint label to read its Goal Check evidence.
+Close the evidence panel with its close control, Escape, or the backdrop.
+Checkpoint indicators stay beneath the terminal and mission edit dialogs, so
+they cannot cover dialog content or receive clicks through a backdrop.
+
 ## Cycle time and agent runtime are different numbers
 
 FLOW reports both, under labels that do not overlap:

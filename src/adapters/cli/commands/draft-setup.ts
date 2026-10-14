@@ -179,16 +179,67 @@ function reportGraphifyWorkspace(targetPath: string, logFn: (_message: string) =
   return false;
 }
 
+// Graphify state a mission worktree needs before its first query or incremental
+// refresh (TASK-2714). A recursive copy of the primary worktree's graphify-out
+// carried every dated pre-overwrite snapshot Graphify writes (graphify's own
+// `backup_if_protected`, one folder per day) plus the browser export: measured at
+// 660,368,980 bytes here, of which 632,951,392 bytes were 35 dated snapshot
+// directories. None of that is read by `graphify query|path|explain` or by
+// `graphify update .`, so the copy is an allowlist instead.
+//   graph.json                the graph every query traverses and `update` re-clusters
+//   manifest.json             per-file scan record `update` diffs against
+//   cache/                    stat index + AST cache that make the refresh incremental
+//   .graphify_labels.json(.sig) curated community labels, reused by update/cluster-only
+//   .graphify_root            authoritative scan root for the worktree
+//   .graphify_python          interpreter the skill and hooks probe
+//   GRAPH_REPORT.md           the report AGENTS.md points agents at
+const GRAPHIFY_QUERY_STATE_FILES = [
+  'graph.json',
+  'manifest.json',
+  'GRAPH_REPORT.md',
+  '.graphify_labels.json',
+  '.graphify_labels.json.sig',
+  '.graphify_analysis.json',
+  '.graphify_semantic_marker',
+  '.graphify_python',
+  '.graphify_root',
+  'cost.json',
+];
+const GRAPHIFY_INCREMENTAL_STATE_DIRS = ['cache'];
+
 function copyGraphifyWorkspace(mainRepo: string, targetPath: string, logFn: (_message: string) => void) {
   if (!mainRepo) { return; }
   const sourcePath = path.join(mainRepo, 'graphify-out');
   try {
     if (!fs.existsSync(sourcePath) || !fs.lstatSync(sourcePath).isDirectory()) { return; }
-    fs.cpSync(sourcePath, targetPath, { recursive: true, force: true });
-    logFn(fmt.status('PASS', `Copied graphify-out contents from primary worktree ${fmt.path(sourcePath)}.`));
+    let copiedBytes = 0;
+    for (const name of GRAPHIFY_QUERY_STATE_FILES) {
+      const source = path.join(sourcePath, name);
+      if (fs.existsSync(source) && fs.lstatSync(source).isFile()) {
+        fs.copyFileSync(source, path.join(targetPath, name));
+        copiedBytes += fs.statSync(source).size;
+      }
+    }
+    for (const name of GRAPHIFY_INCREMENTAL_STATE_DIRS) {
+      const source = path.join(sourcePath, name);
+      if (fs.existsSync(source) && fs.lstatSync(source).isDirectory()) {
+        fs.cpSync(source, path.join(targetPath, name), { recursive: true, force: true });
+        copiedBytes += directoryBytes(source);
+      }
+    }
+    logFn(fmt.status('PASS', `Copied ${copiedBytes} bytes of query and incremental graph state from primary worktree ${fmt.path(sourcePath)}; dated snapshots and exports were left behind.`));
   } catch (_) {
     // Graceful degradation: graphify not installed, source unavailable, or copy failed.
   }
+}
+
+function directoryBytes(dir: string): number {
+  let total = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    total += entry.isDirectory() ? directoryBytes(full) : (fs.statSync(full).size);
+  }
+  return total;
 }
 function ensureGraphifyIgnore(targetWorktree: string, { gitFn = git, logFn = fmt.log.plain }: { gitFn?: typeof git; logFn?: Log } = {}) {
   const targetPath = path.join(targetWorktree, '.graphifyignore');

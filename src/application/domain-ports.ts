@@ -37,6 +37,10 @@ export interface MissionTransitionHistoryEntry {
 /** Persistence ports belong to the application layer; the domain stays store-agnostic. */
 export interface MissionStore {
   load(_id: MissionId): Promise<MissionLoadResult>;
+  /** Append-only checkpoint evidence, in recording order. */
+  checkpointHistory?(_id: MissionId): Promise<readonly import('../domain/checkpoint.js').CheckpointVersion[]>;
+  /** Null is a known legacy round whose start state was never captured; undefined is no such round. */
+  reviewCheckpointState?(_id: MissionId, _round: number): Promise<import('../domain/checkpoint.js').ReviewCheckpointState | null | undefined>;
   /** Read the mission aggregates owned by one repository. */
   loadByRepository?(_repositoryId: import('../domain/repository.js').RepositoryId): Promise<readonly Mission[]>;
   /**

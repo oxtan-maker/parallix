@@ -5,6 +5,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import React from 'react';
 import { Board, restoreActionFocus } from '../../../../web/src/board.js';
+import { C } from '../../../../web/src/palette.js';
 import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
 import { missionId } from '../../../../src/domain/mission.js';
@@ -183,7 +184,7 @@ test('cancellation confirmation stays open when the refreshed projection removes
   } finally { await page.close(); }
 });
 
-test('clicking the checkpoint label toggles the evidence panel open and closed (TASK-2660)', async () => {
+test('checkpoint evidence opens from the label and closes from its dialog (TASK-2660, TASK-2745)', async () => {
   const card = makeCard({
     id: missionId('task-2660-detail'),
     status: 'review',
@@ -198,17 +199,13 @@ test('clicking the checkpoint label toggles the evidence panel open and closed (
   try {
     const label = page.mount.querySelector<DomHtmlElement>('[role="button"][aria-label^="View checkpoint evidence for"]')!;
     assert.equal(page.mount.querySelector('[role="dialog"]'), null, 'no panel before the first click');
-    // A real click event, dispatched at the label, must reach it even while the
-    // backdrop is open: the label sits above the backdrop (zIndex 60 > 50), so
-    // the required same-label click-to-close toggle is reachable.
     await act(async () => { label.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 })); });
     const dialog = page.mount.querySelector('[role="dialog"]');
     assert.ok(dialog !== null, 'the panel opens on click');
     assert.match(dialog?.textContent ?? '', /CP-2: components extracted/, 'the panel renders the checkpoint description');
     assert.match(dialog?.textContent ?? '', /runs the gate/, 'the panel renders the Goal Check evidence row');
-    // The same label click closes the view; the label stays above the backdrop.
-    await act(async () => { label.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 })); });
-    assert.equal(page.mount.querySelector('[role="dialog"]'), null, 'the same label click closes the panel');
+    await act(async () => { page.mount.querySelector<DomButton>('[role="dialog"] button')!.click(); });
+    assert.equal(page.mount.querySelector('[role="dialog"]'), null, 'the dialog close control closes the panel');
   } finally { await page.close(); }
 });
 
@@ -688,7 +685,7 @@ test('Create new mission keeps entries after a failure and retries with the same
   } finally { await page.close(); }
 });
 
-const editFields = { missionId: 'task-open-one', version: 7, title: 'Full title', description: 'Full description', context: 'Full context', labels: ['user_value', 'api'], successCriteria: ['works', 'documented'], dependencies: ['task-open-two'] };
+const editFields = { missionId: 'task-open-one', version: 7, title: 'Full title', description: 'Full description', context: 'Full context', labels: ['user_value', 'api'], successCriteria: ['works', 'documented'], successCriterionIds: ['sc-1', 'sc-2'], dependencies: ['task-open-two'] };
 const editResult = (value = editFields) => ({ ...commandResult(), value });
 const editOpener = (page: Awaited<ReturnType<typeof renderBoard>>) => page.mount.querySelector<DomButton>('[data-board-card="task-open-one"] button[aria-label="Edit — enabled"]')!;
 
@@ -725,7 +722,7 @@ test('Edit saves removals with the read version and refreshes the board (TASK-27
     await act(async () => { picker.click(); });
     await act(async () => { const inputs = [...page.mount.querySelectorAll<DomHtmlElement & { checked: boolean }>('fieldset input')]; assert.equal(inputs.length, 1, page.mount.querySelector('fieldset')?.outerHTML); inputs[0].click(); });
     await act(async () => { submitButton(page).click(); });
-    assert.deepEqual(JSON.parse(String(page.calls[1].body)), { kind: 'mission:edit', missionId: 'task-open-one', expectedVersion: 7, title: 'Revised', description: '', context: '', labels: [], successCriteria: [], dependencies: [] });
+    assert.deepEqual(JSON.parse(String(page.calls[1].body)), { kind: 'mission:edit', missionId: 'task-open-one', expectedVersion: 7, title: 'Revised', description: '', context: '', labels: [], successCriteria: [], successCriterionIds: [], dependencies: [] });
     assert.equal(refreshed, 1); assert.equal(dialogOf(page), null);
   } finally { await page.close(); }
 });
@@ -830,5 +827,54 @@ test('a refreshed pointer control cannot dispatch its replacement or activate th
     });
     assert.equal(page.calls.length, 1);
     assert.equal(payload(page.calls).kind, 'handoff:record');
+  } finally { await page.close(); }
+});
+
+
+test('Edit sends retained criterion IDs and leaves new IDs to the backend (TASK-2742)', async () => {
+  let calls = 0;
+  const page = await renderBoard({ board: createBoard(), respond: async () => new Response(JSON.stringify(++calls === 1 ? editResult() : createdResult('task-open-one'))) });
+  try {
+    await act(async () => { editOpener(page).click(); });
+    await enter(page, fieldByLabel(page, 'Success criterion 1'), 'edited wording');
+    await act(async () => { page.mount.querySelector<DomButton>('button[aria-label="Remove criterion 2"]')!.click(); });
+    const add = [...page.mount.querySelectorAll<DomButton>('button')].find(button => button.textContent?.includes('Add criterion'))!;
+    await act(async () => { add.click(); });
+    await enter(page, fieldByLabel(page, 'Success criterion 2'), 'new criterion');
+    await act(async () => { submitButton(page).click(); });
+    const saved = JSON.parse(String(page.calls[1].body));
+    assert.deepEqual(saved.successCriteria, ['edited wording', 'new criterion']);
+    assert.deepEqual(saved.successCriterionIds, ['sc-1', null]);
+  } finally { await page.close(); }
+});
+
+
+test('current checkpoint blink follows projected working-to-idle transitions (TASK-2745)', async () => {
+  const card = makeCard({ checkpoint: 'CP-1', checkpointEvidence: [
+    { name: 'CP-1', description: 'done', goalCheck: [{ criterion: 'done', evidence: 'npm test' }], state: 'completed' },
+    { name: 'CP-2', description: 'current', goalCheck: [], state: 'current' },
+    { name: 'CP-3', description: 'later', goalCheck: [], state: 'future' },
+  ] });
+  const page = await renderBoard({ board: snapshot([card]) });
+  try {
+    const checkpointColor = (name: string) => page.mount.querySelector<DomHtmlElement>(`[aria-label="Checkpoint plan"] > [aria-label="${name}"]`)!.style.background;
+    const green = page.window.document.createElement('span');
+    green.style.background = C.green;
+    assert.equal(checkpointColor('CP-1'), green.style.background);
+    assert.equal(checkpointColor('CP-2'), green.style.background);
+    assert.equal(page.mount.querySelectorAll('.review-pip--running').length, 0);
+    for (const freshness of ['live', 'unverified', 'stale'] as const) {
+      await page.rerender(snapshot([{ ...card, currentWork: { operationId: 'execute', phase: 'execute', summary: 'execute', agent: null, updatedAt: 'now', freshness } }]));
+      const blinking = page.mount.querySelectorAll('.review-pip--running');
+      assert.equal(blinking.length, 1);
+      assert.equal(blinking[0].getAttribute('aria-label'), 'CP-2');
+      assert.equal(checkpointColor('CP-2'), green.style.background);
+    }
+    for (const blockingReason of [null, 'waiting']) {
+      await page.rerender(snapshot([{ ...card, currentWork: null, blockingReason }]));
+      assert.equal(page.mount.querySelectorAll('.review-pip--running').length, 0);
+      assert.equal(checkpointColor('CP-2'), green.style.background);
+      assert.equal(page.mount.querySelectorAll('[aria-label="Checkpoint plan"] > span').length, 3);
+    }
   } finally { await page.close(); }
 });

@@ -34,6 +34,7 @@ import { getPrStatus } from '../../review/review-adapter.js';
 import type { BoardProjectionBuilder } from '../../../application/projections/board-readers.js';
 import type { MissionId } from '../../../domain/mission.js';
 import { projectMissionActivity, type MissionActivitySource } from '../../../application/projections/mission-activity.js';
+import { recordedClassification } from '../../../domain/mission-authoring.js';
 import { latestEvidencedCheckpoint } from '../../../domain/checkpoint.js';
 import { latestIntegrationRepair } from '../../../application/integration-repair-review.js';
 
@@ -147,6 +148,7 @@ export function createStatusBoardAdapter(options: {
         const legacyReview = readLegacyReviewSnapshot(slug, rootDir);
 
         return {
+          classification: recordedClassification(recorded?.mission.labels ?? []),
           activity: card ? projectMissionActivity(card as MissionActivitySource) : null,
           brief: brief
             ? { goal: brief.goal, why: brief.why, scope: brief.scope, outOfScope: [...brief.outOfScope] }
@@ -154,6 +156,7 @@ export function createStatusBoardAdapter(options: {
           description: recorded?.mission.description ?? null,
           declaredGates: [...(recorded?.mission.declaredGates ?? [])],
           successCriteria: [...(recorded?.mission.successCriteria ?? [])],
+          successCriterionIds: recorded?.mission.successCriterionIds,
           completedSuccessCriteria: [...(recorded?.mission.completedSuccessCriteria ?? [])],
           dependencies: [...(recorded?.mission.dependencies ?? [])],
           checkpoints: (recorded?.mission.checkpoints ?? []).map((checkpoint) => ({
@@ -161,11 +164,11 @@ export function createStatusBoardAdapter(options: {
             repair: checkpoint.repair,
             description: checkpoint.firstLine ?? '',
             recorded: checkpoint.goalCheck.length > 0,
-            goalCheck: checkpoint.goalCheck.map((r) => ({ criterion: r.criterion, evidence: r.evidence })),
+            goalCheck: checkpoint.goalCheck.map((r) => ({ criterion: r.criterion, criterionId: r.criterionId ?? null, evidence: r.evidence })),
           })),
           predictedNelBucket: recorded?.mission.predictedNelBucket ?? null,
           reproductionTest: recorded?.mission.reproductionTest ?? null,
-          goalCheck: latest ? latest.goalCheck.map((r) => ({ criterion: r.criterion, evidence: r.evidence })) : [],
+          goalCheck: latest ? latest.goalCheck.map((r) => ({ criterion: r.criterion, criterionId: r.criterionId ?? null, evidence: r.evidence })) : [],
           nextAction: latest?.nextActionText ?? null,
           version: recorded?.version ?? null,
           // `title` is target-repository authority (MISSION_FIELD_AUTHORITY), so

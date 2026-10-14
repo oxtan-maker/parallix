@@ -585,3 +585,19 @@ it('flat review state preserves the exact mechanically restored subject and deci
   assert.deepEqual(currentReviewRound(mapped).subject, currentReviewRound(review).subject);
   assert.deepEqual(currentReviewRound(mapped).decision, currentReviewRound(review).decision);
 });
+
+it('review checkpoint boundaries keep their original proof when latest evidence changes (TASK-2742)', async () => {
+  const { captureReviewCheckpointState, recordCheckpoint, uncoveredCompletedCriteria } = await import('../../../src/domain/checkpoint.js');
+  const { missionId } = await import('../../../src/domain/mission.js');
+  const checkpoint = { missionId: missionId('task-round-checkpoints'), name: 'CP-1', goalCheck: [{ criterion: 'covered', evidence: 'original' }], nextActionText: 'review' };
+  const planned = { ...checkpoint, name: 'CP-2', goalCheck: [], nextActionText: '' };
+  const versions = [{ version: 1, checkpoint, recordedAt: null, recordedRound: null, missionRevision: null }];
+  const boundary = captureReviewCheckpointState(1, [checkpoint, planned], versions);
+  const latest = recordCheckpoint([checkpoint, planned], { ...checkpoint, goalCheck: [{ criterion: 'covered', evidence: 'replacement' }] });
+  assert.equal(latest.length, 2);
+  assert.equal(latest[0]?.goalCheck[0]?.evidence, 'replacement');
+  assert.equal(boundary.checkpoints[0]?.goalCheck[0]?.evidence, 'original');
+  assert.deepEqual(boundary.versions, [1], 'a plan has no invented evidence version');
+  assert.deepEqual(uncoveredCompletedCriteria(latest, ['covered'], [0]), [], 'handoff uses the latest view');
+  assert.equal(boundary.checkpoints[1]?.name, 'CP-2', 'the exact view includes unevidenced plans');
+});

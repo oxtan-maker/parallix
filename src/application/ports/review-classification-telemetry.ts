@@ -27,6 +27,11 @@ export interface ClassifierCallMeasurement {
   readonly shadow: boolean;
   /** Set when a recorded gate fact was admitted for the weakening question; absent on other rows. */
   readonly admissibleFact?: boolean;
+  /** Per-question invocation evidence; absent on historical single-question rows. */
+  readonly weakening?: {
+    readonly v4: { readonly preserves: number | null };
+    readonly v5?: { readonly preserves: number | null; readonly cleared: boolean };
+  };
   readonly preparationMs: number | null;
   readonly classificationMs: number | null;
 }

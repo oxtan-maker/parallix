@@ -84,7 +84,7 @@ test('mission card contains the board decision inputs without changing lifecycle
   assert.equal(card.nextActionText, 'integrate');
   // The card carries per-mission checkpoint evidence for the board detail view.
   assert.deepEqual(card.checkpointEvidence, [
-    { name: 'CP-2', description: 'CP-2: Domain model', goalCheck: [{ criterion: 'x', evidence: 'y' }] },
+    { name: 'CP-2', description: 'CP-2: Domain model', goalCheck: [{ criterion: 'x', evidence: 'y' }], state: 'completed' },
   ]);
   // A mission with no checkpoints carries an empty evidence list, so the board
   // renders no evidence panel and keeps its original layout.
@@ -297,4 +297,39 @@ test('mission detail keeps review, checkpoint guidance, NEL, and statistics on o
     () => projectMissionDetail(mission, { missionId: id } as never),
     /Open missions cannot have completed statistics/,
   );
+});
+
+
+test('mission card preserves planned-only, partial and empty checkpoint plans (TASK-2745)', () => {
+  const checkpoints = [1, 2, 3].map(number => ({
+    missionId: id, name: `CP-${number}`, firstLine: `Deliver step ${number}`,
+    goalCheck: [], nextActionText: '',
+  }));
+  const mission = {
+    id, repositoryId: repo, title: 'Plan', labels: missionLabels(['ai_sdlc']),
+    status: 'active' as const, closedAt: null, assignee: null,
+    checkpoints, review: null, netEngineeringLines: null,
+  };
+  const facts = { latestGate: 'unknown' as const, reviewApproval: null, currentWork: null, blockingReason: null, flags: [] };
+  const planned = projectMissionCard(mission, facts);
+  assert.equal(planned.checkpoint, null);
+  assert.deepEqual(planned.checkpointEvidence.map(cp => cp.state), ['current', 'future', 'future']);
+  assert.deepEqual(planned.checkpointEvidence.map(cp => cp.name), ['CP-1', 'CP-2', 'CP-3']);
+  assert.deepEqual(planned.checkpointEvidence.map(cp => cp.description), ['Deliver step 1', 'Deliver step 2', 'Deliver step 3']);
+  const partial = projectMissionCard({ ...mission, checkpoints: [
+    { ...checkpoints[0], goalCheck: [{ criterion: 'delivers', evidence: 'test/unit/application/projections/domain-projections.test.ts' }], nextActionText: 'CP-2' },
+    ...checkpoints.slice(1),
+  ] }, facts);
+  assert.equal(partial.checkpoint, 'CP-1');
+  assert.deepEqual(partial.checkpointEvidence.map(cp => cp.state), ['completed', 'current', 'future']);
+  assert.deepEqual(partial.checkpointEvidence.map(cp => cp.goalCheck.length), [1, 0, 0]);
+  assert.deepEqual(partial.checkpointEvidence.map(cp => cp.name), ['CP-1', 'CP-2', 'CP-3']);
+  assert.deepEqual(projectMissionCard({ ...mission, checkpoints: [] }, facts).checkpointEvidence, []);
+  for (const status of ['refined', 'review', 'integration', 'done'] as const) {
+    assert.equal(projectMissionCard({ ...mission, status }, facts).checkpointEvidence.some(cp => cp.state === 'current'), false);
+  }
+  const complete = projectMissionCard({ ...mission, checkpoints: checkpoints.map(cp => ({ ...cp, goalCheck: [{ criterion: 'done', evidence: 'npm test' }], nextActionText: 'handoff' })) }, facts);
+  assert.deepEqual(complete.checkpointEvidence.map(cp => cp.state), ['completed', 'completed', 'completed']);
+  const gap = projectMissionCard({ ...mission, checkpoints: [checkpoints[0], { ...checkpoints[1], goalCheck: [{ criterion: 'done', evidence: 'npm test' }], nextActionText: 'resume CP-1' }, checkpoints[2]] }, facts);
+  assert.deepEqual(gap.checkpointEvidence.map(cp => cp.state), ['current', 'completed', 'future']);
 });

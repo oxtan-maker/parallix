@@ -17,7 +17,7 @@ import { missionVersion } from '../../../src/application/domain-ports.js';
 import { MissionCheckpointService } from '../../../src/application/mission-checkpoint-service.js';
 import { MissionHandoffService } from '../../../src/application/mission-handoff-service.js';
 import { MissionBriefService } from '../../../src/application/mission-brief-service.js';
-import { MissionCreationService } from '../../../src/application/mission-creation-service.js';
+import { MissionCreationService, type MissionIdentityAllocator } from '../../../src/application/mission-creation-service.js';
 import { allocateAdhocIdentity } from '../../../src/adapters/sqlite/adhoc-counter.js';
 import { createRepositoryMissionCatalog } from '../../../src/composition/board-projection.js';
 import { MissionIntakeService } from '../../../src/application/mission-intake-service.js';
@@ -305,12 +305,16 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
         name: 'CP-1',
       });
       assert.equal(read.status, 'completed');
-      assert.deepEqual(read.value!.checkpoints[0], {
+      const { recording, ...latestCheckpoint } = read.value!.checkpoints[0]!;
+      assert.equal(recording?.missionRevision, 2);
+      assert.equal(recording?.recordedRound, null);
+      assert.ok(recording?.recordedAt);
+      assert.deepEqual(latestCheckpoint, {
         missionId: MISSION,
         name: 'CP-1',
         rawFilename: 'CP-1.md',
         firstLine: 'CP-1: Call paths mapped',
-        goalCheck: goalChecks.map((row) => ({ criterion: row.criterion, evidence: row.evidence })),
+        goalCheck: goalChecks.map((row) => ({ criterion: row.criterion, criterionId: null, evidence: row.evidence })),
         nextActionText: 'Define the use cases.',
       });
     } finally {
@@ -391,13 +395,13 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
 });
 
 describe('Mission creation over isolated SQLite', () => {
-  async function creation() {
+  async function creation(identities?: MissionIdentityAllocator) {
     const { store, db, databasePath } = await isolatedStore();
     const rootDir = path.dirname(databasePath);
     const service = new MissionCreationService(
       new MissionIntakeService(store),
       createRepositoryMissionCatalog({ rootDir, missionStore: store, repositoryId: REPOSITORY }),
-      { allocate: (repository) => missionId(allocateAdhocIdentity(repository, { dbPath: databasePath }).slug) },
+      identities ?? { allocate: (repository) => missionId(allocateAdhocIdentity(repository, { dbPath: databasePath }).slug) },
       REPOSITORY,
       store,
     );
@@ -483,7 +487,13 @@ describe('Mission creation over isolated SQLite', () => {
   });
 
   it('a retry after the in-memory request cache evicted it still returns the persisted mission', async () => {
-    const { db, create } = await creation();
+    // Exercise cache eviction and durable recovery over real SQLite, without
+    // reopening a separate counter connection for each of the 258 creations.
+    // The preceding creation case covers the real allocator and px identities.
+    let allocated = 0;
+    const { db, create } = await creation({
+      allocate: () => missionId(`px-${String(++allocated).padStart(4, '0')}`),
+    });
     try {
       const first = await create({ requestKey: 'original' });
       for (let i = 0; i < 257; i += 1) { await create({ requestKey: `other-${i}` }); }
@@ -492,6 +502,7 @@ describe('Mission creation over isolated SQLite', () => {
       assert.equal(retry.value.mission.id, first.value.mission.id);
       const rows = await db.query<{ n: number }>("SELECT COUNT(*) AS n FROM missions WHERE id LIKE 'px-%'");
       assert.equal(rows[0].n, 258);
+      assert.equal(allocated, 258, 'durable recovery must not allocate another identity');
     } finally {
       await db.close();
     }

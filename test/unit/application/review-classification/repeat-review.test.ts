@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { tryClassifyReview } from '../../../../src/application/review-classification/classify-review.js';
+import { tryRestoreIntegrationApproval } from '../../../../src/application/review-loop/restore-integration-approval.js';
 import { observeGeneralReview } from '../../../../src/application/review-classification/observe-review.js';
 import { fakeLoopContext, fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import { ReviewRound } from '../../../../src/application/review-loop/round.js';
@@ -27,6 +28,7 @@ function scenario(mode: ReviewClassificationPorts['mode'] = 'enabled') {
   const attempts: ClassifierCallMeasurement[] = [];
   const observations: ClassifierObservation[] = [];
   const published: string[] = [];
+  const summaries: string[] = [];
   const classifier: ReviewClassificationPorts = {
     mode, hash: text => createHash('sha256').update(text).digest('hex'), fingerprint: () => 'attempt',
     now: () => '2026-10-06T00:00:00Z', clock: () => 1,
@@ -42,7 +44,7 @@ function scenario(mode: ReviewClassificationPorts['mode'] = 'enabled') {
     validations: async () => [],
     telemetry: async () => ({ recordCall: async a => { attempts.push(a); }, 
       recordObservation: async o => { observations.push(o); }, calls: async () => attempts, observations: async () => observations }),
-    publish: async (_source, route) => { published.push(route); return true; },
+    publish: async (_source, route, summary) => { published.push(route); summaries.push(summary); return true; },
   };
   const fake = fakeReviewLoopPorts({ slug: 'task-2658', provider: {}, missionStore: store, lifecycle: new MissionLifecycleService(store),
     preReview: { head: () => 'b'.repeat(40) } });
@@ -50,7 +52,7 @@ function scenario(mode: ReviewClassificationPorts['mode'] = 'enabled') {
   context.state.round = 2;
   const ports = { ...context.ports, classification: classifier };
   const classified = { ...context, ports };
-  return { context: classified, classifier, store, attempts, observations, published, logs: fake.logs, round: new ReviewRound(2, classified) };
+  return { context: classified, classifier, store, attempts, observations, published, summaries, logs: fake.logs, round: new ReviewRound(2, classified) };
 }
 
 test('available default records a real classifier clear and moves through existing approval authority', async () => {
@@ -102,7 +104,8 @@ test('the restored approval cites its decision source, gate, validation and prob
   const decision = s.store.mission().review!.rounds.at(-1)!.decision!;
   assert.equal(decision.kind, 'approved');
   assert.deepEqual(decision.classifier!.weakening, { decisionSource: 'integration-repair-weakening', approvedRevision: 'a'.repeat(40), gate: 'unit',
-    validationSha: 'b'.repeat(40), validationRecordedAt: '2026-10-01T00:02:30Z', relation: 'same' });
+    validationSha: 'b'.repeat(40), validationRecordedAt: '2026-10-01T00:02:30Z', relation: 'same',
+    question: { clearedBy: 'weakening-v4', preserves: 0.6, versions: ['weakening-v4', 'weakening-v5'] } });
   assert.equal(decision.classifier!.policyVersion, WEAKENING_POLICY_VERSION);
   assert.equal(decision.classifier!.label, 'preserves');
   assert.equal(decision.classifier!.score, 0.6);
@@ -209,7 +212,7 @@ test('unresolved classifier returns preserve original findings without invented 
   assert.match(decision.comment!, /Make changes or request general review/);
 });
 
-test('a classifier return cannot become evidence for another classifier review (TASK-2658)', async () => {
+test('one classifier return permits another return using retained findings and comment (TASK-2741)', async () => {
   const s = scenario();
   const prior = s.store.mission().review!.rounds[0]!;
   (prior as { decision: typeof prior.decision }).decision = {
@@ -220,9 +223,13 @@ test('a classifier return cannot become evidence for another classifier review (
       findingIds: ['F1'], policyVersion: 'repeat-findings-52-89-v2', label: 'does_not_address', score: 0.89,
     },
   };
-  assert.equal(await tryClassifyReview(s.context, s.round), null);
-  assert.deepEqual(s.published, []);
-  assert.equal(s.attempts[0]?.reason, 'prior-classifier-review');
+  s.classifier.decision.decide = async request => {
+    assert.match(JSON.stringify(request.state), /Fix output/);
+    return result('does_not_address', 0.89);
+  };
+  assert.equal(await tryClassifyReview(s.context, s.round), 'REQUEST_CHANGES');
+  assert.deepEqual(s.published, ['implementer']);
+  assert.deepEqual(s.round.blockingFindings, [{ id: 'F1', summary: 'x.java:1 drops output' }]);
 });
 
 test('frozen V3 includes 51% approval boundary (TASK-2716)', async () => {
@@ -304,7 +311,7 @@ test('a retried round keeps one decision identity so statistics count it once (T
 /** A mutable view of the stored review so a case can reshape the rounds it starts from. */
 function reshape(s: ReturnType<typeof scenario>) {
   const mission = s.store.mission() as { review: ReturnType<typeof repeatReview>; successCriteria?: readonly string[] };
-  return { mission, rounds: mission.review.rounds as unknown as { decision: unknown; response: unknown; subject: { revision: string } }[] };
+  return { mission, rounds: mission.review.rounds as unknown as { number: number; decision: ReturnType<typeof repeatReview>['rounds'][number]['decision']; response: unknown; subject: { revision: string } }[] };
 }
 
 test('a re-review whose candidate differs from the recorded response revision reaches the classifier (TASK-2680)', async () => {
@@ -458,13 +465,12 @@ test('a validation at a backlog-only or rebased-only predecessor of the candidat
   assert.equal(rebased.store.mission().review!.rounds.at(-1)!.decision!.classifier!.weakening!.relation, 'rebase-only');
 });
 
-test('consecutive Jev gate-repair decisions always require general review (TASK-2716)', async () => {
+test('a classifier return about a gate repair can reach the normal findings panel (TASK-2741)', async () => {
   const s = gateRepairScenario(true);
-  s.classifier.decision.decide = async () => { assert.fail('recursive classifier call'); };
-  assert.equal(await tryClassifyReview(s.context, s.round), null);
-  assert.equal(s.attempts[0].reason, 'prior-classifier-review');
-  assert.deepEqual(s.published, []);
+  assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED');
+  assert.equal(s.attempts[0].reason, 'resolved-threshold');
 });
+
 
 test('ordinary finding re-reviews retain the 89% return threshold (TASK-2692)', async () => {
   const s = scenario();
@@ -475,38 +481,91 @@ test('ordinary finding re-reviews retain the 89% return threshold (TASK-2692)', 
   assert.deepEqual(s.published, []);
 });
 
-test('revoked Jev approvals and further returns preserve classifier provenance fallback (TASK-2716)', async () => {
-  for (const previous of ['approved', 'continued-return'] as const) {
-    const s = gateRepairScenario(previous === 'continued-return');
+test('a revoked classifier clear reaches weakening and unchanged-patch restore (TASK-2741)', async () => {
+  for (const unchanged of [false, true]) {
+    const s = gateRepairScenario();
     const prior = s.store.mission().review!.rounds[0]!;
-    if (previous === 'approved') {
-      (prior as { decision: typeof prior.decision }).decision = { ...prior.decision!, classifier: {
-        kind: 'classifier', identity: 'jev', decisionId: 'prior-clear', provider: 'typesafe', model: 'jev',
-        packetHash: 'c'.repeat(64), priorRevision: 'd'.repeat(40), candidateRevision: 'a'.repeat(40),
-        findingIds: ['F1'], policyVersion: 'repeat-findings-52-89-v2', label: 'addresses', score: 0.52,
-      } };
+    (prior as { decision: typeof prior.decision }).decision = { ...prior.decision!,
+      classifier: { ...gateRepairScenario(true).store.mission().review!.rounds[0].decision!.classifier!,
+        label: 'addresses', score: 0.52 } };
+    if (unchanged) {
+      (s.store.mission().review!.rounds[1].subject as { baseline?: string }).baseline = 'e'.repeat(40);
+      s.context.ports.restoration = {
+        samePatch: async () => true,
+        validation: async () => ({ sha: 'b'.repeat(40), baseline: 'e'.repeat(40), hooks: ['unit'],
+          createdAt: '2026-10-01T00:02:30Z', missionId: s.context.slug, reference: 'isolated-green' }),
+        now: () => '2026-10-06T00:00:00Z', clock: () => 1,
+      };
+      assert.equal(await tryRestoreIntegrationApproval(s.context, s.round), 'APPROVED');
+      assert.equal(s.attempts.length, 0);
     } else {
-      (prior.decision!.classifier as { policyVersion: string }).policyVersion = 'integration-repair-52-81-v1';
+      assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED');
+      assert.equal(s.attempts[0].reason, 'weakening-preserves');
     }
-    s.classifier.decision.decide = async () => ({ provider: 'typesafe', model: 'jev', answers: { resolution: {
-      type: 'choice', selected: 'does_not_address', probabilities: { does_not_address: 0.81 }, confidence: 0.1 } } });
-    assert.equal(await tryClassifyReview(s.context, s.round), null);
-    assert.equal(s.attempts[0].reason, 'prior-classifier-review');
   }
 });
 
+test('two mission-local classifier returns hand off and recorded reviewer or clear decisions reset the sequence (TASK-2741)', async () => {
+  for (const reset of [null, 'reviewer', 'clear'] as const) {
+    const s = gateRepairScenario(true);
+    const { rounds } = reshape(s);
+    const returned = structuredClone(rounds[0]);
+    const history = [returned, structuredClone(returned)];
+    if (reset) {
+      const breaker = structuredClone(returned);
+      if (reset === 'reviewer') { breaker.decision = { ...breaker.decision!, classifier: undefined }; }
+      else { breaker.decision = { kind: 'approved', comment: 'Classifier clear', decidedAt: returned.decision!.decidedAt,
+        source: { kind: 'local' }, classifier: { ...returned.decision!.classifier!, label: 'addresses', score: 0.52 } }; }
+      history.push(breaker, structuredClone(returned));
+    }
+    rounds.splice(0, 1, ...history);
+    rounds.forEach((round, index) => { round.number = index + 1; });
+    s.context.state.round = rounds.length;
+    const round = new ReviewRound(rounds.length, s.context);
+    if (!reset) {
+      s.classifier.decision.available = () => { assert.fail('bound must precede provider access'); };
+      s.classifier.evidence.diff = async () => { assert.fail('bound must precede evidence collection'); };
+    }
+    assert.equal(await tryClassifyReview(s.context, round), reset ? 'APPROVED' : null);
+    assert.equal(s.attempts[0].reason, reset ? 'resolved-threshold' : 'consecutive-classifier-returns');
+    assert.deepEqual(s.published, reset ? ['clear'] : []);
+  }
+});
 
-test('an additional obligation prevents a consecutive gate-only Jev decision (TASK-2692)', async () => {
+test('another mission classifier-return history cannot affect this mission (TASK-2741)', async () => {
+  const returned = gateRepairScenario(true).store.mission().review!.rounds[0];
+  const other = inMemoryTransitionStore(fixtureMission('task-other', { status: 'review',
+    review: { ...repeatReview(), rounds: [returned, { ...returned, number: 2 }] } }));
+  const own = scenario();
+  const load = own.context.ports.missionStore!.load;
+  own.context.ports.missionStore!.load = async id => id === own.context.slug ? load(id) : other.load(id);
+  assert.equal(other.mission().review!.rounds.filter(r => r.decision?.classifier).length, 2);
+  assert.equal(await tryClassifyReview(own.context, own.round), 'APPROVED');
+  assert.equal(own.attempts[0].reason, 'resolved-threshold');
+});
+
+test('a prior classifier clear reaches the success-criteria findings panel (TASK-2741)', async () => {
+  const s = scenario();
+  const { mission, rounds } = reshape(s);
+  rounds[0].decision = { kind: 'approved', comment: 'Classifier clear', decidedAt: '2026-10-01T00:01:00Z', source: { kind: 'local' },
+    classifier: { ...gateRepairScenario(true).store.mission().review!.rounds[0].decision!.classifier!,
+      label: 'addresses', score: 0.52 } };
+  mission.successCriteria = ['Output is preserved in x.java'];
+  assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED');
+  assert.equal(s.attempts[0].reason, 'resolved-threshold');
+});
+
+
+test('an added finding still requires a complete recorded response after a classifier return (TASK-2741)', async () => {
   const s = gateRepairScenario(true);
   const prior = s.store.mission().review!.rounds[0]!;
   if (prior.decision?.kind !== 'changes-requested') { throw new Error('missing prior return'); }
   (prior.decision as { findings: typeof prior.decision.findings }).findings = [...prior.decision.findings,
     { id: 'F2' as never, summary: 'New obligation: preserve logging', location: null }];
   assert.equal(await tryClassifyReview(s.context, s.round), null);
-  assert.equal(s.attempts[0].reason, 'prior-classifier-review');
+  assert.equal(s.attempts[0].reason, 'classifier-exception');
   assert.deepEqual(s.published, []);
 });
-
 
 test('oversized mandatory repair evidence retains general review without calling Jev (TASK-2692)', async () => {
   const s = gateRepairScenario();
@@ -773,4 +832,65 @@ test('panel question token pressure omits whole context before refusing re-revie
   };
   assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED');
   assert.equal(s.attempts[0].panel!.calls, 3);
+});
+
+
+test('V4 clear uses one call; V5 fallback reuses subject-only state and never returns a mission (TASK-2743)', async () => {
+  const { WEAKENING_QUESTION, WEAKENING_V5 } = await import('../../../../src/application/review-classification/weakening-policy.js');
+  for (const outcome of ['v4-clear', 'v5-clear', 'both-fallback', 'v5-failure', 'v5-weakens', 'v5-insufficient', 'v5-malformed', 'v4-failure', 'v4-malformed'] as const) {
+    const s = gateRepairScenario();
+    const requests: import('../../../../src/application/ports/decision.js').DecisionRequest[] = [];
+    s.classifier.decision.decide = async request => {
+      requests.push(request);
+      if (requests.length === 1) {
+        if (outcome === 'v4-failure') { throw new Error('provider down'); }
+        if (outcome === 'v4-malformed') { return { provider: 'typesafe', model: 'jev', answers: { resolution: { type: 'choice', selected: 'preserves', probabilities: null } } } as never; }
+        return await weakeningAnswer('preserves', outcome === 'v4-clear' ? 0.6 : 0.59)();
+      }
+      if (outcome === 'v5-failure') { throw new Error('provider down'); }
+      if (outcome === 'v5-malformed') { return { provider: 'typesafe', model: 'jev', answers: {} }; }
+      return await weakeningAnswer(outcome === 'v5-weakens' ? 'weakens' : outcome === 'v5-insufficient' ? 'insufficient_evidence' : 'preserves', outcome === 'both-fallback' ? 0.59 : 0.6)();
+    };
+    const clears = ['v4-clear', 'v5-clear', 'v4-failure', 'v4-malformed'].includes(outcome);
+    assert.equal(await tryClassifyReview(s.context, s.round), clears ? 'APPROVED' : null, outcome);
+    assert.equal(requests.length, outcome === 'v4-clear' ? 1 : 2, outcome);
+    assert.equal(s.attempts[0].weakening?.v5 !== undefined, requests.length === 2);
+    if (requests.length === 2) {
+      assert.equal(s.attempts[0].weakening!.v5!.cleared, clears);
+      assert.equal(s.attempts[0].weakening!.v5!.preserves, ['v5-failure', 'v5-malformed'].includes(outcome) ? null : outcome === 'both-fallback' ? 0.59 : 0.6);
+    }
+    assert.equal(requests[0].questions.resolution, WEAKENING_QUESTION);
+    if (requests.length === 2) {
+      assert.equal(requests[1].questions.resolution, WEAKENING_V5);
+      assert.equal(requests[1].state, requests[0].state, 'identical state object');
+    }
+    const state = requests[0].state as { repairCommitSubjects: readonly string[] };
+    assert.deepEqual(state.repairCommitSubjects, ['abc1234 Repair x.java']);
+    assert.equal(JSON.stringify(state).includes('repairCommitBodies'), false);
+    assert.deepEqual(s.published, clears ? ['clear'] : [], outcome);
+    const decision = s.store.mission().review!.rounds.at(-1)!.decision;
+    assert.equal(decision?.kind, clears ? 'approved' : undefined);
+    if (clears) {
+      assert.equal(decision!.classifier!.weakening!.question!.clearedBy, outcome === 'v4-clear' ? 'weakening-v4' : 'weakening-v5');
+      assert.match(decision!.comment!, /questions weakening-v4, weakening-v5/);
+      assert.match(s.summaries[0], new RegExp(`cleared by ${outcome === 'v4-clear' ? 'weakening-v4' : 'weakening-v5'}, preserves 0.6, questions weakening-v4, weakening-v5`));
+    } else {
+      assert.equal(s.store.mission().status, 'review');
+    }
+  }
+});
+
+
+test('V5 budget refusal keeps the same evidence and does not count an unmade call (TASK-2743)', async () => {
+  const s = gateRepairScenario();
+  const { WEAKENING_V5 } = await import('../../../../src/application/review-classification/weakening-policy.js');
+  const measure = s.classifier.decision.requestBudget;
+  s.classifier.decision.requestBudget = request => ({ ...measure(request), inputTokens: request.questions.resolution === WEAKENING_V5 ? 64001 : 1 });
+  let calls = 0;
+  s.classifier.decision.decide = async () => { calls++; return await weakeningAnswer('preserves', 0.59)(); };
+  assert.equal(await tryClassifyReview(s.context, s.round), null);
+  assert.equal(calls, 1);
+  assert.equal(s.attempts[0].reason, 'weakening-over-budget');
+  assert.equal(s.attempts[0].weakening!.v5, undefined);
+  assert.deepEqual(s.published, []);
 });

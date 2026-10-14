@@ -164,6 +164,41 @@ owns shared integration validation. The configured post-integration hook still
 runs after the squash, for example to build and install a local package.
 Repositories may choose to run tests in that hook.
 
+Successful integration can also satisfy later `all` verification when
+`adapters.verification.integrationCoverage` explicitly names the resolved
+verification command and maps **every** check it performs to required
+`preIntegration` gate keys. For example:
+
+```json
+"integrationCoverage": {
+  "command": "./scripts/verify-local.sh all",
+  "checks": {
+    "docs": ["documentation"],
+    "build": ["build"],
+    "unit": ["unit"]
+  }
+}
+```
+
+The repository owner is responsible for complete, accurate coverage: gate names
+or arbitrary integration commands alone prove no relationship to `all`.
+Every configured integration gate must pass, with all named coverage gates
+present, against unchanged clean inputs. A successful partial run or dry run
+cannot establish this evidence. Review, handoff and `px verify all` report the
+integration evidence location and both the validated and covered revisions when
+reusing it.
+
+Integration-backed reuse requires the same checkout, branch, resolved command,
+configuration, tracked substantive inputs and runtime/npm toolchain. A different
+SHA requires a successful Git diff containing only `backlog/tasks/` or
+`backlog/completed/` bookkeeping paths; it does not inherit the completed-rebase
+exception of ordinary active/review verification. Missing, malformed, failed or
+incomplete evidence, dirty inputs, substantive changes or Git lookup failures
+cause normal verification. Starting another integration run clears earlier
+integration-backed evidence, so failed or partial retries cannot reuse it.
+Review approval, required integration gates and exact publication proof checks
+retain their own authorization requirements.
+
 Captured external commands show terminal progress and completion marks with
 elapsed time. Bash commands identify the shell payload or script being invoked,
 so checks such as `bash -c "npm test"` and `bash -lc "npm run build"` are
@@ -272,9 +307,8 @@ harness substitutes, parser-visible tokens and formats, permitted
 lifecycle mechanics), and an overridable **default-opinion** half that is taste
 (how to review, evidence standards, thoroughness, tone).
 
-`adapters.prompts` is a closed object with a single allowed property, `override`.
-When `override` is unset — the default — a repository keeps today's prompts
-byte for byte, because Parallix assembles the shipped core and default-opinion
+`adapters.prompts` accepts `override` and the boolean `contextCompaction`.
+When `override` is unset, Parallix assembles the shipped core and default-opinion
 halves. A shipped default-opinion half may be empty when a stage has no
 tailorable opinion content.
 
@@ -301,11 +335,44 @@ or per-user override keys.
 ```
 
 An unknown key beneath `adapters.prompts` (for example `adapters.prompts.draftOverride`,
-or any property other than `override`) is rejected through the existing
+or any property other than `override` and `contextCompaction`) is rejected through the existing
 configuration-error path, so a repository cannot invent a second or per-stage
 override surface. The five shipped default-opinion files selected when no
 override is configured are `prompts/draft.md`, `prompts/execute.md`, `prompts/review.md`,
 `prompts/act-on-review.md`, and `prompts/portfolio.md`.
+
+### Context compaction
+
+Parallix-requested compaction defaults on. To opt out, set:
+
+```json
+{
+  "adapters": {
+    "prompts": {
+      "contextCompaction": false
+    }
+  }
+}
+```
+
+Omitting this field or setting it to `true` enables compaction. Only boolean
+values are valid. The repository's explicit value overrides the built-in on
+default; there is no environment, per-user, per-agent or per-stage override for
+this policy. An opinion override does not replace the core policy. Inspect
+repository configuration with `px config` and the public schema.
+
+Enabled prompts request compaction after recorded checkpoints and successful
+mission gates, before review rounds after the first, and before acting on review
+findings, including missions with no gates. Both policies retain authoritative
+mission-state reloads, durable evidence, failed-gate diagnostics and review
+rules. Failed gates retain their diagnostics during repair.
+
+This policy controls Parallix's instructions, not the provider's automatic
+near-context-limit safeguards. Those remain governed by the agent runtime's
+configuration. Checkpoints continue in the retained conversation; toggling this
+option does not start fresh checkpoint sessions. See
+[the context-management decision](adr/0066-mission-context-management.md) for
+its rationale.
 
 ## Integration
 
@@ -362,10 +429,19 @@ store was already populated, and the draft output separates worktree checkout
 time from hook time. A failed hook prints its exit code and the tail of its
 output. Repair the environment or the command and re-run the draft.
 
+Parallix's own hook installs dependencies through a wrapper that records the
+semantic dependency identity of the last successful install in the worktree, so
+re-running a draft in a worktree whose identity still matches does not install
+again. A release version-only change leaves that identity intact; a dependency,
+resolution, integrity, install-policy or pinned-toolchain change, and a missing,
+unreadable or failed install, all require reconciliation. The record lives in the
+worktree, so parallel worktrees never share or overwrite each other's install
+state, and a successful record is published only after the installer exits zero.
+
 ```json
 {
   "adapters": {
-    "draft": { "preDraftCommand": "pnpm install --frozen-lockfile --prefer-offline" }
+    "draft": { "preDraftCommand": "./scripts/px-install.sh" }
   }
 }
 ```
@@ -491,10 +567,33 @@ Integration requires a recorded reviewer approval, reruns the repository's
 resulting tree. These built-in lifecycle controls remain in force alongside the
 configurable gates above.
 
+In the self-hosted workflow, integration removes stale active-task copies when
+an existing completed record is canonical, preserving that completed history.
+Every file beneath `backlog/archive` in the resulting payload blocks landing,
+whether inherited from the base or reintroduced by a mission. Preserve any
+needed history and commit the retired paths' deletion on the mission branch
+before retrying. Recheck after a rebase: the new base may carry retired files
+that the previously verified tree did not contain. The final landing guard checks a
+disposable copy of the tree destined for the squash commit, including closeout
+and excluding unrelated staged board changes. A failed check leaves the base
+branch unchanged; a payload change during verification requires a retry.
+
+When changing shipped core or default-opinion prompts, update the corresponding
+entry in `test/fixtures/prompt-split-parent.json` in the same mission. Preserve
+byte-identical assembly, instruction order and the prompt's non-blank content;
+the integration consistency gate rejects an unmatched fixture before landing.
+
 ## Review classification
 
-First reviews and rounds following a classifier decision always use the general
-reviewer, including in shadow mode. Eligible re-reviews run after configured
+First reviews always use the general reviewer, including in shadow mode. A prior
+classifier decision does not prevent normal classification of an eligible
+re-review. After two consecutive classifier returns to the implementer on the
+same mission, the following eligible round hands off to the general reviewer
+before another classifier decision. A general-reviewer decision resets the count,
+and a classifier clear breaks the sequence. The handoff is reported separately
+as `consecutive-classifier-returns` in classifier telemetry and `px stats`.
+Classification judges the retained findings and comment or withdrawn gate without
+requiring an additional provenance chain. Eligible re-reviews run after configured
 verification and use one immutable mechanically packed state from the previous
 findings/comment, implementer response and pinned source. A repaired integration
 failure is judged against the withdrawn gate. Human feedback and recorded
@@ -520,10 +619,16 @@ before the review round started, at the candidate or at a revision whose
 difference from it is Backlog task records only or a rebase that leaves the mission
 patch unchanged (a version bump is ignored). Any other code change after the
 validated revision, or a validation recorded after the round started, is not
-admitted. One classifier call then asks whether the repair weakened or bypassed
+admitted. The frozen V4 question first asks whether the repair weakened or bypassed
 the checked obligation (deleted, skipped or excluded the check, loosened
 assertions, or raised a budget without measurement evidence); the approval is
-restored when the `preserves` probability is at least 0.60. The packet carries the
+restored when the answer selects `preserves` with probability at least 0.60.
+If V4 does not clear, the frozen measured-limit V5 question asks the same packet
+and uses the same threshold. V5 permits a resource-limit raise only for the check
+that failed, when the failure lines report a measured overrun and the new limit
+is finite and at most about twice that measured value. Commit messages never
+replace that measurement; removing a limit, raising an entry that did not fail
+or lowering a quality bar is weakening. A V4 clear makes no V5 call. The packet carries the
 failed gate, its extracted failure lines, the plain prior-to-candidate diff
 restricted to the files whose mission change differs (Backlog records excluded),
 the repair commit subjects, both main baselines with the main commits a rebase
@@ -533,7 +638,8 @@ evidence, call failure, over-budget packet) leaves the round with the general
 reviewer, and the weakening answer can never return a mission to the implementer.
 The restored approval records its own decision source and policy version with the
 approved revision, candidate, gate, validation revision and `preserves`
-probability.
+probability, the clearing question and both question versions (`weakening-v4` and
+`weakening-v5`).
 
 Re-review packets include the complete repair delta and changed paths even when
 the prior findings and response do not cite them. When both review subjects
@@ -598,7 +704,11 @@ Below it, `px stats` reports integration-repair re-reviews per period: repair ro
 rounds with an admissible gate fact, weakening calls, clears and clear share, the
 reasons rounds fell back (no fact, below threshold, weakens, insufficient evidence,
 failure, over budget), and the `preserves` probability of clears and fallbacks in
-the buckets at least 0.60, 0.40 to 0.60 and below 0.40. Observed wrong clears
+the buckets at least 0.60, 0.40 to 0.60 and below 0.40. Beside these rows, V5
+call and clear counts and its own `preserves` distribution show how often the
+second question runs and restores approval. Failed or malformed V5 calls count
+as calls without a probability; historical single-question rounds remain in
+the existing tables. Observed wrong clears
 count a restored approval later revoked by a human or followed by changes requested
 on the same mission; clears whose mission is still open without either signal are
 shown as unobserved, so a zero always carries its denominator.

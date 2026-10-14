@@ -6,6 +6,7 @@ import type { CSSProperties, DragEvent } from 'react';
 import type { WebMissionCard, WebStage } from '../../src/interfaces/web/transport.js';
 import { ActionButton, cardCommands } from './action-button.js';
 import { Fan } from './fan.js';
+import { CheckpointPips } from './checkpoint-pips.js';
 import { LaneHeader, laneEmpty } from './lane-header.js';
 import { C } from './palette.js';
 import type { PendingCommands } from './pending-command.js';
@@ -42,6 +43,7 @@ function IntakeCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
         </span>
       </div>
       <p style={{ margin: '5px 0 0', lineHeight: 1.4, color: C.muted, fontSize: 11 }}>{card.title}</p>
+      <CheckpointPips card={card} />
       {(actions.length > 0 || cancel !== null) && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 5, marginTop: 7, flexWrap: 'wrap' }}>
           {cancel !== null && (

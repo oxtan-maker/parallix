@@ -548,6 +548,8 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     'src/adapters/git/worktree.ts',
     // Verification proofs — infrastructure metadata, not a domain concept
     'src/adapters/verification/verification.ts',
+    // Landing guards read a package manifest and create only disposable indexes/trees.
+    'src/adapters/cli/commands/integrate-staged-guards.ts',
     // Exact proof inputs read checkout and runtime metadata, not domain state.
     'src/adapters/verification/verification-proof-inputs.ts',
     // Temporary-root cleanup manifests are verification infrastructure, not domain state.

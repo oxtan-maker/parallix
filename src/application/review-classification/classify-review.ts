@@ -243,16 +243,26 @@ async function unavailableProvider(context: LoopContext, ports: ReviewClassifica
   return null;
 }
 
+/** Count only the uninterrupted suffix of recorded decisions on this mission. */
+function consecutiveClassifierReturns(review: Review): number {
+  let count = 0;
+  for (const round of review.rounds.slice(0, -1).reverse()) {
+    if (!round.decision) { continue; }
+    if (round.decision.kind !== 'changes-requested' || !round.decision.classifier) { break; }
+    count++;
+  }
+  return count;
+}
+
 /** Calls the classifier for the scope; a null decision means the general reviewer decides. */
 async function decideAndCommit(context: LoopContext, round: ReviewRound, scope: ReviewScope, rows: RoundTelemetry,
   telemetry: ReviewClassificationTelemetryPort, cycleStarted?: number): Promise<Outcome> {
   const ports = context.ports.classification!;
-  const { original } = scope;
   const emit = (value: string) => context.emit({ kind: 'reviewer-classification', reason: value });
   const fallback = async (why: string, message = why) => { await rows.finish(why); emit(message); return null; };
   const started = cycleStarted ?? ports.clock();
   rows.note({ policyVersion: scope.policyVersion, promptVersion: PANEL_PROMPT_VERSION, packetVersion: ARCHIVED_PACKING_VERSION });
-  if (original?.classifier) { return await fallback('prior-classifier-review'); }
+  if (consecutiveClassifierReturns(scope.review) >= 2) { return await fallback('consecutive-classifier-returns'); }
   if (scope.repairCause) {
     const weakening = await decideWeakening(context, round, scope, rows, started);
     return weakening ? await commitDecision(context, round, scope, weakening, rows, telemetry, started) : null;

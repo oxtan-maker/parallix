@@ -115,8 +115,16 @@ if (realGit) {
   // The shim is pure POSIX sh (test/lib/git-compat-shim.sh): a Node exec
   // wrapper per git call cost ~50-100 ms and, under 12-worker parallelism,
   // pushed git-spawning tests past the 1 s per-test budget (task-2431).
-  fs.copyFileSync(path.join(__dirname, 'lib', 'git-compat-shim.sh'), gitShim);
-  fs.chmodSync(gitShim, 0o755);
+  const version = childProcess.spawnSync(realGit, ['--version'], { encoding: 'utf8' });
+  const parsed = version.status === 0 ? /^git version (\d+)\.(\d+)/.exec(version.stdout) : null;
+  // Git 2.28 introduced init -b. Modern runners need no compatibility shell
+  // on every Git call; keep the same PATH entry with a direct executable link.
+  if (parsed && (Number(parsed[1]) > 2 || (Number(parsed[1]) === 2 && Number(parsed[2]) >= 28))) {
+    fs.symlinkSync(realGit, gitShim);
+  } else {
+    fs.copyFileSync(path.join(__dirname, 'lib', 'git-compat-shim.sh'), gitShim);
+    fs.chmodSync(gitShim, 0o755);
+  }
   process.env.PARALLIX_TEST_REAL_GIT = realGit;
   process.env.PATH = `${gitBin}${path.delimiter}${process.env.PATH || ''}`;
 }

@@ -5,7 +5,7 @@
   "adapters": {
     "tasks": { "provider": "backlog-md", "storage": "backlog", "stateMap": "config/state-map.json" },
     "agents": {
-      "maxConcurrentCustom": 2,
+      "maxConcurrentCustom": 1,
       "models": { "codex": "gpt-6.1-sol" },
       "runners": { "custom": "pi" },
       "subagents": { "maxParallel": 2 }
@@ -15,14 +15,18 @@
       "branchPrefix": "mission/",
       "worktreePattern": "../<repo>-<slug>"
     },
-    "verification": { "command": "./scripts/verify-local.sh {{area}}", "defaultArea": "all" },
+    "verification": { "command": "./scripts/verify-local.sh {{area}}", "defaultArea": "all",
+      "integrationCoverage": { "command": "./scripts/verify-local.sh all", "checks": { "docs": ["documentation"], "build": ["build"], "unit": ["unit"] } }
+    },
     "review": { "provider": "forgejo", "baseUrl": "http://localhost:3300", "remote": "review", "repo": "magnus/parallix" },
-    "draft": { "preDraftCommand": "pnpm install --frozen-lockfile --prefer-offline" },
+    "draft": { "preDraftCommand": "./scripts/px-install.sh" },
     "integrate": { "preCommitCommand": "./scripts/bump-version.sh", "postIntegrateCommand": "./scripts/refresh-global-px.sh && npm run sonar:delete-branch" },
     "gates": {
       "requirePreIntegration": true,
       "parallel": { "preIntegration": 6 },
       "preIntegration": [
+        { "key": "documentation", "command": "./scripts/verify-local.sh docs", "order": 0 },
+        { "key": "landing-tree", "command": "./scripts/verify-landing-tree.sh", "order": 1 },
         { "key": "build", "command": "npm run build", "order": 1 },
         { "key": "dependency-audit", "command": "pnpm audit --audit-level=high", "order": 2 },
         { "key": "verification", "command": "./scripts/verify-local.sh static-analysis", "order": 3, "reuse": "clean-tree" },

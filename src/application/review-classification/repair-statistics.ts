@@ -37,6 +37,7 @@ export function integrationRepairStatistics(input: ClassifierStatisticsInput, wi
   }
   const rounds = [...byRound.values()].map(samples => ({
     latest: samples.reduce((a, b) => Date.parse(b.observedAt) >= Date.parse(a.observedAt) ? b : a, samples[0]),
+    v5Called: samples.some(s => s.weakening?.v5 !== undefined),
     factAdmitted: samples.some(s => s.admissibleFact === true), called: samples.some(s => s.classificationMs !== null),
   })).filter(round => reportingWindowContains(window, round.latest.observedAt));
   const cleared = rounds.filter(r => !r.latest.shadow && r.latest.route === 'clear');
@@ -49,6 +50,12 @@ export function integrationRepairStatistics(input: ClassifierStatisticsInput, wi
   const wrong = clears.filter(c => c.outcome === 'revoked-by-human' || c.outcome === 'changes-requested-later').length;
   const unobserved = clears.filter(c => c.outcome === 'open').length;
   return { coverage: input.coverage, rounds: rounds.length, withFact: rounds.filter(r => r.factAdmitted).length, calls: rounds.filter(r => r.called).length,
+    v5Calls: rounds.filter(r => r.v5Called).length,
+    v5Clears: cleared.filter(r => r.latest.weakening?.v5?.cleared === true).length,
+    v5Scores: Object.fromEntries(PRESERVES_BUCKETS.map(bucket => [bucket, rounds.filter(r => {
+      const score = r.latest.weakening?.v5?.preserves;
+      return typeof score === 'number' && Number.isFinite(score) && bucketOf(score) === bucket;
+    }).length])) as Record<typeof PRESERVES_BUCKETS[number], number>,
     clears: cleared.length, reasons, clearScores: distribution(cleared), fallbackScores: distribution(fellBack),
     clearsRecorded: clears.length, observedClears: clears.length - unobserved, unobservedClears: unobserved, wrongClears: wrong };
 }

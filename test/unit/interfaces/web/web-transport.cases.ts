@@ -879,3 +879,16 @@ test('stored progress sequence round-trips and malformed identity is rejected (T
   assert.equal(validateWebBoardSnapshot(snapshot).ok, true);
   assert.equal(validateWebBoardSnapshot({ ...snapshot, operationLog: [{ ...snapshot.operationLog[0], sequence: '4' }] }).ok, false);
 });
+
+
+test('checkpoint progress state round-trips and invalid states fail closed (TASK-2745)', () => {
+  const card = makeFullCard({ checkpointEvidence: [
+    { name: 'CP-1', description: 'work', goalCheck: [], state: 'current' },
+  ] });
+  const wire = toWebBoardSnapshot(makeProjection({ active: [card] }));
+  assert.equal(validateWebBoardSnapshot(wire).ok, true);
+  assert.equal(wire.stages.flatMap(stage => stage.cards)[0].checkpointEvidence?.[0].state, 'current');
+  const malformed = JSON.parse(JSON.stringify(wire));
+  malformed.stages.flatMap((stage: { cards: unknown[] }) => stage.cards)[0].checkpointEvidence[0].state = 'guess';
+  assert.equal(validateWebBoardSnapshot(malformed).ok, false);
+});

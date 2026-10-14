@@ -583,6 +583,13 @@ Backlog lifecycle state changes are committed in the active mission worktree. Th
 
 The workflow harness automatically recovers from routine handoff hygiene issues after a successful execute-agent exit. When `px active <slug>` completes its execution phase, it attempts automated handoff. If handoff fails, the harness runs a repair step and retries exactly once before declaring failure.
 
+Handoff, its nested rebase, and automatic repair preserve the environment supplied
+when Parallix starts. Conflict-resolution launcher detection and agent launches
+use that same environment, including `PATH`, so a Codex installed through NVM
+remains available when its bin directory was on the initiating shell's `PATH`.
+Start Parallix from the shell configured for the intended launchers; a missing
+recorded implementer executable still blocks conflict resolution.
+
 #### Repaired conditions:
 1. **Uncommitted mission artifacts**: The harness commits mission-owned files (the configured mission base dir for the repo, `backlog/tasks/<slug> - *`, or `backlog/completed/<slug> - *`) with a deterministic message: `workflow(<slug>): auto-commit mission artifacts before handoff`. Unrelated dirty files are left untouched and do not block that mission commit.
 2. **Branch behind primary branch (main)**: If the handoff fails because the branch is behind its remote (non-fast-forward), the harness automatically invokes `px rebase <slug>`.
@@ -590,7 +597,7 @@ The workflow harness automatically recovers from routine handoff hygiene issues 
 #### Hard blockers:
 Automatic repair is refused and the harness stops if:
 - Git reports unmerged or conflicting files.
-- Rebase requires manual conflict resolution or agent assistance for shared files.
+- The recorded implementer launcher is unavailable, or shared-file conflicts remain after agent-assisted resolution.
 - Handoff fails for a genuine infrastructure or state-transition blocker.
 
 Missing checkpoint evidence, incomplete success criteria, and failed verification
@@ -600,6 +607,50 @@ with `px mission mark-complete --slug <slug> --criterion <index>`.
 The index is one-based; the write resolves its own current version automatically,
 so no intervening status read is needed between writes. Completion flags and final checkpoint evidence are both required.
 The same handoff check must pass after repair.
+
+Before declaring execute or repair complete, run `px checkpoint check --slug <slug>
+--json` (the slug may be omitted inside the mission worktree). It returns JSON
+with `ready`, the current Mission `version`, all `findings`, `primaryStopReason`
+and suggested `nextCommands`. Exit 0 means the read succeeded; inspect `ready`
+before proceeding. Findings identify missing planned checkpoints, incomplete or
+uncovered criteria, unverifiable references and stale repair evidence. Coverage
+retains valid earlier rows; fresh repair rows satisfy only their applicable obligations.
+This read uses handoff's recorded evidence policies without running gates,
+publishing, recording evidence or changing Mission or repair state. Readiness
+checks references and recorded obligations, not whether a prose claim is true
+or the locked contract is semantically feasible. Historical contracts must be
+imported before using this recorded-evidence check.
+
+A recorded unresolved human-only contract blocker is the primary stop reason,
+even when planned evidence is also missing. Stop for the operator; Parallix does
+not launch repeated evidence-only repair for that blocker. Do not fabricate
+proof, use `record --force` as an agent, or treat a note saying “resolved” as an
+operator decision. The operator correction described below is still required.
+
+Checkpoint evidence keeps its earlier versions when a checkpoint is re-recorded.
+Status, review packets and handoff use the latest evidence for each name. To
+inspect the history, use `px checkpoint history --slug <slug>`; add `--name CP-1`
+to focus on one checkpoint. `px checkpoint round --slug <slug> --round 1`
+replays the exact checkpoint state captured when that review round began.
+`px checkpoint read --slug <slug>` reads the latest checkpoint state. These
+commands only read state; see `px checkpoint --help` for their current interface.
+
+Each new version includes its recording time, the review round current at
+recording (null before review), and the Mission aggregate revision committed by
+the write. This revision is the stored Mission version, not a Git commit.
+Migrated evidence retains its known row-level review rounds, but recording times,
+checkpoint-level rounds and Mission revisions remain unknown. Historical rounds
+whose start state was never captured are reported as unknown, separately from a
+round that does not exist. Overwritten evidence from before migration cannot be
+reconstructed.
+
+The backend assigns stable IDs to success criteria. Editing a criterion's text
+keeps its identity and existing evidence coverage; a new criterion receives a
+new ID. Review-round replay includes the criterion IDs and text at round start,
+so later edits cannot change that round's coverage result. Existing evidence is
+linked only when its text exactly matches a current criterion; unmatched rows
+keep a null ID. Round-time criteria from before capture remain unknown.
+
 
 Before a dedicated repair launch, Parallix persists an incident-associated repair
 checkpoint and names it in the prompt. The agent records fresh evidence there

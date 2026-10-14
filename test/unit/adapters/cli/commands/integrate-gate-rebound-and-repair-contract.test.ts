@@ -202,7 +202,8 @@ describe("rebound active mission context", () => {
     const { squashAndLand } = createSquashLanding({
       git: { git: (args: string[]) => {
         if (args.includes('commit')) { commits += 1; return commits === 1 ? { status: 1, stdout: '', stderr: 'pre-commit: failed' } : { status: 0, stdout: '', stderr: '' }; }
-        if (args.includes('diff')) { return { status: 0, stdout: 'fixture.ts\0', stderr: '' }; }
+        if (args.includes('diff')) { return { status: 0, stdout: args.includes('--cached') ? 'fixture.ts\0' : '', stderr: '' }; }
+        if (args.includes('ls-files')) { return { status: 0, stdout: '', stderr: '' }; }
         return { status: 0, stdout: 'commit\n', stderr: '' };
       } },
       backlog: { checkBacklogIntegrity: () => [] }, fileSystem: { existsSync: () => false },

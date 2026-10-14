@@ -576,7 +576,15 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode', r
     'utf8',
   );
 
-  fs.writeFileSync(path.join(repoRoot, 'AGENTS.md'), '', 'utf8');
+  fs.writeFileSync(path.join(repoRoot, 'AGENTS.md'), [
+    '# Smoke repository',
+    'This disposable repository contains one executable Bash program, hello.sh.',
+    'Read hello.sh for the greeting task. There are no package dependencies or additional source trees.',
+    'The existing repository gate is ./scripts/verify-local.sh all; it checks worktree provisioning.',
+    'Use px status --json to inspect recorded Mission state, including labels; use the public px commands for writes.',
+    'Runner state and the operator database are infrastructure, not task source files.',
+    ''
+  ].join('\n'), 'utf8');
   fs.writeFileSync(path.join(repoRoot, 'README.md'), '# Real Agent Smoke Probe\n', 'utf8');
   fs.writeFileSync(path.join(repoRoot, '.gitignore'), [
     '.workflow/',
@@ -615,6 +623,11 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode', r
     '## Description',
     '',
     'Fix the typo in hello.sh so it prints Hello, World!',
+    '',
+    'Repository context: hello.sh is the only program; it is already executable. Read it before planning the change.',
+    'The existing gate is ./scripts/verify-local.sh all (worktree provisioning). There are no package dependencies.',
+    'Recorded Mission classification is available through px status --json; use public px commands for Mission state.',
+    'Parallix commits lifecycle updates to the Backlog task mirror. Those workflow-owned metadata changes are expected; constrain the implementation source diff to hello.sh without requiring the entire branch diff to omit lifecycle commits.',
     ''
   ].join('\n'), 'utf8');
 

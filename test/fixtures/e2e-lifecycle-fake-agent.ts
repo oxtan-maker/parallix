@@ -31,6 +31,10 @@ async function recordContract(slug: string, root: string): Promise<void> {
   await missionServices.checkpoints.plan({ ...await request('mission:context'), name: 'CP-1', description: 'Execute the fake deliverable' });
   await missionServices.checkpoints.plan({ ...await request('mission:context'), name: 'CP-2', description: 'Ready the mission for review' });
   await missionServices.brief.setPredictedNelBucket({ ...await request('mission:context'), bucket: 'Small' });
+  // Adhoc intake starts as unknown; the drafting agent must classify this
+  // workflow probe before refinement (TASK-2731), just as a real agent does.
+  const classification = await missionServices.brief.setClassification({ ...await request('mission:context'), classification: 'ai_sdlc' });
+  if (classification.status !== 'completed') { throw new Error(`fake classification failed: ${classification.error?.message}`); }
 }
 
 async function runFakeLifecycleAgent(prompt: string, worktree?: string) {

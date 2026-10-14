@@ -4,7 +4,7 @@ import { isLoaded, loadForCommand, missingCapability, writeFailure, type Mission
 import { missionLabels, type Mission } from '../domain/mission.js';
 import { missionBrief } from '../domain/mission-brief.js';
 import { missionDependencies } from '../domain/mission-dependencies.js';
-import { successCriteria, carryCompletion } from '../domain/mission-success-criteria.js';
+import { successCriteria, replaceSuccessCriteria } from '../domain/mission-success-criteria.js';
 
 /** Complete planning replacement; no lifecycle or execution fields cross this port. */
 export interface MissionPlanningFields {
@@ -13,6 +13,7 @@ export interface MissionPlanningFields {
   readonly context: string;
   readonly labels: readonly string[];
   readonly successCriteria: readonly string[];
+  readonly successCriterionIds?: readonly (string | null)[];
   readonly dependencies: readonly string[];
 }
 export interface MissionEditSnapshot extends MissionPlanningFields {
@@ -30,7 +31,7 @@ export class MissionEditService {
     const m = loaded.mission;
     return completed({ missionId: m.id, version: loaded.version, title: m.title,
       description: m.brief?.goal ?? m.description ?? '', context: m.brief?.why ?? '',
-      labels: m.labels, successCriteria: m.successCriteria ?? [], dependencies: m.dependencies ?? [] });
+      labels: m.labels, successCriteria: m.successCriteria ?? [], successCriterionIds: m.successCriterionIds, dependencies: m.dependencies ?? [] });
   }
 
   async save(request: MissionEditRequest): Promise<ApplicationOutcome<{ missionId: string; version: MissionVersion }>> {
@@ -83,6 +84,6 @@ function validateFields(request: MissionEditRequest, m: Mission) {
 function replacePlanning(request: MissionEditRequest, m: Mission): Mission {
   const { title, description, context, labels, criteria, dependencies } = validateFields(request, m);
   const brief = description && context ? missionBrief({ goal: description, why: context, scope: m.brief?.scope ?? null, outOfScope: m.brief?.outOfScope ?? [] }) : null;
-  return { ...m, title, labels, brief, description: brief ? null : description || null,
-    successCriteria: criteria, completedSuccessCriteria: carryCompletion(m.successCriteria ?? [], m.completedSuccessCriteria ?? [], criteria), dependencies };
+  return { ...replaceSuccessCriteria(m, criteria, request.successCriterionIds), title, labels, brief, description: brief ? null : description || null,
+    dependencies };
 }

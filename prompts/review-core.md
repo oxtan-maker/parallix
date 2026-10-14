@@ -20,7 +20,7 @@ Review history is not optional context:
 - Treat a `PUSHBACK_ALL` in the history as a response awaiting your decision, not as an approval and not as a fresh set of findings.
 
 Minimum loop contract:
-- When `{{attempt}}` is 2 or later, before beginning this review round compact the prior-round working context. Reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; and the exact post-rebase revision and review baseline shown by `git diff {{reviewBaseline}}..HEAD`. This compaction is independent of the mission's declared gates.
+- When `{{attempt}}` is 2 or later, before beginning this review round {{reviewContextAction}} the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; and the exact post-rebase revision and review baseline shown by `git diff {{reviewBaseline}}..HEAD`. This compaction is independent of the mission's declared gates.
 - Load the Mission context with `px status {{slug}}` and read `AGENTS.md` before reviewing.
 - The block below reports which controls the workflow has already executed for this mission and which it has not, derived from machine records rather than from anyone's prose. Do not re-run a listed command whose recorded status is `passed`; cite the recorded result from this block instead. Re-running is permitted only when the block reports no recorded gate result, reports a `failed` status, reports a control as not yet run, or the command you need is not listed here.
 {{completedControls}}

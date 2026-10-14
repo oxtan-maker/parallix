@@ -314,6 +314,7 @@ export class DeclaredGateRunner {
     for (const cmd of cleanCommands) {
       const reusableProof = verification.readReusableVerificationProof(cmd, rootDir);
       if (reusableProof.ok) {
+        if (reusableProof.diagnostic) { log(reusableProof.diagnostic); }
         log(`  Gate reused proof ${reusableProof.identity}: ${cmd}`);
         continue;
       }

@@ -1,3 +1,5 @@
+import { runStagedTierGuards } from '../../../src/adapters/cli/commands/integrate-staged-guards.js';
+import { mkdtemp } from '../../helpers/temp-dir.js';
 // TASK-2625: sha-keyed integration-validation marker.
 //
 // Covers the four success criteria:
@@ -525,4 +527,55 @@ test('runRequiredLocalGates does not record when the suite fails', async () => {
     );
     assert.equal(recorded.length, 0, 'no marker recorded on a red suite');
   } finally { setLogger(previous); }
+});
+
+
+test('final landing guards inspect the committed projection and exclude ambient index entries (TASK-2712)', (t) => {
+  const root = mkdtemp('landing-guard-projection-');
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' }).trim();
+  const write = (file: string, text: string) => {
+    fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+    fs.writeFileSync(path.join(root, file), text);
+  };
+  git(['init', '-q', '-b', 'main']);
+  git(['config', 'user.name', 'Fixture']);
+  git(['config', 'user.email', 'fixture@example.com']);
+  write('package.json', JSON.stringify({ name: '@magnusekdahl/parallix' }));
+  write('scripts/verify-landing-tree.sh', 'set -e\ntest ! -f ambient.txt\ntest ! -f backlog/tasks/task-1.md\ntest ! -f backlog/archive/task-1.md\ncmp prompts/draft-core.md test/fixtures/prompt-split-parent.json\n');
+  write('prompts/draft-core.md', 'old prompt\n');
+  write('test/fixtures/prompt-split-parent.json', 'old prompt\n');
+  write('backlog/tasks/task-1.md', 'stale\n');
+  write('backlog/completed/task-1.md', 'canonical\n');
+  git(['add', '-A']);
+  git(['commit', '-qm', 'base']);
+  const before = git(['rev-parse', 'HEAD']);
+  write('ambient.txt', 'board entry\n');
+  git(['add', 'ambient.txt']);
+  fs.rmSync(path.join(root, 'backlog/tasks/task-1.md'));
+  write('prompts/draft-core.md', 'new prompt\n');
+  const paths = new Set(['backlog/tasks/task-1.md', 'prompts/draft-core.md']);
+  assert.equal(runStagedTierGuards(root, paths).ok, false, 'mismatched fixture fails the projected tree');
+  assert.equal(git(['rev-parse', 'HEAD']), before, 'a failed final guard cannot advance main');
+  write('test/fixtures/prompt-split-parent.json', 'new prompt\n');
+  paths.add('test/fixtures/prompt-split-parent.json');
+  const verified = runStagedTierGuards(root, paths);
+  assert.equal(verified.ok, true, verified.error);
+  assert.match(verified.tree!, /^[a-f0-9]{40}$/);
+  assert.equal(git(['diff', '--cached', '--name-only']), 'ambient.txt', 'real index remains untouched');
+  assert.equal(git(['show', 'HEAD:backlog/completed/task-1.md']), 'canonical');
+  write('backlog/archive/task-1.md', 'retired\n');
+  paths.add('backlog/archive/task-1.md');
+  assert.equal(runStagedTierGuards(root, paths).ok, false, 'archive reintroduction fails final guard');
+});
+
+test('the configured preIntegration plan includes landing tree consistency checks (TASK-2712)', () => {
+  const root = path.resolve(import.meta.dirname, '../../..');
+  const config = JSON.parse(fs.readFileSync(path.join(root, 'workflow.config.json'), 'utf8'));
+  assert.ok(config.adapters.gates.preIntegration.some(gate => gate.key === 'landing-tree' && gate.command === './scripts/verify-landing-tree.sh'));
+  const script = fs.readFileSync(path.join(root, 'scripts/verify-landing-tree.sh'), 'utf8');
+  for (const contract of ['backlog-completed-task-consistency.test.ts', 'mission-directory-free-workflow.test.ts', 'prompt-split.test.ts']) {
+    assert.ok(script.includes(contract), contract);
+  }
+  assert.match(script, /npm test -- --unit-test-headroom/);
 });

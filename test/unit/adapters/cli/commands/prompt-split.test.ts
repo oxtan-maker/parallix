@@ -2,10 +2,12 @@
 // an overridable default-opinion half; no-override assembly is byte-preserving,
 // and the single `adapters.prompts.override` key swaps only the opinion half.
 import test from 'node:test';
+import { renderPromptContextPolicy } from '../../../../../src/application/prompt-context-policy.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { FilesystemAssetStore } from '../../../../../src/adapters/assets/asset-store.js';
 import { assembleStagePrompt } from '../../../../../src/adapters/assets/runtime-assets.js';
 import { resolvePromptOverride, validateWorkflowConfig } from '../../../../../src/adapters/config/product-config.js';
 import { buildDraftPrompt } from '../../../../../src/adapters/cli/commands/draft-prompts.js';
@@ -81,7 +83,7 @@ function multisetEqual(a: Map<string, number>, b: Map<string, number>): boolean 
 
 for (const [i, stage] of STAGES.entries()) {
   test(`task-2465-${i}: ${stage} core+default preserves the parent-commit prompt as a non-blank multiset`, () => {
-    const core = fs.readFileSync(path.join(realRepoRoot(), 'prompts', `${stage}-core.md`), 'utf8');
+    const core = renderPromptContextPolicy(fs.readFileSync(path.join(realRepoRoot(), 'prompts', `${stage}-core.md`), 'utf8'));
     const def = fs.readFileSync(path.join(realRepoRoot(), 'prompts', `${stage}.md`), 'utf8');
     const heading = core.split('\n')[0];
     assert.ok(heading && heading.startsWith('#'), `${stage} core file must begin with a file-naming heading`);
@@ -256,4 +258,31 @@ test('task-2465: adapters.prompts.override is accepted; unknown keys beneath it 
   assert.notDeepEqual(validateWorkflowConfig({ adapters: { prompts: { override: 5 } } }), []);
   // No per-stage keys: only the single adapters.prompts surface exists.
   assert.notDeepEqual(validateWorkflowConfig({ adapters: { prompts: { draftOverride: 'x' } } }), []);
+});
+
+
+test('draft-core changes require a matching preservation fixture (TASK-2712)', () => {
+  const root = registeredMkdtemp('prompt-fixture-consistency-');
+  try {
+    fs.mkdirSync(path.join(root, 'prompts'));
+    const core = fs.readFileSync(path.join(realRepoRoot(), 'prompts/draft-core.md'), 'utf8');
+    const opinion = fs.readFileSync(path.join(realRepoRoot(), 'prompts/draft.md'), 'utf8');
+    fs.writeFileSync(path.join(root, 'prompts/draft-core.md'), core.replace('Mode: draft.', 'Mode: draft.\nKeep the introducing mission accountable.'));
+    fs.writeFileSync(path.join(root, 'prompts/draft.md'), opinion);
+    const assembled = assembleStagePrompt('draft', { assets: new FilesystemAssetStore(root) });
+    assert.notEqual(assembled, parentPrompt('draft'), 'the unchanged fixture rejects new core guidance');
+    assert.equal(multisetEqual(counts(nonBlank(assembled)), counts(nonBlank(parentPrompt('draft')))), false);
+    const matching = parentPrompt('draft').replace('Mode: draft.', 'Mode: draft.\nKeep the introducing mission accountable.');
+    assert.equal(assembled, matching, 'a matching fixture preserves byte-identical assembly');
+    assert.ok(multisetEqual(counts(nonBlank(assembled)), counts(nonBlank(matching))));
+    assert.ok(isOrderedSubsequence(nonPlaceholderSeq(matching), nonPlaceholderSeq(assembled)));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('execute core requires readiness and an operator stop for recorded contract blockers (TASK-2713)', () => {
+  const core = fs.readFileSync(path.join(realRepoRoot(), 'prompts/execute-core.md'), 'utf8');
+  assert.match(core, /Before declaring completion, run `px checkpoint check --slug {{slug}} --json`/);
+  assert.match(core, /primary stop reason even when evidence is incomplete/);
+  assert.match(core, /without fabricated evidence or repeated evidence-only repair/);
+  assert.match(core, /only an explicit operator decision can clear the recorded blocker/);
 });

@@ -4,7 +4,7 @@ import { missionId, type Mission } from '../domain/mission.js';
 import { assertInvalidContractBlocker, type InvalidContractBlocker } from '../domain/rebound-policy.js';
 import { loadForCommand, isLoaded, writeFailure, type MissionCommandRequest } from './mission-command-support.js';
 import { completed, failure, type ApplicationOutcome } from './contracts.js';
-import type { CheckpointData } from '../domain/checkpoint.js';
+import { missingCheckpointEvidence, type CheckpointData } from '../domain/checkpoint.js';
 
 /** Writes through MissionStore CAS; no legacy documents and no agent-authored proof. */
 export class RepairCheckpointService implements RepairCheckpointPort {
@@ -77,7 +77,7 @@ export class RepairCheckpointService implements RepairCheckpointPort {
 }
 
 /** Shared by both handoff paths: plans and incident freshness remain visible. */
-export function repairCheckpointFailure(checkpoints: readonly CheckpointData[], gates?: readonly string[], criteria?: readonly string[]): string | null {
+export function repairContractFailure(checkpoints: readonly CheckpointData[], gates?: readonly string[], criteria?: readonly string[]): string | null {
   const blocked = checkpoints.find(cp => cp.repair?.blocker);
   if (blocked) { return `Invalid locked contract requires human review: ${JSON.stringify(blocked.repair!.blocker)}`; }
   if (gates && checkpoints.some(cp => cp.repair && !cp.repair.verified && JSON.stringify(cp.repair.authorizedGates) !== JSON.stringify(gates))) {
@@ -86,6 +86,12 @@ export function repairCheckpointFailure(checkpoints: readonly CheckpointData[], 
   if (criteria && checkpoints.some(cp => cp.repair && !cp.repair.verified && JSON.stringify(cp.repair.authorizedCriteria) !== JSON.stringify(criteria))) {
     return 'Authorized success criteria changed during repair; operator decision required before handoff.';
   }
-  const missing = checkpoints.filter(cp => !cp.goalCheck.length || (cp.repair && !cp.repair.evidenceRecorded));
+  return null;
+}
+
+export function repairCheckpointFailure(checkpoints: readonly CheckpointData[], gates?: readonly string[], criteria?: readonly string[]): string | null {
+  const contractFailure = repairContractFailure(checkpoints, gates, criteria);
+  if (contractFailure) { return contractFailure; }
+  const missing = missingCheckpointEvidence(checkpoints);
   return missing.length ? `Planned checkpoint evidence is missing before handoff: ${missing.map(cp => cp.name).join(', ')}. Record fresh evidence with px checkpoint record before handoff.` : null;
 }

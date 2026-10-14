@@ -17,15 +17,16 @@ import type { MissionStore, MissionVersion } from './domain-ports.js';
 import { isLoaded, loadForCommand, missingCapability, storeEvidence, writeFailure, type MissionCommandRequest } from './mission-command-support.js';
 import { missionBrief, type MissionBrief } from '../domain/mission-brief.js';
 import { declaredGates } from '../domain/mission-gates.js';
-import { carryCompletion, completedCriteria, successCriteria } from '../domain/mission-success-criteria.js';
+import { replaceSuccessCriteria, completedCriteria, successCriteria } from '../domain/mission-success-criteria.js';
 import { missionDependencies } from '../domain/mission-dependencies.js';
 import type { NelBucketLabel } from '../domain/net-engineering-lines.js';
 import type { OperationalHistoryRepository } from './ports/operation-history.js';
 import type { CheckpointData } from '../domain/checkpoint.js';
-import { missionLabel, type MissionId } from '../domain/mission.js';
+import type { MissionId } from '../domain/mission.js';
+import { MISSION_CLASSIFICATIONS, classificationLabels, type MissionClassification } from '../domain/mission-authoring.js';
+import { MissionAuthoringService, type AuthorMissionRequest } from './mission-authoring-service.js';
+export { MISSION_CLASSIFICATIONS, type MissionClassification } from '../domain/mission-authoring.js';
 
-export const MISSION_CLASSIFICATIONS = ['ai_sdlc', 'user_value', 'unknown'] as const;
-export type MissionClassification = typeof MISSION_CLASSIFICATIONS[number];
 
 /** Named partial brief update: omitted fields keep their recorded value. */
 export interface UpdateMissionBriefRequest extends MissionCommandRequest {
@@ -36,6 +37,7 @@ export interface SetMissionGatesRequest extends MissionCommandRequest {
 }
 export interface SetSuccessCriteriaRequest extends MissionCommandRequest {
   readonly criteria: readonly string[];
+  readonly criterionIds?: readonly (string | null)[];
 }
 export interface MissionSuccessCriteriaResult {
   readonly successCriteria: readonly string[];
@@ -88,6 +90,8 @@ export interface MissionClassificationResult { readonly classification: MissionC
 export class MissionBriefService {
   constructor(private readonly _store: MissionStore, private readonly _history?: Pick<OperationalHistoryRepository, 'append'>) {}
 
+  author(request: AuthorMissionRequest) { return new MissionAuthoringService(this._store).author(request); }
+
   /**
    * Record or refine the brief.
    *
@@ -138,7 +142,7 @@ export class MissionBriefService {
     let criteria: readonly string[];
     try { criteria = successCriteria(request.criteria); } catch (error) { return failure('validation', error instanceof Error ? error.message : 'invalid success criteria'); }
     try {
-      const version = await this._store.save({ ...loaded.mission, successCriteria: criteria, completedSuccessCriteria: carryCompletion(loaded.mission.successCriteria ?? [], loaded.mission.completedSuccessCriteria ?? [], criteria) }, loaded.version);
+      const version = await this._store.save(replaceSuccessCriteria(loaded.mission, criteria, request.criterionIds), loaded.version);
       return completed({ successCriteria: criteria, version }, [storeEvidence(request.missionId, 'success-criteria', `${criteria.length} success criteria recorded`)]);
     } catch (error) { return writeFailure(error); }
   }
@@ -244,7 +248,7 @@ export class MissionBriefService {
     if (!MISSION_CLASSIFICATIONS.includes(classification)) {
       return failure('validation', 'classification must be exactly one of ai_sdlc, user_value, or unknown');
     }
-    const labels = [...loaded.mission.labels.filter(label => !MISSION_CLASSIFICATIONS.includes(String(label) as MissionClassification)), missionLabel(classification)];
+    const labels = classificationLabels(loaded.mission, classification);
     try {
       const version = await this._store.save({ ...loaded.mission, labels }, loaded.version);
       return completed({ classification, version }, [storeEvidence(request.missionId, 'mission-classification', `classification: ${classification}`)]);

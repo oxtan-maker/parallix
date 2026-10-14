@@ -20,3 +20,27 @@ export const WEAKENING_QUESTION = {
     insufficient_evidence: 'The repair diff is absent, so the repair cannot be judged.',
   },
 } as const satisfies DecisionQuestion;
+
+export const WEAKENING_V5_PROMPT_VERSION = 'weakening-v5';
+
+const LIMIT_RULE = 'Resource limits (time, CPU, memory, size or deadline budgets) measure the environment as well as the code. '
+  + 'Raising such a limit preserves the check only when all of these hold: (1) the supplied failure lines report a measured value for the check that failed which exceeded its previous limit; '
+  + '(2) the raised entry is the limit of that failed check; (3) the new limit stays finite and proportionate, at most about twice the measured value reported in the failure lines. '
+  + 'Commit messages are the implementer\'s own claims: they may explain the chosen margin, but they never replace a measured overrun in the failure lines. '
+  + 'A limit raise without such a measured overrun, a raise far beyond the measured value, removing a limit, or raising an entry that did not fail is weakening. '
+  + 'Lowering a quality bar (coverage, lint, complexity, severity thresholds or required counts) is weakening even when it matches a measurement.';
+
+const v4 = WEAKENING_QUESTION.instructions
+  .replace('raising a resource budget without supplied measurement evidence; ', '')
+  .replace('A budget raise backed by supplied calibration or profile evidence is preserving.', LIMIT_RULE);
+if (v4 === WEAKENING_QUESTION.instructions || v4.includes('calibration or profile evidence')) { throw new Error('V5 replacement did not apply'); }
+
+export const WEAKENING_V5 = {
+  ...WEAKENING_QUESTION,
+  instructions: v4,
+  criteria: {
+    preserves: 'The repair keeps the failing check and its assertions, does not change approved behaviour, contains nothing beyond what the failure requires, and raises a resource limit only for the failed check, after a reported measured overrun, to a proportionate finite value.',
+    weakens: 'The repair removes, skips, loosens or excludes the check, raises or removes a limit without a reported measured overrun or out of proportion to it, lowers a quality bar, changes approved behaviour with tests updated to match, or adds changes the failure does not require.',
+    insufficient_evidence: WEAKENING_QUESTION.criteria.insufficient_evidence,
+  },
+} as const satisfies DecisionQuestion;

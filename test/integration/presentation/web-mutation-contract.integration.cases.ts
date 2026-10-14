@@ -637,7 +637,7 @@ test('web mutation: edit read and replacement dispatch host capability and versi
   const spy = makeDispatcherSpy();
   await withHost({ commandDispatcher: () => spy.dispatcher }, async info => {
     const launch = await launchValue(info);
-    const body = { kind: 'mission:edit', missionId: 'supplied-id-1', expectedVersion: 3, title: 'Revised', description: '', context: '', labels: [], successCriteria: [], dependencies: [] };
+    const body = { kind: 'mission:edit', missionId: 'supplied-id-1', expectedVersion: 3, title: 'Revised', description: '', context: '', labels: [], successCriteria: ['edited', 'new'], successCriterionIds: ['sc-1', null], dependencies: [] };
     for (const request of [{ kind: 'mission:edit-read', missionId: 'supplied-id-1' }, body]) {
       const response = await postCommand(info, launch, request);
       assert.equal(response.status, 200);
@@ -645,6 +645,7 @@ test('web mutation: edit read and replacement dispatch host capability and versi
     assert.equal(spy.requests.length, 2);
     assert.deepEqual([...spy.requests[1].capabilities], ['mission:context']);
     assert.equal(spy.requests[1].missionId, 'supplied-id-1');
+    assert.deepEqual((spy.requests[1].payload as { successCriterionIds: unknown }).successCriterionIds, ['sc-1', null]);
     assert.equal((spy.requests[1].payload as { expectedVersion: number }).expectedVersion, 3);
     assert.equal((await postCommand(info, launch, { ...body, status: 'done' })).status, 400);
     assert.equal(spy.requests.length, 2);

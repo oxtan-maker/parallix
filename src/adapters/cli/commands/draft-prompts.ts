@@ -19,13 +19,9 @@ function resolveTaskPath(slug: string, promptRoot: string) {
   return path.join(promptRoot, 'backlog', 'tasks', `<${slug}>.md`);
 }
 function resolveClassificationInstructions(taskPath: string) {
-  if (taskPath && fs.existsSync(taskPath)) {
-    const content = fs.readFileSync(taskPath, 'utf8');
-    if (/^source:\s*synthetic\s*$/mi.test(content)) {
-      return 'because this task was synthesized by the harness, preserve the `unknown` label unless you have concrete repo-specific evidence to replace it. Do not add a separate frontmatter field for mission type.';
-    }
-  }
-  return 'set exactly one Mission classification with `px classification set --value <ai_sdlc|user_value|unknown>`. Backlog task labels may describe the task, but Mission state is authoritative. Use `ai_sdlc` for workflow, prompt, or agent-fix work; use `user_value` for everything else; use `unknown` only when evidence is unavailable.';
+  const synthetic = taskPath && fs.existsSync(taskPath) && /^source:\s*synthetic\s*$/mi.test(fs.readFileSync(taskPath, 'utf8'));
+  const intake = synthetic ? 'This task was synthesized by the harness. ' : 'Backlog task labels may describe the task. ';
+  return intake + 'classify this Mission before finishing the draft, including tasks synthesized by the harness. Set exactly one of ai_sdlc or user_value with --classification <ai_sdlc|user_value> in px mission author (or px classification set for a focused edit). Use ai_sdlc for workflow, prompt, or agent-fix work; use user_value for everything else. Unknown is an intake placeholder, never a completed draft classification. Mission state is authoritative; do not add a separate frontmatter field for mission type.';
 }
 function buildDraftPrompt(slug: string, { rootDir = process.cwd(), worktree = null }: { rootDir?: string; worktree?: string | null } = {}) {
   const promptRoot = worktree || rootDir;
@@ -86,7 +82,7 @@ function normalizeDraftClassification(slug: string, worktree: string, {
   try {
     const resolveClassification = resolveMissionClassificationResolver(resolveMissionClassificationFn);
     const { classification, error: classificationError } = resolveClassification(slug, worktree, undefined, configuration);
-    if (!classification) {
+    if (classification !== 'ai_sdlc' && classification !== 'user_value') {
       if (classificationError) {errorFn(fmt.status('FAIL', classificationError));}
       return { ok: false, reason: 'missing-classification' };
     }
@@ -103,8 +99,8 @@ function buildRestartPrompt(slug: string, { rootDir = process.cwd(), worktree = 
   return `${buildDraftPrompt(slug, { rootDir, worktree })}
 
 Focused repair:
-- read \`px status ${slug}\`, then use \`px classification set --value <ai_sdlc|user_value|unknown>\`
-- choose exactly one of \`ai_sdlc\` or \`user_value\` when the Mission has evidence; use \`unknown\` only when it does not
+- read \`px status ${slug}\`, then use \`px classification set --value <ai_sdlc|user_value>\`
+- choose exactly one of \`ai_sdlc\` or \`user_value\`; unknown must be resolved before draft completion
 - classification is Mission state: do not repair it by editing a provider task
 `;
 }

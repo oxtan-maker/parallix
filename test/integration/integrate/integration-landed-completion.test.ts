@@ -175,6 +175,8 @@ async function runIntegrate(scenario: Scenario) {
         ? { status: 1, stdout: 'CONFLICT (content): Merge conflict in src/fixture.ts\n', stderr: '' }
         : ok('');
     }
+    // The worktree matches the staged payload; HEAD comparison still models new work.
+    if (args.includes('diff') && args.includes('--quiet') && !args.includes('HEAD')) { return ok(''); }
     if (args.includes('diff') && args.includes('--quiet')) { return { status: 1, stdout: '', stderr: '' }; }
     if (args.includes('diff') && args.includes('--cached')) { return ok('fixture.ts\n'); }
     if (args.includes('commit')) {

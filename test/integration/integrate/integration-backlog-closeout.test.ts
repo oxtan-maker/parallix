@@ -14,7 +14,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
+import { mkdtemp } from '../../helpers/temp-dir.js';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -50,7 +50,7 @@ function taskBody(id: string): string {
  * mission's unsquashed history, so it carries the first task file too.
  */
 function seedRepository(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2613-'));
+  const root = mkdtemp('integration-backlog-closeout-');
   git(root, ['init', '-q', '-b', 'main']);
   git(root, ['config', 'user.email', 'test@parallix.test']);
   git(root, ['config', 'user.name', 'Test']);
@@ -78,10 +78,17 @@ function seedRepository(): string {
 }
 
 /** Drive `squashAndLand` through the production Git, Backlog and product-config ports. */
-function landMission(root: string, slug: string, taskFile: string): Promise<void> {
+function landMission(root: string, slug: string, taskFile: string, gitFailure?: 'rm' | 'archive-list'): Promise<void> {
   const production = createIntegratePorts();
   const { squashAndLand } = createSquashLanding({
     ...production,
+    git: { ...production.git, git: args => {
+      if ((gitFailure === 'rm' && args.includes('rm'))
+        || (gitFailure === 'archive-list' && args.includes('ls-files') && args.includes('backlog/archive'))) {
+        return { status: 1, stdout: '', stderr: 'injected payload read/removal failure' };
+      }
+      return production.git.git(args);
+    } },
     missionPaths: { softResetTrailingBacklogNoise: () => false },
     productConfig: { ...production.productConfig, isForgejoReviewEnabled: () => false },
     checkout: { rewriteWorktreePaths: () => {} },
@@ -140,6 +147,7 @@ function quietLogs(t: { mock: { method: Function } }): void {
 test('TASK-2613: landing moves the task file to backlog/completed as done in the landed squash', async (t) => {
   quietLogs(t as never);
   const root = seedRepository();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   await landMission(root, FIRST, FIRST_FILE);
 
@@ -155,6 +163,7 @@ test('TASK-2613: landing moves the task file to backlog/completed as done in the
 test('TASK-2613: a base-tracked task file lands its removal and completed record together', async (t) => {
   quietLogs(t as never);
   const root = seedRepository();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   write(root, `backlog/tasks/${FIRST_FILE}`, taskBody(FIRST));
   git(root, ['add', '-A']);
   git(root, ['commit', '-qm', 'file first task on main']);
@@ -169,6 +178,7 @@ test('TASK-2613: a base-tracked task file lands its removal and completed record
 test('TASK-2613: a later landing drops the stale copy of an earlier landed task', async (t) => {
   quietLogs(t as never);
   const root = seedRepository();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   await landMission(root, FIRST, FIRST_FILE);
 
   await landMission(root, SECOND, SECOND_FILE);
@@ -181,3 +191,80 @@ test('TASK-2613: a later landing drops the stale copy of an earlier landed task'
   assert.ok(tracked(root, `backlog/completed/${SECOND_FILE}`), 'the second mission is archived too');
   assert.ok(!fs.existsSync(path.join(root, 'backlog/tasks', FIRST_FILE)), 'the stale copy leaves the working tree');
 });
+
+test('a later mission removes a base-tracked stale copy while preserving completed history (TASK-2712)', async (t) => {
+  quietLogs(t as never);
+  const root = seedRepository();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  await landMission(root, FIRST, FIRST_FILE);
+  const canonical = git(root, ['show', `HEAD:backlog/completed/${FIRST_FILE}`]);
+  write(root, `backlog/tasks/${FIRST_FILE}`, taskBody(FIRST));
+  git(root, ['add', '-A']);
+  git(root, ['commit', '-qm', 'inherited stale copy']);
+  await landMission(root, SECOND, SECOND_FILE);
+  assert.equal(tracked(root, `backlog/tasks/${FIRST_FILE}`), false);
+  assert.equal(git(root, ['show', `HEAD:backlog/completed/${FIRST_FILE}`]), canonical);
+});
+
+for (const inherited of [true, false]) {
+  test(`archive paths ${inherited ? 'inherited from base' : 'reintroduced by a mission'} block landing before main advances (TASK-2712)`, async (t) => {
+    quietLogs(t as never);
+    const root = seedRepository();
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    await landMission(root, FIRST, FIRST_FILE);
+    const canonical = git(root, ['show', `HEAD:backlog/completed/${FIRST_FILE}`]);
+    if (!inherited) { git(root, ['checkout', '-q', `mission/${SECOND}`]); }
+    write(root, 'backlog/archive/tasks/task-9999 - cancelled.md', 'cancelled history\n');
+    git(root, ['add', '-A']);
+    git(root, ['commit', '-qm', 'retired archive']);
+    git(root, ['checkout', '-q', 'main']);
+    const before = git(root, ['rev-parse', 'HEAD']);
+    await assert.rejects(() => landMission(root, SECOND, SECOND_FILE), /IntegrationAbort/);
+    assert.equal(git(root, ['rev-parse', 'HEAD']), before);
+    assert.equal(tracked(root, 'backlog/completed/' + SECOND_FILE), false);
+    assert.equal(git(root, ['show', `HEAD:backlog/completed/${FIRST_FILE}`]), canonical);
+  });
+}
+
+
+test('a mission explicitly deleting an inherited archive path can land without losing completed history (TASK-2712)', async (t) => {
+  quietLogs(t as never);
+  const root = seedRepository();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  await landMission(root, FIRST, FIRST_FILE);
+  const completed = `backlog/completed/${FIRST_FILE}`;
+  const canonical = git(root, ['show', `HEAD:${completed}`]);
+  const retired = 'backlog/archive/tasks/task-9999 - cancelled.md';
+  write(root, retired, 'cancelled history\n');
+  git(root, ['add', '--', retired]);
+  git(root, ['commit', '-qm', 'inherited retired record']);
+  const before = git(root, ['rev-parse', 'HEAD']).trim();
+
+  git(root, ['checkout', '-q', `mission/${SECOND}`]);
+  git(root, ['merge', '-q', '--no-edit', 'main']);
+  git(root, ['rm', '--', retired]);
+  git(root, ['commit', '-qm', 'remove inherited retired record']);
+  git(root, ['checkout', '-q', 'main']);
+  await landMission(root, SECOND, SECOND_FILE);
+
+  assert.equal(landedStatus(root)[retired], 'D', 'the committed mission deletion reaches landed HEAD');
+  assert.equal(git(root, ['ls-files', '-z', '--', 'backlog/archive']), '');
+  assert.equal(git(root, ['show', `HEAD:${completed}`]), canonical);
+  assert.equal(git(root, ['show', `${before}:${retired}`]), 'cancelled history\n', 'retirement retains Git history');
+  assert.ok(tracked(root, `backlog/completed/${SECOND_FILE}`));
+  assert.equal(git(root, ['status', '--porcelain']), '');
+});
+
+for (const failure of ['rm', 'archive-list'] as const) {
+  test(`failed ${failure} payload operation blocks landing and cleans the squash (TASK-2712)`, async (t) => {
+    quietLogs(t as never);
+    const root = seedRepository();
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    await landMission(root, FIRST, FIRST_FILE);
+    const before = git(root, ['rev-parse', 'HEAD']);
+    await assert.rejects(() => landMission(root, SECOND, SECOND_FILE, failure), /IntegrationAbort/);
+    assert.equal(git(root, ['rev-parse', 'HEAD']), before);
+    assert.equal(git(root, ['status', '--porcelain']), '');
+    assert.ok(tracked(root, `backlog/completed/${FIRST_FILE}`));
+  });
+}

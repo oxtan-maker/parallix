@@ -69,7 +69,18 @@
           "additionalProperties": true,
           "properties": {
             "command": { "type": "string", "description": "Gate command; supports {{area}} substitution." },
-            "defaultArea": { "type": "string", "description": "Default verification area." }
+            "defaultArea": { "type": "string", "description": "Default verification area." },
+            "integrationCoverage": {
+              "type": "object", "additionalProperties": false, "required": ["command", "checks"],
+              "description": "Explicit verification check coverage by required integration gate keys.",
+              "properties": {
+                "command": { "type": "string", "minLength": 1 },
+                "checks": {
+                  "type": "object", "minProperties": 1,
+                  "additionalProperties": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+                }
+              }
+            }
           }
         },
         "web": {
@@ -248,9 +259,14 @@
         },
         "prompts": {
           "type": "object",
-          "description": "Prompt split configuration. Closed object with a single allowed property, override. Selects one repo-local default-opinion file to assemble in place of the shipped default-opinion half; unset keeps today's prompts byte for byte.",
+          "description": "Repository prompt opinion and context policy. Omitted contextCompaction defaults on independently of provider-native near-limit safeguards.",
           "additionalProperties": false,
           "properties": {
+            "contextCompaction": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable Parallix-requested context compaction at checkpoints, successful gates and review lifecycle boundaries (default on; set false to opt out). Does not control provider-native safeguards or start fresh checkpoint sessions."
+            },
             "override": {
               "type": "string",
               "description": "Repo-relative or absolute path to a repo-local default-opinion file. Parallix always assembles the mandatory core half; only the opinion half is replaced. Unknown keys beneath adapters.prompts are rejected."

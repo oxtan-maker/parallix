@@ -1,3 +1,5 @@
+import { evaluateMissionEvidence } from './mission-evidence-readiness.js';
+import { criterionContract, identifyGoalCheckRows } from '../domain/mission-success-criteria.js';
 import { RepairCheckpointService } from './repair-checkpoint-service.js';
 /**
  * Checkpoint use case.
@@ -89,6 +91,7 @@ export class MissionCheckpointService {
   constructor(
     private readonly _store: MissionStore,
     private readonly _evidence?: CheckpointEvidenceReferences,
+    private readonly _now: () => string = () => new Date().toISOString(),
   ) {}
 
   reportInvalidContract(request: Parameters<RepairCheckpointService['report']>[0]) {
@@ -178,11 +181,12 @@ export class MissionCheckpointService {
       // repair's fresh proof is distinguishable from rows kept from earlier rounds.
       const round = mission.review ? currentReviewRound(mission.review).number : undefined;
       const gate = openRepairFromReview(mission.review, mission.successCriteria ?? [], mission.checkpoints.flatMap((checkpoint) => checkpoint.goalCheck))?.gate;
+      const identified = { ...request.checkpoint, goalCheck: identifyGoalCheckRows(request.checkpoint.goalCheck, criterionContract(mission)) };
       const stamped = round === undefined
-        ? request.checkpoint
-        : { ...request.checkpoint, goalCheck: request.checkpoint.goalCheck.map((row) => {
+        ? identified
+        : { ...identified, goalCheck: identified.goalCheck.map((row) => {
           const priorRows = mission.checkpoints.flatMap((checkpoint) => checkpoint.goalCheck)
-            .filter((priorRow) => priorRow.criterion === row.criterion);
+            .filter((priorRow) => (priorRow.criterionId ?? priorRow.criterion) === (row.criterionId ?? row.criterion));
           const repairedGates = [...new Set(priorRows.flatMap((priorRow) => [
             ...(priorRow.repairedGates ?? []), ...(priorRow.repairedGate ? [priorRow.repairedGate] : []),
           ]).concat(gate ? [gate] : []))];
@@ -199,6 +203,7 @@ export class MissionCheckpointService {
         if (prior.repair.blocker && !request.force) { return failure('validation', 'Invalid locked contract awaits operator decision; an operator can re-record corrected evidence with --force'); }
         merged = { ...merged, repair: { ...prior.repair, ...(request.force ? { blocker: undefined } : {}), evidenceRecorded: true, verified: false } };
       }
+      merged = { ...merged, recording: { recordedAt: this._now(), recordedRound: round ?? null, missionRevision: version + 1 } };
       updated = {
         ...mission,
         checkpoints: recordCheckpoint(mission.checkpoints, merged),
@@ -287,7 +292,7 @@ export class MissionCheckpointService {
           + `Run px checkpoint record --name ${request.checkpoint.name} --criterion <affected> --evidence <verifiable> for the criteria the failure touches, then handoff.`,
         );
       }
-      const uncovered = uncoveredCriteria(updated.checkpoints, mission.successCriteria ?? []);
+      const uncovered = uncoveredCriteria(updated.checkpoints, mission.successCriteria ?? [], mission.successCriterionIds);
       if (uncovered.length > 0) {
         const recordedRows = updated.checkpoints.reduce((total, cp) => total + cp.goalCheck.length, 0);
         const criteria = mission.successCriteria?.length ?? 0;
@@ -299,6 +304,46 @@ export class MissionCheckpointService {
       }
     }
     return null;
+  }
+
+  /** Inspect evidence without recording, verifying gates, or resolving blockers. */
+  async check(request: MissionCommandRequest, checkoutRoot?: string) {
+    const loaded = await loadForCommand<ReturnType<typeof evaluateMissionEvidence> & { version: MissionVersion; slug: string }>(this._store, request);
+    if (!isLoaded(loaded)) { return loaded; }
+    const rootDir = this._evidence?.rootFor(request.missionId) ?? checkoutRoot;
+    if (!this._evidence || !rootDir) { return failure('unavailable', 'Evidence reference checkout is unavailable'); }
+    const { mission } = loaded;
+    if (!mission.brief) { return failure('unavailable', 'Import the historical Mission contract before checking recorded evidence'); }
+    return completed({ slug: mission.id, version: loaded.version, ...evaluateMissionEvidence({
+      draftedInDb: true, checkpoints: mission.checkpoints, successCriteria: mission.successCriteria ?? [],
+      successCriterionIds: mission.successCriterionIds, completedSuccessCriteria: mission.completedSuccessCriteria ?? [],
+      gates: mission.declaredGates ?? [], review: mission.review ?? null,
+    }, this._evidence.fileSystem, rootDir) });
+  }
+
+  /** Read every immutable record; never writes or reconstructs missing history. */
+  async history(request: ReadCheckpointsRequest) {
+    const guard = missingCapability<readonly import('../domain/checkpoint.js').CheckpointVersion[]>(request, REQUIRED_CAPABILITY);
+    if (guard) { return guard; }
+    const loaded = await loadForCommand<readonly import('../domain/checkpoint.js').CheckpointVersion[]>(this._store, request);
+    if (!isLoaded(loaded)) { return loaded; }
+    if (!this._store.checkpointHistory) { return failure('unavailable', 'Checkpoint history is unavailable in this store'); }
+    const versions = await this._store.checkpointHistory(request.missionId);
+    return completed(request.name === undefined ? versions : versions.filter(item => item.checkpoint.name === request.name));
+  }
+
+  /** Read the stored review-start boundary, distinguishing missing and legacy rounds. */
+  async round(request: ReadCheckpointsRequest & { readonly round: number }) {
+    const guard = missingCapability<import('../domain/checkpoint.js').ReviewCheckpointState>(request, REQUIRED_CAPABILITY);
+    if (guard) { return guard; }
+    if (!Number.isSafeInteger(request.round) || request.round < 1) { return failure('validation', 'Review round must be a positive integer'); }
+    const loaded = await loadForCommand<import('../domain/checkpoint.js').ReviewCheckpointState>(this._store, request);
+    if (!isLoaded(loaded)) { return loaded; }
+    if (!this._store.reviewCheckpointState) { return failure('unavailable', 'Review checkpoint states are unavailable in this store'); }
+    const state = await this._store.reviewCheckpointState(request.missionId, request.round);
+    if (state === undefined) { return failure('unavailable', `Mission ${request.missionId} has no checkpoint state for review round ${request.round}`); }
+    if (state === null) { return failure('unavailable', `Review round ${request.round} checkpoint state is unknown: its start predates checkpoint capture`); }
+    return completed(state);
   }
 
   async read(

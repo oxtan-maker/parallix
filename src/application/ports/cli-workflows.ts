@@ -67,6 +67,8 @@ export interface StatusReviewRound {
 
 /** Mission-specific data returned by status projection. */
 export interface StatusMissionData {
+  /** Stored Mission classification; null means unset, never inferred from a card. */
+  readonly classification?: import('../../domain/mission-authoring.js').MissionClassification | null;
   /** Authoritative Mission lifecycle status. */
   readonly missionStatus?: string;
   /** Backlog status string. */
@@ -114,6 +116,7 @@ export interface StatusMissionData {
   readonly declaredGates?: readonly string[];
   /** What must be true for the Mission to be done. */
   readonly successCriteria?: readonly string[];
+  readonly successCriterionIds?: readonly string[];
   /** Zero-based positions in `successCriteria` marked complete. */
   readonly completedSuccessCriteria?: readonly number[];
   /** Missions this one depends on; recorded for readers, enforced by nothing. */
@@ -160,6 +163,7 @@ export interface StatusCheckpoint {
 
 export interface StatusGoalCheckRow {
   readonly criterion: string;
+  readonly criterionId?: string | null;
   readonly evidence: string;
 }
 

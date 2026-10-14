@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import { renderPromptContextPolicy } from '../../application/prompt-context-policy.js';
+import type { PromptConfiguration } from '../../application/ports/configuration.js';
 import { FilesystemAssetStore, type AssetStore } from './asset-store.js';
 import { packageRoot } from '../filesystem/package-root.js';
 import { fileURLToPath } from 'node:url';
@@ -25,16 +27,17 @@ export type PromptStage = 'draft' | 'execute' | 'review' | 'act-on-review' | 'po
  * The review default-opinion half is also retained before an override: it
  * contains the workflow guidance against redundant batched coverage, which
  * must reach reviewers regardless of local opinion customization. No
- * templating, registry, resolver hierarchy, plugin interface, factory, or new
- * dependency (mission-2465 guardrail 4).
+ * registry, resolver hierarchy, plugin interface, factory, or new dependency.
+ * Context actions in the core are rendered from the typed repository policy;
+ * opinion content cannot remove those obligations.
  *
  * @param stage Stage slug selecting the `prompts/<stage>-core.md` /
  *   `prompts/<stage>.md` pair.
  * @param overridePath Absolute path to a repo-local opinion half, or null for
  *   the shipped default. An unset/absent path keeps today's prompts byte for
- *   byte.
+ *   byte within the selected context policy.
  */
-export function assembleStagePrompt(stage: PromptStage, { overridePath, assets = runtimeAssetStore }: { overridePath?: string | null; assets?: AssetStore } = {}): string {
+export function assembleStagePrompt(stage: PromptStage, { overridePath, contextCompaction = true, assets = runtimeAssetStore }: Partial<PromptConfiguration> & { assets?: AssetStore } = {}): string {
   const core = assets.readText(`prompts/${stage}-core.md`);
   const defaultOpinion = assets.readText(`prompts/${stage}.md`);
   const opinion = overridePath
@@ -45,7 +48,7 @@ export function assembleStagePrompt(stage: PromptStage, { overridePath, assets =
   // Strip the file-naming heading from the core before assembly so a no-override
   // launch reproduces the pre-split prompt byte-for-byte (one added heading per
   // file is required for the split but is not part of the original prompt).
-  const coreBody = core.startsWith('#') ? core.slice(core.indexOf('\n') + 1) : core;
+  const coreBody = renderPromptContextPolicy(core.startsWith('#') ? core.slice(core.indexOf('\n') + 1) : core, contextCompaction);
   if (!opinion) {return coreBody;}
   // Join with exactly one blank line: strip trailing blanks from the core and
   // leading blanks from the opinion so a boundary cut at a section separator

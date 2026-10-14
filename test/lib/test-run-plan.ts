@@ -240,7 +240,10 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     && requestedPaths.every(file => tierFiles.integrationCi.includes(file)));
   const runsIntegrationLocalSuite = explicitLocal || (!explicitIntegration && requestedPaths.length > 0
     && requestedPaths.every(file => tierFiles.integrationLocal.includes(file)));
-  const runsIntegrationSuite = explicitIntegration || focusedIntegration;
+  // Explicit agent-E2E selection keeps its separate population, but real
+  // processes need waited-child accounting rather than the unit CPU hook.
+  const focusedAgentE2e = requestedPaths.some(file => tierFiles.agentE2e.includes(file));
+  const runsIntegrationSuite = explicitIntegration || focusedIntegration || focusedAgentE2e;
   const enforcesUnitTestHeadroom = requestedArgs.includes('--unit-test-headroom');
   const population = runsIntegrationCiSuite ? (explicitCi && !explicitCiAll && requestedPaths.length === 0 ? tierFiles.integrationCiEarly : tierFiles.integrationCi)
     : runsIntegrationLocalSuite ? tierFiles.integrationLocal

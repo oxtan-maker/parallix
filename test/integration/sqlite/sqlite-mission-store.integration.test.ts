@@ -8,6 +8,7 @@ import path from 'node:path';
 
 import { missionVersion } from '../../../src/application/domain-ports.js';
 import { RevokeReviewDecisionUseCase } from '../../../src/application/revoke-review-decision-use-case.js';
+import { MissionEditService } from '../../../src/application/mission-edit-service.js';
 import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { missionId, missionLabels, type Mission } from '../../../src/domain/mission.js';
@@ -156,8 +157,8 @@ function completeMission(overrides: Partial<Mission> = {}): Mission {
       rawFilename: 'CP-1.md',
       firstLine: '# CP-1: Persistence',
       goalCheck: [
-        { criterion: 'Mission round trips', evidence: 'named adapter test' },
-        { criterion: 'Writes are checked', evidence: 'same-status stale-writer test', recordedRound: 2, repairedGate: 'unit', repairedGates: ['unit', 'docs'] },
+        { criterion: 'Mission round trips', criterionId: null, evidence: 'named adapter test' },
+        { criterion: 'Writes are checked', criterionId: null, evidence: 'same-status stale-writer test', recordedRound: 2, repairedGate: 'unit', repairedGates: ['unit', 'docs'] },
       ],
       nextActionText: 'Run the integration suite.',
     }],
@@ -169,6 +170,8 @@ function completeMission(overrides: Partial<Mission> = {}): Mission {
     },
     declaredGates: ['./scripts/verify-local.sh all', 'npm test'],
     successCriteria: ['The aggregate survives a restart', 'Stale writes are rejected'],
+    successCriterionIds: (overrides.successCriteria ?? ['The aggregate survives a restart', 'Stale writes are rejected']).map((_, index) => `sc-${index + 1}`),
+    nextSuccessCriterionId: (overrides.successCriteria?.length ?? 2) + 1,
     completedSuccessCriteria: [1],
     dependencies: ['task-2521.01', 'task-2521.03'],
     predictedNelBucket: 'Medium',
@@ -268,6 +271,7 @@ describe('SQLite Mission aggregate integration', () => {
           'reproduction_test',
           'predicted_nel_bucket',
           'description',
+          'next_success_criterion_id',
         ],
       );
       assert.ok(!columns.some(({ name }) => ['labels', 'checkpoints', 'review'].includes(name)));
@@ -851,4 +855,124 @@ it('re-saves migrated historical closures without rewriting preserved values (TA
     await assert.rejects(store.save(completeMission({ id: missionId('task-new-invalid'), status: 'done', checkpoints: [], review: null, closedAt: 'new-invalid-value' }), null), /parseable ISO-8601 instant/);
     assert.equal((await store.load(missionId('task-new-invalid'))).kind, 'missing');
   } finally { await database.close(); }
+});
+
+it('retains checkpoint records and recording metadata after reload (TASK-2742)', async () => {
+  const databasePath = tempDatabasePath();
+  let db = await migratedDatabase(databasePath);
+  try {
+    let store = new SqliteMissionStore(db);
+    const { MissionCheckpointService } = await import('../../../src/application/mission-checkpoint-service.js');
+    let revision = await store.save(completeMission({ review: null, checkpoints: [], successCriteria: [], completedSuccessCriteria: [] }), null);
+    const service = new MissionCheckpointService(store, undefined, () => '2026-10-14T12:00:00.000Z');
+    const request = { operationId: 'record', missionId: testMissionId, capabilities: new Set(['checkpoint:record'] as const) };
+    const checkpoint = { missionId: testMissionId, name: 'CP-1', goalCheck: [{ criterion: 'proof', evidence: 'first' }], nextActionText: 'continue' };
+    const first = await service.record({ ...request, checkpoint });
+    assert.equal(first.status, 'completed');
+    const second = await service.record({ ...request, checkpoint: { ...checkpoint, goalCheck: [{ criterion: 'proof', evidence: 'second' }] } });
+    assert.equal(second.status, 'completed');
+    const before = await store.checkpointHistory(testMissionId);
+    assert.equal(before.length, 2);
+    assert.equal(before[0]?.checkpoint.goalCheck[0]?.evidence, 'first');
+    assert.equal(before[1]?.checkpoint.goalCheck[0]?.evidence, 'second');
+    assert.equal(before[0]?.recordedAt, '2026-10-14T12:00:00.000Z');
+    assert.equal(before[0]?.recordedRound, null);
+    assert.equal(before[0]?.missionRevision, revision + 1);
+    const loaded = await store.load(testMissionId);
+    assert.equal(loaded.kind, 'found');
+    if (loaded.kind !== 'found') { throw new Error('missing mission'); }
+    assert.equal(loaded.mission.checkpoints[0]?.goalCheck[0]?.evidence, 'second');
+    revision = await store.save({ ...loaded.mission, title: 'Unrelated edit' }, loaded.version);
+    await db.close();
+    db = await migratedDatabase(databasePath);
+    store = new SqliteMissionStore(db);
+    assert.deepEqual(await store.checkpointHistory(testMissionId), before);
+    const reloaded = await store.load(testMissionId);
+    assert.equal(reloaded.kind, 'found');
+    if (reloaded.kind === 'found') { assert.equal(reloaded.version, revision); }
+  } finally { await db.close(); }
+});
+
+it('replays each review-start checkpoint state after later records and reopening (TASK-2742)', async () => {
+  const databasePath = tempDatabasePath();
+  let db = await migratedDatabase(databasePath);
+  try {
+    let store = new SqliteMissionStore(db);
+    const { MissionCheckpointService } = await import('../../../src/application/mission-checkpoint-service.js');
+    await store.save(completeMission({ review: null, checkpoints: [], successCriteria: [], completedSuccessCriteria: [] }), null);
+    const service = new MissionCheckpointService(store);
+    const request = { operationId: 'record', missionId: testMissionId, capabilities: new Set(['checkpoint:record'] as const) };
+    const checkpoint = { missionId: testMissionId, name: 'CP-1', goalCheck: [{ criterion: 'proof', evidence: 'before review' }], nextActionText: 'review' };
+    assert.equal((await service.record({ ...request, checkpoint })).status, 'completed');
+    const loaded = await store.load(testMissionId);
+    if (loaded.kind !== 'found') { throw new Error('missing mission'); }
+    // Save a new review boundary through the same port all round-opening paths use.
+    await store.save({ ...loaded.mission, review: completeReview() }, loaded.version);
+    const original = await store.reviewCheckpointState(testMissionId, 1);
+    assert.equal(original?.checkpoints[0]?.goalCheck[0]?.evidence, 'before review');
+    assert.deepEqual(original?.versions, [1]);
+    assert.equal((await service.record({ ...request, checkpoint: { ...checkpoint, goalCheck: [{ criterion: 'proof', evidence: 'after review' }] } })).status, 'completed');
+    const history = await store.checkpointHistory(testMissionId);
+    assert.equal(history[1]?.recordedRound, 2);
+    assert.equal(history[1]?.checkpoint.goalCheck[0]?.recordedRound, 2);
+    assert.deepEqual(await store.reviewCheckpointState(testMissionId, 1), original);
+    assert.equal(await store.reviewCheckpointState(testMissionId, 99), undefined);
+    const next = await store.load(testMissionId);
+    if (next.kind !== 'found' || !next.mission.review) { throw new Error('missing review'); }
+    const rounds = next.mission.review.rounds;
+    await store.save({ ...next.mission, review: { ...next.mission.review,
+      rounds: [...rounds, { ...rounds[1]!, number: 3 }] as never } }, next.version);
+    const third = await store.reviewCheckpointState(testMissionId, 3);
+    assert.deepEqual(third?.versions, [2]);
+    assert.equal(third?.checkpoints[0]?.goalCheck[0]?.evidence, 'after review');
+    await db.close();
+    db = await migratedDatabase(databasePath);
+    store = new SqliteMissionStore(db);
+    assert.deepEqual(await store.reviewCheckpointState(testMissionId, 1), original);
+    assert.deepEqual(await store.checkpointHistory(testMissionId), history);
+  } finally { await db.close(); }
+});
+
+it('keeps criterion identity through edits and replays round-time coverage (TASK-2742)', async () => {
+  const databasePath = tempDatabasePath();
+  let db = await migratedDatabase(databasePath);
+  try {
+    let store = new SqliteMissionStore(db);
+    const { MissionCheckpointService } = await import('../../../src/application/mission-checkpoint-service.js');
+    await store.save(completeMission({ review: null, checkpoints: [], dependencies: [], successCriteria: ['original', 'uncovered'], completedSuccessCriteria: [0] }), null);
+    const request = { operationId: 'identity', missionId: testMissionId, capabilities: new Set(['checkpoint:record', 'mission:context'] as const) };
+    const checkpoint = { missionId: testMissionId, name: 'CP-1', goalCheck: [{ criterion: 'original', evidence: 'npm test' }], nextActionText: 'review' };
+    // A later planned checkpoint permits recording partial progress.
+    await new MissionCheckpointService(store).plan({ ...request, name: 'CP-2', description: 'remaining evidence' });
+    assert.equal((await new MissionCheckpointService(store).record({ ...request, checkpoint })).status, 'completed');
+    const loaded = await store.load(testMissionId);
+    if (loaded.kind !== 'found') { throw new Error('missing mission'); }
+    const ids = loaded.mission.successCriterionIds!;
+    assert.equal(loaded.mission.checkpoints[0]?.goalCheck[0]?.criterionId, ids[0]);
+    await store.save({ ...loaded.mission, review: completeReview() }, loaded.version);
+    const original = await store.reviewCheckpointState(testMissionId, 1);
+    assert.deepEqual(original?.successCriteria, [{ id: ids[0], text: 'original' }, { id: ids[1], text: 'uncovered' }]);
+    assert.deepEqual(original?.uncoveredCriterionIds, [ids[1]]);
+    const editor = new MissionEditService(store);
+    const read = await editor.read(request);
+    assert.ok(read.value);
+    assert.equal((await editor.save({ ...request, ...read.value!, missionId: testMissionId, expectedVersion: read.value!.version, successCriteria: ['edited'], successCriterionIds: [ids[0]!] })).status, 'completed');
+    const edited = await store.load(testMissionId);
+    if (edited.kind !== 'found') { throw new Error('missing edited mission'); }
+    const { uncoveredCriteria } = await import('../../../src/domain/checkpoint.js');
+    assert.deepEqual(uncoveredCriteria(edited.mission.checkpoints, edited.mission.successCriteria!, edited.mission.successCriterionIds), []);
+    const history = await store.checkpointHistory(testMissionId);
+    assert.equal(history[0]?.checkpoint.goalCheck[0]?.criterionId, ids[0]);
+    assert.equal((await new MissionCheckpointService(store).record({ ...request, checkpoint: { ...checkpoint, goalCheck: [{ criterion: 'edited', evidence: 'npm test -- --unit-test-headroom' }] } })).status, 'completed');
+    const updated = await store.load(testMissionId);
+    if (updated.kind !== 'found') { throw new Error('missing updated mission'); }
+    assert.equal(updated.mission.checkpoints[0]?.goalCheck.length, 1, 'edited criterion replaces its own row by ID');
+    assert.equal((await store.checkpointHistory(testMissionId))[1]?.checkpoint.goalCheck[0]?.criterionId, ids[0]);
+    await store.save({ ...updated.mission, review: { ...updated.mission.review!, rounds: [...updated.mission.review!.rounds, { ...updated.mission.review!.rounds[1]!, number: 3 }] as never } }, updated.version);
+    const later = await store.reviewCheckpointState(testMissionId, 3);
+    assert.deepEqual(later?.successCriteria, [{ id: ids[0], text: 'edited' }]);
+    assert.deepEqual(later?.uncoveredCriterionIds, []);
+    await db.close(); db = await migratedDatabase(databasePath); store = new SqliteMissionStore(db);
+    assert.deepEqual(await store.reviewCheckpointState(testMissionId, 1), original);
+  } finally { await db.close(); }
 });

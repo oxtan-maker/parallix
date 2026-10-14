@@ -9,7 +9,7 @@ import * as agents from '../../agents/agents.js';
 import { findMissionDir, findCheckpoints, getFirstLine, inferSlug, getMissionYear, missionDirForSlug, isWorkflowGeneratedArtifact } from '../../filesystem/mission-utils.js';
 import { resolveTaskFile, transitionTask, getTaskStatus, getTaskImplementer } from '../../backlog/backlog.js';
 import { assembleStagePrompt } from '../../assets/runtime-assets.js';
-import { resolvePromptOverride } from '../../config/product-config.js';
+import { resolvePromptConfiguration } from '../../config/product-config.js';
 import { isDbAdhocIdentity } from '../../../domain/mission.js';
 
 function renderActiveProgress(event: { phase: string; agent?: string }, logFn: Log) {
@@ -352,8 +352,8 @@ function resolveExecuteTaskPath(slug: string, rootDir: string) {
 
 function buildExecutePrompt(slug: string, checkpointContext: string, options: { rootDir?: string } = {}) {
   const { rootDir = process.cwd() } = options;
-  const overridePath = resolvePromptOverride(rootDir);
-  const template = assembleStagePrompt('execute', { overridePath });
+  const promptConfiguration = resolvePromptConfiguration(rootDir);
+  const template = assembleStagePrompt('execute', promptConfiguration);
   const year = getMissionYear(slug, rootDir) || String(new Date().getFullYear());
   const missionPath = path.join(missionDirForSlug(rootDir, slug), 'MISSION.md');
   const missionDir = path.dirname(missionPath);

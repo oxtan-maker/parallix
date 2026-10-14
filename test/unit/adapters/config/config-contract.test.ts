@@ -24,6 +24,7 @@ import {
   loadEffectiveConfig,
   resolveIntegrationMode,
   resolveTaskProvider,
+  resolvePromptConfiguration,
   resolveTaskStorage,
   validateWorkflowConfig,
 } from '../../../../src/adapters/config/product-config.js';
@@ -251,5 +252,38 @@ describe("adapters.tasks.provider validation", () => {
     assert.equal(validateWorkflowConfig({ adapters: { terminal: { attach: true } } }).length, 1);
     assert.deepEqual(terminalHostConfig({}), { host: 'auto', whenUnavailable: 'fallback' });
     assert.deepEqual(terminalHostConfig({ terminal: { host: 'tmux' } }), { host: 'tmux', whenUnavailable: 'fallback' });
+  });
+});
+
+
+describe('repository prompt context policy', () => {
+  test('omitted compaction resolves on; repository opt-out overrides the built-in default (TASK-2737)', () => {
+    for (const value of [undefined, false, true]) {
+      const prompts = value === undefined ? {} : { contextCompaction: value };
+      withConfig({ adapters: { prompts } }, root => {
+        assert.deepEqual(validateWorkflowConfig({ adapters: { prompts } }), []);
+        assert.equal(resolvePromptConfiguration(root).contextCompaction, value !== false);
+      });
+    }
+    withConfig(null, root => assert.equal(resolvePromptConfiguration(root).contextCompaction, true));
+  });
+
+  test('invalid compaction values fail validation and prompt resolution (TASK-2737)', () => {
+    for (const value of [null, 'true', 'false', 1, 0, {}, []]) {
+      withConfig({ adapters: { prompts: { contextCompaction: value } } }, root => {
+        assert.match(validateWorkflowConfig({ adapters: { prompts: { contextCompaction: value } } }).join(';'), /contextCompaction must be a boolean/);
+        assert.throws(() => resolvePromptConfiguration(root), /contextCompaction must be a boolean/);
+      });
+    }
+  });
+
+  test('opinion overrides coexist with repository policy and cannot introduce per-stage precedence (TASK-2737)', () => {
+    withConfig({ adapters: { prompts: { override: 'opinion.md', contextCompaction: true } } }, root => {
+      assert.deepEqual(resolvePromptConfiguration(root), { overridePath: path.join(root, 'opinion.md'), contextCompaction: true });
+    });
+    assert.ok(validateWorkflowConfig({ adapters: { prompts: { execute: { contextCompaction: true } } } }).length);
+    const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
+    assert.deepEqual(schema.properties.adapters.properties.prompts.properties.contextCompaction.type, 'boolean');
+    assert.equal(schema.properties.adapters.properties.prompts.properties.contextCompaction.default, true);
   });
 });

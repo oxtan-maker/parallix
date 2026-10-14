@@ -59,3 +59,18 @@ test('bootstrap provides a portable git init -b compatibility shim', () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('bootstrap avoids the compatibility shell when Git supports init -b (TASK-2737)', () => {
+  const realGit = process.env.PARALLIX_TEST_REAL_GIT;
+  assert.ok(realGit);
+  const version = spawnSync(realGit, ['--version'], { encoding: 'utf8' });
+  assert.equal(version.status, 0);
+  const parsed = /^git version (\d+)\.(\d+)/.exec(version.stdout);
+  const modern = parsed && (Number(parsed[1]) > 2 || (Number(parsed[1]) === 2 && Number(parsed[2]) >= 28));
+  const gitDir = (process.env.PATH || '').split(path.delimiter)
+    .find(dir => dir.includes('parallix-test-git-'));
+  assert.ok(gitDir);
+  const executable = path.join(gitDir, 'git');
+  assert.equal(fs.lstatSync(executable).isSymbolicLink(), Boolean(modern));
+  if (modern) assert.equal(fs.realpathSync(executable), fs.realpathSync(realGit));
+});

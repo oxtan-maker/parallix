@@ -5,6 +5,7 @@
 import type { WebMissionCard, WebStage } from '../../src/interfaces/web/transport.js';
 import { laneEmpty, laneHeaderBox, laneHeading } from './lane-header.js';
 import { C } from './palette.js';
+import { CheckpointPips } from './checkpoint-pips.js';
 
 function ShippedCard({ card }: { card: WebMissionCard }) {
   return (
@@ -19,6 +20,7 @@ function ShippedCard({ card }: { card: WebMissionCard }) {
         <span style={{ color: C.dim, fontWeight: 500 }}>{card.id}</span>
       </div>
       <p style={{ margin: '3px 0 0', color: C.faint, fontSize: 11 }}>{card.title}</p>
+      <CheckpointPips card={card} />
     </article>
   );
 }

@@ -312,3 +312,59 @@ test('execute mission use case carries run state per call instead of holding it 
   assert.ok(calls.includes('safety:task-1:/worktrees/task-1'));
   assert.ok(calls.includes('safety:task-2:/worktrees/task-2'));
 });
+
+import { ExecuteHandoffService } from '../../../src/application/execute-handoff-service.js';
+import { validateCheckpointsBeforeHandoff } from '../../../src/adapters/mission/checkpoint-validation.js';
+
+test('recorded contract blocker stops checkpoint repair despite missing CP-5 and CP-6 (TASK-2713)', async () => {
+  const blocker = { command: 'npm test', diagnostic: 'requires operator decision', authorityReason: 'locked contract', proposedCorrection: 'operator choice' };
+  const verdict = await validateCheckpointsBeforeHandoff('task-1', '/worktree', { loadRecordedCheckpointsFn: async () => ({
+    planned: ['CP-1', 'CP-5', 'CP-6'], recorded: ['CP-1'], humanOnlyContractBlocker: blocker,
+  }) });
+  assert.deepEqual(verdict.humanOnlyContractBlocker, blocker);
+  assert.match(verdict.error ?? '', /Invalid locked contract requires human review/);
+  let launches = 0;
+  let handoffs = 0;
+  let hygiene = 0;
+  const stops: string[] = [];
+  const { ports } = strictPorts();
+  const service = new ExecuteHandoffService({ checkpoints: { validateBeforeHandoff: async () => verdict },
+    handoff: { ...ports.handoffExecution, run: async () => { handoffs++; return { ok: true }; }, repairHygiene: async () => { hygiene++; return { repaired: false }; } },
+    review: ports.autonomousReview, repairLaunch: { ...ports.repairLaunch, launch: async () => { launches++; } }, output: ports.output });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    assert.equal(await service.run({ slug: 'task-1', worktree: '/worktree', agent: 'codex', taskFile: null,
+      onAutonomousStop: async reason => { stops.push(reason); } }), false);
+  }
+  assert.equal(launches, 0);
+  assert.equal(handoffs, 0);
+  assert.equal(hygiene, 0);
+  assert.equal(stops.length, 2);
+});
+
+test('handoff typed contract blocker stops hygiene and evidence repair after validation (TASK-2713)', async () => {
+  const { ports } = strictPorts();
+  let repairs = 0;
+  const service = new ExecuteHandoffService({ checkpoints: ports.checkpointValidation,
+    handoff: { ...ports.handoffExecution, run: async () => ({ ok: false, reason: 'human-only-contract-blocker', error: 'Invalid locked contract requires human review' }),
+      repairHygiene: async () => { repairs++; return { repaired: true }; } },
+    review: ports.autonomousReview, repairLaunch: { ...ports.repairLaunch, launch: async () => { repairs++; } }, output: ports.output });
+  assert.equal(await service.run({ slug: 'task-1', worktree: '/worktree', agent: 'codex', taskFile: null }), false);
+  assert.equal(repairs, 0);
+});
+
+test('a contract blocker discovered during handoff retry stops further evidence launches (TASK-2713)', async () => {
+  const { ports } = strictPorts();
+  let launches = 0;
+  let handoffs = 0;
+  const stops: string[] = [];
+  const service = new ExecuteHandoffService({ checkpoints: ports.checkpointValidation,
+    handoff: { ...ports.handoffExecution, run: async () => ++handoffs === 1
+      ? { ok: false, error: 'Missing evidence; run `px checkpoint record`' }
+      : { ok: false, reason: 'human-only-contract-blocker', error: 'Recorded contract requires operator decision' },
+      classifyFailure: () => ({ failureClass: 'IncompleteEvidence', dispatchAction: 'AutoSendBack' }) },
+    review: ports.autonomousReview, repairLaunch: { ...ports.repairLaunch, launch: async () => { launches++; return { result: { status: 0 } } as never; } }, output: ports.output });
+  assert.equal(await service.run({ slug: 'task-1', worktree: '/worktree', agent: 'codex', taskFile: null, onAutonomousStop: async reason => { stops.push(reason); } }), false);
+  assert.deepEqual(stops, ['Recorded contract requires operator decision']);
+  assert.equal(launches, 1);
+  assert.equal(handoffs, 2);
+});

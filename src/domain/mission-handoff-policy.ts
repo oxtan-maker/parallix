@@ -19,6 +19,7 @@ export function isIncompleteSuccessCriteriaFailure(errorMsg: string): boolean {
 export function handoffEvidencePolicy(contract: {
   checkpoints: readonly { goalCheck: readonly unknown[] }[];
   successCriteria: readonly string[];
+  successCriterionIds?: readonly string[];
   completedSuccessCriteria: readonly number[];
   draftedInDb: boolean;
 }) {
@@ -28,6 +29,7 @@ export function handoffEvidencePolicy(contract: {
       recorded as { readonly goalCheck: readonly import('./checkpoint.js').GoalCheckRow[] }[],
       contract.successCriteria,
       contract.completedSuccessCriteria,
+      contract.successCriterionIds,
     ).length > 0;
   return {
     source: recorded.length ? 'recorded' as const : contract.draftedInDb ? 'missing' as const : 'historical' as const,

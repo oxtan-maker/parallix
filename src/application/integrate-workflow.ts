@@ -1,3 +1,4 @@
+import { prepareBacklogPayload } from './integrate/backlog-payload.js';
 import type { ParallixConfiguration } from "./ports/configuration.js";
 /**
  * Integrate workflow use case — the `px integrate` sequence (TASK-2512).
@@ -171,6 +172,11 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
         return;
       }
       await runIntegrationRebase(slug, { baseWorktree, baseBranch, git, missionServicesFn });
+      const checkout = ports.gates.resolveIntegrationVerificationWorktree(slug, { baseWorktree: String(baseWorktree) });
+      const removed = prepareBacklogPayload(ports, checkout, baseBranch);
+      if (removed.size > 0 && git(['-C', checkout, 'commit', '--only', '-m', 'Remove stale completed-task copies before integration', '--', ...removed]).status !== 0) {
+        throw abortWith(landing, 'Could not commit stale backlog cleanup before integration gates.');
+      }
       // Repo-owned metadata such as a version bump is committed onto the
       // rebased mission branch here, so it is computed from the current base,
       // verified by the gates below, and squashed into the one mission commit.

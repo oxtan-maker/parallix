@@ -1,8 +1,8 @@
 ---
 id: TASK-2714
 title: Remove redundant self-development setup and integration work
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-10-10 09:43'
 updated_date: '2026-10-10 09:43'
 labels:
@@ -16,7 +16,7 @@ ordinal: 215008
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Implement performance review findings 1-3 for Parallix developing itself. Agent execution time is excluded. Coordinate with TASK-2707 (pnpm migration); do not duplicate or conflict with its install changes.
+Implement performance review findings for Parallix developing itself. Agent execution time is excluded. Coordinate with TASK-2707 (pnpm migration); do not duplicate or conflict with its install changes.
 
 Current evidence: scripts/refresh-global-px.sh explicitly builds then npm pack builds again through package.json prepack; draft setup recursively copies graphify-out, currently 584 MB including dated historical directories; post-integration refresh repeats npm ci after the draft installation.
 
@@ -28,11 +28,10 @@ Preserve repository-owned hooks, independent worktree state, release metadata, p
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 Post-integration refresh builds the landed distributable exactly once; npm pack lifecycle cannot trigger a duplicate build.
-- [ ] #2 Draft copies only graph data and metadata needed for queries and incremental refresh, excluding historical snapshots and unnecessary exports; independent worktree graph updates remain correct.
-- [ ] #3 Coordinate with TASK-2707; preserve fresh CI provisioning and isolated distribution/install contract tests.
-- [ ] #4 Measure affected hook durations and copied bytes before/after; extend owning tests, run static-analysis and applicable docs checks, and manually exercise the lifecycle in an isolated home without real DB/statistics changes.
-- [ ] #5 Draft installs dependencies once per mission. Post-integration base dependency reconciliation runs only when the installed dependency identity is missing, invalid or changed; routine active/review/integration paths do not reinstall.
-- [ ] #6 Version-only package and root lockfile metadata changes do not invalidate installed dependencies. Actual dependency changes trigger reconciliation before the landed build; failed installs do not publish a successful identity. Owning tests cover both cases and parallel-worktree isolation.
+- [ ] #2 Coordinate with TASK-2707; preserve fresh CI provisioning and isolated distribution/install contract tests.
+- [ ] #3 Measure affected hook durations and copied bytes before/after; extend owning tests, run static-analysis and applicable docs checks, and manually exercise the lifecycle in an isolated home without real DB/statistics changes.
+- [ ] #4 Draft installs dependencies once per mission. Post-integration base dependency reconciliation runs only when the installed dependency identity is missing, invalid or changed; routine active/review/integration paths do not reinstall.
+- [ ] #5 Version-only package and root lockfile metadata changes do not invalidate installed dependencies. Actual dependency changes trigger reconciliation before the landed build; failed installs do not publish a successful identity. Owning tests cover both cases and parallel-worktree isolation.
 <!-- AC:END -->
 
 

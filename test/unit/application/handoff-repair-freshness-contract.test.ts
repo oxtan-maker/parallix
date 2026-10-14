@@ -91,7 +91,16 @@ async function handOffRepair(
     })),
     fileSystem: { existsSync: (target: string) => target === targetRef, readText: () => '', writeText: () => {}, listNames: () => [], listEntries: () => [] },
   });
+  const loaded = await ports.missionServices!(ROOT, { missionDir: ROOT });
+  const state = await loaded.store.load(missionId(SLUG));
+  assert.equal(state.kind, 'found');
+  if (state.kind !== 'found') { throw new Error('fixture missing'); }
+  const readiness = evaluateMissionEvidence({ draftedInDb: true, checkpoints: state.mission.checkpoints,
+    successCriteria: state.mission.successCriteria ?? [], completedSuccessCriteria: state.mission.completedSuccessCriteria ?? [],
+    gates: state.mission.declaredGates ?? [], review: state.mission.review }, ports.fileSystem, ROOT);
   const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  assert.equal(readiness.ready, result.ok, 'shared readiness and handoff agree');
+  if (!result.ok) { assert.equal(readiness.findings[0].message, result.error); }
   return { result, recorder };
 }
 
@@ -246,4 +255,78 @@ test('handoff accepts a partial fresh repair that keeps unrelated retained proof
 test('handoff accepts a repair that re-evidences the criterion a finding names (TASK-2665)', async () => {
   const { result } = await handOffRepair('classifier-criterion-1', ['first']);
   assert.equal(result.ok, true);
+});
+
+// Readiness and both handoff paths share recorded policies (TASK-2713).
+import { evaluateMissionEvidence, type EvidenceContract } from '../../../src/application/mission-evidence-readiness.js';
+import { HandoffContractVerifier } from '../../../src/application/handoff-contract.js';
+
+test('readiness reports CP-5 and CP-6 together with coverage and every bad reference (TASK-2713)', () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder);
+  const contract: EvidenceContract = {
+    draftedInDb: true, gates: [], review: null, successCriteria: ['first', 'second'], completedSuccessCriteria: [0, 1],
+    checkpoints: [1, 2, 3, 4, 5, 6].map(number => ({ missionId: missionId(SLUG), name: `CP-${number}`, nextActionText: 'continue',
+      goalCheck: number < 5 ? [{ criterion: 'first', evidence: 'unresolvable proof' }] : [] })),
+  };
+  const result = evaluateMissionEvidence(contract, ports.fileSystem, ROOT);
+  assert.equal(result.ready, false);
+  assert.deepEqual(result.findings.filter(item => item.code === 'missing-checkpoint').map(item => item.checkpoint), ['CP-5', 'CP-6']);
+  assert.equal(result.findings.filter(item => item.code === 'unverifiable-reference').length, 4);
+  assert.deepEqual(result.findings.filter(item => item.code === 'uncovered-criterion').map(item => item.criterion), ['second']);
+  const handoff = new HandoffContractVerifier(ports).verifyCheckpointEvidence(SLUG, { ...contract, ok: true }, {
+    rootDir: ROOT, missionDirPath: ROOT, log: recorder.log.push.bind(recorder.log), error: recorder.errors.push.bind(recorder.errors),
+  });
+  assert.equal('error' in handoff && handoff.error, result.findings[0].message);
+});
+
+test('readiness prioritizes a typed human-only blocker over incomplete evidence and prose (TASK-2713)', () => {
+  const ports = makePorts(makeRecorder());
+  const contract: EvidenceContract = { draftedInDb: true, gates: ['npm test'], review: null,
+    successCriteria: ['first'], completedSuccessCriteria: [], checkpoints: [{ missionId: missionId(SLUG), name: 'CP-5', goalCheck: [],
+      nextActionText: 'Blocker resolved; all done', repair: { incidentId: 'incident', command: 'npm test', authorizedGates: ['npm test'],
+        authorizedCriteria: ['first'], attempt: 1, evidenceRecorded: false, verified: false,
+        blocker: { command: 'npm test', diagnostic: 'contradictory requirement', authorityReason: 'locked contract', proposedCorrection: 'operator decision' } } }] };
+  const result = evaluateMissionEvidence(contract, ports.fileSystem, ROOT);
+  assert.equal(result.primaryStopReason, 'human-only-contract-blocker');
+  assert.ok(result.findings.some(item => item.code === 'missing-checkpoint'));
+  assert.ok(result.findings.some(item => item.code === 'incomplete-criterion'));
+  assert.deepEqual(contract.checkpoints[0].goalCheck, []);
+});
+
+test('checkpoint readiness service preserves state for ready and incomplete evidence (TASK-2713)', async () => {
+  const id = missionId(SLUG);
+  const recorder = makeRecorder();
+  const fileSystem = makePorts(recorder).fileSystem;
+  let mission = { id, brief: DRAFTED_BRIEF, successCriteria: ['first'], completedSuccessCriteria: [0],
+    declaredGates: ['npm test'], checkpoints: [{ missionId: id, name: 'CP-1', goalCheck: [], nextActionText: 'record' }],
+    review: null } as unknown as Mission;
+  let writes = 0;
+  const store: MissionStore = {
+    load: async () => ({ kind: 'found', mission, version: missionVersion(7) }),
+    save: async () => { writes += 1; throw new Error('readiness must not save'); },
+  };
+  const service = new MissionCheckpointService(store, { fileSystem, rootFor: () => ROOT });
+  const request = { operationId: 'read', missionId: id, capabilities: new Set(), expectedVersion: missionVersion(7) } as never;
+  const before = structuredClone(mission);
+  const incomplete = await service.check(request);
+  assert.equal(incomplete.status, 'completed');
+  if (incomplete.status !== 'completed') throw new Error('missing diagnostic');
+  const diagnostic = incomplete.value as ReturnType<typeof evaluateMissionEvidence> & { version: number; slug: string };
+  assert.equal(diagnostic.version, 7);
+  assert.equal(diagnostic.slug, id);
+  assert.equal(diagnostic.ready, false);
+  assert.equal(diagnostic.primaryStopReason, 'missing-checkpoint');
+  assert.ok(diagnostic.findings.some(finding => finding.code === 'uncovered-criterion'));
+  assert.deepEqual(mission, before);
+  mission = { ...mission, checkpoints: [{ ...mission.checkpoints[0], goalCheck: [{ criterion: 'first', evidence: REPAIR_REF }] }] };
+  const readyBefore = structuredClone(mission);
+  const ready = await service.check(request);
+  assert.equal(ready.status, 'completed');
+  if (ready.status !== 'completed') throw new Error('missing diagnostic');
+  const readyDiagnostic = ready.value as ReturnType<typeof evaluateMissionEvidence>;
+  assert.equal(readyDiagnostic.ready, true);
+  assert.deepEqual(readyDiagnostic.findings, []);
+  assert.deepEqual(mission, readyBefore);
+  assert.equal(writes, 0);
 });

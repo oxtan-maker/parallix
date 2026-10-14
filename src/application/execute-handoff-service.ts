@@ -3,6 +3,7 @@ import { buildTypedMissionRecoveryAdvice, isTypedCheckpointEvidenceFailure } fro
 import type {
   AutonomousReviewPort,
   CheckpointValidationPort,
+  CheckpointValidationVerdict,
   ExecuteOperatorOutputPort,
   ExecuteRepairLaunchPort,
   HandoffExecutionPort,
@@ -36,6 +37,11 @@ export class ExecuteHandoffService {
   async run(request: ExecuteHandoffRequest): Promise<boolean> {
     let validation = await this.validate(request);
     if (!validation.ok) {
+      if (validation.humanOnlyContractBlocker) {
+        this._ports.output.error(validation.error ?? 'Invalid locked contract requires human review.');
+        await request.onAutonomousStop?.('Recorded invalid locked contract requires operator decision; evidence repair is stopped.');
+        return false;
+      }
       const repaired = await this.repairCheckpointGap(request, validation);
       if (!repaired) { return false; }
     }
@@ -61,7 +67,7 @@ export class ExecuteHandoffService {
     return this._ports.checkpoints.validateBeforeHandoff({ ...request, log: this._ports.output.log, error: this._ports.output.error });
   }
 
-  private async repairCheckpointGap(request: ExecuteHandoffRequest, validation: { error?: string; nextCheckpoint?: string; ok: boolean }): Promise<boolean> {
+  private async repairCheckpointGap(request: ExecuteHandoffRequest, validation: CheckpointValidationVerdict): Promise<boolean> {
     const error = validation.error ?? 'checkpoint validation failed';
     const classification = this._ports.handoff.classifyFailure(error);
     if (!validation.nextCheckpoint && classification?.failureClass !== 'IncompleteEvidence') {
@@ -74,7 +80,7 @@ export class ExecuteHandoffService {
       : error;
     const repaired = await this.rebound(request, diagnostic, async () => {
       const verdict = await this.validate(request);
-      return { ok: verdict.ok, diagnostic: verdict.error ?? '' };
+      return { ok: verdict.ok, diagnostic: verdict.error ?? '', ...(verdict.humanOnlyContractBlocker ? { reason: { kind: 'declared-gate-validation' as const, command: verdict.humanOnlyContractBlocker.command, diagnostic: verdict.error ?? 'Recorded contract requires operator decision' } } : {}) };
     });
     if (repaired) { return true; }
     const finalValidation = await this.validate(request);
@@ -84,6 +90,7 @@ export class ExecuteHandoffService {
   }
 
   private async repairHandoff(request: ExecuteHandoffRequest, holder: { result: HandoffRunResult }): Promise<void> {
+    if (await this.stopForContract(request, holder.result)) { return; }
     const error = holder.result.error ?? 'unknown';
     const diagnostic = [error, holder.result.gateOutput?.stdout, holder.result.gateOutput?.stderr].filter(Boolean).join('\n');
     const classification = this._ports.handoff.classifyFailure(error);
@@ -99,8 +106,9 @@ export class ExecuteHandoffService {
         this._ports.output.log('Content error detected. Attempting agent relaunch to fix...');
         await this.rebound(request, error, async () => {
           holder.result = await this._ports.handoff.run({ ...request, force: true });
-          return { ok: holder.result.ok, diagnostic: holder.result.error ?? '' };
+          return this.handoffVerification(holder.result);
         });
+        if (await this.stopForContract(request, holder.result)) { return; }
         if (!holder.result.ok) { holder.result = { ...holder.result, error: `Post-relaunch handoff failed: ${holder.result.error ?? 'unknown'}` }; }
       }
       return;
@@ -109,9 +117,24 @@ export class ExecuteHandoffService {
     const reason: ReboundReason = holder.result.gateFailure ?? { kind: 'handoff-verification', error, gateOutput: diagnostic };
     await this.rebound(request, reason, async () => {
       holder.result = await this._ports.handoff.run({ ...request, force: true });
-      return { ok: holder.result.ok, diagnostic: holder.result.error ?? '', reason: holder.result.gateFailure };
+      return this.handoffVerification(holder.result);
     });
+    if (await this.stopForContract(request, holder.result)) { return; }
     if (!holder.result.ok) { holder.result = { ...holder.result, error: `Gate failure persisting after ${DEFAULT_REBOUND_ATTEMPTS} relaunch attempts. Manual intervention required.` }; }
+  }
+
+  private async stopForContract(request: ExecuteHandoffRequest, result: HandoffRunResult): Promise<boolean> {
+    if (result.reason !== 'human-only-contract-blocker' && result.reason !== 'repair-contract-changed') { return false; }
+    await request.onAutonomousStop?.(result.error ?? 'Recorded contract requires operator decision.');
+    return true;
+  }
+
+  private handoffVerification(result: HandoffRunResult): VerifyResult {
+    const diagnostic = result.error ?? '';
+    const reason = result.reason === 'human-only-contract-blocker' || result.reason === 'repair-contract-changed'
+      ? { kind: 'declared-gate-validation' as const, command: 'px checkpoint check', diagnostic }
+      : result.gateFailure;
+    return { ok: result.ok, diagnostic, reason };
   }
 
   private async rebound(request: ExecuteHandoffRequest, reason: ReboundReason | string, verify: () => Promise<VerifyResult>): Promise<boolean> {

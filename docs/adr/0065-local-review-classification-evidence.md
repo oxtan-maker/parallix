@@ -163,8 +163,17 @@ Decision: first reviews require the general reviewer, with no Jev call or
 classifier verdict. This restriction applies independently of operator mode.
 Finding-resolution re-reviews retain their eligibility, thresholds and
 publication authority. Integration repairs are decided by the recorded green gate
-and one weakening question (restore at `preserves` >= 0.60, otherwise the general
-reviewer) rather than the resolution panel; the question never returns a mission. Display only re-review
+and the frozen V4 weakening question, followed by the measured-limit V5 question
+only if V4 does not clear, rather than the resolution panel. Each clears only
+when it selects `preserves` with probability >= 0.60; every other V5 outcome
+retains the general reviewer and never returns a mission. Both questions reuse
+the same state, with repair commit subjects and no commit bodies. V5 permits a
+finite resource limit at most about twice a measured overrun in the failure lines,
+only for the check that failed. Implementer claims cannot replace that measurement,
+and removing limits or lowering quality bars remains weakening. Restored approvals
+record the clearing question, probability and both question versions. Statistics
+report V5 calls, clears and its preserves distribution alongside historical
+single-question rounds. Display only re-review
 statistics; keep historical measurements and their collection intact.
 
 The research found useful first-review decisions alongside unsafe clears.

@@ -212,6 +212,7 @@ export const MISSION_CHECKPOINTS_AUTHORITY = {
   raw_filename: MISSION_VALUE_AUTHORITY,
   first_line: MISSION_VALUE_AUTHORITY,
   next_action_text: MISSION_VALUE_AUTHORITY,
+  recording_json: MISSION_VALUE_AUTHORITY,
 } as const satisfies Readonly<Record<string, FieldAuthority>>;
 
 export const MISSION_CHECKPOINT_GOAL_CHECKS_AUTHORITY = {
@@ -297,6 +298,8 @@ export const SQLITE_ENTITY_AUTHORITY = {
   missions: MISSIONS_AUTHORITY,
   mission_labels: MISSION_LABELS_AUTHORITY,
   mission_external_task_refs: MISSION_EXTERNAL_TASK_REFS_AUTHORITY,
+  mission_review_checkpoint_states: { mission_id: MISSION_VALUE_AUTHORITY, round_number: MISSION_VALUE_AUTHORITY, state_json: MISSION_VALUE_AUTHORITY },
+  mission_checkpoint_versions: { mission_id: MISSION_VALUE_AUTHORITY, version: MISSION_VALUE_AUTHORITY, name: MISSION_VALUE_AUTHORITY, checkpoint_json: MISSION_VALUE_AUTHORITY, recorded_at: MISSION_VALUE_AUTHORITY, recorded_round: MISSION_VALUE_AUTHORITY, mission_revision: MISSION_VALUE_AUTHORITY },
   mission_checkpoints: MISSION_CHECKPOINTS_AUTHORITY,
   mission_dependencies: MISSION_DEPENDENCIES_AUTHORITY,
   mission_checkpoint_goal_checks: MISSION_CHECKPOINT_GOAL_CHECKS_AUTHORITY,

@@ -39,3 +39,35 @@ export function carryCompletion(before: readonly string[], completed: readonly n
   const done = new Set(completed.map((index) => before[index]));
   return after.flatMap((criterion, index) => (done.has(criterion) ? [index] : []));
 }
+
+export interface SuccessCriterion { readonly id: string; readonly text: string }
+
+/** IDs are mission-scoped, monotonically allocated and never reused. Text-only
+ * replacements retain exact matches; text edits must carry the existing ID. */
+export function replaceSuccessCriteria(
+  mission: import('./mission.js').Mission, texts: readonly string[], ids?: readonly (string | null)[],
+): import('./mission.js').Mission {
+  const before = mission.successCriteria ?? [];
+  let next = mission.nextSuccessCriterionId ?? 1;
+  const previousIds = mission.successCriterionIds ?? before.map(() => `sc-${next++}`);
+  if (ids && ids.length !== texts.length) { throw new MissionSuccessCriteriaViolation('Criterion IDs must pair with criterion texts'); }
+  const assigned = texts.map((text, index) => {
+    const requested = ids?.[index];
+    if (typeof requested === 'string' && !previousIds.includes(requested)) { throw new MissionSuccessCriteriaViolation(`Unknown criterion ID: ${requested}`); }
+    return requested ?? (ids ? null : previousIds[before.indexOf(text)]) ?? `sc-${next++}`;
+  });
+  if (new Set(assigned).size !== assigned.length) { throw new MissionSuccessCriteriaViolation('Criterion IDs must be distinct'); }
+  const completed = new Set((mission.completedSuccessCriteria ?? []).map(index => previousIds[index]));
+  return { ...mission, successCriteria: texts, successCriterionIds: assigned, nextSuccessCriterionId: next,
+    completedSuccessCriteria: assigned.flatMap((id, index) => completed.has(id) ? [index] : []) };
+}
+
+export function criterionContract(mission: Pick<import('./mission.js').Mission, 'successCriteria' | 'successCriterionIds'>): readonly SuccessCriterion[] {
+  return (mission.successCriteria ?? []).map((text, index) => ({ id: mission.successCriterionIds?.[index] ?? '', text }));
+}
+
+/** Exact matching only; an explicit null is retained as unknown legacy identity. */
+export function identifyGoalCheckRows(rows: readonly import('./checkpoint.js').GoalCheckRow[], criteria: readonly SuccessCriterion[]) {
+  return rows.map(row => ({ ...row, criterionId: row.criterionId !== undefined ? row.criterionId
+    : criteria.find(criterion => criterion.text === row.criterion)?.id || null }));
+}

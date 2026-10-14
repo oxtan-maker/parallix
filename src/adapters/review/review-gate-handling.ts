@@ -6,6 +6,7 @@
  * repaired is decided by `src/application/review-loop/pre-review.ts`.
  */
 
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import type { GateFailureReason, HookFailureReason } from '../../application/rebound-kernel.js';
 import { classifyHookFailure } from '../../application/hook-failure-workflow.js';
@@ -37,6 +38,7 @@ export async function runPreReviewGate(
   slug: string,
   worktree: string,
   opts: {
+    configuration?: ParallixConfiguration;
     resolveEffectiveAreaFn?: typeof resolveEffectiveArea;
     findMissionAreaFn?: typeof findMissionArea;
     runFn?: typeof run;
@@ -67,12 +69,13 @@ export async function runPreReviewGate(
 
   log(fmt.status('INFO', `Pre-review gate for area "${area}": ${fmt.command(command)}`));
 
-  const reusable = readReusableVerificationProof(command, worktree);
+  const reusable = readReusableVerificationProof(command, worktree, { configuration: opts.configuration });
   if (reusable.ok) {
+    if ('diagnostic' in reusable) { log(String(reusable.diagnostic)); }
     log(fmt.status('PASS', `Pre-review gate reused successful active/review proof for area "${area}"${reusable.rebased ? ' after completed rebase' : ''}.`));
     return { ok: true, area, command, exitCode: 0, stdout: '', stderr: '' };
   }
-  const before = createVerificationProofIdentity(command, worktree);
+  const before = createVerificationProofIdentity(command, worktree, { configuration: opts.configuration });
 
   // Run with pipe mode to capture output for auto-bounce fix prompts.
   const result = runFnOverride('bash', ['-lc', command], {
@@ -103,7 +106,7 @@ export async function runPreReviewGate(
 
   log(fmt.status('PASS', `Pre-review gate passed for area "${area}".`));
   if (before.ok) {
-    const written = writeReusableVerificationProof(command, worktree, { expectedIdentity: before.identity });
+    const written = writeReusableVerificationProof(command, worktree, { expectedIdentity: before.identity, configuration: opts.configuration });
     if (written.ok === false) { log(fmt.status('WARN', `Pre-review gate proof unavailable (${written.error}).`)); }
   }
   return { ok: true, area, command, exitCode: 0, stdout, stderr };

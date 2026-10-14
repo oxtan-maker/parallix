@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { subscribeToBoardProjection } from '../../../../src/application/projections/board-subscription.js';
 import type { BoardProjection } from '../../../../src/application/projections/board.js';
-import { makeProjection } from '../../../fixtures/board-projection.js';
+import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
 
 test('SC35: a slow board refresh never overlaps or accumulates a timer backlog', async () => {
   const timers: Array<() => void> = [];
@@ -72,3 +72,33 @@ function withUnattributed(count: number): BoardProjection {
   };
   return projection;
 }
+
+
+test('checkpoint-only plan and evidence changes repaint the subscribed board (TASK-2745)', async () => {
+  const plan = [1, 2].map(number => ({ name: `CP-${number}`, description: `Step ${number}`, goalCheck: [], state: 'future' as const }));
+  const projections = [
+    makeProjection({ active: [makeCard()] }),
+    makeProjection({ active: [makeCard({ checkpointEvidence: plan })] }),
+    makeProjection({ active: [makeCard({ checkpointEvidence: [
+      { ...plan[0], state: 'completed', goalCheck: [{ criterion: 'done', evidence: 'npm test' }] },
+      { ...plan[1], state: 'current' },
+    ] })] }),
+  ];
+  const timers: Array<() => void> = [];
+  let index = 0;
+  const seen: BoardProjection[] = [];
+  const stop = subscribeToBoardProjection(async () => projections[index], projection => seen.push(projection), {
+    setTimer: callback => { timers.push(callback); return callback; }, clearTimer: () => { timers.length = 0; },
+  });
+  try {
+    for (index = 0; index < projections.length; index++) {
+      timers.shift()!();
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(seen.length, index + 1);
+    }
+    index = projections.length - 1;
+    timers.shift()!();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(seen.length, 3, 'unchanged checkpoint state does not repaint');
+  } finally { stop(); }
+});

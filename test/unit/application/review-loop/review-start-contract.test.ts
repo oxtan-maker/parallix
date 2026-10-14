@@ -96,3 +96,32 @@ test('continuation preparation stops after an unreachable provider even when exi
   assert.deepEqual(fake.launches, []);
   assert.deepEqual(fake.writes, []);
 });
+
+import { fixtureMission, approvedReview, inMemoryTransitionStore } from '../../../fixtures/mission-builders.js';
+import { revokeApprovedDecision } from '../../../../src/domain/review.js';
+
+test('continue enters interrupted repair work before checkpoint handoff checks (TASK-2738)', async () => {
+  const review = revokeApprovedDecision(approvedReview(slug), 1, {
+    revokedAt: '2026-10-01T12:00:00Z', revokedBy: 'workflow', reason: 'gate failed',
+    cause: { kind: 'integration-gate-failure', gate: 'npm test' },
+  });
+  const mission = fixtureMission(slug, { review, checkpoints: [{
+    missionId: fixtureMission(slug).id, name: 'CP-6', goalCheck: [], nextActionText: 'repair',
+    repair: { incidentId: 'incident-6', command: 'npm test', attempt: 3,
+      authorizedGates: ['npm test'], authorizedCriteria: ['repair works'], evidenceRecorded: false, verified: false },
+  }] });
+  const store = inMemoryTransitionStore(mission);
+  const fake = fakeReviewLoopPorts({ slug, missionStore: store,
+    handoff: { handoff: async () => { assert.fail('entering implementer work must not require completed checkpoints'); } },
+    agents: { launch: async launch => {
+      assert.equal(launch.role, 'implementer');
+      assert.equal(launch.prompt?.reviewOutcome, 'REQUEST_CHANGES');
+      return { result: { status: 0 } };
+    } },
+  });
+  await runReviewLoop({ slug, isContinue: true, implementer: 'claude' }, fake.ports);
+  const loaded = await store.load(mission.id);
+  assert.equal(loaded.kind, 'found');
+  if (loaded.kind === 'found') { assert.deepEqual(loaded.mission, mission); }
+  assert.deepEqual(fake.exits, []);
+});

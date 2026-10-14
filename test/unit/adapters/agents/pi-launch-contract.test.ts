@@ -6,6 +6,8 @@
 //   Pi e2e opt-in guard: task-2236, task-2500.04
 //   Pi progress streaming: task-2583
 
+import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
+import { buildExecutePrompt } from '../../../../src/adapters/cli/commands/active.js';
 import test, { describe, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -277,6 +279,39 @@ describe("Pi progress streaming", () => {
     assert.equal(result.telemetry.toolCalls, 3);
     assert.equal(result.telemetry.cost_usd, 0.25);
     assert.match(f.writes.join(''), /2 turns · 50 in \/ 20 out · \$0\.2500/);
+  });
+
+  test('both prompt policies retain Pi sessions and leave native near-limit settings to the runtime (TASK-2737)', async () => {
+    const root = registeredMkdtemp('pi-context-policy-');
+    try {
+      fs.mkdirSync(path.join(root, '.pi'));
+      for (const contextCompaction of [false, true]) {
+        fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { prompts: { contextCompaction } } }));
+        for (const nativeEnabled of [false, true]) {
+          const settings = JSON.stringify({ compaction: { enabled: nativeEnabled, reserveTokens: 16384 } });
+          fs.writeFileSync(path.join(root, '.pi/settings.json'), settings);
+          const f = fixture();
+          const manager = {};
+          let received: any;
+          let receivedPrompt = '';
+          pi.__setSdkForTest({ SessionManager: {
+            continueRecent: (cwd: string) => { assert.equal(cwd, root); return manager; },
+            create: () => { throw new Error('checkpoint continuation must not create a fresh session'); },
+          } });
+          pi.__setCreateAgentSessionForTest(async options => {
+            received = options;
+            return { session: { ...f.session, prompt: async (prompt: string) => { receivedPrompt = prompt; } } };
+          });
+          const prompt = buildExecutePrompt('task-2737', 'CP-1 recorded; CP-2 pending', { rootDir: root });
+          const result = await pi.startPiAgent({ ...f.options, worktree: root, prompt, resume: true }).resultPromise;
+          assert.equal(result.status, 0);
+          assert.equal(result.sessionId, 'pi-session');
+          assert.ok(receivedPrompt.endsWith(prompt));
+          assert.deepEqual(received, { cwd: root, sessionManager: manager }, 'no runtime settings override from prompt policy');
+          assert.equal(fs.readFileSync(path.join(root, '.pi/settings.json'), 'utf8'), settings);
+        }
+      }
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 
   test('Pi telemetry getter failures do not discard successful assistant output', async () => {

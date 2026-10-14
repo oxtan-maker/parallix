@@ -424,3 +424,98 @@ describe("stopped review recovery through px review --resume", () => {
     });
   });
 });
+
+// Running CLI recovery contract: real Git/SQLite/composition, isolated launcher boundary.
+import { setLogger } from '../../../src/application/presentation/cli-format.js';
+import { run as runCli } from '../../../src/composition/create-cli.js';
+import { openRepairFixture } from '../../lib/integration-repair-fixture.js';
+import { setCommandPathProbe, setLauncherHealthProbe, setWorkflowLaunchPort } from '../../../src/adapters/agents/agents.js';
+import { RepairCheckpointService } from '../../../src/application/repair-checkpoint-service.js';
+import { revokeApprovedDecision } from '../../../src/domain/review.js';
+
+it('running CLI recovers an interrupted bounceback and retains handoff evidence obligations (TASK-2738)', { timeout: 10000 }, async (t) => {
+  const fixture = await openRepairFixture({ slug: 'task-repair-recovery' });
+  const priorConfinement = process.env.PARALLIX_NO_BUBBLEWRAP;
+  process.env.PARALLIX_NO_BUBBLEWRAP = '1';
+  t.after(async () => {
+    setWorkflowLaunchPort(null);
+    setCommandPathProbe(null);
+    setLauncherHealthProbe(null);
+    if (priorConfinement === undefined) { delete process.env.PARALLIX_NO_BUBBLEWRAP; }
+    else { process.env.PARALLIX_NO_BUBBLEWRAP = priorConfinement; }
+    await fixture.close();
+  });
+  const store = new SqliteMissionStore(fixture.database);
+  const original = await fixture.load();
+  const bounced = revokeApprovedDecision(original.review!, 1, {
+    revokedAt: '2026-10-01T12:00:00Z', revokedBy: 'workflow', reason: 'gate failed',
+    cause: { kind: 'integration-gate-failure', gate: ':' },
+  });
+  const stopped = requestReviewIntervention(bounced, {
+    requestedAt: '2026-10-01T13:00:00Z', requestedBy: 'workflow', reason: 'REPAIR_EXHAUSTED',
+  });
+  await store.save({ ...original, status: 'active', rawStatus: 'active', review: stopped } as Mission, await fixture.version() as never);
+  const repair = new RepairCheckpointService(store);
+  const opened = await repair.open({ slug: fixture.slug, incidentId: 'interrupted-incident', command: ':', attempt: 3 });
+  assert.ok(opened);
+  const task = path.join(fixture.worktree, 'backlog', 'tasks', `${fixture.slug} - Fixture.md`);
+  fs.writeFileSync(task, fs.readFileSync(task, 'utf8').replace('status: ready-for-integration', 'status: active'));
+  fixture.git(fixture.worktree, ['add', '.']);
+  fixture.git(fixture.worktree, ['commit', '-m', 'persist interrupted repair fixture']);
+  const before = await fixture.load();
+  const prompts: string[] = [];
+  const launches: string[] = [];
+  setCommandPathProbe(() => '/fixture-agent');
+  setLauncherHealthProbe(() => ({ ok: true }));
+  setWorkflowLaunchPort(({ prompt, worktree }: { prompt: string; worktree?: string }) => {
+    launches.push('act-on-review');
+    prompts.push(prompt);
+    return { invocation: { command: 'fixture-agent', args: [], options: { cwd: worktree } },
+      resultPromise: Promise.resolve({ status: 0, stdout: '', stderr: '' }) };
+  });
+  const messages: string[] = [];
+  const previousLogger = setLogger({ log: text => { messages.push(String(text)); }, error: text => { messages.push(String(text)); } });
+  t.after(() => { setLogger(previousLogger); });
+  const invoke = (args: string[]) => runCli(args, { baseCwd: fixture.worktree, log: text => { messages.push(text); return text; }, error: text => { messages.push(text); return text; } });
+  assert.equal(await invoke(['review', fixture.slug, '--continue']), 0);
+  assert.deepEqual(launches, ['act-on-review']);
+  const prompt = prompts[0];
+  for (const text of ['act-on-review', 'status task-repair-recovery', 'checkpoint', 'handoff']) { assert.ok(prompt.includes(text), prompt); }
+  const after = await fixture.load();
+  assert.deepEqual(after.checkpoints, before.checkpoints);
+  assert.equal(after.review?.intervention, null, '--continue clears the operator stop');
+  assert.equal(after.checkpoints.at(-1)?.repair?.evidenceRecorded, false);
+  assert.equal(after.checkpoints.at(-1)?.repair?.verified, false);
+
+  t.diagnostic(`CLI recovery launched one implementer; ${opened.name}/interrupted-incident retained, evidenceRecorded=false, verified=false; operator stop cleared.`);
+
+  messages.length = 0;
+  assert.equal(await invoke(['review', fixture.slug, '--start']), 1);
+  assert.ok(messages.join('\n').includes('checkpoint evidence is missing'), messages.join('\n'));
+  assert.ok(messages.join('\n').includes(opened.name), messages.join('\n'));
+  assert.equal(launches.length, 1, 'handoff refusal must not launch a reviewer or repair agent');
+  t.diagnostic(`Reviewer handoff rejected missing ${opened.name} evidence before any reviewer launch.`);
+  await assert.rejects(repair.verify(fixture.slug, opened.name), /fresh authorized evidence/);
+  assert.equal(await invoke(['checkpoint', 'record', '--slug', fixture.slug, '--name', opened.name,
+    '--criterion', 'feature ships', '--evidence', 'feature.txt', '--next', 'Run authorized checks, then independent review']), 0);
+  const recorded = await fixture.load();
+  assert.equal(recorded.checkpoints.at(-1)?.repair?.evidenceRecorded, true);
+  assert.equal(recorded.checkpoints.at(-1)?.repair?.verified, false, 'recorded evidence is not harness verification');
+  assert.equal(recorded.checkpoints.at(-1)?.repair?.incidentId, 'interrupted-incident');
+  t.diagnostic('Real checkpoint record accepted fresh evidence and retained incident authority; it did not synthesize verification or approval.');
+  setWorkflowLaunchPort(({ prompt, worktree }: { prompt: string; worktree?: string }) => ({
+    invocation: { command: 'fixture-reviewer', args: [], options: { cwd: worktree } },
+    resultPromise: (async () => {
+      assert.match(prompt, /^Mode: review\./m, 'only independent reviewer work is allowed after repaired handoff');
+      launches.push('review');
+      const mission = await fixture.load();
+      assert.equal(await invoke(['verdict', 'approve', '--slug', fixture.slug,
+        '--actor', mission.review!.rounds.at(-1)!.reviewer, '--comment', 'Fixture repair reviewed']), 0);
+      return { status: 0, stdout: '', stderr: '' };
+    })(),
+  }));
+  assert.equal(await invoke(['review', fixture.slug, '--continue']), 0, messages.join('\n'));
+  assert.deepEqual(launches, ['act-on-review', 'review']);
+  assert.equal(reviewStatus((await fixture.load()).review!), 'approved');
+  t.diagnostic('After valid evidence, normal --continue passed handoff and launched the independent reviewer; approval came only from its explicit verdict.');
+});

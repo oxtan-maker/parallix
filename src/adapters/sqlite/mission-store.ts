@@ -1,3 +1,4 @@
+import { SqliteCheckpointHistory } from './checkpoint-history.js';
 import type {
   MissionLoadResult,
   MissionNelRecordReceipt,
@@ -12,7 +13,7 @@ import type { MissionNelRecord } from '../../domain/net-engineering-lines.js';
 import { missionTitle, type Mission, type MissionId } from '../../domain/mission.js';
 import { missionBrief } from '../../domain/mission-brief.js';
 import { declaredGates } from '../../domain/mission-gates.js';
-import { completedCriteria, successCriteria } from '../../domain/mission-success-criteria.js';
+import { completedCriteria, successCriteria, replaceSuccessCriteria, criterionContract, identifyGoalCheckRows } from '../../domain/mission-success-criteria.js';
 import { missionDependencies } from '../../domain/mission-dependencies.js';
 import type { KnownRepository, RepositoryId } from '../../domain/repository.js';
 import { toCanonicalUtcInstant } from '../../domain/instant.js';
@@ -149,6 +150,14 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     return cache;
   }
 
+  async reviewCheckpointState(id: MissionId, round: number) {
+    return this.enqueue(() => new SqliteCheckpointHistory(this.db).round(id, round));
+  }
+
+  async checkpointHistory(id: MissionId) {
+    return this.enqueue(() => new SqliteCheckpointHistory(this.db).read(id));
+  }
+
   async save(
     mission: Mission,
     expectedVersion: MissionVersion | null,
@@ -194,7 +203,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     const params = [...scope.params];
     const missionRows = await this.db.query<MissionRecord>(
       `SELECT id, repository_id, title, status, raw_status, assignee,
-              net_engineering_lines, reproduction_test, predicted_nel_bucket, description, closed_at, version
+              net_engineering_lines, reproduction_test, predicted_nel_bucket, description, closed_at, version, next_success_criterion_id
        FROM missions WHERE ${scope.missions} ORDER BY id`,
       params,
     );
@@ -225,16 +234,16 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
         this.db.query<MissionBriefRecord>(`SELECT mission_id, goal, why_text, scope_text FROM mission_briefs WHERE ${scope.children}`, params),
         this.db.query<MissionBriefOutOfScopeRecord>(`SELECT mission_id, position, entry FROM mission_brief_out_of_scope WHERE ${scope.children} ORDER BY mission_id, position`, params),
         this.db.query<MissionDeclaredGateRecord>(`SELECT mission_id, position, command FROM mission_declared_gates WHERE ${scope.children} ORDER BY mission_id, position`, params),
-        this.db.query<MissionSuccessCriterionRecord>(`SELECT mission_id, position, criterion, completed FROM mission_success_criteria WHERE ${scope.children} ORDER BY mission_id, position`, params),
+        this.db.query<MissionSuccessCriterionRecord>(`SELECT mission_id, position, criterion, criterion_id, completed FROM mission_success_criteria WHERE ${scope.children} ORDER BY mission_id, position`, params),
         this.db.query<MissionDependencyRecord>(`SELECT mission_id, position, depends_on_mission_id FROM mission_dependencies WHERE ${scope.children} ORDER BY mission_id, position`, params),
         this.db.query<MissionCheckpointRecord>(
           `SELECT mission_id, position, checkpoint_mission_id, name, raw_filename,
-                  first_line, next_action_text, repair_json
+                  first_line, next_action_text, repair_json, recording_json
            FROM mission_checkpoints WHERE ${scope.children} ORDER BY mission_id, position`,
           params,
         ),
         this.db.query<MissionGoalCheckRecord>(
-          `SELECT mission_id, checkpoint_position, position, criterion, evidence, recorded_round, repaired_gate, repaired_gates
+          `SELECT mission_id, checkpoint_position, position, criterion, criterion_id, evidence, recorded_round, repaired_gate, repaired_gates
            FROM mission_checkpoint_goal_checks
            WHERE ${scope.children} ORDER BY mission_id, checkpoint_position, position`,
           params,
@@ -570,6 +579,13 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       await this.clearAggregateValues(mission);
     }
 
+    mission = replaceSuccessCriteria(mission, mission.successCriteria ?? [], mission.successCriterionIds);
+    mission = { ...mission, checkpoints: mission.checkpoints.map(checkpoint => ({ ...checkpoint,
+      goalCheck: identifyGoalCheckRows(checkpoint.goalCheck, criterionContract(mission)) })) };
+    await this.db.execute('UPDATE missions SET next_success_criterion_id = ? WHERE id = ?', [mission.nextSuccessCriterionId!, mission.id]);
+    const checkpointHistory = new SqliteCheckpointHistory(this.db);
+    await checkpointHistory.append(mission);
+    await checkpointHistory.captureRounds(mission);
     await this.insertAggregateValues(mission);
     return nextVersion;
   }
@@ -640,8 +656,8 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     }
     for (const [position, criterion] of (mission.successCriteria ?? []).entries()) {
       await this.db.execute(
-        'INSERT INTO mission_success_criteria (mission_id, position, criterion, completed) VALUES (?, ?, ?, ?)',
-        [mission.id, position, criterion, (mission.completedSuccessCriteria ?? []).includes(position) ? 1 : 0],
+        'INSERT INTO mission_success_criteria (mission_id, position, criterion, completed, criterion_id) VALUES (?, ?, ?, ?, ?)',
+        [mission.id, position, criterion, (mission.completedSuccessCriteria ?? []).includes(position) ? 1 : 0, mission.successCriterionIds?.[position] ?? null],
       );
     }
     if (mission.externalTaskRef) {
@@ -666,8 +682,8 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       await this.db.execute(
         `INSERT INTO mission_checkpoints
            (mission_id, position, checkpoint_mission_id, name, raw_filename,
-            first_line, next_action_text, repair_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            first_line, next_action_text, repair_json, recording_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           mission.id,
           checkpointPosition,
@@ -677,14 +693,15 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
           checkpoint.firstLine ?? null,
           checkpoint.nextActionText,
           checkpoint.repair ? JSON.stringify(checkpoint.repair) : null,
+          checkpoint.recording ? JSON.stringify(checkpoint.recording) : null,
         ],
       );
       for (const [position, row] of checkpoint.goalCheck.entries()) {
         await this.db.execute(
           `INSERT INTO mission_checkpoint_goal_checks
-             (mission_id, checkpoint_position, position, criterion, evidence, recorded_round, repaired_gate, repaired_gates)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [mission.id, checkpointPosition, position, row.criterion, row.evidence, row.recordedRound ?? null, row.repairedGate ?? null, row.repairedGates ? JSON.stringify(row.repairedGates) : null],
+             (mission_id, checkpoint_position, position, criterion, evidence, recorded_round, repaired_gate, repaired_gates, criterion_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [mission.id, checkpointPosition, position, row.criterion, row.evidence, row.recordedRound ?? null, row.repairedGate ?? null, row.repairedGates ? JSON.stringify(row.repairedGates) : null, row.criterionId ?? null],
         );
       }
     }

@@ -195,6 +195,7 @@ function repairAuthorityRoute(slots: FixPromptSlots): string[] {
   const cp = slots.repairCheckpoint;
   return [
     'REPAIR AUTHORITY: These dedicated instructions govern this session, including resumed execute or act-on-review context. Preserve locked gates, success criteria and test invariants. An invalid locked contract requires human review; never rewrite your own checks.',
+    `Run px checkpoint check --slug ${slots.slug} --json before declaring completion. Inspect ready and primaryStopReason. A recorded unresolved human-only contract blocker is the primary stop reason even when checkpoint evidence is incomplete: stop for the operator; do not fabricate proof, start repeated evidence-only repair, use record --force, or treat prose as resolution. Only an explicit operator decision can clear the recorded blocker.`,
     'Only a successful harness rerun of the authorized required check establishes repair success; an unrelated passing test or an agent claim does not.',
     ...(cp ? [
       `Harness-created repair checkpoint: ${cp.name}; Version at launch: ${cp.version}.`,

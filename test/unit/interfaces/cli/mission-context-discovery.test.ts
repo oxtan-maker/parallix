@@ -83,3 +83,45 @@ test('AC #11/#13: every write help uses typed flags, never a JSON request blob',
   // The slug is inferred, so the agent is never asked to thread it through.
   assert.match(GOAL_HELP, /\[--slug <slug>\]/);
 });
+
+test('checkpoint history and round reads expose immutable evidence without writes (TASK-2742)', async () => {
+  const { createCheckpointCommand } = await import('../../../../src/interfaces/cli/mission-writes.js');
+  const { MissionCheckpointService } = await import('../../../../src/application/mission-checkpoint-service.js');
+  const { missionId } = await import('../../../../src/domain/mission.js');
+  const { missionVersion } = await import('../../../../src/application/domain-ports.js');
+  const id = missionId('task-history-fixture');
+  const checkpoint = { missionId: id, name: 'CP-1', goalCheck: [{ criterion: 'proof', evidence: 'original' }], nextActionText: 'continue' };
+  const versions = [{ version: 1, checkpoint, recordedAt: null, recordedRound: null, missionRevision: null }];
+  const boundary = { round: 1, versions: [1], checkpoints: [checkpoint] };
+  let saves = 0;
+  const service = new MissionCheckpointService({
+    load: async () => ({ kind: 'found', mission: { id, checkpoints: [checkpoint] } as never, version: missionVersion(2) }),
+    save: async () => { saves++; return missionVersion(3); },
+    checkpointHistory: async () => versions,
+    reviewCheckpointState: async (_id, round) => round === 1 ? boundary : round === 2 ? null : undefined,
+  });
+  const command = createCheckpointCommand(service, () => id);
+  const chunks: string[] = [];
+  const original = process.stdout.write;
+  process.stdout.write = ((chunk: string) => { chunks.push(String(chunk)); return true; }) as typeof original;
+  try {
+    await command(['history']);
+    assert.deepEqual(JSON.parse(chunks.join('')), versions);
+    chunks.length = 0;
+    await command(['round', '--round', '1']);
+    assert.deepEqual(JSON.parse(chunks.join('')), boundary);
+    chunks.length = 0;
+    await command(['read', '--name', 'CP-1']);
+    assert.deepEqual(JSON.parse(chunks.join('')).checkpoints, [checkpoint]);
+    chunks.length = 0;
+    await command(['history', '--name', 'CP-99']);
+    assert.deepEqual(JSON.parse(chunks.join('')), []);
+    await assert.rejects(command(['round', '--round', '2']), /unknown.*predates/);
+    await assert.rejects(command(['round', '--round', '99']), /no checkpoint state.*99/);
+    for (const round of ['0', '-1', '1.5', 'garbage', 'Infinity']) {
+      await assert.rejects(command(['round', '--round', round]), /positive integer/);
+    }
+    assert.equal(saves, 0);
+    assert.equal(versions[0]?.checkpoint.goalCheck[0]?.evidence, 'original');
+  } finally { process.stdout.write = original; }
+});

@@ -12,6 +12,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDraftWorkflowAdapter, DRAFT_CONTRACT_REPAIR_ATTEMPTS } from '../../../src/adapters/cli/commands/draft-stats.js';
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { normalizeDraftClassification, buildRestartPrompt } from '../../../src/adapters/cli/commands/draft-prompts.js';
 import { decideMission } from '../../../src/domain/mission-workflow.js';
 import { missionId, missionLabels, type Mission } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
@@ -253,7 +255,14 @@ test('generated config carries the pre-draft hook entry and Parallix installs de
   const generated = buildWorkflowConfig({}) as { adapters: { draft?: { preDraftCommand?: unknown } } };
   assert.equal(generated.adapters.draft?.preDraftCommand, '');
   const own = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'workflow.config.json'), 'utf8'));
-  assert.match(own.adapters.draft.preDraftCommand, /^pnpm install --frozen-lockfile\b/);
+  // TASK-2714: the draft hook is the mission's one successful dependency install, so
+  // it goes through the identity-aware wrapper that records it. ADR 0063 still owns
+  // the command itself: pnpm, frozen lockfile, prefer-offline.
+  assert.equal(own.adapters.draft.preDraftCommand, './scripts/px-install.sh');
+  const wrapper = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'px-install.sh'), 'utf8');
+  assert.match(wrapper, /dependency-identity\.mjs\" ensure/);
+  const identity = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'dependency-identity.mjs'), 'utf8');
+  assert.match(identity, /INSTALL_ARGS = \['install', '--frozen-lockfile', '--prefer-offline'\]/);
 });
 
 // --- handoff PR step area ----------------------------------------------------------------
@@ -391,4 +400,43 @@ test('px gate add refuses a gate the validator rejects and writes nothing', asyn
   assert.deepEqual(writes, []);
   await quietly(async () => { await command(['add', '--slug', 'task-x', '--command', 'npm test', '--expected-version', '1']); });
   assert.equal(writes.length, 1);
+});
+
+
+test('draft completion refuses unknown until the agent classifies the mission (TASK-2731)', () => {
+  const mission = fixtureMission('task-classify', {
+    status: 'backlog', labels: missionLabels(['unknown']),
+    brief: { goal: 'Fix greeting', why: 'Typo', scope: 'hello.sh', outOfScope: [] },
+    successCriteria: ['hello.sh prints hello'], declaredGates: ['npm test'], predictedNelBucket: 'Small',
+  });
+  assert.throws(() => decideMission(mission, { type: 'refine' }), /Cannot refine with unknown classification/);
+  assert.equal(mission.status, 'backlog');
+  for (const classification of ['ai_sdlc', 'user_value']) {
+    assert.equal(decideMission({ ...mission, labels: missionLabels([classification]) }, { type: 'refine' }).status, 'refined');
+    assert.equal(normalizeDraftClassification('task-classify', '/unused', {
+      resolveMissionClassificationFn: () => ({ classification, taskFile: null, source: 'mission' }),
+    }).ok, true);
+  }
+  assert.equal(normalizeDraftClassification('task-classify', '/unused', {
+    resolveMissionClassificationFn: () => ({ classification: 'unknown', taskFile: null, source: 'mission' }),
+  }).ok, false);
+  assert.match(buildRestartPrompt('task-classify'), /unknown must be resolved before draft completion/);
+});
+
+
+test('post-draft stored unknown triggers agent repair and is checked again (TASK-2731)', async () => {
+  for (const repaired of [false, true]) {
+    let classification = 'unknown'; let restarts = 0;
+    const record = { logs: [] as string[], errors: [] as string[], exits: [] as number[] };
+    const base = draftContext(async () => ({}), async () => true);
+    const ctx = {
+      ...base,
+      missionServicesFn: async () => ({ store: { load: async () => ({ kind: 'found', mission: { labels: [classification] } }) } }),
+      options: { ...base.options, restartDraftAgentFn: async () => { restarts++; if (repaired) classification = 'user_value'; return true; } },
+    } as unknown as DraftWorkflowContext;
+    const result = await quietly(async () => draftAdapter(record).postProcess(ctx));
+    assert.equal(restarts, 1);
+    assert.equal(Boolean(result.exited), !repaired);
+    assert.deepEqual(record.exits, repaired ? [] : [1]);
+  }
 });

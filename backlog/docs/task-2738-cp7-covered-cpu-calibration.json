@@ -1,0 +1,472 @@
+{
+  "revision": "e6265ec470cce55242fe2a022507708d2ee802c7",
+  "rationale": "Covered-only calibration. Squash 400ms is 26.3% above fresh 316.625ms peak; smoke 400ms is 39.6% above fresh 286.496ms peak and 33.3% above retained 300ms overrun; SQLite 150ms retains 50% margin above retained 100ms overrun (fresh focused peak 60.729ms). All remain in early CI; plain limits, assertions, suite limits and wall deadlines unchanged.",
+  "records": [
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "squash landing commit message > TASK-2595: landed squash subject is the recorded title and body records the task reference",
+      "profile": "covered",
+      "cpuMs": 287.841,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "squash landing commit message > TASK-2595: landed-squash detection recognises the title subject plus task reference body",
+      "profile": "covered",
+      "cpuMs": 140.847,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "squash landing commit message > TASK-2595: landed-squash detection still recognises the legacy mission/<slug>: subject",
+      "profile": "covered",
+      "cpuMs": 195.936,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "squash hook bounce > SC2 S1: hook failure bounces through the kernel and lands when the re-run commit passes",
+      "profile": "covered",
+      "cpuMs": 316.625,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "squash hook bounce > SC2 S2: two failed re-run commits exhaust the budget and throw IntegrationAbort",
+      "profile": "covered",
+      "cpuMs": 196.314,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "squash hook bounce > SC2 S3: an already-landed payload short-circuits without bouncing",
+      "profile": "covered",
+      "cpuMs": 207.481,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "squash hook bounce > SC2 S4: a non-hook commit failure aborts without bouncing",
+      "profile": "covered",
+      "cpuMs": 210.255,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "base-branch landed squash detection > TASK-2517 F1: HEAD-scoped scan misses a base-branch squash; base-branch scan finds it from the mission worktree",
+      "profile": "covered",
+      "cpuMs": 222.104,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "base-branch landed squash detection > TASK-2517 F1: base-branch scan misses a payload that never landed on the base branch",
+      "profile": "covered",
+      "cpuMs": 125.784,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "already-merged detection > TASK-2492: squash-landed mission payload is detected as already merged",
+      "profile": "covered",
+      "cpuMs": 151.722,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "already-merged detection > TASK-2492: branch with no committed payload is not reported as merged",
+      "profile": "covered",
+      "cpuMs": 87.501,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "already-merged detection > TASK-2492: recover command refuses a squash-landed mission and cleans up exactly once",
+      "profile": "covered",
+      "cpuMs": 147.346,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "already-merged detection > TASK-2492: recovery does not fire for a not-yet-committed mission",
+      "profile": "covered",
+      "cpuMs": 80.771,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/sqlite/sqlite-operator-state.integration.test.ts",
+      "name": "SQLite operator-state transaction contract (CP3) > materializes the operator blocklist from SQLite via a single async read",
+      "profile": "covered",
+      "cpuMs": 58.442,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/sqlite/sqlite-operator-state.integration.test.ts",
+      "name": "SQLite operator-state transaction contract (CP3) > the real selector consumes the SQLite blocklist synchronously and excludes blocked agents",
+      "profile": "covered",
+      "cpuMs": 51.096,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/sqlite/sqlite-operator-state.integration.test.ts",
+      "name": "SQLite operator-state transaction contract (CP3) > time-based SQLite blocks apply and expire through the existing sync isAgentBlocked logic",
+      "profile": "covered",
+      "cpuMs": 50.338,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/sqlite/sqlite-operator-state.integration.test.ts",
+      "name": "SQLite operator-state transaction contract (CP3) > with no SQLite overlay the selector falls back to the file-based config.blocklist",
+      "profile": "covered",
+      "cpuMs": 0.394,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/sqlite/sqlite-operator-state.integration.test.ts",
+      "name": "SQLite operator-state transaction contract (CP3) > agent-config.ts consumer functions are not async",
+      "profile": "covered",
+      "cpuMs": 0.65,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/sqlite/sqlite-operator-state.integration.test.ts",
+      "name": "SQLite operator-state transaction contract (CP3) > launcher-selection.ts selection functions are not async",
+      "profile": "covered",
+      "cpuMs": 0.592,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/sqlite/sqlite-operator-state.integration.test.ts",
+      "name": "SQLite operator-state transaction contract (CP3) > the blocklist materializer is a pure synchronous mapper (no async, no I/O imports)",
+      "profile": "covered",
+      "cpuMs": 0.43,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "synthetic smoke-capture children leave the suite coverage directory untouched (TASK-2681)",
+      "profile": "covered",
+      "cpuMs": 132.278,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "real-agent smoke capture removes its first stdout file when stderr capture setup fails",
+      "profile": "covered",
+      "cpuMs": 2.435,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "real-agent smoke captures clean up after normal, command-failure, and timeout runs",
+      "profile": "covered",
+      "cpuMs": 105.927,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "real-agent smoke capture retention is opt-in and never deletes operator or concurrent paths",
+      "profile": "covered",
+      "cpuMs": 53.759,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "repeated real-agent smoke capture runs leave no Parallix-owned residue beneath the configured temporary root",
+      "profile": "covered",
+      "cpuMs": 261.601,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "real-agent smoke preflight reports temporary-storage exhaustion before fixture creation",
+      "profile": "covered",
+      "cpuMs": 2.542,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "real-agent smoke classifies ENOSPC and Git index/lock failures as environment resources",
+      "profile": "covered",
+      "cpuMs": 0.721,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "real-agent smoke classifies a trapped SIGTERM as a runner or model failure",
+      "profile": "covered",
+      "cpuMs": 0.456,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "real-agent smoke distinguishes active timeout from active workflow rejection",
+      "profile": "covered",
+      "cpuMs": 1.895,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "smoke fixture commits AGENTS.md before mission worktree creation (TASK-2726)",
+      "profile": "covered",
+      "cpuMs": 95.321,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "smoke progress reaches integration output before child exit and clears tool state (TASK-2726)",
+      "profile": "covered",
+      "cpuMs": 52.958,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "smoke capture isolates concurrent children and bounds inherited tool pipes (TASK-2726)",
+      "profile": "covered",
+      "cpuMs": 160.247,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "smoke repositories isolate credentials, sessions and mutable operator state (TASK-2727)",
+      "profile": "covered",
+      "cpuMs": 109.356,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "squash landing commit message > TASK-2595: landed squash subject is the recorded title and body records the task reference",
+      "profile": "covered",
+      "cpuMs": 260.594,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "squash landing commit message > TASK-2595: landed-squash detection recognises the title subject plus task reference body",
+      "profile": "covered",
+      "cpuMs": 120.971,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "squash landing commit message > TASK-2595: landed-squash detection still recognises the legacy mission/<slug>: subject",
+      "profile": "covered",
+      "cpuMs": 149.054,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "squash hook bounce > SC2 S1: hook failure bounces through the kernel and lands when the re-run commit passes",
+      "profile": "covered",
+      "cpuMs": 284.986,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "squash hook bounce > SC2 S2: two failed re-run commits exhaust the budget and throw IntegrationAbort",
+      "profile": "covered",
+      "cpuMs": 205.52,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "squash hook bounce > SC2 S3: an already-landed payload short-circuits without bouncing",
+      "profile": "covered",
+      "cpuMs": 198.876,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "squash hook bounce > SC2 S4: a non-hook commit failure aborts without bouncing",
+      "profile": "covered",
+      "cpuMs": 173.269,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "base-branch landed squash detection > TASK-2517 F1: HEAD-scoped scan misses a base-branch squash; base-branch scan finds it from the mission worktree",
+      "profile": "covered",
+      "cpuMs": 195.253,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "base-branch landed squash detection > TASK-2517 F1: base-branch scan misses a payload that never landed on the base branch",
+      "profile": "covered",
+      "cpuMs": 114.07,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "already-merged detection > TASK-2492: squash-landed mission payload is detected as already merged",
+      "profile": "covered",
+      "cpuMs": 132.309,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "already-merged detection > TASK-2492: branch with no committed payload is not reported as merged",
+      "profile": "covered",
+      "cpuMs": 75.311,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "already-merged detection > TASK-2492: recover command refuses a squash-landed mission and cleans up exactly once",
+      "profile": "covered",
+      "cpuMs": 139.859,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts",
+      "name": "already-merged detection > TASK-2492: recovery does not fire for a not-yet-committed mission",
+      "profile": "covered",
+      "cpuMs": 92.533,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/sqlite/sqlite-operator-state.integration.test.ts",
+      "name": "SQLite operator-state transaction contract (CP3) > materializes the operator blocklist from SQLite via a single async read",
+      "profile": "covered",
+      "cpuMs": 60.729,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/sqlite/sqlite-operator-state.integration.test.ts",
+      "name": "SQLite operator-state transaction contract (CP3) > the real selector consumes the SQLite blocklist synchronously and excludes blocked agents",
+      "profile": "covered",
+      "cpuMs": 57.955,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/sqlite/sqlite-operator-state.integration.test.ts",
+      "name": "SQLite operator-state transaction contract (CP3) > time-based SQLite blocks apply and expire through the existing sync isAgentBlocked logic",
+      "profile": "covered",
+      "cpuMs": 58.797,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/sqlite/sqlite-operator-state.integration.test.ts",
+      "name": "SQLite operator-state transaction contract (CP3) > with no SQLite overlay the selector falls back to the file-based config.blocklist",
+      "profile": "covered",
+      "cpuMs": 4.283,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/sqlite/sqlite-operator-state.integration.test.ts",
+      "name": "SQLite operator-state transaction contract (CP3) > agent-config.ts consumer functions are not async",
+      "profile": "covered",
+      "cpuMs": 0.634,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/sqlite/sqlite-operator-state.integration.test.ts",
+      "name": "SQLite operator-state transaction contract (CP3) > launcher-selection.ts selection functions are not async",
+      "profile": "covered",
+      "cpuMs": 0.741,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/sqlite/sqlite-operator-state.integration.test.ts",
+      "name": "SQLite operator-state transaction contract (CP3) > the blocklist materializer is a pure synchronous mapper (no async, no I/O imports)",
+      "profile": "covered",
+      "cpuMs": 0.405,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "synthetic smoke-capture children leave the suite coverage directory untouched (TASK-2681)",
+      "profile": "covered",
+      "cpuMs": 124.548,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "real-agent smoke capture removes its first stdout file when stderr capture setup fails",
+      "profile": "covered",
+      "cpuMs": 2.903,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "real-agent smoke captures clean up after normal, command-failure, and timeout runs",
+      "profile": "covered",
+      "cpuMs": 113.832,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "real-agent smoke capture retention is opt-in and never deletes operator or concurrent paths",
+      "profile": "covered",
+      "cpuMs": 57.394,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "repeated real-agent smoke capture runs leave no Parallix-owned residue beneath the configured temporary root",
+      "profile": "covered",
+      "cpuMs": 286.496,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "real-agent smoke preflight reports temporary-storage exhaustion before fixture creation",
+      "profile": "covered",
+      "cpuMs": 0.924,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "real-agent smoke classifies ENOSPC and Git index/lock failures as environment resources",
+      "profile": "covered",
+      "cpuMs": 0.925,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "real-agent smoke classifies a trapped SIGTERM as a runner or model failure",
+      "profile": "covered",
+      "cpuMs": 0.425,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "real-agent smoke distinguishes active timeout from active workflow rejection",
+      "profile": "covered",
+      "cpuMs": 0.873,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "smoke fixture commits AGENTS.md before mission worktree creation (TASK-2726)",
+      "profile": "covered",
+      "cpuMs": 102.279,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "smoke progress reaches integration output before child exit and clears tool state (TASK-2726)",
+      "profile": "covered",
+      "cpuMs": 61.671,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "smoke capture isolates concurrent children and bounds inherited tool pipes (TASK-2726)",
+      "profile": "covered",
+      "cpuMs": 170.807,
+      "limitMs": 300
+    },
+    {
+      "file": "integration/test-harness/agent-smoke-capture-cleanup.test.ts",
+      "name": "smoke repositories isolate credentials, sessions and mutable operator state (TASK-2727)",
+      "profile": "covered",
+      "cpuMs": 112.021,
+      "limitMs": 300
+    }
+  ],
+  "commands": [
+    "PARALLIX_TEST_COVERAGE=1 PARALLIX_TEST_CPU_PROFILE_DIR=/tmp/task-2738-cp7-cpu npm test -- test/integration/sqlite/sqlite-operator-state.integration.test.ts test/integration/test-harness/agent-smoke-capture-cleanup.test.ts test/integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts test/integration/review/review-intervention-resume.integration.test.ts",
+    "PARALLIX_TEST_COVERAGE=1 PARALLIX_TEST_CPU_PROFILE_DIR=/tmp/task-2738-cp7-cpu npm test -- test/integration/sqlite/sqlite-operator-state.integration.test.ts test/integration/test-harness/agent-smoke-capture-cleanup.test.ts test/integration/integrate/integrate-squash-commit-and-landed-detection-contract.test.ts"
+  ]
+}

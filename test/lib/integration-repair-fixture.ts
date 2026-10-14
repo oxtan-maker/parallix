@@ -129,6 +129,12 @@ export async function openRepairFixture(options: {
     ? { ...seeded, status: 'review', rawStatus: 'review', repositoryId: resolveCanonicalRepositoryId(repo) } as Mission
     : { ...seeded, repositoryId: resolveCanonicalRepositoryId(repo) }, null);
 
+  // Some composed adapters resolve the primary checkout from process.cwd().
+  // Keep those real Git reads inside the fixture, rather than the operator's
+  // repository and its unrelated worktrees (TASK-2712 repair).
+  const previousCwd = process.cwd();
+  process.chdir(worktree);
+
   return {
     root, repo, worktree, slug, approvedRevision, database,
     git,
@@ -144,10 +150,14 @@ export async function openRepairFixture(options: {
     },
     laneEvents: () => database.query('SELECT from_status, to_status, trigger FROM board_lane_events WHERE mission_id = ? ORDER BY id', [slug]),
     async close() {
-      await database.close();
-      await clearOperatorStateCache();
-      if (previousHome === undefined) { delete process.env.PARALLIX_HOME; } else { process.env.PARALLIX_HOME = previousHome; }
-      fs.rmSync(root, { recursive: true, force: true });
+      try {
+        await database.close();
+        await clearOperatorStateCache();
+      } finally {
+        if (previousHome === undefined) { delete process.env.PARALLIX_HOME; } else { process.env.PARALLIX_HOME = previousHome; }
+        process.chdir(previousCwd);
+        fs.rmSync(root, { recursive: true, force: true });
+      }
     },
   };
 }

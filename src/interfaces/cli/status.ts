@@ -43,6 +43,7 @@ export function statusJson(result: StatusResult): string {
     backlogStatus: md?.backlogStatus ?? null,
     closedAt: md?.closedAt ?? null,
     assignee: md?.assignee ?? null,
+    classification: md?.classification ?? null,
     externalTaskRef: md?.externalTaskRef ?? null,
     legacyTaskContent: md?.legacyTaskContent ?? null,
     legacyTaskError: md?.legacyTaskError ?? null,
@@ -55,6 +56,7 @@ export function statusJson(result: StatusResult): string {
     description: md?.description ?? null,
     declaredGates: md?.declaredGates ?? [],
     successCriteria: md?.successCriteria ?? [],
+    successCriterionIds: md?.successCriterionIds ?? [],
     completedSuccessCriteria: md?.completedSuccessCriteria ?? [],
     dependencies: md?.dependencies ?? [],
     checkpoints: md?.checkpoints ?? [],
@@ -182,6 +184,7 @@ function logMissionData(missionData: StatusMissionData | null, log: (_msg: strin
     log('Closeout: pending; resume with px integrate <slug> --recover-landed');
   }
   log(`Assignee: ${missionData.assignee ?? 'none'}`);
+  log(`Classification: ${missionData.classification ?? 'unset'}`);
   if (missionData.externalTaskRef) {
     const ref = missionData.externalTaskRef;
     log(`External task: ${ref.source}:${ref.id}${ref.url ? ` (${ref.url})` : ''}`);

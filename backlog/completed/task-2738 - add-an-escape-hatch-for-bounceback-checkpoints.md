@@ -1,8 +1,8 @@
 ---
 id: TASK-2738
 title: add an escape hatch for bounceback checkpoints
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-13 14:42'
 labels: []
 dependencies: []

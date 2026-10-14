@@ -237,6 +237,20 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
   let persisted = await ports.state.read();
   const implementer = resolveImplementer(slug, request.implementer, persisted, ports, out);
   if (stopsOnMissingTaskFile(slug, ports, out)) { return; }
+  if (start.isContinue && ports.missionStore) {
+    const loaded = await ports.missionStore.load(missionId(slug));
+    if (loaded.kind === 'found' && loaded.mission.status === 'active'
+      && loaded.mission.checkpoints.some(cp => cp.repair && !cp.repair.evidenceRecorded)) {
+      const prompt = { implementer, reviewer: persisted?.reviewer ?? 'autonomous',
+        attempt: persisted?.round ?? 1, reviewBaseline: ports.preReview.reviewBaseline(),
+        integrationRepair: '', reviewOutcome: 'REQUEST_CHANGES' };
+      if (start.dryRun) { ports.output.log(ports.agents.dryRunPrompt('implementer', prompt)); return; }
+      const launch = await ports.agents.launch({ role: 'implementer', agent: implementer,
+        exclude: [persisted?.reviewer], prompt });
+      if (launch?.result?.status !== 0) { out.exit(1); }
+      return;
+    }
+  }
   const prepared = await prepareStart(start, request.skipHandoff ?? false, implementer, ports, out);
   if (!prepared) { return; }
   // A fresh handoff created the authoritative Review with its reviewer and

@@ -1,12 +1,13 @@
-import type { DecisionAnswer, DecisionResult } from '../ports/decision.js';
+import type { DecisionAnswer, DecisionResult, DecisionRequest } from '../ports/decision.js';
 import { EvidenceOverBudgetError } from '../ports/review-evidence.js';
 import type { LoopContext, ReviewRound } from '../review-loop/round.js';
 import { WEAKENING_DECISION_SOURCE, type ClassifierReviewSource } from '../../domain/classifier-review.js';
 import type { ReviewScope, Decision } from './classify-review.js';
 import { admitGateFact, relateToCandidate } from './gate-fact.js';
+import type { ReviewClassificationPorts } from '../ports/review-classification.js';
 import type { RoundTelemetry } from './round-telemetry.js';
 import { buildWeakeningPacket } from './weakening-packet.js';
-import { WEAKENING_LABELS, WEAKENING_PACKET_VERSION, WEAKENING_PROMPT_VERSION, WEAKENING_POLICY_VERSION, WEAKENING_THRESHOLD } from './weakening-policy.js';
+import { WEAKENING_V5, WEAKENING_V5_PROMPT_VERSION, WEAKENING_LABELS, WEAKENING_PACKET_VERSION, WEAKENING_PROMPT_VERSION, WEAKENING_POLICY_VERSION, WEAKENING_THRESHOLD } from './weakening-policy.js';
 
 /** A weakening decision can only clear, so its packet and provenance are all a caller needs to commit it. */
 export type WeakeningDecision = Decision & { readonly weakening: NonNullable<ClassifierReviewSource['weakening']> };
@@ -23,8 +24,10 @@ const validIdentity = (result: DecisionResult) => [result.provider, result.model
 
 /** The single `resolution` answer of a well-formed result, or undefined when identity, shape or probabilities are invalid. */
 function resolutionOf(result: DecisionResult): Extract<DecisionAnswer, { type: 'choice' }> | undefined {
-  const answer = result.answers.resolution;
-  return Object.keys(result.answers).length === 1 && validIdentity(result) && validAnswer(answer) ? answer : undefined;
+  try {
+    const answer = result.answers.resolution;
+    return Object.keys(result.answers).length === 1 && validIdentity(result) && validAnswer(answer) ? answer : undefined;
+  } catch { return undefined; }
 }
 
 /** Why an answer which did not reach the threshold goes to the reviewer. */
@@ -33,8 +36,38 @@ function fallbackReason(answer: Extract<DecisionAnswer, { type: 'choice' }>): st
   return answer.selected === 'insufficient_evidence' ? 'weakening-insufficient-evidence' : 'weakening-below-threshold';
 }
 
+/** Sequential questions share evidence; failed or malformed V4 answers are non-clears too. */
+async function askWeakening(request: DecisionRequest, ports: ReviewClassificationPorts, rows: RoundTelemetry) {
+  const classifyStart = ports.clock();
+  const ask = async (candidate: DecisionRequest) => {
+    try { return await ports.decision.decide(candidate); }
+    catch { return undefined; }
+    finally { rows.note({ classificationMs: ports.clock() - classifyStart }); }
+  };
+  let result = await ask(request);
+  let answer = result && resolutionOf(result);
+  rows.note({ weakening: { v4: { preserves: answer ? answer.probabilities.preserves : null } } });
+  let clearedBy: 'weakening-v4' | 'weakening-v5' = WEAKENING_PROMPT_VERSION;
+  if (!answer || answer.selected !== 'preserves' || answer.probabilities.preserves < WEAKENING_THRESHOLD) {
+    const v5Request = { state: request.state, questions: { resolution: WEAKENING_V5 } };
+    const budget = ports.decision.requestBudget(v5Request);
+    if (budget.inputTokens > budget.maxInputTokens || budget.contextTokens > budget.maxContextTokens) {
+      throw new EvidenceOverBudgetError('Weakening V5 evidence exceeds the decision budget');
+    }
+    clearedBy = WEAKENING_V5_PROMPT_VERSION;
+    rows.note({ weakening: { ...rows.current.weakening!, v5: { preserves: null, cleared: false } } });
+    result = await ask(v5Request);
+    answer = result && resolutionOf(result);
+    rows.note({ weakening: { ...rows.current.weakening!, v5: {
+      preserves: answer ? answer.probabilities.preserves : null,
+      cleared: !!answer && answer.selected === 'preserves' && answer.probabilities.preserves >= WEAKENING_THRESHOLD,
+    } } });
+  }
+  return { result, answer, clearedBy };
+}
+
 /**
- * The single weakening question for an integration repair: Parallix's recorded green gate answers whether the
+ * The two weakening questions for an integration repair: Parallix's recorded green gate answers whether the
  * failure is fixed, so the classifier only judges whether the repair weakened the checked obligation. Every
  * outcome other than `preserves` at the threshold returns null and leaves the round to the general reviewer.
  */
@@ -58,13 +91,8 @@ export async function decideWeakening(context: LoopContext, round: ReviewRound, 
       fact: admitted.fact }, ports.evidence, candidate => ports.decision.requestBudget(candidate));
     const packetHash = ports.hash(JSON.stringify(request.state));
     rows.note({ preparationMs: ports.clock() - started, packetHash });
-    const classifyStart = ports.clock();
-    let result: DecisionResult;
-    try { result = await ports.decision.decide(request); }
-    catch (error) { rows.note({ classificationMs: ports.clock() - classifyStart }); throw error; }
-    const answer = resolutionOf(result);
-    rows.note({ classificationMs: ports.clock() - classifyStart });
-    if (!answer) { return await fallback('weakening-failure'); }
+    const { result, answer, clearedBy } = await askWeakening(request, ports, rows);
+    if (!answer || !result) { return await fallback('weakening-failure'); }
     const preserves = answer.probabilities.preserves;
     rows.note({ label: answer.selected, score: preserves, provider: result.provider, model: result.model });
     if (answer.selected !== 'preserves' || preserves < WEAKENING_THRESHOLD) { return await fallback(fallbackReason(answer)); }
@@ -72,7 +100,8 @@ export async function decideWeakening(context: LoopContext, round: ReviewRound, 
     const { fact } = admitted;
     return { selected: { route: 'clear', label: 'preserves', score: preserves, reason: 'weakening-preserves' }, provider: result.provider, model: result.model, packetHash,
       weakening: { decisionSource: WEAKENING_DECISION_SOURCE, approvedRevision: String(prior!.subject.revision), gate: fact.gate, validationSha: fact.validationSha,
-        validationRecordedAt: fact.recordedAt, relation: fact.relation } };
+        validationRecordedAt: fact.recordedAt, relation: fact.relation,
+        question: { clearedBy, preserves, versions: [WEAKENING_PROMPT_VERSION, WEAKENING_V5_PROMPT_VERSION] } } };
   } catch (error) {
     return await fallback(error instanceof EvidenceOverBudgetError ? 'weakening-over-budget' : 'weakening-failure');
   }

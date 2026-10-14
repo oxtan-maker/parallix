@@ -1,4 +1,4 @@
-import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import type { ParallixConfiguration, PromptConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import fs from 'node:fs';
 import os from 'node:os';
@@ -274,17 +274,21 @@ function validateIntegrateSection(section: unknown, issues: string[]): void {
   validateStringField(section, 'postIntegrateCommand', 'adapters.integrate.postIntegrateCommand', issues);
 }
 
-// adapters.prompts is a closed object whose single allowed property is `override`
-// (a repo-local default-opinion path). Unknown keys fail here through the
+// adapters.prompts is a closed object for opinion overrides and context policy.
+// The opinion override cannot change the resolved compaction policy.
+// Unknown keys fail here through the
 // existing configuration-error path, so a repo cannot invent a second surface.
 function validatePromptsSection(section: unknown, issues: string[]): void {
   if (!isPlainObject(section)) { return; }
   if ('override' in section && typeof section.override !== 'string') {
     issues.push('adapters.prompts.override must be a string');
   }
+  if ('contextCompaction' in section && typeof section.contextCompaction !== 'boolean') {
+    issues.push('adapters.prompts.contextCompaction must be a boolean');
+  }
   for (const key of Object.keys(section)) {
-    if (key !== 'override') {
-      issues.push('adapters.prompts may only contain "override"');
+    if (key !== 'override' && key !== 'contextCompaction') {
+      issues.push('adapters.prompts may only contain "override" and "contextCompaction"');
     }
   }
 }
@@ -664,6 +668,21 @@ export function resolvePromptOverride(rootDir: string = process.cwd()): string |
   const override = prompts.override;
   if (typeof override !== 'string' || override.trim() === '') {return null;}
   return path.isAbsolute(override) ? override : path.resolve(rootDir, override);
+}
+
+/** Repository policy overrides the built-in off default; no host or per-stage override. */
+export function resolvePromptConfiguration(rootDir: string = process.cwd()): PromptConfiguration {
+  const prompts = loadAdapterConfig(rootDir).prompts;
+  if (prompts !== undefined && !isPlainObject(prompts)) {
+    throw new Error('adapters.prompts must be an object');
+  }
+  const issues: string[] = [];
+  validatePromptsSection(prompts, issues);
+  if (issues.length) { throw new Error(issues.join('; ')); }
+  return Object.freeze({
+    overridePath: resolvePromptOverride(rootDir),
+    contextCompaction: !isPlainObject(prompts) || prompts.contextCompaction !== false,
+  });
 }
 
 export interface TaskStorageResult {

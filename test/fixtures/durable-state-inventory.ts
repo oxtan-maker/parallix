@@ -92,6 +92,26 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     classification: 'generated-artifact',
     cutoverTask: null,
   },
+  // Integration gate evidence is a disposable verification observation, never
+  // Mission, approval, or publication authority (TASK-2740).
+  {
+    id: 'integration-verification-proof-read',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/verification/integration-verification-proof.ts',
+    operation: 'read',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
+    id: 'integration-verification-proof-write',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/verification/integration-verification-proof.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
   {
     id: 'active-verification-proof-read',
     concept: 'LargeArtifacts',
@@ -1308,6 +1328,13 @@ export interface MissionDocumentCallSiteEntry {
  * as Mission persistence must be registered here or guard 2 fails.
  */
 export const MISSION_DOCUMENT_CALL_SITES: readonly MissionDocumentCallSiteEntry[] = [
+  {
+    id: 'mission-doc-call-squash-retired-root-rejection',
+    fileLocation: 'src/application/integrate/squash.ts',
+    purpose: 'inspect Git payload paths and reject retired archive entries before landing; no Mission-state persistence',
+    pathPatterns: ['ls-files.*backlog/archive', 'rejectSquash.*Retired backlog/archive'],
+    classification: 'git-topology-observation',
+  },
   {
     id: 'mission-doc-call-execute-handoff',
     fileLocation: 'src/application/execute-handoff-service.ts',

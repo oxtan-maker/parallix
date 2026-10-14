@@ -18,16 +18,23 @@ SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 cd "$REPO_ROOT"
 
-echo "[refresh-global-px] Reconciling installed dependencies from the landed lockfile..."
-pnpm install --frozen-lockfile --prefer-offline
+# Reconcile dependencies only when this checkout's recorded installed identity is
+# missing, invalid or changed (TASK-2714). The draft install already recorded the
+# identity for a mission worktree; the base worktree records its own here, so a
+# landed release-version-only bump does not reinstall the base.
+echo "[refresh-global-px] Reconciling installed dependencies when the installed identity changed..."
+"${SCRIPT_DIR}/px-install.sh"
 
 echo "[refresh-global-px] Building the distributable (esbuild -> build/px.mjs)..."
 npm run build
 
+# --ignore-scripts keeps package.json's `prepack` (npm run build) from rebuilding
+# the distributable a second time: the build above is the one landed build, and
+# `files` in package.json ships exactly what it produced (TASK-2714).
 echo "[refresh-global-px] Packing a tarball of this checkout..."
 PACK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/parallix-refresh.XXXXXX")"
 trap 'rm -rf "${PACK_DIR}"' EXIT
-PACK_OUTPUT="$(npm pack --pack-destination "${PACK_DIR}")"
+PACK_OUTPUT="$(npm pack --ignore-scripts --pack-destination "${PACK_DIR}")"
 TARBALL="$(printf '%s\n' "${PACK_OUTPUT}" | awk '/\.tgz$/ { tarball = $0 } END { print tarball }')"
 if [[ -z "${TARBALL}" ]]; then
   echo "[refresh-global-px] npm pack did not report a tarball filename." >&2

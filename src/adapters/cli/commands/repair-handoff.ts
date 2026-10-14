@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 import { git, getCurrentBranch } from '../../git/git.js';
 import rebase from './rebase.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
@@ -79,7 +80,7 @@ function commitDirtyFiles(rootDir: string, slug: string, gitFn: Function, log: F
  * @param {object} [options]
  * @returns {Promise<{repaired: boolean, blocker: string|null}>} Result and optional blocker reason
   */
-async function repairHandoff(slug: string, worktree: string, errorMsg: string, options: { gitFn?: Function, rebaseFn?: Function, log?: Function, error?: Function } = {}) {
+async function repairHandoff(slug: string, worktree: string, errorMsg: string, options: { configuration?: ParallixConfiguration, gitFn?: Function, rebaseFn?: Function, log?: Function, error?: Function } = {}) {
   /** @type {{gitFn?: Function, rebaseFn?: Function, log?: Function, error?: Function}} */
   const opts = options;
   const {
@@ -123,6 +124,7 @@ async function repairHandoff(slug: string, worktree: string, errorMsg: string, o
     let rebaseError: string | null = null;
     try {
       await rebaseFn([slug], {
+        configuration: opts.configuration,
         gitFn: (args: string[], opts: { cwd?: string }) => gitFn(args, { ...opts, cwd: rootDir }),
         getCurrentBranchFn: () => getCurrentBranch(rootDir),
         exitFn: (code: number) => {

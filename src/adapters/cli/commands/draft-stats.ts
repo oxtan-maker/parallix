@@ -35,7 +35,7 @@ async function validateStoredDraftClassification(ctx: DraftWorkflowContext) {
     const labels = loaded.mission.labels
       .map((label: string) => String(label).toLowerCase())
       .filter((label: string) => CLASSIFICATION_LABELS.has(label));
-    return labels.length === 1
+    return labels.length === 1 && labels[0] !== 'unknown'
       ? { ok: true, classification: labels[0] }
       : { ok: false, reason: 'missing-classification' };
   } catch { return null; }

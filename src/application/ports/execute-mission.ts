@@ -152,6 +152,7 @@ export interface ExecuteTelemetryPort {
 export interface CheckpointValidationVerdict {
   readonly ok: boolean;
   readonly error?: string;
+  readonly humanOnlyContractBlocker?: import('../../domain/rebound-policy.js').InvalidContractBlocker;
   readonly missingCheckpoints?: readonly string[];
   readonly nextCheckpoint?: string;
   readonly declaredCheckpoints?: readonly string[];
@@ -185,6 +186,7 @@ export interface HandoffRunRequest {
 
 export interface HandoffRunResult {
   readonly ok: boolean;
+  readonly reason?: string;
   readonly error?: string;
   readonly gateFailure?: GateFailureReason;
   readonly gateOutput?: { readonly stdout?: string; readonly stderr?: string };

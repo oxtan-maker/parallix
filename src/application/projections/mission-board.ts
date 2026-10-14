@@ -1,5 +1,5 @@
 import type { AgentFamily } from '../../domain/agents.js';
-import { latestEvidencedCheckpoint, type GoalCheckRow } from '../../domain/checkpoint.js';
+import { isPlannedCheckpoint, latestEvidencedCheckpoint, type GoalCheckRow } from '../../domain/checkpoint.js';
 import { isClosedMission, type Mission, type MissionId, type MissionLabel, type MissionStatus } from '../../domain/mission.js';
 import type { CheckpointData } from '../../domain/checkpoint.js';
 import type { RepositoryId } from '../../domain/repository.js';
@@ -113,13 +113,7 @@ export interface MissionCard {
   readonly checkpoint: string | null;
   /** First line of checkpoint file (e.g. "CP-2: Status Command Re-implemented"). */
   readonly checkpointDescription: string | null;
-  /**
-   * Every checkpoint for the mission, oldest first, each carrying its first-line
-   * description and Goal Check evidence rows. Populated from `mission.checkpoints`
-   * so the web board can render what a checkpoint is about and the evidence for it
-   * from the GET /api/board snapshot alone, without a second request. Empty when
-   * the mission has no checkpoints at all.
-   */
+  /** Complete ordered checkpoint plan and recorded evidence. */
   readonly checkpointEvidence: readonly CheckpointEvidence[];
   readonly nextActionText: string | null;
   readonly gate: MissionOperationalFacts['latestGate'];
@@ -299,6 +293,8 @@ export interface CheckpointEvidence {
   readonly name: string;
   readonly description: string;
   readonly goalCheck: readonly GoalCheckRow[];
+  /** Absent only on older projection fixtures. */
+  readonly state?: 'completed' | 'current' | 'future';
 }
 
 /**
@@ -307,11 +303,13 @@ export interface CheckpointEvidence {
  * history and its evidence in one snapshot. Planned checkpoints carry their
  * description with an empty Goal Check list; recorded checkpoints carry their rows.
  */
-function checkpointEvidence(checkpoints: readonly CheckpointData[]): CheckpointEvidence[] {
+function checkpointEvidence(checkpoints: readonly CheckpointData[], status: MissionStatus): CheckpointEvidence[] {
+  const current = status === 'active' ? checkpoints.find(isPlannedCheckpoint) : undefined;
   return checkpoints.map((checkpoint) => ({
     name: checkpoint.name,
     description: checkpoint.firstLine ?? '',
     goalCheck: checkpoint.goalCheck,
+    state: !isPlannedCheckpoint(checkpoint) ? 'completed' : checkpoint === current ? 'current' : 'future',
   }));
 }
 
@@ -416,7 +414,7 @@ export function projectMissionCard(mission: Mission, facts: MissionOperationalFa
     agent: mission.assignee,
     checkpoint: checkpoint?.rawFilename ?? checkpoint?.name ?? null,
     checkpointDescription: checkpoint?.firstLine ?? null,
-    checkpointEvidence: checkpointEvidence(mission.checkpoints),
+    checkpointEvidence: checkpointEvidence(mission.checkpoints, mission.status),
     nextActionText: checkpoint?.nextActionText ?? null,
     gate: facts.latestGate,
     pullRequest: reviewedChange?.kind === 'pull-request' ? reviewedChange : null,

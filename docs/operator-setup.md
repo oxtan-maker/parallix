@@ -354,7 +354,9 @@ If the review loop escalates to a human, run `px review <slug> --continue` to
 resume its persisted review. This clears the recorded stop and grants another
 review attempt, including when the previous round limit was exhausted. After
 approval, run `px integrate <slug>` to continue integration. Repair budgets and
-mandatory gates still apply; a failed gate never counts as approval.
+mandatory gates still apply; a failed gate never counts as approval. An interrupted
+repair resumes the implementer even with unfinished checkpoints. Checkpoint
+evidence is required before leaving active work for reviewer handoff.
 
 If continuation reports that the mission has no persisted Review, run
 `px review <slug> --start` to begin one. Start performs handoff, creates the

@@ -1,16 +1,11 @@
 import path from 'node:path';
-import type { ParallixConfiguration } from '../../application/ports/configuration.js';
+import { readIntegrationVerificationProof } from './integration-verification-proof.js';
+import { createActiveVerificationIdentity, type ActiveVerificationOptions as Options } from './active-verification-identity.js';
+export { createActiveVerificationIdentity } from './active-verification-identity.js';
 import { git } from '../git/git.js';
-import { ensureRebaseCompletionRecorder, readRebaseCompletions, rebaseInProgress } from '../git/rebase-completion-recorder.js';
+import { ensureRebaseCompletionRecorder, readRebaseCompletions } from '../git/rebase-completion-recorder.js';
 import { readJson, resolveParallixHome, writeJson } from '../storage/storage.js';
-import { isVerificationBookkeeping, readVerificationInputs, verificationDigest } from './verification-proof-inputs.js';
-
-interface Options {
-  configuration?: ParallixConfiguration;
-  proofPath?: string;
-  expectedIdentity?: string;
-  context?: string;
-}
+import { isVerificationBookkeeping } from './verification-proof-inputs.js';
 
 interface ActiveProof {
   policy: 'active-review-v1';
@@ -24,24 +19,6 @@ interface ActiveProof {
 }
 
 const revision = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{40,64}$/.test(value);
-
-export function createActiveVerificationIdentity(command: string, root: string, options: Options = {}) {
-  try {
-    if (rebaseInProgress(root)) { return { ok: false as const, blocked: true as const, error: 'Rebase in progress; complete or abort it before verification' }; }
-  } catch { return { ok: false as const, error: 'Git metadata unavailable for active verification reuse' }; }
-  const inputs = readVerificationInputs(root, git, options.configuration?.agents.searchPath ?? '');
-  if (inputs.ok === false) { return inputs; }
-  if (!command.trim() || !inputs.branch) { return { ok: false as const, error: 'Active verification requires a command and attached mission branch' }; }
-  const head = git(['-C', root, 'rev-parse', 'HEAD']);
-  if (head.status !== 0) { return { ok: false as const, error: 'Active verification HEAD unavailable' }; }
-  const inputFingerprint = verificationDigest(inputs.trackedOutput.split('\n').filter(entry =>
-    !isVerificationBookkeeping(entry.slice(entry.indexOf('\t') + 1))).join('\n'));
-  const scope = verificationDigest(JSON.stringify({ policy: 'active-review-v1', root: inputs.root,
-    branch: inputs.branch, command: command.trim(), toolchain: inputs.toolchain, context: options.context ?? '' }));
-  return { ok: true as const, scope, inputFingerprint, toolchain: inputs.toolchain,
-    branch: inputs.branch, commit: head.stdout.trim(),
-    identity: verificationDigest(JSON.stringify({ scope, inputFingerprint, commit: head.stdout.trim() })) };
-}
 
 function proofPath(scope: string, options: Options): string {
   return options.proofPath ?? path.join(resolveParallixHome({ configuration: options.configuration, ensureDir: false }),
@@ -77,6 +54,8 @@ function completedRebaseCovers(root: string, branch: string, from: string, to: s
 export function readActiveVerificationProof(command: string, root: string, options: Options = {}) {
   const current = createActiveVerificationIdentity(command, root, options);
   if (current.ok === false) { return current; }
+  const integration = readIntegrationVerificationProof(command, root, current);
+  if (integration.ok) { return { ...integration, identity: current.identity, rebased: false }; }
   const file = proofPath(current.scope, options);
   const cached = readJson<ActiveProof>(file);
   const proof = cached.data;
@@ -92,7 +71,7 @@ export function readActiveVerificationProof(command: string, root: string, optio
     try { writeJson(file, updated, { mode: 0o600 }); }
     catch { return { ok: false as const, error: 'Could not advance active verification proof' }; }
   }
-  return { ok: true as const, identity: current.identity, proof: updated, rebased };
+  return { ok: true as const, identity: current.identity, proof: updated, rebased, diagnostic: 'Active/review verification: reused successful proof.' };
 }
 
 export function writeActiveVerificationProof(command: string, root: string, options: Options = {}) {

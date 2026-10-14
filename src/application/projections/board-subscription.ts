@@ -123,6 +123,7 @@ export function boardFingerprint(
       id: card.id,
       lane: card.lane,
       status: card.status,
+      checkpointEvidence: card.checkpointEvidence,
       gate: card.gate,
       agent: card.agent,
       reviewPhase: card.reviewPhase,

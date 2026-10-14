@@ -53,6 +53,12 @@ export interface ClassifierReviewSource {
     readonly validationSha: string;
     readonly validationRecordedAt: string;
     readonly relation: 'same' | 'backlog-only' | 'rebase-only';
+    /** Absent on historical single-question decisions. */
+    readonly question?: {
+      readonly clearedBy: 'weakening-v4' | 'weakening-v5';
+      readonly preserves: number;
+      readonly versions: readonly ['weakening-v4', 'weakening-v5'];
+    };
   };
   readonly findingIds: readonly string[];
   readonly policyVersion: string;
@@ -70,6 +76,8 @@ function validWeakening(source: ClassifierReviewSource): boolean {
   if (!w) { return true; }
   return w.decisionSource === WEAKENING_DECISION_SOURCE && source.integrationRepair !== undefined && source.integrationRepair.gate === w.gate
     && w.approvedRevision === source.priorRevision && /^[a-f0-9]{40,64}$/.test(w.approvedRevision) && /^[a-f0-9]{40,64}$/.test(w.validationSha)
+    && (w.question === undefined || (['weakening-v4', 'weakening-v5'].includes(w.question.clearedBy)
+      && w.question.preserves === source.score && JSON.stringify(w.question.versions) === JSON.stringify(['weakening-v4', 'weakening-v5'])))
     && Number.isFinite(Date.parse(w.validationRecordedAt)) && ['same', 'backlog-only', 'rebase-only'].includes(w.relation);
 }
 
@@ -116,8 +124,7 @@ export function applyClassifierReview(review: Review, source: ClassifierReviewSo
   if (current.number === 1 || !prior) { throw new Error('First review requires the general reviewer'); }
   if (source.policyVersion !== (source.weakening ? WEAKENING_POLICY_VERSION : classifierPolicyForReview(review))) { throw new Error('Classifier review must use the current policy for this scope'); }
   if (current.decision || current.phase !== 'reviewing' || current.subject.revision !== source.candidateRevision
-    || (source.successCriteria ? source.priorRevision !== source.candidateRevision : prior?.subject.revision !== source.priorRevision)
-    || (prior?.decision?.classifier && source.policyVersion === PANEL_POLICY_VERSION)) { throw new Error('Classifier review scope or revision is stale'); }
+    || (source.successCriteria ? source.priorRevision !== source.candidateRevision : prior?.subject.revision !== source.priorRevision)) { throw new Error('Classifier review scope or revision is stale'); }
   let findings: readonly ReviewFinding[];
   if (source.successCriteria) {
     findings = criteria;
@@ -147,7 +154,7 @@ export function applyClassifierReview(review: Review, source: ClassifierReviewSo
     throw new Error('Classifier review provenance or threshold is invalid');
   }
   const w = source.weakening;
-  const comment = w ? `Approval of ${w.approvedRevision} restored: gate ${w.gate} re-ran green at ${w.validationSha} (${w.relation}) and the repair preserves the checked obligation (${source.score}).`
+  const comment = w ? `Approval of ${w.approvedRevision} restored: gate ${w.gate} re-ran green at ${w.validationSha} (${w.relation}) and the repair preserves the checked obligation (${source.score})${w.question ? `; cleared by ${w.question.clearedBy}, preserves ${w.question.preserves}, questions ${w.question.versions.join(', ')}` : ''}.`
     : route === 'clear' ? 'Classifier cleared the complete prior finding set.'
     : 'Classifier reports likely unresolved prior findings. Make changes or request general review; no repair instructions supplied.';
   const decision = route === 'clear'

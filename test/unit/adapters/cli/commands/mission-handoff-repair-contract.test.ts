@@ -8,9 +8,13 @@
 
 import test, { describe, mock } from 'node:test';
 import assert from 'node:assert/strict';
+import { resolveConfiguration } from '../../../../../src/composition/config.js';
 import { mockModule, installModuleMocks } from '../../../../lib/module-mock.js';
 
 const repairHandoff = mockModule<typeof import('../../../../../src/adapters/cli/commands/repair-handoff.js')>('../../../../../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
+const handoff = mockModule<typeof import('../../../../../src/adapters/cli/commands/handoff.js')>('../../../../../src/adapters/cli/commands/handoff.js', import.meta.url);
+const reviewRebase = mockModule<typeof import('../../../../../src/adapters/review/rebase.js')>('../../../../../src/adapters/review/rebase.js', import.meta.url);
+const execute = mockModule<typeof import('../../../../../src/adapters/mission/execute-mission-adapters.js')>('../../../../../src/adapters/mission/execute-mission-adapters.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 
@@ -872,4 +876,58 @@ describe('Rebase failure classification', () => {
     assert.equal(result.dispatchAction, DispatchAction.AutoSendBack,
       'rebase failure must auto-send-back to the implementer');
   });
+});
+
+
+test('nested handoff preserves configuration and caller rebase seams (TASK-2744)', async () => {
+  const configuration = resolveConfiguration({ PATH: '/injected/bin', PARALLIX_HOME: '/injected/home' });
+  const gitFn = () => ({ status: 0, stdout: '', stderr: '' });
+  const createPrFn = () => ({ ok: true });
+  const runRebaseWorkflowFn = async () => {};
+  mock.method(reviewRebase, 'rebaseBeforeReviewRound', async (slug, options) => {
+    assert.equal(slug, 'task-2744');
+    assert.strictEqual(options.gitFn, gitFn);
+    assert.strictEqual(options.runRebaseWorkflowFn, runRebaseWorkflowFn);
+    assert.strictEqual(options.rebaseWorkflowOptions.createPrFn, createPrFn);
+    assert.strictEqual(options.rebaseWorkflowOptions.configuration, configuration);
+    return { ok: true, sharedFileConflicts: false, hookFailure: false };
+  });
+  const options = {
+    gitFn, worktree: '/fixture', runRebaseWorkflowFn, rebaseWorkflowOptions: { createPrFn },
+    log: () => {}, error: () => {}, isForgejoReviewEnabledFn: () => true,
+  };
+  const result = await handoff.createHandoffPorts(configuration).rebase.rebaseBeforeReviewRound('task-2744', options);
+  assert.equal(result.ok, true);
+});
+
+test('default execute runtime preserves configuration through handoff and automatic repair rebase (TASK-2744)', async () => {
+  const configuration = resolveConfiguration({ PATH: '/injected/bin', PARALLIX_HOME: '/injected/home' });
+  const runtime = execute.createDefaultExecuteMissionRuntime(configuration);
+  let handoffs = 0;
+  mock.method(handoff, 'performHandoff', async (slug, options) => {
+    assert.equal(slug, 'task-2744');
+    assert.strictEqual(options.configuration, configuration);
+    assert.equal(options.worktree, '/fixture');
+    handoffs += 1;
+    return { ok: true };
+  });
+  assert.equal((await runtime.performHandoff('task-2744', { worktree: '/fixture' })).ok, true);
+  assert.equal(handoffs, 1);
+  const gitCalls = [];
+  const gitFn = (args, options) => { gitCalls.push({ args, options }); return { status: 0, stdout: '' }; };
+  let rebases = 0;
+  const result = await runtime.repairHandoff('task-2744', '/fixture', 'git push failed: Updates were rejected', {
+    gitFn, log: () => {}, error: () => {},
+    rebaseFn: async (args, options) => {
+      assert.deepEqual(args, ['task-2744']);
+      assert.strictEqual(options.configuration, configuration);
+      options.gitFn(['status'], { cwd: '/wrong', marker: 'preserved' });
+      assert.deepEqual(gitCalls.at(-1), { args: ['status'], options: { cwd: '/fixture', marker: 'preserved' } });
+      assert.equal(typeof options.getCurrentBranchFn, 'function');
+      rebases += 1;
+      options.exitFn(0);
+    },
+  });
+  assert.equal(rebases, 1);
+  assert.deepEqual(result, { repaired: true, blocker: null });
 });

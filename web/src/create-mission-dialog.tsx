@@ -106,13 +106,13 @@ function Fields({ id, pending, invalidTitle, titleField, initial }: { id: string
       <textarea id={`${id}-context`} name="context" defaultValue={initial?.context} rows={2} style={FIELD} disabled={pending} />
       <label style={LABEL} htmlFor={`${id}-labels`}>Labels (comma separated)</label>
       <input id={`${id}-labels`} name="labels" defaultValue={initial?.labels.join(', ')} style={FIELD} disabled={pending} />
-      <CriteriaEditor id={id} initial={initial?.successCriteria ?? []} pending={pending} />
+      <CriteriaEditor id={id} initial={initial?.successCriteria ?? []} identities={initial?.successCriterionIds} pending={pending} />
     </>
   );
 }
 
 /** Stable row keys keep unsaved neighboring entries intact when one is removed. */
-function CriteriaEditor({ id, initial, pending }: { id: string; initial: readonly string[]; pending: boolean }) {
+function CriteriaEditor({ id, initial, identities, pending }: { id: string; initial: readonly string[]; identities?: readonly (string | null)[]; pending: boolean }) {
   const [rows, setRows] = useState(() => (initial.length ? initial : ['']).map((value, key) => ({ key, value })));
   const nextKey = useRef(rows.length);
   const focusAfterChange = useRef<number | 'add' | null>(null);
@@ -142,7 +142,7 @@ function CriteriaEditor({ id, initial, pending }: { id: string; initial: readonl
     {rows.map((row, index) => <div key={row.key} style={{ marginBottom: 8 }}>
       <label style={LABEL} htmlFor={`${id}-criterion-${row.key}`}>Success criterion {index + 1}</label>
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-        <textarea id={`${id}-criterion-${row.key}`} data-criterion-key={row.key} name="criteria" defaultValue={row.value} rows={2} style={FIELD} disabled={pending} />
+        <textarea id={`${id}-criterion-${row.key}`} data-criterion-key={row.key} data-criterion-id={row.key < initial.length ? identities?.[row.key] ?? undefined : undefined} name="criteria" defaultValue={row.value} rows={2} style={FIELD} disabled={pending} />
         <button type="button" disabled={pending} aria-label={`Remove criterion ${index + 1}`} onClick={() => remove(row.key)}
           style={{ ...BUTTON, background: 'none', border: `1px solid ${C.cardEdge}`, color: C.muted }}>Remove</button>
       </div>
@@ -184,14 +184,15 @@ export function CreateMissionDialog({ options, onClose, onCreated, initial }: {
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (submitting.current) { return; }
-    const built = buildRequest(event.currentTarget as HTMLFormElement, requestKey.current, dependencies);
+    const form = event.currentTarget as HTMLFormElement;
+    const built = buildRequest(form, requestKey.current, dependencies);
     if ('problem' in built) { fail(built.problem, built.focusTitle); return; }
     submitting.current = true;
     setPending(true);
     setError(null);
     setInvalidTitle(false);
     try {
-      const result = await savePlanning(built.request, initial);
+      const result = await savePlanning(built.request, initial, [...form.querySelectorAll<HTMLTextAreaElement>('textarea[name="criteria"]')].filter(field => field.value.trim()).map(field => field.dataset.criterionId ?? null));
       const created = (result.value as { missionId?: unknown } | null | undefined)?.missionId;
       if (result.status === 'completed' && typeof created === 'string') {
         if (mounted.current) { onCreated(created); }
@@ -252,10 +253,10 @@ export function CreateMissionDialog({ options, onClose, onCreated, initial }: {
   );
 }
 
-async function savePlanning(request: WebCreateMissionRequest, initial?: MissionEditSnapshot) {
+async function savePlanning(request: WebCreateMissionRequest, initial?: MissionEditSnapshot, successCriterionIds?: readonly (string | null)[]) {
   return initial === undefined ? await sendCreateMission(request) : await sendEditMission({
         kind: 'mission:edit', missionId: initial.missionId, expectedVersion: initial.version,
         title: request.title, description: request.description ?? '', context: request.context ?? '',
-        labels: request.labels, successCriteria: request.successCriteria, dependencies: request.dependencies,
+        labels: request.labels, successCriteria: request.successCriteria, successCriterionIds, dependencies: request.dependencies,
       });
 }

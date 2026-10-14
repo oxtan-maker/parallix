@@ -1,3 +1,4 @@
+import { replaceSuccessCriteria } from '../../domain/mission-success-criteria.js';
 /**
  * Legacy import companions: carry a legacy task's documents, review
  * launches, reviews, and NEL onto the imported Mission.
@@ -56,7 +57,7 @@ export async function importLegacyMissionDocuments(
     changed += 1;
     if (options.dryRun) { continue; }
     try {
-      await services.store.save({ ...mission, brief, successCriteria: success,
+      await services.store.save({ ...replaceSuccessCriteria(mission, success ?? []), brief,
         declaredGates: gates, predictedNelBucket: predicted, reproductionTest: reproduction,
         checkpoints }, read.version);
     } catch (error) {

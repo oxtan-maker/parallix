@@ -106,6 +106,8 @@ const MISSION_ID_TABLES = [
   'missions',
   'mission_labels',
   'mission_checkpoints',
+  'mission_checkpoint_versions',
+  'mission_review_checkpoint_states',
   'mission_checkpoint_goal_checks',
   'mission_reviews',
   'mission_review_rounds',

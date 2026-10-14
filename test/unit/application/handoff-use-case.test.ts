@@ -849,3 +849,35 @@ test('handoff final and declared gates consume one successful matching proof (TA
   assert.equal(executions, 1, 'final verification runs successfully once');
   assert.deepEqual(recorder.spawned, [], 'matching declared gate consumes the successful proof');
 });
+
+test('handoff consumes integration evidence through its proof port with zero verifier calls (TASK-2740)', async () => {
+  const recorder = makeRecorder();
+  const base = makePorts(recorder);
+  const diagnostic = 'Repository verification passed by reuse of integration evidence .git/integration-verification-proof.json; validated abc, covered abc.';
+  const ports = makePorts(recorder, { verification: { ...base.verification,
+    readReusableVerificationProof: () => ({ ok: true, identity: 'integration-proof', diagnostic }),
+  } });
+  let executions = 0;
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder, {
+    runVerificationGateFn: () => { executions++; return { status: 7 }; },
+  }));
+  assert.equal(result.ok, true, recorder.errors.join('\n'));
+  assert.equal(executions, 0);
+  assert.ok(recorder.log.some(line => line.includes(diagnostic)));
+});
+
+test('handoff blocks a failed verifier after integration proof rejection (TASK-2740)', async () => {
+  const recorder = makeRecorder();
+  const base = makePorts(recorder);
+  const ports = makePorts(recorder, { verification: { ...base.verification,
+    readReusableVerificationProof: () => ({ ok: false, error: 'integration evidence does not cover current inputs' }),
+  } });
+  let executions = 0;
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder, {
+    recoverGateFailure: false, runVerificationGateFn: () => { executions++; return { status: 7, stdout: '', stderr: 'red' }; },
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(executions, 1);
+  assert.equal(result.gateFailure?.exitCode, 7);
+  assert.deepEqual(recorder.transitions, []);
+});

@@ -9,6 +9,7 @@ import type { CSSProperties, DragEvent, KeyboardEvent as ReactKeyboardEvent } fr
 import type { WebMissionCard, WebStage } from '../../src/interfaces/web/transport.js';
 import { ActionButton, cardCommands } from './action-button.js';
 import { Fan } from './fan.js';
+import { CheckpointPips } from './checkpoint-pips.js';
 import { LaneHeader, laneEmpty } from './lane-header.js';
 import { C } from './palette.js';
 import type { PendingCommands } from './pending-command.js';
@@ -55,7 +56,7 @@ function ReviewPips({ card }: { card: WebMissionCard }) {
 
 /**
  * The per-checkpoint evidence panel. Opens when a user clicks a checkpoint
- * label on the mission card and closes on the same click, the Escape key, or a
+ * label on the mission card and closes on its close control, the Escape key, or a
  * click on the backdrop. It renders the selected checkpoint's first-line
  * description and every recorded Goal Check row for it. Missions whose wire
  * card carries no evidence rows render nothing, so an empty mission keeps its
@@ -151,17 +152,6 @@ export function CheckpointDetail({ card, initial, onClose }: {
   );
 }
 
-function CheckpointPips({ checkpoint }: { checkpoint: string }) {
-  const current = Number(/^CP-(\d+)/i.exec(checkpoint)?.[1] ?? 0);
-  return (
-    <span aria-label={`checkpoint ${checkpoint}`} style={{ display: 'flex', gap: 4 }}>
-      {Array.from({ length: current }, (_unused, index) => (
-        <span key={index} style={{ width: 16, height: 8, borderRadius: 2, background: C.green }} />
-      ))}
-    </span>
-  );
-}
-
 function cancelAction(actions: readonly WebMissionCard['actions'][number][]) {
   return actions.find((action) => action.state === 'enabled' && action.kind === 'mission:cancel')
     ?? actions.find((action) => action.kind === 'mission:cancel') ?? null;
@@ -252,20 +242,17 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
             <ReviewPips card={card} />
           </div>
         )}
-        {card.checkpoint !== null && (
+        {(card.checkpoint !== null || checkpointEvidence.length > 0) && (
           <div
             role="button"
             tabIndex={hasCheckpointEvidence ? 0 : undefined}
             aria-label={hasCheckpointEvidence ? `View checkpoint evidence for ${card.checkpoint}` : undefined}
             onClick={openCheckpointDetail}
             onKeyDown={(event: ReactKeyboardEvent<HTMLElement>) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openCheckpointDetail(); } }}
-            // Keep the label clickable above the modal backdrop (zIndex 50) so the
-            // same-label click closes the panel; the backdrop still closes on a
-            // backdrop click or Escape.
-            style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginBottom: 8, fontSize: 11, cursor: hasCheckpointEvidence ? 'pointer' : 'default', position: 'relative', zIndex: 60 }}
+            style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginBottom: 8, fontSize: 11, cursor: hasCheckpointEvidence ? 'pointer' : 'default', position: 'relative', zIndex: 10 }}
           >
-            <CheckpointPips checkpoint={card.checkpoint} />
-            <span style={{ color: C.dim }} title={card.checkpointDescription ?? undefined}>{card.checkpoint}</span>
+            <CheckpointPips card={card} />
+            {card.checkpoint !== null && <span style={{ color: C.dim }} title={card.checkpointDescription ?? undefined}>{card.checkpoint}</span>}
             <span style={{ color: GATE_COLOR[card.gate], fontWeight: card.gate === 'failed' ? 700 : 400 }}>
               {GATE_TEXT[card.gate]}
             </span>

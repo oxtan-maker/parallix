@@ -178,3 +178,11 @@ test('independent repair two receives durable original and latest evidence (TASK
     assert.equal(outcome.attempts, 2);
   } finally { fs.rmSync(worktree, { recursive: true, force: true }); }
 });
+
+test('repair guidance checks readiness and stops on recorded human-only blockers (TASK-2713)', async () => {
+  const prompt = await promptFor(repairableGate);
+  assert.match(prompt, /Run px checkpoint check --slug task-2575-fixture --json before declaring completion/);
+  assert.match(prompt, /primary stop reason even when checkpoint evidence is incomplete/);
+  assert.match(prompt, /do not fabricate proof, start repeated evidence-only repair/);
+  assert.match(prompt, /Only an explicit operator decision can clear the recorded blocker/);
+});

@@ -78,14 +78,35 @@ describe("refresh-global-px script", () => {
 
   test('scripts/refresh-global-px.sh rebuilds and reinstalls from a packed tarball without allocating a version', () => {
     const content = fs.readFileSync(SCRIPT_PATH, 'utf8');
-    assert.match(content, /pnpm install --frozen-lockfile/);
+    assert.match(content, /px-install\.sh/);
     assert.match(content, /npm run build/);
-    assert.match(content, /npm pack/);
+    assert.match(content, /npm pack --ignore-scripts/);
     assert.match(content, /npm install -g/);
     assert.doesNotMatch(content, /npm version/);
     assert.doesNotMatch(content, /git commit/);
     // Uses the hook-provided env vars documented in lib/core/post-integrate-hook.ts.
     assert.match(content, /INTEGRATE_HOOK_SLUG/);
+  });
+
+  test('scripts/refresh-global-px.sh builds the landed distributable exactly once and packing cannot rebuild it (TASK-2714)', () => {
+    const content = fs.readFileSync(SCRIPT_PATH, 'utf8');
+    // Count commands, not prose: the script's own comments name the commands it avoids.
+    const code = content.split('\n').filter(line => !/^\s*#/.test(line)).join('\n');
+    // One explicit build of the landed tree. `prepack` is `npm run build`, so a pack
+    // that runs lifecycle scripts would compile the same bundle a second time.
+    const buildCalls = code.match(/^npm run build\s*$/gm) || [];
+    assert.equal(buildCalls.length, 1, 'the refresh must contain exactly one `npm run build`');
+    const packCalls = code.match(/npm pack --/g) || [];
+    assert.equal(packCalls.length, 1, 'the refresh must pack exactly once');
+    assert.match(code, /npm pack --ignore-scripts/, 'packing must not trigger the prepack build');
+    assert.doesNotMatch(code, /npm pack --pack-destination/, 'no pack without --ignore-scripts');
+    // The build stays before the pack, so the tarball carries the one built tree.
+    assert.ok(code.indexOf('npm run build') < code.indexOf('npm pack --ignore-scripts'),
+      'the single build must precede packing');
+    // package.json still declares prepack, so a standalone `npm pack` (release
+    // publication, package-content audit) keeps building normally (ADR 0044).
+    const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
+    assert.equal(pkg.scripts.prepack, 'npm run build');
   });
 
   test('scripts/refresh-global-px.sh cleans up the packed tarball on both success and failure', () => {
@@ -238,7 +259,6 @@ describe("publish and reinstall", () => {
 // ---- task-2206 post-integrate hook errors (consolidated from test/task-2206-post-integrate-hook-errors.test.ts, TASK-2622.09) ----
 describe("post-integrate hook errors", () => {
   const REPO_ROOT = path.join(import.meta.dirname, '..', '..', '..');
-  const SCRIPT_SOURCE = path.join(REPO_ROOT, 'scripts', 'refresh-global-px.sh');
 
   function writeExecutable(filePath, content) {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -253,8 +273,12 @@ describe("post-integrate hook errors", () => {
     const logPath = path.join(root, 'calls.log');
 
     fs.mkdirSync(path.join(repoRoot, 'scripts'), { recursive: true });
-    fs.copyFileSync(SCRIPT_SOURCE, path.join(repoRoot, 'scripts', 'refresh-global-px.sh'));
-    fs.writeFileSync(path.join(repoRoot, 'package.json'), JSON.stringify({ name: 'fixture', version: '1.0.1' }, null, 2));
+    for (const name of ['refresh-global-px.sh', 'px-install.sh', 'dependency-identity.mjs']) {
+      fs.copyFileSync(path.join(REPO_ROOT, 'scripts', name), path.join(repoRoot, 'scripts', name));
+    }
+    // A manifest with a dependency, so the identity's installed-tree presence check has
+    // something to require (a dependency-free manifest legitimately installs nothing).
+    fs.writeFileSync(path.join(repoRoot, 'package.json'), JSON.stringify({ name: 'fixture', version: '1.0.1', dependencies: { left: '^1.0.0' } }, null, 2));
     fs.writeFileSync(path.join(repoRoot, 'pnpm-lock.yaml'), 'lockfileVersion: 9.0\n');
 
     writeExecutable(path.join(binDir, 'git'), `#!/usr/bin/env node
@@ -269,7 +293,10 @@ process.stdout.write(fs.readFileSync(${JSON.stringify(path.join(root, 'installed
 `);
 
     writeExecutable(path.join(binDir, 'pnpm'), `#!/usr/bin/env node
-require('node:fs').appendFileSync(${JSON.stringify(logPath)}, 'pnpm ' + process.argv.slice(2).join(' ') + '\\n');
+const fs = require('node:fs');
+fs.appendFileSync(${JSON.stringify(logPath)}, 'pnpm ' + process.argv.slice(2).join(' ') + '\\n');
+// A successful installer leaves an installed tree; the identity skip path checks for it.
+fs.mkdirSync(require('node:path').join(process.cwd(), 'node_modules', '.pnpm'), { recursive: true });
 `);
 
     writeExecutable(path.join(binDir, 'npm'), `#!/usr/bin/env node
@@ -348,7 +375,83 @@ process.exit(1);
       assert.deepEqual(fs.readdirSync(fixture.repoRoot).filter(file => file.endsWith('.tgz')), []);
       assert.match(result.stdout, /Global px runner refreshed/);
       assert.match(result.stdout, /1\.0\.1/, 'the reported installed px version equals the landed package version');
-      assert.match(calls, /pnpm install --frozen-lockfile --prefer-offline\nnpm run build\nnpm pack --pack-destination [^\n]+\nnpm install -g/, 'dependency reconciliation precedes build, pack, and global installation');
+      assert.match(calls, /pnpm install --frozen-lockfile --prefer-offline\nnpm run build\nnpm pack --ignore-scripts --pack-destination [^\n]+\nnpm install -g/, 'dependency reconciliation precedes the single build, pack, and global installation');
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('refresh-global-px.sh reconciles dependencies only when the installed identity changed (TASK-2714)', () => {
+    const fixture = setupFixture();
+    try {
+      const first = runHook(fixture.binDir, fixture.repoRoot);
+      assert.equal(first.status, 0, first.stderr);
+      const second = runHook(fixture.binDir, fixture.repoRoot);
+      assert.equal(second.status, 0, second.stderr);
+
+      const calls = fs.readFileSync(fixture.logPath, 'utf8');
+      const installs = calls.match(/^pnpm install --frozen-lockfile --prefer-offline$/gm) || [];
+      assert.equal(installs.length, 1, `the second refresh must skip reconciliation, calls:\n${calls}`);
+      assert.match(calls, /npm run build/, 'the landed build still runs on the skipped path');
+      assert.ok(fs.existsSync(path.join(fixture.repoRoot, '.workflow', 'dependency-identity.json')),
+        'the successful install publishes the identity');
+
+      // A release-version-only bump in the landed tree must not reinstall either.
+      fs.writeFileSync(path.join(fixture.repoRoot, 'package.json'), JSON.stringify({ name: 'fixture', version: '1.0.2', dependencies: { left: '^1.0.0' } }, null, 2));
+      const fourth = runHook(fixture.binDir, fixture.repoRoot);
+      assert.equal(fourth.status, 0, fourth.stderr);
+      assert.equal((fs.readFileSync(fixture.logPath, 'utf8').match(/^pnpm install --frozen-lockfile --prefer-offline$/gm) || []).length, 1,
+        'a version-only landed change keeps the installed identity');
+
+      // A dependency change in the landed tree invalidates it again.
+      fs.writeFileSync(path.join(fixture.repoRoot, 'package.json'), JSON.stringify({ name: 'fixture', version: '1.0.3', dependencies: { left: '^1.0.0', right: '^2.0.0' } }, null, 2));
+      const third = runHook(fixture.binDir, fixture.repoRoot);
+      assert.equal(third.status, 0, third.stderr);
+      const afterChange = fs.readFileSync(fixture.logPath, 'utf8');
+      assert.equal((afterChange.match(/^pnpm install --frozen-lockfile --prefer-offline$/gm) || []).length, 2,
+        'a real dependency change reconciles again');
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('refresh-global-px.sh reconciles when the installed tree is gone even though the identity matches (TASK-2714)', () => {
+    const fixture = setupFixture();
+    try {
+      assert.equal(runHook(fixture.binDir, fixture.repoRoot).status, 0);
+      const published = fs.readFileSync(path.join(fixture.repoRoot, '.workflow', 'dependency-identity.json'), 'utf8');
+
+      // The operator prunes node_modules but the successful record survives. Skipping
+      // here would build the distributable against a tree that no longer exists.
+      fs.rmSync(path.join(fixture.repoRoot, 'node_modules'), { recursive: true, force: true });
+
+      const second = runHook(fixture.binDir, fixture.repoRoot);
+      assert.equal(second.status, 0, second.stderr);
+      const calls = fs.readFileSync(fixture.logPath, 'utf8');
+      assert.equal((calls.match(/^pnpm install --frozen-lockfile --prefer-offline$/gm) || []).length, 2,
+        'a matching identity without node_modules must still reconcile');
+      assert.match(`${second.stdout}${second.stderr}`, /node_modules is missing/, 'the skip refusal is reported');
+      assert.ok(fs.existsSync(path.join(fixture.repoRoot, 'node_modules')), 'the installed tree is restored before the build');
+      assert.ok(JSON.parse(published).identity, 'the first run published a real identity');
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('the identity check subcommand blocks dependent work when the installed tree is gone (TASK-2714)', () => {
+    const fixture = setupFixture();
+    const check = () => childProcess.spawnSync(process.execPath,
+      ['scripts/dependency-identity.mjs', 'check', '--worktree', fixture.repoRoot],
+      { cwd: fixture.repoRoot, encoding: 'utf8' });
+    try {
+      assert.equal(runHook(fixture.binDir, fixture.repoRoot).status, 0);
+      const installed = check();
+      assert.equal(installed.status, 0, `an installed tree is trusted: ${installed.stdout}`);
+
+      fs.rmSync(path.join(fixture.repoRoot, 'node_modules'), { recursive: true, force: true });
+      const pruned = check();
+      assert.equal(pruned.status, 2, 'a pruned installed tree is not a trusted identity');
+      assert.match(pruned.stdout, /^reconcile /, 'dependent work is told to reconcile');
     } finally {
       fs.rmSync(fixture.root, { recursive: true, force: true });
     }
@@ -447,21 +550,17 @@ describe("publish proof is captured after the post-integrate rebuild (consolidat
   });
 
   // ---------------------------------------------------------------------------
-  // Test 3: Source code ordering — proof capture must come AFTER post-integrate
-  // hook invocation in the Variant B integrate flow.
+  // Test 3: Source ordering — the post-integrate rebuild must not be followed by a
+  // proof captured from the pre-hook tree in the Variant B integrate flow.
   //
-  // This test reads the source TypeScript of the module that owns the Variant B
-  // closeout order and asserts that the textual ordering of function calls
-  // matches the fixed behaviour:
-  //   runPostIntegrateHook (or runPostIntegrateHookOrAbort)  <  captureVerifiedTreeProof
-  //
-  // Before the fix: captureVerifiedTreeProof appeared BEFORE runPostIntegrateHook.
-  // After the fix:  runPostIntegrateHook appears BEFORE captureVerifiedTreeProof.
-  //
-  // TASK-2604 moved the hook into shared landed closeout. The squash flow must
-  // await that closeout before capturing the publish proof.
+  // Before the fix: captureVerifiedTreeProof appeared BEFORE runPostIntegrateHook,
+  // so the proof described a tree the hook had already rebuilt (task-2200/2203).
+  // TASK-2604 moved the hook into shared landed closeout, and the publish-proof
+  // capture moved out of the squash flow entirely. The invariant that remains: the
+  // squash flow awaits the closeout that runs the hook, and no proof capture is
+  // left in the squash flow that could observe a pre-hook tree.
   // ---------------------------------------------------------------------------
-  test('Variant B: post-integrate hook runs before proof capture (task-2203 fix)', () => {
+  test('Variant B: post-integrate hook runs inside the awaited landed closeout and no proof is captured from a pre-hook tree (task-2203 fix)', () => {
     const REPO_ROOT = path.join(import.meta.dirname, '..', '..', '..');
     const squashPath = path.join(REPO_ROOT, 'src', 'application', 'integrate', 'squash.ts');
     const content = fs.readFileSync(squashPath, 'utf8');
@@ -469,13 +568,17 @@ describe("publish proof is captured after the post-integrate rebuild (consolidat
     const closeout = fs.readFileSync(closeoutPath, 'utf8');
 
     const finishIdx = content.indexOf('await finishLanding(run, { branch, mergedCommit');
-    const proofIdx = content.indexOf('captureVerifiedTreeProof');
 
     assert.match(content, /await completeLandedCloseout\(/);
     assert.match(closeout, /await landing\.runPostIntegrateHookOrAbort\(/);
     assert.ok(finishIdx >= 0, 'squash.ts must await landed closeout');
-    assert.ok(proofIdx >= 0, 'squash.ts must call captureVerifiedTreeProof');
-    assert.ok(proofIdx > finishIdx, 'proof must follow the awaited closeout hook');
+    assert.doesNotMatch(content, /captureVerifiedTreeProof/,
+      'the squash flow must not capture a tree proof before the awaited closeout rebuilds the tree');
+    // The hook stays inside the closeout the squash flow awaits, so the rebuild
+    // completes before anything downstream reads the landed tree.
+    const hookIdx = closeout.indexOf('await landing.runPostIntegrateHookOrAbort(');
+    const closeIdx = closeout.indexOf('await landing.closeLandedIntegrationOrAbort(');
+    assert.ok(hookIdx >= 0 && closeIdx > hookIdx, 'the hook must run before the closeout closes the mission');
   });
 
   // ---------------------------------------------------------------------------
@@ -541,7 +644,6 @@ describe("publish proof is captured after the post-integrate rebuild (consolidat
 // ---- task-2621 refresh reconciles the landed lockfile before pack (consolidated from test/task-2621-repro.test.ts, TASK-2622.17) ----
 describe("refresh reconciles the landed lockfile before pack (consolidated from test/-repro.test.ts,", () => {
   const REPO_ROOT = path.join(import.meta.dirname, '..', '..', '..');
-  const REFRESH_SCRIPT = path.join(REPO_ROOT, 'scripts', 'refresh-global-px.sh');
 
   function executable(file: string, source: string) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -563,7 +665,9 @@ describe("refresh reconciles the landed lockfile before pack (consolidated from 
     const nestedBrace = path.join(repo, nested);
 
     fs.mkdirSync(path.join(repo, 'scripts'), { recursive: true });
-    fs.copyFileSync(REFRESH_SCRIPT, path.join(repo, 'scripts/refresh-global-px.sh'));
+    for (const name of ['refresh-global-px.sh', 'px-install.sh', 'dependency-identity.mjs']) {
+      fs.copyFileSync(path.join(REPO_ROOT, `scripts/${name}`), path.join(repo, `scripts/${name}`));
+    }
     fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: 'fixture', version: '1.0.0' }));
     fs.writeFileSync(path.join(repo, 'pnpm-lock.yaml'), 'lockfileVersion: 9.0\n');
     fs.mkdirSync(rootBrace, { recursive: true });
@@ -590,13 +694,15 @@ const args = process.argv.slice(2);
 const root = process.cwd();
 const nested = ${JSON.stringify(nested)};
 fs.appendFileSync(${JSON.stringify(calls)}, args.join(' ') + '\\n');
-if (args[0] === 'run' && args[1] === 'build') process.exit(0);
-if (args[0] === 'pack') {
+if (args[0] === 'run' && args[1] === 'build') {
   for (const target of ['node_modules/brace-expansion', nested]) {
     if (JSON.parse(fs.readFileSync(path.join(root, target, 'package.json'))).version !== '5.0.12') {
-      process.stderr.write('prepare rejected stale brace-expansion\\n'); process.exit(1);
+      process.stderr.write('build rejected stale brace-expansion\\n'); process.exit(1);
     }
   }
+  process.exit(0);
+}
+if (args[0] === 'pack') {
   process.stdout.write('fixture-1.0.0.tgz\\n'); process.exit(0);
 }
 if (args[0] === 'install' && args[1] === '-g') process.exit(0);
@@ -605,7 +711,7 @@ process.exit(1);
     return { root, repo, bin, calls };
   }
 
-  test('task-2621: refresh reconciles the landed lockfile before npm pack prepare without a real global install', () => {
+  test('task-2621: refresh reconciles the landed lockfile before the single build consumes it, without a real global install', () => {
     const setup = fixture();
     try {
       const result = childProcess.spawnSync('bash', ['scripts/refresh-global-px.sh'], {
@@ -613,7 +719,7 @@ process.exit(1);
         encoding: 'utf8',
         env: { ...process.env, PATH: `${setup.bin}:${process.env.PATH}` },
       });
-      assert.equal(result.status, 0, `refresh should reconcile stale dependencies before pack prepare\n${result.stderr}`);
+      assert.equal(result.status, 0, `refresh should reconcile stale dependencies before the build\n${result.stderr}`);
       assert.match(fs.readFileSync(setup.calls, 'utf8'), /^install --frozen-lockfile --prefer-offline$/m);
     } finally {
       fs.rmSync(setup.root, { recursive: true, force: true });

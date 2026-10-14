@@ -18,9 +18,19 @@ Forbidden actions:
 
 Mission state authority: `px status {{slug}}` is the authority for recorded Mission facts.
 
-Record the mission contract with typed commands. The slug is inferred from this worktree, and every write resolves its own current version automatically, so no write takes `--expected-version`. Each write prints the new `version`; pass it to the next write only when you want to pin the version, otherwise keep writing without re-reading `px status`.
+Prefer one foreground px mission author invocation to record the complete contract atomically, then read it back once with px status {{slug}}. Run px mission --help for the typed flags. The slug is inferred from this worktree. Each write resolves its own current version automatically; --expected-version is optional when you want to pin an earlier read. Validation or a version conflict rejects the whole batch without partial writes.
 
-The contract, and what the harness requires before this draft can finish:
+For example, a small greeting fix can use plain criterion text:
+
+```sh
+px mission author --goal 'Fix the greeting' --why 'The greeting contains a typo' --scope 'Correct hello.sh greeting text' --out-of-scope 'Other behavior' --criterion 'hello.sh prints Hello, World! and exits successfully' --checkpoint CP-1 --checkpoint-text 'Correct the greeting and verify public execution' --gate './scripts/verify-local.sh all' --predicted Small --classification ai_sdlc
+```
+
+Supply every required part: goal and why, scope, at least one success criterion, an ordered checkpoint plan, exact runnable verification gates, a predicted NEL bucket, and classification. Repeat list flags within the same invocation; the lists replace recorded lists. Out-of-scope entries are optional; record them whenever review should check a deliberate boundary. Checkpoint descriptions are at most 512 characters. Gates contain only runnable commands, without prose, comments or expected outcomes. Expected outcomes belong in criteria.
+
+Use plain text in criteria and evidence values, without literal backticks or embedded double quotes. Quote shell arguments with single quotes as in the example. Execution can cite a repository-relative path such as hello.sh or test/unit/example.test.ts as its evidence reference; formatting characters are unnecessary.
+
+The required parts and their existing single-concept commands are listed below. The batch above records the same parts together; reproduction and dependencies use their own commands.
 
 | Part | Command | Required |
 |---|---|---|
@@ -34,13 +44,13 @@ The contract, and what the harness requires before this draft can finish:
 | Reproduction test | `px repro set --test <path>` | required for a `bug` mission only |
 | Dependencies | `px depends add --on <slug>`, one call each | optional; nothing enforces it |
 
-This table is the whole requirement. The draft does not complete while any required part is missing: the harness refuses it, names what is missing, and sends it back to you. Run any command with `--help` for its exact flags.
+Existing single-concept commands remain available for focused edits. Record a reproduction test with px repro set --test <path> for a bug mission; add optional dependencies with px depends add --on <slug>. Neither changes lifecycle state. Run any command with --help for exact flags.
 
-Run each write as its own foreground command and wait for it to finish. Do not chain the whole contract into one long command, do not move a write to the background, and never end your turn while a `px` command is still running: when your turn ends, anything still running is killed and was not recorded.
+Wait for each foreground write to finish; never end your turn while a `px` command is still running: when your turn ends, anything still running is killed and was not recorded.
 
 A write against a stale version is rejected with an explicit conflict and changes nothing; re-read the version with `px status {{slug}}` and retry.
 
-Before you finish, read the contract back with `px status {{slug}}` and check every required part in the table. Anything it does not report was not recorded.
+Before you finish, read the contract back with `px status {{slug}}` and check every required part above. Anything it does not report was not recorded.
 
 Plan the checkpoints; do not record their evidence. `px checkpoint record` is for execution: evidence is what the work produces, and there is nothing to cite yet.
 
@@ -56,7 +66,7 @@ Drafting requirements:
 
 Bug-labeled missions (regression-test-first / "lock the bug"):
 - this section applies only when the backlog task at `{{taskPath}}` carries a `bug` label (in addition to its `ai_sdlc` or `user_value` classification). If there is no `bug` label, ignore this section entirely.
-- make the **first planned checkpoint** (`px checkpoint plan --name CP-1`) the authoring of a failing reproduction test that locks the bug before any fix is written. Describe in that checkpoint: the test file location (under `test/`), the reproduction scenario, and the assertion that fails at the mission's parent commit (red) and will pass once the fix lands (green).
+- make the **first planned checkpoint** (--checkpoint CP-1 in the batch) the authoring of a failing reproduction test that locks the bug before any fix is written. Describe in that checkpoint: the test file location (under `test/`), the reproduction scenario, and the assertion that fails at the mission's parent commit (red) and will pass once the fix lands (green).
 - record the reproduction test's path with `px repro set --test <path>` (for example, `px repro set --test test/task-1354-repro.test.ts`); the table above makes it required for a bug mission. `px status {{slug}}` reports it back for the reviewer to check against the diff.
 - do not author the fix during draft — the reproduction test and its recorded path are the only bug-specific drafting outputs.
 

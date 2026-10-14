@@ -265,7 +265,7 @@ describe('Context CLI', () => {
       ]), 0, errors.join('\n'));
       const replaced = await statusJson();
       assert.deepEqual(replaced.latestCheckpoint.goalCheck, [
-        { criterion: 'CLI round trip', evidence: 'test/task-2521-03-review-verbs.test.ts' },
+        { criterion: 'CLI round trip', criterionId: null, evidence: 'test/task-2521-03-review-verbs.test.ts' },
       ]);
       assert.equal(replaced.latestCheckpoint.nextAction, 'Replaced evidence.');
       assert.deepEqual(replaced.checkpoints, afterCheckpoint.checkpoints);
@@ -714,5 +714,140 @@ test('CLI mutations preserve invalid-contract blockers, evidence and optimistic 
     await clearOperatorStateCache();
     if (previousHome === undefined) { delete process.env.PARALLIX_HOME; } else { process.env.PARALLIX_HOME = previousHome; }
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('checkpoint history and round replay survive production CLI re-records (TASK-2742)', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-checkpoint-history-'));
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-checkpoint-repo-'));
+  const previousHome = process.env.PARALLIX_HOME;
+  process.env.PARALLIX_HOME = home;
+  try {
+    fs.writeFileSync(path.join(repo, 'workflow.config.json'), JSON.stringify({
+      product: { name: 'Checkpoint fixture' }, adapters: { review: { provider: 'none' }, agents: {} },
+    }));
+    const id = missionId('task-checkpoint-replay-fixture');
+    const { db } = await initOperatorState({ homeDir: home });
+    const store = new SqliteMissionStore(db);
+    await store.save({ ...intakeMission({ id, repositoryId: repositoryId('parallix'), title: 'Disposable evidence replay', labels: [], assignee: agentFamily('codex') }), status: 'active' } as Mission, null);
+    const invoke = async (args: string[]) => {
+      const output: string[] = [];
+      const errors: string[] = [];
+      const original = process.stdout.write;
+      process.stdout.write = ((chunk: string) => { output.push(String(chunk)); return true; }) as typeof original;
+      try {
+        const code = await run(['checkpoint', ...args, '--slug', id], { baseCwd: repo, error: message => { errors.push(message); return message; } });
+        return { code, output: output.join(''), errors: errors.join('\n') };
+      } finally { process.stdout.write = original; }
+    };
+    const record = (evidence: string) => invoke(['record', '--name', 'CP-1', '--criterion', 'replay', '--evidence', evidence, '--next', 'inspect round state']);
+    assert.equal((await record('original proof')).code, 0);
+    const loaded = await store.load(id);
+    if (loaded.kind !== 'found') { throw new Error('fixture missing'); }
+    const reviewer = agentFamily('claude');
+    const review = startReview({ change: { kind: 'local-branch', sourceBranch: `mission/${id}`, targetBranch: 'main' }, revision: changeRevision('fixture-head') }, reviewer, agentFamily('codex'), '2026-10-14T00:00:00Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' }));
+    await store.save({ ...loaded.mission, review, status: 'review' } as Mission, loaded.version);
+    const before = await invoke(['round', '--round', '1']);
+    assert.equal(before.code, 0, before.errors);
+    assert.equal((await record('replacement proof')).code, 0);
+    await clearOperatorStateCache();
+    const latest = await invoke(['read']);
+    assert.equal(JSON.parse(latest.output).checkpoints[0].goalCheck[0].evidence, 'replacement proof');
+    const history = await invoke(['history']);
+    assert.equal(history.code, 0, history.errors);
+    const versions = JSON.parse(history.output);
+    assert.deepEqual(versions.map((v: { checkpoint: { goalCheck: { evidence: string }[] } }) => v.checkpoint.goalCheck[0]?.evidence), ['original proof', 'replacement proof']);
+    assert.equal(versions[1].recordedRound, 1);
+    const replay = await invoke(['round', '--round', '1']);
+    assert.deepEqual(JSON.parse(replay.output), JSON.parse(before.output));
+    assert.deepEqual(JSON.parse(replay.output).versions, [1]);
+    const missing = await invoke(['round', '--round', '99']);
+    assert.equal(missing.code, 1);
+    assert.match(missing.errors, /no checkpoint state.*99/);
+    const { db: reopened } = await initOperatorState({ homeDir: home });
+    const final = await new SqliteMissionStore(reopened).load(id);
+    assert.equal(final.kind, 'found');
+    if (final.kind === 'found') { assert.equal(final.version, loaded.version + 2, 'all subsequent reads leave the write version unchanged'); }
+  } finally {
+    await clearOperatorStateCache();
+    if (previousHome === undefined) { delete process.env.PARALLIX_HOME; } else { process.env.PARALLIX_HOME = previousHome; }
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('public checkpoint check reports blocked and ready evidence without effects (TASK-2713)', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-readiness-home-'));
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-readiness-repo-'));
+  const previousHome = process.env.PARALLIX_HOME;
+  process.env.PARALLIX_HOME = home;
+  try {
+    const marker = path.join(repo, 'unexpected-gate');
+    const gate = `node -e "require('fs').writeFileSync('${marker}', 'gate ran')"`;
+    fs.writeFileSync(path.join(repo, 'workflow.config.json'), JSON.stringify({ product: { name: 'Readiness fixture' }, adapters: {
+      review: { provider: 'none' }, agents: {}, verification: { command: gate },
+      gates: { preHandoff: [{ key: 'sentinel', command: gate }] },
+    } }));
+    fs.mkdirSync(path.join(repo, 'test'));
+    fs.writeFileSync(path.join(repo, 'test', 'proof.test.ts'), '// disposable evidence reference');
+    const id = missionId('task-readiness-fixture');
+    const { db } = await initOperatorState({ homeDir: home });
+    const store = new SqliteMissionStore(db);
+    const blocker = { command: gate, diagnostic: 'requires operator choice', authorityReason: 'locked contract', proposedCorrection: 'operator decision' };
+    const mission = { ...intakeMission({ id, repositoryId: repositoryId('parallix'), title: 'Readiness', labels: [], assignee: agentFamily('codex') }),
+      status: 'active', brief: missionBrief({ goal: 'check evidence', why: 'read-only contract', scope: 'fixture', outOfScope: [] }),
+      declaredGates: [gate], successCriteria: ['first', 'second'], completedSuccessCriteria: [0, 1], checkpoints: [
+        { missionId: id, name: 'CP-1', nextActionText: 'continue', goalCheck: [{ criterion: 'first', evidence: 'test/proof.test.ts' }] },
+        { missionId: id, name: 'CP-5', nextActionText: '', goalCheck: [] },
+        { missionId: id, name: 'CP-6', nextActionText: 'all done; blocker resolved', goalCheck: [], repair: {
+          incidentId: 'incident', command: gate, authorizedGates: [gate], authorizedCriteria: ['first', 'second'], attempt: 1,
+          evidenceRecorded: false, verified: false, blocker,
+        } },
+      ],
+    } as Mission;
+    await store.save(mission, null);
+    const invoke = async (args: string[]) => {
+      const output: string[] = [];
+      const errors: string[] = [];
+      const original = process.stdout.write;
+      process.stdout.write = ((chunk: string) => { output.push(String(chunk)); return true; }) as typeof original;
+      try {
+        const code = await run(args, { baseCwd: repo, error: message => { errors.push(message); return message; } });
+        return { code, output: output.join(''), errors: errors.join('\n') };
+      } finally { process.stdout.write = original; }
+    };
+    assert.match((await invoke(['checkpoint', '--help'])).output, /checkpoint check/);
+    assert.match((await invoke(['--help'])).output, /check \[--json\].*read-only evidence readiness/);
+    const snapshot = async () => ({ state: await store.load(id), history: await store.checkpointHistory(id),
+      files: fs.readdirSync(repo), homeFiles: fs.readdirSync(home) });
+    const before = await snapshot();
+    const checked = await invoke(['checkpoint', 'check', '--slug', id, '--json']);
+    assert.equal(checked.code, 0, checked.errors);
+    const result = JSON.parse(checked.output);
+    assert.equal(result.ready, false);
+    assert.equal(result.version, before.state.kind === 'found' && before.state.version);
+    assert.equal(result.primaryStopReason, 'human-only-contract-blocker');
+    assert.deepEqual(result.findings.filter((item: { code: string }) => item.code === 'missing-checkpoint').map((item: { checkpoint: string }) => item.checkpoint), ['CP-5', 'CP-6']);
+    assert.ok(result.findings.some((item: { code: string; criterion: string }) => item.code === 'uncovered-criterion' && item.criterion === 'second'));
+    assert.match(result.findings[1].nextCommands[0], /px checkpoint record --name CP-5/);
+    assert.deepEqual(await snapshot(), before, 'version, lifecycle, evidence history and repair state remain unchanged');
+    assert.equal(fs.existsSync(marker), false);
+    const loaded = await store.load(id);
+    if (loaded.kind !== 'found') { throw new Error('fixture missing'); }
+    await store.save({ ...loaded.mission, checkpoints: loaded.mission.checkpoints.map(cp => ({ ...cp, repair: undefined,
+      goalCheck: cp.name === 'CP-1' ? cp.goalCheck : [{ criterion: 'second', evidence: 'test/proof.test.ts' }], nextActionText: 'review' })) } as Mission, loaded.version);
+    const readyBefore = await snapshot();
+    const ready = await invoke(['checkpoint', 'check', '--slug', id]);
+    assert.equal(ready.code, 0, ready.errors);
+    assert.deepEqual(JSON.parse(ready.output).findings, []);
+    assert.equal(JSON.parse(ready.output).ready, true);
+    assert.deepEqual(await snapshot(), readyBefore);
+    assert.equal(fs.existsSync(marker), false);
+    assert.equal(fs.existsSync(path.join(repo, 'missions')), false);
+  } finally {
+    await clearOperatorStateCache();
+    if (previousHome === undefined) { delete process.env.PARALLIX_HOME; } else { process.env.PARALLIX_HOME = previousHome; }
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
   }
 });

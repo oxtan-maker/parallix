@@ -388,9 +388,11 @@ test('this repository exposes the full independent gate width and orders Sonar a
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
   const gates = loadPhaseGates(repoRoot, 'preIntegration');
   const keys = gates.map((g) => g.key);
-  assert.deepEqual(keys, ['build', 'dependency-audit', 'verification', 'unit', 'integration-ci', 'integration-local', 'coverage-merge', 'workflow', 'agent-smoke', 'quality-gate']);
+  assert.deepEqual(keys, ['documentation', 'landing-tree', 'build', 'dependency-audit', 'verification', 'unit', 'integration-ci', 'integration-local', 'coverage-merge', 'workflow', 'agent-smoke', 'quality-gate']);
   assert.equal(loadPhaseGateParallelism(repoRoot, 'preIntegration'), 6);
   assert.deepEqual(gates.map(({ key, command, order }) => ({ key, command, order })), [
+    { key: 'documentation', command: './scripts/verify-local.sh docs', order: 0 },
+    { key: 'landing-tree', command: './scripts/verify-landing-tree.sh', order: 1 },
     { key: 'build', command: 'npm run build', order: 1 },
     { key: 'dependency-audit', command: 'pnpm audit --audit-level=high', order: 2 },
     { key: 'verification', command: './scripts/verify-local.sh static-analysis', order: 3 },

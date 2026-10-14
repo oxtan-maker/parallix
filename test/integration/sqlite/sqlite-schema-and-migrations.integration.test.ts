@@ -286,6 +286,8 @@ describe("SQLite schema and migration runner", () => {
     ['the recorded pre-Sonar checksum for migration 0007', '0007-usage-statistics-identity', '0bba52d7101501a2a2bc95d20abed97f52bae10670bdf15e55c5d09c391315b3'],
     // TASK-2701: the 0018 comment renamed the adhoc identity prefix to `px-`.
     ['the pre-rename checksum for migration 0018', '0018-adhoc-mission-counter', '3560376d8e31e0b8fc527509211378a839ba24ef5e5e5fac9ee6dadc06c172c2'],
+    // TASK-2742: selective backfill predicates preserve the original results.
+    ['the pre-Sonar checksum for migration 0038 (TASK-2742)', '0038-success-criterion-identity', '674db493a344c3d3ffd5c0d9e4eca5f51672d442e9c591380a0ba0888ca9ed3c'],
   ] as const) {
     it(`accepts ${label} without rewriting it`, async () => {
       const { db, dir } = createTempDb();
@@ -302,6 +304,10 @@ describe("SQLite schema and migration runner", () => {
           'SELECT checksum FROM schema_migrations WHERE id = ?', [migration.id],
         );
         assert.equal(entry.checksum, legacyChecksum, 'the legacy ledger entry remains compatible with older px builds');
+        if (id === '0038-success-criterion-identity') {
+          await assert.rejects(runner.applyPending(migrations.map(item => item.id === id
+            ? { ...item, checksum: 'unapproved-sql-drift' } : item)), /checksum mismatch/i);
+        }
       } finally {
         await db.close();
         cleanupTempDir(dir);
@@ -723,4 +729,63 @@ describe("SQLite schema and migration runner", () => {
 
     assert.deepEqual(offenders, [], `no lib module may import node:sqlite; found: ${offenders.join(', ')}`);
   });
+});
+
+it('migrates checkpoint evidence losslessly with unknown legacy metadata (TASK-2742)', async () => {
+  const { db, dir } = createTempDb();
+  try {
+    const migrations = loadDefaultMigrations();
+    const runner = new SqliteMigrationRunner(db);
+    await runner.applyPending(migrations.filter(m => m.id < '0037'));
+    await db.execute("INSERT INTO missions (id, repository_id, title, status, version) VALUES ('legacy', 'repo', 'Legacy evidence', 'active', 7)");
+    await db.execute("INSERT INTO mission_checkpoints (mission_id, position, checkpoint_mission_id, name, next_action_text) VALUES ('legacy', 0, 'legacy', 'CP-1', 'continue')");
+    await db.execute("INSERT INTO mission_checkpoint_goal_checks (mission_id, checkpoint_position, position, criterion, evidence, recorded_round) VALUES ('legacy', 0, 0, 'old criterion', 'old proof', 3), ('legacy', 0, 1, '', 'partial legacy proof', NULL)");
+    await db.execute("INSERT INTO mission_reviews (mission_id) VALUES ('legacy')");
+    await db.execute("INSERT INTO mission_review_rounds (mission_id, position, round_number, change_kind, source_branch, target_branch, revision, reviewer, implementer, started_at) VALUES ('legacy', 0, 3, 'local-branch', 'mission/legacy', 'main', 'old-revision', 'claude', 'codex', '2026-09-01T00:00:00Z')");
+    await runner.applyPending(migrations);
+    const boundaries = await db.query<{ state_json: string | null }>("SELECT state_json FROM mission_review_checkpoint_states WHERE mission_id = 'legacy' AND round_number = 3");
+    assert.deepEqual(boundaries.map(row => row.state_json), [null]);
+    const rows = await db.query<{ checkpoint_json: string; recorded_at: null; recorded_round: null; mission_revision: null }>("SELECT * FROM mission_checkpoint_versions WHERE mission_id = 'legacy'");
+    assert.equal(rows.length, 1);
+    const checkpoint = JSON.parse(rows[0]!.checkpoint_json);
+    assert.deepEqual(checkpoint.goalCheck.map((row: { criterion: string; evidence: string; recordedRound: number | null }) => [row.criterion, row.evidence, row.recordedRound]), [['old criterion', 'old proof', 3], ['', 'partial legacy proof', null]]);
+    assert.equal(rows[0]!.recorded_at, null);
+    assert.equal(rows[0]!.recorded_round, null);
+    assert.equal(rows[0]!.mission_revision, null);
+    await runner.applyPending(migrations);
+    assert.equal((await db.query("SELECT * FROM mission_checkpoint_versions WHERE mission_id = 'legacy'")).length, 1);
+  } finally { await db.close(); cleanupTempDir(dir); }
+});
+
+it('assigns legacy criterion IDs only on exact text matches (TASK-2742)', async () => {
+  const { db, dir } = createTempDb();
+  try {
+    const migrations = loadDefaultMigrations();
+    const runner = new SqliteMigrationRunner(db);
+    await runner.applyPending(migrations.filter(m => m.id < '0038'));
+    await db.execute("INSERT INTO missions (id, repository_id, title, status, version) VALUES ('identity', 'repo', 'Legacy identity', 'active', 1)");
+    await db.execute("INSERT INTO missions (id, repository_id, title, status, version) VALUES ('no-criteria', 'repo', 'Empty contract', 'active', 1)");
+    await db.execute("INSERT INTO mission_success_criteria (mission_id, position, criterion) VALUES ('identity', 0, 'Exact criterion')");
+    await db.execute("INSERT INTO mission_checkpoints (mission_id, position, checkpoint_mission_id, name, next_action_text) VALUES ('identity', 0, 'identity', 'CP-1', 'review')");
+    await db.execute("INSERT INTO mission_checkpoint_goal_checks (mission_id, checkpoint_position, position, criterion, evidence) VALUES ('identity', 0, 0, 'Exact criterion', 'npm test'), ('identity', 0, 1, 'exact criterion', 'npm test'), ('identity', 0, 2, 'Exact criterion ', 'npm test')");
+    const checkpoint = { missionId: 'identity', name: 'CP-1', nextActionText: 'review', goalCheck: ['Exact criterion', 'exact criterion', 'Exact criterion '].map(criterion => ({ criterion, evidence: 'npm test' })) };
+    await db.execute('INSERT INTO mission_checkpoint_versions (mission_id, version, name, checkpoint_json) VALUES (?, 1, ?, ?)', ['identity', 'CP-1', JSON.stringify(checkpoint)]);
+    await db.execute('INSERT INTO mission_review_checkpoint_states (mission_id, round_number, state_json) VALUES (?, 1, ?)', ['identity', JSON.stringify({ round: 1, checkpoints: [checkpoint], versions: [1] })]);
+    await runner.applyPending(migrations);
+    const criteria = await db.query<{ criterion_id: string }>("SELECT criterion_id FROM mission_success_criteria WHERE mission_id = 'identity'");
+    const id = criteria[0]!.criterion_id;
+    assert.ok(id);
+    const counters = await db.query("SELECT id, next_success_criterion_id FROM missions WHERE id IN ('identity', 'no-criteria') ORDER BY id");
+    assert.deepEqual(counters.map(row => ({ ...row })), [
+      { id: 'identity', next_success_criterion_id: 2 }, { id: 'no-criteria', next_success_criterion_id: 1 },
+    ]);
+    const rows = await db.query<{ criterion_id: string | null }>("SELECT criterion_id FROM mission_checkpoint_goal_checks WHERE mission_id = 'identity' ORDER BY position");
+    assert.deepEqual(rows.map(row => row.criterion_id), [id, null, null]);
+    const history = await db.query<{ checkpoint_json: string }>("SELECT checkpoint_json FROM mission_checkpoint_versions WHERE mission_id = 'identity'");
+    assert.deepEqual(JSON.parse(history[0]!.checkpoint_json).goalCheck.map((row: { criterionId: string | null }) => row.criterionId), [id, null, null]);
+    const state = await db.query<{ state_json: string }>("SELECT state_json FROM mission_review_checkpoint_states WHERE mission_id = 'identity'");
+    assert.equal(JSON.parse(state[0]!.state_json).successCriteria, null, 'round-time criteria cannot be reconstructed from current text');
+    await runner.applyPending(migrations);
+    assert.deepEqual(await db.query("SELECT criterion_id FROM mission_success_criteria WHERE mission_id = 'identity'"), criteria);
+  } finally { await db.close(); cleanupTempDir(dir); }
 });

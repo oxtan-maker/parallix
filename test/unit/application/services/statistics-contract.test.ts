@@ -439,9 +439,9 @@ test('px stats fallback-reasons table renders each distinguishable classifier fa
     observedAt: '2026-10-05T00:00:00Z', route: 'reviewer', reason, classificationMs: null,
     ...(unreached ? { provider: null, model: null, packetHash: null } : {}) });
   const attempts = [row(2, 'evidence-over-budget'), row(3, 'evidence-read-failed'), row(4, 'classifier-exception'),
-    row(5, 'provider-key-missing', true), row(6, 'provider-unavailable', true)];
+    row(5, 'provider-key-missing', true), row(6, 'provider-unavailable', true), row(7, 'consecutive-classifier-returns', true)];
   const report = renderClassifierStatistics({ decisions: [], attempts, applied: [], observations: [], coverage: 'complete' }, [windows.current, windows.previous]);
-  for (const reason of ['evidence-over-budget', 'evidence-read-failed', 'classifier-exception', 'provider-key-missing', 'provider-unavailable']) {
+  for (const reason of ['evidence-over-budget', 'evidence-read-failed', 'classifier-exception', 'provider-key-missing', 'provider-unavailable', 'consecutive-classifier-returns']) {
     assert.match(report, new RegExp(`\\| ${reason}\\s+\\|\\s+1 \\|`), reason);
   }
 });
@@ -541,4 +541,29 @@ test('restoration stats select periods, separate sources and label observed and 
   assert.match(report, /cost: \$0.3000 \(n=2\)/);
   assert.match(renderIntegrationRestorationStatistics([fact('restore-1')], [windows.current]), /0\/0 observed; 1\/1 unobserved/);
   assert.match(renderIntegrationRestorationStatistics(null, [windows.current]), /unavailable/);
+});
+
+
+test('px stats reports V5 calls, clears and preserves buckets alongside historical rounds (TASK-2743)', async () => {
+  const { integrationRepairStatistics } = await import('../../../../src/application/review-classification/repair-statistics.js');
+  const { renderIntegrationRepairStatistics } = await import('../../../../src/application/presentation/integration-repair-statistics.js');
+  const { windows, attempts } = await repairStatisticsFixture();
+  const v5 = (preserves: number | null, cleared = false) => ({ v4: { preserves: 0.1 }, v5: { preserves, cleared } });
+  const samples = attempts.map(a => a.round === 2 ? { ...a, weakening: v5(0.6, true) }
+    : a.round === 4 ? { ...a, weakening: v5(0.4) }
+    : a.round === 5 ? { ...a, weakening: v5(0.39) }
+    : a.round === 8 ? { ...a, weakening: v5(null) } : a);
+  // Retried attempts count as one round; failed calls count but have no score.
+  const input = { decisions: [], attempts: [...samples, samples[0]], applied: [], observations: [], coverage: 'complete' as const };
+  const stats = integrationRepairStatistics(input, windows.current);
+  assert.deepEqual([stats.rounds, stats.clears, stats.v5Calls, stats.v5Clears], [9, 2, 4, 1]);
+  assert.deepEqual(stats.v5Scores, { '>= 0.60': 1, '0.40-0.60': 1, '< 0.40': 1 });
+  const report = renderIntegrationRepairStatistics(input, [windows.current, windows.previous]);
+  assert.match(report, /V5 calls\s+\|\s+4 \|\s+0 \|/);
+  assert.match(report, /V5 clears\s+\|\s+1 \|\s+0 \|/);
+  assert.match(report, /V5 preserves probability/);
+  const shadow = integrationRepairStatistics({ ...input, attempts: [{ ...samples[0], shadow: true }] }, windows.current);
+  assert.deepEqual([shadow.v5Calls, shadow.v5Clears], [1, 0]);
+  const unavailable = renderIntegrationRepairStatistics(null, [windows.current, windows.previous]);
+  assert.match(unavailable, /V5 calls\s+\| unavailable\s+\| unavailable/);
 });

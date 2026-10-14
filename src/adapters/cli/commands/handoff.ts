@@ -89,7 +89,13 @@ export function createHandoffPorts(configuration?: ParallixConfiguration): Hando
       get apiRequest() { return setupReview.apiRequest; },
     },
     rebase: {
-      rebaseBeforeReviewRound: (slug, options) => rebaseBeforeReviewRound(slug, options),
+      rebaseBeforeReviewRound: (slug, options) => {
+        const rebaseOptions = options as Parameters<typeof rebaseBeforeReviewRound>[1];
+        return rebaseBeforeReviewRound(slug, {
+          ...rebaseOptions,
+          rebaseWorkflowOptions: { ...rebaseOptions?.rebaseWorkflowOptions, configuration },
+        });
+      },
     },
     gatekeeper: {
       runGatekeeper: (slug, options) => gatekeeper.runGatekeeper(slug, { ...options, configuration }),

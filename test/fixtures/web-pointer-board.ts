@@ -21,11 +21,31 @@ export async function pointerBoard(onCommand?: (request: WebCommandRequest) => P
     stdin: { contents: `
       import React from 'react';
       import {createRoot} from 'react-dom/client';
+      import {flushSync} from 'react-dom';
       import {Board} from './web/src/board';
       import './web/src/style.css';
       const root = createRoot(document.getElementById('root'));
       let boardKey = 0;
-      window.renderBoard = (snapshot, reset = false) => { if (reset) boardKey++; root.render(React.createElement(Board, {key: boardKey, snapshot, onRefresh: async () => {}})); };
+      window.boardRenders = 0;
+      // flushSync commits the refreshed DOM before the counter advances, so a
+      // caller can wait for the applied projection instead of guessing a settle
+      // time. Without it the counter only proved the frame was received.
+      window.renderBoard = (snapshot, reset = false) => { if (reset) boardKey++; flushSync(() => root.render(React.createElement(Board, {key: boardKey, snapshot, onRefresh: async () => {}}))); window.boardRenders++; };
+      // A coordinate press is dispatched through the browser process, so issuing
+      // it does not prove the page has processed it. On a loaded runner the
+      // pointerdown could land after an SSE refresh had already committed, which
+      // turns a press meant for the pre-refresh control into an ordinary click on
+      // the refreshed board. These counters make the press observable.
+      window.boardInput = { downs: 0, ups: 0, kind: null };
+      document.addEventListener('pointerdown', (event) => {
+        const button = event.target && event.target.closest ? event.target.closest('button[data-action-kind]') : null;
+        window.boardInput.downs++;
+        window.boardInput.kind = button ? button.dataset.actionKind : null;
+      }, true);
+      document.addEventListener('pointerup', () => { window.boardInput.ups++; }, true);
+      // Two frames plus a macrotask is the point past which the release's
+      // synthesised click (when there is one) and React's commit have landed.
+      window.boardSettled = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => resolve(true), 0))));
       const events = new EventSource('/events');
       events.onmessage = (event) => window.renderBoard(JSON.parse(event.data));
     `, resolveDir: process.cwd(), loader: 'tsx' },
@@ -39,8 +59,9 @@ export async function pointerBoard(onCommand?: (request: WebCommandRequest) => P
   const streams = new Set<import('node:http').ServerResponse>();
   const server = createServer(async (req, res) => {
     if (req.url === '/events') {
-      res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write(': connected\n\n');
-      streams.add(res); req.on('close', () => streams.delete(res)); return;
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      streams.add(res); res.write(': connected\n\n');
+      req.on('close', () => streams.delete(res)); return;
     }
     if (req.method === 'POST') {
       let body = ''; for await (const part of req) { body += part; }
@@ -77,9 +98,38 @@ export async function pointerBoard(onCommand?: (request: WebCommandRequest) => P
     page, requests, assetHash: createHash('sha256').update(js).digest('hex'),
     hold() { responseDelay = new Promise<void>((resolve) => { release = resolve; }); },
     release() { release?.(); responseDelay = undefined; },
+    /** Press at a coordinate and wait until the page has processed the press. */
+    async press(x: number, y: number, kind: string | null = null) {
+      await page.mouse.move(x, y);
+      const seen = await page.evaluate(() => (window as unknown as { boardInput: { downs: number } }).boardInput.downs);
+      await page.mouse.down();
+      await page.waitForFunction(([previous, expected]: [number, string | null]) => {
+        const state = (window as unknown as { boardInput: { downs: number; kind: string | null } }).boardInput;
+        return state.downs > previous && (expected === null || state.kind === expected);
+      }, [seen, kind] as [number, string | null], { timeout: 5000 });
+    },
+    /** Release and wait until the page has processed it and settled. */
+    async releasePress() {
+      const seen = await page.evaluate(() => (window as unknown as { boardInput: { ups: number } }).boardInput.ups);
+      await page.mouse.up();
+      await page.waitForFunction((previous: number) => (window as unknown as { boardInput: { ups: number } }).boardInput.ups > previous, seen, { timeout: 5000 });
+      await page.evaluate('window.boardSettled()');
+    },
     async render(snapshot: ReturnType<typeof toWebBoardSnapshot>, sse = false) {
-      if (sse) { for (const stream of streams) { stream.write(`data: ${JSON.stringify(snapshot)}\n\n`); } }
+      const applied = await page.evaluate(() => (window as unknown as { boardRenders: number }).boardRenders);
+      if (sse) {
+        // A frame can only land once the page's EventSource is registered.
+        const connected = Date.now() + 3000;
+        while (streams.size === 0 && Date.now() < connected) { await new Promise((resolve) => setTimeout(resolve, 20)); }
+        for (const stream of streams) { stream.write(`data: ${JSON.stringify(snapshot)}\n\n`); }
+      }
       else { await page.evaluate((value) => (window as unknown as {renderBoard: (s: unknown, reset: boolean) => void}).renderBoard(value, true), snapshot); }
+      // An SSE frame is delivered asynchronously. The previous fixed 30 ms sleep
+      // left a loaded runner on the pre-refresh DOM, so a coordinate press held
+      // across a refresh still activated the control that refresh had removed.
+      // Wait for the committed projection instead: the press precondition is now
+      // observable, and every assertion in the pointer contracts is unchanged.
+      await page.waitForFunction((previous: number) => (window as unknown as { boardRenders: number }).boardRenders > previous, applied, { timeout: 5000 });
       await page.waitForTimeout(30);
     },
     close,

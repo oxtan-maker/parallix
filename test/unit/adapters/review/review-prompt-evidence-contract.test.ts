@@ -1,5 +1,8 @@
 // review prompt evidence contract.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
+import { assembleStagePrompt } from '../../../../src/adapters/assets/runtime-assets.js';
+import { buildExecutePrompt } from '../../../../src/adapters/cli/commands/active.js';
+import { resolvePromptConfiguration } from '../../../../src/adapters/config/product-config.js';
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -46,14 +49,22 @@ describe("context compaction", { concurrency: false }, () => {
   test('task-2317: successful declared-gate instruction compacts only after success and retains failed-gate diagnostics', () => {
     // The compaction requirement is a lifecycle mechanic, so it lives in the
     // mandatory core half of the split execute prompt (task-2465).
-    const executePrompt = fs.readFileSync(path.join(repoRoot, 'prompts/execute-core.md'), 'utf8');
+    const executePrompt = assembleStagePrompt('execute', { contextCompaction: true });
 
     assert.match(executePrompt, /Immediately after \*\*each successful mission-declared Gate\*\*, compact/i);
-    assert.match(executePrompt, /Do not compact for a failed gate: retain its failure diagnostic/i);
+    assert.match(executePrompt, /Retain a failed gate's failure diagnostic/i);
     assert.match(executePrompt, /locked mission goal and scope plus committed checkpoint or successful-gate evidence/i);
   });
 
-  test('task-2317: no-declared-gates implementation-to-act-on-review prompt compacts and reloads durable state', () => {
+  function withEnabledPolicy(run: (root: string) => void): void {
+    const root = registeredMkdtemp('context-policy-');
+    try {
+      fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { prompts: { contextCompaction: true } } }));
+      run(root);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  }
+
+  test('task-2317: no-declared-gates implementation-to-act-on-review prompt compacts and reloads durable state', () => withEnabledPolicy(repoRoot => {
     const prompt = buildCompactActOnReviewPrompt({
       implementer: 'codex',
       branch: 'mission/task-2317-no-gates',
@@ -65,9 +76,9 @@ describe("context compaction", { concurrency: false }, () => {
     assert.match(prompt, /Before acting on findings, compact the implementation context/i);
     assert.match(prompt, /applies even when the mission declares no gates/i);
     assert.match(prompt, /current review round and disposition; unresolved findings and implementer resolutions; and the exact revision under review/i);
-  });
+  }));
 
-  test('task-2317: reviewer round-2 prompt compacts after rebase and reloads the rewritten baseline', () => {
+  test('task-2317: reviewer round-2 prompt compacts after rebase and reloads the rewritten baseline', () => withEnabledPolicy(repoRoot => {
     const prompt = buildCompactReviewPrompt({
       reviewer: 'claude',
       implementer: 'codex',
@@ -80,7 +91,7 @@ describe("context compaction", { concurrency: false }, () => {
     assert.match(prompt, /When `2` is 2 or later, before beginning this review round compact/i);
     assert.match(prompt, /exact post-rebase revision and review baseline shown by `git diff post-rebase-baseline-sha\.\.HEAD`/i);
     assert.match(prompt, /independent of the mission.s declared gates/i);
-  });
+  }));
 
   test('repairable gate-error bounce reloads fresh authority and retains diagnostic plus retry state (TASK-2700)', async () => {
     let repairPrompt = '';
@@ -688,4 +699,58 @@ describe("completed controls", { concurrency: false }, () => {
       fs.rmSync(repoRoot, { recursive: true, force: true });
     }
   });
+});
+
+
+test('checkpoint, successful-gate and review lifecycle prompts share default-on and opt-out policy (TASK-2737)', () => {
+  const root = registeredMkdtemp('prompt-policy-');
+  try {
+    fs.writeFileSync(path.join(root, 'opinion.md'), 'Repository opinion retained.');
+    for (const enabled of [undefined, false, true]) {
+      fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { prompts: {
+        override: 'opinion.md', ...(enabled === undefined ? {} : { contextCompaction: enabled }),
+      } } }));
+      const execute = buildExecutePrompt('task-2737', 'CP-1 pending', { rootDir: root });
+      const review = buildCompactReviewPrompt({ reviewer: 'codex', implementer: 'claude', branch: 'mission/task-2737', attempt: 2, repoRoot: root, reviewBaseline: 'baseline' });
+      const repair = buildCompactActOnReviewPrompt({ implementer: 'claude', branch: 'mission/task-2737', attempt: 2, repoRoot: root });
+      for (const prompt of [execute, review, repair]) {
+        if (enabled !== false) { assert.match(prompt, /compact (?:your working|the prior-round working|the implementation) context/); }
+        else { assert.doesNotMatch(prompt, /compact (?:your working|the prior-round working|the implementation) context/i); }
+        assert.match(prompt, /Repository opinion retained/);
+        assert.match(prompt, /locked mission goal|mission goal, scope/);
+        assert.doesNotMatch(prompt, /\{\{/);
+      }
+      if (enabled !== false) {
+        assert.match(execute, /Immediately after recording a checkpoint's evidence, compact your working context/);
+        assert.match(execute, /each successful mission-declared Gate\*\*, compact your working context/);
+      }
+      assert.match(execute, /Immediately after recording a checkpoint's evidence/);
+      assert.match(execute, /each successful mission-declared Gate/);
+      assert.match(execute, /Retain a failed gate's failure diagnostic while repairing it/);
+      assert.match(execute, /every success criterion is marked complete/);
+      assert.match(execute, /do not change the Backlog task's status/);
+      assert.match(review, /unresolved findings and implementer resolutions/);
+      assert.match(review, /git diff baseline\.\.HEAD/);
+      assert.match(review, /Separation of duties/);
+      assert.match(repair, /applies even when the mission declares no gates/);
+      assert.match(repair, /px resolve --slug/);
+    }
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('self-development and shipped templates inherit the consumer default-on prompt path (TASK-2737)', () => {
+  const root = path.resolve(import.meta.dirname, '../../../..');
+  assert.equal(resolvePromptConfiguration(root).contextCompaction, true);
+  const config = JSON.parse(fs.readFileSync(path.join(root, 'workflow.config.json'), 'utf8'));
+  assert.equal(config.adapters?.prompts?.contextCompaction, undefined);
+  function checkTemplates(dir: string): void {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) { checkTemplates(file); }
+      else { assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /contextCompaction/); }
+    }
+  }
+  checkTemplates(path.join(root, 'templates'));
+  assert.match(buildExecutePrompt('task-2737', '', { rootDir: root }), /compact (?:your working|the prior-round working|the implementation) context/i);
+  assert.match(buildCompactActOnReviewPrompt({ implementer: 'codex', branch: 'mission/task-2737', attempt: 2, repoRoot: root }), /compact (?:your working|the prior-round working|the implementation) context/i);
 });

@@ -1,8 +1,8 @@
 ---
 id: TASK-2713
 title: Expose early read-only mission evidence checks and targeted agent guidance
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-10 09:16'
 labels:
   - ai_sdlc

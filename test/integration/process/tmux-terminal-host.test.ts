@@ -777,7 +777,7 @@ test('a host whose harness pipe is gone still stops its command when the termina
   } finally { fx.cleanup(); }
 });
 
-test('hosted Claude launch shows readable presentation in the live pane and transcript while the raw stream stays intact (TASK-2735)', { timeout: 20000 }, async () => {
+test('hosted Claude launch shows readable presentation in the live pane and transcript while the raw stream stays intact (TASK-2735)', { timeout: 30000 }, async () => {
   const fx = fixture();
   try {
     const worktree = fx.worktree('task-claude');
@@ -795,9 +795,15 @@ test('hosted Claude launch shows readable presentation in the live pane and tran
     });
     const reader = createTmuxTerminalReader({ resolveMissionWorktree: () => worktree, repositoryKey: () => 'itrepo', configuration: resolveConfiguration(fx.env) });
     const paneText = () => { const live = reader.read('task-claude'); return live.kind === 'live' ? live.output : ''; };
-    const deadline = Date.now() + 4000;
-    while (!paneText().includes('Checking the launcher wiring') && Date.now() < deadline) { childProcess.spawnSync('sleep', ['0.05']); }
-    const pane = paneText();
+    // Presenter cold starts measured up to 5.6 s under workstation load;
+    // retain the 12 s hang bound and 250 ms polling to limit tmux CPU cost.
+    // Yield to the host's pipe handlers and wait for both rendered records.
+    const deadline = Date.now() + 12_000;
+    let pane = paneText();
+    while ((!pane.includes('Checking the launcher wiring') || !pane.includes('ls src/adapters')) && Date.now() < deadline) {
+      await delay(250);
+      pane = paneText();
+    }
     fs.writeFileSync(release, '');
     const result: any = await resultPromise;
     run.finish(result);

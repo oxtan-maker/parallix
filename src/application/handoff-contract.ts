@@ -1,5 +1,4 @@
-import { repairCheckpointFailure } from './repair-checkpoint-service.js';
-import { handoffEvidencePolicy } from '../domain/mission-handoff-policy.js';
+import { evaluateMissionEvidence } from './mission-evidence-readiness.js';
 /**
  * Recorded Mission contract inputs handoff verifies: the recorded contract,
  * the implementer identity, and legacy checkpoint document evidence.
@@ -12,7 +11,6 @@ import { missionId } from '../domain/mission.js';
 import type { Review } from '../domain/review.js';
 import type { HandoffLog, HandoffMissionServicesPort, HandoffResult, HandoffWorkflowPorts } from './ports/handoff-workflow.js';
 import type { CheckpointData } from '../domain/checkpoint.js';
-import { uncoveredCompletedCriteria } from '../domain/checkpoint.js';
 import { collectGoalCheckEvidenceRows, findUnverifiableGoalCheckRow } from './static-evidence.js';
 
 /**
@@ -30,7 +28,7 @@ export async function loadRecordedContract(
   missionDirPath: string,
   slug: string,
 ): Promise<
-  | { ok: true; draftedInDb: boolean; checkpoints: readonly CheckpointData[]; successCriteria: readonly string[]; completedSuccessCriteria: readonly number[]; gates: readonly string[]; review: Review | null }
+  | { ok: true; draftedInDb: boolean; checkpoints: readonly CheckpointData[]; successCriteria: readonly string[]; successCriterionIds?: readonly string[]; completedSuccessCriteria: readonly number[]; gates: readonly string[]; review: Review | null }
   | { ok: false; error: string }
 > {
   try {
@@ -47,6 +45,7 @@ export async function loadRecordedContract(
       draftedInDb: Boolean(mission.brief),
       checkpoints: mission.checkpoints,
       successCriteria: mission.successCriteria ?? [],
+      successCriterionIds: mission.successCriterionIds,
       completedSuccessCriteria: mission.completedSuccessCriteria ?? [],
       gates: mission.declaredGates ?? [],
       // The open review round names the affected criteria a repair must re-evidence.
@@ -175,52 +174,16 @@ export class HandoffContractVerifier {
   ): HandoffResult | VerifiedCheckpointDocument {
     const ports = this.ports;
     const { rootDir, missionDirPath, log, error } = context;
-    const checkpointFailure = contract.draftedInDb ? repairCheckpointFailure(contract.checkpoints, contract.gates, contract.successCriteria) : null;
-    if (checkpointFailure) { context.error(checkpointFailure); return { ok: false, error: checkpointFailure }; }
+    const readiness = evaluateMissionEvidence(contract, ports.fileSystem, rootDir);
     const recorded = contract.checkpoints;
     let finalCheckpoint: string | null = null;
     let checkpointContent = '';
     let evidenceRows: string[] = [];
-    const policy = handoffEvidencePolicy(contract);
-    if (policy.source === 'recorded') {
-      // Validate every recorded checkpoint's rows, not only the last: retained
-      // evidence from earlier checkpoints must cite a verifiable reference too.
-      for (const checkpoint of recorded) {
-        const rows = checkpoint.goalCheck.map((row) => `| ${row.criterion} | ${row.evidence} |`);
-        const unverifiable = findUnverifiableGoalCheckRow(ports.fileSystem, rows, rootDir);
-        if (unverifiable) {
-          const msg = `The recorded evidence for ${checkpoint.name} has a Goal Check row that cites no verifiable reference such as a recognized repo command/path, exact test name, test-file path, or ADR reference. Re-record it with \`px checkpoint record\`. Offending row: ${unverifiable}`;
-          error(msg);
-          return { ok: false, error: msg };
-        }
-      }
-      const incomplete = policy.incomplete;
-      if (incomplete.length > 0) {
-        const msg = `Success criteria ${incomplete.join(', ')} are incomplete before handoff. Mark every criterion complete with \`px mission mark-complete --criterion <index>\` (or \`--all\`) before handoff.`;
-        error(msg);
-        return { ok: false, error: msg };
-      }
-      // Completion is addressed by the stored criterion index, and a completed
-      // criterion still needs its own evidence row whose identity (the row's
-      // `criterion` text) matches the criterion text. Coverage is the union of
-      // identities across all recorded checkpoints: a repair checkpoint may carry
-      // only its affected criteria while earlier evidence is retained, and a row
-      // for one criterion does not count as evidence for another.
-      if (policy.insufficientRows) {
-        const uncovered = uncoveredCompletedCriteria(recorded, contract.successCriteria, contract.completedSuccessCriteria);
-        const combinedRows = recorded.reduce((total, checkpoint) => total + checkpoint.goalCheck.length, 0);
-        const msg = `Success-criterion evidence is missing before handoff: ${contract.successCriteria.length} completed criteria require ${contract.successCriteria.length} Goal Check row(s), but only ${combinedRows} were recorded across ${recorded.length} recorded checkpoint(s), and ${uncovered.length} criterion have no row: ${uncovered.join(', ')}. Re-record with \`px checkpoint record\` and verifiable evidence for every completed criterion; prior evidence is retained.`;
-        error(msg);
-        return { ok: false, error: msg };
-      }
+    if (readiness.source !== 'historical') {
+      const finding = readiness.findings[0];
+      if (finding) { error(finding.message); return { ok: false, error: finding.message, reason: finding.code }; }
       const combinedRows = recorded.reduce((total, checkpoint) => total + checkpoint.goalCheck.length, 0);
       log(fmt.status('PASS', `Recorded checkpoint evidence verified: ${recorded.length} recorded checkpoint(s), ${combinedRows} Goal Check row(s).`));
-    } else if (policy.source === 'missing') {
-      // A Mission drafted through the typed verbs records its evidence the same
-      // way. Handoff never writes evidence on the implementer's behalf.
-      const msg = `${fmt.slug(slug)} has no recorded checkpoint evidence. Record it with \`px checkpoint record\` before handoff; handoff never generates evidence.`;
-      error(msg);
-      return { ok: false, error: msg };
     } else {
       const evidence = this.verifyHandoffEvidence(slug, { rootDir, missionDirPath, log, error });
       if (!('finalCheckpoint' in evidence)) { return evidence; }

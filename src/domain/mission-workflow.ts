@@ -256,6 +256,9 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
     // already refined mission is idempotent so a re-run of `px draft` is safe.
     requireStatus(mission, ['backlog', 'refined'], command);
     requireDraftedContract(mission, command);
+    if (mission.labels.includes('unknown' as MissionLabel)) {
+      throw new MissionRuleViolation('Cannot refine with unknown classification: record ai_sdlc or user_value with px classification set before finishing the draft');
+    }
     return { ...mission, status: 'refined' };
   case 'activate':
     requireStatus(mission, ['refined', 'active'], command);

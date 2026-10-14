@@ -9,7 +9,7 @@ Latest reviewer outcome was: {{review_outcome}}
 Entrypoint: {{act_on_review_entrypoint}}
 
 Minimum loop contract:
-- Before acting on findings, compact the implementation context and reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current review round and disposition; unresolved findings and implementer resolutions; and the exact revision under review. This applies even when the mission declares no gates.
+- Before acting on findings, {{actOnReviewContextAction}} the locked mission goal and scope; committed checkpoint or gate evidence when present; current review round and disposition; unresolved findings and implementer resolutions; and the exact revision under review. This applies even when the mission declares no gates.
 - Load the Mission context with `px status {{slug}}` and read `AGENTS.md` before acting. That command reports the recorded brief, declared gates, the latest recorded checkpoint evidence, the reviewed revision, the outstanding findings, and your prior resolutions.
 - Get the current round, phase, and disposition from `px status {{slug}}`, which reports them on its `Review:` line. `px status` is the authority for review-loop state; take it from there and nowhere else.
 - Read the review outcome and findings from `px status {{slug}}`; its review history is projected from the operator database.

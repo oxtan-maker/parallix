@@ -101,9 +101,10 @@ function toWebMissionCard(card: MissionCard): WebMissionCard {
     agent: card.agent,
     checkpoint: card.checkpoint,
     checkpointDescription: card.checkpointDescription,
-    checkpointEvidence: card.checkpointEvidence.map(({ name, description, goalCheck }) => ({
+    checkpointEvidence: card.checkpointEvidence.map(({ name, description, goalCheck, state }) => ({
       name,
       description,
+      ...(state === undefined ? {} : { state }),
       goalCheck: goalCheck.map(({ criterion, evidence }) => ({ criterion, evidence })),
     })),
     nextActionText: card.nextActionText,

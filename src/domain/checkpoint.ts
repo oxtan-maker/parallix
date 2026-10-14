@@ -1,10 +1,13 @@
 import type { InvalidContractBlocker } from './rebound-policy.js';
+import type { SuccessCriterion } from './mission-success-criteria.js';
 import type { MissionId } from './mission.js';
 
 /** One Goal Check evidence row. Handoff requires each row to cite a verifiable
  * reference (recognized command, test name, ADR, or test-file path; file:line is accepted when necessary). */
 export interface GoalCheckRow {
   readonly criterion: string;
+  /** Null means legacy evidence has no exact criterion match. */
+  readonly criterionId?: string | null;
   readonly evidence: string;
   /**
    * Review round current when the row was recorded; absent when the Mission had
@@ -20,6 +23,13 @@ export interface GoalCheckRow {
 
 export interface CheckpointData {
   readonly missionId: MissionId;
+  /** Recording metadata; absent for legacy evidence and checkpoint plans. */
+  readonly recording?: {
+    readonly recordedAt: string;
+    readonly recordedRound: number | null;
+    /** Mission aggregate revision committed by the recording write. */
+    readonly missionRevision: number;
+  };
   /** Normalized name (e.g. "CP-2"). Used for board rendering and sorting. */
   readonly name: string;
   /** Original filename with .md extension (e.g. "CP-2.md"). Preserves legacy output contract.
@@ -61,8 +71,8 @@ export function isHandoffReadyCheckpoint(cp: CheckpointData): boolean {
 }
 
 /**
- * Checkpoints are replaceable mission evidence. Re-recording CP-1 after a
- * mission is redone replaces the earlier CP-1 view; Git retains the revisions.
+ * Latest-state projection by checkpoint name. Durable storage retains each
+ * recorded version separately from this replaceable view.
  */
 export function recordCheckpoint(
   checkpoints: readonly CheckpointData[],
@@ -132,16 +142,17 @@ export function latestEvidencedCheckpoint(checkpoints: readonly CheckpointData[]
 export function uncoveredCriteria(
   checkpoints: readonly { readonly goalCheck: readonly GoalCheckRow[] }[],
   requiredCriteria: readonly string[],
+  identities?: readonly string[],
 ): readonly string[] {
   const covered = new Set<string>();
   for (const checkpoint of checkpoints) {
     for (const row of checkpoint.goalCheck) {
       if (typeof row.criterion === 'string' && row.criterion.length > 0) {
-        covered.add(row.criterion);
+        covered.add(identities ? row.criterionId ?? '' : row.criterion);
       }
     }
   }
-  return requiredCriteria.filter((criterion) => !covered.has(criterion));
+  return requiredCriteria.filter((criterion, index) => !covered.has(identities?.[index] ?? criterion));
 }
 
 /**
@@ -157,11 +168,11 @@ export function retainPriorGoalCheckRows(
   if (priorRows.length === 0) {
     return [...newRows];
   }
-  const priorByCriterion = new Map(priorRows.map((row) => [row.criterion, row] as const));
+  const priorByCriterion = new Map(priorRows.map((row) => [row.criterionId ?? row.criterion, row] as const));
   // New rows overwrite a shared criterion in place and append criteria the
   // earlier evidence did not cover, preserving order.
   for (const row of newRows) {
-    priorByCriterion.set(row.criterion, row);
+    priorByCriterion.set(row.criterionId ?? row.criterion, row);
   }
   return [...priorByCriterion.values()];
 }
@@ -177,9 +188,10 @@ export function uncoveredCompletedCriteria(
   checkpoints: readonly { readonly goalCheck: readonly GoalCheckRow[] }[],
   successCriteria: readonly string[],
   completedSuccessCriteria: readonly number[],
+  identities?: readonly string[],
 ): readonly string[] {
   const completed = successCriteria.filter((_, index) => completedSuccessCriteria.includes(index));
-  return uncoveredCriteria(checkpoints, completed);
+  return uncoveredCriteria(checkpoints, completed, identities?.filter((_, index) => completedSuccessCriteria.includes(index)));
 }
 
 /** Reject blank Goal Check text before it can reach persistence. */
@@ -210,4 +222,42 @@ export function staleRepairCriteria(
   }
   if (repair.affected.length === 0) { return fresh.size > 0 ? [] : ['(any)']; }
   return repair.affected.filter((criterion) => !fresh.has(criterion));
+}
+
+/** Immutable evidence record; null metadata identifies migrated legacy evidence. */
+export interface CheckpointVersion {
+  readonly version: number;
+  readonly checkpoint: CheckpointData;
+  readonly recordedAt: string | null;
+  readonly recordedRound: number | null;
+  readonly missionRevision: number | null;
+}
+
+/** Exact latest checkpoint view and immutable version references at round start. */
+export interface ReviewCheckpointState {
+  readonly round: number;
+  readonly versions: readonly number[];
+  /** Null for boundaries captured before criterion identity was available. */
+  readonly successCriteria?: readonly SuccessCriterion[] | null;
+  readonly uncoveredCriterionIds?: readonly string[] | null;
+  readonly checkpoints: readonly CheckpointData[];
+}
+
+/** Bind a review boundary to its latest checkpoint view and retained records. */
+export function captureReviewCheckpointState(
+  round: number,
+  checkpoints: readonly CheckpointData[],
+  history: readonly CheckpointVersion[],
+  successCriteria: readonly SuccessCriterion[] = [],
+): ReviewCheckpointState {
+  const uncovered = uncoveredCriteria(checkpoints, successCriteria.map(item => item.text), successCriteria.map(item => item.id));
+  return { round, checkpoints, successCriteria, uncoveredCriterionIds: successCriteria.filter(item => uncovered.includes(item.text)).map(item => item.id), versions: checkpoints.flatMap(checkpoint => {
+    const current = history.findLast(item => item.checkpoint.name === checkpoint.name);
+    return current ? [current.version] : [];
+  }) };
+}
+
+/** Planned or incident evidence still owed; shared by handoff and readiness. */
+export function missingCheckpointEvidence(checkpoints: readonly CheckpointData[]): readonly CheckpointData[] {
+  return checkpoints.filter(cp => !cp.goalCheck.length || (cp.repair && !cp.repair.evidenceRecorded));
 }

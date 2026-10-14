@@ -133,6 +133,8 @@ export interface WebCheckpointEvidence {
   readonly name: string;
   readonly description: string;
   readonly goalCheck: readonly WebGoalCheckRow[];
+  /** Server-owned progress state; omitted by older snapshots. */
+  readonly state?: 'completed' | 'current' | 'future';
 }
 
 export interface WebMissionCard {

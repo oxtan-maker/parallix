@@ -52,6 +52,7 @@ export interface MissionRecord {
   readonly net_engineering_lines: number | null;
   readonly closed_at: string | null;
   readonly version: number;
+  readonly next_success_criterion_id?: number;
 }
 
 export interface MissionLabelRecord {
@@ -62,13 +63,14 @@ export interface MissionLabelRecord {
 export interface MissionBriefRecord { readonly mission_id: string; readonly goal: string; readonly why_text: string; readonly scope_text: string | null; }
 export interface MissionBriefOutOfScopeRecord { readonly mission_id: string; readonly position: number; readonly entry: string; }
 export interface MissionDeclaredGateRecord { readonly mission_id: string; readonly position: number; readonly command: string; }
-export interface MissionSuccessCriterionRecord { readonly mission_id: string; readonly position: number; readonly criterion: string; readonly completed?: number; }
+export interface MissionSuccessCriterionRecord { readonly mission_id: string; readonly position: number; readonly criterion: string; readonly criterion_id?: string | null; readonly completed?: number; }
 export interface MissionDependencyRecord { readonly mission_id: string; readonly position: number; readonly depends_on_mission_id: string; }
 
 export interface MissionCheckpointRecord {
   readonly mission_id: string;
   readonly position: number;
   readonly checkpoint_mission_id: string;
+  readonly recording_json?: string | null;
   readonly name: string;
   readonly raw_filename: string | null;
   readonly first_line: string | null;
@@ -81,6 +83,7 @@ export interface MissionGoalCheckRecord {
   readonly checkpoint_position: number;
   readonly position: number;
   readonly criterion: string;
+  readonly criterion_id?: string | null;
   readonly evidence: string;
   readonly recorded_round?: number | null;
   readonly repaired_gate?: string | null;
@@ -287,6 +290,7 @@ function checkpointsFrom(records: MissionAggregateRecords): readonly CheckpointD
       .filter((row) => row.criterion.trim() !== '' && row.evidence.trim() !== '')
       .map((row) => ({
         criterion: requiredText(row.criterion, 'goal criterion'),
+        criterionId: row.criterion_id ?? null,
         evidence: requiredText(row.evidence, 'goal evidence'),
         ...(typeof row.recorded_round === 'number' ? { recordedRound: row.recorded_round } : {}),
         ...(typeof row.repaired_gate === 'string' ? { repairedGate: row.repaired_gate } : {}),
@@ -294,6 +298,7 @@ function checkpointsFrom(records: MissionAggregateRecords): readonly CheckpointD
       }));
     return {
       missionId: missionId(checkpoint.checkpoint_mission_id),
+      ...(checkpoint.recording_json ? { recording: JSON.parse(checkpoint.recording_json) as CheckpointData['recording'] } : {}),
       name: checkpoint.name,
       rawFilename: checkpoint.raw_filename ?? undefined,
       firstLine: checkpoint.first_line ?? undefined,
@@ -630,6 +635,12 @@ function externalTaskRefFrom(
   return { externalTaskRef: externalTaskRef(row.source, row.external_id, row.url) };
 }
 
+function criterionIdentityFrom(records: MissionAggregateRecords) {
+  const rows = records.successCriteria ?? [];
+  return { ...(rows.every(row => row.criterion_id) ? { successCriterionIds: rows.map(row => row.criterion_id!) } : {}),
+    nextSuccessCriterionId: records.mission.next_success_criterion_id ?? 1 };
+}
+
 /** Reconstruct and validate domain values from the normalized relational rows. */
 export function hydrateMission(records: MissionAggregateRecords): HydratedMission {
   const row = records.mission;
@@ -652,6 +663,7 @@ export function hydrateMission(records: MissionAggregateRecords): HydratedMissio
     brief: briefFrom(records),
     declaredGates: declaredGatesFrom(records),
     successCriteria: successCriteria((records.successCriteria ?? []).map(({ criterion }) => criterion)),
+    ...criterionIdentityFrom(records),
     completedSuccessCriteria: completedCriteria(
       (records.successCriteria ?? []).flatMap(({ completed }, index) => (completed === 1 ? [index] : [])),
       (records.successCriteria ?? []).length,

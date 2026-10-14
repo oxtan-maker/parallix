@@ -331,8 +331,8 @@ describe("stale Backlog copy at landing", () => {
 
   test('TASK-2534: landing aborts before the squash commit when a duplicate survives closeout', async (t) => {
     const root = buildFixture();
-    // A duplicate the step-1 filter cannot see: it is already committed on main,
-    // so the squash never stages it.
+    // Normalization now removes inherited duplicates (TASK-2712). Recreate
+    // one after normalization to exercise the closeout backstop.
     write(root, 'backlog/tasks/task-9003 - old.md', 'TASK-9003');
     write(root, 'backlog/completed/task-9003 - old.md', 'TASK-9003');
     git(root, ['add', '.']);
@@ -342,7 +342,13 @@ describe("stale Backlog copy at landing", () => {
     t.mock.method(fmt.log, 'fail', (message: string) => { fails.push(String(message)); });
     for (const quiet of ['debug', 'pass', 'plain', 'info'] as const) { t.mock.method(fmt.log, quiet, () => {}); }
 
-    const { land, abort } = landing(root);
+    let integrityReads = 0;
+    const { land, abort } = landing(root, {
+      checkBacklogIntegrity: (rootDir: string) => {
+        if (++integrityReads === 2) { write(root, 'backlog/tasks/task-9003 - old.md', 'TASK-9003'); }
+        return checkBacklogIntegrity(rootDir);
+      },
+    });
     await assert.rejects(land(), error => error === abort, 'the integrity backstop aborts the landing');
 
     assert.ok(
@@ -635,8 +641,8 @@ describe("stage/commit race", () => {
     mock.method(gitModule, 'git', (args) => {
       if (args.includes('branch') && args.includes('--show-current')) return { status: 0, stdout: 'main', stderr: '' };
       if (args.includes('branch') || args.includes('status') || args.includes('merge')) return { status: 0, stdout: '', stderr: '' };
-      if (args.includes('diff') && args.includes('--cached')) return { status: 0, stdout: `${MISSION_PAYLOAD}\n`, stderr: '' };
-      if (args.includes('diff') && args.includes('--quiet')) return { status: payloadAtHead ? 0 : 1, stdout: '', stderr: '' };
+      if (args.includes('diff') && args.includes('--cached')) return { status: 0, stdout: `${MISSION_PAYLOAD}\0`, stderr: '' };
+      if (args.includes('diff') && args.includes('--quiet')) return { status: !args.includes('HEAD') || payloadAtHead ? 0 : 1, stdout: '', stderr: '' };
       if (args.includes('commit')) return { status: 1, stdout: '', stderr: 'hook rejected the commit' };
       if (args.includes('rev-parse')) return { status: 0, stdout: 'carrying-commit', stderr: '' };
       return { status: 0, stdout: '', stderr: '' };

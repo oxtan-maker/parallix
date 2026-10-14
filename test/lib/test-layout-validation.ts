@@ -226,7 +226,9 @@ function validatePolicies(input: LayoutInput, suites: readonly string[], errors:
   }
   const integration = new Set([...input.registry.ci, ...input.registry.local]);
   for (const entry of new Set(input.cpuBudgetFiles)) {
-    if (!integration.has(entry)) { errors.push(`test-cpu-budgets.json: ${entry} is not a registered integration suite`); }
+    if (!integration.has(entry) && !input.registry.agentE2e.includes(entry)) {
+      errors.push(`test-cpu-budgets.json: ${entry} is not a registered integration suite`);
+    }
   }
 }
 

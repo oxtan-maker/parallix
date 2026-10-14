@@ -50,15 +50,15 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'A mission cannot close before integration reports `done`, cannot close twice, and cannot close without an actual closure time; each violation throws MissionRuleViolation.',
     fileLocation: 'src/domain/mission.ts',
-    line: 247,
+    line: 250,
     anchor: 'export function closeMission',
   },
   CheckpointData: {
     concept: 'CheckpointData',
     invariant:
-      'Checkpoint evidence from another mission is rejected, and a checkpoint that is not handoff-ready cannot be recorded; a same-named checkpoint replaces rather than accumulates.',
+      'Checkpoint evidence from another mission is rejected, and a checkpoint that is not handoff-ready cannot be recorded; a same-named checkpoint replaces the latest-state projection while durable storage retains recorded versions.',
     fileLocation: 'src/domain/checkpoint.ts',
-    line: 67,
+    line: 77,
     anchor: 'export function recordCheckpoint',
   },
   Review: {

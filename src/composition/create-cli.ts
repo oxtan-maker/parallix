@@ -334,10 +334,13 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
       return result.ok ? null : result.error;
     })(args)),
     criterion: (args) => withGraph(services => createCriterionCommand(missionWrites(services))(args)),
-    mission: (args) => withGraph(services => createMissionCommand(missionWrites(services))(args)),
+    mission: (args) => withGraph(services => createMissionCommand(missionWrites(services), (command) => {
+      const result = validateDeclaredGates([command], rootDir, { checkFiles: false });
+      return result.ok ? null : result.error;
+    })(args)),
     depends: (args) => withGraph(services => createDependsCommand(missionWrites(services))(args)),
     nel: (args) => withGraph(services => createNelCommand(missionWrites(services))(args)),
-    checkpoint: (args) => withGraph(services => createCheckpointCommand(missionWrites(services).checkpoints, (explicit) => inferSlug(explicit))(args)),
+    checkpoint: (args) => withGraph(services => createCheckpointCommand(missionWrites(services).checkpoints, (explicit) => inferSlug(explicit), rootDir)(args)),
     assign: (args) => withGraph(services => createAssignCommand(missionWrites(services), false)(args)),
     verdict: (args) => withGraph(services => createVerdictCommand(reviewVerbPorts(services))(args)),
     resolve: (args) => withGraph(services => createResolveCommand(reviewVerbPorts(services))(args)),

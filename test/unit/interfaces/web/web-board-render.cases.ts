@@ -789,3 +789,21 @@ test('DONE exposes other retained history without adding it to the weekly count 
   assert.match(html, /task-unknown/);
   assert.match(html, /<details aria-label="Other completed history">/);
 });
+
+
+test('board renders the entire checkpoint plan before evidence and during partial execution (TASK-2745)', () => {
+  const plan = [1, 2, 3].map(number => ({ name: `CP-${number}`, description: `Deliver step ${number}`, goalCheck: [] }));
+  for (const lane of ['refined', 'active', 'review', 'integration', 'done'] as const) {
+    for (const partial of [false, true]) {
+      const card = makeCard({ lane, status: lane, checkpoint: partial ? 'CP-1' : null,
+        checkpointEvidence: partial ? [{ ...plan[0], goalCheck: [{ criterion: 'delivers', evidence: 'npm test' }] }, ...plan.slice(1)] : plan });
+      const snapshot = toWebBoardSnapshot(makeProjection({ [lane]: [card] }));
+      assert.equal(validateWebBoardSnapshot(snapshot).ok, true);
+      const html = render(snapshot);
+      const pips = [...html.matchAll(/aria-label="(CP-\d+)"/g)].map(match => match[1]);
+      assert.deepEqual(pips, ['CP-1', 'CP-2', 'CP-3'], `${lane}/${partial}: complete plan in order`);
+      assert.match(html, /title="CP-3: Deliver step 3"/);
+    }
+  }
+  assert.doesNotMatch(render(toWebBoardSnapshot(makeProjection({ active: [makeCard()] }))), /aria-label="Checkpoint plan"/);
+});

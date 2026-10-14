@@ -423,11 +423,11 @@ describe("status lists all checkpoints and evidence", () => {
   /** Two recorded checkpoints followed by two planned ones, stored in execution order. */
   const checkpoints: CheckpointData[] = [
     cp('CP-1', 'Add focused coverage', [
-      { criterion: 'Every checkpoint is shown', evidence: 'test/unit/interfaces/cli/status-read-model-contract.test.ts' },
-      { criterion: 'Evidence is shown', evidence: '`npm test`' },
+      { criterion: 'Every checkpoint is shown', criterionId: 'sc-1', evidence: 'test/unit/interfaces/cli/status-read-model-contract.test.ts' },
+      { criterion: 'Evidence is shown', criterionId: null, evidence: '`npm test`' },
     ], 'Continue with CP-2'),
     cp('CP-2', 'Update the renderer', [
-      { criterion: 'Renderer lists all checkpoints', evidence: 'src/interfaces/cli/status.ts' },
+      { criterion: 'Renderer lists all checkpoints', criterionId: null, evidence: 'src/interfaces/cli/status.ts' },
     ], 'Continue with CP-3'),
     cp('CP-3', 'Document the view'),
     cp('CP-4', 'Run the gate'),
@@ -438,6 +438,7 @@ describe("status lists all checkpoints and evidence", () => {
       id,
       repositoryId: repositoryId('parallix'),
       title: 'px status all checkpoints and evidence',
+      successCriteria: ['Every checkpoint is shown'], successCriterionIds: ['sc-1'],
       labels: missionLabels(['user_value']),
       status: 'active',
       rawStatus: 'active',
@@ -491,21 +492,22 @@ describe("status lists all checkpoints and evidence", () => {
 
   test('px status --json carries every checkpoint with its Goal Check evidence', async () => {
     const json = JSON.parse(statusJson(await statusResult()));
+    assert.deepEqual(json.successCriterionIds, ['sc-1']);
     assert.deepEqual(json.checkpoints, [
       {
         name: 'CP-1',
         description: 'Add focused coverage',
         recorded: true,
         goalCheck: [
-          { criterion: 'Every checkpoint is shown', evidence: 'test/unit/interfaces/cli/status-read-model-contract.test.ts' },
-          { criterion: 'Evidence is shown', evidence: '`npm test`' },
+          { criterion: 'Every checkpoint is shown', criterionId: 'sc-1', evidence: 'test/unit/interfaces/cli/status-read-model-contract.test.ts' },
+          { criterion: 'Evidence is shown', criterionId: null, evidence: '`npm test`' },
         ],
       },
       {
         name: 'CP-2',
         description: 'Update the renderer',
         recorded: true,
-        goalCheck: [{ criterion: 'Renderer lists all checkpoints', evidence: 'src/interfaces/cli/status.ts' }],
+        goalCheck: [{ criterion: 'Renderer lists all checkpoints', criterionId: null, evidence: 'src/interfaces/cli/status.ts' }],
       },
       { name: 'CP-3', description: 'Document the view', recorded: false, goalCheck: [] },
       { name: 'CP-4', description: 'Run the gate', recorded: false, goalCheck: [] },
@@ -526,4 +528,22 @@ describe("status lists all checkpoints and evidence", () => {
     assert.deepEqual(JSON.parse(statusJson(result)).checkpoints.at(-1).repair, repair);
   });
 
+});
+
+test('status projects stored classification and distinguishes unset from unknown without card inference (TASK-2731)', async () => {
+  for (const value of ['ai_sdlc', 'user_value', 'unknown', null] as const) {
+    for (const stored of [true, false]) {
+      const mission = { id: missionId('task-classification'), labels: missionLabels(value ? ['bug', value] : ['bug']), checkpoints: [] } as unknown as Mission;
+      const board = createStatusBoardAdapter({
+        buildProjectionFn: async () => ({ async buildMissionCard() { return { title: 'provider card', labels: ['ai_sdlc'], status: 'backlog', reviewHistory: [], currentWork: null, blockingReason: null }; } } as any),
+        loadMissionFn: async () => stored ? { mission, version: 1 } : null,
+      });
+      const md = await board.getMissionData('task-classification', '/repo');
+      assert.equal(md?.classification, stored ? value : null);
+      const result = { missionData: md, slug: 'task-classification', staleWorktrees: [], agents: [], lastThreeCommits: [] } as unknown as StatusResult;
+      assert.equal(JSON.parse(statusJson(result)).classification, stored ? value : null);
+      const lines: string[] = []; renderStatus(result, line => lines.push(line));
+      assert.ok(lines.includes(`Classification: ${(stored ? value : null) ?? 'unset'}`), lines.join('\n'));
+    }
+  }
 });

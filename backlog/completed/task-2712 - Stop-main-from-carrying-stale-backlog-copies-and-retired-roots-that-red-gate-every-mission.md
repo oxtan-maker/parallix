@@ -3,8 +3,8 @@ id: TASK-2712
 title: >-
   Stop main from carrying stale backlog copies and retired roots that red-gate
   every mission
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-10 09:13'
 labels:
   - ai_sdlc

@@ -230,3 +230,9 @@ export const DEFAULT_CONFIGURATION: ParallixConfiguration = {
   },
   forwardedEnvironment: {}
 };
+
+/** Repository prompt policy resolved by the existing workflow configuration adapter. */
+export interface PromptConfiguration {
+  readonly overridePath: string | null;
+  readonly contextCompaction: boolean;
+}

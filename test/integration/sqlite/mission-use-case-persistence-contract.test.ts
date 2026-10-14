@@ -383,38 +383,41 @@ describe('Mission use cases', () => {
   // SC3 — checkpoint data
   // ---------------------------------------------------------------------------
 
-  test('SC3: checkpoint data round-trips through the boundary with GoalCheckRow semantics', async () => {
-    const store = new FakeMissionStore(activeMission({ successCriteria: ['Boundary exists', 'Gate ran'] }), 1);
-    const service = new MissionCheckpointService(store);
-    const recorded = await service.record({
-      operationId: 'op-cp',
-      missionId: MISSION,
-      capabilities: ALL_CAPABILITIES,
-      checkpoint: checkpoint({
-        goalCheck: [
-          { criterion: 'Boundary exists', evidence: 'src/application/mission-checkpoint-service.ts:60' },
-          { criterion: 'Gate ran', evidence: '`./scripts/verify-local.sh all`' },
-        ],
-      }),
-    });
-    assert.equal(recorded.status, 'completed');
-    assert.equal(recorded.value!.replaced, false);
+  for (const criterionIds of [undefined, ['sc-1', 'sc-2']] as const) {
+    test(`SC3: checkpoint data round-trips with ${criterionIds ? 'known' : 'unknown'} criterion identity (TASK-2742)`, async () => {
+      const store = new FakeMissionStore(activeMission({ successCriteria: ['Boundary exists', 'Gate ran'], successCriterionIds: criterionIds }), 1);
+      const service = new MissionCheckpointService(store);
+      const recorded = await service.record({
+        operationId: 'op-cp',
+        missionId: MISSION,
+        capabilities: ALL_CAPABILITIES,
+        checkpoint: checkpoint({
+          goalCheck: [
+            { criterion: 'Boundary exists', evidence: 'src/application/mission-checkpoint-service.ts:60' },
+            { criterion: 'Gate ran', evidence: '`./scripts/verify-local.sh all`' },
+          ],
+        }),
+      });
+      assert.equal(recorded.status, 'completed');
+      assert.equal(recorded.value!.replaced, false);
 
-    const read = await service.read({
-      operationId: 'op-cp-read',
-      missionId: MISSION,
-      capabilities: ALL_CAPABILITIES,
-      name: 'CP-2',
+      const read = await service.read({
+        operationId: 'op-cp-read',
+        missionId: MISSION,
+        capabilities: ALL_CAPABILITIES,
+        name: 'CP-2',
+      });
+      assert.equal(read.status, 'completed');
+      assert.deepEqual(read.value!.goalCheck, [
+        { criterion: 'Boundary exists', criterionId: criterionIds?.[0] ?? null, evidence: 'src/application/mission-checkpoint-service.ts:60' },
+        { criterion: 'Gate ran', criterionId: criterionIds?.[1] ?? null, evidence: '`./scripts/verify-local.sh all`' },
+      ]);
+      assert.equal(read.value!.checkpoints[0].rawFilename, 'CP-2.md');
+      assert.equal(read.value!.checkpoints[0].firstLine, 'CP-2: Application boundary defined');
+      assert.equal(read.value!.checkpoints[0].nextActionText, 'Reroute the CLI and controller paths.');
     });
-    assert.equal(read.status, 'completed');
-    assert.deepEqual(read.value!.goalCheck, [
-      { criterion: 'Boundary exists', evidence: 'src/application/mission-checkpoint-service.ts:60' },
-      { criterion: 'Gate ran', evidence: '`./scripts/verify-local.sh all`' },
-    ]);
-    assert.equal(read.value!.checkpoints[0].rawFilename, 'CP-2.md');
-    assert.equal(read.value!.checkpoints[0].firstLine, 'CP-2: Application boundary defined');
-    assert.equal(read.value!.checkpoints[0].nextActionText, 'Reroute the CLI and controller paths.');
-  });
+
+  }
 
   test('SC3: re-recording a checkpoint replaces it and keeps CP order', async () => {
     const store = new FakeMissionStore(activeMission(), 1);
@@ -900,4 +903,44 @@ describe('Lifecycle ordering', () => {
       assert.deepEqual(await laneEvents(SLUG), []);
     } finally { await close(); }
   });
+});
+
+
+test('authoring batches persist a full aggregate and SQLite failures roll back all facts (TASK-2731)', async () => {
+  const mission = fixtureMission('task-author-sqlite', { status: 'backlog', checkpoints: [] });
+  const f = await openMigratedMissionStore([mission]);
+  try {
+    const service = new MissionBriefService(f.store);
+    const request = { operationId: 'batch', missionId: mission.id, capabilities: new Set(['mission:context'] as const),
+      brief: { goal: 'Goal', why: 'Why', scope: 'Scope', outOfScope: ['Excluded'] },
+      criteria: ['first', 'second'], gates: ['npm test'], checkpoints: [{ name: 'CP-1', description: 'Deliver' }],
+      predictedNelBucket: 'Small' as const, classification: 'user_value' as const };
+    assert.equal((await service.author(request)).status, 'completed');
+    const read = await f.store.load(mission.id); assert.equal(read.kind, 'found');
+    if (read.kind !== 'found') { throw new Error('mission missing'); }
+    assert.equal(read.version, 2); assert.deepEqual(read.mission.brief, request.brief);
+    assert.deepEqual(read.mission.successCriteria, request.criteria); assert.deepEqual(read.mission.declaredGates, request.gates);
+    assert.deepEqual(read.mission.labels, ['user_value']); assert.equal(read.mission.predictedNelBucket, 'Small');
+    assert.equal(read.mission.checkpoints[0]?.firstLine, 'Deliver');
+    for (const patch of [{ criteria: ['same', 'same'] }, { expectedVersion: missionVersion(1) }, { capabilities: new Set<'mission:context'>() }]) {
+      assert.notEqual((await service.author({ ...request, ...patch })).status, 'completed');
+      assert.deepEqual(await f.store.load(mission.id), read);
+    }
+    // Fail after the parent row has been updated, proving real transaction rollback.
+    await f.database.execute("CREATE TRIGGER refuse_batch_checkpoint BEFORE INSERT ON mission_checkpoints BEGIN SELECT RAISE(ABORT, 'injected checkpoint failure'); END");
+    const failed = await service.author({ ...request, brief: { ...request.brief, goal: 'Changed' }, classification: 'ai_sdlc' });
+    assert.equal(failed.status, 'failed'); assert.match(failed.error?.message ?? '', /injected checkpoint failure/);
+    assert.deepEqual(await f.store.load(mission.id), read);
+    await f.database.execute('DROP TRIGGER refuse_batch_checkpoint');
+    assert.equal((await service.update({ ...request, patch: { goal: 'Legacy goal' } })).status, 'completed');
+    const legacy = await f.store.load(mission.id);
+    assert.equal(legacy.kind === 'found' ? legacy.mission.brief?.goal : null, 'Legacy goal');
+    assert.deepEqual(await f.laneEvents(mission.id), []);
+    if (legacy.kind === 'found') {
+      const version = await f.store.save({ ...legacy.mission, status: 'active', closedAt: null }, legacy.version);
+      const locked = await f.store.load(mission.id);
+      assert.equal((await service.author({ ...request, expectedVersion: version })).error?.kind, 'validation');
+      assert.deepEqual(await f.store.load(mission.id), locked);
+    }
+  } finally { await f.close(); }
 });

@@ -441,7 +441,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
           ...(missionStore ? { missionServicesFn: async () => ({ store: missionStore, lifecycle: lifecycleService }) } : {}),
         } as never,
       })),
-      runGate: async () => gateFacts(await runPreReviewGate(slug, worktree, { runFn: run, log, error })),
+      runGate: async () => gateFacts(await runPreReviewGate(slug, worktree, { configuration: bindings.configuration, runFn: run, log, error })),
       reviewBaseline() {
         try {
           const primary = getPrimaryBranch(worktree, git);

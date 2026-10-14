@@ -185,6 +185,8 @@ test('web edit request accepts opaque identity and complete removals, rejects li
   const body = { kind: 'mission:edit', missionId: 'supplied-identity-1', expectedVersion: 2,
     title: 'Revised', description: '', context: '', labels: [], successCriteria: [], dependencies: [] };
   assert.equal(validateWebEditMissionRequest(body).ok, true);
+  assert.equal(validateWebEditMissionRequest({ ...body, successCriteria: ['edited', 'new'], successCriterionIds: ['sc-1', null] }).ok, true);
+  for (const successCriterionIds of [[1], [''], 'sc-1']) { assert.equal(validateWebEditMissionRequest({ ...body, successCriterionIds }).ok, false); }
   assert.equal(validateWebEditMissionRequest({ kind: 'mission:edit-read', missionId: 'px-1234' }).ok, true);
   for (const patch of [{ expectedVersion: undefined }, { expectedVersion: 0 }, { expectedVersion: 1.5 }, { status: 'active' }, { assignee: 'codex' }, { dependencies: 'x' }, { description: null }]) {
     assert.equal(validateWebEditMissionRequest({ ...body, ...patch }).ok, false);

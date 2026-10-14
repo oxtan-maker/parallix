@@ -50,3 +50,24 @@ test('mission editing refuses invalid fields, dependency and stale or finished s
   const f = fixture(); f.set({ ...f.current(), status: 'done', closedAt: null });
   assert.notEqual((await f.service.save(f.request)).status, 'completed'); assert.equal(f.writes(), 0);
 });
+
+test('criterion edits preserve IDs and evidence coverage; new rows get backend IDs (TASK-2742)', async () => {
+  const { replaceSuccessCriteria } = await import('../../../src/domain/mission-success-criteria.js');
+  const { uncoveredCriteria } = await import('../../../src/domain/checkpoint.js');
+  const f = fixture();
+  const identified = replaceSuccessCriteria(f.current(), f.current().successCriteria ?? []);
+  const id = identified.successCriterionIds![0]!;
+  f.set({ ...identified, checkpoints: [{ missionId: identified.id, name: 'CP-1', nextActionText: 'review', goalCheck: [{ criterion: 'keep', criterionId: id, evidence: 'npm test' }] }] });
+  const changed = await f.service.save({ ...f.request, successCriteria: ['edited', 'new'], successCriterionIds: [id, null] });
+  assert.equal(changed.status, 'completed');
+  const after = f.current();
+  assert.equal(after.successCriterionIds![0], id);
+  assert.ok(after.successCriterionIds![1]);
+  assert.notEqual(after.successCriterionIds![1], identified.successCriterionIds![1], 'removed IDs are never reused');
+  assert.deepEqual(after.completedSuccessCriteria, [0]);
+  assert.deepEqual(uncoveredCriteria(after.checkpoints, after.successCriteria!, after.successCriterionIds), ['new']);
+  const { handoffEvidencePolicy } = await import('../../../src/domain/mission-handoff-policy.js');
+  assert.equal(handoffEvidencePolicy({ checkpoints: after.checkpoints, successCriteria: after.successCriteria!, successCriterionIds: after.successCriterionIds, completedSuccessCriteria: [0], draftedInDb: true }).insufficientRows, false);
+  assert.deepEqual(uncoveredCriteria(after.checkpoints, ['keep'], ['sc-new']), ['keep'], 'same text on a new identity cannot reuse earlier coverage');
+  assert.equal((await f.service.save({ ...f.request, expectedVersion: missionVersion(2), successCriterionIds: ['foreign-id'] })).status, 'failed');
+});

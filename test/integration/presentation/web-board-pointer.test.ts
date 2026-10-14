@@ -1,5 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { makeProjection } from '../../fixtures/board-projection.js';
+import { projectMissionCard } from '../../../src/application/projections/mission-board.js';
+import { toWebBoardSnapshot } from '../../../src/interfaces/web/transport.js';
 import type { Locator, Page } from 'playwright-core';
 import { compactPointerSnapshot, pointerBoard, pointerSnapshot } from '../../fixtures/web-pointer-board.js';
 
@@ -125,10 +129,14 @@ test('SSE refresh during coordinate press cannot invoke another action or fall t
       await fixture.render(pointerSnapshot(lane));
       const control = page.locator('[data-board-card] button[aria-label^="px cancel"]');
       const box = await control.boundingBox(); assert.ok(box);
-      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-      await page.mouse.down();
+      // The press has to be observed by the page while the pre-refresh control is
+      // still there. Issuing mouse.down() only proves the browser process got it:
+      // on a loaded runner the pointerdown used to land after the refresh had
+      // committed, so the scenario became a plain click on the refreshed board,
+      // which legitimately selects the card and opens its terminal.
+      await fixture.press(box.x + box.width / 2, box.y + box.height / 2, 'mission:cancel');
       await fixture.render(pointerSnapshot(lane, ['active', 'handoff', 'integrate']), true);
-      await page.mouse.up();
+      await fixture.releasePress();
       assert.equal(requests.length, 0);
       assert.equal(await page.locator('[data-board-card]').getAttribute('aria-selected'), 'false');
       assert.equal(await page.locator('[role="dialog"]').count(), 0);
@@ -192,5 +200,73 @@ test('tall board modal and pending coordinate presses remain safe (TASK-2705)', 
     assert.match(await page.getByRole('status').first().textContent() ?? '', /already running/);
     fixture.release();
     await waitForCommands(page);
+  } finally { await fixture.close(); }
+});
+
+
+test('checkpoint indicators stay below terminal and edit dialogs with usable evidence (TASK-2745)', { timeout: 20_000 }, async (context) => {
+  const fixture = await pointerBoard();
+  context.after(fixture.close);
+  const { page } = fixture;
+  const mission = fixtureMission('task-pointer-disposable', { checkpoints: [] });
+  const planned = [1, 2, 3].map(number => ({ missionId: mission.id, name: `CP-${number}`, firstLine: `Step ${number}`, goalCheck: [], nextActionText: '' }));
+  const show = async (partial: boolean, working: boolean, sse = false) => {
+    const checkpoints = partial ? [{ ...planned[0], goalCheck: [{ criterion: 'visible', evidence: 'npm test' }], nextActionText: 'CP-2' }, ...planned.slice(1)] : planned;
+    const card = projectMissionCard({ ...mission, checkpoints }, {
+      latestGate: 'unknown', reviewApproval: null, flags: [], blockingReason: null,
+      currentWork: working ? { operationId: 'execute', phase: 'execute', summary: 'Implement', agent: null, updatedAt: 'now', freshness: 'live' } : null,
+    });
+    await fixture.render(toWebBoardSnapshot(makeProjection({ active: [card] })), sse);
+  };
+  await page.route('**/api/terminal/**', route => route.fulfill({ json: { kind: 'live', output: 'Checkpoint terminal output' } }));
+  await page.route('**/api/commands', route => route.fulfill({ json: {
+    kind: 'command-result', transportVersion: 2, status: 'completed', error: null, durableEvidence: [],
+    value: { missionId: mission.id, version: 1, title: mission.title, description: '', context: '', labels: [], successCriteria: ['visible'], successCriterionIds: ['sc-1'], dependencies: [] },
+  } }));
+  try {
+    for (const partial of [false, true]) {
+      await show(partial, false);
+      const plan = page.getByLabel('Checkpoint plan', { exact: true });
+      assert.deepEqual(await plan.locator('span').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label'))), ['CP-1', 'CP-2', 'CP-3']);
+      assert.equal(await plan.locator('.review-pip--running').count(), 0);
+      await show(partial, true, true);
+      const running = plan.locator('.review-pip--running');
+      assert.equal(await running.count(), 1);
+      assert.equal(await running.getAttribute('aria-label'), partial ? 'CP-2' : 'CP-1');
+      assert.equal(await running.evaluate(node => getComputedStyle(node).animationName), 'blink');
+      await show(partial, false, true);
+      assert.equal(await plan.locator('.review-pip--running').count(), 0);
+      assert.deepEqual(await plan.locator('span').evaluateAll(nodes => nodes.map(node => getComputedStyle(node).animationName)), ['none', 'none', 'none']);
+    }
+    // Open at coordinates; then hit-test at the underlying indicator location.
+    const underlying = await page.getByLabel('Checkpoint plan', { exact: true }).boundingBox();
+    assert.ok(underlying);
+    const point = { x: underlying.x + 8, y: underlying.y + 4 };
+    const assertCovered = async () => {
+      assert.equal(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('[data-board-card]') === null, point), true);
+    };
+    await clickAt(page.locator('[data-board-card] p').first());
+    const terminal = page.getByRole('dialog', { name: /Mission progress/ });
+    await terminal.waitFor();
+    await assertCovered();
+    assert.match(await terminal.textContent() ?? '', /Checkpoint terminal output/);
+    await page.mouse.click(point.x, point.y);
+    assert.equal(await page.getByRole('dialog', { name: /Checkpoint evidence/ }).count(), 0);
+    await terminal.waitFor({ state: 'hidden' });
+    await clickAt(page.locator('[data-board-card] button[data-action-kind="mission:edit"]'));
+    const edit = page.getByRole('dialog', { name: /Edit/ });
+    await edit.waitFor();
+    await assertCovered();
+    await page.getByLabel('Title (required)', { exact: true }).fill('Disposable edit');
+    assert.equal(await page.getByLabel('Title (required)', { exact: true }).inputValue(), 'Disposable edit');
+    await page.keyboard.press('Escape');
+    await edit.waitFor({ state: 'hidden' });
+    await clickAt(page.getByRole('button', { name: 'View checkpoint evidence for CP-1' }));
+    const evidence = page.getByRole('dialog', { name: /Checkpoint evidence/ });
+    await evidence.waitFor();
+    assert.match(await evidence.textContent() ?? '', /visible.*evidence: npm test/);
+    await clickAt(evidence.getByRole('button', { name: 'close', exact: true }));
+    await evidence.waitFor({ state: 'hidden' });
+    console.log('TASK-2745 browser: CP-1/2/3 visible planned-only and partial; CP-1 then CP-2 blink on working and stop on idle; terminal/edit cover indicators at coordinates; editor typing and evidence access pass.');
   } finally { await fixture.close(); }
 });

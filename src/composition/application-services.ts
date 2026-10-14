@@ -254,6 +254,7 @@ export async function createProductionApplicationServices(
           const loaded = await mission.store.load(missionId(checkpointSlug));
           if (loaded.kind !== 'found' || !loaded.mission.brief) { return null; }
           return {
+            humanOnlyContractBlocker: loaded.mission.checkpoints.find(cp => cp.repair?.blocker)?.repair?.blocker,
             planned: loaded.mission.checkpoints.map(({ name }) => name),
             recorded: loaded.mission.checkpoints.filter(({ goalCheck, repair }) => goalCheck.length > 0 && (!repair || repair.evidenceRecorded)).map(({ name }) => name),
           };

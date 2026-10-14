@@ -72,9 +72,12 @@ function checkCheckpointEvidence(object: unknown, path: string, problems: string
   object.forEach((checkpoint, index) => {
     const checkpointPath = `${path}.checkpointEvidence[${index}]`;
     if (!isPlainObject(checkpoint)) { problems.push(`${checkpointPath} must be an object`); return; }
-    checkKeys(checkpoint, ['name', 'description', 'goalCheck'], ['name', 'description', 'goalCheck'], checkpointPath, problems);
+    checkKeys(checkpoint, ['name', 'description', 'goalCheck', 'state'], ['name', 'description', 'goalCheck'], checkpointPath, problems);
     checkString(checkpoint, 'name', checkpointPath, problems);
     checkString(checkpoint, 'description', checkpointPath, problems);
+    if (Object.prototype.hasOwnProperty.call(checkpoint, 'state')) {
+      checkEnum(checkpoint, 'state', ['completed', 'current', 'future'], checkpointPath, problems);
+    }
     const rows = checkpoint.goalCheck as unknown;
     if (!Array.isArray(rows)) { problems.push(`${checkpointPath}.goalCheck must be an array`); return; }
     rows.forEach((row, rowIndex) => {

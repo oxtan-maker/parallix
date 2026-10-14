@@ -22,11 +22,14 @@ function parseDeclaredCheckpointNames(missionText: string): { names: string[]; e
 export async function validateCheckpointsBeforeHandoff(
   slug: string,
   worktree: string,
-  options: { loadRecordedCheckpointsFn?: (_slug: string) => Promise<{ planned: string[]; recorded: string[] } | null>; log?: (_message: string) => void; error?: (_message: string) => void; findMissionDirFn?: typeof findMissionDir; findCheckpointsFn?: typeof findCheckpoints; readMissionFileFn?: typeof readMissionFile; runFn?: (..._args: any[]) => any } = {},
+  options: { loadRecordedCheckpointsFn?: (_slug: string) => Promise<{ planned: string[]; recorded: string[]; humanOnlyContractBlocker?: import('../../domain/rebound-policy.js').InvalidContractBlocker } | null>; log?: (_message: string) => void; error?: (_message: string) => void; findMissionDirFn?: typeof findMissionDir; findCheckpointsFn?: typeof findCheckpoints; readMissionFileFn?: typeof readMissionFile; runFn?: (..._args: any[]) => any } = {},
 ): Promise<CheckpointValidationVerdict> {
   const fail = (message: string, extra: Partial<CheckpointValidationVerdict> = {}) => { options.error?.(message); return { ok: false, error: message, ...extra }; };
   const recorded = await (options.loadRecordedCheckpointsFn ?? (async (_slug: string) => null))(slug);
   if (recorded) {
+    if (recorded.humanOnlyContractBlocker) {
+      return fail(`Invalid locked contract requires human review: ${JSON.stringify(recorded.humanOnlyContractBlocker)}`, { humanOnlyContractBlocker: recorded.humanOnlyContractBlocker });
+    }
     const missing = recorded.planned.filter(name => !recorded.recorded.includes(name));
     if (missing.length) {return fail(`Planned checkpoint evidence is missing before handoff: ${missing.join(', ')}. Record each with \`px checkpoint record --name <CP-N>\` before handoff.`, { missingCheckpoints: missing, nextCheckpoint: missing[0] });}
     options.log?.(fmt.status('PASS', `All ${recorded.planned.length} planned checkpoint(s) have recorded evidence.`));

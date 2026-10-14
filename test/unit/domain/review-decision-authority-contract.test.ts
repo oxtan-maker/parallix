@@ -489,6 +489,13 @@ it('a weakening decision restores the withdrawn approval only with its own prove
   const approved = applyClassifierReview(review, source, 'clear', at);
   assert.equal(currentReviewRound(approved).decision?.kind, 'approved');
   assert.deepEqual(currentReviewRound(approved).decision?.classifier?.weakening, source.weakening);
+  for (const clearedBy of ['weakening-v4', 'weakening-v5'] as const) {
+    const question = { clearedBy, preserves: 0.6, versions: ['weakening-v4', 'weakening-v5'] as const };
+    const updated = applyClassifierReview(review, { ...source, weakening: { ...source.weakening, question } }, 'clear', at);
+    assert.deepEqual(currentReviewRound(updated).decision?.classifier?.weakening?.question, question);
+    assert.match(currentReviewRound(updated).decision!.comment!, new RegExp(`cleared by ${clearedBy}, preserves 0.6, questions weakening-v4, weakening-v5`));
+    assert.throws(() => applyClassifierReview(review, { ...source, weakening: { ...source.weakening, question: { ...question, preserves: 0.9 } } }, 'clear', at), /provenance/);
+  }
   assert.throws(() => applyClassifierReview(review, { ...source, score: 0.599 }, 'clear', at), /provenance/);
   assert.throws(() => applyClassifierReview(review, { ...source, weakening: undefined }, 'clear', at), /provenance/);
   assert.throws(() => applyClassifierReview(review, { ...source, label: 'addresses' }, 'clear', at), /provenance/);

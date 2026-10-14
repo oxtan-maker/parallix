@@ -9,14 +9,22 @@ export function validateWebEditMissionRequest(body: unknown): { ok: true; value:
   if (!isPlainObject(body)) { return { ok: false, problems: ['request must be an object'] }; }
   const problems: string[] = [];
   const keys = body.kind === 'mission:edit-read' ? ['kind', 'missionId'] : ['kind', 'missionId', 'expectedVersion', 'title', 'description', 'context', 'labels', 'successCriteria', 'dependencies'];
-  checkKeys(body, keys, keys, 'request', problems);
+  checkKeys(body, [...keys, ...(body.kind === 'mission:edit' ? ['successCriterionIds'] : [])], keys, 'request', problems);
   if (!isEditMissionBody(body)) { problems.push('invalid editing kind'); }
   const id = checkString(body, 'missionId', 'request', problems);
   if (!id?.trim()) { problems.push('missionId is required'); }
   if (body.kind === 'mission:edit') {
     if (!Number.isInteger(body.expectedVersion) || (body.expectedVersion as number) < 1) { problems.push('expectedVersion must be a positive integer'); }
+    validateCriterionIds(body.successCriterionIds, problems);
     for (const key of ['title', 'description', 'context']) { checkString(body, key, 'request', problems); }
     for (const key of ['labels', 'successCriteria', 'dependencies']) { checkStringArray(body, key, 'request', problems); }
   }
   return problems.length ? { ok: false, problems } : { ok: true, value: body as unknown as WebEditMissionRequest };
+}
+
+function validateCriterionIds(value: unknown, problems: string[]): void {
+  if (value === undefined) { return; }
+  if (!Array.isArray(value) || value.some(id => id !== null && (typeof id !== 'string' || !id.trim()))) {
+    problems.push('successCriterionIds must contain IDs or null');
+  }
 }

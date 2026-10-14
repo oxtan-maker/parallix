@@ -1,4 +1,4 @@
-import { INTEGRATION_CI_TESTS } from '../../../lib/test-categories.js';
+import { INTEGRATION_CI_TESTS, AGENT_E2E_TESTS } from '../../../lib/test-categories.js';
 import { INTEGRATION_LOCAL_TESTS } from '../../../lib/test-categories.js';
 import { buildTestRunPlan } from '../../../lib/test-run-plan.js';
 import { readCpuBudgetPolicy, suiteCpuBudget } from '../../../lib/test-cpu-policy.mjs';
@@ -68,6 +68,16 @@ test('default test runner routes registered integration tests out of the default
   assert.ok(defaultRun.args.some(a => a === '--test-concurrency=4'),
     'unit concurrency is bounded so measured durations are not host-oversubscription artifacts');
   assert.equal(pkg.scripts['test:integration:prebuilt'], 'PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration');
+});
+
+test('focused real-agent smoke uses waited-child CPU accounting (TASK-2739)', () => {
+  const plan = buildTestRunPlan({ executionRoot: REPO_ROOT,
+    requestedArgs: ['test/e2e/agents/real-agent-smoke.test.ts'],
+    probeNodeVersion: () => 'v24.15.0', probeTestConcurrency: () => true });
+  assert.equal(plan.runsIntegrationSuite, true);
+  assert.equal(plan.runsIntegrationCiSuite, false);
+  assert.ok(plan.nodeArgs.some(arg => arg.endsWith('/integration-cpu-hook.mjs')));
+  assert.ok(plan.nodeArgs.some(arg => arg.endsWith('/bootstrap-e2e-parallix-home.ts')));
 });
 
 test('default test runner selects a Node version that supports node:test', () => {
@@ -338,6 +348,7 @@ test('CPU profiles name live integration owners and new cases retain a finite fa
   const policy = readCpuBudgetPolicy(root);
   const integration = new Set(buildTestRunPlan({ executionRoot: root, requestedArgs: ['--integration'], probeNodeVersion: () => 'v24.15.0' })
     .testFiles.map(file => path.relative(path.join(root, 'test'), file)));
+  for (const file of AGENT_E2E_TESTS) { integration.add(file); }
   for (const profile of ['plain', 'covered']) {
     assert.deepEqual(Object.keys(policy.integrationCases[profile]).filter(file => !integration.has(file)), [],
       'Remove stale CPU profile entries when behavior ownership changes.');

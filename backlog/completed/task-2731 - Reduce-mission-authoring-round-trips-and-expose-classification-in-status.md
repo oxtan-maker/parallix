@@ -1,8 +1,8 @@
 ---
 id: TASK-2731
 title: Reduce mission authoring round trips and expose classification in status
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-12 10:39'
 labels:
   - ai_sdlc
@@ -21,6 +21,7 @@ Add a public typed batch operation for mission authoring so an agent can submit 
 Use plain-text mission criteria and evidence examples that do not require literal backticks or embedded double quotes. In TASK-2727 an agent used backticks inside a double-quoted criterion, executing bash hello.sh during drafting, causing an unintended 45-second wait and remove/re-add repair. Prefer simplifying mission/example wording over adding a separate general shell-input framework.
 
 Do not change locked mission criteria/gates, lifecycle semantics, checkpoint evidence validation, model selection, capacity, or timeouts. Extend existing owning typed mutation/status suites and manually exercise public CLI operations on disposable state. Measure tool-call reduction on a representative draft; do not promise an unmeasured wall-time target. Coordinate with TASK-2726 fixture instructions/progress work. Do not implement this mission as part of TASK-2727.
+Coordination boundary with TASK-2726: this mission owns shared batch-authoring and plain criterion/evidence guidance in the runtime prompts and smoke documentation. TASK-2726 retains fixture AGENTS.md and live smoke progress implementation; the smoke fixture and progress code are untouched here.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

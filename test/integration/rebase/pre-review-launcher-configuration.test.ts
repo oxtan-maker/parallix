@@ -7,6 +7,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
+import { createRebaseWorkflowPort } from '../../../src/adapters/rebase/rebase-workflow-adapter.js';
+import { setCommandPathProbe, setLauncherHealthProbe } from '../../../src/adapters/agents/agents.js';
+import { createHandoffPorts } from '../../../src/adapters/cli/commands/handoff.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import { createIntegratePorts } from '../../../src/adapters/cli/commands/integrate.js';
 import { runReviewLoop } from '../../../src/application/review-loop/review-loop.js';
@@ -45,6 +48,7 @@ function conflictRepo(root: string, extraConfig: Record<string, unknown> = {}) {
     'while [ $# -gt 0 ] && [ "$1" != "--cd" ]; do shift; done',
     '[ $# -gt 0 ] || exit 0',
     `echo launched >> '${launches}'`,
+    `printf '%s' "$TASK_2744_ENV" > '${path.join(root, 'child-environment')}'`,
     'cd "$2" || exit 1',
     'printf "resolved\\n" > shared.txt',
     'git add shared.txt',
@@ -54,6 +58,72 @@ function conflictRepo(root: string, extraConfig: Record<string, unknown> = {}) {
 }
 
 describe("pre-review rebase launcher configuration", () => {
+  test.before(() => { setCommandPathProbe(null); setLauncherHealthProbe(null); });
+  test('nested handoff resolves shared conflicts with Codex only in supplied PATH (TASK-2744)', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'px-handoff-cfg-'));
+    const prior = process.env.TASK_2744_ENV;
+    process.env.TASK_2744_ENV = 'ambient';
+    try {
+      const { repo, binDir, launches, git } = conflictRepo(root);
+      const configuration = resolveConfiguration({ PATH: `${binDir}:/usr/bin:/bin`, PARALLIX_HOME: path.join(root, 'home'), TASK_2744_ENV: 'composed' });
+      const logs: string[] = [];
+      const options = {
+        isForgejoReviewEnabledFn: () => true,
+        worktree: repo, log: (line: string) => logs.push(line), error: (line: string) => logs.push(line),
+        rebaseWorkflowOptions: {
+          readTokenFn: () => 'fixture-token', resolveForgejoUserFn: () => 'fixture-user',
+          createPrFn: () => ({ ok: true }),
+        },
+      };
+      const result = await createHandoffPorts(configuration).rebase.rebaseBeforeReviewRound('task-lcfg-iso', options);
+      assert.equal(fs.existsSync(launches), true, `Codex was not detected/launched: ${logs.join(' | ')}`);
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.equal(fs.readFileSync(path.join(root, 'child-environment'), 'utf8'), 'composed');
+      assert.equal(git('status', '--porcelain', '--untracked-files=no').stdout.trim(), '');
+      assert.equal(fs.existsSync(path.join(repo, '.git', 'rebase-merge')), false);
+      assert.equal(fs.readFileSync(path.join(repo, 'shared.txt'), 'utf8'), 'resolved\n');
+    } finally {
+      if (prior === undefined) { delete process.env.TASK_2744_ENV; } else { process.env.TASK_2744_ENV = prior; }
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('nested handoff reports genuinely missing pinned Codex and never launches (TASK-2744)', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'px-handoff-missing-'));
+    const prior = process.env.TASK_2744_ENV;
+    process.env.TASK_2744_ENV = 'ambient';
+    try {
+      const { repo, launches } = conflictRepo(root);
+      // Keep the discovery shell available while excluding every Codex executable.
+      fs.mkdirSync(path.join(root, 'empty'));
+      fs.symlinkSync('/bin/bash', path.join(root, 'empty', 'bash'));
+      const configuration = resolveConfiguration({ PATH: path.join(root, 'empty'), PARALLIX_HOME: path.join(root, 'home'), TASK_2744_ENV: 'composed' });
+      let probes = 0;
+      const options = {
+        isForgejoReviewEnabledFn: () => true,
+        worktree: repo, log: () => {}, error: () => {},
+        createRebaseWorkflowPortFn: (options: Parameters<typeof createRebaseWorkflowPort>[0]) => {
+          assert.strictEqual(options?.configuration, configuration);
+          const port = createRebaseWorkflowPort(options);
+          const status = port.workflowLauncherStatus('codex', repo);
+          assert.equal(status.supported, false);
+          assert.equal('health' in status ? status.health : undefined, 'missing');
+          assert.equal(configuration.forwardedEnvironment.TASK_2744_ENV, 'composed');
+          probes += 1;
+          return port;
+        },
+      };
+      const result = await createHandoffPorts(configuration).rebase.rebaseBeforeReviewRound('task-lcfg-iso', options);
+      assert.equal(probes, 1);
+      assert.equal(result.ok, false);
+      assert.equal(fs.existsSync(launches), false);
+      assert.equal(fs.existsSync(path.join(repo, '.git', 'rebase-merge')), true);
+    } finally {
+      if (prior === undefined) { delete process.env.TASK_2744_ENV; } else { process.env.TASK_2744_ENV = prior; }
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   // TASK-2709: the composed review loop must hand its resolved configuration to the
   // conflict-resolution launcher, or executable discovery falls back to an empty search path.
   test('shared conflicts reach the recorded implementer found through the composed configuration (TASK-2709)', async () => {

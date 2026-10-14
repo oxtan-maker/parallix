@@ -344,9 +344,9 @@ export function createDefaultExecuteMissionRuntime(configuration: ParallixConfig
     recordActiveStats: options => stats.recordActiveStats({ ...options, configuration }),
     resolveAgentModel,
     resolveStageTelemetry,
-    performHandoff,
+    performHandoff: (slug, options) => performHandoff(slug, { ...options, configuration }),
     reviewLoopMechanisms: createReviewLoopPorts,
-    repairHandoff: repairHandoff.default,
+    repairHandoff: (slug, worktree, errorMsg, options) => repairHandoff.default(slug, worktree, errorMsg, { ...options, configuration }),
     validateCheckpointsBeforeHandoff,
     resolveExecutionContext: async () => null,
   };

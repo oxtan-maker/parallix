@@ -215,6 +215,17 @@ why, scope, success criteria, checkpoint plan, gates and predicted NEL bucket â€
 and the mission is activated with the gates the agent recorded, not gates the
 harness substituted.
 
+For authoring, prefer one `px mission author` invocation followed by `px status`
+readback; see `px mission --help`. Criteria and evidence values can use plain
+text without literal backticks or embedded double quotes. A greeting criterion
+can be `hello.sh prints Hello, World! and exits successfully`; its execution
+evidence can be `hello.sh was run with ./hello.sh; output was Hello, World!;
+exit status was 0`. The repository-relative path supplies the verifiable
+reference. Status reports the stored Mission classification, with `unset`
+(distinct from an explicit `unknown`) when none has been recorded. Unknown may
+be recorded at intake, including for a harness-created task; the draft agent must
+choose `ai_sdlc` or `user_value` before the Mission can be refined.
+
 The lifecycle continues through integration, verifies the landed greeting, and
 checks that the disposable mission worktree was removed.
 

@@ -12,7 +12,7 @@ import * as path from 'path';
 import { getMissionYear, getPrimaryBranch, missionPathForSlug } from '../filesystem/mission-utils.js';
 import { resolveReviewBaseline } from '../../application/review-baseline.js';
 import { assembleStagePrompt } from '../assets/runtime-assets.js';
-import { resolvePromptOverride } from '../config/product-config.js';
+import { resolvePromptConfiguration } from '../config/product-config.js';
 import { loadRepositoryGates } from '../config/repository-gates.js';
 import { GATE_RESULT_RELATIVE_PATH } from '../verification/verification.js';
 import { resolveArtifactDir } from './review-artifacts.js';
@@ -224,8 +224,8 @@ export function buildCompactReviewPrompt({ reviewer, branch, implementer, focus 
   const missionPath = resolveMissionPath(slug, repoRoot, missionPathOverride);
   const primaryBranch = resolvePrimaryBranch(repoRoot);
   const artifactDir = resolveArtifactDir(repoRoot || process.cwd());
-  const overridePath = resolvePromptOverride(repoRoot || process.cwd());
-  const template = assembleStagePrompt('review', { overridePath });
+  const promptConfiguration = resolvePromptConfiguration(repoRoot || process.cwd());
+  const template = assembleStagePrompt('review', promptConfiguration);
   // Dry-run output preserves the runtime-selected agent as a placeholder.
   // Resolve its entrypoint from the configured reviewer instead, because the
   // placeholder is deliberately not a registered agent family.
@@ -260,8 +260,8 @@ export function buildCompactActOnReviewPrompt({ implementer, branch, attempt, re
   const missionPath = resolveMissionPath(slug, repoRoot, missionPathOverride);
   const primaryBranch = resolvePrimaryBranch(repoRoot);
   const artifactDir = resolveArtifactDir(repoRoot || process.cwd());
-  const overridePath = resolvePromptOverride(repoRoot || process.cwd());
-  const template = assembleStagePrompt('act-on-review', { overridePath });
+  const promptConfiguration = resolvePromptConfiguration(repoRoot || process.cwd());
+  const template = assembleStagePrompt('act-on-review', promptConfiguration);
   return template
     .replaceAll('{{branch}}',                  branch)
     .replaceAll('{{implementer}}',             finalImplementer)

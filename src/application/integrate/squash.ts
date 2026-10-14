@@ -10,6 +10,7 @@ import * as fmt from '../presentation/cli-format.js';
 import { rebound } from '../rebound-kernel.js';
 import { abortWith, resolveBounceImplementer, type BounceSeams } from './support.js';
 import { missionId } from '../../domain/mission.js';
+import { prepareBacklogPayload } from './backlog-payload.js';
 import { completeLandedCloseout } from './landed-closeout.js';
 import type { IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
 
@@ -104,32 +105,6 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
       if (!restoreNoiseResult.ok) {
         throw abortWith(landing, 'Could not restore trailing backlog noise after squash merge.', ...(restoreNoiseResult.error ? [restoreNoiseResult.error] : []));
       }
-    }
-  }
-
-  /**
-   * Drop squash-staged `backlog/tasks/` copies whose task id already has a
-   * canonical `completed/`/`archive/` file at base `HEAD` (task-2534). The
-   * mission branch's unsquashed history carries other missions' pre-squash task
-   * files; the squash sees them as added and would resurrect closed work.
-   */
-  function dropStaleBacklogCopies({ baseWorktree }: LandingRun, stagedPaths: ReadonlySet<string>) {
-    for (const issue of backlog.checkBacklogIntegrity(baseWorktree)) {
-      if (issue.type !== 'duplicate-completed' || !issue.canonicalFile) { continue; }
-      // Only the squash payload is ours to trim: unstaged trailing backlog
-      // noise restored around the merge must stay untouched.
-      if (!stagedPaths.has(issue.file)) { continue; }
-      // Canonical only counts when it is already on the base branch. The
-      // landing mission's own task file becomes canonical later, in
-      // `stageCloseout`, and must not be dropped here.
-      if (git(['-C', baseWorktree, 'cat-file', '-e', `HEAD:${issue.canonicalFile}`]).status !== 0) { continue; }
-      git(['-C', baseWorktree, 'reset', '-q', 'HEAD', '--', issue.file]);
-      // Restore the base-branch content, or remove the file when the base
-      // branch does not carry it at all.
-      if (git(['-C', baseWorktree, 'checkout', '-q', 'HEAD', '--', issue.file]).status !== 0) {
-        git(['-C', baseWorktree, 'clean', '-q', '-f', '--', issue.file]);
-      }
-      fmt.log.info(`Dropped stale backlog copy ${issue.file}; ${issue.taskId} is already canonical at ${issue.canonicalFile}.`);
     }
   }
 
@@ -271,12 +246,17 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
     // checkout.  This makes a rejection retryable without discarding operator
     // work that was present before integration started.
     const abandonSquash = (payloadPaths: Iterable<string> = []): string | null => {
-      const reset = git(['-C', baseWorktree, 'reset', '-q', '--merge', 'HEAD']);
+      const paths = [...payloadPaths];
+      const preClean = paths.length > 0
+        ? git(['-C', baseWorktree, 'clean', '-q', '-f', '--', ...paths])
+        : { status: 0, stdout: '', stderr: '' };
+      const reset = preClean.status === 0
+        ? git(['-C', baseWorktree, 'reset', '-q', '--merge', 'HEAD'])
+        : preClean;
       // A payload path deliberately removed from the index before rejection is
       // untracked by the time `--merge` runs.  Clean only the captured
       // integration payload paths; never use a broad clean that could erase
       // unrelated operator files.
-      const paths = [...payloadPaths];
       const clean = reset.status === 0 && paths.length > 0
         ? git(['-C', baseWorktree, 'clean', '-q', '-f', '--', ...paths])
         : { status: 0, stdout: '', stderr: '' };
@@ -305,20 +285,40 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
         .split('\0')
         .filter(Boolean),
     );
-    dropStaleBacklogCopies(run, capturePayloadPaths());
+    let removedStalePaths: Set<string>;
+    try { removedStalePaths = prepareBacklogPayload(ports, baseWorktree, 'HEAD'); }
+    catch (error) {
+      rejectSquash(`Could not prepare backlog payload: ${(error as Error).message}`, capturePayloadPaths());
+      return;
+    }
     const intendedPayloadPaths = capturePayloadPaths();
-    const treeMismatches = stagedPayloadTreeMismatches(baseWorktree, branch, intendedPayloadPaths);
+    const treeMismatches = stagedPayloadTreeMismatches(baseWorktree, branch, new Set([...intendedPayloadPaths].filter(file => !removedStalePaths.has(file))));
     if (treeMismatches.length > 0) {
       rejectSquash(
         `Staged squash payload does not match gated mission tip ${branch}: ${treeMismatches.join(', ')}`,
         intendedPayloadPaths,
       );
     }
+    const retiredEntries = git(['-C', baseWorktree, 'ls-files', '-z', '--', 'backlog/archive']);
+    if (retiredEntries.status !== 0) {
+      rejectSquash('Could not inspect retired archive paths before landing.', intendedPayloadPaths);
+    }
+    const retiredPaths = retiredEntries.stdout.split('\0').filter(Boolean);
+    if (retiredPaths.length > 0) {
+      rejectSquash(`Retired backlog/archive paths cannot land: ${retiredPaths.join(', ')}`, intendedPayloadPaths);
+    }
     await stageCloseout(run, mainTaskFile, intendedPayloadPaths);
-    const tierGuardResult = ports.gates.runStagedTierGuards?.(baseWorktree) ?? { ok: true };
+    const guardHead = git(['-C', baseWorktree, 'rev-parse', 'HEAD']).stdout.trim();
+    const tierGuardResult = ports.gates.runStagedTierGuards?.(baseWorktree, intendedPayloadPaths) ?? { ok: true };
     if (!tierGuardResult.ok) {
       rejectSquash(`Staged squash fails fast tier guards before commit: ${tierGuardResult.error || 'test-categories, default-test-suite, or file-size-cap failed'}`, intendedPayloadPaths);
     }
+    if (git(['-C', baseWorktree, 'rev-parse', 'HEAD']).stdout.trim() !== guardHead
+      || git(['-C', baseWorktree, 'diff', '--quiet', '--', ...intendedPayloadPaths]).status !== 0
+      || git(['-C', baseWorktree, 'ls-files', '--others', '-z', '--', ...intendedPayloadPaths]).stdout.length > 0) {
+      rejectSquash('Landing payload changed during final-tree guards; retry integration.', intendedPayloadPaths);
+    }
+    if (tierGuardResult.tree) { fmt.log.info(`Final landing tree guards passed: tree=${tierGuardResult.tree}`); }
     // Fail-closed backstop: nothing may land while the repository still holds a
     // `backlog/tasks/` copy of a completed or archived task (task-2534).
     const remainingDuplicates = backlog.checkBacklogIntegrity(baseWorktree)

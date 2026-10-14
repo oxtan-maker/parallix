@@ -178,6 +178,7 @@ export interface HandoffGatekeeperPort {
 }
 
 export interface ProofResult {
+  readonly diagnostic?: string;
   readonly ok: boolean;
   readonly identity?: string;
   readonly error?: string;

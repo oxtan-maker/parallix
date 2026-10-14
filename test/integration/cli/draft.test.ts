@@ -160,7 +160,7 @@ test('buildDraftPrompt uses absolute worktree paths and emits no docs/agent-prom
   assert.doesNotMatch(prompt, /\{\{[^}]+\}\}/);
 });
 
-test('buildDraftPrompt preserves unknown classification instructions for synthetic tasks', () => {
+test('buildDraftPrompt requires agents to classify synthetic tasks (TASK-2731)', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'draft-synth-prompt-'));
   try {
     const tasksDir = path.join(tempRoot, 'backlog', 'tasks');
@@ -180,8 +180,9 @@ test('buildDraftPrompt preserves unknown classification instructions for synthet
     ].join('\n'));
 
     const prompt = buildDraftPrompt('task-synth', { rootDir: tempRoot });
-    assert.match(prompt, /preserve the `unknown` label/);
-    assert.doesNotMatch(prompt, /set exactly one of `ai_sdlc` or `user_value`/);
+    assert.match(prompt, /including tasks synthesized by the harness/);
+    assert.match(prompt, /Set exactly one of ai_sdlc or user_value/);
+    assert.match(prompt, /Unknown is an intake placeholder, never a completed draft classification/);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -410,6 +411,95 @@ test('ensureGraphifyWorkspace copies graph.json from primary worktree when direc
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
     fs.rmSync(tmpMain, { recursive: true, force: true });
+  }
+});
+
+// TASK-2714: the draft copy carries only the Graphify state a mission worktree
+// needs to answer queries and refresh incrementally. Dated pre-overwrite
+// snapshots (graphify's `backup_if_protected`) and the browser export are dead
+// weight: measured 660,368,980 bytes copied before, 26,610,509 bytes after.
+function seedPrimaryGraphify(primaryPath) {
+  const queryState = {
+    'graph.json': '{"nodes":[],"links":[]}',
+    'manifest.json': '{"files":{}}',
+    'GRAPH_REPORT.md': '# graph report',
+    '.graphify_labels.json': '{"communities":{}}',
+    '.graphify_labels.json.sig': 'signature',
+    '.graphify_python': '/usr/bin/python3\n',
+    '.graphify_root': '/primary\n',
+    'graph.html': '<html><body>browser export</body></html>',
+    '2026-10-12/graph.json': '{"snapshot":"before overwrite"}',
+    '2026-10-13/graph.json': '{"snapshot":"before overwrite"}',
+    'cache/stats.json': '{"mtime":1}',
+    'cache/ast/left.json': '{"ast":null}',
+  };
+  let queryBytes = 0;
+  for (const [name, body] of Object.entries(queryState)) {
+    const file = path.join(primaryPath, name);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, body, 'utf8');
+    if (!name.startsWith('2026-') && name !== 'graph.html') { queryBytes += Buffer.byteLength(body); }
+  }
+  return queryBytes;
+}
+
+test('ensureGraphifyWorkspace copies only query and incremental graph state, leaving snapshots and exports behind (TASK-2714)', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-test-'));
+  const tmpMain = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-main-'));
+  try {
+    const primaryPath = path.join(tmpMain, 'graphify-out');
+    fs.mkdirSync(primaryPath, { recursive: true });
+    const expectedBytes = seedPrimaryGraphify(primaryPath);
+
+    const messages = [];
+    const result = ensureGraphifyWorkspace(tmpRoot, tmpMain, { logFn: (message) => messages.push(message) });
+    assert.equal(result, true);
+    const target = path.join(tmpRoot, 'graphify-out');
+
+    // Everything `graphify query|path|explain` and `graphify update .` read.
+    for (const name of ['graph.json', 'manifest.json', 'GRAPH_REPORT.md', '.graphify_labels.json',
+      '.graphify_labels.json.sig', '.graphify_python', '.graphify_root',
+      'cache/stats.json', 'cache/ast/left.json']) {
+      assert.ok(fs.existsSync(path.join(target, name)), `${name} must be present for queries and incremental refresh`);
+    }
+    // Dead weight a recursive copy used to carry.
+    assert.ok(!fs.existsSync(path.join(target, '2026-10-12')), 'dated Graphify pre-overwrite snapshots must not be copied');
+    assert.ok(!fs.existsSync(path.join(target, '2026-10-13')), 'dated Graphify pre-overwrite snapshots must not be copied');
+    assert.ok(!fs.existsSync(path.join(target, 'graph.html')), 'the browser export is not query state');
+
+    // The copy reports its own byte total so the reduction stays measurable.
+    const reported = /Copied (\d+) bytes/.exec(messages.join('\n'));
+    assert.ok(reported, `the selective copy must report copied bytes, got: ${messages.join('\n')}`);
+    assert.equal(Number(reported[1]), expectedBytes, 'only allowlisted bytes are copied');
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    fs.rmSync(tmpMain, { recursive: true, force: true });
+  }
+});
+
+test('ensureGraphifyWorkspace gives each worktree an independent graph copy (TASK-2714)', () => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-isolation-'));
+  const tmpMain = path.join(parent, 'primary');
+  const missionA = path.join(parent, 'mission-a');
+  const missionB = path.join(parent, 'mission-b');
+  try {
+    const primaryPath = path.join(tmpMain, 'graphify-out');
+    fs.mkdirSync(primaryPath, { recursive: true });
+    seedPrimaryGraphify(primaryPath);
+    const primaryGraph = path.join(primaryPath, 'graph.json');
+    const primaryBefore = fs.readFileSync(primaryGraph, 'utf8');
+
+    ensureGraphifyWorkspace(missionA, tmpMain, { logFn: () => {} });
+    ensureGraphifyWorkspace(missionB, tmpMain, { logFn: () => {} });
+
+    // A mission graph update writes into its own worktree copy only.
+    fs.writeFileSync(path.join(missionA, 'graphify-out', 'graph.json'), '{"mission":"a"}');
+    assert.equal(fs.readFileSync(path.join(missionB, 'graphify-out', 'graph.json'), 'utf8'), primaryBefore,
+      'a sibling mission worktree must not observe another mission\'s graph update');
+    assert.equal(fs.readFileSync(primaryGraph, 'utf8'), primaryBefore,
+      'a mission worktree must not mutate the primary worktree graph');
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
   }
 });
 

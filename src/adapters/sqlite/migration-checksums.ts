@@ -9,5 +9,11 @@ const LEGACY_CHECKSUMS: Readonly<Record<string, readonly string[]>> = {
 
 export function acceptsMigrationChecksum(id: string, actual: string, expected: string): boolean {
   if (actual === expected) { return true; }
+  // TASK-2742: 0038 predicates skip only unchanged rows. Accept its original
+  // ledger entry only for this exact equivalent SQL, never arbitrary drift.
+  if (id === '0038-success-criterion-identity') {
+    return actual === '674db493a344c3d3ffd5c0d9e4eca5f51672d442e9c591380a0ba0888ca9ed3c'
+      && expected === 'd59c6e91e82e9cdd93fb2735209a396cfd9d68c73dbee18b55b4db68b00d44f1';
+  }
   return actual !== expected && LEGACY_CHECKSUMS[id]?.includes(actual) === true;
 }

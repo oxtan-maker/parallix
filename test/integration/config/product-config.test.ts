@@ -679,7 +679,7 @@ test('validateWorkflowConfig accepts an integrate section and rejects non-string
   );
 });
 
-test('validateWorkflowConfig enforces the closed prompts section (override only)', () => {
+test('validateWorkflowConfig enforces the closed prompts section (TASK-2737)', () => {
   assert.deepEqual(
     validateWorkflowConfig({ adapters: { prompts: { override: './opinion.md' } } }),
     []
@@ -690,7 +690,17 @@ test('validateWorkflowConfig enforces the closed prompts section (override only)
   );
   assert.deepEqual(
     validateWorkflowConfig({ adapters: { prompts: { surface: 'x' } } }),
-    ['adapters.prompts may only contain "override"']
+    ['adapters.prompts may only contain "override" and "contextCompaction"']
+  );
+  for (const contextCompaction of [true, false]) {
+    assert.deepEqual(
+      validateWorkflowConfig({ adapters: { prompts: { override: './opinion.md', contextCompaction } } }),
+      []
+    );
+  }
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { prompts: { contextCompaction: 'false' } } }),
+    ['adapters.prompts.contextCompaction must be a boolean']
   );
 });
 

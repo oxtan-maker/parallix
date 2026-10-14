@@ -42,7 +42,6 @@ const EXCEPTIONS: readonly string[] = [
   'src/adapters/agents/agents.ts',
   'src/adapters/cli/commands/draft-stats.ts',
   'src/adapters/config/product-config.ts',
-  'src/adapters/config/repository-gates.ts',
   'src/adapters/forgejo/forgejo-git.ts',
   'src/adapters/forgejo/forgejo-pr.ts',
   'src/adapters/review/review-events.ts',

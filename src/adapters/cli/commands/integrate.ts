@@ -1,3 +1,4 @@
+import { createIntegrationVerificationEvidencePort } from '../../verification/integration-verification-proof.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 /**
  * Integrate command adapter (TASK-2512).
@@ -10,9 +11,7 @@ import type { ParallixConfiguration } from '../../../application/ports/configura
  */
 import { createIntegrateWorkflow } from '../../../application/integrate-workflow.js';
 import fs from 'node:fs';
-import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawnSync } from '../../process/process-runner.js';
 import * as git from '../../git/git.js';
 import * as backlog from '../../backlog/backlog.js';
 import * as stateMap from '../../config/state-map.js';
@@ -32,6 +31,7 @@ import * as reviewAdapter from '../../review/review-adapter.js';
 import * as rebaseWorkflow from '../../rebase/rebase-workflow-adapter.js';
 import * as repositoryGates from '../../config/repository-gates.js';
 import * as gates from './integrate-gates.js';
+import { runStagedTierGuards } from './integrate-staged-guards.js';
 import * as integrationGateRebound from './integrate-gate-rebound.js';
 import * as conflict from './integrate-conflict.js';
 import * as post from './integrate-post.js';
@@ -45,6 +45,9 @@ import type { IntegrateWorkflowPorts } from '../../../application/ports/integrat
  * workflow — the `createHandoffPorts` pattern.
  */
 export function createIntegratePorts(configuration?: ParallixConfiguration): IntegrateWorkflowPorts {
+  const runIntegrationGates: typeof repositoryGates.runPhaseGates = (phase, options) => repositoryGates.runPhaseGates(phase, {
+    ...options, configuration, verificationEvidence: createIntegrationVerificationEvidencePort(configuration),
+  });
   return {
     process: {
       terminate: code => process.exit(code),
@@ -132,20 +135,13 @@ export function createIntegratePorts(configuration?: ParallixConfiguration): Int
     gates: {
       loadPhaseGates: (rootDir, phase) => repositoryGates.loadPhaseGates(rootDir, phase),
       loadRequirePreIntegration: rootDir => repositoryGates.loadRequirePreIntegration(rootDir),
-      runPhaseGates: (phase, options) => repositoryGates.runPhaseGates(phase, options as Parameters<typeof repositoryGates.runPhaseGates>[1]),
+      runPhaseGates: (phase, options) => runIntegrationGates(phase, options as Parameters<typeof repositoryGates.runPhaseGates>[1]),
       captureFinalIntegrationTree: rootDir => gates.captureFinalIntegrationTree(rootDir),
       listChangedPathsBetween: (rootDir, fromCommit, toCommit) => gates.listChangedPathsBetween(rootDir, fromCommit, toCommit),
       resolveIntegrationVerificationWorktree: (slug, options) => gates.resolveIntegrationVerificationWorktree(slug, options),
       isIntendedPayloadAtHead: (rootDir, paths, options) => gates.isIntendedPayloadAtHead(rootDir, paths, options),
-      runStagedTierGuards: rootDir => {
-        // Minimal Git fixtures exercise the landing workflow without carrying
-        // a Parallix checkout. They cannot run repository-owned guards; a real
-        // integration checkout must contain every guard source and is checked.
-        if (!fs.existsSync(path.join(rootDir, 'test', 'test-categories.test.ts'))) { return { ok: true }; }
-        const result = spawnSync('node', ['--test', '--import', 'tsx', 'test/unit/test/lib/test-categories.test.ts', 'test/unit/test/lib/default-test-suite.test.ts', 'test/unit/repository/file-size-cap.test.ts'], { cwd: rootDir, encoding: 'utf8' });
-        return result.status === 0 ? { ok: true } : { ok: false, error: [result.stdout, result.stderr].filter(Boolean).join('\n').trim() };
-      },
-      routeIntegrationGateFailure: options => integrationGateRebound.routeIntegrationGateFailure(options),
+      runStagedTierGuards,
+      routeIntegrationGateFailure: options => integrationGateRebound.routeIntegrationGateFailure({ ...options, runPhaseGatesFn: runIntegrationGates }),
     },
     checkout: {
       stashMainCheckoutIfNeeded: options => conflict.stashMainCheckoutIfNeeded(options),

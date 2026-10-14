@@ -114,6 +114,9 @@ export interface MissionData {
   readonly declaredGates?: readonly string[];
   /** What must be true for the mission to be done. Empty until the draft records them. */
   readonly successCriteria?: readonly string[];
+  /** Stable mission-scoped identities, parallel to successCriteria. */
+  readonly successCriterionIds?: readonly string[];
+  readonly nextSuccessCriterionId?: number;
   /** Zero-based positions in `successCriteria` marked complete. Empty until marked. */
   readonly completedSuccessCriteria?: readonly number[];
   /**

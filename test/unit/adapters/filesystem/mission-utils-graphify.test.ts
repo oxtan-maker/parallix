@@ -162,6 +162,38 @@ test('queryGraph passes --graph with absolute path anchored to active worktree',
   fs.rmSync(graphRoot, { recursive: true, force: true });
 });
 
+test('updateGraphifyKnowledgeGraph confines the update to the active worktree, never the base or a sibling (TASK-2714)', () => {
+  const parent = registeredMkdtemp('graphify-worktree-isolation-');
+  const roots = {};
+  for (const name of ['primary', 'mission-a', 'mission-b']) {
+    const dir = path.join(parent, name);
+    fs.mkdirSync(path.join(dir, 'graphify-out'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'graphify-out', 'graph.json'), '{"seeded":true}\n');
+    roots[name] = dir;
+  }
+  try {
+    const result = updateGraphifyKnowledgeGraph({
+      rootDir: roots['mission-a'],
+      log: () => {},
+      commandRunner: (command, args, options) => {
+        if (args[0] === '--help') { return { status: 0 }; }
+        // graphify writes into its working directory only.
+        assert.equal(options.cwd, roots['mission-a'], 'the update must run in the active worktree');
+        fs.writeFileSync(path.join(options.cwd, 'graphify-out', 'graph.json'), '{"updatedBy":"mission-a"}\n');
+        return { status: 0 };
+      },
+    });
+    assert.deepEqual(result, { updated: true, skipped: false });
+    assert.equal(fs.readFileSync(path.join(roots['mission-a'], 'graphify-out', 'graph.json'), 'utf8'), '{"updatedBy":"mission-a"}\n');
+    for (const name of ['primary', 'mission-b']) {
+      assert.equal(fs.readFileSync(path.join(roots[name], 'graphify-out', 'graph.json'), 'utf8'), '{"seeded":true}\n',
+        `${name} must not be mutated by another worktree's graph update`);
+    }
+  } finally {
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
 test('Graphify update catches thrown commands and rejects nonzero probes (TASK-2725)', t => {
   const root = registeredMkdtemp('graphify-errors-');
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

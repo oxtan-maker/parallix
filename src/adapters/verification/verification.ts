@@ -478,7 +478,6 @@ export function assertVerifiedTreeProof(proof: { rootDir?: string; branch?: stri
   return { ok: true, proof: current };
 }
 
-/** @param {string[]} args @param {{log?: Function}} [options] */
 export default function runWorkflow(args: string[], options: { log?: Function; configuration?: ParallixConfiguration } = {}): import('child_process').SpawnSyncReturns<string> {
   const logFn = options.log || log.plain;
   const root = process.cwd();
@@ -487,8 +486,9 @@ export default function runWorkflow(args: string[], options: { log?: Function; c
   const command = formatVerificationCommand(area, root);
   const before = createActiveVerificationIdentity(command, root, options);
   if (before.ok === false && 'blocked' in before) { logFn(before.error); return { status: 1 } as import('child_process').SpawnSyncReturns<string>; }
-  if (readActiveVerificationProof(command, root, options).ok) {
-    logFn('Active/review verification: reused successful proof.');
+  const reusable = readActiveVerificationProof(command, root, options);
+  if (reusable.ok) {
+    logFn(reusable.diagnostic);
     return { status: 0 } as import('child_process').SpawnSyncReturns<string>;
   }
   const result = runVerificationGate(area, { stdio: 'inherit' });

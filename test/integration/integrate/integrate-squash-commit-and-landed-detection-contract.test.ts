@@ -330,6 +330,8 @@ describe("squash hook bounce", () => {
       if (joined.includes('merge') && joined.includes('--no-commit')) { return ok(''); }
       if (joined.includes('merge') && joined.includes('--abort')) { return ok(''); }
       if (joined.includes('merge') && joined.includes('--squash')) { return ok(''); }
+      // The worktree matches the staged payload; HEAD comparison still models new work.
+      if (args.includes('diff') && args.includes('--quiet') && !args.includes('HEAD')) { return ok(''); }
       if (args.includes('diff') && args.includes('--quiet')) { return { status: scenario.alreadyAtHead ? 0 : 1, stdout: '', stderr: '' }; }
       if (args.includes('diff') && args.includes('--cached')) { return ok('fixture.ts\n'); }
       if (args.includes('commit')) {

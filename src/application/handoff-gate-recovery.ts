@@ -5,7 +5,7 @@
  */
 
 import * as fmt from './presentation/cli-format.js';
-import type { HandoffLog, HandoffMissionServicesPort, HandoffResult, HandoffWorkflowPorts, PerformHandoffOptions } from './ports/handoff-workflow.js';
+import type { HandoffLog, HandoffMissionServicesPort, HandoffResult, HandoffWorkflowPorts, PerformHandoffOptions, ProofResult } from './ports/handoff-workflow.js';
 import type { RecordedContract } from './handoff-contract.js';
 import type { DeclaredGateRunner } from './handoff-declared-gates.js';
 import { rebound } from './rebound-kernel.js';
@@ -46,7 +46,7 @@ export class HandoffGateRecovery {
       const verificationCommand = ports.verification.formatVerificationCommand(area, rootDir);
       const reusableProof = ports.verification.readReusableVerificationProof(verificationCommand, rootDir);
       if (reusableProof.ok) {
-        log(fmt.status('PASS', 'Repository verification passed by reuse of successful active/review proof.'));
+        log(fmt.status('PASS', proofReuseMessage(reusableProof)));
       } else {
       // Bind a reusable proof to the inputs that existed before execution. A
       // successful process exit alone must not certify a tree changed mid-gate.
@@ -204,4 +204,9 @@ export class HandoffGateRecovery {
     }
     return null;
   }
+}
+
+/** Preserve producer attribution while supporting older proof-port adapters. */
+function proofReuseMessage(proof: ProofResult): string {
+  return proof.diagnostic ?? 'Repository verification passed by reuse of successful active/review proof.';
 }

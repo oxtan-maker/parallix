@@ -300,6 +300,12 @@ test('smoke repositories isolate credentials, sessions and mutable operator stat
     }
     assert.notEqual(fixtures[0].stateHome, fixtures[1].stateHome);
     for (const fixture of fixtures) {
+      const taskDir = path.join(fixture.repoRoot, 'backlog', 'tasks');
+      const taskText = fs.readFileSync(path.join(taskDir, fs.readdirSync(taskDir)[0]), 'utf8');
+      assert.match(taskText, /Fix the typo in hello.sh so it prints Hello, World!/);
+      assert.match(taskText, /px status --json/);
+      assert.match(taskText, /workflow-owned metadata changes are expected/);
+      assert.match(fs.readFileSync(path.join(fixture.repoRoot, 'AGENTS.md'), 'utf8'), /hello.sh/);
       const copiedAuth = path.join(fixture.opencodeDataHome, 'opencode', 'auth.json');
       assert.equal(fs.readFileSync(copiedAuth, 'utf8'), 'operator-credential');
       fs.writeFileSync(copiedAuth, 'fixture-credential');

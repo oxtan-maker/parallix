@@ -499,7 +499,7 @@ describe("Mission field and legacy-path authority", () => {
   const repositoryMission: Mission = {
     id: missionId('task-2294'), repositoryId: repositoryId('parallix'), title: 'authoritative',
     labels: missionLabels(['user_value', 'bug']), status: 'active', rawStatus: 'active', closedAt: null, assignee: agentFamily('codex'),
-    checkpoints: [], brief: null, declaredGates: [], successCriteria: [], completedSuccessCriteria: [], dependencies: [], description: null, predictedNelBucket: null, reproductionTest: null, review: null, netEngineeringLines: 10,
+    checkpoints: [], brief: null, declaredGates: [], successCriteria: [], successCriterionIds: [], nextSuccessCriterionId: 1, completedSuccessCriteria: [], dependencies: [], description: null, predictedNelBucket: null, reproductionTest: null, review: null, netEngineeringLines: 10,
     externalTaskRef: externalTaskRef('backlog', 'TASK-2294', 'backlog/tasks/task-2294.md'),
   };
 

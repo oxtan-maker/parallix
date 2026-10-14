@@ -1,11 +1,8 @@
 /**
  * Typed Mission write verbs.
  *
- * One command per domain concept, every argument a typed flag. There is no JSON
- * request blob and no generic patch: `px goal set` writes the brief's goal and
- * reason, `px scope set` bounds it, `px gate add` declares one gate. A caller
- * that wants to change two concepts runs two commands, each validated by its
- * own domain rule.
+ * Typed flags author the complete draft atomically with mission author, or edit
+ * individual concepts with the existing single-mutation commands.
  *
  * The slug is inferred from the branch or worktree; `--slug` is only needed
  * outside the mission worktree. Every write accepts an otherwise valid
@@ -17,6 +14,7 @@
  * never takes the flag at all.
  */
 
+import { AUTHOR_HELP, parseMissionAuthoring } from './mission-authoring.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import type { MissionCheckpointService } from '../../application/mission-checkpoint-service.js';
 import type { MissionBriefService } from '../../application/mission-brief-service.js';
@@ -143,7 +141,7 @@ review verify against these; read them back with \`px status\`.
 `.trimStart();
 
 export const MISSION_HELP = `
-Usage:
+Usage:${AUTHOR_HELP}
   px mission mark-complete [--slug <slug>] (--criterion <n> | --all)
 
 Mark one success criterion, by the index \`px status\` lists it with, or every
@@ -171,7 +169,11 @@ Medium (81-235) or Large (235+). Handoff compares it with the measured bucket.
 `.trimStart();
 
 export const CHECKPOINT_HELP = `
-Usage: px checkpoint plan   [--slug <slug>] --name <CP-N> --text <what it delivers>
+Usage: px checkpoint check  [--slug <slug>] [--json]
+       px checkpoint plan   [--slug <slug>] --name <CP-N> --text <what it delivers>
+       px checkpoint history [--slug <slug>] [--name <CP-N>]
+       px checkpoint round   [--slug <slug>] --round <n>
+       px checkpoint read    [--slug <slug>] [--name <CP-N>]
        px checkpoint unplan [--slug <slug>] --name <CP-N>
        px checkpoint record [--slug <slug>] --name <CP-N> --next <text>
                             --criterion <text> --evidence <text> [--criterion ... --evidence ...]
@@ -183,7 +185,7 @@ Report an invalid locked contract: px checkpoint report-invalid-contract --name 
 
 A checkpoint is planned at draft and evidenced during execution. \`plan\` adds
 one with no evidence yet; \`unplan\` drops one that still has none. \`record\`
-writes a checkpoint's Goal Check evidence as durable Mission state, replacing
+appends an immutable version of a checkpoint's Goal Check evidence, replacing
 the planned entry of the same --name (or earlier evidence for it) and keeping
 what it was planned to deliver. --criterion and --evidence are repeatable and
 pair up in the order given, so the counts must match. Each row must cite a
@@ -194,6 +196,22 @@ the first without is where a relaunched agent resumes. An operator may use
 \`record --force\` to clear a reported invalid-contract blocker while recording
 corrected evidence. It retains unrelated proof and still validates evidence and
 the write version; it does not mark the repair verified or skip its required check.
+
+Read-only \`check\` reports evidence readiness as JSON: ready, version, findings,
+primaryStopReason and nextCommands. It lists all missing checkpoints, incomplete
+and uncovered criteria, invalid references and stale repair rows. A recorded
+human-only contract blocker takes priority: stop for an operator even if evidence
+is incomplete. Check never runs gates, publishes, writes evidence or clears a
+blocker. Exit 0 means the read succeeded; inspect ready before declaring completion.
+Read-only \`history\` shows all versions (optionally by name), \`round --round <n>\`
+replays the exact checkpoint state at review start, and \`read\` shows latest state.
+Round replay includes criterion IDs and text at review start, plus uncovered IDs.
+Criterion IDs are backend-allocated and survive text edits; legacy unmatched
+evidence has a null criterion ID. Earlier round-time criteria remain unknown.
+Versions include recording time, recording review round (null before review),
+and Mission aggregate revision. Legacy recording metadata is null; known row
+rounds remain intact. Legacy round snapshots were not captured and are reported
+as unknown. Missing rounds are reported separately. These reads never mutate state.
 `.trimStart();
 
 export const REPRO_HELP = `
@@ -288,9 +306,15 @@ export function createCriterionCommand(services: MissionWriteServices) {
 }
 
 /** `px mission mark-complete (--criterion <n> | --all)` */
-export function createMissionCommand(services: MissionWriteServices) {
+export function createMissionCommand(services: MissionWriteServices, validateGate: (_command: string) => string | null = () => null) {
   return async (args: string[] = []): Promise<void> => {
     if (helped(args, MISSION_HELP)) { return; }
+    if (args[0] === 'author') {
+      const fields = parseMissionAuthoring(args, validateGate);
+      const req = request(args, 'mission-author', services.resolveSlug);
+      output(unwrap(await services.brief.author({ ...req, ...fields }), 'mission author'));
+      return;
+    }
     if (args[0] !== 'mark-complete') { fail(MISSION_HELP); }
     const index = flag(args, '--criterion');
     const all = args.includes('--all');
@@ -331,15 +355,33 @@ export function createNelCommand(services: MissionWriteServices) {
   };
 }
 
+/** Read command dispatch shares slug resolution but cannot call a writer. */
+async function readCheckpointCommand(services: MissionCheckpointService, resolveSlug: (_explicit?: string) => string | null, args: string[]) {
+  const req = request(args, `checkpoint-${args[0]}`, resolveSlug, 'checkpoint:record');
+  const name = flag(args, '--name') ?? undefined;
+  const outcome = args[0] === 'history' ? await services.history({ ...req, name })
+    : args[0] === 'round' ? await services.round({ ...req, round: Number(required(args, '--round')) })
+      : await services.read({ ...req, name });
+  output(unwrap(outcome, `checkpoint ${args[0]}`));
+}
+
 /**
  * `px checkpoint record`. TASK-2482 removed an earlier `px checkpoint` because
  * it was unused and could be mistaken for verification. It returns here as the
  * agent's only durable evidence path once the workflow files are retired, and
  * it records evidence only — it runs no gate and asserts no verification.
  */
-export function createCheckpointCommand(services: MissionCheckpointService, resolveSlug: (_explicit?: string) => string | null) {
+export function createCheckpointCommand(services: MissionCheckpointService, resolveSlug: (_explicit?: string) => string | null, checkoutRoot?: string) {
   return async (args: string[] = []): Promise<void> => {
     if (helped(args, CHECKPOINT_HELP)) { return; }
+    if (args[0] === 'check') {
+      output(unwrap(await services.check(request(args, 'checkpoint-check', resolveSlug), checkoutRoot), 'checkpoint check'));
+      return;
+    }
+    if (['history', 'round', 'read'].includes(args[0] ?? '')) {
+      await readCheckpointCommand(services, resolveSlug, args);
+      return;
+    }
     if (args[0] === 'plan' || args[0] === 'unplan') {
       const req = request(args, `checkpoint-${args[0]}`, resolveSlug);
       const name = required(args, '--name');
