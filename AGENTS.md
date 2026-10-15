@@ -1,12 +1,8 @@
 # Repository instructions
 
-## graphify
-
-If `graphify-out/graph.json` exists, start codebase questions with `graphify query "<question>" --graph "$(pwd)/graphify-out/graph.json"`. Use `graphify path` for relationships and `graphify explain` for a focused concept, with the same `--graph` argument. Use `graphify-out/wiki/index.md` for broad navigation when present. Read `GRAPH_REPORT.md` only for architecture review or when a query is insufficient. If the graph is absent, say to run `/graphify .` to build it, then read source directly. Dirty graph output is usable. Parallix updates existing Graphify graphs after successful squash integration on the receiving base worktree; review, edits and checkpoints do not trigger updates.
-
 ## Documentation
 
-Read `docs/doc-standards.md` before editing root or `docs/` Markdown. Update live documentation for changed user-facing behavior, constraints, or rationale; internal refactors usually need no doc change. Keep implementation inventories and test evidence out of live docs.
+Read `docs/doc-standards.md` before editing root or `docs/` Markdown. Update live documentation for changed user-facing behavior, constraints, or rationale; keep internal documentation to a minimum. Keep implementation inventories and test evidence out of live docs.
 
 ## Git
 
@@ -28,7 +24,7 @@ Push mission branches only to `review` (Forgejo), never to `origin` (GitHub). On
   or comments. Do not force unrelated behaviors into giant suites.
 - Use the narrowest tier proving the behavior (ADR 0057): `unit` for in-process
   tests with doubles and isolated state; adapter integration for real boundaries
-  (`integration-ci` when a clean hosted runner supplies all dependencies,
+  (`integration-ci` when a clean hosted runner supplies all dependencies and only when needed,
   `integration-local` when a declared workstation dependency is required);
   `agent-e2e` for configured agent runners with reachable model backends.
   Keep integration membership and local dependency reasons in the category registry.
@@ -43,9 +39,6 @@ Push mission branches only to `review` (Forgejo), never to `origin` (GitHub). On
   behavioral risks, and a proposed decision to the user, then obtaining an explicit
   subsequent decision before implementation. This wave grants no exception.
 - Other than that, do not run full test gates when a focused test run is enough, parallix will run the complete test gates automatically at appropriate times.
-- `px integrate` uses `adapters.gates.preIntegration` in `workflow.config.json` as its mandatory gate plan. `config/integration-pipelines.json` is for the standalone `./scripts/verify-local.sh integrate` script.
-- `px integrate` skips re-running high-level integration hooks a mission already ran green: when a mission was bounced from the integration lane back to active and its fix was validated green by those tests, the next integrate run skips the already-validated hooks when the finalized commit is the validated one or differs from it only in Backlog task records (`backlog/tasks/`, `backlog/completed/`), so lane-transition commits and bookkeeping-only rebases keep the skip. Any other changed path, missing validation, or git error runs the full suite. The skip is a sha-keyed whitelist decided purely from the recorded validation and that diff, with no repo, branch, or mission special-casing.
-- Run tests through `npm test`: the runner contains the whole test process tree in a memory limit and reports a breach as `MEMORY LIMIT EXCEEDED` (exit 137). Direct `node --test`/`tsx` runs are uncontained and unsupported; see `docs/test-memory-containment.md`.
 - Retune CPU budgets only from current CPU profiles with explicit margin.
   Integration cases and suites, including hook contracts and their waited
   children, must retain finite CPU budgets. Wall deadlines remain hang bounds.
