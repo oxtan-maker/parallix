@@ -28,7 +28,14 @@ import type { HandoffWorkflowPorts } from '../../../src/application/ports/handof
 
 test('handoff use case completes the full workflow over mocked ports', async () => {
   const recorder = makeRecorder();
-  const useCase = new HandoffCommandUseCase(makePorts(recorder));
+  const ports = makePorts(recorder);
+  const recordGateCommand = ports.process.spawnSync;
+  ports.process.spawnSync = (...args) => {
+    assert.ok(recorder.log.some(line => line.includes(`Running mission-declared gates for ${SLUG}.`)),
+      'mission gate context is visible before its command executes');
+    return recordGateCommand(...args);
+  };
+  const useCase = new HandoffCommandUseCase(ports);
   const result = await useCase.performHandoff(SLUG, runOptions(recorder));
 
   assert.equal(result.ok, true, recorder.errors.join('\n'));

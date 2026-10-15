@@ -148,6 +148,7 @@ export class HandoffGateRecovery {
       error(msg);
       return { ok: false, error: msg };
     }
+    log(fmt.status('INFO', `Running mission-declared gates for ${fmt.slug(slug)}.`));
     const gatesResult = gates.runDeclaredGates(missionDir, rootDir, { log: internalLog, error, recordedGates });
     if (gatesResult.ok === false) {
       const msg = `Declared gate "${gatesResult.gate}" failed for ${fmt.slug(slug)}: ${gatesResult.error || gatesResult.reason}. Blocking handoff — task remains in active.`;
