@@ -66,8 +66,8 @@ import {
 } from './security.js';
 import { createShellBootstrap } from './shell-bootstrap.js';
 import { dispatchEditMission, dispatchCreateMission, errorMessage, sendCommandResult, singleHeader, transportStatusCode } from './host-support.js';
-import { registerTerminalRoute, type WebTerminalReader } from './terminal-route.js';
-export { WEB_TERMINAL_PATH, type WebTerminalOutput, type WebTerminalReader } from './terminal-route.js';
+import { registerTerminalRoute, type WebMissionTerminal } from './terminal-route.js';
+export { WEB_TERMINAL_PATH, WEB_TERMINAL_HISTORY_PATH, WEB_TERMINAL_LIVE_PATH, WEB_TERMINAL_SEARCH_PATH, type WebMissionTerminal } from './terminal-route.js';
 
 export const WEB_CSRF_HEADER = 'x-px-csrf';
 export { WEB_CSRF_META_NAME } from './shell-bootstrap.js';
@@ -149,7 +149,7 @@ export interface WebHostOptions {
    * default `BOARD_REFRESH_INTERVAL_MS` poll.
    */
   subscription?: BoardSubscriptionOptions;
-  terminalReader?: WebTerminalReader;
+  missionTerminal?: () => WebMissionTerminal | null; // Mission history reads (TASK-2749); `null` when not wired.
 }
 
 export interface WebHostInfo extends LoopbackBinding {

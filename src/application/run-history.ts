@@ -10,9 +10,12 @@
  * Every answer states its source and coverage, and reports omissions instead
  * of implying the history is whole.
  */
-import { isAgentRunId } from '../domain/agent-run.js';
+import { retainedRunFamily } from './mission-terminal-compat.js';
+import { isRunHistoryId, runCaptureKind } from './run-history-types.js';
 import {
+  MAX_RUN_PAGE_BYTES,
   MAX_RUN_SEARCH_HITS,
+  MAX_RUN_SEARCH_SCAN_BYTES,
   MAX_RUN_SHOW_BYTES,
   RUN_RECORD_FILE,
   RUN_SEARCH_CONTEXT_BYTES,
@@ -34,12 +37,14 @@ export interface RunHistoryScope {
   readonly fs: RunHistoryFileSystem;
   /** Supervisor liveness, used to report an abandoned `running` record as interrupted. */
   readonly isAlive: (_pid: number) => boolean;
+  readonly executionAlive?: (_execution: { readonly pid: number; readonly processIdentity: string | null }) => boolean | null;
 }
 
 export interface RunSummary {
   readonly record: RunRecord;
   /** The record's state, with a dead supervisor's `running` reported as `interrupted`. */
   readonly state: RunState;
+  readonly execution: 'live' | 'stopped' | 'unknown';
   /** Plain coverage statements: sources, retained bytes and omissions. */
   readonly coverage: readonly string[];
 }
@@ -71,26 +76,30 @@ function coverageOf(record: RunRecord, state: RunState): string[] {
   if (record.redacted) { lines.push('configured credential redaction ran; offsets index the redacted stream'); }
   for (const source of record.sources) { lines.push(`${source.kind}${source.path ? ` (${source.path})` : ''}: ${source.covers}${source.complete ? '' : ' [incomplete]'}`); }
   if (state === 'interrupted') { lines.push('the run was interrupted: its supervisor exited before the run finished, so the tail may be missing'); }
-  if (state === 'running') { lines.push('the run is still live; later output is not yet captured'); }
+  if (state === 'running') { lines.push('capture is still open; this alone does not prove that an agent is executing'); }
   lines.push(...record.omissions);
   return lines;
 }
 
 function readRecord(scope: RunHistoryScope, runId: string): RunLookup {
-  if (!isAgentRunId(runId)) { return { ok: false, error: 'access-denied', detail: `not a run id of this Mission: ${runId}` }; }
+  if (!isRunHistoryId(runId)) { return { ok: false, error: 'access-denied', detail: `not a run id of this Mission: ${runId}` }; }
   const raw = scope.fs.readText(join(scope.runsDir, runId, RUN_RECORD_FILE));
   if (raw === null) { return { ok: false, error: 'missing', detail: `no retained run ${runId} in this Mission (it may have been retired)` }; }
   let record: RunRecord;
   try { record = JSON.parse(raw) as RunRecord; } catch { return { ok: false, error: 'malformed', detail: `run record ${runId} is not valid JSON` }; }
   if (record.runId !== runId) { return { ok: false, error: 'malformed', detail: `run record ${runId} names another run` }; }
+  try { record = { ...record, family: retainedRunFamily(record), captureKind: runCaptureKind(record) }; }
+  catch { return { ok: false, error: 'malformed', detail: `run record ${runId} has an invalid agent family` }; }
   const state = effectiveState(record, scope.isAlive);
-  return { ok: true, run: { record, state, coverage: coverageOf(record, state) } };
+  const observed = record.execution ? scope.executionAlive?.(record.execution) : null;
+  const execution = state !== 'running' ? 'stopped' : observed === true ? 'live' : observed === false ? 'stopped' : 'unknown';
+  return { ok: true, run: { record, state, execution, coverage: coverageOf(record, state) } };
 }
 
 /** Every retained run of the Mission, newest first. */
 export function listRuns(scope: RunHistoryScope): RunSummary[] {
   return scope.fs.listDirs(scope.runsDir)
-    .filter(isAgentRunId)
+    .filter(isRunHistoryId)
     .map(runId => readRecord(scope, runId))
     .flatMap(lookup => (lookup.ok && lookup.run ? [lookup.run] : []))
     .sort((a, b) => b.record.startedAt.localeCompare(a.record.startedAt));
@@ -162,6 +171,8 @@ export interface RunSearchResult {
   /** Coverage and omission statements for every searched run. */
   readonly coverage: readonly string[];
   readonly errors: readonly string[];
+  /** True when the scan stopped at its byte budget before covering every run. */
+  readonly scanLimited: boolean;
 }
 
 export interface RunSearchQuery {
@@ -170,6 +181,8 @@ export interface RunSearchQuery {
   readonly runId?: string;
   readonly stream?: RunStreamName;
   readonly maxHits?: number;
+  /** Stored bytes the scan may read; newest runs are scanned first. */
+  readonly maxScanBytes?: number;
 }
 
 function matcher(query: RunSearchQuery): RegExp {
@@ -195,10 +208,18 @@ export function searchRuns(scope: RunHistoryScope, query: RunSearchQuery): RunSe
   }
   const hits: RunSearchHit[] = [];
   let totalHits = 0;
+  let budget = Math.max(0, query.maxScanBytes ?? MAX_RUN_SEARCH_SCAN_BYTES);
+  let scanLimited = false;
+  const searched: RunSummary[] = [];
   for (const run of runs) {
+    if (scanLimited) { break; }
+    searched.push(run);
     for (const stream of query.stream ? [query.stream] : (['stdout', 'stderr'] as const)) {
+      if (scanLimited) { break; }
       for (const segment of segments(scope, run.record.runId, stream)) {
         const size = scope.fs.size(segment.path) ?? 0;
+        if (size > budget) { scanLimited = true; break; }
+        budget -= size;
         const bytes = scope.fs.readBytes(segment.path, 0, size);
         if (!bytes) { errors.push(`access-denied: cannot read ${run.record.runId} ${stream} segment at ${segment.start}`); continue; }
         const { text, map } = searchable(latin1(bytes));
@@ -220,9 +241,13 @@ export function searchRuns(scope: RunHistoryScope, query: RunSearchQuery): RunSe
   return {
     hits,
     totalHits,
-    searchedRuns: runs.map(run => run.record.runId),
-    coverage: runs.flatMap(run => run.coverage.map(line => `${run.record.runId}: ${line}`)),
+    searchedRuns: searched.map(run => run.record.runId),
+    coverage: [
+      ...searched.flatMap(run => run.coverage.map(line => `${run.record.runId}: ${line}`)),
+      ...(scanLimited ? [`search stopped at its scan budget; ${runs.length - searched.length} older run(s) and the rest of ${searched.at(-1)?.record.runId ?? 'the newest run'} were not searched`] : []),
+    ],
     errors,
+    scanLimited,
   };
 }
 
@@ -281,4 +306,115 @@ export function showRun(scope: RunHistoryScope, ref: RunHistoryRef, context = 0)
     clamped: to < requestedEnd,
     coverage: run.coverage,
   };
+}
+
+/** A bounded, line-aligned page of one stream; see `MissionHistoryPage`. */
+export interface RunPage {
+  readonly from: number;
+  readonly to: number;
+  readonly bytes: Uint8Array;
+  readonly hasEarlier: boolean;
+  readonly atEnd: boolean;
+  readonly gaps: ReadonlyArray<{ readonly from: number; readonly to: number }>;
+}
+
+type Range = { from: number; to: number };
+type SizedSegment = { path: string; start: number; end: number };
+
+/** Retained segments with their sizes, and the contiguous ranges they form; holes are dropped bytes. */
+function retainedRanges(scope: RunHistoryScope, runId: string, stream: RunStreamName): { sized: SizedSegment[]; ranges: Range[] } {
+  const sized = segments(scope, runId, stream)
+    .map(segment => ({ ...segment, end: segment.start + (scope.fs.size(segment.path) ?? 0) }))
+    .filter(segment => segment.end > segment.start);
+  const ranges: Range[] = [];
+  for (const segment of sized) {
+    const last = ranges[ranges.length - 1];
+    if (last && last.to === segment.start) { last.to = segment.end; } else { ranges.push({ from: segment.start, to: segment.end }); }
+  }
+  return { sized, ranges };
+}
+
+/** The byte window a page request selects inside one contiguous retained range, or `null` past the data. */
+function pageWindow(ranges: readonly Range[], request: { readonly before?: number; readonly after?: number }, limit: number): Range | null {
+  const end = ranges[ranges.length - 1].to;
+  if (request.after !== undefined) {
+    const start = Math.max(0, request.after);
+    const range = ranges.find(r => start < r.to);
+    if (!range) { return null; }
+    const from = Math.max(start, range.from);
+    return { from, to: Math.min(range.to, from + limit) };
+  }
+  const stop = Math.min(Math.max(0, request.before ?? end), end);
+  const range = [...ranges].reverse().find(r => stop > r.from);
+  if (!range) { return null; }
+  const to = Math.min(stop, range.to);
+  return { from: Math.max(range.from, to - limit), to };
+}
+
+/** Forward pages end on a line break; earlier pages drop a partial first line. */
+function alignPage(bytes: Uint8Array, window: Range, forward: boolean, rangeStart: number): { bytes: Uint8Array; from: number; to: number } {
+  if (forward) {
+    const cut = bytes.lastIndexOf(0x0a);
+    return cut >= 0 && cut < bytes.length - 1 ? { bytes: bytes.subarray(0, cut + 1), from: window.from, to: window.from + cut + 1 } : { bytes, ...window };
+  }
+  const cut = window.from > rangeStart ? bytes.indexOf(0x0a) : -1;
+  return cut >= 0 && cut < bytes.length - 1 ? { bytes: bytes.subarray(cut + 1), from: window.from + cut + 1, to: window.to } : { bytes, ...window };
+}
+
+/**
+ * Read one page of a run stream (TASK-2749). `after` pages forward from an
+ * offset (newer output, ending at a line break when one is present); `before`
+ * pages backward to an offset (earlier history, starting after a line break);
+ * neither returns the tail. Only the segments the page touches are read, and a
+ * dropped range is reported as a gap rather than skipped silently.
+ */
+export function readRunPage(scope: RunHistoryScope, request: { readonly runId: string; readonly stream: RunStreamName; readonly before?: number; readonly after?: number; readonly limit?: number }): { ok: true; run: RunSummary; page: RunPage } | { ok: false; error: RunHistoryErrorKind; detail: string } {
+  const lookup = getRun(scope, request.runId);
+  if (!lookup.ok || !lookup.run) { return { ok: false, error: lookup.error!, detail: lookup.detail! }; }
+  const run = lookup.run;
+  const limit = Math.min(Math.max(Math.trunc(request.limit ?? MAX_RUN_PAGE_BYTES), 1), MAX_RUN_PAGE_BYTES);
+  const { sized, ranges } = retainedRanges(scope, request.runId, request.stream);
+  const gapsNear = gapFinder(run.record.streams[request.stream].omitted, ranges);
+  const first = ranges[0]?.from ?? 0;
+  const end = ranges[ranges.length - 1]?.to ?? 0;
+  const finish = (page: { bytes: Uint8Array; from: number; to: number }): { ok: true; run: RunSummary; page: RunPage } =>
+    ({ ok: true, run, page: { ...page, hasEarlier: ranges.length > 0 && page.from > first, atEnd: page.to >= end, gaps: gapsNear(page.from, page.to) } });
+  const window = ranges.length > 0 ? pageWindow(ranges, request, limit) : null;
+  if (window === null) {
+    const at = request.after !== undefined ? Math.min(Math.max(0, request.after), end) : first;
+    return finish({ bytes: new Uint8Array(0), from: at, to: at });
+  }
+  const bytes = readWindow(scope, sized, window);
+  if (bytes === null) { return { ok: false, error: 'access-denied', detail: `cannot read ${request.runId} ${request.stream} retained segments` }; }
+  const rangeStart = ranges.find(r => window.from >= r.from && window.from < r.to)?.from ?? window.from;
+  return finish(alignPage(bytes, window, request.after !== undefined, rangeStart));
+}
+
+/** Recorded omissions and holes between retained ranges that touch `[from, to]`, each once, in order. */
+function gapFinder(omitted: readonly Range[], ranges: readonly Range[]): (_from: number, _to: number) => Range[] {
+  const holes = ranges.slice(1).map((range, index) => ({ from: ranges[index].to, to: range.from }));
+  return (from, to) => [...omitted, ...holes]
+    .filter((gap, index, all) => gap.from <= to && gap.to >= from && all.findIndex(other => other.from === gap.from && other.to === gap.to) === index)
+    .sort((x, y) => x.from - y.from);
+}
+
+/** Read exactly the window's bytes from the segments it touches; `null` when one cannot be read. */
+function readWindow(scope: RunHistoryScope, sized: readonly SizedSegment[], window: Range): Uint8Array | null {
+  const parts: Uint8Array[] = [];
+  for (const segment of sized) {
+    const segFrom = Math.max(window.from, segment.start);
+    const segTo = Math.min(window.to, segment.end);
+    if (segTo <= segFrom) { continue; }
+    const bytes = scope.fs.readBytes(segment.path, segFrom - segment.start, segTo - segFrom);
+    if (!bytes) { return null; }
+    parts.push(bytes);
+  }
+  return concat(parts);
+}
+
+function concat(parts: readonly Uint8Array[]): Uint8Array {
+  const joined = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let cursor = 0;
+  for (const part of parts) { joined.set(part, cursor); cursor += part.length; }
+  return joined;
 }

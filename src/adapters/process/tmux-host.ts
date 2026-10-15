@@ -4,8 +4,10 @@ import childProcess from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AgentRunIdentity } from '../../domain/agent-run.js';
+import type { NativeTerminalRun, NativeMissionTerminalIdentity } from './mission-terminal-identity.js';
+import { isRunHistoryId } from '../../application/run-history-types.js';
 import { agentRunId } from '../../domain/agent-run.js';
+import { missionTerminalIdentity } from './mission-terminal-identity.js';
 import { ensurePrivateDir, terminalSocketFallbackRoot, terminalStateRoot } from './terminal-state-root.js';
 
 /** Mission-keyed persistent terminals; operation windows retain run attribution. */
@@ -31,19 +33,37 @@ export function probeTmux(spawnSyncFn: SpawnSyncFn = childProcess.spawnSync, pla
   return { available: true, version: String(probe.stdout).trim() || null, reason: null };
 }
 
+/**
+ * The native tmux name of a canonical Mission ID (TASK-2749). tmux rewrites
+ * `.` and `:` in session names, so the adapter encodes `.` as `_` itself.
+ * Canonical Mission IDs never contain `_` or `:`, so the encoding is injective
+ * and equals the token earlier releases used: existing sessions keep resolving.
+ */
+export function tmuxMissionName(missionId: string): string {
+  return missionTerminalIdentity({ repositoryKey: 'x', missionId }).missionId.replace(/\./g, '_');
+}
+
 /** The Mission's tmux socket: one server per repository and Mission. */
-export function missionSocketPath(identity: Pick<AgentRunIdentity, 'repositoryKey' | 'missionId'>, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
+export function missionSocketPath(input: { readonly repositoryKey: string; readonly missionId: string }, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
+  // Native handles are derived only from a validated identity; invalid input throws.
+  const identity = missionTerminalIdentity(input);
   const root = terminalStateRoot(configuration);
-  const socket = path.join(root, identity.repositoryKey, `${identity.missionId}.sock`);
+  const name = tmuxMissionName(identity.missionId);
+  const socket = path.join(root, identity.repositoryKey, `${name}.sock`);
   if (Buffer.byteLength(socket) <= 100) { return socket; }
   // sockaddr_un pathnames have a small portable limit. Include the resolved
   // root in the digest so independent configured state roots cannot collide.
-  const name = createHash('sha256').update(`${root}\0${identity.repositoryKey}\0${identity.missionId}`).digest('hex').slice(0, 32);
-  return path.join(terminalSocketFallbackRoot(configuration), `${name}.sock`);
+  const digest = createHash('sha256').update(`${root}\0${identity.repositoryKey}\0${name}`).digest('hex').slice(0, 32);
+  return path.join(terminalSocketFallbackRoot(configuration), `${digest}.sock`);
 }
 
-/** Durable operator transcript, retained when the live tmux server is closed. */
-export function missionTerminalCapturePath(identity: Pick<AgentRunIdentity, 'repositoryKey' | 'missionId'>, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
+/**
+ * Private, unredacted operation transcript in the owner-only terminal state
+ * root: the source of the console's display-only replay. It is never exposed
+ * through history, attach or the web host; retained, redacted history is the
+ * run-history store (TASK-2749).
+ */
+export function missionTerminalCapturePath(identity: { readonly repositoryKey: string; readonly missionId: string }, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
   return `${missionSocketPath(identity, configuration)}.log`;
 }
 
@@ -52,8 +72,7 @@ export function shellQuote(value: string): string {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
-export interface TmuxLaunchInput {
-  readonly identity: AgentRunIdentity;
+export type TmuxLaunchInput = {
   /** Distinguishes a second spawn inside one launch (for example a stale-resume retry). */
   readonly spawnIndex: number;
   /** Whole CLI command, or an already-confined agent command from its launch seam. */
@@ -68,7 +87,8 @@ export interface TmuxLaunchInput {
    * the rendered view while the supervisor still receives the raw bytes.
    */
   readonly presenter?: { readonly command: string; readonly args: readonly string[] };
-}
+} & ({ readonly identity: NativeMissionTerminalIdentity; readonly runId: string }
+  | { readonly identity: NativeTerminalRun; readonly runId?: undefined });
 
 export interface TmuxLaunch {
   readonly command: string;
@@ -82,12 +102,12 @@ export interface TmuxLaunch {
 }
 
 /** Session identity follows the mission, not an agent or attempt. */
-export function tmuxSessionName(identity: AgentRunIdentity, _spawnIndex: number): string {
-  return identity.missionId;
+export function tmuxSessionName(identity: { readonly missionId: string }, _spawnIndex = 0): string {
+  return tmuxMissionName(identity.missionId);
 }
 
-function operationWindowName(identity: AgentRunIdentity, spawnIndex: number): string {
-  return `${agentRunId(identity)}-s${spawnIndex}-${randomUUID().slice(0, 8)}`;
+function operationWindowName(runId: string, spawnIndex: number): string {
+  return `${runId}-s${spawnIndex}-${randomUUID().slice(0, 8)}`;
 }
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -145,7 +165,7 @@ function consolePxScript(command: string | undefined): string {
     `PARALLIX_CONSOLE_PX=1 exec /bin/bash -ic 'unset PARALLIX_CONSOLE_PX; exec "$@"' bash ${quoted} "$@"`, ''].join('\n');
 }
 
-function hostScript(socketPath: string, sessionName: string, windowName: string, scratch: string, cwd: string, supervisorPid: number, consoleBin: string, capturePath: string, terminalStateDir: string, configuration: ParallixConfiguration, presented: boolean): string {
+function hostScript(socketPath: string, sessionName: string, windowName: string, scratch: string, cwd: string, supervisorPid: number, consoleBin: string, capturePath: string, terminalStateDir: string, configuration: ParallixConfiguration, presented: boolean, runId: string): string {
   // The tmux server, and every window it later launches, must not inherit operation credentials.
   // The retained console is the operator's own interactive shell and reads their rc files like any terminal.
   const cleanEnv = Object.entries(configuration.terminal.hostEnvironment).filter(([, value]) => value !== undefined && value !== '')
@@ -187,8 +207,11 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
     // -A would attach when the session exists and require a caller TTY.
     // Concurrent creators may lose new-session; recheck the exact session.
     `${t} has-session -t ${shellQuote(`=${sessionName}`)} 2>/dev/null || ${t} -f /dev/null new-session -d -s ${name} -n console -x 200 -y 50 -c ${shellQuote(cwd)} ${shellQuote(`PARALLIX_TERMINAL_STATE_DIR=${shellQuote(terminalStateDir)} PATH=${consoleBin}:$PATH exec "\${SHELL:-/bin/sh}" -i`)} 2>/dev/null || ${t} has-session -t ${shellQuote(`=${sessionName}`)} || exit 70`,
+    // The private transcript keeps the operator console too (TASK-2670); it is
+    // never history: retained, redacted history is the run-history store.
     `${t} pipe-pane -t ${consoleTarget} -o ${shellQuote(`cat >> ${capture}`)} || exit 70`,
     `${t} new-window -d -t ${name} -n ${shellQuote(windowName)} -c ${shellQuote(cwd)} ${shellQuote(`sh ${shellQuote(path.join(scratch, 'pane.sh'))}`)} || exit 70`,
+    `${t} set-option -w -t ${target} @px_run_id ${shellQuote(runId)} >/dev/null`,
     `${t} set-option -w -t ${target} @px_host_pid "$$" >/dev/null`,
     `${t} set-option -w -t ${target} @px_supervisor_pid ${supervisorPid} >/dev/null`,
     `${t} pipe-pane -t ${target} -o ${shellQuote(`cat > ${fifo}`)} || { cleanup; exit 70; }`,
@@ -206,8 +229,8 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
     `  result=$(cat ${status})`,
     `  printf '\n[mission terminal command exit code: %s]\n' "$result" >> ${capture}`,
     // Show the completed command in the surviving operator shell before the
-    // operation window disappears. Console commands (including integration)
-    // also stream into the durable transcript.
+    // operation window disappears. The replay reaches only the console and its
+    // private transcript; retained history never receives it (TASK-2749).
     `  ${t} send-keys -t ${consoleTarget} -l ${shellQuote(`tail -n 50 ${capture}`)}`,
     `  ${t} send-keys -t ${consoleTarget} Enter`,
     `  ${t} select-window -t ${consoleTarget}`,
@@ -236,11 +259,13 @@ export function prepareTmuxLaunch(input: TmuxLaunchInput, options: { configurati
   const configuration = options.configuration ?? DEFAULT_CONFIGURATION;
   const socketPath = missionSocketPath(input.identity, configuration);
   const sessionName = tmuxSessionName(input.identity, input.spawnIndex);
-  const windowName = operationWindowName(input.identity, input.spawnIndex);
-  const scratch = path.join(path.dirname(socketPath), input.identity.missionId, windowName);
+  const runId = input.runId ?? ('family' in input.identity ? agentRunId(input.identity) : null);
+  if (!runId || !isRunHistoryId(runId)) { throw new Error('A terminal launch needs a valid retained capture id'); }
+  const windowName = operationWindowName(runId, input.spawnIndex);
+  const scratch = path.join(path.dirname(socketPath), sessionName, windowName);
   ensurePrivateDir(path.dirname(socketPath));
   ensurePrivateDir(scratch);
-  const consoleBin = path.join(path.dirname(socketPath), input.identity.missionId, 'console-bin');
+  const consoleBin = path.join(path.dirname(socketPath), sessionName, 'console-bin');
   ensurePrivateDir(consoleBin);
   const commandPath = configuration.agents.searchPath.split(path.delimiter).map(dir => path.join(dir, 'px')).find(candidate => {
     try { return fs.statSync(candidate).isFile(); } catch { return false; }
@@ -249,7 +274,7 @@ export function prepareTmuxLaunch(input: TmuxLaunchInput, options: { configurati
   writeEnvFile(path.join(scratch, 'pane.env'), { ...input.env, PWD: input.cwd, PARALLIX_MISSION_TERMINAL: input.identity.missionId, PARALLIX_MISSION_SOCKET: socketPath });
   fs.writeFileSync(path.join(scratch, 'command.sh'), commandScript(socketPath, scratch, input.command, input.args), { mode: 0o700 });
   fs.writeFileSync(path.join(scratch, 'pane.sh'), paneScript(socketPath, windowName, scratch, input.presenter), { mode: 0o700 });
-  fs.writeFileSync(path.join(scratch, 'host.sh'), hostScript(socketPath, sessionName, windowName, scratch, input.cwd, input.supervisorPid ?? process.pid, consoleBin, missionTerminalCapturePath(input.identity, configuration), terminalStateRoot(configuration), configuration, Boolean(input.presenter)), { mode: 0o700 });
+  fs.writeFileSync(path.join(scratch, 'host.sh'), hostScript(socketPath, sessionName, windowName, scratch, input.cwd, input.supervisorPid ?? process.pid, consoleBin, missionTerminalCapturePath(input.identity, configuration), terminalStateRoot(configuration), configuration, Boolean(input.presenter), runId), { mode: 0o700 });
   const spawnSyncFn = options.spawnSyncFn ?? childProcess.spawnSync;
   let started = false;
   return {
@@ -312,14 +337,15 @@ function isReconciledOperationWindow(name: string, host: string | undefined, sup
 
 /** Stop unsupervised operation windows; idle shells and other roles survive. */
 export function reconcileOrphanSessions(
-  identity: Pick<AgentRunIdentity, 'repositoryKey' | 'missionId' | 'role'>,
+  identity: { readonly repositoryKey: string; readonly missionId: string; readonly role: string },
   options: { configuration?: ParallixConfiguration; spawnSyncFn?: SpawnSyncFn; isAlive?: (_pid: number) => boolean; allRoles?: boolean } = {},
 ): string[] {
   const socketPath = missionSocketPath(identity, options.configuration ?? DEFAULT_CONFIGURATION);
+  const session = tmuxSessionName(identity);
   const spawnSyncFn = options.spawnSyncFn ?? childProcess.spawnSync;
   const isAlive = options.isAlive ?? pidAlive;
   if (!fs.existsSync(socketPath)) { return []; }
-  const listed = spawnSyncFn('tmux', ['-S', socketPath, 'list-windows', '-t', `=${identity.missionId}`, '-F', '#{window_name}\t#{@px_host_pid}\t#{@px_supervisor_pid}\t#{@px_command_pid}'], { encoding: 'utf8', timeout: 5000 });
+  const listed = spawnSyncFn('tmux', ['-S', socketPath, 'list-windows', '-t', `=${session}`, '-F', '#{window_name}\t#{@px_host_pid}\t#{@px_supervisor_pid}\t#{@px_command_pid}'], { encoding: 'utf8', timeout: 5000 });
   if (listed.status !== 0) { return []; }
   const killed: string[] = [];
   for (const line of String(listed.stdout).split('\n').filter(Boolean)) {
@@ -330,9 +356,9 @@ export function reconcileOrphanSessions(
     if (hostPid !== null && isAlive(hostPid) && supervisorPid !== null && isAlive(supervisorPid)) { continue; }
     const commandPid = positivePid(command);
     if (commandPid !== null) {
-      spawnSyncFn('tmux', ['-S', socketPath, 'run-shell', '-t', `=${identity.missionId}:${name}`, `kill -s TERM ${commandPid} 2>/dev/null; sleep 0.25`], { stdio: 'ignore', timeout: 5000 });
+      spawnSyncFn('tmux', ['-S', socketPath, 'run-shell', '-t', `=${session}:${name}`, `kill -s TERM ${commandPid} 2>/dev/null; sleep 0.25`], { stdio: 'ignore', timeout: 5000 });
     }
-    spawnSyncFn('tmux', ['-S', socketPath, 'kill-window', '-t', `=${identity.missionId}:${name}`], { stdio: 'ignore', timeout: 5000 });
+    spawnSyncFn('tmux', ['-S', socketPath, 'kill-window', '-t', `=${session}:${name}`], { stdio: 'ignore', timeout: 5000 });
     killed.push(name);
   }
   return killed;
@@ -343,8 +369,12 @@ export function tmuxAttachArgs(socketPath: string, sessionName: string, readOnly
   return ['-S', socketPath, 'attach-session', ...(readOnly ? ['-r'] : []), '-t', `=${sessionName}`];
 }
 
-/** Supervise a whole CLI command without applying agent confinement to the CLI. */
-export function superviseTmuxLaunch(launch: TmuxLaunch): Promise<number> {
+/**
+ * Supervise a whole CLI command without applying agent confinement to the CLI.
+ * `onOutput` receives every byte the operation pane relays (stderr merged by
+ * the terminal), whether or not an operator is attached (TASK-2749).
+ */
+export function superviseTmuxLaunch(launch: TmuxLaunch, options: { onOutput?: (_stream: 'stdout' | 'stderr', _chunk: Buffer) => void } = {}): Promise<number> {
   return new Promise((resolve, reject) => {
     const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
     const child = childProcess.spawn(launch.command, launch.args, { stdio: ['inherit', 'pipe', 'pipe'], detached: true });
@@ -355,7 +385,8 @@ export function superviseTmuxLaunch(launch: TmuxLaunch): Promise<number> {
     let attachedOnce = false;
     let attaching: ReturnType<typeof setTimeout> | null = null;
     let readiness: childProcess.ChildProcess | null = null;
-    child.stdout?.on('data', chunk => { if (!client) { process.stdout.write(chunk); } });
+    child.stdout?.on('data', chunk => { options.onOutput?.('stdout', chunk); if (!client) { process.stdout.write(chunk); } });
+    if (options.onOutput) { child.stderr?.on('data', chunk => options.onOutput!('stderr', chunk)); }
     child.stderr?.pipe(process.stderr, { end: false });
     const scheduleAttach = () => {
       if (!finished && !commandClosed && !client && !attaching) { attaching = setTimeout(attach, 50); }

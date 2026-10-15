@@ -7,8 +7,8 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp } from '../../../helpers/temp-dir.js';
-import { agentRunIdentity } from '../../../../src/domain/agent-run.js';
+import { mkdtemp, mkdtempAt } from '../../../helpers/temp-dir.js';
+import { agentRunIdentity as logicalRunIdentity } from '../../../../src/domain/agent-run.js';
 import {
   missionSocketPath,
   closeMissionTerminal,
@@ -18,8 +18,11 @@ import {
   shellQuote,
   superviseTmuxLaunch,
   tmuxAttachArgs,
+  tmuxMissionName,
 } from '../../../../src/adapters/process/tmux-host.js';
 import { ensurePrivateDir, terminalStateRoot } from '../../../../src/adapters/process/terminal-state-root.js';
+import { createTmuxMissionTerminalHost } from '../../../../src/adapters/process/tmux-mission-terminal.js';
+import { missionTerminalIdentity } from '../../../../src/adapters/process/mission-terminal-identity.js';
 
 // Doubles only: real tmux runs in test/integration/process/tmux-terminal-host.test.ts.
 
@@ -277,37 +280,62 @@ test('mission restart sweeps dead operations across roles and preserves live wor
   assert.equal(calls.some(call => call.includes('=task-1:review-codex-a1-live')), false);
 });
 
-test('read-only terminal capture selects command panes and fails closed (TASK-2661)', async () => {
-  const { createTmuxTerminalReader } = await import('../../../../src/adapters/process/tmux-terminal-reader.js');
+test('the mission host port reads owned sessions, encodes dotted ids and types every probe failure (TASK-2661, TASK-2749)', t => {
+  // Covered runs lengthen TMPDIR; this case owns the short-path legacy contract.
+  // The overlong-root case above owns compact socket fallback behavior.
+  const root = mkdtempAt('/tmp', 'px-tmux-port-');
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(root, 'state') };
+  const configuration = resolveConfiguration(env);
+  const dotted = { ...identity('task-2622.18'), ...missionTerminalIdentity({ repositoryKey: 'abc123', missionId: 'task-2622.18' }) };
   const calls: string[][] = [];
-  let listing = 'console\t\nexecute\t42\n';
-  let status = 0;
-  let captureStatus = 0;
-  const reader = createTmuxTerminalReader({ configuration: resolveConfiguration({ PARALLIX_TERMINAL_STATE_DIR: '/tmp/px-reader-double' }),
-    resolveMissionWorktree: id => id === 'task-1' ? '/isolated' : null,
-    repositoryKey: () => 'abc123',
-    spawnSyncFn: ((_cmd: string, args: string[]) => {
-      calls.push(args);
-      return args.includes('list-windows') ? { status, stdout: listing } : { status: captureStatus, stdout: 'progress marker\n' };
-    }) as never,
-  });
-  assert.equal(reader.read('absent').kind, 'unavailable');
+  let reply: Record<string, unknown> = {};
+  let windows = 'console\t\t\nexecute-codex-a1-x-s0-1\t11\t42\nreview-claude-a1-y-s0-2\t12\t\nexecute-codex-a1-z-s0-3\t\t\n';
+  const host = createTmuxMissionTerminalHost({ configuration, repositoryKey: 'abc123', spawnSyncFn: ((_command: string, args: string[]) => {
+    calls.push(args);
+    if (Object.keys(reply).length > 0) { return { status: 1, stdout: '', stderr: '', ...reply }; }
+    if (args.includes('list-sessions')) { return { status: 0, stdout: 'task-2622_18\nlegacy-run\n' }; }
+    if (args.includes('list-windows')) { return { status: 0, stdout: windows }; }
+    return { status: 0, stdout: 'pane marker\n' };
+  }) as never });
+  assert.deepEqual(host.sessions(dotted), { ok: true, sessions: null }, 'no socket file: definitively absent, without running tmux');
   assert.equal(calls.length, 0);
-  assert.deepEqual(reader.read('task-1'), { kind: 'live', output: 'progress marker\n' });
-  assert.equal(calls.at(-1)?.at(-1), '=task-1:execute');
-  listing = 'console\t\nreview\t\n';
-  assert.equal(reader.read('task-1').kind, 'live');
-  assert.equal(calls.at(-1)?.at(-1), '=task-1:review');
-  listing = 'console\t\n';
-  assert.equal(reader.read('task-1').kind, 'live');
-  assert.equal(calls.at(-1)?.at(-1), '=task-1:console');
-  listing = '';
-  assert.equal(reader.read('task-1').kind, 'unavailable');
-  listing = 'execute\t42\n'; captureStatus = 1;
-  assert.equal(reader.read('task-1').kind, 'unavailable');
-  status = 1;
-  assert.equal(reader.read('task-1').kind, 'unavailable');
-  assert.ok(calls.every(args => args.includes('list-windows') || args.includes('capture-pane')));
+  const socket = missionSocketPath(dotted, configuration);
+  assert.equal(path.basename(socket), 'task-2622_18.sock', 'dotted ids use the injective native name earlier releases created');
+  fs.mkdirSync(path.dirname(socket), { recursive: true });
+  fs.writeFileSync(socket, '');
+  assert.deepEqual(host.sessions(dotted), { ok: true, sessions: { owned: 'task-2622_18', others: ['legacy-run'], operations: [
+    { name: 'execute-codex-a1-x-s0-1', started: true, runId: null }, { name: 'review-claude-a1-y-s0-2', started: false, runId: null },
+  ] } }, 'finished windows that cleared both PIDs are not operations');
+  assert.deepEqual(calls.at(-1)?.slice(0, 5), ['-S', socket, 'list-windows', '-t', '=task-2622_18']);
+  assert.deepEqual(host.capture(dotted, 'task-2622_18', 'execute-codex-a1-x-s0-1'), { ok: true, output: 'pane marker\n' });
+  assert.equal(calls.at(-1)?.at(-1), '=task-2622_18:execute-codex-a1-x-s0-1');
+  host.capture(dotted, 'task-2622_18', null);
+  assert.equal(calls.at(-1)?.at(-1), '=task-2622_18:console');
+  windows = '';
+  reply = { error: Object.assign(new Error('spawnSync tmux ETIMEDOUT'), { code: 'ETIMEDOUT' }) };
+  assert.deepEqual(host.sessions(dotted), { ok: false, reason: 'timeout', detail: 'tmux did not answer within 1000 ms' });
+  assert.equal(host.capture(dotted, 'task-2622_18', null).ok, false);
+  reply = { error: Object.assign(new Error('spawnSync tmux ENOENT'), { code: 'ENOENT' }), status: null };
+  assert.equal((host.sessions(dotted) as { reason: string }).reason, 'host-missing', 'missing tmux is not reported as absence');
+  reply = { stderr: 'no server running on /tmp/x' };
+  assert.deepEqual(host.sessions(dotted), { ok: true, sessions: null }, 'a stale socket without a server is absence');
+  reply = { stderr: 'unexpected' };
+  assert.equal((host.sessions(dotted) as { reason: string }).reason, 'failed');
+  assert.ok(calls.every(args => ['list-sessions', 'list-windows', 'capture-pane'].includes(args[2])), 'the reader never mutates the server');
+});
+
+test('native mission names are injective, lossless for canonical ids and refuse invalid ids (TASK-2749)', () => {
+  const configuration = resolveConfiguration({ PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-names-'), 'state') });
+  const ids = ['task-1.2', 'task-1-2', 'task-12', 'px-0012', 'adhoc-a.b-c'];
+  assert.equal(new Set(ids.map(id => tmuxMissionName(id))).size, ids.length);
+  assert.equal(new Set(ids.map(id => missionSocketPath({ repositoryKey: 'abc123', missionId: id }, configuration))).size, ids.length);
+  assert.equal(tmuxMissionName('task-2622.18'), 'task-2622_18');
+  for (const invalid of ['TASK-1', 'task-1_2', 'task-1:2', '../task-1', 'task-1.']) {
+    assert.throws(() => missionSocketPath({ repositoryKey: 'abc123', missionId: invalid }, configuration), /Invalid mission slug/);
+  }
+  assert.throws(() => missionSocketPath({ repositoryKey: '../x', missionId: 'task-1' }, configuration), /Invalid repository key/);
+  assert.throws(() => prepareTmuxLaunch({ identity: identity(), runId: '../../foreign', spawnIndex: 0, command: 'sh', args: [], cwd: '/tmp', env: {} }, { configuration }), /valid retained capture id/);
 });
 
 test('a presented launch draws the readable view on the pane and relays raw bytes to the host separately (TASK-2735)', () => {
@@ -327,4 +355,29 @@ test('a presented launch draws the readable view on the pane and relays raw byte
   assert.doesNotMatch(after.host, /tee -a/, 'the transcript receives only the rendered pane');
   plain.cleanup();
   presented.cleanup();
+});
+
+function agentRunIdentity(input: Omit<Parameters<typeof logicalRunIdentity>[0], 'repositoryId'> & { repositoryKey: string }) {
+  return { ...logicalRunIdentity({ ...input, repositoryId: input.repositoryKey }), repositoryKey: input.repositoryKey };
+}
+
+
+test('terminal observation exposes the retained run id and an explicit execution probe (TASK-2749)', () => {
+  const root = mkdtemp('px-native-run-observation-');
+  const configuration = resolveConfiguration({ PARALLIX_TERMINAL_STATE_DIR: root });
+  const owned = identity();
+  const socket = missionSocketPath(owned, configuration);
+  fs.mkdirSync(path.dirname(socket), { recursive: true });
+  fs.writeFileSync(socket, '');
+  let alive: boolean | null = true;
+  const host = createTmuxMissionTerminalHost({ configuration, repositoryKey: 'abc123', executionAlive: () => alive, spawnSyncFn: ((_command: string, args: string[]) => ({ status: 0,
+    stdout: args.includes('list-sessions') ? 'task-1\n' : 'native-window\t11\t12\texecute-claude-a1-abc\n',
+  })) as never });
+  const observation = () => { const result = host.sessions(owned); assert.equal(result.ok, true); return result.ok ? result.sessions!.operations[0] : null; };
+  assert.equal(observation()!.runId, 'execute-claude-a1-abc');
+  assert.equal(observation()!.execution, true);
+  alive = false;
+  assert.equal(observation()!.execution, false);
+  alive = null;
+  assert.equal(observation()!.execution, null, 'unknown liveness remains unknown');
 });

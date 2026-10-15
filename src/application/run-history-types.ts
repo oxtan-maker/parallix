@@ -1,13 +1,15 @@
 /**
  * Agent-run history contract (TASK-2643).
  *
- * One record per agent run: the run's identity, what was captured and from
- * which source, and what is missing. The store reuses the TASK-2642 recovery
+ * One record per agent invocation or coordinator capture: attribution, captured output and
+ * its sources and omissions. The store reuses the TASK-2642 recovery
  * evidence contract instead of opening a second Mission store: the same
- * worktree-local `.workflow/` tree, the same Mission directory naming, the same
+ * repository-scoped `.workflow/` tree, canonical Mission directory naming, the same
  * byte cap, retention window and record budget, the same opt-in credential
  * redaction, and the same honest error kinds.
  */
+import type { AgentFamily } from '../domain/agents.js';
+import { isAgentRunId } from '../domain/agent-run.js';
 import {
   MAX_RECOVERY_EVIDENCE_BYTES,
   MAX_RECOVERY_EVIDENCE_INCIDENTS,
@@ -28,6 +30,10 @@ export const RUN_HISTORY_RETENTION_MS = RECOVERY_EVIDENCE_RETENTION_MS;
 
 /** Largest slice one `show` returns; larger requests are clamped and say so. */
 export const MAX_RUN_SHOW_BYTES = 16 * 1024;
+/** Largest page one history read returns; pages are line-aligned slices (TASK-2749). */
+export const MAX_RUN_PAGE_BYTES = 64 * 1024;
+/** Stored bytes one search may scan before it stops and says so (TASK-2749). */
+export const MAX_RUN_SEARCH_SCAN_BYTES = 32 * 1024 * 1024;
 /** Most hits one `search` returns; more are counted, not returned. */
 export const MAX_RUN_SEARCH_HITS = 20;
 /** Context bytes returned on each side of a search hit. */
@@ -66,10 +72,16 @@ export interface RunRecord {
   readonly version: typeof RUN_HISTORY_VERSION;
   readonly runId: string;
   readonly missionId: string;
-  readonly repositoryKey: string;
+  /** Legacy storage attribution; new records use the domain RepositoryId. */
+  readonly repositoryKey?: string;
+  readonly repositoryId?: string;
+  readonly captureKind?: 'agent' | 'coordinator';
+  /** Existing CurrentWork correlation; never a second activity authority. */
+  readonly operationId?: string | null;
+  readonly execution?: { readonly pid: number; readonly processIdentity: string | null } | null;
   readonly role: string;
-  readonly family: string;
-  readonly attempt: number;
+  readonly family: AgentFamily | null;
+  readonly attempt: number | null;
   readonly terminalHost: RunTerminalHost;
   /** Why a configured tmux launch ran through `pipe`, when it did. */
   readonly hostFallbackReason: string | null;
@@ -135,4 +147,14 @@ export function parseRunHistoryRef(token: string): RunHistoryRef | null {
   const match = /^run:([a-z0-9_-]+):(stdout|stderr)@(\d+)\+(\d+)$/.exec(token.trim());
   if (!match) { return null; }
   return { runId: match[1], stream: match[2] as RunStreamName, offset: Number(match[3]), length: Number(match[4]) };
+}
+
+/** Existing agent-run ids and separately identified coordinator captures. */
+export function isRunHistoryId(value: string): boolean {
+  return isAgentRunId(value) || /^workflow-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
+}
+
+/** Compatibility for coordinator captures written before capture attribution. */
+export function runCaptureKind(record: Pick<RunRecord, 'captureKind' | 'family'>): 'agent' | 'coordinator' {
+  return record.captureKind ?? (record.family === 'parallix' ? 'coordinator' : 'agent');
 }

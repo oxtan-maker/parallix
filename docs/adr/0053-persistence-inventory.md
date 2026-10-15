@@ -110,11 +110,10 @@ The inventory is enforced by architecture tests in `test/unit/persistence-invent
 
 The following files perform durable IO but are excluded from the concept inventory
 because they are infrastructure, not domain-boundary readers or writers
-(13 files, maintained in the `infrastructureExclusions` set in
+(maintained in the `infrastructureExclusions` set in
 `test/unit/persistence-inventory-guardrail.test.ts`):
 
 - `src/adapters/storage/storage.ts` — defines the persistence API itself
-- `src/adapters/architecture/boundary-guards.ts` — internal guard helper
 - `src/adapters/filesystem/package-root.ts` — reads `package.json` for name resolution
 - `src/adapters/sqlite/database-adapter.ts` — SQLite infrastructure
 - `src/adapters/agents/codex.ts`, `vibe.ts` — write agent runtime config

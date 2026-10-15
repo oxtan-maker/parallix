@@ -5,12 +5,8 @@ import { resolveConfiguration, resolveProcessConfiguration } from './config.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 
 import fs from 'node:fs';
-import { hostMissionCommand } from './mission-terminal.js';
-import { createTmuxTerminalReader } from '../adapters/process/tmux-terminal-reader.js';
-import { readRetainedMissionOutput } from '../adapters/filesystem/retained-mission-output.js';
-import { createRecordedOutputRenderer } from '../adapters/agents/recorded-output-renderer.js';
-import { resolveWorktree as resolveMissionWorktree } from '../adapters/filesystem/mission-utils.js';
-import { missionRepositoryKey } from '../adapters/filesystem/mission-repository-key.js';
+import { captureMissionCommand, hostMissionCommand } from './mission-terminal.js';
+import { createMissionTerminalCapability } from './mission-terminal-capability.js';
 import { cliInvocation, type CliInvocation } from '../adapters/process/cli-invocation.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -500,8 +496,7 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
           await services.operatorState.close();
           throw new Error('board projection is unavailable for px web');
         }
-        const terminalReader = createTmuxTerminalReader({ resolveMissionWorktree, repositoryKey: missionRepositoryKey, configuration });
-        const recordedOutputRenderer = createRecordedOutputRenderer();
+        const missionTerminal = createMissionTerminalCapability(rootDir, configuration);
         return {
           buildProjection: () => builder.build(),
           // The same guarded BoardCommandController instance the TUI dispatches
@@ -510,12 +505,7 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
           // endpoint adds a route, never a second dispatch path; the controller's
           // progress sink is this host's SSE sink.
           commandDispatcher: capabilities.commandController,
-          terminalReader: { read: (missionId: string) => {
-            const terminal = terminalReader.read(missionId);
-            if (terminal.kind === 'live') { return terminal; }
-            const worktree = resolveMissionWorktree(missionId);
-            return worktree === null ? terminal : readRetainedMissionOutput(worktree, missionId, recordedOutputRenderer) ?? terminal;
-          } },
+          missionTerminal,
           close: () => services.operatorState.close(),
         };
       },
@@ -959,13 +949,15 @@ async function runTargetCommand(parsed: ParsedArgs, configuration: ParallixConfi
       return startupPreflightModule.default([], { command: 'verify-env', returnResult: true, log, error })?.pass ? 0 : 1;
     }
     ensureWorkflowAgentConfig(parsed.command || '', parsed.target, configuration);
-    return await commandInvocation(exitFn => workflow.main([parsed.command, ...parsed.args], {
+    const invoke = () => commandInvocation(exitFn => workflow.main([parsed.command, ...parsed.args], {
       ...createRuntimeOptions(parsed.target, configuration),
       cwdFn: () => parsed.target,
       exitFn,
       logFn: log,
       errorFn: error,
     }));
+    // A mission operation run in this process is retained as mission history too.
+    return await (hasGitRepository(parsed.target) ? captureMissionCommand(parsed.command || '', parsed.args, parsed.target, configuration, invoke) : invoke());
   } catch (err) {
     error(fmt.status('FAIL', (err as Error).message));
     return 1;

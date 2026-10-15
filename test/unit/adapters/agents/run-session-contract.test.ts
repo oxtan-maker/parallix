@@ -42,6 +42,9 @@ test('the pipe host captures durably and reports what is not covered (TASK-2643)
   const session = openRunSession(input, deps)!;
   assert.equal(session.teeOptions.terminalHost, undefined, 'pipe is the existing headless launch');
   assert.equal(record(worktree, session.runId).state, 'running', 'the record exists before any output');
+  assert.equal(record(worktree, session.runId).execution, null, 'an open capture is not proof of agent execution');
+  session.observeExecution(process.pid);
+  assert.equal(record(worktree, session.runId).execution.pid, process.pid, 'the actual launch callback records execution identity');
   session.teeOptions.capture!.write('stderr', Buffer.from('npm ERR! code E401\n'));
   session.finish({ status: 1, signal: null, sessionId: null });
   const finished = record(worktree, session.runId);
@@ -79,7 +82,9 @@ test('available tmux hosts the launch and records the attach target (TASK-2643)'
   assert.ok(session.teeOptions.terminalHost);
   const hosted = session.teeOptions.terminalHost!.host({ command: 'codex', args: ['exec'] }, { cwd: worktree, env: {} });
   try {
+    session.observeExecution(process.pid);
     const rec = record(worktree, session.runId);
+    assert.equal(rec.execution, null, 'the tmux host wrapper is not the agent command');
     assert.equal(rec.terminalHost, 'tmux');
     assert.equal(rec.tmux.sessions.length, 1);
     assert.equal(rec.tmux.sessions[0], 'task-7');

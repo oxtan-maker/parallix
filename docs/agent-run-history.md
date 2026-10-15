@@ -2,9 +2,11 @@
 
 Interactive mission operations automatically use tmux when it is installed
 and runnable. Headless callers keep pipes, preserving stdin and separate
-stdout/stderr. Each mission has a persistent terminal keyed by its
-`task-XXXX` or `adhoc*` slug. Parallix commands and their agents share that
-terminal across roles, retries and provider changes. No configuration is needed.
+stdout/stderr. Each mission has a persistent terminal keyed by its Mission ID
+(`task-1234`, `task-2622.18`, `px-0042`, …), kept exactly as recorded; an
+uppercase alias such as `TASK-2622.18` is accepted on the command line. Parallix
+commands and their agents share that terminal across roles, retries and
+provider changes. No configuration is needed.
 Interactive active, review, integrate, recover and verify operations enter it
 automatically. Queries and structured writes keep their caller-side output.
 
@@ -27,11 +29,13 @@ run record. Concurrent operations use separate windows in the same mission
 session. Different repositories and missions have separate private sockets.
 Use `px attach <slug> --close` to remove an idle terminal when finished; it
 refuses to close a terminal with an owned operation. Terminal cleanup does not
-remove retained agent history. It also leaves a private command transcript for
-the mission terminal. After landing has retired the live terminal, `px attach
-<slug> --list` reports the transcript location so an operator can recover the
-final integration result, gate diagnostics, and statistics from the surviving
-repository checkout.
+remove retained history. `px attach <slug> --list` reports the terminal state
+and how many operations are retained; after landing has retired the terminal,
+`px history <slug> list` and `search` recover the final integration result,
+gate diagnostics and statistics from the surviving repository checkout.
+Terminals and history recorded by earlier releases resolve without being
+renamed. A record or session that cannot be attributed to exactly this Mission
+and repository is reported and is never attached to, closed or deleted.
 Retirement failures warn without blocking integration closeout. The console
 retains the resolved terminal-state location so commands and attachment from
 inside it reuse the same mission socket. If a configured state path is too long
@@ -42,6 +46,21 @@ Explicit terminal-host overrides and unavailable-tool policy remain available
 through `px config` and the workflow configuration schema. A pipe-hosted mission
 has no attachable terminal; its retained output is still searchable. tmux hosting
 requires Linux or macOS with a working tmux binary.
+
+## Mission history on the board
+
+Selecting a mission card in `px web` opens its retained history, newest
+operation first, with new output appended while an operation runs. Earlier
+history loads page by page; search covers every retained operation (literal
+text); the operation and stream selectors switch between records; copy copies
+what is shown. Scrolling back keeps the selected operation and position when
+new runs arrive; resume following to return to the newest operation. Failed
+initial history reads retry during polling. The live
+pane is an optional extra view and never replaces the history. The view states
+whether an operation is starting, live, ended, ran without a terminal (pipe),
+has no history, or whether the terminal could not be inspected; a failed or
+timed-out inspection keeps the history on screen and is not reported as "no
+terminal".
 
 ## Search retained output
 
@@ -63,6 +82,33 @@ not pasted terminal content.
 
 ## What is retained
 
+Each mission operation (`active`, `review`, `integrate`, `recover`) is retained
+as its own record next to the agent runs it launched, with its exit status, so
+harness messages, preflight, gates, handoff, review and retries are searchable
+too. A terminal-hosted operation records everything its pane drew, with stderr
+merged by the terminal. An operation without a terminal records what Parallix
+printed, keeping stdout and stderr apart; output a child process wrote straight
+to the terminal (for example a gate with inherited stdio) is not captured, and
+the record says so. Commands dispatched from the board's own buttons run inside
+the web host and record only their agent runs.
+
+Coordinator command records are labelled workflow captures, with no agent
+family or attempt. When current work is published, they correlate to its
+existing operation ID; missing publication leaves that correlation unconfirmed. Agent records retain their invocation identity and separate execution
+observation: an open capture alone does not mean the agent is live. A confirmed
+process or matching terminal-run observation can establish execution; missing
+or inconclusive observations remain unconfirmed. This does not change family
+availability or the Mission assignee. Earlier coordinator records remain
+readable with the same history references. Hyphenated agent family names stay
+canonical in invocation and history metadata; old encoded family tokens are
+decoded when read, without renaming retained records or terminal windows.
+
+History lives in the repository checkout (`.workflow/run-history/<mission>/`
+under the main checkout, ignored by Git), not in the Mission worktree, so it
+survives worktree removal and host restart. Worktree-local history from earlier
+releases is read in place and moved there before integration removes the
+worktree.
+
 Terminal history is raw stdout and stderr bytes captured while the launch runs,
 not tmux scrollback or a rendered screen. It therefore survives terminal
 redraws, alternate screens, session exit, and tmux scrollback limits. Each run
@@ -76,10 +122,12 @@ If you set `HOME` for the invocation, retention looks in that home's Claude
 project directory.
 
 Output is bounded by the existing recovery-evidence retention and redaction
-contract. Under pressure, the store keeps the start and newest segments and
-reports the omitted middle range. A supervisor crash leaves the written bytes
-and is reported as an interrupted run. Retention eventually removes old runs;
-copy stable references into mission evidence before that happens.
+contract: at most 50 records (operations and agent runs together) per mission,
+each kept up to 30 days, and per stream the first and newest bytes up to 5 MiB
+with the omitted middle reported as a gap. Credential redaction runs only when
+`PARALLIX_CREDENTIAL_REDACTOR` is set. A supervisor crash leaves the written
+bytes and is reported as an interrupted run. Retention eventually removes old
+runs; copy stable references into mission evidence before that happens.
 
 ## Boundaries and cleanup
 
@@ -103,10 +151,10 @@ This is best effort when the recorded process identity is stale or a child
 has escaped its supervisor: removing a tmux window alone does not prove that
 all detached descendants have exited.
 
-The terminal-command transcript is separate from agent-run history: it records
-the operator-visible command output and its exit code, including integration
-gate and closeout messages. It is retained for terminal recovery; an absent
-live terminal or unavailable observation is reported as such rather than being
+The private terminal transcript (unredacted, in the owner-only terminal state
+directory) only feeds the console's display of a finished command; it is never
+offered through `px history`, `px attach` or the web host. An absent live
+terminal or unavailable observation is reported as such rather than being
 inferred from scrollback.
 
 Terminal separation is not a security sandbox. On Linux, the existing

@@ -20,7 +20,7 @@
     "unit/adapters/agents/opencode-telemetry.test.ts",
     "unit/adapters/agents/qwen-telemetry.test.ts",
     "unit/adapters/agents/running-sessions.test.ts",
-    "unit/adapters/architecture/dependency-graph.test.ts",
+    "unit/scripts/architecture/dependency-graph.test.ts",
     "unit/adapters/backlog/backlog-catalog-round-trip.test.ts",
     "unit/adapters/backlog/backlog-completed-task-consistency.test.ts",
     "unit/adapters/backlog/concrete-adapters-cp2.test.ts",

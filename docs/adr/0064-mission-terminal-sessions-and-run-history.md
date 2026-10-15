@@ -9,9 +9,9 @@
 ## Context
 
 The operator requires tmux to behave like running Parallix in a terminal:
-everything belonging to a mission shares its terminal, keyed by `task-XXXX`
-or `adhoc*`. This also provides the terminal a future web card can display,
-including when the mission is stopped.
+everything belonging to a mission shares its terminal, keyed by its Mission
+ID. The board's mission view shows that mission's workflow history, including
+when the mission is stopped and its worktree is gone.
 
 A terminal limited to individual agent attempts omits Parallix command output
 and verification work. The mission command needs a shared terminal while run
@@ -28,10 +28,33 @@ need unchanged stdin, stdout, stderr and exit-status contracts.
 
 ## Decision
 
-Use one persistent tmux session per repository and mission. Its session key is
-the existing mission slug (`task-XXXX` or `adhoc*`), independent of role,
-provider, attempt and lifecycle lane. Retain repository-scoped private socket
-isolation so identical mission slugs in different repositories cannot collide.
+Use one persistent tmux session per repository and mission. Its logical
+identity uses the existing RepositoryId and canonical MissionId, kept
+losslessly by the domain (dots and hyphens included), independent of role,
+provider, attempt and lifecycle lane. Native socket keys are adapter encodings,
+not another domain repository or terminal entity. Uppercase CLI aliases are normalized at input boundaries
+only. Retain repository-scoped private socket isolation so identical Mission IDs
+in different repositories cannot collide.
+
+Family availability remains governed by agent availability and block policy;
+assignment remains the Mission assignee. CurrentWork and MissionActivity own
+workflow activity and distinguish published work from coordinator-process
+evidence. Coordinator transcripts correlate with the existing CurrentWork
+operation ID, carry no agent family or attempt, and reuse the segmented history
+store. Individual invocations retain AgentRunIdentity and RunRecord. An open
+capture or live coordinator does not prove an agent is executing: execution
+observations correlate to a specific run and preserve unknown results.
+
+An application-owned mission terminal capability resolves a Mission ID to the
+resources it owns: its live terminal and its retained history. Launch, attach,
+capture, history, retirement, cleanup, the web host and board actions use it;
+only the tmux adapter derives native handles. Session and socket names encode
+`.` as `_`, which is injective because canonical Mission IDs never contain `_`,
+and equals the token earlier releases used, so existing sessions keep resolving
+without being renamed. One bounded compatibility resolver attributes history
+recorded under that earlier token by the record's own Mission and repository;
+anything it cannot attribute, and any session on the Mission's socket that does
+not carry its name, is reported and never attached to, closed, moved or deleted.
 
 Run the mission's Parallix command inside that terminal, as an operator would
 run it from a shell. Interactive CLI callers attach automatically so their
@@ -63,8 +86,11 @@ Attach resolves the mission terminal directly, including while idle. Run selecto
 run record is not a prerequisite for attaching to a stopped mission.
 The console must retain the operator-state locations needed to resolve the same
 mission socket on re-entry while excluding operation credentials.
-Future web terminal access uses this same mission identity and terminal.
-Web terminal rendering is outside this decision's implementation scope.
+The web mission view reads retained history through the capability, appends
+current output incrementally and reports typed states (starting, live, ended,
+capture-only, missing, probe failed or timed out, ambiguous). A failed probe is
+reported beside retained history, never as absence. A live pane is an optional
+view that never replaces history.
 
 Detect tmux automatically: use it when installed and runnable, otherwise use
 the pipe path without requiring configuration or reporting an ordinary missing
@@ -81,9 +107,14 @@ agents must not gain access to its private control socket. Hosting the outer
 command must not bypass supervision or turn tmux into a lifecycle authority.
 
 Retain per-run durable capture and bounded retrieval under the existing
-evidence ownership, access, retention and redaction contract. A mission console
-includes operator and harness output; it is not a replacement for attributable
-agent history. Scrollback and rendered screens are not durable evidence.
+evidence ownership, access, retention and redaction contract. Each mission
+operation (the whole hosted or in-process command) is its own attributed record
+beside the agent runs it launched. History is stored per repository and Mission
+under the canonical repository root, not in the Mission worktree, so worktree
+removal and host restart keep it; worktree-local history from earlier releases
+moves to the repository store before the worktree is removed. The private
+terminal transcript serves the console's display-only replay and is never
+exposed as history. Scrollback and rendered screens are not durable evidence.
 
 ## Relationship to existing decisions
 
@@ -108,8 +139,8 @@ composition. Terminal hosting does not depend on the child-command wrapper or
 mission-hosting path.
 
 The terminal follows the mission across agents, roles, retries and stopped
-work. Future web console access can use the mission key without reconstructing
-an attempt-specific terminal.
+work. Web and board consumers pass the Mission ID and never reconstruct a
+socket, session or attempt-specific terminal.
 
 Persistent shells consume resources until explicitly cleaned up. Worktree
 removal must account for the retained terminal. Multiple simultaneous commands

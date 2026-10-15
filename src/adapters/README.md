@@ -3,7 +3,7 @@
 **This directory contains concrete integrations with filesystems, Git, agent processes, review providers, Backlog data, packaged assets, and SQLite.**
 
 Adapters implement application-owned ports or provide concrete mechanisms used
-by composition. The guards in `src/adapters/architecture/boundary-guards.ts`
+by composition. The guards in `scripts/architecture/boundary-guards.ts`
 classify every production module by location and then check five specific
 things, listed in full under "Enforced rules" below: that the module sits in a
 canonical root, that each cross-adapter import matches a named package rule,
@@ -19,7 +19,7 @@ covers and what it deliberately leaves alone.
 ## The layer DAG
 
 Six responsibilities own the production tree, one canonical root each. The
-layer table `layerRoots` in `src/adapters/architecture/boundary-guards.ts` is the
+layer table `layerRoots` in `scripts/architecture/boundary-guards.ts` is the
 single classification source — responsibility and layer are the same concept, and
 there is no second table:
 
@@ -33,7 +33,7 @@ there is no second table:
 | `entry` | `src/entry` | Process entry points |
 
 Permitted edges (`allowedDependencyGraph` in
-`src/adapters/architecture/boundary-guards.ts`) form a DAG:
+`scripts/architecture/boundary-guards.ts`) form a DAG:
 
 ```
 entry        → composition, interfaces
@@ -74,7 +74,6 @@ ownership; see "Workflow ownership" below.
 | Directory | Responsibility |
 |---|---|
 | `agents/` | Agent configuration, launchers, telemetry, and availability |
-| `architecture/` | The executable responsibility-ownership guards themselves |
 | `assets/` | Packaged runtime assets |
 | `backlog/` | Backlog task and board readers |
 | `cli/` | Concrete command mechanisms bound by CLI composition |
@@ -89,7 +88,7 @@ ownership; see "Workflow ownership" below.
 ## Enforced rules and the fixtures that prove they bite
 
 Each rule below is exercised by a hermetic fixture in
-`test/unit/adapters/architecture/dependency-graph.test.ts` that builds a temporary tree with
+`test/unit/scripts/architecture/dependency-graph.test.ts` that builds a temporary tree with
 `fs.mkdtempSync`. Every fixture has been mutation-checked: disabling the rule
 turns that fixture red.
 
@@ -113,7 +112,7 @@ src/application/ports/; expected owner: application, actual owner: adapters
 
 The guards run under the static-analysis workflow and use only `node:fs` and
 `node:path`. They reach no network service, Forgejo instance, agent, or CLI
-process; run them with `npm test -- test/unit/adapters/architecture/dependency-graph.test.ts`.
+process; run them with `npm test -- test/unit/scripts/architecture/dependency-graph.test.ts`.
 
 ## Workflow ownership
 

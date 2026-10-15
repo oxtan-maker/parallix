@@ -1,8 +1,8 @@
 ---
 id: TASK-2749
 title: 'One mission identity and one retained history across CLI, tmux and web'
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-14 18:17'
 labels: []
 dependencies: []
@@ -41,10 +41,33 @@ Implement the shared contract and all consumers together. Record before/after re
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
-- [ ] #2 Lint and static analysis report clean on every changed file
-- [ ] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
-- [ ] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
-- [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
-- [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
+- [x] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
+- [x] #2 Lint and static analysis report clean on every changed file
+- [x] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
+- [x] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
+- [x] #5 Docs updated to reflect any workflow or user-facing behavior change
+- [x] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+
+
+## Delivery evidence
+
+The reconciliation reuses RepositoryId, MissionId and AgentFamily in the
+existing AgentRunIdentity. Coordinator captures correlate with CurrentWork
+without inventing an agent family or attempt. Invocation observations identify
+the exact run, and inconclusive observations remain unknown. Native terminal
+addressing stays in adapters; existing socket names, run IDs and retained
+references remain stable. Old encoded family names are decoded on read without
+rewriting stored evidence.
+
+The final Goal Check rows are recorded in CP-9; inspect them with
+`px checkpoint read --slug task-2749 --name CP-9`. Final focused checks passed
+343 tests with unit headroom, and the declared tmux/presentation integration
+pair passed 30 tests. Static analysis, test hygiene, file-size guards and docs
+verification passed. Manual isolated process and Chromium checks confirmed
+canonical hyphenated family attribution, execution observation, history-read
+recovery and paused scrollback while output changes.
+
+DoD #6 is not applicable: this Mission has no bug label. No new review approval
+or complete pre-integration gate result is claimed. Review remains stopped;
+the operator decides when to restart review and integration.

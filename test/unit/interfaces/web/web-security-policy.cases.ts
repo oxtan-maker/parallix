@@ -180,20 +180,23 @@ test('web security: asset path resolution rejects traversal and non-allowlisted 
   assert.equal(resolveAssetPath('assets/app.js', MANIFEST).result, 'reject');
 });
 
-test('terminal route fails closed when projection or reader is unavailable (TASK-2661)', async () => {
-  const { registerTerminalRoute } = await import('../../../../src/interfaces/web/terminal-route.js');
+test('mission history routes fail closed when projection or capability is unavailable (TASK-2661, TASK-2749)', async () => {
+  const { registerTerminalRoute, WEB_TERMINAL_PATH } = await import('../../../../src/interfaces/web/terminal-route.js');
   async function invoke(options: Parameters<typeof registerTerminalRoute>[1], params = { missionId: 'task-1' }) {
-    let handler: any;
-    registerTerminalRoute({ get: (_path: string, fn: any) => { handler = fn; } } as never, options);
+    const handlers = new Map<string, any>();
+    registerTerminalRoute({ get: (path: string, fn: any) => { handlers.set(path, fn); } } as never, options);
     let status = 0;
     let body: any;
     const reply = { code: (value: number) => { status = value; return reply; }, type: () => reply, send: (value: any) => { body = value; return reply; } };
-    await handler({ params }, reply);
+    await handlers.get(WEB_TERMINAL_PATH)({ params, query: {} }, reply);
     return { status, body };
   }
+  const terminal = { overview: () => ({ state: 'missing' }) } as never;
   assert.equal((await invoke({})).status, 503);
-  assert.equal((await invoke({ buildProjection: async () => { throw new Error('offline'); } })).status, 503);
+  assert.equal((await invoke({ missionTerminal: () => terminal, buildProjection: async () => { throw new Error('offline'); } })).status, 503);
   const buildProjection = async () => ({ stages: [{ cards: [{ id: 'task-1' }] }] }) as never;
-  assert.equal((await invoke({ buildProjection })).status, 404);
-  assert.equal((await invoke({ buildProjection }, {} as never)).status, 503);
+  assert.equal((await invoke({ buildProjection, missionTerminal: () => null })).status, 503, 'an unwired capability is unavailable, not absent');
+  assert.equal((await invoke({ buildProjection, missionTerminal: () => terminal }, { missionId: 'task-2' })).status, 404);
+  assert.deepEqual(await invoke({ buildProjection, missionTerminal: () => terminal }), { status: 200, body: { state: 'missing' } });
+  assert.equal((await invoke({ buildProjection, missionTerminal: () => terminal }, {} as never)).status, 503);
 });

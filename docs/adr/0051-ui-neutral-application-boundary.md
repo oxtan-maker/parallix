@@ -251,8 +251,10 @@ failures; they do not choose lifecycle transitions or authorization policy.
 translation and rendering live under `src/interfaces/`; object wiring lives
 under `src/composition/`; and `src/entry/px.ts` is the minimal process host.
 There is no secondary runtime or platform tree. The `layerRoots` and
-`allowedDependencyGraph` rules in `src/adapters/architecture/boundary-guards.ts`
-enforce the complete layer DAG.
+`allowedDependencyGraph` rules in `scripts/architecture/boundary-guards.ts`
+enforce the complete layer DAG. These source-scanning checks are development
+verification tooling outside the production tree; they are not runtime adapters
+and do not introduce another architectural layer.
 
 **Adapter mechanisms and workflows.** An adapter may use a named concrete host
 mechanism. That permission does not grant ownership of a workflow that

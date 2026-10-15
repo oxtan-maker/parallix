@@ -60,6 +60,8 @@ export interface TerminalConfiguration {
   readonly hostEnvironment: Readonly<Record<string, string | undefined>>;
   readonly missionTerminal: OptionalString;
   readonly missionSocket: OptionalString;
+  /** Set inside a hosted operation whose supervisor already records its output (TASK-2749). */
+  readonly operationCapture: OptionalString;
   readonly tmux: OptionalString;
   readonly stateDir: OptionalString;
   readonly runtimeDir: OptionalString;
@@ -177,6 +179,7 @@ export const DEFAULT_CONFIGURATION: ParallixConfiguration = {
     },
     missionTerminal: undefined,
     missionSocket: undefined,
+    operationCapture: undefined,
     tmux: undefined,
     stateDir: undefined,
     runtimeDir: undefined,

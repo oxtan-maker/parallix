@@ -685,22 +685,23 @@ test('production browser code imports no Node built-in, concrete adapter, or ser
   assert.ok(transportImports.length > 0, 'the client reuses the shared transport contract');
 });
 
-test('production browser code uses no browser persistence; terminal polling is confined to the read-only board', () => {
+test('production browser code uses no browser persistence; history polling is confined to the read-only mission view', () => {
   for (const file of browserSources) {
     for (const forbidden of ['localStorage', 'sessionStorage', 'indexedDB', 'document.cookie', 'caches.']) {
       assert.ok(!file.text.includes(forbidden), `${file.name} must not use ${forbidden}`);
     }
   }
-  assert.match(browserSources.find((file) => file.name === 'board.tsx')?.text ?? '', /setInterval\(refresh, 1000\)/,
-    'only the selected terminal view polls its GET-only read');
+  const pollers = browserSources.filter((file) => /setInterval\(/.test(file.text)).map((file) => file.name);
+  assert.deepEqual(pollers, ['mission-history.tsx'], 'only the selected mission history view polls its GET-only reads (TASK-2749)');
+  assert.match(browserSources.find((file) => file.name === 'mission-history.tsx')?.text ?? '', /const POLL_MS = 1000;/);
 });
 
-test('production browser code reads snapshots and terminals while keeping one guarded mutation route', () => {
-  const fetches = browserSources.flatMap((file) => (file.text.match(/\bfetch\(/g) ?? []).map(() => file.name));
-  assert.deepEqual(fetches, ['board-data.ts', 'board-data.ts', 'board-data.ts'], 'snapshot, terminal, and command requests stay in the typed client');
+test('production browser code reads snapshots and mission history while keeping one guarded mutation route', () => {
+  const fetches = browserSources.flatMap((file) => (file.text.match(/\bfetch\(/g) ?? []).map(() => file.name)).sort();
+  assert.deepEqual(fetches, ['board-data.ts', 'board-data.ts', 'mission-history-data.ts'], 'snapshot, command and mission history requests stay in typed clients');
   const data = browserSources.find((file) => file.name === 'board-data.ts')?.text ?? '';
   assert.match(data, /COMMANDS_PATH = '\/api\/commands'/);
-  assert.match(data, /terminalPath/);
+  assert.match(browserSources.find((file) => file.name === 'mission-history-data.ts')?.text ?? '', /`\/api\/terminal\/\$\{encodeURIComponent\(missionId\)\}`/);
   assert.match(data, /method: 'POST'/);
   for (const file of browserSources.filter((file) => file.name !== 'board-data.ts')) {
     for (const verb of ["'POST'", "'PUT'", "'PATCH'", "'DELETE'", 'method:']) {

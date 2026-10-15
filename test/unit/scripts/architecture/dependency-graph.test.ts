@@ -20,7 +20,8 @@ import {
   formatResponsibilityViolation,
   dependencyLayers,
   layerRoots,
-} from '../../../../src/adapters/architecture/boundary-guards.js';
+} from '../../../../scripts/architecture/boundary-guards.js';
+import { findMissionTerminalHandleViolations } from '../../../../scripts/architecture/mission-terminal-handles.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 
 function withTempRoot(run: (_root: string) => void): void {
@@ -537,6 +538,27 @@ test('application ports import no adapter and no storage runtime', () => {
 
 
 /* ------------------------------------------------------------------ *
+ * TASK-2749 — mission terminals resolve through the application capability
+ * ------------------------------------------------------------------ */
+
+test('production tree derives native mission-terminal handles only in the tmux adapter and launch seams (TASK-2749)', () => {
+  assert.deepEqual(findMissionTerminalHandleViolations(), []);
+});
+
+test('mission-terminal handle guard rejects web, interface and stray tmux handle derivation (TASK-2749)', () => {
+  withTempRoot(root => {
+    writeModule(root, 'src/adapters/process/tmux-host.ts', "export function missionSocketPath() { return spawnSync('tmux', []); }\n");
+    writeModule(root, 'src/composition/mission-terminal.ts', "import { missionSocketPath } from '../adapters/process/tmux-host.js';\nmissionSocketPath();\n");
+    writeModule(root, 'src/interfaces/web/terminal-route.ts', "import { missionSocketPath } from '../../adapters/process/tmux-host.js';\n");
+    writeModule(root, 'src/adapters/cli/commands/attach.ts', "const session = tmuxSessionName({ missionId: 'task-1' });\n");
+    writeModule(root, 'web/src/view.tsx', "spawnSync('tmux', ['capture-pane']);\n");
+    assert.deepEqual(findMissionTerminalHandleViolations(root).map(line => line.split(':')[0]).sort(), [
+      'src/adapters/cli/commands/attach.ts', 'src/interfaces/web/terminal-route.ts', 'web/src/view.tsx',
+    ]);
+  });
+});
+
+/* ------------------------------------------------------------------ *
  * TASK-2332.06 — the architecture documentation and the graph agree
  * ------------------------------------------------------------------ */
 
@@ -592,3 +614,14 @@ function walkProduction(dir: string): string[] {
     return entry.isFile() && /\.(?:ts|tsx)$/.test(entry.name) ? [file] : [];
   });
 }
+
+
+test('mission terminal guard rejects a second native repository identity in the domain (TASK-2749)', () => {
+  const root = registeredMkdtemp('px-domain-native-key-');
+  try {
+    writeModule(root, 'src/domain/agent-run.ts', 'export interface AgentRunIdentity { readonly repositoryKey: string; }');
+    assert.match(findMissionTerminalHandleViolations(root).join('\n'), /declares a native repository storage key/);
+    writeModule(root, 'src/domain/agent-run.ts', 'export interface AgentRunIdentity { readonly repositoryId: RepositoryId; }');
+    assert.deepEqual(findMissionTerminalHandleViolations(root), []);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

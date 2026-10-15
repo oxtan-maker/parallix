@@ -195,9 +195,10 @@ display. `PARALLIX_CLAUDE_RAW_STREAM=0` and leaving it unset both mean
 "render".
 
 The same default applies in the hosted tmux mission terminal: the operation
-pane that `px attach`, the web terminal and the retained console transcript
-show carries the rendered view, while Parallix still receives the unmodified
-JSONL for telemetry, session ids and the retained run record. With the raw
+pane that `px attach`, the web mission view's optional live pane and the
+console replay show carries the rendered view, while Parallix still receives the
+unmodified JSONL for telemetry, session ids and the retained run record; the
+web mission history renders that record with the same renderer. With the raw
 opt-in, the hosted pane shows the verbatim events too. The rationale, and the library alternatives that were rejected, are
 recorded in [ADR 0056](adr/0056-claude-stream-json-output-rendering.md).
 

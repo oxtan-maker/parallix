@@ -751,6 +751,7 @@ async function launchPrepared(prepared: PreparedLaunch, deps: StartAgentLoopDeps
           // lifecycle persistence deadline starts here (not pre-spawn).
           startedAtMs = monotonicNowMs();
           launchedChild = child;
+          if (child.pid) { runSession?.observeExecution(child.pid); }
           customReservation?.bindChild(child.pid);
         },
         ...(unrefChild ? { unrefChild: true } : {}),

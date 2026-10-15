@@ -365,6 +365,8 @@ export interface CurrentWorkRecorderOptions {
   /** This process's start identity, supplied by composition alongside the pid. */
   readonly processIdentity?: string | null;
   readonly now?: () => Date;
+  /** Best-effort capture correlation supplied by composition, never another activity store. */
+  readonly onPublication?: (_publication: CurrentWorkPublication) => void;
 }
 
 /**
@@ -379,6 +381,7 @@ export class CurrentWorkRecorder implements CurrentWorkPort {
   private readonly processId: number | null;
   private readonly processIdentity: string | null;
   private readonly now: () => Date;
+  private readonly onPublication: CurrentWorkRecorderOptions['onPublication'];
 
   constructor(
     private readonly _historyRepo: OperationalHistoryRepository,
@@ -387,6 +390,7 @@ export class CurrentWorkRecorder implements CurrentWorkPort {
     this.processId = options.processId ?? null;
     this.processIdentity = options.processIdentity ?? null;
     this.now = options.now ?? (() => new Date());
+    this.onPublication = options.onPublication;
   }
 
   async running(publication: CurrentWorkPublication): Promise<void> {
@@ -418,6 +422,7 @@ export class CurrentWorkRecorder implements CurrentWorkPort {
       blockedReason,
       occurredAt: this.now().toISOString(),
     }));
+    try { this.onPublication?.(publication); } catch { /* Capture cannot block current-work publication. */ }
   }
 }
 

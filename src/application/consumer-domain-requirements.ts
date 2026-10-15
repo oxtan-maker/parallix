@@ -159,7 +159,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-session-marker-write',
     family: 'launch',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 986,
+    line: 987,
     anchor: 'launchSessionMarkerPort.save({',
     reads: ['SessionMarker'],
     requirement:
@@ -174,7 +174,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-in-process-tried-set',
     family: 'retry',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 1028,
+    line: 1029,
     anchor: 'tried: new Set(excludeIterable),',
     reads: ['AgentBlock'],
     requirement:
@@ -185,7 +185,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-launch-failure-reselect',
     family: 'retry',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 942,
+    line: 943,
     anchor: 'retrying with next eligible agent',
     reads: ['AgentBlock'],
     requirement:
@@ -211,7 +211,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'failover-limit-hit-block',
     family: 'failover',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 882,
+    line: 883,
     anchor: 'deps.updateAgentBlockFn(chosen, limitHit.until',
     reads: ['AgentBlock'],
     requirement:

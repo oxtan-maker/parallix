@@ -20,7 +20,8 @@ import { FlowPanel } from './flow-panel.js';
 import { IntakeColumn } from './intake-column.js';
 import { OperationLog } from './operation-log.js';
 import { TopBar } from './top-bar.js';
-import { loadTerminal, sendCommand, type TerminalState } from './board-data.js';
+import { sendCommand } from './board-data.js';
+import { MissionHistory } from './mission-history.js';
 import { unavailableReason, type PendingCommands } from './pending-command.js';
 
 // Presentation-only grouping: which reference region a received stage sits in.
@@ -293,47 +294,9 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
           }}
         />
       )}
-      {terminalMission !== null && <TerminalProgress missionId={terminalMission} onClose={closeTerminal} />}
+      {terminalMission !== null && <MissionHistory missionId={terminalMission} onClose={closeTerminal} />}
       {[...outcomes.entries()].map(([missionId, outcome]) => <p key={missionId} role="status" aria-live="polite" style={{ margin: '0 14px 10px', color: '#aab4bf' }}>{outcome}</p>)}
       <OperationLog snapshot={snapshot} />
-    </div>
-  );
-}
-
-function TerminalProgress({ missionId, onClose }: { missionId: string; onClose: () => void }) {
-  const [terminal, setTerminal] = useState<TerminalState>({ kind: 'unavailable', message: 'Loading terminal output…' });
-  const [readError, setReadError] = useState(false);
-  useEffect(() => {
-    let live = true;
-    let pending = false;
-    const controller = new AbortController();
-    const refresh = () => {
-      if (pending) { return; }
-      pending = true;
-      void loadTerminal(missionId, controller.signal).then(result => {
-        if (live) {
-          const interrupted = result.kind === 'unavailable' && result.message === 'Mission terminal is unavailable.';
-          setReadError(interrupted);
-          setTerminal(previous => interrupted && previous.kind !== 'unavailable' ? previous : result);
-        }
-      }).finally(() => { pending = false; });
-    };
-    refresh();
-    const interval = window.setInterval(refresh, 1000);
-    const escape = (event: globalThis.KeyboardEvent) => { if (event.key === 'Escape') { onClose(); } };
-    window.addEventListener('keydown', escape);
-    return () => { live = false; controller.abort(); window.clearInterval(interval); window.removeEventListener('keydown', escape); };
-  }, [missionId, onClose]);
-  return (
-    <div role="presentation" onClick={event => { if (event.target === event.currentTarget) { onClose(); } }} style={{ position: 'fixed', inset: 0, zIndex: 70, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.55)' }}>
-      <section role="dialog" aria-modal="true" aria-label={`Mission progress for ${missionId}`} style={{ width: 720, maxWidth: '92vw', maxHeight: '80vh', overflow: 'auto', padding: 16, background: '#101c16', border: '1px solid #2f5a3f', borderRadius: 6, color: '#cbd9cf', fontFamily: 'inherit' }}>
-        <header style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><h2 style={{ margin: 0, fontSize: 14 }}>{missionId} — {terminal.kind === 'captured' ? 'recorded output' : 'live terminal'}</h2><button type="button" onClick={onClose}>close</button></header>
-        {terminal.kind === 'captured' && <p role="status">{terminal.message}</p>}
-        {readError && terminal.kind !== 'unavailable' && <p role="status">Terminal refresh interrupted; showing last captured output. Retrying…</p>}
-        {terminal.kind !== 'unavailable'
-          ? <pre aria-live="polite" style={{ margin: '12px 0 0', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{terminal.output}</pre>
-          : <p role="status">{terminal.message}</p>}
-      </section>
     </div>
   );
 }

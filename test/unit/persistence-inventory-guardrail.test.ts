@@ -17,7 +17,7 @@ const INTERFACES_DIR = path.join(ROOT, 'src', 'interfaces');
 const ADAPTERS_SQLITE_DIR = path.join(ROOT, 'src', 'adapters', 'sqlite');
 
 // ---------------------------------------------------------------------------
-// Helpers (reuses patterns from src/adapters/architecture/boundary-guards.ts)
+// Helpers (reuses patterns from scripts/architecture/boundary-guards.ts)
 // ---------------------------------------------------------------------------
 
 function tsFiles(dir: string): string[] {
@@ -515,12 +515,6 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
 
   // Files that do durable IO but are infrastructure (not concept entries)
   const infrastructureExclusions = new Set([
-    // Adapter-layer boundary guard scans source files to enforce dependency rules,
-    // rather than reading or writing an ADR 0053 durable-state concept.
-    'src/adapters/architecture/boundary-guards.ts',
-    // Adapter-layer workflow-control guard scans source files to enforce
-    // ownership rules, rather than reading or writing an ADR 0053 durable concept.
-    'src/adapters/architecture/workflow-ownership.ts',
     // The inventory file itself
     'test/fixtures/durable-state-inventory.ts',
     // Core storage abstraction (defines the API, not a concept reader/writer)

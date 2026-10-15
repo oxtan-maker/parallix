@@ -1,3 +1,4 @@
+import { correlateMissionCapture } from './mission-terminal.js';
 import { configureRepairCheckpoints } from '../application/ports/repair-checkpoint.js';
 import { RepairCheckpointService } from '../application/repair-checkpoint-service.js';
 import { resolveProcessConfiguration } from './config.js';
@@ -279,6 +280,7 @@ export async function createProductionApplicationServices(
   const currentWork: CurrentWorkPort = operatorState.repositories
     ? new CurrentWorkRecorder(operatorState.repositories.operationalHistory, {
       processId: process.pid,
+      onPublication: work => correlateMissionCapture(rootDir, options.configuration, work),
       // Pid plus start identity: a recycled pid must not keep a dead run's
       // work displayed as live (TASK-2373 SC13).
       processIdentity: processStartIdentity(process.pid),

@@ -16,7 +16,7 @@ import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { loadWebAssets } from '../../../src/adapters/web/asset-store.js';
-import { createWebHost, PROTECTION_HEADERS, WEB_COMMANDS_PATH, WEB_EVENTS_PATH, WEB_SNAPSHOT_PATH, WEB_TERMINAL_PATH, type WebAssets, type WebHostInfo, type WebHostOptions } from '../../../src/interfaces/web/host.js';
+import { createWebHost, PROTECTION_HEADERS, WEB_COMMANDS_PATH, WEB_EVENTS_PATH, WEB_SNAPSHOT_PATH, WEB_TERMINAL_PATH, type WebAssets, type WebMissionTerminal, type WebHostInfo, type WebHostOptions } from '../../../src/interfaces/web/host.js';
 import { validateWebBoardSnapshot, validateWebProgressEvent, WEB_TRANSPORT_VERSION } from '../../../src/interfaces/web/transport.js';
 import { WEB_EVENT_BUFFER_LIMIT } from '../../../src/interfaces/web/stream.js';
 import { sessionCookieName } from '../../../src/interfaces/web/security.js';
@@ -641,33 +641,53 @@ test('web host: overlapping snapshot reads share builds and never take a build t
   });
 });
 
-test('web host: terminal route is GET-only, captures only a projected mission, and reports absence', async () => {
+test('web host: mission history routes are GET-only, typed, bounded to projected missions and reject handle input (TASK-2661, TASK-2749)', async () => {
   const projection = makeProjection({ active: makeCards(1, 'active') });
   const missionId = projection.stages.find(stage => stage.lane === 'active')!.cards[0]!.id;
   const reads: string[] = [];
   let builds = 0;
-  let captured = false;
-  await withHost({ buildProjection: async () => { builds++; return projection; }, terminalReader: { read: id => {
-    reads.push(id);
-    if (captured) { return { kind: 'captured', output: 'retained review output', message: 'No live tmux session. Recorded output.' }; }
-    return id === missionId ? { kind: 'live', output: 'agent output\\n' } : { kind: 'unavailable', message: 'missing' };
-  } } }, async info => {
+  let failing = false;
+  const overview = { missionId, state: 'ended', probe: { kind: 'absent' }, operations: [], unattributed: [], notices: [] };
+  const terminal: WebMissionTerminal = {
+    overview: id => { reads.push(`overview ${id}`); if (failing) { throw new Error('tmux exploded'); } return overview as never; },
+    page: (id, request) => { reads.push(`page ${id} ${JSON.stringify(request)}`); return request.runId === 'execute-codex-a1-gone' ? { ok: false, error: 'missing', detail: 'no retained operation' } : { ok: true, runId: request.runId, stream: request.stream, from: 0, to: 5, text: '<b>x\n', hasEarlier: false, atEnd: true, running: false, gaps: [] }; },
+    search: (id, query) => { reads.push(`search ${id} ${JSON.stringify(query)}`); return { ok: true, hits: [], totalHits: 0, searchedRuns: [], scanLimited: false, coverage: [], errors: [] }; },
+    live: id => { reads.push(`live ${id}`); return { kind: 'live', operation: null, output: 'agent output\n' }; },
+  };
+  await withHost({ buildProjection: async () => { builds++; return projection; }, missionTerminal: () => terminal }, async info => {
     const board = await fetch(`${info.origin}/api/board`);
     assert.equal(board.status, 200);
     await board.json();
     const buildsBeforeTerminal = builds;
-    const live = await fetch(`${info.origin}/api/terminal/${missionId}`);
-    assert.equal(live.status, 200);
-    assert.deepEqual(await live.json(), { kind: 'live', output: 'agent output\\n' });
-    assert.deepEqual(reads, [missionId]);
-    assert.equal(builds, buildsBeforeTerminal, 'terminal polling uses the displayed board without another expensive rebuild (TASK-2661)');
+    const read = await fetch(`${info.origin}/api/terminal/${missionId}`);
+    assert.equal(read.status, 200);
+    assert.deepEqual(await read.json(), overview);
+    assert.equal(builds, buildsBeforeTerminal, 'history polling uses the displayed board without another expensive rebuild (TASK-2661)');
+    const page = await fetch(`${info.origin}/api/terminal/${missionId}/history?run=execute-codex-a1-x&stream=stderr&after=12`);
+    assert.equal(page.status, 200);
+    assert.equal((await page.json()).text, '<b>x\n', 'text is data; the browser renders it as text');
+    assert.equal((await fetch(`${info.origin}/api/terminal/${missionId}/history?run=execute-codex-a1-gone`)).status, 404);
+    assert.equal((await fetch(`${info.origin}/api/terminal/${missionId}/search?q=E401`)).status, 200);
+    assert.deepEqual(await (await fetch(`${info.origin}/api/terminal/${missionId}/live`)).json(), { kind: 'live', operation: null, output: 'agent output\n' });
+    for (const bad of [
+      'history?run=../../etc/passwd', 'history?run=execute-codex-a1-x&stream=tty', 'history?run=execute-codex-a1-x&before=-1',
+      'history?run=execute-codex-a1-x&before=1&after=2', 'history', 'search?q=', `search?q=${'x'.repeat(201)}`, 'search?q=a&run=%2Ftmp%2Fx.sock',
+    ]) {
+      assert.equal((await fetch(`${info.origin}/api/terminal/${missionId}/${bad}`)).status, 400, bad);
+    }
     const absent = await fetch(`${info.origin}/api/terminal/not-on-board`);
     assert.equal(absent.status, 404);
-    assert.deepEqual(reads, [missionId], 'unknown cards never reach the terminal port');
-    captured = true;
-    const recorded = await fetch(`${info.origin}/api/terminal/${missionId}`);
-    assert.equal(recorded.status, 200, 'recorded output remains readable for pipe-hosted missions (TASK-2661)');
-    assert.deepEqual(await recorded.json(), { kind: 'captured', output: 'retained review output', message: 'No live tmux session. Recorded output.' });
+    assert.equal((await fetch(`${info.origin}/api/terminal/not-on-board/history?run=execute-codex-a1-x`)).status, 404);
+    assert.deepEqual(reads, [
+      `overview ${missionId}`,
+      `page ${missionId} {"runId":"execute-codex-a1-x","stream":"stderr","after":12}`,
+      `page ${missionId} {"runId":"execute-codex-a1-gone","stream":"stdout"}`,
+      `search ${missionId} {"pattern":"E401"}`,
+      `live ${missionId}`,
+    ], 'invalid input and unknown cards never reach the capability; search is literal');
+    failing = true;
+    const failed = await fetch(`${info.origin}/api/terminal/${missionId}`);
+    assert.equal(failed.status, 503, 'a failing read is reported as unavailable, never as absence');
     const mutation = await fetch(`${info.origin}/api/terminal/${missionId}`, { method: 'POST' });
     assert.equal(mutation.status, 403, 'the existing mutation guard runs before the catch-all 405');
   });

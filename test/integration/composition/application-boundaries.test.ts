@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { findForbiddenApplicationDependencies, findCompositionViolations, findWorkflowOwnershipViolations } from '../../../src/adapters/architecture/boundary-guards.js';
+import { findForbiddenApplicationDependencies, findCompositionViolations, findWorkflowOwnershipViolations } from '../../../scripts/architecture/boundary-guards.js';
 import { createProductionApplicationServices } from '../../../src/composition/application-services.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 const root = process.cwd();

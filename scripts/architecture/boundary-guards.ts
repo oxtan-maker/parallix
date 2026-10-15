@@ -49,8 +49,6 @@ export const allowedDependencyGraph: Readonly<Record<DependencyLayer, readonly D
 export const adapterPackageDependencies: Readonly<Record<string, readonly string[]>> = {
   // mechanism: packaged assets, configuration, filesystem, Git, processes, SQLite, and durable storage.
   agents: ['assets', 'config', 'filesystem', 'git', 'process', 'sqlite', 'storage'],
-  // mechanism: boundary guard has no sibling mechanism dependency.
-  architecture: [],
   // mechanism: packaged-asset discovery reads the host filesystem.
   assets: ['filesystem'],
   // mechanism: configuration, filesystem, Git, and SQLite task storage.

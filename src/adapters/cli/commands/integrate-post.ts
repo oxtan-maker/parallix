@@ -1,4 +1,5 @@
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
+import { DEFAULT_CONFIGURATION } from '../../../application/ports/configuration.js';
 import fs from 'node:fs';
 import { git } from '../../git/git.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
@@ -21,8 +22,9 @@ import { missionId } from '../../../domain/mission.js';
 import { toCanonicalUtcInstant } from '../../../domain/instant.js';
 import { classifyHookFailure } from '../../../application/hook-failure-workflow.js';
 import { bookkeepingCommitMessage } from '../../../domain/approval-coverage.js';
+import { historyRepositoryRoot, preserveWorktreeRunHistory } from '../../filesystem/run-history-store.js';
 import { missionRepositoryKey } from '../../filesystem/mission-repository-key.js';
-import { missionSocketPath, retireMissionTerminal } from '../../process/tmux-host.js';
+import { createMissionTerminalResources } from './mission-terminal-resources.js';
 
 export { classifyHookFailure };
 
@@ -396,12 +398,19 @@ export function cleanupMissionWorktree(
       return fs.rmSync(target, { recursive: true, force: true });
     },
     existsSync = fs.existsSync,
-    retireTerminal = (mission: string, root: string) => retireMissionTerminal(missionSocketPath({ repositoryKey: missionRepositoryKey(root), missionId: mission }, configuration), mission),
-  }: {configuration?: ParallixConfiguration, rootDir?: string, gitRunner?: Function, removeDir?: Function, existsSync?: Function, retireTerminal?: (_slug: string, _root: string) => void} = {}
+    retireTerminal = (mission: string, root: string) => createMissionTerminalResources(root, { configuration: configuration ?? DEFAULT_CONFIGURATION }).retire(mission),
+    preserveHistory = (mission: string, worktree: string, root: string) => preserveWorktreeRunHistory(worktree, historyRepositoryRoot(root), { repositoryKey: missionRepositoryKey(historyRepositoryRoot(root)), missionId: mission }),
+  }: {configuration?: ParallixConfiguration, rootDir?: string, gitRunner?: Function, removeDir?: Function, existsSync?: Function, retireTerminal?: (_slug: string, _root: string) => void, preserveHistory?: (_slug: string, _worktree: string, _root: string) => unknown} = {}
 ) {
   const retire = () => {
     try { retireTerminal(slug, rootDir); }
     catch (error) { fmt.log.warn(`Mission terminal cleanup warning: ${(error as Error).message}`); }
+  };
+  // Worktree-local history from earlier releases moves to the repository store
+  // first, so removing the worktree never deletes the only transcript.
+  const preserve = () => {
+    try { preserveHistory(slug, worktreePath, rootDir); }
+    catch (error) { fmt.log.warn(`Mission history preservation warning: ${(error as Error).message}`); }
   };
   const branch = missionBranchName(slug, rootDir);
   const worktreePath = `${conventionalWorktreePath(slug, rootDir)}`;
@@ -422,6 +431,7 @@ export function cleanupMissionWorktree(
   const worktreeList = gitRunner(['-C', rootDir, 'worktree', 'list', '--porcelain']).stdout;
   const isRegistered = worktreeList.split('\n').some((line: string) => line.trim() === `worktree ${worktreePath}`);
 
+  if (existsSync(worktreePath)) { preserve(); }
   if (existsSync(worktreePath) && isRegistered) {
     let removeResult = gitRunner(['-C', rootDir, 'worktree', 'remove', worktreePath]);
     if (removeResult.status !== 0) {

@@ -8,6 +8,7 @@ import './web-board-render.cases.js';
 import './web-client-snapshot.cases.js';
 import './web-command-request.cases.js';
 import './web-mission-card-render.cases.js';
+import './web-mission-history.cases.js';
 import './web-security-policy.cases.js';
 import './web-stream.cases.js';
 import './web-transport.cases.js';

@@ -218,7 +218,10 @@ test('checkpoint indicators stay below terminal and edit dialogs with usable evi
     });
     await fixture.render(toWebBoardSnapshot(makeProjection({ active: [card] })), sse);
   };
-  await page.route('**/api/terminal/**', route => route.fulfill({ json: { kind: 'live', output: 'Checkpoint terminal output' } }));
+  const operation = { runId: 'execute-codex-a1-x', role: 'execute', family: 'codex', attempt: 1, state: 'exited', terminalHost: 'tmux', startedAt: '2026-10-14T00:00:00.000Z', endedAt: null, exitCode: 0, signal: null, streams: { stdout: 27, stderr: 0 }, coverage: [] };
+  await page.route('**/api/terminal/**', route => route.fulfill({ json: new URL(route.request().url()).pathname.endsWith('/history')
+    ? { ok: true, runId: operation.runId, stream: 'stdout', from: 0, to: 27, text: 'Checkpoint terminal output\n', hasEarlier: false, atEnd: true, running: false, gaps: [] }
+    : { missionId: mission.id, state: 'ended', probe: { kind: 'absent' }, operations: [operation], unattributed: [], notices: [] } }));
   await page.route('**/api/commands', route => route.fulfill({ json: {
     kind: 'command-result', transportVersion: 2, status: 'completed', error: null, durableEvidence: [],
     value: { missionId: mission.id, version: 1, title: mission.title, description: '', context: '', labels: [], successCriteria: ['visible'], successCriterionIds: ['sc-1'], dependencies: [] },
@@ -249,6 +252,7 @@ test('checkpoint indicators stay below terminal and edit dialogs with usable evi
     const terminal = page.getByRole('dialog', { name: /Mission progress/ });
     await terminal.waitFor();
     await assertCovered();
+    await terminal.getByText('Checkpoint terminal output').waitFor();
     assert.match(await terminal.textContent() ?? '', /Checkpoint terminal output/);
     await page.mouse.click(point.x, point.y);
     assert.equal(await page.getByRole('dialog', { name: /Checkpoint evidence/ }).count(), 0);
