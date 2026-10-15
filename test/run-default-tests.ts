@@ -173,8 +173,9 @@ const child = spawn(launch.command, launch.args, {
     ...(childCpuModule ? { PARALLIX_CHILD_CPU_USAGE_MODULE: childCpuModule } : {}),
     PARALLIX_EXECUTION_ROOT: executionRoot,
     PARALLIX_TEST_MANIFEST_DIR: testManifestDir,
-    // Keeps tsx's transpile cache per checkout; see test/lib/test-tmpdir.ts.
-    TMPDIR: checkoutTestTmpdir(executionRoot, coverageScratchDir ?? undefined),
+    // Coverage scratch already lives below the checkout's temporary root.
+    // Use it directly to keep tsx IPC paths within Unix socket limits.
+    TMPDIR: coverageScratchDir ?? checkoutTestTmpdir(executionRoot),
     ...(fastUnitScratchDir ? { PARALLIX_FAST_UNIT_SCRATCH_DIR: fastUnitScratchDir } : {}),
     // The profile belongs to this invocation only: runners that tests spawn as
     // fixtures keep their unprofiled argv and write no profile of their own.

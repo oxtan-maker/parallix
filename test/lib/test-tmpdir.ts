@@ -17,7 +17,16 @@ import path from 'node:path';
 
 export function checkoutTestTmpdir(executionRoot: string, base: string = os.tmpdir()): string {
   const id = crypto.createHash('sha256').update(path.resolve(executionRoot)).digest('hex').slice(0, 12);
-  const dir = path.join(base, `parallix-test-tmp-${id}`);
+  // A child runner inherits either this checkout root or an owned coverage
+  // scratch below it. Start at the original base rather than nesting again.
+  const resolvedBase = path.resolve(base);
+  const parts = resolvedBase.split(path.sep);
+  const managed = /^parallix-test-tmp-[a-f0-9]{12}$/;
+  const managedRoot = parts.findIndex((part, index) => managed.test(part)
+    && parts.slice(index + 1).every(child => managed.test(child) || /^coverage-scratch-[a-zA-Z0-9]+$/.test(child)));
+  const root = managedRoot < 0 ? resolvedBase
+    : parts.slice(0, managedRoot).join(path.sep) || path.parse(resolvedBase).root;
+  const dir = path.join(root, `parallix-test-tmp-${id}`);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
 }

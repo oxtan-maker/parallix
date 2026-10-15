@@ -18,3 +18,20 @@ test('each checkout gets one stable private temporary directory outside the repo
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+test('nested coverage roots reuse the checkout directory without repeating path segments (px-0011)', () => {
+  const base = mkdtemp('test-tmpdir-');
+  try {
+    const first = checkoutTestTmpdir('/work/repo-a', base);
+    let inherited = first;
+    for (let depth = 0; depth < 4; depth++) {
+      inherited = path.join(inherited, 'coverage-scratch-TYSVml');
+      assert.equal(checkoutTestTmpdir('/work/repo-a', inherited), first);
+      const other = checkoutTestTmpdir('/work/repo-b', inherited);
+      assert.equal(path.dirname(other), base);
+      assert.notEqual(other, first);
+    }
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});

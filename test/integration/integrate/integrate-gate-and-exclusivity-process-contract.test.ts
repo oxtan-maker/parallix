@@ -2,6 +2,8 @@ import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflo
 // Behavior-owned suite (TASK-2622.09, integration-ci): integration-time gate scripting and cross-process
 // exclusivity — verify-local integrate, workflow gate recursion, and the exclusive Mission claim across
 // two processes. Legacy case names unchanged.
+import { checkoutTestTmpdir } from '../../lib/test-tmpdir.js';
+import { mkdtemp, mkdtempAt } from '../../helpers/temp-dir.js';
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -18,7 +20,7 @@ describe("verify-local integrate gate", () => {
   const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..');
   const scriptPath = path.join(repoRoot, 'scripts', 'verify-local.sh');
 
-  function runScript(args: readonly string[], env = {}) {
+  function runScript(args: readonly string[], env = {}, timeout = 30_000) {
     // These dry-run and stubbed-gate contracts keep output small. Capture it
     // directly instead of writing, reopening, reading, and deleting two files
     // for every invoked gate plan.
@@ -26,7 +28,7 @@ describe("verify-local integrate gate", () => {
       cwd: repoRoot,
       env: { ...process.env, ...env },
       encoding: 'utf8',
-      timeout: 30_000,
+      timeout,
     });
     if (result.error && result.status === null) {
       throw result.error;
@@ -51,6 +53,10 @@ describe("verify-local integrate gate", () => {
   // ESLint configuration, compiler commands and hygiene scanner without a model,
   // database, network request or change to the operator checkout.
   function analysisProject(root: string) {
+    fs.mkdirSync(path.join(root, 'bin'));
+    // Resolve installed tools directly: npx package discovery is not this
+    // contract and adds avoidable startup/network variability to each case.
+    fs.writeFileSync(path.join(root, 'bin', 'npx'), `#!/bin/sh\n[ "$1" != --yes ] || shift\ntool=$1; shift\nexec '${repoRoot}/node_modules/.bin/'"$tool" "$@"\n`, { mode: 0o755 });
     fs.mkdirSync(path.join(root, 'scripts'));
     fs.mkdirSync(path.join(root, 'src'));
     fs.mkdirSync(path.join(root, 'web'));
@@ -63,7 +69,7 @@ describe("verify-local integrate gate", () => {
       typecheck: 'tsc --noEmit && tsc --noEmit --project tsconfig.scripts.json',
     } }));
     fs.writeFileSync(path.join(root, 'tsconfig.json'), JSON.stringify({ compilerOptions: {
-      strict: true, noEmit: true, skipLibCheck: true, module: 'NodeNext', moduleResolution: 'NodeNext', target: 'ES2024', types: [],
+      strict: true, noEmit: true, skipLibCheck: true, module: 'NodeNext', moduleResolution: 'NodeNext', target: 'ES2024', lib: ['ES2024'], types: [],
     }, include: ['src/**/*.ts', 'web/**/*.ts'] }));
     fs.writeFileSync(path.join(root, 'tsconfig.scripts.json'), JSON.stringify({ extends: './tsconfig.json', include: ['scripts/fixture.ts'] }));
     fs.writeFileSync(path.join(root, 'tsconfig.test.json'), JSON.stringify({ extends: './tsconfig.json', include: ['test/unit/analysis-contract.test.ts'] }));
@@ -87,13 +93,19 @@ describe("verify-local integrate gate", () => {
   ];
 
   for (const scenario of [{ name: 'clean project', file: 'src/fixture.ts', source: 'export const validValue = 1;', diagnostic: null }, ...invalidAnalysis]) {
-    test(`static analysis enforces standard tools: ${scenario.name} (TASK-2746)`, () => {
-      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'standard-analysis-contract-'));
+    test(`static analysis enforces standard tools: ${scenario.name} (TASK-2746)`, { timeout: 3500 }, () => {
+      const root = mkdtemp('standard-analysis-contract-');
+      const coverageScratch = mkdtempAt(checkoutTestTmpdir(repoRoot), 'coverage-scratch-');
       try {
         analysisProject(root);
         fs.writeFileSync(path.join(root, scenario.file), scenario.source + '\n');
-        const result = runScript(['static-analysis'], { PARALLIX_EXECUTION_ROOT: root });
+        const result = runScript(['static-analysis'], {
+          PARALLIX_EXECUTION_ROOT: root,
+          TMPDIR: checkoutTestTmpdir(repoRoot, coverageScratch),
+          PATH: `${path.join(root, 'bin')}:${process.env.PATH}`,
+        }, 3400);
         const output = result.stdout + result.stderr;
+        assert.doesNotMatch(output, /listen EINVAL/);
         if (scenario.diagnostic === null) {
           assert.equal(result.status, 0, output);
           assert.match(output, /ALL STAGES PASSED/);
@@ -102,7 +114,10 @@ describe("verify-local integrate gate", () => {
           assert.match(output, scenario.diagnostic);
           assert.doesNotMatch(output, /ALL STAGES PASSED/);
         }
-      } finally { fs.rmSync(root, { recursive: true, force: true }); }
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+        fs.rmSync(coverageScratch, { recursive: true, force: true });
+      }
     });
   }
 
