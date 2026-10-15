@@ -4,6 +4,7 @@ title: Remove unintended recurring focused review test execution
 status: backlog
 assignee: []
 created_date: '2026-10-15 16:44'
+updated_date: '2026-10-15 16:45'
 labels:
   - bug
 dependencies: []
@@ -23,6 +24,12 @@ Operator reports repeated execution of: npm test -- test/unit/application/review
 - [ ] #2 Remove unintended recurring execution of the focused pair without deleting regression coverage or changing unrelated operator-configured gates.
 - [ ] #3 Prove with a focused reproduction and a safe manual lifecycle check that the affected flow no longer launches the extra command and still honors repository-configured verification.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Source located by read-only SQLite inspection: /home/magnus/.local/state/parallix/parallix.db, table mission_declared_gates. task-2766 (Restore review restart by reverting isolated repair-continuation mistakes; status integration) stores the exact two-suite command. task-2757 (done) stores the single review-gate-repair suite command. These are persisted mission-declared gates, not hardcoded suite names or installed Git hook commands. src/application/handoff-declared-gates.ts:238 forwards recorded gates to executeGateCommands; line 322 executes each using the process port with bash -c. Reassess removal against this mission-specific authority; do not remove generic declared-gate support or regression suites. Earlier task wording treated unintended recurrence as a hypothesis; the remaining question is why this declared gate is being repeated and whether that repetition is unwanted.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
