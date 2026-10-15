@@ -1,3 +1,5 @@
+import { emptyBoardRepositories } from '../../../helpers/empty-board-repositories.js';
+import { missionVersion as fixtureVersion } from '../../../../src/application/domain-ports.js';
 // Historical regression provenance: TASK-2444.
 // Attention queue contract: which missions the board asks a human (or the supervisor) to look at, how
 // they rank, and what source facts back each reason.
@@ -57,33 +59,32 @@ function storeFor(persisted: readonly Mission[]): MissionStore {
     async load(id: MissionId) {
       const found = persisted.find((candidate) => candidate.id === id);
       return found
-        ? { kind: 'found' as const, mission: found, version: 1 as never }
+        ? { kind: 'found' as const, mission: found, version: fixtureVersion(1) }
         : { kind: 'missing' as const };
     },
-    async save() { return 1 as never; },
+    async save() { return fixtureVersion(1); },
     async loadByRepository() { return persisted; },
   };
 }
 
 // Hermetic doubles: no shimmed git CLI, launcher probe, or OS process scan.
-const gitDouble = () => ({ status: 0, stdout: '', stderr: '' });
+const gitDouble: NonNullable<NonNullable<Parameters<typeof composeBoardProjection>[0]>["gitFn"]> = () => ({ status: 0, stdout: '', stderr: '' });
 
 async function board(store: MissionStore, currentWork: readonly CurrentWorkEvent[] = []): Promise<BoardHarness> {
   const root = registeredMkdtemp('orphaned-active-');
+  const repositories = emptyBoardRepositories();
   const historyEvents = currentWork.map((event) => currentWorkEventToEntry(event));
   const projection = await composeBoardProjection({
     rootDir: root,
     missionStore: store,
     repositoryId: repository,
-    blocklistRepo: { async findAll() { return []; } } as never,
+    ...repositories,
     // A non-empty current-work list publishes a standing work fact for the
     // mission, so the board must treat it as worked on (not stranded).
     historyRepo: {
-      async findAll() { return []; },
+      ...repositories.historyRepo,      async findAll() { return []; },
       async findByType(type: string) { return type === CURRENT_WORK_EVENT_TYPE ? historyEvents : []; },
-    } as never,
-    laneEventRepo: { async findAll() { return []; } } as never,
-    usageRepo: { async findAll() { return []; } } as never,
+    },
     knownAgentFamilies: [],
     launcherProbe: () => ({ available: true, detail: null }),
     readAgentConfig: () => null,

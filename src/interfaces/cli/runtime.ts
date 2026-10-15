@@ -63,7 +63,7 @@ export const KNOWN_COMMANDS: string[] = [
 const READ_ONLY_COMMANDS = new Set(['config', 'ui', 'web', 'github-publish-status', 'audit-legacy', 'history', 'attach']);
 export const MISSION_TERMINAL_COMMANDS = new Set(['active', 'review', 'integrate', 'recover', 'verify']);
 
-export type Command = (..._args: any[]) => unknown;
+export type Command = (_args: string[], _options?: Record<string, unknown>) => unknown;
 
 // Derives the command-alias table from state-map.json and fixed parallix invariants.
 // Users only maintain state-map.json; aliases update automatically.
@@ -84,7 +84,7 @@ export function resolveAlias(command: string, aliases: Record<string, string> = 
   return Object.prototype.hasOwnProperty.call(aliases, command) ? aliases[command] : null;
 }
 
-export function printAliases(aliases: Record<string, string>, logFn = fmt.log.plain): void {
+export function printAliases(aliases: Record<string, string>, logFn: (_message: string) => void = fmt.log.plain): void {
   const entries = Object.entries(aliases).sort(([a], [b]) => a.localeCompare(b));
   if (entries.length === 0) {
     logFn('No aliases configured.');
@@ -103,10 +103,10 @@ export interface MainOptions {
   ensureStandaloneGitRepoFn?: (_rootDir: string) => { failed?: boolean; initialized?: boolean; message?: string; branch?: string };
   commandFns?: Partial<Record<string, Command>>;
   printUsageFn?: typeof printUsage;
-  exitFn?: (_code?: number) => never;
-  errorFn?: typeof fmt.log.plainError;
-  logFn?: typeof fmt.log.plain;
-  loadAliasesFn?: typeof deriveAliases;
+  exitFn?: (_code?: number) => void;
+  errorFn?: (_message: string) => void;
+  logFn?: (_message: string) => void;
+  loadAliasesFn?: (_options: { readonly rootDir?: string }) => Record<string, string>;
   isInteractiveTTYFn?: () => boolean;
   runtime: Pick<RuntimeConfiguration, 'ci' | 'noTui'>;
   product?: { name: string; version: string };
@@ -179,7 +179,7 @@ function reportUnknownCommand(command: string, printUsageFn: NonNullable<MainOpt
   exitFn(1);
 }
 
-async function main(args: string[], options: MainOptions) {
+function runtimeDependencies(options: MainOptions) {
   const {
     cwdFn = () => process.cwd(),
     ensureStandaloneGitRepoFn = (): { failed?: boolean; initialized?: boolean; message?: string; branch?: string } => ({}),
@@ -192,6 +192,11 @@ async function main(args: string[], options: MainOptions) {
     runtime,
     product = { name: 'parallix', version: 'development' },
   } = options;
+  return { cwdFn, ensureStandaloneGitRepoFn, printUsageFn, exitFn, errorFn, logFn, loadAliasesFn, isInteractiveTTYFn, runtime, product };
+}
+
+async function main(args: string[], options: MainOptions) {
+  const { cwdFn, ensureStandaloneGitRepoFn, printUsageFn, exitFn, errorFn, logFn, loadAliasesFn, isInteractiveTTYFn, runtime, product } = runtimeDependencies(options);
 
   const command = args[0];
 
@@ -247,13 +252,13 @@ export function buildSuggestionSuffix(command: string): string {
 }
 
 export function suggestCommand(input: string): string | null {
-  if (!input) {return null;}
+  if (!input) { return null; }
   const normalizedInput = input.toLowerCase();
   let best: { candidate: string; distance: number } | null = null;
 
   for (const candidate of KNOWN_COMMANDS) {
     const distance = levenshteinDistance(normalizedInput, candidate);
-    if (distance > 2) {continue;}
+    if (distance > 2) { continue; }
     if (!best || distance < best.distance) {
       best = { candidate, distance };
     }

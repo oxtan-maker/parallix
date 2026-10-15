@@ -1,3 +1,5 @@
+import { TerminalStream } from '../../../helpers/terminal-stream.js';
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
@@ -138,19 +140,11 @@ function waitForFrame(stream: FrameSink, count: number): Promise<void> {
   });
 }
 
-class FrameSink extends EventEmitter {
-  public columns = 200;
-  public rows = 50;
-  public readonly isTTY = true;
-  public readonly frames: string[] = [];
-  write(value: string): boolean { this.frames.push(String(value)); this.emit('write'); return true; }
-  setRawMode(_enabled: boolean): void {}
-  setEncoding(_encoding: string): void {}
-  resume(): void {}
-  ref(): void {}
-  unref(): void {}
-  read(): string | null { return null; }
-  send(_value: string): void {}
+class FrameSink extends TerminalStream {
+  override columns = 200;
+  override rows = 50;
+  readonly frames = this.writes;
+
 }
 
 test('SC1: a same-label blocked countdown emits one notification and no second mounted Ink frame', async () => {
@@ -182,8 +176,8 @@ test('SC1: a same-label blocked countdown emits one notification and no second m
   const instance = render(
     React.createElement(BoardShell, props),
     {
-      stdin: stdin as unknown as NodeJS.ReadStream,
-      stdout: stdout as unknown as NodeJS.WriteStream,
+      stdin: stdin,
+      stdout: stdout,
       patchConsole: false,
       exitOnCtrlC: false,
       // Unthrottled render mode: every render commit writes a frame, so a
@@ -281,8 +275,6 @@ test('SC2: every scheduled tick invokes the projection builder even when the fin
   driver.stop();
 });
 
-
-
 // ---------------------------------------------------------------------------
 // Display-boundary crossings: each visible label change must publish exactly
 // one additional notification on the next scheduled projection.
@@ -326,15 +318,15 @@ test('SC3: a displayed minute-boundary crossing publishes one additional notific
 });
 
 test('SC3: an elapsed block renders the family available on its next scheduled projection', async () => {
-  let notified: BoardProjection | null = null;
+  let notified: { value: BoardProjection | null } = { value: null };
   const observed = await twoTicks(
     withBlockedAgent({}, { blockedForMs: 120_000 }),
     withBlockedAgent({}, { available: true, blockedForMs: 0, reason: null }),
-    (projection) => { notified = projection; },
+    (projection) => { notified.value = projection; },
   );
   assert.equal(observed.builds, 2, 'both ticks rebuild the projection');
   assert.equal(observed.notifications, 2, 'the expiry flipping the family to available must repaint');
-  assert.equal(notified?.metrics.agentAvailability[0].available, true, 'the repainted state must show the family available, not keep claiming a block');
+  assert.equal(notified.value?.metrics.agentAvailability[0].available, true, 'the repainted state must show the family available, not keep claiming a block');
 });
 
 test('SC3: an indefinite block keeps one visible state across polls', async () => {
@@ -384,7 +376,7 @@ test('SC4: an unattributed live-process count change publishes on the next sched
 
 test('SC4: a card state change publishes on the next scheduled projection', async () => {
   const card = (status: 'active' | 'review') => makeCard({
-    id: 'task-2442' as MissionId,
+    id: fixtureMissionId('task-2442') as MissionId,
     lane: 'active',
     status,
     rawStatus: status,
@@ -397,7 +389,7 @@ test('SC4: a card state change publishes on the next scheduled projection', asyn
 });
 
 test('SC4: an attention state change publishes on the next scheduled projection', async () => {
-  const card = makeCard({ id: 'task-2442' as MissionId, lane: 'active', status: 'active', rawStatus: 'active' });
+  const card = makeCard({ id: fixtureMissionId('task-2442') as MissionId, lane: 'active', status: 'active', rawStatus: 'active' });
   const withAttention = makeProjection({ active: [card] });
   const item = makeAttentionItem(card, { kind: 'blocking', detail: 'usage limit' }, 1);
   const observed = await twoTicks(
@@ -424,10 +416,10 @@ test('SC4: a current-work state change publishes on the next scheduled projectio
     agent: agentFamily('custom'),
     updatedAt: '2026-08-30T12:00:00.000Z',
     freshness: 'live' as const,
-  };
+  } satisfies import("../../../../src/application/projections/mission-board.js").LiveMissionWork;
   const observed = await twoTicks(
-    makeProjection({ active: [makeCard({ id: 'task-2442' as MissionId, lane: 'active', currentWork: null })] }),
-    makeProjection({ active: [makeCard({ id: 'task-2442' as MissionId, lane: 'active', currentWork: work })] }),
+    makeProjection({ active: [makeCard({ id: fixtureMissionId('task-2442') as MissionId, lane: 'active', currentWork: null })] }),
+    makeProjection({ active: [makeCard({ id: fixtureMissionId('task-2442') as MissionId, lane: 'active', currentWork: work })] }),
   );
   assert.equal(observed.notifications, 2, 'a current-work change must repaint');
 });

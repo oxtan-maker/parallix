@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
+import type { IncomingMessage } from 'http';
 import { spawnSync } from 'child_process';
 import { getPrimaryWorktree } from '../filesystem/mission-utils.js';
 import { resolveReviewAdapter } from '../config/product-config.js';
@@ -11,14 +12,15 @@ import { resolveReviewAdapter } from '../config/product-config.js';
 const DISPOSITION_PATTERN = /Autonomous review disposition:\s*(CHANGES_MADE|PUSHBACK_ALL|PARKED|BLOCKED)/;
 const DEFAULT_FORGEJO_USER = 'human';
 const HTTP_REQUEST_TIMEOUT = 5000;
-const derivedRepoCache = new Map();
+const derivedRepoCache = new Map<string, string | null>();
 let testForgejoHome: string | undefined;
 
 /** @param {string} rootDir @param {string} remoteName @returns {string} */
 function cacheKey(rootDir: string, remoteName: string): string { return `${rootDir}::${remoteName}`; }
 /** @param {string} rootDir @param {string} remoteName @returns {string|null} */
 function deriveRepoFromGitRemote(rootDir: string, remoteName: string): string | null {
-  if (derivedRepoCache.has(cacheKey(rootDir, remoteName))) { return derivedRepoCache.get(cacheKey(rootDir, remoteName)); }
+  const cached = derivedRepoCache.get(cacheKey(rootDir, remoteName));
+  if (cached !== undefined) { return cached; }
   const remote = remoteName || 'origin';
   try {
     const result = spawnSync('git', ['-C', rootDir, 'remote', 'get-url', remote], { encoding: 'utf8', timeout: 2000 });
@@ -32,14 +34,14 @@ function deriveRepoFromGitRemote(rootDir: string, remoteName: string): string | 
 }
 
 /** @param {string} [explicitUser] @returns {string} */
-function resolveForgejoUser(explicitUser?: string, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string { return explicitUser || configuration.forgejo.user || DEFAULT_FORGEJO_USER; }
+function resolveForgejoUser(explicitUser?: string | null, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string { return explicitUser || configuration.forgejo.user || DEFAULT_FORGEJO_USER; }
 
 /**
  * The provider login authorized to make the human integration decision.
  * Deliberately do not derive this from FORGEJO_USER: that variable selects an
  * API credential, while authority still requires an actual provider APPROVED.
  */
-function resolveAuthorizedApproverUser(explicitUser?: string, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string | undefined {
+function resolveAuthorizedApproverUser(explicitUser?: string | null, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string | undefined {
   return explicitUser || configuration.forgejo.authorizedApprover || undefined;
 }
 
@@ -103,8 +105,15 @@ function normalizePathForComparison(targetPath: string): string | null {
   }
 }
 
+/** Options accepted by the path helpers; `rootDir`/`configuration` select the home. */
+type ForgejoPathOptions = {
+  forgejoHome?: string;
+  rootDir?: string;
+  configuration?: ParallixConfiguration;
+};
+
 /** @param {string} targetPath @param {{forgejoHome?: string}} [options] @returns {boolean} */
-function isForgejoPath(targetPath: string, options: any = {}): boolean {
+function isForgejoPath(targetPath: string, options: ForgejoPathOptions = {}): boolean {
   const forgejoHome = options.forgejoHome || resolveForgejoHome(options.rootDir || process.cwd(), options.configuration);
   const normalizedTarget = normalizePathForComparison(targetPath);
   const normalizedForgejoHome = normalizePathForComparison(forgejoHome);
@@ -119,7 +128,7 @@ function resolveForgejoSettings(rootDir = process.cwd(), configuration: Parallix
 }
 
 /** @param {{forgejoUser?: string, token?: string}} options @returns {{forgejoUser: string, token: string|null}} */
-function resolveForgejoAuth(options: { forgejoUser?: string, token?: string, rootDir?: string; configuration?: ParallixConfiguration } = {} as { forgejoUser?: string, token?: string, rootDir?: string; configuration?: ParallixConfiguration }): { forgejoUser: string, token: string | null } {
+function resolveForgejoAuth(options: { forgejoUser?: string | null, token?: string, rootDir?: string; configuration?: ParallixConfiguration } = {}): { forgejoUser: string, token: string | null } {
   const forgejoUser = resolveForgejoUser(options.forgejoUser, options.configuration);
   const token = options.token || readToken(forgejoUser, options.rootDir, options.configuration);
   return { forgejoUser, token };
@@ -144,13 +153,23 @@ function readToken(user: string, rootDir: string = process.cwd(), configuration:
   return fs.readFileSync(tokenFile, 'utf8').trim();
 }
 
+/** Only the response status and request lifecycle are consumed by the probe. */
+export type AvailabilityResponse = Pick<IncomingMessage, 'statusCode'>;
+export interface AvailabilityRequest {
+  on(_event: 'error' | 'timeout', _listener: () => void): void;
+  end(): void;
+  destroy(): void;
+}
+/** Injectable transport for the availability probe; http.request in production. */
+export type HttpRequestFn = (url: string | URL, options: http.RequestOptions, callback: (res: AvailabilityResponse) => void) => AvailabilityRequest;
+
 /** @param {string} [url='http://localhost:3300'] @param {{request?: Function, timeout?: number}} [options] @returns {Promise<boolean>} */
-function forgejoAvailable(url: string | undefined = undefined, options: { request?: Function; timeout?: number; configuration?: ParallixConfiguration } = {}): Promise<boolean> {
+function forgejoAvailable(url: string | undefined = undefined, options: { request?: HttpRequestFn; timeout?: number; configuration?: ParallixConfiguration } = {}): Promise<boolean> {
   if (options.configuration?.forgejo.unavailableForTests && !options.request) { return Promise.resolve(false); }
   const { request = http.request, timeout = HTTP_REQUEST_TIMEOUT } = options;
   const targetUrl = new URL(url ?? options.configuration?.forgejo.url ?? 'http://localhost:3300');
   return new Promise((resolve) => {
-    const req = request(targetUrl, { method: 'GET', timeout }, (/** @type {import('http').IncomingMessage} */ res: any) => {
+    const req = request(targetUrl, { method: 'GET', timeout }, (res: AvailabilityResponse) => {
       req.destroy();
       resolve(res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 300);
     });

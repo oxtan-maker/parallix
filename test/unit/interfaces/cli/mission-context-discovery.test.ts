@@ -1,3 +1,4 @@
+import { fixtureMission } from '../../../fixtures/mission-builders.js';
 /**
  * TASK-2521.03 — discovery of the Mission read and write surface from `px --help`.
  *
@@ -22,12 +23,12 @@ import {
 function captureUsage(): string {
   const chunks: string[] = [];
   const original = process.stdout.write.bind(process.stdout);
-  (process.stdout as unknown as { write: (_c: string) => boolean }).write = (chunk: string) => {
+  ((process.stdout)).write = (chunk: string) => {
     chunks.push(String(chunk));
     return true;
   };
   try { printUsage(); } finally {
-    (process.stdout as unknown as { write: typeof original }).write = original;
+    ((process.stdout)).write = original;
   }
   return chunks.join('');
 }
@@ -95,7 +96,7 @@ test('checkpoint history and round reads expose immutable evidence without write
   const boundary = { round: 1, versions: [1], checkpoints: [checkpoint] };
   let saves = 0;
   const service = new MissionCheckpointService({
-    load: async () => ({ kind: 'found', mission: { id, checkpoints: [checkpoint] } as never, version: missionVersion(2) }),
+    load: async () => ({ kind: 'found' as const, mission: fixtureMission(id, { checkpoints: [checkpoint] }), version: missionVersion(2) }),
     save: async () => { saves++; return missionVersion(3); },
     checkpointHistory: async () => versions,
     reviewCheckpointState: async (_id, round) => round === 1 ? boundary : round === 2 ? null : undefined,
@@ -124,11 +125,4 @@ test('checkpoint history and round reads expose immutable evidence without write
     assert.equal(saves, 0);
     assert.equal(versions[0]?.checkpoint.goalCheck[0]?.evidence, 'original');
   } finally { process.stdout.write = original; }
-});
-
-
-test('checkpoint help documents optional atomic named completion (TASK-2747)', () => {
-  assert.match(CHECKPOINT_HELP, /\[--complete-criteria\]/);
-  assert.match(CHECKPOINT_HELP, /complete exactly the criteria named by the supplied rows in the same atomic/);
-  assert.match(CHECKPOINT_HELP, /Without that flag, record only evidence as before/);
 });

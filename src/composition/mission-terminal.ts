@@ -61,12 +61,7 @@ export async function hostMissionCommand(command: string, args: string[], target
   const { slug, worktree, identity, terminal, runId } = operation;
   const config = terminalHostConfig(loadAdapterConfig(worktree));
   if (config.host === 'pipe') { return null; }
-  const probe = probeTmux();
-  if (!probe.available) {
-    if (config.host === 'tmux' && config.whenUnavailable === 'fail') { throw new Error(`Terminal host unavailable: ${probe.reason}`); }
-    if (config.host !== 'auto') { log(`tmux terminal host unavailable (${probe.reason}); running through the pipe host.`); }
-    return null;
-  }
+  if (!terminalHostReady(config, probeTmux(), log)) { return null; }
   reconcileOrphanSessions(terminal, { allRoles: true, configuration });
   const socketPath = missionSocketPath(terminal, configuration);
   if (configuration.terminal.tmux?.startsWith(`${socketPath},`)) {
@@ -87,6 +82,17 @@ export async function hostMissionCommand(command: string, args: string[], target
   const result = await superviseTmuxLaunch(launch, { onOutput: (stream, chunk) => { try { capture?.write(stream, chunk); } catch { /* keep the command running */ } } });
   finishOperation(capture, result, { kind: 'terminal-bytes', path: 'stdout', covers: `everything the hosted ${command} operation drew in its terminal pane: harness, preflight, gates, agent output, handoff and review messages (stderr merged by the terminal)`, complete: true },
     launch.started() ? [] : ['The operation did not start in the terminal; it may run through the pipe host as a separate operation.']);
+  return hostedMissionResult(launch, result, config);
+}
+
+function terminalHostReady(config: ReturnType<typeof terminalHostConfig>, probe: ReturnType<typeof probeTmux>, log: (_line: string) => void): boolean {
+  if (probe.available) { return true; }
+  if (config.host === 'tmux' && config.whenUnavailable === 'fail') { throw new Error(`Terminal host unavailable: ${probe.reason}`); }
+  if (config.host !== 'auto') { log(`tmux terminal host unavailable (${probe.reason}); running through the pipe host.`); }
+  return false;
+}
+
+function hostedMissionResult(launch: ReturnType<typeof prepareTmuxLaunch>, result: number, config: ReturnType<typeof terminalHostConfig>): number | null {
   if (!launch.started() && result === 70) {
     if (config.host === 'tmux' && config.whenUnavailable === 'fail') { throw new Error('Terminal host failed before the command started.'); }
     return null;

@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 
 
@@ -15,7 +14,7 @@ test.afterEach(() => mock.restoreAll());
 const { resolveAgentAdapter } = resolveAgentAdapterModule;
 const { DEFAULT_CONFIG, commitWorkflowBaseline, detectLegacyRepoLayout, ensureStandaloneMissionBaseline, ensureStandaloneGitRepo, evaluateRepositoryReadiness, hasGitRepository, initializeGitRepository, isStandaloneWorkflowLayout, loadAdapterConfig, loadEffectiveConfig, loadWorkflowConfig, resolveAgentModel, resolveMaxConcurrentCustom, resolveReviewAdapter, resolveTaskStorage, validateWorkflowConfig } = resolveAgentAdapterModule;
 
-function withTempDir(fn) {
+function withTempDir(fn: (_arg0: string) => void) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-product-config-'));
   try {
     fn(dir);
@@ -25,7 +24,7 @@ function withTempDir(fn) {
 }
 
 test('detectLegacyRepoLayout identifies the in-repo workflow shape', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.mkdirSync(path.join(root, 'backlog'), { recursive: true });
     fs.mkdirSync(path.join(root, 'docs', 'missions'), { recursive: true });
     fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
@@ -36,7 +35,7 @@ test('detectLegacyRepoLayout identifies the in-repo workflow shape', () => {
 });
 
 test('isStandaloneWorkflowLayout identifies a drop-in workflow shape', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.mkdirSync(path.join(root, 'workflow'), { recursive: true });
     fs.writeFileSync(path.join(root, 'workflow', 'index.js'), '// stub\n');
     fs.writeFileSync(path.join(root, 'workflow.config.json'), '{}\n');
@@ -46,7 +45,7 @@ test('isStandaloneWorkflowLayout identifies a drop-in workflow shape', () => {
 });
 
 test('isStandaloneWorkflowLayout still recognizes installs when repo also has backlog docs and verify script', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.mkdirSync(path.join(root, 'workflow'), { recursive: true });
     fs.mkdirSync(path.join(root, 'backlog'), { recursive: true });
     fs.mkdirSync(path.join(root, 'docs', 'missions'), { recursive: true });
@@ -60,7 +59,7 @@ test('isStandaloneWorkflowLayout still recognizes installs when repo also has ba
 });
 
 test('hasGitRepository checks for .git presence', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     assert.equal(hasGitRepository(root), false);
     fs.mkdirSync(path.join(root, '.git'));
     assert.equal(hasGitRepository(root), true);
@@ -68,19 +67,20 @@ test('hasGitRepository checks for .git presence', () => {
 });
 
 test('loadEffectiveConfig returns code-owned defaults when no override file exists', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     assert.deepEqual(loadEffectiveConfig(root), DEFAULT_CONFIG);
   });
 });
 
 test('loadEffectiveConfig merges a partial override over the defaults', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       adapters: { verification: { command: './gate.sh' } },
     }, null, 2));
 
     const effective = loadEffectiveConfig(root);
     // overridden key wins
+    assert.ok('command' in effective.adapters.verification);
     assert.equal(effective.adapters.verification.command, './gate.sh');
     // sibling default within the same section is preserved by deep merge
     assert.equal(effective.adapters.verification.defaultArea, 'docs');
@@ -90,19 +90,20 @@ test('loadEffectiveConfig merges a partial override over the defaults', () => {
 });
 
 test('loadEffectiveConfig has no post-integrate hook by default', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     const effective = loadEffectiveConfig(root);
     assert.deepEqual(effective.adapters.integrate, {});
   });
 });
 
 test('loadEffectiveConfig merges a repo-declared post-integrate hook command', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       adapters: { integrate: { postIntegrateCommand: './scripts/refresh-px.sh' } },
     }, null, 2));
 
     const effective = loadEffectiveConfig(root);
+    assert.ok('postIntegrateCommand' in effective.adapters.integrate);
     assert.equal(effective.adapters.integrate.postIntegrateCommand, './scripts/refresh-px.sh');
     // unrelated defaults are untouched by declaring the hook
     assert.equal(effective.adapters.verification.defaultArea, 'docs');
@@ -141,7 +142,7 @@ test('validateWorkflowConfig rejects non-object product/adapters shapes', () => 
 });
 
 test('evaluateRepositoryReadiness distinguishes configured standalone repos', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       product: { name: 'Standalone' },
       adapters: {
@@ -175,7 +176,7 @@ test('validateWorkflowConfig accepts a full override with all sections', () => {
 });
 
 test('evaluateRepositoryReadiness returns invalid for a malformed override', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       product: { name: 'Broken' },
       adapters: [],
@@ -188,7 +189,7 @@ test('evaluateRepositoryReadiness returns invalid for a malformed override', () 
 });
 
 test('evaluateRepositoryReadiness reports default mode when no override file exists', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     const result = evaluateRepositoryReadiness(root);
     assert.equal(result.mode, 'default');
     assert.deepEqual(result.issues, []);
@@ -196,7 +197,7 @@ test('evaluateRepositoryReadiness reports default mode when no override file exi
 });
 
 test('initializeGitRepository creates a main branch repo', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     const result = initializeGitRepository(root);
     assert.equal(result.ok, true);
     assert.equal(hasGitRepository(root), true);
@@ -204,21 +205,21 @@ test('initializeGitRepository creates a main branch repo', () => {
 });
 
 test('initializeGitRepository falls back to git init then symbolic-ref when init -b main is unsupported', () => {
-  withTempDir(root => {
-    const calls = [];
+  withTempDir((root) => {
+    const calls: string[] = [];
     const result = initializeGitRepository(root, {
       spawnSyncFn(command, args) {
         calls.push(args.join(' '));
         if (args[0] === 'init' && args[1] === '-b') {
-          return { status: 1, stderr: 'unsupported' };
+          return { stdout: '', signal: null,  status: 1, stderr: 'unsupported' };
         }
         if (args[0] === 'init') {
-          return { status: 0, stdout: 'initialized' };
+          return { stderr: '', signal: null,  status: 0, stdout: 'initialized' };
         }
         if (args[0] === 'symbolic-ref') {
-          return { status: 0 };
+          return { stdout: '', stderr: '', signal: null,  status: 0 };
         }
-        return { status: 1 };
+        return { stdout: '', stderr: '', signal: null,  status: 1 };
       }
     });
 
@@ -229,13 +230,13 @@ test('initializeGitRepository falls back to git init then symbolic-ref when init
 });
 
 test('initializeGitRepository returns a failure payload when git init fallback fails', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     const result = initializeGitRepository(root, {
       spawnSyncFn(_command, args) {
         if (args[0] === 'init' && args[1] === '-b') {
-          return { status: 1, stderr: 'unsupported' };
+          return { stdout: '', signal: null,  status: 1, stderr: 'unsupported' };
         }
-        return { status: 1, stderr: 'fatal init error' };
+        return { stdout: '', signal: null,  status: 1, stderr: 'fatal init error' };
       }
     });
 
@@ -245,30 +246,31 @@ test('initializeGitRepository returns a failure payload when git init fallback f
 });
 
 test('ensureStandaloneGitRepo initializes missing git repo for standalone layout and commits baseline', () => {
-  withTempDir(root => {
-    const calls = [];
+  withTempDir((root) => {
+    const calls: string[] = [];
     const result = ensureStandaloneGitRepo(root, {
       isStandaloneWorkflowLayoutFn: () => true,
       hasGitRepositoryFn: () => false,
       initializeGitRepositoryFn: () => {
         calls.push('init');
-        return { ok: true, branch: 'main', mode: 'init-main' };
+        return { ok: true as const, branch: 'main', mode: 'init-main' };
       },
       commitWorkflowBaselineFn: () => {
         calls.push('commit');
-        return { ok: true, committed: true, files: ['workflow', 'workflow.config.json'] };
+        return { ok: true as const, committed: true, files: ['workflow', 'workflow.config.json'] };
       },
     });
 
     assert.deepEqual(calls, ['init', 'commit']);
     assert.equal(result.initialized, true);
     assert.equal(result.branch, 'main');
+    assert.ok(result.baselineCommit != null);
     assert.deepEqual(result.baselineCommit.files, ['workflow', 'workflow.config.json']);
   });
 });
 
 test('ensureStandaloneGitRepo through real git produces a baseline commit that tracks the exported repo snapshot', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.mkdirSync(path.join(root, 'workflow'));
     fs.writeFileSync(path.join(root, 'workflow', 'index.js'), '// stub\n');
     fs.writeFileSync(path.join(root, 'workflow.config.json'), '{}\n');
@@ -286,7 +288,7 @@ test('ensureStandaloneGitRepo through real git produces a baseline commit that t
 });
 
 test('commitWorkflowBaseline returns no-workflow-files when nothing to commit', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     spawnSync('git', ['init', '-b', 'main'], { cwd: root });
     const result = commitWorkflowBaseline(root);
     assert.equal(result.ok, true);
@@ -296,7 +298,7 @@ test('commitWorkflowBaseline returns no-workflow-files when nothing to commit', 
 });
 
 test('ensureStandaloneGitRepo skips initialization when repo is not standalone or already has git', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     assert.deepEqual(ensureStandaloneGitRepo(root, {
       isStandaloneWorkflowLayoutFn: () => false,
       hasGitRepositoryFn: () => false,
@@ -310,11 +312,11 @@ test('ensureStandaloneGitRepo skips initialization when repo is not standalone o
 });
 
 test('ensureStandaloneGitRepo returns failed payload when initialization fails', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     const result = ensureStandaloneGitRepo(root, {
       isStandaloneWorkflowLayoutFn: () => true,
       hasGitRepositoryFn: () => false,
-      initializeGitRepositoryFn: () => ({ ok: false, message: 'boom' }),
+      initializeGitRepositoryFn: () => ({ ok: false as const, message: 'boom' }),
     });
 
     assert.equal(result.failed, true);
@@ -323,7 +325,7 @@ test('ensureStandaloneGitRepo returns failed payload when initialization fails',
 });
 
 test('ensureStandaloneMissionBaseline auto-commits standalone repo changes before draft', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.mkdirSync(path.join(root, 'workflow'));
     fs.writeFileSync(path.join(root, 'workflow', 'index.js'), '// stub\n');
     fs.writeFileSync(path.join(root, 'workflow.config.json'), '{}\n');
@@ -341,7 +343,7 @@ test('ensureStandaloneMissionBaseline auto-commits standalone repo changes befor
 });
 
 test('ensureStandaloneMissionBaseline skips legacy repos and clean standalone repos', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     assert.deepEqual(ensureStandaloneMissionBaseline(root), { changed: false, committed: false, skipped: true });
 
     fs.mkdirSync(path.join(root, 'workflow'));
@@ -356,7 +358,7 @@ test('ensureStandaloneMissionBaseline skips legacy repos and clean standalone re
 });
 
 test('resolveTaskStorage uses configured storage directories when present', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       product: { name: 'Standalone' },
       adapters: {
@@ -375,7 +377,7 @@ test('resolveTaskStorage uses configured storage directories when present', () =
 });
 
 test('loadAdapterConfig returns empty object when config is missing or malformed', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     assert.deepEqual(loadAdapterConfig(root), {});
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ product: { name: 'x' }, adapters: [] }));
     assert.deepEqual(loadAdapterConfig(root), {});
@@ -383,7 +385,7 @@ test('loadAdapterConfig returns empty object when config is missing or malformed
 });
 
 test('resolveTaskStorage supports string storage paths and invalid storage types', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       product: { name: 'Standalone' },
       adapters: {
@@ -415,11 +417,11 @@ test('resolveTaskStorage supports string storage paths and invalid storage types
 });
 
 test('resolveAgentAdapter returns empty object (command env prefix removed)', () => {
-  assert.deepEqual(resolveAgentAdapter('/tmp'), {});
+  assert.deepEqual(resolveAgentAdapter(), {});
 });
 
 test('resolveMaxConcurrentCustom defaults to Infinity and reads a positive configured limit', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     assert.equal(resolveMaxConcurrentCustom(root), Infinity);
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       adapters: { agents: { maxConcurrentCustom: 3 } }
@@ -574,8 +576,8 @@ test('validateWorkflowConfig preserves allowed unknown properties', () => {
 
 // ---------- resolveAgentModel ----------
 
-function withConfigDir(config, fn) {
-  withTempDir(root => {
+function withConfigDir(config: unknown, fn: (root: string) => void) {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify(config), 'utf8');
     fn(root);
   });
@@ -584,7 +586,7 @@ function withConfigDir(config, fn) {
 test('resolveAgentModel returns the configured model for a listed family', () => {
   withConfigDir(
     { adapters: { agents: { models: { codex: 'gpt-5.4-mini', claude: 'sonnet-4-20250514' } } } },
-    root => {
+(    root: string|undefined) => {
       assert.equal(resolveAgentModel('codex', root), 'gpt-5.4-mini');
       assert.equal(resolveAgentModel('claude', root), 'sonnet-4-20250514');
     }
@@ -594,20 +596,20 @@ test('resolveAgentModel returns the configured model for a listed family', () =>
 test('resolveAgentModel returns null for a family not in models', () => {
   withConfigDir(
     { adapters: { agents: { models: { codex: 'gpt-5.4-mini' } } } },
-    root => {
+(    root: string|undefined) => {
       assert.equal(resolveAgentModel('gemini', root), null);
     }
   );
 });
 
 test('resolveAgentModel returns null when adapters.agents.models is absent', () => {
-  withConfigDir({ adapters: { agents: {} } }, root => {
+  withConfigDir({ adapters: { agents: {} } }, (root: string|undefined) => {
     assert.equal(resolveAgentModel('codex', root), null);
   });
 });
 
 test('resolveAgentModel returns null when no config file exists (defaults)', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     assert.equal(resolveAgentModel('codex', root), null);
   });
 });
@@ -615,8 +617,9 @@ test('resolveAgentModel returns null when no config file exists (defaults)', () 
 test('resolveAgentModel returns null for empty-string or missing agent family', () => {
   withConfigDir(
     { adapters: { agents: { models: { codex: 'gpt-5.4-mini' } } } },
-    root => {
+(    root: string|undefined) => {
       assert.equal(resolveAgentModel('', root), null);
+      // @ts-expect-error Intentional absent family from an unchecked caller.
       assert.equal(resolveAgentModel(undefined, root), null);
     }
   );
@@ -625,7 +628,7 @@ test('resolveAgentModel returns null for empty-string or missing agent family', 
 test('resolveAgentModel returns the configured model for the custom family (task-2337)', () => {
   withConfigDir(
     { adapters: { agents: { models: { custom: 'qwen3.6-27b-q8', codex: 'gpt-5.6-terra' } } } },
-    root => {
+(    root: string|undefined) => {
       assert.equal(resolveAgentModel('custom', root), 'qwen3.6-27b-q8');
     }
   );
@@ -634,7 +637,7 @@ test('resolveAgentModel returns the configured model for the custom family (task
 test('resolveAgentModel returns null for custom when adapters.agents.models.custom is absent (task-2337)', () => {
   withConfigDir(
     { adapters: { agents: { models: { codex: 'gpt-5.6-terra' } } } },
-    root => {
+(    root: string|undefined) => {
       assert.equal(resolveAgentModel('custom', root), null);
     }
   );

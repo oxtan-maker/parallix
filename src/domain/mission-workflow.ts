@@ -139,15 +139,7 @@ function requireSameReviewedRevision(mission: OpenMission, review: Review): void
   const recorded = currentReviewRound(mission.review);
   const proposed = currentReviewRound(review);
   if (sameReviewedRevision(recorded.subject, proposed.subject)) { return; }
-  // The reviewer classifier runs only after rebase, verification, and Backlog
-  // mirroring. Its source binds the final verified candidate, so this narrowly
-  // admits that persisted pin on an undecided round while rejecting every
-  // ordinary revision replacement.
-  const source = proposed.decision?.classifier;
-  if (recorded.decision === null && source?.candidateRevision === proposed.subject.revision) { return; }
-  {
-    throw new MissionRuleViolation('Review decision must preserve the exact reviewed revision');
-  }
+  throw new MissionRuleViolation('Review decision must preserve the exact reviewed revision');
 }
 
 /**
@@ -245,96 +237,105 @@ function approvableFromActiveLane(review: Review | null): boolean {
   return !(previous?.kind === 'approved' && previous.revocation);
 }
 
+function reboundMission(mission: Mission, command: Extract<MissionCommand, { type: 'rebound-to-active' }>): Mission {
+  requireStatus(mission, ['integration', 'review', 'active'], command);
+  if (mission.status === 'review' && (!mission.review || reviewStatus(mission.review) !== 'awaiting-review')) {
+    throw new MissionRuleViolation('A review repair rebound requires an undecided review round');
+  }
+  return {
+    ...mission, status: 'active', assignee: command.agent,
+    review: mission.review && reviewStatus(mission.review) === 'approved'
+      ? revokeApprovedDecision(mission.review, currentReviewRound(mission.review).number, {
+        revokedAt: command.occurredAt ?? '',
+        revokedBy: 'workflow',
+        reason: REBOUND_REASONS[command.cause.kind],
+        cause: command.cause,
+      })
+      : mission.review,
+  };
+}
+
+function approveMission(mission: Mission, command: Extract<MissionCommand, { type: 'approve' }>): Mission {
+  requireStatus(mission, ['review', 'active'], command);
+  if (mission.status === 'active' && !approvableFromActiveLane(mission.review)) {
+    throw new MissionRuleViolation('Approval from an active Mission requires an awaiting-review round outside an integration repair');
+  }
+  requireSameReviewedRevision(mission, command.review);
+  if (reviewStatus(command.review) !== 'approved') {
+    throw new MissionRuleViolation('Approval requires an approved review');
+  }
+  return { ...mission, status: 'integration', review: command.review };
+}
+
+function revokeMissionApproval(mission: Mission, command: Extract<MissionCommand, { type: 'revoke-approval' }>): Mission {
+  requireStatus(mission, ['integration', 'active'], command);
+  if (!mission.review || reviewStatus(mission.review) !== 'approved') {
+    throw new MissionRuleViolation('Revocation requires a current effective approval');
+  }
+  requireRevocationSubject(mission.review, command.review);
+  if (reviewStatus(command.review) !== 'awaiting-review') {
+    throw new MissionRuleViolation('Revocation must open an awaiting-review round');
+  }
+  return { ...mission, status: 'review', review: command.review };
+}
+
 export function decideMission(mission: Mission, command: MissionCommand): Mission {
   switch (command.type) {
-  case 'refine':
-    // Refinement is what `px draft` produces: the mission leaves the backlog
-    // with a mission document to work from. Recording it here is what lets
-    // `activate` demand `refined` — without this transition the persisted
-    // aggregate would never leave `backlog` and activation could only be
-    // spelled as the backlog jump this rule exists to forbid. Re-refining an
-    // already refined mission is idempotent so a re-run of `px draft` is safe.
-    requireStatus(mission, ['backlog', 'refined'], command);
-    requireDraftedContract(mission, command);
-    if (mission.labels.includes('unknown' as MissionLabel)) {
-      throw new MissionRuleViolation('Cannot refine with unknown classification: record ai_sdlc or user_value with px classification set before finishing the draft');
-    }
-    return { ...mission, status: 'refined' };
-  case 'activate':
-    requireStatus(mission, ['refined', 'active'], command);
-    if (mission.brief) { requireDraftedContract(mission, command); }
-    return { ...mission, status: 'active', assignee: command.agent };
-  case 'abort-activation':
-    requireStatus(mission, ['refined', 'active'], command);
-    if (mission.status === 'refined') { return mission; }
-    return { ...mission, status: 'refined', assignee: command.assignee };
-  case 'rebound-to-active':
-    requireStatus(mission, ['integration', 'review', 'active'], command);
-    if (mission.status === 'review' && (!mission.review || reviewStatus(mission.review) !== 'awaiting-review')) {
-      throw new MissionRuleViolation('A review repair rebound requires an undecided review round');
-    }
-    return {
-      ...mission, status: 'active', assignee: command.agent,
-      review: mission.review && reviewStatus(mission.review) === 'approved'
-        ? revokeApprovedDecision(mission.review, currentReviewRound(mission.review).number, {
-          revokedAt: command.occurredAt ?? '',
-          revokedBy: 'workflow',
-          reason: REBOUND_REASONS[command.cause.kind],
-          cause: command.cause,
-        })
-        : mission.review,
-    };
-  case 'submit-for-review':
-    // A handoff that relaunches (gatekeeper pushback, crashed agent, retried
-    // CLI invocation) replays this transition against a mission that already
-    // reached review. Submission is therefore idempotent: the mission is
-    // returned untouched, so the recorded review round cannot be rewritten and
-    // no lane event is emitted for a lane that did not move.
-    // An active Mission whose recorded round was already APPROVED is not
-    // re-submittable (the approval landed on the provider before the local
-    // status advanced to review) and must not be rewritten. Replaying
-    // submit-for-review against it would otherwise throw at the awaiting-review
-    // guard below. Recognise the approved round and move the lane to review at
-    // the existing round's time so the downstream approve transition can run;
-    // the round, its decidedAt, and its reviewed change are passed through
-    // untouched. Only `approved` matches here: a `changes-requested` round means
-    // the implementer fixed the findings and is legitimately resubmitting a new
-    // round, which must flow through the normal round-advancement path below.
-    // ponytail: trusted-authority ceiling — this accepts a stored `approved`
-    // decision as authoritative even without a live provider
-    // approval. The integrate recovery path gates this on an active Mission that
-    // also carries a provider approval, so an unrelated submit-for-review caller
-    // cannot forge the lane move.
-    return submitForReview(mission, command);
-  case 'request-changes':
-    requireStatus(mission, ['review'], command);
-    requireSameReviewedRevision(mission, command.review);
-    if (reviewStatus(command.review) !== 'awaiting-implementation') {
-      throw new MissionRuleViolation('Requested changes must await an implementer response');
-    }
-    return { ...mission, status: 'active', review: command.review };
-  case 'approve':
-    requireStatus(mission, ['review', 'active'], command);
-    if (mission.status === 'active' && !approvableFromActiveLane(mission.review)) {
-      throw new MissionRuleViolation('Approval from an active Mission requires an awaiting-review round outside an integration repair');
-    }
-    requireSameReviewedRevision(mission, command.review);
-    if (reviewStatus(command.review) !== 'approved') {
-      throw new MissionRuleViolation('Approval requires an approved review');
-    }
-    return { ...mission, status: 'integration', review: command.review };
-  case 'revoke-approval':
-    requireStatus(mission, ['integration', 'active'], command);
-    if (!mission.review || reviewStatus(mission.review) !== 'approved') {
-      throw new MissionRuleViolation('Revocation requires a current effective approval');
-    }
-    requireRevocationSubject(mission.review, command.review);
-    if (reviewStatus(command.review) !== 'awaiting-review') {
-      throw new MissionRuleViolation('Revocation must open an awaiting-review round');
-    }
-    return { ...mission, status: 'review', review: command.review };
-  case 'integrate':
-    requireStatus(mission, ['integration'], command);
-    return { ...mission, status: 'done', closedAt: null };
+    case 'refine':
+      // Refinement is what `px draft` produces: the mission leaves the backlog
+      // with a mission document to work from. Recording it here is what lets
+      // `activate` demand `refined` — without this transition the persisted
+      // aggregate would never leave `backlog` and activation could only be
+      // spelled as the backlog jump this rule exists to forbid. Re-refining an
+      // already refined mission is idempotent so a re-run of `px draft` is safe.
+      requireStatus(mission, ['backlog', 'refined'], command);
+      requireDraftedContract(mission, command);
+      if (mission.labels.includes('unknown' as MissionLabel)) {
+        throw new MissionRuleViolation('Cannot refine with unknown classification: record ai_sdlc or user_value with px classification set before finishing the draft');
+      }
+      return { ...mission, status: 'refined' };
+    case 'activate':
+      requireStatus(mission, ['refined', 'active'], command);
+      if (mission.brief) { requireDraftedContract(mission, command); }
+      return { ...mission, status: 'active', assignee: command.agent };
+    case 'abort-activation':
+      requireStatus(mission, ['refined', 'active'], command);
+      if (mission.status === 'refined') { return mission; }
+      return { ...mission, status: 'refined', assignee: command.assignee };
+    case 'rebound-to-active': return reboundMission(mission, command);
+    case 'submit-for-review':
+      // A handoff that relaunches (gatekeeper pushback, crashed agent, retried
+      // CLI invocation) replays this transition against a mission that already
+      // reached review. Submission is therefore idempotent: the mission is
+      // returned untouched, so the recorded review round cannot be rewritten and
+      // no lane event is emitted for a lane that did not move.
+      // An active Mission whose recorded round was already APPROVED is not
+      // re-submittable (the approval landed on the provider before the local
+      // status advanced to review) and must not be rewritten. Replaying
+      // submit-for-review against it would otherwise throw at the awaiting-review
+      // guard below. Recognise the approved round and move the lane to review at
+      // the existing round's time so the downstream approve transition can run;
+      // the round, its decidedAt, and its reviewed change are passed through
+      // untouched. Only `approved` matches here: a `changes-requested` round means
+      // the implementer fixed the findings and is legitimately resubmitting a new
+      // round, which must flow through the normal round-advancement path below.
+      // ponytail: trusted-authority ceiling — this accepts a stored `approved`
+      // decision as authoritative even without a live provider
+      // approval. The integrate recovery path gates this on an active Mission that
+      // also carries a provider approval, so an unrelated submit-for-review caller
+      // cannot forge the lane move.
+      return submitForReview(mission, command);
+    case 'request-changes':
+      requireStatus(mission, ['review'], command);
+      requireSameReviewedRevision(mission, command.review);
+      if (reviewStatus(command.review) !== 'awaiting-implementation') {
+        throw new MissionRuleViolation('Requested changes must await an implementer response');
+      }
+      return { ...mission, status: 'active', review: command.review };
+    case 'approve': return approveMission(mission, command);
+    case 'revoke-approval': return revokeMissionApproval(mission, command);
+    case 'integrate':
+      requireStatus(mission, ['integration'], command);
+      return { ...mission, status: 'done', closedAt: null };
   }
 }

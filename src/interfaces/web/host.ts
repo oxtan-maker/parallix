@@ -11,9 +11,13 @@
  * process.
  */
 
-import { isEditMissionBody } from './transport-edit-mission.js';
+import { registerEventRoute, registerAssetRoutes } from './host-read-routes.js';
+export { WEB_EVENTS_PATH } from './host-read-routes.js';
+import { installHostRequestPolicy } from './host-request-policy.js';
+import { registerCommandRoute } from './command-route.js';
+export { WEB_COMMANDS_PATH } from './command-route.js';
 import * as crypto from 'node:crypto';
-import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 import { shareBuilds } from './shared-build.js';
 import type { BoardProjection } from '../../application/projections/board.js';
 import {
@@ -22,62 +26,37 @@ import {
 } from '../../application/projections/board-subscription.js';
 import type {
   BoardCommandDispatcher,
-  BoardCommandRequest,
   BoardProgressSink,
 } from '../../application/controller/board-command.js';
 import {
-  failure,
-  rejected,
-  type ApplicationOutcome,
-  type Capability,
-} from '../../application/contracts.js';
-import {
   createWebEventStream,
-  formatSseFrame,
   type WebEventStream,
 } from './stream.js';
 import {
-  isCreateMissionBody,
-  isInvalidWebCommandRequest,
   toWebBoardSnapshot,
-  toWebCommandResult,
   toWebProgressEvent,
-  validateWebCommandRequest,
   WEB_TRANSPORT_VERSION,
-  type WebBoardSnapshot,
   type WebCommandError,
-  type WebCommandResult,
   type WebTransportVersion,
 } from './transport.js';
 import {
   actualOrigin,
-  cookieValue,
-  evaluateContentLength,
-  evaluateContentType,
-  evaluateHostHeader,
-  evaluateMutationAuthorization,
   isLoopbackHost,
-  isReadOnlyMethod,
-  resolveAssetPath,
-  sessionCookieName,
   LOOPBACK_LITERALS,
   type LoopbackBinding,
   type LoopbackLiteral,
 } from './security.js';
 import { createShellBootstrap } from './shell-bootstrap.js';
-import { dispatchEditMission, dispatchCreateMission, errorMessage, sendCommandResult, singleHeader, transportStatusCode } from './host-support.js';
+import { errorMessage } from './host-support.js';
 import { registerTerminalRoute, type WebMissionTerminal } from './terminal-route.js';
 export { WEB_TERMINAL_PATH, WEB_TERMINAL_HISTORY_PATH, WEB_TERMINAL_LIVE_PATH, WEB_TERMINAL_SEARCH_PATH, type WebMissionTerminal } from './terminal-route.js';
 
-export const WEB_CSRF_HEADER = 'x-px-csrf';
+export { PROTECTION_HEADERS, WEB_CSRF_HEADER } from './host-request-policy.js';
 export { WEB_CSRF_META_NAME } from './shell-bootstrap.js';
 export const DEFAULT_BODY_LIMIT_BYTES = 64 * 1024;
 
 /** Read-only route paths. Both outrank the `/*` asset catch-all. */
 export const WEB_SNAPSHOT_PATH = '/api/board';
-export const WEB_EVENTS_PATH = '/api/events';
-/** The only mutation route (card commands and mission creation). Outranks the 405 catch-all. */
-export const WEB_COMMANDS_PATH = '/api/commands';
 
 /**
  * A projection rebuild that failed. Deliberately *not* an empty board: a
@@ -91,21 +70,6 @@ export interface WebBoardSnapshotError {
   readonly transportVersion: WebTransportVersion;
   readonly error: WebCommandError;
 }
-
-/**
- * The protection header set every response from this host carries. No
- * `unsafe-inline`, no remote sources: the shell references only same-origin
- * assets, and the CSRF meta tag is data, not executable script.
- */
-export const PROTECTION_HEADERS = {
-  'content-security-policy':
-    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
-    + "connect-src 'self'; font-src 'none'; object-src 'none'; base-uri 'none'; "
-    + "frame-ancestors 'none'; form-action 'self'",
-  'x-frame-options': 'DENY',
-  'x-content-type-options': 'nosniff',
-  'referrer-policy': 'no-referrer',
-} as const;
 
 /**
  * The loaded, manifest-allowlisted browser assets the host serves. The
@@ -186,7 +150,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
   }
   const bodyLimitBytes = options.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES;
   const sharedBuild = options.buildProjection === undefined ? undefined : shareBuilds(options.buildProjection);
-  const { manifest, assets } = options.assets;
+  const { manifest } = options.assets;
   if (manifest['index.html'] === undefined) {
     throw new Error('web asset manifest has no index.html entry');
   }
@@ -212,105 +176,9 @@ export function createWebHost(options: WebHostOptions): WebHost {
       if (app !== null) { throw new Error('web host is already started'); }
       app = Fastify({ logger: false, bodyLimit: bodyLimitBytes });
 
-      // js/missing-rate-limiting flags this request path, but the host binds a
-      // loopback port for a single launch (ADR 0054) and is never reachable off
-      // 127.0.0.1, so there is no network-facing attacker to exhaust. Rate
-      // limiting a loopback single-tenant socket would add cost with no threat.
-      // One origin per launch; the hooks below read the actual bound port.
-      app.addHook('onRequest', async (request, reply) => {
-        const current = binding;
-        if (current === null) {
-          reply.code(503).header('connection', 'close');
-          return reply.send('host not ready');
-        }
-        const origin = actualOrigin(current);
-        if (evaluateHostHeader(request.headers.host, current) !== 'ok') {
-          // The Host header is part of the per-launch capability (ADR 0054);
-          // the rejection carries the same safe envelope as every other
-          // command response.
-          return sendCommandResult(reply, 403, rejected('capability', 'host mismatch'));
-        }
-        if (!isReadOnlyMethod(request.method)) {
-          // Read-only requests carry no body, so only state-changing methods
-          // are length-gated (chunked/absent length = 411, over = 413).
-          const lengthCheck = evaluateContentLength(request.headers['content-length'], bodyLimitBytes);
-          if (lengthCheck.result === 'reject') { return reply.code(lengthCheck.status).send(); }
-          const decision = evaluateMutationAuthorization({
-            origin: singleHeader(request.headers.origin),
-            sessionCookie: cookieValue(request.headers.cookie, sessionCookieName(current)),
-            csrfHeader: singleHeader(request.headers[WEB_CSRF_HEADER]),
-          }, origin, launchValue);
-          if (decision.result === 'reject') {
-            return sendCommandResult(reply, 403, rejected('capability', decision.reason));
-          }
-          const contentTypeCheck = evaluateContentType(request.method, singleHeader(request.headers['content-type']));
-          if (contentTypeCheck.result === 'reject') { return reply.code(contentTypeCheck.status).send(); }
-          // Credentials valid: the command route below dispatches, every
-          // other path still answers 405. The boundary above is what the
-          // route had to pass first.
-        }
-      });
+      installHostRequestPolicy(app, () => binding, bodyLimitBytes, launchValue);
 
-      app.addHook('onSend', async (_request, reply) => {
-        for (const [name, value] of Object.entries(PROTECTION_HEADERS)) {
-          reply.header(name, value);
-        }
-        if (reply.getHeader('cache-control') === undefined) {
-          reply.header('cache-control', 'no-store');
-        }
-      });
-
-      // Transport-level errors (a malformed JSON body reaches the parser
-      // before any route does) answer with the same safe envelope: a parse
-      // failure is a 400 validation rejection, transport size/type limits
-      // keep their status and empty body, and anything else is a 500 whose
-      // body never echoes internal detail.
-      app.setErrorHandler((error, _request, reply) => {
-        const status = transportStatusCode(error);
-        if (status === 400) {
-          sendCommandResult(reply, 400, rejected('validation', 'request body is not valid JSON'));
-          return;
-        }
-        if (status === 411 || status === 413 || status === 415) {
-          reply.code(status);
-          return reply.send();
-        }
-        sendCommandResult(reply, 500, failure('execution', 'internal error'));
-      });
-
-      app.get(WEB_EVENTS_PATH, async (request, reply) => {
-        // The reply is hijacked, so Fastify's onSend hook never runs for this
-        // response: the protection headers are written explicitly here rather
-        // than inherited. `connect-src 'self'` in the existing CSP is what
-        // permits the same-origin EventSource; it is not widened.
-        reply.hijack();
-        const raw = reply.raw;
-        raw.writeHead(200, {
-          ...PROTECTION_HEADERS,
-          'content-type': 'text/event-stream; charset=utf-8',
-          'cache-control': 'no-store',
-          connection: 'keep-alive',
-          // Defeats reverse-proxy and framework response buffering, so frames
-          // reach the client before the response ends.
-          'x-accel-buffering': 'no',
-        });
-        raw.flushHeaders();
-        // Reconnect: replay only what this client has not seen. Truth is still
-        // re-established by refetching the snapshot; this only avoids
-        // duplicate user-visible progress lines.
-        for (const frame of stream.replayAfter(singleHeader(request.headers['last-event-id']))) {
-          raw.write(formatSseFrame(frame));
-        }
-        const unsubscribe = stream.subscribe((frame) => { raw.write(formatSseFrame(frame)); });
-        const detach = (): void => {
-          if (!clients.delete(detach)) { return; }
-          unsubscribe();
-          raw.end();
-        };
-        clients.add(detach);
-        request.raw.on('close', detach);
-        request.raw.on('error', detach);
-      });
+      registerEventRoute(app, stream, clients);
 
       app.get(WEB_SNAPSHOT_PATH, async (_request, reply) => {
         const build = sharedBuild;
@@ -335,118 +203,9 @@ export function createWebHost(options: WebHostOptions): WebHost {
       // Terminal polls reuse the displayed board; commands still rebuild below.
       registerTerminalRoute(app, { ...options, buildProjection: sharedBuild === undefined
         ? undefined : async () => displayedProjection ?? sharedBuild() });
-      app.post(WEB_COMMANDS_PATH, async (request, reply) => {
-        const dispatcher = options.commandDispatcher?.();
-        if (dispatcher === undefined || dispatcher === null) {
-          return sendCommandResult(reply, 503, failure('unavailable', 'command dispatcher port is not wired'));
-        }
-        if (isEditMissionBody(request.body)) { return dispatchEditMission(reply, dispatcher, request.body); }
-        if (isCreateMissionBody(request.body)) { return dispatchCreateMission(reply, dispatcher, request.body); }
-        const validation = validateWebCommandRequest(request.body);
-        if (isInvalidWebCommandRequest(validation)) {
-          return sendCommandResult(reply, 400, rejected('validation', validation.problems.join('; ')));
-        }
-        const build = sharedBuild;
-        if (build === undefined) {
-          return sendCommandResult(reply, 503, failure('unavailable', 'board projection port is not wired'));
-        }
-        let projection: BoardProjection;
-        try {
-          projection = await build();
-        } catch (error) {
-          // A failed rebuild is transient, exactly as on the snapshot route:
-          // "unavailable, try again", never a dispatch on a stale board.
-          return sendCommandResult(reply, 503, failure('unavailable', errorMessage(error)));
-        }
-        let snapshot: WebBoardSnapshot;
-        try {
-          // Gating on the wire card reuses the server-owned action states
-          // (`enabled`/`ineligible`/`unavailable`) rather than re-deriving
-          // them: one definition of "currently advertised".
-          snapshot = toWebBoardSnapshot(projection);
-        } catch (error) {
-          return sendCommandResult(reply, 500, failure('execution', errorMessage(error)));
-        }
-        const command = validation.value;
-        const card = snapshot.stages
-          .flatMap((stage) => stage.cards)
-          .find((candidate) => candidate.id === command.missionId);
-        if (card === undefined) {
-          return sendCommandResult(reply, 409, failure('conflict', `mission ${command.missionId} is not on the board`));
-        }
-        const action = card.actions.find((candidate) => candidate.kind === command.kind);
-        if (action === undefined || action.state !== 'enabled') {
-          const detail = action?.reason !== null && action?.reason !== undefined ? `: ${action.reason}` : '';
-          return sendCommandResult(reply, 409, failure('conflict',
-            `action ${command.kind} is not enabled for mission ${command.missionId}${detail}`));
-        }
-        // Identity is host-owned (fresh operation ID, single-kind capability set).
-        const boardRequest: BoardCommandRequest = {
-          operationId: crypto.randomUUID(),
-          kind: command.kind,
-          missionId: command.missionId,
-          missionStatusAtRequest: command.missionStatusAtRequest,
-          capabilities: new Set([command.kind as Capability] as const),
-          ...(command.payload !== undefined
-            ? { payload: { kind: 'handoff:record' as const, ...command.payload } }
-            : {}),
-        };
-        let outcome: ApplicationOutcome<unknown>;
-        try {
-          outcome = await dispatcher.dispatch(boardRequest);
-        } catch (error) {
-          // A dispatcher that throws is an execution failure; only its
-          // message may cross the wire.
-          outcome = failure('execution', errorMessage(error));
-        }
-        let result: WebCommandResult;
-        try {
-          result = toWebCommandResult(outcome);
-        } catch (error) {
-          // An outcome the transport refuses to project is a contract
-          // failure, not a dispatched outcome.
-          return sendCommandResult(reply, 500, failure('execution', errorMessage(error)));
-        }
-        // Every dispatched outcome — completed, conflict, failed, cancelled —
-        // answers 200 inside the envelope; the wire status carries the
-        // meaning and no server-side retry happens.
-        return reply.code(200).type('application/json; charset=utf-8').send(result);
-      });
+      registerCommandRoute(app, options, sharedBuild);
 
-      app.get('/', async (_request, reply) => {
-        const current = binding;
-        if (current === null) { return reply.code(503).send(); }
-        return shell.serve(reply, sessionCookieName(current));
-      });
-
-      app.get('/*', async (request, reply) => {
-        const rawPath = (request.raw.url ?? '/').split('?')[0] ?? '/';
-        const resolution = resolveAssetPath(rawPath, manifest);
-        if (resolution.result === 'reject') { return reply.code(resolution.status).send(); }
-        if (resolution.relativePath === 'index.html') {
-          const current = binding;
-          if (current === null) { return reply.code(503).send(); }
-          return shell.serve(reply, sessionCookieName(current));
-        }
-        const asset = assets.get(resolution.relativePath);
-        if (asset === undefined) { return reply.code(500).send(); }
-        // Hashed build assets are immutable; the shell page is not.
-        reply.header('cache-control', 'public, max-age=31536000, immutable');
-        return reply.type(asset.contentType).send(asset.body);
-      });
-
-      // Explicit method allowlist: the command route above is the only
-      // mutation route, so every other state-changing method on every path is
-      // 405 with the allowed set. The onRequest hook still enforces the
-      // Host/Origin/session/CSRF boundary before this answer; a second
-      // mutation route would need an ADR-level decision.
-      const methodNotAllowed = async (_request: unknown, reply: FastifyReply) => {
-        reply.header('allow', 'GET, HEAD');
-        return reply.code(405).send();
-      };
-      for (const method of ['POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'] as const) {
-        app.route({ method, url: '/*', handler: methodNotAllowed });
-      }
+      registerAssetRoutes(app, options.assets, shell, () => binding);
 
       // The listen callback runs asynchronously, so a failure must reject
       // the promise: a throw here would escape as an uncaught exception and

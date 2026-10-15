@@ -25,11 +25,8 @@ async function rebase(args: string[], options: RebaseCommandOptions = {}): Promi
   return new RebaseCommandUseCase(createRebaseWorkflowPort(options)).execute(args);
 }
 
-(rebase as any).buildRebasePrompt = buildRebasePrompt;
-(rebase as any).parseConflictFilesFromRebaseOutput = parseConflictFilesFromRebaseOutput;
-(rebase as any).parseConflictFilesFromGitStatus = parseConflictFilesFromGitStatus;
-(rebase as any).classifyHookFailure = classifyHookFailure;
-export default rebase;
+const rebaseWithHelpers = Object.assign(rebase, { buildRebasePrompt, parseConflictFilesFromRebaseOutput, parseConflictFilesFromGitStatus, classifyHookFailure });
+export default rebaseWithHelpers;
 export {
   rebase,
   buildRebasePrompt,

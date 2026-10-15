@@ -4,7 +4,7 @@ import { mirrorReviewOutcome, repairReviewedTask, reboundRejectedHandoff } from 
 
 test('review outcome mirrors preserve local approval and provider active-task repair (TASK-2647)', async () => {
   const transitions: string[] = [];
-  const mirror = { transition: async (status: string) => { transitions.push(status); return true; } };
+  const mirror = { transition: async (status: string) => { transitions.push(status); return true; } } satisfies NonNullable<Parameters<typeof mirrorReviewOutcome>[3]>;
   await mirrorReviewOutcome('approve', false, 'active', mirror);
   await mirrorReviewOutcome('approve', true, 'active', mirror);
   await mirrorReviewOutcome('approve', true, 'review', mirror);
@@ -16,7 +16,7 @@ test('review outcome mirrors preserve local approval and provider active-task re
 
 test('stale task repair only transitions a resolved active task and reports failure (TASK-2647)', async () => {
   const transitions: string[] = [];
-  const mirror = { transition: async (status: string) => { transitions.push(status); return false; } };
+  const mirror = { transition: async (status: string) => { transitions.push(status); return false; } } satisfies NonNullable<Parameters<typeof repairReviewedTask>[3]>;
   assert.deepEqual(await repairReviewedTask(false, null, '', mirror), { repaired: false, skipped: true });
   assert.deepEqual(await repairReviewedTask(true, 'review', 'review', mirror), { repaired: false, skipped: true, currentStatus: 'review' });
   assert.deepEqual(await repairReviewedTask(true, 'In Progress', 'active', mirror), { repaired: false, skipped: false, currentStatus: 'In Progress' });
@@ -29,7 +29,7 @@ test('handoff validation rebound repairs authority before mirroring and never re
     repairMission: async () => { effects.push('authority'); },
     transition: async (status: string) => { effects.push(status); return true; },
     reportBounce: () => { effects.push('reported'); },
-  };
+  } satisfies NonNullable<Parameters<typeof reboundRejectedHandoff>[1]>;
   await reboundRejectedHandoff({ ok: false, reason: 'validation-failed' }, port);
   assert.deepEqual(effects, ['authority', 'active', 'reported']);
   await reboundRejectedHandoff({ ok: false, reason: 'validation-failed', recoveryAttempted: true }, port);

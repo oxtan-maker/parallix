@@ -61,9 +61,10 @@ async function benchmarkSource() {
   const store = {
     async loadByRepository() { return [...open, ...done]; },
     async load() { return { kind: 'missing' as const }; },
+    async save(): Promise<never> { throw new Error('Benchmark board is read-only'); },
   };
   const board = composeBoardProjection({
-    rootDir, missionStore: store as never, database: db, repositoryId: repo,
+    rootDir, missionStore: store, database: db, repositoryId: repo,
     blocklistRepo: new SqliteBlocklistRepository(db), historyRepo: new SqliteOperationalHistoryRepository(db),
     laneEventRepo: new SqliteBoardLaneEventRepository(db), usageRepo: new SqliteUsageRepository(db),
     knownAgentFamilies: [agentFamily('codex')],

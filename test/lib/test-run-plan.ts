@@ -65,7 +65,7 @@ export interface TestRunPlan {
 // TASK-2591 (ADR 0062): the coverage contract formerly enforced through c8.
 // The denominator is every production TypeScript module, including modules no
 // test loads, with test and non-source paths excluded.
-export const COVERAGE_INCLUDES = ['src/**/*.ts'];
+export const COVERAGE_INCLUDES = ['src/**/*.ts', 'src/**/*.tsx'];
 export const COVERAGE_EXCLUDES = ['test/**', 'prompts/**', 'config/*.json', '.workflow/**', 'node_modules/**'];
 const MINIMUM_COVERAGE_NODE_MAJOR = 26;
 const MINIMUM_COVERAGE_NODE_MINOR = 7;

@@ -1,3 +1,6 @@
+import { statusResult } from '../../../fixtures/status-result.js';
+import { fixtureMission } from '../../../fixtures/mission-builders.js';
+import { makeCard } from '../../../fixtures/board-projection.js';
 // Historical regression provenance: TASK-2402, TASK-2593.
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -91,7 +94,7 @@ describe("focused Mission status reads only the selected Mission", () => {
       startedAt: '2026-08-24T08:00:00.000Z',
       decision: null,
       response: null,
-      phase: 'reviewing',
+      phase: 'reviewing' as const,
       disposition: null,
       reviewerRetryCount: 0,
       implementerRetryCount: 0,
@@ -359,7 +362,7 @@ describe("focused Mission status reads only the selected Mission", () => {
     const board = createStatusBoardAdapter({
       buildProjectionFn: async () => ({
         async buildMissionCard() { return null; },
-      } as any),
+      }),
       loadMissionFn: async (slug) => slug === adHocId
         ? { mission: missionRecord(adHocId, { status: 'active', rawStatus: 'active' }), version: 3 }
         : null,
@@ -449,7 +452,7 @@ describe("status lists all checkpoints and evidence", () => {
       netEngineeringLines: null,
     } as Mission;
     const board = createStatusBoardAdapter({
-      buildProjectionFn: async () => ({ async buildMissionCard() { return null; } } as any),
+      buildProjectionFn: async () => ({ async buildMissionCard() { return null; } }),
       loadMissionFn: async () => ({ mission, version: 7 }),
     });
     return {
@@ -513,6 +516,22 @@ describe("status lists all checkpoints and evidence", () => {
       { name: 'CP-4', description: 'Run the gate', recorded: false, goalCheck: [] },
     ]);
   });
+  test('status names a new blocked reason and preserves the operator acknowledgment (TASK-2756)', async () => {
+    const prior = { command: 'npm test', diagnostic: 'old contradiction', authorityReason: 'operator owns criteria', proposedCorrection: 'amend criterion' };
+    const repair: NonNullable<CheckpointData['repair']> = {
+      incidentId: 'resume', command: 'npm test', authorizedGates: ['npm test'], authorizedCriteria: ['amended'],
+      attempt: 1, evidenceRecorded: false, verified: false,
+      acknowledgedBlocker: prior, acknowledgedBy: 'px active operator', acknowledgedAt: '2026-10-15T08:00:00.000Z',
+      blocker: { ...prior, diagnostic: 'new contradiction', proposedCorrection: 'amend new criterion' },
+    };
+    const result = await statusResult(repair);
+    const lines: string[] = [];
+    renderStatus(result, line => lines.push(line));
+    assert.match(lines.join('\n'), /Blocked: new contradiction/);
+    assert.match(lines.join('\n'), /Prior stop acknowledged by px active operator at 2026-10-15T08:00:00.000Z:.*old contradiction.*amend criterion/);
+    assert.deepEqual(JSON.parse(statusJson(result)).checkpoints.at(-1).repair, repair);
+  });
+
   test('status exposes durable invalid-contract blocker and harness repair state (TASK-2695)', async () => {
     const repair: NonNullable<CheckpointData['repair']> = {
       incidentId: 'incident', command: 'npm test', authorizedGates: ['npm test'], authorizedCriteria: [], attempt: 1,
@@ -528,19 +547,41 @@ describe("status lists all checkpoints and evidence", () => {
     assert.deepEqual(JSON.parse(statusJson(result)).checkpoints.at(-1).repair, repair);
   });
 
+  test('status distinguishes carried repair rows from fresh rows by source checkpoint (TASK-2755)', async () => {
+    const repaired = checkpoints.map(item => item.name === 'CP-3' ? { ...item, goalCheck: [
+      { criterion: 'Every checkpoint is shown', criterionId: 'sc-1', evidence: 'npm test -- fresh' },
+      { criterion: 'Evidence is shown', criterionId: null, evidence: '`npm test`', carriedFrom: 'CP-1' },
+    ], nextActionText: 'verify' } : item);
+    const result = await statusResult();
+    const board = createStatusBoardAdapter({
+      buildProjectionFn: async () => ({ async buildMissionCard() { return null; } } as any),
+      loadMissionFn: async () => ({ mission: { id, checkpoints: repaired, labels: missionLabels([]) } as unknown as Mission, version: 8 }),
+    });
+    const projected = await board.getMissionData(id, '/repo');
+    assert.deepEqual(projected?.goalCheck, repaired[2].goalCheck, 'the latest checkpoint projects provenance only on carried rows');
+    const json = JSON.parse(statusJson({ ...result, missionData: projected }));
+    assert.deepEqual(json.checkpoints[2].goalCheck.map((row: { carriedFrom?: string }) => row.carriedFrom ?? null), [null, 'CP-1']);
+    assert.deepEqual(json.latestCheckpoint.goalCheck.map((row: { carriedFrom?: string }) => row.carriedFrom ?? null), [null, 'CP-1']);
+    const lines: string[] = [];
+    renderStatus({ ...result, missionData: projected }, line => lines.push(line));
+    assert.ok(lines.includes('      Goal Check: Every checkpoint is shown'), lines.join('\n'));
+    assert.ok(lines.includes('      Goal Check: Evidence is shown (carried from CP-1)'), lines.join('\n'));
+    assert.ok(lines.includes('  Evidence is shown (carried from CP-1): `npm test`'), lines.join('\n'));
+  });
+
 });
 
 test('status projects stored classification and distinguishes unset from unknown without card inference (TASK-2731)', async () => {
   for (const value of ['ai_sdlc', 'user_value', 'unknown', null] as const) {
     for (const stored of [true, false]) {
-      const mission = { id: missionId('task-classification'), labels: missionLabels(value ? ['bug', value] : ['bug']), checkpoints: [] } as unknown as Mission;
+      const mission = fixtureMission('task-classification', { labels: missionLabels(value ? ['bug', value] : ['bug']), checkpoints: [] });
       const board = createStatusBoardAdapter({
-        buildProjectionFn: async () => ({ async buildMissionCard() { return { title: 'provider card', labels: ['ai_sdlc'], status: 'backlog', reviewHistory: [], currentWork: null, blockingReason: null }; } } as any),
+        buildProjectionFn: async () => ({ async buildMissionCard() { return makeCard({ title: 'provider card', labels: missionLabels(['ai_sdlc']), status: 'backlog', lane: 'backlog', reviewHistory: [], currentWork: null, blockingReason: null }); } }),
         loadMissionFn: async () => stored ? { mission, version: 1 } : null,
       });
       const md = await board.getMissionData('task-classification', '/repo');
       assert.equal(md?.classification, stored ? value : null);
-      const result = { missionData: md, slug: 'task-classification', staleWorktrees: [], agents: [], lastThreeCommits: [] } as unknown as StatusResult;
+      const result = statusResult({ missionData: md, slug: 'task-classification' });
       assert.equal(JSON.parse(statusJson(result)).classification, stored ? value : null);
       const lines: string[] = []; renderStatus(result, line => lines.push(line));
       assert.ok(lines.includes(`Classification: ${(stored ? value : null) ?? 'unset'}`), lines.join('\n'));

@@ -45,7 +45,7 @@ function availabilityMetric(overrides: Partial<AgentAvailabilityMetric> = {}): A
 function workFact(freshness: LiveMissionWork['freshness']): LiveMissionWork {
   return {
     operationId: 'op-1',
-    phase: 'implement',
+    phase: 'implement' as const,
     summary: 'writing tests',
     agent: agentFamily('custom'),
     updatedAt: '2026-08-28T00:00:00.000Z',
@@ -317,6 +317,7 @@ test('action DTO distinguishes an unavailable action from an ineligible action',
   assert.ok(review !== undefined);
   assert.equal(review.state, 'unavailable');
   assert.equal(typeof review.reason, 'string');
+  assert.ok(review.reason != null);
   assert.ok(review.reason.length > 0, 'unavailable carries the server-owned reason');
   assert.notEqual(review.reason, 'Review is available only while the mission is in review');
 
@@ -489,7 +490,7 @@ test('an omitted checkpoint evidence field reads as no evidence, never malformed
 test('a malformed checkpoint evidence field is rejected', () => {
   const snapshot = toWebBoardSnapshot(makeProjection({ review: [makeFullCard({ checkpointEvidence: [] })] }));
   const parsed = JSON.parse(JSON.stringify(snapshot));
-  const card = parsed.stages.flatMap((stage) => stage.cards).find((wireCard) => 'checkpointEvidence' in wireCard);
+  const card = stageCards(parsed).find(wireCard => 'checkpointEvidence' in wireCard);
   card!.checkpointEvidence = 'not-an-array';
   const validation = validateWebBoardSnapshot(parsed);
   assert.equal(validation.ok, false);
@@ -555,8 +556,9 @@ test('progress event DTO is versioned and validated', () => {
 // ---------------------------------------------------------------------------
 
 test('unsupported projection version is rejected before conversion', () => {
-  const future = { ...makeProjection(), version: 99 } as unknown as BoardProjection;
+  const future = { ...makeProjection(), version: 99 };
   assert.throws(
+    // @ts-expect-error Intentional unsupported projection version must fail closed.
     () => toWebBoardSnapshot(future),
     (error: unknown) => error instanceof WebTransportError && error.code === 'unsupported-projection-version',
   );
@@ -728,7 +730,11 @@ test('snapshot validation accepts the extended card and fails closed on malforme
   }
 
   const nonFiniteRound = JSON.parse(JSON.stringify(payload));
-  stageCards(nonFiniteRound)[0].reviewHistory[0].number = Number.NaN;
+  const history = stageCards(nonFiniteRound)[0].reviewHistory;
+  assert.ok(Array.isArray(history));
+  const round: unknown = history[0];
+  assert.ok(round && typeof round === 'object' && 'number' in round);
+  round.number = Number.NaN;
   const nonFiniteRoundValidation = validateWebBoardSnapshot(nonFiniteRound);
   assert.equal(nonFiniteRoundValidation.ok, false);
   if (!nonFiniteRoundValidation.ok) {
@@ -858,15 +864,18 @@ test('weekly delivery count survives transport and rejects malformed values (TAS
 test('other completed history round-trips separately from the weekly DONE count (TASK-2688)', () => {
   const projection = makeProjection({ done: [makeCard({ id: tid('task-weekly'), lane: 'done' })] });
   const withHistory = { ...projection, stages: projection.stages.map(stage => stage.lane === 'done'
-    ? { ...stage, historyCards: [makeCard({ id: tid('task-unknown'), lane: 'done' })] } : stage) };
+    ? { ...stage, historyCards: [makeCard({ id: tid('task-unknown'), lane: 'done' })] } : stage) } satisfies NonNullable<Parameters<typeof toWebBoardSnapshot>[0]>;
   const snapshot = JSON.parse(JSON.stringify(toWebBoardSnapshot(withHistory)));
-  assert.equal(validateWebBoardSnapshot(snapshot).ok, true);
-  const done = snapshot.stages.find(stage => stage.lane === 'done');
+  const validated = validateWebBoardSnapshot(snapshot);
+  assert.ok(validated.ok);
+  const done = validated.value.stages.find(stage => stage.lane === 'done');
+  assert.ok(done);
   assert.equal(done.count, 1);
   assert.deepEqual(done.cards.map(card => card.id), ['task-weekly']);
+  assert.ok(done.historyCards);
   assert.deepEqual(done.historyCards.map(card => card.id), ['task-unknown']);
   for (const historyCards of [null, 'unknown', [{}]]) {
-    const malformed = { ...snapshot, stages: snapshot.stages.map(stage => stage.lane === 'done'
+    const malformed = { ...snapshot, stages: snapshot.stages.map((stage: { lane: string; }) => stage.lane === 'done'
       ? { ...stage, historyCards } : stage) };
     assert.equal(validateWebBoardSnapshot(malformed).ok, false);
   }

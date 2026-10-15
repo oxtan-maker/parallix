@@ -1,3 +1,7 @@
+import { missionVersion } from '../../../../src/application/domain-ports.js';
+import { fixtureMission } from '../../../fixtures/mission-builders.js';
+import { emptyBoardRepositories } from '../../../helpers/empty-board-repositories.js';
+import { missionVersion as fixtureVersion } from '../../../../src/application/domain-ports.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -29,19 +33,19 @@ import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 const repository = repositoryId('task-2518-repo');
 
 function mission(id: string, status: MissionStatus): Mission {
-  return {
+  return fixtureMission(id, {
     id: missionId(id), repositoryId: repository, title: id, labels: [], assignee: null,
     checkpoints: [], review: null, netEngineeringLines: null, status, closedAt: null,
-  };
+  });
 }
 
 function storeFor(persisted: readonly Mission[]): MissionStore {
   return {
     async load(id) {
       const found = persisted.find((candidate) => candidate.id === id);
-      return found ? { kind: 'found' as const, mission: found, version: 1 as never } : { kind: 'missing' as const };
+      return found ? { kind: 'found' as const, mission: found, version: fixtureVersion(1) } : { kind: 'missing' as const };
     },
-    async save() { return 1 as never; },
+    async save() { return fixtureVersion(1); },
     async loadByRepository() { return persisted; },
   };
 }
@@ -51,15 +55,12 @@ async function strandedProjection(root: string) {
     rootDir: root,
     missionStore: storeFor([mission('task-stranded', 'active')]),
     repositoryId: repository,
-    blocklistRepo: { async findAll() { return []; } } as never,
-    historyRepo: { async findAll() { return []; }, async findByType() { return []; } } as never,
-    laneEventRepo: { async findAll() { return []; } } as never,
-    usageRepo: { async findAll() { return []; } } as never,
+    ...emptyBoardRepositories(),
     knownAgentFamilies: [],
     launcherProbe: () => ({ available: true, detail: null }),
     readAgentConfig: () => null,
     detectRunningSessions: () => null,
-    gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
+    gitFn: () => ({ signal: null,  status: 0, stdout: '', stderr: '' }),
   }).builder.build();
 }
 
@@ -87,7 +88,7 @@ test('stranded active mission snapshot validates and advertises active:execute',
       ...snapshot.stages.flatMap((stage) => stage.cards.flatMap((c) => c.actions.map((a) => a.kind))),
       ...snapshot.attentionQueue.map((i) => i.action.kind),
     ];
-    assert.ok(!kinds.includes('recover:mission' as never), 'no action may carry recover:mission');
+    assert.ok(!kinds.some(kind => String(kind) === 'recover:mission'), 'no action may carry recover:mission');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -165,9 +166,9 @@ test('every board lane produces only wire-accepted action kinds', () => {
 test('stranded active mission dispatches active:execute through ExecuteMissionService', async () => {
   const { ports, calls } = makeExecutePorts({
     missionTransitions: {
-      async load() { return { kind: 'found', mission: { status: 'active' }, version: 1 }; },
-      async save() { calls.push('synchronize'); return 1; },
-      async saveWithTransition() { calls.push('synchronize'); return 1; },
+      async load() { return { kind: 'found' as const, mission: fixtureMission('task-fixture', { status: 'active' }), version: missionVersion(1) }; },
+      async save() { calls.push('synchronize'); return missionVersion(1); },
+      async saveWithTransition() { calls.push('synchronize'); return missionVersion(1); },
     },
   });
   const controller = new BoardCommandController(ports);

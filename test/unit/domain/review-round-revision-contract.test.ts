@@ -1,3 +1,5 @@
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { missionVersion, type MissionVersion } from '../../../src/application/domain-ports.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 // Historical regression provenance: TASK-2478.
@@ -43,14 +45,14 @@ describe("stale review round repro", { concurrency: false }, () => {
    */
 
   function twoRoundReview(): Review {
-    const change = { kind: 'local-branch' as const, sourceBranch: 'mission/task-2385', targetBranch: 'main' };
+    const change = { kind: 'local-branch' as const, sourceBranch: 'mission/task-2385', targetBranch: 'main' } satisfies import("../../../src/domain/review.js").ReviewedChange;
     const reviewer = agentFamily('codex');
     const implementer = agentFamily('claude');
-    const eligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer] } as never);
+    const eligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' });
     const round1 = startReview({ change, revision: changeRevision('rev-1') }, reviewer, implementer, '2026-08-01T10:00:00.000Z', eligibility);
     const base = round1.rounds[0];
     const round2: ReviewRound = { ...base, number: 2 };
-    return { ...round1, rounds: [base, round2] as unknown as Review['rounds'] };
+    return { ...round1, rounds: [base, round2] };
   }
 
   describe("stale review round", () => {
@@ -126,14 +128,14 @@ describe("stale review round repro", { concurrency: false }, () => {
      * miss and throws, so this test fails until the forward is present.
      */
     function twoRoundStore() {
-      const base = {
+      const base: ReviewRound = {
         number: 1,
         subject: {
           change: { kind: 'local-branch' as const, sourceBranch: 'mission/task-2385', targetBranch: 'main' },
-          revision: 'rev-1',
+          revision: changeRevision('rev-1'),
         },
-        reviewer: 'claude',
-        implementer: 'codex',
+        reviewer: agentFamily('claude'),
+        implementer: agentFamily('codex'),
         startedAt: '2026-08-01T10:00:00.000Z',
         decision: null,
         response: null,
@@ -142,12 +144,12 @@ describe("stale review round repro", { concurrency: false }, () => {
         reviewerRetryCount: 0,
         implementerRetryCount: 0,
       };
-      const state = { mission: { id: 'task-2385', status: 'review', review: { rounds: [base, { ...base, number: 2 }], intervention: null, stageLaunches: [], reviewEvents: [] } as any }, version: 1, saves: [] as unknown[] };
+      const state: { mission: Mission; version: MissionVersion; saves: Mission[] } = { mission: fixtureMission('task-2385', { status: 'review', review: { rounds: [base, { ...base, number: 2 }], intervention: null, stageLaunches: [], reviewEvents: [] } }), version: missionVersion(1), saves: [] };
       return {
         state,
-        async load() { return { kind: 'found', mission: state.mission, version: state.version }; },
-        async save(mission: any) { state.mission = mission; state.version += 1; state.saves.push(mission); return state.version; },
-        async saveWithTransition(mission: any) { return this.save(mission); },
+        async load() { return { kind: 'found' as const, mission: state.mission, version: state.version }; },
+        async save(mission: Mission) { state.mission = mission; state.version = missionVersion(state.version + 1); state.saves.push(mission); return state.version; },
+        async saveWithTransition(mission: Mission) { return this.save(mission); },
       };
     }
 
@@ -166,28 +168,30 @@ describe("stale review round repro", { concurrency: false }, () => {
       });
       let providerReviewCalled = false;
 
-      const result = await bindReviewPersistence(store as never).consumeReviewerArtifacts('task-2385', 'claude', {
-        worktree: tmpDir,
+      const result = await bindReviewPersistence(store).consumeReviewerArtifacts('task-2385', 'claude', {
+        worktree: tmpDir, revision: 'reviewed-head',
         tmpDir,
         providerEnabled: true,
         readTokenFn: () => 'mock-token',
-        postCommentFn: () => ({ ok: true }),
+        postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
         // Self-author: claude is the reviewer AND the PR author, so the provider
         // review POST is skipped and the verdict must persist locally on round 2.
         getPrAuthorFn: () => 'claude',
-        postReviewFn: () => { providerReviewCalled = true; return { ok: true }; },
+        postReviewFn: () => { providerReviewCalled = true; return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
       });
 
       assert.equal(result.ok, true, 'the bound verdict writer consumes the artifacts');
       assert.equal(providerReviewCalled, false, 'a self-author verdict skips the provider review POST');
-      const output = await reviewLoopBindings(store as never).consumeReviewerArtifacts('task-2385', 'claude', { worktree: tmpDir });
+      const output = await reviewLoopBindings(store).consumeReviewerArtifacts('task-2385', 'claude', { worktree: tmpDir });
       assert.equal(output.consumed, true, 'the review loop reads the persisted verdict output');
       // The persisted verdict survives on round 2, not a fabricated round 1, and
       // round 1 keeps its number: the stale-round invariant holds end to end.
+      assert.ok(store.state.mission.review);
       assert.equal(store.state.mission.review.rounds[1].disposition, 'APPROVED', 'the approve verdict persists on the current round 2');
+      assert.ok(store.state.mission.review);
       assert.equal(store.state.mission.review.rounds[1].phase, 'approved', 'round 2 transitions to the approved phase');
       assert.deepEqual(
-        store.state.mission.review.rounds.map((round: any) => round.number),
+        store.state.mission.review.rounds.map((round) => round.number),
         [1, 2],
         'round numbers stay 1 and 2 after the verdict persists',
       );
@@ -202,13 +206,13 @@ describe("stale review round repro", { concurrency: false }, () => {
           forgejoUser: 'reviewer-agent',
           readTokenFn: () => 'mock-token',
           getPrAuthorFn: () => 'reviewer-agent', // self-author => local verdict path
-          postReviewFn: () => ({ ok: true }),
+          postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
           readReviewStateFn: () => null, // read miss: no review state
           writeReviewStateFn: () => {
             verdictStateWritten = true;
             return Promise.resolve({ outcome: 'committed' as const });
           },
-          createEventFn: () => ({ ok: true, path: '/mock' }),
+          createEventFn: () => ({ ok: true as const, path: '/mock' }),
           buildMetadataFooterFn: () => '',
           log: () => {},
           error: () => {},
@@ -231,12 +235,12 @@ describe("stale review round repro", { concurrency: false }, () => {
           forgejoUser: 'reviewer-agent',
           readTokenFn: () => 'mock-token',
           getPrAuthorFn: () => 'reviewer-agent', // self-author => local verdict path
-          readReviewStateFn: () => ({ round: 2, phase: 'reviewing', reviewer: 'claude', implementer: 'codex' }),
+          readReviewStateFn: () => ({ round: 2, phase: 'reviewing' as const, reviewer: 'claude', implementer: 'codex' }),
           writeReviewStateFn: (_slug: string, state: unknown) => {
             captured = state;
             return Promise.resolve({ outcome: 'committed' as const });
           },
-          createEventFn: () => ({ ok: true, path: '/mock' }),
+          createEventFn: () => ({ ok: true as const, path: '/mock' }),
           buildMetadataFooterFn: () => '',
           log: () => {},
           error: () => {},
@@ -264,7 +268,7 @@ describe("revision integrity", { concurrency: false }, () => {
    */
   const reviewer = agentFamily('codex');
   const implementer = agentFamily('custom');
-  const eligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer] } as never);
+  const eligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' });
 
   const finding = { id: reviewFindingId('F1'), summary: 'fractional input accepted instead of rejected', location: null };
 
@@ -473,13 +477,13 @@ describe("continue invalidates a BLOCKED/PARKED stop —", () => {
     it('clears a BLOCKED disposition and resets the round to reviewing', async () => {
       await withHome(createTempRoot(), async () => {
         const { root, store } = await seedRoot(blockedRound());
-        const gitUser = { status: 0, stdout: 'alice-dev\n', stderr: '', error: null };
+        const gitUser = { signal: null, status: 0, stdout: 'alice-dev\n', stderr: '', error: null };
         const result = await continueReviewInvalidatesBlocker(SLUG, [], {
           resolveWorktreeFn: () => root,
           missionStore: store,
           log: () => undefined,
           error: () => undefined,
-          runFn: (() => gitUser) as any,
+          runFn: (() => gitUser),
         });
         assert.equal(result.invalidated, true, 'the BLOCKED stop is invalidated');
         const loaded = await store.load(missionId(SLUG));
@@ -494,13 +498,13 @@ describe("continue invalidates a BLOCKED/PARKED stop —", () => {
     it('clears a PARKED disposition too', async () => {
       await withHome(createTempRoot(), async () => {
         const { root, store } = await seedRoot(parkedRound());
-        const gitUser = { status: 0, stdout: 'alice-dev\n', stderr: '', error: null };
+        const gitUser = { signal: null, status: 0, stdout: 'alice-dev\n', stderr: '', error: null };
         const result = await continueReviewInvalidatesBlocker(SLUG, [], {
           resolveWorktreeFn: () => root,
           missionStore: store,
           log: () => undefined,
           error: () => undefined,
-          runFn: (() => gitUser) as any,
+          runFn: (() => gitUser),
         });
         assert.equal(result.invalidated, true, 'the PARKED stop is invalidated');
         const loaded = await store.load(missionId(SLUG));
@@ -517,17 +521,18 @@ describe("continue invalidates a BLOCKED/PARKED stop —", () => {
           { type: 'approve', decidedAt: '2026-09-01T10:00:00.000Z', comment: null, source: { kind: 'local' } },
         );
         const { root, store } = await seedRoot(resolved);
-        const gitUser = { status: 0, stdout: 'alice-dev\n', stderr: '', error: null };
+        const gitUser = { signal: null, status: 0, stdout: 'alice-dev\n', stderr: '', error: null };
         const result = await continueReviewInvalidatesBlocker(SLUG, [], {
           resolveWorktreeFn: () => root,
           missionStore: store,
           log: () => undefined,
           error: () => undefined,
-          runFn: (() => gitUser) as any,
+          runFn: (() => gitUser),
         });
         assert.equal(result.invalidated, false, 'a non-blocked review is not invalidated');
         const loaded = await store.load(missionId(SLUG));
         const review = loaded.kind === 'found' ? loaded.mission.review! : null;
+        assert.ok(review);
         assert.equal(reviewStatus(review), 'approved', 'the aggregate is unchanged');
       });
     });
@@ -535,13 +540,13 @@ describe("continue invalidates a BLOCKED/PARKED stop —", () => {
     it('attributes the invalidation to the current git user on a review event', async () => {
       await withHome(createTempRoot(), async () => {
         const { root, store } = await seedRoot(blockedRound());
-        const gitUser = { status: 0, stdout: 'alice-dev\n', stderr: '', error: null };
+        const gitUser = { signal: null, status: 0, stdout: 'alice-dev\n', stderr: '', error: null };
         await continueReviewInvalidatesBlocker(SLUG, [], {
           resolveWorktreeFn: () => root,
           missionStore: store,
           log: () => undefined,
           error: () => undefined,
-          runFn: (() => gitUser) as any,
+          runFn: (() => gitUser),
         });
         const events = await readAllEvents(SLUG, { rootDir: root, missionStore: store });
         const note = (events as Array<Record<string, unknown>>).find(
@@ -555,13 +560,13 @@ describe("continue invalidates a BLOCKED/PARKED stop —", () => {
     it('forwards a named --actor over the git user', async () => {
       await withHome(createTempRoot(), async () => {
         const { root, store } = await seedRoot(blockedRound());
-        const gitUser = { status: 0, stdout: 'alice-dev\n', stderr: '', error: null };
+        const gitUser = { signal: null, status: 0, stdout: 'alice-dev\n', stderr: '', error: null };
         await continueReviewInvalidatesBlocker(SLUG, ['--actor=operator-carol'], {
           resolveWorktreeFn: () => root,
           missionStore: store,
           log: () => undefined,
           error: () => undefined,
-          runFn: (() => gitUser) as any,
+          runFn: (() => gitUser),
         });
         const events = await readAllEvents(SLUG, { rootDir: root, missionStore: store });
         const note = (events as Array<Record<string, unknown>>).find(
@@ -589,7 +594,7 @@ it('flat review state preserves the exact mechanically restored subject and deci
 it('review checkpoint boundaries keep their original proof when latest evidence changes (TASK-2742)', async () => {
   const { captureReviewCheckpointState, recordCheckpoint, uncoveredCompletedCriteria } = await import('../../../src/domain/checkpoint.js');
   const { missionId } = await import('../../../src/domain/mission.js');
-  const checkpoint = { missionId: missionId('task-round-checkpoints'), name: 'CP-1', goalCheck: [{ criterion: 'covered', evidence: 'original' }], nextActionText: 'review' };
+  const checkpoint = { missionId: missionId('task-round-checkpoints'), name: 'CP-1', goalCheck: [{ criterion: 'covered', evidence: 'original' }], nextActionText: 'review' } satisfies Partial<NonNullable<Parameters<typeof recordCheckpoint>[1]>>;
   const planned = { ...checkpoint, name: 'CP-2', goalCheck: [], nextActionText: '' };
   const versions = [{ version: 1, checkpoint, recordedAt: null, recordedRound: null, missionRevision: null }];
   const boundary = captureReviewCheckpointState(1, [checkpoint, planned], versions);
@@ -600,4 +605,39 @@ it('review checkpoint boundaries keep their original proof when latest evidence 
   assert.deepEqual(boundary.versions, [1], 'a plan has no invented evidence version');
   assert.deepEqual(uncoveredCompletedCriteria(latest, ['covered'], [0]), [], 'handoff uses the latest view');
   assert.equal(boundary.checkpoints[1]?.name, 'CP-2', 'the exact view includes unevidenced plans');
+});
+
+it('retains the reviewed head independently of the round start (TASK-2752)', async () => {
+  const reviewer = agentFamily('codex');
+  const review = startReview({ change: { kind: 'local-branch', sourceBranch: 'mission/revision', targetBranch: 'main' }, revision: changeRevision('A') },
+    reviewer, agentFamily('claude'), '2026-10-01T10:00:00Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' }));
+  const decided = applyReviewerCommand(review, { type: 'approve', decidedAt: '2026-10-01T11:00:00Z', comment: null,
+    source: { kind: 'local' }, revision: changeRevision('B') });
+  const { fixtureMission, inMemoryTransitionStore } = await import('../../fixtures/mission-builders.js');
+  const store = inMemoryTransitionStore(fixtureMission('task-revision-reproduction', { status: 'review', review }));
+  await store.save({ ...store.mission(), review: decided });
+  const persisted = (await store.load()).mission.review!;
+  assert.equal(currentReviewRound(persisted).subject.revision, 'A');
+  assert.equal(currentReviewRound(persisted).decision?.revision, 'B');
+});
+
+it('reloads both general reviewer verdicts at B while the round starts at A (TASK-2752)', async () => {
+  const { recordApproval, recordRequestedChanges } = await import('../../../src/adapters/review/review-round.js');
+  const { fixtureMission, inMemoryTransitionStore } = await import('../../fixtures/mission-builders.js');
+  for (const verdict of ['approved', 'changes-requested']) {
+    const reviewer = agentFamily('codex');
+    const review = startReview({ change: { kind: 'local-branch', sourceBranch: 'mission/revision', targetBranch: 'main' }, revision: changeRevision('A') },
+      reviewer, agentFamily('claude'), '2026-10-01T10:00:00Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' }));
+    const store = inMemoryTransitionStore(fixtureMission('task-revision-recorder', { status: 'review', review }));
+    const input = { revision: 'B', decidedAt: '2026-10-01T11:00:00Z', comment: null };
+    const result = verdict === 'approved'
+      ? await recordApproval(String(store.mission().id), input, { missionStore: store })
+      : await recordRequestedChanges(String(store.mission().id), { ...input, findings: [{ id: reviewFindingId('F1'), summary: 'fix B', location: null }] }, { missionStore: store });
+    assert.equal(result.outcome, 'recorded');
+    const loaded = await store.load(store.mission().id);
+    assert.equal(loaded.kind, 'found');
+    if (loaded.kind !== 'found') { continue; }
+    assert.equal(currentReviewRound(loaded.mission.review!).subject.revision, 'A');
+    assert.equal(currentReviewRound(loaded.mission.review!).decision?.revision, 'B');
+  }
 });

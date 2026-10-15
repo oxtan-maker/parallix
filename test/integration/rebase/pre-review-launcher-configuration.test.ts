@@ -72,7 +72,7 @@ describe("pre-review rebase launcher configuration", () => {
         worktree: repo, log: (line: string) => logs.push(line), error: (line: string) => logs.push(line),
         rebaseWorkflowOptions: {
           readTokenFn: () => 'fixture-token', resolveForgejoUserFn: () => 'fixture-user',
-          createPrFn: () => ({ ok: true }),
+          createPrFn: () => ({ ok: true as const }),
         },
       };
       const result = await createHandoffPorts(configuration).rebase.rebaseBeforeReviewRound('task-lcfg-iso', options);
@@ -139,7 +139,7 @@ describe("pre-review rebase launcher configuration", () => {
         rebaseWorkflowOptions: {
           readTokenFn: () => 'fixture-token',
           resolveForgejoUserFn: () => 'fixture-user',
-          createPrFn: () => ({ ok: false, error: 'controlled publication rejection (TASK-2717)' }),
+          createPrFn: () => ({ ok: false as const, error: 'controlled publication rejection (TASK-2717)' }),
         },
       });
       const result = await ports.preReview.rebase();
@@ -197,7 +197,7 @@ describe("pre-review rebase launcher configuration", () => {
       const configuration = resolveConfiguration({ PATH: `${binDir}:${process.env.PATH}`, PARALLIX_TEST_NO_FORGEJO: '1', FORGEJO_URL: 'http://127.0.0.1:1', PARALLIX_HOME: path.join(root, 'home') });
       const real = createReviewLoopPorts('task-lcfg-iso', { worktree: repo, verbose: true }, {
         configuration, log: () => {}, error: () => {}, exit: () => {},
-        rebaseWorkflowOptions: { readTokenFn: () => 'fixture-token', resolveForgejoUserFn: () => 'fixture-user', createPrFn: () => ({ ok: true }) },
+        rebaseWorkflowOptions: { readTokenFn: () => 'fixture-token', resolveForgejoUserFn: () => 'fixture-user', createPrFn: () => ({ ok: true as const }) },
       });
       const note = (event: string) => fs.appendFileSync(order, `${event}\n`);
       const fake = fakeReviewLoopPorts({
@@ -206,11 +206,11 @@ describe("pre-review rebase launcher configuration", () => {
         routing: { eligibleFamilies: () => ['codex', 'claude'] },
         preReview: {
           // Real composed rebase with controlled publication and real verification gate.
-          rebase: async () => { assert.equal((await real.preReview.rebase()).ok, true); note(fs.existsSync(launches) ? 'rebase-with-implementer' : 'rebase-without-implementer'); return { ok: true }; },
+          rebase: async () => { assert.equal((await real.preReview.rebase()).ok, true); note(fs.existsSync(launches) ? 'rebase-with-implementer' : 'rebase-without-implementer'); return { ok: true as const }; },
           runGate: real.preReview.runGate,
         },
         agents: { launch: async launch => { note(`launch:${launch.role}`); return { agent: launch.agent, result: { status: 0 } }; } },
-        artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) },
+        artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
       });
       await runReviewLoop({ slug: 'task-lcfg-iso', implementer: 'codex', reviewer: 'claude', maxAttempts: 1, skipHandoff: true }, fake.ports);
 
@@ -233,7 +233,7 @@ describe("pre-review rebase launcher configuration", () => {
       const command = createRebaseCommand((args, options) => rebase(args, {
         ...options, resolveWorktreeFn: () => repo,
         readTokenFn: () => 'fixture-token', resolveForgejoUserFn: () => 'fixture-user',
-        createPrFn: () => ({ ok: false, error: 'controlled CLI publication rejection (TASK-2717)' }),
+        createPrFn: () => ({ ok: false as const, error: 'controlled CLI publication rejection (TASK-2717)' }),
       }));
       const code = await command(['task-lcfg-iso', '--push'], { configuration, exitFn: (value: number) => { exits.push(value); } });
       assert.equal(code, 1, 'public CLI must not overwrite publication failure with success');
@@ -248,7 +248,7 @@ describe("pre-review rebase launcher configuration", () => {
     try {
       fs.writeFileSync(path.join(root, 'codex'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
       const configuration = resolveConfiguration({ PATH: `${root}:${process.env.PATH}` });
-      const port = createIntegratePorts(configuration).rebase.createRebaseWorkflowPort({ gitFn: (() => ({ status: 0, stdout: '', stderr: '' })) as never, exitFn: () => {} });
+      const port = createIntegratePorts(configuration).rebase.createRebaseWorkflowPort({ gitFn: (() => ({ status: 0, stdout: '', stderr: '' })), exitFn: () => {} });
       assert.equal(port.workflowLauncherStatus('codex').supported, true, JSON.stringify(port.workflowLauncherStatus('codex')));
     } finally {
       fs.rmSync(root, { recursive: true, force: true });

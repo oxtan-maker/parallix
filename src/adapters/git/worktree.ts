@@ -14,17 +14,10 @@ import {
   getMissionYear,
 } from '../filesystem/mission-paths.js';
 
-/** @param {string|Function} rootDirOrGitFn @param {Function|null} [maybeGitFn] */
-export function getPrimaryBranch(rootDirOrGitFn: string | Function = process.cwd(), maybeGitFn: Function | null = null): string {
-  const rootDir = typeof rootDirOrGitFn === 'function' ? process.cwd() : rootDirOrGitFn;
-  /** @type {Function} */
-  const runner = typeof rootDirOrGitFn === 'function' ? rootDirOrGitFn : (maybeGitFn || gitModule.git);
-  const listLocalBranches = () => {
-    const result = runner(['-C', rootDir, 'branch', '--list', '--format=%(refname:short)', 'main', 'master']);
-    return (result.stdout || '').split('\n').map((b: string) => b.trim()).filter(Boolean);
-  };
+export type GitReader = (args: string[], options?: gitModule.GitOptions) => Pick<gitModule.GitResult, 'status' | 'stdout' | 'stderr'>;
 
-  try {
+/** @param {string|GitReader} rootDirOrGitFn @param {GitReader|null} [maybeGitFn] */
+function configuredPrimaryBranch(rootDir: string, listLocalBranches: () => string[]): string | null {
     const config = loadAdapterConfig(rootDir);
     const missions = (config.missions as Record<string, unknown>) || {};
     if (typeof missions.primaryBranch === 'string' && missions.primaryBranch.trim()) {
@@ -37,6 +30,21 @@ export function getPrimaryBranch(rootDirOrGitFn: string | Function = process.cwd
         return configured;
       }
     }
+  return null;
+}
+
+export function getPrimaryBranch(rootDirOrGitFn: string | GitReader = process.cwd(), maybeGitFn: GitReader | null = null): string {
+  const rootDir = typeof rootDirOrGitFn === 'function' ? process.cwd() : rootDirOrGitFn;
+  /** @type {GitReader} */
+  const runner = typeof rootDirOrGitFn === 'function' ? rootDirOrGitFn : (maybeGitFn || gitModule.git);
+  const listLocalBranches = () => {
+    const result = runner(['-C', rootDir, 'branch', '--list', '--format=%(refname:short)', 'main', 'master']);
+    return (result.stdout || '').split('\n').map((b: string) => b.trim()).filter(Boolean);
+  };
+
+  try {
+    const configured = configuredPrimaryBranch(rootDir, listLocalBranches);
+    if (configured) { return configured; }
   } catch (_) {
     // fall through to git-based detection
   }
@@ -158,12 +166,12 @@ export function conventionalBaseWorktreePath(baseBranch: string, mainRepo: strin
  * on a mission is refused).
  *
  * @param {string} [cwd]
- * @param {{ gitFn?: Function }} [options]
+ * @param {{ gitFn?: GitReader }} [options]
  * @returns {string|null}
  */
-/** @param {string} [cwd] @param {{gitFn?: Function}} [options] */
-export function detectLaunchBaseBranch(cwd: string = process.cwd(), options: { gitFn?: Function } = {}): string | null {
-  /** @type {Function} */
+/** @param {string} [cwd] @param {{gitFn?: GitReader}} [options] */
+export function detectLaunchBaseBranch(cwd: string = process.cwd(), options: { gitFn?: GitReader } = {}): string | null {
+  /** @type {GitReader} */
   const runner = options.gitFn || gitModule.git;
   const result = runner(['-C', cwd, 'branch', '--show-current']);
   const branch = ((result && result.stdout) || '').trim();
@@ -195,9 +203,9 @@ export function parseBaseBranchLine(content: string): string | null {
  * `git show <branch>:<path>`. Returns `null` when no `Base-Branch:` line exists
  * (every pre-existing mission), so callers fall back to the primary branch.
  */
-/** @param {string} slug @param {string} [rootDir] @param {{gitFn?: Function}} [options] */
-export function readRecordedBaseBranch(slug: string, rootDir: string = process.cwd(), options: { gitFn?: Function | null } = {}): string | null {
-  /** @type {Function | null} */
+/** @param {string} slug @param {string} [rootDir] @param {{gitFn?: GitReader}} [options] */
+export function readRecordedBaseBranch(slug: string, rootDir: string = process.cwd(), options: { gitFn?: GitReader | null } = {}): string | null {
+  /** @type {GitReader | null} */
   const gitFn = options.gitFn ?? null;
   if (!slug) {return null;}
 
@@ -214,6 +222,10 @@ export function readRecordedBaseBranch(slug: string, rootDir: string = process.c
     }
   }
 
+  return readMissionBaseFromBranch(slug, rootDir, branch, runner);
+}
+
+function readMissionBaseFromBranch(slug: string, rootDir: string, branch: string, runner: GitReader): string | null {
   const baseSlugMatch = slug.match(/^(task-\d+)/i);
   const baseSlug = baseSlugMatch ? baseSlugMatch[1].toLowerCase() : slug;
   const year = getMissionYear(slug, rootDir);
@@ -244,17 +256,17 @@ export function readRecordedBaseBranch(slug: string, rootDir: string = process.c
  * Returns the recorded `Base-Branch:` when present, otherwise `getPrimaryBranch()`
  * (the byte-identical legacy behaviour for every pre-existing mission).
  */
-/** @param {string} slug @param {string} [rootDir] @param {{gitFn?: Function}} [options] */
-export function resolveMissionBaseBranch(slug: string, rootDir: string = process.cwd(), options: { gitFn?: Function | null } = {}): string {
-  /** @type {Function | null} */
+/** @param {string} slug @param {string} [rootDir] @param {{gitFn?: GitReader}} [options] */
+export function resolveMissionBaseBranch(slug: string, rootDir: string = process.cwd(), options: { gitFn?: GitReader | null } = {}): string {
+  /** @type {GitReader | null} */
   const gitFn = options.gitFn ?? null;
-  const recorded = readRecordedBaseBranch(slug, rootDir, { gitFn: gitFn as Function | undefined });
+  const recorded = readRecordedBaseBranch(slug, rootDir, { gitFn });
   if (recorded) {return recorded;}
-  return gitFn ? getPrimaryBranch(rootDir, gitFn as Function) : getPrimaryBranch(rootDir);
+  return gitFn ? getPrimaryBranch(rootDir, gitFn) : getPrimaryBranch(rootDir);
 }
 
-/** @param {string} branchRef @param {Function} runner @param {string} mainRepo */
-function findWorktreeForBranch(branchRef: string, runner: Function, mainRepo: string): string | null {
+/** @param {string} branchRef @param {GitReader} runner @param {string} mainRepo */
+function findWorktreeForBranch(branchRef: string, runner: GitReader, mainRepo: string): string | null {
   const result = runner(['-C', mainRepo, 'worktree', 'list', '--porcelain']);
   const lines = ((result && result.stdout) || '').split('\n');
   let current: { path: string; branch: string | null } | null = null;
@@ -283,14 +295,14 @@ function findWorktreeForBranch(branchRef: string, runner: Function, mainRepo: st
  * conventional pattern path when none exists. Throws a `base branch`-bearing
  * error when the recorded base does not exist locally.
  */
-/** @param {string} slug @param {{rootDir?: string, gitFn?: Function}} [options] */
-export function resolveBaseWorktree(slug: string, options: { rootDir?: string; gitFn?: Function | null; configuration?: ParallixConfiguration } = {}): string {
+/** @param {string} slug @param {{rootDir?: string, gitFn?: GitReader}} [options] */
+export function resolveBaseWorktree(slug: string, options: { rootDir?: string; gitFn?: GitReader | null; configuration?: ParallixConfiguration } = {}): string {
   const rootDir = options.rootDir || process.cwd();
-  /** @type {Function | null} */
+  /** @type {GitReader | null} */
   const gitFn = options.gitFn ?? null;
   const runner = gitFn || gitModule.git;
-  const base = resolveMissionBaseBranch(slug, rootDir, { gitFn: gitFn as Function | undefined });
-  const primary = gitFn ? getPrimaryBranch(rootDir, gitFn as Function) : getPrimaryBranch(rootDir);
+  const base = resolveMissionBaseBranch(slug, rootDir, { gitFn });
+  const primary = gitFn ? getPrimaryBranch(rootDir, gitFn) : getPrimaryBranch(rootDir);
   if (base === primary) {
     return getPrimaryWorktree(options.configuration);
   }
@@ -320,7 +332,7 @@ export function resolveBaseWorktree(slug: string, options: { rootDir?: string; g
   return worktreePath;
 }
 
-/** @param {string} slug @param {{cwd?: string, gitFn?: Function}} [options] */
+/** @param {string} slug @param {{cwd?: string, gitFn?: GitReader}} [options] */
 /**
  * Normalize a path reported by `git worktree list --porcelain` to the checkout
  * it belongs to.
@@ -331,7 +343,7 @@ export function resolveBaseWorktree(slug: string, options: { rootDir?: string; g
  * that path to `git -C <path> rebase` fails with "this operation must be run in
  * a work tree", so walk up one level when the reported path is not one.
  */
-function workTreeRootFor(candidate: string, runGit: Function): string {
+function workTreeRootFor(candidate: string, runGit: GitReader): string {
   const isWorkTree = (dir: string) => {
     try {
       // A directory holding `.git` (a directory, or the file a linked worktree
@@ -354,16 +366,10 @@ export interface WorktreeTopologySnapshot {
 }
 
 /** Read the worktree list once for one projection build. */
-export function snapshotWorktreeTopology(options: { cwd?: string; gitFn?: Function | null; currentBranch?: (_cwd: string) => string } = {}): WorktreeTopologySnapshot {
-  const cwd = options.cwd || process.cwd();
-  const runGit = options.gitFn || gitModule.git;
-  const currentBranch = options.currentBranch || gitModule.getCurrentBranch;
-  const normalizedRoots = new Map<string, string>();
-  let branchAtCwd: string | null | undefined;
-  const entries: Array<{ path: string; branch: string | null; prunable: boolean }> = [];
-  try {
+function parseWorktreeTopology(output: string): WorktreeEntry[] {
+  const entries: WorktreeEntry[] = [];
     let current: { path: string; branch: string | null; prunable: boolean } | null = null;
-    for (const line of String(runGit(['worktree', 'list', '--porcelain']).stdout || '').split('\n')) {
+    for (const line of output.split('\n')) {
       if (line.startsWith('worktree ')) {
         if (current) { entries.push(current); }
         current = { path: line.slice('worktree '.length).trim(), branch: null, prunable: false };
@@ -377,6 +383,18 @@ export function snapshotWorktreeTopology(options: { cwd?: string; gitFn?: Functi
       }
     }
     if (current) { entries.push(current); }
+  return entries;
+}
+
+export function snapshotWorktreeTopology(options: { cwd?: string; gitFn?: GitReader | null; currentBranch?: (_cwd: string) => string } = {}): WorktreeTopologySnapshot {
+  const cwd = options.cwd || process.cwd();
+  const runGit = options.gitFn || gitModule.git;
+  const currentBranch = options.currentBranch || gitModule.getCurrentBranch;
+  const normalizedRoots = new Map<string, string>();
+  let branchAtCwd: string | null | undefined;
+  const entries: Array<{ path: string; branch: string | null; prunable: boolean }> = [];
+  try {
+    entries.push(...parseWorktreeTopology(String(runGit(['worktree', 'list', '--porcelain']).stdout || '')));
   } catch {
     // The ordinary resolver retains its branch-based cwd fallback below.
   }
@@ -405,9 +423,9 @@ export function snapshotWorktreeTopology(options: { cwd?: string; gitFn?: Functi
   });
 }
 
-export function resolveWorktree(slug: string, options: { cwd?: string; gitFn?: Function | null } = {}): string | null {
+export function resolveWorktree(slug: string, options: { cwd?: string; gitFn?: GitReader | null } = {}): string | null {
   const cwd = options.cwd || process.cwd();
-  /** @type {Function | null} */
+  /** @type {GitReader | null} */
   const gitFn = options.gitFn ?? null;
   const runGit = gitFn || gitModule.git;
   const branchRef = missionBranchRef(slug, cwd);
@@ -436,7 +454,7 @@ export function resolveWorktree(slug: string, options: { cwd?: string; gitFn?: F
 
 type WorktreeEntry = { path: string; branch: string | null; prunable: boolean };
 
-function matchingWorktrees(output: string, branchRef: string, runGit: Function): WorktreeEntry[] {
+function matchingWorktrees(output: string, branchRef: string, runGit: GitReader): WorktreeEntry[] {
   const matches: WorktreeEntry[] = [];
   let current: WorktreeEntry | null = null;
   for (const line of output.split('\n')) {

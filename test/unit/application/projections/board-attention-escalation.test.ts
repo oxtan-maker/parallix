@@ -1,3 +1,8 @@
+import { makeExecutePorts as completeExecuteFixture } from '../../../fixtures/execute-mission-ports.js';
+import { fixtureMission as completeMission } from '../../../fixtures/mission-builders.js';
+import { missionId as completeMissionId } from '../../../../src/domain/mission.js';
+import { repositoryId as completeRepositoryId } from '../../../../src/domain/repository.js';
+import { missionVersion as completeVersion } from '../../../../src/application/domain-ports.js';
 /**
  * TASK-2373 CP-4 — truthful NEEDS YOU (SC10–SC12).
  *
@@ -41,12 +46,12 @@ function boardState(appended: readonly OperationalHistoryEntry[], options: { now
 }
 
 function strictPorts(overrides: Record<string, unknown> = {}) {
-  const parts = {
+  const parts = completeExecuteFixture({
     ...makeExecutePorts().ports,
     workspace: {
       async preflight() { return true; },
       async resolveWorktree() { return '/worktree'; },
-      async resolveTaskFile() { return { ok: true, taskFile: '/worktree/task.md' }; },
+      async resolveTaskFile() { return { ok: true as const, taskFile: '/worktree/task.md' }; },
       async readTaskStatus() { return 'active'; },
       async enforceCommitSafety() {},
     },
@@ -57,14 +62,14 @@ function strictPorts(overrides: Record<string, unknown> = {}) {
       },
     },
     missionTransitions: {
-      async load() { return { kind: 'found' as const, version: 1, mission: { id: SLUG, repositoryId: 'repo', title: 'Fixture', labels: [], assignee: null, checkpoints: [{ missionId: SLUG, name: 'CP-1', firstLine: 'work', goalCheck: [], nextActionText: '' }], review: null, netEngineeringLines: null, brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] }, declaredGates: ['npm test'], successCriteria: ['done'], predictedNelBucket: 'Small', status: 'refined' as const, closedAt: null } }; },
-      async save() { return 2; },
-      async saveWithTransition() { return 2; },
+      async load() { return { kind: 'found' as const, version: completeVersion(1), mission: completeMission(String(SLUG), {repositoryId: completeRepositoryId('repo'),title: 'Fixture',labels: [],assignee: null,checkpoints: [{ missionId: completeMissionId(SLUG), name: 'CP-1', firstLine: 'work', goalCheck: [], nextActionText: '' }],review: null,netEngineeringLines: null,brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },declaredGates: ['npm test'],successCriteria: ['done'],predictedNelBucket: 'Small',status: 'refined' as const,closedAt: null}) }; },
+      async save() { return completeVersion(2); },
+      async saveWithTransition() { return completeVersion(2); },
     },
     telemetry: { async recordLaunchTelemetry() {} },
-    autonomousReview: { async start() { return true; } },
-  };
-  return { ...parts, ...overrides } as unknown as ExecuteMissionPorts;
+    autonomousReview: { async start() {} },
+  }).ports;
+  return { ...parts, ...overrides };
 }
 
 function executeRequest() {
@@ -73,7 +78,7 @@ function executeRequest() {
     slug: SLUG,
     agent: 'claude',
     capabilities: new Set(['active:execute'] as const),
-  } as never;
+  };
 }
 
 // ---------------------------------------------------------------------------

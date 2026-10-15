@@ -28,7 +28,7 @@ function withGitHubActions<T>(github: boolean, callback: () => T): T {
 
 // Regression group from the original runner-plan suite
 {
-function selectedFiles(args, version = process.version) {
+function selectedFiles(args: string[], version = process.version) {
   // TASK-2328: the runner's suite selection and argv assembly live in
   // test/lib/test-run-plan.ts, so this guard calls the same ESM module the
   // runner calls instead of transpiling the runner into a CommonJS vm sandbox.
@@ -157,7 +157,7 @@ test('TASK-2423: GitHub default plan omits the unit-test budget reporter', () =>
 
 test('TASK-2423: headroom remains an opt-in per-test CPU bound', () => {
   const { defaultPlan, headroomPlan } = withGitHubActions(false, () => {
-    const options = { executionRoot: process.cwd(), probeNodeVersion: () => 'v24.15.0' };
+    const options = { executionRoot: process.cwd(), probeNodeVersion: () => 'v24.15.0' } satisfies Partial<NonNullable<Parameters<typeof buildTestRunPlan>[0]>>;
     return {
       defaultPlan: buildTestRunPlan({ ...options, requestedArgs: [] }),
       headroomPlan: buildTestRunPlan({ ...options, requestedArgs: ['--unit-test-headroom'] }),
@@ -313,7 +313,7 @@ test('CPU policy covers unit and integration profiles and rejects invalid overri
     for (const covered of [false, true]) {
       for (const fast of [false, true]) {
         for (const ci of [false, true]) {
-          const options = { integration, ci, local: !ci, fast, covered, env: {} };
+          const options = { integration, ci, local: !ci, fast, covered, env: {} } satisfies Partial<NonNullable<Parameters<typeof suiteCpuBudget>[1]>>;
           const budget = suiteCpuBudget(policy, options);
           assert.ok(Number.isSafeInteger(budget) && budget > 0);
           const key = integration ? 'PARALLIX_INTEGRATION_SUITE_CPU_BUDGET_MS' : 'PARALLIX_UNIT_TEST_CPU_BUDGET_MS';
@@ -329,7 +329,7 @@ test('CPU policy covers unit and integration profiles and rejects invalid overri
 
 test('focused integration hooks retain CPU enforcement and tier boundaries (TASK-2622.20)', () => {
   const root = path.join(import.meta.dirname, '..', '..', '..', '..');
-  const options = { executionRoot: root, probeNodeVersion: () => 'v24.15.0', probeTestConcurrency: () => true };
+  const options = { executionRoot: root, probeNodeVersion: () => 'v24.15.0', probeTestConcurrency: () => true } satisfies Partial<NonNullable<Parameters<typeof buildTestRunPlan>[0]>>;
   const previous = process.env.GITHUB_ACTIONS;
   try {
     delete process.env.GITHUB_ACTIONS;
@@ -359,7 +359,7 @@ test('CPU profiles name live integration owners and new cases retain a finite fa
   const integration = new Set(buildTestRunPlan({ executionRoot: root, requestedArgs: ['--integration'], probeNodeVersion: () => 'v24.15.0' })
     .testFiles.map(file => path.relative(path.join(root, 'test'), file)));
   for (const file of AGENT_E2E_TESTS) { integration.add(file); }
-  for (const profile of ['plain', 'covered']) {
+  for (const profile of ['plain', 'covered'] as const) {
     assert.deepEqual(Object.keys(policy.integrationCases[profile]).filter(file => !integration.has(file)), [],
       'Remove stale CPU profile entries when behavior ownership changes.');
   }
@@ -440,7 +440,7 @@ test('same-basename suites stay distinct and an exact focused path selects only 
   const checkout = syntheticCheckout();
   try {
     const tierFiles = selectTierFiles(checkout.root, SYNTHETIC_REGISTRY);
-    const options = { executionRoot: checkout.root, probeNodeVersion: () => 'v24.15.0', probeTestConcurrency: () => true, tierFiles };
+    const options = { executionRoot: checkout.root, probeNodeVersion: () => 'v24.15.0', probeTestConcurrency: () => true, tierFiles } satisfies Partial<NonNullable<Parameters<typeof buildTestRunPlan>[0]>>;
     const indexSuites = relativeTo(checkout.root)([...tierFiles.unit, ...tierFiles.allIntegration]).filter(file => file.endsWith('/index.test.ts'));
     assert.deepEqual(indexSuites, ['unit/adapters/sqlite/index.test.ts', 'unit/domain/missions/deep/index.test.ts', 'integration/git/deep/worktree/index.test.ts']);
     const plan = buildTestRunPlan({ ...options, requestedArgs: ['test/unit/domain/missions/deep/index.test.ts'] });

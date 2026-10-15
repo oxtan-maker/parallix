@@ -61,17 +61,17 @@ test('handoff, declared gates and pre-review share candidate verification and in
     t.mock.method(missionUtils, 'missionBranchName', () => `mission/${slug}`);
     t.mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
     t.mock.method(git, 'getWorktreeStatus', () => []);
-    t.mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+    t.mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
     t.mock.method(backlog, 'getTaskImplementer', () => 'codex');
     t.mock.method(backlog, 'transitionTask', () => true);
     const result = await performHandoff(slug, {
       missionServicesFn: stubMissionServices(),
       worktree: root,
       isForgejoReviewEnabledFn: () => false,
-      rebaseFn: async () => ({ ok: true }),
-      captureNelFn: () => ({ ok: true, nel: 1, bucket: { label: 'tiny' } }),
-      runGatekeeperFn: () => ({ ok: true, missing: [], skipped: true }),
-      log: message => logs.push(message), error: () => {}
+      rebaseFn: async () => ({ ok: true as const }),
+      captureNelFn: async () => ({ ok: true as const, nel: 1, bucket: 'tiny' }),
+      runGatekeeperFn: () => ({ ok: true as const, missing: [], skipped: true }),
+      log: (message: string) => logs.push(message), error: () => {}
     });
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(fs.readFileSync(counter, 'utf8'), 'all\n', 'handoff resolves the configured area rather than injecting docs');

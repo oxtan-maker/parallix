@@ -1,4 +1,4 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import { integrationContext } from '../../fixtures/integration-context.js';
 
 /**
  * Forgejo-independence tests for the core workflow path.
@@ -37,7 +37,7 @@ test.afterEach(() => mock.restoreAll());
 
 const { isForgejoReviewEnabled } = productConfig;
 
-function createTempConfigDir(reviewProvider) {
+function createTempConfigDir(reviewProvider: string|null) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-forgejo-ind-'));
   const config = {
     product: { name: 'Test' },
@@ -89,15 +89,15 @@ test('isForgejoReviewEnabled defaults to false for legacy repo without config', 
 
 test('mission-start accepts isForgejoReviewEnabledFn option and skips PR check when false', () => {
   const missionStart = missionStartModule.default;
-  const lines = [];
+  const lines: string[] = [];
   let prStatusCalled = false;
 
   const result = missionStart(['task-test'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-test',
     getCurrentBranchFn: () => 'mission/task-test',
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-test.md' }),
-    resolveMissionClassificationFn: () => ({ classification: 'user_value' }),
+    resolveTaskFileFn: () => ({ matches: ['/tmp/task-test.md'],  ok: true as const, taskFile: '/tmp/task-test.md' }),
+    resolveMissionClassificationFn: () => ({ classification: 'user_value' as const, taskFile: null, source: 'mission' as const }),
     getTaskStatusFn: () => 'active',
     toVirtualFn: (s) => s,
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-test',
@@ -109,10 +109,10 @@ test('mission-start accepts isForgejoReviewEnabledFn option and skips PR check w
     getLastCommitFn: () => ({ sha: 'abcdef123456', subject: 'test', date: '2026-05-26' }),
     getPrStatusFn: () => {
       prStatusCalled = true;
-      return { exists: false };
+      return { raw: '',  exists: false as const };
     },
     evaluateRepositoryReadinessFn: () => ({ mode: 'configured', configPath: '/tmp/workflow.config.json', issues: [] }),
-    evaluateReviewSetupFn: () => ({ required: false, ok: true, issues: [], steps: [] }),
+    evaluateReviewSetupFn: () => ({ required: false, ok: true as const, issues: [], steps: [] }),
     adapterChecklistFn: () => [],
     isForgejoReviewEnabledFn: () => false,
     log: line => lines.push(line),
@@ -173,7 +173,7 @@ test('evaluateReviewSetup returns not-required when provider is not forgejo', ()
 
 test('verifyReview skips Forgejo PR check when review provider is not forgejo', () => {
   const { verifyReview } = reviewCommandsModule;
-  const lines = [];
+  const lines: string[] = [];
   let prStatusCalled = false;
 
   verifyReview('task-test', false, {
@@ -183,18 +183,18 @@ test('verifyReview skips Forgejo PR check when review provider is not forgejo', 
     resolveWorktreeFn: () => '/tmp/project-task-test',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-test',
     getCurrentBranchFn: () => 'mission/task-test',
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    resolveTaskFileFn: () => ({ matches: ['/tmp/task.md'],  ok: true as const, taskFile: '/tmp/task.md' }),
     getTaskStatusFn: () => 'review',
     findMissionAreaFn: () => 'docs',
-    runFn: () => ({ status: 0 }),
+    runFn: () => ({ signal: null, stdout: '', stderr: '',  status: 0 }),
     getAcceptanceCriteriaFn: () => [],
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => [],
+    buildAutonomousReviewMatrixFn: () => ({ step: 'review', agents: [], configPath: '/fixture/config', configPresent: true, launchers: {} }),
     readReviewStateFn: () => null,
     cwdFn: () => '/tmp/project-task-test',
     getPrStatusFn: () => {
       prStatusCalled = true;
-      return { exists: false };
+      return { raw: '',  exists: false as const };
     },
     isForgejoReviewEnabledFn: () => false,
   });
@@ -212,7 +212,7 @@ test('review loop binds the Forgejo provider only behind isProviderEnabled', asy
   const { createReviewLoopPorts } = await import('../../../src/adapters/review/review-loop.js');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forgejo-independence-loop-'));
   try {
-    const quiet = { log: () => {}, error: () => {} };
+    const quiet = { log: () => {}, error: () => {} } satisfies NonNullable<Parameters<typeof createReviewLoopPorts>[2]>;
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { review: { provider: 'none' } } }));
     assert.equal(createReviewLoopPorts('task-1', { worktree: root }, quiet).provider, null, 'provider=none binds no review provider');
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { review: { provider: 'forgejo' } } }));
@@ -228,9 +228,11 @@ test('review loop binds the Forgejo provider only behind isProviderEnabled', asy
 
 test('integrate printIntegrationPreflight gates Forgejo checks', () => {
   const src = fs.readFileSync(path.join(ADAPTERS, '..', 'application', 'integrate', 'preflight.ts'), 'utf8');
-  const preflightSection = src.slice(src.indexOf('function printIntegrationPreflight'));
-  assert.ok(preflightSection.includes('isForgejoReviewEnabled'),
-    'printIntegrationPreflight should gate Forgejo PR/approval checks');
+  const methodStart = src.indexOf('  printIntegrationPreflight(');
+  assert.notEqual(methodStart, -1, 'the preflight method must be present');
+  const preflightSection = src.slice(methodStart);
+  assert.match(preflightSection, /if \(isForgejoReviewEnabledFn\(baseWorktree\)\) \{\s*checkReviewProvider\(/,
+    'printIntegrationPreflight should gate its delegated Forgejo PR/approval checks');
 });
 
 // =============================================================================
@@ -240,6 +242,8 @@ test('integrate printIntegrationPreflight gates Forgejo checks', () => {
 test('consumeReviewerArtifacts does not call Forgejo helpers when forgejoEnabled is false', async () => {
   const { consumeReviewerArtifacts, reviewArtifactPath } = reviewArtifactsModule;
   
+  let getPrStatusCalled = false;
+  let readTokenCalled = false;
   let consumeHumanNotesCalled = false;
   let postCommentCalled = false;
   let postReviewCalled = false;
@@ -277,7 +281,7 @@ test('consumeReviewerArtifacts does not call Forgejo helpers when forgejoEnabled
     buildMetadataFooterFn: () => '',
     // This test is about Forgejo independence, not event storage: stub the
     // event writer so it does not need an operator database with a Review.
-    createEventFn: () => ({ ok: true, path: '/mock/event' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/event' }),
     log: () => {},
     error: () => {},
   });
@@ -296,6 +300,8 @@ test('consumeReviewerArtifacts does not call Forgejo helpers when forgejoEnabled
   assert.equal(result.consumed, true, 'Artifacts should be consumed');
   assert.equal(result.ok, true, 'Consumption should succeed');
   assert.equal(result.reviewState, 'APPROVED', 'Should return APPROVED reviewState for approve verdict');
+  assert.equal(getPrStatusCalled, false, 'provider status must remain unqueried');
+  assert.equal(readTokenCalled, false, 'provider tokens must remain unread');
 });
 
 // =============================================================================
@@ -305,6 +311,8 @@ test('consumeReviewerArtifacts does not call Forgejo helpers when forgejoEnabled
 test('consumeImplementerArtifacts does not call Forgejo helpers when forgejoEnabled is false', async () => {
   const { consumeImplementerArtifacts, reviewArtifactPath } = reviewArtifactsModule;
   
+  let getPrStatusCalled = false;
+  let readTokenCalled = false;
   let consumeHumanNotesCalled = false;
   let postCommentCalled = false;
   
@@ -338,11 +346,11 @@ test('consumeImplementerArtifacts does not call Forgejo helpers when forgejoEnab
     buildMetadataFooterFn: () => '',
     // This test is about Forgejo independence, not event storage: stub the
     // event writer so it does not need an operator database with a Review.
-    createEventFn: () => ({ ok: true, path: '/mock/event' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/event' }),
     // The temp worktree has no checkout; supply the branch tip and stub the
     // round-closing record (covered in test/unit/adapters/review/review-round-loop.test.ts).
     headRevisionFn: () => 'rev-4',
-    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' }),
+    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' as const }),
     log: () => {},
     error: () => {},
   });
@@ -359,6 +367,8 @@ test('consumeImplementerArtifacts does not call Forgejo helpers when forgejoEnab
   assert.equal(result.consumed, true, 'Artifacts should be consumed');
   assert.equal(result.ok, true, 'Consumption should succeed');
   assert.equal(result.disposition, 'CHANGES_MADE', 'Should return CHANGES_MADE disposition');
+  assert.equal(getPrStatusCalled, false, 'provider status must remain unqueried');
+  assert.equal(readTokenCalled, false, 'provider tokens must remain unread');
 });
 
 // =============================================================================
@@ -378,7 +388,7 @@ test('printIntegrationPreflight does not call Forgejo API helpers when context i
   const fresh = integrateModule.printIntegrationPreflight;
   
   // Create a context that indicates Forgejo is disabled
-  const context = {
+  const context = integrationContext({
     slug: 'task-test',
     branch: 'mission/task-test',
     currentBranch: 'mission/task-test',
@@ -392,9 +402,9 @@ test('printIntegrationPreflight does not call Forgejo API helpers when context i
     pr: { exists: false },
     approval: { ok: false, error: 'forgejo-off', reviewState: null },
     siblingPrs: [],
-  };
+  });
   
-  const lines = [];
+  const lines: string[] = [];
   fresh(context, {
     log: (line) => lines.push(line),
     readTokenFn: () => { readTokenCalled = true; throw new Error('readToken called'); },

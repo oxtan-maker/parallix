@@ -1,3 +1,6 @@
+import type { Review } from '../../domain/review.js';
+import type { IntegrationApproval } from '../ports/integration-records.js';
+import type { IntegrationContext } from './context.js';
 /**
  * Integration approval policy: which authority lets a Mission integrate, and
  * what recovery would establish for a run that has not recovered yet. Pure
@@ -27,7 +30,7 @@ export interface TaskStatusCheck {
  * default-user approval wins only when both are present; the qualifier is the
  * approval's own provider timestamp, never the recovery wall clock (SC5).
  */
-export function resolveAuthoritativeApprovalAt(approval: any): string | undefined {
+export function resolveAuthoritativeApprovalAt(approval: IntegrationApproval | null | undefined): string | undefined {
   if (!approval || approval.ok !== true) {return undefined;}
   if (approval.defaultUserApproved) {return approval.defaultUserApprovedAt;}
   if (approval.operatorApproved) {return approval.operatorApprovedAt;}
@@ -39,7 +42,7 @@ function rejectedRecovery(reason: string): RecoveryDecision {
   return { established: false, via: null, reason };
 }
 
-function activeRecovery(review: any, overrideAt: string | undefined): RecoveryDecision {
+function activeRecovery(review: Review | null | undefined, overrideAt: string | undefined): RecoveryDecision {
   if (!review && overrideAt === undefined) {
     return rejectedRecovery('active with no authoritative Review and no default-user override; run px review <slug> --start before integration');
   }
@@ -51,7 +54,7 @@ function activeRecovery(review: any, overrideAt: string | undefined): RecoveryDe
   return rejectedRecovery(`existing Review is ${roundStatus}; resolve the round before overriding`);
 }
 
-function reviewRecovery(review: any, overrideAt: string | undefined): RecoveryDecision {
+function reviewRecovery(review: Review | null | undefined, overrideAt: string | undefined): RecoveryDecision {
   if (review && overrideAt !== undefined && reviewStatus(review) === 'awaiting-review') {
     return { established: true, via: 'human-override', decidedAt: overrideAt, reason: '' };
   }
@@ -65,7 +68,15 @@ function reviewRecovery(review: any, overrideAt: string | undefined): RecoveryDe
  * persisting. Both consume this one function, so `--dry-run` can never fail
  * for the case the real run accepts.
  */
-export function recoveryEstablishesApproval(context: any): RecoveryDecision {
+function activeApprovalNeedsProvider(context: IntegrationContext, lastRound: NonNullable<IntegrationContext['missionReview']>['rounds'][number] | null | undefined, overrideAt: string | undefined) {
+  const status = context.missionStatus;
+  return ( status === 'active'
+    && lastRound?.decision?.kind === 'approved'
+    && overrideAt === undefined
+    && context.approval?.providerDisabled !== true);
+}
+
+export function recoveryEstablishesApproval(context: IntegrationContext): RecoveryDecision {
   const status = context.missionStatus;
   if (status === 'integration' || status === 'done') {
     return { established: true, via: 'lifecycle', reason: '' };
@@ -79,10 +90,7 @@ export function recoveryEstablishesApproval(context: any): RecoveryDecision {
   // corroboration (unless the provider is disabled), matching recovery's
   // active→review guard. Without this, dry-run reports READY while the real
   // run refuses the same stale approval.
-  const activeStoredApprovalWithoutProvider = status === 'active'
-    && lastRound?.decision?.kind === 'approved'
-    && overrideAt === undefined
-    && context.approval?.providerDisabled !== true;
+  const activeStoredApprovalWithoutProvider = activeApprovalNeedsProvider(context, lastRound, overrideAt);
   if (lastRound?.decision?.kind === 'approved' && !activeStoredApprovalWithoutProvider) {
     return { established: true, via: 'mission-review', decidedAt: lastRound.decision.decidedAt, reason: '' };
   }
@@ -93,7 +101,26 @@ export function recoveryEstablishesApproval(context: any): RecoveryDecision {
 }
 
 /** Whether the Mission (or a pre-store task) status lets integration proceed. */
-export function evaluateTaskStatusForIntegration(context: any, stateMap: IntegrateStateMapPort): TaskStatusCheck {
+function storedApprovalWithoutProvider(context: IntegrationContext) {
+  const missionStatus = context.missionStatus ?? context.taskStatus;
+  const latestRound = context.missionReview?.rounds?.at(-1);
+  return missionStatus === 'active' && latestRound?.decision?.kind === 'approved' && resolveAuthoritativeApprovalAt(context.approval) === undefined;
+}
+
+function providerApprovedStatus(context: IntegrationContext, missionStatus: string | undefined): TaskStatusCheck | null {
+  const reviewApproved = context.approval?.ok && context.approval.reviewState === 'APPROVED';
+  const localApproved = context.approval?.source === 'local-review-state';
+  if (missionStatus === 'review' && (reviewApproved || localApproved)) {
+    const reason = localApproved
+      ? 'local review-state: approved'
+      : `latest formal review state is ${context.approval.reviewState}`;
+    return { ok: true, level: 'warn', message: `Mission status: review accepted for integration because ${reason}` };
+  }
+
+  return null;
+}
+
+export function evaluateTaskStatusForIntegration(context: IntegrationContext, stateMap: IntegrateStateMapPort): TaskStatusCheck {
   const missionStatus = context.missionStatus ?? context.taskStatus;
   // The state map treats this argument as its map; the shape is preserved from
   // the pre-extraction command so lifecycle names resolve exactly as before.
@@ -128,8 +155,7 @@ export function evaluateTaskStatusForIntegration(context: any, stateMap: Integra
     };
   }
 
-  const latestRound = context.missionReview?.rounds?.at(-1);
-  if (missionStatus === 'active' && latestRound?.decision?.kind === 'approved' && resolveAuthoritativeApprovalAt(context.approval) === undefined) {
+  if (storedApprovalWithoutProvider(context)) {
     return {
       ok: false,
       level: 'fail',
@@ -137,14 +163,8 @@ export function evaluateTaskStatusForIntegration(context: any, stateMap: Integra
     };
   }
 
-  const reviewApproved = context.approval?.ok && context.approval.reviewState === 'APPROVED';
-  const localApproved = context.approval?.source === 'local-review-state';
-  if (missionStatus === 'review' && (reviewApproved || localApproved)) {
-    const reason = localApproved
-      ? 'local review-state: approved'
-      : `latest formal review state is ${context.approval.reviewState}`;
-    return { ok: true, level: 'warn', message: `Mission status: review accepted for integration because ${reason}` };
-  }
+  const providerStatus = providerApprovedStatus(context, missionStatus);
+  if (providerStatus !== null) { return providerStatus; }
 
   return {
     ok: false,

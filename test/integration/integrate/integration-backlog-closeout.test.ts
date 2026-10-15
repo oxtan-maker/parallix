@@ -1,3 +1,9 @@
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { integrationBounceSeams } from '../../helpers/integration-bounce-seams.js';
+import { integrationServices } from '../../helpers/stub-integration-services.js';
+import { integrationContext } from '../../fixtures/integration-context.js';
+import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflow-ports.js';
+import { missionVersion as fixtureVersion } from '../../../src/application/domain-ports.js';
 // TASK-2613: landing must archive the task file in `backlog/completed/`.
 //
 // TASK-2521.07 made this repository's closeout delete the landed task file.
@@ -80,12 +86,12 @@ function seedRepository(): string {
 /** Drive `squashAndLand` through the production Git, Backlog and product-config ports. */
 function landMission(root: string, slug: string, taskFile: string, gitFailure?: 'rm' | 'archive-list'): Promise<void> {
   const production = createIntegratePorts();
-  const { squashAndLand } = createSquashLanding({
+  const { squashAndLand } = createSquashLanding(stubIntegrateWorkflowPorts({
     ...production,
-    git: { ...production.git, git: args => {
+    git: { ...production.git, git: (args) => {
       if ((gitFailure === 'rm' && args.includes('rm'))
         || (gitFailure === 'archive-list' && args.includes('ls-files') && args.includes('backlog/archive'))) {
-        return { status: 1, stdout: '', stderr: 'injected payload read/removal failure' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'injected payload read/removal failure' };
       }
       return production.git.git(args);
     } },
@@ -95,7 +101,7 @@ function landMission(root: string, slug: string, taskFile: string, gitFailure?: 
     gates: { isIntendedPayloadAtHead: () => false },
     landing: {
       createAbort: () => new Error('IntegrationAbort'),
-      classifyHookFailure: () => ({ isHookFailure: false }),
+      classifyHookFailure: () => ({ isHookFailure: false, hookType: null }),
       persistLandedIntegrationOrAbort: async () => {},
       closeLandedIntegrationOrAbort: async () => {},
       recordPostIntegrationStatsOrAbort: async () => {},
@@ -105,20 +111,18 @@ function landMission(root: string, slug: string, taskFile: string, gitFailure?: 
     },
     verification: {
       formatVerificationCommand: () => 'verify',
-      captureVerifiedTreeProof: () => ({ ok: true, proof: {} }),
-      assertVerifiedTreeProof: () => ({ ok: true }),
     },
-  } as never, { promoteTaskForIntegrationIfNeeded: async () => {} });
+  }), { promoteTaskForIntegrationIfNeeded: async () => {} });
 
   return squashAndLand({
     slug,
-    context: { area: 'all' },
-    missionServices: { store: { load: async () => ({ kind: 'found', mission: { status: 'integration' }, version: 1 }) } },
+    context: integrationContext({ area: 'all' }),
+    missionServices: integrationServices({ store: { load: async () => ({ kind: 'found' as const, mission: fixtureMission(slug, { status: 'integration' }), version: fixtureVersion(1) }) } }),
     baseWorktree: root,
     baseBranch: 'main',
-    seams: {},
+    seams: integrationBounceSeams(),
     state: { temporaryStash: null, nextActionMessage: null },
-  } as never, {
+  }, {
     branch: `mission/${slug}`,
     summary: `land ${slug}`,
     landedFromSha: 'base',
@@ -145,7 +149,7 @@ function quietLogs(t: { mock: { method: Function } }): void {
 }
 
 test('TASK-2613: landing moves the task file to backlog/completed as done in the landed squash', async (t) => {
-  quietLogs(t as never);
+  quietLogs(t);
   const root = seedRepository();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
@@ -161,7 +165,7 @@ test('TASK-2613: landing moves the task file to backlog/completed as done in the
 });
 
 test('TASK-2613: a base-tracked task file lands its removal and completed record together', async (t) => {
-  quietLogs(t as never);
+  quietLogs(t);
   const root = seedRepository();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   write(root, `backlog/tasks/${FIRST_FILE}`, taskBody(FIRST));
@@ -176,7 +180,7 @@ test('TASK-2613: a base-tracked task file lands its removal and completed record
 });
 
 test('TASK-2613: a later landing drops the stale copy of an earlier landed task', async (t) => {
-  quietLogs(t as never);
+  quietLogs(t);
   const root = seedRepository();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   await landMission(root, FIRST, FIRST_FILE);
@@ -193,7 +197,7 @@ test('TASK-2613: a later landing drops the stale copy of an earlier landed task'
 });
 
 test('a later mission removes a base-tracked stale copy while preserving completed history (TASK-2712)', async (t) => {
-  quietLogs(t as never);
+  quietLogs(t);
   const root = seedRepository();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   await landMission(root, FIRST, FIRST_FILE);
@@ -208,7 +212,7 @@ test('a later mission removes a base-tracked stale copy while preserving complet
 
 for (const inherited of [true, false]) {
   test(`archive paths ${inherited ? 'inherited from base' : 'reintroduced by a mission'} block landing before main advances (TASK-2712)`, async (t) => {
-    quietLogs(t as never);
+    quietLogs(t);
     const root = seedRepository();
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
     await landMission(root, FIRST, FIRST_FILE);
@@ -228,7 +232,7 @@ for (const inherited of [true, false]) {
 
 
 test('a mission explicitly deleting an inherited archive path can land without losing completed history (TASK-2712)', async (t) => {
-  quietLogs(t as never);
+  quietLogs(t);
   const root = seedRepository();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   await landMission(root, FIRST, FIRST_FILE);
@@ -257,7 +261,7 @@ test('a mission explicitly deleting an inherited archive path can land without l
 
 for (const failure of ['rm', 'archive-list'] as const) {
   test(`failed ${failure} payload operation blocks landing and cleans the squash (TASK-2712)`, async (t) => {
-    quietLogs(t as never);
+    quietLogs(t);
     const root = seedRepository();
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
     await landMission(root, FIRST, FIRST_FILE);

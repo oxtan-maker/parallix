@@ -1,4 +1,5 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import { ReviewState } from '../../../src/adapters/review/review-state.js';
+import { reviewStateWriterFixture } from '../../helpers/review-state-writer.js';
 
 
 import test from 'node:test';
@@ -55,8 +56,8 @@ test('formatStaticReviewSuccess includes slug', () => {
 // performStaticReview - test different failure modes
 test('performStaticReview fails when no mission dir', () => {
   const result = performStaticReview(mockSlug, {
-    findMissionDirFn: () => null,
-    resolveWorktreeFn: () => mockWorktree
+    findMissionDir: () => null,
+    resolveWorktree: () => mockWorktree
   });
   assert.equal(result.ok, false);
   assert.ok(result.findings.length > 0);
@@ -64,9 +65,9 @@ test('performStaticReview fails when no mission dir', () => {
 
 test('performStaticReview fails when no checkpoints', () => {
   const result = performStaticReview(mockSlug, {
-    findMissionDirFn: () => '/mock/mission',
-    resolveWorktreeFn: () => mockWorktree,
-    findCheckpointsFn: () => []
+    findMissionDir: () => '/mock/mission',
+    resolveWorktree: () => mockWorktree,
+    findCheckpoints: () => []
   });
   assert.equal(result.ok, false);
   assert.ok(result.findings.length > 0);
@@ -74,10 +75,12 @@ test('performStaticReview fails when no checkpoints', () => {
 
 test('performStaticReview fails when Goal Check missing', () => {
   const result = performStaticReview(mockSlug, {
-    findMissionDirFn: () => '/mock/mission',
-    resolveWorktreeFn: () => mockWorktree,
-    findCheckpointsFn: () => ['/mock/CP-1.md'],
-    readFileSyncFn: () => '## Other'
+    findMissionDir: () => '/mock/mission',
+    resolveWorktree: () => mockWorktree,
+    findCheckpoints: () => ['/mock/CP-1.md'],
+    getPrimaryBranch: () => 'main',
+    run: () => ({ status: 0, stdout: '', stderr: '', signal: null }),
+    readFileSync: () => '## Other'
   });
   assert.equal(result.ok, false);
 });
@@ -90,10 +93,10 @@ test('performStaticReview fails when Goal Check missing', () => {
 //
 //   try {
 //     const result = performStaticReview(mockSlug, {
-//       findMissionDirFn: () => '/mock/mission',
-//       resolveWorktreeFn: () => mockWorktree,
-//       findCheckpointsFn: () => ['/mock/CP-1.md'],
-//       readFileSyncFn: () => '## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| AC1 | evidence | PASS |',
+//       findMissionDir: () => '/mock/mission',
+//       resolveWorktree: () => mockWorktree,
+//       findCheckpoints: () => ['/mock/CP-1.md'],
+//       readFileSync: () => '## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| AC1 | evidence | PASS |',
 //       runFn: () => ({ status: 0, stdout: '', stderr: '' })
 //     });
 //     assert.equal(result.ok, true);
@@ -108,7 +111,7 @@ test('verifyReview exits on missing mission dir', async () => {
   await verifyReview(mockSlug, false, {
     findMissionDirFn: () => null,
     getCurrentBranchFn: () => mockBranch,
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/mock/task.md' }),
+    resolveTaskFileFn: () => ({ matches: ['/mock/task.md'],  ok: true as const, taskFile: '/mock/task.md' }),
     getTaskStatusFn: () => 'review',
     isForgejoReviewEnabledFn: () => false,
     log: () => {},
@@ -123,7 +126,7 @@ test('verifyReview exits on branch mismatch', async () => {
   await verifyReview(mockSlug, false, {
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => 'wrong-branch',
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/mock/task.md' }),
+    resolveTaskFileFn: () => ({ matches: ['/mock/task.md'],  ok: true as const, taskFile: '/mock/task.md' }),
     getTaskStatusFn: () => 'review',
     isForgejoReviewEnabledFn: () => false,
     log: () => {},
@@ -138,7 +141,7 @@ test('verifyReview exits on task not found', async () => {
   await verifyReview(mockSlug, false, {
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => mockBranch,
-    resolveTaskFileFn: () => ({ ok: false }),
+    resolveTaskFileFn: () => ({ matches: [], reason: 'missing' as const,  ok: false as const }),
     getTaskStatusFn: () => 'review',
     isForgejoReviewEnabledFn: () => false,
     log: () => {},
@@ -153,7 +156,7 @@ test('verifyReview passes with all green', async () => {
   await verifyReview(mockSlug, false, {
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => mockBranch,
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/mock/task.md' }),
+    resolveTaskFileFn: () => ({ matches: ['/mock/task.md'],  ok: true as const, taskFile: '/mock/task.md' }),
     getTaskStatusFn: () => 'review',
     isForgejoReviewEnabledFn: () => false,
     runVerificationGate: () => ({ status: 0 }),
@@ -166,25 +169,25 @@ test('verifyReview passes with all green', async () => {
 
 test('verifyReview preserves the selected worktree for its verification gate and review state', async () => {
   const missionRoot = '/tmp/selected-mission-tree';
-  let gateRoot = null;
-  let stateRoot = null;
+  let gateRoot: { value: string | undefined | null } = { value: null };
+  let stateRoot: { value: string | undefined | null } = { value: null };
   await verifyReview(mockSlug, false, {
     resolveWorktreeFn: () => missionRoot,
     findMissionDirFn: () => `${missionRoot}/missions/${mockSlug}`,
     getCurrentBranchFn: () => mockBranch,
-    resolveTaskFileFn: () => ({ ok: true, taskFile: `${missionRoot}/backlog/task.md` }),
+    resolveTaskFileFn: () => ({ matches: [`${missionRoot}/backlog/task.md`],  ok: true as const, taskFile: `${missionRoot}/backlog/task.md` }),
     getTaskStatusFn: () => 'review',
     findMissionAreaFn: () => 'workflow',
     isForgejoReviewEnabledFn: () => false,
-    runVerificationGate: (_area, options) => { gateRoot = options.rootDir; return { status: 0 }; },
-    readReviewStateFn: (_slug, rootDir) => { stateRoot = rootDir; return null; },
+    runVerificationGate: (_area, options) => { assert.ok(options); gateRoot.value = options.rootDir; return { status: 0 }; },
+    readReviewStateFn: (_slug, rootDir) => { stateRoot.value = rootDir; return null; },
     getAcceptanceCriteriaFn: () => [],
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({}),
+    buildAutonomousReviewMatrixFn: () => ({ step: 'review', agents: [], configPath: '', configPresent: false, launchers: {} }),
     log: () => {}, error: () => {}, exit: () => {}
   });
-  assert.equal(gateRoot, missionRoot);
-  assert.equal(stateRoot, missionRoot);
+  assert.equal(gateRoot.value, missionRoot);
+  assert.equal(stateRoot.value, missionRoot);
 });
 
 // submitReviewRound - test different outcomes
@@ -212,23 +215,23 @@ test('submitReviewRound blocks approve when a pre-review gate fails', async () =
     );
     let exited = 0;
     let disp = null;
-    let transitioned = null;
-    const state = { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl', transitionTo: () => {} };
+    let transitioned: { value: { slug: string; status: string; } | null } = { value: null };
+    const state = new ReviewState(mockSlug, { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl' });
     await submitReviewRound(mockSlug, 'approve', 'msg', {
       worktree: checkout,
       isForgejoReviewEnabledFn: () => true,
       readReviewStateFn: () => state,
-      writeReviewStateFn: (s, st) => { disp = st.disposition; },
-      transitionTaskFn: (slug, status) => { transitioned = { slug, status }; return true; },
+      writeReviewStateFn: reviewStateWriterFixture((s, st) => { disp = st.disposition; }),
+      transitionTaskFn: async (slug, status) => { transitioned.value = { slug, status }; return true; },
       readTokenFn: () => 'token',
-      postReviewFn: () => ({ ok: true }),
+      postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
       log: () => {},
       error: () => {},
       exit: () => { exited = 1; },
     });
     assert.equal(exited, 1, 'approve exits non-zero when the pre-review gate fails');
     assert.equal(disp, null, 'no approved disposition is recorded on a blocked gate');
-    assert.equal(transitioned, null, 'backlog task is not promoted to approved');
+    assert.equal(transitioned.value, null, 'backlog task is not promoted to approved');
   } finally {
     fs.rmSync(checkout, { recursive: true, force: true });
   }
@@ -243,21 +246,21 @@ test('submitReviewRound permits approve when the pre-review gate passes', async 
       JSON.stringify({ adapters: { gates: { preReview: [{ key: 'smoke', command: 'true', order: 0 }] } } }),
     );
     let disp = null;
-    let transitioned = null;
-    const state = { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl', transitionTo: () => {} };
+    let transitioned: { value: { slug: string; status: string; } | null } = { value: null };
+    const state = new ReviewState(mockSlug, { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl' });
     await submitReviewRound(mockSlug, 'approve', 'msg', {
       worktree: checkout,
       isForgejoReviewEnabledFn: () => true,
       readReviewStateFn: () => state,
-      writeReviewStateFn: (s, st) => { disp = st.disposition; },
-      transitionTaskFn: (slug, status) => { transitioned = { slug, status }; return true; },
+      writeReviewStateFn: reviewStateWriterFixture((s, st) => { disp = st.disposition; }),
+      transitionTaskFn: async (slug, status) => { transitioned.value = { slug, status }; return true; },
       readTokenFn: () => 'token',
-      postReviewFn: () => ({ ok: true }),
+      postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
       log: () => {},
       error: () => {},
     });
     assert.equal(disp, 'APPROVED', 'a passing pre-review gate permits the approve');
-    assert.deepEqual(transitioned, { slug: mockSlug, status: 'approved' });
+    assert.deepEqual(transitioned.value, { slug: mockSlug, status: 'approved' });
   } finally {
     fs.rmSync(checkout, { recursive: true, force: true });
   }
@@ -265,52 +268,52 @@ test('submitReviewRound permits approve when the pre-review gate passes', async 
 
 test('submitReviewRound handles approve for forgejo', async () => {
   let disp = null;
-  let transitioned = null;
-  const state = { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl', transitionTo: () => {} };
+  let transitioned: { value: { slug: string; status: string; } | null } = { value: null };
+  const state = new ReviewState(mockSlug, { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl' });
   await submitReviewRound(mockSlug, 'approve', 'msg', {
     worktree: mockWorktree,
     isForgejoReviewEnabledFn: () => true,
     readReviewStateFn: () => state,
-    writeReviewStateFn: (s, st) => { disp = st.disposition; },
-    transitionTaskFn: (slug, status) => { transitioned = { slug, status }; return true; },
+    writeReviewStateFn: reviewStateWriterFixture((s, st) => { disp = st.disposition; }),
+    transitionTaskFn: async (slug, status) => { transitioned.value = { slug, status }; return true; },
     readTokenFn: () => 'token',
-    postReviewFn: () => ({ ok: true }),
+    postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
     log: () => {},
     error: () => {}
   });
   assert.equal(disp, 'APPROVED');
-  assert.deepEqual(transitioned, { slug: mockSlug, status: 'approved' });
+  assert.deepEqual(transitioned.value, { slug: mockSlug, status: 'approved' });
 });
 
 test('submitReviewRound handles request-changes for forgejo', async () => {
   let disp = null;
-  let transitioned = null;
-  const state = { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl', transitionTo: () => {} };
+  let transitioned: { value: { slug: string; status: string; } | null } = { value: null };
+  const state = new ReviewState(mockSlug, { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl' });
   await submitReviewRound(mockSlug, 'request-changes', 'msg', {
     worktree: mockWorktree,
     isForgejoReviewEnabledFn: () => true,
     readReviewStateFn: () => state,
-    writeReviewStateFn: (s, st) => { disp = st.disposition; },
-    transitionTaskFn: (slug, status) => { transitioned = { slug, status }; return true; },
+    writeReviewStateFn: reviewStateWriterFixture((s, st) => { disp = st.disposition; }),
+    transitionTaskFn: async (slug, status) => { transitioned.value = { slug, status }; return true; },
     readTokenFn: () => 'token',
-    postReviewFn: () => ({ ok: true }),
+    postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
     log: () => {},
     error: () => {}
   });
   assert.equal(disp, 'REQUEST_CHANGES');
-  assert.deepEqual(transitioned, { slug: mockSlug, status: 'review' });
+  assert.deepEqual(transitioned.value, { slug: mockSlug, status: 'review' });
 });
 
 test('submitReviewRound handles provider=none', async () => {
   let disp = null;
   let transitioned = false;
-  const state = { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl', transitionTo: () => {} };
+  const state = new ReviewState(mockSlug, { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl' });
   await submitReviewRound(mockSlug, 'approve', 'msg', {
     worktree: mockWorktree,
     isForgejoReviewEnabledFn: () => false,
     readReviewStateFn: () => state,
-    writeReviewStateFn: (s, st) => { disp = st.disposition; },
-    transitionTaskFn: () => { transitioned = true; return true; },
+    writeReviewStateFn: reviewStateWriterFixture((s, st) => { disp = st.disposition; }),
+    transitionTaskFn: async () => { transitioned = true; return true; },
     log: () => {},
     error: () => {}
   });
@@ -319,19 +322,19 @@ test('submitReviewRound handles provider=none', async () => {
 });
 
 test('submitReviewRound creates state when none exists', async () => {
-  let newState = null;
+  let newState: { value: Record<string, unknown> | import("../../../src/adapters/review/review-state.js").ReviewState | import("../../../src/application/ports/review-persistence.js").ReviewStateData | null } = { value: null };
   await submitReviewRound(mockSlug, 'approve', 'msg', {
     worktree: mockWorktree,
     isForgejoReviewEnabledFn: () => false,
     readReviewStateFn: () => null,
-    writeReviewStateFn: (s, st) => { newState = st; },
-    transitionTaskFn: () => true,
+    writeReviewStateFn: reviewStateWriterFixture((s, st) => { newState.value = st; }),
+    transitionTaskFn: async () => true,
     log: () => {},
     error: () => {}
   });
-  assert.ok(newState);
-  assert.equal(newState.disposition, 'APPROVED');
-  assert.equal(newState.phase, 'approved');
+  assert.ok(newState.value);
+  assert.equal(newState.value.disposition, 'APPROVED');
+  assert.equal(newState.value.phase, 'approved');
 });
 
 test('submitReviewRound does not exit when reviewer is the PR author (self-author skip)', async () => {
@@ -341,23 +344,23 @@ test('submitReviewRound does not exit when reviewer is the PR author (self-autho
   let exited = false;
   let postCalled = false;
   let recordedDisposition = null;
-  let recordedVerdict = null;
-  const warnings = [];
+  let recordedVerdict: { value: string | undefined | null } = { value: null };
+  const warnings: string[] = [];
   // Force forgejoUser to resolve from state.reviewer (= 'custom') regardless of
   // the ambient FORGEJO_USER env so the reviewer==author case is exercised.
   const prevEnv = process.env.FORGEJO_USER;
   delete process.env.FORGEJO_USER;
   try {
-    const state = { round: 1, phase: 'reviewing', reviewer: 'custom', implementer: 'custom', transitionTo: () => {} };
+    const state = new ReviewState(mockSlug, { round: 1, phase: 'reviewing', reviewer: 'custom', implementer: 'custom' });
     await submitReviewRound(mockSlug, 'approve', 'msg', {
       worktree: mockWorktree,
       isForgejoReviewEnabledFn: () => true,
       readReviewStateFn: () => state,
-      writeReviewStateFn: (s, st) => { recordedDisposition = st.disposition; },
-      createEventFn: (slug, type, params) => { recordedVerdict = params.verdict; return { ok: true, path: '/mock' }; },
+      writeReviewStateFn: reviewStateWriterFixture((s, st) => { recordedDisposition = st.disposition; }),
+      createEventFn: async (slug, type, params) => { recordedVerdict.value = params.verdict; return { ok: true as const, path: '/mock' }; },
       readTokenFn: () => 'token',
       getPrAuthorFn: () => 'custom', // reviewer == PR author
-      postReviewFn: () => { postCalled = true; return { ok: true }; },
+      postReviewFn: () => { postCalled = true; return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
       log: (msg) => { if (/WARN/.test(msg)) warnings.push(msg); },
       error: () => {},
       exit: () => { exited = true; }
@@ -369,7 +372,7 @@ test('submitReviewRound does not exit when reviewer is the PR author (self-autho
   assert.equal(exited, false, 'self-author skip must NOT exit(1)');
   assert.equal(postCalled, false, 'must NOT POST a self-approval to Forgejo');
   assert.equal(recordedDisposition, 'APPROVED', 'verdict recorded to local review-state');
-  assert.equal(recordedVerdict, 'approve', 'reviewer_outcome event recorded locally');
+  assert.equal(recordedVerdict.value, 'approve', 'reviewer_outcome event recorded locally');
   assert.ok(warnings.some(w => /self-approval POST skipped|different agent or a human/.test(w)), 'must warn that a different agent/human posts the formal approval');
 });
 
@@ -378,11 +381,11 @@ test('submitReviewRound exits(1) on a genuine review failure (non-author path)',
   await submitReviewRound(mockSlug, 'approve', 'msg', {
     worktree: mockWorktree,
     isForgejoReviewEnabledFn: () => true,
-    readReviewStateFn: () => ({ round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl', transitionTo: () => {} }),
-    writeReviewStateFn: () => {},
+    readReviewStateFn: () => new ReviewState(mockSlug, { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl' }),
+    writeReviewStateFn: reviewStateWriterFixture(() => {}),
     readTokenFn: () => 'token',
     getPrAuthorFn: () => 'someone-else',
-    postReviewFn: () => ({ ok: false, status: 500, data: { message: 'boom' } }),
+    postReviewFn: () => ({ statusCode: null, stderr: null, error: null,  ok: false as const, status: 500, data: { message: 'boom' } }),
     log: () => {},
     error: () => {},
     exit: () => { exited = true; }
@@ -398,7 +401,7 @@ test('pushRound exits when no forgejo identity can be resolved', async () => {
   try {
     await pushRound(mockSlug, {
       readReviewStateFn: () => null,
-      resolveTaskFileFn: () => ({ ok: false }),
+      resolveTaskFileFn: () => ({ matches: [], reason: 'missing' as const,  ok: false as const }),
       isForgejoReviewEnabledFn: () => true,
       resolveForgejoUserFn: () => null,
       readTokenFn: () => 'token',
@@ -431,11 +434,12 @@ test('pushRound succeeds with valid user and token', async () => {
   await pushRound(mockSlug, {
     readReviewStateFn: () => ({ implementer: 'user' }),
     readTokenFn: () => 'token',
-    transitionTaskFn: () => { transitioned = true; return true; },
+    transitionTaskFn: async () => { transitioned = true; return true; },
     createPrFn: (_branch, _user, _token, opts) => {
       created = true;
+      assert.ok(opts != null);
       assert.equal(opts.forceWithLease, true);
-      return { ok: true };
+      return { ok: true as const };
     },
     log: () => {},
     error: () => {}
@@ -451,8 +455,9 @@ test('pushRound bootstraps a missing review repo and retries push', async () => 
   await pushRound(mockSlug, {
     readReviewStateFn: () => ({ implementer: 'magnus' }),
     readTokenFn: () => 'token',
-    transitionTaskFn: () => { transitioned = true; return true; },
+    transitionTaskFn: async () => { transitioned = true; return true; },
     createPrFn: (_branch, _user, _token, opts) => {
+      assert.ok(opts != null);
       assert.equal(opts.forceWithLease, true);
       created += 1;
       return created === 1
@@ -461,9 +466,9 @@ test('pushRound bootstraps a missing review repo and retries push', async () => 
     },
     bootstrapReviewSurfaceFn: async () => {
       bootstrapped = true;
-      return { ok: true };
+      return { ok: true as const };
     },
-    resolveReviewAdapterFn: () => ({ baseUrl: 'http://localhost:3300', repo: 'magnus/parallix', remote: 'review' }),
+    resolveReviewAdapterFn: () => ({ provider: 'forgejo', baseUrl: 'http://localhost:3300', repo: 'magnus/parallix', remote: 'review' }),
     log: () => {},
     error: () => {},
     exit: () => {}
@@ -479,8 +484,7 @@ test('showReviewStatus shows state', async () => {
   const state = { round: 5, phase: 'reviewing', reviewer: 'rev', implementer: 'impl', startedAt: '2024-01-01' };
   await showReviewStatus(mockSlug, {
     readReviewStateFn: () => state,
-    log: (msg) => { if (msg.includes('Round:')) logged = true; },
-    error: () => {}
+    log: (msg) => { if (msg.includes('Round:')) logged = true; }
   });
   assert.equal(logged, true);
 });
@@ -489,8 +493,7 @@ test('showReviewStatus handles missing state', async () => {
   let logged = false;
   await showReviewStatus(mockSlug, {
     readReviewStateFn: () => null,
-    log: (msg) => { if (msg.includes('No persisted')) logged = true; },
-    error: () => {}
+    log: (msg) => { if (msg.includes('No persisted')) logged = true; }
   });
   assert.equal(logged, true);
 });
@@ -500,8 +503,7 @@ test('showReviewStatus shows disposition', async () => {
   const state = { round: 1, phase: 'fixing', reviewer: 'rev', implementer: 'impl', startedAt: '2024-01-01', disposition: 'REQUEST_CHANGES' };
   await showReviewStatus(mockSlug, {
     readReviewStateFn: () => state,
-    log: (msg) => { if (msg.includes('Disposition:')) logged = true; },
-    error: () => {}
+    log: (msg) => { if (msg.includes('Disposition:')) logged = true; }
   });
   assert.equal(logged, true);
 });
@@ -513,20 +515,20 @@ test('showReviewStatus shows disposition', async () => {
 // Test verifyReview PR check with implementation phase (active task, no PR)
 test('verifyReview warns (not fails) when task is active and no PR exists', async () => {
   let exited = false;
-  const logs = [];
+  const logs: string[] = [];
   const warnings = [];
   const failures = [];
 
   await verifyReview(mockSlug, true, {
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => mockBranch,
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/mock/task.md' }),
+    resolveTaskFileFn: () => ({ matches: ['/mock/task.md'],  ok: true as const, taskFile: '/mock/task.md' }),
     getTaskStatusFn: () => 'active',
     isForgejoReviewEnabledFn: () => true,
-    getPrStatusFn: () => ({ exists: false, raw: 'no PR found' }),
+    getPrStatusFn: () => ({ exists: false as const, raw: 'no PR found' }),
     getAcceptanceCriteriaFn: () => [],
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({}),
+    buildAutonomousReviewMatrixFn: () => ({ step: 'review', agents: [], configPath: '', configPresent: false, launchers: {} }),
     readReviewStateFn: () => null,
     findMissionAreaFn: () => 'workflow',
     cwdFn: () => mockWorktree,
@@ -546,18 +548,18 @@ test('verifyReview warns (not fails) when task is active and no PR exists', asyn
 // Test verifyReview PR check with post-implementation phase (review task, no PR)
 test('verifyReview fails when task is review and no PR exists', async () => {
   let exited = false;
-  const logs = [];
+  const logs: string[] = [];
 
   await verifyReview(mockSlug, true, {
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => mockBranch,
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/mock/task.md' }),
+    resolveTaskFileFn: () => ({ matches: ['/mock/task.md'],  ok: true as const, taskFile: '/mock/task.md' }),
     getTaskStatusFn: () => 'review',
     isForgejoReviewEnabledFn: () => true,
-    getPrStatusFn: () => ({ exists: false, raw: 'no PR found' }),
+    getPrStatusFn: () => ({ exists: false as const, raw: 'no PR found' }),
     getAcceptanceCriteriaFn: () => [],
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({}),
+    buildAutonomousReviewMatrixFn: () => ({ step: 'review', agents: [], configPath: '', configPresent: false, launchers: {} }),
     readReviewStateFn: () => null,
     findMissionAreaFn: () => 'workflow',
     cwdFn: () => mockWorktree,
@@ -575,18 +577,18 @@ test('verifyReview fails when task is review and no PR exists', async () => {
 // Test verifyReview PR check with approved task and no PR
 test('verifyReview fails when task is approved and no PR exists', async () => {
   let exited = false;
-  const logs = [];
+  const logs: string[] = [];
 
   await verifyReview(mockSlug, true, {
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => mockBranch,
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/mock/task.md' }),
+    resolveTaskFileFn: () => ({ matches: ['/mock/task.md'],  ok: true as const, taskFile: '/mock/task.md' }),
     getTaskStatusFn: () => 'approved',
     isForgejoReviewEnabledFn: () => true,
-    getPrStatusFn: () => ({ exists: false, raw: 'no PR found' }),
+    getPrStatusFn: () => ({ exists: false as const, raw: 'no PR found' }),
     getAcceptanceCriteriaFn: () => [],
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({}),
+    buildAutonomousReviewMatrixFn: () => ({ step: 'review', agents: [], configPath: '', configPresent: false, launchers: {} }),
     readReviewStateFn: () => null,
     findMissionAreaFn: () => 'workflow',
     cwdFn: () => mockWorktree,
@@ -603,18 +605,18 @@ test('verifyReview fails when task is approved and no PR exists', async () => {
 // Test verifyReview PR check with ambiguous task status and no PR
 test('verifyReview fails when task resolution fails and no PR exists', async () => {
   let exited = false;
-  const logs = [];
+  const logs: string[] = [];
 
   await verifyReview(mockSlug, true, {
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => mockBranch,
-    resolveTaskFileFn: () => ({ ok: false }),
+    resolveTaskFileFn: () => ({ matches: [], reason: 'missing' as const,  ok: false as const }),
     getTaskStatusFn: () => 'backlog',
     isForgejoReviewEnabledFn: () => true,
-    getPrStatusFn: () => ({ exists: false, raw: 'no PR found' }),
+    getPrStatusFn: () => ({ exists: false as const, raw: 'no PR found' }),
     getAcceptanceCriteriaFn: () => [],
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({}),
+    buildAutonomousReviewMatrixFn: () => ({ step: 'review', agents: [], configPath: '', configPresent: false, launchers: {} }),
     readReviewStateFn: () => null,
     findMissionAreaFn: () => 'workflow',
     cwdFn: () => mockWorktree,
@@ -632,19 +634,19 @@ test('verifyReview fails when task resolution fails and no PR exists', async () 
 // Uses injected toVirtualFn to avoid mutating tracked config/state-map.json
 test('verifyReview warns (not fails) when task status maps to virtual active via state-map',  async () => {
   let exited = false;
-  const logs = [];
+  const logs: string[] = [];
 
   await verifyReview(mockSlug, true, {
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => mockBranch,
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/mock/task.md' }),
+    resolveTaskFileFn: () => ({ matches: ['/mock/task.md'],  ok: true as const, taskFile: '/mock/task.md' }),
     getTaskStatusFn: () => 'in-progress',
     toVirtualFn: (s) => s === 'in-progress' ? 'active' : s,
     isForgejoReviewEnabledFn: () => true,
-    getPrStatusFn: () => ({ exists: false, raw: 'no PR found' }),
+    getPrStatusFn: () => ({ exists: false as const, raw: 'no PR found' }),
     getAcceptanceCriteriaFn: () => [],
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({}),
+    buildAutonomousReviewMatrixFn: () => ({ step: 'review', agents: [], configPath: '', configPresent: false, launchers: {} }),
     readReviewStateFn: () => null,
     findMissionAreaFn: () => 'workflow',
     cwdFn: () => mockWorktree,

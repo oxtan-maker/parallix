@@ -1,3 +1,4 @@
+const reactGlobal: typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean } = globalThis;
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window, HTMLButtonElement as DomButton, HTMLElement as DomHtmlElement } from 'happy-dom';
@@ -13,7 +14,7 @@ import { missionId } from '../../../../src/domain/mission.js';
 const action = { command: 'handoff', enabled: true, reason: null, targetLane: 'review' } as const;
 const cancel = { command: 'cancel', enabled: true, reason: null, targetLane: null, label: 'cancel ✕' } as const;
 const request = { missionId: 'task-2436-interaction', kind: 'handoff:record', missionStatusAtRequest: 'active' };
-const commandResult = (status = 'completed', error: { readonly kind: string; readonly message: string } | null = null) => ({ kind: 'command-result', transportVersion: 2, status, value: null, error, durableEvidence: [] });
+const commandResult = (status = 'completed', error: { readonly kind: string; readonly message: string } | null = null) => ({ kind: 'command-result' as const, transportVersion: 2, status, value: null, error, durableEvidence: [] });
 
 function snapshot(cards = [makeCard({ id: missionId('task-2436-interaction'), status: 'active', lane: 'active', commands: [action] })]) {
   return toWebBoardSnapshot(makeProjection({ active: cards }));
@@ -21,9 +22,9 @@ function snapshot(cards = [makeCard({ id: missionId('task-2436-interaction'), st
 
 async function renderBoard(options: { readonly board?: ReturnType<typeof snapshot>; readonly result?: unknown; readonly refresh?: () => Promise<void>; readonly respond?: () => Promise<Response> } = {}) {
   const window = new Window();
-  const previous = { window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch, IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT, requestAnimationFrame: globalThis.requestAnimationFrame };
+  const previous = { window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch, IS_REACT_ACT_ENVIRONMENT: reactGlobal.IS_REACT_ACT_ENVIRONMENT, requestAnimationFrame: globalThis.requestAnimationFrame };
   Object.assign(globalThis, { window, document: window.document });
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  reactGlobal.IS_REACT_ACT_ENVIRONMENT = true;
   globalThis.requestAnimationFrame = (callback) => { callback(0); return 0; };
   const calls: RequestInit[] = [];
   globalThis.fetch = async (_url, init) => {
@@ -32,11 +33,14 @@ async function renderBoard(options: { readonly board?: ReturnType<typeof snapsho
     return new Response(JSON.stringify(options.result ?? commandResult()), { headers: { 'content-type': 'application/json' } });
   };
   const mount = window.document.createElement('div');
+  mount.id = 'react-test-root';
   window.document.body.append(mount);
-  const root = createRoot(mount);
+  const reactMount = document.getElementById(mount.id);
+  assert.ok(reactMount);
+  const root = createRoot(reactMount);
   await act(async () => { root.render(React.createElement(Board, { snapshot: options.board ?? snapshot(), onRefresh: options.refresh ?? (async () => {}) })); });
   return {
-    window, mount, calls, root,
+    window, mount, reactMount, calls, root,
     async rerender(board: ReturnType<typeof snapshot>) {
       await act(async () => { root.render(React.createElement(Board, { snapshot: board, onRefresh: options.refresh ?? (async () => {}) })); });
     },
@@ -90,7 +94,7 @@ test('independent missions dispatch concurrently and retain separate pending sta
   let resolveFirst: ((response: Response) => void) | undefined;
   let resolveSecond: ((response: Response) => void) | undefined;
   let requestNumber = 0;
-  const deferred = () => new Promise<Response>((resolve) => {
+  const deferred: () => Promise<Response> = () => new Promise<Response>((resolve) => {
     requestNumber += 1;
     if (requestNumber === 1) { resolveFirst = resolve; } else { resolveSecond = resolve; }
   });
@@ -333,7 +337,7 @@ test('unmounting a request and completing an older request cannot restore stale 
   let resolveFirst: ((response: Response) => void) | undefined;
   let resolveSecond: ((response: Response) => void) | undefined;
   let ordinal = 0;
-  const deferred = () => new Promise<Response>((resolve) => {
+  const deferred: () => Promise<Response> = () => new Promise<Response>((resolve) => {
     ordinal += 1;
     if (ordinal === 1) { resolveFirst = resolve; } else { resolveSecond = resolve; }
   });
@@ -389,19 +393,19 @@ test('board drag dispatches the projected target action and rejects other target
 test('board focus fallback lands on the selected card after refresh removes the action', async () => {
   const window = new Window();
   const previous = globalThis.document;
-  globalThis.document = window.document as unknown as Document;
+  Object.assign(globalThis, { document: window.document });
   try {
-    const root = window.document.createElement('div');
+    const root = document.createElement('div');
     root.tabIndex = -1;
-    const card = window.document.createElement('article');
+    const card = document.createElement('article');
     card.dataset.boardCard = 'task-2436-interaction';
     card.setAttribute('aria-selected', 'true');
     card.tabIndex = 0;
-    const button = window.document.createElement('button');
+    const button = document.createElement('button');
     root.append(card, button);
-    window.document.body.append(root);
+    document.body.append(root);
     button.remove();
-    restoreActionFocus(button as unknown as HTMLButtonElement, root as unknown as HTMLDivElement);
+    restoreActionFocus(button, root);
     await new Promise<void>((resolve) => queueMicrotask(resolve));
     assert.equal(isSameNode(window.document.activeElement, card), true);
   } finally {
@@ -424,7 +428,8 @@ function createBoard() {
 
 /** The dialog's text fields are uncontrolled, so typing is assigning the DOM value. */
 async function enter(_page: Awaited<ReturnType<typeof renderBoard>>, element: unknown, value: string) {
-  (element as unknown as { value: string }).value = value;
+  assert.ok(element && typeof element === 'object' && 'value' in element);
+  element.value = value;
 }
 
 const opener = (page: Awaited<ReturnType<typeof renderBoard>>) => [...page.mount.querySelectorAll<DomButton>('button')].find((button) => button.textContent?.includes('Create new mission'))!;
@@ -606,7 +611,7 @@ test('Edit saves removals with the read version and refreshes the board (TASK-27
     while (page.mount.querySelector('button[aria-label="Remove criterion 1"]')) { await act(async () => { page.mount.querySelector<DomButton>('button[aria-label="Remove criterion 1"]')!.click(); }); }
     const picker = page.mount.querySelector<DomButton>('button[aria-haspopup="true"]')!;
     await act(async () => { picker.click(); });
-    await act(async () => { const inputs = [...page.mount.querySelectorAll<DomHtmlElement & { checked: boolean }>('fieldset input')]; assert.equal(inputs.length, 1, page.mount.querySelector('fieldset')?.outerHTML); inputs[0].click(); });
+    await act(async () => { const inputs = [...page.mount.querySelectorAll<DomHtmlElement & { checked: boolean }>('fieldset input')]; assert.equal(inputs.length, 1, page.mount.querySelector('fieldset')?.outerHTML ?? ''); inputs[0].click(); });
     await act(async () => { submitButton(page).click(); });
     assert.deepEqual(JSON.parse(String(page.calls[1].body)), { kind: 'mission:edit', missionId: 'task-open-one', expectedVersion: 7, title: 'Revised', description: '', context: '', labels: [], successCriteria: [], successCriterionIds: [], dependencies: [] });
     assert.equal(refreshed, 1); assert.equal(dialogOf(page), null);

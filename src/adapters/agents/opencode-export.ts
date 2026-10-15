@@ -5,17 +5,23 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+interface ExportChild {
+  on(event: string, listener: () => void): unknown;
+  kill(signal: NodeJS.Signals): boolean;
+  stderr: { on(event: string, listener: () => void): unknown } | null;
+}
+
 interface CaptureOpencodeExportOptions {
   configuration?: ParallixConfiguration;
   worktree?: string;
-  env?: Record<string, string>;
+  env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
   maxBytes?: number;
   /** Retain only this invocation's owned capture directory for diagnosis. */
   retainTemp?: boolean;
   /** Injectable temporary root for deterministic tests. */
   tmpDir?: string;
-  spawn?: typeof childProcess.spawn;
+  spawn?: (command: string, args: readonly string[], options: childProcess.SpawnOptions) => ExportChild;
 }
 
 function opencodeCommandCandidates(configuration: ParallixConfiguration) {
@@ -136,7 +142,7 @@ function captureOpencodeExport(sessionId: string, opts: CaptureOpencodeExportOpt
       resolve(value);
     };
 
-    const killChild = (child: childProcess.ChildProcess | undefined) => {
+    const killChild = (child: ExportChild | undefined) => {
       try { if (child) { child.kill('SIGKILL'); } } catch (_) { /* already gone */ }
     };
 

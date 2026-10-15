@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { run } from '../../../src/composition/create-cli.js';
 import '../../fixtures/e2e-lifecycle-fake-agent-preload.js';
 
-function runCommand(command, args, options = {}) {
+function runCommand(command: string, args: readonly string[], options: Omit<childProcess.SpawnSyncOptionsWithStringEncoding, 'encoding'> = {}) {
   assert.notEqual(command, 'codex', 'mocked lifecycle E2E must not launch an agent executable');
   assert.notEqual(command, 'opencode', 'mocked lifecycle E2E must not launch an agent executable');
   const result = childProcess.spawnSync(command, args, {
@@ -27,7 +27,7 @@ function runCommand(command, args, options = {}) {
   return result;
 }
 
-function runGit(cwd, args, options = {}) {
+function runGit(cwd: string, args: readonly string[], options: Omit<childProcess.SpawnSyncOptionsWithStringEncoding, 'encoding'> = {}) {
   const result = runCommand('git', args, { cwd, ...options });
   if (result.status !== 0) {
     throw new Error(`git ${args.join(' ')} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
@@ -35,7 +35,7 @@ function runGit(cwd, args, options = {}) {
   return (result.stdout || '').trim();
 }
 
-function commandDir(command) {
+function commandDir(command: string) {
   const resolved = maybeCommandPath(command);
   if (!resolved) {
     throw new Error(`Could not resolve command on PATH: ${command}`);
@@ -43,7 +43,7 @@ function commandDir(command) {
   return resolved;
 }
 
-function maybeCommandPath(command) {
+function maybeCommandPath(command: string) {
   for (const directory of (process.env.PATH || '').split(path.delimiter)) {
     if (!directory) {continue;}
     const candidate = path.join(directory, command);
@@ -57,7 +57,7 @@ function maybeCommandPath(command) {
   return null;
 }
 
-function writeExecutable(filePath, content) {
+function writeExecutable(filePath: string, content: string|NodeJS.ArrayBufferView<ArrayBufferLike>) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, content, 'utf8');
   fs.chmodSync(filePath, 0o755);
@@ -197,7 +197,7 @@ process.stdout.write('{"sessionID":"ses_stubbed_opencode"}\\n');
 `;
 }
 
-function createTask(repoRoot, slug, title) {
+function createTask(repoRoot: string, slug: string, title: string) {
   const taskPath = path.join(repoRoot, 'backlog', 'tasks', `${slug} - ${title.replace(/\s+/g, '-').toLowerCase()}.md`);
   const taskId = slug.toUpperCase();
   const body = [
@@ -220,11 +220,11 @@ function createTask(repoRoot, slug, title) {
   return taskPath;
 }
 
-function postIntegrateHookMarkerPath(repoRoot) {
+function postIntegrateHookMarkerPath(repoRoot: string) {
   return path.join(repoRoot, 'post-integrate-hook.log');
 }
 
-function writePostIntegrateHookScript(repoRoot) {
+function writePostIntegrateHookScript(repoRoot: string) {
   const scriptPath = path.join(repoRoot, 'scripts', 'e2e-post-integrate-hook.sh');
   const markerPath = postIntegrateHookMarkerPath(repoRoot);
   writeExecutable(scriptPath, [
@@ -236,7 +236,7 @@ function writePostIntegrateHookScript(repoRoot) {
   return scriptPath;
 }
 
-function setupRepository({ slug, title, postIntegrateHook = false, preCommitHook = false }) {
+function setupRepository({ slug, title, postIntegrateHook = false, preCommitHook = false }: { slug: string; title: string; postIntegrateHook?: boolean; preCommitHook?: boolean }) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-e2e-'));
   const repoRoot = path.join(tmpRoot, 'repo');
   const binDir = path.join(repoRoot, 'bin');
@@ -259,17 +259,18 @@ function setupRepository({ slug, title, postIntegrateHook = false, preCommitHook
     fs.symlinkSync(graphifyPath, path.join(binDir, 'graphify'));
   }
 
+  const integrate: { postIntegrateCommand?: string; preCommitCommand?: string } = {};
   const adapters = {
     tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
     agents: { models: { custom: 'stub/custom' } },
     missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
     verification: { command: ':', defaultArea: 'all' },
-    review: { provider: 'none', tmpDir: reviewTmpDir }
+    review: { provider: 'none', tmpDir: reviewTmpDir },
+    integrate
   };
 
   if (postIntegrateHook) {
     const scriptPath = writePostIntegrateHookScript(repoRoot);
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `integrate` absent from its inferred mock shape.
     adapters.integrate = { postIntegrateCommand: `./${path.relative(repoRoot, scriptPath)}` };
   }
 
@@ -277,7 +278,6 @@ function setupRepository({ slug, title, postIntegrateHook = false, preCommitHook
     fs.writeFileSync(path.join(repoRoot, 'version.txt'), '1.0.0\n', 'utf8');
     const scriptPath = path.join(repoRoot, 'scripts', 'e2e-pre-commit-hook.sh');
     writeExecutable(scriptPath, ['#!/usr/bin/env bash', 'set -euo pipefail', 'echo 1.0.1 > version.txt', ''].join('\n'));
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `integrate` absent from its inferred mock shape.
     adapters.integrate = { preCommitCommand: `./${path.relative(repoRoot, scriptPath)}` };
   }
 
@@ -315,7 +315,7 @@ function setupRepository({ slug, title, postIntegrateHook = false, preCommitHook
   };
 }
 
-function workflowEnv(binDir, stateHome, repoRoot) {
+function workflowEnv(binDir: string, stateHome: string, repoRoot: string) {
   return {
     ...process.env,
     FORCE_COLOR: '0',
@@ -327,7 +327,7 @@ function workflowEnv(binDir, stateHome, repoRoot) {
   };
 }
 
-async function runWorkflow(repoRoot, env, args, _timeout = 60000, { allowFailure = false, invokeFromTarget = false } = {}) {
+async function runWorkflow(repoRoot: string, env: NodeJS.ProcessEnv, args: string[], _timeout = 60000, { allowFailure = false, invokeFromTarget = false } = {}) {
   const previousCwd = process.cwd();
   const previous = new Map(Object.entries(process.env));
   const previousStdoutWrite = process.stdout.write;
@@ -343,11 +343,11 @@ async function runWorkflow(repoRoot, env, args, _timeout = 60000, { allowFailure
     process.stdout.write = ((chunk, ...args) => {
       // node --test serializes its worker events as binary writes. Preserve
       // those events while capturing the CLI's text output.
-      if (typeof chunk !== 'string') { return previousStdoutWrite.call(process.stdout, chunk, ...args); }
+      if (typeof chunk !== 'string') { return Reflect.apply(previousStdoutWrite, process.stdout, [chunk, ...args]) as boolean; }
       stdout += chunk; return true;
     }) as typeof process.stdout.write;
     process.stderr.write = ((chunk, ...args) => {
-      if (typeof chunk !== 'string') { return previousStderrWrite.call(process.stderr, chunk, ...args); }
+      if (typeof chunk !== 'string') { return Reflect.apply(previousStderrWrite, process.stderr, [chunk, ...args]) as boolean; }
       stderr += chunk; return true;
     }) as typeof process.stderr.write;
     const status = await run(args, {
@@ -370,7 +370,7 @@ async function runWorkflow(repoRoot, env, args, _timeout = 60000, { allowFailure
   }
 }
 
-function worktreePathFor(repoRoot, slug) {
+function worktreePathFor(repoRoot: string, slug: string) {
   return path.resolve(repoRoot, '..', `${path.basename(repoRoot)}-${slug}`);
 }
 
@@ -378,7 +378,7 @@ function shouldKeepTmp() {
   return process.env.PARALLIX_E2E_KEEP_TMP === '1';
 }
 
-function pauseAfterWorktreeFixture(repo, worktree) {
+function pauseAfterWorktreeFixture(repo: ReturnType<typeof setupRepository>, worktree: string) {
   const readyMarker = process.env.PARALLIX_E2E_WORKTREE_READY_MARKER || '';
   if (!readyMarker) { return; }
   fs.writeFileSync(readyMarker, JSON.stringify({
@@ -400,7 +400,7 @@ function pauseAfterWorktreeFixture(repo, worktree) {
 // is transpiled before it runs, and the transpiler rewrites function bodies
 // (name-preserving `__name(...)` wrappers) into a form that no longer evaluates
 // standalone. It is plain CommonJS with no closure over this module.
-function cleanInterruptedFixtureSource(parentPid, root, repoRoot, worktree, cleanupMarker) {
+function cleanInterruptedFixtureSource(parentPid: number, root: string, repoRoot: string, worktree: string, cleanupMarker: string) {
   return `
     const fs = require('node:fs');
     const childProcess = require('node:child_process');
@@ -428,7 +428,7 @@ function cleanInterruptedFixtureSource(parentPid, root, repoRoot, worktree, clea
   `;
 }
 
-function watchInterruptedFixture(root, repoRoot, worktree) {
+function watchInterruptedFixture(root: string, repoRoot: string, worktree: string) {
   const cleanupMarker = process.env.PARALLIX_E2E_CLEANUP_MARKER || '';
   const watcher = childProcess.spawn(process.execPath, [
     '-e', cleanInterruptedFixtureSource(process.pid, root, repoRoot, worktree, cleanupMarker)
@@ -436,7 +436,7 @@ function watchInterruptedFixture(root, repoRoot, worktree) {
   watcher.unref();
 }
 
-function taskFileIn(rootDir, slug) {
+function taskFileIn(rootDir: string, slug: string) {
   const candidateDirs = [
     path.join(rootDir, 'backlog', 'tasks'),
     path.join(rootDir, 'backlog', 'completed'),
@@ -456,17 +456,17 @@ function taskFileIn(rootDir, slug) {
   return null;
 }
 
-function taskStatus(taskPath) {
+function taskStatus(taskPath: fs.PathOrFileDescriptor) {
   const content = fs.readFileSync(taskPath, 'utf8');
   const match = content.match(/^status:\s*([^\r\n]+)/m);
   return match ? match[1].trim().toLowerCase() : null;
 }
 
-function missionPath(rootDir, slug) {
+function missionPath(rootDir: string, slug: string) {
   return path.join(rootDir, 'missions', slug, 'MISSION.md');
 }
 
-function missionDir(rootDir, slug) {
+function missionDir(rootDir: string, slug: string) {
   return path.join(rootDir, 'missions', slug);
 }
 
@@ -476,13 +476,13 @@ function missionDir(rootDir, slug) {
 // `px review <slug> --status`, which reads the same authority the loop writes.
 // A mission whose loop never persisted its state therefore still fails here,
 // exactly as the missing-file read used to.
-async function reviewState(rootDir, slug, env) {
+async function reviewState(rootDir: string, slug: string, env: { FORCE_COLOR: string; FORGEJO_USER: string; PRIMARY_WORKTREE: string; PARALLIX_HOME: string; PARALLIX_NO_BUBBLEWRAP: string; PATH: string; }) {
   const result = await runWorkflow(rootDir, env, ['review', slug, '--status']);
   const output = `${result.stdout}${result.stderr}`.replace(/\x1B\[[0-9;]*m/g, '');
   if (/No persisted review state found/.test(output)) {
     throw new Error(`px review ${slug} --status found no persisted review state\n${output}`);
   }
-  const field = label => {
+  const field = (label: string) => {
     const match = output.match(new RegExp(`^\\s*${label}:\\s*(.+)$`, 'm'));
     return match ? match[1].trim() : null;
   };
@@ -501,13 +501,13 @@ async function reviewState(rootDir, slug, env) {
   };
 }
 
-function checkpointFiles(rootDir, slug) {
+function checkpointFiles(rootDir: string, slug: string) {
   return fs.readdirSync(missionDir(rootDir, slug))
     .filter(name => /^CP-\d+\.md$/.test(name))
     .sort();
 }
 
-function countTaskIds(rootDir, id) {
+function countTaskIds(rootDir: string, id: string) {
   let count = 0;
   for (const dir of ['tasks', 'completed', 'archive']) {
     const fullDir = path.join(rootDir, 'backlog', dir);
@@ -524,14 +524,26 @@ function countTaskIds(rootDir, id) {
   return count;
 }
 
+interface LifecycleSummary {
+  slug: string; repoRoot: string; worktree: string;
+  draft: { taskStatus: string | null; missionId: string; missionHasBaseBranch: boolean } | null;
+  active: { taskStatus: string | null; checkpointFiles: string[]; milestoneFiles: string[]; reviewState: { phase: string; disposition: string | null }; taskIdCount: number } | null;
+  integrate: {
+    gateFailed?: boolean; exitCode?: number; worktreeStillExists?: boolean;
+    rootTaskStatus?: string | null; worktreeExistsAfter?: boolean;
+    closeout?: { mission: Record<string, import('node:sqlite').SQLOutputValue> | undefined; measurements: Record<string, import('node:sqlite').SQLOutputValue> | undefined };
+    mainHeadBefore?: string; mainHeadAfter?: string; featureHeadAfter?: string;
+    postIntegrateHookLines?: string[]; landedSubject?: string; landedBody?: string; landedFiles?: string[]; versionAtMain?: string;
+  } | null;
+}
+
 async function runScenario({ launchFromFeatureBranch = false, integrate = true, postIntegrateHook = false, preCommitHook = false, failIntegrationGate = false }) {
   const slug = launchFromFeatureBranch ? 'task-2001' : 'task-2002';
   const title = launchFromFeatureBranch ? 'Feature Branch Lifecycle' : 'Primary Branch Lifecycle';
   const repo = setupRepository({ slug, title, postIntegrateHook, preCommitHook });
   const env = workflowEnv(repo.binDir, repo.stateHome, repo.repoRoot);
   const worktree = worktreePathFor(repo.repoRoot, slug);
-  /** @type {any} */
-  const summary = {
+  const summary: LifecycleSummary = {
     slug,
     repoRoot: repo.repoRoot,
     worktree,
@@ -564,6 +576,7 @@ async function runScenario({ launchFromFeatureBranch = false, integrate = true, 
     assert.equal(recordedBase, launchFromFeatureBranch ? 'feature/e2e-base' : 'main');
     const missionId = /^id:\s*([^\r\n]+)/m.exec(fs.readFileSync(worktreeTask, 'utf8'))?.[1]?.trim();
 
+    assert.ok(missionId, 'draft must retain a Backlog task identity');
     summary.draft = {
       taskStatus: taskStatus(worktreeTask),
       missionId,
@@ -677,7 +690,7 @@ async function runScenario({ launchFromFeatureBranch = false, integrate = true, 
  * sibling of the base repo named `<repo>-<slug>` (the configured worktree
  * pattern). The adhoc identity is the non-`task-` mission dir.
  */
-function discoverAdhocSlug(repoRoot) {
+function discoverAdhocSlug(repoRoot: string) {
   const parent = path.dirname(repoRoot);
   const base = path.basename(repoRoot);
   if (!fs.existsSync(parent)) {return null;}
@@ -699,7 +712,7 @@ function discoverAdhocSlug(repoRoot) {
  * free-text prompt must still materialize a DB-owned `px-<NNNN>`
  * mission and reach the lifecycle.
  */
-function setupAdhocRepository({ title }) {
+function setupAdhocRepository({ title }: { title: string }) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-e2e-'));
   const repoRoot = path.join(tmpRoot, 'repo');
   const binDir = path.join(repoRoot, 'bin');
@@ -720,12 +733,14 @@ function setupAdhocRepository({ title }) {
     fs.symlinkSync(graphifyPath, path.join(binDir, 'graphify'));
   }
 
+  const integrate: { postIntegrateCommand?: string; preCommitCommand?: string } = {};
   const adapters = {
     tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
     agents: { models: { custom: 'stub/custom' } },
     missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
     verification: { command: ':', defaultArea: 'all' },
     review: { provider: 'none', tmpDir: reviewTmpDir },
+    integrate,
   };
 
   fs.writeFileSync(path.join(repoRoot, 'workflow.config.json'), JSON.stringify({
@@ -761,7 +776,7 @@ function setupAdhocRepository({ title }) {
  * Read-only: the authority for review-loop state is the operator database, so
  * status must resolve the DB-owned adhoc identity without a Backlog task file.
  */
-async function statusOutputFor(slug, rootDir, env) {
+async function statusOutputFor(slug: string, rootDir: string, env: { FORCE_COLOR: string; FORGEJO_USER: string; PRIMARY_WORKTREE: string; PARALLIX_HOME: string; PARALLIX_NO_BUBBLEWRAP: string; PATH: string; }) {
   const result = await runWorkflow(rootDir, env, ['status', slug]);
   return `${result.stdout}${result.stderr}`.replace(/\x1B\[[0-9;]*m/g, '');
 }
@@ -771,7 +786,7 @@ async function statusOutputFor(slug, rootDir, env) {
  * identity under the worktree's `backlog/tasks/` dir. Returns the first task
  * file found, or null when the mirror is absent.
  */
-function findMirroredTaskFile(worktree, slug) {
+function findMirroredTaskFile(worktree: string, slug: string) {
   const tasksDir = path.join(worktree, 'backlog', 'tasks');
   if (!fs.existsSync(tasksDir)) {return null;}
   const entries = fs.readdirSync(tasksDir).filter(f => f.endsWith('.md'));
@@ -958,42 +973,69 @@ if (process.argv[2] === '--scenario') {
 
 test('feature-branch lifecycle drafts from the recorded base and integrates back into that feature branch', async () => {
   const summary = await runScenario({ launchFromFeatureBranch: true, integrate: true });
+  assert.ok(summary.draft != null);
   assert.equal(summary.draft.taskStatus, 'refined');
+  assert.ok(summary.draft != null);
   assert.equal(summary.draft.missionHasBaseBranch, true);
+  assert.ok(summary.active != null);
   assert.equal(summary.active.taskStatus, 'ready-for-integration');
+  assert.ok(summary.active != null);
   assert.equal(summary.active.reviewState.phase, 'approved');
+  assert.ok(summary.active != null);
   assert.equal(summary.active.reviewState.disposition, 'APPROVED');
+  assert.ok(summary.active != null);
   assert.deepEqual(summary.active.checkpointFiles, []);
+  assert.ok(summary.integrate != null);
   assert.equal(summary.integrate.rootTaskStatus, 'done');
+  assert.ok(summary.integrate != null);
   assert.equal(summary.integrate.worktreeExistsAfter, false);
+  assert.ok(summary.integrate != null);
   assert.equal(summary.integrate.mainHeadAfter, summary.integrate.mainHeadBefore);
+  assert.ok(summary.integrate != null);
   assert.notEqual(summary.integrate.featureHeadAfter, summary.integrate.mainHeadBefore);
 });
 
 test('primary-branch lifecycle integrates cleanly to main and marks the task done', async () => {
   const summary = await runScenario({ launchFromFeatureBranch: false, integrate: true });
+  assert.ok(summary.draft != null);
   assert.equal(summary.draft.taskStatus, 'refined');
+  assert.ok(summary.draft != null);
   assert.equal(summary.draft.missionHasBaseBranch, false);
+  assert.ok(summary.active != null);
   assert.equal(summary.active.taskStatus, 'ready-for-integration');
+  assert.ok(summary.active != null);
   assert.deepEqual(summary.active.checkpointFiles, []);
+  assert.ok(summary.integrate != null);
   assert.equal(summary.integrate.rootTaskStatus, 'done');
+  assert.ok(summary.integrate != null);
   assert.equal(summary.integrate.worktreeExistsAfter, false);
+  assert.ok(summary.integrate != null);
   assert.notEqual(summary.integrate.mainHeadAfter, summary.integrate.mainHeadBefore);
 });
 
 test('closeout records integration stats and keeps the completed task record', async () => {
   const summary = await runScenario({});
+  assert.ok(summary.integrate != null);
   assert.equal(summary.integrate.rootTaskStatus, 'done');
+  assert.ok(summary.integrate != null);
+  assert.ok(summary.integrate.closeout);
   assert.equal(summary.integrate.closeout.mission?.status, 'done');
+  assert.ok(summary.integrate != null);
   assert.ok(summary.integrate.closeout.mission?.closed_at);
+  assert.ok(summary.integrate != null);
   assert.equal(summary.integrate.closeout.measurements?.total, 1);
+  assert.ok(summary.integrate != null);
   assert.equal(summary.integrate.worktreeExistsAfter, false);
 });
 
 test('configured post-integrate hook runs exactly once with slug/base-worktree/base-branch/variant env vars (SC2/SC3)', async () => {
   const summary = await runScenario({ launchFromFeatureBranch: false, integrate: true, postIntegrateHook: true });
+  assert.ok(summary.integrate != null);
   assert.equal(summary.integrate.rootTaskStatus, 'done');
+  assert.ok(summary.integrate != null);
+  assert.ok(summary.integrate.postIntegrateHookLines);
   assert.equal(summary.integrate.postIntegrateHookLines.length, 1, 'hook must run exactly once for a successful integrate');
+  assert.ok(summary.integrate != null);
   assert.match(
     summary.integrate.postIntegrateHookLines[0],
     /^slug=task-2002 base_worktree=\S+ base_branch=main variant=variant-b$/
@@ -1002,36 +1044,53 @@ test('configured post-integrate hook runs exactly once with slug/base-worktree/b
 
 test('pre-commit hook changes land inside the mission squash commit, not a follow-up commit (task-2510)', async () => {
   const summary = await runScenario({ launchFromFeatureBranch: false, integrate: true, preCommitHook: true });
+  assert.ok(summary.integrate != null);
   assert.equal(summary.integrate.rootTaskStatus, 'done');
   // TASK-2595: the landed subject is the recorded mission title, and the body
   // records the mission task reference — main history reads like the mission.
+  assert.ok(summary.integrate != null);
   assert.equal(summary.integrate.landedSubject, 'Primary Branch Lifecycle', 'main tip subject must be the recorded mission title');
+  assert.ok(summary.integrate != null);
+  assert.ok(summary.integrate.landedBody);
   assert.ok(
     summary.integrate.landedBody.split('\n').includes('Task: task-2002'),
     `main tip body must record the mission task reference; body was ${JSON.stringify(summary.integrate.landedBody)}`,
   );
+  assert.ok(summary.integrate != null);
+  assert.ok(summary.integrate.landedFiles);
   assert.ok(summary.integrate.landedFiles.includes('version.txt'), `landed commit must carry the hook change: ${summary.integrate.landedFiles.join(', ')}`);
+  assert.ok(summary.integrate != null);
   assert.equal(summary.integrate.versionAtMain, '1.0.1');
 });
 
 test('a failed integration gate aborts before the post-integrate hook can run (SC4)', async () => {
   const summary = await runScenario({ launchFromFeatureBranch: false, integrate: true, postIntegrateHook: true, failIntegrationGate: true });
+  assert.ok(summary.integrate != null);
   assert.equal(summary.integrate.gateFailed, true);
+  assert.ok(summary.integrate != null);
   assert.notEqual(summary.integrate.exitCode, 0);
+  assert.ok(summary.integrate != null);
+  assert.ok(summary.integrate.postIntegrateHookLines);
   assert.deepEqual(summary.integrate.postIntegrateHookLines, []);
 });
 
 test('a repo with no post-integrate hook configured runs px integrate with unchanged behavior (SC1)', async () => {
   const summary = await runScenario({ launchFromFeatureBranch: false, integrate: true, postIntegrateHook: false });
+  assert.ok(summary.integrate != null);
   assert.equal(summary.integrate.rootTaskStatus, 'done');
+  assert.ok(summary.integrate != null);
   assert.equal(summary.integrate.postIntegrateHookLines, undefined);
 });
 
 test('artifact-focused run keeps the typed contract file-free while preserving the Backlog mirror', async () => {
   const summary = await runScenario({ launchFromFeatureBranch: true, integrate: false });
+  assert.ok(summary.draft != null);
   assert.ok(summary.draft.missionId, 'Backlog task should retain its id');
+  assert.ok(summary.active != null);
   assert.equal(summary.active.taskIdCount, 1, 'mission id should map to exactly one backlog task in the test repo');
+  assert.ok(summary.active != null);
   assert.deepEqual(summary.active.milestoneFiles, ['milestone-1.md']);
+  assert.ok(summary.active != null);
   assert.deepEqual(summary.active.checkpointFiles, []);
 });
 

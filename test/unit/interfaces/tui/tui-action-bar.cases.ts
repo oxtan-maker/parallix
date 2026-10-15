@@ -5,7 +5,7 @@ import React from 'react';
 import { renderToString } from 'ink';
 import { ActionBar, BOARD_ACTION_KINDS } from '../../../../src/interfaces/tui/action-bar.js';
 
-const controller = { canExecute(kind: string) { return kind === 'active:execute'; }, async dispatch() { return { status: 'completed' as const, durableEvidence: [] }; } };
+const controller = { canExecute(kind: string) { return kind === 'active:execute'; }, async dispatch() { return { status: 'completed' as const, durableEvidence: [] }; } } satisfies import("../../../../src/application/controller/board-command.js").BoardCommandDispatcher;
 
 test('action bar renders the declared command kinds with only active:execute enabled', async () => {
   const output = renderToString(React.createElement(ActionBar, {
@@ -40,7 +40,7 @@ test('canDispatchAction gates draft:create on wiring and pre-draft eligibility',
   const draftController = {
     canExecute(kind: string) { return kind === 'draft:create'; },
     async dispatch() { return { status: 'completed' as const, durableEvidence: [] }; },
-  };
+  } satisfies NonNullable<Parameters<typeof canDispatchAction>[2]>;
   const backlogCard = makeCard({
     lane: 'backlog', status: 'backlog', rawStatus: 'backlog',
     commands: [{ command: 'draft', enabled: true, reason: null }],

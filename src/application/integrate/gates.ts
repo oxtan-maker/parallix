@@ -1,11 +1,17 @@
+import { completeGateRepairRoute } from './gate-repair-closeout.js';
+import type { MissionLoadResult } from '../domain-ports.js';
+import type { IntegrationMissionServices } from '../ports/integration-records.js';
+import type { IntegrationContext } from './context.js';
 import type { ParallixConfiguration } from '../ports/configuration.js';
-import { integrationGateDisposition, integrationRepairRoute, integrationRepairMustReactivate, repairedRevisionReviewEligible, repairCanResumeIntegration } from '../../domain/integration-gate-policy.js';
+import { integrationGateDisposition } from '../../domain/integration-gate-policy.js';
 /**
  * The required local integration gates: run the repository's configured
  * pre-integration gates against the finalized mission tree and route a red
  * gate through the integration-gate rebound (TASK-2492).
  */
 import * as fmt from '../presentation/cli-format.js';
+import { agentFamily } from '../../domain/agents.js';
+import type { IntegrationReviewSnapshot } from '../ports/integration-records.js';
 import { missionId } from '../../domain/mission.js';
 import { integrationRepairNeedsReview } from '../integration-repair-review.js';
 import { reportedApprovalStaleness } from '../approval-coverage.js';
@@ -52,18 +58,12 @@ export interface IntegrateSeams extends BounceSeams {
  * invocation (TASK-2620 AC2). The workflow catches it and returns a clean
  * stop with a human next action.
  */
-export class IntegrationStopsForHuman extends Error {
-  constructor(readonly message: string) {
-    super(message);
-    this.name = 'IntegrationStopsForHuman';
-  }
-}
-
+export { IntegrationStopsForHuman } from './gate-repair-closeout.js';
 /** The commit the mission's current approval was given to, when one is recorded. */
-function approvedRevisionOf(missionLoad: any): string | null {
+function approvedRevisionOf(missionLoad: MissionLoadResult): string | null {
   const round = missionLoad?.kind === 'found' ? missionLoad.mission.review?.rounds.at(-1) : null;
-  // A legacy round may record no reviewed subject; then HEAD stands in for A.
-  const revision = round?.decision?.kind === 'approved' ? round.subject?.revision : null;
+  // Unknown legacy decided revisions stay unknown; never substitute the round start.
+  const revision = round?.decision?.kind === 'approved' ? round.decision.revision : null;
   return revision ? String(revision) : null;
 }
 
@@ -78,7 +78,7 @@ function approvedRevisionOf(missionLoad: any): string | null {
  * lands on the round the repair is actually on. When no live aggregate is
  * available the snapshot is returned unchanged.
  */
-async function currentRepairState(missionStore: MissionStore | null | undefined, slug: string, snapshot: Record<string, unknown> | null | undefined): Promise<Record<string, unknown>> {
+async function currentRepairState(missionStore: MissionStore | null | undefined, slug: string, snapshot: IntegrationReviewSnapshot | null | undefined): Promise<IntegrationReviewSnapshot> {
   // The rebound changes the aggregate after the integration context was built.
   // Load it at the persistence boundary rather than reusing that stale read.
   let missionLoad;
@@ -111,9 +111,9 @@ export function integrationGateFailureCause(failedGate: { key: string; command: 
 export interface GateStepRequest {
   configuration?: ParallixConfiguration;
   slug: string;
-  context: any;
-  missionLoad: any;
-  missionServices: any;
+  context: IntegrationContext;
+  missionLoad: MissionLoadResult;
+  missionServices: IntegrationMissionServices;
   dryRun: boolean;
   noIntegrationGates: boolean;
   realAgent: string | null;
@@ -121,7 +121,19 @@ export interface GateStepRequest {
   seams: IntegrateSeams;
 }
 
-export function createIntegrationGateStep({ gates, landing, verification, git: gitPort }: IntegrateWorkflowPorts) {
+function composeIntegrationGateStepDependencies({ gates, landing, verification, git: gitPort }: IntegrateWorkflowPorts) {
+
+  return { gates, landing, verification, gitPort };
+}
+
+export function createIntegrationGateStep(ports: IntegrateWorkflowPorts) {
+  return new IntegrationGateStep(ports).surface();
+}
+
+class IntegrationGateStep {
+  private readonly dependencies: ReturnType<typeof composeIntegrationGateStepDependencies>;
+  constructor(ports: IntegrateWorkflowPorts) { this.dependencies = composeIntegrationGateStepDependencies(ports); }
+
   /**
    * Decide which of the configured preIntegration gates to run, applying the
    * TASK-2625 skip: when a durable, sha-keyed marker records that this mission
@@ -138,7 +150,7 @@ export function createIntegrationGateStep({ gates, landing, verification, git: g
    *   (TASK-2646); a rebase that changes code, tests, or configuration never
    *   skips a suite that did not run against the new tree (TASK-2625 F2).
    */
-  async function resolveSkippableGates({
+  async resolveSkippableGates<T extends SkippableGate>({
     configured,
     slug,
     checkout,
@@ -146,13 +158,13 @@ export function createIntegrationGateStep({ gates, landing, verification, git: g
     operationalHistory,
     log,
   }: {
-    configured: SkippableGate[];
+    configured: T[];
     slug: string;
     checkout: string;
     finalizedCommit: string | null | undefined;
-    operationalHistory: OperationalHistoryService | null | undefined;
+    operationalHistory: Pick<OperationalHistoryService, 'loadLatestByTypeForMission'> | null | undefined;
     log: (_message: string) => void;
-  }): Promise<{ gates: SkippableGate[]; skippedAll: boolean }> {
+  }): Promise<{ gates: T[]; skippedAll: boolean }> {
     const full = { gates: configured, skippedAll: false };
     if (!finalizedCommit || !operationalHistory) { return full; }
     let markerEntry: { eventType?: string; eventData?: string } | null = null;
@@ -165,19 +177,19 @@ export function createIntegrationGateStep({ gates, landing, verification, git: g
     }
     const marker = parseIntegrationValidationMarker(markerEntry);
     if (!marker) { return full; }
-    const diff = marker.sha === finalizedCommit ? null : diffFromValidated(checkout, marker.sha, finalizedCommit);
+    const diff = marker.sha === finalizedCommit ? null : this.diffFromValidated(checkout, marker.sha, finalizedCommit);
     if (!validationSkipApplies(marker, finalizedCommit, diff)) { return full; }
     const { skip, run } = partitionGatesForSkip(configured.map(gate => gate.key), marker);
     const coverage = diff ? ` (finalized ${finalizedCommit.slice(0, 12)} differs only in backlog bookkeeping)` : '';
     log(`Integration gates for ${slug}: ${skip.length} hook(s) already validated at ${marker.sha.slice(0, 12)}${coverage}; skipping ${skip.join(', ')}.`);
-    const toRun = run.map(key => configured.find(gate => gate.key === key) as SkippableGate);
+    const toRun = run.map(key => configured.find(gate => gate.key === key) as T);
     return { gates: toRun, skippedAll: toRun.length === 0 };
   }
 
   /** The validated-to-finalized path diff; any git failure reads as `ok: false` (fail open). */
-  function diffFromValidated(checkout: string, validatedSha: string, finalizedCommit: string): ValidatedCommitDiff {
+  diffFromValidated(checkout: string, validatedSha: string, finalizedCommit: string): ValidatedCommitDiff {
     try {
-      return gates.listChangedPathsBetween(checkout, validatedSha, finalizedCommit);
+      return this.dependencies.gates.listChangedPathsBetween(checkout, validatedSha, finalizedCommit);
     } catch (error) {
       return { ok: false, error: (error as Error).message };
     }
@@ -187,36 +199,32 @@ export function createIntegrationGateStep({ gates, landing, verification, git: g
    * Returns the Verification evidence the readiness view reports: exactly what
    * ran, never "passed" without a gate result behind it.
    */
-  async function runRequiredLocalGates({ slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent, realAgentModel, seams, configuration }: GateStepRequest): Promise<string> {
-    if (noIntegrationGates) {
-      fmt.log.info('Integration gates skipped via --no-integration-gates flag');
-      return 'skipped via --no-integration-gates';
-    }
+  private async executeGatePlan({ slug, context, missionServices, dryRun, realAgent, realAgentModel, configuration }: GateStepRequest) {
     // The integration checkout is the mission's own worktree. Verify the
     // exact resulting tree is finalized before any gate runs, then run the
     // repository's configured pre-integration gates from that checkout.
     // An unconfigured repository runs no gate; a gate that exits non-zero
     // aborts before the merge. The live integration gate carries no
     // Node/npm/tsx/verify-local.sh/Parallix-layout assumption (TASK-2457).
-    const checkout = gates.resolveIntegrationVerificationWorktree(slug, { baseWorktree: context.baseWorktree });
-    const finalTree = gates.captureFinalIntegrationTree(checkout);
+    const checkout = this.dependencies.gates.resolveIntegrationVerificationWorktree(slug, { baseWorktree: context.baseWorktree });
+    const finalTree = this.dependencies.gates.captureFinalIntegrationTree(checkout);
     if (!finalTree.ok) {
-      throw abortWith(landing, `Integration gates cannot start for ${slug}: ${finalTree.error}`);
+      throw abortWith(this.dependencies.landing, `Integration gates cannot start for ${slug}: ${finalTree.error}`);
     }
-    const configured = gates.loadPhaseGates(checkout, 'preIntegration');
+    const configured = this.dependencies.gates.loadPhaseGates(checkout, 'preIntegration');
     // The mandatory-gate invariant is repository-configured, not hardcoded
     // product policy (task-2457 F11): a repository that opts in via
     // adapters.gates.requirePreIntegration: true fails closed on an empty gate
     // list; an unconfigured repository completes the integration path with
     // no lifecycle gate. --no-integration-gates is rejected outside the test
     // bypass, so the message below never points at it (task-2457 F12).
-    const requirePreIntegration = gates.loadRequirePreIntegration(checkout);
+    const requirePreIntegration = this.dependencies.gates.loadRequirePreIntegration(checkout);
     fmt.log.debug(`Integration gate target: slug=${slug} root=${finalTree.rootDir} commit=${finalTree.commit} tree=${finalTree.tree} requirePreIntegration=${requirePreIntegration}`, configuration?.runtime.debug);
 
     // TASK-2625/TASK-2646: skip the high-level hooks this mission already ran
     // green on a tree that differs from the finalized one at most in backlog
     // bookkeeping. Every other case runs the full configured set.
-    const gatesToRun = await resolveSkippableGates({
+    const gatesToRun = await this.resolveSkippableGates({
       configured,
       slug,
       checkout,
@@ -224,10 +232,10 @@ export function createIntegrationGateStep({ gates, landing, verification, git: g
       // not the pre-rebase HEAD: a rebase that changes the tree must not let the
       // mission skip a suite that never ran against the new tree (TASK-2625 F2).
       finalizedCommit: finalTree.commit ?? null,
-      operationalHistory: (missionServices as { operationalHistory?: OperationalHistoryService | null } | null | undefined)?.operationalHistory ?? null,
+      operationalHistory: missionServices?.operationalHistory ?? null,
       log: fmt.log.plain,
     });
-    const result = await gates.runPhaseGates('integration', {
+    const result = await this.dependencies.gates.runPhaseGates('integration', {
       slug,
       checkoutPath: checkout,
       gates: gatesToRun.gates,
@@ -239,6 +247,16 @@ export function createIntegrationGateStep({ gates, landing, verification, git: g
       realAgent,
       realAgentModel,
     });
+
+    return { checkout, configured, gatesToRun, requirePreIntegration, result, finalTree };
+  }
+
+  async runRequiredLocalGates({ slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent, realAgentModel, seams, configuration }: GateStepRequest): Promise<string> {
+    if (noIntegrationGates) {
+      fmt.log.info('Integration gates skipped via --no-integration-gates flag');
+      return 'skipped via --no-integration-gates';
+    }
+    const { checkout, configured, gatesToRun, requirePreIntegration, result, finalTree } = await this.executeGatePlan({ slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent, realAgentModel, seams, configuration });
 
     const disposition = integrationGateDisposition({ dryRun, skippedAll: gatesToRun.skippedAll, skipped: result.skipped, required: requirePreIntegration, ok: result.ok, cancelled: result.cancelled });
     if (disposition === 'plan') {
@@ -258,7 +276,7 @@ export function createIntegrationGateStep({ gates, landing, verification, git: g
         // adapters.gates.preIntegration must fail closed here rather than
         // merge with "All integration gates passed." (TASK-2300 / F1).
         throw abortWith(
-          landing,
+          this.dependencies.landing,
           `\nIntegration gates are mandatory for ${slug}: no preIntegration gates configured in workflow.config.json, but adapters.gates.requirePreIntegration is set. Configure adapters.gates.preIntegration to run gates.`,
           'Aborting before merge.',
         );
@@ -271,7 +289,7 @@ export function createIntegrationGateStep({ gates, landing, verification, git: g
       return `${gatesToRun.gates.length} integration gate(s) passed`;
     }
     if (disposition === 'cancelled') {
-      throw abortWith(landing, `Integration gates cancelled for ${slug}. Aborting before merge.`);
+      throw abortWith(this.dependencies.landing, `Integration gates cancelled for ${slug}. Aborting before merge.`);
     }
 
     fmt.log.fail(`\nIntegration gates failed for ${slug} (root=${finalTree.rootDir}) — ${result.error}`);
@@ -290,7 +308,7 @@ export function createIntegrationGateStep({ gates, landing, verification, git: g
         missionId: missionId(bounceSlug),
         expectedVersion: current.version,
         capabilities: new Set(['mission:transition']),
-        command: { type: 'rebound-to-active', agent: implementer, cause: integrationGateFailureCause(result.failedGate), occurredAt },
+        command: { type: 'rebound-to-active', agent: agentFamily(implementer), cause: integrationGateFailureCause(result.failedGate), occurredAt },
         actor: implementer,
         occurredAt,
         idempotencyKey: `integration-gate-rebound:${bounceSlug}:${current.version}`,
@@ -307,7 +325,7 @@ export function createIntegrationGateStep({ gates, landing, verification, git: g
     const route = await seams.routeIntegrationGateFailureFn({
       slug,
       missionWorktree: checkout,
-      verificationCommand: verification.formatVerificationCommand(context.area, checkout),
+      verificationCommand: this.dependencies.verification.formatVerificationCommand(context.area, checkout),
       failedGate: result.failedGate,
       gateError: result.error,
       gates: configured,
@@ -328,7 +346,7 @@ export function createIntegrationGateStep({ gates, landing, verification, git: g
       startAgentFn: seams.startAgentFn,
       transitionTaskFn: (bounceSlug: string) => seams.transitionTaskFn(bounceSlug, 'active'),
       reactivateMissionFn: reactivateMission,
-      applyAgentFallbackFn: async ({ launchResult, original }: { launchResult: unknown; original: string }) => seams.applyAgentFallbackFn({
+      applyAgentFallbackFn: async ({ launchResult, original }) => seams.applyAgentFallbackFn({
         launchResult,
         original,
         role: 'implementer',
@@ -347,58 +365,16 @@ export function createIntegrationGateStep({ gates, landing, verification, git: g
       },
       recordIntegrationValidationFn: context.missionHeadSha
         ? (input: { missionId: string; sha: string; hooks: readonly string[] }) => {
-            const history = (missionServices as { operationalHistory?: OperationalHistoryService | null | undefined } | null | undefined)?.operationalHistory;
+            const history = missionServices?.operationalHistory;
             if (!history) { return; }
             return history.recordIntegrationValidation(
               { ...buildIntegrationValidationMarker(input.missionId, input.sha, input.hooks),
-                baseline: context.baseBranch ? gitPort.git(['-C', checkout, 'rev-parse', context.baseBranch]).stdout?.trim() : undefined },
+                baseline: context.baseBranch ? this.dependencies.gitPort.git(['-C', checkout, 'rev-parse', context.baseBranch]).stdout?.trim() : undefined },
             );
           }
         : undefined,
     });
-    // A route that cannot continue landing must leave the authoritative lane
-    // in active repair state. The live rebound reaches this through
-    // `transitionToImplementer`; retain the same fail-closed outcome for
-    // exhausted transient retries and injected routing boundaries that did
-    // not launch a repair.
-    const repairRoute = integrationRepairRoute(route.route, Boolean(seams.reReviewFn));
-    if (repairRoute !== 'resume' && missionServices?.store) {
-      const failedMission = await missionServices.store.load(missionId(slug));
-      if (failedMission.kind === 'found' && integrationRepairMustReactivate(route.route, failedMission.mission.status)) {
-        await reactivateMission(slug);
-      }
-    }
-    if (repairRoute === 're-review' && seams.reReviewFn) {
-      // The repair changed what the reviewer approved, so the standing approval
-      // was retracted on the PR. Re-review the repaired revision through the
-      // single live `px review --continue` route. On approval the mission sits
-      // in the integration lane for the human to read the fresh PR and
-      // integrate; no path auto-restarts integration or merges (TASK-2620 AC2).
-      const current = route.invalidation?.ok ? null : await missionServices?.store?.load(missionId(slug));
-      if (repairedRevisionReviewEligible(Boolean(route.invalidation?.ok), current?.kind === 'found' && integrationRepairNeedsReview(current.mission))) {
-        const approved = await reReviewRepairedRevision(slug, checkout, route.repairedRevision ?? 'unknown', seams.reReviewFn);
-        if (approved) {
-          throw new IntegrationStopsForHuman(`${configured.length} integration gate(s) passed after ${route.rebounds} integration-gate rebound(s); the repaired revision was re-reviewed and approved. Read the fresh PR and run px integrate ${slug} to land.`);
-        }
-        throw abortWith(landing, `The repaired revision of ${slug} was not approved in re-review. Run px review ${slug} --continue to resume review; an approval returns the mission to the integration lane for you to integrate.`, 'Aborting before merge.');
-      }
-      throw abortWith(landing, `The approval for ${slug}'s superseded revision could not be retracted. Aborting before merge.`);
-    }
-    if (repairRoute === 'stop') {
-      throw abortWith(landing, `Aborting before merge. Resume the repair review with px review ${slug} --continue; an approval returns the mission to the integration lane for you to integrate.`);
-    }
-    // A route may report `fixed` only if the repair left the approved diff
-    // unchanged and its approval was never retracted. Restore the mission to
-    // the integration lane through the authoritative lifecycle guard so a
-    // legacy or injected route cannot claim a green gate while the mission is
-    // still in its active repair lane.
-    const repaired = await missionServices.store.load(missionId(slug));
-    if (repaired.kind !== 'found') { throw abortWith(landing, `Mission ${slug} is unavailable after integration repair.`); }
-    if (!repairCanResumeIntegration(repaired.mission.status)) {
-      throw abortWith(landing, `Mission ${slug} cannot resume integration from ${repaired.mission.status}.`);
-    }
-    await seams.transitionTaskFn(slug, 'ready-for-integration');
-    return `${configured.length} integration gate(s) passed after ${route.rebounds} integration-gate rebound(s)`;
+    return completeGateRepairRoute({ request: { slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent, realAgentModel, seams, configuration }, ports: this.dependencies, configured, checkout, route, reactivateMission, reReviewRepairedRevision: this.reReviewRepairedRevision.bind(this) });
   }
 
   /**
@@ -407,20 +383,22 @@ export function createIntegrationGateStep({ gates, landing, verification, git: g
    * mission for an operator: nothing is approved on the reviewer's behalf,
    * and the superseded approval stays in the review history.
    */
-  async function reReviewRepairedRevision(slug: string, checkout: string, repairedRevision: string, reReviewFn: NonNullable<IntegrateSeams['reReviewFn']>): Promise<boolean> {
+  async reReviewRepairedRevision(slug: string, checkout: string, repairedRevision: string, reReviewFn: NonNullable<IntegrateSeams['reReviewFn']>): Promise<boolean> {
     fmt.log.info(`Sending ${slug} back through review for the repaired revision ${repairedRevision}.`);
     let approved = false;
     try {
       approved = await reReviewFn(slug, checkout);
     } catch (error) {
-      throw abortWith(landing, `Re-review of ${slug} could not run: ${(error as Error).message}`, `Run px review ${slug} --continue to resume review; an approval returns the mission to the integration lane for you to integrate.`, 'Aborting before merge.');
+      throw abortWith(this.dependencies.landing, `Re-review of ${slug} could not run: ${(error as Error).message}`, `Run px review ${slug} --continue to resume review; an approval returns the mission to the integration lane for you to integrate.`, 'Aborting before merge.');
     }
     if (!approved) {
-      throw abortWith(landing, `The repaired revision of ${slug} was not approved in re-review. Run px review ${slug} --continue to resume review; an approval returns the mission to the integration lane for you to integrate.`, 'Aborting before merge.');
+      throw abortWith(this.dependencies.landing, `The repaired revision of ${slug} was not approved in re-review. Run px review ${slug} --continue to resume review; an approval returns the mission to the integration lane for you to integrate.`, 'Aborting before merge.');
     }
     fmt.log.pass(`The repaired revision of ${slug} was re-reviewed and approved. ${slug} now sits in the integration lane for the human to read the fresh PR and integrate (TASK-2620).`);
     return true;
   }
 
-  return { runRequiredLocalGates, resolveSkippableGates };
+  surface() {
+    return { runRequiredLocalGates: this.runRequiredLocalGates.bind(this), resolveSkippableGates: this.resolveSkippableGates.bind(this) };
+  }
 }

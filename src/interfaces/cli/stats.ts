@@ -1,6 +1,4 @@
-import { renderIntegrationRestorationStatistics } from '../../application/presentation/integration-restoration-statistics.js';
 import { renderClassifierStatistics } from '../../application/presentation/classifier-statistics.js';
-import { renderIntegrationRepairStatistics } from '../../application/presentation/integration-repair-statistics.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { createRangeWindow } from '../../application/services/statistics-row.js';
 import type { StatsRow } from '../../application/services/statistics-row.js';
@@ -65,26 +63,9 @@ export function createStatsCommand(useCase: Pick<StatsCommandUseCase<StatsRow>, 
     const range = from !== null || to !== null;
     let report: string;
     try {
-      if (!mission && range) { createRangeWindow({ from: from || undefined, to: to || undefined }); }
-      const result = await useCase.execute({
-        mode: mission ? 'mission' : range ? 'range' : 'weekly',
-        mission: mission ?? undefined, today, from: from || undefined, to: to || undefined,
-      });
-      if (mission) {
-        report = presentation.renderMission(result.rows, mission, { rootDir });
-      } else {
-        log(fmt.status('INFO', `Loaded ${result.rows.length} measurements from the statistics database`));
-        if (!result.selection) { throw new Error('Statistics report selection is missing.'); }
-        report = range
-          ? presentation.renderRange(result.rows, { rootDir, selection: result.selection })
-          : presentation.renderWeekly(result.rows, { rootDir, selection: result.selection });
-        if (result.selection.previous) {
-          const windows = [result.selection.current.window, result.selection.previous.window] as const;
-          report += `\n\n${renderClassifierStatistics(result.classifierStatistics ?? null, windows)}\n\n${renderIntegrationRepairStatistics(result.classifierStatistics ?? null, windows)}`;
-        }
-        report += `\n\n${renderIntegrationRestorationStatistics(result.classifierStatistics?.integrationRepairs ?? null,
-          [result.selection.current.window, ...(result.selection.previous ? [result.selection.previous.window] : [])])}`;
-      }
+      assertStatsRange(mission, range, from, to);
+      const result = await useCase.execute(statsReadRequest(mission, range, today, from, to));
+      report = renderStatsResult(result, mission, range, rootDir, log, presentation);
     } catch (failure) {
       error(fmt.status('FAIL', failure instanceof Error ? failure.message : String(failure)));
       exit(1);
@@ -97,6 +78,37 @@ export function createStatsCommand(useCase: Pick<StatsCommandUseCase<StatsRow>, 
   };
 }
 
+function assertStatsRange(mission: string | null, range: boolean, from: string | null, to: string | null): void {
+  if (!mission && range) { createRangeWindow({ from: from || undefined, to: to || undefined }); }
+}
+
+function statsReadRequest(mission: string | null, range: boolean, today: string | Date, from: string | null, to: string | null): Parameters<StatsCommandUseCase<StatsRow>['execute']>[0] {
+  return {
+    mode: mission ? 'mission' : range ? 'range' : 'weekly',
+    mission: mission ?? undefined, today, from: from || undefined, to: to || undefined,
+  };
+}
+
+type StatsCommandResult = Awaited<ReturnType<StatsCommandUseCase<StatsRow>['execute']>>;
+function renderStatsResult(result: StatsCommandResult, mission: string | null, range: boolean, rootDir: string, log: (_message: string) => unknown, presentation: StatsPresentation): string {
+  let report: string;
+  if (mission) {
+    report = presentation.renderMission(result.rows, mission, { rootDir });
+  } else {
+    log(fmt.status('INFO', `Loaded ${result.rows.length} measurements from the statistics database`));
+    if (!result.selection) { throw new Error('Statistics report selection is missing.'); }
+    report = range
+      ? presentation.renderRange(result.rows, { rootDir, selection: result.selection })
+      : presentation.renderWeekly(result.rows, { rootDir, selection: result.selection });
+    if (result.selection.previous) {
+      const windows = [result.selection.current.window, result.selection.previous.window] as const;
+      report += `\n\n${renderClassifierStatistics(result.classifierStatistics ?? null, windows)}`;
+    }
+
+  }
+  return report;
+}
+
 const STATS_VALUE_FLAGS: Readonly<Record<string, 'mission' | 'outputFile' | 'today' | 'from' | 'to'>> = {
   '--mission': 'mission', '--output': 'outputFile', '--today': 'today', '--from': 'from', '--to': 'to',
 };
@@ -107,7 +119,7 @@ export function parseStatsArgs(args: string[]) {
     outputFile: null, today: new Date(), from: null, to: null, mission: null,
   };
   const positional: string[] = [];
-  for (let i = 0; i < args.length; i += 1) {
+  for (let i = 0;i < args.length;i += 1) {
     const arg = args[i];
     const field = STATS_VALUE_FLAGS[arg];
     if (field) {

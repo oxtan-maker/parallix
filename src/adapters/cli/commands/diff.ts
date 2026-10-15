@@ -4,8 +4,21 @@ import { git } from '../../git/git.js';
 import { getPrimaryBranch, missionBranchName, inferSlug, resolveWorktree } from '../../filesystem/mission-utils.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
 
+type DiffLaunchResult = Pick<childProcess.SpawnSyncReturns<unknown>, 'status' | 'signal' | 'error'>;
+type DiffSpawn = (command: string, args: readonly string[], options: { cwd: string; stdio: 'inherit' }) => DiffLaunchResult;
+interface DiffOptions {
+  gitFn?: (args: string[]) => { status: number | null; stdout: string };
+  spawnSyncFn?: DiffSpawn;
+  getPrimaryBranchFn?: typeof getPrimaryBranch;
+  missionBranchNameFn?: typeof missionBranchName;
+  inferSlugFn?: typeof inferSlug;
+  resolveWorktreeFn?: typeof resolveWorktree;
+  exitFn?: (code: number) => void;
+  failFn?: (message: string) => void;
+}
+
 /** @param {string[]} args @param {{gitFn?: Function, spawnSyncFn?: Function, getPrimaryBranchFn?: Function, missionBranchNameFn?: Function, inferSlugFn?: Function, resolveWorktreeFn?: Function, exitFn?: Function, failFn?: Function}} opts */
-async function diff(args: any, {
+async function diff(args: string[], {
   gitFn = git,
   spawnSyncFn = childProcess.spawnSync,
   getPrimaryBranchFn = getPrimaryBranch,
@@ -14,7 +27,7 @@ async function diff(args: any, {
   resolveWorktreeFn = resolveWorktree,
   exitFn = process.exit,
   failFn = fmt.log.fail,
-} = {}) {
+}: DiffOptions = {}) {
   /** @param {string} a */
   const explicitSlug = args.filter((a: string) => !a.startsWith('--'))[0];
   const slug = inferSlugFn(explicitSlug);
@@ -51,29 +64,8 @@ async function diff(args: any, {
     return result.status === 0 ? result.stdout.trim() : null;
   };
 
-  /** @param {string} cmd */
-  const isSpecializedTool = (cmd: string) => {
-    if (!cmd) {return false;}
-    const parts = cmd.split(/\s+/);
-    // Handle cases like "LESS=FRX less" or "/usr/bin/delta"
-    /** @param {string} p */
-    const exePart = parts.find((p: string) => !p.includes('='));
-    if (!exePart) {return false;}
-    const exe = path.basename(exePart).toLowerCase();
-    
-    // Explicitly reject known default pagers
-    if (['less', 'cat', 'more'].includes(exe)) {return false;}
-    
-    // Accept known specialized tools documented in review-tooling.md
-    if (['delta', 'difft', 'diff-so-fancy'].includes(exe)) {return true;}
-    
-    // Fallback: if it's not a known default, and we have a value, treat it as specialized
-    // for now to avoid breaking custom setups like "vimdiff", but we've rejected plain "less".
-    return true;
-  };
-
   /** @param {childProcess.SpawnSyncReturns<string>} result @param {string} toolName */
-  const handleLaunchResult = (result: any, toolName: string) => {
+  const handleLaunchResult = (result: DiffLaunchResult, toolName: string) => {
     if (result.error) {
       failFn(`Failed to launch ${toolName}: ${result.error.message}`);
       exitFn(1);
@@ -92,6 +84,35 @@ async function diff(args: any, {
     exitFn(result.status);
   };
 
+  launchConfiguredDiff({ worktree, branch, target, getGitConfig, spawnSyncFn, handleLaunchResult, failFn, exitFn });
+}
+
+/** @param {string} cmd */
+function isSpecializedTool(cmd: string) {
+  if (!cmd) { return false; }
+  const parts = cmd.split(/\s+/);
+  // Handle cases like "LESS=FRX less" or "/usr/bin/delta"
+  /** @param {string} p */
+  const exePart = parts.find((p: string) => !p.includes('='));
+  if (!exePart) { return false; }
+  const exe = path.basename(exePart).toLowerCase();
+
+  // Explicitly reject known default pagers
+  if (['less', 'cat', 'more'].includes(exe)) { return false; }
+
+  // Accept known specialized tools documented in review-tooling.md
+  if (['delta', 'difft', 'diff-so-fancy'].includes(exe)) { return true; }
+
+  // Fallback: if it's not a known default, and we have a value, treat it as specialized
+  // for now to avoid breaking custom setups like "vimdiff", but we've rejected plain "less".
+  return true;
+}
+
+function launchConfiguredDiff({ worktree, branch, target, getGitConfig, spawnSyncFn, handleLaunchResult, failFn, exitFn }: {
+  worktree: string; branch: string; target: string; getGitConfig: (_key: string) => string | null;
+  spawnSyncFn: DiffSpawn; handleLaunchResult: (_result: DiffLaunchResult, _name: string) => void;
+  failFn: (_message: string) => unknown; exitFn: (_code: number) => void;
+}) {
   const diffTool = getGitConfig('diff.tool');
   if (diffTool) {
     fmt.log.info(`Launching ${fmt.command('git difftool')} for ${fmt.branch(branch)} (tool: ${fmt.bold(diffTool)})...`);

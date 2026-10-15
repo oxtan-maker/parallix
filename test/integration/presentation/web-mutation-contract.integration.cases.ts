@@ -1,3 +1,4 @@
+import { missionId as fixtureMissionId } from '../../../src/domain/mission.js';
 // task-2433-web-mutation — real-socket proof of the guarded mutation route
 // (TASK-2433, ADR 0055).
 //
@@ -92,7 +93,7 @@ async function withHost(
 function commandCard(
   commands: readonly CommandAvailability[] = [{ command: 'handoff', enabled: true, reason: null }],
 ): MissionCard {
-  return makeCard({ id: 'task-2433' as MissionId, commands });
+  return makeCard({ id: fixtureMissionId('task-2433') as MissionId, commands });
 }
 
 /** A spy dispatcher: records every request, emits like the controller would. */
@@ -217,12 +218,12 @@ function openSse(info: WebHostInfo) {
 test('web mutation: an enabled action dispatches exactly once with a host-generated operation ID and a matching SSE progress event', async () => {
   // The spy is created once the host exists so its emit is the host's SSE
   // sink, exactly where the production controller's progressPort lands.
-  let spy: ReturnType<typeof makeDispatcherSpy> | null = null;
+  let spy: { value: ReturnType<typeof makeDispatcherSpy> | null } = { value: null };
   await withHost({
     buildProjection: async () => makeProjection({ active: [commandCard()] }),
-    commandDispatcher: () => (spy === null ? null : spy.dispatcher),
+    commandDispatcher: () => (spy.value === null ? null : spy.value.dispatcher),
   }, async (info, host) => {
-    spy = makeDispatcherSpy((event) => host.progress(event));
+    spy.value = makeDispatcherSpy((event) => host.progress(event));
     const value = await launchValue(info);
     const client = openSse(info);
     await client.ready;
@@ -239,8 +240,8 @@ test('web mutation: an enabled action dispatches exactly once with a host-genera
     assert.equal(validation.value.status, 'completed');
     assert.equal(validation.value.error, null);
 
-    assert.equal(spy.requests.length, 1, 'exactly one dispatch');
-    const dispatched = spy.requests[0];
+    assert.equal(spy.value.requests.length, 1, 'exactly one dispatch');
+    const dispatched = spy.value.requests[0];
     assert.ok(dispatched, 'the dispatch must have been recorded');
     assert.ok(dispatched.operationId.length > 0, 'the host must generate a non-empty operation ID');
     assert.match(dispatched.operationId,
@@ -505,7 +506,7 @@ test('web mutation: the 405 catch-all and the read routes are unchanged around t
       cookie: `${sessionCookieName(info)}=${value}`,
       'x-px-csrf': value,
       'content-type': 'application/json',
-    };
+    } satisfies HeadersInit;
     for (const method of ['PUT', 'DELETE', 'PATCH', 'OPTIONS'] as const) {
       const res = await fetch(`${info.origin}${WEB_COMMANDS_PATH}`, { method, body: '{}', headers });
       assert.equal(res.status, 405, `${method} on the command path must be 405`);
@@ -538,7 +539,7 @@ test('web mutation: a read-only host without a dispatcher answers 503 and dispat
 
 function createBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    kind: 'mission:create',
+    kind: 'mission:create' as const,
     requestKey: 'form-1',
     title: 'Capture the idea',
     labels: ['ux'],

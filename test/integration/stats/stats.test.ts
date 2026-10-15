@@ -1,4 +1,5 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import type { ReviewRound } from '../../../src/domain/review.js';
+import type { StatsRow } from "../../../src/application/services/statistics-row.js";
 
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import test, { mock } from 'node:test';
@@ -11,6 +12,7 @@ import { createRequire } from 'node:module';
 import { seedMissionDatabase } from '../../fixtures/review-state-db.js';
 import { createStatisticsCommand, createStatsMissionFlowReader, type StatsCompositionOptions } from '../../../src/composition/stats.js';
 import { clearOperatorStateCache } from '../../../src/adapters/sqlite/adapter-factory.js';
+import { ReportRow } from '../../../src/adapters/cli/commands/stats-rendering-types.js';
 
 // Bind each invocation through composition so its repository and database
 // options reach the statistics workflow adapter.
@@ -34,32 +36,35 @@ function createRepoFixture() {
   return root;
 }
 
-function completedMissionKeys(rows) {
+type FixtureStatsRow = StatsRow & { completedForTest?: string };
+function completedMissionKeys(rows: readonly FixtureStatsRow[]) {
   return new Set(rows.filter(row => row.completedForTest === 'yes')
     .map(row => `${String(row.repo || '')}::${String(row.mission).trim().toLowerCase()}`));
 }
 
-function missionFlow(rows) {
-  return rows.filter(row => row.completedForTest === 'yes')
-    .map(row => ({ repo: String(row.repo || ''), mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [], implementer: row.implementer }));
+function missionFlow(rows: readonly FixtureStatsRow[]) {
+  return rows.filter(row => row.completedForTest === 'yes').map(row => {
+    assert.ok(row.mission && row.date);
+    return { repo: String(row.repo || ''), mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [], implementer: row.implementer ?? null };
+  });
 }
 
-function renderWeeklyStatsReport(rows, options = {}) {
+function renderWeeklyStatsReport(rows: readonly FixtureStatsRow[], options: NonNullable<Parameters<typeof stats.renderWeeklyStatsReport>[1]> = {}) {
   return stats.renderWeeklyStatsReport(rows, { ...options, missionFlow: options.missionFlow ?? missionFlow(rows) });
 }
 
-function renderRangeStatsReport(rows, options = {}) {
+function renderRangeStatsReport(rows: readonly FixtureStatsRow[], options: NonNullable<Parameters<typeof stats.renderRangeStatsReport>[1]> = {}) {
   return stats.renderRangeStatsReport(rows, { ...options, missionFlow: options.missionFlow ?? missionFlow(rows) });
 }
 
-function summarizeAgentWindow(rows, window, options = {}) {
+function summarizeAgentWindow(rows: readonly FixtureStatsRow[], window: { start: Date; end: Date }, options: NonNullable<Parameters<typeof stats._internals.summarizeAgentWindow>[2]> = {}) {
   return stats._internals.summarizeAgentWindow(rows, window, { ...options, completedMissionKeys: completedMissionKeys(rows) });
 }
 
 // visualBoard's Ways of Working use Forgejo review. Tests that exercise
 // PR-comment-based fix-round derivation declare it on their fixture (the code
 // default is off for config-less distribution repos).
-function enableForgejoReview(root) {
+function enableForgejoReview(root: string) {
   fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
     adapters: { review: { provider: 'forgejo', baseUrl: 'http://localhost:3300', remote: 'review', repo: 'magnus/visualboard' } },
   }), 'utf8');
@@ -151,7 +156,9 @@ test('task-1314: upsertMeasurementRow keys on (repo, mission, stage) so same mis
   assert.equal(data.rows.length, 2);
   const visualboardRow = data.rows.find(r => r.repo === 'visualboard');
   const parallixRow = data.rows.find(r => r.repo === 'parallix');
+  assert.ok(visualboardRow != null);
   assert.equal(visualboardRow.input_tokens, '999');
+  assert.ok(parallixRow != null);
   assert.equal(parallixRow.input_tokens, '200');
   } finally {
     fs.rmSync(path.dirname(dbFile), { recursive: true, force: true });
@@ -251,6 +258,7 @@ test('resolveMissionClassification requires a stored px Mission', () => {
     assert.equal(result.classification, null);
     assert.equal(result.taskFile, null);
     assert.equal(result.source, 'mission');
+    assert.ok(result.error);
     assert.match(result.error, /Mission database unavailable for task-missing/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -267,7 +275,6 @@ test('upsertMeasurementRow accepts unknown classification rows and weekly report
       classification: 'unknown',
       implementer: 'unknown',
       pr_fix_rounds: 0,
-      completedForTest: 'yes',
     }, { configuration: resolveConfiguration(process.env), dbPath: dbFile });
 
     const rows = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), dbPath: dbFile }).rows;
@@ -296,7 +303,7 @@ test('no stats CSV path resolver survives the measurement cut-over', () => {
     'loadStatsCsv',
     'upsertStatsRow',
   ]) {
-    assert.equal(stats[removed], undefined, `${removed} must not be reachable from the stats module`);
+    assert.equal(removed in stats, false, `${removed} must not be reachable from the stats module`);
   }
 });
 
@@ -331,9 +338,12 @@ test('recording a measurement with no explicit path writes no CSV under PARALLIX
     // TASK-2363: the configured `product.name` is a display alias, not an
     // identity. Each row is written under its checkout's canonical repository
     // id, which is what the mission lifecycle joins against.
-    assert.equal(loaded.rows.find(r => r.mission === 'task-a').repo, path.basename(repoA));
-    assert.equal(loaded.rows.find(r => r.mission === 'task-b').repo, path.basename(repoB));
-    assert.notEqual(loaded.rows.find(r => r.mission === 'task-a').repo, 'visualboard');
+    const taskA = loaded.rows.find(r => r.mission === 'task-a');
+    const taskB = loaded.rows.find(r => r.mission === 'task-b');
+    assert.ok(taskA && taskB);
+    assert.equal(taskA.repo, path.basename(repoA));
+    assert.equal(taskB.repo, path.basename(repoB));
+    assert.notEqual(taskA.repo, 'visualboard');
 
     // No CSV was created anywhere: not in PARALLIX_HOME, not in either repo.
     assert.deepEqual(fs.readdirSync(home).filter(name => name.endsWith('.csv')), []);
@@ -360,10 +370,10 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
   fs.mkdirSync(home);
   const dbFile = path.join(home, 'parallix.db');
   stats.upsertMeasurementRow(
-    { date: '2026-05-18', mission: 'task-shared', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '1', completedForTest: 'yes' },
+    { date: '2026-05-18', mission: 'task-shared', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '1' },
     { configuration: resolveConfiguration(process.env), dbPath: dbFile, rootDir: repoOne }
   );
-  const logs = [];
+  const logs: string[] = [];
   const previousHome = process.env.PARALLIX_HOME;
 
   try {
@@ -386,7 +396,7 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
     assert.match(output, /Loaded \d+ measurements from the statistics database/);
     assert.doesNotMatch(output, /Loading CSV/);
 
-    const secondLogs = [];
+    const secondLogs: string[] = [];
     await statsCommand(['--today', '2026-05-18'], { configuration: resolveConfiguration(process.env),
       rootDir: repoTwo,
       log: line => secondLogs.push(line),
@@ -600,8 +610,8 @@ test('task-1414: renderWeeklyStatsReport spend table renders a stable empty stat
 });
 
 test('stats command exits non-zero and prints date-range diagnostics for invalid range flags', async () => {
-  const logs = [];
-  const exits = [];
+  const logs: string[] = [];
+  const exits: (number | undefined)[] = [];
 
   await statsCommand(['--from', '2026-05-01'] , { configuration: resolveConfiguration(process.env),
     log: line => logs.push(line),
@@ -622,7 +632,7 @@ test('stats command exits non-zero and prints date-range diagnostics for invalid
 });
 
 test('stats command help documents the pre-integration preview workflow', async () => {
-  const logs = [];
+  const logs: string[] = [];
 
   await statsCommand(['--help'], { configuration: resolveConfiguration(process.env),
     log: line => logs.push(line),
@@ -647,7 +657,7 @@ test('recordIntegrationStats reads Mission classification and Review aggregate f
 
   const { reviewFindingId } = __mm3;
   const root = createRepoFixture();
-  let restoreHome: (() => Promise<void>) & { store?: unknown } = Object.assign(async () => {}, { store: undefined });
+  let restoreHome: (() => Promise<void>) & { store?: Awaited<ReturnType<typeof seedMissionDatabase>>['store'] } = Object.assign(async () => {}, { store: undefined });
   try {
     const taskFile = path.join(root, 'backlog', 'tasks', 'task-2000 - Example.md');
     fs.writeFileSync(taskFile, [
@@ -666,7 +676,7 @@ test('recordIntegrationStats reads Mission classification and Review aggregate f
 
     // Four rounds, three of which the reviewer sent back: the aggregate records
     // the fix-round count directly, so nothing has to be reconstructed.
-    const sentBack = (at) => ({
+    const sentBack = (at: string): Partial<ReviewRound> => ({
       implementer: agentFamily('gemini'),
       decision: {
         kind: 'changes-requested',
@@ -675,7 +685,7 @@ test('recordIntegrationStats reads Mission classification and Review aggregate f
         findings: [{ id: reviewFindingId('F1'), summary: 'sent back', location: null }],
       },
       disposition: 'REQUEST_CHANGES',
-      phase: 'fixing',
+      phase: 'fixing' as const,
     });
     restoreHome = await seedMissionDatabase(
       path.join(root, 'parallix-home'),
@@ -712,12 +722,13 @@ test('recordIntegrationStats reads Mission classification and Review aggregate f
     // The completed-mission row is readable from the database, not a CSV.
     const stored = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), dbPath: dbFile }).rows
       .find(candidate => candidate.mission === 'task-2000');
+    assert.ok(stored != null);
     assert.equal(stored.date, '2026-05-18');
     assert.equal(stored.repo, repoName);
     assert.equal(stored.classification, 'ai_sdlc');
     assert.equal(stored.implementer, 'gemini');
     assert.equal(stored.pr_fix_rounds, '3');
-    assert.equal(stored.closed, undefined);
+    assert.equal('closed' in stored, false);
   } finally {
     await restoreHome();
     fs.rmSync(root, { recursive: true, force: true });
@@ -726,7 +737,7 @@ test('recordIntegrationStats reads Mission classification and Review aggregate f
 
 test('recordIntegrationStats returns the unchanged weekly report labels for integration output', async () => {
   const root = createRepoFixture();
-  let restoreHome: (() => Promise<void>) & { store?: unknown } = Object.assign(async () => {}, { store: undefined });
+  let restoreHome: (() => Promise<void>) & { store?: Awaited<ReturnType<typeof seedMissionDatabase>>['store'] } = Object.assign(async () => {}, { store: undefined });
   try {
     const taskFile = path.join(root, 'backlog', 'tasks', 'task-2000 - Example.md');
     fs.writeFileSync(taskFile, [
@@ -761,6 +772,7 @@ test('recordIntegrationStats returns the unchanged weekly report labels for inte
       readMissionFlow: createStatsMissionFlowReader({ configuration: resolveConfiguration(process.env), rootDir: root, missionStore: restoreHome.store }),
     });
 
+    assert.ok(result.report);
     const report = __mm2.stripAnsi(result.report);
     assert.doesNotMatch(report, /Agent telemetry/);
     assert.match(report, /Agent performance this week \(2026-05-12 → 2026-05-18\)/);
@@ -810,7 +822,7 @@ test('task-1314: stats mission reports filter to the active repo', async () => {
       cached_tokens: '23', context_tokens: '24', tool_calls: '25', openai_usage_after: '2', duration_minutes: '3',
     }, { configuration: resolveConfiguration(process.env), dbPath });
 
-    const logs = [];
+    const logs: string[] = [];
     await statsCommand(['--mission', 'task-alpha'], { configuration: resolveConfiguration(process.env),
       rootDir: root,
       dbPath,
@@ -844,6 +856,7 @@ test('task-1251: upsertMeasurementRow keys on (mission, stage) so stages do not 
     data = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), dbPath: dbFile });
     assert.equal(data.rows.length, 2);
     const draftRow = data.rows.find(r => r.stage === 'draft');
+    assert.ok(draftRow != null);
     assert.equal(draftRow.input_tokens, '999');
   } finally {
     fs.rmSync(path.dirname(dbFile), { recursive: true, force: true });
@@ -988,7 +1001,7 @@ test('recordReviewStats records the reviewer-session telemetry on the review row
 // task-1318: fix-round derivation reads the authoritative mission-local review
 // event store (ground truth), independent of integration.
 
-function writeReviewEvent(root, slug, { type, round, actor, verdict, timestamp, seq = 0 }) {
+function writeReviewEvent(root: string, slug: string, { type, round, actor, verdict, timestamp, seq = 0 }: { type: string; round: number; actor: string; verdict: string; timestamp?: string; seq?: number; }) {
   const dir = path.join(root, 'docs', 'missions', '2026', slug, 'review-events');
   fs.mkdirSync(dir, { recursive: true });
   const ts = timestamp || `2026-06-16T00:0${round}:0${seq}.000Z`;
@@ -1005,7 +1018,7 @@ test('deriveImplementerAndFixRounds counts the rounds the reviewer sent back to 
   const { reviewFindingId } = __mm3;
   const root = createRepoFixture();
 
-  const sentBack = (at) => ({
+  const sentBack = (at: string): Partial<ReviewRound> => ({
     decision: {
       kind: 'changes-requested',
       decidedAt: at,
@@ -1013,7 +1026,7 @@ test('deriveImplementerAndFixRounds counts the rounds the reviewer sent back to 
       findings: [{ id: reviewFindingId('F1'), summary: 'sent back', location: null }],
     },
     disposition: 'REQUEST_CHANGES',
-    phase: 'fixing',
+    phase: 'fixing' as const,
     implementer: agentFamily('codex'),
   });
 
@@ -1050,7 +1063,6 @@ test('deriveImplementerAndFixRounds prefers the Review aggregate over the event 
   const { reviewFindingId } = __mm3;
   const root = createRepoFixture();
   // A review-events file that disagrees with the database: the aggregate wins.
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
   writeReviewEvent(root, 'task-3010', { type: 'reviewer_outcome', round: 1, actor: 'custom', verdict: 'request-changes' });
   const restoreHome = await seedMissionDatabase(
     path.join(root, 'parallix-home'),
@@ -1130,7 +1142,7 @@ test('task-1342: mixed-agent phase report shows — for Usage % when provider is
       input_tokens: '0', output_tokens: '0', cached_tokens: '0',
       tool_calls: '0', duration_minutes: '0', cost_usd: '0',
     },
-  ].map(stats.normalizeStatsRow);
+  ].map(row => stats.normalizeStatsRow(row));
 
   const report = stats.renderMissionPhaseReport(rows, 'task-1339');
 
@@ -1155,7 +1167,7 @@ test('task-1342: phase report row for claude implementer does not show OpenAI Us
       input_tokens: '5000', output_tokens: '100', cached_tokens: '4000',
       tool_calls: '10', duration_minutes: '5', cost_usd: '0',
     },
-  ].map(stats.normalizeStatsRow);
+  ].map(row => stats.normalizeStatsRow(row));
 
   const report = stats.renderMissionPhaseReport(rows, 'task-mixed');
   const lines = report.split('\n');
@@ -1193,7 +1205,7 @@ test('task-1342: review row with OpenAI reviewer shows Usage % even when claude 
       tool_calls: '76', duration_minutes: '2', cost_usd: '0',
       openai_usage_after: '37', completedForTest: 'yes',
     },
-  ].map(stats.normalizeStatsRow);
+  ].map(row => stats.normalizeStatsRow(row));
 
   const report = stats.renderMissionPhaseReport(rows, 'task-1339');
   const lines = report.split('\n');

@@ -94,10 +94,12 @@ function checkReviewRound(object: unknown, path: string, problems: string[]): vo
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
   checkKeys(object,
     ['number', 'reviewer', 'implementer', 'phase', 'disposition', 'comment',
-      'findingSummaries', 'pushbacks', 'fixes'],
+      'findingSummaries', 'pushbacks', 'fixes', 'startRevision', 'decidedRevision'],
     ['number', 'reviewer', 'implementer', 'phase', 'disposition', 'comment',
       'findingSummaries', 'pushbacks', 'fixes'], path, problems);
   checkFiniteNumber(object, 'number', path, problems);
+  if (object.startRevision !== undefined) { checkString(object, 'startRevision', path, problems); }
+  if (object.decidedRevision !== undefined) { checkNullableString(object, 'decidedRevision', path, problems); }
   checkString(object, 'reviewer', path, problems);
   checkString(object, 'implementer', path, problems);
   checkString(object, 'phase', path, problems);

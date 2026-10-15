@@ -4,6 +4,19 @@ import { recoveryEvidenceForPrompt } from './rebound-evidence.js';
 import type { RecoveryEvidenceRef } from './recovery-evidence.js';
 import { buildFreshDiagnosticRepairPrompt, promptSlotsFor } from './rebound-prompts.js';
 
+// Non-gate checkpoints store workflow labels, not executable checks. Keep the
+// encoding shared with continuation so legacy interrupted repairs stay resumable.
+const NON_GATE_COMMANDS = {
+  'handoff-verification': 'px handoff',
+  'hook-failure': 'hook-failure',
+  'artifact-incomplete': 'artifact-incomplete',
+  'agent-timeout': 'agent-timeout',
+} satisfies Record<Exclude<ReboundReason['kind'], 'gate-failure' | 'declared-gate-validation'>, string>;
+
+export function isRetainedGateRepair(command: string): boolean {
+  return !Object.values(NON_GATE_COMMANDS).includes(command);
+}
+
 /** Persists the harness checkpoint before exposing each fresh diagnostic repair prompt. */
 export async function prepareRepairPrompt(
   state: { occurrenceId: string; reason: ReboundReason; originalReason: ReboundReason; classification: ReboundClassification; diagnostic: string; originalDiagnostic: string; capturedEvidence?: RecoveryEvidenceRef | null },
@@ -18,9 +31,9 @@ export async function prepareRepairPrompt(
   const repairPort = context.repairCheckpoints ?? repairCheckpointPort();
   const required = state.originalReason;
   const command = required.kind === 'gate-failure' || required.kind === 'declared-gate-validation'
-    ? required.command : required.kind === 'handoff-verification' ? 'px handoff' : required.kind;
+    ? required.command : NON_GATE_COMMANDS[required.kind];
   const repairCheckpoint = await repairPort?.open({ slug, incidentId: state.occurrenceId, command, attempt }) ?? null;
-  const lookup = worktree ? recoveryEvidenceForPrompt(worktree, slug) : {};
+  const lookup = context.retainedFailure ? {} : worktree ? recoveryEvidenceForPrompt(worktree, slug) : {};
   const slots = { label: state.classification.label, slug, worktree, diagnostic: state.diagnostic,
     originalDiagnostic: state.originalDiagnostic, classification: state.classification, attempt, maxAttempts,
     ...promptSlotsFor(state.reason, slug), ...lookup,

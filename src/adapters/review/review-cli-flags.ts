@@ -44,10 +44,12 @@ export function repeatedFlagValues(args: string[], flag: string): string[] {
   return values;
 }
 
-export function readTextFlag(args: string[], inlineFlag: string, fileFlag: string, label: string, options: { readFileSync?: typeof fs.readFileSync; error?: (_msg: string) => void; exit?: (_code: number) => never } = {}): string | null {
+export type ReadUtf8File = (_path: string, _encoding: 'utf8') => string;
+
+export function readTextFlag(args: string[], inlineFlag: string, fileFlag: string, label: string, options: { readFileSync?: ReadUtf8File; error?: (_msg: string) => void; exit?: (_code: number) => void } = {}): string | null {
   const filePath = flagValue(args, fileFlag);
   if (filePath) {
-    try { return ((options.readFileSync || fs.readFileSync)(filePath, 'utf8') as string).trimEnd(); }
+    try { return (options.readFileSync || fs.readFileSync)(filePath, 'utf8').trimEnd(); }
     catch (err) { (options.error || fmt.log.plainError)(`Could not read ${label} from ${fmt.path(filePath)}: ${(err as Error).message}`); (options.exit || process.exit)(1); return null; }
   }
   return flagValue(args, inlineFlag);

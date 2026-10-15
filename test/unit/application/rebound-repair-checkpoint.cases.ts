@@ -12,7 +12,7 @@ export function repairCheckpointCases(): void {
   const reason: ReboundReason = { kind: 'gate-failure', command: 'npm test -- test/unit/application/rebound-kernel-contract.test.ts', area: 'unit', exitCode: 1, stdout: 'failure', stderr: '' };
   const context = (overrides: Partial<ReboundContext>): ReboundContext => ({
     slug: 'repair-fixture', worktree: '', implementer: 'codex', log() {}, error() {},
-    startAgent: async () => ({ result: { status: 0 } }), verify: () => ({ ok: true, command: reason.command }), ...overrides,
+    startAgent: async () => ({ result: { status: 0 } }), verify: () => ({ ok: true as const, command: reason.command }), ...overrides,
   });
   const port = (overrides: Partial<RepairCheckpointPort> = {}): RepairCheckpointPort => ({
     open: async () => ({ name: 'CP-2', version: 2 }), readBlocker: async () => undefined, verify: async () => {}, ...overrides,
@@ -75,7 +75,7 @@ export function repairCheckpointCases(): void {
   test('repair checkpoint persistence failure prevents any launch or rerun (TASK-2695)', async () => {
     const result = await rebound(reason, context({
       repairCheckpoints: port({ open: async () => { throw new Error('CAS conflict'); } }),
-      startAgent: async () => { assert.fail('must not launch'); }, verify: () => { assert.fail('must not verify'); },
+      startAgent: async () => { return assert.fail('must not launch'); }, verify: () => { return assert.fail('must not verify'); },
     }));
     assert.equal(result.outcome, 'human-only');
     assert.match(result.diagnostic, /CAS conflict/);
@@ -87,7 +87,7 @@ export function repairCheckpointCases(): void {
     const result = await rebound(reason, context({
       repairCheckpoints: port({ readBlocker: async () => blocker }),
       startAgent: async () => { launched++; return { result: { status: 0 } }; },
-      verify: () => { assert.fail('blocker must not be certified by unrelated success'); },
+      verify: () => { return assert.fail('blocker must not be certified by unrelated success'); },
     }));
     assert.equal(result.outcome, 'human-only');
     assert.equal(launched, 1);
@@ -100,14 +100,14 @@ export function repairCheckpointCases(): void {
       startAgent: async () => { launched++; return { result: { status: 1, invalidContract: {
         command: reason.command, diagnostic: 'invalid locked contract', authorityReason: 'operator owns checks', proposedCorrection: 'operator corrects command',
       } } }; },
-      verify: () => { assert.fail('must not rerun after blocker'); },
+      verify: () => { return assert.fail('must not rerun after blocker'); },
     }));
     assert.equal(result.outcome, 'human-only'); assert.equal(launched, 1);
   });
 
   test('mechanically rejected declaration fails closed without a repair launch (TASK-2695)', async () => {
     const result = await rebound({ kind: 'declared-gate-validation', command: 'prose', diagnostic: 'not executable' }, context({
-      startAgent: async () => { assert.fail('operator owns declaration'); }, verify: () => { assert.fail('must not verify'); },
+      startAgent: async () => { return assert.fail('operator owns declaration'); }, verify: () => { return assert.fail('must not verify'); },
     }));
     assert.equal(result.outcome, 'human-only');
   });
@@ -120,7 +120,7 @@ export function repairCheckpointCases(): void {
       let launches = 0;
       const result = await rebound(reason, context({
         startAgent: async () => { launches++; return { result: { status: 0 } }; },
-        verify: () => ({ ok: false, reason: { ...reason, stdout: '', stderr: 'forgejo connection refused', invalidContract } }),
+        verify: () => ({ ok: false as const, reason: { ...reason, stdout: '', stderr: 'forgejo connection refused', invalidContract } }),
       }));
       assert.equal(launches, 1);
       assert.equal(result.outcome, invalidContract ? 'human-only' : 'exhausted');
@@ -134,15 +134,15 @@ export function repairCheckpointCases(): void {
   });
 
   test('unrelated successful check cannot certify the authorized required gate (TASK-2695)', async () => {
-    const result = await rebound(reason, context({ repairCheckpoints: port({ verify: async () => { assert.fail('must not stamp success'); } }),
-      verify: () => ({ ok: true, command: 'npm test -- unrelated.test.ts' }),
+    const result = await rebound(reason, context({ repairCheckpoints: port({ verify: async () => { return assert.fail('must not stamp success'); } }),
+      verify: () => ({ ok: true as const, command: 'npm test -- unrelated.test.ts' }),
     }));
     assert.equal(result.outcome, 'human-only');
     assert.match(result.diagnostic, /Unrelated check/);
   });
 
   test('a green rerun with no required-check identity fails closed for recorded repairs (TASK-2695)', async () => {
-    const result = await rebound(reason, context({ repairCheckpoints: port(), verify: () => ({ ok: true }) }));
+    const result = await rebound(reason, context({ repairCheckpoints: port(), verify: () => ({ ok: true as const }) }));
     assert.equal(result.outcome, 'human-only');
     assert.match(result.diagnostic, /cannot certify/);
   });
@@ -156,13 +156,13 @@ export function repairCheckpointCases(): void {
     const ports = makePorts(recorder);
     let command = 'npm test';
     let launches = 0;
-    const verification = { ...ports.verification, formatVerificationCommand: () => command };
+    const verification = { ...ports.verification, formatVerificationCommand: () => command } satisfies import("../../../src/application/ports/handoff-workflow.js").HandoffVerificationPort;
     const recovery = new HandoffGateRecovery({ ...ports, verification }, new DeclaredGateRunner(ports));
     const result = await recovery.verifyRepository('fixture', {
       rootDir: '', forgejoUser: 'codex', log() {}, error() {}, recoverGateFailure: true, options: {},
       skipGate: false, area: 'docs', runVerificationGateFn: () => ({ status: 1, stderr: 'failure' }),
       startAgentFn: async () => { launches++; command = 'npm run typecheck'; return { result: { status: 0 } }; },
-      retryHandoff: async () => { assert.fail('must not certify a replacement command'); },
+      retryHandoff: async () => { return assert.fail('must not certify a replacement command'); },
     });
     assert.equal(result?.ok, false);
     assert.equal(launches, 1);

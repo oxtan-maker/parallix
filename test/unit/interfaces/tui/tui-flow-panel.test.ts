@@ -1,3 +1,4 @@
+import { TerminalStream } from '../../../helpers/terminal-stream.js';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -31,11 +32,9 @@ function populatedMetrics() {
   });
 }
 
-class FakeStdout extends EventEmitter {
-  public readonly isTTY = true;
-  public readonly writes: string[] = [];
+class FakeStdout extends TerminalStream {
   constructor(public columns: number, public rows: number) { super(); }
-  write(chunk: string): boolean { this.writes.push(chunk); return true; }
+
   resize(columns: number): void { this.columns = columns; this.emit('resize'); }
   lastFrame(): string {
     for (let index = this.writes.length - 1; index >= 0; index -= 1) {
@@ -76,8 +75,8 @@ test('FLOW panel visibly labels unavailable and partial health without treating 
   const React = await import('react');
   const { FlowPanel } = await import('../../../../src/interfaces/tui/flow-panel.js');
   const base = populatedMetrics();
-  const unavailable = { ...base, health: { state: 'unavailable' as const }, provenance: { ...base.provenance, sampleSize: 3, adapterSucceeded: false } };
-  const partial = { ...base, health: { state: 'partial' as const }, provenance: { ...base.provenance, sampleSize: 3 } };
+  const unavailable = { ...base, health: { state: 'unavailable' as const }, provenance: { ...base.provenance, sampleSize: 3, adapterSucceeded: false } } satisfies import("../../../../src/application/projections/board.js").BoardMetrics;
+  const partial = { ...base, health: { state: 'partial' as const }, provenance: { ...base.provenance, sampleSize: 3 } } satisfies import("../../../../src/application/projections/board.js").BoardMetrics;
 
   const unavailableOutput = plain(ink.renderToString(React.createElement(FlowPanel, { metrics: unavailable, columns: 240 }), { columns: 240 }));
   const partialOutput = plain(ink.renderToString(React.createElement(FlowPanel, { metrics: partial, columns: 240 }), { columns: 240 }));
@@ -109,7 +108,7 @@ test('FLOW panel renders supplied cohort values with metric-specific coverage in
         observationCounts: { cycleTime: 3, activeDwell: 2, reviewDwell: 0, reviewBounce: 0, reviewFixRounds: 3, tokens: 0, runtime: 1, cost: 2, netEngineeringLines: 0 },
       }],
     },
-  };
+  } satisfies import("../../../../src/application/projections/board.js").BoardMetrics;
   for (const columns of [120, 60]) {
     const output = plain(ink.renderToString(React.createElement(FlowPanel, { metrics, columns }), { columns }));
     assert.match(output, /EXPERIMENT COHORTS · label/);
@@ -127,7 +126,7 @@ test('FLOW panel switches to textual layout at narrow width and after a resize',
   const { FlowPanel } = await import('../../../../src/interfaces/tui/flow-panel.js');
   const stdout = new FakeStdout(120, 40);
   const instance = ink.render(React.createElement(FlowPanel, { metrics: populatedMetrics() }), {
-    stdout: stdout as unknown as NodeJS.WriteStream,
+    stdout: stdout,
     patchConsole: false,
     exitOnCtrlC: false,
   });

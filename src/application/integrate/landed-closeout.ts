@@ -1,3 +1,4 @@
+import type { IntegrationMissionServices } from '../ports/integration-records.js';
 import * as fmt from '../presentation/cli-format.js';
 import { missionId } from '../../domain/mission.js';
 import type { IntegrateLandingPort } from '../ports/integrate-workflow.js';
@@ -10,7 +11,7 @@ type CloseoutPort = Pick<IntegrateLandingPort,
 export async function completeLandedCloseout(options: {
   slug: string;
   landedCommit: string;
-  missionServices: any;
+  missionServices: IntegrationMissionServices;
   baseWorktree: string;
   baseBranch: string;
   variant: string;

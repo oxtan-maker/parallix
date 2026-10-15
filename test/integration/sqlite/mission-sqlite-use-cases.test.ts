@@ -1,3 +1,4 @@
+import { seedDraftedContract } from '../../helpers/seed-drafted-contract.js';
 /**
  * TASK-2322.05 — the Mission use cases against isolated SQLite adapters.
  *
@@ -16,7 +17,6 @@ import * as path from 'node:path';
 import { missionVersion } from '../../../src/application/domain-ports.js';
 import { MissionCheckpointService } from '../../../src/application/mission-checkpoint-service.js';
 import { MissionHandoffService } from '../../../src/application/mission-handoff-service.js';
-import { MissionBriefService } from '../../../src/application/mission-brief-service.js';
 import { MissionCreationService, type MissionIdentityAllocator } from '../../../src/application/mission-creation-service.js';
 import { allocateAdhocIdentity } from '../../../src/adapters/sqlite/adhoc-counter.js';
 import { createRepositoryMissionCatalog } from '../../../src/composition/board-projection.js';
@@ -38,33 +38,7 @@ import { repositoryId } from '../../../src/domain/repository.js';
  * least one verification gate (`requireDraftedContract` in mission-workflow.ts).
  * A fixture that activates without it is not a mission the workflow can produce.
  */
-async function seedDraftedContract(store: never, mission: never): Promise<number> {
-  const briefService = new MissionBriefService(store as never);
-  await briefService.update({
-    operationId: 'op-brief', missionId: mission,
-    capabilities: new Set(['mission:context']),
-    patch: { goal: 'Fixture goal', why: 'Fixture why', scope: 'Fixture scope' },
-  } as never);
-  await briefService.setGates({
-    operationId: 'op-gates', missionId: mission,
-    capabilities: new Set(['mission:context']), gates: ['npm test'],
-  } as never);
-  await briefService.setSuccessCriteria({
-    operationId: 'op-criteria', missionId: mission,
-    capabilities: new Set(['mission:context']), criteria: ['The fixture mission is done'],
-  } as never);
-  await briefService.setPredictedNelBucket({
-    operationId: 'op-nel', missionId: mission,
-    capabilities: new Set(['mission:context']), bucket: 'Small',
-  } as never);
-  const plan = await new MissionCheckpointService(store as never).plan({
-    operationId: 'op-plan', missionId: mission,
-    capabilities: new Set(['mission:context']), name: 'CP-1', description: 'Do the fixture work',
-  } as never);
-  // Recording the contract advances the Mission, so the caller activates
-  // against the version the seeding produced rather than the one before it.
-  return (plan as { value: { version: number } }).value.version;
-}
+
 
 const MISSION = missionId('task-2322-05-fixture');
 const REPOSITORY = repositoryId('parallix');
@@ -99,7 +73,7 @@ async function intake(store: SqliteMissionStore, overrides: Record<string, unkno
     rawStatus: 'refined',
     capabilities: CAPABILITIES,
     ...overrides,
-  } as never);
+  });
 }
 
 /**
@@ -115,7 +89,7 @@ async function refine(store: SqliteMissionStore, expectedVersion = missionVersio
     command: { type: 'refine' },
     actor: agentFamily('codex'),
     occurredAt: '2026-07-29T11:00:00Z',
-  } as never);
+  });
 }
 
 afterEach(async () => {
@@ -186,7 +160,7 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
     const { store, db } = await isolatedStore();
     try {
       await intake(store);
-      const contractVersion = await seedDraftedContract(store as never, MISSION as never);
+      const contractVersion = await seedDraftedContract(store, MISSION);
       const refinedVersion = ((await refine(store, missionVersion(contractVersion))) as { value: { version: number } }).value.version;
       const activated = await new MissionLifecycleService(store).activate({
         operationId: 'op-activate',
@@ -223,7 +197,7 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
     const { store, db } = await isolatedStore();
     try {
       await intake(store);
-      const contractVersion = await seedDraftedContract(store as never, MISSION as never);
+      const contractVersion = await seedDraftedContract(store, MISSION);
       const refinedVersion = ((await refine(store, missionVersion(contractVersion))) as { value: { version: number } }).value.version;
       const service = new MissionLifecycleService(store);
       const first = await service.activate({
@@ -407,7 +381,7 @@ describe('Mission creation over isolated SQLite', () => {
     );
     const create = (overrides: Record<string, unknown> = {}) => service.execute({
       operationId: 'op-create', requestKey: 'form-1', title: 'Capture the idea', capabilities: CAPABILITIES, ...overrides,
-    } as never);
+    });
     return { store, db, create };
   }
 
@@ -421,7 +395,9 @@ describe('Mission creation over isolated SQLite', () => {
       });
       const second = await create({ requestKey: 'form-2' });
       assert.equal(first.status, 'completed');
+      assert.ok(first.value != null);
       assert.equal(first.value.mission.id, 'px-0001');
+      assert.ok(second.value != null);
       assert.equal(second.value.mission.id, 'px-0002');
 
       const read = await store.load(first.value.mission.id);
@@ -445,6 +421,7 @@ describe('Mission creation over isolated SQLite', () => {
     try {
       const created = await create({ description: 'Needs a reason later' });
       assert.equal(created.status, 'completed');
+      assert.ok(created.value);
       const read = await store.load(created.value.mission.id);
       assert.equal(read.kind, 'found');
       assert.equal(read.mission.description, 'Needs a reason later');
@@ -458,10 +435,12 @@ describe('Mission creation over isolated SQLite', () => {
     const { store, db, create } = await creation();
     try {
       await intake(store);
+      const loaded = await store.load(MISSION);
+      assert.equal(loaded.kind, 'found');
       const finished = missionId('task-finished');
-      await store.save({ ...(await store.load(MISSION) as never as { mission: object }).mission, id: finished, status: 'done', closedAt: '2026-07-01T00:00:00Z' } as never, null);
+      await store.save({ ...loaded.mission, id: finished, status: 'done', closedAt: '2026-07-01T00:00:00Z' }, null);
       const foreign = missionId('task-foreign');
-      await store.save({ ...(await store.load(MISSION) as never as { mission: object }).mission, id: foreign, repositoryId: repositoryId('other') } as never, null);
+      await store.save({ ...loaded.mission, id: foreign, repositoryId: repositoryId('other') }, null);
       for (const dependency of [finished, foreign, 'task-nonexistent']) {
         const outcome = await create({ requestKey: dependency, dependencies: [MISSION, dependency] });
         assert.equal(outcome.status, 'rejected', dependency);
@@ -478,6 +457,8 @@ describe('Mission creation over isolated SQLite', () => {
     try {
       const first = await create();
       const retry = await create();
+      assert.ok(first.value != null);
+      assert.ok(retry.value != null);
       assert.equal(retry.value.mission.id, first.value.mission.id);
       const rows = await db.query<{ n: number }>("SELECT COUNT(*) AS n FROM missions WHERE id LIKE 'px-%'");
       assert.equal(rows[0].n, 1);
@@ -499,6 +480,8 @@ describe('Mission creation over isolated SQLite', () => {
       for (let i = 0; i < 257; i += 1) { await create({ requestKey: `other-${i}` }); }
       const retry = await create({ requestKey: 'original' });
       assert.equal(retry.status, 'completed');
+      assert.ok(first.value != null);
+      assert.ok(retry.value != null);
       assert.equal(retry.value.mission.id, first.value.mission.id);
       const rows = await db.query<{ n: number }>("SELECT COUNT(*) AS n FROM missions WHERE id LIKE 'px-%'");
       assert.equal(rows[0].n, 258);
@@ -521,18 +504,22 @@ describe('Mission creation over isolated SQLite', () => {
       );
       let allocated = 0;
       const dbPath = db.getPath()!;
-      const request = (title: string) => ({ operationId: 'op', requestKey: 'same-form-key', title, capabilities: CAPABILITIES }) as never;
+      const request = (title: string) => ({ operationId: 'op', requestKey: 'same-form-key', title, capabilities: CAPABILITIES });
       const a = serviceFor(repositoryId('repo-a'), dbPath);
       const b = serviceFor(repositoryId('repo-b'), dbPath);
       const first = await a.execute(request('In A'));
       const second = await b.execute(request('In B'));
       assert.equal(second.status, 'completed');
+      assert.ok(first.value != null);
+      assert.ok(second.value != null);
       assert.notEqual(second.value.mission.id, first.value.mission.id);
       assert.equal(second.value.mission.repositoryId, 'repo-b');
       // Fresh services have no memory: recovery must stay inside each repository.
       const recoveredB = await serviceFor(repositoryId('repo-b'), dbPath).execute(request('In B'));
       const recoveredA = await serviceFor(repositoryId('repo-a'), dbPath).execute(request('In A'));
+      assert.ok(recoveredB.value != null);
       assert.equal(recoveredB.value.mission.id, second.value.mission.id);
+      assert.ok(recoveredA.value != null);
       assert.equal(recoveredA.value.mission.id, first.value.mission.id);
     } finally {
       await db.close();

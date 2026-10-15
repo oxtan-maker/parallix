@@ -8,22 +8,25 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from '../../../../lib/module-mock.js';
+import { StatsRow } from '../../../../../src/application/services/statistics-row.js';
 const stats = mockModule<typeof import('../../../../../src/adapters/cli/commands/stats.js')>('../../../../../src/adapters/cli/commands/stats.js', import.meta.url);
 const __mm1 = mockModule<typeof import('../../../../../src/application/presentation/cli-format.js')>('../../../../../src/application/presentation/cli-format.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 'use strict';
 
-function missionFlow(rows) {
-  return rows.filter(row => row.completedForTest === 'yes')
+interface TestRow extends StatsRow { mission: string; date: string; completedForTest?: string; }
+
+function missionFlow(rows: readonly TestRow[]) {
+  return rows.filter((row) => row.completedForTest === 'yes')
     .map(row => ({ repo: String(row.repo || ''), mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [], implementer: row.implementer }));
 }
 
-function renderWeeklyStatsReport(rows, options = {}) {
+function renderWeeklyStatsReport(rows: readonly TestRow[], options = {}) {
   return stats.renderWeeklyStatsReport(rows, { ...options, missionFlow: missionFlow(rows) });
 }
 
-function renderRangeStatsReport(rows, options = {}) {
+function renderRangeStatsReport(rows: readonly TestRow[], options = {}) {
   return stats.renderRangeStatsReport(rows, { ...options, missionFlow: missionFlow(rows) });
 }
 
@@ -79,8 +82,7 @@ test('task-1409: active-stage rows are visible in per-mission phase report', () 
       duration_minutes: '30',
       cost_usd: '2.50',
     },
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-  ].map(stats.normalizeStatsRow);
+  ].map(row => stats.normalizeStatsRow(row));
 
   const report = stats.renderMissionPhaseReport(rows, 'task-1354');
 

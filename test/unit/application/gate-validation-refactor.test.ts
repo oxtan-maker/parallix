@@ -1,3 +1,4 @@
+import { makePorts, makeRecorder } from '../../helpers/handoff-ports.js';
 // Focused regression coverage for the validateDeclaredGates refactor (S3776
 // slice). Each test pins one extracted branch: prose detection, unclosed-quote
 // detection, the merged delimiter-balance helper, and missing-file detection.
@@ -13,8 +14,9 @@ const verifyPath = path.join(rootDir, 'scripts', 'verify-local.sh');
 
 function useCaseWithExisting(existing: string[]) {
   const set = new Set(existing);
-  const fileSystem = { existsSync: (p: string) => set.has(p) };
-  return new HandoffCommandUseCase({ fileSystem } as never);
+  const base = makePorts(makeRecorder());
+  const fileSystem = { ...base.fileSystem, existsSync: (p: string) => set.has(p) };
+  return new HandoffCommandUseCase({ ...base, fileSystem });
 }
 
 test('refactor proseError branch rejects markdown-span-with-suffix declaration', () => {

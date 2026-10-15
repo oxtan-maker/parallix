@@ -7,19 +7,13 @@ import type { ParallixConfiguration } from '../../src/application/ports/configur
 import { setCommandPathProbe, setLauncherHealthProbe, setWorkflowLaunchPort } from '../../src/adapters/agents/agents.js';
 
 setCommandPathProbe(() => '/fixture-agent');
-setLauncherHealthProbe(() => ({ ok: true }));
+setLauncherHealthProbe(() => ({ ok: true as const }));
 
-type LaunchRequest = {
-  prompt: string;
-  worktree?: string;
-  env: Record<string, string | undefined>;
-  configuration: ParallixConfiguration;
-};
-
-setWorkflowLaunchPort(({ prompt, worktree, env, configuration }: LaunchRequest) => ({
+setWorkflowLaunchPort(({ prompt, worktree, env, configuration }) => ({
   invocation: { command: 'fixture-agent', args: [], options: { cwd: worktree } },
   resultPromise: (async () => {
     await new Promise(resolve => setImmediate(resolve));
+    if (!configuration) { throw new Error('Review repair fixture requires resolved configuration'); }
     const slug = process.env.TASK_2582_SLUG!;
     const childEnvironment = { ...configuration.forwardedEnvironment, ...env };
     const cli = childEnvironment.PARALLIX_CLI_COMMAND!;

@@ -206,17 +206,21 @@ function endOfCurrentUtcMonth(now: Date) {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
 }
 
+export type DetectedLimitHit =
+  | { reroute: true; kind?: string; reason: string; until?: never; source?: string }
+  | { reroute?: false; until: string; source?: string; reason: string; kind?: never };
+
 interface DetectLimitHitOptions {
   agent: string;
   stdout?: string;
   stderr?: string;
-  status?: number;
+  status?: number | null;
   signal?: string | null;
-  error?: { code?: string } | null;
+  error?: unknown;
   now?: Date;
 }
 
-function matchedLimitHit(agent: string, combined: string, match: any, now: Date) {
+function matchedLimitHit(agent: string, combined: string, match: NonNullable<ReturnType<typeof findLimitHitMatch>>, now: Date) {
   // A failed launcher can contain an agent's review of a transcript. Reject a
   // complete quoted match so that review prose cannot persist a family block;
   // bare provider messages remain positive limit-hit evidence.
@@ -226,10 +230,10 @@ function matchedLimitHit(agent: string, combined: string, match: any, now: Date)
     // A model-level 403 means this invocation cannot use its selected model.
     // It is neither provider-wide quota nor a reason to poison all Qwen
     // launches: reroute the current work and tell the operator what to fix.
-    return { reroute: true, kind: 'entitlement', reason: 'model entitlement denied (scoped, no family block)' };
+    return { reroute: true as const, kind: 'entitlement', reason: 'model entitlement denied (scoped, no family block)' };
   }
   if (agent === 'qwen' && /Requests rate limit exceeded/i.test(matchedText)) {
-    return { reroute: true, reason: 'rate limit (transient, no block)' };
+    return { reroute: true as const, reason: 'rate limit (transient, no block)' };
   }
   const parsed = parseResetTime(clipContext(combined, match.index, match.length), now);
   if (parsed && !Number.isNaN(parsed.getTime()) && parsed.getTime() > now.getTime()) {
@@ -243,6 +247,13 @@ function matchedLimitHit(agent: string, combined: string, match: any, now: Date)
   };
 }
 
+function failedLauncher({ error, signal, status }: DetectLimitHitOptions) {
+  return (
+    error !== null && error !== undefined ||
+    signal !== null && signal !== undefined ||
+    (typeof status === 'number' && status !== 0));
+}
+
 function detectLimitHit({
   agent,
   stdout = '',
@@ -251,7 +262,7 @@ function detectLimitHit({
   signal,
   error,
   now = new Date()
-}: DetectLimitHitOptions = {} as DetectLimitHitOptions): { reroute?: boolean; until?: string; source?: string; reason: string } | null {
+}: DetectLimitHitOptions = {} as DetectLimitHitOptions): DetectedLimitHit | null {
   if (!agent) {return null;}
   // Gate detection on a failed launcher invocation. A successful child (exit 0,
   // no signal, no spawn error) means any limit-hit phrases in the transcript
@@ -260,10 +271,7 @@ function detectLimitHit({
   // wrongly block a healthy agent in agents.local.json.
   // `status === undefined` means the caller did not pass exit metadata; return
   // null to avoid false-positive limit-hit blocks from legacy callers.
-  const launcherFailed =
-    error !== null && error !== undefined ||
-    signal !== null && signal !== undefined ||
-    (typeof status === 'number' && status !== 0);
+  const launcherFailed = failedLauncher({ agent, error, signal, status });
   if (!launcherFailed) {return null;}
 
   const combined = `${stdout || ''}\n${stderr || ''}`;
@@ -276,7 +284,7 @@ function detectLimitHit({
   if (match) {
     const detected = matchedLimitHit(agent, combined, match, now);
     if (!detected) {return null;}
-    if ('reroute' in detected) { return detected; }
+    if (detected.reroute === true) { return detected; }
     ({ target, source, reason } = detected);
   } else if (signal !== null && signal !== undefined && signal !== 'SIGTERM') {
     // Agent was killed by a signal (e.g. SIGINT/Ctrl-C) but no limit-hit

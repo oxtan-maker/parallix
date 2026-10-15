@@ -25,10 +25,10 @@ import {
 
 // Injected doubles for the git-boundary seams. Cast through `never` so the
 // test stays free of a real spawnSync/git dependency.
-const initDenied = () => ({ ok: false, message: 'git init denied' }) as never;
-const initBoom = (): never => { throw new Error('should not init'); }
-const statusFail = () => ({ status: 1, stdout: '', stderr: 'git boom' }) as never;
-const conflicted = () => ({ status: 0, stdout: 'DD  conflicted-file\n' }) as never;
+const initDenied: NonNullable<NonNullable<Parameters<typeof ensureStandaloneGitRepo>[1]>["initializeGitRepositoryFn"]> = () => ({ ok: false, message: 'git init denied' });
+const initBoom: NonNullable<NonNullable<Parameters<typeof ensureStandaloneMissionBaseline>[1]>["spawnSyncFn"]> = (): never => { throw new Error('should not init'); }
+const statusFail: NonNullable<NonNullable<Parameters<typeof ensureStandaloneMissionBaseline>[1]>["spawnSyncFn"]> = () => ({ signal: null,  status: 1, stdout: '', stderr: 'git boom' });
+const conflicted: NonNullable<NonNullable<Parameters<typeof ensureStandaloneMissionBaseline>[1]>["spawnSyncFn"]> = () => ({ stderr: '', signal: null,  status: 0, stdout: 'DD  conflicted-file\n' });
 
 function withTempConfig(run: (rootDir: string, config: unknown) => void): void {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pcfg-'));
@@ -306,7 +306,7 @@ test('ensureStandaloneGitRepo short-circuits when a git repository already exist
   try {
     const result = ensureStandaloneGitRepo(rootDir, {
       hasGitRepositoryFn: () => true,
-      initializeGitRepositoryFn: initBoom,
+      initializeGitRepositoryFn: () => { throw new Error('should not init'); },
     });
     assert.deepEqual(result, { changed: false, initialized: false });
   } finally { fs.rmSync(rootDir, { recursive: true, force: true }); }

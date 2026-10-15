@@ -186,9 +186,9 @@ export async function installModuleMocks(): Promise<void> {
     // namespaces such as stats.ts's `export default stats`) are included so
     // their properties route through the same state as the named exports.
     if (initial.default !== null && initial.default !== undefined && (typeof initial.default === 'function' || typeof initial.default === 'object')) {
-      for (const key of Object.keys(initial.default)) {
+      for (const [key, value] of Object.entries(initial.default)) {
         if (!(key in entry.state)) {
-          entry.state[key] = (initial.default as unknown as Record<string, unknown>)[key];
+          entry.state[key] = value;
         }
       }
     }

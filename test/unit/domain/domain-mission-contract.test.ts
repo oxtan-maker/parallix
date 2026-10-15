@@ -1,3 +1,4 @@
+import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
 // Historical regression provenance: TASK-2294, TASK-2322, TASK-2322.09, TASK-2347.09.
 // Mission domain contract: pure Mission invariants, authority, and outcomes.
 //
@@ -47,7 +48,7 @@ describe("Mission lifecycle and review invariants , ,", () => {
     url: '/pull/152',
     sourceBranch: 'mission/task-2294',
     targetBranch: 'main',
-  };
+  } satisfies ReviewedChange;
 
   function mission(status: Mission['status'] = 'refined'): Mission {
     return {
@@ -323,7 +324,7 @@ describe("Mission lifecycle and review invariants , ,", () => {
       kind: 'local-branch' as const,
       sourceBranch: 'mission/task-2294',
       targetBranch: 'main',
-    };
+    } satisfies ReviewedChange;
     const submitted = initialReview(localChange);
     const inReview = decideMission(active, {
       type: 'submit-for-review',
@@ -433,7 +434,7 @@ describe("Mission lifecycle and review invariants , ,", () => {
   });
 
   test('recordCheckpoint rejects blank Goal Check text as defense in depth (TASK-2634)', () => {
-    const base = { missionId: id, name: 'CP-1', firstLine: 'CP-1: x', nextActionText: 'next' };
+    const base = { missionId: id, name: 'CP-1', firstLine: 'CP-1: x', nextActionText: 'next' } satisfies Partial<NonNullable<Parameters<typeof recordCheckpoint>[1]>>;
     assert.throws(() => recordCheckpoint([], { ...base, goalCheck: [{ criterion: ' ', evidence: 'e' }] }), /goal criterion must not be empty/);
     assert.throws(() => recordCheckpoint([], { ...base, goalCheck: [{ criterion: 'c', evidence: ' ' }] }), /goal evidence must not be empty/);
   });
@@ -513,7 +514,7 @@ describe("Mission field and legacy-path authority", () => {
   });
 
   test('mission reads prefer repository truth and label cache fallback stale', () => {
-    const cached = { ...repositoryMission, title: 'cached', status: 'review' as const };
+    const cached = { ...repositoryMission, title: 'cached', status: 'review' as const } satisfies { title: string; status: "review"; id: import("../../../src/domain/mission.js").MissionId; repositoryId: import("../../../src/domain/repository.js").RepositoryId; description?: string | null; labels: readonly import("../../../src/domain/mission.js").MissionLabel[]; assignee: import("../../../src/domain/agents.js").AgentFamily | null; checkpoints: readonly import("../../../src/domain/checkpoint.js").CheckpointData[]; brief?: import("../../../src/domain/mission-brief.js").MissionBrief | null; declaredGates?: readonly string[]; successCriteria?: readonly string[]; successCriterionIds?: readonly string[]; nextSuccessCriterionId?: number; completedSuccessCriteria?: readonly number[]; dependencies?: readonly import("../../../src/domain/mission.js").MissionId[]; predictedNelBucket?: import("../../../src/domain/net-engineering-lines.js").NelBucketLabel | null; reproductionTest?: string | null; review: import("../../../src/domain/review.js").Review | null; netEngineeringLines: number | null; rawStatus?: string; externalTaskRef?: import("../../../src/domain/external-task.js").ExternalTaskRef | null; closedAt: null; };
     assert.deepEqual(reconcileMissionRead(repositoryMission, cached), {
       mission: repositoryMission, source: 'target-repository', stale: false,
     });
@@ -524,11 +525,11 @@ describe("Mission field and legacy-path authority", () => {
 });
 
 describe("Mission outcome and completed statistics ,", () => {
-  const measured = <T>(value: T): Measurement<T> => ({ kind: 'measured', value });
-  const unavailable = <T>(reason: string): Measurement<T> => ({ kind: 'unavailable', reason });
+  const measured = <T>(value: T): Measurement<T> => ({ kind: 'measured' as const, value });
+  const unavailable = <T>(reason: string): Measurement<T> => ({ kind: 'unavailable' as const, reason });
 
   function closedMission(overrides: Partial<Omit<ClosedMission, 'status' | 'closedAt'>> = {}) {
-    return requireClosedMission({
+    return requireClosedMission(completeMissionFixture(String(missionId('task-2294')), {
       id: missionId('task-2294'),
       repositoryId: repositoryId('parallix'),
       title: 'Model the domain',
@@ -541,7 +542,7 @@ describe("Mission outcome and completed statistics ,", () => {
       review: null,
       netEngineeringLines: 90,
       ...overrides,
-    });
+    }));
   }
 
   function run(overrides: Partial<AgentRunMeasurement> = {}): AgentRunMeasurement {

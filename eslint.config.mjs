@@ -21,7 +21,11 @@ const sourceFiles = ['src/**/*.{ts,tsx}', 'web/**/*.{ts,tsx}'];
 
 const sourceRules = {
   'no-undef': 'error',
-  'no-unused-vars': ['error', { argsIgnorePattern, varsIgnorePattern, caughtErrorsIgnorePattern }],
+  // Core no-unused-vars cannot see type-only positions (type alias parameter
+  // names, imported types used only in annotations), so it reports false
+  // positives on TypeScript sources. The type-aware rule owns this for .ts/.tsx.
+  'no-unused-vars': 'off',
+  '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern, varsIgnorePattern, caughtErrorsIgnorePattern }],
   'valid-typeof': 'error',
   'no-unreachable': 'error',
   'no-async-promise-executor': 'error',
@@ -29,14 +33,14 @@ const sourceRules = {
   'curly': 'error',
   'no-var': 'error',
   '@typescript-eslint/no-require-imports': 'off',
-  // Promise handling is never baselined: source must be clean.
+  // Promise handling is enforced as an error.
   '@typescript-eslint/no-floating-promises': 'error',
   '@typescript-eslint/no-misused-promises': 'error',
-  // These debt-bearing rules are ratcheted by the static-analysis gate.
-  '@typescript-eslint/no-explicit-any': 'warn',
-  '@typescript-eslint/no-unsafe-assignment': 'warn',
-  complexity: ['warn', 15],
-  'max-lines-per-function': ['warn', { max: 100, skipBlankLines: true, skipComments: true }],
+  // Type safety is enforced as an error; the gate also rejects warnings.
+  '@typescript-eslint/no-explicit-any': 'error',
+  '@typescript-eslint/no-unsafe-assignment': 'error',
+  complexity: ['error', 15],
+  'max-lines-per-function': ['error', { max: 100, skipBlankLines: true, skipComments: true }],
 };
 
 export default [
@@ -85,6 +89,7 @@ export default [
     plugins: {
       '@typescript-eslint': tsPlugin,
     },
+    linterOptions: { noInlineConfig: true },
     rules: sourceRules,
   },
   // Browser globals and callback-shape declarations belong to the web adapter.

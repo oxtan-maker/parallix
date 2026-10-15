@@ -1,4 +1,4 @@
-import type { DecisionAnswer, DecisionPort, DecisionRequest, DecisionResult } from '../../application/ports/decision.js';
+import type { DecisionAnswer, DecisionQuestion, DecisionPort, DecisionRequest, DecisionResult } from '../../application/ports/decision.js';
 import { DecisionError } from '../../application/ports/decision.js';
 import type { DecisionResolution } from './provider.js';
 import { measureDecisionBudget, supportsDecisionBudget } from './token-budget.js';
@@ -28,51 +28,77 @@ function distribution(value: unknown, labels: readonly string[]): Record<string,
 function decode(body: unknown, request: DecisionRequest, provider: string): DecisionResult {
   if (!record(body) || !record(body.answers) || typeof body.model !== 'string' || !body.model.trim()) { return invalid(); }
   if (Object.keys(body.answers).length !== Object.keys(request.questions).length) { return invalid(); }
-  const answers: Record<string, DecisionAnswer> = Object.create(null);
+  const answers: Record<string, DecisionAnswer> = Object.create(null) as Record<string, DecisionAnswer>;
   for (const [id, question] of Object.entries(request.questions)) {
     const answer = body.answers[id];
     if (!record(answer)) { return invalid(); }
-    switch (question.type) {
-      case 'boolean':
-        if (answer.type !== 'noul') { return invalid(); }
-        answers[id] = { type: 'boolean', probability: probability(answer.noul) };
-        break;
-      case 'choice': {
-        if (answer.type !== 'choice' || typeof answer.choice !== 'string' || !Object.hasOwn(question.criteria, answer.choice)) { return invalid(); }
-        answers[id] = { type: 'choice', selected: answer.choice,
-          probabilities: distribution(answer.probabilities, Object.keys(question.criteria)), confidence: probability(answer.confidence) };
-        break;
-      }
-      case 'score': {
-        if (answer.type !== 'score' || !record(answer.legend)) { return invalid(); }
-        const score = finite(answer.score);
-        if (score < 0 || score > question.criteria.length - 1) { return invalid(); }
-        const labels = question.criteria.map((_, index) => String(index));
-        if (Object.keys(answer.legend).length !== labels.length || labels.some(label => !Object.hasOwn(answer.legend as object, label))) { return invalid(); }
-        answers[id] = { type: 'score', score,
-          levels: Object.fromEntries(question.criteria.map((level, index) => [String(index), level])),
-          ...(answer.probabilities === undefined ? {} : { probabilities: distribution(answer.probabilities, labels) }),
-          confidence: probability(answer.confidence) };
-        break;
-      }
-    }
+    answers[id] = decodeAnswer(answer, question);
   }
+
+  const usage = decodeUsage(body.usage);
+  return { provider, model: body.model, answers, ...(usage ? { usage } : {}) };
+}
+
+function decodeAnswer(answer: Record<string, unknown>, question: DecisionQuestion): DecisionAnswer {
+  switch (question.type) {
+    case 'boolean':
+      if (answer.type !== 'noul') { return invalid(); }
+      return { type: 'boolean', probability: probability(answer.noul) };
+    case 'choice': {
+      if (answer.type !== 'choice' || typeof answer.choice !== 'string' || !Object.hasOwn(question.criteria, answer.choice)) { return invalid(); }
+      return {
+        type: 'choice', selected: answer.choice,
+        probabilities: distribution(answer.probabilities, Object.keys(question.criteria)), confidence: probability(answer.confidence)
+      };
+    }
+    case 'score': return decodeScoreAnswer(answer, question);
+  }
+}
+
+function decodeScoreAnswer(answer: Record<string, unknown>, question: Extract<DecisionQuestion, { type: 'score' }>): DecisionAnswer {
+  if (answer.type !== 'score' || !record(answer.legend)) { return invalid(); }
+  const score = finite(answer.score);
+  if (score < 0 || score > question.criteria.length - 1) { return invalid(); }
+  const labels = question.criteria.map((_, index) => String(index));
+  if (Object.keys(answer.legend).length !== labels.length || labels.some(label => !Object.hasOwn(answer.legend as object, label))) { return invalid(); }
+  return {
+    type: 'score', score,
+    levels: Object.fromEntries(question.criteria.map((level, index) => [String(index), level])),
+    ...(answer.probabilities === undefined ? {} : { probabilities: distribution(answer.probabilities, labels) }),
+    confidence: probability(answer.confidence)
+  };
+}
+
+function decodeUsage(value: unknown): DecisionResult['usage'] {
   let usage: DecisionResult['usage'];
-  if (body.usage !== undefined) {
-    if (!record(body.usage)) { return invalid(); }
+  if (value !== undefined) {
+    if (!record(value)) { return invalid(); }
     const count = (value: unknown): number => {
       const number = finite(value);
       if (!Number.isSafeInteger(number) || number < 0) { return invalid(); }
       return number;
     };
     usage = {
-      ...(body.usage.input_tokens === undefined ? {} : { inputTokens: count(body.usage.input_tokens) }),
-      ...(body.usage.output_tokens === undefined ? {} : { outputTokens: count(body.usage.output_tokens) }),
-      ...(body.usage.cost === undefined ? {} : { cost: finite(body.usage.cost) }),
+      ...(value.input_tokens === undefined ? {} : { inputTokens: count(value.input_tokens) }),
+      ...(value.output_tokens === undefined ? {} : { outputTokens: count(value.output_tokens) }),
+      ...(value.cost === undefined ? {} : { cost: finite(value.cost) }),
     };
     if (usage.cost !== undefined && usage.cost < 0) { return invalid(); }
   }
-  return { provider, model: body.model, answers, ...(usage ? { usage } : {}) };
+  return usage;
+}
+
+function assertQuestionCriteria(question: DecisionQuestion): void {
+  if (question.type === 'choice' && (!record(question.criteria) || Object.keys(question.criteria).length < 2 || Object.keys(question.criteria).length > 255)) {
+    throw new Error('Choice questions require between 2 and 255 options.');
+  }
+  if (question.type === 'score' && (!Array.isArray(question.criteria) || question.criteria.length < 2)) {
+    throw new Error('Score questions require at least two ordered levels.');
+  }
+  if (question.type === 'boolean' && question.criteria !== undefined && !record(question.criteria)) {
+    throw new Error('Boolean criteria must describe true and false.');
+  }
+
 }
 
 function serialize(request: DecisionRequest, model: string): string {
@@ -82,15 +108,7 @@ function serialize(request: DecisionRequest, model: string): string {
       || question.instructions === undefined || question.instructions === null || question.instructions === '') {
       throw new Error('Decision questions require a supported type and instructions.');
     }
-    if (question.type === 'choice' && (!record(question.criteria) || Object.keys(question.criteria).length < 2 || Object.keys(question.criteria).length > 255)) {
-      throw new Error('Choice questions require between 2 and 255 options.');
-    }
-    if (question.type === 'score' && (!Array.isArray(question.criteria) || question.criteria.length < 2)) {
-      throw new Error('Score questions require at least two ordered levels.');
-    }
-    if (question.type === 'boolean' && question.criteria !== undefined && !record(question.criteria)) {
-      throw new Error('Boolean criteria must describe true and false.');
-    }
+    assertQuestionCriteria(question);
     return [id, { ...question, type: question.type === 'boolean' ? 'noul' : question.type }];
   }));
   // Reject non-JSON inputs rather than silently dropping undefined or coercing NaN.
@@ -138,8 +156,10 @@ export class SystemOneDecisionAdapter implements DecisionPort {
 
   async decide(request: DecisionRequest): Promise<DecisionResult> {
     const route = this.resolution.route;
-    if (!route) { throw new DecisionError('setup-required', this.resolution.availability.status === 'setup-required'
-      ? this.resolution.availability.reason : 'Decision setup required.'); }
+    if (!route) {
+      throw new DecisionError('setup-required', this.resolution.availability.status === 'setup-required'
+        ? this.resolution.availability.reason : 'Decision setup required.');
+    }
     let body: string;
     try {
       body = encode(request, route.model);

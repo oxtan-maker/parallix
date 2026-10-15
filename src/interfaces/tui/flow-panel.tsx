@@ -143,9 +143,9 @@ export function FlowPanel({ metrics, columns }: { readonly metrics: BoardMetrics
 
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Text bold color="cyan">{`FLOW${narrow ? ' · textual' : ''}${windowLabel ? ` · decision window ${windowLabel}` : ''}`}</Text>
+      <Text bold color="cyan">{flowHeading(narrow, windowLabel)}</Text>
       {windowLabel && <Text dimColor>Local calendar days · current period updates with new completions</Text>}
-      <Text color={healthState === 'unavailable' ? 'red' : healthState === 'partial' ? 'yellow' : 'gray'}>{`Statistics: ${healthState} · population n=${sampleSize} (all recorded history, not the decision sample)`}</Text>
+      <Text color={flowHealthColor(healthState)}>{`Statistics: ${healthState} · population n=${sampleSize} (all recorded history, not the decision sample)`}</Text>
       <Box flexDirection={narrow ? 'column' : 'row'}>
         <Box flexDirection="column" marginRight={narrow ? 0 : 4}>
           <DecisionWindowRows metrics={metrics} narrow={narrow} />
@@ -175,4 +175,11 @@ export function FlowPanel({ metrics, columns }: { readonly metrics: BoardMetrics
       <CohortRows metrics={metrics} />
     </Box>
   );
+}
+
+function flowHeading(narrow: boolean, windowLabel: string | undefined): string {
+  return `FLOW${narrow ? ' · textual' : ''}${windowLabel ? ` · decision window ${windowLabel}` : ''}`;
+}
+function flowHealthColor(healthState: string): 'red' | 'yellow' | 'gray' {
+  return healthState === 'unavailable' ? 'red' : healthState === 'partial' ? 'yellow' : 'gray';
 }

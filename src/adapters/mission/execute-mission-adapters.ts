@@ -1,3 +1,4 @@
+import { commandErrorMessage } from '../cli/commands/agent-result.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import { readAgentConfigOrExit } from '../agents/agents.js';
@@ -59,7 +60,7 @@ export type { OperatorBlocklistOverlay };
 
 /** The command helpers these adapters stand in front of. */
 export interface ExecuteMissionRuntime {
-  readonly preflight: typeof startupPreflight;
+  readonly preflight: (...args: Parameters<typeof startupPreflight>) => Pick<ReturnType<typeof startupPreflight>, 'pass'>;
   readonly resolveWorktree: typeof resolveWorktree;
   readonly resolveTaskFile: typeof resolveTaskFile;
   readonly buildCheckpointContext: typeof buildCheckpointContext;
@@ -69,17 +70,17 @@ export interface ExecuteMissionRuntime {
   readonly resolveExecutionContext: (_slug: string) => Promise<MissionLaunchContext | null>;
   readonly readAgentConfig: typeof readAgentConfigOrExit;
   readonly buildExecutePrompt: typeof buildExecutePrompt;
-  readonly selectLaunchAndRecord: typeof selectLaunchAndRecord;
-  readonly enforceExecuteCommitSafety: typeof enforceExecuteCommitSafety;
+  readonly selectLaunchAndRecord: (...args: Parameters<typeof selectLaunchAndRecord>) => Promise<Pick<Awaited<ReturnType<typeof selectLaunchAndRecord>>, 'agent' | 'result' | 'rebaseDeferred'>>;
+  readonly enforceExecuteCommitSafety: (...args: Parameters<typeof enforceExecuteCommitSafety>) => void;
   readonly getTaskStatus: typeof getTaskStatus;
-  readonly recordActiveStats: typeof stats.recordActiveStats;
+  readonly recordActiveStats: (options: NonNullable<Parameters<typeof stats.recordActiveStats>[0]> & { slug: string; rootDir: string; implementer: string }) => void;
   readonly resolveAgentModel: typeof resolveAgentModel;
-  readonly resolveStageTelemetry: typeof resolveStageTelemetry;
+  readonly resolveStageTelemetry: (options: NonNullable<Parameters<typeof resolveStageTelemetry>[0]>) => ReturnType<typeof resolveStageTelemetry>;
   /** Individual post-execute mechanisms. The application service owns their ordering. */
-  readonly performHandoff: typeof performHandoff;
+  readonly performHandoff: (slug: string, options: { forgejoUser?: string; worktree: string; force?: boolean }) => ReturnType<typeof performHandoff>;
   /** Binds the review-loop mechanisms; the application review loop sequences them. */
   readonly reviewLoopMechanisms: typeof createReviewLoopPorts;
-  readonly repairHandoff: typeof repairHandoff.default;
+  readonly repairHandoff: (...args: Parameters<typeof repairHandoff.repairHandoff>) => Promise<{ repaired: boolean; blocker?: string | null }>;
   readonly validateCheckpointsBeforeHandoff: typeof validateCheckpointsBeforeHandoff;
 }
 
@@ -142,7 +143,6 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
     private readonly _operatorBlocklist: OperatorBlocklistOverlay | null = null,
     private readonly _sessionMarkerPort: SessionMarkerPort | null = null,
     private readonly _configuration: ParallixConfiguration = DEFAULT_CONFIGURATION,
-    private readonly _missionStore?: Pick<MissionTransitionStore, 'load'>,
   ) {}
 
   async prepare(request: { readonly slug: string; readonly worktree: string }): Promise<AgentLaunchPlan> {
@@ -174,7 +174,6 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
       agentConfig: request.plan.agentConfig as object,
       taskResolution: request.taskResolution,
       prompt: request.plan.prompt,
-      missionStore: this._missionStore,
       sessionMarkerPort: this._sessionMarkerPort,
       onAgentLaunched: request.onAgentChanged,
       onActivated: request.onActivated,
@@ -186,7 +185,7 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
       agent: launch.agent,
       rebaseDeferred: Boolean(launch.rebaseDeferred),
       errored: Boolean(result?.error),
-      errorMessage: result?.error ? (result.error.message ?? String(result.error)) : null,
+      errorMessage: result?.error ? (commandErrorMessage(result.error) ?? String(result.error)) : null,
       exitStatus: typeof result?.status === 'number' ? result.status : null,
       detail: result ?? null,
     };
@@ -278,14 +277,14 @@ class RepairLaunchAdapter implements ExecuteRepairLaunchPort {
   constructor(private readonly _configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) {}
   available(agent: string) { return agents.workflowLauncherStatus(agent, undefined, this._configuration); }
   readHead(worktree: string) {
-    const result = (awaitableGit as any)(['-C', worktree, 'rev-parse', 'HEAD']);
+    const result = awaitableGit(['-C', worktree, 'rev-parse', 'HEAD']);
     return result.status === 0 ? result.stdout.trim() : null;
   }
-  async launch(request: { slug: string; worktree: string; agent: string; prompt: string; sessionPolicy?: unknown }): Promise<unknown> {
+  async launch(request: Parameters<ExecuteRepairLaunchPort['launch']>[0]) {
     const status = this.available(request.agent);
     if (!status.supported) { throw new Error(`Agent ${request.agent} is not available for relaunch: ${status.detail || status.reason || 'unknown'}`); }
     return agents.startAgent('active', { configuration: this._configuration,
-      prompt: request.prompt, worktree: request.worktree, agent: request.agent, slug: request.slug, role: 'implementer', sessionPolicy: request.sessionPolicy as any,
+      prompt: request.prompt, worktree: request.worktree, agent: request.agent, slug: request.slug, role: 'implementer', sessionPolicy: request.sessionPolicy,
       onLaunch: ({ agent }: { agent: string }) => fmt.log.plain(`Relaunched ${fmt.agent(agent)} for repair. Session persistence will be used if available.`),
     });
   }
@@ -321,7 +320,6 @@ export function createExecuteMissionPorts(
       options.operatorBlocklist ?? null,
       options.sessionMarkerPort ?? null,
       options.configuration,
-      options.missionTransitionStore,
     ),
     missionTransitions: options.missionTransitionStore,
     telemetry: new ExecuteTelemetryAdapter(resolved),

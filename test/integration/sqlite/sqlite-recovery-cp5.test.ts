@@ -286,7 +286,7 @@ describe('SQLite recovery, backup, concurrency, rollback — CP5', () => {
       const overlay = materializeBlocklistSnapshot(await new SqliteBlocklistRepository(db).findAll());
 
       // The composition root overlays ONLY the blocklist field (as LegacyActiveAdapter does).
-      const effective = { ...fileConfig, blocklist: overlay };
+      const effective = { ...fileConfig, blocklist: overlay } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
 
       // Repo-owned steps are untouched by any SQLite projection.
       assert.deepEqual(effective.steps, fileConfig.steps, 'SQLite must not rewrite repo-owned step eligibility');

@@ -1,4 +1,9 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import { missionId, missionLabels } from '../../../src/domain/mission.js';
+import { draftMissionServicesFixture } from '../../helpers/draft-mission-services.js';
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+
+import { repositoryId as fixtureRepositoryId } from '../../../src/domain/repository.js';
+import { missionVersion as fixtureVersion } from '../../../src/application/domain-ports.js';
 
 
 import { resolveConfiguration } from '../../../src/composition/config.js';
@@ -41,16 +46,16 @@ const {
 const { getPrimaryBranch, resolveMissionBaseBranch, missionDirForSlug } = missionUtils;
 
 const PRIMARY = getPrimaryBranch();
-const typeKey = ['class', 'ification'].join('');
-const validateMissionType = draftLib[`validateDraft${typeKey[0].toUpperCase()}${typeKey.slice(1)}`];
-const verifyMissionType = draftLib[`normalizeDraft${typeKey[0].toUpperCase()}${typeKey.slice(1)}`];
+const typeKey = 'classification';
+const validateMissionType = draftLib['validateDraftClassification'];
+const verifyMissionType = draftLib['normalizeDraftClassification'];
 const restartDraftRepair = draftLib.restartDraftAgent;
-const normalizeKey = `normalizeDraft${typeKey[0].toUpperCase()}${typeKey.slice(1)}Fn`;
+const normalizeKey = 'normalizeDraftClassificationFn';
 
 // Isolate stats writes to a temp PARALLIX_HOME so test runs never pollute
 // the real operator stats.csv (recordDraftStats writes there via recordStageStats).
-let _prevParallixHome;
-let _tmpHome;
+let _prevParallixHome: string | undefined;
+let _tmpHome: string;
 test.beforeEach(() => {
   _tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'draft-test-home-'));
   _prevParallixHome = process.env.PARALLIX_HOME;
@@ -137,7 +142,7 @@ test('draft setup accepts valid labels and tolerates missing labels before launc
   assert.equal(missingResult.ok, true);
   assert.equal(missingResult[typeKey], null);
 
-  const errors = [];
+  const errors: string[] = [];
   const badResult = validateMissionType('task-test', '/tmp/worktree', {
     resolveMissionClassificationFn: () => {
       throw new Error('Could not resolve backlog task for task-test.');
@@ -200,6 +205,7 @@ test('post-draft mission type validation is label-only', () => {
     },
   });
   assert.equal(missingResult.ok, false);
+  assert.ok(missingResult.reason != null);
   assert.ok(missingResult.reason.includes('missing'));
 });
 
@@ -232,12 +238,12 @@ test('draft classification helpers report non-Error resolver failures (TASK-2668
 });
 
 test('restartDraftAgent uses the focused repair prompt', async () => {
-  let capturedPrompt = null;
+  let capturedPrompt: { value: string | ((agent: string) => string | Promise<string>) | null } = { value: null };
   const ok = await restartDraftRepair('task-test', '/tmp/worktree', {
     readAgentConfigOrExitFn: () => ({}),
     selectAgentFn: () => 'codex',
     startDraftAgentFn: async ({ prompt }) => {
-      capturedPrompt = prompt;
+      capturedPrompt.value = prompt;
       return { agent: 'codex', result: { status: 0 } };
     },
     logFn: () => {},
@@ -246,13 +252,14 @@ test('restartDraftAgent uses the focused repair prompt', async () => {
   });
 
   assert.equal(ok, true);
-  assert.match(capturedPrompt, /Focused repair:/);
-  assert.match(capturedPrompt, /exactly one of `ai_sdlc` or `user_value`/);
+  assert.ok(typeof capturedPrompt.value === 'string');
+  assert.match(capturedPrompt.value, /Focused repair:/);
+  assert.match(capturedPrompt.value, /exactly one of `ai_sdlc` or `user_value`/);
 });
 
 test('restartDraftAgent leaves exit control to the caller on failure', async () => {
-  let exitCode = null;
-  const errors = [];
+  let exitCode: { value: number | undefined | null } = { value: null };
+  const errors: string[] = [];
 
   const ok = await restartDraftRepair('task-test', '/tmp/worktree', {
     readAgentConfigOrExitFn: () => ({}),
@@ -260,18 +267,18 @@ test('restartDraftAgent leaves exit control to the caller on failure', async () 
     startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 17 } }),
     logFn: () => {},
     errorFn: (message) => errors.push(message),
-    exitFn: (code) => { exitCode = code; }
+    exitFn: (code) => { exitCode.value = code; }
   });
 
   assert.equal(ok, false);
-  assert.equal(exitCode, null);
+  assert.equal(exitCode.value, null);
   assert.ok(errors.some(message => message.includes('exited with status 17')));
 });
 
 // ---------- recordDraftImplementer ----------
 
 test('recordDraftImplementer returns actual when no taskResolution', async () => {
-  const result = await recordDraftImplementer({
+  const result = await recordDraftImplementer({slug: 'task-draft-fixture', worktree: '/tmp/worktree',
     selected: 'codex',
     actual: 'codex',
     taskResolution: null,
@@ -281,7 +288,7 @@ test('recordDraftImplementer returns actual when no taskResolution', async () =>
 });
 
 test('recordDraftImplementer returns actual when taskResolution.ok is false', async () => {
-  const result = await recordDraftImplementer({
+  const result = await recordDraftImplementer({slug: 'task-draft-fixture', worktree: '/tmp/worktree',
     selected: 'codex',
     actual: 'codex',
     taskResolution: { ok: false },
@@ -291,7 +298,7 @@ test('recordDraftImplementer returns actual when taskResolution.ok is false', as
 });
 
 test('recordDraftImplementer routes the actual implementer through the shared transition path', async () => {
-  const calls = [];
+  const calls: [slug: string, newStatus: string, ({ implementer?: string | null | undefined; clearAssignee?: boolean; rootDir?: string; log?: (_message: string) => void; } | undefined)?][] = [];
   const resolved = await recordDraftImplementer({
     selected: 'gemini', actual: 'codex', slug: 'task-086', worktree: '/tmp/wt',
     taskResolution: { ok: true, taskFile: '/tmp/task-086.md' },
@@ -300,17 +307,18 @@ test('recordDraftImplementer routes the actual implementer through the shared tr
     log: () => {}
   });
   assert.equal(resolved, 'codex');
+  assert.ok(calls[0][2] != null);
   assert.deepEqual(calls, [['task-086', 'refined', { implementer: 'codex', rootDir: '/tmp/wt', log: calls[0][2].log }]]);
 });
 
 test('recordDraftImplementer does nothing when the draft task cannot be resolved', async () => {
-  const calls = [];
-  const resolved = await recordDraftImplementer({
+  const calls: Parameters<NonNullable<Parameters<typeof recordDraftImplementer>[0]['transitionTaskFn']>>[] = [];
+  const resolved = await recordDraftImplementer({slug: 'task-draft-fixture', worktree: '/tmp/worktree',
     selected: 'gemini',
     actual: 'codex',
     taskResolution: { ok: false },
-    enforceTaskAssigneeFn(taskFile, agent) {
-      calls.push({ taskFile, agent });
+    async transitionTaskFn(...args) {
+      calls.push(args);
       return true;
     }
   });
@@ -319,8 +327,8 @@ test('recordDraftImplementer does nothing when the draft task cannot be resolved
 });
 
 test('recordDraftImplementer logs fallback when selected differs from actual', async () => {
-  const logLines = [];
-  await recordDraftImplementer({
+  const logLines: string[] = [];
+  await recordDraftImplementer({slug: 'task-draft-fixture', worktree: '/tmp/worktree',
     selected: 'claude',
     actual: 'codex',
     taskResolution: { ok: true, taskFile: '/tmp/task.md' },
@@ -331,8 +339,8 @@ test('recordDraftImplementer logs fallback when selected differs from actual', a
 });
 
 test('recordDraftImplementer logs recording when selected equals actual', async () => {
-  const logLines = [];
-  await recordDraftImplementer({
+  const logLines: string[] = [];
+  await recordDraftImplementer({slug: 'task-draft-fixture', worktree: '/tmp/worktree',
     selected: 'codex',
     actual: 'codex',
     taskResolution: { ok: true, taskFile: '/tmp/task.md' },
@@ -343,8 +351,8 @@ test('recordDraftImplementer logs recording when selected equals actual', async 
 });
 
 test('recordDraftImplementer logs warning when the shared transition fails', async () => {
-  const logLines = [];
-  await recordDraftImplementer({
+  const logLines: string[] = [];
+  await recordDraftImplementer({slug: 'task-draft-fixture', worktree: '/tmp/worktree',
     selected: 'codex',
     actual: 'codex',
     taskResolution: { ok: true, taskFile: '/tmp/task.md' },
@@ -365,7 +373,7 @@ test('fallbackDraftCommitMessage formats correctly', () => {
 test('ensureGraphifyWorkspace creates graphify-out directory', () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-test-'));
   try {
-    const result = ensureGraphifyWorkspace(tmpRoot);
+    const result = ensureGraphifyWorkspace(tmpRoot, tmpRoot);
     assert.equal(result, true);
     assert.ok(fs.existsSync(path.join(tmpRoot, 'graphify-out')));
   } finally {
@@ -377,7 +385,7 @@ test('ensureGraphifyWorkspace returns true when graphify-out already exists as d
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-test-'));
   try {
     fs.mkdirSync(path.join(tmpRoot, 'graphify-out'), { recursive: true });
-    const result = ensureGraphifyWorkspace(tmpRoot);
+    const result = ensureGraphifyWorkspace(tmpRoot, tmpRoot);
     assert.equal(result, true);
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -388,7 +396,7 @@ test('ensureGraphifyWorkspace returns false when graphify-out exists but is not 
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-test-'));
   try {
     fs.writeFileSync(path.join(tmpRoot, 'graphify-out'), 'not a dir');
-    const result = ensureGraphifyWorkspace(tmpRoot);
+    const result = ensureGraphifyWorkspace(tmpRoot, tmpRoot);
     assert.equal(result, false);
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -418,7 +426,7 @@ test('ensureGraphifyWorkspace copies graph.json from primary worktree when direc
 // needs to answer queries and refresh incrementally. Dated pre-overwrite
 // snapshots (graphify's `backup_if_protected`) and the browser export are dead
 // weight: measured 660,368,980 bytes copied before, 26,610,509 bytes after.
-function seedPrimaryGraphify(primaryPath) {
+function seedPrimaryGraphify(primaryPath: string) {
   const queryState = {
     'graph.json': '{"nodes":[],"links":[]}',
     'manifest.json': '{"files":{}}',
@@ -451,7 +459,7 @@ test('ensureGraphifyWorkspace copies only query and incremental graph state, lea
     fs.mkdirSync(primaryPath, { recursive: true });
     const expectedBytes = seedPrimaryGraphify(primaryPath);
 
-    const messages = [];
+    const messages: string[] = [];
     const result = ensureGraphifyWorkspace(tmpRoot, tmpMain, { logFn: (message) => messages.push(message) });
     assert.equal(result, true);
     const target = path.join(tmpRoot, 'graphify-out');
@@ -547,30 +555,30 @@ test('ensureGraphifyWorkspace skips gracefully when source graphify-out absent',
 // ---------- ensureMissionBranch ----------
 
 test('ensureMissionBranch creates branch from main when absent', () => {
-  const gitCalls = [];
-  let squashedRepo = null;
+  const gitCalls: string[][] = [];
+  let squashedRepo: { value: string | null } = { value: null };
 
   ensureMissionBranch('/repo', 'mission/task-test', {
     gitFn(args) {
       gitCalls.push(args);
-      if (args.includes('--list')) return { stdout: '' };
-      return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('--list')) return { signal: null, status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     },
     logFn: () => {},
-    squashTrailingBacklogNoiseIntoPreviousMissionFn: (repo) => { squashedRepo = repo; }
+    squashTrailingBacklogNoiseIntoPreviousMissionFn: (repo) => { squashedRepo.value = repo; return false; }
   });
 
-  assert.equal(squashedRepo, '/repo');
+  assert.equal(squashedRepo.value, '/repo');
  assert.ok(gitCalls.some(args => args.join(' ') === `-C /repo branch mission/task-test ${PRIMARY}`));
 });
 
 test('ensureMissionBranch skips creation when branch already exists', () => {
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
 
   ensureMissionBranch('/repo', 'mission/task-test', {
     gitFn(args) {
       gitCalls.push(args);
-      return { stdout: '  mission/task-test\n', status: 0 };
+      return { signal: null, stderr: '',  stdout: '  mission/task-test\n', status: 0 };
     },
     logFn: () => {},
     squashTrailingBacklogNoiseIntoPreviousMissionFn: () => {
@@ -584,15 +592,15 @@ test('ensureMissionBranch skips creation when branch already exists', () => {
 });
 
 test('ensureMissionBranch creates the mission branch from the recorded feature base', () => {
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
   ensureMissionBranch('/repo', 'mission/task-test', {
     gitFn(args) {
       gitCalls.push(args);
-      if (args.includes('--list')) return { stdout: '' };
-      return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('--list')) return { signal: null, status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     },
     logFn: () => {},
-    squashTrailingBacklogNoiseIntoPreviousMissionFn: () => {},
+    squashTrailingBacklogNoiseIntoPreviousMissionFn: () => false,
     baseBranch: 'feat/x'
   });
 
@@ -615,7 +623,7 @@ test('ensureMissionBranch creates the mission branch from the recorded feature b
 // stubbed; the recorded base resolver runs for real.
 function tempGitRepoOnMain() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draft-2396-repo-'));
-  const run = (args) => spawnSync('git', args, { cwd: root, encoding: 'utf8', env: process.env });
+  const run = (args: readonly string[]) => spawnSync('git', args, { cwd: root, encoding: 'utf8', env: process.env });
   run(['init', '-b', 'main']);
   // Configure the isolated fixture without three extra Git processes. The
   // covered integration case charges waited-child CPU to its 150 ms budget.
@@ -642,11 +650,11 @@ test('runDraftCommand clears a stale feature Base-Branch when re-drafted from th
       resolveMainRepoFn: () => root,
       conventionalWorktreePathFn: () => path.join(root, 'task-stale'),
       ensureRepoExistsFn: () => true,
-      resolveTaskFileFn: () => ({ ok: true, taskFile: path.join(root, 'backlog', 'tasks', 'task-stale.md'), matches: [] }),
+      resolveTaskFileFn: () => ({ ok: true as const, taskFile: path.join(root, 'backlog', 'tasks', 'task-stale.md'), matches: [] }),
       checkBacklogIntegrityFn: () => [],
       detectLaunchBaseBranchFn: () => null, // launch from the primary branch (main)
       ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
-      ensureMissionBranchFn: (_repo, branch, { baseBranch }) => {
+      ensureMissionBranchFn: (_repo, branch, { baseBranch } = {}) => {
         const result = spawnSync('git', ['config', '--local', '--replace-all', `branch.${branch}.parallixBase`, baseBranch || 'main'], { cwd: root });
         assert.equal(result.status, 0);
       },
@@ -665,15 +673,15 @@ test('runDraftCommand clears a stale feature Base-Branch when re-drafted from th
       readAgentConfigOrExitFn: () => ({}),
       selectAgentFn: () => 'codex',
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
-      missionServicesFn: async () => ({
-        repositoryId: 'main',
-        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
-        intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
-      }),
+      missionServicesFn: async () => (draftMissionServicesFixture({
+        repositoryId: fixtureRepositoryId('main'),
+        lifecycle: { transition: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(2), mission: fixtureMission(request.missionId, { status: 'refined' }), previousAssignee: null, from: 'backlog', to: 'refined', laneChanged: true }, durableEvidence: [] }) },
+        intake: { execute: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(1), mission: fixtureMission(request.missionId, { status: 'backlog' }) }, durableEvidence: [] }) },
+      })),
       recordDraftImplementerFn: () => {},
       enforceDraftCommitSafetyFn: () => false,
-      validateDraftClassificationFn: () => ({ ok: true }),
-      [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
+      validateDraftClassificationFn: () => ({ ok: true as const }),
+      [normalizeKey]: () => ({ ok: true as const, [typeKey]: 'ai_sdlc' }),
       exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
       logFn: () => {},
       errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); }
@@ -700,12 +708,12 @@ test('runDraftCommand records a non-primary launch branch over a previous base o
       resolveMainRepoFn: () => root,
       conventionalWorktreePathFn: () => path.join(root, 'task-relaunch'),
       ensureRepoExistsFn: () => true,
-      resolveTaskFileFn: () => ({ ok: true, taskFile: path.join(root, 'backlog', 'tasks', 'task-relaunch.md'), matches: [] }),
+      resolveTaskFileFn: () => ({ ok: true as const, taskFile: path.join(root, 'backlog', 'tasks', 'task-relaunch.md'), matches: [] }),
       checkBacklogIntegrityFn: () => [],
       detectLaunchBaseBranchFn: () => 'feature/two', // re-drafting from a feature branch
       ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
-      ensureMissionBranchFn: (_repo, branch, { baseBranch }) => {
-        const result = spawnSync('git', ['config', '--local', '--replace-all', `branch.${branch}.parallixBase`, baseBranch], { cwd: root });
+      ensureMissionBranchFn: (_repo, branch, { baseBranch } = {}) => {
+        const result = spawnSync('git', ['config', '--local', '--replace-all', `branch.${branch}.parallixBase`, baseBranch ?? 'main'], { cwd: root });
         assert.equal(result.status, 0);
       },
       ensureWorktreeFn: () => {},
@@ -723,15 +731,15 @@ test('runDraftCommand records a non-primary launch branch over a previous base o
       readAgentConfigOrExitFn: () => ({}),
       selectAgentFn: () => 'codex',
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
-      missionServicesFn: async () => ({
-        repositoryId: 'main',
-        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
-        intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
-      }),
+      missionServicesFn: async () => (draftMissionServicesFixture({
+        repositoryId: fixtureRepositoryId('main'),
+        lifecycle: { transition: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(2), mission: fixtureMission(request.missionId, { status: 'refined' }), previousAssignee: null, from: 'backlog', to: 'refined', laneChanged: true }, durableEvidence: [] }) },
+        intake: { execute: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(1), mission: fixtureMission(request.missionId, { status: 'backlog' }) }, durableEvidence: [] }) },
+      })),
       recordDraftImplementerFn: () => {},
       enforceDraftCommitSafetyFn: () => false,
-      validateDraftClassificationFn: () => ({ ok: true }),
-      [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
+      validateDraftClassificationFn: () => ({ ok: true as const }),
+      [normalizeKey]: () => ({ ok: true as const, [typeKey]: 'ai_sdlc' }),
       exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
       logFn: () => {},
       errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); }
@@ -762,14 +770,14 @@ test('runDraftCommand scaffold does not emit a classification FAIL for an unset 
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
   fs.writeFileSync(taskFile, '---\nid: task-noclass\ntitle: no class\nlabels: []\n---\n');
 
-  const errors = [];
+  const errors: string[] = [];
   try {
     await runDraftCommand(['task-noclass'], { configuration: resolveConfiguration(process.env),
       inferSlugFn: () => 'task-noclass',
       resolveMainRepoFn: () => root,
       conventionalWorktreePathFn: () => worktree,
       ensureRepoExistsFn: () => true,
-      resolveTaskFileFn: () => ({ ok: true, taskFile, matches: [] }),
+      resolveTaskFileFn: () => ({ ok: true as const, taskFile, matches: [] }),
       checkBacklogIntegrityFn: () => [],
       detectLaunchBaseBranchFn: () => null,
       ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
@@ -787,15 +795,15 @@ test('runDraftCommand scaffold does not emit a classification FAIL for an unset 
       readAgentConfigOrExitFn: () => ({}),
       selectAgentFn: () => 'codex',
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
-      missionServicesFn: async () => ({
-        repositoryId: 'main',
-        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
-        intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
-      }),
+      missionServicesFn: async () => (draftMissionServicesFixture({
+        repositoryId: fixtureRepositoryId('main'),
+        lifecycle: { transition: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(1), mission: fixtureMission(request.missionId, { status: 'refined' }), previousAssignee: null, from: 'backlog', to: 'refined', laneChanged: true }, durableEvidence: [] }) },
+        intake: { execute: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(1), mission: fixtureMission(request.missionId, { status: 'backlog' }) }, durableEvidence: [] }) },
+      })),
       recordDraftImplementerFn: () => {},
       enforceDraftCommitSafetyFn: () => false,
       // Leave validateDraftClassificationFn unset so the real helper runs.
-      [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
+      [normalizeKey]: () => ({ ok: true as const, [typeKey]: 'ai_sdlc' }),
       exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
       logFn: () => {},
       errorFn: (msg) => { errors.push(String(msg)); },
@@ -818,7 +826,7 @@ test('runDraftCommand scaffold does not emit a classification FAIL for an unset 
 test('runDraftCommand reuses the existing mission branch and clears the stale base on a primary re-draft', async () => {
   const root = tempGitRepoOnMain();
   const missionFile = path.join(missionDirForSlug(root, 'task-reuse'), 'MISSION.md');
-  const ensured = [];
+  const ensured: string[] = [];
 
   try {
     await runDraftCommand(['task-reuse'], { configuration: resolveConfiguration(process.env),
@@ -826,7 +834,7 @@ test('runDraftCommand reuses the existing mission branch and clears the stale ba
       resolveMainRepoFn: () => root,
       conventionalWorktreePathFn: () => path.join(root, 'task-reuse'),
       ensureRepoExistsFn: () => true,
-      resolveTaskFileFn: () => ({ ok: true, taskFile: path.join(root, 'backlog', 'tasks', 'task-reuse.md'), matches: [] }),
+      resolveTaskFileFn: () => ({ ok: true as const, taskFile: path.join(root, 'backlog', 'tasks', 'task-reuse.md'), matches: [] }),
       checkBacklogIntegrityFn: () => [],
       detectLaunchBaseBranchFn: () => null, // re-draft from the primary branch over an existing mission
       ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
@@ -848,15 +856,15 @@ test('runDraftCommand reuses the existing mission branch and clears the stale ba
       readAgentConfigOrExitFn: () => ({}),
       selectAgentFn: () => 'codex',
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
-      missionServicesFn: async () => ({
-        repositoryId: 'main',
-        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
-        intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
-      }),
+      missionServicesFn: async () => (draftMissionServicesFixture({
+        repositoryId: fixtureRepositoryId('main'),
+        lifecycle: { transition: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(2), mission: fixtureMission(request.missionId, { status: 'refined' }), previousAssignee: null, from: 'backlog', to: 'refined', laneChanged: true }, durableEvidence: [] }) },
+        intake: { execute: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(1), mission: fixtureMission(request.missionId, { status: 'backlog' }) }, durableEvidence: [] }) },
+      })),
       recordDraftImplementerFn: () => {},
       enforceDraftCommitSafetyFn: () => false,
-      validateDraftClassificationFn: () => ({ ok: true }),
-      [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
+      validateDraftClassificationFn: () => ({ ok: true as const }),
+      [normalizeKey]: () => ({ ok: true as const, [typeKey]: 'ai_sdlc' }),
       exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
       logFn: () => {},
       errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); }
@@ -876,13 +884,13 @@ test('runDraftCommand reuses the existing mission branch and clears the stale ba
 // ---------- ensureWorktree ----------
 
 test('ensureWorktree creates worktree when target directory is absent', () => {
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
 
   ensureWorktree('/repo', '/repo-task-test', 'mission/task-test', {
     existsFn: () => false,
     gitFn: (args) => {
       gitCalls.push(args);
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     },
     logFn: () => {}
   });
@@ -891,7 +899,7 @@ test('ensureWorktree creates worktree when target directory is absent', () => {
 });
 
 test('ensureWorktree ignores add error when target directory already exists', () => {
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
 
   ensureWorktree('/repo', '/repo-task-test', 'mission/task-test', {
     existsFn: () => true,
@@ -906,8 +914,8 @@ test('ensureWorktree ignores add error when target directory already exists', ()
 });
 
 test('ensureWorktree exits 1 when creating a missing worktree fails', () => {
-  let exitCode = null;
-  const errors = [];
+  let exitCode: { value: number | undefined | null } = { value: null };
+  const errors: string[] = [];
 
   ensureWorktree('/repo', '/repo-task-test', 'mission/task-test', {
     existsFn: () => false,
@@ -916,10 +924,10 @@ test('ensureWorktree exits 1 when creating a missing worktree fails', () => {
     },
     logFn: () => {},
     errorFn: (msg) => errors.push(msg),
-    exitFn: (code) => { exitCode = code; }
+    exitFn: (code) => { exitCode.value = code; }
   });
 
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.ok(errors.some(msg => msg.includes('Could not create worktree: boom')));
 });
 
@@ -962,11 +970,11 @@ test('ensureRepoExists returns true when repo exists', () => {
 });
 
 test('ensureRepoExists returns false and exits when repo is missing', () => {
-  let exitCode = null;
-  const errors = [];
-  const result = ensureRepoExists('/definitely/missing/repo', (code) => { exitCode = code; }, (msg) => errors.push(msg));
+  let exitCode: { value: number | undefined | null } = { value: null };
+  const errors: string[] = [];
+  const result = ensureRepoExists('/definitely/missing/repo', (code) => { exitCode.value = code; }, (msg) => errors.push(msg));
   assert.equal(result, false);
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.ok(errors.some(msg => msg.includes('Main repository not found')));
 });
 
@@ -974,7 +982,7 @@ test('ensureRepoExists returns false and exits when repo is missing', () => {
 
 test('bootstrapBacklogTask returns true when task already exists in worktree', () => {
   const result = bootstrapBacklogTask('/tmp/worktree', '/tmp/repo', 'task-exists', {
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/worktree/backlog/tasks/task-exists.md' }),
+    resolveTaskFileFn: () => ({ matches: ['/tmp/worktree/backlog/tasks/task-exists.md'],  ok: true as const, taskFile: '/tmp/worktree/backlog/tasks/task-exists.md' }),
     gitFn: () => {
       throw new Error('git should not run for existing task');
     },
@@ -993,17 +1001,17 @@ test('bootstrapBacklogTask copies task from main repo and commits', () => {
 
   const taskFile = path.join(mainRepo, 'backlog', 'tasks', 'task-test.md');
   fs.writeFileSync(taskFile, '# Task Test');
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
 
   try {
     const result = bootstrapBacklogTask(worktree, mainRepo, 'task-test', {
       resolveTaskFileFn: (_slug, repo) => {
-        if (repo === worktree) return { ok: false };
-        return { ok: true, taskFile };
+        if (repo === worktree) return { matches: [],  ok: false as const, reason: 'missing' as const };
+        return { matches: [],  ok: true as const, taskFile };
       },
       gitFn: (args) => {
         gitCalls.push(args);
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
       logFn: () => {}
     });
@@ -1027,10 +1035,10 @@ test('bootstrapBacklogTask returns false when bootstrap commit fails', () => {
 
   try {
     const result = bootstrapBacklogTask(worktree, mainRepo, 'task-test', {
-      resolveTaskFileFn: (_slug, repo) => repo === worktree ? { ok: false } : { ok: true, taskFile },
+      resolveTaskFileFn: (_slug, repo) => repo === worktree ? { ok: false, reason: 'missing', matches: [] } : { ok: true, taskFile, matches: [taskFile] },
       gitFn: (args) => {
         if (args.includes('commit')) throw new Error('commit failed');
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
       logFn: () => {}
     });
@@ -1043,7 +1051,7 @@ test('bootstrapBacklogTask returns false when bootstrap commit fails', () => {
 
 test('bootstrapBacklogTask returns false when task missing in main repo', () => {
   const result = bootstrapBacklogTask('/tmp/worktree', '/tmp/repo', 'task-missing', {
-    resolveTaskFileFn: () => ({ ok: false }),
+    resolveTaskFileFn: () => ({ matches: [], reason: 'missing' as const,  ok: false as const }),
     gitFn: () => {
       throw new Error('git should not run when task is missing');
     },
@@ -1060,8 +1068,8 @@ test('bootstrapBacklogTask creates a synthetic unknown-classification task when 
 
   try {
     const ok = bootstrapBacklogTask(worktree, '/tmp/repo', 'adhoc-sample', {
-      resolveTaskFileFn: () => ({ ok: false, reason: 'missing' }),
-      gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
+      resolveTaskFileFn: () => ({ matches: [],  ok: false as const, reason: 'missing' as const }),
+      gitFn: () => ({ signal: null,  status: 0, stdout: '', stderr: '' }),
       syntheticTask: {
         id: 'ADHOC-SAMPLE-1234ABCD',
         title: 'Sample task',
@@ -1137,14 +1145,14 @@ test('enforceDraftCommitSafety returns false when no dirty entries', () => {
 });
 
 test('enforceDraftCommitSafety creates fallback commit with dirty entries', () => {
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
   const result = enforceDraftCommitSafety({
     slug: 'task-test',
     worktree: '/tmp/wt',
     dirtyEntries: [' M backlog/tasks/task-test.md', '?? notes.txt'],
     gitImpl(args) {
       gitCalls.push(args);
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     }
   });
 
@@ -1154,13 +1162,13 @@ test('enforceDraftCommitSafety creates fallback commit with dirty entries', () =
 });
 
 test('enforceDraftCommitSafety refuses generated mission documents before staging', () => {
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
   for (const file of ['MISSION.md', 'CP-1.md']) {
     assert.throws(() => enforceDraftCommitSafety({
       slug: 'task-test',
       worktree: '/tmp/wt',
       dirtyEntries: [` M missions/task-test/${file}`],
-      gitImpl(args) { gitCalls.push(args); return { status: 0, stdout: '', stderr: '' }; },
+      gitImpl(args) { gitCalls.push(args); return { signal: null,  status: 0, stdout: '', stderr: '' }; },
     }), /refuses to commit/);
   }
   assert.deepEqual(gitCalls, []);
@@ -1187,7 +1195,7 @@ test('enforceDraftCommitSafety throws on shared-file conflicts', () => {
       slug: 'task-test',
       worktree: '/tmp/wt',
       dirtyEntries: ['DD shared-file.txt'],
-      gitImpl: () => ({ status: 0, stdout: '', stderr: '' })
+      gitImpl: () => ({ signal: null,  status: 0, stdout: '', stderr: '' })
     }),
     /shared-file conflicts: shared-file\.txt/
   );
@@ -1200,8 +1208,8 @@ test('enforceDraftCommitSafety throws when fallback commit fails', () => {
       worktree: '/tmp/wt',
       dirtyEntries: [' M backlog/tasks/task-test.md'],
       gitImpl(args) {
-        if (args.includes('commit')) return { status: 1, stdout: '', stderr: 'no changes' };
-        return { status: 0, stdout: '', stderr: '' };
+        if (args.includes('commit')) return { signal: null,  status: 1, stdout: '', stderr: 'no changes' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
     }),
     /could not create fallback commit/
@@ -1214,7 +1222,7 @@ test('enforceDraftCommitSafety throws when the mission backlog task is deleted',
       slug: 'task-test',
       worktree: '/tmp/wt',
       dirtyEntries: [' D backlog/tasks/task-test.md'],
-      gitImpl: () => ({ status: 0, stdout: '', stderr: '' })
+      gitImpl: () => ({ signal: null,  status: 0, stdout: '', stderr: '' })
     }),
     /deletion of the mission backlog task/
   );
@@ -1226,14 +1234,14 @@ test('enforceDraftCommitSafety throws when the mission backlog task is renamed a
       slug: 'task-test',
       worktree: '/tmp/wt',
       dirtyEntries: ['R  backlog/tasks/task-test.md -> backlog/drafts/task-test.md'],
-      gitImpl: () => ({ status: 0, stdout: '', stderr: '' })
+      gitImpl: () => ({ signal: null,  status: 0, stdout: '', stderr: '' })
     }),
     /rename\/move of the mission backlog task/
   );
 });
 
 test('enforceDraftCommitSafety stages git-quoted paths from the task-1218 transcript without the quotes', () => {
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
   const result = enforceDraftCommitSafety({
     slug: 'task-1218',
     worktree: '/tmp/wt',
@@ -1244,7 +1252,7 @@ test('enforceDraftCommitSafety stages git-quoted paths from the task-1218 transc
     ],
     gitImpl(args) {
       gitCalls.push(args);
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     }
   });
 
@@ -1271,14 +1279,14 @@ test('enforceDraftCommitSafety stages git-quoted paths from the task-1218 transc
 });
 
 test('enforceDraftCommitSafety stages a rename with quoted source and destination, unquoting the destination', () => {
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
   const result = enforceDraftCommitSafety({
     slug: 'task-1218',
     worktree: '/tmp/wt',
     dirtyEntries: ['R  "docs/missions/2026/task-1218/old name.md" -> "docs/missions/2026/task-1218/new name.md"'],
     gitImpl(args) {
       gitCalls.push(args);
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     }
   });
 
@@ -1296,14 +1304,14 @@ test('enforceDraftCommitSafety stages a rename with quoted source and destinatio
 });
 
 test('enforceDraftCommitSafety stages a quoted path containing parentheses and special characters decoded', () => {
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
   const result = enforceDraftCommitSafety({
     slug: 'task-1218',
     worktree: '/tmp/wt',
     dirtyEntries: ['?? "web-client/src/components/Price (legacy) & co.tsx"'],
     gitImpl(args) {
       gitCalls.push(args);
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     }
   });
 
@@ -1315,7 +1323,7 @@ test('enforceDraftCommitSafety stages a quoted path containing parentheses and s
 });
 
 test('enforceDraftCommitSafety decodes octal-escaped non-ASCII bytes in quoted paths', () => {
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
   // git C-escapes bytes >= 0x80 as octal under the default core.quotePath; the
   // UTF-8 for "å" is 0xC3 0xA5 -> "\303\245".
   const result = enforceDraftCommitSafety({
@@ -1324,7 +1332,7 @@ test('enforceDraftCommitSafety decodes octal-escaped non-ASCII bytes in quoted p
     dirtyEntries: ['?? "docs/missions/2026/task-1218/sm\\303\\245tt.md"'],
     gitImpl(args) {
       gitCalls.push(args);
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     }
   });
 
@@ -1340,7 +1348,7 @@ test('enforceDraftCommitSafety still blocks deletion of a quoted mission task pa
       slug: 'task-1207',
       worktree: '/tmp/wt',
       dirtyEntries: [' D "backlog/tasks/task-1207 - add-automatic-pricing-functionality-to-BE-Web.md"'],
-      gitImpl: () => ({ status: 0, stdout: '', stderr: '' })
+      gitImpl: () => ({ signal: null,  status: 0, stdout: '', stderr: '' })
     }),
     /deletion of the mission backlog task: backlog\/tasks\/task-1207 - add-automatic-pricing-functionality-to-BE-Web\.md/
   );
@@ -1355,8 +1363,8 @@ test('recordDraftImplementer supplies the mission worktree to the shared transit
     const taskFile = path.join(taskDir, 'task-086 - some-task.md');
     fs.writeFileSync(taskFile, 'status: active');
 
-    const calls = [];
-    const logs = [];
+    const calls: { slug: string; status: string; options: { implementer?: string | null | undefined; clearAssignee?: boolean; rootDir?: string; log?: (_message: string) => void; } | undefined; }[] = [];
+    const logs: string[] = [];
     recordDraftImplementer({
       selected: 'gemini',
       actual: 'gemini',
@@ -1365,12 +1373,13 @@ test('recordDraftImplementer supplies the mission worktree to the shared transit
       worktree,
       log(message) { logs.push(message); },
       getTaskStatusFn: () => 'active',
-      transitionTaskFn(slug, status, options) { calls.push({ slug, status, options }); return true; }
+      async transitionTaskFn(slug, status, options) { calls.push({ slug, status, options }); return true; }
     });
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0].slug, 'task-086');
     assert.equal(calls[0].status, 'active');
+    assert.ok(calls[0].options != null);
     assert.equal(calls[0].options.rootDir, worktree);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -1425,7 +1434,7 @@ test('ensureGraphifyWorkspace creates an independent graphify-out directory in t
 
     fs.mkdirSync(worktree, { recursive: true });
 
-    const created = ensureGraphifyWorkspace(worktree);
+    const created = ensureGraphifyWorkspace(worktree, root);
 
     assert.equal(created, true);
     assert.equal(fs.lstatSync(targetGraph).isDirectory(), true);
@@ -1437,7 +1446,7 @@ test('ensureGraphifyWorkspace creates an independent graphify-out directory in t
 // ---------- runDraftCommand — status transition contract ----------
 
 test('runDraftCommand transitions task to backlog after setup completes', async () => {
-  const transitions = [];
+  const transitions: { slug: string; status: string; rootDir: string | undefined; }[] = [];
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run-draft-backlog-'));
   const taskFile = path.join(tmpRoot, 'backlog', 'tasks', 'task-tst.md');
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
@@ -1449,7 +1458,7 @@ test('runDraftCommand transitions task to backlog after setup completes', async 
       resolveMainRepoFn: () => tmpRoot,
       conventionalWorktreePathFn: () => '/wt-tst',
       ensureRepoExistsFn: () => true,
-      resolveTaskFileFn: () => ({ ok: true, taskFile, matches: [] }),
+      resolveTaskFileFn: () => ({ ok: true as const, taskFile, matches: [] }),
       checkBacklogIntegrityFn: () => [],
       detectLaunchBaseBranchFn: () => null,
       ensureMissionBranchFn: () => {},
@@ -1457,19 +1466,19 @@ test('runDraftCommand transitions task to backlog after setup completes', async 
       ensureGraphifyWorkspaceFn: () => {},
       ensureMissionFileFn: () => '/wt-tst/docs/missions/2026/task-tst/MISSION.md',
       bootstrapBacklogTaskFn: () => true,
-      transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, rootDir: opts.rootDir }); return true; },
+      transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, rootDir: opts?.rootDir }); return true; },
       readAgentConfigOrExitFn: () => ({}),
       selectAgentFn: () => 'codex',
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
-      missionServicesFn: async () => ({
-        repositoryId: 'main',
-        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
-        intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
-      }),
+      missionServicesFn: async () => (draftMissionServicesFixture({
+        repositoryId: fixtureRepositoryId('main'),
+        lifecycle: { transition: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(2), mission: fixtureMission(request.missionId, { status: 'refined' }), previousAssignee: null, from: 'backlog', to: 'refined', laneChanged: true }, durableEvidence: [] }) },
+        intake: { execute: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(1), mission: fixtureMission(request.missionId, { status: 'backlog' }) }, durableEvidence: [] }) },
+      })),
       recordDraftImplementerFn: () => {},
       enforceDraftCommitSafetyFn: () => false,
-      validateDraftClassificationFn: () => ({ ok: true }),
-      [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
+      validateDraftClassificationFn: () => ({ ok: true as const }),
+      [normalizeKey]: () => ({ ok: true as const, [typeKey]: 'ai_sdlc' }),
       exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
       logFn: () => {},
       errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); }
@@ -1485,7 +1494,7 @@ test('runDraftCommand transitions task to backlog after setup completes', async 
 });
 
 test('runDraftCommand transitions task to refined after draft agent succeeds and safety harness passes', async () => {
-  const transitions = [];
+  const transitions: { slug: string; status: string; rootDir: string | undefined; }[] = [];
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'run-draft-ready-'));
   const taskFile = path.join(tmpRoot, 'backlog', 'tasks', 'task-tst.md');
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
@@ -1497,7 +1506,7 @@ test('runDraftCommand transitions task to refined after draft agent succeeds and
       resolveMainRepoFn: () => tmpRoot,
       conventionalWorktreePathFn: () => '/wt-tst',
       ensureRepoExistsFn: () => true,
-      resolveTaskFileFn: () => ({ ok: true, taskFile, matches: [] }),
+      resolveTaskFileFn: () => ({ ok: true as const, taskFile, matches: [] }),
       checkBacklogIntegrityFn: () => [],
       detectLaunchBaseBranchFn: () => null,
       ensureMissionBranchFn: () => {},
@@ -1505,19 +1514,19 @@ test('runDraftCommand transitions task to refined after draft agent succeeds and
       ensureGraphifyWorkspaceFn: () => {},
       ensureMissionFileFn: () => '/wt-tst/docs/missions/2026/task-tst/MISSION.md',
       bootstrapBacklogTaskFn: () => true,
-      transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, rootDir: opts.rootDir }); return true; },
+      transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, rootDir: opts?.rootDir }); return true; },
       readAgentConfigOrExitFn: () => ({}),
       selectAgentFn: () => 'codex',
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
-      missionServicesFn: async () => ({
-        repositoryId: 'main',
-        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
-        intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
-      }),
+      missionServicesFn: async () => (draftMissionServicesFixture({
+        repositoryId: fixtureRepositoryId('main'),
+        lifecycle: { transition: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(2), mission: fixtureMission(request.missionId, { status: 'refined' }), previousAssignee: null, from: 'backlog', to: 'refined', laneChanged: true }, durableEvidence: [] }) },
+        intake: { execute: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(1), mission: fixtureMission(request.missionId, { status: 'backlog' }) }, durableEvidence: [] }) },
+      })),
       recordDraftImplementerFn: () => {},
       enforceDraftCommitSafetyFn: () => false,
-      validateDraftClassificationFn: () => ({ ok: true }),
-      [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
+      validateDraftClassificationFn: () => ({ ok: true as const }),
+      [normalizeKey]: () => ({ ok: true as const, [typeKey]: 'ai_sdlc' }),
       exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
       logFn: () => {},
       errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); }
@@ -1538,15 +1547,15 @@ test('runDraftCommand transitions task to refined after draft agent succeeds and
 });
 
 test('runDraftCommand does not transition to refined when draft agent exits non-zero', async () => {
-  const transitions = [];
-  let exitCode = null;
+  const transitions: { slug: string; status: string; }[] = [];
+  let exitCode: { value: number | undefined | null } = { value: null };
 
   await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env),
     inferSlugFn: () => 'task-tst',
     resolveMainRepoFn: () => '/main',
     conventionalWorktreePathFn: () => '/wt-tst',
     ensureRepoExistsFn: () => true,
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/main/backlog/tasks/task-tst.md', matches: [] }),
+    resolveTaskFileFn: () => ({ ok: true as const, taskFile: '/main/backlog/tasks/task-tst.md', matches: [] }),
     checkBacklogIntegrityFn: () => [],
     detectLaunchBaseBranchFn: () => null,
     ensureMissionBranchFn: () => {},
@@ -1558,32 +1567,32 @@ test('runDraftCommand does not transition to refined when draft agent exits non-
     readAgentConfigOrExitFn: () => ({}),
     selectAgentFn: () => 'codex',
     startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 1 } }),
-    missionServicesFn: async () => ({
-      repositoryId: 'main',
-      lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
-      intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
-    }),
+    missionServicesFn: async () => (draftMissionServicesFixture({
+      repositoryId: fixtureRepositoryId('main'),
+      lifecycle: { transition: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(2), mission: fixtureMission(request.missionId, { status: 'refined' }), previousAssignee: null, from: 'backlog', to: 'refined', laneChanged: true }, durableEvidence: [] }) },
+      intake: { execute: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(1), mission: fixtureMission(request.missionId, { status: 'backlog' }) }, durableEvidence: [] }) },
+    })),
     recordDraftImplementerFn: () => {},
     enforceDraftCommitSafetyFn: () => false,
-    exitFn: (code) => { exitCode = code; },
+    exitFn: (code) => { exitCode.value = code; },
     logFn: () => {},
     errorFn: () => {}
   });
 
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.ok(!transitions.some(t => t.status === 'refined'), 'must not transition to refined when draft agent fails');
 });
 
 test('runDraftCommand does not transition to refined when safety harness throws', async () => {
-  const transitions = [];
-  let exitCode = null;
+  const transitions: { slug: string; status: string; }[] = [];
+  let exitCode: { value: number | undefined | null } = { value: null };
 
   await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env),
     inferSlugFn: () => 'task-tst',
     resolveMainRepoFn: () => '/main',
     conventionalWorktreePathFn: () => '/wt-tst',
     ensureRepoExistsFn: () => true,
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/main/backlog/tasks/task-tst.md', matches: [] }),
+    resolveTaskFileFn: () => ({ ok: true as const, taskFile: '/main/backlog/tasks/task-tst.md', matches: [] }),
     checkBacklogIntegrityFn: () => [],
     detectLaunchBaseBranchFn: () => null,
     ensureMissionBranchFn: () => {},
@@ -1595,20 +1604,20 @@ test('runDraftCommand does not transition to refined when safety harness throws'
     readAgentConfigOrExitFn: () => ({}),
     selectAgentFn: () => 'codex',
     startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
-    missionServicesFn: async () => ({
-      repositoryId: 'main',
-      lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
-      intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
-    }),
+    missionServicesFn: async () => (draftMissionServicesFixture({
+      repositoryId: fixtureRepositoryId('main'),
+      lifecycle: { transition: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(2), mission: fixtureMission(request.missionId, { status: 'refined' }), previousAssignee: null, from: 'backlog', to: 'refined', laneChanged: true }, durableEvidence: [] }) },
+      intake: { execute: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(1), mission: fixtureMission(request.missionId, { status: 'backlog' }) }, durableEvidence: [] }) },
+    })),
     recordDraftImplementerFn: () => {},
-    normalizeDraftClassificationFn: () => ({ ok: true, classification: 'user_value' }),
+    normalizeDraftClassificationFn: () => ({ ok: true as const, classification: 'user_value' }),
     enforceDraftCommitSafetyFn: () => { throw new Error('shared-file conflicts: lib/common.js'); },
-    exitFn: (code) => { exitCode = code; },
+    exitFn: (code) => { exitCode.value = code; },
     logFn: () => {},
     errorFn: () => {}
   });
 
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.ok(!transitions.some(t => t.status === 'refined'), 'must not transition to refined when safety harness fails');
 });
 
@@ -1621,13 +1630,14 @@ test('runDraftCommand does not transition to refined when safety harness throws'
 
 const composition = __mm1;
 
-function draftDepsForIntake(overrides) {
-  return Object.assign({
+type DraftFixtureDependencies = NonNullable<Parameters<typeof runDraftCommand>[1]>;
+function draftDepsForIntake(overrides: Partial<DraftFixtureDependencies>): DraftFixtureDependencies {
+  return {
     inferSlugFn: () => 'task-tst',
     resolveMainRepoFn: () => '/main',
     conventionalWorktreePathFn: () => '/wt-tst',
     ensureRepoExistsFn: () => true,
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/main/backlog/tasks/task-tst.md', matches: [] }),
+    resolveTaskFileFn: () => ({ ok: true as const, taskFile: '/main/backlog/tasks/task-tst.md', matches: [] }),
     checkBacklogIntegrityFn: () => [],
     detectLaunchBaseBranchFn: () => null,
     ensureMissionBranchFn: () => {},
@@ -1635,39 +1645,40 @@ function draftDepsForIntake(overrides) {
     ensureGraphifyWorkspaceFn: () => {},
     ensureMissionFileFn: () => '/wt-tst/docs/missions/2026/task-tst/MISSION.md',
     bootstrapBacklogTaskFn: () => true,
-    validateDraftClassificationFn: () => ({ ok: true }),
-    [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
+    validateDraftClassificationFn: () => ({ ok: true as const }),
+    [normalizeKey]: () => ({ ok: true as const, [typeKey]: 'ai_sdlc' }),
     readAgentConfigOrExitFn: () => ({}),
     selectAgentFn: () => 'codex',
     startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
     recordDraftImplementerFn: () => {},
     enforceDraftCommitSafetyFn: () => false,
-    missionServicesFn: async () => ({
-      repositoryId: 'main',
-      lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
-      intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
-    }),
+    missionServicesFn: async () => (draftMissionServicesFixture({
+      repositoryId: fixtureRepositoryId('main'),
+      lifecycle: { transition: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(2), mission: fixtureMission(request.missionId, { status: 'refined' }), previousAssignee: null, from: 'backlog', to: 'refined', laneChanged: true }, durableEvidence: [] }) },
+      intake: { execute: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(1), mission: fixtureMission(request.missionId, { status: 'backlog' }) }, durableEvidence: [] }) },
+    })),
     logFn: () => {},
-  }, overrides);
+    ...overrides,
+  };
 }
 
 test('runDraftCommand materializes the Mission in SQLite before transitioning the Backlog task', async () => {
-  const calls = [];
-  const requests = [];
+  const calls: string[] = [];
+  const requests: import("../../../src/application/mission-intake-service.js").MissionIntakeRequest[] = [];
   // Composition canonicalizes a mission worktree back to its primary checkout,
   // so the services it returns carry `main` — not the `<repo>-<slug>` worktree
   // basename that `targetWorktree` (`/wt-tst`) would yield.
-  const missionServicesFn = async () => ({
-    repositoryId: 'main',
-    lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
+  const missionServicesFn: NonNullable<DraftFixtureDependencies['missionServicesFn']> = async () => (draftMissionServicesFixture({
+    repositoryId: fixtureRepositoryId('main'),
+    lifecycle: { transition: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(2), mission: fixtureMission(request.missionId, { status: 'refined' }), previousAssignee: null, from: 'backlog', to: 'refined', laneChanged: true }, durableEvidence: [] }) },
     intake: {
       execute: async (request) => {
         calls.push(`intake:${request.missionId}`);
         requests.push(request);
-        return { status: 'completed', value: { version: 1 }, durableEvidence: [] };
+        return { status: 'completed' as const, value: { version: fixtureVersion(1), mission: fixtureMission(request.missionId, { status: 'backlog' }) }, durableEvidence: [] };
       },
     },
-  });
+  }));
 
   try {
     await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env), ...(draftDepsForIntake({
@@ -1694,19 +1705,19 @@ test('runDraftCommand keys the intake request to the identity the composition ro
   // The regression guarded here: deriving the ID from `targetWorktree` yields
   // `<repo>-<slug>`, which no other command path resolves to, so the Mission's
   // later lifecycle data would be attributed to a repository that does not exist.
-  const requests = [];
-  const missionServicesFn = async (rootDir) => {
+  const requests: import("../../../src/application/mission-intake-service.js").MissionIntakeRequest[] = [];
+  const missionServicesFn: NonNullable<DraftFixtureDependencies['missionServicesFn']> = async (rootDir) => {
     assert.equal(rootDir, '/wt-tst', 'composition still receives the mission worktree and canonicalizes it itself');
-    return {
-      repositoryId: 'parallix',
-      lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
+    return draftMissionServicesFixture({
+      repositoryId: fixtureRepositoryId('parallix'),
+      lifecycle: { transition: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(2), mission: fixtureMission(request.missionId, { status: 'refined' }), previousAssignee: null, from: 'backlog', to: 'refined', laneChanged: true }, durableEvidence: [] }) },
       intake: {
         execute: async (request) => {
           requests.push(request);
-          return { status: 'completed', value: { version: 1 }, durableEvidence: [] };
+          return { status: 'completed' as const, value: { version: fixtureVersion(1), mission: fixtureMission(request.missionId, { status: 'backlog' }) }, durableEvidence: [] };
         },
       },
-    };
+    });
   };
 
   try {
@@ -1725,24 +1736,24 @@ test('runDraftCommand keys the intake request to the identity the composition ro
 });
 
 test('runDraftCommand fails closed and leaves the Backlog task untouched when Mission intake is unavailable', async () => {
-  const transitions = [];
-  const errors = [];
-  const exitCodes = [];
-  const missionServicesFn = async () => ({
+  const transitions: string[] = [];
+  const errors: string[] = [];
+  const exitCodes: number[] = [];
+  const missionServicesFn: NonNullable<DraftFixtureDependencies['missionServicesFn']> = async () => (draftMissionServicesFixture({
     intake: {
       execute: async () => ({
-        status: 'failed',
-        error: { kind: 'unavailable', message: 'database is locked' },
+        status: 'failed' as const,
+        error: { kind: 'unavailable' as const, message: 'database is locked' },
         durableEvidence: [],
       }),
     },
-  });
+  }));
 
   try {
     await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env), ...(draftDepsForIntake({
       transitionTaskFn: (slug, status) => { transitions.push(status); return true; },
       missionServicesFn,
-      exitFn: (code) => { exitCodes.push(code); },
+      exitFn: (code) => { assert.ok(typeof code === 'number'); exitCodes.push(code); },
       errorFn: (msg) => { errors.push(String(msg)); },
     })) });
   } finally {
@@ -1755,10 +1766,10 @@ test('runDraftCommand fails closed and leaves the Backlog task untouched when Mi
 });
 
 test('runDraftCommand fails closed when the Mission store cannot be constructed', async () => {
-  const transitions = [];
-  const errors = [];
-  const exitCodes = [];
-  const missionServicesFn = async () => {
+  const transitions: string[] = [];
+  const errors: string[] = [];
+  const exitCodes: number[] = [];
+  const missionServicesFn: NonNullable<DraftFixtureDependencies['missionServicesFn']> = async () => {
     throw new Error('SQLITE_CANTOPEN: unable to open database file');
   };
 
@@ -1766,7 +1777,7 @@ test('runDraftCommand fails closed when the Mission store cannot be constructed'
     await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env), ...(draftDepsForIntake({
       transitionTaskFn: (slug, status) => { transitions.push(status); return true; },
       missionServicesFn,
-      exitFn: (code) => { exitCodes.push(code); },
+      exitFn: (code) => { assert.ok(typeof code === 'number'); exitCodes.push(code); },
       errorFn: (msg) => { errors.push(String(msg)); },
     })) });
   } finally {
@@ -1779,19 +1790,19 @@ test('runDraftCommand fails closed when the Mission store cannot be constructed'
 });
 
 test('runDraftCommand treats an already-recorded Mission as idempotent and continues the draft', async () => {
-  const transitions = [];
-  const missionServicesFn = async () => ({
+  const transitions: string[] = [];
+  const missionServicesFn: NonNullable<DraftFixtureDependencies['missionServicesFn']> = async () => (draftMissionServicesFixture({
     intake: {
       execute: async () => ({
-        status: 'failed',
-        error: { kind: 'conflict', message: 'mission task-tst is already recorded' },
+        status: 'failed' as const,
+        error: { kind: 'conflict' as const, message: 'mission task-tst is already recorded' },
         durableEvidence: [],
       }),
     },
     // An intake conflict continues the draft, so this double still reaches the
     // refinement the final transition records.
-    lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
-  });
+    lifecycle: { transition: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(2), mission: fixtureMission(request.missionId, { status: 'refined' }), previousAssignee: null, from: 'backlog', to: 'refined', laneChanged: true }, durableEvidence: [] }) },
+  }));
 
   try {
     await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env), ...(draftDepsForIntake({
@@ -1813,20 +1824,20 @@ test('runDraftCommand treats an already-recorded Mission as idempotent and conti
 // the Backlog task reaches `ready` — otherwise a failed database write leaves
 // a task advertised as ready that `px active` can no longer activate.
 test('runDraftCommand records the refine transition before the Backlog task reaches ready', async () => {
-  const calls = [];
+  const calls: string[] = [];
 
   await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env), ...(draftDepsForIntake({
     transitionTaskFn: (slug, status) => { calls.push(`transition:${status}`); return true; },
-    missionServicesFn: async () => ({
-      repositoryId: 'main',
-      intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
+    missionServicesFn: async () => (draftMissionServicesFixture({
+      repositoryId: fixtureRepositoryId('main'),
+      intake: { execute: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(1), mission: fixtureMission(request.missionId, { status: 'backlog' }) }, durableEvidence: [] }) },
       lifecycle: {
         transition: async (request) => {
           calls.push(`lifecycle:${request.command.type}`);
-          return { status: 'completed', value: { version: 2 }, durableEvidence: [] };
+          return { status: 'completed' as const, value: { version: fixtureVersion(2), mission: fixtureMission(request.missionId, { status: 'refined' }), previousAssignee: null, from: 'backlog', to: 'refined', laneChanged: true }, durableEvidence: [] };
         },
       },
-    }),
+    })),
     exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
     errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); },
   })) });
@@ -1839,24 +1850,24 @@ test('runDraftCommand records the refine transition before the Backlog task reac
 });
 
 test('runDraftCommand leaves the Backlog task alone when refinement cannot be recorded', async () => {
-  const calls = [];
-  const exitCodes = [];
-  const errors = [];
+  const calls: string[] = [];
+  const exitCodes: number[] = [];
+  const errors: string[] = [];
 
   await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env), ...(draftDepsForIntake({
     transitionTaskFn: (slug, status) => { calls.push(`transition:${status}`); return true; },
-    missionServicesFn: async () => ({
-      repositoryId: 'main',
-      intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
+    missionServicesFn: async () => (draftMissionServicesFixture({
+      repositoryId: fixtureRepositoryId('main'),
+      intake: { execute: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(1), mission: fixtureMission(request.missionId, { status: 'backlog' }) }, durableEvidence: [] }) },
       lifecycle: {
         transition: async () => ({
-          status: 'failed',
-          error: { kind: 'unavailable', message: 'database is locked' },
+          status: 'failed' as const,
+          error: { kind: 'unavailable' as const, message: 'database is locked' },
           durableEvidence: [],
         }),
       },
-    }),
-    exitFn: (code) => { exitCodes.push(code); },
+    })),
+    exitFn: (code) => { assert.ok(typeof code === 'number'); exitCodes.push(code); },
     errorFn: (msg) => { errors.push(String(msg)); },
   })) });
 
@@ -1891,47 +1902,52 @@ const TASK_2471_PLUMBING_LINES = [
 // Setup helpers own half the SC1 lines and emit them through the single `logFn`
 // the adapter hands them. These doubles reproduce the real messages (and one
 // real WARN) so the adapter's demote/keep routing is what is under test.
-function task2471DraftDeps(overrides = {}) {
-  return draftDepsForIntake(Object.assign({
-    ensureMissionBranchFn: (_repo, branchName, { logFn }) => {
+function task2471DraftDeps(overrides: Partial<DraftFixtureDependencies> = {}) {
+  return draftDepsForIntake({
+    ensureMissionBranchFn: (_repo, branchName, { logFn } = {}) => {
+      assert.ok(logFn);
       logFn(cliFormat.status('PASS', `Created branch ${branchName} from main.`));
     },
-    ensureWorktreeFn: (_repo, worktree, _branch, { logFn }) => {
+    ensureWorktreeFn: (_repo, worktree, _branch, { logFn } = {}) => {
+      assert.ok(logFn);
       logFn(cliFormat.status('PASS', `Created worktree at ${worktree}.`));
     },
-    ensureGraphifyWorkspaceFn: (worktree, _repo, { logFn }) => {
+    ensureGraphifyWorkspaceFn: (worktree, _repo, { logFn } = {}) => {
+      assert.ok(logFn);
       logFn(cliFormat.status('PASS', `Created independent graphify-out directory in the mission worktree at ${worktree}/graphify-out.`));
     },
-    ensureGraphifyIgnoreFn: () => {},
-    ensureMissionFileFn: (worktree, slug, { logFn }) => {
+    ensureGraphifyIgnoreFn: () => true,
+    ensureMissionFileFn: (worktree, slug, { logFn } = {}) => {
+      assert.ok(logFn);
       const missionFile = `${worktree}/missions/${slug}/MISSION.md`;
       logFn(cliFormat.status('PASS', `Prepared typed mission directory at ${worktree}/missions/${slug}`));
       return missionFile;
     },
     missionServicesFn: async () => ({
-      repositoryId: 'main',
-      lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
-      intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
-      store: { load: async () => ({ kind: 'found', mission: { title: 'Improve px draft default terminal output', checkpoints: [] }, version: 2 }) },
+      repositoryId: fixtureRepositoryId('main'),
+      lifecycle: { transition: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(2), mission: fixtureMission(request.missionId, { status: 'refined' }), previousAssignee: null, from: 'backlog', to: 'refined', laneChanged: true }, durableEvidence: [] }) },
+      intake: { execute: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(1), mission: fixtureMission(request.missionId, { status: 'backlog' }) }, durableEvidence: [] }) },
+      store: { load: async () => ({ kind: 'found' as const, mission: fixtureMission('task-tst', { title: 'Improve px draft default terminal output', checkpoints: [], labels: missionLabels(['ai_sdlc']) }), version: fixtureVersion(2) }) },
     }),
     recordDraftStatsFn: () => {},
     transitionTaskFn: () => true,
-    transitionVirtualFn: async () => true,
     exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
     errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); },
-  }, overrides));
+    ...overrides,
+  });
 }
 
 // Runs a draft with output captured, optionally with DEBUG set for the duration.
-async function runDraftCapturingOutput({ debug = false, overrides = {} } = {}) {
-  const logs = [];
-  const errors = [];
+async function runDraftCapturingOutput({ debug = false, overrides = {} }: { debug?: boolean; overrides?: Partial<DraftFixtureDependencies> } = {}) {
+  const logs: string[] = [];
+  const errors: string[] = [];
   const previousDebug = process.env.DEBUG;
   if (debug) { process.env.DEBUG = '1'; } else { delete process.env.DEBUG; }
   try {
-    await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env), ...(task2471DraftDeps(Object.assign({
+    await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env), ...(task2471DraftDeps({
       logFn: (msg) => logs.push(String(msg)),
-    }, overrides))) });
+      ...overrides,
+    })) });
   } finally {
     if (previousDebug === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = previousDebug; }
   }
@@ -1944,15 +1960,16 @@ async function runDraftCapturingOutput({ debug = false, overrides = {} } = {}) {
 }
 
 // Points the scaffold step at a specific mission path without creating it.
-function missionFileStub(missionFile) {
-  return (_worktree, _slug, { logFn }) => {
+function missionFileStub(missionFile: string): NonNullable<DraftFixtureDependencies['ensureMissionFileFn']> {
+  return (_worktree, _slug, { logFn } = {}) => {
+      assert.ok(logFn);
     logFn(cliFormat.status('PASS', `Prepared typed mission directory at ${path.dirname(missionFile)}`));
     return missionFile;
   };
 }
 
 // Historical document fixture: the typed summary must ignore its heading.
-function writeMissionFile(heading, body = '\n## Goal\nSomething.\n') {
+function writeMissionFile(heading: string, body = '\n## Goal\nSomething.\n') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'px-2471-'));
   const missionFile = path.join(dir, 'MISSION.md');
   fs.writeFileSync(missionFile, `${heading}\n${body}`);
@@ -2023,9 +2040,11 @@ test('px draft keeps setup-helper warnings on the default path', async () => {
   const { text } = await runDraftCapturingOutput({
     overrides: {
       ensureMissionFileFn: missionFileStub(missionFile),
-      ensureGraphifyWorkspaceFn: (worktree, _repo, { logFn }) => {
+      ensureGraphifyWorkspaceFn: (worktree, _repo, { logFn } = {}) => {
+      assert.ok(logFn);
         logFn(cliFormat.status('PASS', `Created independent graphify-out directory in the mission worktree at ${worktree}/graphify-out.`));
         logFn(cliFormat.status('WARN', `${worktree}/graphify-out already exists and is not a directory. Leaving it unchanged.`));
+        return false;
       },
     },
   });
@@ -2035,16 +2054,16 @@ test('px draft keeps setup-helper warnings on the default path', async () => {
 });
 
 test('px draft failure path keeps the FAIL line, the repair hint and a non-zero exit', async () => {
-  const logs = [];
-  const errors = [];
-  const exits = [];
+  const logs: string[] = [];
+  const errors: string[] = [];
+  const exits: number[] = [];
   const previousDebug = process.env.DEBUG;
   delete process.env.DEBUG;
   try {
     await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env), ...(task2471DraftDeps({
       logFn: (msg) => logs.push(String(msg)),
       errorFn: (msg) => errors.push(String(msg)),
-      exitFn: (code) => { exits.push(code); },
+      exitFn: (code) => { assert.ok(typeof code === 'number'); exits.push(code); },
       missionServicesFn: async () => { throw new Error('database is locked'); },
     })) });
   } finally {
@@ -2065,10 +2084,10 @@ test('px draft summary falls back to the slug when recorded mission has no title
     overrides: {
       ensureMissionFileFn: missionFileStub(missionFile),
       missionServicesFn: async () => ({
-        repositoryId: 'main',
-        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
-        intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
-        store: { load: async () => ({ kind: 'found', mission: { checkpoints: [] }, version: 2 }) },
+        repositoryId: fixtureRepositoryId('main'),
+        lifecycle: { transition: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(2), mission: fixtureMission(request.missionId, { status: 'refined' }), previousAssignee: null, from: 'backlog', to: 'refined', laneChanged: true }, durableEvidence: [] }) },
+        intake: { execute: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(1), mission: fixtureMission(request.missionId, { status: 'backlog' }) }, durableEvidence: [] }) },
+        store: { load: async () => ({ kind: 'found' as const, mission: fixtureMission('task-tst', { title: '', checkpoints: [], labels: missionLabels(['ai_sdlc']) }), version: fixtureVersion(2) }) },
       }),
     },
   });
@@ -2158,6 +2177,8 @@ test('px draft demotes the routine safety-harness commit but keeps unexpected di
       ensureMissionFileFn: missionFileStub(missionFile),
       enforceDraftCommitSafetyFn: ({ logFn, plumbingLogFn }) => {
         // Mirrors the real helper's two channels.
+        assert.ok(plumbingLogFn);
+        assert.ok(logFn);
         plumbingLogFn(cliFormat.status('INFO', 'Draft safety harness: committing the changes the draft agent left behind.'));
         logFn(cliFormat.status('WARN', 'Draft safety harness: capturing unexpected dirty files alongside mission artifacts:'));
         return true;
@@ -2175,6 +2196,8 @@ test('px draft keeps an agent fallback visible while demoting assignee bookkeepi
     overrides: {
       ensureMissionFileFn: missionFileStub(missionFile),
       recordDraftImplementerFn: async ({ log, plumbingLog }) => {
+        assert.ok(log);
+        assert.ok(plumbingLog);
         log(cliFormat.status('INFO', 'Draft agent fell back from claude to codex; enforcing backlog assignee.'));
         plumbingLog(cliFormat.status('INFO', 'Enforcing draft agent codex as assignee...'));
         return 'codex';
@@ -2188,24 +2211,25 @@ test('px draft keeps an agent fallback visible while demoting assignee bookkeepi
 
 test('px draft prints the recorded contract goal and its shape so no pager is needed', async () => {
   const missionFile = writeMissionFile('# Mission: Fix the hello.sh greeting output');
-  const recorded = {
+  const recorded = fixtureMission('task-tst', {
+    labels: missionLabels(['ai_sdlc']),
     brief: { goal: 'Correct the greeting string emitted by hello.sh', why: 'w', scope: 's', outOfScope: [] },
     successCriteria: ['First criterion.', 'Second criterion.', 'Third criterion.'],
     declaredGates: ['./scripts/verify-local.sh all'],
     predictedNelBucket: 'Small',
     checkpoints: [
-      { missionId: 'task-tst', name: 'CP-1', firstLine: 'Fix the greeting', goalCheck: [], nextActionText: '' },
-      { missionId: 'task-tst', name: 'CP-2', firstLine: 'Prove it', goalCheck: [], nextActionText: '' },
+      { missionId: missionId('task-tst'), name: 'CP-1', firstLine: 'Fix the greeting', goalCheck: [], nextActionText: '' },
+      { missionId: missionId('task-tst'), name: 'CP-2', firstLine: 'Prove it', goalCheck: [], nextActionText: '' },
     ],
-  };
+  });
   const { text } = await runDraftCapturingOutput({
     overrides: {
       ensureMissionFileFn: missionFileStub(missionFile),
       missionServicesFn: async () => ({
-        repositoryId: 'main',
-        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
-        intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
-        store: { load: async () => ({ kind: 'found', mission: recorded, version: 9 }) },
+        repositoryId: fixtureRepositoryId('main'),
+        lifecycle: { transition: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(2), mission: fixtureMission(request.missionId, { status: 'refined' }), previousAssignee: null, from: 'backlog', to: 'refined', laneChanged: true }, durableEvidence: [] }) },
+        intake: { execute: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(1), mission: fixtureMission(request.missionId, { status: 'backlog' }) }, durableEvidence: [] }) },
+        store: { load: async () => ({ kind: 'found' as const, mission: recorded, version: fixtureVersion(9) }) },
       }),
     },
   });
@@ -2221,10 +2245,10 @@ test('px draft summary survives a contract with no Goal section', async () => {
     overrides: {
       ensureMissionFileFn: missionFileStub(missionFile),
       missionServicesFn: async () => ({
-        repositoryId: 'main',
-        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
-        intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
-        store: { load: async () => ({ kind: 'found', mission: { title: 'Untitled', checkpoints: [] }, version: 2 }) },
+        repositoryId: fixtureRepositoryId('main'),
+        lifecycle: { transition: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(2), mission: fixtureMission(request.missionId, { status: 'refined' }), previousAssignee: null, from: 'backlog', to: 'refined', laneChanged: true }, durableEvidence: [] }) },
+        intake: { execute: async (request) => ({ status: 'completed' as const, value: { version: fixtureVersion(1), mission: fixtureMission(request.missionId, { status: 'backlog' }) }, durableEvidence: [] }) },
+        store: { load: async () => ({ kind: 'found' as const, mission: fixtureMission('task-tst', { title: 'Untitled', checkpoints: [], labels: missionLabels(['ai_sdlc']) }), version: fixtureVersion(2) }) },
       }),
     },
   });

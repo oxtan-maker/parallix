@@ -6,6 +6,7 @@ export interface ReviewClassificationPorts {
   readonly decision: DecisionPort;
   readonly evidence: ReviewEvidencePort;
   telemetry(): Promise<ReviewClassificationTelemetryPort>;
+  readonly obligationMode?: 'enabled' | 'shadow';
   readonly mode: 'enabled' | 'disabled' | 'shadow';
   hash(_text: string): string;
   fingerprint(): string;

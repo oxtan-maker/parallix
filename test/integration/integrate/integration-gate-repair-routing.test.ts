@@ -1,3 +1,4 @@
+import type { IntegrationGateFailureRequest, IntegrationGateRoute } from '../../../src/application/ports/integrate-workflow.js';
 // ---------------------------------------------------------------------------
 // TASK-2492 — the `px integrate` CLI wires a failed integration gate through
 // the routing module instead of dead-ending in `IntegrationAbort`.
@@ -50,8 +51,8 @@ function servicesFor() {
   const store = createFakeStore('done');
   return {
     store,
-    lifecycle: new MissionLifecycleService(store as never),
-    integration: new MissionIntegrationService(store as never),
+    lifecycle: new MissionLifecycleService(store),
+    integration: new MissionIntegrationService(store),
     handoff: { recordNel: async () => ({}) },
   };
 }
@@ -80,16 +81,16 @@ async function runIntegrate(scenario: Scenario) {
   fs.writeFileSync(taskFile, 'status: approved\n');
   const services = scenario.repairs ? (() => {
     const store = createFakeStore('review');
-    return { store, lifecycle: new MissionLifecycleService(store as never), integration: new MissionIntegrationService(store as never), handoff: { recordNel: async () => ({}) } };
+    return { store, lifecycle: new MissionLifecycleService(store), integration: new MissionIntegrationService(store), handoff: { recordNel: async () => ({}) } };
   })() : servicesFor();
   if (scenario.repairs) {
-    await services.store.save({ ...services.store.mission(), checkpoints: [{ missionId: missionId(SLUG), name: 'CP-1', rawFilename: null,
+    await services.store.save({ ...services.store.mission(), checkpoints: [{ missionId: missionId(SLUG), name: 'CP-1', rawFilename: undefined,
       firstLine: '', goalCheck: [{ criterion: 'repair', evidence: 'recorded' }], nextActionText: 'review' }] });
   }
   const launches: string[] = [];
   const seamLaunches: string[] = [];
   const logs: string[] = [];
-  const captured: Array<Record<string, unknown>> = [];
+  const captured: IntegrationGateFailureRequest[] = [];
 
   mock.method(process.stdout, 'write', (chunk: string | Uint8Array) => {
     logs.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
@@ -125,15 +126,15 @@ async function runIntegrate(scenario: Scenario) {
     if (args.includes('commit')) { return ok(''); }
     return ok('');
   });
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
   mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
   mock.method(backlog, 'getTaskStatus', () => 'approved');
   mock.method(backlog, 'getTaskAssignee', () => 'codex');
   mock.method(backlog, 'completeTask', () => true);
   mock.method(backlog, 'setTaskStatus', () => true);
-  mock.method(forgejo, 'getPrStatus', () => ({ exists: true, state: 'open', merged: false, number: 1 }));
-  mock.method(verification, 'captureVerifiedTreeProof', () => ({ ok: true, proof: { rootDir: root } }));
-  mock.method(verification, 'assertVerifiedTreeProof', () => ({ ok: true }));
+  mock.method(forgejo, 'getPrStatus', () => ({ exists: true as const, state: 'open', merged: false, number: 1 }));
+  mock.method(verification, 'captureVerifiedTreeProof', () => ({ ok: true as const, proof: { rootDir: root } }));
+  mock.method(verification, 'assertVerifiedTreeProof', () => ({ ok: true as const }));
   mock.method(process, 'cwd', () => root);
   let exitCode: number | undefined;
   mock.method(process, 'exit', (code?: number) => { exitCode = code; });
@@ -153,32 +154,33 @@ async function runIntegrate(scenario: Scenario) {
     error: `Repository gate "${FAILED_GATE.key}" exited with code 1 for integration.`,
   }));
 
-  const routeIntegrationGateFailureFn = mock.fn(async (args: Record<string, unknown>) => {
+  const routeIntegrationGateFailureFn = mock.fn(async (args: IntegrationGateFailureRequest): Promise<IntegrationGateRoute> => {
     captured.push(args);
     if (scenario.repairs) {
-      await (args.reactivateMissionFn as (_slug: string) => Promise<unknown>)(SLUG);
+      assert.ok(args.reactivateMissionFn);
+      await args.reactivateMissionFn(SLUG);
       assert.equal(services.store.mission().status, 'active');
       assert.equal(reviewStatus(services.store.mission().review!), 'awaiting-review');
-      return { route: 'revision-changed', rebounds: captured.length, repairedRevision: `repair-${captured.length}`, invalidation: { ok: true } };
+      return { route: 'revision-changed', rebounds: captured.length, repairedRevision: `repair-${captured.length}`, invalidation: { ok: true, dismissed: [], errors: [] } };
     }
     if (scenario.route === 'fixed') {
       // A recoverable mission-regression route transitions the task back to
       // the implementer and relaunches exactly once.
-      await (args.transitionTaskFn as (_slug: string) => Promise<unknown> | unknown)(args.slug as string);
+      await args.transitionTaskFn(args.slug);
       seamLaunches.push('launched');
       return { route: 'fixed', rebounds: 1 };
     }
-    return { route: scenario.route, rebounds: 0, detail: 'aborts before merge' };
+    return { route: scenario.route, rebounds: 0 };
   });
 
   let error: Error | undefined;
   try {
     await integrate.default([SLUG], {
       missionServicesFn: async () => services,
-      startAgentFn: async () => { launches.push('launched'); return { agent: 'codex', result: { status: 0 } } as never; },
+      startAgentFn: async () => { launches.push('launched'); return { agent: 'codex', result: { status: 0 } }; },
       transitionTaskFn: async () => { launches.push('transitioned'); return true; },
       applyAgentFallbackFn: async ({ original }: { original: string }) => original,
-      routeIntegrationGateFailureFn: routeIntegrationGateFailureFn as never,
+      routeIntegrationGateFailureFn: routeIntegrationGateFailureFn,
       ...(scenario.repairs ? { reReviewFn: async () => {
         reviews++;
         // The lifecycle service owns its transition coverage. This CLI-wiring
@@ -213,7 +215,7 @@ test('TASK-2492: a red integration gate routes through the seam with the failed 
   assert.equal(result.captured.length, 1, 'the routing seam is called exactly once on a red gate');
   const args = result.captured[0]!;
   assert.ok(args.failedGate, 'the failed gate is passed through');
-  assert.equal((args.failedGate as { key: string }).key, 'integration-suite');
+  assert.equal(args.failedGate.key, 'integration-suite');
   assert.match(String(args.gateError), /integration/i, 'the gate error is passed through');
   assert.ok(Array.isArray(args.gates), 'the configured gate set is passed through');
   assert.equal(args.implementer, 'codex', 'the named implementer is passed through');

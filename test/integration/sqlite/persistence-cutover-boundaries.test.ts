@@ -115,13 +115,13 @@ test('SC5: no src/adapters/sqlite file imports the production composition root',
 // (c) SC6 — durable IO for a database-owned concept stays declared
 // ---------------------------------------------------------------------------
 
-test('SC6: review-state.ts declares only the one-way legacy import, never a writer', () => {
+test('SC6: review persistence declares only the one-way legacy import, never a writer', () => {
   // The loop's review state is the Review aggregate. The single entry left for
-  // this file is the operator-invoked `--backfill-review` import; a write entry,
+  // these files is the operator-invoked `--backfill-review` import; a write entry,
   // or a read classified as domain state, means review-state.json came back as
   // a live authority.
   const entries = ADR0053_PERSISTENCE_INVENTORY.filter(
-    (entry) => entry.fileLocation.endsWith('review/review-state.ts'),
+    (entry) => ['review/review-state.ts', 'review/review-legacy-import.ts'].some(file => entry.fileLocation.endsWith(file)),
   );
   assert.deepEqual(
     entries.map((entry) => `${entry.id}:${entry.operation}:${entry.classification}`),

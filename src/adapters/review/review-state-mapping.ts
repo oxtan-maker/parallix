@@ -67,7 +67,7 @@ function decisionFromState(
 ): ReviewerDecision | null {
   if (phase === 'approved') {
     if (previous?.kind === 'approved') { return previous; }
-    return { kind: 'approved', decidedAt: startedAt, comment: disposition, source: { kind: 'local' } };
+    return { kind: 'approved', revision: null, decidedAt: startedAt, comment: disposition, source: { kind: 'local' } };
   }
   if (phase === 'fixing' && disposition) {
     // A flattened legacy state has no finding payload. Retain findings from
@@ -195,5 +195,5 @@ export function applyReviewStateToReview(review: Review, state: ReviewStateData)
     ? { requestedAt: escalationAt, requestedBy: 'workflow' as const, reason: escalationReason }
     : review.intervention;
 
-  return { ...review, rounds: rounds as unknown as Review['rounds'], intervention, stageLaunches };
+  return { ...review, rounds: [rounds[0], ...rounds.slice(1)], intervention, stageLaunches };
 }

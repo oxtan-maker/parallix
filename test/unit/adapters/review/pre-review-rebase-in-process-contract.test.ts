@@ -1,3 +1,4 @@
+import { rebaseWorkflowFixture } from '../../../helpers/rebase-workflow-fixture.js';
 // Historical regression provenance: TASK-2377.
 // Behavior-owned suite (TASK-2622.09): the pre-review rebase runs in-process through the rebase workflow
 // port (task-2377-02) and hook/gate failures during it classify correctly. Legacy case names unchanged.
@@ -48,7 +49,7 @@ describe("02 pre-review rebase in-process", () => {
    * these tests exercise the in-process path with no git, Forgejo, or agent access.
    */
   function stubPort(overrides: Partial<RebaseWorkflowPort> = {}): RebaseWorkflowPort {
-    return {
+    return rebaseWorkflowFixture({
       git: () => OK,
       detectRebaseState: () => ({ inProgress: false, unmergedFiles: [] }),
       getCurrentBranch: () => BRANCH,
@@ -69,30 +70,30 @@ describe("02 pre-review rebase in-process", () => {
       workflowLauncherStatus: (_agent: string) => ({ supported: true, agent: 'test-agent' }),
       applyAgentFallback: async () => 'test-agent',
 
-      createPr: () => ({ ok: true }),
+      createPr: () => ({ ok: true as const }),
       readToken: () => 'token',
       resolveForgejoUser: (user: string | null) => user ?? 'tester',
       fetchReviewBranch: () => OK,
 
-      resolveTaskFile: () => ({ ok: true, taskFile: `${WORKTREE}/backlog/tasks/${SLUG}.md`, task: {} }),
+      resolveTaskFile: () => ({ ok: true as const, taskFile: `${WORKTREE}/backlog/tasks/${SLUG}.md`, task: {} }),
       getTaskImplementer: () => 'tester',
       transitionTask: async () => undefined,
 
       resolveReviewIdentity: () => ({ forgejoUser: 'tester' }),
-      readReviewState: () => ({ metadata: {} }),
-      writeReviewState: () => undefined,
-      persistReviewState: async () => undefined,
+      readReviewState: async () => ({ metadata: {} }),
+      writeReviewState: async () => ({ outcome: 'committed' as const }),
+      persistReviewState: async () => ({ outcome: 'committed' as const }),
 
       isForgejoReviewEnabled: () => true,
 
       formatVerificationCommand: (area: string) => `./scripts/verify-local.sh ${area}`,
 
-      resolveConflictsForMission: () => ({ ok: true, conflictFiles: [], missionSpecificFiles: [], sharedFiles: [] }),
+      resolveConflictsForMission: () => ({ ok: true as const, conflictFiles: [], missionSpecificFiles: [], sharedFiles: [] }),
 
       missionServices: null,
       exit: () => {},
       ...overrides,
-    };
+    });
   }
 
   /** Options that keep `rebaseBeforeReviewRound` off the real filesystem. */
@@ -136,7 +137,7 @@ describe("02 pre-review rebase in-process", () => {
   });
 
   test('push-time gate failure whose output contains pre-push classifies as a gate failure', async () => {
-    const port = stubPort({ createPr: () => ({ ok: false, error: GATE_OUTPUT_WITH_PRE_PUSH, gateFailure: { area: 'lib', command: './scripts/verify-local.sh lib', exitCode: 1, stdout: '', stderr: GATE_OUTPUT_WITH_PRE_PUSH } }) });
+    const port = stubPort({ createPr: () => ({ ok: false as const, error: GATE_OUTPUT_WITH_PRE_PUSH, gateFailure: { area: 'lib', command: './scripts/verify-local.sh lib', exitCode: 1, stdout: '', stderr: GATE_OUTPUT_WITH_PRE_PUSH } }) });
     const previousLogger = setLogger({ log: () => {} });
     let result;
     try {
@@ -218,8 +219,8 @@ describe("02 pre-review rebase in-process", () => {
   test('genuine pre-commit failure on the pre-review safety commit reports hook evidence', async () => {
     const result = await rebaseBeforeReviewRound(SLUG, preReviewOptions(stubPort(), {
       gitFn: (args: string[]) => {
-        if (args.includes('status')) { return { status: 0, stdout: ` M missions/${SLUG}/MISSION.md\0`, stderr: '' }; }
-        if (args.includes('commit')) { return { status: 1, stdout: '', stderr: 'pre-commit hook failed: lint error' }; }
+        if (args.includes('status')) { return { signal: null,  status: 0, stdout: ` M missions/${SLUG}/MISSION.md\0`, stderr: '' }; }
+        if (args.includes('commit')) { return { signal: null,  status: 1, stdout: '', stderr: 'pre-commit hook failed: lint error' }; }
         return OK;
       },
     }));
@@ -245,7 +246,7 @@ describe("02 pre-review rebase in-process", () => {
         operation: 'push' as const,
         gate: { area: 'lib', command: './scripts/verify-local.sh lib', exitCode: 1, stdout: gateOutput, stderr: gateOutput },
       },
-    } as never);
+    });
     assert.ok(facts.ok === false && facts.gate && !facts.hook, 'a push-time gate failure is reported as gate facts only');
 
     const fake = fakeReviewLoopPorts({
@@ -285,12 +286,12 @@ describe("02 pre-review rebase in-process", () => {
     // The workflow drives `port.git`; auto-commit uses the gitFn option, so keep
     // that clean and only make the workflow's rebase land on a shared conflict.
     const git = (args: string[]) => {
-      if (args.includes('--show-current')) { return { status: 0, stdout: '', stderr: '' }; }
+      if (args.includes('--show-current')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
       if (args.includes('rebase') && args.includes('--continue')) { return OK; }
       if (args.includes('rebase')) {
-        return { status: 1, stdout: 'Merge conflict in src/shared/common.ts', stderr: '' };
+        return { signal: null,  status: 1, stdout: 'Merge conflict in src/shared/common.ts', stderr: '' };
       }
-      if (args.includes('merge-base')) { return { status: 0, stdout: '', stderr: '' }; }
+      if (args.includes('merge-base')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
       return OK;
     };
     // A conflict-agent that fails makes the workflow exit non-zero, which is the
@@ -300,9 +301,9 @@ describe("02 pre-review rebase in-process", () => {
       : { agent: 'tester', result: { status: 0 } });
 
     const result = await rebaseBeforeReviewRound(SLUG, preReviewOptions(stubPort({
-      git: git as any,
-      startAgent: startAgent as any,
-      resolveConflictsForMission: () => ({ ok: true, conflictFiles: [], missionSpecificFiles: [], sharedFiles: ['src/shared/common.ts'] }),
+      git: git,
+      startAgent: startAgent,
+      resolveConflictsForMission: () => ({ ok: true as const, conflictFiles: [], missionSpecificFiles: [], sharedFiles: ['src/shared/common.ts'] }),
     }), {
       log: (line: string) => logs.push(line),
       error: (line: string) => logs.push(line),

@@ -15,7 +15,7 @@ export interface PostIntegrateHookParams {
   /** Directory to resolve config from and run in; defaults to baseWorktree. */
   cwd?: string;
   processEnv?: NodeJS.ProcessEnv;
-  runFn?: (_cmd: string, _args: string[], _options: Record<string, unknown>) => { status: number | null; stdout: string; stderr: string };
+  runFn?: (_cmd: string, _args: string[], _options: { cwd: string; env: NodeJS.ProcessEnv; encoding: 'utf8' }) => { status: number | null; stdout: string; stderr: string };
   resolveCommandFn?: (_rootDir: string) => string | null;
 }
 
@@ -65,7 +65,7 @@ export function runPostIntegrateHook(params: PostIntegrateHookParams): PostInteg
     return { ran: false, ok: true };
   }
 
-  const runFn = params.runFn || ((cmd: string, args: string[], options: Record<string, unknown>) => child_process.spawnSync(cmd, args, options as child_process.SpawnSyncOptions) as unknown as { status: number | null; stdout: string; stderr: string });
+  const runFn: NonNullable<PostIntegrateHookParams['runFn']> = params.runFn || ((cmd, args, options) => child_process.spawnSync(cmd, args, options));
   const env = buildPostIntegrateHookEnv(params);
   const result = runFn('bash', ['-lc', command], {
     cwd,

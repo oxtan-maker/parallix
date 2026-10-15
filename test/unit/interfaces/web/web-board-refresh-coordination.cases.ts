@@ -1,3 +1,4 @@
+const reactGlobal: typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean } = globalThis;
 /**
  * Refresh-coordination contract for the browser shell (TASK-2655): every
  * snapshot read — initial load, SSE invalidate/progress, connection open and
@@ -74,7 +75,7 @@ const boardOf = (id: string, operationLog: readonly { readonly operationId: stri
   const snapshot = toWebBoardSnapshot(makeProjection({ active: id.split(',').map(card => makeCard({ id: missionId(card), status: 'active', lane: 'active', commands: [handoff] })) }));
   return {
     ...snapshot,
-    operationLog: operationLog.map(entry => ({ phase: 'run', timestamp: '2026-10-06T10:00:00.000Z', ...entry })),
+    operationLog: operationLog.map(entry => ({ phase: 'run' as const, timestamp: '2026-10-06T10:00:00.000Z', ...entry })),
   };
 };
 
@@ -96,24 +97,27 @@ async function mountShell(t: TestContext) {
   const window = new Window();
   const previous = {
     window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch,
-    EventSource: globalThis.EventSource, IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT,
+    EventSource: globalThis.EventSource, IS_REACT_ACT_ENVIRONMENT: reactGlobal.IS_REACT_ACT_ENVIRONMENT,
   };
   FakeEventSource.instances = [];
   const reads: PendingRead[] = [];
   const server = { truth: 'task-a' };
   Object.assign(globalThis, { window, document: window.document, EventSource: FakeEventSource });
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  reactGlobal.IS_REACT_ACT_ENVIRONMENT = true;
   const commandResult = { kind: 'command-result', transportVersion: WEB_TRANSPORT_VERSION, status: 'completed', value: null, error: null, durableEvidence: [] };
   globalThis.fetch = ((url: RequestInfo | URL) => String(url) === COMMANDS_PATH ? Promise.resolve(ok(commandResult)) : new Promise<Response>((resolve) => {
     const read: PendingRead = { truth: server.truth, settled: false, respond(response) { read.settled = true; resolve(response); } };
     reads.push(read);
   })) as typeof fetch;
   const mount = window.document.createElement('div');
+  mount.id = 'react-test-root';
   window.document.body.append(mount);
-  let root: Root | null = createRoot(mount);
+  const reactMount = document.getElementById(mount.id);
+  assert.ok(reactMount);
+  let root: Root | null = createRoot(reactMount);
   await act(async () => { root!.render(React.createElement(Shell)); });
   const page = {
-    window, mount, server,
+    window, mount, reactMount, server,
     /** Snapshot reads only; command requests answer immediately and are not listed. */
     reads,
     text: () => mount.textContent ?? '',
@@ -547,7 +551,7 @@ test('unmount and remount leak no connection, listener, timer, or state-committi
     await page.settle(inFlight);
     assert.equal(page.pending().length, 0, 'no timer starts a read after unmount');
     assert.deepEqual(errors, [], 'no state is committed after unmount');
-    const root = createRoot(page.mount);
+    const root = createRoot(page.reactMount);
     await act(async () => { root.render(React.createElement(Shell)); });
     assert.equal(FakeEventSource.instances.filter(source => source.readyState !== FakeEventSource.CLOSED).length, 1, 'remount holds exactly one subscription');
     await page.drain();

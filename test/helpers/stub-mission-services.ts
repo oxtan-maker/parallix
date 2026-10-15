@@ -1,53 +1,46 @@
+import { missionVersion } from '../../src/application/domain-ports.js';
 /**
- * In-memory stand-in for `createMissionApplicationServices()`.
- *
- * After the TASK-2322.07 cutover, `performHandoff` commits the Mission
- * transition through the SQLite authority before it touches the Backlog task.
- * Tests that mock `fs` wholesale cannot let the real composition root run — its
- * lazy `import()` of the SQLite adapter would read the mocked file contents —
- * so they inject this stub through the `missionServicesFn` seam instead.
+ * In-memory Mission services for tests that replace filesystem/module seams.
+ * Each factory owns fresh aggregates and never opens the operator database.
  */
-export function stubMissionServices(overrides: Record<string, unknown> = {}) {
-  return () => ({
-    repositoryId: 'test-repo',
+import type { HandoffMissionServices, HandoffMissionServicesPort } from '../../src/application/ports/handoff-workflow.js';
+import { repositoryId } from '../../src/domain/repository.js';
+import { fixtureMission } from '../fixtures/mission-builders.js';
+
+export function stubMissionServices(overrides: Partial<HandoffMissionServices> = {}): HandoffMissionServicesPort {
+  return async () => {
+    const services: HandoffMissionServices & { repositoryId: ReturnType<typeof repositoryId> } = {
+    repositoryId: repositoryId('test-repo'),
     store: {
-      _repoId: 'test-repo',
-      async load() {
-        return { kind: 'found' as const, mission: { status: 'review', review: { rounds: [] }, checkpoints: [], brief: null, declaredGates: [] }, version: 1 };
+      async load(id) {
+        return { kind: 'found' as const, mission: fixtureMission(id, {
+          repositoryId: repositoryId('test-repo'), status: 'review', checkpoints: [],
+        }), version: missionVersion(1) };
       },
     },
-    checkpoints: {
-      async record() {
-        return { status: 'completed', value: { replaced: false }, durableEvidence: [] };
-      },
-    },
-    lifecycle: {
-      async transition() {
-        return { status: 'completed', value: { to: 'review', version: 2 }, durableEvidence: [] };
-      },
-    },
-    handoff: {
-      async recordNel() {
-        return { status: 'completed', value: {}, durableEvidence: [] };
-      },
-    },
+    checkpoints: { async record() { return { status: 'completed' as const, durableEvidence: [] }; } },
+    lifecycle: { async transition() { return { status: 'completed' as const, durableEvidence: [] }; } },
+    handoff: { async recordNel() { return { status: 'completed' as const, durableEvidence: [] }; } },
     ...overrides,
-  });
+    };
+    return services;
+  };
 }
 
-export function stubRecordedMissionServices() {
+export function stubRecordedMissionServices(): HandoffMissionServicesPort {
   return stubMissionServices({
     store: {
-      async load() {
+      async load(id) {
         return {
           kind: 'found' as const,
-          mission: {
-            status: 'review', review: { rounds: [] },
-            checkpoints: [{ name: 'CP-1', goalCheck: [{ criterion: 'handoff coverage', evidence: '`npm run typecheck`' }], nextActionText: 'review' }],
+          mission: fixtureMission(id, {
+            repositoryId: repositoryId('test-repo'), status: 'review',
+              checkpoints: [{ missionId: id, name: 'CP-1',
+              goalCheck: [{ criterion: 'handoff coverage', evidence: '`npm run typecheck`' }], nextActionText: 'review' }],
             brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
             successCriteria: ['handoff coverage'], completedSuccessCriteria: [0], declaredGates: ['true'],
-          },
-          version: 1,
+          }),
+          version: missionVersion(1),
         };
       },
     },

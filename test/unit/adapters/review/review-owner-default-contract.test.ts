@@ -1,4 +1,3 @@
-// @ts-nocheck -- Retained legacy partial request doubles (TASK-2328).
 import { resolveConfiguration } from '../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 // review owner default contract.
@@ -23,8 +22,9 @@ test('auto-bootstrap fallback owner is human not magnus when repo is empty', asy
   await pushRound(mockSlug, {
     readReviewStateFn: () => ({ implementer: 'human' }),
     readTokenFn: () => 'token',
-    transitionTaskFn: () => true,
+    transitionTaskFn: async () => true,
     createPrFn: (_branch, _user, _token, opts) => {
+      assert.ok(opts != null);
       assert.equal(opts.forceWithLease, true);
       created += 1;
       return created === 1
@@ -33,10 +33,10 @@ test('auto-bootstrap fallback owner is human not magnus when repo is empty', asy
     },
     bootstrapReviewSurfaceFn: async (rootDir, params) => {
       capturedOwner = params.ownerLogin;
-      return { ok: true };
+      return { ok: true as const };
     },
     // Empty repo forces fallback path
-    resolveReviewAdapterFn: () => ({ baseUrl: 'http://localhost:3300', repo: '', remote: 'review' }),
+    resolveReviewAdapterFn: () => ({ provider: 'forgejo', baseUrl: 'http://localhost:3300', repo: '', remote: 'review' }),
     log: () => {},
     error: () => {},
     exit: () => {}
@@ -54,8 +54,9 @@ test('auto-bootstrap derives owner from repo slug when present', async () => {
   await pushRound(mockSlug, {
     readReviewStateFn: () => ({ implementer: 'human' }),
     readTokenFn: () => 'token',
-    transitionTaskFn: () => true,
+    transitionTaskFn: async () => true,
     createPrFn: (_branch, _user, _token, opts) => {
+      assert.ok(opts != null);
       assert.equal(opts.forceWithLease, true);
       created += 1;
       return created === 1
@@ -64,10 +65,10 @@ test('auto-bootstrap derives owner from repo slug when present', async () => {
     },
     bootstrapReviewSurfaceFn: async (rootDir, params) => {
       capturedOwner = params.ownerLogin;
-      return { ok: true };
+      return { ok: true as const };
     },
     // Non-empty repo — owner derived from slug
-    resolveReviewAdapterFn: () => ({ baseUrl: 'http://localhost:3300', repo: 'acme/parallix', remote: 'review' }),
+    resolveReviewAdapterFn: () => ({ provider: 'forgejo', baseUrl: 'http://localhost:3300', repo: 'acme/parallix', remote: 'review' }),
     log: () => {},
     error: () => {},
     exit: () => {}
@@ -89,15 +90,15 @@ test('setup-review collectSetupAnswers defaults owner to human when repo is empt
   const path = await import('node:path');
   const root = registeredMkdtemp('task-2364-');
   try {
-    const prompts = [];
+    const prompts: { prompt: string; promptOptions: { hidden?: boolean; }; }[] = [];
     const answers = ['', 'owner-password', '', 'agent-password', ''];
     const result = await collectSetupAnswers(root, {
       users: ['codex'],
-      resolveForgejoSettingsFn: () => ({ url: 'http://localhost:3300', repo: '' }),
+      resolveForgejoSettingsFn: () => ({ url: 'http://localhost:3300', repo: '', remote: 'review' }),
       log: () => {},
       promptFn: async (prompt, promptOptions = {}) => {
         prompts.push({ prompt, promptOptions });
-        return answers.shift();
+        return answers.shift() ?? '';
       },
     });
     assert.equal(result.ownerLogin, 'human', 'ownerLogin should default to human when repo is empty');

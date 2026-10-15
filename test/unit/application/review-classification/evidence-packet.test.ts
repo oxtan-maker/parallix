@@ -77,7 +77,7 @@ test('absolute citations resolve only inside the supplied worktree and retain li
   const source = Array.from({ length: 1000 }, (_, i) => `line ${i + 1} ${'x'.repeat(200)}\n`).join('');
   const absolute = { ...input, findings: [{ id: 'F1', summary: 'drops output', location: '/repo/mission/lib/x.java:400' }],
     priorReviewComment: 'at runSmoke (/repo/mission/lib/x.java:400:14)', implementerResponse: 'Fixed F1' };
-  const port = { ...repository, source: async () => source, diff: async () => '' };
+  const port = { ...repository, source: async () => source, diff: async () => '' } satisfies NonNullable<Parameters<typeof buildEvidencePacket>[1]>;
   const packet = await buildEvidencePacket(absolute, port, '/repo/mission/');
   assert.deepEqual(packet.paths, ['lib/x.java']);
   assert.match(JSON.stringify(packet.request.state), /"startLine":370,"endLine":430/);
@@ -120,7 +120,7 @@ test('the last-resort packet still respects the measured budget (TASK-2675)', as
 
 test('packet budget uses the measured encoded request size and degrades stepwise (TASK-2675)', async () => {
   const source = Array.from({ length: 1000 }, (_, i) => `line ${i + 1} ${'x'.repeat(40)}\n`).join('');
-  const port = { ...repository, source: async () => source };
+  const port = { ...repository, source: async () => source } satisfies NonNullable<Parameters<typeof buildEvidencePacket>[1]>;
   const sizes: number[] = [];
   const everything = await buildEvidencePacket(input, port, undefined, request => { sizes.push(1); return encodedBytes(request); });
   assert.ok(sizes.length >= 1);
@@ -200,14 +200,14 @@ test('token pressure drops optional source pairs without truncating the repair d
   const state = packet.request.state as Record<string, unknown>;
   assert.equal(state.repairDiff, diff);
   assert.deepEqual(state.sourcePairs, []);
-  assert.match(omissionsOf(packet.request), /complete source pair omitted; complete repair diff retained/);
+  assert.match(omissionsOf(packet.request), /complete source pair omitted; repair diff coverage is declared separately/);
   assert.ok(repairBudget(packet.request).contextTokens <= 8000);
 });
 
 test('mandatory repair evidence that cannot fit refuses a partial decision packet (TASK-2692)', async () => {
-  await assert.rejects(buildPacket(input, { ...repository,
-    diff: async () => '--- a/lib/x.java\n+++ b/lib/x.java\n+' + 'large mandatory change'.repeat(1000),
-  }, undefined, repairBudget, true), /Complete repair diff.*exceed/);
+  await assert.rejects(buildPacket({ ...input, findings: input.findings.map(f => ({ ...f, summary: 'mandatory finding'.repeat(2000) })) }, { ...repository,
+    diff: async () => '--- a/lib/x.java\n+++ b/lib/x.java\n+change',
+  }, undefined, repairBudget, true), /Mandatory obligations.*exceed/);
 });
 
 test('repair packing retains deletions, additions and explicitly cited unchanged context (TASK-2692)', async () => {
@@ -267,13 +267,13 @@ test('a failed repository read is declared as lost evidence instead of escaping 
   assert.match(omissionsOf(packet.request), /source unavailable/);
   await assert.rejects(buildPacket(input, { ...repository, diff: async () => { throw oversize; } }, undefined, repairBudget, true), EvidenceReadError);
   await assert.rejects(buildPacket(input, { ...repository, tree: async () => { throw new Error('boom'); } }, undefined, repairBudget, true), EvidenceReadError);
-  await assert.rejects(buildPacket(input, { ...repository,
-    diff: async () => '--- a/lib/x.java\n+++ b/lib/x.java\n+' + 'large mandatory change'.repeat(1000) }, undefined, repairBudget, true), EvidenceOverBudgetError);
+  await assert.rejects(buildPacket({ ...input, findings: input.findings.map(f => ({ ...f, summary: 'mandatory finding'.repeat(2000) })) }, { ...repository,
+    diff: async () => '--- a/lib/x.java\n+++ b/lib/x.java\n+change' }, undefined, repairBudget, true), EvidenceOverBudgetError);
 });
 
 test('a rebased repair is compared as a baseline-relative mission interdiff (TASK-2704)', async () => {
   const polluted = Array.from({ length: 400 }, (_, i) => `--- a/main-only-${i}.ts\n+++ b/main-only-${i}.ts\n@@ -1 +1 @@\n-a\n+b\n`).join('');
-  const range = { approved: { baseline: 'c'.repeat(40), revision: input.priorRevision }, candidate: { baseline: 'd'.repeat(40), revision: input.candidateRevision } };
+  const range = { approved: { baseline: 'c'.repeat(40), revision: input.priorRevision }, candidate: { baseline: 'd'.repeat(40), revision: input.candidateRevision } } satisfies { readonly approved: import("../../../../src/application/ports/review-evidence.js").MissionRevision; readonly candidate: import("../../../../src/application/ports/review-evidence.js").MissionRevision; };
   const calls: unknown[] = [];
   const repo: ReviewEvidencePort = { ...repository, diff: async () => polluted,
     missionInterdiff: async (before, after) => {
@@ -310,13 +310,16 @@ test('production retains complete diff and tokenizer refuses oversized obligatio
   const { buildArchivedEvidencePacket } = await import('../../../../src/application/review-classification/archived-packing.js');
   const packet = await buildArchivedEvidencePacket(input, { ...repository, diff: async () => 'x'.repeat(15001) }, budgetOf(() => 1));
   assert.equal((packet.request.state as { diff: string }).diff, 'x'.repeat(15001));
+  assert.match((packet.request.state as { coverage: string }).coverage, /^Complete selected candidate files supplied/);
+  assert.match((packet.request.state as { coverage: string }).coverage, /Do not assume missing evidence/);
+  assert.equal((packet.request.state as Record<string, unknown>).omissionNotice, undefined);
   await assert.rejects(buildArchivedEvidencePacket({ ...input, implementerResponse: 'mandatory '.repeat(10000) }, repository, budgetOf(encodedBytes)), EvidenceOverBudgetError);
 });
 
 test('production uses mission interdiff and main-fix provenance (TASK-2732)', async () => {
   const { buildArchivedEvidencePacket } = await import('../../../../src/application/review-classification/archived-packing.js');
   let called = false;
-  const range = { approved: { baseline: 'old-base', revision: input.priorRevision }, candidate: { baseline: 'new-base', revision: input.candidateRevision } };
+  const range = { approved: { baseline: 'old-base', revision: input.priorRevision }, candidate: { baseline: 'new-base', revision: input.candidateRevision } } satisfies { readonly approved: import("../../../../src/application/ports/review-evidence.js").MissionRevision; readonly candidate: import("../../../../src/application/ports/review-evidence.js").MissionRevision; };
   const packet = await buildArchivedEvidencePacket({ ...input, missionRange: range }, { ...repository,
     missionInterdiff: async () => { called = true; return { diff: '+repair', paths: ['lib/x.java'] }; },
     mainCommits: async () => [{ revision: 'main-fix', paths: ['lib/x.java'], diff: '+fixed-by-main' }],
@@ -340,7 +343,7 @@ test('production retains uncited repair paths and hunks (TASK-2732)', async () =
     approved: { baseline: 'old-base', revision: input.priorRevision }, candidate: { baseline: 'new-base', revision: input.candidateRevision },
   } }, { ...repository, tree: async () => ['lib/x.java', path],
     missionInterdiff: async () => ({ diff: '+uncited-interdiff-repair', paths: [path] }),
-    diff: async () => { assert.fail('plain range must not replace mission interdiff'); },
+    diff: async () => { return assert.fail('plain range must not replace mission interdiff'); },
   }, budgetOf(() => 1));
   assert.ok(rebased.paths.includes(path));
   assert.match(JSON.stringify(rebased.request.state), /uncited-interdiff-repair/);
@@ -359,7 +362,7 @@ test('production drops whole files largest-token-first and retains mandatory hun
   const port = { ...repository, tree: async () => ['lib/x.java', 'short.rs', 'long.ts'],
     diff: async () => '+++ b/short.rs\n@@ -1 +1 @@\n+short-repair\n+++ b/long.ts\n@@ -1 +1 @@\n+long-repair',
     source: async (_revision: string, path: string) => path === 'short.rs' ? 'costly' : path === 'long.ts' ? 'cheap'.repeat(300) : 'cited',
-  };
+  } satisfies NonNullable<Parameters<typeof buildArchivedEvidencePacket>[1]>;
   const measure: MeasureBudget = request => {
     const excerpts = (request.state as { candidateSourceExcerpts: Record<string, unknown> }).candidateSourceExcerpts;
     const tokens = 10 + (excerpts?.['short.rs'] ? 100 : 0) + (excerpts?.['long.ts'] ? 20 : 0);
@@ -368,6 +371,8 @@ test('production drops whole files largest-token-first and retains mandatory hun
   const packet = await buildArchivedEvidencePacket(input, port, measure);
   assert.deepEqual(packet.paths, ['lib/x.java', 'long.ts']);
   assert.match(omissionsOf(packet.request), /short.rs: complete candidate file omitted by token budget/);
+  assert.match((packet.request.state as { coverage: string }).coverage, /omissions are listed in state/);
+  assert.doesNotMatch((packet.request.state as { coverage: string }).coverage, /Complete selected candidate files supplied/);
   assert.match((packet.request.state as { diff: string }).diff, /short-repair/);
   assert.match((packet.request.state as { diff: string }).diff, /long-repair/);
   await assert.rejects(buildArchivedEvidencePacket(input, port, budgetOf(() => 2, 1)), EvidenceOverBudgetError);
@@ -379,4 +384,54 @@ test('production labels missing baselines and propagates typed diff read errors 
   assert.match((packet.request.state as { repairComparison: string }).repairComparison, /Missing review baselines: plain revision comparison/);
   const failure = new EvidenceReadError('typed diff read failed');
   await assert.rejects(buildArchivedEvidencePacket(input, { ...repository, diff: async () => { throw failure; } }, budgetOf(() => 1)), error => error === failure);
+});
+
+test('production repair and archived packets omit large diffs with path and line counts (TASK-2751)', async () => {
+  const { buildArchivedEvidencePacket } = await import('../../../../src/application/review-classification/archived-packing.js');
+  const { buildRepairEvidencePacket } = await import('../../../../src/application/review-classification/repair-evidence-packet.js');
+  const diff = 'diff --git a/lib/x.java b/lib/x.java\n--- a/lib/x.java\n+++ b/lib/x.java\n@@ -1 +1 @@\n-old\n+' + 'large '.repeat(10000) + '\n';
+  const measure: MeasureBudget = request => { const tokens = JSON.stringify(request).length; return { requestBytes: tokens, inputTokens: tokens, contextTokens: tokens,
+    maxRequestBytes: 1000000, maxInputTokens: 6000, maxContextTokens: 6000, tokenizerModel: 'stub' }; };
+  for (const build of [buildArchivedEvidencePacket, buildRepairEvidencePacket]) {
+    const packet = await build(input, { ...repository, diff: async () => diff, source: async () => 'context '.repeat(10000) }, measure);
+    const state = packet.request.state as Record<string, unknown>;
+    assert.deepEqual(state.omittedDiffs, [{ path: 'lib/x.java', added: 1, removed: 1 }]);
+    assert.match(String(state.omissionNotice), /not shown/);
+    assert.ok(measure(packet.request).inputTokens <= 6000);
+  }
+});
+
+test('omission instructions are conditional across panel, repair and weakening questions (TASK-2751 F1)', async () => {
+  const { PANEL_QUESTIONS } = await import('../../../../src/application/review-classification/panel-questions.js');
+  const { REPAIR_RESOLUTION_QUESTION } = await import('../../../../src/application/review-classification/repair-evidence-packet.js');
+  const { WEAKENING_QUESTION, WEAKENING_V5 } = await import('../../../../src/application/review-classification/weakening-policy.js');
+  for (const question of [...Object.values(PANEL_QUESTIONS), REPAIR_RESOLUTION_QUESTION, WEAKENING_QUESTION, WEAKENING_V5]) {
+    assert.match(question.instructions, /When the state lists omissions, that evidence was not shown/);
+    assert.doesNotMatch(question.instructions, /Omitted changes were not shown/);
+  }
+});
+
+test('obligation policy validates every call before inclusive 0.97 clear or return (TASK-2753)', async () => {
+  const { aggregateObligations, obligationAnswer } = await import('../../../../src/application/review-classification/obligation-review.js');
+  const answer = (id: string, selected: string, score: number) => obligationAnswer(id, { provider: 'stub', model: 'jev', answers: {
+    resolution: { type: 'choice', selected, confidence: 1, probabilities: Object.fromEntries(['addresses', 'does_not_address', 'insufficient_evidence'].map(l => [l, l === selected ? score : (1 - score) / 2])) } } });
+  for (const label of ['addresses', 'does_not_address']) {
+    assert.equal(aggregateObligations(['F1'], [answer('F1', label, 0.97)]).route, label === 'addresses' ? 'clear' : 'implementer');
+    assert.equal(aggregateObligations(['F1'], [answer('F1', label, 0.969999)]).route, 'reviewer');
+  }
+  const returned = answer('F1', 'does_not_address', 1);
+  for (const answers of [[returned], [returned, { id: 'F2', selected: null, probabilities: null, failure: 'provider-failure' }],
+    [returned, obligationAnswer('F2', { provider: '', model: '', answers: {} })]]) {
+    assert.equal(aggregateObligations(['F1', 'F2'], answers).route, 'reviewer');
+  }
+  assert.equal(aggregateObligations(['F1', 'F2'], [returned, answer('F2', 'addresses', 1)]).reason, 'unresolved-obligations:F1');
+});
+
+test('source windows keep mixed line endings and long unterminated lines (TASK-2746)', () => {
+  for (const ending of ['\r\n', '\r', '\n', '\v', '\f', '\x1c', '\x1d', '\x1e', '\x85', '\u2028', '\u2029']) {
+    const source = `first${ending}${ending}last`;
+    assert.deepEqual(sourceWindows(source, [2], [], []).excerpts.map(e => [e.startLine, e.endLine, e.text]), [[1, 3, source]]);
+  }
+  const source = 'x'.repeat(100000);
+  assert.equal(sourceWindows(source, [1], [], []).excerpts[0].text, source);
 });

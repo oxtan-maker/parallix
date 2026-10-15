@@ -1,3 +1,5 @@
+import { repositoryId as fixtureRepositoryId } from '../../../../src/domain/repository.js';
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 import { weeklyDecisionWindows } from '../../../../src/application/services/decision-window.js';
 /**
  * Statistics contract for the metrics slice (TASK-2622.13 consolidation).
@@ -47,7 +49,7 @@ const repository = repositoryId('statistics-repro');
 // task-2347.08-own: CLI and board agree on identity, completions, cycle time
 // ---------------------------------------------------------------------------
 
-const REPOSITORY = 'acme/widgets' as RepositoryId;
+const REPOSITORY = fixtureRepositoryId('acme/widgets') as RepositoryId;
 const WINDOW = stats.createWindow('2026-08-03', 1);
 
 class MemoryUsageRepository implements UsageRepository {
@@ -64,7 +66,7 @@ class DoneLaneEventRepository implements BoardLaneEventRepository {
   async findByMissionId(): Promise<readonly BoardLaneEventEntry[]> { return []; }
   async findAll(): Promise<readonly BoardLaneEventEntry[]> { return []; }
   async findByRepositoryId(repositoryId: string): Promise<readonly BoardLaneEventEntry[]> {
-    return [{ repositoryId, missionId: 'task-2347.08' as MissionId, fromStatus: 'integration', toStatus: 'done', trigger: 'integrate', agent: 'codex', occurredAt: '2026-08-03T00:00:00Z', idempotencyKey: 'task-2347.08-done' }];
+    return [{ repositoryId, missionId: fixtureMissionId('task-2347.08') as MissionId, fromStatus: 'integration', toStatus: 'done', trigger: 'integrate', agent: 'codex', occurredAt: '2026-08-03T00:00:00Z', idempotencyKey: 'task-2347.08-done' }];
   }
   async clear(): Promise<void> {}
 }
@@ -162,7 +164,7 @@ test('metrics projection reports controlled provenance and distinguishes no-comp
     usageRepo: usageRepo([]),
   });
 
-  const noCompletionMetrics = await noCompletions.buildMetrics(new Map([["task-open" as MissionId, 'active' as MissionStatus]]));
+  const noCompletionMetrics = await noCompletions.buildMetrics(new Map([[fixtureMissionId("task-open") as MissionId, 'active' as MissionStatus]]));
   const noTelemetryMetrics = await noTelemetry.buildMetrics(new Map());
 
   assert.deepEqual(noCompletionMetrics.provenance, {
@@ -177,7 +179,7 @@ test('metrics projection reports controlled provenance and distinguishes no-comp
   assert.equal(noTelemetryMetrics.health.state, 'no-telemetry');
 
   const preLifecycleMetrics = await noTelemetry.buildMetrics(new Map([
-    ['task-completed' as MissionId, 'done' as MissionStatus],
+    [fixtureMissionId('task-completed') as MissionId, 'done' as MissionStatus],
   ]));
   assert.equal(preLifecycleMetrics.health.state, 'pre-lifecycle');
 
@@ -289,147 +291,6 @@ test('stats CLI renders the application-selected population without selecting co
   }
 });
 
-test('weekly classifier share counts applied PR decisions including open missions (TASK-2658)', async () => {
-  const { classifierStatistics } = await import('../../../../src/application/review-classification/statistics.js');
-  const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
-  const window = weeklyDecisionWindows('2026-10-06', 'UTC').current;
-  const decisions = [
-    { id: 'ordinary', decidedAt: '2026-09-30T00:00:00Z', source: 'reviewer' as const, outcome: 'implementer' as const },
-    { id: 'classifier', decidedAt: '2026-10-06T23:59:59Z', source: 'classifier' as const, outcome: 'clear' as const },
-    { id: 'old', decidedAt: '2026-09-29T23:59:59Z', source: 'reviewer' as const, outcome: 'clear' as const },
-  ];
-  const input = { decisions: [...decisions, decisions[1]], attempts: [], applied: [], observations: [], coverage: 'complete' as const };
-  const stats = classifierStatistics(input, window);
-  assert.equal(stats.total, 2);
-  assert.equal(stats.classifier, 1);
-  assert.equal(stats.percentage, 50);
-  assert.equal(stats.clears, 1);
-  assert.equal(stats.returns, 0);
-  assert.equal(classifierStatistics({ ...input, coverage: 'partial' }, window).percentage, null);
-  assert.equal(classifierStatistics({ ...input, decisions: [] }, window).percentage, null);
-});
-
-test('weekly PR table is a single truthful UTC comparison (TASK-2671)', async () => {
-  const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
-  const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
-  const windows = weeklyDecisionWindows('2026-10-06', 'UTC');
-  const input = { decisions: [], applied: [], attempts: [], observations: [], coverage: 'complete' as const };
-  const report = renderClassifierStatistics(input, [windows.current, windows.previous]);
-  assert.equal(report.split('\n').filter(line => line === 'PR Classification analysis').length, 1);
-  assert.match(report, /This week \(2026-09-30 to 2026-10-06 UTC\) \| re-review\s+\|\s+0 \|\s+0 \(n\/a\)/);
-  assert.match(report, /Last week \(2026-09-23 to 2026-09-29 UTC\)/);
-  const unavailable = renderClassifierStatistics(null, [windows.current, windows.previous]);
-  assert.match(unavailable, /\| re-review\s+\|\s+unavailable \|\s+unavailable \|/);
-  const partial = renderClassifierStatistics({ ...input, coverage: 'partial' }, [windows.current, windows.previous]);
-  assert.match(partial, /0 \(partial\)/);
-  assert.match(partial, /none\s+\|\s+0 \(partial\)/);
-});
-
-test('PR statistics count review rounds with classifier shares and a separate reason table (TASK-2675)', async () => {
-  const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
-  const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
-  const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
-  const windows = weeklyDecisionWindows('2026-10-06', 'UTC');
-  const at = '2026-10-05T00:00:00Z';
-  const row = (round: number, overrides: Parameters<typeof classificationAttempt>[0]) =>
-    classificationAttempt({ round, decisionId: `d${round}`, fingerprint: `f${round}`, observedAt: at, ...overrides });
-  const attempts = [
-    row(2, { route: 'clear', reason: 'resolved-threshold' }),
-    row(3, { route: 'implementer', reason: 'unresolved-threshold' }),
-    row(4, { route: 'reviewer', reason: 'abstention' }),
-    row(5, { route: 'reviewer', reason: 'opted-out', provider: null, model: null, packetHash: null, classificationMs: null }),
-    row(6, { route: 'reviewer', reason: 'provider-unavailable', provider: null, model: null, packetHash: null, classificationMs: null }),
-    // A retried round: the failed first sample and the later success are one round.
-    row(7, { route: 'reviewer', reason: 'classifier-failure', fingerprint: 'first', observedAt: '2026-10-04T00:00:00Z' }),
-    row(7, { route: 'clear', reason: 'resolved-threshold', fingerprint: 'second' }),
-  ];
-  const report = renderClassifierStatistics({ decisions: [], attempts, applied: [], observations: [], coverage: 'complete' },
-    [windows.current, windows.previous]);
-  const lines = report.split('\n');
-  const week = lines.find(line => line.startsWith('| This week'))!;
-  // 6 rounds; 2 not attempted; 1 attempted-then-fell-back; 4 called; 2 cleared; 1 returned; 3 of 6 decided by the classifier.
-  assert.match(week, /\| re-review\s+\|\s+6 \|\s+2 \(33%\) \|\s+1 \(17%\) \|\s+4 \(67%\) \|\s+2 \(33%\) \|\s+1 \(17%\) \|\s+50% \|\s+67% \|/);
-  assert.match(week, /n\/a \(no classifier decisions\)/);
-  assert.doesNotMatch(report, /100%/);
-  assert.doesNotMatch(report, /Re-review rounds/);
-  const widths = new Set(lines.slice(1, lines.indexOf('')).map(line => line.length));
-  assert.equal(widths.size, 1, 'PR table columns are aligned');
-  const reasons = lines.slice(lines.indexOf('') + 2);
-  assert.equal(new Set(reasons.map(line => line.length)).size, 1, 'reason table columns are aligned');
-  assert.match(reasons.join('\n'), /abstention\s+\|\s+1 \|\s+0 \|/);
-  assert.match(reasons.join('\n'), /opted-out\s+\|\s+1 \|/);
-  assert.doesNotMatch(reasons.join('\n'), /classifier-failure/);
-});
-
-test('PR statistics display only re-reviews and exclude first-review reasons and observations (TASK-2703)', async () => {
-  const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
-  const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
-  const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
-  const windows = weeklyDecisionWindows('2026-10-06', 'UTC');
-  const row = (round: number, overrides: Parameters<typeof classificationAttempt>[0]) =>
-    classificationAttempt({ round, decisionId: `d${round}`, fingerprint: `f${round}`, observedAt: '2026-10-05T00:00:00Z', ...overrides });
-  const attempts = [row(1, { route: 'clear', reason: 'resolved-threshold' }), row(1, { mission: 'other', route: 'reviewer', reason: 'first-review' }),
-    row(2, { route: 'implementer', reason: 'unresolved-threshold' })];
-  const applied = ['d1', 'missing-history'].map(decisionId => ({ decisionId, decidedAt: '2026-10-05T00:00:00Z', route: 'clear' as const }));
-  const observations = [{ decisionId: 'd1', revision: attempts[0].candidateRevision, findingIds: attempts[0].findingIds,
-    observedAt: '2026-10-05T00:00:00Z', originalFindings: 'unresolved' as const, newFindings: 0, cycleMs: 1, ordinaryReviewMs: 1 }];
-  const lines = renderClassifierStatistics({ decisions: [], attempts, applied, observations, coverage: 'complete' },
-    [windows.current, windows.previous]).split('\n');
-  assert.equal(attempts.length, 3, 'display filtering preserves stored measurements');
-  const kind = (name: string) => lines.find(line => line.startsWith('| This week') && line.includes(`| ${name}`))!;
-  assert.match(kind('re-review'), /n\/a \(no classifier decisions\)/);
-  assert.equal(lines.filter(line => line.startsWith('| This week')).length, 1);
-  assert.doesNotMatch(lines.join('\n'), /first review|first-review|\| all\s+\|/);
-  assert.match(kind('re-review'), /\|\s+1 \|\s+0 \(0%\) \|\s+0 \(0%\) \|\s+1 \(100%\) \|\s+0 \(0%\) \|\s+1 \(100%\) \|/);
-});
-
-test('observed wrong is n/a without classifier decisions and never a vacuous 100% correct (TASK-2675)', async () => {
-  const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
-  const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
-  const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
-  const windows = weeklyDecisionWindows('2026-10-06', 'UTC');
-  const reviewerOnly = Array.from({ length: 239 }, (_, i) => ({ id: `r${i}`, decidedAt: '2026-10-05T00:00:00Z',
-    source: 'reviewer' as const, outcome: 'clear' as const }));
-  const empty = renderClassifierStatistics({ decisions: reviewerOnly, attempts: [classificationAttempt({ route: 'reviewer', reason: 'abstention', observedAt: '2026-10-05T00:00:00Z' })],
-    applied: [], observations: [], coverage: 'complete' }, [windows.current, windows.previous]);
-  assert.match(empty, /n\/a \(no classifier decisions\)/);
-  assert.doesNotMatch(empty, /239|correct/);
-  const applied = [{ decisionId: 'decision', decidedAt: '2026-10-05T00:00:00Z', route: 'clear' as const }];
-  const attempt = classificationAttempt({ observedAt: '2026-10-05T00:00:00Z' });
-  const unobserved = renderClassifierStatistics({ decisions: [], attempts: [attempt], applied, observations: [], coverage: 'complete' }, [windows.current, windows.previous]);
-  assert.match(unobserved, /n\/a \(0\/1 observed\)/);
-  const wrong = renderClassifierStatistics({ decisions: [], attempts: [attempt], applied, coverage: 'complete', observations: [{ decisionId: 'decision',
-    revision: attempt.candidateRevision, findingIds: attempt.findingIds, observedAt: '2026-10-05T01:00:00Z', originalFindings: 'unresolved', newFindings: 0, cycleMs: 1, ordinaryReviewMs: 1 }] },
-  [windows.current, windows.previous]);
-  assert.match(wrong, /1\/1 observed; 0\/1 unobserved/);
-});
-
-test('completed classifier cohorts include old calls and same-scope shadow disagreements (TASK-2658)', async () => {
-  const { classifierGroups, classifierStatistics } = await import('../../../../src/application/review-classification/statistics.js');
-  const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
-  const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
-  const window = weeklyDecisionWindows('2026-10-06', 'UTC').current;
-  const sample = classificationAttempt({ observedAt: '2026-09-01T00:00:00Z', shadow: true });
-  const observation = { decisionId: sample.decisionId, revision: sample.candidateRevision, findingIds: sample.findingIds,
-    observedAt: '2026-09-01T00:01:00Z', originalFindings: 'unresolved' as const, newFindings: 2, cycleMs: 100.42, ordinaryReviewMs: 100 };
-  const input = { decisions: [], applied: [], attempts: [sample, classificationAttempt({ mission: 'still-open', decisionId: 'open' })],
-    observations: [observation], coverage: 'complete' as const,
-    missions: [{ mission: sample.mission, closedAt: '2026-10-06T00:00:00Z', reviewRounds: 3, fixRounds: 2 },
-      { mission: 'still-open', closedAt: null, reviewRounds: 1, fixRounds: 0 }] };
-  const group = classifierGroups(input, window)![0];
-  assert.equal(group.statistics.calls, 1, 'closure selects the full history, including calls outside this week');
-  assert.equal(group.missions, 1);
-  assert.equal(group.reviewRounds, 3);
-  assert.equal(group.fixRounds, 2);
-  assert.equal(group.statistics.shadowFalseClears, 1);
-  assert.equal(group.statistics.falseClears, 0, 'shadow decisions were never applied');
-  assert.ok(Math.abs(group.measuredNetMs! + 0.42) < 1e-9);
-  assert.equal(classifierStatistics(input, window).calls, 1, 'decision-week counters still include the open mission');
-  const drifted = { ...input, observations: [{ ...observation, revision: 'c'.repeat(40) }] };
-  assert.equal(classifierGroups(drifted, window)![0].statistics.shadowFalseClears, 0);
-  assert.equal(classifierGroups(drifted, window)![0].statistics.shadowUnobserved, 1);
-});
-
 test('px stats fallback-reasons table renders each distinguishable classifier failure cause (TASK-2704)', async () => {
   const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
   const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
@@ -440,130 +301,75 @@ test('px stats fallback-reasons table renders each distinguishable classifier fa
     ...(unreached ? { provider: null, model: null, packetHash: null } : {}) });
   const attempts = [row(2, 'evidence-over-budget'), row(3, 'evidence-read-failed'), row(4, 'classifier-exception'),
     row(5, 'provider-key-missing', true), row(6, 'provider-unavailable', true), row(7, 'consecutive-classifier-returns', true)];
-  const report = renderClassifierStatistics({ decisions: [], attempts, applied: [], observations: [], coverage: 'complete' }, [windows.current, windows.previous]);
+  const report = renderClassifierStatistics({ decisions: [], attempts, coverage: 'complete' }, [windows.current, windows.previous]);
   for (const reason of ['evidence-over-budget', 'evidence-read-failed', 'classifier-exception', 'provider-key-missing', 'provider-unavailable', 'consecutive-classifier-returns']) {
-    assert.match(report, new RegExp(`\\| ${reason}\\s+\\|\\s+1 \\|`), reason);
+    assert.match(report, new RegExp(`\\| ${reason}\\s+\\|\\s+1 \\(partial\\) \\|`), reason);
   }
 });
 
-async function repairStatisticsFixture() {
-  const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
+test('classifier clear statistics separate omissions and historical unknowns (TASK-2751)', async () => {
+  const { reviewRounds } = await import('../../../../src/application/review-classification/statistics.js');
+  const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
   const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
-  const { WEAKENING_POLICY_VERSION } = await import('../../../../src/application/review-classification/weakening-policy.js');
   const windows = weeklyDecisionWindows('2026-10-06', 'UTC');
-  const row = (round: number, overrides: Parameters<typeof classificationAttempt>[0]) => classificationAttempt({
-    round, decisionId: `r${round}`, fingerprint: `f${round}`, observedAt: '2026-10-05T00:00:00Z', policyVersion: WEAKENING_POLICY_VERSION, ...overrides });
-  const fact = { admissibleFact: true };
-  const attempts = [
-    row(2, { ...fact, route: 'clear', reason: 'weakening-preserves', label: 'preserves', score: 0.9 }),
-    row(3, { ...fact, route: 'clear', reason: 'weakening-preserves', label: 'preserves', score: 0.6 }),
-    row(4, { ...fact, route: 'reviewer', reason: 'weakening-below-threshold', label: 'preserves', score: 0.5 }),
-    row(5, { ...fact, route: 'reviewer', reason: 'weakening-weakens', label: 'weakens', score: 0.1 }),
-    row(6, { ...fact, route: 'reviewer', reason: 'weakening-insufficient-evidence', label: 'insufficient_evidence', score: 0.3 }),
-    row(7, { ...fact, route: 'reviewer', reason: 'weakening-over-budget', label: null, score: null, classificationMs: null }),
-    // A thrown or malformed call is still a call: the invocation time is recorded without a label or score.
-    row(8, { ...fact, route: 'reviewer', reason: 'weakening-failure', label: null, score: null, classificationMs: 4 }),
-    row(9, { route: 'reviewer', reason: 'weakening-fact-after-round-start', label: null, score: null, classificationMs: null }),
-    row(10, { route: 'reviewer', reason: 'weakening-no-fact', label: null, score: null, classificationMs: null }),
-    // Panel rows on other rounds are not integration-repair rounds.
-    classificationAttempt({ round: 11, decisionId: 'panel', fingerprint: 'panel', observedAt: '2026-10-05T00:00:00Z' }),
-  ];
-  return { windows, attempts };
-}
+  const attempts = [0, 2, undefined].map((omittedDiffCount, index) => classificationAttempt({ round: index + 2,
+    decisionId: `omission-${index}`, observedAt: '2026-10-05T00:00:00Z', route: 'clear', omittedDiffCount, omittedTokens: omittedDiffCount ? 500 : 0 }));
+  attempts.push(classificationAttempt({ round: 5, decisionId: 'context-only', observedAt: '2026-10-05T00:00:00Z', route: 'clear', omittedDiffCount: 0, omittedTokens: 500 }));
+  const input = { decisions: [], attempts, coverage: 'complete' as const };
+  const result = reviewRounds(input, windows.current);
+  assert.equal(result.clearsWithOmissions, 2);
+  assert.equal(result.clearsWithoutOmissions, 1);
+  assert.equal(result.clearsOmissionsUnknown, 1);
+  const rendered = renderClassifierStatistics(input, [windows.current, windows.previous]);
+  assert.match(rendered, /With omissions\s+\|\s+2/);
+  assert.match(rendered, /Without omissions\s+\|\s+1/);
+  assert.match(rendered, /Historical unknown\s+\|\s+1/);
+});
 
-test('px stats counts integration-repair rounds, facts, calls, clears and fallback reasons (TASK-2736)', async () => {
-  const { integrationRepairStatistics } = await import('../../../../src/application/review-classification/repair-statistics.js');
-  const { renderIntegrationRepairStatistics } = await import('../../../../src/application/presentation/integration-repair-statistics.js');
-  const { windows, attempts } = await repairStatisticsFixture();
-  const input = { decisions: [], attempts, applied: [], observations: [], coverage: 'complete' as const };
-  const week = integrationRepairStatistics(input, windows.current);
-  assert.deepEqual([week.rounds, week.withFact, week.calls, week.clears], [9, 7, 6, 2]);
-  assert.deepEqual(week.reasons, { 'no fact': 2, 'below threshold': 1, weakens: 1, 'insufficient evidence': 1, failure: 1, 'over budget': 1, other: 0 });
-  const report = renderIntegrationRepairStatistics(input, [windows.current, windows.previous]);
-  assert.match(report.split('\n').find(line => line.startsWith('| This week'))!, /\|\s+9 \|\s+7 \|\s+6 \|\s+2 \|\s+22% \|/);
-  for (const reason of ['no fact', 'below threshold', 'weakens', 'insufficient evidence', 'failure', 'over budget']) {
-    assert.match(report, new RegExp(`\\| ${reason}\\s+\\|\\s+[12] \\|\\s+0 \\|`), reason);
+test('decided rounds ignore missing and undecided samples and use decision weeks (TASK-2758)', async () => {
+  const { reviewRounds } = await import('../../../../src/application/review-classification/statistics.js');
+  const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
+  const windows = weeklyDecisionWindows('2026-10-09', 'UTC');
+  for (const round of [1, 2]) {
+    const kind = round === 1 ? 'first review' : 're-review';
+    const decisions = [
+      { id: 'no-sample', round, decidedAt: '2026-10-08T12:00:00Z', source: 'reviewer' as const, outcome: 'clear' as const },
+      { id: 'cross-week', round, decidedAt: '2026-10-08T13:00:00Z', source: 'classifier' as const, outcome: 'clear' as const },
+      { id: 'before-telemetry', round, decidedAt: '2026-10-01T12:00:00Z', source: 'classifier' as const, outcome: 'implementer' as const },
+    ];
+    const attempts = [classificationAttempt({ round, decisionId: 'cross-week', observedAt: '2026-10-01T13:00:00Z' }),
+      classificationAttempt({ round, mission: 'undecided', decisionId: 'undecided', observedAt: '2026-10-08T13:00:00Z' })];
+    const input = { decisions, attempts, coverage: 'partial' as const };
+    const current = reviewRounds(input, windows.current, kind);
+    assert.equal(current.rounds, 2, 'decided round without a sample is counted; undecided sample is excluded');
+    assert.equal(current.jevDecisions, 1, 'attribution uses the stored decider in its decision week');
+    assert.equal(reviewRounds(input, windows.previous, kind).rounds, 1);
+    assert.equal(reviewRounds({ ...input, attempts: [] }, windows.previous, kind).jevDecisions, 1, 'pre-telemetry share remains available');
   }
 });
 
-test('px stats buckets the preserves probability of clears and fallbacks (TASK-2736)', async () => {
-  const { integrationRepairStatistics } = await import('../../../../src/application/review-classification/repair-statistics.js');
-  const { windows, attempts } = await repairStatisticsFixture();
-  const week = integrationRepairStatistics({ decisions: [], attempts, applied: [], observations: [], coverage: 'complete' }, windows.current);
-  assert.deepEqual(week.clearScores, { '>= 0.60': 2, '0.40-0.60': 0, '< 0.40': 0 });
-  assert.deepEqual(week.fallbackScores, { '>= 0.60': 0, '0.40-0.60': 1, '< 0.40': 2 });
-});
-
-test('px stats shows observed wrong clears with observed and unobserved denominators (TASK-2736)', async () => {
-  const { renderIntegrationRepairStatistics } = await import('../../../../src/application/presentation/integration-repair-statistics.js');
-  const { windows } = await repairStatisticsFixture();
-  const at = '2026-10-05T00:00:00Z';
-  const base = { decisions: [], attempts: [], applied: [], observations: [], coverage: 'complete' as const };
-  const line = (repairClears: { decisionId: string; decidedAt: string; outcome: 'revoked-by-human' | 'changes-requested-later' | 'landed' | 'open' }[]) =>
-    renderIntegrationRepairStatistics({ ...base, repairClears }, [windows.current, windows.previous]).split('\n').find(l => l.startsWith('| This week') && l.includes('observed'))!;
-  assert.match(line([]), /\|\s+0 \|\s+0 \|\s+0 \|\s+n\/a \(0\/0 observed\)\s+\|/);
-  assert.match(line([{ decisionId: 'a', decidedAt: at, outcome: 'open' }]), /\|\s+1 \|\s+0 \|\s+1 \|\s+n\/a \(0\/1 observed\)\s+\|/);
-  assert.match(line([
-    { decisionId: 'a', decidedAt: at, outcome: 'landed' }, { decisionId: 'b', decidedAt: at, outcome: 'revoked-by-human' },
-    { decisionId: 'c', decidedAt: at, outcome: 'changes-requested-later' }, { decisionId: 'd', decidedAt: at, outcome: 'open' },
-  ]), /\|\s+4 \|\s+3 \|\s+1 \|\s+2\/3 observed\s+\|/);
-  assert.match(line([{ decisionId: 'e', decidedAt: '2026-01-01T00:00:00Z', outcome: 'landed' }]), /\|\s+0 \|\s+0 \|\s+0 \|\s+n\/a/);
-});
-
-test('px stats reports integration-repair rows as unavailable without telemetry (TASK-2736)', async () => {
-  const { renderIntegrationRepairStatistics } = await import('../../../../src/application/presentation/integration-repair-statistics.js');
-  const { windows } = await repairStatisticsFixture();
-  assert.match(renderIntegrationRepairStatistics(null, [windows.current, windows.previous]), /\| This week[^\n]*unavailable/);
-});
-
-import { integrationRestorationStatistics, integrationRepairFacts, type IntegrationRepairRoundFact } from '../../../../src/application/review-loop/integration-restoration-statistics.js';
-import { renderIntegrationRestorationStatistics } from '../../../../src/application/presentation/integration-restoration-statistics.js';
-
-test('restoration stats select periods, separate sources and label observed and estimated denominators (TASK-2734)', () => {
-  const windows = weeklyDecisionWindows('2026-10-06');
-  const fact = (id: string, overrides: Partial<IntegrationRepairRoundFact> = {}): IntegrationRepairRoundFact => ({ id,
-    assessedAt: '2026-10-05T12:00:00Z', outcome: 'restored', restored: true, observedWrong: false,
-    normalReviewMs: null, normalReviewCostUsd: null, ...overrides });
-  const facts = [fact('restore-1'), fact('restore-2', { observedWrong: true }),
-    fact('old', { assessedAt: '2026-09-27T12:00:00Z' }),
-    fact('normal-1', { outcome: 'mission-change-differs', restored: false, normalReviewMs: 100, normalReviewCostUsd: 0.2 }),
-    fact('normal-2', { outcome: 'gate-evidence-missing', restored: false, normalReviewMs: 300, normalReviewCostUsd: 0.4 }),
-    fact('failed', { outcome: 'gate-failed', restored: false }), fact('error', { outcome: 'comparison-error', restored: false })];
-  const stats = integrationRestorationStatistics(facts, windows.current);
-  assert.equal(stats.rounds, 6); assert.equal(stats.restores, 2); assert.equal(stats.share, 1 / 3);
-  assert.deepEqual(stats.fallbacks, { 'mission-change-differs': 1, 'gate-evidence-missing': 1, 'gate-failed': 1, 'comparison-error': 1 });
-  assert.deepEqual([stats.observedWrong, stats.observed, stats.unobserved], [1, 1, 1]);
-  assert.equal(stats.medianNormalReviewMs, 200); assert.ok(Math.abs(stats.medianNormalReviewCostUsd! - 0.3) < 1e-9);
-  assert.equal(stats.estimatedAvoidedMs, 400);
-  assert.equal(integrationRestorationStatistics([fact('restore-1')], windows.current).medianNormalReviewMs, null);
-  const report = renderIntegrationRestorationStatistics(facts, [windows.current, windows.previous]);
-  assert.match(report, /Estimated avoided review work/); assert.match(report, /1\/1 observed; 1\/2 unobserved/);
-  assert.match(report, /cost: \$0.3000 \(n=2\)/);
-  assert.match(renderIntegrationRestorationStatistics([fact('restore-1')], [windows.current]), /0\/0 observed; 1\/1 unobserved/);
-  assert.match(renderIntegrationRestorationStatistics(null, [windows.current]), /unavailable/);
-});
-
-
-test('px stats reports V5 calls, clears and preserves buckets alongside historical rounds (TASK-2743)', async () => {
-  const { integrationRepairStatistics } = await import('../../../../src/application/review-classification/repair-statistics.js');
-  const { renderIntegrationRepairStatistics } = await import('../../../../src/application/presentation/integration-repair-statistics.js');
-  const { windows, attempts } = await repairStatisticsFixture();
-  const v5 = (preserves: number | null, cleared = false) => ({ v4: { preserves: 0.1 }, v5: { preserves, cleared } });
-  const samples = attempts.map(a => a.round === 2 ? { ...a, weakening: v5(0.6, true) }
-    : a.round === 4 ? { ...a, weakening: v5(0.4) }
-    : a.round === 5 ? { ...a, weakening: v5(0.39) }
-    : a.round === 8 ? { ...a, weakening: v5(null) } : a);
-  // Retried attempts count as one round; failed calls count but have no score.
-  const input = { decisions: [], attempts: [...samples, samples[0]], applied: [], observations: [], coverage: 'complete' as const };
-  const stats = integrationRepairStatistics(input, windows.current);
-  assert.deepEqual([stats.rounds, stats.clears, stats.v5Calls, stats.v5Clears], [9, 2, 4, 1]);
-  assert.deepEqual(stats.v5Scores, { '>= 0.60': 1, '0.40-0.60': 1, '< 0.40': 1 });
-  const report = renderIntegrationRepairStatistics(input, [windows.current, windows.previous]);
-  assert.match(report, /V5 calls\s+\|\s+4 \|\s+0 \|/);
-  assert.match(report, /V5 clears\s+\|\s+1 \|\s+0 \|/);
-  assert.match(report, /V5 preserves probability/);
-  const shadow = integrationRepairStatistics({ ...input, attempts: [{ ...samples[0], shadow: true }] }, windows.current);
-  assert.deepEqual([shadow.v5Calls, shadow.v5Clears], [1, 0]);
-  const unavailable = renderIntegrationRepairStatistics(null, [windows.current, windows.previous]);
-  assert.match(unavailable, /V5 calls\s+\| unavailable\s+\| unavailable/);
+test('deciders are exclusive and partial telemetry leaves decided share available (TASK-2758)', async () => {
+  const { reviewRounds } = await import('../../../../src/application/review-classification/statistics.js');
+  const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
+  const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
+  const windows = weeklyDecisionWindows('2026-10-09', 'UTC');
+  const at = '2026-10-08T12:00:00Z';
+  const decisions = (['classifier', 'mechanical', 'reviewer'] as const).map(source => ({
+    id: source, round: 2, source, decidedAt: at, outcome: 'clear' as const,
+  }));
+  const sample = classificationAttempt({ observedAt: at, route: 'clear', decisionId: 'classifier' });
+  const input = { decisions: [...decisions, decisions[0]], attempts: [sample, sample], coverage: 'complete' as const };
+  const result = reviewRounds(input, windows.current, 're-review');
+  assert.deepEqual([result.rounds, result.jevDecisions, result.mechanical, result.reviewer, result.called], [3, 1, 1, 1, 1]);
+  assert.equal(result.coverage, 'partial');
+  const report = renderClassifierStatistics(input, [windows.current, windows.previous]);
+  const current = report.split('\n').find(line => line.startsWith('| This week'))!;
+  assert.match(current, /\|\s+3 \|\s+1 \|\s+1 \|\s+1 \|\s+33% \|/);
+  assert.match(current, /1 \(partial\)/);
+  assert.match(report, /Sample coverage starts: 2026-10-08T12:00:00Z/);
+  assert.match(report.split('\n').find(line => line.startsWith('| Last week'))!, /\|\s+0 \|\s+0 \|\s+0 \|\s+0 \|\s+n\/a \|/);
+  assert.doesNotMatch(report, /Observed wrong|unobserved|Integration.repair|V5|preserves probability/);
+  const complete = { decisions: [decisions[0]], attempts: [sample,
+    classificationAttempt({ observedAt: '2026-09-01T00:00:00Z', mission: 'early', round: 1 })], coverage: 'complete' as const };
+  assert.equal(reviewRounds(complete, windows.current).coverage, 'complete');
 });

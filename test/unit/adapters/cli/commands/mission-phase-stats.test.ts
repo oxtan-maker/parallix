@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 
 import test, { mock } from 'node:test';
@@ -79,7 +78,6 @@ test('mission phase report includes Cost ($) column in header and data rows', ()
 });
 
 test('mission phase report Cost ($) column shows values from telemetry rows and totals', () => {
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `map` absent from its inferred mock shape.
   const rowsWithCost = rows().map(r => ({ ...r, cost_usd: '5' }));
   const report = renderMissionPhaseReport(rowsWithCost, 'task-1285', { repo: TEST_REPO });
   // Each phase row should show the cost value
@@ -96,7 +94,6 @@ test('mission phase report Cost ($) column preserves fractional dollar costs (ta
   // Real cost_usd values are sub-dollar floats (e.g. 1.4226295, 0.46). parseInt
   // would truncate these to "1"/"0", silently discarding the cost. The column
   // must render the rounded decimal instead.
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `map` absent from its inferred mock shape.
   const rowsWithCost = rows().map((r, i) => ({ ...r, cost_usd: i === 1 ? '1.4226295' : '0.46433' }));
   const report = renderMissionPhaseReport(rowsWithCost, 'task-1285', { repo: TEST_REPO });
   const lines = report.split('\n');
@@ -106,6 +103,7 @@ test('mission phase report Cost ($) column preserves fractional dollar costs (ta
   // Total is computed from rounded individual costs so it equals the
   // sum of displayed values: 0.46 + 1.42 + 0.46 = 2.34
   const totalLine = lines.find(l => /\btotal\b/i.test(l));
+  assert.ok(totalLine);
   assert.match(totalLine, /2\.34/, 'total equals sum of displayed phase costs');
 });
 

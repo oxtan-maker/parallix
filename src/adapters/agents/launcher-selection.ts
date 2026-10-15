@@ -1,3 +1,4 @@
+import type { AgentLauncher } from './agent-process-types.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import fs from 'node:fs';
@@ -26,12 +27,12 @@ type AgentSelectionOptions = ReadAgentConfigOptions & {
   configuration?: ParallixConfiguration;
   config?: AgentConfig | null;
   configPath?: string;
-  exclude?: any;
+  exclude?: readonly string[] | ReadonlySet<string>;
   worktree?: string;
   checkAvailability?: boolean;
 };
 
-const LAUNCHERS: {[key: string]: Function} = {
+const LAUNCHERS: Record<string, AgentLauncher> = {
   codex: startCodexDraftAgent,
   claude: startClaudeAgent,
   vibe: startVibeAgent,
@@ -139,25 +140,7 @@ function weightedRandom(agents: string[], weights: {[key: string]: number}) {
   return agents[agents.length - 1];
 }
 
-function selectAgent(step: string, options: AgentSelectionOptions = {}) {
-  const envOverride = options.configuration?.agents.override;
-  const excluded = options.exclude instanceof Set ? options.exclude : new Set();
-  const eligible = eligibleAgentsForStep(step, options);
-  if (envOverride && !excluded.has(envOverride) && eligible.includes(envOverride)) {
-    return envOverride;
-  }
-
-  const pool = eligible.filter((agent) => !excluded.has(agent));
-  if (eligible.length === 0) {
-    throw new Error(`No agents are eligible for workflow step: ${step}`);
-  }
-  if (pool.length === 0) {
-    throw new AgentPoolExhaustedError(step,
-      `All eligible agents for step "${step}" are exhausted (limit-hit or excluded). ` +
-      `Tried: ${[...excluded].join(', ')}.`
-    );
-  }
-
+function availableLaunchers(pool: string[], step: string, options: AgentSelectionOptions): string[] {
   let available = pool;
   if (options.checkAvailability !== false) {
     const { worktree } = options;
@@ -183,6 +166,34 @@ function selectAgent(step: string, options: AgentSelectionOptions = {}) {
     }
   }
 
+  return available;
+}
+
+function selectAgent(step: string, options: AgentSelectionOptions = {}) {
+  const envOverride = options.configuration?.agents.override;
+  const excluded = options.exclude instanceof Set ? options.exclude : new Set();
+  const eligible = eligibleAgentsForStep(step, options);
+  if (envOverride && !excluded.has(envOverride) && eligible.includes(envOverride)) {
+    return envOverride;
+  }
+
+  const pool = eligible.filter((agent) => !excluded.has(agent));
+  if (eligible.length === 0) {
+    throw new Error(`No agents are eligible for workflow step: ${step}`);
+  }
+  if (pool.length === 0) {
+    throw new AgentPoolExhaustedError(step,
+      `All eligible agents for step "${step}" are exhausted (limit-hit or excluded). ` +
+      `Tried: ${[...excluded].join(', ')}.`
+    );
+  }
+
+  const available = availableLaunchers(pool, step, options);
+
+  return selectFromAvailable(available, step, options);
+}
+
+function selectFromAvailable(available: string[], step: string, options: AgentSelectionOptions): string {
   const config = options.config !== undefined
     ? options.config
     : readAgentConfig(options.configPath || CONFIG_PATH, options);
@@ -207,18 +218,16 @@ function assertAgentSupported(agent: string, worktree?: string, configuration: P
     if (agent === 'custom') {
       const runner = resolveCustomRunner(worktree);
       if (!LAUNCHERS[runner]) {
-        const error: any = new Error(
+        const error = new Error(
           `Unknown custom runner: "${runner}". Supported custom runners: ${['opencode', 'pi'].join(', ')}.`
         );
-        error.code = 'UNKNOWN_AGENT';
-        throw error;
+        throw Object.assign(error, { code: 'UNKNOWN_AGENT' });
       }
     } else {
-      const error: any = new Error(
+      const error = new Error(
         `Unknown agent: "${fmt.agent(agent)}". Supported agents: ${WORKFLOW_AGENT_NAMES.join(', ')}.`
       );
-      error.code = 'UNKNOWN_AGENT';
-      throw error;
+      throw Object.assign(error, { code: 'UNKNOWN_AGENT' });
     }
   }
 
@@ -227,21 +236,16 @@ function assertAgentSupported(agent: string, worktree?: string, configuration: P
     const health = status.health ? ` (${status.health})` : '';
     const reason = status.reason ? `; reason: ${status.reason}` : '';
     const displayAgent = agent === 'custom' ? `custom (${status.agent})` : agent;
-    const error: any = new Error(
+    const error = new Error(
       `Agent "${fmt.agent(displayAgent)}" launcher is not available on this workstation${health}. ` +
       `Looked for: ${fmt.path(status.detail)}${reason}. ` +
       `Ensure ${fmt.agent(displayAgent)} is on your PATH and retry.`
     );
-    error.code = 'LAUNCHER_UNAVAILABLE';
-    throw error;
+    throw Object.assign(error, { code: 'LAUNCHER_UNAVAILABLE' });
   }
 }
 
-function resolveNoOutputWatchdogConfig(config: {initialDelayMs?: number, intervalMs?: number, maxNoOutputMs?: number} | boolean, step: string | null = null, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) {
-  if (config === false || !configuration.agents.watchdogEnabled) {
-    return null;
-  }
-  const explicit: {initialDelayMs?: number, intervalMs?: number, maxNoOutputMs?: number} = config && typeof config === 'object' ? config : {};
+function watchdogTiming(explicit: { initialDelayMs?: number; intervalMs?: number }, step: string | null, configuration: ParallixConfiguration) {
   let initialDelayMs;
   let intervalMs;
   if (step === 'draft') {
@@ -259,6 +263,15 @@ function resolveNoOutputWatchdogConfig(config: {initialDelayMs?: number, interva
       configuration.agents.noOutputIntervalMs ??
       DEFAULT_NO_OUTPUT_INTERVAL_MS;
   }
+  return { initialDelayMs, intervalMs };
+}
+
+function resolveNoOutputWatchdogConfig(config: {initialDelayMs?: number, intervalMs?: number, maxNoOutputMs?: number} | boolean, step: string | null = null, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) {
+  if (config === false || !configuration.agents.watchdogEnabled) {
+    return null;
+  }
+  const explicit: {initialDelayMs?: number, intervalMs?: number, maxNoOutputMs?: number} = config && typeof config === 'object' ? config : {};
+  const { initialDelayMs, intervalMs } = watchdogTiming(explicit, step, configuration);
   const maxNoOutputMs = step === 'review'
     ? explicit.maxNoOutputMs ?? configuration.agents.reviewNoOutputMaxMs
     : explicit.maxNoOutputMs;

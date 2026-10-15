@@ -22,9 +22,9 @@ interface Commit { parent: string | null; }
 
 class GitSim {
   readonly commits = new Map<string, Commit>();
-  readonly localBranches = new Map<string, string>();
-  readonly localRemoteRefs = new Map<string, string>(); // 'origin/main' -> sha
-  readonly remoteBranches = new Map<string, string>(); // 'main' -> sha
+  readonly localBranches = new Map<string, string | null>();
+  readonly localRemoteRefs = new Map<string, string | null>(); // 'origin/main' -> sha
+  readonly remoteBranches = new Map<string, string | null>(); // 'main' -> sha
   readonly remoteRefs = new Map<string, string>(); // full ref path -> sha
   headName = 'main';
   counter = 0;
@@ -74,10 +74,12 @@ function resolveRef(state: GitSim, ref: string | undefined): string | null {
   }
   if (sha == null || !state.commits.has(sha)) {return null;}
   for (let i = 0; i < tilde; i++) {
-    const parent = state.commits.get(sha)!.parent;
+    assert.ok(sha);
+    const parent: string | null = state.commits.get(sha)!.parent;
     if (parent == null) {return null;}
     sha = parent;
   }
+  assert.ok(sha);
   return sha.toLowerCase();
 }
 
@@ -151,13 +153,14 @@ function runSim(state: GitSim, args: string[]): { status: number; stdout: string
         }
       } else {
         const tip = state.localBranches.get(state.headName) ?? null;
-        state.remoteBranches.set('main', tip);
+          state.remoteBranches.set('main', tip);
         state.localRemoteRefs.set('origin/main', tip);
       }
       return ok();
     }
     case 'fetch': {
-      state.localRemoteRefs.set('origin/main', state.remoteBranches.get('main') ?? null);
+      const fetched = state.remoteBranches.get('main') ?? null;
+      state.localRemoteRefs.set('origin/main', fetched);
       return ok();
     }
     case 'rev-parse': {
@@ -222,14 +225,14 @@ interface Repo {
   verifyRef: (_sha: string) => string;
 }
 
-let active: GitSim | null = null;
+let active: { value: GitSim | null } = { value: null };
 
 function run(_handle: string, args: string[], _env?: NodeJS.ProcessEnv): { status: number; stdout: string; stderr: string } {
   // The in-memory GitSim does not fork a real git process, so the process env
   // passed by the commit helpers (idEnv) is not consulted here; it is accepted
   // only so the fixture call sites keep the author-identity argument they use in
   // the real-git variant.
-  const state = active!;
+  const state = active.value!;
   const result = runSim(state, args);
   if (result.status !== 0) {
     // Surface unexpected failures during fixture setup.
@@ -249,17 +252,17 @@ function idEnv(): NodeJS.ProcessEnv {
 
 function makeRepo(): Repo {
   const state = new GitSim();
-  active = state;
+  active.value = state;
   // init --bare -b main; clone; configure; commit P; push.
   run('init', ['init']);
   run('clone', ['clone']);
   run('commit', ['commit', '-m', 'P']);
   run('push', ['push', 'origin', 'main']);
 
-  const head = () => run('root', ['rev-parse', 'HEAD']).stdout.trim().toLowerCase();
-  const originMain = () => run('origin', ['rev-parse', 'origin/main']).stdout.trim().toLowerCase();
+  const head: () => string = () => run('root', ['rev-parse', 'HEAD']).stdout.trim().toLowerCase();
+  const originMain: () => string = () => run('origin', ['rev-parse', 'origin/main']).stdout.trim().toLowerCase();
 
-  const commit = (msg: string) => {
+  const commit: (_msg: string) => string = (msg) => {
     run('root', ['commit', '-m', msg], idEnv());
     return head();
   };
@@ -278,10 +281,10 @@ function engineFor(repo: Repo, state: GitSim) {
   const git = (args: string[]) => {
     // Strip the `-C <cwd>` prefix the port always passes.
     const clean = args.filter((x, i) => !(x === '-C' || i === 1));
-    return runSim(state, clean);
+    return { signal: null, ...runSim(state, clean) };
   };
   return new GithubPublishEngine({
-    git: new GitRepositoryPort('root', git as never),
+    git: new GitRepositoryPort('root', git),
     mainBranch: 'main',
     verificationRemote: 'origin',
     verificationRefPrefix: 'github-publish',
@@ -296,7 +299,7 @@ function headShaAt(repo: Repo, state: GitSim, offset: number): string {
 // SHAs for A, B, C are the exact local integration SHAs (no rewrite of B or C).
 test('github-publish: exact integration SHA preserved through verification ref and publication', () => {
   const repo = makeRepo();
-  const state = active!;
+  const state = active.value!;
   try {
     const a = repo.commit('A');
     const b = repo.commit('B');
@@ -329,7 +332,7 @@ test('github-publish: exact integration SHA preserved through verification ref a
     assert.equal(refB, b, 'B published unchanged');
     assert.equal(refC, c, 'C published unchanged');
   } finally {
-    active = null;
+    active.value = null;
   }
 });
 
@@ -337,7 +340,7 @@ test('github-publish: exact integration SHA preserved through verification ref a
 // advances only in A, B, C order, never skipping.
 test('github-publish: out-of-order verification advances in order without skipping', () => {
   const repo = makeRepo();
-  const state = active!;
+  const state = active.value!;
   try {
     const a = repo.commit('A');
     const b = repo.commit('B');
@@ -359,14 +362,14 @@ test('github-publish: out-of-order verification advances in order without skippi
     assert.equal(adv.to, headShaAt(repo, state, 0));
     assert.equal(repo.originMain(), headShaAt(repo, state, 0));
   } finally {
-    active = null;
+    active.value = null;
   }
 });
 
 // AC #3: A externally verified: failed; B and C are green but NOT published.
 test('github-publish: failed earlier verification blocks later commits', () => {
   const repo = makeRepo();
-  const state = active!;
+  const state = active.value!;
   try {
     const a = repo.commit('A');
     repo.commit('B');
@@ -385,7 +388,7 @@ test('github-publish: failed earlier verification blocks later commits', () => {
     // origin/main still at P (unchanged).
     assert.equal(run('root', ['rev-parse', 'HEAD~3']).stdout.trim().toLowerCase(), repo.originMain());
   } finally {
-    active = null;
+    active.value = null;
   }
 });
 
@@ -393,7 +396,7 @@ test('github-publish: failed earlier verification blocks later commits', () => {
 // local history is NOT rewritten or diverged.
 test('github-publish: fetching updated origin/main does not rewrite local history', () => {
   const repo = makeRepo();
-  const state = active!;
+  const state = active.value!;
   try {
     const a = repo.commit('A');
     const engine = engineFor(repo, state);
@@ -410,7 +413,7 @@ test('github-publish: fetching updated origin/main does not rewrite local histor
     assert.deepEqual(localAfter, localBefore, 'local history must be identical after fetch — no rewrite or divergence');
     assert.equal(repo.originMain(), a);
   } finally {
-    active = null;
+    active.value = null;
   }
 });
 
@@ -418,7 +421,7 @@ test('github-publish: fetching updated origin/main does not rewrite local histor
 // publication engine fails closed, never force-pushes.
 test('github-publish: unexpected origin/main movement fails closed', () => {
   const repo = makeRepo();
-  const state = active!;
+  const state = active.value!;
   try {
     const a = repo.commit('A');
     const engine = engineFor(repo, state);
@@ -443,7 +446,7 @@ test('github-publish: unexpected origin/main movement fails closed', () => {
     );
     assert.notEqual(repo.originMain(), a, 'origin/main is the external movement, not A');
   } finally {
-    active = null;
+    active.value = null;
   }
 });
 
@@ -451,7 +454,7 @@ test('github-publish: unexpected origin/main movement fails closed', () => {
 // integration through verification through publication.
 test('github-publish: never force-pushes; exact SHA unchanged through the lifecycle', () => {
   const repo = makeRepo();
-  const state = active!;
+  const state = active.value!;
   try {
     const a = repo.commit('A');
     const engine = engineFor(repo, state);
@@ -465,14 +468,14 @@ test('github-publish: never force-pushes; exact SHA unchanged through the lifecy
     const src = fs.readFileSync(new URL('../../../../src/application/github-publish/publication-engine.ts', import.meta.url).pathname, 'utf8');
     assert.ok(!/--force/.test(src), 'engine must never force-push');
   } finally {
-    active = null;
+    active.value = null;
   }
 });
 
 // Status: verified-but-blocked and failed are surfaced for operator status.
 test('github-publish: status reports awaiting, verified-blocked, and failed', () => {
   const repo = makeRepo();
-  const state = active!;
+  const state = active.value!;
   try {
     const a = repo.commit('A');
     const b = repo.commit('B');
@@ -491,7 +494,7 @@ test('github-publish: status reports awaiting, verified-blocked, and failed', ()
     assert.equal(status.verifiedBlocked.length, 2, 'B and C verified but blocked by failed A');
     assert.equal(status.awaitingVerification.length, 0);
   } finally {
-    active = null;
+    active.value = null;
   }
 });
 
@@ -505,21 +508,21 @@ test('github-publish: verification ref naming encodes SHA and detects collision'
 // CP-6 recovery: pushing the same commit twice is idempotent, not an error.
 test('github-publish: re-publishing the same SHA is an idempotent no-op', () => {
   const repo = makeRepo();
-  const state = active!;
+  const state = active.value!;
   try {
     const a = repo.commit('A');
     const engine = engineFor(repo, state);
     assert.equal(engine.publishCommit(a).action, 'published-to-verification-ref');
     assert.equal(engine.publishCommit(a).action, 'idempotent-ref', 'second push of same SHA is idempotent');
   } finally {
-    active = null;
+    active.value = null;
   }
 });
 
 // CP-6 recovery: a pre-existing verification ref at a DIFFERENT SHA is a collision; never clobbered.
 test('github-publish: pre-existing ref at a different SHA fails closed without clobbering', () => {
   const repo = makeRepo();
-  const state = active!;
+  const state = active.value!;
   try {
     const a = repo.commit('A');
     const b = repo.commit('B');
@@ -534,14 +537,14 @@ test('github-publish: pre-existing ref at a different SHA fails closed without c
     // The pre-existing ref is untouched — still points at B.
     assert.equal(run('origin', ['rev-parse', `refs/github-publish/${a}`]).stdout.trim().toLowerCase(), b);
   } finally {
-    active = null;
+    active.value = null;
   }
 });
 
 // CP-6 recovery: GitHub unavailable (pending) is not a failure; engine waits with retry.
 test('github-publish: pending verification does not fail and does not advance', () => {
   const repo = makeRepo();
-  const state = active!;
+  const state = active.value!;
   try {
     repo.commit('A');
     const engine = engineFor(repo, state);
@@ -554,6 +557,6 @@ test('github-publish: pending verification does not fail and does not advance', 
     const state2 = engine.tracking(a, oracle);
     assert.equal(state2.state, 'external verification pending');
   } finally {
-    active = null;
+    active.value = null;
   }
 });

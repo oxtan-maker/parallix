@@ -1,3 +1,4 @@
+import { missionId } from '../../domain/mission.js';
 /**
  * Review artifact file utilities: metadata footer, artifact paths and I/O,
  * typed-transport rendering, and verdict/disposition normalization.
@@ -7,14 +8,14 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { git } from '../git/git.js';
-import { readReviewState, ReviewState, type ReviewStateData } from './review-state.js';
+import { readReviewState } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { type ReviewFinding, type ReviewItemDisposition } from '../../domain/review.js';
 import { resolveArtifactDir as resolveConfiguredArtifactDir } from './review-adapter.js';
 
 type CreateResult = { ok: boolean; path: string | null; error?: string | null; event?: unknown };
 export type CreateEventFn = (_s: string, _t: string, _p: Record<string, unknown>, _o: Record<string, unknown>) => CreateResult | Promise<CreateResult>;
-export type ReviewStateReader = (_s: string, _r?: string, _store?: MissionStore | null) => ReviewState | ReviewStateData | null | Promise<ReviewState | ReviewStateData | null>;
+export type { ReviewStateReader } from './review-state.js';
 
 // ============================================================================
 // Metadata Footer
@@ -58,10 +59,10 @@ export async function staleReviewWrite(
   missionStore: MissionStore | null | undefined,
 ): Promise<string | null> {
   if (expectedVersion === undefined || !missionStore) { return null; }
-  if (typeof (missionStore as { load?: unknown }).load !== 'function') { return null; }
-  const loaded = await missionStore.load(slug as never);
+  if (typeof missionStore.load !== 'function') { return null; }
+  const loaded = await missionStore.load(missionId(slug));
   if (loaded.kind !== 'found') { return null; }
-  const actual = (loaded as { version: number }).version;
+  const actual = loaded.version;
   if (actual === expectedVersion) { return null; }
   return `stale write for ${slug}: expected version ${expectedVersion}, found ${actual}. `
     + `Re-read \`px status ${slug}\` and retry.`;
@@ -116,7 +117,7 @@ export function resolveArtifactDir(rootDir = process.cwd()): string {
   return resolveConfiguredArtifactDir(rootDir);
 }
 
-export function readArtifactFile(filePath: string, readFileSync = fs.readFileSync): string | null {
+export function readArtifactFile(filePath: string, readFileSync: (_path: string, _encoding: 'utf8') => unknown = fs.readFileSync): string | null {
   try {
     const value = readFileSync(filePath, 'utf8');
     return typeof value === 'string' ? value.trim() : '';

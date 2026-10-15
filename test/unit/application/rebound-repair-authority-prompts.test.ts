@@ -31,11 +31,11 @@ async function promptFor(reason: ReboundReason): Promise<string> {
     worktree: '/tmp/task-2575-fixture',
     implementer: 'codex',
     maxAttempts: 1,
-    startAgent: async (_step, options: any) => {
-      prompts.push(options.prompt('codex'));
+    startAgent: async (_step, options) => {
+      prompts.push((typeof options.prompt === 'function' ? options.prompt('codex') : options.prompt));
       return { agent: 'codex', result: { status: 0 } };
     },
-    verify: () => ({ ok: true }),
+    verify: () => ({ ok: true as const }),
     log: () => {},
     error: () => {},
   });
@@ -117,7 +117,7 @@ test('task-2575: a declared environment healthcheck failure is reported to the h
     worktree: '/tmp/task-2575-fixture',
     implementer: 'codex',
     startAgent: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
-    verify: () => { reruns++; return { ok: false, reason: { ...externalHealthcheck, transient: true, environment: true } }; },
+    verify: () => { reruns++; return { ok: false as const, reason: { ...externalHealthcheck, transient: true, environment: true } }; },
     log: () => {},
     error: (message) => { failures.push(message); },
   });
@@ -149,9 +149,9 @@ test('independent repair two receives durable original and latest evidence (TASK
   try {
     const outcome = await rebound(repairableGate, {
       slug: SLUG, worktree, implementer: 'codex', readHead: () => head,
-      startAgent: async (_step, options: any) => {
+      startAgent: async (_step, options) => {
         assert.equal(options.sessionPolicy, 'fresh-ephemeral');
-        const prompt = options.prompt('codex');
+        const prompt = (typeof options.prompt === 'function' ? options.prompt('codex') : options.prompt);
         prompts.push(prompt);
         if (prompts.length === 2) {
           assert.equal(head, 'valid-first-repair');

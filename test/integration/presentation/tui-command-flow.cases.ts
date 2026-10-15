@@ -1,22 +1,17 @@
+import { missionId as fixtureMissionId } from '../../../src/domain/mission.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
+import { TerminalStream } from '../../helpers/terminal-stream.js';
+import type { BoardShellProps } from '../../../src/interfaces/tui/shell.js';
+import type { BoardCommandDispatcher } from '../../../src/application/controller/board-command.js';
+import type { BoardProgressSink } from '../../../src/application/controller/board-command.js';
 import { makeCard, makeProjection } from '../../fixtures/board-projection.js';
 
-class Stream extends EventEmitter {
-  public columns = 120;
-  public rows = 30;
-  public readonly isTTY = true;
-  public readonly writes: string[] = [];
-  private readonly input: string[] = [];
-  write(value: string): boolean { this.writes.push(value); this.emit('write'); return true; }
-  setRawMode(_enabled: boolean): void {}
-  setEncoding(_encoding: string): void {}
-  resume(): void {}
-  ref(): void {}
-  unref(): void {}
-  read(): string | null { return this.input.shift() ?? null; }
-  send(value: string): void { this.input.push(value); this.emit('readable'); }
+class Stream extends TerminalStream {
+  override _write(chunk: Buffer, encoding: BufferEncoding, callback: (_error?: Error | null) => void): void {
+    super._write(chunk, encoding, callback);
+    this.emit('write');
+  }
 }
 
 async function waitForWrite(stream: Stream, writeCount: number): Promise<void> {
@@ -46,14 +41,14 @@ function waitForOutput(stream: Stream, pattern: RegExp, timeoutMs = 2_000): Prom
   return waitFor(() => pattern.test(stream.writes.join('')), timeoutMs);
 }
 
-async function renderFlow(controller: { dispatch: (...args: any[]) => Promise<any> }, refreshProjection?: () => Promise<any>) {
+async function renderFlow(controller: Pick<BoardCommandDispatcher, 'dispatch'>, refreshProjection?: BoardShellProps['refreshProjection']) {
   const ink = await import('ink');
   const React = await import('react');
   const { BoardShell } = await import('../../../src/interfaces/tui/shell.js');
   const stdin = new Stream();
   const stdout = new Stream();
   const card = makeCard({
-    id: 'task-flow' as never,
+    id: fixtureMissionId('task-flow'),
     lane: 'refined', status: 'refined', rawStatus: 'refined',
     commands: [{ command: 'active', enabled: true, reason: null }],
   });
@@ -61,7 +56,7 @@ async function renderFlow(controller: { dispatch: (...args: any[]) => Promise<an
     projection: makeProjection({ refined: [card] }),
     commandControllerFactory: () => ({ canExecute: (kind: string) => kind === 'active:execute', ...controller }),
     refreshProjection,
-  } as never), { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false });
+  }), { stdin: stdin, stdout: stdout, patchConsole: false, exitOnCtrlC: false });
   await waitForWrite(stdout, 0);
   return { stdin, stdout, instance };
 }
@@ -86,7 +81,7 @@ test('confirmed action dispatches through supplied controller and conflict refre
     return { status: 'failed', error: { kind: 'conflict', message: 'stale mission' }, durableEvidence: [] };
   } }, async () => {
     refreshes += 1;
-    return makeProjection({ refined: [makeCard({ id: 'task-flow' as never, lane: 'refined', status: 'refined', commands: [{ command: 'active', enabled: true, reason: null }] })] });
+    return makeProjection({ refined: [makeCard({ id: fixtureMissionId('task-flow'), lane: 'refined', status: 'refined', commands: [{ command: 'active', enabled: true, reason: null }] })] });
   });
   ui.stdin.send('\r');
   await waitForOutput(ui.stdout, /CONFIRM CONSEQUENTIAL ACTION/);
@@ -103,20 +98,20 @@ test('progress events render in the command log without changing the card lane',
   const React = await import('react');
   const { BoardShell } = await import('../../../src/interfaces/tui/shell.js');
   const card = makeCard({
-    id: 'task-progress' as never,
+    id: fixtureMissionId('task-progress'),
     lane: 'refined', status: 'refined', rawStatus: 'refined',
     commands: [{ command: 'active', enabled: true, reason: null }],
   });
-  let progress: ((event: any) => void) | undefined;
+  let progress: BoardProgressSink | undefined;
   const stdin = new Stream();
   const stdout = new Stream();
   const instance = ink.render(React.createElement(BoardShell, {
     projection: makeProjection({ refined: [card] }),
-    commandControllerFactory: (receiveProgress: any) => {
+    commandControllerFactory: (receiveProgress) => {
       progress = receiveProgress;
       return { canExecute(kind: string) { return kind === 'active:execute'; }, async dispatch() { return { status: 'completed', durableEvidence: [] }; } };
     },
-  } as never), { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false });
+  }), { stdin: stdin, stdout: stdout, patchConsole: false, exitOnCtrlC: false });
   await new Promise((resolve) => setTimeout(resolve, 35));
   progress!({ operationId: 'op-progress', sequence: 2, phase: 'record', message: 'durable evidence recorded', timestamp: '2026-07-26T12:00:00.000Z' });
   await waitForOutput(stdout, /record durable evidence recorded/);
@@ -152,14 +147,14 @@ test('Ctrl+A on disabled card does not dispatch (pins R1)', async () => {
   const stdout = new Stream();
   /* Card with active:execute disabled. */
   const card = makeCard({
-    id: 'task-disabled' as never,
+    id: fixtureMissionId('task-disabled'),
     lane: 'done', status: 'done', rawStatus: 'done',
     commands: [{ command: 'active', enabled: false, reason: 'Mission cannot be activated from its current state' }],
   });
   const instance = ink.render(React.createElement(BoardShell, {
     projection: makeProjection({ done: [card] }),
     commandControllerFactory: () => ({ canExecute(kind: string) { return kind === 'active:execute'; }, async dispatch() { calls += 1; return { status: 'completed', durableEvidence: [] }; } }),
-  } as never), { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false });
+  }), { stdin: stdin, stdout: stdout, patchConsole: false, exitOnCtrlC: false });
   await new Promise((resolve) => setTimeout(resolve, 35));
   /* Ctrl+A on a card whose active command is disabled. */
   stdin.send('\x01');
@@ -187,7 +182,7 @@ test('Ctrl+D on draft-eligible card confirms and dispatches once when wired', as
   const React = await import('react');
   const { BoardShell } = await import('../../../src/interfaces/tui/shell.js');
   const card = makeCard({
-    id: 'task-draft-flow' as never,
+    id: fixtureMissionId('task-draft-flow'),
     lane: 'backlog', status: 'backlog', rawStatus: 'backlog',
     commands: [{ command: 'draft', enabled: true, reason: null }],
   });
@@ -201,7 +196,7 @@ test('Ctrl+D on draft-eligible card confirms and dispatches once when wired', as
       canExecute: (kind: string) => kind === 'draft:create',
       async dispatch(request: { kind: string }) { calls += 1; dispatchedKinds.push(request.kind); return { status: 'completed', durableEvidence: [] }; },
     }),
-  } as never), { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false });
+  }), { stdin: stdin, stdout: stdout, patchConsole: false, exitOnCtrlC: false });
   await waitForWrite(stdout, 0);
   /* Ctrl+D (\x04) triggers draft:create. */
   stdin.send('\x04');
@@ -219,7 +214,7 @@ test('Ctrl+D on a past-pre-draft card does not dispatch even when wired', async 
   const React = await import('react');
   const { BoardShell } = await import('../../../src/interfaces/tui/shell.js');
   const card = makeCard({
-    id: 'task-draft-disabled' as never,
+    id: fixtureMissionId('task-draft-disabled'),
     lane: 'active', status: 'active', rawStatus: 'active',
     commands: [{ command: 'active', enabled: true, reason: null }],
   });
@@ -232,7 +227,7 @@ test('Ctrl+D on a past-pre-draft card does not dispatch even when wired', async 
       canExecute: (kind: string) => kind === 'draft:create',
       async dispatch() { calls += 1; return { status: 'completed', durableEvidence: [] }; },
     }),
-  } as never), { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false });
+  }), { stdin: stdin, stdout: stdout, patchConsole: false, exitOnCtrlC: false });
   await waitForWrite(stdout, 0);
   stdin.send('\x04');
   await new Promise((resolve) => setTimeout(resolve, 35));
@@ -262,10 +257,10 @@ test('Shift+S toggles shipped lane to collapsed strip and back', async () => {
   const { BoardShell } = await import('../../../src/interfaces/tui/shell.js');
   const stdin = new Stream();
   const stdout = new Stream();
-  const projection = makeProjection({ done: [makeCard({ id: 'task-done' as never, lane: 'done', status: 'done', rawStatus: 'done' })] });
+  const projection = makeProjection({ done: [makeCard({ id: fixtureMissionId('task-done'), lane: 'done', status: 'done', rawStatus: 'done' })] });
   const instance = ink.render(React.createElement(BoardShell, {
     projection,
-  } as never), { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false });
+  }), { stdin: stdin, stdout: stdout, patchConsole: false, exitOnCtrlC: false });
   await new Promise((resolve) => setTimeout(resolve, 50));
 
   /* Cumulative output: all frames since mount. */
@@ -308,12 +303,12 @@ test('Ctrl+I (0x09) is reported as Tab by Ink and toggles rail/board focus, not 
   const { BoardShell } = await import('../../../src/interfaces/tui/shell.js');
   const stdin = new Stream();
   const stdout = new Stream();
-  const projection = makeProjection({ done: [makeCard({ id: 'task-done' as never, lane: 'done', status: 'done', rawStatus: 'done' })] });
+  const projection = makeProjection({ done: [makeCard({ id: fixtureMissionId('task-done'), lane: 'done', status: 'done', rawStatus: 'done' })] });
   let calls = 0;
   const instance = ink.render(React.createElement(BoardShell, {
     projection,
     commandControllerFactory: () => ({ canExecute(kind: string) { return kind === 'active:execute'; }, async dispatch() { calls += 1; return { status: 'completed', durableEvidence: [] }; } }),
-  } as never), { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false });
+  }), { stdin: stdin, stdout: stdout, patchConsole: false, exitOnCtrlC: false });
   await new Promise((resolve) => setTimeout(resolve, 35));
 
   /* Ctrl+I (\x09 = Tab byte) is reported by Ink as {input:'', ctrl:false, tab:true}.

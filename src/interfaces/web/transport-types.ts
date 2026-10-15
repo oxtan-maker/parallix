@@ -106,8 +106,10 @@ export interface WebPullRequestReference {
   readonly targetBranch: string;
 }
 
-/** Wire mirror of `ReviewRoundSummary` — nine keys per round, oldest first. */
+/** Wire mirror of review history, oldest first. */
 export interface WebReviewRoundSummary {
+  readonly startRevision?: string;
+  readonly decidedRevision?: string | null;
   readonly number: number;
   readonly reviewer: string;
   readonly implementer: string;

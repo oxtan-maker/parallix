@@ -35,7 +35,7 @@ afterEach(() => configureReboundTelemetry(null));
 test('TASK-2653: a first-attempt pass records one fresh rescue row with agent, provider and model', async () => {
   const rows: OperationalHistoryEntry[] = [];
   bind(async (entry) => { rows.push(entry); });
-  await rebound(gateReason, contextFor(() => ({ ok: true }), { readHead: () => 'abc' }));
+  await rebound(gateReason, contextFor(() => ({ ok: true as const }), { readHead: () => 'abc' }));
   assert.equal(rows.length, 1);
   assert.equal(rows[0].eventType, REBOUND_REPAIR_EVENT);
   const data = JSON.parse(rows[0].eventData);
@@ -66,7 +66,7 @@ test('TASK-2653: fresh advance then fresh rescue share one occurrence with fresh
 test('TASK-2653: an exhausted budget records escalate on the last attempt, one row per attempt', async () => {
   const rows: OperationalHistoryEntry[] = [];
   bind(async (entry) => { rows.push(entry); });
-  const outcome = await rebound(gateReason, contextFor(() => ({ ok: false, diagnostic: 'nope' })));
+  const outcome = await rebound(gateReason, contextFor(() => ({ ok: false as const, diagnostic: 'nope' })));
   assert.equal(outcome.outcome, 'exhausted');
   assert.deepEqual(rows.map((row) => JSON.parse(row.eventData).outcome), ['advance', 'escalate']);
 });
@@ -74,7 +74,7 @@ test('TASK-2653: an exhausted budget records escalate on the last attempt, one r
 test('TASK-2653: a failing history append is logged and does not change the rebound outcome', async () => {
   const logs: string[] = [];
   bind(async () => { throw new Error('db locked'); });
-  const outcome = await rebound(gateReason, contextFor(() => ({ ok: true }), { log: (msg) => logs.push(msg) }));
+  const outcome = await rebound(gateReason, contextFor(() => ({ ok: true as const }), { log: (msg) => logs.push(msg) }));
   assert.equal(outcome.outcome, 'fixed');
   assert.ok(logs.some((line) => /could not be recorded: db locked/.test(line)));
 });
@@ -82,7 +82,7 @@ test('TASK-2653: a failing history append is logged and does not change the rebo
 test('TASK-2653: a launch that exits non-zero still spends an attempt and records one row', async () => {
   const rows: OperationalHistoryEntry[] = [];
   bind(async (entry) => { rows.push(entry); });
-  const outcome = await rebound(gateReason, contextFor(() => ({ ok: true }), {
+  const outcome = await rebound(gateReason, contextFor(() => ({ ok: true as const }), {
     startAgent: async () => ({ agent: 'codex', result: { status: 1, provider: 'openai', model: 'gpt-x' } as { status: number } }),
   }));
   assert.equal(outcome.outcome, 'exhausted');

@@ -128,7 +128,7 @@ function implementerDiagnostic(context: LoopContext, artifacts: ImplementerArtif
  * rebound occurrence, and an infrastructure failure or spent budget escalates.
  */
 async function consumeImplementerOutput(context: LoopContext, round: ReviewRound, reviewState: unknown, disposition: Disposition): Promise<'stop' | null> {
-  const { ports, state, identities, slug } = context;
+  const { ports, state, identities } = context;
   let artifacts = await ports.artifacts.consumeImplementer(identities.implementer, state);
   if (!artifacts.consumed && disposition.implementerExited) {
     const stored = await storedImplementerResolution(context);
@@ -176,19 +176,24 @@ async function consumeImplementerOutput(context: LoopContext, round: ReviewRound
   round.used += recovery.attempts ?? 0;
   identities.implementer = recovery.implementer || identities.implementer;
   if (recovery.outcome !== 'fixed') {
-    if (recovery.outcome === 'human-only' || isArtifactInfraDiagnostic(recovery.diagnostic)) {
-      context.emit({ kind: 'implementer-recovery-human', slug: slug });
-      await context.escalateToHumanReview('IMPLEMENTER_ARTIFACT_INFRA_FAILURE');
-      return 'stop';
-    }
-    if (round.capReached()) { return await round.stopForCap('implementer artifact'); }
-    context.emit({ kind: 'implementer-recovery-exhausted', maxAttempts: maxAttempts, slug: slug });
-    await context.escalateToHumanReview('IMPLEMENTER_ARTIFACT_RETRY_EXHAUSTED');
-    return 'stop';
+    return await failedImplementerRecovery(context, round, recovery, maxAttempts);
   }
   context.emit({ kind: 'implementer-artifacts-recovered', attempts: recovery.attempts });
   disposition.value = (artifacts.consumed ? artifacts.disposition : null) || stored;
   return null;
+}
+
+async function failedImplementerRecovery(context: LoopContext, round: ReviewRound, recovery: Awaited<ReturnType<typeof rebound>>, maxAttempts: number): Promise<'stop' | null> {
+  const { slug } = context;
+  if (recovery.outcome === 'human-only' || isArtifactInfraDiagnostic(recovery.diagnostic)) {
+    context.emit({ kind: 'implementer-recovery-human', slug: slug });
+    await context.escalateToHumanReview('IMPLEMENTER_ARTIFACT_INFRA_FAILURE');
+    return 'stop';
+  }
+  if (round.capReached()) { return await round.stopForCap('implementer artifact'); }
+  context.emit({ kind: 'implementer-recovery-exhausted', maxAttempts: maxAttempts, slug: slug });
+  await context.escalateToHumanReview('IMPLEMENTER_ARTIFACT_RETRY_EXHAUSTED');
+  return 'stop';
 }
 
 /** Poll for the disposition; a timeout relaunches the implementer through the kernel. */
@@ -259,7 +264,7 @@ async function applyDisposition(context: LoopContext, round: ReviewRound, dispos
   }
   try { state.transitionTo('reviewing'); } catch { /* already reviewing */ }
   const postFixHead = ports.preReview.head();
-  const hasCommittedChange = disposition.skippedLaunch || preFixHead === null || postFixHead === null || postFixHead !== preFixHead;
+  const hasCommittedChange = committedImplementation(disposition, preFixHead, postFixHead);
   if (!hasCommittedChange) {
     state.disposition = 'IMPLEMENTER_NO_CHANGE';
     state.metadata = { ...state.metadata, humanEscalationReason: 'IMPLEMENTER_NO_CHANGE', humanEscalatedAt: new Date().toISOString() };
@@ -296,4 +301,8 @@ export async function runImplementerPhase(context: LoopContext, round: ReviewRou
     if (await pollDisposition(context, round, reviewState, disposition)) { return 'stop'; }
   }
   return applyDisposition(context, round, disposition, preFixHead);
+}
+
+function committedImplementation(disposition: Disposition, preFixHead: string | null, postFixHead: string | null): boolean {
+  return disposition.skippedLaunch || preFixHead === null || postFixHead === null || postFixHead !== preFixHead;
 }

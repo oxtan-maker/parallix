@@ -1,5 +1,3 @@
-// @ts-nocheck -- TASK-2535: inline doubles for integrate-conflict seams; mirrors the
-// mockModule/@ts-nocheck pattern in test/integration/stats/stats-backfill.test.ts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -10,7 +8,7 @@ import * as ic from '../../../src/adapters/cli/commands/integrate-conflict.js';
 function tempDir(prefix = 'integrate-conflict-') {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
-function cleanup(dir) { fs.rmSync(dir, { recursive: true, force: true }); }
+function cleanup(dir: fs.PathLike) { fs.rmSync(dir, { recursive: true, force: true }); }
 
 test('areAllBacklogOnlyConflicts treats an empty list as backlog-only', () => {
   assert.equal(ic.areAllBacklogOnlyConflicts([]), true);
@@ -40,7 +38,7 @@ test('parseStashPopCollisionFiles returns an empty list when there are no collis
 test('prepareNoisePatchForSquash captures a staged diff and resets the checkout', () => {
   const dir = tempDir();
   try {
-    const calls = [];
+    const calls: string[] = [];
     const result = ic.prepareNoisePatchForSquash(dir, {
       gitRunner: (args) => {
         calls.push(args.join(' '));
@@ -75,7 +73,7 @@ test('prepareNoisePatchForSquash reports a diff failure', () => {
     gitRunner: () => ({ status: 1, stdout: '', stderr: 'diff failed' }),
   });
   assert.equal(result.ok, false);
-  assert.match(result.error, /diff failed/);
+  assert.match(result.error ?? '', /diff failed/);
 });
 
 test('restoreNoisePatchAfterSquash is a no-op without a patch path', () => {
@@ -92,7 +90,7 @@ test('restoreNoisePatchAfterSquash applies the patch or reports failure', () => 
     gitRunner: () => ({ status: 1, stdout: '', stderr: 'apply failed' }),
   });
   assert.equal(failed.ok, false);
-  assert.match(failed.error, /apply failed/);
+  assert.match(failed.error ?? '', /apply failed/);
 });
 
 test('getUnresolvedIndexConflicts parses unmerged index entries', () => {
@@ -131,7 +129,6 @@ test('maybeDropStashAfterCollision returns null when a collision file is missing
       dir,
       {
         gitRunner: () => ({ status: 0, stdout: '', stderr: '' }),
-        getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
       },
     );
     assert.equal(result, null);

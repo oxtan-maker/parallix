@@ -12,6 +12,17 @@ import * as fmt from '../../../application/presentation/cli-format.js';
 import * as verification from '../../verification/verification.js';
 import { resolveWorktree, getPrimaryWorktree, getPrimaryBranch, conventionalWorktreePath } from '../../filesystem/mission-utils.js';
 
+interface IntegrationPipelineEntry {
+  command: string; order?: number; run_last?: boolean; areas?: string[]; always?: boolean; enabled?: boolean;
+}
+interface IntegrationPipelineConfig { gates?: Record<string, IntegrationPipelineEntry>; }
+interface IntegrationPipelineGate extends IntegrationPipelineEntry { key: string; order: number; run_last: boolean; }
+type IntegrationCommandRunner = (command: string, args: string[], options: { cwd: string; stdio: 'inherit' }) => { status: number | null };
+
+type FinalIntegrationTree = { ok: true; rootDir: string; commit: string; tree: string } | { ok: false; error: string; commit?: never; tree?: never; rootDir?: never };
+
+type IntegrationGitRunner = (args: string[]) => Pick<ReturnType<typeof git>, 'status' | 'stdout' | 'stderr'>;
+
 const { formatVerificationCommand } = verification;
 
 // Integration gates support
@@ -29,11 +40,11 @@ export function getIntegrationConfigPath(): string {
  * Detect which top-level areas have been modified in the mission branch vs primary branch
  * Returns an array of area names (e.g., ['server', 'auth-server', 'web-client'])
  */
-/** @param {string} slug @param {{gitRunner?: Function, rootDir?: string, baseBranch?: string|null}} opts */
-export function detectChangedAreas(slug: string, opts: {gitRunner?: Function, rootDir?: string, baseBranch?: string | null} = {}) {
+/** @param {string} slug @param {{gitRunner?: IntegrationGitRunner, rootDir?: string, baseBranch?: string|null}} opts */
+export function detectChangedAreas(slug: string, opts: {gitRunner?: IntegrationGitRunner, rootDir?: string, baseBranch?: string | null} = {}) {
   const primaryBranch = opts.baseBranch || getPrimaryBranch();
   const branch = `mission/${slug}`;
-  const runner = (opts.gitRunner || git) as Function;
+  const runner = opts.gitRunner || git;
 
   // Get changed files between primary branch and mission branch
   const diffResult = runner(['-C', opts.rootDir || getPrimaryWorktree(), 'diff', '--name-only', primaryBranch, branch, '--']);
@@ -53,11 +64,11 @@ export function detectChangedAreas(slug: string, opts: {gitRunner?: Function, ro
   return parseFilesToAreas(diffResult.stdout);
 }
 
-/** @param {string} rootDir @param {Iterable<string>} paths @param {{gitRunner?: Function}} opts */
-export function isIntendedPayloadAtHead(rootDir: string, paths: Iterable<string>, opts: {gitRunner?: Function} = {}) {
+/** @param {string} rootDir @param {Iterable<string>} paths @param {{gitRunner?: IntegrationGitRunner}} opts */
+export function isIntendedPayloadAtHead(rootDir: string, paths: Iterable<string>, opts: {gitRunner?: IntegrationGitRunner} = {}) {
   const payloadPaths = [...paths];
   if (payloadPaths.length === 0) { return false; }
-  const runner = (opts.gitRunner || git) as Function;
+  const runner = opts.gitRunner || git;
   return runner(['-C', rootDir, 'diff', '--quiet', 'HEAD', '--', ...payloadPaths]).status === 0;
 }
 
@@ -112,7 +123,7 @@ export function parseFilesToAreas(filesOutput: string) {
  * @param {{gates?: Record<string, any>}} config
  * @returns {{key: string, command: string, order: number, run_last: boolean, areas?: string[], always?: boolean}[]}
  */
-export function orderIntegrationGates(config: {gates?: Record<string, any>}) {
+export function orderIntegrationGates(config: IntegrationPipelineConfig) {
   const gateEntries = Object.entries(config.gates || {});
   /** @type {{key: string, command: string, order: number, run_last: boolean, areas?: string[], always?: boolean}[]} */
   const gates = gateEntries
@@ -162,7 +173,7 @@ export function gateMatchesChangedAreas(gateKey: string, changedAreas: string[],
  * Load integration pipelines config from repo-side file
  */
 /** @param {{configPath?: string}} opts */
-export function loadIntegrationConfig(opts: {configPath?: string} = {}) {
+export function loadIntegrationConfig(opts: {configPath?: string} = {}): { ok: true; config: IntegrationPipelineConfig } | { ok: false; error: string } {
   const configPath = opts.configPath || getIntegrationConfigPath();
   if (!fs.existsSync(configPath) || !fs.statSync(configPath).size) {
     return { ok: false, error: 'no config present' };
@@ -170,10 +181,10 @@ export function loadIntegrationConfig(opts: {configPath?: string} = {}) {
   
   try {
     const content = fs.readFileSync(configPath, 'utf8');
-    const config = JSON.parse(content);
+    const config = JSON.parse(content) as IntegrationPipelineConfig;
     return { ok: true, config };
-  } catch (/** @type{any} */ error: any) {
-    return { ok: false, error: `invalid JSON: ${error.message}` };
+  } catch (error) {
+    return { ok: false, error: `invalid JSON: ${(error as Error).message}` };
   }
 }
 
@@ -181,8 +192,8 @@ export function loadIntegrationConfig(opts: {configPath?: string} = {}) {
  * Get the integration gate plan for changed areas
  * Returns { gates: [{key, command, run_last}], changedAreas: [...] }
  */
-/** @param {string} slug @param {{runIntegrationGates?: boolean, gitRunner?: Function, dryRun?: boolean, configPath?: string, rootDir?: string, baseBranch?: string|null}} opts */
-export function getIntegrationGatePlan(slug: string, opts: {runIntegrationGates?: boolean, gitRunner?: Function, dryRun?: boolean, configPath?: string, rootDir?: string, baseBranch?: string | null} = {}) {
+/** @param {string} slug @param {{runIntegrationGates?: boolean, gitRunner?: IntegrationGitRunner, dryRun?: boolean, configPath?: string, rootDir?: string, baseBranch?: string|null}} opts */
+export function getIntegrationGatePlan(slug: string, opts: {runIntegrationGates?: boolean, gitRunner?: IntegrationGitRunner, dryRun?: boolean, configPath?: string, rootDir?: string, baseBranch?: string | null} = {}): { gates: IntegrationPipelineGate[]; changedAreas: string[]; configError: string | null | undefined } {
   // Check config
   const configResult = loadIntegrationConfig(opts);
   if (!configResult.ok) {
@@ -221,7 +232,7 @@ export function getIntegrationGatePlan(slug: string, opts: {runIntegrationGates?
  * Print the integration gate plan (for --dry-run)
  */
 /** @param{{key: string, command: string, order: number, run_last: boolean}[]} gates */
-export function printIntegrationGatePlan(gates: any) {
+export function printIntegrationGatePlan(gates: readonly IntegrationPipelineGate[]) {
   fmt.log.info('Integration gate plan:');
   for (const gate of gates) {
     fmt.log.info(`  ${gate.key}: ${gate.command}`);
@@ -230,11 +241,11 @@ export function printIntegrationGatePlan(gates: any) {
 
 /**
  * @param {string} slug
- * @param {{dryRun?: boolean, processEnv?: NodeJS.ProcessEnv, gitRunner?: Function, baseBranch?: string|null, baseWorktree?: string|null}} opts
+ * @param {{dryRun?: boolean, processEnv?: NodeJS.ProcessEnv, gitRunner?: IntegrationGitRunner, baseBranch?: string|null, baseWorktree?: string|null}} opts
  */
-export function buildIntegrationGateEnv(slug: string, opts: {dryRun?: boolean, processEnv?: NodeJS.ProcessEnv, gitRunner?: Function, baseBranch?: string | null, baseWorktree?: string | null, realAgent?: string | null, realAgentModel?: string | null} = {}) {
+export function buildIntegrationGateEnv(slug: string, opts: {dryRun?: boolean, processEnv?: NodeJS.ProcessEnv, gitRunner?: IntegrationGitRunner, baseBranch?: string | null, baseWorktree?: string | null, realAgent?: string | null, realAgentModel?: string | null} = {}) {
   /** @type {{[key: string]: string | undefined}} */
-  const env = /** @type {{[key: string]: string | undefined}} */ ({
+  const env: NodeJS.ProcessEnv = /** @type {{[key: string]: string | undefined}} */ ({
     // Integration gates need the invoking process environment (especially
     // PATH and HOME) to find the selected Node runtime on macOS and Linux.
     // Tests can still pass an isolated environment explicitly.
@@ -250,21 +261,21 @@ export function buildIntegrationGateEnv(slug: string, opts: {dryRun?: boolean, p
 
   // Integration must always use the repo-side config, but the changed-area set
   // should be the one resolved for this mission branch, not rediscovered later.
-  delete (env as any).INTEGRATION_CONFIG_PATH;
+  delete env['INTEGRATION_CONFIG_PATH'];
   if (opts.realAgent && opts.realAgentModel) {
-    (env as any).PARALLIX_REAL_AGENT = opts.realAgent;
-    (env as any).PARALLIX_REAL_AGENT_MODEL = opts.realAgentModel;
+    env['PARALLIX_REAL_AGENT'] = opts.realAgent;
+    env['PARALLIX_REAL_AGENT_MODEL'] = opts.realAgentModel;
   }
   return env;
 }
 
 /** Capture the exact clean mission tree that integration gates are allowed to verify. */
-export function captureFinalIntegrationTree(rootDir: string, opts: {gitRunner?: Function} = {}) {
+export function captureFinalIntegrationTree(rootDir: string, opts: {gitRunner?: IntegrationGitRunner} = {}): FinalIntegrationTree {
   const resolvedRoot = path.resolve(rootDir || '');
   if (!rootDir || !fs.existsSync(resolvedRoot)) {
     return { ok: false, error: `selected execution root does not exist: ${resolvedRoot || rootDir}` };
   }
-  const runner = (opts.gitRunner || git) as Function;
+  const runner = opts.gitRunner || git;
   const status = runner(['-C', resolvedRoot, 'status', '--porcelain']);
   if (status.status !== 0) {
     return { ok: false, error: `could not inspect selected execution root: ${status.stderr || status.stdout || resolvedRoot}` };
@@ -272,6 +283,10 @@ export function captureFinalIntegrationTree(rootDir: string, opts: {gitRunner?: 
   if (String(status.stdout || '').trim()) {
     return { ok: false, error: `selected execution root is not finalized (dirty tree): ${resolvedRoot}` };
   }
+  return readFinalRevision(resolvedRoot, runner);
+}
+
+function readFinalRevision(resolvedRoot: string, runner: IntegrationGitRunner): FinalIntegrationTree {
   const commit = runner(['-C', resolvedRoot, 'rev-parse', 'HEAD']);
   const tree = runner(['-C', resolvedRoot, 'rev-parse', 'HEAD^{tree}']);
   if (commit.status !== 0 || tree.status !== 0) {
@@ -288,11 +303,11 @@ const COMMIT_ID = /^[0-9a-f]{4,64}$/i;
  * A malformed id, an unreachable commit, or any other git failure is
  * `ok: false`; callers treat it as "cannot prove coverage".
  */
-export function listChangedPathsBetween(rootDir: string, fromCommit: string, toCommit: string, opts: {gitRunner?: Function} = {}): { ok: true; paths: string[] } | { ok: false; error: string } {
+export function listChangedPathsBetween(rootDir: string, fromCommit: string, toCommit: string, opts: {gitRunner?: IntegrationGitRunner} = {}): { ok: true; paths: string[] } | { ok: false; error: string } {
   if (!COMMIT_ID.test(fromCommit) || !COMMIT_ID.test(toCommit)) {
     return { ok: false, error: `not a commit id: ${COMMIT_ID.test(fromCommit) ? toCommit : fromCommit}` };
   }
-  const runner = (opts.gitRunner || git) as Function;
+  const runner = opts.gitRunner || git;
   const diff = runner(['-C', rootDir, 'diff', '--name-only', '--no-renames', '-z', fromCommit, toCommit, '--']);
   if (diff.status !== 0) {
     return { ok: false, error: String(diff.stderr || diff.stdout || `git diff exited ${diff.status}`).trim() };
@@ -302,22 +317,22 @@ export function listChangedPathsBetween(rootDir: string, fromCommit: string, toC
 
 /**
  * @param {string} slug
- * @param {{baseWorktree?: string, resolveWorktreeFn?: Function, conventionalWorktreePathFn?: Function}} opts
+ * @param {{baseWorktree?: string, resolveWorktreeFn?: typeof resolveWorktree, conventionalWorktreePathFn?: typeof conventionalWorktreePath}} opts
  */
-export function resolveIntegrationVerificationWorktree(slug: string, opts: {baseWorktree?: string, resolveWorktreeFn?: Function, conventionalWorktreePathFn?: Function} = {}) {
-  const resolveFn = (opts.resolveWorktreeFn || resolveWorktree) as Function;
-  const convFn = (opts.conventionalWorktreePathFn || conventionalWorktreePath) as Function;
+export function resolveIntegrationVerificationWorktree(slug: string, opts: {baseWorktree?: string, resolveWorktreeFn?: typeof resolveWorktree, conventionalWorktreePathFn?: typeof conventionalWorktreePath} = {}) {
+  const resolveFn = opts.resolveWorktreeFn || resolveWorktree;
+  const convFn = opts.conventionalWorktreePathFn || conventionalWorktreePath;
   return resolveFn(slug, { cwd: opts.baseWorktree })
     || convFn(slug, opts.baseWorktree);
 }
 
 /**
  * @param {string} slug
- * @param {{baseWorktree?: string, resolveWorktreeFn?: Function, conventionalWorktreePathFn?: Function, formatVerificationCommandFn?: Function}} opts
+ * @param {{baseWorktree?: string, resolveWorktreeFn?: typeof resolveWorktree, conventionalWorktreePathFn?: typeof conventionalWorktreePath, formatVerificationCommandFn?: typeof formatVerificationCommand}} opts
  */
-export function buildIntegrationVerificationInvocation(slug: string, opts: {baseWorktree?: string, resolveWorktreeFn?: Function, conventionalWorktreePathFn?: Function, formatVerificationCommandFn?: Function} = {}) {
+export function buildIntegrationVerificationInvocation(slug: string, opts: {baseWorktree?: string, resolveWorktreeFn?: typeof resolveWorktree, conventionalWorktreePathFn?: typeof conventionalWorktreePath, formatVerificationCommandFn?: typeof formatVerificationCommand} = {}) {
   const cwd = resolveIntegrationVerificationWorktree(slug, opts);
-  const fmtFn = (opts.formatVerificationCommandFn || formatVerificationCommand) as Function;
+  const fmtFn = opts.formatVerificationCommandFn || formatVerificationCommand;
   return {
     command: fmtFn('integrate', cwd),
     cwd
@@ -332,7 +347,7 @@ export function buildIntegrationVerificationInvocation(slug: string, opts: {base
  * @param {{key: string, command: string, order: number, run_last: boolean}[]} gates
  * @param {{commandRunner?: Function, rootDir: string}} opts
  */
-export async function executeIntegrationGates(gates: any, opts: {commandRunner?: Function, rootDir: string}) {
+export async function executeIntegrationGates(gates: readonly IntegrationPipelineGate[], opts: {commandRunner?: IntegrationCommandRunner, rootDir: string}) {
   if (!opts.rootDir) {
     throw new Error('integration gates require an explicit execution root');
   }
@@ -340,7 +355,7 @@ export async function executeIntegrationGates(gates: any, opts: {commandRunner?:
       shell: true,
       cwd: opts.rootDir,
       stdio: 'inherit'
-    }))) as Function;
+    })));
   
   for (const gate of gates) {
     fmt.log.info(`Running integration gate: ${gate.key}...`);

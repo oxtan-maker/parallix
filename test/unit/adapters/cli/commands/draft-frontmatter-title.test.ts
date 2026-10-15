@@ -1,3 +1,5 @@
+import { draftMissionServicesFixture } from '../../../../helpers/draft-mission-services.js';
+import { missionVersion } from '../../../../../src/application/domain-ports.js';
 // TASK-2612: draft intake must record the folded title text, never `>-`.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -28,25 +30,28 @@ test('TASK-2612: draft intake records a folded frontmatter title', async () => {
   ].join('\n'));
 
   let recordedTitle: string | undefined;
-  const missionServicesFn = async () => ({
-      repositoryId: 'parallix',
-      intake: { execute: async (request: { title: string }) => {
+  const missionServicesFn = async () => draftMissionServicesFixture({
+      repositoryId: repositoryId('parallix'),
+      intake: { execute: async request => {
         recordedTitle = request.title;
-        return { status: 'completed', value: { version: 1 }, durableEvidence: [] };
+        return { status: 'completed' as const, value: { mission: intakeMission({ ...request, id: request.missionId }), version: missionVersion(1) }, durableEvidence: [] };
       } },
     });
   const workflow = createDraftWorkflowAdapter({
-    resolveTaskFileFn: () => ({ ok: true, taskFile, matches: [taskFile] }),
+    resolveTaskFileFn: () => ({ ok: true as const, taskFile, matches: [taskFile] }),
   });
 
   try {
     await workflow.intake({
+      exited: false, mainRepo: root, missionFile: '', recordedBase: null,
+      agent: 'codex', actualAgent: null, agentResult: null,
+      exitFn: () => { throw new Error('Unexpected draft fixture exit'); }, logFn: () => {}, errorFn: () => {},
       slug: SLUG,
       targetWorktree: root,
       syntheticTask: null,
       options: {},
       missionServicesFn,
-    } as never);
+    });
     assert.equal(recordedTitle, TITLE);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

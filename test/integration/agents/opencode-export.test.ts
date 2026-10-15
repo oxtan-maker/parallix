@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 
 import { resolveConfiguration } from '../../../src/composition/config.js';
@@ -19,7 +18,7 @@ const { captureOpencodeExport } = captureOpencodeExportModule;
 test('captureOpencodeExport returns the full stdout JSON on clean exit', async () => {
   const expected = JSON.stringify({ info: { tokens: { input: 1, output: 2 } } });
   const encoded = Buffer.from(expected).toString('base64');
-  const spawn = (cmd, args, opts) => {
+  const spawn: NonNullable<NonNullable<Parameters<typeof captureOpencodeExport>[1]>["spawn"]> = (cmd, args, opts) => {
     return realSpawn('node', ['-e', 'process.stdout.write(Buffer.from(process.argv[1], "base64"))', encoded], opts);
   };
   const result = await captureOpencodeExport('ses_x', { configuration: resolveConfiguration(process.env), spawn });
@@ -28,14 +27,14 @@ test('captureOpencodeExport returns the full stdout JSON on clean exit', async (
 
 test('captureOpencodeExport times out and kills a non-exiting export child', async () => {
   const child = childProcessDouble();
-  const spawn = () => child;
+  const spawn: NonNullable<NonNullable<Parameters<typeof captureOpencodeExport>[1]>["spawn"]> = () => child;
   const result = await captureOpencodeExport('ses_hang', { configuration: resolveConfiguration(process.env), spawn, timeoutMs: 50 });
   assert.equal(result, null, 'must degrade to null, not hang');
   assert.equal(child.killed, true, 'hung export child must be killed');
 });
 
 test('captureOpencodeExport fails explicitly when output exceeds maxBytes', async () => {
-  const spawn = (cmd, args, opts) => {
+  const spawn: NonNullable<NonNullable<Parameters<typeof captureOpencodeExport>[1]>["spawn"]> = (cmd, args, opts) => {
     return realSpawn('node', ['-e', 'process.stdout.write(Buffer.alloc(200, "{").toString())'], opts);
   };
   const result = await captureOpencodeExport('ses_big', { configuration: resolveConfiguration(process.env), spawn, maxBytes: 100, timeoutMs: 1000 });
@@ -43,7 +42,7 @@ test('captureOpencodeExport fails explicitly when output exceeds maxBytes', asyn
 });
 
 test('captureOpencodeExport resolves null when spawn throws', async () => {
-  const spawn = () => { throw new Error('opencode not found'); };
+  const spawn: NonNullable<NonNullable<Parameters<typeof captureOpencodeExport>[1]>["spawn"]> = () => { throw new Error('opencode not found'); };
   assert.equal(await captureOpencodeExport('ses_x', { configuration: resolveConfiguration(process.env), spawn }), null);
 });
 
@@ -82,7 +81,7 @@ test('captureOpencodeExport retains only its owned temporary directory when opte
 
 test('captureOpencodeExport resolves null on child error event', async () => {
   const child = childProcessDouble();
-  const spawn = () => child;
+  const spawn: NonNullable<NonNullable<Parameters<typeof captureOpencodeExport>[1]>["spawn"]> = () => child;
   const p = captureOpencodeExport('ses_x', { configuration: resolveConfiguration(process.env), spawn });
   child.emit('error', new Error('spawn ENOENT'));
   assert.equal(await p, null);
@@ -109,7 +108,7 @@ test('captureOpencodeExport captures full output with large payloads (regression
 
   // Generate identical payload in child process to avoid CLI argument size limits
   const spawnCode = 'var p={info:{id:"ses_large",tokens:{input:522475,output:6932,cached:0}},steps:[]};for(var i=0;i<50;i++){p.steps.push({type:"step-"+i,content:"x".repeat(3000),tokens:{input:20000,output:266}});}process.stdout.write(JSON.stringify(p));';
-  const spawn = (cmd, args, opts) => {
+  const spawn: NonNullable<NonNullable<Parameters<typeof captureOpencodeExport>[1]>["spawn"]> = (cmd, args, opts) => {
     return realSpawn('node', ['-e', spawnCode], opts);
   };
 

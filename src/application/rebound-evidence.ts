@@ -1,3 +1,4 @@
+import * as fmt from './presentation/cli-format.js';
 import type { ReboundContext, ReboundReason } from './rebound-kernel.js';
 import type { FixPromptSlots } from './rebound-prompts.js';
 import { reboundDiagnostic } from '../domain/rebound-policy.js';
@@ -124,3 +125,17 @@ export async function captureRetryEvidence(
 }
 
 /** Prompt slots derived from a structured reason. */
+
+export async function captureOriginalFailureEvidence(state: { reason: ReboundReason; capturedEvidence?: RecoveryEvidenceRef | null }, worktree: string, context: ReboundContext, log: NonNullable<ReboundContext['log']>): Promise<void> {
+  if (!state.capturedEvidence && worktree) {
+    // Best-effort: a missing or unwritable worktree must not abort the launch.
+    // captureGateFailureEvidence reports a write failure as `undefined`, not an
+    // error, so an absent worktree store simply skips retention here.
+    try {
+      state.capturedEvidence = await captureGateFailureEvidence(state.reason, worktree, context);
+    } catch (cause) {
+      log(fmt.status('WARN', `Could not persist original gate failure evidence (${worktree}): ${String(cause)}`));
+      state.capturedEvidence = undefined;
+    }
+  }
+}

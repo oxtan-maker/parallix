@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 
 
@@ -9,6 +8,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
+import { GitReader } from '../../../src/adapters/git/worktree.js';
 const git = mockModule<typeof import('../../../src/adapters/git/git.js')>('../../../src/adapters/git/git.js', import.meta.url);
 const __mm1 = mockModule<typeof import('../../../src/adapters/filesystem/mission-utils.js')>('../../../src/adapters/filesystem/mission-utils.js', import.meta.url);
 await installModuleMocks();
@@ -28,7 +28,7 @@ const {
   resolveBaseWorktree,
 } = __mm1;
 
-function withTempRepo(fn) {
+function withTempRepo(fn: (_arg0: string) => void) {
   const previous = process.cwd();
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-mission-utils-')));
   process.chdir(root);
@@ -48,8 +48,8 @@ test('getPrimaryBranch returns main when main branch exists', () => {
   const originalGit = git.git;
   try {
     git.git = (args) => {
-      if (args.includes('branch') && args.includes('--list')) return { stdout: 'main\nmaster\n' };
-      return { stdout: '' };
+      if (args.includes('branch') && args.includes('--list')) return { status: 0, stderr: '', signal: null,  stdout: 'main\nmaster\n' };
+      return { status: 0, stderr: '', signal: null,  stdout: '' };
     };
     assert.equal(getPrimaryBranch(), 'main');
   } finally {
@@ -59,7 +59,7 @@ test('getPrimaryBranch returns main when main branch exists', () => {
 
 test('getPrimaryBranch falls back to master when config says main but only master exists locally', () => {
   const originalGit = git.git;
-  withTempRepo(root => {
+  withTempRepo((root) => {
     fs.mkdirSync(path.join(root, 'workflow'), { recursive: true });
     fs.writeFileSync(path.join(root, 'workflow', 'index.js'), '// stub\n');
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
@@ -71,9 +71,9 @@ test('getPrimaryBranch falls back to master when config says main but only maste
     try {
       git.git = (args) => {
         if (args.includes('branch') && args.includes('--list')) {
-          return { status: 0, stdout: 'master\n', stderr: '' };
+          return { signal: null,  status: 0, stdout: 'master\n', stderr: '' };
         }
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       };
       assert.equal(getPrimaryBranch(root), 'master');
     } finally {
@@ -86,8 +86,8 @@ test('getPrimaryBranch returns master when only master exists', () => {
   const originalGit = git.git;
   try {
     git.git = (args) => {
-      if (args.includes('branch') && args.includes('--list')) return { stdout: 'master\n' };
-      return { stdout: '' };
+      if (args.includes('branch') && args.includes('--list')) return { status: 0, stderr: '', signal: null,  stdout: 'master\n' };
+      return { status: 0, stderr: '', signal: null,  stdout: '' };
     };
     assert.equal(getPrimaryBranch(), 'master');
   } finally {
@@ -98,7 +98,7 @@ test('getPrimaryBranch returns master when only master exists', () => {
 test('getPrimaryBranch throws when neither main nor master exists', () => {
   const originalGit = git.git;
   try {
-    git.git = () => ({ stdout: '' });
+    git.git = () => ({ status: 0, stderr: '', signal: null,  stdout: '' });
     assert.throws(() => getPrimaryBranch(), /Could not detect primary branch/);
   } finally {
     git.git = originalGit;
@@ -110,14 +110,14 @@ test('resolveMainRepo finds the master worktree', () => {
   try {
     git.git = (args) => {
       if (args.includes('branch') && args.includes('--list')) {
-        return { stdout: 'master\n' };
+        return { status: 0, stderr: '', signal: null,  stdout: 'master\n' };
       }
       if (args.includes('worktree') && args.includes('list')) {
-        return {
+        return { status: 0, stderr: '', signal: null,
           stdout: 'worktree /tmp/main\nbranch refs/heads/master\n\nworktree /tmp/mission-task-1\nbranch refs/heads/mission/task-1\n\n'
         };
       }
-      return { stdout: '' };
+      return { status: 0, stderr: '', signal: null,  stdout: '' };
     };
     assert.equal(resolveMainRepo(resolveConfiguration(process.env)), '/tmp/main');
     assert.equal(getPrimaryWorktree(resolveConfiguration(process.env)), '/tmp/main');
@@ -147,19 +147,19 @@ test('resolveMainRepo falls back to the current checkout when it is already on t
   try {
     git.git = (args) => {
       if (args.includes('branch') && args.includes('--list')) {
-        return { status: 0, stdout: 'main\n', stderr: '' };
+        return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
       }
       if (args.includes('worktree') && args.includes('list')) {
-        return {
+        return { signal: null,
           status: 0,
           stdout: 'worktree /tmp/mission-task-1\nbranch refs/heads/mission/task-1\n\n',
           stderr: ''
         };
       }
       if (args.includes('rev-parse') && args.includes('--show-toplevel')) {
-        return { status: 0, stdout: '/tmp/testproj\n', stderr: '' };
+        return { signal: null,  status: 0, stdout: '/tmp/testproj\n', stderr: '' };
       }
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     };
     git.getCurrentBranch = () => 'main';
 
@@ -177,7 +177,7 @@ test('resolveMainRepo falls back to the standalone repo root when branch metadat
   const previousPrimary = process.env.PRIMARY_WORKTREE;
   delete process.env.PRIMARY_WORKTREE;
 
-  withTempRepo(root => {
+  withTempRepo((root) => {
     fs.mkdirSync(path.join(root, 'workflow'), { recursive: true });
     fs.writeFileSync(path.join(root, 'workflow', 'index.js'), '#!/usr/bin/env node\n');
     fs.writeFileSync(path.join(root, 'workflow.config.json'), '{}\n');
@@ -185,19 +185,19 @@ test('resolveMainRepo falls back to the standalone repo root when branch metadat
     try {
       git.git = (args) => {
         if (args.includes('branch') && args.includes('--list')) {
-          return { status: 0, stdout: 'main\n', stderr: '' };
+          return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
         }
         if (args.includes('worktree') && args.includes('list')) {
-          return {
+          return { signal: null,
             status: 0,
             stdout: 'worktree /tmp/mission-task-1\nbranch refs/heads/mission/task-1\n\n',
             stderr: ''
           };
         }
         if (args.includes('rev-parse') && args.includes('--show-toplevel')) {
-          return { status: 0, stdout: `${root}\n`, stderr: '' };
+          return { signal: null,  status: 0, stdout: `${root}\n`, stderr: '' };
         }
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       };
       git.getCurrentBranch = () => '';
 
@@ -219,14 +219,14 @@ test('resolveMainRepo (regression) throws when primary branch worktree is missin
     git.git = (args) => {
       // branch --list: report master exists so getPrimaryBranch succeeds
       if (args.includes('branch') && args.includes('--list')) {
-        return { stdout: 'master\n' };
+        return { status: 0, stderr: '', signal: null,  stdout: 'master\n' };
       }
       if (args.includes('worktree') && args.includes('list')) {
-        return {
+        return { status: 0, stderr: '', signal: null,
           stdout: 'worktree /tmp/mission-task-1\nbranch refs/heads/mission/task-1\n\n'
         };
       }
-      return { stdout: '' };
+      return { status: 0, stderr: '', signal: null,  stdout: '' };
     };
     assert.throws(() => resolveMainRepo(resolveConfiguration(process.env)), /Could not resolve primary repository/);
   } finally {
@@ -259,7 +259,7 @@ test('resolveWorktree prefers live non-prunable matches and falls back to cwd br
 
   const resolved = resolveWorktree('task-130', {
     cwd: '/tmp/live-task-130/subdir',
-    gitFn: () => ({ stdout: worktreeList })
+    gitFn: () => ({ signal: null,  status: 0, stderr: '',  stdout: worktreeList })
   });
   assert.equal(resolved, '/tmp/live-task-130');
 
@@ -289,10 +289,10 @@ test('resolveWorktree walks up when git reports the git dir as the main worktree
   const resolved = resolveWorktree('task-132', {
     cwd: '/tmp/repo-task-132',
     gitFn: args => {
-      if (args[0] === 'worktree') {return { status: 0, stdout: worktreeList, stderr: '' };}
+      if (args[0] === 'worktree') {return { signal: null,  status: 0, stdout: worktreeList, stderr: '' };}
       assert.deepEqual(args.slice(2), ['rev-parse', '--is-inside-work-tree']);
       const dir = args[1];
-      return { status: 0, stdout: `${dir === '/tmp/repo-task-132'}\n`, stderr: '' };
+      return { signal: null,  status: 0, stdout: `${dir === '/tmp/repo-task-132'}\n`, stderr: '' };
     }
   });
   assert.equal(resolved, '/tmp/repo-task-132');
@@ -302,7 +302,7 @@ test('detectLaunchBaseBranch returns the current feature branch', () => {
   const base = detectLaunchBaseBranch('/tmp/repo', {
     gitFn: args => {
       assert.deepEqual(args, ['-C', '/tmp/repo', 'branch', '--show-current']);
-      return { status: 0, stdout: 'feat/x\n', stderr: '' };
+      return { signal: null,  status: 0, stdout: 'feat/x\n', stderr: '' };
     }
   });
   assert.equal(base, 'feat/x');
@@ -310,7 +310,7 @@ test('detectLaunchBaseBranch returns the current feature branch', () => {
 
 test('detectLaunchBaseBranch returns null for a detached HEAD', () => {
   const base = detectLaunchBaseBranch('/tmp/repo', {
-    gitFn: () => ({ status: 0, stdout: '\n', stderr: '' })
+    gitFn: () => ({ signal: null,  status: 0, stdout: '\n', stderr: '' })
   });
   assert.equal(base, null);
 });
@@ -318,7 +318,7 @@ test('detectLaunchBaseBranch returns null for a detached HEAD', () => {
 test('detectLaunchBaseBranch refuses to nest a mission on a mission branch', () => {
   assert.throws(
     () => detectLaunchBaseBranch('/tmp/repo', {
-      gitFn: () => ({ status: 0, stdout: 'mission/task-200\n', stderr: '' })
+      gitFn: () => ({ signal: null,  status: 0, stdout: 'mission/task-200\n', stderr: '' })
     }),
     /mission/
   );
@@ -331,7 +331,7 @@ test('parseBaseBranchLine extracts the recorded base branch only on an exact lin
 });
 
 test('resolveMissionBaseBranch returns the recorded base when MISSION.md records one', () => {
-  withTempRepo(root => {
+  withTempRepo((root) => {
     const year = new Date().getFullYear().toString();
     const missionDir = path.join(root, 'docs', 'missions', year, 'task-201');
     fs.mkdirSync(missionDir, { recursive: true });
@@ -343,7 +343,7 @@ test('resolveMissionBaseBranch returns the recorded base when MISSION.md records
 
 test('resolveMissionBaseBranch falls back to the primary branch when no base is recorded', () => {
   const originalGit = git.git;
-  withTempRepo(root => {
+  withTempRepo((root) => {
     const year = new Date().getFullYear().toString();
     const missionDir = path.join(root, 'docs', 'missions', year, 'task-202');
     fs.mkdirSync(missionDir, { recursive: true });
@@ -352,9 +352,9 @@ test('resolveMissionBaseBranch falls back to the primary branch when no base is 
     try {
       git.git = args => {
         if (args.includes('branch') && args.includes('--list')) {
-          return { status: 0, stdout: 'main\n', stderr: '' };
+          return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
         }
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       };
       assert.equal(resolveMissionBaseBranch('task-202', root), 'main');
     } finally {
@@ -366,7 +366,7 @@ test('resolveMissionBaseBranch falls back to the primary branch when no base is 
 test('resolveBaseWorktree delegates to the primary worktree when base equals primary', () => {
   const previousPrimary = process.env.PRIMARY_WORKTREE;
   process.env.PRIMARY_WORKTREE = `/tmp/primary-main-${process.pid}`;
-  withTempRepo(root => {
+  withTempRepo((root) => {
     const year = new Date().getFullYear().toString();
     const missionDir = path.join(root, 'docs', 'missions', year, 'task-203');
     fs.mkdirSync(missionDir, { recursive: true });
@@ -378,9 +378,9 @@ test('resolveBaseWorktree delegates to the primary worktree when base equals pri
         rootDir: root,
         gitFn: args => {
           if (args.includes('branch') && args.includes('--list')) {
-            return { status: 0, stdout: 'main\n', stderr: '' };
+            return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
           }
-          return { status: 0, stdout: '', stderr: '' };
+          return { signal: null,  status: 0, stdout: '', stderr: '' };
         }
       });
       assert.equal(worktree, `/tmp/primary-main-${process.pid}`);
@@ -394,32 +394,32 @@ test('resolveBaseWorktree delegates to the primary worktree when base equals pri
 test('resolveBaseWorktree auto-creates a worktree on the base branch when none is checked out', () => {
   const previousPrimary = process.env.PRIMARY_WORKTREE;
   process.env.PRIMARY_WORKTREE = `/tmp/primary-main-${process.pid}`;
-  withTempRepo(root => {
+  withTempRepo((root) => {
     const year = new Date().getFullYear().toString();
     const missionDir = path.join(root, 'docs', 'missions', year, 'task-204');
     fs.mkdirSync(missionDir, { recursive: true });
     fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: Feature branch\n\nBase-Branch: feat/x\n');
 
-    const calls = [];
+    const calls: string[] = [];
     try {
       const worktree = resolveBaseWorktree('task-204', { configuration: resolveConfiguration(process.env),
         rootDir: root,
         gitFn: args => {
           calls.push(args.join(' '));
           if (args.includes('branch') && args.includes('--list')) {
-            return { status: 0, stdout: 'main\n', stderr: '' };
+            return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
           }
           if (args.includes('worktree') && args.includes('list')) {
             // No worktree on feat/x yet — only the primary.
-            return { status: 0, stdout: `worktree /tmp/primary-main-${process.pid}\nbranch refs/heads/main\n\n`, stderr: '' };
+            return { signal: null,  status: 0, stdout: `worktree /tmp/primary-main-${process.pid}\nbranch refs/heads/main\n\n`, stderr: '' };
           }
           if (args.includes('show-ref')) {
-            return { status: 0, stdout: '', stderr: '' };
+            return { signal: null,  status: 0, stdout: '', stderr: '' };
           }
           if (args.includes('worktree') && args.includes('add')) {
-            return { status: 0, stdout: '', stderr: '' };
+            return { signal: null,  status: 0, stdout: '', stderr: '' };
           }
-          return { status: 0, stdout: '', stderr: '' };
+          return { signal: null,  status: 0, stdout: '', stderr: '' };
         }
       });
       const expected = conventionalBaseWorktreePath('feat/x', `/tmp/primary-main-${process.pid}`);
@@ -435,7 +435,7 @@ test('resolveBaseWorktree auto-creates a worktree on the base branch when none i
 test('resolveBaseWorktree returns an existing worktree already checked out on the base branch', () => {
   const previousPrimary = process.env.PRIMARY_WORKTREE;
   process.env.PRIMARY_WORKTREE = `/tmp/primary-main-${process.pid}`;
-  withTempRepo(root => {
+  withTempRepo((root) => {
     const year = new Date().getFullYear().toString();
     const missionDir = path.join(root, 'docs', 'missions', year, 'task-205');
     fs.mkdirSync(missionDir, { recursive: true });
@@ -446,16 +446,16 @@ test('resolveBaseWorktree returns an existing worktree already checked out on th
         rootDir: root,
         gitFn: args => {
           if (args.includes('branch') && args.includes('--list')) {
-            return { status: 0, stdout: 'main\n', stderr: '' };
+            return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
           }
           if (args.includes('worktree') && args.includes('list')) {
-            return {
+            return { signal: null,
               status: 0,
               stdout: `worktree /tmp/primary-main-${process.pid}\nbranch refs/heads/main\n\nworktree /tmp/feat-y\nbranch refs/heads/feat/y\n\n`,
               stderr: ''
             };
           }
-          return { status: 0, stdout: '', stderr: '' };
+          return { signal: null,  status: 0, stdout: '', stderr: '' };
         }
       });
       assert.equal(worktree, '/tmp/feat-y');
@@ -469,7 +469,7 @@ test('resolveBaseWorktree returns an existing worktree already checked out on th
 test('resolveBaseWorktree fails fast with a base-branch message when the base does not exist locally', () => {
   const previousPrimary = process.env.PRIMARY_WORKTREE;
   process.env.PRIMARY_WORKTREE = `/tmp/primary-main-${process.pid}`;
-  withTempRepo(root => {
+  withTempRepo((root) => {
     const year = new Date().getFullYear().toString();
     const missionDir = path.join(root, 'docs', 'missions', year, 'task-206');
     fs.mkdirSync(missionDir, { recursive: true });
@@ -481,15 +481,15 @@ test('resolveBaseWorktree fails fast with a base-branch message when the base do
           rootDir: root,
           gitFn: args => {
             if (args.includes('branch') && args.includes('--list')) {
-              return { status: 0, stdout: 'main\n', stderr: '' };
+              return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
             }
             if (args.includes('worktree') && args.includes('list')) {
-              return { status: 0, stdout: `worktree /tmp/primary-main-${process.pid}\nbranch refs/heads/main\n\n`, stderr: '' };
+              return { signal: null,  status: 0, stdout: `worktree /tmp/primary-main-${process.pid}\nbranch refs/heads/main\n\n`, stderr: '' };
             }
             if (args.includes('show-ref')) {
-              return { status: 1, stdout: '', stderr: '' };
+              return { signal: null,  status: 1, stdout: '', stderr: '' };
             }
-            return { status: 0, stdout: '', stderr: '' };
+            return { signal: null,  status: 0, stdout: '', stderr: '' };
           }
         }),
         /base branch/

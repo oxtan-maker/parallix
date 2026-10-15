@@ -48,81 +48,81 @@ export class HandoffGateRecovery {
       if (reusableProof.ok) {
         log(fmt.status('PASS', proofReuseMessage(reusableProof)));
       } else {
-      // Bind a reusable proof to the inputs that existed before execution. A
-      // successful process exit alone must not certify a tree changed mid-gate.
-      const beforeGateProof = ports.verification.createVerificationProofIdentity(verificationCommand, rootDir);
-      log(`Verifying the repository: ${verificationCommand}`);
-      const verifyResult = runVerificationGateFn(area, {
-        rootDir,
-        stdio: 'pipe',
-        runFn: ports.git.run
-      });
-      if (verifyResult.status !== 0) {
-        const stdout = (verifyResult.stdout || '').trim();
-        const stderr = (verifyResult.stderr || '').trim();
-        const msg = 'Final verification gate failed. Fix errors before submitting or use --no-gate if appropriate.';
-        error(msg);
-        const failure: HandoffResult = {
-          ok: false,
-          error: msg,
-          gateOutput: { stdout, stderr },
-          gateFailure: {
-            area, command: verificationCommand, cwd: rootDir,
-            exitCode: verifyResult.status, stdout, stderr,
-            ...(ports.verification.isTransientVerificationFailure({ stdout, stderr }) ? { transient: true } : {}),
-          },
-        };
-        // `px handoff` used to print this result and exit, unlike the active
-        // command which routed it through rebound.  Keep one kernel policy for
-        // both entry points and re-run the complete handoff only after a real
-        // agent repair succeeds.  The recursive run disables this boundary so
-        // it returns fresh process evidence to the kernel instead of nesting
-        // another recovery budget.
-        if (!recoverGateFailure) { return failure; }
-        let retried: HandoffResult | null = null;
-        const outcome = await rebound(failure.gateFailure ? {
-          kind: 'gate-failure',
-          ...failure.gateFailure,
-        } : {
-          kind: 'handoff-verification', error: msg, gateOutput: `${stdout}\n${stderr}`.trim(),
-        }, {
-          slug,
-          worktree: rootDir,
-          implementer: forgejoUser,
-          startAgent: startAgentFn,
-          readHead: () => {
-            const result = ports.git.git(['-C', rootDir, 'rev-parse', 'HEAD']);
-            return result.status === 0 ? (result.stdout ?? '').trim() : null;
-          },
-          verify: async () => {
-            if (ports.verification.formatVerificationCommand(area, rootDir) !== verificationCommand) {
-              return { ok: false, diagnostic: 'Authorized required check changed during repair; operator decision required', reason: { kind: 'declared-gate-validation', command: verificationCommand, diagnostic: 'Locked repository verification command changed' } };
-            }
-            retried = await retryHandoff(slug, {
-              ...options, worktree: rootDir, force: true, recoverGateFailure: false,
-            });
-            return {
-              ok: Boolean(retried.ok),
-              command: verificationCommand,
-              diagnostic: retried.error || '',
-              reason: retried.gateFailure ? { kind: 'gate-failure', ...retried.gateFailure } : undefined,
-            };
-          },
-          log,
-          error,
+        // Bind a reusable proof to the inputs that existed before execution. A
+        // successful process exit alone must not certify a tree changed mid-gate.
+        const beforeGateProof = ports.verification.createVerificationProofIdentity(verificationCommand, rootDir);
+        log(`Verifying the repository: ${verificationCommand}`);
+        const verifyResult = runVerificationGateFn(area, {
+          rootDir,
+          stdio: 'pipe',
+          runFn: ports.git.run
         });
-        return outcome.outcome === 'fixed' && retried
-          ? retried
-          : { ...failure, error: outcome.dossier || outcome.diagnostic || failure.error };
-      }
-      const proofResult = beforeGateProof.ok
-        ? ports.verification.writeReusableVerificationProof(verificationCommand, rootDir, { expectedIdentity: beforeGateProof.identity })
-        : beforeGateProof;
-      if (proofResult.ok) {
-        log(fmt.status('PASS', 'Repository verification passed.'));
-      } else {
-        log(fmt.status('WARN', `Repository verification passed, but its reusable proof is unavailable (${proofResult.error}).`));
-      }
+        if (verifyResult.status !== 0) {
+          const stdout = (verifyResult.stdout || '').trim();
+          const stderr = (verifyResult.stderr || '').trim();
+          const msg = 'Final verification gate failed. Fix errors before submitting or use --no-gate if appropriate.';
+          error(msg);
+          const failure: HandoffResult = {
+            ok: false,
+            error: msg,
+            gateOutput: { stdout, stderr },
+            gateFailure: {
+              area, command: verificationCommand, cwd: rootDir,
+              exitCode: verifyResult.status, stdout, stderr,
+              ...(ports.verification.isTransientVerificationFailure({ stdout, stderr }) ? { transient: true } : {}),
+            },
+          };
+          // `px handoff` used to print this result and exit, unlike the active
+          // command which routed it through rebound.  Keep one kernel policy for
+          // both entry points and re-run the complete handoff only after a real
+          // agent repair succeeds.  The recursive run disables this boundary so
+          // it returns fresh process evidence to the kernel instead of nesting
+          // another recovery budget.
+          if (!recoverGateFailure) { return failure; }
+          let retried: HandoffResult | null = null;
+          const outcome = await rebound(failure.gateFailure ? {
+            kind: 'gate-failure',
+            ...failure.gateFailure,
+          } : {
+            kind: 'handoff-verification', error: msg, gateOutput: `${stdout}\n${stderr}`.trim(),
+          }, {
+            slug,
+            worktree: rootDir,
+            implementer: forgejoUser,
+            startAgent: startAgentFn,
+            readHead: () => {
+              const result = ports.git.git(['-C', rootDir, 'rev-parse', 'HEAD']);
+              return result.status === 0 ? (result.stdout ?? '').trim() : null;
+            },
+            verify: async () => {
+              if (ports.verification.formatVerificationCommand(area, rootDir) !== verificationCommand) {
+                return { ok: false, diagnostic: 'Authorized required check changed during repair; operator decision required', reason: { kind: 'declared-gate-validation', command: verificationCommand, diagnostic: 'Locked repository verification command changed' } };
+              }
+              retried = await retryHandoff(slug, {
+                ...options, worktree: rootDir, force: true, recoverGateFailure: false,
+              });
+              return {
+                ok: Boolean(retried.ok),
+                command: verificationCommand,
+                diagnostic: retried.error || '',
+                reason: retried.gateFailure ? { kind: 'gate-failure', ...retried.gateFailure } : undefined,
+              };
+            },
+            log,
+            error,
+          });
+          return outcome.outcome === 'fixed' && retried
+            ? retried
+            : { ...failure, error: outcome.dossier || outcome.diagnostic || failure.error };
+        }
+        const proofResult = beforeGateProof.ok
+          ? ports.verification.writeReusableVerificationProof(verificationCommand, rootDir, { expectedIdentity: beforeGateProof.identity })
+          : beforeGateProof;
+        if (proofResult.ok) {
+          log(fmt.status('PASS', 'Repository verification passed.'));
+        } else {
+          log(fmt.status('WARN', `Repository verification passed, but its reusable proof is unavailable (${proofResult.error}).`));
+        }
       }
     }
     return null;
@@ -152,19 +152,7 @@ export class HandoffGateRecovery {
     if (gatesResult.ok === false) {
       const msg = `Declared gate "${gatesResult.gate}" failed for ${fmt.slug(slug)}: ${gatesResult.error || gatesResult.reason}. Blocking handoff — task remains in active.`;
       error(msg);
-      const processFailure = gatesResult.reason === 'gate-failed' ? gatesResult : null;
-      const failure: HandoffResult = {
-        ok: false,
-        error: msg,
-        reason: gatesResult.reason,
-        gateOutput: { stdout: (processFailure?.stdout || ''), stderr: (processFailure?.stderr || '') },
-        ...(processFailure ? {
-          gateFailure: {
-            area: 'declared gate', command: processFailure.gate, cwd: rootDir, exitCode: processFailure.exitCode,
-            stdout: processFailure.stdout || '', stderr: processFailure.stderr || processFailure.error || '',
-          },
-        } : {}),
-      };
+      const failure = declaredGateFailure(gatesResult, msg, rootDir);
       if (!recoverGateFailure) { return failure; }
       const reason = gatesResult.reason === 'validation-failed'
         ? { kind: 'declared-gate-validation' as const, command: gatesResult.gate, diagnostic: gatesResult.error || msg }
@@ -209,4 +197,21 @@ export class HandoffGateRecovery {
 /** Preserve producer attribution while supporting older proof-port adapters. */
 function proofReuseMessage(proof: ProofResult): string {
   return proof.diagnostic ?? 'Repository verification passed by reuse of successful active/review proof.';
+}
+
+function declaredGateFailure(gatesResult: Extract<ReturnType<DeclaredGateRunner['runDeclaredGates']>, { ok: false }>, msg: string, rootDir: string): HandoffResult {
+  const processFailure = gatesResult.reason === 'gate-failed' ? gatesResult : null;
+  return {
+    ok: false,
+    error: msg,
+    reason: gatesResult.reason,
+    gateOutput: { stdout: (processFailure?.stdout || ''), stderr: (processFailure?.stderr || '') },
+    ...(processFailure ? {
+      gateFailure: {
+        area: 'declared gate', command: processFailure.gate, cwd: rootDir, exitCode: processFailure.exitCode,
+        stdout: processFailure.stdout || '', stderr: processFailure.stderr || processFailure.error || '',
+      },
+    } : {}),
+  };
+
 }

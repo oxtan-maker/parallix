@@ -6,24 +6,25 @@ Entrypoint: {{review_entrypoint}}
 
 Load before reviewing:
 - `AGENTS.md`
-- Mission context: use the authoritative status snapshot supplied at launch, current as of launch; no initial px status call is needed. It reports the recorded brief (goal, why, scope, out-of-scope), the success criteria, declared gates, the latest recorded checkpoint evidence with its Goal Check rows and next action, the reviewed revision, unresolved findings and implementer resolutions.
+- Mission context: `px status {{slug}}` (add `--json` for structured fields). It reports the recorded brief (goal, why, scope, out-of-scope), the success criteria, declared gates, the latest recorded checkpoint evidence with its Goal Check rows and next action, the reviewed revision, outstanding findings, and prior implementer resolutions.
 - diff: `git diff {{reviewBaseline}}..HEAD`
-- review history: the launch snapshot reports the current round, phase, and disposition, then each recorded round with its reviewer and implementer families, verdict, comment, findings, fixes, and pushbacks. This is projected from the operator database, not from your own context.
+- review history: `px status {{slug}}`, whose `Review:` block reports the current round, phase, and disposition, then each recorded round with its reviewer and implementer families, verdict, comment, findings, fixes, and pushbacks. This is projected from the operator database, not from your own context.
 
 `px status` is the authority for Mission state. Nothing in the repository records it.
 
 {{integrationRepair}}
 
 Review history is not optional context:
-- You may not be the agent family that reviewed the previous round. When a family is usage-blocked the workflow reroutes the launch, so the round-1 reviewer's context is simply gone. The snapshot includes that durable history even when the agent family changes.
+- You may not be the agent family that reviewed the previous round. When a family is usage-blocked the workflow reroutes the launch, so the round-1 reviewer's context is simply gone. `px status {{slug}}` is how that continuity is preserved.
 - Do not re-raise a finding a previous round already settled. If the implementer fixed it, verify the fix instead of restating the finding. If the implementer pushed back, engage with their rationale — accept it, or explain specifically why it does not hold.
 - Treat a `PUSHBACK_ALL` in the history as a response awaiting your decision, not as an approval and not as a fresh set of findings.
 
 Minimum loop contract:
-- Use the supplied Mission snapshot and read AGENTS.md before reviewing. Read px status {{slug}} only for missing context or a conflict.
-- The block below reports which controls the workflow has already executed for this mission and which it has not, derived from machine records rather than from anyone's prose. Do not re-run a listed command whose recorded status is `passed`; cite the recorded result from this block instead. Use a focused check only to diagnose a concrete review finding. Handoff owns declared gates; a missing proof is something to investigate, not a request to rerun the full gates.
+- When `{{attempt}}` is 2 or later, before beginning this review round {{reviewContextAction}} the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; and the exact post-rebase revision and review baseline shown by `git diff {{reviewBaseline}}..HEAD`. This compaction is independent of the mission's declared gates.
+- Load the Mission context with `px status {{slug}}` and read `AGENTS.md` before reviewing.
+- The block below reports which controls the workflow has already executed for this mission and which it has not, derived from machine records rather than from anyone's prose. Do not re-run a listed command whose recorded status is `passed`; cite the recorded result from this block instead. Re-running is permitted only when the block reports no recorded gate result, reports a `failed` status, reports a control as not yet run, or the command you need is not listed here.
 {{completedControls}}
-- Use the snapshot for review history and Mission context. Submit your final decision with `px verdict`; do not use other write commands.
+- Use `px status {{slug}}` to load review history and Mission context. Submit your final decision with `px verdict`; do not use other write commands.
 - Review as an independent senior engineer. Approve only if the mission is satisfied, verification is credible for the risk level, and the diff is safe to integrate.
 - Request changes for actionable issues introduced or materially worsened by this mission.
 - Findings must be grounded in `git diff {{reviewBaseline}}..HEAD`, the Mission context and checkpoint evidence reported by `px status {{slug}}`, or inability to identify the reviewed revision.
@@ -39,9 +40,8 @@ Rebasing Artifacts:
 - Still flag real scope or correctness problems when this mission actually changes the file; only ignore branch stale-ness that is not a mission change.
 
 Check:
-- mission scope and success criteria in the authoritative snapshot: every planned checkpoint must have recorded evidence, and the latest must evidence every success criterion
+- mission scope and success criteria as reported by `px status {{slug}}`: every planned checkpoint must have recorded evidence, and the latest must evidence every success criterion
 - recorded checkpoint claims vs actual diff
-- Parallix owns Backlog lifecycle changes: status, assignee and lifecycle bookkeeping transitions are expected workflow changes. This does not exempt substantive task description, scope, acceptance criteria or other task edits; review those against the locked mission.
 - correctness and regressions
 - tests / gates / verification evidence
 - security and unsafe operations
@@ -70,5 +70,3 @@ You MUST:
 
 You MAY:
 - Create temporary diagnostic files under `/tmp`.
-
-Keep the final response to two to three lines: verdict submitted, key evidence, and any actionable finding.

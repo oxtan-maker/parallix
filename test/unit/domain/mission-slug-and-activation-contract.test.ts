@@ -1,3 +1,7 @@
+import type { MeasurementRecord } from '../../../src/application/measurement-ports.js';
+import { approvedReview } from '../../fixtures/mission-builders.js';
+import { missionVersion, type MissionVersion } from '../../../src/application/domain-ports.js';
+import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
 // Mission slug and activation contract: extraction boundaries, slug namespace and duplicate-closeout
 // rules, direct Backlog activation guard, and classification preservation across closeout.
 //
@@ -219,23 +223,19 @@ describe('Classification preservation across closeout', () => {
   const slug = 'task-2521.07';
 
   function missionWithLabels(labels: readonly string[]): Mission {
-    return {
+    return completeMissionFixture(String(missionId(slug)), {
       id: missionId(slug), repositoryId: repositoryId('parallix'), title: 'classification regression',
       labels: missionLabels(labels), status: 'done', assignee: agentFamily('codex'),
       checkpoints: [], closedAt: '2026-09-27T12:00:00.000Z', netEngineeringLines: null,
-      review: {
-        rounds: [{ number: 1, implementer: agentFamily('codex'), reviewer: agentFamily('claude'),
-          subject: { revision: 'landed' }, decision: { kind: 'approved', decidedAt: '2026-09-27T11:00:00.000Z', comment: null, source: { kind: 'local' } } }],
-        reviewEvents: [], stageLaunches: [], intervention: null,
-      } as unknown as Mission['review'],
-    };
+      review: approvedReview(slug, { startedAt: '2026-09-27T10:00:00Z', decidedAt: '2026-09-27T11:00:00.000Z' }),
+    });
   }
 
   function missionStore(mission: Mission) {
     return {
       async load(id: ReturnType<typeof missionId>) {
         return String(id) === slug
-          ? { kind: 'found' as const, mission, version: 1 as never }
+          ? { kind: 'found' as const, mission, version: missionVersion(1) }
           : { kind: 'missing' as const };
       },
     };
@@ -244,22 +244,22 @@ describe('Classification preservation across closeout', () => {
   test('TASK-2594: classification writes preserve labels for native and imported Mission identities', async () => {
     for (const origin of ['native', 'imported'] as const) {
       let mission = missionWithLabels([origin, 'bug', 'ai_sdlc']);
-      let version = 4;
+      let version = missionVersion(4);
       const service = new MissionBriefService({
-        async load() { return { kind: 'found' as const, mission, version: version as never }; },
-        async save(next: Mission, expected: number) {
+        async load() { return { kind: 'found' as const, mission, version: version }; },
+        async save(next: Mission, expected: MissionVersion | null) {
           assert.equal(expected, version, `${origin} write uses the loaded version`);
-          mission = next; version += 1; return version as never;
+          mission = next; version = missionVersion(version + 1); return version;
         },
-      } as never);
+      });
       const result = await service.setClassification({
-        operationId: `test-${origin}`, missionId: missionId(slug), expectedVersion: version as never,
+        operationId: `test-${origin}`, missionId: missionId(slug), expectedVersion: version,
         capabilities: new Set(['mission:context']), classification: 'user_value',
       });
       assert.equal(result.status, 'completed');
       assert.deepEqual(mission.labels.map(String).sort(), ['bug', origin, 'user_value'].sort());
       const invalid = await service.setClassification({
-        operationId: `invalid-${origin}`, missionId: missionId(slug), expectedVersion: version as never,
+        operationId: `invalid-${origin}`, missionId: missionId(slug), expectedVersion: version,
         capabilities: new Set(['mission:context']), classification: 'other',
       });
       assert.equal(invalid.status, 'failed');
@@ -277,7 +277,7 @@ describe('Classification preservation across closeout', () => {
 
       const staleStore = missionStore(missionWithLabels(['migration', 'workflow']));
       await assert.rejects(
-        recordIntegrationStats({ slug, rootDir: root, date: '2026-09-27', store: inMemoryMeasurements(), missionStore: staleStore as never }),
+        recordIntegrationStats({ slug, rootDir: root, date: '2026-09-27', store: inMemoryMeasurements(), missionStore: staleStore }),
         /requires exactly one classification|px state/i,
         'provider-only ai_sdlc must not allow draft/closeout to treat an unclassified Mission as valid',
       );
@@ -285,8 +285,8 @@ describe('Classification preservation across closeout', () => {
       const classifiedStore = missionStore(missionWithLabels(['migration', 'workflow', 'ai_sdlc']));
       const measurements = inMemoryMeasurements();
       fs.rmSync(taskFile);
-      const first = await recordIntegrationStats({ slug, rootDir: root, date: '2026-09-27', store: measurements, missionStore: classifiedStore as never });
-      const second = await recordIntegrationStats({ slug, rootDir: root, date: '2026-09-27', store: measurements, missionStore: classifiedStore as never });
+      const first = await recordIntegrationStats({ slug, rootDir: root, date: '2026-09-27', store: measurements, missionStore: classifiedStore });
+      const second = await recordIntegrationStats({ slug, rootDir: root, date: '2026-09-27', store: measurements, missionStore: classifiedStore });
 
       assert.equal(first.row.classification, 'ai_sdlc');
       assert.equal(first.metadataSource.classification, 'mission-aggregate');
@@ -297,9 +297,9 @@ describe('Classification preservation across closeout', () => {
   });
 
   function inMemoryMeasurements() {
-    const rows: any[] = [];
+    const rows: MeasurementRecord[] = [];
     return {
-      upsertMeasurement(row: any) {
+      upsertMeasurement(row: MeasurementRecord) {
         const existing = rows.findIndex(candidate => candidate.repo === row.repo && candidate.mission === row.mission && candidate.stage === row.stage);
         if (existing >= 0) { return { changed: false }; }
         rows.push(row);

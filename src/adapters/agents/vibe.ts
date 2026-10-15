@@ -1,6 +1,7 @@
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
-import { spawnAndTee } from '../process/spawn-tee.js';
+import type { AgentProcessResult } from './agent-process-types.js';
+import { spawnAndTee, type SpawnTeeOptions } from '../process/spawn-tee.js';
 import { compareCodeUnits } from '../../domain/comparators.js';
 import { parseVibeMeta, getVibeProviderModel, DEFAULT_VIBE_LOG_DIR } from './vibe-telemetry.js';
 import fs from 'node:fs';
@@ -19,14 +20,14 @@ interface VibeInvocationOptions {
   configuration?: ParallixConfiguration;
   prompt: string;
   worktree: string;
-  env?: Record<string, string>;
+  env?: NodeJS.ProcessEnv;
   resume?: boolean;
   sessionId?: string | null;
   model?: string | null;
 }
 
 interface StartVibeAgentOptions extends VibeInvocationOptions {
-  teeOptions?: object;
+  teeOptions?: SpawnTeeOptions;
 }
 
 function resolveVibeWorktree(worktree?: string | null) {
@@ -125,7 +126,7 @@ function ensureVibeHome(worktree: string) {
 // telemetryToStatsFields in src/adapters/cli/commands/stats.ts.
 
 
-interface ProcessedResult {
+interface ProcessedResult extends AgentProcessResult {
   sessionId: string | null;
   telemetry: {
     provider: string;
@@ -138,7 +139,6 @@ interface ProcessedResult {
     usagePercent: null;
     cost_usd: number;
   } | null;
-  [key: string]: unknown;
 }
 
 function readVibeSession(scanDir: string, dir: string) {
@@ -171,7 +171,32 @@ function closestVibeSession(scanDir: string, invokeTime: number, invokeWindow: {
   }
 }
 
-function processResult(result: any, basePath?: string, invocationStart?: string): ProcessedResult {
+function invocationWindow(invocationStart?: string) {
+  let invokeTime = NaN;
+  let invokeWindow: { start: number; end: number } | null = null;
+  if (invocationStart) {
+    invokeTime = Date.parse(invocationStart);
+    if (!Number.isNaN(invokeTime)) {
+      const deltaMs = MAX_SESSION_AGE_MINUTES * 60000;
+      invokeWindow = { start: invokeTime - deltaMs, end: invokeTime + deltaMs };
+    }
+  }
+
+  return { invokeTime, invokeWindow };
+}
+
+function totalVibeToolCalls(bestTelemetry: NonNullable<ReturnType<typeof parseVibeMeta>>) {
+  const allToolCalls =
+    (bestTelemetry.toolCallsAgreed || 0) +
+    (bestTelemetry.toolCallsRejected || 0) +
+    (bestTelemetry.toolCallsFailed || 0) +
+    (bestTelemetry.toolCallsSucceeded || 0);
+
+  return allToolCalls;
+}
+
+function processResult<T extends AgentProcessResult>(result: T, basePath?: string, invocationStart?: string): Omit<T, 'sessionId' | 'telemetry'> & ProcessedResult;
+function processResult(result: AgentProcessResult, basePath?: string, invocationStart?: string): ProcessedResult {
   if (!result || typeof result !== 'object') {
     return { sessionId: null, telemetry: null };
   }
@@ -183,15 +208,7 @@ function processResult(result: any, basePath?: string, invocationStart?: string)
   // start_time falls within MAX_SESSION_AGE_MINUTES of the invocation.
   // This prevents cross-mission telemetry misattribution when multiple
   // vibe phases run concurrently against a shared session directory.
-  let invokeTime = NaN;
-  let invokeWindow: { start: number; end: number } | null = null;
-  if (invocationStart) {
-    invokeTime = Date.parse(invocationStart);
-    if (!Number.isNaN(invokeTime)) {
-      const deltaMs = MAX_SESSION_AGE_MINUTES * 60000;
-      invokeWindow = { start: invokeTime - deltaMs, end: invokeTime + deltaMs };
-    }
-  }
+  const { invokeTime, invokeWindow } = invocationWindow(invocationStart);
 
   const bestSession = closestVibeSession(scanDir, invokeTime, invokeWindow);
   const bestTelemetry = bestSession?.telemetry ?? null;
@@ -218,11 +235,6 @@ function processResult(result: any, basePath?: string, invocationStart?: string)
     bestMtimeMs !== null && !Number.isNaN(invokeTime) && bestMtimeMs + 1000 >= invokeTime
   );
 
-  const allToolCalls =
-    (bestTelemetry.toolCallsAgreed || 0) +
-    (bestTelemetry.toolCallsRejected || 0) +
-    (bestTelemetry.toolCallsFailed || 0) +
-    (bestTelemetry.toolCallsSucceeded || 0);
 
   const pm = getVibeProviderModel();
   const model = bestTelemetry.contextTokens > 0 || bestTelemetry.inputTokens > 0 ? 'mistral' : pm.model;
@@ -234,7 +246,7 @@ function processResult(result: any, basePath?: string, invocationStart?: string)
     outputTokens: bestTelemetry.outputTokens,
     cachedTokens: bestTelemetry.contextTokens,
     totalTokens: bestTelemetry.totalTokens,
-    toolCalls: allToolCalls,
+    toolCalls: totalVibeToolCalls(bestTelemetry),
     usagePercent: null,
     cost_usd: bestTelemetry.sessionCost,
   };
@@ -271,7 +283,8 @@ function buildVibeInvocation({ configuration = DEFAULT_CONFIGURATION, prompt, wo
 
   // Vibe has no CLI model flag in programmatic mode; the active model is
   // selected via the VIBE_ACTIVE_MODEL env var (verified from `vibe --help`).
-  const modelEnv = model ? { VIBE_ACTIVE_MODEL: model } : {};
+  const modelEnv: NodeJS.ProcessEnv = model ? { VIBE_ACTIVE_MODEL: model } : {};
+  const childEnv: NodeJS.ProcessEnv = { ...configuration.forwardedEnvironment, ...env, ...modelEnv, VIBE_HOME: vibeHomeRoot(rootDir) };
 
   return {
     command: resolveVibeCommand(),
@@ -279,7 +292,7 @@ function buildVibeInvocation({ configuration = DEFAULT_CONFIGURATION, prompt, wo
     options: {
       stdio: 'inherit',
       cwd: rootDir,
-      env: { ...configuration.forwardedEnvironment, ...env, ...modelEnv, VIBE_HOME: vibeHomeRoot(rootDir) }
+      env: childEnv
     }
   };
 }
@@ -289,7 +302,7 @@ function startVibeAgent({ configuration = DEFAULT_CONFIGURATION, prompt, worktre
   ensureVibeHome(rootDir);
   const invocation = buildVibeInvocation({ configuration, prompt, worktree: rootDir, env, resume, sessionId, model });
   const invocationStart = new Date().toISOString();
-  const resultPromise = spawnAndTee(invocation.command, invocation.args, { ...invocation.options, ...teeOptions, configuration } as any).then((result: any) => {
+  const resultPromise = spawnAndTee(invocation.command, invocation.args, { ...invocation.options, ...teeOptions, configuration }).then((result: AgentProcessResult) => {
     if (result && result.stdout) {
       result.sessionId = extractVibeSessionId(result.stdout);
     }
@@ -306,7 +319,7 @@ function startVibeAgent({ configuration = DEFAULT_CONFIGURATION, prompt, worktre
 // result.telemetry by processResult above) is trustworthy evidence the run
 // produced real work, independent of the final exit code. Mirrors
 // isSpuriousOpencodeExit() in opencode.ts.
-function isSpuriousVibeExit(result: any) {
+function isSpuriousVibeExit(result: AgentProcessResult) {
   if (!result || result.status !== 1 || result.signal || result.error) {return false;}
   if (!result.telemetryFresh) {return false;}
   const t = result.telemetry;

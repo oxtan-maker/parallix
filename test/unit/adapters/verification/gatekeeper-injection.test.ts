@@ -45,9 +45,9 @@ test('runGatekeeper short-circuits with ok when the mandatory-file check passes'
   const posted = runGatekeeper('task-1', {
     branch: 'mission/task-1',
     log: () => '',
-    checkFn: () => ({ ok: true, missing: [] }),
+    checkFn: () => ({ ok: true as const, missing: [] }),
     readTokenFn: () => 'token',
-    postReviewFn: () => ({ ok: true }),
+    postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
   });
   assert.equal(posted.ok, true);
   assert.equal(posted.posted, false);
@@ -59,7 +59,7 @@ test('runGatekeeper skips pushback when no Forgejo token is available', () => {
     branch: 'mission/task-1',
     user: 'claude',
     log: () => '',
-    checkFn: () => ({ ok: false, missing: ['MISSION.md'] }),
+    checkFn: () => ({ ok: false as const, missing: ['MISSION.md'] }),
     readTokenFn: () => null,
     postReviewFn: () => { throw new Error('should not post'); },
   });
@@ -72,13 +72,13 @@ test('runGatekeeper posts a request-changes review on a clean token', () => {
   const posted = runGatekeeper('task-1', {
     branch: 'mission/task-1',
     log: () => '',
-    checkFn: () => ({ ok: false, missing: ['MISSION.md'] }),
+    checkFn: () => ({ ok: false as const, missing: ['MISSION.md'] }),
     readTokenFn: () => 'secret',
     postReviewFn: (branch, _token, state, body) => {
       assert.equal(branch, 'mission/task-1');
       assert.equal(state, 'request-changes');
       assert.ok(body.includes('gatekeeper'));
-      return { ok: true };
+      return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const };
     },
   });
   assert.equal(posted.posted, true);
@@ -89,9 +89,9 @@ test('runGatekeeper reports a failed postReview as skipped=false and posted=fals
   const posted = runGatekeeper('task-1', {
     branch: 'mission/task-1',
     log: () => '',
-    checkFn: () => ({ ok: false, missing: ['MISSION.md'] }),
+    checkFn: () => ({ ok: false as const, missing: ['MISSION.md'] }),
     readTokenFn: () => 'secret',
-    postReviewFn: () => ({ ok: false, error: '403 forbidden' }),
+    postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null,  ok: false as const, error: '403 forbidden' }),
   });
   assert.equal(posted.posted, false);
   assert.equal(posted.skipped, false);

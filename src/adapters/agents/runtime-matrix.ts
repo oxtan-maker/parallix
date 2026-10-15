@@ -23,6 +23,7 @@ function resolveConfigPath(configPath: string | undefined, existsSyncFn: typeof 
 }
 
 interface LauncherStatusResult {
+  agent: string;
   supported: boolean;
   detail: string;
   health?: string;

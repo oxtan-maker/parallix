@@ -14,20 +14,23 @@
 // cumulative Codex usage for the execute phase instead of the windowed delta
 // (architecture migration review F1/F6).
 
+import type { StageTelemetry } from '../../application/stats-recording-use-case.js';
 import { codexHomeRoot, extractCodexTelemetry } from './codex.js';
 
 interface StageTelemetryOptions {
   worktree: string;
   // Optional: a launcher that produced no run record still resolves to null
   // through the guard below rather than forcing callers to fabricate one.
-  result?: { telemetry?: { provider?: string } & Record<string, any> };
+  result?: { telemetry?: StageTelemetry | null } | null;
   sinceMs?: number;
 }
+
+const EMPTY_STAGE_OPTIONS: StageTelemetryOptions = Object.freeze({ worktree: '' });
 
 /**
  * @returns normalized telemetry, or null when none is available.
  */
-function resolveStageTelemetry({ worktree, result, sinceMs = 0 }: StageTelemetryOptions = {} as StageTelemetryOptions) {
+function resolveStageTelemetry({ worktree, result, sinceMs = 0 }: StageTelemetryOptions = EMPTY_STAGE_OPTIONS) {
   if (!result || !result.telemetry) {return null;}
   try {
     const codexT = extractCodexTelemetry(codexHomeRoot(worktree), { sinceMs: sinceMs || 0 });
@@ -47,11 +50,3 @@ function resolveStageTelemetry({ worktree, result, sinceMs = 0 }: StageTelemetry
 }
 
 export { resolveStageTelemetry };
-
-/** Legacy normalization uses zero for absent cost; only an explicit measured zero is usable. */
-export function measuredReviewCost(telemetry: unknown): number | null {
-  if (!telemetry || typeof telemetry !== 'object') { return null; }
-  const data = telemetry as Record<string, unknown>, cost = data.cost_usd;
-  if (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0) { return null; }
-  return cost > 0 || data.cost_measured === true ? cost : null;
-}

@@ -1,3 +1,4 @@
+import type { AgentConfig } from '../../../src/adapters/agents/agent-config.js';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -40,7 +41,7 @@ async function createDbWithSchema(): Promise<{ db: SqliteDatabaseAdapter; dir: s
   return { db, dir, dbPath };
 }
 
-const activeStepConfig = (blocklist: unknown) => ({
+const activeStepConfig = (blocklist: AgentConfig['blocklist']): AgentConfig => ({
   steps: { active: { eligible: ['codex', 'claude', 'vibe', 'custom'] } },
   blocklist,
 });

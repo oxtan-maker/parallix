@@ -124,7 +124,6 @@ test('repository active verifier real shell ' + scenario + ' contract (TASK-2715
       '.gitignore': 'node_modules\n',
       'bin/npm': '#!/bin/sh\nif [ "$FAIL_BUILD" = 1 ]; then exit 7; fi\nif [ "$1" = test ]; then\n  test "$PARALLIX_TEST_COVERAGE" = 0 && test -z "$NODE_V8_COVERAGE" && test -z "$NODE_OPTIONS" || exit 8\n  printf "uncovered\\n" >> .git/unit-count\nfi\n',
       'package.json': '{"type":"module","version":"1.0.0"}',
-      'scripts/verify-docs.mjs': '',
       'scripts/verify-local.sh': fs.readFileSync(path.join(repoRoot, 'scripts/verify-local.sh'), 'utf8'),
     });
     fs.chmodSync(path.join(checkout, 'bin/npm'), 0o755);

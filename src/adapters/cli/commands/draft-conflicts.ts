@@ -115,21 +115,7 @@ function enforceDraftCommitSafety({ slug, worktree, dirtyEntries = getWorktreeSt
     return false;
   }
 
-  const entries = dirtyEntries.map(parseDirtyEntry);
-  const retiredDocument = entries.find(entry =>
-    /(?:^|\/)(?:MISSION|CP-\d+)\.md$/i.test(entry.filePath)
-  );
-  if (retiredDocument) {
-    throw new Error(`Draft safety harness refuses to commit ${retiredDocument.filePath}; record the contract with typed px commands and inspect it with px status.`);
-  }
-  const missionDir = findMissionDir(slug, worktree) || missionDirForSlug(worktree, slug);
-  const missionPath = path.relative(worktree, missionDir).split(path.sep).join('/');
-  if (entries.some(entry => entry.status === '??' && entry.filePath.endsWith('/') && `${missionPath}/`.startsWith(entry.filePath)) && fs.existsSync(missionDir)) {
-    const retiredName = fs.readdirSync(missionDir).find(name => /^(?:MISSION|CP-\d+)\.md$/i.test(name));
-    if (retiredName) {
-      throw new Error(`Draft safety harness refuses to commit ${path.join(missionPath, retiredName)}; record the contract with typed px commands and inspect it with px status.`);
-    }
-  }
+  rejectRetiredDraftDocuments(dirtyEntries, slug, worktree);
 
   // A draft agent may leave Backlog task metadata uncommitted for the harness.
   // That is the designed handoff, so it travels on the plumbing channel. Genuine trouble
@@ -197,3 +183,22 @@ function enforceDraftCommitSafety({ slug, worktree, dirtyEntries = getWorktreeSt
 
 
 export { classifyDraftEntries, isUnmergedStatus, isDeletedStatus, isMissionTaskPath, isExpectedDraftPath, parseDirtyEntry, resolveMissionSpecificDraftConflicts, enforceDraftCommitSafety };
+
+function rejectRetiredDraftDocuments(dirtyEntries: readonly string[], slug: string, worktree: string): void {
+  const entries = dirtyEntries.map(parseDirtyEntry);
+  const retiredDocument = entries.find(entry =>
+    /(?:^|\/)(?:MISSION|CP-\d+)\.md$/i.test(entry.filePath)
+  );
+  if (retiredDocument) {
+    throw new Error(`Draft safety harness refuses to commit ${retiredDocument.filePath}; record the contract with typed px commands and inspect it with px status.`);
+  }
+  const missionDir = findMissionDir(slug, worktree) || missionDirForSlug(worktree, slug);
+  const missionPath = path.relative(worktree, missionDir).split(path.sep).join('/');
+  if (entries.some(entry => entry.status === '??' && entry.filePath.endsWith('/') && `${missionPath}/`.startsWith(entry.filePath)) && fs.existsSync(missionDir)) {
+    const retiredName = fs.readdirSync(missionDir).find(name => /^(?:MISSION|CP-\d+)\.md$/i.test(name));
+    if (retiredName) {
+      throw new Error(`Draft safety harness refuses to commit ${path.join(missionPath, retiredName)}; record the contract with typed px commands and inspect it with px status.`);
+    }
+  }
+
+}

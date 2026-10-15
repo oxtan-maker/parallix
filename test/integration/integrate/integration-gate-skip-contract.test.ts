@@ -1,4 +1,12 @@
-import { runStagedTierGuards } from '../../../src/adapters/cli/commands/integrate-staged-guards.js';
+import type { OperationalHistoryEntry } from '../../../src/application/ports/operation-history.js';
+import { missionVersion } from '../../../src/application/domain-ports.js';
+import type { IntegrateWorkflowPorts } from '../../../src/application/ports/integrate-workflow.js';
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { classifyReboundReason } from '../../../src/domain/rebound-policy.js';
+import { phaseGateResult } from '../../helpers/phase-gate-result.js';
+import { integrationServices } from '../../helpers/stub-integration-services.js';
+import { integrationContext } from '../../fixtures/integration-context.js';
+import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflow-ports.js';
 import { mkdtemp } from '../../helpers/temp-dir.js';
 // TASK-2625: sha-keyed integration-validation marker.
 //
@@ -77,7 +85,7 @@ test('validationSkipApplies is true only when the validating sha still covers th
   assert.equal(validationSkipApplies(null, 'validating-sha'), false, 'no marker -> fallback');
   // A marker is never built with an empty whitelist (buildIntegrationValidationMarker rejects it),
   // so an empty whitelist also falls back; assert via the guarded predicate directly.
-  assert.equal(validationSkipApplies({ missionId: SLUG, sha: 's', hooks: [] } as never, 's'), false, 'empty whitelist -> fallback');
+  assert.equal(validationSkipApplies({ missionId: SLUG, sha: 's', hooks: [] }, 's'), false, 'empty whitelist -> fallback');
 });
 
 // ── partitionGatesForSkip ─────────────────────────────────────────────────────
@@ -92,45 +100,45 @@ test('partitionGatesForSkip splits whitelisted (skip) from unvalidated (run) hoo
 // ── resolveSkippableGates (the wired skip decision) ───────────────────────────
 
 function markerEntry(sha: string, hooks: string[]) {
-  return { eventType: EVENT, eventData: JSON.stringify({ missionId: SLUG, sha, hooks }) };
+  return { createdAt: '2026-10-01T00:00:00Z', eventType: EVENT, eventData: JSON.stringify({ missionId: SLUG, sha, hooks }) };
 }
 
 type ChangedPathsResult = { ok: true; paths: string[] } | { ok: false; error: string };
 
 function makeStep(overrides: {
-  loadLatest?: () => Promise<unknown> | unknown;
-  runPhaseGates?: () => Promise<unknown>;
+  loadLatest?: () => Promise<OperationalHistoryEntry | null> | OperationalHistoryEntry | null;
+  runPhaseGates?: IntegrateWorkflowPorts['gates']['runPhaseGates'];
   changedPaths?: (_from: string, _to: string) => ChangedPathsResult;
 } = {}) {
   const recorded: Array<{ missionId: string; sha: string; hooks: string[] }> = [];
   const diffCalls: Array<{ rootDir: string; from: string; to: string }> = [];
-  const step = createIntegrationGateStep({
+  const step = createIntegrationGateStep(stubIntegrateWorkflowPorts({
     gates: {
       listChangedPathsBetween: (rootDir: string, from: string, to: string) => {
         diffCalls.push({ rootDir, from, to });
         return overrides.changedPaths ? overrides.changedPaths(from, to) : { ok: false, error: 'no diff seam configured' };
       },
       resolveIntegrationVerificationWorktree: () => '/fw',
-      captureFinalIntegrationTree: () => ({ ok: true, rootDir: '/fw', commit: 'final', tree: 't' }),
+      captureFinalIntegrationTree: () => ({ ok: true as const, rootDir: '/fw', commit: 'final', tree: 't' }),
       loadPhaseGates: () => [{ key: 'unit', command: 'u', order: 1 }, { key: 'integration-ci', command: 'i', order: 2 }],
       loadRequirePreIntegration: () => false,
       runPhaseGates: overrides.runPhaseGates
         ? overrides.runPhaseGates
-        : async () => ({ ok: true, skipped: false, gates: [{ key: 'unit' }, { key: 'integration-ci' }], executed: 2 }),
+        : async () => phaseGateResult({ skipped: false, gates: [{ key: 'unit', command: 'u', order: 1 }, { key: 'integration-ci', command: 'i', order: 2 }], executed: 2 }),
     },
     landing: { createAbort: () => Object.assign(new Error('aborted'), { name: 'IntegrationAbort' }) },
     verification: { formatVerificationCommand: () => 'verify' },
-  } as never);
-  const operationalHistory = {
+  }));
+  const operationalHistory: Pick<OperationalHistoryService, 'loadLatestByTypeForMission' | 'recordIntegrationValidation'> = {
     async loadLatestByTypeForMission(type: string, missionId: string) {
       assert.equal(type, EVENT);
       assert.equal(missionId, SLUG);
       return overrides.loadLatest ? overrides.loadLatest() : null;
     },
-    async recordIntegrationValidation(marker: { missionId: string; sha: string; hooks: string[] }) {
+    async recordIntegrationValidation(marker: { missionId: string; sha: string; hooks: readonly string[] }) {
       recorded.push({ missionId: marker.missionId, sha: marker.sha, hooks: [...marker.hooks] });
     },
-  } as unknown as OperationalHistoryService;
+  };
   return { step, operationalHistory, recorded, diffCalls };
 }
 
@@ -267,7 +275,7 @@ const FINALIZED_SHA = 'f0e1d2c3b4a5968778695a4b3c2d1e0f98765432';
 test('a finalized commit advanced only by a backlog task-file commit skips the validated hooks and logs the validated sha (TASK-2646 SC1/SC2)', async () => {
   const { step, operationalHistory, diffCalls } = makeStep({
     loadLatest: () => markerEntry(VALIDATED_SHA, ['unit', 'integration-ci']),
-    changedPaths: () => ({ ok: true, paths: [TASK_FILE] }),
+    changedPaths: () => ({ ok: true as const, paths: [TASK_FILE] }),
   });
   const logs: string[] = [];
   const result = await step.resolveSkippableGates({
@@ -306,7 +314,7 @@ test('any non-bookkeeping path in the validated-to-finalized diff selects the fu
   for (const substantive of ['src/application/integrate/gates.ts', 'test/a.test.ts', 'config/integration-pipelines.json', 'workflow.config.json']) {
     const { step, operationalHistory } = makeStep({
       loadLatest: () => markerEntry(VALIDATED_SHA, ['unit', 'integration-ci']),
-      changedPaths: () => ({ ok: true, paths: [TASK_FILE, substantive] }),
+      changedPaths: () => ({ ok: true as const, paths: [TASK_FILE, substantive] }),
     });
     const logs: string[] = [];
     const result = await step.resolveSkippableGates({
@@ -321,10 +329,10 @@ test('missing history, an unreachable marker sha, and every git-diff failure fal
   const configured = [{ key: 'unit' }, { key: 'integration-ci' }];
   const marker = () => markerEntry(VALIDATED_SHA, ['unit', 'integration-ci']);
   const cases: Array<[string, Parameters<typeof makeStep>[0], boolean]> = [
-    ['no marker row', { changedPaths: () => ({ ok: true, paths: [TASK_FILE] }) }, true],
-    ['unreadable history', { loadLatest: async () => { throw new Error('db locked'); }, changedPaths: () => ({ ok: true, paths: [TASK_FILE] }) }, true],
-    ['malformed marker row', { loadLatest: () => ({ eventType: EVENT, eventData: '{' }), changedPaths: () => ({ ok: true, paths: [TASK_FILE] }) }, true],
-    ['unreachable marker sha', { loadLatest: marker, changedPaths: () => ({ ok: false, error: `fatal: bad object ${VALIDATED_SHA}` }) }, true],
+    ['no marker row', { changedPaths: () => ({ ok: true as const, paths: [TASK_FILE] }) }, true],
+    ['unreadable history', { loadLatest: async () => { throw new Error('db locked'); }, changedPaths: () => ({ ok: true as const, paths: [TASK_FILE] }) }, true],
+    ['malformed marker row', { loadLatest: () => ({ createdAt: '2026-10-01T00:00:00Z', eventType: EVENT, eventData: '{' }), changedPaths: () => ({ ok: true as const, paths: [TASK_FILE] }) }, true],
+    ['unreachable marker sha', { loadLatest: marker, changedPaths: () => ({ ok: false as const, error: `fatal: bad object ${VALIDATED_SHA}` }) }, true],
     ['git diff throws', { loadLatest: marker, changedPaths: () => { throw new Error('spawn git ENOENT'); } }, true],
   ];
   for (const [label, overrides] of cases) {
@@ -334,7 +342,7 @@ test('missing history, an unreachable marker sha, and every git-diff failure fal
     });
     assert.deepEqual(result.gates.map(gate => gate.key), ['unit', 'integration-ci'], label);
   }
-  const { step } = makeStep({ loadLatest: marker, changedPaths: () => ({ ok: true, paths: [TASK_FILE] }) });
+  const { step } = makeStep({ loadLatest: marker, changedPaths: () => ({ ok: true as const, paths: [TASK_FILE] }) });
   const noStore = await step.resolveSkippableGates({
     configured, slug: SLUG, checkout: '/fw', finalizedCommit: FINALIZED_SHA, operationalHistory: null, log: () => {},
   });
@@ -432,32 +440,32 @@ test('a post-rebase finalized commit runs the full suite when main brought a non
 // ── SC1: the rebound green-validation path persists the skip marker ──────────
 
 test('rebound verify rerun green records the skip marker keyed on the fix commit (SC1)', async () => {
-  let recorded: { missionId: string; sha: string; hooks: string[] } | null = null;
+  let recorded: { value: { missionId: string; sha: string; hooks: string[] } | null } = { value: null };
   const route = await routeIntegrationGateFailure({
     slug: SLUG,
     missionWorktree: '/fw',
     failedGate: { key: 'integration-ci', command: 'int', exitCode: 1, stdout: '', stderr: '' },
-    gates: [{ key: 'unit', command: 'u' }, { key: 'integration-ci', command: 'i' }],
+    gates: [{ key: 'unit', command: 'u', order: 1 }, { key: 'integration-ci', command: 'i', order: 2 }],
     implementer: 'custom',
     repositoryId: 'unknown',
     // The kernel bounces the mission active, the implementer fixes, and the
     // verify seam re-runs the identical gate set green. Replaying context.verify()
     // drives the real verify seam (my injected runPhaseGatesFn + captureFinalTreeFn)
     // so the marker is recorded, then report the bounce fixed.
-    runPhaseGatesFn: async () => ({ ok: true }),
-    captureFinalTreeFn: () => ({ ok: true, rootDir: '/fw', commit: 'fixsha123', tree: 't' }),
-    reboundFn: async (_reason, ctx) => { await (ctx as { verify: () => Promise<unknown> }).verify(); return { attempts: 1, outcome: 'fixed' }; },
-    startAgent: async () => ({ status: 'completed' }),
+    runPhaseGatesFn: async () => (phaseGateResult({ ok: true as const })),
+    captureFinalTreeFn: () => ({ ok: true as const, rootDir: '/fw', commit: 'fixsha123', tree: 't' }),
+    reboundFn: async (reason, ctx) => { await ctx.verify(1); return { attempts: 1, outcome: 'fixed', diagnostic: '', implementer: ctx.implementer, classification: classifyReboundReason(reason) }; },
+    startAgentFn: async () => ({ agent: 'custom', result: { status: 0 } }),
     transitionTaskFn: async () => true,
     recordIntegrationValidationFn: async (input) => {
-      recorded = { missionId: input.missionId, sha: input.sha, hooks: [...input.hooks] };
+      recorded.value = { missionId: input.missionId, sha: input.sha, hooks: [...input.hooks] };
     },
-  } as never);
+  });
   assert.equal(route.route, 'fixed', 'routing reports the bounce fixed');
-  assert.ok(recorded, 'the rebound green-validation path persisted the skip marker');
-  assert.equal(recorded!.missionId, SLUG);
-  assert.equal(recorded!.sha, 'fixsha123', 'keyed on the fix commit, not the pre-rebase head');
-  assert.deepEqual(recorded!.hooks.sort(), ['integration-ci', 'unit'], 'every validated hook is whitelisted');
+  assert.ok(recorded.value, 'the rebound green-validation path persisted the skip marker');
+  assert.equal(recorded.value!.missionId, SLUG);
+  assert.equal(recorded.value!.sha, 'fixsha123', 'keyed on the fix commit, not the pre-rebase head');
+  assert.deepEqual(recorded.value!.hooks.sort(), ['integration-ci', 'unit'], 'every validated hook is whitelisted');
 });
 
 test('rebound verify rerun green with no recording store leaves the full suite to run next time', async () => {
@@ -465,15 +473,17 @@ test('rebound verify rerun green with no recording store leaves the full suite t
     slug: SLUG,
     missionWorktree: '/fw',
     failedGate: { key: 'integration-ci', command: 'int', exitCode: 1, stdout: '', stderr: '' },
-    gates: [{ key: 'unit', command: 'u' }, { key: 'integration-ci', command: 'i' }],
+    gates: [{ key: 'unit', command: 'u', order: 1 }, { key: 'integration-ci', command: 'i', order: 2 }],
     implementer: 'custom',
     repositoryId: 'unknown',
-    runPhaseGatesFn: async () => ({ ok: true }),
-    captureFinalTreeFn: () => ({ ok: true, rootDir: '/fw', commit: 'fixsha123', tree: 't' }),
+    runPhaseGatesFn: async () => (phaseGateResult({ ok: true as const })),
+    captureFinalTreeFn: () => ({ ok: true as const, rootDir: '/fw', commit: 'fixsha123', tree: 't' }),
+    startAgentFn: async () => { throw new Error('Unexpected launch'); },
+    transitionTaskFn: async () => { throw new Error('Unexpected transition'); },
     // Replaying verify drives the real seam; with no recordIntegrationValidationFn
     // injected the seam short-circuits the record, so an unavailable store is inert.
-    reboundFn: async (_reason, ctx) => { await (ctx as { verify: () => Promise<unknown> }).verify(); return { attempts: 1, outcome: 'fixed' }; },
-  } as never);
+    reboundFn: async (reason, ctx) => { await ctx.verify(1); return { attempts: 1, outcome: 'fixed', diagnostic: '', implementer: ctx.implementer, classification: classifyReboundReason(reason) }; },
+  });
   assert.equal(route.route, 'fixed');
 });
 
@@ -502,16 +512,16 @@ test('the integration-validation marker persists and reads back through the real
 
 test('runRequiredLocalGates does not record when the suite fails', async () => {
   const { step, operationalHistory, recorded } = makeStep({
-    runPhaseGates: async () => ({ ok: false, skipped: false, failedGate: { key: 'unit' }, error: 'red' }),
+    runPhaseGates: async () => (phaseGateResult({ ok: false as const, skipped: false, failedGate: { key: 'unit' }, error: 'red' })),
   });
   const previous = setLogger({ log: () => {}, error: () => {} });
   try {
     await assert.rejects(
       step.runRequiredLocalGates({
         slug: SLUG,
-        context: { missionHeadSha: 'validating-sha', baseWorktree: '/fw', area: 'all', branch: `mission/${SLUG}` },
-        missionLoad: { kind: 'found', mission: { status: 'integration', review: null } },
-        missionServices: { operationalHistory },
+        context: integrationContext({ missionHeadSha: 'validating-sha', baseWorktree: '/fw', area: 'all', branch: `mission/${SLUG}` }),
+        missionLoad: { kind: 'found', version: missionVersion(1), mission: fixtureMission(SLUG, { status: 'integration', review: null }) },
+        missionServices: integrationServices({ operationalHistory }),
         dryRun: false,
         noIntegrationGates: false,
         realAgent: null,
@@ -520,62 +530,11 @@ test('runRequiredLocalGates does not record when the suite fails', async () => {
           transitionTaskFn: async () => true,
           startAgentFn: async () => { throw new Error('no launch'); },
           applyAgentFallbackFn: async () => 'custom',
-          routeIntegrationGateFailureFn: async () => Object.assign(new Error('red gate'), { name: 'IntegrationAbort' }),
-        } as never,
+          routeIntegrationGateFailureFn: async () => { throw Object.assign(new Error('red gate'), { name: 'IntegrationAbort' }); },
+        },
       }),
       (error: Error) => error.name === 'IntegrationAbort',
     );
     assert.equal(recorded.length, 0, 'no marker recorded on a red suite');
   } finally { setLogger(previous); }
-});
-
-
-test('final landing guards inspect the committed projection and exclude ambient index entries (TASK-2712)', (t) => {
-  const root = mkdtemp('landing-guard-projection-');
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const git = (args: string[]) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' }).trim();
-  const write = (file: string, text: string) => {
-    fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
-    fs.writeFileSync(path.join(root, file), text);
-  };
-  git(['init', '-q', '-b', 'main']);
-  git(['config', 'user.name', 'Fixture']);
-  git(['config', 'user.email', 'fixture@example.com']);
-  write('package.json', JSON.stringify({ name: '@magnusekdahl/parallix' }));
-  write('scripts/verify-landing-tree.sh', 'set -e\ntest ! -f ambient.txt\ntest ! -f backlog/tasks/task-1.md\ntest ! -f backlog/archive/task-1.md\ncmp prompts/draft-core.md test/fixtures/prompt-split-parent.json\n');
-  write('prompts/draft-core.md', 'old prompt\n');
-  write('test/fixtures/prompt-split-parent.json', 'old prompt\n');
-  write('backlog/tasks/task-1.md', 'stale\n');
-  write('backlog/completed/task-1.md', 'canonical\n');
-  git(['add', '-A']);
-  git(['commit', '-qm', 'base']);
-  const before = git(['rev-parse', 'HEAD']);
-  write('ambient.txt', 'board entry\n');
-  git(['add', 'ambient.txt']);
-  fs.rmSync(path.join(root, 'backlog/tasks/task-1.md'));
-  write('prompts/draft-core.md', 'new prompt\n');
-  const paths = new Set(['backlog/tasks/task-1.md', 'prompts/draft-core.md']);
-  assert.equal(runStagedTierGuards(root, paths).ok, false, 'mismatched fixture fails the projected tree');
-  assert.equal(git(['rev-parse', 'HEAD']), before, 'a failed final guard cannot advance main');
-  write('test/fixtures/prompt-split-parent.json', 'new prompt\n');
-  paths.add('test/fixtures/prompt-split-parent.json');
-  const verified = runStagedTierGuards(root, paths);
-  assert.equal(verified.ok, true, verified.error);
-  assert.match(verified.tree!, /^[a-f0-9]{40}$/);
-  assert.equal(git(['diff', '--cached', '--name-only']), 'ambient.txt', 'real index remains untouched');
-  assert.equal(git(['show', 'HEAD:backlog/completed/task-1.md']), 'canonical');
-  write('backlog/archive/task-1.md', 'retired\n');
-  paths.add('backlog/archive/task-1.md');
-  assert.equal(runStagedTierGuards(root, paths).ok, false, 'archive reintroduction fails final guard');
-});
-
-test('the configured preIntegration plan includes landing tree consistency checks (TASK-2712)', () => {
-  const root = path.resolve(import.meta.dirname, '../../..');
-  const config = JSON.parse(fs.readFileSync(path.join(root, 'workflow.config.json'), 'utf8'));
-  assert.ok(config.adapters.gates.preIntegration.some(gate => gate.key === 'landing-tree' && gate.command === './scripts/verify-landing-tree.sh'));
-  const script = fs.readFileSync(path.join(root, 'scripts/verify-landing-tree.sh'), 'utf8');
-  for (const contract of ['backlog-completed-task-consistency.test.ts', 'mission-directory-free-workflow.test.ts', 'prompt-split.test.ts']) {
-    assert.ok(script.includes(contract), contract);
-  }
-  assert.match(script, /npm test -- --unit-test-headroom/);
 });

@@ -30,7 +30,7 @@ function reviewWithLocalBranch(): Review {
     intervention: null,
     stageLaunches: [],
     reviewEvents: [],
-  } as unknown as Review;
+  };
 }
 
 test('a confirmed PR reference is written onto the round and flattened back out', () => {
@@ -111,7 +111,7 @@ test('loadReview and loadReviewApproval agree on the reviewed change', async () 
   const adapter = new ConcreteReviewReadAdapter({
     rootDir: '/tmp',
     missionStore: null,
-    readReviewState: () => state as never,
+    readReviewState: () => state,
     findMissionDir: () => '/tmp/missions/task-2343',
   });
 

@@ -1,6 +1,7 @@
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
-import { spawnAndTee } from '../process/spawn-tee.js';
+import type { AgentProcessResult, AgentProcessSpawn } from './agent-process-types.js';
+import { spawnAndTee, type SpawnTeeOptions } from '../process/spawn-tee.js';
 import { extractQwenTelemetry } from './qwen-telemetry.js';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -18,7 +19,7 @@ interface QwenInvocationOptions {
   configuration?: ParallixConfiguration;
   prompt: string;
   worktree: string;
-  env?: Record<string, string>;
+  env?: NodeJS.ProcessEnv;
   resume?: boolean;
   sessionId?: string | null;
   model?: string | null;
@@ -32,7 +33,7 @@ interface QwenInvocationOptions {
 }
 
 interface StartQwenAgentOptions extends QwenInvocationOptions {
-  teeOptions?: object;
+  teeOptions?: SpawnTeeOptions;
 }
 
 function resolveQwenWorktree(worktree?: string | null) {
@@ -94,7 +95,7 @@ function ensureQwenHome(
 
   try {
     const sourceText = fs.readFileSync(sourceSettings, 'utf8');
-    const settings = JSON.parse(sourceText);
+    const settings = JSON.parse(sourceText) as { tools?: { approvalMode?: string }; [key: string]: unknown };
     // Ensure non-interactive tool-call approval bypass (TASK-1398 failure mode:
     // without yolo, any prompt needing a tool call blocks on interactive
     // approval outside a TTY and fails with a generic error, writing a
@@ -197,7 +198,7 @@ function buildQwenInvocation({ configuration = DEFAULT_CONFIGURATION, prompt, wo
 // Qwen Code currently exits 0 for this provider rejection, even though no
 // assistant turn was completed. Keep this adapter-specific so a successful
 // exit from every other agent retains the shared quoted-transcript safeguard.
-function isQwenQuotaExhausted(result: any) {
+function isQwenQuotaExhausted(result: AgentProcessResult) {
   if (!result || result.status !== 0 || result.signal || result.error) { return false; }
   const text = `${result.stdout || ''}\n${result.stderr || ''}`;
   return /Quota exhausted:[\s\S]{0,500}\bcause:\s*insufficient_quota:\s*429\b/i.test(text);
@@ -209,7 +210,7 @@ function isQwenQuotaExhausted(result: any) {
  * home, not from stdout, and telemetry is best-effort so a parse failure never
  * breaks the launch.
  */
-function processResult(result: any, rootDir: string, invocationStart: string) {
+function processResult(result: AgentProcessResult, rootDir: string, invocationStart: string) {
   if (!result) { return result; }
   if (isQwenQuotaExhausted(result)) { result.status = 1; }
   result.sessionId = extractQwenSessionId(qwenProjectsDir(rootDir), invocationStart);
@@ -232,16 +233,16 @@ function processResult(result: any, rootDir: string, invocationStart: string) {
  * fails the whole launch. Detect that and relaunch fresh instead of losing the
  * run. Mirrors isStaleSessionResult()/staleSessionHandler() in codex.ts.
  */
-function isStaleQwenSessionResult(result: any) {
+function isStaleQwenSessionResult(result: AgentProcessResult) {
   // Adapter-owned parsing of Qwen CLI diagnostics; never exposed as a workflow signal.
   if (!result || result.status === 0) { return false; }
   const text = `${result.stderr || ''}${result.stdout || ''}`;
   return /session not found|no session|invalid session/i.test(text);
 }
 
-let _spawnAndTee: any = spawnAndTee;
+let _spawnAndTee: AgentProcessSpawn = spawnAndTee;
 /** Test hook: replace the launcher's spawn seam to capture argv. */
-function __setSpawnAndTeeForTest(fn: any) { _spawnAndTee = fn || spawnAndTee; }
+function __setSpawnAndTeeForTest(fn: AgentProcessSpawn | null) { _spawnAndTee = fn || spawnAndTee; }
 
 function startQwenAgent({ configuration = DEFAULT_CONFIGURATION, prompt, worktree, env, resume = false, sessionId = null, model = null, sandbox = false, teeOptions = {} }: StartQwenAgentOptions) {
   const rootDir = resolveQwenWorktree(worktree);
@@ -249,12 +250,12 @@ function startQwenAgent({ configuration = DEFAULT_CONFIGURATION, prompt, worktre
   const invocation = buildQwenInvocation({ configuration, prompt, worktree: rootDir, env, resume, sessionId, model, sandbox });
   const invocationStart = new Date().toISOString();
 
-  const spawn = (inv: any) => _spawnAndTee(inv.command, inv.args, { ...inv.options, ...teeOptions, configuration } as any);
+  const spawn = (inv: ReturnType<typeof buildQwenInvocation>) => _spawnAndTee(inv.command, inv.args, { ...inv.options, ...teeOptions, configuration });
 
-  const resultPromise = spawn(invocation).then((result: any) => {
+  const resultPromise = spawn(invocation).then((result: AgentProcessResult) => {
     if (resume && sessionId && isStaleQwenSessionResult(result)) {
       const fresh = buildQwenInvocation({ configuration, prompt, worktree: rootDir, env, resume: false, sessionId: null, model, sandbox });
-      return spawn(fresh).then((freshResult: any) => processResult(freshResult, rootDir, invocationStart));
+      return spawn(fresh).then((freshResult: AgentProcessResult) => processResult(freshResult, rootDir, invocationStart));
     }
     return processResult(result, rootDir, invocationStart);
   });
@@ -268,7 +269,7 @@ function startQwenAgent({ configuration = DEFAULT_CONFIGURATION, prompt, worktre
  * shows non-zero token usage, the run produced real work regardless of exit
  * code. Mirrors isSpuriousCodexExit() and isSpuriousVibeExit().
  */
-function isSpuriousQwenExit(result: any) {
+function isSpuriousQwenExit(result: AgentProcessResult) {
   if (!result || result.status !== 1 || result.signal || result.error) { return false; }
   if (isQwenQuotaExhausted({ ...result, status: 0 })) { return false; }
   const t = result.telemetry;

@@ -157,10 +157,82 @@ function cancelAction(actions: readonly WebMissionCard['actions'][number][]) {
     ?? actions.find((action) => action.kind === 'mission:cancel') ?? null;
 }
 
+function FlightCardHeader({ card, agent, liveAgent, accent, spinning }: { card: WebMissionCard; agent: WebMissionCard['agent']; liveAgent: WebMissionCard['agent']; accent: string; spinning: boolean }) {
+  return (
+      <div
+        style={{
+          display: 'flex', alignItems: 'stretch', gap: 8, padding: '9px 10px 8px',
+          background: C.cardHead, borderBottom: `1px solid ${C.panel}`,
+        }}
+      >
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0, lineHeight: 0 }}>
+          <Fan size={23} color={accent} spinning={spinning} speed="0.9s" />
+          <Fan size={23} color={accent} spinning={spinning} speed="1.7s" />
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, minWidth: 0 }}>
+            <span style={{ color: C.cyan, fontWeight: 500, flexShrink: 0 }}>{card.id}</span>
+            <div style={{ flex: 1, minWidth: 4 }} />
+            {agent !== null && (
+            <span
+              title={agent === null ? undefined : `${liveAgent === null ? 'implementer' : 'active worker'} family: ${agent}`}
+              style={{
+                color: agent === null ? C.faint : familyAccent(agent),
+                fontSize: 10, letterSpacing: 1, minWidth: 0,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}
+            >
+              {agent}
+            </span>
+            )}
+          </div>
+          <p style={{ margin: '5px 0 0', lineHeight: 1.35, color: C.text, fontSize: 13 }}>{card.title}</p>
+        </div>
+      </div>
+
+  );
+}
+
+function FlightCardReview({ card, review }: { card: WebMissionCard; review: string[] }) {
+  return (
+(card.pullRequest !== null || review.length > 0) && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8, fontSize: 11 }}>
+            {card.pullRequest !== null && (card.pullRequest.url === null
+              ? <span style={{ color: C.cyan }}>PR #{card.pullRequest.id}</span>
+              : <a href={card.pullRequest.url} rel="noreferrer" style={{ color: C.cyan }}>PR #{card.pullRequest.id}</a>)}
+            {review.length > 0 && <span style={{ color: C.dim }}>{review.join(' · ')}</span>}
+            <div style={{ flex: 1, minWidth: 4 }} />
+            <ReviewPips card={card} />
+          </div>
+        )
+  );
+}
+
+function FlightCardCheckpoint({ card, openCheckpointDetail }: { card: WebMissionCard; openCheckpointDetail: () => void }) {
+  const checkpointEvidence = card.checkpointEvidence ?? [];
+  const hasCheckpointEvidence = checkpointEvidence.some(entry => entry.goalCheck.length > 0);
+  return (
+(card.checkpoint !== null || checkpointEvidence.length > 0) && (
+          <div
+            role="button"
+            tabIndex={hasCheckpointEvidence ? 0 : undefined}
+            aria-label={hasCheckpointEvidence ? `View checkpoint evidence for ${card.checkpoint}` : undefined}
+            onClick={openCheckpointDetail}
+            onKeyDown={(event: ReactKeyboardEvent<HTMLElement>) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openCheckpointDetail(); } }}
+            style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginBottom: 8, fontSize: 11, cursor: hasCheckpointEvidence ? 'pointer' : 'default', position: 'relative', zIndex: 10 }}
+          >
+            <CheckpointPips card={card} />
+            {card.checkpoint !== null && <span style={{ color: C.dim }} title={card.checkpointDescription ?? undefined}>{card.checkpoint}</span>}
+            <span style={{ color: GATE_COLOR[card.gate], fontWeight: card.gate === 'failed' ? 700 : 400 }}>
+              {GATE_TEXT[card.gate]}
+            </span>
+          </div>
+        )
+  );
+}
+
 function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCommands }: { card: WebMissionCard; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingCommands: PendingCommands }) {
   const [openCheckpoint, setOpenCheckpoint] = useState<string | null>(null);
-  const checkpointEvidence = card.checkpointEvidence ?? [];
-  const hasCheckpointEvidence = checkpointEvidence.some((entry) => entry.goalCheck.length > 0);
   const openCheckpointDetail = () => setOpenCheckpoint(openCheckpoint === card.checkpoint ? null : (card.checkpoint ?? null));
   const spinning = isSpinning(card);
   // The work publication names the worker; a px process alone does not.
@@ -200,64 +272,11 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
         boxShadow: '0 6px 18px rgba(0,0,0,.55)',
       }}
     >
-      <div
-        style={{
-          display: 'flex', alignItems: 'stretch', gap: 8, padding: '9px 10px 8px',
-          background: C.cardHead, borderBottom: `1px solid ${C.panel}`,
-        }}
-      >
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0, lineHeight: 0 }}>
-          <Fan size={23} color={accent} spinning={spinning} speed="0.9s" />
-          <Fan size={23} color={accent} spinning={spinning} speed="1.7s" />
-        </div>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, minWidth: 0 }}>
-            <span style={{ color: C.cyan, fontWeight: 500, flexShrink: 0 }}>{card.id}</span>
-            <div style={{ flex: 1, minWidth: 4 }} />
-            {agent !== null && (
-            <span
-              title={agent === null ? undefined : `${liveAgent === null ? 'implementer' : 'active worker'} family: ${agent}`}
-              style={{
-                color: agent === null ? C.faint : familyAccent(agent),
-                fontSize: 10, letterSpacing: 1, minWidth: 0,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}
-            >
-              {agent}
-            </span>
-            )}
-          </div>
-          <p style={{ margin: '5px 0 0', lineHeight: 1.35, color: C.text, fontSize: 13 }}>{card.title}</p>
-        </div>
-      </div>
+      <FlightCardHeader card={card} agent={agent} liveAgent={liveAgent} accent={accent} spinning={spinning} />
 
       <div style={{ padding: '8px 10px' }}>
-        {(card.pullRequest !== null || review.length > 0) && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8, fontSize: 11 }}>
-            {card.pullRequest !== null && (card.pullRequest.url === null
-              ? <span style={{ color: C.cyan }}>PR #{card.pullRequest.id}</span>
-              : <a href={card.pullRequest.url} rel="noreferrer" style={{ color: C.cyan }}>PR #{card.pullRequest.id}</a>)}
-            {review.length > 0 && <span style={{ color: C.dim }}>{review.join(' · ')}</span>}
-            <div style={{ flex: 1, minWidth: 4 }} />
-            <ReviewPips card={card} />
-          </div>
-        )}
-        {(card.checkpoint !== null || checkpointEvidence.length > 0) && (
-          <div
-            role="button"
-            tabIndex={hasCheckpointEvidence ? 0 : undefined}
-            aria-label={hasCheckpointEvidence ? `View checkpoint evidence for ${card.checkpoint}` : undefined}
-            onClick={openCheckpointDetail}
-            onKeyDown={(event: ReactKeyboardEvent<HTMLElement>) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openCheckpointDetail(); } }}
-            style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginBottom: 8, fontSize: 11, cursor: hasCheckpointEvidence ? 'pointer' : 'default', position: 'relative', zIndex: 10 }}
-          >
-            <CheckpointPips card={card} />
-            {card.checkpoint !== null && <span style={{ color: C.dim }} title={card.checkpointDescription ?? undefined}>{card.checkpoint}</span>}
-            <span style={{ color: GATE_COLOR[card.gate], fontWeight: card.gate === 'failed' ? 700 : 400 }}>
-              {GATE_TEXT[card.gate]}
-            </span>
-          </div>
-        )}
+        <FlightCardReview card={card} review={review} />
+        <FlightCardCheckpoint card={card} openCheckpointDetail={openCheckpointDetail} />
         {openCheckpoint !== null && (
           <CheckpointDetail card={card} initial={openCheckpoint} onClose={() => setOpenCheckpoint(null)} />
         )}

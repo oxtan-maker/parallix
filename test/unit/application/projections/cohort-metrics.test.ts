@@ -1,3 +1,5 @@
+import { pendingReview } from '../../../fixtures/mission-builders.js';
+import { fixtureMission as typedMissionFixture } from '../../../fixtures/mission-builders.js';
 // Historical regression provenance: TASK-2347.09.
 /**
  * Cohort behavior for the metrics slice (TASK-2622.13 consolidation).
@@ -281,10 +283,8 @@ test('cohorts can be grouped by model, provider, and closing date range', () => 
 
 
 test('delivery credit belongs only to the recorded final implementer after a family switch', async () => {
-  const canonical = missionCohortMetadata(COHORT_SEEDS.map(seed => ({
-    id: missionId(seed.slug), labels: missionLabels(['canonical']), assignee: agentFamily('codex'),
-    review: { rounds: [{ implementer: 'codex' }, { implementer: 'custom' }] },
-  } as unknown as Mission)));
+  const canonical = missionCohortMetadata(COHORT_SEEDS.map(seed => (typedMissionFixture(String(missionId(seed.slug)), { labels: missionLabels(['canonical']), assignee: agentFamily('codex'),
+    review: { ...pendingReview(seed.slug), rounds: [{ ...pendingReview(seed.slug).rounds[0], implementer: agentFamily('codex') }, { ...pendingReview(seed.slug).rounds[0], number: 2, implementer: agentFamily('custom') }] }}))));
   const lines: string[] = [];
   await statsCohorts(['--by', 'implementer', '--min-sample', '1'], {
     log: message => { lines.push(message); }, error: message => { throw new Error(message); }, exit: () => null,

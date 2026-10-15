@@ -36,35 +36,78 @@ export function parseStatusCliRequest(args: string[]): StatusCliRequest {
 export function statusJson(result: StatusResult): string {
   const md = result.missionData;
   return JSON.stringify({
+    ...statusIdentityJson(result),
+    classification: md?.classification ?? null,
+    externalTaskRef: md?.externalTaskRef ?? null,
+    ...statusLegacyJson(result),
+    ...statusContractJson(result),
+    ...statusPlanJson(result),
+    ...statusCheckpointJson(result),
+    ...statusReviewJson(result),
+    pullRequest: result.prInfo ?? null
+  }, null, 2);
+}
+
+function statusIdentityJson(result: StatusResult) {
+  const md = result.missionData;
+  return {
     slug: result.slug,
     title: md?.title ?? null,
     branch: result.branch,
     missionStatus: md?.missionStatus ?? md?.backlogStatus ?? null,
     backlogStatus: md?.backlogStatus ?? null,
     closedAt: md?.closedAt ?? null,
-    assignee: md?.assignee ?? null,
-    classification: md?.classification ?? null,
-    externalTaskRef: md?.externalTaskRef ?? null,
+    assignee: md?.assignee ?? null
+  };
+}
+
+function statusLegacyJson(result: StatusResult) {
+  const md = result.missionData;
+  return {
     legacyTaskContent: md?.legacyTaskContent ?? null,
     legacyTaskError: md?.legacyTaskError ?? null,
     legacyMissionContent: md?.legacyMissionContent ?? null,
     legacyMissionError: md?.legacyMissionError ?? null,
     legacyReviewStateContent: md?.legacyReviewStateContent ?? null,
-    legacyReviewStateError: md?.legacyReviewStateError ?? null,
+    legacyReviewStateError: md?.legacyReviewStateError ?? null
+  };
+}
+
+function statusContractJson(result: StatusResult) {
+  const md = result.missionData;
+  return {
     version: md?.version ?? null,
     brief: md?.brief ?? null,
     description: md?.description ?? null,
     declaredGates: md?.declaredGates ?? [],
     successCriteria: md?.successCriteria ?? [],
-    successCriterionIds: md?.successCriterionIds ?? [],
+    successCriterionIds: md?.successCriterionIds ?? []
+  };
+}
+
+function statusPlanJson(result: StatusResult) {
+  const md = result.missionData;
+  return {
     completedSuccessCriteria: md?.completedSuccessCriteria ?? [],
     dependencies: md?.dependencies ?? [],
     checkpoints: md?.checkpoints ?? [],
     predictedNelBucket: md?.predictedNelBucket ?? null,
-    reproductionTest: md?.reproductionTest ?? null,
+    reproductionTest: md?.reproductionTest ?? null
+  };
+}
+
+function statusCheckpointJson(result: StatusResult) {
+  const md = result.missionData;
+  return {
     latestCheckpoint: md?.checkpoint
       ? { name: md.checkpoint, description: md.checkpointDescription ?? null, goalCheck: md.goalCheck ?? [], nextAction: md.nextAction ?? null }
-      : null,
+      : null
+  };
+}
+
+function statusReviewJson(result: StatusResult) {
+  const md = result.missionData;
+  return {
     review: md?.reviewPhase
       ? {
         round: md.reviewRound ?? 1,
@@ -75,9 +118,8 @@ export function statusJson(result: StatusResult): string {
         integrationRepair: md.integrationRepair ?? null,
         history: md.reviewHistory,
       }
-      : null,
-    pullRequest: result.prInfo ?? null,
-  }, null, 2);
+      : null
+  };
 }
 
 /** Render the complete status output from a StatusResult. */
@@ -106,19 +148,22 @@ function logReviewRounds(missionData: StatusMissionData, log: (_msg: string) => 
   } else if (coverage?.kind === 'unverifiable') {
     log(`Approval coverage unknown: ${coverage.reason}.`);
   }
-  for (const round of missionData.reviewHistory) {
-    log(`  Round ${round.number} [${round.reviewer} -> ${round.implementer}]: ${round.disposition ?? 'pending'}`);
-    if (round.integrationRepairAssessment) {
-      const a = round.integrationRepairAssessment;
-      log(`    integration repair source: ${a.source?.kind ?? 'normal-review'}; ${a.outcome}; approved ${a.approvedRevision}; candidate ${a.candidateRevision}; failed gate ${a.failedGate ?? 'unknown'}${a.source ? `; validated ${a.source.validationRevision} at ${a.source.validatedAt}; ${a.source.validationReference}` : ''}`);
-    }
-    if (round.comment) { log(`    comment: ${round.comment}`); }
-    if (round.revocation) { log(`    revoked by ${round.revocation.by}: ${round.revocation.reason} (${round.revocation.at})`); }
-    if (round.supersession) { log(`    superseded by revision ${round.supersession.revision} (${round.supersession.by}, ${round.supersession.at})`); }
-    for (const summary of round.findingSummaries) { log(`    finding: ${summary}`); }
-    for (const fix of round.fixes) { log(`    fixed: ${fix}`); }
-    for (const pushback of round.pushbacks) { log(`    pushback: ${pushback}`); }
+  for (const round of missionData.reviewHistory) { logReviewRound(round, log); }
+}
+
+function logReviewRound(round: StatusMissionData['reviewHistory'][number], log: (_msg: string) => void): void {
+  log(`  Round ${round.number} [${round.reviewer} -> ${round.implementer}]: ${round.disposition ?? 'pending'}`);
+  log(`    start revision: ${round.startRevision ?? 'unknown'}; decided revision: ${round.decidedRevision ?? 'unknown'}`);
+  if (round.integrationRepairAssessment) {
+    const a = round.integrationRepairAssessment;
+    log(`    integration repair source: ${a.source?.kind ?? 'normal-review'}; ${a.outcome}; approved ${a.approvedRevision}; candidate ${a.candidateRevision}; failed gate ${a.failedGate ?? 'unknown'}${a.source ? `; validated ${a.source.validationRevision} at ${a.source.validatedAt}; ${a.source.validationReference}` : ''}`);
   }
+  if (round.comment) { log(`    comment: ${round.comment}`); }
+  if (round.revocation) { log(`    revoked by ${round.revocation.by}: ${round.revocation.reason} (${round.revocation.at})`); }
+  if (round.supersession) { log(`    superseded by revision ${round.supersession.revision} (${round.supersession.by}, ${round.supersession.at})`); }
+  for (const summary of round.findingSummaries) { log(`    finding: ${summary}`); }
+  for (const fix of round.fixes) { log(`    fixed: ${fix}`); }
+  for (const pushback of round.pushbacks) { log(`    pushback: ${pushback}`); }
 }
 
 function logDescription(description: string | null | undefined, log: (_msg: string) => void): void {
@@ -150,6 +195,14 @@ function logBriefAndGates(missionData: StatusMissionData, log: (_msg: string) =>
   }
   const dependencies = missionData.dependencies ?? [];
   log(dependencies.length > 0 ? `Depends on: ${dependencies.join(', ')}` : 'Depends on: nothing recorded');
+  logCheckpointPlan(missionData, log);
+  const gates = missionData.declaredGates ?? [];
+  log(gates.length > 0 ? `Declared gates: ${gates.join('; ')}` : 'Declared gates: none');
+  if (missionData.predictedNelBucket) { log(`Predicted NEL bucket: ${missionData.predictedNelBucket}`); }
+  if (missionData.reproductionTest) { log(`Reproduction test: ${missionData.reproductionTest}`); }
+}
+
+function logCheckpointPlan(missionData: StatusMissionData, log: (_msg: string) => void): void {
   const checkpoints = missionData.checkpoints ?? [];
   if (checkpoints.length > 0) {
     log('Checkpoints:');
@@ -157,18 +210,17 @@ function logBriefAndGates(missionData: StatusMissionData, log: (_msg: string) =>
       log(`  ${checkpoint.recorded ? '[x]' : '[ ]'} ${checkpoint.name}: ${checkpoint.description}`.trimEnd());
       if (checkpoint.repair) {
         log(`      Repair incident: ${checkpoint.repair.incidentId}; attempt ${checkpoint.repair.attempt}; harness verified: ${checkpoint.repair.verified}`);
-        if (checkpoint.repair.blocker) { log(`      Human review required: ${JSON.stringify(checkpoint.repair.blocker)}`); }
+        if (checkpoint.repair.acknowledgedBlocker) {
+          log(`      Prior stop acknowledged by ${checkpoint.repair.acknowledgedBy} at ${checkpoint.repair.acknowledgedAt}: ${JSON.stringify(checkpoint.repair.acknowledgedBlocker)}`);
+        }
+        if (checkpoint.repair.blocker) { log(`      Blocked: ${checkpoint.repair.blocker.diagnostic}; Human review required: ${JSON.stringify(checkpoint.repair.blocker)}`); }
       }
       for (const row of checkpoint.goalCheck) {
-        log(`      Goal Check: ${row.criterion}`);
+        log(`      Goal Check: ${row.criterion}${row.carriedFrom ? ` (carried from ${row.carriedFrom})` : ''}`);
         log(`        Evidence: ${row.evidence}`);
       }
     }
   }
-  const gates = missionData.declaredGates ?? [];
-  log(gates.length > 0 ? `Declared gates: ${gates.join('; ')}` : 'Declared gates: none');
-  if (missionData.predictedNelBucket) { log(`Predicted NEL bucket: ${missionData.predictedNelBucket}`); }
-  if (missionData.reproductionTest) { log(`Reproduction test: ${missionData.reproductionTest}`); }
 }
 
 function logMissionData(missionData: StatusMissionData | null, log: (_msg: string) => void): void {
@@ -179,22 +231,10 @@ function logMissionData(missionData: StatusMissionData | null, log: (_msg: strin
   }
   if (missionData.title) { log(`Title: ${missionData.title}`); }
   log(`Mission status: ${missionData.missionStatus ?? missionData.backlogStatus}`);
-  if (missionData.closedAt) { log(`Closed at: ${missionData.closedAt}`); }
-  else if (missionData.missionStatus === 'done') {
-    log('Closeout: pending; resume with px integrate <slug> --recover-landed');
-  }
+  logCloseoutStatus(missionData, log);
   log(`Assignee: ${missionData.assignee ?? 'none'}`);
   log(`Classification: ${missionData.classification ?? 'unset'}`);
-  if (missionData.externalTaskRef) {
-    const ref = missionData.externalTaskRef;
-    log(`External task: ${ref.source}:${ref.id}${ref.url ? ` (${ref.url})` : ''}`);
-  }
-  if (missionData.legacyTaskContent) { log(`Legacy task content (pinned Git artifact):\n${missionData.legacyTaskContent}`); }
-  if (missionData.legacyTaskError) { log(`Legacy task content unavailable: ${missionData.legacyTaskError}`); }
-  if (missionData.legacyMissionContent) { log(`Historical mission document (committed archive):\n${missionData.legacyMissionContent}`); }
-  if (missionData.legacyMissionError) { log(`Historical mission document unavailable: ${missionData.legacyMissionError}`); }
-  if (missionData.legacyReviewStateContent) { log(`Historical review snapshot (committed archive):\n${missionData.legacyReviewStateContent}`); }
-  if (missionData.legacyReviewStateError) { log(`Historical review snapshot unavailable: ${missionData.legacyReviewStateError}`); }
+  logMissionSources(missionData, log);
   // The same two facts the TUI agent strip renders, from the same projection:
   // authoritative work first, then the recovery-only evidence that a `px`
   // coordinator process exists. Keeping them on separate lines is deliberate —
@@ -209,12 +249,32 @@ function logMissionData(missionData: StatusMissionData | null, log: (_msg: strin
   }
   if (missionData.checkpoint) {
     log(`Last checkpoint: ${missionData.checkpoint}${missionData.checkpointDescription ? ` - ${missionData.checkpointDescription}` : ''}`);
-    for (const row of missionData.goalCheck ?? []) { log(`  ${row.criterion}: ${row.evidence}`); }
+    for (const row of missionData.goalCheck ?? []) { log(`  ${row.criterion}${row.carriedFrom ? ` (carried from ${row.carriedFrom})` : ''}: ${row.evidence}`); }
     if (missionData.nextAction) { log(`  Next action: ${missionData.nextAction}`); }
   } else {
     log('Last checkpoint: none');
   }
   logReviewRounds(missionData, log);
+}
+
+function logCloseoutStatus(missionData: StatusMissionData, log: (_msg: string) => void): void {
+  if (missionData.closedAt) { log(`Closed at: ${missionData.closedAt}`); }
+  else if (missionData.missionStatus === 'done') {
+    log('Closeout: pending; resume with px integrate <slug> --recover-landed');
+  }
+}
+
+function logMissionSources(missionData: StatusMissionData, log: (_msg: string) => void): void {
+  if (missionData.externalTaskRef) {
+    const ref = missionData.externalTaskRef;
+    log(`External task: ${ref.source}:${ref.id}${ref.url ? ` (${ref.url})` : ''}`);
+  }
+  if (missionData.legacyTaskContent) { log(`Legacy task content (pinned Git artifact):\n${missionData.legacyTaskContent}`); }
+  if (missionData.legacyTaskError) { log(`Legacy task content unavailable: ${missionData.legacyTaskError}`); }
+  if (missionData.legacyMissionContent) { log(`Historical mission document (committed archive):\n${missionData.legacyMissionContent}`); }
+  if (missionData.legacyMissionError) { log(`Historical mission document unavailable: ${missionData.legacyMissionError}`); }
+  if (missionData.legacyReviewStateContent) { log(`Historical review snapshot (committed archive):\n${missionData.legacyReviewStateContent}`); }
+  if (missionData.legacyReviewStateError) { log(`Historical review snapshot unavailable: ${missionData.legacyReviewStateError}`); }
 }
 
 function logPrInfo(prInfo: StatusPrInfo | null, log: (_msg: string) => void): void {
@@ -288,7 +348,7 @@ function formatParseError(error: Error): string {
 }
 
 export interface StatusCommandOptions {
-  readonly exitFn?: (_code?: number) => never;
+  readonly exitFn?: (_code?: number) => void;
   readonly logFn?: (_msg: string) => void;
   readonly errorFn?: (_msg: string) => void;
 }

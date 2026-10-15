@@ -32,7 +32,7 @@ export interface ExecuteHandoffRequest {
 
 /** Application-owned post-execute ordering: evidence, handoff, then review. */
 export class ExecuteHandoffService {
-  constructor(private readonly _ports: ExecuteHandoffPorts) {}
+  constructor(private readonly _ports: ExecuteHandoffPorts) { }
 
   async run(request: ExecuteHandoffRequest): Promise<boolean> {
     let validation = await this.validate(request);
@@ -75,9 +75,7 @@ export class ExecuteHandoffService {
     }
     this._ports.output.log(`Checkpoint validation failed (${classification?.failureClass ?? 'DeclaredCheckpointGap'}). Bouncing to the implementer for a targeted checkpoint repair...`);
     const next = validation.nextCheckpoint ?? /(?:CP-|CHECKPOINT_)(\d+)/i.exec(error)?.[1];
-    const diagnostic = next
-      ? `${error}\n\n${isTypedCheckpointEvidenceFailure(error) ? buildTypedMissionRecoveryAdvice(request.slug, next.startsWith('CP-') ? next : `CP-${next}`) : this.fileCheckpointContinuation(request, next.startsWith('CP-') ? next : `CP-${next}`)}`
-      : error;
+    const diagnostic = this.checkpointRepairDiagnostic(request, error, next);
     const repaired = await this.rebound(request, diagnostic, async () => {
       const verdict = await this.validate(request);
       return { ok: verdict.ok, diagnostic: verdict.error ?? '', ...(verdict.humanOnlyContractBlocker ? { reason: { kind: 'declared-gate-validation' as const, command: verdict.humanOnlyContractBlocker.command, diagnostic: verdict.error ?? 'Recorded contract requires operator decision' } } : {}) };
@@ -89,28 +87,20 @@ export class ExecuteHandoffService {
     return false;
   }
 
+  private checkpointRepairDiagnostic(request: ExecuteHandoffRequest, error: string, next: string | undefined): string {
+    return next
+      ? `${error}\n\n${isTypedCheckpointEvidenceFailure(error) ? buildTypedMissionRecoveryAdvice(request.slug, next.startsWith('CP-') ? next : `CP-${next}`) : this.fileCheckpointContinuation(request, next.startsWith('CP-') ? next : `CP-${next}`)}`
+      : error;
+
+  }
+
   private async repairHandoff(request: ExecuteHandoffRequest, holder: { result: HandoffRunResult }): Promise<void> {
     if (await this.stopForContract(request, holder.result)) { return; }
     const error = holder.result.error ?? 'unknown';
-    const diagnostic = [error, holder.result.gateOutput?.stdout, holder.result.gateOutput?.stderr].filter(Boolean).join('\n');
+    const diagnostic = handoffFailureDiagnostic(holder.result, error);
     const classification = this._ports.handoff.classifyFailure(error);
     if (classification?.failureClass === 'GitBlockers' || classification?.dispatchAction === 'HumanOnly' || !classification) {
-      this._ports.output.log(`\nAutomated handoff failed: ${error}`);
-      this._ports.output.log('Attempting post-execute repair...');
-      const repair = await this._ports.handoff.repairHygiene({
-        ...request, error, log: this._ports.output.log, outputError: this._ports.output.error,
-      });
-      if (repair.repaired) { this._ports.output.log('Repair successful. Retrying automated handoff...'); holder.result = await this._ports.handoff.run({ ...request, force: true }); return; }
-      if (repair.blocker) { holder.result = { ...holder.result, error: repair.blocker }; }
-      else if (this._ports.handoff.isRelaunchableFailure(error)) {
-        this._ports.output.log('Content error detected. Attempting agent relaunch to fix...');
-        await this.rebound(request, error, async () => {
-          holder.result = await this._ports.handoff.run({ ...request, force: true });
-          return this.handoffVerification(holder.result);
-        });
-        if (await this.stopForContract(request, holder.result)) { return; }
-        if (!holder.result.ok) { holder.result = { ...holder.result, error: `Post-relaunch handoff failed: ${holder.result.error ?? 'unknown'}` }; }
-      }
+      await this.repairHygieneFailure(request, holder, error);
       return;
     }
     this._ports.output.log(`\nRelaunchable error detected (${classification.failureClass}). Bouncing to the implementer...`);
@@ -121,6 +111,25 @@ export class ExecuteHandoffService {
     });
     if (await this.stopForContract(request, holder.result)) { return; }
     if (!holder.result.ok) { holder.result = { ...holder.result, error: `Gate failure persisting after ${DEFAULT_REBOUND_ATTEMPTS} relaunch attempts. Manual intervention required.` }; }
+  }
+
+  private async repairHygieneFailure(request: ExecuteHandoffRequest, holder: { result: HandoffRunResult }, error: string): Promise<void> {
+    this._ports.output.log(`\nAutomated handoff failed: ${error}`);
+    this._ports.output.log('Attempting post-execute repair...');
+    const repair = await this._ports.handoff.repairHygiene({
+      ...request, error, log: this._ports.output.log, outputError: this._ports.output.error,
+    });
+    if (repair.repaired) { this._ports.output.log('Repair successful. Retrying automated handoff...'); holder.result = await this._ports.handoff.run({ ...request, force: true }); return; }
+    if (repair.blocker) { holder.result = { ...holder.result, error: repair.blocker }; }
+    else if (this._ports.handoff.isRelaunchableFailure(error)) {
+      this._ports.output.log('Content error detected. Attempting agent relaunch to fix...');
+      await this.rebound(request, error, async () => {
+        holder.result = await this._ports.handoff.run({ ...request, force: true });
+        return this.handoffVerification(holder.result);
+      });
+      if (await this.stopForContract(request, holder.result)) { return; }
+      if (!holder.result.ok) { holder.result = { ...holder.result, error: `Post-relaunch handoff failed: ${holder.result.error ?? 'unknown'}` }; }
+    }
   }
 
   private async stopForContract(request: ExecuteHandoffRequest, result: HandoffRunResult): Promise<boolean> {
@@ -152,7 +161,7 @@ export class ExecuteHandoffService {
         slug: request.slug, worktree: request.worktree, agent: request.agent,
         prompt: typeof options.prompt === 'function' ? options.prompt(request.agent) : String(options.prompt ?? ''),
         sessionPolicy: options.sessionPolicy,
-      }) as never,
+      }),
       log: this._ports.output.log, error: this._ports.output.error,
     });
     return result.outcome === 'fixed';
@@ -177,4 +186,8 @@ export class ExecuteHandoffService {
     }
     return `Create a checkpoint document (CP-N.md) in ${request.worktree}/missions/${request.slug} with a Goal Check table. Then re-run: ${this._ports.output.command(`px review ${request.slug} --submit`)}.`;
   }
+}
+
+function handoffFailureDiagnostic(result: HandoffRunResult, error: string): string {
+  return [error, result.gateOutput?.stdout, result.gateOutput?.stderr].filter(Boolean).join('\n');
 }

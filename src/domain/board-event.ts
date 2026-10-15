@@ -74,38 +74,23 @@ export class DuplicateLaneEventError extends Error {
  * Returns `null` when the transition is not recognised by the state machine
  * (e.g. a direct Markdown edit that bypassed the authority path).
  */
-export function triggerFromTransition(
-  from: MissionStatus | null,
-  to: MissionStatus,
-): MissionCommand['type'] | null {
-  if (from === 'backlog' && to === 'refined') {
-    return 'refine';
-  }
-  if (to === 'active' && (from === 'refined' || from === 'active' || from === null)) {
-    return 'activate';
-  }
-  if (from === 'active' && to === 'refined') {
-    return 'abort-activation';
-  }
-  if (from === 'active' && to === 'review') {
-    return 'submit-for-review';
-  }
-  if (from === 'review' && to === 'active') {
-    return 'request-changes';
-  }
-  if ((from === 'review' || from === 'active') && to === 'integration') {
-    return 'approve';
-  }
- if (from === 'integration' && to === 'active') {
-    return 'rebound-to-active';
-  }
-  if (from === 'integration' && to === 'review') {
-    return 'revoke-approval';
-  }
-  if (from === 'integration' && to === 'done') {
-    return 'integrate';
-  }
-  return null;
+const TRANSITION_TRIGGERS: Readonly<Partial<Record<string, MissionCommand['type']>>> = {
+  'backlog:refined': 'refine',
+  'refined:active': 'activate',
+  'active:active': 'activate',
+  'null:active': 'activate',
+  'active:refined': 'abort-activation',
+  'active:review': 'submit-for-review',
+  'review:active': 'request-changes',
+  'review:integration': 'approve',
+  'active:integration': 'approve',
+  'integration:active': 'rebound-to-active',
+  'integration:review': 'revoke-approval',
+  'integration:done': 'integrate',
+};
+
+export function triggerFromTransition(from: MissionStatus | null, to: MissionStatus): MissionCommand['type'] | null {
+  return TRANSITION_TRIGGERS[`${from}:${to}`] ?? null;
 }
 
 /**

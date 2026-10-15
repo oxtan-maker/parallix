@@ -88,6 +88,7 @@ export interface MissionGoalCheckRecord {
   readonly recorded_round?: number | null;
   readonly repaired_gate?: string | null;
   readonly repaired_gates?: string | null;
+  readonly carried_from?: string | null;
 }
 
 export interface MissionReviewRecord {
@@ -112,6 +113,7 @@ export interface MissionReviewRoundRecord {
   readonly reviewer: string;
   readonly implementer: string;
   readonly started_at: string;
+  readonly decided_revision?: string | null;
   readonly decision_kind: string | null;
   readonly decided_at: string | null;
   readonly decision_comment: string | null;
@@ -295,6 +297,7 @@ function checkpointsFrom(records: MissionAggregateRecords): readonly CheckpointD
         ...(typeof row.recorded_round === 'number' ? { recordedRound: row.recorded_round } : {}),
         ...(typeof row.repaired_gate === 'string' ? { repairedGate: row.repaired_gate } : {}),
         ...(typeof row.repaired_gates === 'string' ? { repairedGates: JSON.parse(row.repaired_gates) as string[] } : {}),
+        ...(typeof row.carried_from === 'string' ? { carriedFrom: row.carried_from } : {}),
       }));
     return {
       missionId: missionId(checkpoint.checkpoint_mission_id),
@@ -364,6 +367,7 @@ function decisionFor(
     return {
       kind: 'changes-requested',
       decidedAt,
+      revision: typeof row.decided_revision === 'string' ? changeRevision(row.decided_revision) : null,
       comment: row.decision_comment,
       findings,
     };
@@ -375,6 +379,7 @@ function decisionFor(
     return {
       kind: 'approved',
       decidedAt,
+      revision: typeof row.decided_revision === 'string' ? changeRevision(row.decided_revision) : null,
       comment: row.decision_comment,
       source: { kind: 'local' },
       ...approvalRevocation(row),
@@ -385,6 +390,7 @@ function decisionFor(
     return {
       kind: 'approved',
       decidedAt,
+      revision: typeof row.decided_revision === 'string' ? changeRevision(row.decided_revision) : null,
       comment: row.decision_comment,
       source: {
         kind: 'provider',
@@ -421,7 +427,7 @@ function mechanicalDecisionFor(row: MissionReviewRoundRecord, stored: ReviewerDe
   if (!row.integration_repair_assessment || stored?.kind !== 'approved' || row.classifier_source) { throw new Error('Invalid persisted mechanical source'); }
   const assessment = parseIntegrationRepairAssessment(row.integration_repair_assessment);
   const source = parseMechanicalApprovalSource(row.mechanical_source);
-  if (JSON.stringify(source) !== JSON.stringify(mechanicalSource(assessment, row.revision))) { throw new Error('Invalid persisted mechanical source'); }
+  if (JSON.stringify(source) !== JSON.stringify(mechanicalSource(assessment, row.decided_revision ?? source.candidateRevision))) { throw new Error('Invalid persisted mechanical source'); }
   return { ...stored, source };
 }
 
@@ -430,7 +436,7 @@ function classifierDecisionFor(row: MissionReviewRoundRecord, records: MissionRe
   if (!decision || !row.classifier_source) { return decision; }
   const source = JSON.parse(row.classifier_source) as import('../../domain/classifier-review.js').ClassifierReviewSource;
   assertClassifierReviewSource(source);
-  if (source.candidateRevision !== row.revision || clearingLabel(source) !== (decision.kind === 'approved')) {
+  if (source.candidateRevision !== (row.decided_revision ?? source.candidateRevision) || clearingLabel(source) !== (decision.kind === 'approved')) {
     throw new Error('Invalid persisted classifier provenance');
   }
   return { ...decision, classifier: source };
@@ -506,7 +512,7 @@ function reviewRoundFrom(
 function parseItemDispositions(value: string | null): ReviewItemDisposition[] | null {
   if (!value || !value.trim()) { return null; }
   try {
-    const parsed = JSON.parse(value);
+    const parsed: unknown = JSON.parse(value);
     if (!Array.isArray(parsed)) { return null; }
     const dispositions: ReviewItemDisposition[] = [];
     for (const item of parsed) {

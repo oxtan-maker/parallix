@@ -1,3 +1,4 @@
+import { phaseGateResult } from '../../../../helpers/phase-gate-result.js';
 // ---------------------------------------------------------------------------
 // TASK-2504 — an integration-gate bounce must tell the implementer to commit
 // its repair, because the automatic re-verification only accepts a finalized
@@ -33,12 +34,12 @@ function routeArgs(prompts: string[], messages: string[], treeFinalized: boolean
     gates: [{ key: 'integration-suite', command: GATE_COMMAND, order: 3 }],
     implementer: 'codex',
     repositoryId: 'parallix',
-    startAgentFn: (async (_step: string, o: any) => { prompts.push(o.prompt('codex')); return { agent: 'codex', result: { status: 0 } }; }) as never,
+    startAgentFn: (async (_step: string, o) => { prompts.push(typeof o.prompt === 'function' ? o.prompt('codex') : o.prompt); return { agent: 'codex', result: { status: 0 } }; }),
     transitionTaskFn: async () => true,
     captureFinalTreeFn: (() => (treeFinalized
       ? { ok: true, rootDir: '/tmp/mission', commit: 'c', tree: 't' }
-      : { ok: false, error: 'selected execution root is not finalized (dirty tree): /tmp/mission' })) as never,
-    runPhaseGatesFn: (async (_p: string, o: any) => ({ ok: true, phase: 'integration', gates: o.gates, executed: 1, skipped: false, dryRun: false, failedGate: null, error: null })) as never,
+      : { ok: false, error: 'selected execution root is not finalized (dirty tree): /tmp/mission' })),
+    runPhaseGatesFn: (async (_p: string, o) => ({ ok: true as const, phase: 'integration' as const, gates: o.gates, executed: 1, skipped: false, dryRun: false, failedGate: null, error: null })),
     log: (m: string) => messages.push(m),
     error: (m: string) => messages.push(m),
     gateRunLog: (m: string) => messages.push(m),
@@ -69,15 +70,15 @@ test('failed, timed-out and unsupported fresh launches cannot accept a green pro
     let gateRuns = 0;
     const messages: string[] = [];
     const args = routeArgs([], messages, true);
-    args.startAgentFn = (async (_step: string, options: any) => {
+    args.startAgentFn = (async (_step: string, options) => {
       assert.equal(options.sessionPolicy, 'fresh-ephemeral');
       if (status === 'unsupported') { throw new Error('Unsupported launcher'); }
       return { agent: 'codex', result: { status } };
-    }) as never;
+    });
     args.runPhaseGatesFn = (async () => {
       gateRuns++;
-      return { ok: true };
-    }) as never;
+      return phaseGateResult();
+    });
     const route = await routeIntegrationGateFailure(args);
     assert.notEqual(route.route, 'fixed');
     assert.equal(gateRuns, 0, 'a potentially green verifier cannot certify an unacceptable launch');
@@ -88,17 +89,17 @@ test('failed, timed-out and unsupported fresh launches cannot accept a green pro
 test('fresh repair reruns the authorized integration gates on the committed tree (TASK-2700)', async () => {
   const args = routeArgs([], [], true);
   let runs = 0;
-  args.startAgentFn = (async (_step: string, options: any) => {
+  args.startAgentFn = (async (_step: string, options) => {
     assert.equal(options.sessionPolicy, 'fresh-ephemeral');
     return { agent: 'codex', result: { status: 0 } };
-  }) as never;
-  args.runPhaseGatesFn = (async (phase: string, options: any) => {
+  });
+  args.runPhaseGatesFn = (async (phase: string, options) => {
     runs++;
     assert.equal(phase, 'integration');
     assert.deepEqual(options.gates, args.gates);
     assert.equal(options.checkoutPath, args.missionWorktree);
-    return { ok: true };
-  }) as never;
+    return phaseGateResult();
+  });
   assert.equal((await routeIntegrationGateFailure(args)).route, 'fixed');
   assert.equal(runs, 1);
 });
@@ -131,15 +132,4 @@ test('restoration provenance rejects malformed, future and mismatched persisted 
   assert.throws(() => parseMechanicalApprovalSource('{}'));
   assert.throws(() => parseIntegrationRepairAssessment(JSON.stringify({ ...assessment, outcome: 'unknown' })));
   assert.throws(() => parseIntegrationRepairAssessment(JSON.stringify({ ...assessment, normalReviewMs: -1 })));
-});
-
-
-import { measuredReviewCost } from '../../../../../src/adapters/agents/stage-telemetry.js';
-
-test('normal repair review cost excludes unavailable legacy zero while retaining measured zero (TASK-2734)', () => {
-  assert.equal(measuredReviewCost(undefined), null);
-  assert.equal(measuredReviewCost({ cost_usd: 0 }), null);
-  assert.equal(measuredReviewCost({ cost_usd: 0, cost_measured: true }), 0);
-  assert.equal(measuredReviewCost({ cost_usd: 0.03 }), 0.03);
-  assert.equal(measuredReviewCost({ cost_usd: -1 }), null);
 });

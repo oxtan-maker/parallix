@@ -77,7 +77,10 @@ success.
 
 When automatic recovery exhausts its budget, the report still names the failed
 check, the attempts spent, and the retrieval route so the retained output remains
-reachable.
+reachable. When a repair agent never started, the report also names the launch
+failure's error code, message and signal. A launch the operating system refused
+in a way that would repeat, such as `E2BIG` for an oversized command line, is not
+relaunched unchanged.
 
 ## Honest reporting
 

@@ -1,10 +1,11 @@
 import { analyzeRequestTokens, getEncoding, type JsonValue, type Questions } from 'jevtok-ts';
+import { DECISION_MODEL } from './provider.js';
 import type { DecisionRequestBudget } from '../../application/ports/decision.js';
 
-/** Existing provider aliases name the pinned Jev family; other models are unsupported. */
+/** Only these names have a matching tokenizer; never infer support from a version prefix. */
 export function supportsDecisionBudget(model: string): boolean {
   return ['jev-latest', 'typesafe/jev-latest', 'typesafe-ai/jev', 'jev-1.13', 'jev-1.13.0',
-    'jev-1.13-20260917', 'typesafe/jev-1.13', 'typesafe/jev-1.13.0', 'typesafe/jev-1.13-20260917'].includes(model);
+    'jev-1.13-20260917', 'typesafe/jev-1.13', 'typesafe/jev-1.13.0', DECISION_MODEL].includes(model);
 }
 
 /** The pinned Jev tokenizer owns provider accounting, including structured state. */

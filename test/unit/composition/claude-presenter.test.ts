@@ -7,9 +7,9 @@ import { runClaudeStreamPresenter } from '../../../src/composition/claude-presen
 test('presenter forwards stdin chunks to stdout and closes on end (TASK-2735)', () => {
   const handlers = new Map<string, (_chunk?: unknown) => void>();
   const written: string[] = [];
-  mock.method(process.stdin, 'on', ((event: string, handler: (_chunk?: unknown) => void) => { handlers.set(event, handler); return process.stdin; }) as never);
-  mock.method(process.stdin, 'once', ((event: string, handler: () => void) => { handlers.set(event, handler); return process.stdin; }) as never);
-  mock.method(process.stdout, 'write', ((chunk: string) => { written.push(String(chunk)); return true; }) as never);
+  mock.method(process.stdin, 'on', ((event: string, handler: (_chunk?: unknown) => void) => { handlers.set(event, handler); return process.stdin; }));
+  mock.method(process.stdin, 'once', ((event: string, handler: () => void) => { handlers.set(event, handler); return process.stdin; }));
+  mock.method(process.stdout, 'write', ((chunk: string) => { written.push(String(chunk)); return true; }));
   try {
     runClaudeStreamPresenter(resolveConfiguration({ PARALLIX_CLAUDE_RAW_STREAM: '1' }));
     handlers.get('data')!('hello');

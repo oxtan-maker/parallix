@@ -1,3 +1,4 @@
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 // review current work family contract.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
 import test from 'node:test';
@@ -5,7 +6,7 @@ import assert from 'node:assert/strict';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import { type MissionId } from '../../../../src/domain/mission.js';
 import {
-  CurrentWorkRecorder,
+  CurrentWorkRecorder, parseCurrentWorkEntry,
   reviewLoopPublisher,
   type CurrentWorkEvent,
 } from '../../../../src/application/recording/current-work-recorder.js';
@@ -55,33 +56,19 @@ function memoryHistoryRepo(): {
 } {
   const events: CurrentWorkEvent[] = [];
   let seq = 0;
-  const repo: any = {
-    async append(entry: { eventData: string; createdAt: string }) {
-      const data = JSON.parse(entry.eventData);
-      events.push({
-        missionId: data.missionId,
-        operationId: data.operationId,
-        phase: data.phase,
-        state: data.state,
-        summary: data.summary,
-        agent: data.agent,
-        processId: data.processId,
-        processIdentity: data.processIdentity ?? null,
-        blockedReason: data.blockedReason,
-        occurredAt: entry.createdAt,
-        sequence: seq += 1,
-      });
+  const repo: import('../../../../src/application/ports/operation-history.js').OperationalHistoryRepository = {
+    async append(entry) {
+      const parsed = parseCurrentWorkEntry({ ...entry, id: ++seq });
+      if (parsed) { events.push(parsed); }
     },
     async findAll() { return []; },
-    async findByOperationId() { return undefined; },
-    async save() {},
-    async deleteByOperationId() {},
+    async findByType() { return []; },
     async clear() {},
   };
-  return { repo: repo as any, events };
+  return { repo: repo, events };
 }
 
-const missionId = 'task-2416' as MissionId;
+const missionId = fixtureMissionId('task-2416') as MissionId;
 const LIVE_WORKTREE = '/home/dev/parallix-task-2416';
 
 function currentWorkReader(events: readonly CurrentWorkEvent[]) {
@@ -159,7 +146,7 @@ test('TASK-2416 repro: a nested px review --start must not shadow the outer revi
     rootDir: '/home/dev/parallix',
     blocklistRepo: new EmptyBlocklistRepo(),
     knownAgentFamilies: [agentFamily('claude')],
-    resolveTaskFile: () => ({ ok: false, matches: [] }),
+    resolveTaskFile: () => ({ ok: false as const, matches: [] }),
     sessionMarkers: new Markers([]),
     currentWork: currentWorkReader(events),
     isProcessAlive: () => true,
@@ -199,7 +186,7 @@ test('TASK-2416 guard: a live non-agent operation that publishes a null current-
     rootDir: '/home/dev/parallix',
     blocklistRepo: new EmptyBlocklistRepo(),
     knownAgentFamilies: [agentFamily('claude'), agentFamily('custom')],
-    resolveTaskFile: () => ({ ok: false, matches: [] }),
+    resolveTaskFile: () => ({ ok: false as const, matches: [] }),
     sessionMarkers: new Markers([]),
     currentWork: currentWorkReader(events),
     detectRunningSessions: () => [{
@@ -237,7 +224,7 @@ test('TASK-2416 guard: a dead recording process shows no family attribution', as
     rootDir: '/home/dev/parallix',
     blocklistRepo: new EmptyBlocklistRepo(),
     knownAgentFamilies: [agentFamily('claude')],
-    resolveTaskFile: () => ({ ok: false, matches: [] }),
+    resolveTaskFile: () => ({ ok: false as const, matches: [] }),
     sessionMarkers: new Markers([]),
     currentWork: currentWorkReader([deadEvent]),
     isProcessAlive: () => false,

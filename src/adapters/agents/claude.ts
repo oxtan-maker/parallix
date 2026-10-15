@@ -1,6 +1,7 @@
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
-import { spawnAndTee } from '../process/spawn-tee.js';
+import type { AgentProcessResult, AgentProcessSpawn } from './agent-process-types.js';
+import { spawnAndTee, type SpawnTeeOptions } from '../process/spawn-tee.js';
 import { extractClaudeTelemetryFromStdout } from './claude-telemetry.js';
 import { createClaudeRenderSink, rawStreamRequested } from './claude-stream-view.js';
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
@@ -11,14 +12,14 @@ interface ClaudeInvocationOptions {
   configuration?: ParallixConfiguration;
   prompt: string;
   worktree: string;
-  env?: object;
+  env?: NodeJS.ProcessEnv;
   resume?: boolean;
   sessionId?: string | null;
   model?: string | null;
 }
 
 interface StartClaudeAgentOptions extends ClaudeInvocationOptions {
-  teeOptions?: object;
+  teeOptions?: SpawnTeeOptions;
   slug?: MissionId | null;
   role?: SessionRole | null;
   /** Checked application port for session markers (architecture migration cutover). */
@@ -26,13 +27,13 @@ interface StartClaudeAgentOptions extends ClaudeInvocationOptions {
 }
 
 // Injectable I/O for tests. Production uses the real spawn-tee / export capture.
-let _spawnAndTee: any = spawnAndTee;
+let _spawnAndTee: AgentProcessSpawn = spawnAndTee;
 let _sessionPort: SessionMarkerPort | null = null;
 
 // Test hooks: override the launcher's I/O without touching the public signature.
-function __setSpawnAndTeeForTest(fn: any) { _spawnAndTee = fn || spawnAndTee; }
+function __setSpawnAndTeeForTest(fn: AgentProcessSpawn | null) { _spawnAndTee = fn || spawnAndTee; }
 /** @deprecated Test compatibility hook; file-backed sessions are no longer used. */
-function __setSessionsForTest(_mod: any) { /* no-op */ }
+function __setSessionsForTest(_mod: unknown) { /* no-op */ }
 function __setSessionPortForTest(port: SessionMarkerPort | null) { _sessionPort = port; }
 
 // Claude usage telemetry is parsed from the `stream-json` stdout stream, which
@@ -52,7 +53,7 @@ function extractClaudeSessionIdFromStreamJson(stdout: string) {
     const trimmed = line.trim();
     if (!trimmed.startsWith('{')) {continue;}
     try {
-      const evt = JSON.parse(trimmed);
+      const evt = JSON.parse(trimmed) as { type?: string; session_id?: string };
       // stream-json 'result' events carry session_id at the top level.
       if (evt.type === 'result' && evt.session_id) {return evt.session_id;}
     } catch {
@@ -106,7 +107,7 @@ function buildClaudeInvocation({ configuration = DEFAULT_CONFIGURATION, prompt, 
 }
 
 function startClaudeAgent({ configuration = DEFAULT_CONFIGURATION, prompt, worktree, env, resume = false, sessionId = null, model = null, teeOptions = {}, slug = null, role = null, sessionMarkerPort }: StartClaudeAgentOptions) {
-  function isStaleSessionResult(result: any) {
+  function isStaleSessionResult(result: AgentProcessResult) {
     // Adapter-owned parsing of Claude CLI diagnostics; never exposed as a workflow signal.
     if (!result) {return false;}
     const stderr = result.stderr || '';
@@ -120,7 +121,7 @@ function startClaudeAgent({ configuration = DEFAULT_CONFIGURATION, prompt, workt
     return signals.some(s => stderr.includes(s) || stdout.includes(s));
   }
 
-  function processResult(result: any) {
+  function processResult(result: AgentProcessResult) {
     if (result && result.stdout) {
       result.sessionId = extractClaudeSessionId(result.stdout);
       try {
@@ -142,13 +143,13 @@ function startClaudeAgent({ configuration = DEFAULT_CONFIGURATION, prompt, workt
   // buffer *before* writing this sink, so `extractClaudeTelemetryFromStdout`
   // and `extractClaudeSessionId` still see the byte-identical raw JSONL.
   // `PARALLIX_CLAUDE_RAW_STREAM=1` restores the verbatim passthrough.
-  function launch(invocation: any) {
+  function launch(invocation: ReturnType<typeof buildClaudeInvocation>) {
     const sink = createClaudeRenderSink(process.stdout, {}, configuration);
     const teeWithTail = {
       maxTailBytes: CLAUDE_TELEMETRY_TAIL_BYTES,
       stdoutSink: sink,
       // A hosted terminal shows the same readable view; raw bytes still reach the tail and capture.
-      ...(rawStreamRequested(configuration) ? {} : { hostPresentation: 'claude-stream' }),
+      ...(rawStreamRequested(configuration) ? {} : { hostPresentation: 'claude-stream' as const }),
       ...invocation.options,
       ...teeOptions,
       configuration
@@ -157,9 +158,9 @@ function startClaudeAgent({ configuration = DEFAULT_CONFIGURATION, prompt, workt
       .finally(() => sink.close());
   }
 
-  function staleSessionHandler(invocation: any) {
+  function staleSessionHandler(invocation: ReturnType<typeof buildClaudeInvocation>) {
     return launch(invocation)
-      .then(async (result: any) => {
+      .then(async (result: AgentProcessResult) => {
         if (isStaleSessionResult(result) && worktree && resume) {
           try {
             const port = sessionMarkerPort || _sessionPort;

@@ -1,3 +1,6 @@
+import { VALID_EVENT_TYPES, ALL_EVENT_TYPES, MIRRORED_EVENT_TYPES, VALID_DISPOSITIONS, VALID_VERDICTS, isValidEventType, isValidDisposition, isValidVerdict, shouldMirrorToProvider, hasWorkflowFooter, classifyComment } from './review-event-taxonomy.js';
+import { consumeProviderHumanNotes, type ConsumeHumanNotesOptions, type ConsumeHumanNotesResult } from './review-human-notes.js';
+export type { ConsumeHumanNotesOptions, ConsumeHumanNotesResult } from './review-human-notes.js';
 /**
  * Review event persistence for autonomous review rounds.
  *
@@ -10,11 +13,10 @@
  */
 
 import { git } from '../git/git.js';
-import { missionBranchName, resolveWorktree } from '../filesystem/mission-utils.js';
+import { resolveWorktree } from '../filesystem/mission-utils.js';
 import { missionId } from '../../domain/mission.js';
 import type { Review, ReviewEventType, ReviewItemDisposition } from '../../domain/review.js';
-import * as crypto from 'node:crypto';
-import { readReviewState, writeReviewState, ReviewState } from './review-state.js';
+import { readReviewState, ReviewState } from './review-state.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 
@@ -24,65 +26,6 @@ import type { MissionStore } from '../../application/domain-ports.js';
 async function resolveMissionStore(_rootDir: string, store?: MissionStore | null) {
   return store ?? null;
 }
-
-// -------- Event Taxonomy --------
-
-/**
- * Valid event classification labels.
- * These are the canonical types that can be stored and (optionally) mirrored to the review provider.
- */
-const VALID_EVENT_TYPES = Object.freeze({
-  // Reviewer-produced events
-  REVIEWER_FINDINGS: 'reviewer_findings',
-  REVIEWER_OUTCOME: 'reviewer_outcome',
-
-  // Implementer-produced events
-  IMPLEMENTER_ROUND_SUMMARY: 'implementer_round_summary',
-  IMPLEMENTER_DISPOSITION: 'implementer_disposition',
-
-  // Neutral events
-  NEUTRAL_DISCUSSION: 'neutral_discussion',
-  HUMAN_NOTE: 'human_note',
-
-  // Workflow-internal events (not mirrored to the review provider by default)
-  BLOCKED_PUBLICATION: 'blocked_publication',
-  PARKED_FOLLOWUP: 'parked_followup'
-});
-
-/**
- * All valid event type values as an array for validation.
- */
-const ALL_EVENT_TYPES = Object.freeze(Object.values(VALID_EVENT_TYPES));
-
-/**
- * Event types that should be mirrored to the review provider.
- */
-const MIRRORED_EVENT_TYPES = Object.freeze(new Set([
-  VALID_EVENT_TYPES.REVIEWER_FINDINGS,
-  VALID_EVENT_TYPES.REVIEWER_OUTCOME,
-  VALID_EVENT_TYPES.IMPLEMENTER_ROUND_SUMMARY,
-  VALID_EVENT_TYPES.IMPLEMENTER_DISPOSITION,
-  VALID_EVENT_TYPES.HUMAN_NOTE
-]));
-
-/**
- * Valid disposition values for implementer disposition events.
- */
-const VALID_DISPOSITIONS = Object.freeze([
-  'CHANGES_MADE',
-  'PUSHBACK_ALL',
-  'PARKED',
-  'BLOCKED'
-]);
-
-/**
- * Valid review verdict values for reviewer outcome events.
- */
-const VALID_VERDICTS = Object.freeze([
-  'approve',
-  'request-changes',
-  'comment'
-]);
 
 // -------- Path Resolution --------
 
@@ -102,43 +45,13 @@ function generateEventTimestamp() {
  * Sanitize a string for use in a filename.
  */
 function sanitizeFilename(str: string): string {
-  if (!str) {return 'unknown';}
+  if (!str) { return 'unknown'; }
   return String(str)
     .toLowerCase()
     .replace(/[@.]/g, '')
     .replace(/[^a-z0-9_-]/g, '-')
     .replace(/-+/g, '-')
     .replace(/(?:^-)|(?:-$)/g, '');
-}
-
-// -------- Event Validation --------
-
-/**
- * Validate an event type against the taxonomy.
- */
-function isValidEventType(eventType: string): boolean {
-  return (ALL_EVENT_TYPES as string[]).includes(eventType);
-}
-
-/**
- * Validate a disposition value.
- */
-function isValidDisposition(disposition: string): boolean {
-  return VALID_DISPOSITIONS.includes(disposition);
-}
-
-/**
- * Validate a verdict value.
- */
-function isValidVerdict(verdict: string): boolean {
-  return VALID_VERDICTS.includes(verdict);
-}
-
-/**
- * Check if an event type should be mirrored to the review provider.
- */
-function shouldMirrorToProvider(eventType: string): boolean {
-  return (MIRRORED_EVENT_TYPES as Set<string>).has(eventType);
 }
 
 // -------- Event Structure --------
@@ -187,13 +100,6 @@ export interface CreateEventResult {
   ok: boolean;
   path: string | null;
   event?: NormalizedEvent;
-  error?: string;
-}
-
-export interface ConsumeHumanNotesResult {
-  ok: boolean;
-  created: unknown[];
-  skipped: unknown[];
   error?: string;
 }
 
@@ -271,143 +177,7 @@ function buildEventFooter(slug: string, round: number, phase: string): string {
   return `\n\n---\n\`[workflow-round:${round}, workflow-phase:${phase}]\``;
 }
 
-/**
- * Check if a comment body contains the workflow metadata footer.
- */
-function hasWorkflowFooter(body: string): boolean {
-  return /\`\[workflow-round:\d+, workflow-phase:[^\]]+\]\`/.test(body);
-}
-
-/**
- * Classify a comment as either workflow-generated or human.
- */
-function classifyComment(comment: { body?: string }): string | null {
-  const body = comment.body || '';
-  if (hasWorkflowFooter(body)) {
-    return null;
-  }
-  return VALID_EVENT_TYPES.HUMAN_NOTE;
-}
-
-export interface ConsumeHumanNotesOptions {
-  getCommentsFn?: (_branch: string, _token: string) => Promise<unknown[]>;
-    createEventFn?: typeof createEvent;
-    readReviewStateFn?: typeof readReviewState;
-    readTokenFn?: (_user: string) => string | null;
-  reviewIdentity?: string | null;
-  forgejoUser?: string | null;
-  worktree?: string;
-  log?: (_msg: string) => void;
-  error?: (_msg: string) => void;
-  writeReviewStateFn?: typeof writeReviewState;
-  /** Current review state object — dedup metadata is merged into this in place
-      so the caller's subsequent persist includes the updated dedup list. */
-  currentState?: { round?: number; phase?: string; metadata?: Record<string, unknown> } | null;
-}
-
-/**
- * Consume human notes from provider PR comments.
- */
-async function consumeHumanNotes(slug: string, actor: string, options: ConsumeHumanNotesOptions = {}): Promise<ConsumeHumanNotesResult> {
-  const {
-    getCommentsFn,
-    createEventFn = createEvent,
-    readReviewStateFn = readReviewState,
-    writeReviewStateFn = writeReviewState,
-    readTokenFn,
-    reviewIdentity = null,
-    forgejoUser = null,
-    worktree,
-    log: logger = fmt.log.plain,
-    error = fmt.log.plainError,
-    currentState
-  } = options;
-
-  const actorIdentity = reviewIdentity || forgejoUser;
-  if (!actorIdentity) {
-    error(fmt.status('FAIL', 'Review identity is required for consumeHumanNotes.'));
-    return { ok: false, created: [], skipped: [], error: 'reviewIdentity required' };
-  }
-
-  if (!getCommentsFn) {
-    logger(fmt.status('INFO', 'consumeHumanNotes: no getCommentsFn provided; skipping human note classification.'));
-    return { ok: true, created: [], skipped: [] };
-  }
-
-  const token = readTokenFn ? readTokenFn(actorIdentity) : null;
-  if (!token) {
-    logger(fmt.status('INFO', 'consumeHumanNotes: no provider token found; skipping human note classification.'));
-    return { ok: true, created: [], skipped: [] };
-  }
-
-  const branch = missionBranchName(slug, worktree || process.cwd());
-  const comments = await getCommentsFn(branch, token);
-
-  if (!comments || !Array.isArray(comments)) {
-    logger(fmt.status('INFO', 'consumeHumanNotes: no comments retrieved; skipping classification.'));
-    return { ok: true, created: [], skipped: [] };
-  }
-
-  const created: unknown[] = [];
-  const skipped: unknown[] = [];
-  const rootDir = worktree || process.cwd();
-
-  // Load current state for round/phase and dedup metadata.
-  // If caller provides currentState, we merge dedup into it in-place so the
-  // caller's subsequent persist includes the updated dedup list (avoids the
-  // stale-state overwrite problem when the review loop re-persists its state).
-  // When no state exists yet, create minimal state so dedup keys are recorded
-  // and persisted (N1: durable from first invocation).
-  let stateForRound = currentState ?? (await readReviewStateFn(slug, rootDir));
-  if (!stateForRound) {
-    stateForRound = { round: 1, phase: 'reviewing', metadata: {} };
-  }
-  const round = (stateForRound as { round?: number }).round ?? 1;
-  const phase = (stateForRound as { phase?: string }).phase ?? 'reviewing';
-
-  // Load previously processed dedup keys from metadata.
-  const existingMetadata = (stateForRound as { metadata?: Record<string, unknown> })?.metadata as Record<string, unknown> | undefined;
-  const existingProcessed = existingMetadata?.processedCommentBodies;
-  const processedKeys = new Set<string>(Array.isArray(existingProcessed) ? existingProcessed : []);
-
-  await consumeComments(comments, { slug, actor, round, phase, rootDir, createEventFn, logger, error, processedKeys, created, skipped });
-
-  // Merge dedup keys into state metadata in-place.
-  // No cap — each key is a compact "author\thex16" string (~22 bytes).
-  // Even 500 comments ≈ 11 KB, well within reasonable metadata size.
-  // SC4 requires all already-seen comments to be skipped on re-invocation.
-  if (stateForRound && processedKeys.size > 0) {
-    const targetMetadata = (stateForRound as { metadata?: Record<string, unknown> }).metadata || {};
-    (targetMetadata as Record<string, unknown>).processedCommentBodies = [...processedKeys];
-    (stateForRound as { metadata?: Record<string, unknown> }).metadata = targetMetadata;
-
-    // When currentState was not provided by caller, persist standalone so dedup
-    // survives to next invocation (N2: CLI --consume path).
-    // When currentState WAS provided, caller owns the persist (N1: review loop).
-    if (!currentState) {
-      await writeReviewStateFn(slug, stateForRound as any, rootDir);
-    }
-  }
-
-  logger(fmt.status('INFO', `consumeHumanNotes: created ${created.length} human_note events, skipped ${skipped.length} workflow comments`));
-  return { ok: true, created, skipped };
-}
-
-async function consumeComments(comments: unknown[], context: any): Promise<void> {
-  for (const comment of comments) {
-    const user = (comment as { user?: string }).user;
-    const created = (comment as { created?: string }).created;
-    const body = (comment as { body?: string }).body || '';
-    const key = `${user}\t${crypto.createHash('sha256').update(body).digest('hex').slice(0, 16)}`;
-    if (context.processedKeys.has(key)) { context.skipped.push({ user, created, reason: 'already-processed' }); continue; }
-    if (hasWorkflowFooter(body)) { context.skipped.push({ user, created, reason: 'workflow-generated' }); context.processedKeys.add(key); continue; }
-    const classification = classifyComment(comment as { body?: string });
-    if (!classification) { context.skipped.push({ user, created, reason: 'already-classified' }); context.processedKeys.add(key); continue; }
-    const result = await context.createEventFn(context.slug, classification, { content: body, round: context.round, phase: context.phase, actor: context.actor || user || 'human' }, { worktree: context.rootDir, skipGit: true, log: context.logger, error: context.error });
-    if (result.ok) { context.created.push({ path: result.path, user, created }); context.processedKeys.add(key); }
-    else { context.error(fmt.status('WARN', `Failed to create human_note event for comment by ${user}: ${result.error}`)); }
-  }
-}
+export type ReviewEventCreator = (slug: string, eventType: string, params: CreateEventParams, options: CreateEventOptions) => CreateEventResult | Promise<CreateEventResult>;
 
 // -------- Event Creation --------
 
@@ -459,6 +229,28 @@ function storedEventFailure(slug: string, reason: string, error: (_message: stri
  * conversation. Nothing is written to the repository; agents read the stored
  * events back through `px status`.
  */
+async function eventRoundContext(slug: string, rootDir: string, params: CreateEventParams, options: CreateEventOptions) {
+  let state: ReviewState | null;
+  if (params.round === undefined || params.phase === undefined) {
+    state = await readReviewState(slug, rootDir, options.missionStore);
+  } else {
+    state = null;
+  }
+
+  const round = (params.round !== undefined ? params.round : (state ? state.round : 1)) as number;
+  const phase = (params.phase !== undefined ? params.phase : (state ? state.phase : 'reviewing')) as string;
+  const actor = (params.actor as string) || 'unknown';
+
+  return { round, phase, actor };
+}
+
+function appendWorkflowFooter(slug: string, event: NormalizedEvent): void {
+  if (event.round !== undefined && event.phase !== undefined && !hasWorkflowFooter(event.content || '')) {
+    event.content = `${event.content || ''}${buildEventFooter(slug, event.round, event.phase)}`;
+  }
+
+}
+
 async function createEvent(slug: string, eventType: string, params: CreateEventParams, options: CreateEventOptions = {}): Promise<CreateEventResult> {
   const {
     log: logger = fmt.log.plain,
@@ -472,16 +264,7 @@ async function createEvent(slug: string, eventType: string, params: CreateEventP
   const invalid = invalidEventParams(eventType, params, allowMissingRequiredFields, error);
   if (invalid) { return invalid; }
 
-  let state: ReviewState | null;
-  if (params.round === undefined || params.phase === undefined) {
-    state = await readReviewState(slug, rootDir, options.missionStore);
-  } else {
-    state = null;
-  }
-
-  const round = (params.round !== undefined ? params.round : (state ? state!.round : 1)) as number;
-  const phase = (params.phase !== undefined ? params.phase : (state ? state!.phase : 'reviewing')) as string;
-  const actor = (params.actor as string) || 'unknown';
+  const { round, phase, actor } = await eventRoundContext(slug, rootDir, params, options);
 
   const event = normalizeEventContent(
     (params.content as string) || '',
@@ -504,9 +287,7 @@ async function createEvent(slug: string, eventType: string, params: CreateEventP
   // The workflow footer used to be applied when rendering the exported file.
   // With the export gone the stored row is the only copy, so the footer that
   // downstream provider comments match on is applied to the stored content.
-  if (event.round !== undefined && event.phase !== undefined && !hasWorkflowFooter(event.content || '')) {
-    event.content = `${event.content || ''}${buildEventFooter(slug, event.round, event.phase)}`;
-  }
+  appendWorkflowFooter(slug, event);
 
   const stored = await persistEventInStore(slug, event, rootDir, {
     log: logger,
@@ -560,75 +341,52 @@ async function persistEventInStore(
   }
 
   try {
-    let result = await store.load(missionId(slug));
-    if (result.kind !== 'found' || !result.mission.review) {
-      return { ok: false, path: null, reason: 'no-review' };
-    }
-
-    let mission = result.mission;
-    let review = mission.review!; // narrowed above
-    const eventRecord = {
-      position: review.reviewEvents.length,
-      eventType: event.eventType as ReviewEventType,
-      roundNumber: event.round ?? null,
-      phase: event.phase ?? null,
-      actor: event.actor ?? null,
-      content: event.content,
-      disposition: event.disposition ?? null,
-      verdict: event.verdict ?? null,
-      itemDispositions: event.itemDispositions ?? null,
-      blockedReason: event.blockedReason ?? null,
-      followUpReference: event.followUpReference ?? null,
-      createdAt: event.timestamp || new Date().toISOString(),
-    };
-
-    let updatedReview: Review = {
-      ...review,
-      reviewEvents: [...review.reviewEvents, eventRecord],
-    };
-
-    await store.save({ ...mission, review: updatedReview }, result.version);
-    opts.log?.(fmt.status('PASS', `Persisted review event to SQLite: ${event.eventType} round ${event.round ?? 'n/a'}`));
-    return { ok: true, path: `sqlite:${slug}:${eventRecord.position}` };
+    return await appendReviewEvent(store, slug, event, opts);
   } catch (error) {
-    // Retry once on stale version: another write (e.g. review-state persist)
-    // may have advanced the mission version between our load and save.
-    const isStale = error instanceof Error && error.name === 'MissionStaleWriteError';
-    if (!isStale) {
+    // Retry exactly once when another Mission write advanced the version.
+    if (!(error instanceof Error && error.name === 'MissionStaleWriteError')) {
       return { ok: false, path: null, reason: 'write-failed' };
     }
-    try {
-      const result = await store.load(missionId(slug));
-      if (result.kind !== 'found' || !result.mission.review) {
-        return { ok: false, path: null, reason: 'no-review' };
-      }
-      const mission = result.mission;
-      const review = mission.review!;
-      const eventRecord = {
-        position: review.reviewEvents.length,
-        eventType: event.eventType as ReviewEventType,
-        roundNumber: event.round ?? null,
-        phase: event.phase ?? null,
-        actor: event.actor ?? null,
-        content: event.content,
-        disposition: event.disposition ?? null,
-        verdict: event.verdict ?? null,
-        itemDispositions: event.itemDispositions ?? null,
-        blockedReason: event.blockedReason ?? null,
-        followUpReference: event.followUpReference ?? null,
-        createdAt: event.timestamp || new Date().toISOString(),
-      };
-      const updatedReview: Review = {
-        ...review,
-        reviewEvents: [...review.reviewEvents, eventRecord],
-      };
-      await store.save({ ...mission, review: updatedReview }, result.version);
-      opts.log?.(fmt.status('PASS', `Persisted review event to SQLite: ${event.eventType} round ${event.round ?? 'n/a'}`));
-      return { ok: true, path: `sqlite:${slug}:${eventRecord.position}` };
-    } catch {
-      return { ok: false, path: null, reason: 'write-failed' };
-    }
+    try { return await appendReviewEvent(store, slug, event, opts); }
+    catch { return { ok: false, path: null, reason: 'write-failed' }; }
   }
+}
+
+async function appendReviewEvent(store: MissionStore, slug: string, event: NormalizedEvent, opts: { log?: (message: string) => void }): Promise<PersistEventResult> {
+  const result = await store.load(missionId(slug));
+  if (result.kind !== 'found' || !result.mission.review) {
+    return { ok: false, path: null, reason: 'no-review' };
+  }
+
+  const mission = result.mission;
+  const review = mission.review!; // narrowed above
+  const eventRecord = storedReviewEvent(event, review.reviewEvents.length);
+
+  const updatedReview: Review = {
+    ...review,
+    reviewEvents: [...review.reviewEvents, eventRecord],
+  };
+
+  await store.save({ ...mission, review: updatedReview }, result.version);
+  opts.log?.(fmt.status('PASS', `Persisted review event to SQLite: ${event.eventType} round ${event.round ?? 'n/a'}`));
+  return { ok: true, path: `sqlite:${slug}:${eventRecord.position}` };
+}
+
+function storedReviewEvent(event: NormalizedEvent, position: number) {
+  return {
+    position,
+    eventType: event.eventType as ReviewEventType,
+    roundNumber: event.round ?? null,
+    phase: event.phase ?? null,
+    actor: event.actor ?? null,
+    content: event.content,
+    disposition: event.disposition ?? null,
+    verdict: event.verdict ?? null,
+    itemDispositions: event.itemDispositions ?? null,
+    blockedReason: event.blockedReason ?? null,
+    followUpReference: event.followUpReference ?? null,
+    createdAt: event.timestamp || new Date().toISOString(),
+  };
 }
 
 // -------- Event Reading --------
@@ -641,7 +399,7 @@ async function persistEventInStore(
  * dual authority the cutover removed. A pre-cutover mission is migrated once
  * with `px review <slug> --backfill-review`.
  */
-async function readAllEvents(slug: string, options: ReadAllEventsOptions = {}): Promise<unknown[]> {
+async function readAllEvents(slug: string, options: ReadAllEventsOptions = {}) {
   const { rootDir = process.cwd(), missionStore } = options;
   return readAllEventsFromStore(slug, rootDir, missionStore);
 }
@@ -649,7 +407,7 @@ async function readAllEvents(slug: string, options: ReadAllEventsOptions = {}): 
 /**
  * Read all review events from the SQLite operator database.
  */
-async function readAllEventsFromStore(slug: string, rootDir: string, missionStore?: MissionStore | null): Promise<unknown[]> {
+async function readAllEventsFromStore(slug: string, rootDir: string, missionStore?: MissionStore | null) {
   let store: Awaited<ReturnType<typeof resolveMissionStore>>;
   try {
     store = await resolveMissionStore(rootDir, missionStore);
@@ -704,10 +462,6 @@ export {
   shouldMirrorToProvider
 };
 
-// Path resolution
-export {
-};
-
 // Event creation
 export {
   createEvent,
@@ -738,3 +492,7 @@ export {
   generateEventTimestamp,
   sanitizeFilename
 };
+
+async function consumeHumanNotes(slug: string, actor: string, options: ConsumeHumanNotesOptions = {}): Promise<ConsumeHumanNotesResult> {
+  return consumeProviderHumanNotes(slug, actor, { ...options, createEventFn: options.createEventFn ?? createEvent });
+}

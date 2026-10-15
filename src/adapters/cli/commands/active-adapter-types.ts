@@ -11,8 +11,10 @@ import type { transitionTask, getTaskStatus, getTaskImplementer } from '../../ba
 import type { SessionMarkerPort } from '../../../application/domain-ports.js';
 
 export type Log = (_message: string) => void;
-export type Exit = (_code?: number) => void;
-export interface ActiveOptions extends Record<string, unknown> {
+export type Exit = (_code: number) => void;
+export interface ActiveOptions {
+  /** Set only by the direct operator CLI entry; borrowed recovery calls default to false. */
+  operatorInvocation?: boolean;
   inferSlugFn?: typeof inferSlug;
   service?: Pick<ExecuteMissionService, 'execute'>;
   controller?: BoardCommandDispatcher;
@@ -22,11 +24,10 @@ export interface ActiveOptions extends Record<string, unknown> {
   missionTitleFn?: (_slug: string) => string | null | Promise<string | null>;
   payloadLandedFn?: (_slug: string) => boolean | Promise<boolean>;
 }
-export interface ActiveExecution extends Pick<ActiveOptions, 'controller' | 'controllerFactory' | 'service' | 'serviceFactory'> {
+export interface ActiveExecution extends Pick<ActiveOptions, 'controller' | 'controllerFactory' | 'service' | 'serviceFactory' | 'operatorInvocation'> {
   rootDir: string; renderProgress: (_event: Pick<ProgressEvent, 'phase' | 'agent'>) => void; operationId: string; slug: string; agent: string | null; reviewer: string | null;
 }
 export interface LaunchOptions {
-  missionStore?: Pick<import('../../../application/domain-ports.js').MissionStore, 'load'>;
   configuration?: ParallixConfiguration;
   slug: string; worktree: string; prompt: string; preselectedAgent?: string | null;
   agentConfig: AgentConfig;

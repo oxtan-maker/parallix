@@ -1,3 +1,6 @@
+import { fixtureMission, approvedReview } from '../../../../fixtures/mission-builders.js';
+import { stubMissionServices } from '../../../../helpers/stub-mission-services.js';
+import { missionVersion as fixtureVersion } from '../../../../../src/application/domain-ports.js';
 // Mission classification and NEL capture contract: classification lookup cwd and primary-branch NEL
 // capture.
 //
@@ -30,23 +33,24 @@ describe('Classification lookup', () => {
   // checkout), classification resolution silently looks in the wrong root.
 
   test('missionStart resolves classification using the mission worktree cwd, not process.cwd()', () => {
-    const lines = [];
+    const lines: string[] = [];
     const errors = [];
-    const seenRootDirs = [];
+    const seenRootDirs: string[] = [];
 
     const result = missionStart.default(['task-2200'], {
       returnResult: true,
       cwdFn: () => '/tmp/project-task-2200',
       getCurrentBranchFn: () => 'mission/task-2200',
-      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/project-task-2200/task-2200.md' }),
+      resolveTaskFileFn: () => ({ matches: ['/tmp/project-task-2200/task-2200.md'],  ok: true as const, taskFile: '/tmp/project-task-2200/task-2200.md' }),
       resolveMissionClassificationFn: (slug, rootDir) => {
         seenRootDirs.push(rootDir);
         // Simulate a task file with labels [ai_sdlc, bug] that only exists
         // under the mission worktree, not under process.cwd().
         if (rootDir === '/tmp/project-task-2200') {
-          return { classification: 'ai_sdlc', taskFile: '/tmp/project-task-2200/task-2200.md' };
+          return { source: 'mission', classification: 'ai_sdlc', taskFile: '/tmp/project-task-2200/task-2200.md' };
         }
         return {
+          source: 'mission',
           classification: null,
           taskFile: null,
           error: `Could not resolve backlog task for ${slug}.`,
@@ -60,7 +64,7 @@ describe('Classification lookup', () => {
       getMissionYearFn: () => '2026',
       conventionalWorktreePathFn: () => '/tmp/project-task-2200',
       getLastCommitFn: () => ({ sha: 'abcdef123456', subject: 'Initial', date: '2026-04-30' }),
-      getPrStatusFn: () => ({ exists: false }),
+      getPrStatusFn: () => ({ raw: '',  exists: false as const }),
       log: line => lines.push(line),
       error: line => errors.push(line)
     });
@@ -118,6 +122,8 @@ describe('NEL capture characterization', () => {
     const slug = 'task-4243';
     const { rootDir, missionDir } = missionFixture(slug);
     const effects: string[] = [];
+    const approved = approvedReview(slug);
+    const round = approved.rounds[0];
     mock.method(missionUtils, 'getPrimaryBranch', () => {
       effects.push('primary-branch');
       return 'main';
@@ -128,25 +134,25 @@ describe('NEL capture characterization', () => {
       missionDir,
       log: () => {},
       error: () => {},
-      missionServicesFn: () => ({
+      missionServicesFn: stubMissionServices({
         store: {
           async load() {
             return {
               kind: 'found' as const,
-              mission: {
+              mission: fixtureMission(slug, {
                 predictedNelBucket: 'Large',
                 review: {
-                  rounds: [{ decision: 'APPROVE' }, { decision: 'REQUEST_CHANGES' }, { decision: 'APPROVE' }, { decision: 'APPROVE' }],
+                  ...approved, rounds: [round, { ...round, number: 2, phase: 'fixing', decision: { kind: 'changes-requested', decidedAt: '2026-08-04T10:30:00Z', comment: null, findings: [] } }, { ...round, number: 3 }, { ...round, number: 4 }],
                 },
-              },
-              version: 1 as const,
+              }),
+              version: fixtureVersion(1),
             };
           },
         },
         handoff: {
-          async recordNel(request: Record<string, unknown>) {
+          async recordNel(request) {
             effects.push(`record:${request.netEngineeringLines}:${request.predictedBucket}:${request.reviewRounds}`);
-            return { status: 'completed', value: {}, durableEvidence: [] };
+            return { status: 'completed' as const, durableEvidence: [] };
           },
         },
       }),
@@ -169,17 +175,17 @@ describe('NEL capture characterization', () => {
       missionDir,
       log: () => {},
       error: (message: string) => errors.push(message),
-      missionServicesFn: () => ({
+      missionServicesFn: stubMissionServices({
         store: {
           async load() {
-            return { ok: false, mission: null };
+            return { kind: 'missing' as const };
           },
         },
         handoff: {
           async recordNel() {
             return {
-              status: 'failed',
-              error: { kind: 'unavailable', message: `mission ${slug} is not recorded` },
+              status: 'failed' as const,
+              error: { kind: 'unavailable' as const, message: `mission ${slug} is not recorded` },
               durableEvidence: [],
             };
           },

@@ -1,3 +1,4 @@
+import { missionId as fixtureMissionId } from '../../../src/domain/mission.js';
 import { auditMissionTimestamps, applyMissionTimestampMigration } from '../../../scripts/mission-timestamp-migration.js';
 import { decisionWindowContains, weeklyDecisionWindows } from '../../../src/domain/decision-window.js';
 import { afterEach, describe, it } from 'node:test';
@@ -5,7 +6,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-
 import { missionVersion } from '../../../src/application/domain-ports.js';
 import { RevokeReviewDecisionUseCase } from '../../../src/application/revoke-review-decision-use-case.js';
 import { MissionEditService } from '../../../src/application/mission-edit-service.js';
@@ -32,21 +32,17 @@ import {
   SqliteMissionStore,
 } from '../../../src/adapters/sqlite/mission-store.js';
 import { SqliteBoardLaneEventRepository } from '../../../src/adapters/sqlite/board-lane-event-repository.js';
-
 const tempDirs: string[] = [];
-
 function tempDatabasePath(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-mission-store-'));
   tempDirs.push(dir);
   return path.join(dir, 'operator.db');
 }
-
 async function openDatabase(databasePath = tempDatabasePath()): Promise<SqliteDatabaseAdapter> {
   const database = new SqliteDatabaseAdapter();
   await database.open({ path: databasePath });
   return database;
 }
-
 async function migratedDatabase(
   databasePath = tempDatabasePath(),
 ): Promise<SqliteDatabaseAdapter> {
@@ -54,10 +50,8 @@ async function migratedDatabase(
   await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
   return database;
 }
-
 const testMissionId = missionId('task-mission-store');
 const testRepositoryId = repositoryId('repo-parallix');
-
 function completeReview(): Review {
   const findingId = reviewFindingId('finding-1');
   return {
@@ -79,6 +73,7 @@ function completeReview(): Review {
       startedAt: '2026-07-29T10:00:00Z',
       decision: {
         kind: 'changes-requested',
+        revision: changeRevision('judged-first'),
         decidedAt: '2026-07-29T10:10:00Z',
         comment: 'Use the checked domain model',
         findings: [{
@@ -118,6 +113,7 @@ function completeReview(): Review {
       startedAt: '2026-07-29T10:30:00Z',
       decision: {
         kind: 'approved',
+        revision: changeRevision('judged-second'),
         decidedAt: '2026-07-29T10:40:00Z',
         comment: null,
         source: { kind: 'provider', provider: 'forgejo' },
@@ -141,7 +137,6 @@ function completeReview(): Review {
     reviewEvents: [],
   };
 }
-
 function completeMission(overrides: Partial<Mission> = {}): Mission {
   return {
     id: testMissionId,
@@ -158,7 +153,7 @@ function completeMission(overrides: Partial<Mission> = {}): Mission {
       firstLine: '# CP-1: Persistence',
       goalCheck: [
         { criterion: 'Mission round trips', criterionId: null, evidence: 'named adapter test' },
-        { criterion: 'Writes are checked', criterionId: null, evidence: 'same-status stale-writer test', recordedRound: 2, repairedGate: 'unit', repairedGates: ['unit', 'docs'] },
+        { criterion: 'Writes are checked', criterionId: null, evidence: 'same-status stale-writer test', recordedRound: 2, repairedGate: 'unit', repairedGates: ['unit', 'docs'], carriedFrom: 'CP-0' },
       ],
       nextActionText: 'Run the integration suite.',
     }],
@@ -173,7 +168,7 @@ function completeMission(overrides: Partial<Mission> = {}): Mission {
     successCriterionIds: (overrides.successCriteria ?? ['The aggregate survives a restart', 'Stale writes are rejected']).map((_, index) => `sc-${index + 1}`),
     nextSuccessCriterionId: (overrides.successCriteria?.length ?? 2) + 1,
     completedSuccessCriteria: [1],
-    dependencies: ['task-2521.01', 'task-2521.03'],
+    dependencies: [fixtureMissionId('task-2521.01'), fixtureMissionId('task-2521.03')],
     predictedNelBucket: 'Medium',
     reproductionTest: 'test/task-2294-repro.test.ts',
     review: completeReview(),
@@ -622,7 +617,7 @@ describe('SQLite Mission aggregate integration', () => {
         agent: 'codex',
         occurredAt: '2026-07-29T12:00:00Z',
         idempotencyKey: 'transition-1',
-      };
+      } satisfies Partial<NonNullable<Parameters<typeof store.saveWithTransition>[2]>>;
 
       const nextVersion = await store.saveWithTransition(transitioned, version, event);
       assert.equal(nextVersion, missionVersion(2));
@@ -865,8 +860,8 @@ it('retains checkpoint records and recording metadata after reload (TASK-2742)',
     const { MissionCheckpointService } = await import('../../../src/application/mission-checkpoint-service.js');
     let revision = await store.save(completeMission({ review: null, checkpoints: [], successCriteria: [], completedSuccessCriteria: [] }), null);
     const service = new MissionCheckpointService(store, undefined, () => '2026-10-14T12:00:00.000Z');
-    const request = { operationId: 'record', missionId: testMissionId, capabilities: new Set(['checkpoint:record'] as const) };
-    const checkpoint = { missionId: testMissionId, name: 'CP-1', goalCheck: [{ criterion: 'proof', evidence: 'first' }], nextActionText: 'continue' };
+    const request = { operationId: 'record', missionId: testMissionId, capabilities: new Set(['checkpoint:record'] as const) } satisfies Partial<NonNullable<Parameters<typeof service.record>[0]>>;
+    const checkpoint = { missionId: testMissionId, name: 'CP-1', goalCheck: [{ criterion: 'proof', evidence: 'first' }], nextActionText: 'continue' } satisfies import("../../../src/domain/checkpoint.js").CheckpointData;
     const first = await service.record({ ...request, checkpoint });
     assert.equal(first.status, 'completed');
     const second = await service.record({ ...request, checkpoint: { ...checkpoint, goalCheck: [{ criterion: 'proof', evidence: 'second' }] } });
@@ -901,8 +896,8 @@ it('replays each review-start checkpoint state after later records and reopening
     const { MissionCheckpointService } = await import('../../../src/application/mission-checkpoint-service.js');
     await store.save(completeMission({ review: null, checkpoints: [], successCriteria: [], completedSuccessCriteria: [] }), null);
     const service = new MissionCheckpointService(store);
-    const request = { operationId: 'record', missionId: testMissionId, capabilities: new Set(['checkpoint:record'] as const) };
-    const checkpoint = { missionId: testMissionId, name: 'CP-1', goalCheck: [{ criterion: 'proof', evidence: 'before review' }], nextActionText: 'review' };
+    const request = { operationId: 'record', missionId: testMissionId, capabilities: new Set(['checkpoint:record'] as const) } satisfies Partial<NonNullable<Parameters<typeof service.record>[0]>>;
+    const checkpoint = { missionId: testMissionId, name: 'CP-1', goalCheck: [{ criterion: 'proof', evidence: 'before review' }], nextActionText: 'review' } satisfies import("../../../src/domain/checkpoint.js").CheckpointData;
     assert.equal((await service.record({ ...request, checkpoint })).status, 'completed');
     const loaded = await store.load(testMissionId);
     if (loaded.kind !== 'found') { throw new Error('missing mission'); }
@@ -921,7 +916,7 @@ it('replays each review-start checkpoint state after later records and reopening
     if (next.kind !== 'found' || !next.mission.review) { throw new Error('missing review'); }
     const rounds = next.mission.review.rounds;
     await store.save({ ...next.mission, review: { ...next.mission.review,
-      rounds: [...rounds, { ...rounds[1]!, number: 3 }] as never } }, next.version);
+      rounds: [...rounds, { ...rounds[1]!, number: 3 }] } }, next.version);
     const third = await store.reviewCheckpointState(testMissionId, 3);
     assert.deepEqual(third?.versions, [2]);
     assert.equal(third?.checkpoints[0]?.goalCheck[0]?.evidence, 'after review');
@@ -940,8 +935,8 @@ it('keeps criterion identity through edits and replays round-time coverage (TASK
     let store = new SqliteMissionStore(db);
     const { MissionCheckpointService } = await import('../../../src/application/mission-checkpoint-service.js');
     await store.save(completeMission({ review: null, checkpoints: [], dependencies: [], successCriteria: ['original', 'uncovered'], completedSuccessCriteria: [0] }), null);
-    const request = { operationId: 'identity', missionId: testMissionId, capabilities: new Set(['checkpoint:record', 'mission:context'] as const) };
-    const checkpoint = { missionId: testMissionId, name: 'CP-1', goalCheck: [{ criterion: 'original', evidence: 'npm test' }], nextActionText: 'review' };
+    const request = { operationId: 'identity', missionId: testMissionId, capabilities: new Set(['checkpoint:record', 'mission:context'] as const) } satisfies Partial<NonNullable<Parameters<MissionEditService['save']>[0]>>;
+    const checkpoint = { missionId: testMissionId, name: 'CP-1', goalCheck: [{ criterion: 'original', evidence: 'npm test' }], nextActionText: 'review' } satisfies import("../../../src/domain/checkpoint.js").CheckpointData;
     // A later planned checkpoint permits recording partial progress.
     await new MissionCheckpointService(store).plan({ ...request, name: 'CP-2', description: 'remaining evidence' });
     assert.equal((await new MissionCheckpointService(store).record({ ...request, checkpoint })).status, 'completed');
@@ -968,11 +963,35 @@ it('keeps criterion identity through edits and replays round-time coverage (TASK
     if (updated.kind !== 'found') { throw new Error('missing updated mission'); }
     assert.equal(updated.mission.checkpoints[0]?.goalCheck.length, 1, 'edited criterion replaces its own row by ID');
     assert.equal((await store.checkpointHistory(testMissionId))[1]?.checkpoint.goalCheck[0]?.criterionId, ids[0]);
-    await store.save({ ...updated.mission, review: { ...updated.mission.review!, rounds: [...updated.mission.review!.rounds, { ...updated.mission.review!.rounds[1]!, number: 3 }] as never } }, updated.version);
+    await store.save({ ...updated.mission, review: { ...updated.mission.review!, rounds: [...updated.mission.review!.rounds, { ...updated.mission.review!.rounds[1]!, number: 3 }] } }, updated.version);
     const later = await store.reviewCheckpointState(testMissionId, 3);
     assert.deepEqual(later?.successCriteria, [{ id: ids[0], text: 'edited' }]);
     assert.deepEqual(later?.uncoveredCriterionIds, []);
     await db.close(); db = await migratedDatabase(databasePath); store = new SqliteMissionStore(db);
     assert.deepEqual(await store.reviewCheckpointState(testMissionId, 1), original);
   } finally { await db.close(); }
+});
+
+it('preserves unknown legacy decided revisions through migration and subsequent writes (TASK-2752)', async () => {
+  const database = await openDatabase();
+  try {
+    const migrations = loadDefaultMigrations();
+    await new SqliteMigrationRunner(database).applyPending(migrations.filter(m => !m.id.startsWith('0039')));
+    const mission = completeMission();
+    await database.execute(migrations.find(m => m.id.startsWith('0039'))!.up);
+    const store = new SqliteMissionStore(database);
+    await store.save(mission, null);
+    await database.execute('ALTER TABLE mission_review_rounds DROP COLUMN decided_revision');
+    await new SqliteMigrationRunner(database).applyPending(migrations);
+    let loaded = await store.load(mission.id);
+    assert.equal(loaded.kind, 'found');
+    if (loaded.kind !== 'found') { return; }
+    assert.deepEqual(loaded.mission.review!.rounds.map(r => r.decision?.revision), [null, null]);
+    await store.save(loaded.mission, loaded.version);
+    loaded = await store.load(mission.id);
+    assert.equal(loaded.kind, 'found');
+    if (loaded.kind !== 'found') { return; }
+    assert.deepEqual(loaded.mission.review!.rounds.map(r => r.decision?.revision), [null, null]);
+    assert.deepEqual(loaded.mission.review!.rounds.map(r => r.subject.revision), mission.review!.rounds.map(r => r.subject.revision));
+  } finally { await database.close(); }
 });

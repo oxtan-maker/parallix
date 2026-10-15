@@ -63,6 +63,8 @@ interface StatsBlock {
  * Returns null when the content yields no usable signal (missing stats,
  * empty object, or non-object stats).
  */
+function vibeToolCalls(stats: StatsBlock) { return { toolCallsAgreed: Number(stats.tool_calls_agreed) || 0, toolCallsRejected: Number(stats.tool_calls_rejected) || 0, toolCallsFailed: Number(stats.tool_calls_failed) || 0, toolCallsSucceeded: Number(stats.tool_calls_succeeded) || 0 }; }
+
 export function parseVibeMeta(meta: ParseableMeta | null | undefined): TelemetryResult | null {
   if (!meta || typeof meta !== 'object') {return null;}
 
@@ -84,10 +86,7 @@ export function parseVibeMeta(meta: ParseableMeta | null | undefined): Telemetry
     outputTokens,
     totalTokens,
     contextTokens: Number(s.context_tokens) || 0,
-    toolCallsAgreed: Number(s.tool_calls_agreed) || 0,
-    toolCallsRejected: Number(s.tool_calls_rejected) || 0,
-    toolCallsFailed: Number(s.tool_calls_failed) || 0,
-    toolCallsSucceeded: Number(s.tool_calls_succeeded) || 0,
+    ...vibeToolCalls(s),
     sessionCost: Number(s.session_cost) || 0,
   };
 }
@@ -137,7 +136,7 @@ export function extractVibeTelemetry(_result: unknown, basePath?: string): Telem
 
     let meta: ParseableMeta;
     try {
-      meta = JSON.parse(content);
+      meta = JSON.parse(content) as ParseableMeta;
     } catch (_) {
       continue;
     }

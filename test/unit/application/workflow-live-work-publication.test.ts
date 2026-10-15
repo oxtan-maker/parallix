@@ -39,10 +39,12 @@ function recorder() {
 }
 
 function reviewWorkflow(onContinue: (_context: ReviewWorkflowContext) => Promise<void>) {
+  const unused = () => { throw new Error('Unexpected review workflow operation'); };
   return {
-    async preflight(args: string[], options: Record<string, unknown>) { return { slug: SLUG, args, options }; },
+    verify: unused, submit: unused, push: unused, start: unused, resume: unused, comment: unused, readComments: unused, submitReview: unused, close: unused, status: unused, createEvent: unused, backfillReview: unused, reconcileReview: unused, importLegacy: unused,
+    async preflight(args: string[], options: Record<string, unknown> = {}) { return { slug: SLUG, args, options }; },
     continue: onContinue,
-  } as never;
+  };
 }
 
 test('integration, its repair agent and its nested re-review keep the mission live with the running family', async () => {
@@ -72,7 +74,7 @@ test('integration, its repair agent and its nested re-review keep the mission li
       snapshot();
       return 0;
     },
-  } as never, port);
+  }, port);
 
   await integrate.execute([SLUG]);
 
@@ -93,7 +95,7 @@ test('an integrate that cannot continue shows why, not a silent end', async () =
   const { port, board } = recorder();
   const integrate = new IntegrateCommandUseCase({
     async execute() { throw new Error('Integration gate unit still fails after 2 repair(s)'); },
-  } as never, port);
+  }, port);
   await assert.rejects(integrate.execute([SLUG]));
   assert.equal(board()?.blockingReason, 'Integration gate unit still fails after 2 repair(s)');
 });
@@ -113,7 +115,7 @@ for (const status of [0, 23]) {
     const stopped = Object.freeze({});
     const review = new ReviewCommandUseCase(reviewWorkflow(async context => {
       (context.options.exit as (_code: number) => never)(status);
-      assert.fail('exit must terminate workflow execution');
+      return assert.fail('exit must terminate workflow execution');
     }), port);
     await assert.rejects(review.execute([SLUG, '--continue'], { exit: () => { throw stopped; } }), error => error === stopped);
     assert.equal(board()?.currentWork ?? null, null);

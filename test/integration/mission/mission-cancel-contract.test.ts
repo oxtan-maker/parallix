@@ -1,3 +1,8 @@
+import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
+import { TerminalStream as Stream } from '../../helpers/terminal-stream.js';
+import type { SQLInputValue } from 'node:sqlite';
+import type { BoardCommandDispatcher, BoardCommandRequest, BoardCommandResult } from '../../../src/application/controller/board-command.js';
+import type { BoardProjection } from '../../../src/application/projections/board.js';
 // Mission cancel contract: cancellation use case and persistence plus the CLI/web cancel surfaces.
 //
 // Behavior-owned suite (TASK-2622.07). Legacy case names are unchanged; each section keeps its
@@ -21,8 +26,7 @@ import { availableBoardCommands } from '../../../src/application/projections/mis
 import { agentFamily } from '../../../src/domain/agents.js';
 import { missionLabels, missionId } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
-import { EventEmitter } from 'node:events';
-import { Window, type HTMLButtonElement as DomButton } from 'happy-dom';
+import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Board } from '../../../web/src/board.js';
@@ -129,14 +133,10 @@ describe('Mission cancel', () => {
 
   /** A pass-through adapter façade a test can fail at one chosen statement. */
   function adapterDouble(db: SqliteDatabaseAdapter, overrides: Partial<SqliteDatabaseAdapter>): SqliteDatabaseAdapter {
-    const passthrough = {
-      execute: (sql: string, params?: readonly unknown[]) => db.execute(sql, params),
-      query: (sql: string, params?: readonly unknown[]) => db.query(sql, params),
-      beginTransaction: () => db.beginTransaction(),
-      commitTransaction: () => db.commitTransaction(),
-      rollbackTransaction: () => db.rollbackTransaction(),
-    };
-    return { ...passthrough, ...overrides } as unknown as SqliteDatabaseAdapter;
+    return new Proxy(db, { get(target, property) {
+      const value: unknown = Reflect.get(overrides, property) ?? Reflect.get(target, property);
+      return typeof value === 'function' ? value.bind(target) : value;
+    } });
   }
 
   afterEach(() => {
@@ -192,7 +192,7 @@ describe('Mission cancel', () => {
       await seedBoard(db);
       const before = await lifecycleCounts(db, TARGET);
       const failing = adapterDouble(db, {
-        execute: (async (sql: string, params?: readonly unknown[]) => {
+        execute: (async (sql: string, params?: readonly SQLInputValue[]) => {
           if (sql.includes('FROM missions')) { throw new Error('induced mid-transaction failure'); }
           return db.execute(sql, params);
         }) as SqliteDatabaseAdapter['execute'],
@@ -211,7 +211,7 @@ describe('Mission cancel', () => {
       await seedBoard(db);
       const before = await lifecycleCounts(db, TARGET);
       const unenforced = adapterDouble(db, {
-        query: (async (sql: string, params?: readonly unknown[]) =>
+        query: (async (sql: string, params?: readonly SQLInputValue[]) =>
           sql === 'PRAGMA foreign_keys' ? [{ foreign_keys: 0 }] : db.query(sql, params)) as SqliteDatabaseAdapter['query'],
       });
 
@@ -276,20 +276,20 @@ describe('Mission cancel', () => {
       assignee: agentFamily('claude'),
       rawStatus: 'backlog',
       capabilities: new Set(['mission:intake', 'mission:transition'] as const),
-    } as never);
+    });
 
     // One builder, held across both builds: "without a restart" is exactly this.
     const builder = new BoardProjectionBuilder(
       {
         async loadAllMissions() { return store.loadByRepository(repository); },
-        async loadMission(id: never) { const loaded = await store.load(id); return loaded.kind === 'found' ? loaded.mission : null; },
+        async loadMission(id) { const loaded = await store.load(id); return loaded.kind === 'found' ? loaded.mission : null; },
         getSourceFacts() { return [{ source: 'mission-store' as const, status: 'fresh' as const, value: repository }]; },
-      } as never,
-      { async loadReviews(ids: readonly string[]) { return new Map(ids.map((id) => [id, { review: null, approval: null }])); } } as never,
-      { async loadGateStatus() { return 'unknown' as const; } } as never,
-      { async loadAgentAvailability() { return []; }, async loadAssignedAgent() { return null; } } as never,
-      { async loadRepositoryId() { return repository; }, async loadHeadCommit() { return 'abc123'; } } as never,
-      { async loadOperationLog() { return []; } } as never,
+      },
+      { async loadReviews(ids) { return new Map(ids.map((id) => [id, { review: null, approval: null }])); } },
+      { async loadGateStatus() { return 'unknown' as const; } },
+      { async loadAgentAvailability() { return []; }, async loadAssignedAgent() { return null; } },
+      { async loadRepositoryId() { return repository; }, async loadHeadCommit() { return 'abc123'; } },
+      { async loadOperationLog() { return []; } },
     );
 
     const before = await builder.build();
@@ -303,16 +303,16 @@ describe('Mission cancel', () => {
 
   test('every persisted mission advertises an enabled cancel command, last', () => {
     const commands = availableBoardCommands(
-      { id: missionId(SLUG), repositoryId: repositoryId('parallix'), title: 'Cancel', labels: [], status: 'active', closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null } as never,
-      { reviewApproval: null } as never,
+      completeMissionFixture(String(missionId(SLUG)), { id: missionId(SLUG), repositoryId: repositoryId('parallix'), title: 'Cancel', labels: [], status: 'active', closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null }),
+      { reviewApproval: null },
     );
     assert.deepEqual(commands.at(-1), { command: 'cancel', enabled: true, reason: null, targetLane: null, label: 'cancel ✕' });
   });
 
   test('a delivered Mission does not offer cancellation during closeout', () => {
     const commands = availableBoardCommands(
-      { id: missionId(SLUG), repositoryId: repositoryId('parallix'), title: 'Delivered', labels: [], status: 'done', closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null } as never,
-      { reviewApproval: null } as never,
+      completeMissionFixture(String(missionId(SLUG)), { id: missionId(SLUG), repositoryId: repositoryId('parallix'), title: 'Delivered', labels: [], status: 'done', closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null }),
+      { reviewApproval: null },
     );
     assert.equal(commands.at(-1)?.command, 'cancel');
     assert.equal(commands.at(-1)?.enabled, false);
@@ -379,12 +379,12 @@ describe('Cancel surfaces', () => {
   const ESCAPE = '';
 
   /** Records every request a surface dispatches, and answers with one outcome. */
-  function dispatcherSpy(outcome: unknown = { status: 'completed', value: { slug: SLUG, cleanupCommand: `git worktree remove /tmp/${SLUG} && git branch -D mission/${SLUG}` }, durableEvidence: [] }) {
-    const requests: Array<Record<string, unknown>> = [];
+  function dispatcherSpy(outcome: BoardCommandResult = { status: 'completed', value: { slug: SLUG, cleanupCommand: `git worktree remove /tmp/${SLUG} && git branch -D mission/${SLUG}` }, durableEvidence: [] }) {
+    const requests: BoardCommandRequest[] = [];
     return {
       requests,
       canExecute: () => true,
-      async dispatch(request: Record<string, unknown>) { requests.push(request); return outcome; },
+      async dispatch<T>(request: BoardCommandRequest): Promise<BoardCommandResult<T>> { requests.push(request); return { ...outcome, value: outcome.value as T }; },
     };
   }
 
@@ -397,7 +397,7 @@ describe('Cancel surfaces', () => {
       const dispatcher = dispatcherSpy();
       const lines: string[] = [];
       const codes: number[] = [];
-      const code = await createCancelCommand(dispatcher as never, (line) => lines.push(line), (value) => codes.push(value))([SLUG]);
+      const code = await createCancelCommand(dispatcher, (line) => lines.push(line), (value) => codes.push(value))([SLUG]);
 
       assert.equal(code, 1);
       assert.deepEqual(codes, [1]);
@@ -408,7 +408,7 @@ describe('Cancel surfaces', () => {
     it('dispatches mission:cancel carrying the mission id alone and prints the operator git cleanup', async () => {
       const dispatcher = dispatcherSpy();
       const lines: string[] = [];
-      const code = await createCancelCommand(dispatcher as never, (line) => lines.push(line), () => {})([SLUG, '--yes']);
+      const code = await createCancelCommand(dispatcher, (line) => lines.push(line), () => {})([SLUG, '--yes']);
 
       assert.equal(code, 0);
       assert.equal(dispatcher.requests.length, 1);
@@ -433,7 +433,7 @@ describe('Cancel surfaces', () => {
     const gitCalls: string[][] = [];
     const gitFn = (args: string[]) => {
       gitCalls.push(args);
-      return { stdout: '', status: 0 };
+      return { signal: null, stderr: '',  stdout: '', status: 0 };
     };
     const command = missionCleanupCommand(SLUG, '/fixture/parallix', gitFn);
 
@@ -449,21 +449,6 @@ describe('Cancel surfaces', () => {
   // TUI
   // ---------------------------------------------------------------------------
 
-  class Stream extends EventEmitter {
-    public columns = 120;
-    public rows = 30;
-    public readonly isTTY = true;
-    public readonly writes: string[] = [];
-    private readonly input: string[] = [];
-    write(value: string): boolean { this.writes.push(value); this.emit('write'); return true; }
-    setRawMode(_enabled: boolean): void {}
-    setEncoding(_encoding: string): void {}
-    resume(): void {}
-    ref(): void {}
-    unref(): void {}
-    read(): string | null { return this.input.shift() ?? null; }
-    send(value: string): void { this.input.push(value); this.emit('readable'); }
-  }
 
   async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
@@ -478,13 +463,13 @@ describe('Cancel surfaces', () => {
     return waitFor(() => pattern.test(stream.writes.join('')), timeoutMs);
   }
 
-  async function renderCancelBoard(dispatcher: { dispatch: (..._args: any[]) => Promise<any> }, refreshProjection?: () => Promise<any>) {
+  async function renderCancelBoard(dispatcher: Pick<BoardCommandDispatcher, 'dispatch'>, refreshProjection?: () => Promise<BoardProjection>) {
     const ink = await import('ink');
     const { BoardShell } = await import('../../../src/interfaces/tui/shell.js');
     const stdin = new Stream();
     const stdout = new Stream();
     const card = makeCard({
-      id: SLUG as never,
+      id: missionId(SLUG),
       lane: 'active', status: 'active', rawStatus: 'active',
       commands: [CANCEL_COMMAND],
     });
@@ -493,7 +478,7 @@ describe('Cancel surfaces', () => {
       initialSelectedMissionId: SLUG,
       commandControllerFactory: () => ({ canExecute: (kind: string) => kind === 'mission:cancel', ...dispatcher }),
       refreshProjection,
-    } as never), { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false });
+    }), { stdin, stdout, patchConsole: false, exitOnCtrlC: false });
     await waitFor(() => stdout.writes.length > 0);
     return { stdin, stdout, instance };
   }
@@ -554,9 +539,9 @@ describe('Cancel surfaces', () => {
 
   async function renderWebBoard() {
     const window = new Window();
-    const previous = { window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch, IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT, requestAnimationFrame: globalThis.requestAnimationFrame };
+    const previous = { window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch, IS_REACT_ACT_ENVIRONMENT: Reflect.get(globalThis, 'IS_REACT_ACT_ENVIRONMENT'), requestAnimationFrame: globalThis.requestAnimationFrame };
     Object.assign(globalThis, { window, document: window.document });
-    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     globalThis.requestAnimationFrame = (callback) => { callback(0); return 0; };
     const calls: RequestInit[] = [];
     globalThis.fetch = async (_url, init) => {
@@ -567,8 +552,8 @@ describe('Cancel surfaces', () => {
       );
     };
     let refreshes = 0;
-    const mount = window.document.createElement('div');
-    window.document.body.append(mount);
+    const mount = globalThis.document.createElement('div');
+    globalThis.document.body.append(mount);
     const root = createRoot(mount);
     await act(async () => { root.render(React.createElement(Board, { snapshot: webSnapshot(), onRefresh: async () => { refreshes += 1; } })); });
     return {
@@ -582,12 +567,16 @@ describe('Cancel surfaces', () => {
     };
   }
 
-  function cancelButton(page: { mount: any }): DomButton {
-    return page.mount.querySelector('button[aria-label^="px cancel"]');
+  function cancelButton(page: { mount: HTMLElement }): HTMLButtonElement {
+    const button = page.mount.querySelector<HTMLButtonElement>('button[aria-label^="px cancel"]');
+    assert.ok(button);
+    return button;
   }
 
-  function buttonLabelled(page: { mount: any }, text: string): DomButton {
-    return [...page.mount.querySelectorAll('button')].find((button: DomButton) => button.textContent?.includes(text));
+  function buttonLabelled(page: { mount: HTMLElement }, text: string): HTMLButtonElement {
+    const button = [...page.mount.querySelectorAll('button')].find(button => button.textContent?.includes(text));
+    assert.ok(button);
+    return button;
   }
 
   describe('the web cancel confirmation', () => {
@@ -607,7 +596,9 @@ describe('Cancel surfaces', () => {
         assert.equal(page.mount.ownerDocument.activeElement?.textContent, 'keep mission');
         const dialog = page.mount.querySelector('[role="dialog"]')!;
         await act(async () => {
-          dialog.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+          const KeyboardEvent = globalThis.document.defaultView?.KeyboardEvent;
+          assert.ok(KeyboardEvent);
+          dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
         });
         assert.deepEqual(page.calls, []);
         assert.equal(page.mount.querySelector('[role="dialog"]'), null);

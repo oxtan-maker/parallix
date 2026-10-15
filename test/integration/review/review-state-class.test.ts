@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -46,8 +45,8 @@ test('ReviewState toJSON excludes empty retry counts and metadata', () => {
   });
 
   const json = state.toJSON();
-  assert.equal(json.reviewerRetryCount, undefined);
-  assert.equal(json.implementerRetryCount, undefined);
+  assert.equal('reviewerRetryCount' in json, false);
+  assert.equal('implementerRetryCount' in json, false);
   assert.equal(json.metadata, undefined);
 });
 
@@ -59,8 +58,8 @@ test('ReviewState toJSON includes metadata when present (TASK-2377.04: no retry 
   });
 
   const json = state.toJSON();
-  assert.equal(json.reviewerRetryCount, undefined, 'the persisted reviewer retry field is deleted');
-  assert.equal(json.implementerRetryCount, undefined, 'the persisted implementer retry field is deleted');
+  assert.equal('reviewerRetryCount' in json, false, 'the persisted reviewer retry field is deleted');
+  assert.equal('implementerRetryCount' in json, false, 'the persisted implementer retry field is deleted');
   assert.deepEqual(json.metadata, { key: 'value' });
 });
 
@@ -110,7 +109,7 @@ test('transitionTo rejects transitions from approved', () => {
 });
 
 test('normalizeReviewPhase repairs the rewiewing typo to reviewing', () => {
-  assert.deepEqual(normalizeReviewPhase('rewiewing'), {
+  assert.deepEqual(normalizeReviewPhase('rewiewing', ''), {
     phase: 'reviewing',
     original: 'rewiewing',
     normalized: true
@@ -208,11 +207,14 @@ test('ReviewState save reports write-failed when the operator database is unreac
 test('ReviewState save persists the phase transition the loop just made', async () => {
   await withMissionDatabase('task-save-phase', async ({ root, slug, store }) => {
     const state = await readReviewState(slug, root, store);
+    assert.ok(state);
     state.transitionTo('fixing');
     state.disposition = 'REQUEST_CHANGES';
+    assert.ok(state != null);
     assert.deepEqual(await state.save(root, store), { outcome: 'committed' });
 
     const reloaded = await readReviewState(slug, root, store);
+    assert.ok(reloaded != null);
     assert.equal(reloaded.phase, 'fixing');
     assert.equal(reloaded.disposition, 'REQUEST_CHANGES');
   });
@@ -236,7 +238,7 @@ test('review loop preserves persisted round data when the reviewer identity chan
     }),
     routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
     agents: { launch: async () => ({ agent: 'claude' }) },
-    artifacts: { consumeImplementer: async () => ({ consumed: true, ok: true, disposition: 'PUSHBACK_ALL' }) },
+    artifacts: { consumeImplementer: async () => ({ consumed: true, ok: true as const, disposition: 'PUSHBACK_ALL' }) },
   });
 
   // This regression covers the resume snapshot itself. Keep the loop on its

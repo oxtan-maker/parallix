@@ -1,3 +1,4 @@
+import type { ReadUtf8File } from './review-cli-flags.js';
 /**
  * Static Review Evidence Helpers
  *
@@ -17,7 +18,6 @@ import {
   evidenceCellHasVerifiableReference,
   findUnverifiableGoalCheckRow,
   type EvidenceFileSystemPort,
-  type EvidenceDirent,
 } from '../../application/static-evidence.js';
 
 export {
@@ -67,7 +67,7 @@ export function performStaticReview(
     log?: (_msg: string) => void;
     findMissionDir?: typeof findMissionDir;
     findCheckpoints?: typeof findCheckpoints;
-    readFileSync?: typeof fs.readFileSync;
+    readFileSync?: ReadUtf8File;
     run?: typeof run;
     resolveWorktree?: typeof resolveWorktree;
     getPrimaryBranch?: typeof getPrimaryBranch;
@@ -84,9 +84,9 @@ export function performStaticReview(
   // build an fs-backed port here so its helpers can read real files.
   const evidenceFileSystem: EvidenceFileSystemPort = {
     existsSync: (target) => fs.existsSync(target),
-    readText: (target) => (readFileSyncFn as typeof fs.readFileSync)(target, 'utf8'),
+    readText: (target) => readFileSyncFn(target, 'utf8'),
     listEntries: (target) =>
-      fs.readdirSync(target, { withFileTypes: true }) as unknown as EvidenceDirent[],
+      fs.readdirSync(target, { withFileTypes: true }),
     listNames: (target) => fs.readdirSync(target),
   };
   const resolveWorktreeFn = options.resolveWorktree || resolveWorktree;
@@ -140,14 +140,14 @@ export function performStaticReview(
 
 function validateFinalCheckpoint(
   finalCheckpoint: string,
-  readFileSyncFn: typeof fs.readFileSync,
+  readFileSyncFn: ReadUtf8File,
   evidenceFileSystem: EvidenceFileSystemPort,
   rootDir: string,
   findings: string[],
   log: (_msg: string) => void,
 ): void {
   try {
-    const checkpointContent = readFileSyncFn(finalCheckpoint, 'utf8') as string;
+    const checkpointContent = readFileSyncFn(finalCheckpoint, 'utf8');
     const goalCheckMatch = checkpointContent.match(/^## Goal Check(?: Table)?\s*$/m);
     if (!goalCheckMatch) {
       findings.push(`Final checkpoint ${path.basename(finalCheckpoint)} is missing a "## Goal Check" section.`);

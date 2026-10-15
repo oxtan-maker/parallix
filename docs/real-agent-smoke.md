@@ -215,9 +215,8 @@ why, scope, success criteria, checkpoint plan, gates and predicted NEL bucket â€
 and the mission is activated with the gates the agent recorded, not gates the
 harness substituted.
 
-For authoring, prefer one `px mission author` invocation and use its successful
-output as readback. The launch prompt includes the exact runnable flags and an
-authoritative status snapshot. Recover missing context or a conflict with `px status`. Criteria and evidence values can use plain
+For authoring, prefer one `px mission author` invocation followed by `px status`
+readback; see `px mission --help`. Criteria and evidence values can use plain
 text without literal backticks or embedded double quotes. A greeting criterion
 can be `hello.sh prints Hello, World! and exits successfully`; its execution
 evidence can be `hello.sh was run with ./hello.sh; output was Hello, World!;

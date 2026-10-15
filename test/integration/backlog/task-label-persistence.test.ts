@@ -5,7 +5,7 @@ import os from 'os';
 import path from 'path';
 import { getTaskLabels, getTaskClassification, setTaskLabels, } from '../../../src/adapters/backlog/backlog.js';
 
-async function withTempDir(fn) {
+async function withTempDir(fn: (_arg0: string) => void | Promise<void>) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-labels-')));
   try {
     await fn(root);
@@ -15,7 +15,7 @@ async function withTempDir(fn) {
 }
 
 test('setTaskLabels writes inline format correctly', async () => {
-  await withTempDir(async (root) => {
+  await withTempDir(async (root: string) => {
     const taskPath = path.join(root, 'inline.md');
     fs.writeFileSync(taskPath, '---\nid: TASK-201\nlabels: [old_label]\n---\n');
     assert.equal(setTaskLabels(taskPath, ['ai_sdlc', 'bug']), true);
@@ -24,7 +24,7 @@ test('setTaskLabels writes inline format correctly', async () => {
 });
 
 test('setTaskLabels writes block format correctly', async () => {
-  await withTempDir(async (root) => {
+  await withTempDir(async (root: string) => {
     const taskPath = path.join(root, 'block.md');
     fs.writeFileSync(taskPath, '---\nid: TASK-202\nlabels:\n  - old_label\n  - another\n---\n');
     assert.equal(setTaskLabels(taskPath, ['ai_sdlc', 'bug']), true);
@@ -33,7 +33,7 @@ test('setTaskLabels writes block format correctly', async () => {
 });
 
 test('setTaskLabels inserts labels after created_date', async () => {
-  await withTempDir(async (root) => {
+  await withTempDir(async (root: string) => {
     const taskPath = path.join(root, 'missing.md');
     fs.writeFileSync(taskPath, "---\nid: TASK-203\ncreated_date: '2026-07-25'\ndependencies: []\n---\n");
     assert.equal(setTaskLabels(taskPath, ['ai_sdlc', 'bug']), true);
@@ -44,7 +44,7 @@ test('setTaskLabels inserts labels after created_date', async () => {
 });
 
 test('setTaskLabels and getTaskClassification round-trip', async () => {
-  await withTempDir(async (root) => {
+  await withTempDir(async (root: string) => {
     const taskPath = path.join(root, 'roundtrip.md');
     fs.writeFileSync(taskPath, '---\nid: TASK-204\nlabels: []\n---\n');
     setTaskLabels(taskPath, ['ai_sdlc', 'bug']);

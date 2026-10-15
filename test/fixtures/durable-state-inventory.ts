@@ -375,7 +375,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     id: 'review-import-legacy-review-state',
     concept: 'Review',
     pathType: 'compatibility',
-    fileLocation: 'src/adapters/review/review-state.ts',
+    fileLocation: 'src/adapters/review/review-legacy-import.ts',
     operation: 'read',
     classification: 'explicit-one-way-legacy-input',
     cutoverTask: null,
@@ -649,6 +649,15 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     // importer only reads it. What it writes is the existing Mission
     // aggregate through the Mission store port, never a repository file and
     // never a second task catalog.
+    classification: 'external-fact-or-intake',
+    cutoverTask: null,
+  },
+  {
+    id: 'task-intake-import-legacy-record',
+    concept: 'TaskIntake',
+    pathType: 'default',
+    fileLocation: 'src/adapters/backlog/legacy-import-record.ts',
+    operation: 'read',
     classification: 'external-fact-or-intake',
     cutoverTask: null,
   },
@@ -1079,6 +1088,15 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     cutoverTask: null,
   },
   {
+    id: 'mission-outcome-retained-repair-read',
+    concept: 'MissionOutcome',
+    pathType: 'default',
+    fileLocation: 'src/adapters/review/retained-repair.ts',
+    operation: 'read',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
     id: 'mission-outcome-recovery-evidence-read',
     concept: 'MissionOutcome',
     pathType: 'default',
@@ -1345,14 +1363,14 @@ export const MISSION_DOCUMENT_CALL_SITES: readonly MissionDocumentCallSiteEntry[
   {
     id: 'mission-doc-call-handoff',
     fileLocation: 'src/application/handoff-executor.ts',
-    purpose: 'verify MISSION.md exists and read Refinement Signals / Gates as the mission contract evidence before handoff',
+    purpose: 'resolve the mission document path for handoff orchestration; delegate contract and checkpoint validation to HandoffContractVerifier',
     pathPatterns: ['MISSION.md', 'findMissionDir', 'backlog/tasks'],
     classification: 'mission-document-evidence',
   },
   {
     id: 'mission-doc-call-handoff-contract',
     fileLocation: 'src/application/handoff-contract.ts',
-    purpose: 'verify the legacy checkpoint document path and refuse an uncommitted MISSION.md before handoff',
+    purpose: 'require MISSION.md for historical contracts, refuse uncommitted mission documents and verify legacy checkpoint evidence before handoff',
     pathPatterns: ['MISSION.md'],
     classification: 'mission-document-evidence',
   },
@@ -1493,6 +1511,13 @@ export const MACHINE_WRITTEN_PATH_INVENTORY: readonly MachineWrittenPathInventor
     writer: 'lib/tools/backlog.ts',
     classification: 'user-authored-content',
     persistencePolicy: 'Document workflow; direct text edits remain outside the JSON API.',
+  },
+  {
+    id: 'rebase-hook-overlay',
+    pathPattern: '<git-worktree-state>/hook-overlay.json',
+    writer: 'src/adapters/git/rebase-completion-recorder.ts#ensureRebaseCompletionRecorder',
+    classification: 'secrets-configuration',
+    persistencePolicy: 'Worktree-local original Git hook path retained across recorder installation; existing 0o600 direct-write exception.',
   },
   {
     id: 'coverage-manifest',

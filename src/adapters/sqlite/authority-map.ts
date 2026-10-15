@@ -224,6 +224,7 @@ export const MISSION_CHECKPOINT_GOAL_CHECKS_AUTHORITY = {
   recorded_round: MISSION_VALUE_AUTHORITY,
   repaired_gate: MISSION_VALUE_AUTHORITY,
   repaired_gates: MISSION_VALUE_AUTHORITY,
+  carried_from: MISSION_VALUE_AUTHORITY,
 } as const satisfies Readonly<Record<string, FieldAuthority>>;
 
 export const MISSION_REVIEWS_AUTHORITY = {
@@ -249,6 +250,7 @@ export const MISSION_REVIEW_ROUNDS_AUTHORITY = {
   started_at: MISSION_VALUE_AUTHORITY,
   decision_kind: MISSION_VALUE_AUTHORITY,
   decided_at: MISSION_VALUE_AUTHORITY,
+  decided_revision: MISSION_VALUE_AUTHORITY,
   decision_comment: MISSION_VALUE_AUTHORITY,
   classifier_source: MISSION_VALUE_AUTHORITY,
   integration_repair_assessment: MISSION_VALUE_AUTHORITY,

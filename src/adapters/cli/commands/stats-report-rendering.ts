@@ -420,7 +420,7 @@ function colorAverageFixRounds(rows: readonly Pick<MissionStats, 'averageFixRoun
   });
 }
 
-function colorMissionCounts(rows: readonly Pick<MissionStats, 'missions'>[]) {
+function colorMissionCounts(rows: readonly { missions: unknown }[]) {
   const values = rows
     .map(row => Number.parseInt(String(row.missions), 10))
     .filter(value => Number.isFinite(value));

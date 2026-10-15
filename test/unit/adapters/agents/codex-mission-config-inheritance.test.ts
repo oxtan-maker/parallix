@@ -1,5 +1,6 @@
 import { resolveConfiguration } from '../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
+type SpawnOptions = NonNullable<Parameters<NonNullable<Parameters<typeof codex.__setSpawnAndTeeForTest>[0]>>[2]>;
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -12,7 +13,7 @@ test('mission Codex launcher retains the originating CODEX_HOME MCP configuratio
   const parentCodexHome = registeredMkdtemp('task-2265-parent-codex-home-');
   const worktree = registeredMkdtemp('task-2265-worktree-');
   const originalCodexHome = environment.CODEX_HOME;
-  let launchedInvocation;
+  let launchedInvocation: { value: SpawnOptions | undefined } = { value: undefined };
 
   try {
     fs.writeFileSync(
@@ -21,17 +22,19 @@ test('mission Codex launcher retains the originating CODEX_HOME MCP configuratio
       'utf8'
     );
     environment.CODEX_HOME = parentCodexHome;
-    codex.__setSpawnAndTeeForTest((_command: string, _args: string[], options: Record<string, unknown>) => {
-      launchedInvocation = options;
+    codex.__setSpawnAndTeeForTest((_command: string, _args: string[], options: SpawnOptions = {}) => {
+      launchedInvocation.value = options;
       return Promise.resolve({ status: 0, stdout: '', stderr: '' });
     });
 
     const launched = codex.startCodexDraftAgent({ configuration: resolveConfiguration(environment), prompt: 'Execute.', worktree });
     await launched.resultPromise;
 
-    assert.equal(launchedInvocation.env.CODEX_HOME, codex.codexStateRoot(worktree), 'the launched Codex process must use isolated worktree state');
+    assert.ok(launchedInvocation.value?.env?.CODEX_HOME);
+    assert.equal(launchedInvocation.value.env.CODEX_HOME, codex.codexStateRoot(worktree), 'the launched Codex process must use isolated worktree state');
+    assert.ok(launchedInvocation.value?.env?.CODEX_HOME);
     assert.match(
-      fs.readFileSync(path.join(launchedInvocation.env.CODEX_HOME, 'config.toml'), 'utf8'),
+      fs.readFileSync(path.join(launchedInvocation.value.env.CODEX_HOME, 'config.toml'), 'utf8'),
       /\[mcp_servers\.slack\]/,
       'the launched Codex configuration root must expose the configured MCP server'
     );
@@ -49,11 +52,11 @@ test('mission Codex launcher retains the originating CODEX_HOME MCP configuratio
 test('mission Codex launcher completes when optional CODEX_HOME MCP configuration is absent', async () => {
   const originatingCodexHome = registeredMkdtemp('task-2265-no-mcp-origin-');
   const worktree = registeredMkdtemp('task-2265-no-mcp-worktree-');
-  let launchedInvocation;
+  let launchedInvocation: { value: SpawnOptions | undefined } = { value: undefined };
 
   try {
-    codex.__setSpawnAndTeeForTest((_command: string, _args: string[], options: Record<string, unknown>) => {
-      launchedInvocation = options;
+    codex.__setSpawnAndTeeForTest((_command: string, _args: string[], options: SpawnOptions = {}) => {
+      launchedInvocation.value = options;
       return Promise.resolve({ status: 0, stdout: '', stderr: '' });
     });
 
@@ -64,7 +67,8 @@ test('mission Codex launcher completes when optional CODEX_HOME MCP configuratio
     });
     await launched.resultPromise;
 
-    assert.equal(launchedInvocation.env.CODEX_HOME, codex.codexStateRoot(worktree), 'worktree-local Codex state is synthesized');
+    assert.ok(launchedInvocation.value?.env?.CODEX_HOME);
+    assert.equal(launchedInvocation.value.env.CODEX_HOME, codex.codexStateRoot(worktree), 'worktree-local Codex state is synthesized');
     assert.ok(
       !fs.existsSync(path.join(worktree, '.workflow', 'codex-home', '.codex', 'config.toml')),
       'mission setup completes without creating a Codex configuration file'

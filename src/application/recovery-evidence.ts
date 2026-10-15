@@ -260,10 +260,7 @@ export function captureRecoveryEvidence(input: CaptureInput, options: { now?: ()
   // Apply the configured credential redactor to the retained streams before they
   // touch disk, and record that it ran. Absence of a redactor is an honest
   // unredacted claim, not a scrubbed one.
-  const redactor = input.redactor ?? null;
-  const redacted = Boolean(redactor) || (input.redacted ?? false);
-  const stdoutValue = redactor ? redactor(input.stdout ?? '') : (input.stdout ?? '');
-  const stderrValue = redactor ? redactor(input.stderr ?? '') : (input.stderr ?? '');
+  const { stdoutValue, stderrValue, redacted } = redactedRecoveryStreams(input);
   const dir = incidentDir(input.cwd, input.missionId, incidentId);
 
   let stdoutPath: string;
@@ -455,9 +452,9 @@ export function lookupRecoveryEvidence(options: {
 }
 
 /** Bounded list of the most recent records across all incidents. */
-export function listRecoveryEvidence(options: { missionId?: string; cwd: string; fs?: RecoveryFileSystem } = { cwd: process.cwd() }): RecoveryEvidenceRef[] {
-  const fsMod = options.fs ?? requireFileSystem();
-  const dirs = listIncidentDirs(options.cwd, options.missionId, fsMod);
+export function listRecoveryEvidence(options?: { missionId?: string; cwd: string; fs?: RecoveryFileSystem }): RecoveryEvidenceRef[] {
+  const fsMod = options?.fs ?? requireFileSystem();
+  const dirs = listIncidentDirs(options?.cwd ?? process.cwd(), options?.missionId, fsMod);
   const refs: RecoveryEvidenceRef[] = [];
   for (const dir of dirs) {
     const files = safeReaddir(dir).filter((f) => /^attempt-\d+\.json$/.test(f));
@@ -486,4 +483,12 @@ function readOneMetadata(file: string, fsMod: RecoveryFileSystem): RecoveryEvide
     if (!parsed || parsed.version !== RECOVERY_EVIDENCE_VERSION) { return null; }
     return parsed;
   } catch { return null; }
+}
+
+function redactedRecoveryStreams(input: CaptureInput) {
+  const redactor = input.redactor ?? null;
+  const redacted = Boolean(redactor) || (input.redacted ?? false);
+  const stdoutValue = redactor ? redactor(input.stdout ?? '') : (input.stdout ?? '');
+  const stderrValue = redactor ? redactor(input.stderr ?? '') : (input.stderr ?? '');
+  return { stdoutValue, stderrValue, redacted };
 }

@@ -1,3 +1,4 @@
+import { TerminalStream } from '../../helpers/terminal-stream.js';
 // Historical regression provenance: TASK-2313.
 /**
  * TASK-2313 reproduction — `px ui` renders two overlapping board frames.
@@ -25,22 +26,11 @@ function plain(text: string): string {
 }
 
 /** Minimal stand-in for a TTY write stream, with a settable size. */
-class FakeStdout extends EventEmitter {
-  public columns: number;
-  public rows: number;
-  public readonly isTTY = true;
-  public readonly writes: string[] = [];
-
+class FakeStdout extends TerminalStream {
   constructor(columns: number, rows: number) {
     super();
     this.columns = columns;
     this.rows = rows;
-  }
-
-  write(data: string): boolean {
-    this.writes.push(data);
-    this.emit('write');
-    return true;
   }
 
   resizeTo(columns: number, rows: number): void {
@@ -51,15 +41,7 @@ class FakeStdout extends EventEmitter {
 }
 
 /** Minimal raw-mode-capable stand-in so `useInput` does not abort the render. */
-class FakeStdin extends EventEmitter {
-  public readonly isTTY = true;
-  setRawMode(_enabled: boolean): void {}
-  setEncoding(_encoding: string): void {}
-  resume(): void {}
-  pause(): void {}
-  ref(): void {}
-  unref(): void {}
-  read(): string | null { return null; }
+class FakeStdin extends TerminalStream {
 }
 
 function delay(ms: number): Promise<void> {
@@ -94,10 +76,10 @@ async function mountBoard(columns: number, rows: number): Promise<MountedBoard> 
   const stdout = new FakeStdout(columns, rows);
   const firstWrite = new Promise<void>((resolve) => stdout.once('write', resolve));
   const instance = ink.render(
-    React.createElement(BoardShell, { projection } as never),
+    React.createElement(BoardShell, { projection }),
     {
-      stdin: new FakeStdin() as unknown as NodeJS.ReadStream,
-      stdout: stdout as unknown as NodeJS.WriteStream,
+      stdin: new FakeStdin(),
+      stdout: stdout,
       patchConsole: false,
       exitOnCtrlC: false,
     },
@@ -176,7 +158,7 @@ describe("px ui must not leave a stale board frame on screen", () => {
      * narrower widths truncate INTEGRATION, which is separate behaviour
      * already covered by test/tui-responsive-layout.test.ts. */
     const output = plain(ink.renderToString(
-      React.createElement(BoardShell, { projection, columns: 160 } as never),
+      React.createElement(BoardShell, { projection, columns: 160 }),
       { columns: 160 },
     ));
 

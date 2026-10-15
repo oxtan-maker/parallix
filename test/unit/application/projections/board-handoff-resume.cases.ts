@@ -1,3 +1,6 @@
+import { NO_CURRENT_WORK_PORT } from '../../../../src/application/recording/current-work-recorder.js';
+import { makeExecutePorts } from '../../../fixtures/execute-mission-ports.js';
+import { emptyBoardRepositories } from '../../../helpers/empty-board-repositories.js';
 /**
  * TASK-2436 round-8 F1 — the board's handoff *resume* branch.
  *
@@ -66,8 +69,8 @@ class FakeMissionStore implements MissionTransitionStore {
   }
 
   async load(): Promise<MissionLoadResult> {
-    if (this.mission === null) { return { kind: 'missing' }; }
-    return { kind: 'found', mission: this.mission, version: this.version };
+    if (this.mission === null) { return { kind: 'missing' as const }; }
+    return { kind: 'found' as const, mission: this.mission, version: this.version };
   }
 
   async save(mission: Mission, expectedVersion: MissionVersion | null): Promise<MissionVersion> {
@@ -135,33 +138,34 @@ function activeMissionUnderReview(): Mission {
     // `submit-for-review` refuses a mission with no goal-check evidence, so the
     // fixture carries the checkpoint a real mission reaches review with.
     checkpoints: [{
-      name: 'CP-4',
+      missionId: MISSION, name: 'CP-4',
       rawFilename: 'CP-4.md',
       firstLine: 'CP-4: browser controller authority audit',
       goalCheck: [{ criterion: 'SC9 interaction coverage', evidence: 'test/web-board-interaction.test.ts' }],
-      nextActionText: null,
+      nextActionText: '',
     }],
     review: reviewAwaitingImplementation(),
-  } as unknown as Mission;
+  };
 }
 
 /** Compose only what the handoff workflow needs; every other port stays unused. */
 function composeWithRecordedLoop(store: FakeMissionStore) {
   const launches: { slug: string; options: Record<string, unknown> }[] = [];
+  const repos = emptyBoardRepositories();
   const capabilities = composeProductionCapabilities(
     process.cwd(),
     REPOSITORY,
-    {} as never,
-    {} as never,
+    { agentBlocklist: repos.blocklistRepo, operationalHistory: repos.historyRepo, boardLaneEvents: repos.laneEventRepo, usage: repos.usageRepo },
+    makeExecutePorts().ports,
     store,
-    { read: async () => null } as never,
+    NO_CURRENT_WORK_PORT,
     undefined,
     null,
     {
       configuration: resolveConfiguration({}),
       handoffReviewLoop: (async (request: { slug: string }) => {
         launches.push({ slug: request.slug, options: request as Record<string, unknown> });
-      }) as never,
+      }),
     },
   );
   return { capabilities, launches };
@@ -180,7 +184,7 @@ function resumeVia(capabilities: ReturnType<typeof composeWithRecordedLoop>['cap
     agent: IMPLEMENTER,
     capabilities: new Set(['handoff:record']),
     cancellation: { requested: false },
-  } as never);
+  });
 }
 
 test('board handoff resume advances the review round and records one lane transition', async () => {

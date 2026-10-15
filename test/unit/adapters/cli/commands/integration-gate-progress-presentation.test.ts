@@ -63,30 +63,30 @@ test('TASK-2578: px integrate renders parallel gate progress after rebase and pr
   const logs: string[] = [];
   const rebased = { value: false };
   let preCommitRuns = 0;
-  mock.method(console, 'log', line => { logs.push(String(line)); });
-  mock.method(console, 'error', line => { logs.push(String(line)); });
+  mock.method(console, 'log', (line: Parameters<(typeof console)["log"]>[0]) => { logs.push(String(line)); });
+  mock.method(console, 'error', (line: Parameters<(typeof console)["error"]>[0]) => { logs.push(String(line)); });
   mock.method(process, 'cwd', () => root);
   mock.method(process, 'exit', () => {});
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'git', (args: string[]) => {
     const joined = args.join(' ');
     if (args.includes('show') && args.includes('--format=%cI')) {
-      return { status: 0, stdout: '2026-10-09T09:07:00+02:00\n', stderr: '' };
+      return { signal: null,  status: 0, stdout: '2026-10-09T09:07:00+02:00\n', stderr: '' };
     }
     if (args.includes('rebase')) {
-      if (args.includes('--show-current') || args.includes('--continue')) return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('--show-current') || args.includes('--continue')) return { signal: null,  status: 0, stdout: '', stderr: '' };
       rebased.value = true;
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     }
-    if (args.includes('log')) return { status: 0, stdout: '', stderr: '' };
-    if (args.includes('symbolic-ref')) return { status: 0, stdout: 'main\n', stderr: '' };
-    if (args.includes('branch')) return { status: 0, stdout: 'main\n', stderr: '' };
-    if (joined.includes('merge-base') && joined.includes('--is-ancestor')) return { status: 0, stdout: '', stderr: '' };
-    if (joined.includes('merge-base') || args.includes('rev-parse') || args.includes('show')) return { status: 0, stdout: 'landed-sha', stderr: '' };
-    if (joined.includes('merge') && joined.includes('--no-commit')) return { status: rebased.value ? 0 : 1, stdout: '', stderr: '' };
-    if (joined.includes('merge') && (joined.includes('--abort') || joined.includes('--squash'))) return { status: 0, stdout: '', stderr: '' };
-    if (joined.includes('commit') || joined.includes('diff') || joined.includes('symbolic-ref') || joined.includes('ls-files') || joined.includes('status') || joined.includes('branch')) return { status: 0, stdout: '', stderr: '' };
-    return { status: 0, stdout: '', stderr: '' };
+    if (args.includes('log')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+    if (args.includes('symbolic-ref')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
+    if (args.includes('branch')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
+    if (joined.includes('merge-base') && joined.includes('--is-ancestor')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+    if (joined.includes('merge-base') || args.includes('rev-parse') || args.includes('show')) return { signal: null,  status: 0, stdout: 'landed-sha', stderr: '' };
+    if (joined.includes('merge') && joined.includes('--no-commit')) return { signal: null,  status: rebased.value ? 0 : 1, stdout: '', stderr: '' };
+    if (joined.includes('merge') && (joined.includes('--abort') || joined.includes('--squash'))) return { signal: null,  status: 0, stdout: '', stderr: '' };
+    if (joined.includes('commit') || joined.includes('diff') || joined.includes('symbolic-ref') || joined.includes('ls-files') || joined.includes('status') || joined.includes('branch')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+    return { signal: null,  status: 0, stdout: '', stderr: '' };
   });
   mock.method(missionUtils, 'inferSlug', () => slug);
   mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
@@ -100,28 +100,28 @@ test('TASK-2578: px integrate renders parallel gate progress after rebase and pr
   mock.method(missionUtils, 'resolveMissionBaseBranch', () => 'main');
   mock.method(missionUtils, 'resolveWorktree', () => root);
   mock.method(missionUtils, 'missionBranchName', () => `mission/${slug}`);
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: path.join(root, 'backlog', 'tasks', 'task.md') }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: path.join(root, 'backlog', 'tasks', 'task.md') }));
   mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
   mock.method(backlog, 'getTaskStatus', () => 'integration');
   mock.method(backlog, 'getTaskAssignee', () => 'codex');
   mock.method(backlog, 'getTaskImplementer', () => 'codex');
   mock.method(backlog, 'completeTask', () => true);
-  mock.method(forgejo, 'getPrStatus', () => ({ exists: true, state: 'open', merged: false, number: 1 }));
-  mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true, reviewState: 'APPROVED' }));
+  mock.method(forgejo, 'getPrStatus', () => ({ exists: true as const, state: 'open', merged: false, number: 1 }));
+  mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true as const, reviewState: 'APPROVED' }));
   mock.method(forgejo, 'listOpenPrsForSlug', () => []);
   mock.method(forgejo, 'readToken', () => 'token');
   mock.method(forgejo, 'resolveTokenFile', () => 'token-file');
-  mock.method(forgejo, 'syncMerged', () => ({ ok: true }));
+  mock.method(forgejo, 'syncMerged', () => ({ ok: true as const }));
   mock.method(stats, 'recordIntegrationStats', async () => ({ changed: false, row: { mission: slug }, data: { rows: [] }, report: 'none' }));
   mock.method(stats, 'resolveMissionClassification', () => ({ classification: 'ai_sdlc' }));
-  mock.method(verification, 'captureVerifiedTreeProof', () => ({ ok: true, proof: { rootDir: root, area: 'all', command: 'verify', commit: 'landed-sha', tree: 'tree' } }));
-  mock.method(verification, 'assertVerifiedTreeProof', () => ({ ok: true }));
+  mock.method(verification, 'captureVerifiedTreeProof', () => ({ ok: true as const, proof: { rootDir: root, area: 'all', command: 'verify', commit: 'landed-sha', tree: 'tree' } }));
+  mock.method(verification, 'assertVerifiedTreeProof', () => ({ ok: true as const }));
   mock.method(post, 'runPreCommitHookOrAbort', () => { preCommitRuns++; });
   let status = 'integration';
   mock.method(composition, 'createMissionApplicationServices', async () => ({
-    store: { _repoId: 'default', load: async () => ({ kind: 'found', mission: { status, review: null }, version: 1 }) },
-    integration: { decideIntegration: async () => { status = 'done'; return { status: 'completed', value: { mission: { status }, version: 2 } }; } },
-    lifecycle: { transition: async () => ({ status: 'completed', value: { to: 'review', version: 2 } }) },
+    store: { _repoId: 'default', load: async () => ({ kind: 'found' as const, mission: { status, review: null }, version: 1 }) },
+    integration: { decideIntegration: async () => { status = 'done'; return { durableEvidence: [],  status: 'completed' as const, value: { mission: { status }, version: 2 } }; } },
+    lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: { to: 'review', version: 2 } }) },
     handoff: { recordNel: async () => ({}) },
   }));
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });

@@ -1,8 +1,10 @@
+import type { StatsWorkflowPort } from '../../../src/application/ports/cli-workflows.js';
+import { requestedChangesReview } from '../../fixtures/mission-builders.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { StatsCommandUseCase } from '../../../src/application/stats-command-use-case.js';
 
-function port(rows = [], overrides = {}) {
+function port(rows: StatsRow[] = [], overrides: Partial<StatsWorkflowPort<StatsRow>> = {}): StatsWorkflowPort<StatsRow> {
   return {
     loadMeasurements: async () => rows,
     loadMissionFlow: async () => null,
@@ -11,7 +13,7 @@ function port(rows = [], overrides = {}) {
 }
 
 test('StatsCommandUseCase sequences telemetry then lifecycle completion through the workflow port', async () => {
-  const calls = [];
+  const calls: string[] = [];
   const useCase = new StatsCommandUseCase(port([
     { repo: 'parallix', mission: 'task-1', date: '2026-06-23', },
     { repo: 'parallix', mission: 'task-2', date: '2026-06-10', },
@@ -74,10 +76,8 @@ function recordingPort(overrides: Partial<StatisticsRecordingPort> = {}): Statis
 
 test('integration recording orders classification, authoritative Review, write and lifecycle read (TASK-2637.04)', async () => {
   const calls: string[] = [];
-  const review = {
-    rounds: [{ implementer: 'codex', decision: { kind: 'changes-requested' } }],
-    reviewEvents: [{ eventType: 'reviewer_outcome', verdict: 'request-changes' }],
-  } as unknown as Review;
+  const review: Review = { ...requestedChangesReview('task-1', { startedAt: '2026-06-23T08:00:00Z', decidedAt: '2026-06-23T09:00:00Z' }),
+    reviewEvents: [{ position: 0, eventType: 'reviewer_outcome', roundNumber: 1, phase: 'reviewing', actor: 'claude', content: '', disposition: null, verdict: 'request-changes', itemDispositions: null, blockedReason: null, followUpReference: null, createdAt: '2026-06-23T09:00:00Z' }] };
   const useCase = new StatsRecordingUseCase(recordingPort({
     readStoredClassification: async () => { calls.push('classification'); return 'user_value'; },
     readReview: async () => { calls.push('review'); return review; },

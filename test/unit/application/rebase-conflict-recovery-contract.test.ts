@@ -1,3 +1,7 @@
+import { transitionRebaseRepair } from '../../../src/application/rebase-repair-lifecycle.js';
+import type { StartAgentOptions } from '../../../src/adapters/agents/agent-launch-context.js';
+import { fixtureMission, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
+import { rebaseWorkflowFixture } from '../../helpers/rebase-workflow-fixture.js';
 import { rebaseHookRecoveryEligible, replacementImplementer, preContinueAction, postContinueAction, continueBudgetExceeded } from '../../../src/domain/rebase-policy.js';
 // Historical regression provenance: TASK-2294.01, TASK-2503, TASK-2506, TASK-2494.
 // Behavior-owned suite (TASK-2622.09): `px rebase`/`px resolve-conflict` conflict recovery over injected
@@ -44,28 +48,28 @@ describe("pinned conflict agent", () => {
     return lines;
   }
   test('TASK-2294.01 repro: px resolve-conflict pins the mission implementer as the conflict agent', async () => {
-    const launches: Array<{ step: string; options: Record<string, unknown> }> = [];
-    let exitCode: number | null = null;
+    const launches: Array<{ step: string; options: StartAgentOptions }> = [];
+    let exitCode: { value: number | null } = { value: null };
     await captured(async () => {
       await resolveConflict(['task-2294.01'], {
         rootDir: '/repo',
-        resolveTaskFileFn: () => ({ ok: true, taskFile: '/repo/backlog/tasks/task-2294.01.md' }),
+        resolveTaskFileFn: () => ({ matches: ['/repo/backlog/tasks/task-2294.01.md'],  ok: true as const, taskFile: '/repo/backlog/tasks/task-2294.01.md' }),
         getTaskImplementerFn: () => 'codex',
         resolveConflictsFn: () => ({
-          ok: true,
+          ok: true as const,
           conflictFiles: ['missions/task-2294.01/CP-1.md'],
           sharedFiles: [],
           missionSpecificFiles: ['missions/task-2294.01/CP-1.md'],
           worktreePath: '/tmp/wt',
         }),
-        startAgentFn: async (step: string, options: Record<string, unknown>) => {
+        startAgentFn: async (step, options = { prompt: '' }) => {
           launches.push({ step, options });
           return { agent: options.agent ?? 'pool-selected', result: { status: 0 } };
         },
-        exitFn: (code: number) => { exitCode = code; },
+        exitFn: (code: number) => { exitCode.value = code; },
       });
     });
-    assert.equal(exitCode, 0);
+    assert.equal(exitCode.value, 0);
     assert.equal(launches.length, 1);
     assert.equal(launches[0].step, 'conflict-resolution');
     assert.equal(launches[0].options.agent, 'codex',
@@ -78,11 +82,11 @@ describe("pinned conflict agent", () => {
     const launches: Array<{ step: string; options: Record<string, unknown> }> = [];
     const exitCodes: number[] = [];
     const state = { pushes: 0 };
-    const port: RebaseWorkflowPort = {
+    const port: RebaseWorkflowPort = rebaseWorkflowFixture({
       git: (args: string[]) => {
         const tail = subcommand(args);
         if (tail[0] === 'rebase' && tail[1] === 'main') {
-          return { status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
+          return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
         }
         return OK;
       },
@@ -105,28 +109,28 @@ describe("pinned conflict agent", () => {
       selectAgent: () => 'pool-selected',
       workflowLauncherStatus: (_agent: string) => ({ supported: true, agent: 'pool-selected' }),
       applyAgentFallback: async () => 'codex',
-      createPr: () => { state.pushes += 1; return { ok: true }; },
+      createPr: () => { state.pushes += 1; return { ok: true as const }; },
       readToken: () => 'token',
       resolveForgejoUser: (user: string | null) => user ?? 'tester',
       fetchReviewBranch: () => OK,
-      resolveTaskFile: () => ({ ok: true, taskFile: '/worktree/backlog/tasks/task-2294.01.md' }),
+      resolveTaskFile: () => ({ ok: true as const, taskFile: '/worktree/backlog/tasks/task-2294.01.md' }),
       getTaskImplementer: () => 'codex',
       transitionTask: async () => undefined,
       resolveReviewIdentity: () => ({ forgejoUser: 'tester' }),
-      readReviewState: () => ({ metadata: {} }),
-      writeReviewState: () => undefined,
-      persistReviewState: async () => undefined,
+      readReviewState: async () => ({ metadata: {} }),
+      writeReviewState: async () => ({ outcome: 'committed' as const }),
+      persistReviewState: async () => ({ outcome: 'committed' as const }),
       isForgejoReviewEnabled: () => false,
       formatVerificationCommand: () => 'npm test',
       resolveConflictsForMission: () => ({
-        ok: true,
+        ok: true as const,
         conflictFiles: [shared],
         missionSpecificFiles: [],
         sharedFiles: [shared],
       }),
       missionServices: null,
       exit: (code: number) => { exitCodes.push(code); },
-    };
+    });
     await captured(async () => {
       await new RebaseCommandUseCase(port).execute(['task-2294.01']);
     });
@@ -180,11 +184,11 @@ describe("recorded implementer dispatch", () => {
     const lines: string[] = [];
     const exitCodes: number[] = [];
     const agentLaunches: Array<{ step: string; options: Record<string, unknown> }> = [];
-    const port: RebaseWorkflowPort = {
+    const port: RebaseWorkflowPort = rebaseWorkflowFixture({
       git: (args: string[]) => {
         const tail = subcommand(args);
         if (tail[0] === 'rebase' && tail[1] === 'main') {
-          return { status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${SHARED_FILE}\n` };
+          return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${SHARED_FILE}\n` };
         }
         return OK;
       },
@@ -207,21 +211,21 @@ describe("recorded implementer dispatch", () => {
       selectAgent: () => 'pool-selected',
       workflowLauncherStatus: (_agent: string) => ({ supported: true, agent: _agent }),
       applyAgentFallback: async () => 'pool-selected',
-      createPr: () => ({ ok: true }),
+      createPr: () => ({ ok: true as const }),
       readToken: () => 'token',
       resolveForgejoUser: (user: string | null) => user ?? 'tester',
       fetchReviewBranch: () => OK,
-      resolveTaskFile: () => ({ ok: true, taskFile: '/worktree/backlog/tasks/task-2503.md', task: {} }),
+      resolveTaskFile: () => ({ ok: true as const, taskFile: '/worktree/backlog/tasks/task-2503.md', task: {} }),
       getTaskImplementer: () => null,
       transitionTask: async () => undefined,
       resolveReviewIdentity: () => ({ forgejoUser: null }),
-      readReviewState: () => null,
-      writeReviewState: () => undefined,
-      persistReviewState: async () => undefined,
+      readReviewState: async () => null,
+      writeReviewState: async () => ({ outcome: 'committed' as const }),
+      persistReviewState: async () => ({ outcome: 'committed' as const }),
       isForgejoReviewEnabled: () => false,
       formatVerificationCommand: () => 'npm test',
       resolveConflictsForMission: () => ({
-        ok: true,
+        ok: true as const,
         conflictFiles: [SHARED_FILE],
         missionSpecificFiles: [],
         sharedFiles: [SHARED_FILE],
@@ -229,7 +233,7 @@ describe("recorded implementer dispatch", () => {
       missionServices: null,
       exit: (code: number) => { exitCodes.push(code); },
       ...overrides,
-    };
+    });
     return { port, lines, exitCodes, agentLaunches };
   }
   /** Run the use case with the workflow's terminal output captured. */
@@ -250,7 +254,7 @@ describe("recorded implementer dispatch", () => {
       let targetReads = 0;
       const prompts: string[] = [];
       const h = sharedConflictHarness({
-        readReviewState: () => ({ implementer: 'codex' }),
+        readReviewState: async () => ({ implementer: 'codex' }),
         missionBranchName: () => { targetReads++; return targetReads === 1 ? 'mission/task-2503' : 'changed-target'; },
         getCurrentBranch: () => branch,
         detectRebaseState: () => ({ inProgress: active, unmergedFiles: files }),
@@ -277,7 +281,7 @@ describe("recorded implementer dispatch", () => {
     let branch = 'mission/task-2503';
     const prompts: string[] = [];
     const h = sharedConflictHarness({
-      readReviewState: () => ({ implementer: 'codex' }),
+      readReviewState: async () => ({ implementer: 'codex' }),
       getCurrentBranch: () => branch,
       startAgent: async (_step, options) => {
         launches++;
@@ -286,7 +290,7 @@ describe("recorded implementer dispatch", () => {
         return { agent: 'codex', result: { status: 0 } };
       },
       isForgejoReviewEnabled: () => true,
-      createPr: () => { pushes++; return { ok: true }; },
+      createPr: () => { pushes++; return { ok: true as const }; },
       resumeReviewAfterRepair: async () => { resumes++; },
     });
     await run(h, ['task-2503', '--push']);
@@ -303,7 +307,7 @@ describe("recorded implementer dispatch", () => {
     const prepared = await prepareRepairPrompt({ occurrenceId: 'git-completion', reason, originalReason: reason,
       classification: { failureClass: FailureClass.IncompleteEvidence, dispatchAction: DispatchAction.AutoSendBack,
         isRelaunchable: true, label: 'INCOMPLETE ARTIFACTS' }, diagnostic: reason.diagnostic, originalDiagnostic: reason.diagnostic },
-    { slug: 'task-2503', worktree: '/worktree', implementer: 'codex', verify: () => ({ ok: true }),
+    { slug: 'task-2503', worktree: '/worktree', implementer: 'codex', verify: () => ({ ok: true as const }),
       startAgent: async () => null, repairPrompt: 'complete the rebase, ensuring the checkout ends at mission/task-2503',
       repairCheckpoints: { open: async () => { throw new Error('must not create code-repair evidence for Git completion'); },
         readBlocker: async () => undefined, verify: async () => undefined } }, 1, 2);
@@ -314,7 +318,7 @@ describe("recorded implementer dispatch", () => {
     let repositoryChecks = 0;
     let integrationChecks = 0;
     const h = sharedConflictHarness({
-      readReviewState: () => ({ implementer: 'codex', status: 'active', metadata: {} }),
+      readReviewState: async () => ({ implementer: 'codex', status: 'active', metadata: {} }),
       startAgent: async (_step, options) => {
         const prompt = String(options.prompt);
         assert.match(prompt, /npm test/);
@@ -335,13 +339,13 @@ describe("recorded implementer dispatch", () => {
     let pushes = 0;
     let resumes = 0;
     const h = sharedConflictHarness({
-      readReviewState: () => ({ implementer: 'codex', status: 'active' }),
+      readReviewState: async () => ({ implementer: 'codex', status: 'active' }),
       startAgent: async (_step, options) => {
         assert.match(String(options.prompt), /do not report completion until it passes/);
         return { agent: 'codex', result: { status: 1 } };
       },
       isForgejoReviewEnabled: () => true,
-      createPr: () => { pushes += 1; return { ok: true }; },
+      createPr: () => { pushes += 1; return { ok: true as const }; },
       resumeReviewAfterRepair: async () => { resumes += 1; },
     });
     await run(h, ['task-2503', '--push']);
@@ -355,7 +359,7 @@ describe("recorded implementer dispatch", () => {
     let pushes = 0;
     let resumes = 0;
     const h = sharedConflictHarness({
-      readReviewState: () => ({ implementer: 'codex', status: 'active' }),
+      readReviewState: async () => ({ implementer: 'codex', status: 'active' }),
       startAgent: async () => {
         launched = true;
         return { agent: 'codex', result: { status: 0 } };
@@ -363,7 +367,7 @@ describe("recorded implementer dispatch", () => {
       // No unmerged paths remain, but Git is still replaying an empty pick.
       detectRebaseState: () => ({ inProgress: launched, unmergedFiles: [] }),
       isForgejoReviewEnabled: () => true,
-      createPr: () => { pushes += 1; return { ok: true }; },
+      createPr: () => { pushes += 1; return { ok: true as const }; },
       resumeReviewAfterRepair: async () => { resumes += 1; },
     });
     await run(h, ['task-2503', '--push']);
@@ -391,7 +395,7 @@ describe("recorded implementer dispatch", () => {
         // authoritative final Git-state probe still rejects completion.
         detectRebaseState: () => rebased ? remaining : { inProgress: false, unmergedFiles: [] },
         isForgejoReviewEnabled: () => true,
-        createPr: () => { pushes += 1; return { ok: true }; },
+        createPr: () => { pushes += 1; return { ok: true as const }; },
         recordBranchMove: async () => { branchMoves += 1; return null; },
         resumeReviewAfterRepair: async () => { resumes += 1; },
       });
@@ -413,12 +417,12 @@ describe("recorded implementer dispatch", () => {
     // mission branch is being rebased.
     let replayed = false;
     const h = sharedConflictHarness({
-      readReviewState: () => ({ implementer: 'claude', metadata: {} }),
+      readReviewState: async () => ({ implementer: 'claude', metadata: {} }),
       git: (args: string[]) => {
         const tail = subcommand(args);
         if (tail[0] === 'rebase' && tail[1] === 'main') {
           replayed = true;
-          return { status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${SHARED_FILE}\n` };
+          return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${SHARED_FILE}\n` };
         }
         return OK;
       },
@@ -436,8 +440,8 @@ describe("recorded implementer dispatch", () => {
   });
   test('unavailable local mission metadata is reported as a local workflow condition, not an infrastructure blocker', async () => {
     const h = sharedConflictHarness({
-      readReviewState: () => null,
-      resolveTaskFile: () => ({ ok: false, error: 'not-found' }),
+      readReviewState: async () => null,
+      resolveTaskFile: () => ({ ok: false as const, error: 'not-found' }),
       getTaskImplementer: () => null,
     });
     await run(h);
@@ -500,7 +504,7 @@ describe("dry-run rebase prediction", () => {
       const prediction = predictIntegrationRebase(SLUG, {
         baseWorktree: ROOT,
         baseBranch: 'main',
-        git: makeGit(c) as never,
+        git: makeGit(c),
       });
       assert.deepEqual(prediction, c.expected);
     });
@@ -509,7 +513,7 @@ describe("dry-run rebase prediction", () => {
     const prediction = predictIntegrationRebase(SLUG, {
       baseWorktree: ROOT,
       baseBranch: '',
-      git: makeGit(CASES[1] as Case) as never,
+      git: makeGit(CASES[1] as Case),
     });
     // Empty baseBranch -> target 'main'; merge-base ('base') != 'main' -> needed.
     assert.deepEqual(prediction, { needed: true, wouldConflict: false });
@@ -579,7 +583,7 @@ describe("usage-blocked implementer", () => {
       git: (args: string[]) => {
         const tail = subcommand(args);
         if (tail[0] === 'rebase' && tail[1] === 'main') {
-          return { status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
+          return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
         }
         return OK;
       },
@@ -598,21 +602,21 @@ describe("usage-blocked implementer", () => {
       selectAgent: () => null,
       workflowLauncherStatus: (_agent: string) => ({ supported: true, agent: _agent }),
       applyAgentFallback: async () => 'codex',
-      createPr: () => ({ ok: true }),
+      createPr: () => ({ ok: true as const }),
       readToken: () => 'token',
       resolveForgejoUser: (user: string | null) => user ?? 'tester',
       fetchReviewBranch: () => OK,
-      resolveTaskFile: () => ({ ok: true, taskFile: '/worktree/backlog/tasks/task-2494.md' }),
+      resolveTaskFile: () => ({ ok: true as const, taskFile: '/worktree/backlog/tasks/task-2494.md' }),
       getTaskImplementer: () => 'codex',
       transitionTask: async () => undefined,
       resolveReviewIdentity: () => ({ forgejoUser: 'tester' }),
-      readReviewState: () => ({ metadata: {} }),
-      writeReviewState: () => undefined,
-      persistReviewState: async () => undefined,
+      readReviewState: async () => ({ metadata: {} }),
+      writeReviewState: async () => ({ outcome: 'committed' as const }),
+      persistReviewState: async () => ({ outcome: 'committed' as const }),
       isForgejoReviewEnabled: () => false,
       formatVerificationCommand: () => 'npm test',
       resolveConflictsForMission: () => ({
-        ok: true,
+        ok: true as const,
         conflictFiles: [shared],
         missionSpecificFiles: [],
         sharedFiles: [shared],
@@ -620,7 +624,7 @@ describe("usage-blocked implementer", () => {
       missionServices: null,
       exit: (_code: number) => undefined,
     };
-    return { ...base, ...overrides } as RebaseWorkflowPort;
+    return rebaseWorkflowFixture({ ...base, ...overrides }) as RebaseWorkflowPort;
   }
   test('TASK-2494 repro: usage-blocked pinned implementer during rebase conflict names the usage block and reset time, never infra/Forgejo', async () => {
     const launches: Array<{ step: string; options: Record<string, unknown> }> = [];
@@ -835,7 +839,7 @@ describe("rebase through successive conflict stops", () => {
     const state = { inProgress: false, unmerged: [] as string[], staged: [] as string[],
       continueSets: [] as string[][], rebaseCall: 0, continueCall: 0, classifyCall: 0,
       incomplete: false, pushes: 0, versions: { main: '1.5.283', mission: '1.5.282' }, resolvedVersions: {} as Record<string, string> };
-    const port: RebaseWorkflowPort = {
+    const port: RebaseWorkflowPort = rebaseWorkflowFixture({
       git: (args: string[]) => {
         const tail = subcommand(args);
         if (tail[0] === 'rebase' && tail[1] === 'main') {
@@ -843,7 +847,7 @@ describe("rebase through successive conflict stops", () => {
           assert.equal(state.rebaseCall, 1, 'never restart a paused rebase');
           state.inProgress = true;
           state.unmerged = [HANDOFF];
-          return { status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${HANDOFF}\n` };
+          return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${HANDOFF}\n` };
         }
         if (tail[0] === 'rebase' && tail[1] === '--continue') {
           state.continueSets.push([...state.staged]);
@@ -852,13 +856,13 @@ describe("rebase through successive conflict stops", () => {
           state.staged = [];
           if (state.continueCall === 1) {
             state.unmerged = [PKG, PKGLCK];
-            return { status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${PKG}\nCONFLICT (content): Merge conflict in ${PKGLCK}\n` };
+            return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${PKG}\nCONFLICT (content): Merge conflict in ${PKGLCK}\n` };
           }
           state.inProgress = false;
           return OK;
         }
-        if (tail[0] === 'rebase' && tail[1] === '--show-current') { return { ...OK, stdout: state.inProgress ? 'mission/task-2672' : '' }; }
-        if (tail[0] === 'status' && tail[1] === '--porcelain') { return { ...OK, stdout: state.unmerged.map(file => `UU ${file}`).join('\n') }; }
+        if (tail[0] === 'rebase' && tail[1] === '--show-current') { return { signal: null, ...OK, stdout: state.inProgress ? 'mission/task-2672' : '' }; }
+        if (tail[0] === 'status' && tail[1] === '--porcelain') { return { signal: null, ...OK, stdout: state.unmerged.map(file => `UU ${file}`).join('\n') }; }
         if (tail[0] === 'add') { state.staged.push(...tail.slice(1)); state.unmerged = state.unmerged.filter(file => !state.staged.includes(file)); }
         if (tail[0] === 'push') { state.pushes += 1; }
         return OK;
@@ -882,22 +886,22 @@ describe("rebase through successive conflict stops", () => {
         return { agent: String(options.agent ?? 'pool-selected'), result: { status: 0 } };
       },
       selectAgent: () => 'pool-selected', workflowLauncherStatus: (_agent: string) => ({ supported: true, agent: _agent }),
-      applyAgentFallback: async () => 'codex', createPr: () => { state.pushes += 1; return { ok: true }; }, readToken: () => 'token',
+      applyAgentFallback: async () => 'codex', createPr: () => { state.pushes += 1; return { ok: true as const }; }, readToken: () => 'token',
       resolveForgejoUser: (user: string | null) => user ?? 'tester', fetchReviewBranch: () => OK,
-      resolveTaskFile: () => ({ ok: true, taskFile: '/worktree/backlog/tasks/task-2672.md', task: {} }),
+      resolveTaskFile: () => ({ ok: true as const, taskFile: '/worktree/backlog/tasks/task-2672.md', task: {} }),
       getTaskImplementer: () => 'codex', transitionTask: async () => undefined,
       resolveReviewIdentity: () => ({ forgejoUser: 'tester' }),
-      readReviewState: () => ({ implementer: 'codex', status: 'active', metadata: {} }),
-      writeReviewState: () => undefined, persistReviewState: async () => undefined,
+      readReviewState: async () => ({ implementer: 'codex', status: 'active', metadata: {} }),
+      writeReviewState: async () => ({ outcome: 'committed' as const }), persistReviewState: async () => ({ outcome: 'committed' as const }),
       isForgejoReviewEnabled: () => true, formatVerificationCommand: () => 'npm test',
       resolveConflictsForMission: () => {
         state.classifyCall += 1;
         const files = [...state.unmerged];
-        return { ok: true, conflictFiles: files, missionSpecificFiles: files.filter(f => f === HANDOFF), sharedFiles: files.filter(f => f !== HANDOFF) };
+        return { ok: true as const, conflictFiles: files, missionSpecificFiles: files.filter(f => f === HANDOFF), sharedFiles: files.filter(f => f !== HANDOFF) };
       },
-      missionServices: () => Promise.resolve({ store: {} }),
+      missionServices: () => Promise.resolve({ store: inMemoryTransitionStore(fixtureMission('task-2672')) }),
       exit: (code: number) => { exitCodes.push(code); },
-    };
+    });
     return { port, lines, exitCodes, agentLaunches, state };
   }
   async function runSuccessive(h: ReturnType<typeof successiveConflictHarness>): Promise<void> {
@@ -929,7 +933,7 @@ describe("rebase through successive conflict stops", () => {
     };
     h.port.missionServices = null;
     h.port.detectRebaseState = () => ({ inProgress: h.state.inProgress, unmergedFiles: [] });
-    h.port.resolveConflictsForMission = () => ({ ok: true, conflictFiles: [HANDOFF], missionSpecificFiles: [HANDOFF], sharedFiles: [] });
+    h.port.resolveConflictsForMission = () => ({ ok: true as const, conflictFiles: [HANDOFF], missionSpecificFiles: [HANDOFF], sharedFiles: [] });
     await runSuccessive(h);
     assert.equal(continueCalls, 3, 'the finite continue budget is preserved across successive conflicts');
     assert.ok(h.exitCodes.some((c) => c !== 0), 'budget exhaustion fails closed');
@@ -968,4 +972,23 @@ test('rebase continuation and recovery policy need only observed facts (TASK-266
   assert.equal(postContinueAction(1, false, true, 2, 2, true), 'budget-exhausted');
   assert.equal(postContinueAction(1, false, true, 1, 2, true), 'staged-failure');
   assert.equal(postContinueAction(1, false, true, 1, 2, false), 'retry');
+});
+
+test('integration rebase repair returns to ready-for-integration (TASK-2746)', async () => {
+  const calls: string[] = [];
+  const store = inMemoryTransitionStore(fixtureMission('task-2746', { status: 'integration' }));
+  await transitionRebaseRepair('task-2746', 'active', { rootDir: '/mission' }, {
+    missionServices: async root => {
+      assert.equal(root, '/mission');
+      return { store };
+    },
+    cwd: () => assert.fail('must use the explicit mission root'),
+    transitionTask: (slug, status, options) => {
+      assert.equal(slug, 'task-2746');
+      assert.equal(options.rootDir, '/mission');
+      calls.push(status);
+    },
+    reviewerEligibility: () => assert.fail('integration repair does not resume review'),
+  });
+  assert.deepEqual(calls, ['ready-for-integration']);
 });

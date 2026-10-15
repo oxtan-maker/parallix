@@ -109,6 +109,8 @@ export type ReviewerDecision =
   | {
     readonly kind: 'approved';
     readonly classifier?: import('./classifier-review.js').ClassifierReviewSource;
+    /** Exact judged head; null when unknown, never inferred from the start subject. */
+    readonly revision?: ChangeRevision | null;
     readonly decidedAt: string;
     readonly comment: string | null;
     readonly source: ReviewApprovalSource;
@@ -120,6 +122,8 @@ export type ReviewerDecision =
   | {
     readonly kind: 'changes-requested';
     readonly classifier?: import('./classifier-review.js').ClassifierReviewSource;
+    /** Exact judged head; null when unknown, never inferred from the start subject. */
+    readonly revision?: ChangeRevision | null;
     readonly decidedAt: string;
     readonly comment: string | null;
     readonly findings: readonly ReviewFinding[];
@@ -475,12 +479,16 @@ export class ConfiguredReviewerEligibility {
 export type ReviewerCommand =
   | {
     readonly type: 'approve';
+    /** Exact judged head; null when unknown, never inferred from the start subject. */
+    readonly revision?: ChangeRevision | null;
     readonly decidedAt: string;
     readonly comment: string | null;
     readonly source: ReviewApprovalSource;
   }
   | {
     readonly type: 'request-changes';
+    /** Exact judged head; null when unknown, never inferred from the start subject. */
+    readonly revision?: ChangeRevision | null;
     readonly decidedAt: string;
     readonly comment: string | null;
     readonly findings: readonly ReviewFinding[];
@@ -526,6 +534,11 @@ export function sameReviewedChange(left: ReviewedChange, right: ReviewedChange):
 
 export function sameReviewedRevision(left: ReviewedRevision, right: ReviewedRevision): boolean {
   return sameReviewedChange(left.change, right.change) && left.revision === right.revision;
+}
+
+/** Recorded judged head, including explicit unknowns on legacy decisions. */
+export function decidedRevisionOf(round: ReviewRound | null | undefined): ChangeRevision | null {
+  return round?.decision?.revision ?? null;
 }
 
 export function currentReviewRound(review: Review): ReviewRound {
@@ -769,12 +782,14 @@ export function applyReviewerCommand(review: Review, command: ReviewerCommand): 
     ? {
       kind: 'approved',
       decidedAt: command.decidedAt,
+      revision: typeof command.revision === 'string' ? changeRevision(command.revision) : null,
       comment: command.comment,
       source: command.source,
     }
     : {
       kind: 'changes-requested',
       decidedAt: command.decidedAt,
+      revision: typeof command.revision === 'string' ? changeRevision(command.revision) : null,
       comment: command.comment,
       findings: command.findings,
     };

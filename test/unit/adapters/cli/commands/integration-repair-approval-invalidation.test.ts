@@ -67,8 +67,6 @@ function routeArgs(h: Harness, repairChangesDiff: boolean): IntegrationGateRoute
   return {
     slug: SLUG,
     missionWorktree: '/tmp/mission',
-    baseWorktree: '/tmp/base',
-    baseBranch: 'main',
     branch: `mission/${SLUG}`,
     verificationCommand: './scripts/verify-local.sh all',
     failedGate: failedGate(),
@@ -78,27 +76,25 @@ function routeArgs(h: Harness, repairChangesDiff: boolean): IntegrationGateRoute
     repositoryId: 'parallix',
     // The standing approval the reviewer gave to `approved-tree`.
     approval: { ok: true, reviewState: 'APPROVED', reviewerApproved: true, reviewerApprovedAt: '2026-09-16T10:00:00Z' },
-    reviewerUser: REVIEWER,
     startAgentFn: (async () => {
       if (repairChangesDiff) { h.head = { commit: 'repaired-commit', tree: 'repaired-tree' }; }
       return { agent: 'codex', result: { status: 0 } };
-    }) as never,
+    }),
     transitionTaskFn: async (slug: string) => { h.transitions.push(slug); return true; },
-    probeBaseBranchReproductionFn: (async () => ({ checked: true, reproduced: false, detail: 'passes on main', baseCommit: 'base-commit' })) as never,
-    captureFinalTreeFn: (() => ({ ok: true, rootDir: '/tmp/mission', commit: h.head.commit, tree: h.head.tree })) as never,
+    captureFinalTreeFn: (() => ({ ok: true as const, rootDir: '/tmp/mission', commit: h.head.commit, tree: h.head.tree })),
     // The identical gate set re-runs green once the repair is in place.
-    runPhaseGatesFn: (async (_phase: string, o: any) => ({
-      ok: true, phase: 'integration', gates: o.gates, executed: 1, skipped: false, dryRun: false, failedGate: null, error: null,
-    })) as never,
-    invalidateApprovalFn: (async (opts: any) => {
+    runPhaseGatesFn: (async (_phase, o) => ({
+      ok: true as const, phase: 'integration' as const, gates: o.gates ?? [], executed: 1, skipped: false, dryRun: false, failedGate: null, error: null,
+    })),
+    invalidateApprovalFn: (async opts => {
       h.invalidations.push({ slug: opts.slug, branch: opts.branch });
-      return { ok: true, dismissed: [REVIEWER], errors: [] };
-    }) as never,
+      return { ok: true as const, dismissed: [REVIEWER], errors: [] };
+    }),
     log: (m: string) => h.messages.push(m),
     error: (m: string) => h.messages.push(m),
     gateRunLog: (m: string) => h.messages.push(m),
     gateRunError: (m: string) => h.messages.push(m),
-  } as unknown as IntegrationGateRouteOptions;
+  };
 }
 
 test('TASK-2528: a post-integration-error repair that changes the mission diff cannot land on the prior approval', async () => {
@@ -147,11 +143,12 @@ test('TASK-2620: a stale approval is dismissed as parallix; no review is posted 
     branch: `mission/${SLUG}`,
     approval: { ok: true, reviewerApproved: true },
     summary: staleApprovalSummary(SLUG, 'approved-commit', 'repaired-commit', 'integration-suite'),
-    readTokenFn: ((user: string) => `token-for-${user}`) as never,
-    dismissFn: ((branch: string, token: string, reason: string, o: any) => {
+    readTokenFn: ((user: string) => `token-for-${user}`),
+    dismissFn: ((branch: string, token: string, reason: string, o) => {
+      assert.ok(o?.forgejoUser);
       dismissals.push({ branch, user: o.forgejoUser, token, reason });
-      return { ok: true, dismissed: [REVIEWER], errors: [] };
-    }) as never,
+      return { ok: true as const, dismissed: [REVIEWER], errors: [] };
+    }),
   });
 
   assert.deepEqual(result, { ok: true, dismissed: [REVIEWER], errors: [] });
@@ -166,7 +163,7 @@ test('TASK-2620: a stale approval is dismissed as parallix; no review is posted 
 test('TASK-2620: no provider approval means nothing to dismiss', async () => {
   const result = await invalidateApprovedPrReview({
     slug: SLUG, branch: `mission/${SLUG}`, approval: { ok: false, error: 'forgejo-off' }, summary: 'irrelevant',
-    readTokenFn: (() => { throw new Error('must not read a token'); }) as never,
+    readTokenFn: (() => { throw new Error('must not read a token'); }),
   });
   assert.deepEqual(result, { ok: true, dismissed: [], errors: [] });
 });
@@ -177,8 +174,8 @@ test('TASK-2528: an approval that cannot be retracted is reported and still refu
     branch: `mission/${SLUG}`,
     approval: { ok: true, reviewerApproved: true },
     summary: 'irrelevant',
-    readTokenFn: (() => null) as never,
-    dismissFn: (() => { throw new Error('must not dismiss without a token'); }) as never,
+    readTokenFn: (() => null),
+    dismissFn: (() => { throw new Error('must not dismiss without a token'); }),
   });
 
   assert.equal(result.ok, false, 'a missing token is a failure, never a silent skip');
@@ -189,8 +186,8 @@ test('TASK-2528: an approval that cannot be retracted is reported and still refu
   const h = harness();
   const route = await routeIntegrationGateFailure({
     ...routeArgs(h, true),
-    invalidateApprovalFn: (async () => ({ ok: false, dismissed: [], errors: ['provider rejected the dismissal'] })) as never,
-  } as never);
+    invalidateApprovalFn: (async () => ({ ok: false as const, dismissed: [], errors: ['provider rejected the dismissal'] })),
+  });
   assert.equal(route.route, 'revision-changed', 'a failed retraction still refuses to land the changed revision');
   assert.match(h.messages.join('\n'), /Provider approval was not updated/);
 });

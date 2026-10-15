@@ -1,4 +1,5 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import type { SessionMarkerPort } from '../../../../src/application/domain-ports.js';
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 import { resolveConfiguration } from '../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 // Historical regression provenance: TASK-1322, TASK-2328, TASK-2209, TASK-2211, TASK-2266.
@@ -59,6 +60,7 @@ describe("Codex launcher basics ,", () => {
   });
 
   test('extractCodexSessionId returns null for no match', () => {
+    // @ts-expect-error Intentional non-string session-parser input.
     assert.equal(extractCodexSessionId(null), null);
     assert.equal(extractCodexSessionId(''), null);
   });
@@ -189,9 +191,10 @@ describe("Codex launcher basics ,", () => {
   // ---------- startCodexDraftAgent stale session detection (task-1322) ----------
 
   test('startCodexDraftAgent retries without exec resume when spawn returns "Session not found"', async () => {
-    const mockSessionPort = { deleted: null, async delete(missionId, role) { this.deleted = { missionId, role }; } };
+    const deletion: { value: Parameters<SessionMarkerPort['delete']> | null } = { value: null };
+    const mockSessionPort: SessionMarkerPort = { find: async () => null, save: async () => { throw new Error('Unexpected session save'); }, shouldResume: async () => false, delete: async (...args) => { deletion.value = args; } };
     let spawnCount = 0;
-    const mockSpawn = (cmd, args, opts) => {
+    const mockSpawn: NonNullable<Parameters<typeof codex.__setSpawnAndTeeForTest>[0]> = (_cmd, args, _opts) => {
       spawnCount++;
       if (spawnCount === 1) {
         return Promise.resolve({ status: 1, signal: null, stdout: '', stderr: 'Error: Session not found', error: null });
@@ -203,22 +206,65 @@ describe("Codex launcher basics ,", () => {
     codex.__setSessionPortForTest(mockSessionPort);
 
     const { invocation, resultPromise } = codex.startCodexDraftAgent({ configuration: resolveConfiguration(environment),
-      prompt: 'review task', worktree: '/tmp/wt', env: {}, resume: true, sessionId: 'ses_stale', slug: 'task-1322', role: 'reviewer'
+      prompt: 'review task', worktree: '/tmp/wt', env: {}, resume: true, sessionId: 'ses_stale', slug: fixtureMissionId('task-1322'), role: 'review'
     });
     const result = await resultPromise;
 
     assert.equal(spawnCount, 2, 'must spawn twice: stale session then fresh');
     assert.ok(invocation.args.includes('resume'), 'original invocation must include resume');
-    assert.deepEqual(mockSessionPort.deleted, { missionId: 'task-1322', role: 'reviewer' }, 'marker must be cleared through the port');
+    assert.deepEqual(deletion.value, ['task-1322', 'review'], 'marker must be cleared through the port');
     assert.equal(result.status, 0, 'final result must show success');
 
     codex.__setSpawnAndTeeForTest(null);
     codex.__setSessionPortForTest(null);
   });
 
+  test('headless fresh, resumed and --last launches pass the prompt on stdin, never as argv (TASK-2760)', () => {
+    const prompt = 'repair — 修复\n'.repeat(4);
+    for (const options of [{}, { resume: true, sessionId: 'abc123' }, { resume: true, sessionId: null }]) {
+      const inv = buildCodexDraftInvocation({ configuration: resolveConfiguration(environment), prompt, worktree: '/tmp', interactive: false, model: 'gpt-5.4-mini', ...options });
+      assert.equal(inv.args.at(-1), '-', 'codex exec and exec resume read `-` from stdin');
+      assert.equal(inv.args.includes(prompt), false);
+      assert.equal(inv.options.input, prompt);
+    }
+    const last = buildCodexDraftInvocation({ configuration: resolveConfiguration(environment), prompt, worktree: '/tmp', resume: true, sessionId: null });
+    assert.deepEqual(last.args.slice(-2), ['--last', '-']);
+    const interactive = buildCodexDraftInvocation({ configuration: resolveConfiguration(environment), prompt, worktree: '/tmp', interactive: true });
+    assert.equal(interactive.options.input, undefined, 'the interactive TUI keeps the terminal on stdin');
+  });
+
+  test('a codex 0.162 unknown-session error falls back to a fresh stdin launch with the same prompt (TASK-2760)', async () => {
+    let deleted: { missionId: string; role: string } | null = null;
+    const mockSessionPort = { async find() { return null; }, async save() {}, async shouldResume() { return false; }, async delete(missionId, role) { deleted = { missionId, role }; } } satisfies SessionMarkerPort;
+    const spawns: { args: readonly string[]; input: unknown; configuration: unknown; capture: unknown }[] = [];
+    codex.__setSpawnAndTeeForTest((cmd, args, opts) => {
+      spawns.push({ args, input: opts?.input, configuration: opts?.configuration, capture: opts?.capture });
+      return Promise.resolve(spawns.length === 1
+        ? { status: 1, signal: null, stdout: '', stderr: 'Error: thread/resume: thread/resume failed: no rollout found for thread id abc (code -32600)', error: null }
+        : { status: 0, signal: null, stdout: 'codex resume 1234abcd\n', stderr: '', error: null });
+    });
+    codex.__setSessionPortForTest(mockSessionPort);
+    const capture = { write() {} };
+    try {
+      const { resultPromise } = codex.startCodexDraftAgent({ configuration: resolveConfiguration(environment),
+        prompt: 'resume prompt', worktree: registeredMkdtemp('codex-stale-'), resume: true, sessionId: 'abc', slug: fixtureMissionId('task-2760'), role: 'execute', teeOptions: { capture } });
+      const result = await resultPromise;
+      assert.equal(spawns.length, 2);
+      assert.ok(spawns[0].args.includes('resume'));
+      assert.equal(spawns[1].args.includes('resume'), false);
+      assert.deepEqual(spawns.map(spawn => [spawn.args.at(-1), spawn.input]), [['-', 'resume prompt'], ['-', 'resume prompt']]);
+      assert.ok(spawns.every(spawn => spawn.capture === capture && spawn.configuration), 'tee capture and confinement configuration reach both spawns');
+      assert.deepEqual(deleted, { missionId: 'task-2760', role: 'execute' });
+      assert.equal(result.sessionId, '1234abcd');
+    } finally {
+      codex.__setSpawnAndTeeForTest(null);
+      codex.__setSessionPortForTest(null);
+    }
+  });
+
   test('startCodexDraftAgent does NOT retry when resume is false', async () => {
     let spawnCount = 0;
-    const mockSpawn = (cmd, args, opts) => {
+    const mockSpawn: NonNullable<Parameters<typeof codex.__setSpawnAndTeeForTest>[0]> = (_cmd, args, _opts) => {
       spawnCount++;
       return Promise.resolve({ status: 1, signal: null, stdout: '', stderr: 'Session not found', error: null });
     };
@@ -238,7 +284,7 @@ describe("Codex launcher basics ,", () => {
 
   test('startCodexDraftAgent places the fallback sandbox on exec before resume', async () => {
     let spawnCount = 0;
-    const mockSpawn = (cmd, args, opts) => {
+    const mockSpawn: NonNullable<Parameters<typeof codex.__setSpawnAndTeeForTest>[0]> = (_cmd, args, _opts) => {
       spawnCount++;
       assert.deepEqual(args.slice(args.indexOf('exec'), args.indexOf('ses_valid') + 1), ['exec', '--sandbox', 'workspace-write', 'resume', 'ses_valid']);
       assert.ok(args.includes('ses_valid'), 'must include the session ID');
@@ -328,7 +374,7 @@ describe("Codex operator-state isolation", () => {
       environment.HOME = operatorHome;
 
       const invocation = buildCodexDraftInvocation({ configuration: resolveConfiguration(environment), prompt: 'Execute.', worktree, interactive: false });
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
+      assert.ok(typeof invocation.options.env.HOME === 'string');
       const resolvedNestedTool = path.join(invocation.options.env.HOME, '.local', 'bin', 'opencode');
 
       assert.ok(fs.existsSync(resolvedNestedTool), 'a nested command must retain the operator HOME used to resolve its installation');

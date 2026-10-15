@@ -67,12 +67,12 @@ test('classification set discovers the version itself and records the value', as
       output.length = 0;
       errors.length = 0;
       const write = process.stdout.write.bind(process.stdout);
-      (process.stdout as unknown as { write: (_chunk: string) => boolean }).write = (chunk) => {
+      ((process.stdout)).write = (chunk) => {
         output.push(String(chunk));
         return true;
       };
       try { return await run(args, { baseCwd: repo, error: (message) => { errors.push(message); return message; } }); }
-      finally { (process.stdout as unknown as { write: typeof write }).write = write; }
+      finally { ((process.stdout)).write = write; }
     };
     const readBack = async () => {
       await clearOperatorStateCache();
@@ -131,9 +131,9 @@ test('classification set still rejects a value that is not one of the allowed la
     const invoke = async (args: string[]) => {
       errors.length = 0;
       const write = process.stdout.write.bind(process.stdout);
-      (process.stdout as unknown as { write: (_chunk: string) => boolean }).write = (chunk) => true;
+      ((process.stdout)).write = (chunk) => true;
       try { return await run(args, { baseCwd: repo, error: (message) => { errors.push(message); return message; } }); }
-      finally { (process.stdout as unknown as { write: typeof write }).write = write; }
+      finally { ((process.stdout)).write = write; }
     };
 
     assert.equal(await invoke(['classification', 'set', '--slug', SLUG, '--value', 'bogus']), 1);
@@ -182,9 +182,9 @@ test('other write verbs resolve the version without --expected-version', async (
     const invoke = async (args: string[]) => {
       errors.length = 0;
       const write = process.stdout.write.bind(process.stdout);
-      (process.stdout as unknown as { write: (_chunk: string) => boolean }).write = (chunk) => true;
+      ((process.stdout)).write = (chunk) => true;
       try { return await run(args, { baseCwd: repo, error: (message) => { errors.push(message); return message; } }); }
-      finally { (process.stdout as unknown as { write: typeof write }).write = write; }
+      finally { ((process.stdout)).write = write; }
     };
 
     // A brief write resolves its own version without the flag and persists.

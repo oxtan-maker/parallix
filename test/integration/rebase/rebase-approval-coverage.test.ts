@@ -1,3 +1,4 @@
+import { integrationContext } from '../../fixtures/integration-context.js';
 // TASK-2555 reproduction: an approved mission whose branch is rebased onto a
 // main that already landed part of its change. `px rebase` must record, at the
 // moment the branch moves, that the approval no longer covers the branch; the
@@ -69,7 +70,7 @@ async function approvedMission(root: string, approved: string) {
     { change: { kind: 'local-branch', sourceBranch: branch, targetBranch: 'main' }, revision: changeRevision(approved) },
     agentFamily('custom'), agentFamily('codex'), '2026-09-22T00:00:00Z',
     ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily('custom')], strategy: 'random' }),
-  ), { type: 'approve', decidedAt: '2026-09-22T00:01:00Z', comment: null, source: { kind: 'local' } });
+  ), { type: 'approve', revision: changeRevision(approved), decidedAt: '2026-09-22T00:01:00Z', comment: null, source: { kind: 'local' } });
   const mission = {
     id: missionId(slug), repositoryId: repositoryId('repo'), title: 'Stale approval', labels: missionLabels([]),
     status: 'integration', closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review, netEngineeringLines: null,
@@ -85,7 +86,7 @@ async function rebase(root: string, store: SqliteMissionStore): Promise<number> 
     resolveWorktreeFn: () => root,
     findMissionDirFn: () => null,
     resolveMissionBaseBranchFn: () => 'main',
-    resolveTaskFileFn: () => ({ ok: false }),
+    resolveTaskFileFn: () => ({ matches: [], reason: 'missing' as const,  ok: false as const }),
     isForgejoReviewEnabledFn: () => false,
     exitFn: (exitCode: number) => { code = exitCode; },
     missionServicesFn: async () => ({ store, lifecycle: new MissionLifecycleService(store) }),
@@ -124,7 +125,7 @@ test('px rebase records that the approval no longer covers the branch, keeping i
     const revoked = await new RevokeReviewDecisionUseCase(store, new MissionLifecycleService(store)).execute({
       slug, round: 1, reason: 'The rebase replaced the approved revision', operator: 'operator', occurredAt: '2026-09-22T02:00:00Z', expectedVersion: loaded.version,
     });
-    assert.equal(revoked.status, 'completed', revoked.error?.message);
+    assert.equal(revoked.status, 'completed', revoked.error?.message ?? '');
     const reviewed = await store.load(missionId(slug));
     assert.equal(reviewed.kind === 'found' && reviewed.mission.status, 'review');
     const rounds = reviewed.kind === 'found' ? reviewed.mission.review!.rounds : [];
@@ -215,13 +216,15 @@ test('isolated active conflict repair verifies its tree while integration stays 
       inferSlugFn: () => slug, resolveWorktreeFn: () => root,
       findMissionDirFn: () => root, findMissionAreaFn: () => 'workflow',
       resolveMissionBaseBranchFn: () => 'main',
-      resolveTaskFileFn: () => ({ ok: true, taskFile }), getTaskImplementerFn: () => 'codex',
-      resolveConflictsFn: () => ({ ok: true, conflictFiles: ['contract.txt'], missionSpecificFiles: [], sharedFiles: ['contract.txt'] }),
+      resolveTaskFileFn: () => ({ matches: [],  ok: true as const, taskFile }), getTaskImplementerFn: () => 'codex',
+      resolveConflictsFn: () => ({ ok: true as const, conflictFiles: ['contract.txt'], missionSpecificFiles: [], sharedFiles: ['contract.txt'] }),
       isForgejoReviewEnabledFn: () => false,
       missionServicesFn: async () => ({ store, lifecycle: new MissionLifecycleService(store) }),
-      startAgentFn: async (_step: string, options: { prompt: string }) => {
+      startAgentFn: async (_step, options) => {
+        assert.equal(typeof options.prompt, 'string');
+        if (typeof options.prompt !== 'string') { throw new Error('Expected concrete repair prompt'); }
         const during = await store.load(missionId(slug));
-        if (during.kind !== 'found') { assert.fail('active mission must be recorded'); }
+        if (during.kind !== 'found') { return assert.fail('active mission must be recorded'); }
         assert.equal(during.mission.status, 'active');
         assert.equal(during.mission.review, null);
         assert.doesNotMatch(options.prompt, /px integrate .*--dry-run/);
@@ -238,19 +241,19 @@ test('isolated active conflict repair verifies its tree while integration stays 
       },
       exitFn: (exitCode: number) => { code = exitCode; },
     });
-    port.readReviewState = () => ({ implementer: 'codex' });
+    port.readReviewState = async () => ({ implementer: 'codex' });
     await runRebaseWorkflow([slug], port);
     assert.equal(code, 0);
     assert.equal(verified, true);
     assert.equal(port.detectRebaseState(root).inProgress, false);
     const after = await store.load(missionId(slug));
-    if (after.kind !== 'found') { assert.fail('repaired mission must be recorded'); }
+    if (after.kind !== 'found') { return assert.fail('repaired mission must be recorded'); }
     assert.equal(after.mission.status, 'active');
     assert.equal(after.mission.review, null);
-    const eligibility = evaluateTaskStatusForIntegration({
+    const eligibility = evaluateTaskStatusForIntegration(integrationContext({
       missionStatus: after.mission.status, missionReview: after.mission.review,
       approval: { ok: true, reviewState: null }, baseWorktree: root,
-    }, { toVirtual: (status: string) => status } as any);
+    }), { toVirtual: (status: string) => status, toActual: (status: string) => status });
     assert.equal(eligibility.ok, false, 'green repair must not grant integration eligibility');
     console.log('Isolated repair: Git complete; node --check green; Mission active with no review; integration refused.');
   } finally {

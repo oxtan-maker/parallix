@@ -19,6 +19,7 @@ import {
   superviseTmuxLaunch,
   tmuxAttachArgs,
   tmuxMissionName,
+  type TmuxLaunch,
 } from '../../../../src/adapters/process/tmux-host.js';
 import { ensurePrivateDir, terminalStateRoot } from '../../../../src/adapters/process/terminal-state-root.js';
 import { createTmuxMissionTerminalHost } from '../../../../src/adapters/process/tmux-mission-terminal.js';
@@ -36,15 +37,15 @@ function fakeSpawnSync(listing: string) {
     calls.push([command, ...args]);
     if (args.includes('list-sessions') || args.includes('list-windows')) { return { status: 0, stdout: listing, stderr: '' }; }
     return { status: 0, stdout: '', stderr: '' };
-  }) as never;
+  });
   return { fn, calls };
 }
 
 test('tmux probe reports an actionable unavailable result (TASK-2643)', () => {
-  const missing = probeTmux((() => ({ status: null, error: Object.assign(new Error('spawn tmux ENOENT'), { code: 'ENOENT' }) })) as never, 'linux');
+  const missing = probeTmux((() => ({ stdout: '', stderr: '', signal: null,  status: null, error: Object.assign(new Error('spawn tmux ENOENT'), { code: 'ENOENT' }) })), 'linux');
   assert.equal(missing.available, false);
   assert.match(missing.reason!, /ENOENT.*adapters\.terminal\.host/);
-  assert.equal(probeTmux((() => ({ status: 0, stdout: 'tmux 3.7c\n' })) as never, 'linux').version, 'tmux 3.7c');
+  assert.equal(probeTmux((() => ({ stderr: '', signal: null,  status: 0, stdout: 'tmux 3.7c\n' })), 'linux').version, 'tmux 3.7c');
   assert.match(probeTmux(undefined, 'win32').reason!, /Linux and macOS only/);
 });
 
@@ -79,7 +80,7 @@ test('a symlinked state directory is refused (TASK-2643)', () => {
 });
 
 test('prepared host runs the confined command in the pane and keeps credentials out of argv (TASK-2643)', () => {
-  const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-prep-'), 'state') };
+  const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-prep-'), 'state') } satisfies Partial<NonNullable<Parameters<typeof resolveConfiguration>[0]>>;
   const { fn, calls } = fakeSpawnSync('');
   const launch = prepareTmuxLaunch({
     identity: identity(), spawnIndex: 1, command: 'bwrap', args: ['--ro-bind', '/', '/', '--', 'claude', "it's"],
@@ -108,10 +109,30 @@ test('prepared host runs the confined command in the pane and keeps credentials 
   assert.ok(calls.some(call => call.includes('kill-window') && call.includes(`=${launch.sessionName}:${launch.windowName}`)));
 });
 
+test('a hosted prompt rides in an owner-only stdin file the pane opens, unlinks and redirects, never in argv (TASK-2760)', () => {
+  const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-stdin-'), 'state') };
+  const { fn } = fakeSpawnSync('');
+  const prompt = Buffer.from('recover — 修复\n');
+  const launch = prepareTmuxLaunch({ identity: identity(), spawnIndex: 0, command: 'codex', args: ['exec', '-'], cwd: '/w', env: {}, input: prompt }, { configuration: resolveConfiguration({ ...environment, ...env }), spawnSyncFn: fn });
+  const scratch = path.dirname(launch.args[0]);
+  const stdinFile = path.join(scratch, 'stdin');
+  assert.ok(fs.readFileSync(stdinFile).equals(prompt));
+  assert.equal(fs.statSync(stdinFile).mode & 0o777, 0o600);
+  const pane = fs.readFileSync(path.join(scratch, 'command.sh'), 'utf8');
+  assert.ok(pane.includes(`exec 3< ${shellQuote(stdinFile)} || exit 66\nrm -f ${shellQuote(stdinFile)}\n`));
+  assert.ok(pane.includes(`exec ${shellQuote('codex')} ${shellQuote('exec')} ${shellQuote('-')} <&3 3<&-`));
+  assert.equal(pane.includes('修复'), false, 'the prompt is not interpolated into the command script');
+  launch.cleanup();
+  assert.equal(fs.existsSync(scratch), false, 'cleanup removes an unread prompt file');
+  const plain = prepareTmuxLaunch({ identity: identity(), spawnIndex: 1, command: 'codex', args: ['exec'], cwd: '/w', env: {} }, { configuration: resolveConfiguration({ ...environment, ...env }), spawnSyncFn: fn });
+  assert.equal(fs.readFileSync(path.join(path.dirname(plain.args[0]), 'command.sh'), 'utf8').includes('<&3'), false, 'without input the pane terminal stays stdin');
+  plain.cleanup();
+});
+
 // TASK-2704 launch-path measurement: a whole `px` command hosted in the mission terminal is the owning
 // process and keeps the operator's decision keys; the tmux server and every argv stay credential-free.
 test('a hosted px command keeps decision keys in its private pane environment only (TASK-2704)', () => {
-  const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-keys-'), 'state') };
+  const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-keys-'), 'state') } satisfies Partial<NonNullable<Parameters<typeof resolveConfiguration>[0]>>;
   const keys = { TYPESAFE_API_KEY: 'sentinel-typesafe', OPENROUTER_API_KEY: 'sentinel-openrouter', AI_GATEWAY_API_KEY: 'sentinel-gateway' };
   const { fn } = fakeSpawnSync('');
   const launch = prepareTmuxLaunch({ identity: identity('task-1', 'review'), spawnIndex: 0, command: 'px', args: ['review', 'task-1'], cwd: '/work',
@@ -129,7 +150,7 @@ test('a hosted px command keeps decision keys in its private pane environment on
 });
 
 test('the console px wrapper cannot re-enter itself from an operator rc file (TASK-2675)', () => {
-  const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-wrap-'), 'state') };
+  const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-wrap-'), 'state') } satisfies Partial<NonNullable<Parameters<typeof resolveConfiguration>[0]>>;
   const bin = mkdtemp('px-tmux-bin-');
   fs.writeFileSync(path.join(bin, 'px'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   const previousPath = environment.PATH;
@@ -146,7 +167,7 @@ test('the console px wrapper cannot re-enter itself from an operator rc file (TA
 });
 
 test('restart adoption kills sessions whose host or harness died, only for the same role (TASK-2643)', () => {
-  const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-adopt-'), 'state') };
+  const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-adopt-'), 'state') } satisfies Partial<NonNullable<Parameters<typeof resolveConfiguration>[0]>>;
   const socket = missionSocketPath(identity(), resolveConfiguration(env));
   ensurePrivateDir(path.dirname(socket));
   fs.writeFileSync(socket, '');
@@ -177,18 +198,18 @@ test('interactive supervision retries an attach that loses the server/window rac
     Object.defineProperty(process.stdin, 'isTTY', { value: originalStdinTty, configurable: true });
     Object.defineProperty(process.stdout, 'isTTY', { value: originalStdoutTty, configurable: true });
   });
-  const child = Object.assign(new PassThrough(), { stderr: new PassThrough(), kill: () => true }) as unknown as childProcess.ChildProcess;
-  const firstAttach = Object.assign(new PassThrough(), { kill: () => true }) as unknown as childProcess.ChildProcess;
-  const secondAttach = Object.assign(new PassThrough(), { kill: () => true }) as unknown as childProcess.ChildProcess;
+  const child = Object.assign(new childProcess.ChildProcess(), { stdout: new PassThrough(), stderr: new PassThrough(), kill: () => true });
+  const firstAttach = Object.assign(new childProcess.ChildProcess(), { kill: () => true });
+  const secondAttach = Object.assign(new childProcess.ChildProcess(), { kill: () => true });
   const spawned: string[] = [];
   context.mock.method(childProcess, 'spawn', ((command: string) => {
     spawned.push(command);
     return spawned.length === 1 ? child : spawned.length === 2 ? firstAttach : secondAttach;
-  }) as never);
+  }));
   context.mock.method(childProcess, 'execFile', ((_command: string, _args: string[], _options: object, callback: (error: Error | null) => void) => {
     callback(null);
     return Object.assign(new PassThrough(), { kill: () => true });
-  }) as never);
+  }));
   const result = superviseTmuxLaunch({ command: 'px', args: [], socketPath: '/tmp/task.sock', sessionName: 'task-1', windowName: 'active', started: () => true, cleanup: () => {} });
   await new Promise(resolve => setTimeout(resolve, 60));
   firstAttach.emit('exit', 1);
@@ -207,12 +228,12 @@ for (const clientEvent of ['exit', 'error', 'early-exit', 'early-detach']) {
     const readiness = Object.assign(new EventEmitter(), { kill: () => true });
     let spawnedClient = false;
     const spawn = context.mock.method(childProcess, 'spawn', (command: string) => {
-      if (command === 'tmux') { spawnedClient = true; return client as never; }
-      return host as never;
+      if (command === 'tmux') { spawnedClient = true; return client; }
+      return host;
     });
     const execFile = context.mock.method(childProcess, 'execFile', (_command: string, _args: readonly string[], _options: object, callback: (error: Error | null) => void) => {
       setImmediate(() => callback(null));
-      return readiness as never;
+      return readiness;
     });
     const stdinTTY = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
     const stdoutTTY = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
@@ -250,7 +271,7 @@ test('retired-session cleanup tolerates a concurrent closer and removes transpor
     if (args.includes('show-option')) { return { status: 0, stdout: '1\n' }; }
     if (args.includes('list-windows')) { return { status: inspections++ === 0 ? 0 : 1, stdout: '' }; }
     return { status: 0, stdout: '' };
-  }) as never;
+  });
   const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-race-'), 'state') };
   const launch = prepareTmuxLaunch({ identity: identity(), spawnIndex: 0, command: 'sh', args: [], cwd: '/tmp', env: {} }, { configuration: resolveConfiguration(env), spawnSyncFn });
   const scratch = path.dirname(launch.args[0]);
@@ -271,7 +292,7 @@ test('explicit cleanup refuses an owned operation and closes only an idle missio
 
 
 test('mission restart sweeps dead operations across roles and preserves live work and idle shells (TASK-2643)', () => {
-  const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-mission-sweep-'), 'state') };
+  const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-mission-sweep-'), 'state') } satisfies Partial<NonNullable<Parameters<typeof resolveConfiguration>[0]>>;
   const socket = missionSocketPath(identity(), resolveConfiguration(env));
   ensurePrivateDir(path.dirname(socket));
   fs.writeFileSync(socket, '');
@@ -339,12 +360,12 @@ test('native mission names are injective, lossless for canonical ids and refuse 
 });
 
 test('a presented launch draws the readable view on the pane and relays raw bytes to the host separately (TASK-2735)', () => {
-  const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-pres-'), 'state') };
+  const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-pres-'), 'state') } satisfies Partial<NonNullable<Parameters<typeof resolveConfiguration>[0]>>;
   const { fn } = fakeSpawnSync('');
   const configuration = resolveConfiguration({ ...environment, ...env });
   const plain = prepareTmuxLaunch({ identity: identity(), spawnIndex: 0, command: 'claude', args: [], cwd: '/work', env: {} }, { configuration, spawnSyncFn: fn });
   const presented = prepareTmuxLaunch({ identity: identity(), spawnIndex: 1, command: 'claude', args: [], cwd: '/work', env: {}, presenter: { command: 'px', args: ['--claude-stream-presenter'] } }, { configuration, spawnSyncFn: fn });
-  const files = (launch) => { const scratch = path.dirname(launch.args[0]); return { host: fs.readFileSync(launch.args[0], 'utf8'), pane: fs.readFileSync(path.join(scratch, 'pane.sh'), 'utf8') }; };
+  const files = (launch: TmuxLaunch) => { const scratch = path.dirname(launch.args[0]); return { host: fs.readFileSync(launch.args[0], 'utf8'), pane: fs.readFileSync(path.join(scratch, 'pane.sh'), 'utf8') }; };
   const [before, after] = [files(plain), files(presented)];
   assert.doesNotMatch(before.pane, /presenter/, 'unpresented launches keep the verbatim pane');
   assert.match(before.host, /tee -a/);

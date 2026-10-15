@@ -25,7 +25,7 @@ function runLoop(options: { consume: () => Promise<ReviewerArtifactFacts>; rebou
   const fake = fakeReviewLoopPorts({
     slug: TEST_SLUG,
     routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
-    handoff: { handoff: async () => ({ ok: true }) },
+    handoff: { handoff: async () => ({ ok: true as const }) },
     provider: { pollReview: async () => POLL_TIMEOUT, pollDisposition: async () => 'CHANGES_MADE' },
     // A launched implementer whose process has not reported an exit status:
     // the disposition arrives through the provider.
@@ -38,8 +38,8 @@ function runLoop(options: { consume: () => Promise<ReviewerArtifactFacts>; rebou
   return { events, stops: fake.stops, errors: fake.errors, run };
 }
 
-const incomplete = (diagnostic: string): ReviewerArtifactFacts => ({ consumed: true, ok: false, diagnostic });
-const complete = (reviewState: string | null): ReviewerArtifactFacts => ({ consumed: true, ok: true, reviewState });
+const incomplete = (diagnostic: string): ReviewerArtifactFacts => ({ consumed: true, ok: false as const, diagnostic });
+const complete = (reviewState: string | null): ReviewerArtifactFacts => ({ consumed: true, ok: true as const, reviewState });
 
 test('task-2377.04: a round reaching the per-round relaunch cap stops with the cap diagnostic and exactly the capped number of bounce launches (SC4)', async () => {
   assert.equal(DEFAULT_REBOUNDS_PER_ROUND, 6, 'the named default cap is 6');
@@ -105,8 +105,8 @@ test('task-2377.04: an exhausted artifact occurrence gets a fresh per-occurrence
   // The loop is re-entered on a persisted round (resume); nothing a previous
   // occurrence spent may carry over, so the next same-kind occurrence starts
   // from a fresh budget of 2.
-  const state = { current: null as ReviewLoopState | null };
-  const consume = async () => incomplete('reviewer still left incomplete review artifacts');
+  const state = { current: null as ReviewLoopState | null } satisfies { current: ReviewLoopState | null; };
+  const consume: () => Promise<ReviewerArtifactFacts> = async () => incomplete('reviewer still left incomplete review artifacts');
 
   const first = runLoop({ consume, state });
   await first.run();

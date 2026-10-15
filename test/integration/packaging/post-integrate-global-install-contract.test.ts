@@ -10,6 +10,7 @@ import path from 'node:path';
 import childProcess, { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
+import { URL } from 'node:url';
 
 // Declaration order is load-bearing: installModuleMocks relinks modules in this order, so a
 // module must be declared after the modules it depends on (merged from every section below).
@@ -127,7 +128,8 @@ describe("refresh-global-px script", () => {
 describe("publish and reinstall", () => {
   const PACKAGE_ROOT = path.join(import.meta.dirname, '..', '..', '..');
 
-  type RunOptions = import('node:child_process').SpawnSyncOptions & {
+  type RunOptions = Omit<import('node:child_process').SpawnSyncOptions, 'encoding'> & {
+    encoding?: 'utf8';
     tempHome?: string;
     env?: Record<string, string>;
   };
@@ -138,7 +140,7 @@ describe("publish and reinstall", () => {
   // contains only the canonical ESM bundle payload (build/), so extraction cannot
   // couple source and sibling-JS mtimes.
   function run(command: string, args: string[], options: RunOptions = {}) {
-    const runOptions = options as RunOptions;
+    const runOptions = options;
     const callerProvided = runOptions.tempHome !== undefined;
     // Only npm needs an isolated npm home. The installed CLI does not consult
     // npm, so allocating and deleting one for its read-only probes is needless.
@@ -167,7 +169,7 @@ describe("publish and reinstall", () => {
     return result;
   }
 
-  function packFilename(stdout) {
+  function packFilename(stdout: string|NonSharedBuffer) {
     const jsonMatches = [...String(stdout || '').matchAll(/"filename"\s*:\s*"([^"]+\.tgz)"/g)];
     if (jsonMatches.length > 0) {
       return jsonMatches[jsonMatches.length - 1][1];
@@ -207,8 +209,7 @@ describe("publish and reinstall", () => {
       assert.ok(fs.existsSync(tarball), 'npm pack must write its archive only to the temporary destination');
 
       const installResult = run('npm', ['install', '-g', '--prefix', prefix, tarball], { tempHome: npmHome });
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-      if (installResult.error && installResult.error.code === 'EPERM') {
+      if (installResult.error && 'code' in installResult.error && installResult.error.code === 'EPERM') {
         return;
       }
       assert.equal(
@@ -237,7 +238,6 @@ describe("publish and reinstall", () => {
       // first access, so no seed file is needed and none may be a CSV.
       const pxVersion = run(px, ['--version'], { cwd: target });
       assert.equal(pxVersion.status, 0, `installed px --version failed\nstdout:\n${pxVersion.stdout}\nstderr:\n${pxVersion.stderr}`);
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       assert.match(pxVersion.stdout, new RegExp(`${installedRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/build/px\\.mjs`));
 
       for (const command of ['status', 'stats']) {
@@ -260,7 +260,7 @@ describe("publish and reinstall", () => {
 describe("post-integrate hook errors", () => {
   const REPO_ROOT = path.join(import.meta.dirname, '..', '..', '..');
 
-  function writeExecutable(filePath, content) {
+  function writeExecutable(filePath: string, content: string|NodeJS.ArrayBufferView<ArrayBufferLike>) {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, content, 'utf8');
     fs.chmodSync(filePath, 0o755);
@@ -341,7 +341,7 @@ process.exit(1);
     return { root, repoRoot, binDir, logPath };
   }
 
-  function runHook(binDir, repoRoot) {
+  function runHook(binDir: string, repoRoot: string) {
     return childProcess.spawnSync('bash', ['scripts/refresh-global-px.sh'], {
       cwd: repoRoot,
       encoding: 'utf8',
@@ -507,13 +507,13 @@ describe("publish proof is captured after the post-integrate rebuild (consolidat
   test.afterEach(() => mock.restoreAll());
   const { resolvePostIntegrateCommand } = resolvePostIntegrateCommandModule;
 
-  function withTempDir(fn) {
+  function withTempDir(fn: (_arg0: string) => void) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2203-proof-order-'));
     try { fn(dir); }
     finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }
 
-  function writeWorkflowConfig(root) {
+  function writeWorkflowConfig(root: string) {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       product: { name: 'Test Project' },
       adapters: {
@@ -531,7 +531,7 @@ describe("publish proof is captured after the post-integrate rebuild (consolidat
   // Test 1: The post-integrate command is wired and does a rebuild.
   // ---------------------------------------------------------------------------
   test('post-integrate hook runs the configured distribution rebuild (task-2203 prerequisite)', () => {
-    withTempDir(root => {
+    withTempDir((root) => {
       writeWorkflowConfig(root);
       const command = resolvePostIntegrateCommand(root);
       assert.equal(command, './scripts/refresh-global-px.sh');
@@ -567,7 +567,7 @@ describe("publish proof is captured after the post-integrate rebuild (consolidat
     const closeoutPath = path.join(REPO_ROOT, 'src', 'application', 'integrate', 'landed-closeout.ts');
     const closeout = fs.readFileSync(closeoutPath, 'utf8');
 
-    const finishIdx = content.indexOf('await finishLanding(run, { branch, mergedCommit');
+    const finishIdx = content.indexOf('await this.finishLanding(run, { branch, mergedCommit');
 
     assert.match(content, /await completeLandedCloseout\(/);
     assert.match(closeout, /await landing\.runPostIntegrateHookOrAbort\(/);
@@ -585,9 +585,9 @@ describe("publish proof is captured after the post-integrate rebuild (consolidat
   // Test 4: The task-2200 symptom — proof captured before the rebuild is stale.
   // ---------------------------------------------------------------------------
   test('proof captured before rebuild is stale after post-integrate hook (task-2200 symptom)', () => {
-    withTempDir(root => {
+    withTempDir((root) => {
       // Setup: create a minimal git repo with stale compiled output.
-      const runGit = (args) => {
+      const runGit = (args: string[]) => {
         const res = childProcess.spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
         if (res.status !== 0) {
           throw new Error(`git ${args.join(' ')} failed: ${res.stderr}${res.stdout}`);

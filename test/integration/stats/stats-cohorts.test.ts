@@ -74,7 +74,7 @@ describe("defect G: low-sample is judged per metric, not per cohort", () => {
         }
       }
 
-      const cohortMetadata = async () => new Map<MissionId, { labels: readonly MissionLabel[]; assignee: AgentFamily | null }>(
+      const cohortMetadata: NonNullable<NonNullable<ConstructorParameters<typeof ConcreteMetricsReadAdapter>[0]>["cohortMetadata"]> = async () => new Map<MissionId, { labels: readonly MissionLabel[]; assignee: AgentFamily | null }>(
         missions.map((mission) => [mission, { labels: [LABEL as MissionLabel], assignee: agentFamily('claude') }]),
       );
       const metrics = await new ConcreteMetricsReadAdapter({

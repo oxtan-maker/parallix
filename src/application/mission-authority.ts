@@ -80,6 +80,7 @@ export type LegacyInventoryId =
   | 'review-state'
   | 'agent-blocklist'
   | 'backlog-task'
+  | 'rebase-hook-overlay'
   | 'coverage-manifest'
   | 'forgejo-token'
   | 'workflow-config'
@@ -93,6 +94,7 @@ export const LEGACY_INVENTORY_AUTHORITY = {
   'review-state': MISSION_FIELD_AUTHORITY.review,
   'agent-blocklist': OPERATOR_CONCERN_AUTHORITY.agentBlocks,
   'backlog-task': MISSION_FIELD_AUTHORITY.status,
+  'rebase-hook-overlay': targetSource,
   'coverage-manifest': { owner: 'operator-local', role: 'cache' } as const,
   'forgejo-token': localSource,
   'workflow-config': targetSource,

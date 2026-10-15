@@ -1,3 +1,4 @@
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -281,8 +282,8 @@ test('ConcreteMissionReadAdapter loadMission returns mission by id', async () =>
       resolveTaskFile: (slug) => {
         const files = fs.readdirSync(tasksDir).filter((f) => f.endsWith('.md'));
         const file = files.find((f) => f.toLowerCase().startsWith(slug.toLowerCase()));
-        if (file) return { ok: true, taskFile: path.join(tasksDir, file), matches: [file] };
-        return { ok: false, matches: [] };
+        if (file) return { ok: true as const, taskFile: path.join(tasksDir, file), matches: [file] };
+        return { ok: false as const, matches: [] };
       },
       getTaskStorage: () => ({
         tasksDir,
@@ -309,7 +310,7 @@ test('ConcreteMissionReadAdapter loadMission returns null for missing id', async
     const adapter = new ConcreteMissionReadAdapter({
       rootDir: tmp,
       repositoryId: repositoryId('test-repo'),
-      resolveTaskFile: () => ({ ok: false, matches: [] }),
+      resolveTaskFile: () => ({ ok: false as const, matches: [] }),
       getTaskStorage: () => ({
         tasksDir: path.join(tmp, 'backlog', 'tasks'),
         completedDir: path.join(tmp, 'backlog', 'completed'),
@@ -334,10 +335,10 @@ test('ConcreteMissionReadAdapter tolerates a task removed during materialization
     const adapter = new ConcreteMissionReadAdapter({
       rootDir: tmp,
       repositoryId: repositoryId('test-repo'),
-      resolveTaskFile: () => ({ ok: true, taskFile: missing, matches: [missing] }),
+      resolveTaskFile: () => ({ ok: true as const, taskFile: missing, matches: [missing] }),
       resolveWorktree: () => null,
     });
-    const mission = await adapter.loadMission('task-9999' as MissionId);
+    const mission = await adapter.loadMission(fixtureMissionId('task-9999') as MissionId);
     assert.equal(mission?.title, 'task-9999');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -350,7 +351,7 @@ test('ConcreteMissionReadAdapter uses the shared assignee parser for empty inlin
   });
   try {
     const adapter = new ConcreteMissionReadAdapter({ rootDir: tmp, repositoryId: repositoryId('test-repo'), resolveWorktree: () => null });
-    const mission = await adapter.loadMission('task-9998' as MissionId);
+    const mission = await adapter.loadMission(fixtureMissionId('task-9998') as MissionId);
     assert.equal(mission?.assignee, 'codex');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -560,11 +561,11 @@ test('ConcreteMissionReadAdapter uses worktree content when worktree is present'
       resolveTaskFile: (slug, rootDir) => {
         const dir = rootDir || tmp;
         const tasksDir = path.join(dir, 'backlog', 'tasks');
-        if (!fs.existsSync(tasksDir)) return { ok: false, matches: [] };
+        if (!fs.existsSync(tasksDir)) return { ok: false as const, matches: [] };
         const files = fs.readdirSync(tasksDir).filter((f) => f.endsWith('.md'));
         const file = files.find((f) => f.toLowerCase().startsWith(slug.toLowerCase()));
-        if (file) return { ok: true, taskFile: path.join(tasksDir, file), matches: [file] };
-        return { ok: false, matches: [] };
+        if (file) return { ok: true as const, taskFile: path.join(tasksDir, file), matches: [file] };
+        return { ok: false as const, matches: [] };
       },
     });
 

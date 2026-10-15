@@ -41,8 +41,8 @@ export function readGuardFingerprints(dbPath: string): DefaultDbSnapshot {
     return empty;
   }
   try {
-    const table = <T>(sql: string, fallback: T): T => {
-      try { return db.prepare(sql).all() as unknown as T; } catch { return fallback; }
+    const table = <T extends Record<string, import('node:sqlite').SQLOutputValue>[]>(sql: string, fallback: T): T => {
+      try { return db.prepare(sql).all() as T; } catch { return fallback; }
     };
     return {
       missionIds: table<{ id: string }[]>('SELECT id FROM missions ORDER BY id', []).map(row => row.id),

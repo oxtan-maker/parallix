@@ -1,4 +1,3 @@
-import { buildHandoffControls } from '../../../src/adapters/review/handoff-controls.js';
 /**
  * TASK-2413 CP-2: verification-proof reuse and invalidation.
  *
@@ -11,7 +10,6 @@ import { buildHandoffControls } from '../../../src/adapters/review/handoff-contr
  */
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import test from 'node:test';
-import { createIntegratePorts } from '../../../src/adapters/cli/commands/integrate.js';
 import { createIntegrationVerificationEvidencePort } from '../../../src/adapters/verification/integration-verification-proof.js';
 import { runPreReviewGate } from '../../../src/adapters/review/review-gate-handling.js';
 import { runPhaseGates } from '../../../src/adapters/config/repository-gates.js';
@@ -33,7 +31,7 @@ import runWorkflow, {
   readPublishedTreeState,
 } from '../../../src/adapters/verification/verification.js';
 
-function withTempDir(fn) {
+function withTempDir(fn: (_arg0: string) => void) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-2413-proof-'));
   try { fn(dir); } finally {
     fs.rmSync(`${dir}.verification-proof.json`, { force: true });
@@ -41,10 +39,10 @@ function withTempDir(fn) {
   }
 }
 
-const proofPath = root => `${root}.verification-proof.json`;
+const proofPath = (root: string) => `${root}.verification-proof.json`;
 
 test('verify command executes once and reuses the active proof (TASK-2715)', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     const marker = path.join(root, '.git', 'verification-runs');
     initCommittedRepository(root, {
       'workflow.config.json': JSON.stringify({ adapters: {
@@ -70,7 +68,7 @@ test('verify command executes once and reuses the active proof (TASK-2715)', () 
 });
 
 test('task-2413: unchanged tree/command/toolchain reuses authoritative proof without re-verification', { concurrency: false }, () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     initCommittedRepository(root);
     const command = './scripts/verify-local.sh all';
     const written = writeReusableVerificationProof(command, root, { proofPath: proofPath(root) });
@@ -81,6 +79,7 @@ test('task-2413: unchanged tree/command/toolchain reuses authoritative proof wit
     assert.equal(reused.ok, true, 'identical command reuses the proof');
     assert.equal(reused.proof!.command, command);
     assert.equal(reused.proof!.status, 'passed');
+    assert.ok(written.proof != null);
     assert.equal(reused.proof!.inputFingerprint, written.proof.inputFingerprint);
     assert.equal(reused.proof!.toolchain, written.proof.toolchain);
 
@@ -98,7 +97,7 @@ test('task-2413: unchanged tree/command/toolchain reuses authoritative proof wit
 });
 
 test('task-2413: changing HEAD/tree invalidates proof reuse', { concurrency: false }, () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     initCommittedRepository(root);
     const command = './scripts/verify-local.sh all';
     const written = writeReusableVerificationProof(command, root, { proofPath: proofPath(root) });
@@ -118,7 +117,7 @@ test('task-2413: changing HEAD/tree invalidates proof reuse', { concurrency: fal
 });
 
 test('task-2413: changing HEAD alone invalidates proof reuse', { concurrency: false }, () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     initCommittedRepository(root);
     const command = './scripts/verify-local.sh all';
     assert.equal(writeReusableVerificationProof(command, root, { proofPath: proofPath(root) }).ok, true);
@@ -130,7 +129,7 @@ test('task-2413: changing HEAD alone invalidates proof reuse', { concurrency: fa
 });
 
 test('task-2413: publication consumes an unchanged reusable proof without executing the gate', { concurrency: false }, () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     initCommittedRepository(root);
     const command = 'exit 9';
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
@@ -142,7 +141,7 @@ test('task-2413: publication consumes an unchanged reusable proof without execut
 
     let executions = 0;
     const result = captureVerifiedTreeProof('all', root, {
-      proofPath: proofPath(root), runFn: () => { executions++; return { status: 9, stdout: '', stderr: '' }; },
+      proofPath: proofPath(root), runFn: () => { executions++; return { signal: null,  status: 9, stdout: '', stderr: '' }; },
     });
     assert.equal(result.ok, true);
     assert.equal(executions, 0, 'publication must consume the handoff proof instead of executing the same gate');
@@ -150,7 +149,7 @@ test('task-2413: publication consumes an unchanged reusable proof without execut
 });
 
 test('task-2413: publication reuse matches the handoff command after area placeholder resolution', { concurrency: false }, () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     initCommittedRepository(root);
     const template = './scripts/verify-local.sh {{area}}';
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
@@ -162,16 +161,16 @@ test('task-2413: publication reuse matches the handoff command after area placeh
     assert.equal(writeReusableVerificationProof(command, root, { proofPath: proofPath(root) }).ok, true);
     let executions = 0;
     const result = captureVerifiedTreeProof('all', root, {
-      proofPath: proofPath(root), runFn: () => { executions++; return { status: 9, stdout: '', stderr: '' }; },
+      proofPath: proofPath(root), runFn: () => { executions++; return { signal: null,  status: 9, stdout: '', stderr: '' }; },
     });
-    assert.equal(result.ok, true, result.error);
+    assert.equal(result.ok, true, result.error ?? '');
     assert.equal(result.proof?.command, command);
     assert.equal(executions, 0);
   });
 });
 
 test('task-2413: changing the verification command invalidates proof reuse', { concurrency: false }, () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     initCommittedRepository(root);
     const written = writeReusableVerificationProof('./scripts/verify-local.sh all', root, { proofPath: proofPath(root) });
     assert.equal(written.ok, true);
@@ -181,7 +180,7 @@ test('task-2413: changing the verification command invalidates proof reuse', { c
 });
 
 test('task-2573: proof context is exact and cannot cross phase, mission, or checkout', { concurrency: false }, () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     initCommittedRepository(root);
     const command = 'true';
     const context = JSON.stringify({ phase: 'integration', slug: 'task-1', checkoutPath: root, gate: 'verify' });
@@ -198,7 +197,7 @@ test('task-2573: proof context is exact and cannot cross phase, mission, or chec
 });
 
 test('task-2413: a stale/mismatched proof cannot authorize publication', { concurrency: false }, () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     initCommittedRepository(root);
     const state = readPublishedTreeState(root);
     assert.equal(state.ok, true);
@@ -216,6 +215,7 @@ test('task-2413: a stale/mismatched proof cannot authorize publication', { concu
     assert.match(assertStale.error || '', /does not match the tree being published/);
 
     // Missing proof must not authorise.
+    // @ts-expect-error Intentional missing proof must fail closed at the adapter boundary.
     const assertMissing = assertVerifiedTreeProof(null, root);
     assert.equal(assertMissing.ok, false);
     assert.match(assertMissing.error || '', /missing verification proof/);
@@ -223,7 +223,7 @@ test('task-2413: a stale/mismatched proof cannot authorize publication', { concu
 });
 
 test('task-2413: a dirty worktree cannot issue a reusable proof (fails closed)', { concurrency: false }, () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     initCommittedRepository(root);
     fs.writeFileSync(path.join(root, 'README.md'), 'dirty\n');
     const identity = createVerificationProofIdentity('./scripts/verify-local.sh all', root);
@@ -267,7 +267,7 @@ test('active review changed ' + input + ' invalidates successful units (TASK-271
   const fixture = activeFixture();
   try {
     let executions = 0;
-    const options = { ...fixture.options, runUnits: () => { executions++; return 0; } };
+    const options = { ...fixture.options, runUnits: () => { executions++; return 0; } } satisfies NonNullable<Parameters<typeof verifyActiveUnits>[0]>;
     assert.equal(verifyActiveUnits(options), 0);
     fs.mkdirSync(path.dirname(path.join(fixture.root, input)), { recursive: true });
     fs.writeFileSync(path.join(fixture.root, input), 'export const value = 2;\\n');
@@ -283,7 +283,7 @@ test('active review failed units issue no proof and may retry successfully (TASK
   try {
     let executions = 0;
     let fail = true;
-    const options = { ...fixture.options, runUnits: () => { executions++; return fail ? 7 : 0; } };
+    const options = { ...fixture.options, runUnits: () => { executions++; return fail ? 7 : 0; } } satisfies NonNullable<Parameters<typeof verifyActiveUnits>[0]>;
     assert.equal(verifyActiveUnits(options), 7);
     assert.equal(verifyActiveUnits(options), 7);
     fail = false;
@@ -297,7 +297,7 @@ test('active units survive Backlog-only commits and SHA changes but rerun for ve
   const fixture = activeFixture();
   try {
     let executions = 0;
-    const options = { ...fixture.options, runUnits: () => { executions++; return 0; } };
+    const options = { ...fixture.options, runUnits: () => { executions++; return 0; } } satisfies NonNullable<Parameters<typeof verifyActiveUnits>[0]>;
     assert.equal(verifyActiveUnits(options), 0);
     for (const input of ['backlog/tasks/mission.md', 'backlog/completed/mission.md']) {
       fs.mkdirSync(path.dirname(path.join(fixture.root, input)), { recursive: true });
@@ -327,7 +327,7 @@ test('active units survive upstream source rebases but invalidate changed missio
     fs.writeFileSync(input, baseline.replace('value = 1', 'value = 2'));
     fixture.repo.git('add', '.'); fixture.repo.git('commit', '-m', 'mission edit');
     let executions = 0;
-    const options = { ...fixture.options, runUnits: () => { executions++; return 0; } };
+    const options = { ...fixture.options, runUnits: () => { executions++; return 0; } } satisfies NonNullable<Parameters<typeof verifyActiveUnits>[0]>;
     assert.equal(verifyActiveUnits(options), 0);
     fixture.repo.git('checkout', 'main');
     fs.writeFileSync(input, '// upstream insertion\n' + baseline);
@@ -356,7 +356,7 @@ test(`terminal-resolved rebase ${outcome} has structured cache evidence (TASK-27
     fs.writeFileSync(input, 'export const value = 2;\n');
     fixture.repo.git('add', '.'); fixture.repo.git('commit', '-m', 'mission');
     let executions = 0;
-    const options = { ...fixture.options, runUnits: () => { executions++; return 0; } };
+    const options = { ...fixture.options, runUnits: () => { executions++; return 0; } } satisfies NonNullable<Parameters<typeof verifyActiveUnits>[0]>;
     assert.equal(verifyActiveUnits(options), 0);
     const coveredBefore = JSON.parse(fs.readFileSync(options.proofPath, 'utf8')).coveredCommit;
     // Hooks added after installation are also forwarded by the overlay.
@@ -400,7 +400,7 @@ test('active review ' + changed + ' mismatch cannot reuse success (TASK-2715)', 
   const fixture = activeFixture();
   try {
     let executions = 0;
-    const options = { ...fixture.options, runUnits: () => { executions++; return 0; } };
+    const options = { ...fixture.options, runUnits: () => { executions++; return 0; } } satisfies NonNullable<Parameters<typeof verifyActiveUnits>[0]>;
     assert.equal(verifyActiveUnits(options), 0);
     if (changed === 'mission') fixture.repo.git('checkout', '-b', 'mission/other');
     else {
@@ -415,7 +415,7 @@ test('active review ' + changed + ' mismatch cannot reuse success (TASK-2715)', 
 }
 
 test('outer handoff proof cannot cross identical checkout or mission branch (TASK-2715)', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     const repo = initCommittedRepository(root);
     const artifact = path.join(root, '.git', 'proof.json');
     assert.equal(writeReusableVerificationProof('true', root, { proofPath: artifact }).ok, true);
@@ -429,7 +429,7 @@ test('outer handoff proof cannot cross identical checkout or mission branch (TAS
 });
 
 test('outer verification proof invalidates an updated effective npm launcher (TASK-2715)', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     initCommittedRepository(root);
     const bin = path.join(root, '.git', 'bin');
     fs.mkdirSync(bin);
@@ -459,7 +459,7 @@ for (const scenario of ['green', 'partial', 'failed', 'uncovered']) {
         } }, gates: { preIntegration: gates },
       } }) });
       const configuration = resolveConfiguration({ ...process.env });
-      const result = await createIntegratePorts(configuration).gates.runPhaseGates('integration', { slug: 'task-2740', checkoutPath: root, verificationEvidence: createIntegrationVerificationEvidencePort(),
+      const result = await runPhaseGates('integration', { configuration, slug: 'task-2740', checkoutPath: root, verificationEvidence: createIntegrationVerificationEvidencePort(configuration),
         gates: scenario === 'partial' ? gates.slice(0, 2) : gates,
         commandRunner: () => ({ status: scenario === 'failed' ? 7 : 0, stdout: '', stderr: '' }),
         log: () => {}, error: () => {},
@@ -496,7 +496,7 @@ for (const scenario of ['bookkeeping', 'source', 'test', 'config', 'manifest', '
       } }, gates: { preIntegration: gates } } };
       const repo = initCommittedRepository(root, { 'workflow.config.json': JSON.stringify(config), 'src/input.ts': 'export const value = 1;\n' });
       const options = { slug: 'task-2740', checkoutPath: root, verificationEvidence: createIntegrationVerificationEvidencePort(), log: () => {}, error: () => {},
-        commandRunner: () => ({ status: 0, stdout: '', stderr: '' }) };
+        commandRunner: () => ({ status: 0, stdout: '', stderr: '' }) } satisfies NonNullable<Parameters<typeof runPhaseGates>[1]>;
       assert.equal((await runPhaseGates('integration', options)).ok, true);
       const file = path.join(root, '.git/integration-verification-proof.json');
       const original = fs.readFileSync(file, 'utf8');
@@ -533,11 +533,6 @@ for (const scenario of ['bookkeeping', 'source', 'test', 'config', 'manifest', '
       }
       const reusable = readActiveVerificationProof(command, root);
       assert.equal(reusable.ok, scenario === 'bookkeeping');
-      const controls = buildHandoffControls(root, [command], { repositoryCommand: command });
-      assert.equal(controls.includes('status passed'), scenario === 'bookkeeping', 'review gate facts retain the existing freshness decision (TASK-2747)');
-      if (scenario === 'bookkeeping' && reusable.ok && reusable.proof) {
-        assert.ok(controls.includes(`validated SHA ${reusable.proof.verifiedCommit}`));
-      }
       const output: string[] = [];
       const previous = process.cwd();
       try {
@@ -551,7 +546,7 @@ for (const scenario of ['bookkeeping', 'source', 'test', 'config', 'manifest', '
         // Active evidence must not become exact publication authorization.
         let publicationRuns = 0;
         assert.equal(captureVerifiedTreeProof('all', root, { runFn: () => {
-          publicationRuns++; return { status: 7, stdout: '', stderr: '' };
+          publicationRuns++; return { signal: null,  status: 7, stdout: '', stderr: '' };
         } }).ok, false);
         assert.equal(publicationRuns, 1);
       }

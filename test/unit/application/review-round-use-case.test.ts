@@ -5,11 +5,12 @@ import type { ReviewRoundEntryPort, StartReviewRound } from '../../../src/applic
 import { fakeReviewLoopPorts, type ReviewLoopFakeOverrides } from '../../helpers/review-loop-ports.js';
 import { ReviewState } from '../../../src/adapters/review/review-state.js';
 
-function fixture(round: number | null = 2, controllerFree = false, overrides: ReviewLoopFakeOverrides = {}) {
+function fixture(round: number | null = 2, controllerFree = false, overrides: ReviewLoopFakeOverrides = {}, operator = false) {
   const calls: string[] = [];
   const requests: StartReviewRound[] = [];
   const fake = fakeReviewLoopPorts({ slug: 'task-2637', lock: { tryAcquire: () => controllerFree, release: () => {} }, ...overrides });
   const port: ReviewRoundEntryPort = {
+    operatorResume: operator ? { acknowledge: async () => { calls.push('acknowledge operator'); } } : undefined,
     loadRound: async () => round === null ? null : { round },
     isKnownMission: async () => true,
     clearHumanIntervention: async () => { calls.push('clear intervention'); },
@@ -60,10 +61,10 @@ test('start creates the missing Review through handoff and completes autonomous 
     handoff: { handoff: async () => {
       handoffs += 1;
       await fake.ports.state.persist(new ReviewState(base.slug, { implementer: 'codex', reviewer: 'claude', round: 1 }));
-      return { ok: true };
+      return { ok: true as const };
     } },
-    routing: { nominate: () => { assert.fail('start must use the handoff reviewer'); } },
-    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) },
+    routing: { nominate: () => { return assert.fail('start must use the handoff reviewer'); } },
+    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
   });
   await useCase.start({ ...base, maxAttempts: 1 });
   assert.equal(handoffs, 1);
@@ -80,13 +81,25 @@ test('starting a known mission without Review still stops at rejected handoff (T
   const { fake, useCase } = fixture(null, true, {
     handoff: { handoff: async () => {
       handoffs += 1;
-      return { ok: false, reason: 'Success criteria 1 are incomplete' };
+      return { ok: false as const, reason: 'Success criteria 1 are incomplete' as const };
     } },
-    routing: { nominate: () => { assert.fail('rejected handoff must not select a reviewer'); } },
+    routing: { nominate: () => { return assert.fail('rejected handoff must not select a reviewer'); } },
   });
   await useCase.start({ ...base, maxAttempts: 1 });
   assert.equal(handoffs, 1);
   assert.deepEqual(fake.exits, [1]);
   assert.deepEqual(fake.launches, []);
   assert.deepEqual(fake.writes, []);
+});
+
+test('direct operator acknowledgment precedes continuation readiness and dry-run preserves retained stops (TASK-2759)', async () => {
+  const direct = fixture(2, false, {}, true);
+  await direct.useCase.continue({ ...base, rawMaxAttempts: null });
+  assert.deepEqual(direct.calls, ['acknowledge operator', 'clear intervention', 'invalidate blocker', 'bind mechanisms']);
+  const dry = fixture(2, false, {}, true);
+  await dry.useCase.continue({ ...base, dryRun: true, rawMaxAttempts: null });
+  assert.deepEqual(dry.calls, ['clear intervention', 'bind mechanisms']);
+  const missing = fixture(null, false, {}, true);
+  await missing.useCase.continue({ ...base, rawMaxAttempts: null });
+  assert.deepEqual(missing.calls, ['missing aggregate']);
 });

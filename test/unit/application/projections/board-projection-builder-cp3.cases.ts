@@ -189,11 +189,11 @@ test('Integration-base vs worktree reconciliation: base owns status, worktree pr
       resolveTaskFile: (slug, rootDir) => {
         const dir = rootDir || tmp;
         const tasksDir = path.join(dir, 'backlog', 'tasks');
-        if (!fs.existsSync(tasksDir)) return { ok: false, matches: [] };
+        if (!fs.existsSync(tasksDir)) return { ok: false as const, matches: [] };
         const files = fs.readdirSync(tasksDir).filter((f) => f.endsWith('.md'));
         const file = files.find((f) => f.toLowerCase().startsWith(slug.toLowerCase()));
-        if (file) return { ok: true, taskFile: path.join(tasksDir, file), matches: [file] };
-        return { ok: false, matches: [] };
+        if (file) return { ok: true as const, taskFile: path.join(tasksDir, file), matches: [file] };
+        return { ok: false as const, matches: [] };
       },
     });
 
@@ -248,11 +248,11 @@ test('Integration-base vs worktree reconciliation: done + worktree present = unc
       resolveTaskFile: (slug, rootDir) => {
         const dir = rootDir || tmp;
         const tasksDir = path.join(dir, 'backlog', 'tasks');
-        if (!fs.existsSync(tasksDir)) return { ok: false, matches: [] };
+        if (!fs.existsSync(tasksDir)) return { ok: false as const, matches: [] };
         const files = fs.readdirSync(tasksDir).filter((f) => f.endsWith('.md'));
         const file = files.find((f) => f.toLowerCase().startsWith(slug.toLowerCase()));
-        if (file) return { ok: true, taskFile: path.join(tasksDir, file), matches: [file] };
-        return { ok: false, matches: [] };
+        if (file) return { ok: true as const, taskFile: path.join(tasksDir, file), matches: [file] };
+        return { ok: false as const, matches: [] };
       },
     });
 

@@ -34,9 +34,15 @@
 //   - `cache_read_input_tokens` / `cache_creation_input_tokens` appear on
 //     message_start.usage when prompt caching is active; summed across turns.
 
+type ClaudeUsage = { input_tokens?: unknown; output_tokens?: unknown; cache_read_input_tokens?: unknown; cache_creation_input_tokens?: unknown };
+type ClaudeEvent = { type?: string; event?: ClaudeEvent; session_id?: string; model?: string; usage?: ClaudeUsage; total_cost_usd?: unknown; message?: { model?: string; usage?: ClaudeUsage }; content_block?: { type?: string } };
+type UsageTotals = { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number };
+type ClaudeState = { sessionId: string | null; model: string | null; toolCalls: number; resultUsage: UsageTotals | null; resultCostUsd: number | null; messageStarts: (UsageTotals & { model: string | null })[]; messageDeltas: { outputTokens: number }[] };
+type TelemetryTotals = { inputTokens: number; outputTokens: number; cachedTokens: number; cacheCreationTokens: number };
+
 const PROVIDER = 'anthropic';
 
-function num(value: any) {
+function num(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
@@ -45,14 +51,14 @@ function num(value: any) {
  * `--include-partial-messages` form nests the real event under `stream_event`;
  * the bare form has it at the top level. Returns the inner event object.
  */
-function unwrapEvent(evt: any) {
+function unwrapEvent(evt: ClaudeEvent) {
   if (evt && evt.type === 'stream_event' && evt.event && typeof evt.event === 'object') {
     return evt.event;
   }
   return evt;
 }
 
-function resultEventUsage(outer: any) {
+function resultEventUsage(outer: ClaudeEvent) {
   if (outer.type !== 'result') { return null; }
   const usage = outer.usage && typeof outer.usage === 'object' ? outer.usage : null;
   return {
@@ -61,7 +67,7 @@ function resultEventUsage(outer: any) {
   };
 }
 
-function addClaudeStreamUsage(evt: any, messageStarts: any[], messageDeltas: any[]) {
+function addClaudeStreamUsage(evt: ClaudeEvent, messageStarts: ClaudeState['messageStarts'], messageDeltas: ClaudeState['messageDeltas']) {
   if (evt.type === 'message_start') {
     const message = evt.message || {}; const usage = message.usage || {};
     messageStarts.push({ inputTokens: num(usage.input_tokens), outputTokens: num(usage.output_tokens), cacheReadTokens: num(usage.cache_read_input_tokens), cacheCreationTokens: num(usage.cache_creation_input_tokens), model: message.model || null });
@@ -74,19 +80,24 @@ function addClaudeStreamUsage(evt: any, messageStarts: any[], messageDeltas: any
 function parseStreamLine(line: string) {
   const trimmed = line.trim();
   if (!trimmed.startsWith('{')) { return null; }
-  try { return JSON.parse(trimmed); } catch (_) { return null; }
+  try { return JSON.parse(trimmed) as ClaudeEvent | null; } catch (_) { return null; }
 }
 
-function consumeClaudeStreamEvent(outer: any, state: any) {
-  if (!outer || typeof outer !== 'object') { return; }
-  if (outer.session_id) { state.sessionId = outer.session_id; }
-  if (outer.type === 'system' && outer.model) { state.model = outer.model; }
-
+function applyClaudeResult(outer: ClaudeEvent, state: ClaudeState) {
   // Each field is carried over independently: a later `result` line that omits
   // usage or cost must not blank a value an earlier one already reported.
   const result = resultEventUsage(outer);
   if (result?.usage) { state.resultUsage = result.usage; }
   if (result?.cost !== null && result?.cost !== undefined) { state.resultCostUsd = result.cost; }
+
+}
+
+function consumeClaudeStreamEvent(outer: ClaudeEvent, state: ClaudeState) {
+  if (!outer || typeof outer !== 'object') { return; }
+  if (outer.session_id) { state.sessionId = outer.session_id; }
+  if (outer.type === 'system' && outer.model) { state.model = outer.model; }
+
+  applyClaudeResult(outer, state);
 
   const evt = unwrapEvent(outer);
   if (!evt || typeof evt !== 'object') { return; }
@@ -112,10 +123,10 @@ function consumeClaudeStreamEvent(outer: any, state: any) {
 function parseClaudeStreamJson(content: string) {
   if (!content) {return null;}
 
-  const state = {
+  const state: ClaudeState = {
     sessionId: null as string | null, model: null as string | null, toolCalls: 0,
-    resultUsage: null as any, resultCostUsd: null as number | null,
-    messageStarts: [] as any[], messageDeltas: [] as any[],
+    resultUsage: null, resultCostUsd: null as number | null,
+    messageStarts: [], messageDeltas: [],
   };
 
   for (const line of String(content).split('\n')) {
@@ -139,17 +150,17 @@ function parseClaudeStreamJson(content: string) {
   };
 }
 
-function telemetryTotals(parsed: any) {
+function telemetryTotals(parsed: Pick<ClaudeState, 'messageStarts' | 'messageDeltas'>) {
   const inputTokens = parsed.messageStarts.length > 0 ? parsed.messageStarts[0].inputTokens : 0;
   return {
     inputTokens,
-    outputTokens: parsed.messageDeltas.reduce((sum: number, delta: any) => sum + delta.outputTokens, 0),
-    cachedTokens: parsed.messageStarts.reduce((sum: number, start: any) => sum + start.cacheReadTokens, 0),
-    cacheCreationTokens: parsed.messageStarts.reduce((sum: number, start: any) => sum + start.cacheCreationTokens, 0),
+    outputTokens: parsed.messageDeltas.reduce((sum: number, delta) => sum + delta.outputTokens, 0),
+    cachedTokens: parsed.messageStarts.reduce((sum: number, start) => sum + start.cacheReadTokens, 0),
+    cacheCreationTokens: parsed.messageStarts.reduce((sum: number, start) => sum + start.cacheCreationTokens, 0),
   };
 }
 
-function fallbackTelemetryTotals(totals: any, resultUsage: any) {
+function fallbackTelemetryTotals(totals: TelemetryTotals, resultUsage: UsageTotals | null) {
   if (totals.inputTokens || totals.outputTokens || !resultUsage) { return totals; }
   return {
     inputTokens: resultUsage.inputTokens,

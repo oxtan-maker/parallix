@@ -1,3 +1,6 @@
+import { makeProjection, makeCard } from '../../fixtures/board-projection.js';
+import { reviewFindingId } from '../../../src/domain/review.js';
+import { changeRevision as fixtureRevision } from '../../../src/domain/review.js';
 // review read projection contract.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
 import test, { describe } from 'node:test';
@@ -36,12 +39,12 @@ describe("multi round repro", { concurrency: false }, () => {
   // Helpers
   // ---------------------------------------------------------------------------
 
-  function makeRound(n: number, reviewer: string, implementer: string, phase: string, disposition: string, findings: readonly ReviewFinding[] = [], resolutions: readonly FindingResolution[] = []): ReviewRound {
+  function makeRound(n: number, reviewer: string, implementer: string, phase: ReviewRound['phase'], disposition: ReviewRound['disposition'], findings: readonly ReviewFinding[] = [], resolutions: readonly FindingResolution[] = []): ReviewRound {
     return {
       number: n,
       subject: {
         change: { kind: 'local-branch', sourceBranch: `mission/task-2358`, targetBranch: 'main' },
-        revision: `rev-${n}` as any,
+        revision: fixtureRevision(`rev-${n}`),
       },
       reviewer: agentFamily(reviewer),
       implementer: agentFamily(implementer),
@@ -52,21 +55,21 @@ describe("multi round repro", { concurrency: false }, () => {
           ? { kind: 'changes-requested', decidedAt: `2026-07-2${n}T11:00:00Z`, comment: disposition, findings }
           : null,
       response: resolutions.length
-        ? { kind: 'resolved', respondedAt: `2026-07-2${n}T12:00:00Z`, resolutions, resultingRevision: `rev-${n + 1}` as any }
+        ? { kind: 'resolved', respondedAt: `2026-07-2${n}T12:00:00Z`, resolutions, resultingRevision: fixtureRevision(`rev-${n + 1}`) }
         : null,
-      phase: phase as any,
-      disposition: disposition as any,
+      phase: phase,
+      disposition: disposition,
       reviewerRetryCount: 0,
       implementerRetryCount: 0,
     };
   }
 
   function makeReview(
-    rounds: readonly ReviewRound[],
+    rounds: readonly [ReviewRound, ...ReviewRound[]],
     events: readonly ReviewEventRecord[] = [],
   ): Review {
     return {
-      rounds: rounds as [ReviewRound, ...ReviewRound[]],
+      rounds,
       intervention: null,
       stageLaunches: [],
       reviewEvents: events,
@@ -98,8 +101,8 @@ describe("multi round repro", { concurrency: false }, () => {
     'custom',
     'fixing',
     'REQUEST_CHANGES',
-    [{ id: 'f1' as any, summary: 'Missing error handling', location: 'src/lib.ts:10' }],
-    [{ findingId: 'f1' as any, kind: 'fixed', evidence: 'Added try/catch' }],
+    [{ id: reviewFindingId('f1'), summary: 'Missing error handling', location: 'src/lib.ts:10' }],
+    [{ findingId: reviewFindingId('f1'), kind: 'fixed', evidence: 'Added try/catch' }],
   );
 
   const round2 = makeRound(
@@ -108,8 +111,8 @@ describe("multi round repro", { concurrency: false }, () => {
     'custom',
     'fixing',
     'REQUEST_CHANGES',
-    [{ id: 'f2' as any, summary: 'Incorrect type annotation', location: 'src/lib.ts:25' }],
-    [{ findingId: 'f2' as any, kind: 'fixed', evidence: 'Updated type' }],
+    [{ id: reviewFindingId('f2'), summary: 'Incorrect type annotation', location: 'src/lib.ts:25' }],
+    [{ findingId: reviewFindingId('f2'), kind: 'fixed', evidence: 'Updated type' }],
   );
 
   const round3 = makeRound(
@@ -171,7 +174,7 @@ describe("multi round repro", { concurrency: false }, () => {
   // Mock MissionStore that returns the 3-round mission
   const mockMissionStore: MissionStore = {
     async load(_id: MissionId): Promise<MissionLoadResult> {
-      return { kind: 'found', mission: mission3rounds, version: missionVersion(1) };
+      return { kind: 'found' as const, mission: mission3rounds, version: missionVersion(1) };
     },
     async save(_mission: Mission, _expectedVersion: MissionVersion | null): Promise<MissionVersion> {
       return missionVersion(2);
@@ -179,7 +182,7 @@ describe("multi round repro", { concurrency: false }, () => {
   };
 
   // Mock readReviewState returns flat single-round state (current round only)
-  const mockReadReviewState = () => ({
+  const mockReadReviewState: NonNullable<NonNullable<ConstructorParameters<typeof ConcreteReviewReadAdapter>[0]>["readReviewState"]> = () => ({
     slug: 'task-2358',
     reviewer: 'gemini',
     implementer: 'custom',
@@ -191,7 +194,7 @@ describe("multi round repro", { concurrency: false }, () => {
     implementerRetryCount: 0,
     metadata: {},
     phaseOriginal: null,
-  } as any);
+  });
 
   // ---------------------------------------------------------------------------
   // Regression test: 3-round fixture must NOT collapse to 1 round
@@ -260,7 +263,7 @@ describe("multi round repro", { concurrency: false }, () => {
     const emptyStore: MissionStore = {
       async load(_id: MissionId): Promise<MissionLoadResult> {
         return {
-          kind: 'found',
+          kind: 'found' as const,
           mission: makeMission('task-empty', null),
           version: missionVersion(1),
         };
@@ -285,7 +288,7 @@ describe("multi round repro", { concurrency: false }, () => {
         implementerRetryCount: 0,
         metadata: {},
         phaseOriginal: null,
-      } as any),
+      }),
       findMissionDir: () => '/tmp/missions/task-empty',
     });
 
@@ -310,7 +313,7 @@ describe("multi round repro", { concurrency: false }, () => {
         implementerRetryCount: 0,
         metadata: {},
         phaseOriginal: null,
-      } as any),
+      }),
       findMissionDir: () => '/tmp/missions/task-nullstore',
     });
 
@@ -353,7 +356,7 @@ describe("multi round repro", { concurrency: false }, () => {
 
     const store: MissionStore = {
       async load(_id: MissionId): Promise<MissionLoadResult> {
-        return { kind: 'found', mission: approvedMission, version: missionVersion(1) };
+        return { kind: 'found' as const, mission: approvedMission, version: missionVersion(1) };
       },
       async save(_mission: Mission, _expectedVersion: MissionVersion | null): Promise<MissionVersion> {
         return missionVersion(2);
@@ -386,7 +389,7 @@ describe("multi round repro", { concurrency: false }, () => {
 
     const store: MissionStore = {
       async load(_id: MissionId): Promise<MissionLoadResult> {
-        return { kind: 'found', mission: fixingMission, version: missionVersion(1) };
+        return { kind: 'found' as const, mission: fixingMission, version: missionVersion(1) };
       },
       async save(_mission: Mission, _expectedVersion: MissionVersion | null): Promise<MissionVersion> {
         return missionVersion(2);
@@ -420,7 +423,7 @@ describe("multi round repro", { concurrency: false }, () => {
         implementerRetryCount: 0,
         metadata: {},
         phaseOriginal: null,
-      } as any),
+      }),
       findMissionDir: () => '/tmp/missions/task-fallback',
     });
 
@@ -460,7 +463,7 @@ describe("review projection queries", { concurrency: false }, () => {
           approval_source_provider: null,
           responded_at: null,
           resulting_revision: null,
-          phase: 'approved',
+          phase: 'approved' as const,
           disposition: 'APPROVED',
           reviewer_retry_count: 0,
           implementer_retry_count: 0,
@@ -548,7 +551,7 @@ describe("review history status repro", { concurrency: false }, () => {
       number,
       subject: {
         change: { kind: 'local-branch', sourceBranch: 'mission/task-2344', targetBranch: 'main' },
-        revision: `revision-${number}` as any,
+        revision: fixtureRevision(`revision-${number}`),
       },
       reviewer: agentFamily(reviewer),
       implementer: agentFamily('codex'),
@@ -562,10 +565,10 @@ describe("review history status repro", { concurrency: false }, () => {
       response: number === 1 ? {
         kind: 'resolved',
         respondedAt: '2026-08-01T12:00:00Z',
-        resultingRevision: 'revision-2' as any,
+        resultingRevision: fixtureRevision('revision-2'),
         resolutions: [
-          { findingId: 'finding-fixed' as any, kind: 'fixed', evidence: 'guard added' },
-          { findingId: 'finding-pushback' as any, kind: 'disputed', rationale: 'already covered' },
+          { findingId: reviewFindingId('finding-fixed'), kind: 'fixed', evidence: 'guard added' },
+          { findingId: reviewFindingId('finding-pushback'), kind: 'disputed', rationale: 'already covered' },
         ],
       } : null,
       phase: number === 1 ? 'fixing' : 'reviewing',
@@ -578,7 +581,7 @@ describe("review history status repro", { concurrency: false }, () => {
   test('px status task-2344 renders every persisted review round with earlier findings and resolutions', async () => {
     const rounds = [
       round(1, 'codex', 'PUSHBACK_ALL', {
-        id: 'finding-fixed' as any,
+        id: reviewFindingId('finding-fixed'),
         summary: 'earlier-round finding',
         location: 'src/example.ts:1',
       }),
@@ -604,7 +607,7 @@ describe("review history status repro", { concurrency: false }, () => {
     };
     const store: MissionStore = {
       async load(_id: MissionId): Promise<MissionLoadResult> {
-        return { kind: 'found', mission, version: missionVersion(1) };
+        return { kind: 'found' as const, mission, version: missionVersion(1) };
       },
       async save(_mission: Mission, _expectedVersion: MissionVersion | null): Promise<MissionVersion> {
         return missionVersion(1);
@@ -624,7 +627,7 @@ describe("review history status repro", { concurrency: false }, () => {
       inferSlugFn: () => 'task-2344',
       getCurrentBranchFn: () => 'mission/task-2344',
       detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
-      getPrStatusFn: () => ({ exists: false }),
+      getPrStatusFn: () => ({ raw: '',  exists: false as const }),
       readAgentConfigOrExitFn: () => ({}),
       eligibleAgentsForStepFn: () => [],
       allWorkflowAgentNamesFn: () => [],
@@ -633,7 +636,7 @@ describe("review history status repro", { concurrency: false }, () => {
       getUncommittedCountFn: () => 0,
       buildProjectionFn: async () => ({
         build: async () => ({
-          stages: [{ cards: [{
+          ...makeProjection({ review: [makeCard({
             id: slug,
             status: 'review',
             rawStatus: 'review',
@@ -643,7 +646,7 @@ describe("review history status repro", { concurrency: false }, () => {
             reviewPhase: 'reviewing',
             reviewDisposition: 'BLOCKED',
             reviewHistory: projectReviewHistory(persistedReview),
-          }] }],
+          })] }),
         }),
       }),
     });

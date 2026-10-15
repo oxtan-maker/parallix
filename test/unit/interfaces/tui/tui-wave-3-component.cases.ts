@@ -1,3 +1,5 @@
+import { TerminalStream } from '../../../helpers/terminal-stream.js';
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
@@ -6,22 +8,22 @@ import { render, renderToString } from 'ink';
 import { BoardShell, navigationKeyForInput } from '../../../../src/interfaces/tui/shell.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
 
-function renderShell(props: Record<string, unknown>): string {
-  return renderToString(React.createElement(BoardShell, props as never), { columns: 120 });
+function renderShell(props: import('react').ComponentProps<typeof import('../../../../src/interfaces/tui/shell.js').BoardShell>): string {
+  return renderToString(React.createElement(BoardShell, props), { columns: 120 });
 }
 
 async function waitForRender(predicate: () => boolean, description: string): Promise<void> {
   const deadline = Date.now() + 250;
   while (!predicate()) {
     if (Date.now() >= deadline) {
-      assert.fail(`timed out waiting for ${description}`);
+      return assert.fail(`timed out waiting for ${description}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
 
 test('component: selected mission has an explicit focused marker in wide and narrow board layouts', async () => {
-  const projection = makeProjection({ active: [makeCard({ id: 'task-focus' as never, lane: 'active' })] });
+  const projection = makeProjection({ active: [makeCard({ id: fixtureMissionId('task-focus'), lane: 'active' })] });
   for (const columns of [120, 60]) {
     const output = await renderShell({ projection, columns, rows: 30, initialSelectedMissionId: 'task-focus' });
     // Card renders ▶ gutter marker for the selected card.
@@ -37,7 +39,7 @@ test('component: selected mission has an explicit focused marker in wide and nar
 
 test('component: selected mission focus marker is present and board renders without detail panel', async () => {
   // MissionDetailPanel was removed (not in design). The shell renders board + command log only.
-  const projection = makeProjection({ active: [makeCard({ id: 'task-detail' as never, lane: 'active' })] });
+  const projection = makeProjection({ active: [makeCard({ id: fixtureMissionId('task-detail'), lane: 'active' })] });
   const output = await renderShell({ projection, initialSelectedMissionId: 'task-detail' });
   assert.match(output, /▶.*task-detail/, 'selected card has focus marker');
   assert.doesNotMatch(output, /MISSION DETAIL/, 'no detail panel in design');
@@ -45,28 +47,15 @@ test('component: selected mission focus marker is present and board renders with
 });
 
 test('component: keyboard help is visible on demand and ordinary keys have no workflow action', async () => {
-  class Stream extends EventEmitter {
-    public columns = 120;
-    public rows = 30;
-    public readonly isTTY = true;
-    public readonly writes: string[] = [];
-    private readonly input: string[] = [];
-    write(value: string): boolean { this.writes.push(value); return true; }
-    setRawMode(_enabled: boolean): void {}
-    setEncoding(_encoding: string): void {}
-    resume(): void {}
-    ref(): void {}
-    unref(): void {}
-    read(): string | null { return this.input.shift() ?? null; }
-    send(value: string): void { this.input.push(value); this.emit('readable'); }
+  class Stream extends TerminalStream {
   }
-  const projection = makeProjection({ active: [makeCard({ id: 'task-reserved' as never, lane: 'active' })] });
+  const projection = makeProjection({ active: [makeCard({ id: fixtureMissionId('task-reserved'), lane: 'active' })] });
   for (const key of ['?', 'a', 'r', 'c', '\r'] as const) {
     const stdin = new Stream();
     const stdout = new Stream();
-    const instance = render(React.createElement(BoardShell, { projection } as never), {
-      stdin: stdin as unknown as NodeJS.ReadStream,
-      stdout: stdout as unknown as NodeJS.WriteStream,
+    const instance = render(React.createElement(BoardShell, { projection }), {
+      stdin: stdin,
+      stdout: stdout,
       patchConsole: false,
       exitOnCtrlC: false,
     });
@@ -93,7 +82,7 @@ test('component: keyboard help is visible on demand and ordinary keys have no wo
 });
 
 test('component: arrows and WASD map to navigation, excluding modified letter input', async () => {
-  const noKey = { upArrow: false, downArrow: false, leftArrow: false, rightArrow: false, ctrl: false, meta: false };
+  const noKey = { upArrow: false, downArrow: false, leftArrow: false, rightArrow: false, ctrl: false, meta: false } satisfies Partial<NonNullable<Parameters<typeof navigationKeyForInput>[1]>>;
   assert.equal(navigationKeyForInput('', { ...noKey, downArrow: true }), 'down');
   assert.equal(navigationKeyForInput('w', noKey), 'up');
   assert.equal(navigationKeyForInput('a', noKey), 'left');

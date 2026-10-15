@@ -1,3 +1,4 @@
+import { TerminalStream } from '../../../helpers/terminal-stream.js';
 import { resolveConfiguration } from '../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 // Historical regression provenance: TASK-2513, TASK-2383.
@@ -177,6 +178,7 @@ describe("Confinement launch gating", () => {
         log: () => {}
       });
       assert.equal(result.agent, 'claude');
+      assert.ok(result.invocation != null);
       assert.equal(result.invocation.command, 'claude');
     } finally {
       fs.rmSync(worktree, { recursive: true, force: true });
@@ -203,6 +205,7 @@ describe("Confinement launch gating", () => {
         log: () => {}
       });
       assert.equal(result.agent, 'codex');
+      assert.ok(result.invocation != null);
       assert.equal(result.invocation.command, 'codex');
     } finally {
       fs.rmSync(worktree, { recursive: true, force: true });
@@ -273,8 +276,8 @@ describe("Confinement launch gating", () => {
     setBubblewrapProbeForTest(() => false);
     const captured: string[] = [];
     const previous = fmt.setLogger({
-      log: (t: string) => { captured.push(t); return t; },
-      error: (t: string) => { captured.push(t); return t; }
+      log: (t: unknown) => { captured.push(String(t)); return String(t); },
+      error: (t: unknown) => { captured.push(String(t)); return String(t); }
     });
     try {
       const startAgent = await startAgentForTest();
@@ -308,8 +311,8 @@ describe("Confinement launch gating", () => {
     setBubblewrapProbeForTest(() => false);
     const captured: string[] = [];
     const previous = fmt.setLogger({
-      log: (t: string) => { captured.push(t); return t; },
-      error: (t: string) => { captured.push(t); return t; }
+      log: (t: unknown) => { captured.push(String(t)); return String(t); },
+      error: (t: unknown) => { captured.push(String(t)); return String(t); }
     });
     try {
       const startAgent = await startAgentForTest();
@@ -430,7 +433,7 @@ describe("Bubblewrap guard", () => {
     const worktree = makeWorktree();
     const mocked = test.mock.method(childProcess, 'spawnSync', (command: string) => {
       if (command === 'git') {
-        return { status: null, stdout: '', stderr: '', error: new Error('ETIMEDOUT') } as any;
+        return { status: null, stdout: '', stderr: '', error: new Error('ETIMEDOUT') };
       }
       throw new Error(`unexpected command: ${command}`);
     });
@@ -608,7 +611,7 @@ describe("Bubblewrap guard", () => {
     const stateHome = path.join(worktree, 'unavailable-state');
     const mocked = test.mock.method(fs, 'mkdirSync', (dir: fs.PathLike) => {
       if (dir === stateHome) { throw new Error('EROFS'); }
-      return undefined as any;
+      return undefined;
     });
     try {
       const { result, lines } = captureLogs(() => buildBubblewrapArgs({
@@ -636,7 +639,7 @@ describe("Bubblewrap guard", () => {
   test('spawnAndTee preserves stdout and exit status through bwrap', async () => {
     setBubblewrapProbeForTest(() => true);
     const worktree = makeWorktree();
-    const observed: { command: string; args: string[] }[] = [];
+    const observed: { command: string; args: string[]; }[] = [];
     const mocked = test.mock.method(childProcess, 'spawn', (command: string, args: string[]) => {
       observed.push({ command, args });
       return fakeChild();
@@ -651,6 +654,32 @@ describe("Bubblewrap guard", () => {
       assert.equal(result.status, 0);
       assert.equal(result.signal, null);
       assert.equal(result.stdout, 'hello');
+    } finally { mocked.mock.restore(); fs.rmSync(worktree, { recursive: true, force: true }); }
+  });
+
+  test('a stdin prompt crosses bwrap through the piped stdin, never the confined argv (TASK-2760)', async () => {
+    setBubblewrapProbeForTest(() => true);
+    const worktree = makeWorktree();
+    const observed: { command: string; args: string[]; stdin: unknown }[] = [];
+    const written: Buffer[] = [];
+    const mocked = test.mock.method(childProcess, 'spawn', (command: string, args: string[], options: { stdio: unknown[] }) => {
+      observed.push({ command, args, stdin: options.stdio[0] });
+      const child = fakeChild() as ChildProcessDouble & { stdin?: Writable };
+      child.stdin = new Writable({ write(chunk, _encoding, callback) { written.push(chunk); callback(); } });
+      return child;
+    });
+    try {
+      const prompt = 'confined prompt — 修复';
+      const result = await withSandboxProfile(
+        resolveSandboxProfile('active', worktree, undefined, undefined, resolveConfiguration(environment)),
+        () => spawnAndTee('codex', ['exec', '-'], { cwd: worktree, stdoutSink: nullSink(), stderrSink: nullSink(), input: prompt })
+      );
+      assert.equal(observed[0].command, BUBBLEWRAP_COMMAND);
+      assert.deepEqual(observed[0].args.slice(-3), ['codex', 'exec', '-']);
+      assert.equal(observed[0].args.some(arg => arg.includes(prompt)), false);
+      assert.equal(observed[0].stdin, 'pipe');
+      assert.equal(Buffer.concat(written).toString('utf8'), prompt);
+      assert.equal(result.status, 0);
     } finally { mocked.mock.restore(); fs.rmSync(worktree, { recursive: true, force: true }); }
   });
 
@@ -680,6 +709,6 @@ describe("Bubblewrap guard", () => {
   }
 
   function nullSink(): NodeJS.WriteStream {
-    return new Writable({ write(_chunk, _encoding, callback) { callback(); } }) as unknown as NodeJS.WriteStream;
+    return new TerminalStream();
   }
 });

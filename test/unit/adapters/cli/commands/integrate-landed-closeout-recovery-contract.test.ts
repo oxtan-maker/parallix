@@ -1,3 +1,16 @@
+import { makeProjection, makeCard } from '../../../../fixtures/board-projection.js';
+import { FakeLaneEventRepository, FakeUsageRepository } from '../../../../fixtures/metrics-adapter.js';
+import { agentFamily } from '../../../../../src/domain/agents.js';
+import { createIntegrationStrategy } from '../../../../../src/application/services/integration-dispatch.js';
+import { integrationBounceSeams } from '../../../../helpers/integration-bounce-seams.js';
+import { fixtureMission } from '../../../../fixtures/mission-builders.js';
+import { integrationServices } from '../../../../helpers/stub-integration-services.js';
+import { integrationContext } from '../../../../fixtures/integration-context.js';
+import { stubIntegrateWorkflowPorts } from '../../../../helpers/stub-integrate-workflow-ports.js';
+import { missionVersion as fixtureVersion } from '../../../../../src/application/domain-ports.js';
+import { missionId as fixtureMissionId } from '../../../../../src/domain/mission.js';
+import type { DecideIntegrationRequest } from "../../../../../src/application/mission-integration-service.js";
+import type { CloseMissionRequest } from "../../../../../src/application/mission-integration-service.js";
 // Historical regression provenance: TASK-2551, TASK-2604, TASK-2605, TASK-2517, TASK-2508, TASK-2515, TASK-2614, TASK-2622.17.
 // Behavior-owned suite (TASK-2622.09): recovery and closeout of an already-landed integration —
 // post-integrate hook ordering (task-2551), closed-Mission recovery (task-2604, task-2605), landed
@@ -34,7 +47,7 @@ describe("recovery post-integrate hook", () => {
   // confirmation is persisted, so ADR 0060 cleanup applies to recovered
   // integrations too.
 
-  const missionServices = { store: { load: async () => ({ kind: 'found', mission: {} }) } };
+  const missionServices = integrationServices({ store: { load: async () => ({ kind: 'found' as const, version: fixtureVersion(1), mission: fixtureMission('task-closeout') }) } }) satisfies NonNullable<Parameters<typeof recoverLandedIntegration>[1]>;
 
   function baseOptions(overrides: Record<string, unknown> = {}) {
     return {
@@ -95,7 +108,7 @@ describe("recovery post-integrate hook", () => {
 
   for (const interruptedAfter of ['stats', 'hook'] as const) {
     test(`landed closeout resumes after interruption following ${interruptedAfter}`, async () => {
-      let closedAt: string | null = null;
+      let closedAt: { value: string | null } = { value: null };
       let worktreePresent = true;
       let measurementCount = 0;
       let closeCalls = 0;
@@ -120,13 +133,13 @@ describe("recovery post-integrate hook", () => {
         },
         closeLandedIntegrationOrAbort: async () => {
           closeCalls++;
-          closedAt = '2026-09-28T10:00:00Z';
+          closedAt.value = '2026-09-28T10:00:00Z';
           effects.push('close');
         },
       });
 
       await assert.rejects(recoverLandedIntegration('task-2551', missionServices, '/work/base', options), /interrupted after/);
-      assert.equal(closedAt, null, 'administrative closure waits for all closeout steps');
+      assert.equal(closedAt.value, null, 'administrative closure waits for all closeout steps');
       assert.equal(measurementCount, 1);
       assert.equal(worktreePresent, true, 'a pre-cleanup interruption retains the worktree as the retry marker');
 
@@ -135,7 +148,7 @@ describe("recovery post-integrate hook", () => {
       assert.equal(measurementCount, 1, 'retry preserves the single integration measurement');
       assert.equal(worktreePresent, false);
       assert.equal(closeCalls, 1);
-      assert.ok(closedAt);
+      assert.ok(closedAt.value);
       assert.equal(effects.at(-1), 'close');
     });
   }
@@ -145,14 +158,14 @@ describe("recovery post-integrate hook", () => {
 describe("failed closeout resumes", () => {
   test('TASK-2604: failed closeout stays open and resumes without another landing transition', async () => {
     const steps: string[] = [];
-    let status = 'integration';
-    let closedAt: string | null = null;
+    let status: MissionStatus = 'integration';
+    let closedAt: { value: string | null } = { value: null };
     let failStats = true;
     let mergeCalls = 0;
     let gateCalls = 0;
-    const missionServices = {
-      store: { load: async () => ({ kind: 'found' as const, mission: { status, closedAt } }) },
-    };
+    const missionServices = integrationServices({
+      store: { load: async () => ({ kind: 'found' as const, version: fixtureVersion(1), mission: fixtureMission('task-closeout', status === 'done' ? { status: 'done', closedAt: closedAt.value } : { status, closedAt: null }) }) },
+    }) satisfies NonNullable<Parameters<typeof recoverLandedIntegration>[1]>;
     const options = {
       updateGraphifyRepository: () => {},
       findSquashCommit: () => 'landed-commit',
@@ -164,7 +177,7 @@ describe("failed closeout resumes", () => {
       },
       cleanupMissionWorktree: () => { steps.push('cleanup'); return true; },
       runPostIntegrateHookOrAbort: () => { steps.push('hook'); },
-      closeLandedIntegrationOrAbort: async () => { steps.push('closed'); closedAt = '2026-09-28T12:00:00Z'; },
+      closeLandedIntegrationOrAbort: async () => { steps.push('closed'); closedAt.value = '2026-09-28T12:00:00Z'; },
       createAbort: () => new Error('closeout aborted'),
       baseBranch: 'main',
       merge: () => { mergeCalls++; },
@@ -172,26 +185,26 @@ describe("failed closeout resumes", () => {
     };
 
     await assert.rejects(recoverLandedIntegration('task-2604', missionServices, '/tmp/base', options), /statistics unavailable/);
-    assert.equal(closedAt, null, 'a failed closeout must not administratively close the landed Mission');
+    assert.equal(closedAt.value, null, 'a failed closeout must not administratively close the landed Mission');
 
     failStats = false;
     await recoverLandedIntegration('task-2604', missionServices, '/tmp/base', options);
 
     assert.deepEqual(steps, ['delivered', 'stats', 'stats', 'hook', 'cleanup', 'closed']);
-    assert.equal(closedAt, '2026-09-28T12:00:00Z');
+    assert.equal(closedAt.value, '2026-09-28T12:00:00Z');
     assert.equal(mergeCalls, 0, 'a landed retry must never merge again');
     assert.equal(gateCalls, 0, 'a landed retry must never rerun integration gates');
   });
 
   test('TASK-2604: recovered closeout succeeds after its worktree was already cleaned', async () => {
-    let status = 'integration';
-    let closedAt: string | null = null;
+    let status: MissionStatus = 'integration';
+    let closedAt: { value: string | null } = { value: null };
     let worktreePresent = true;
     let failHook = true;
     const steps: string[] = [];
-    const missionServices = {
-      store: { load: async () => ({ kind: 'found' as const, mission: { status, closedAt } }) },
-    };
+    const missionServices = integrationServices({
+      store: { load: async () => ({ kind: 'found' as const, version: fixtureVersion(1), mission: fixtureMission('task-closeout', status === 'done' ? { status: 'done', closedAt: closedAt.value } : { status, closedAt: null }) }) },
+    }) satisfies NonNullable<Parameters<typeof recoverLandedIntegration>[1]>;
     const options = {
       updateGraphifyRepository: () => {},
       findSquashCommit: () => 'landed-commit',
@@ -203,20 +216,20 @@ describe("failed closeout resumes", () => {
         steps.push('hook');
         if (failHook) { throw new Error('hook unavailable'); }
       },
-      closeLandedIntegrationOrAbort: async () => { steps.push('closed'); closedAt = '2026-09-28T12:00:00Z'; },
+      closeLandedIntegrationOrAbort: async () => { steps.push('closed'); closedAt.value = '2026-09-28T12:00:00Z'; },
       createAbort: () => new Error('closeout aborted'),
       baseBranch: 'main',
     };
 
     await assert.rejects(recoverLandedIntegration('task-2604', missionServices, '/tmp/base', options), /hook unavailable/);
     assert.equal(worktreePresent, true, 'a failed refresh leaves cleanup artifacts as the retry marker');
-    assert.equal(closedAt, null);
+    assert.equal(closedAt.value, null);
 
     failHook = false;
     await recoverLandedIntegration('task-2604', missionServices, '/tmp/base', options);
 
     assert.deepEqual(steps, ['delivered', 'stats', 'hook', 'stats', 'hook', 'cleanup', 'closed']);
-    assert.equal(closedAt, '2026-09-28T12:00:00Z');
+    assert.equal(closedAt.value, '2026-09-28T12:00:00Z');
   });
 });
 
@@ -228,7 +241,7 @@ describe("legacy closed Mission recovery", () => {
     let hasArtifacts = true;
     let hasStats = false;
     let failHook = true;
-    const missionServices = { store: { load: async () => ({ kind: 'found', mission: { status: 'done', closedAt } }) } };
+    const missionServices = integrationServices({ store: { load: async () => ({ kind: 'found' as const, version: fixtureVersion(1), mission: fixtureMission('task-closeout', { status: 'done', closedAt }) }) } }) satisfies NonNullable<Parameters<typeof recoverLandedIntegration>[1]>;
     const options = {
       updateGraphifyRepository: () => {},
       findSquashCommit: () => 'landed-commit',
@@ -255,7 +268,9 @@ describe("legacy closed Mission recovery", () => {
     steps.length = 0;
     await recoverLandedIntegration('task-2595', missionServices, '/tmp/base', options);
     assert.deepEqual(steps, ['hook', 'cleanup', 'closed-again'], 'retry preserves the one statistics row');
-    assert.equal((await missionServices.store.load()).mission.closedAt, closedAt);
+    const loaded = await missionServices.store.load(missionId('task-2595'));
+    assert.equal(loaded.kind, 'found');
+    assert.equal(loaded.mission.closedAt, closedAt);
 
     steps.length = 0;
     await recoverLandedIntegration('task-2595', missionServices, '/tmp/base', options);
@@ -265,7 +280,7 @@ describe("legacy closed Mission recovery", () => {
   test('TASK-2605: missing landed proof stops legacy recovery before mutation', async () => {
     let mutations = 0;
     await assert.rejects(recoverLandedIntegration('task-2595',
-      { store: { load: async () => ({ kind: 'found', mission: { status: 'done', closedAt: '2026-09-27' } }) } },
+      integrationServices({ store: { load: async () => ({ kind: 'found' as const, version: fixtureVersion(1), mission: fixtureMission('task-closeout', { status: 'done', closedAt: '2026-09-27' }) }) } }),
       '/tmp/base', {
         updateGraphifyRepository: () => {},
       findSquashCommit: () => null,
@@ -286,7 +301,7 @@ describe("legacy closed Mission recovery", () => {
   test('TASK-2605: invalid stored classification stops before hook and cleanup', async () => {
     const steps: string[] = [];
     await assert.rejects(recoverLandedIntegration('task-2595',
-      { store: { load: async () => ({ kind: 'found', mission: { status: 'done', closedAt: '2026-09-27' } }) } },
+      integrationServices({ store: { load: async () => ({ kind: 'found' as const, version: fixtureVersion(1), mission: fixtureMission('task-closeout', { status: 'done', closedAt: '2026-09-27' }) }) } }),
       '/tmp/base', {
         updateGraphifyRepository: () => {},
       findSquashCommit: () => 'landed-commit',
@@ -322,10 +337,10 @@ describe("landed guard on active/review", async () => {
   const { ReviewCommandUseCase } = await import('../../../../../src/application/review-command-use-case.js');
 
   test('SC4: px active refuses a landed payload and names the closeout command', async () => {
-    const errors = [];
-    const exits = [];
+    const errors: string[] = [];
+    const exits: (number | undefined)[] = [];
     await active(['task-2517-landed'], {
-      inferSlugFn: (s) => s,
+      inferSlugFn: (s) => s ?? null,
       errorFn: (m) => errors.push(m),
       exitFn: (c) => exits.push(c),
       payloadLandedFn: async () => true,
@@ -340,7 +355,7 @@ describe("landed guard on active/review", async () => {
     const command = new ReviewCommandUseCase(new ReviewWorkflowAdapter({
       payloadLandedFn: async () => true,
       error: (message) => errors.push(message),
-      exit: ((code: number) => { exits.push(code); }) as unknown as typeof process.exit,
+      exit: (code: number) => { exits.push(code); },
     }));
     await command.execute(['task-2517-landed']);
     assert.deepEqual(exits, [1], 'review exits non-zero for a landed payload');
@@ -361,10 +376,10 @@ describe("rebounded landing guard", () => {
     test(`landed mission closes only after post-merge effects: ${failedStep}`, async () => {
       const effects: string[] = [];
       const abort = new Error('closeout failed');
-      const { finishLanding } = createSquashLanding({
+      const { finishLanding } = createSquashLanding(stubIntegrateWorkflowPorts({
         productConfig: { isForgejoReviewEnabled: () => false },
         fileSystem: { existsSync: () => false },
-        git: { git: () => ({ status: 0, stdout: '', stderr: '' }) },
+        git: { git: () => ({ signal: null,  status: 0, stdout: '', stderr: '' }) },
         checkout: {},
         landing: {
           updateGraphifyRepository: () => { effects.push('graphify'); },
@@ -375,13 +390,13 @@ describe("rebounded landing guard", () => {
           runPostIntegrateHookOrAbort: () => { effects.push('hook'); if (failedStep === 'hook') { throw abort; } },
           closeLandedIntegrationOrAbort: async () => { effects.push('close'); },
         },
-      } as never, { promoteTaskForIntegrationIfNeeded: async () => {} });
+      }), { promoteTaskForIntegrationIfNeeded: async () => {} });
       const run = {
-        slug: 'task-closeout', context: {},
-        missionServices: { store: { load: async () => ({ kind: 'found', mission: { status: 'integration' } }) } },
-        baseWorktree: '/tmp/base', baseBranch: 'main', seams: {},
+        slug: 'task-closeout', context: integrationContext(),
+        missionServices: integrationServices({ store: { load: async () => ({ kind: 'found' as const, version: fixtureVersion(1), mission: fixtureMission('task-closeout', { status: 'integration' }) }) } }),
+        baseWorktree: '/tmp/base', baseBranch: 'main', seams: integrationBounceSeams(),
         state: { temporaryStash: null, nextActionMessage: null },
-      } as never;
+      };
       const landing = finishLanding(run, { branch: 'mission/task-closeout', mergedCommit: 'abc', stepLabel: 'test', variant: 'variant-b' });
       if (failedStep === 'none') { await landing; }
       else { await assert.rejects(landing, error => error === abort); }
@@ -395,26 +410,26 @@ describe("rebounded landing guard", () => {
   test('TASK-2517: rebounded landing aborts before Forgejo sync when the lane is ineligible', async () => {
     const effects: string[] = [];
     const abort = new Error('IntegrationAbort');
-    const { finishLanding } = createSquashLanding({
+    const { finishLanding } = createSquashLanding(stubIntegrateWorkflowPorts({
       productConfig: { isForgejoReviewEnabled: () => true },
-      forgejo: { syncMerged: () => { effects.push('forgejo-sync'); return { ok: true }; } },
+      forgejo: { syncMerged: () => { effects.push('forgejo-sync'); return { ok: true as const }; } },
       fileSystem: { existsSync: () => false },
-      git: { git: () => ({ status: 0, stdout: '', stderr: '' }) },
+      git: { git: () => ({ signal: null,  status: 0, stdout: '', stderr: '' }) },
       landing: {
         persistLandedIntegrationOrAbort: async () => { effects.push('decision'); },
         createAbort: () => abort,
         reportSyncMergedFailure: () => {},
       },
-    } as never, { promoteTaskForIntegrationIfNeeded: async () => {} });
+    }), { promoteTaskForIntegrationIfNeeded: async () => {} });
 
     await assert.rejects(
       finishLanding({
         slug: 'task-2517',
-        context: { forgejoUser: 'codex', forgejoToken: 'token', baseBranch: 'main' },
-        missionServices: { store: { load: async () => ({ kind: 'found', mission: { status: 'active' }, version: 1 }) } },
-        baseWorktree: '/tmp/task-2517', baseBranch: 'main', seams: {},
+        context: integrationContext({ forgejoUser: 'codex', forgejoToken: 'token', baseBranch: 'main' }),
+        missionServices: integrationServices({ store: { load: async () => ({ kind: 'found' as const, version: fixtureVersion(1), mission: fixtureMission('task-closeout', { status: 'active' }) }) } }),
+        baseWorktree: '/tmp/task-2517', baseBranch: 'main', seams: integrationBounceSeams(),
         state: { temporaryStash: null, nextActionMessage: null },
-      } as never, { branch: 'mission/task-2517', mergedCommit: 'landed-sha', stepLabel: 'test', variant: 'variant-b' }),
+      }, { branch: 'mission/task-2517', mergedCommit: 'landed-sha', stepLabel: 'test', variant: 'variant-b' }),
       error => error === abort,
     );
 
@@ -429,26 +444,26 @@ describe("rebounded landing guard", () => {
     // `integration` before landing, so this is defense-in-depth for that path.
     const effects: string[] = [];
     const abort = new Error('IntegrationAbort');
-    const { finishLanding } = createSquashLanding({
+    const { finishLanding } = createSquashLanding(stubIntegrateWorkflowPorts({
       productConfig: { isForgejoReviewEnabled: () => true },
-      forgejo: { syncMerged: () => { effects.push('forgejo-sync'); return { ok: true }; } },
+      forgejo: { syncMerged: () => { effects.push('forgejo-sync'); return { ok: true as const }; } },
       fileSystem: { existsSync: () => false },
-      git: { git: () => ({ status: 0, stdout: '', stderr: '' }) },
+      git: { git: () => ({ signal: null,  status: 0, stdout: '', stderr: '' }) },
       landing: {
         persistLandedIntegrationOrAbort: async () => { effects.push('decision'); },
         createAbort: () => abort,
         reportSyncMergedFailure: () => {},
       },
-    } as never, { promoteTaskForIntegrationIfNeeded: async () => {} });
+    }), { promoteTaskForIntegrationIfNeeded: async () => {} });
 
     await assert.rejects(
       finishLanding({
         slug: 'task-2517',
-        context: { forgejoUser: 'codex', forgejoToken: 'token', baseBranch: 'main' },
-        missionServices: { store: { load: async () => ({ kind: 'found', mission: { status: 'review' }, version: 1 }) } },
-        baseWorktree: '/tmp/task-2517', baseBranch: 'main', seams: {},
+        context: integrationContext({ forgejoUser: 'codex', forgejoToken: 'token', baseBranch: 'main' }),
+        missionServices: integrationServices({ store: { load: async () => ({ kind: 'found' as const, version: fixtureVersion(1), mission: fixtureMission('task-closeout', { status: 'review' }) }) } }),
+        baseWorktree: '/tmp/task-2517', baseBranch: 'main', seams: integrationBounceSeams(),
         state: { temporaryStash: null, nextActionMessage: null },
-      } as never, { branch: 'mission/task-2517', mergedCommit: 'landed-sha', stepLabel: 'test', variant: 'variant-b' }),
+      }, { branch: 'mission/task-2517', mergedCommit: 'landed-sha', stepLabel: 'test', variant: 'variant-b' }),
       error => error === abort,
     );
 
@@ -457,18 +472,18 @@ describe("rebounded landing guard", () => {
 
   test('TASK-2517: github-pr landing aborts before the PR is observed or merged when the lane is active', async () => {
     const effects: string[] = [];
-    const { landThroughGithubPr } = createGithubPrLanding({
-      git: { git: () => ({ status: 0, stdout: 'candidate-sha\n', stderr: '' }) },
-      github: { submitOrObserveGithubPr: async () => { effects.push('github-pr'); return { kind: 'merged', resultingSha: 'x', number: 1, base: 'main' }; } },
+    const { landThroughGithubPr } = createGithubPrLanding(stubIntegrateWorkflowPorts({
+      git: { git: () => ({ signal: null,  status: 0, stdout: 'candidate-sha\n', stderr: '' }) },
+      github: { submitOrObserveGithubPr: () => { effects.push('github-pr'); return { kind: 'merged' as const, resultingSha: 'x', number: 1, base: 'main' }; } },
       missionPaths: { missionBranchName: () => 'mission/task-2517' },
-    } as never);
+    }));
 
     await assert.rejects(
       landThroughGithubPr({
         slug: 'task-2517',
-        context: { baseWorktree: '/tmp/task-2517', baseBranch: 'main' },
-        missionServices: { store: { load: async () => ({ kind: 'found', mission: { status: 'active' }, version: 1 }) } },
-        strategy: { run: (_step: string, fn: () => unknown) => fn() } as never,
+        context: integrationContext({ baseWorktree: '/tmp/task-2517', baseBranch: 'main' }),
+        missionServices: integrationServices({ store: { load: async () => ({ kind: 'found' as const, version: fixtureVersion(1), mission: fixtureMission('task-closeout', { status: 'active' }) }) } }),
+        strategy: createIntegrationStrategy('github-pr'),
       }),
       /Cannot integrate while task-2517 is active; expected integration/,
     );
@@ -481,18 +496,18 @@ describe("rebounded landing guard", () => {
     // point that skips the workflow SC1 restore) must abort before any PR
     // submission or merge, never after the merge.
     const effects: string[] = [];
-    const { landThroughGithubPr } = createGithubPrLanding({
-      git: { git: () => ({ status: 0, stdout: 'candidate-sha\n', stderr: '' }) },
-      github: { submitOrObserveGithubPr: async () => { effects.push('github-pr'); return { kind: 'merged', resultingSha: 'x', number: 1, base: 'main' }; } },
+    const { landThroughGithubPr } = createGithubPrLanding(stubIntegrateWorkflowPorts({
+      git: { git: () => ({ signal: null,  status: 0, stdout: 'candidate-sha\n', stderr: '' }) },
+      github: { submitOrObserveGithubPr: () => { effects.push('github-pr'); return { kind: 'merged' as const, resultingSha: 'x', number: 1, base: 'main' }; } },
       missionPaths: { missionBranchName: () => 'mission/task-2517' },
-    } as never);
+    }));
 
     await assert.rejects(
       landThroughGithubPr({
         slug: 'task-2517',
-        context: { baseWorktree: '/tmp/task-2517', baseBranch: 'main' },
-        missionServices: { store: { load: async () => ({ kind: 'found', mission: { status: 'review' }, version: 1 }) } },
-        strategy: { run: (_step: string, fn: () => unknown) => fn() } as never,
+        context: integrationContext({ baseWorktree: '/tmp/task-2517', baseBranch: 'main' }),
+        missionServices: integrationServices({ store: { load: async () => ({ kind: 'found' as const, version: fixtureVersion(1), mission: fixtureMission('task-closeout', { status: 'review' }) }) } }),
+        strategy: createIntegrationStrategy('github-pr'),
       }),
       /Cannot integrate while task-2517 is review; expected integration/,
     );
@@ -503,8 +518,8 @@ describe("rebounded landing guard", () => {
 
 // ---- task-2508 interrupted landed integration (consolidated from test/task-2508-interrupted-landed-integration-repro.test.ts, TASK-2622.09) ----
 describe("interrupted landed integration", () => {
-  function preflight(missionStatus) {
-    return printIntegrationPreflight({
+  function preflight(missionStatus: MissionStatus) {
+    return printIntegrationPreflight(integrationContext({
       slug: 'task-2508',
       branch: 'mission/task-2508',
       currentBranch: 'mission/task-2508',
@@ -523,11 +538,11 @@ describe("interrupted landed integration", () => {
       mainBranch: 'main',
       mainDirty: false,
       mainDirtyEntries: [],
-    }, {
+    }), {
       readTokenFn: () => 'token',
       resolveTokenFileFn: () => '/tmp/token',
-      detectRebaseStateFn: () => ({ inProgress: false, detached: false, rebaseDir: null, rebaseHead: null, unmergedFiles: [] }),
-      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+      detectRebaseStateFn: () => ({ inProgress: false, detached: false, rebaseDir: null, rebaseHead: '', unmergedFiles: [] }),
+      getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] }),
       findMissionDocInBranchesFn: () => [],
       isForgejoReviewEnabledFn: () => true,
       log: () => '',
@@ -535,7 +550,7 @@ describe("interrupted landed integration", () => {
   }
 
   test('printIntegrationPreflight does not fail on a merged PR for a landed integration', () => {
-    for (const missionStatus of ['integration', 'done']) {
+    for (const missionStatus of ['integration', 'done'] as const) {
       assert.ok(!preflight(missionStatus).failures.includes('pr-merged'));
     }
 
@@ -543,23 +558,23 @@ describe("interrupted landed integration", () => {
   });
 
   test('interrupted landing decides delivery once and closes after retry', async () => {
-    const calls = [];
-    let mission = { status: 'integration', closedAt: null, assignee: 'codex' };
+    const calls: (["decide", DecideIntegrationRequest] | ["close", CloseMissionRequest])[] = [];
+    let mission: Mission = fixtureMission('task-2508', { status: 'integration', assignee: agentFamily('codex') });
     const services = {
-      store: { load: async () => ({ kind: 'found', mission, version: 1 }) },
+      store: { load: async () => ({ kind: 'found' as const, mission, version: fixtureVersion(1) }) },
       integration: {
         decideIntegration: async request => {
-          calls.push(['decide', request]);
+          calls.push(['decide', request] as const);
           mission = { ...mission, status: 'done' };
-          return { status: 'completed' };
+          return { durableEvidence: [],  status: 'completed' as const };
         },
         close: async request => {
-          calls.push(['close', request]);
-          mission = { ...mission, closedAt: '2026-09-14T12:00:00.000Z' };
-          return { status: 'completed' };
+          calls.push(['close', request] as const);
+          mission = { ...mission, status: 'done', closedAt: '2026-09-14T12:00:00.000Z' };
+          return { durableEvidence: [],  status: 'completed' as const };
         },
       },
-    };
+    } satisfies NonNullable<Parameters<typeof persistLandedIntegrationOrAbort>[2]>;
 
     await persistLandedIntegrationOrAbort('task-2508', 'landed-sha', services, { landedAt: '2026-09-14T10:00:00.000Z' });
     await persistLandedIntegrationOrAbort('task-2508', 'landed-sha', services, { landedAt: '2026-09-14T10:00:00.000Z' });
@@ -578,15 +593,15 @@ describe("interrupted landed integration", () => {
     const worktree = conventionalWorktreePath('task-2508', rootDir);
     let branchExists = true;
     let worktreeExists = true;
-    const gitRunner = args => {
-      if (args.slice(-2).join(' ') === 'branch --show-current') return { status: 0, stdout: 'main\n', stderr: '' };
-      if (args.includes('show-ref')) return { status: branchExists ? 0 : 1, stdout: '', stderr: '' };
-      if (args.slice(-2).join(' ') === 'list --porcelain') return { status: 0, stdout: `worktree ${worktree}\n`, stderr: '' };
+    const gitRunner: (args: string[], options?: import("../../../../../src/adapters/git/git.js").GitOptions) => import("../../../../../src/adapters/git/git.js").GitResult = (args) => {
+      if (args.slice(-2).join(' ') === 'branch --show-current') return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
+      if (args.includes('show-ref')) return { signal: null,  status: branchExists ? 0 : 1, stdout: '', stderr: '' };
+      if (args.slice(-2).join(' ') === 'list --porcelain') return { signal: null,  status: 0, stdout: `worktree ${worktree}\n`, stderr: '' };
       if (args.includes('-D')) branchExists = false;
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     };
     const retired: string[] = [];
-    const options = { retireTerminal: (slug: string) => { retired.push(slug); }, rootDir, gitRunner, existsSync: target => target === worktree && worktreeExists, removeDir: () => { worktreeExists = false; } };
+    const options = { retireTerminal: (slug: string) => { retired.push(slug); }, rootDir, gitRunner, existsSync: target => target === worktree && worktreeExists, removeDir: () => { worktreeExists = false; } } satisfies NonNullable<Parameters<typeof cleanupMissionWorktree>[1]>;
 
     assert.equal(cleanupMissionWorktree('task-2508', options), true);
     assert.equal(cleanupMissionWorktree('task-2508', options), true);
@@ -597,24 +612,23 @@ describe("interrupted landed integration", () => {
   });
 
   test('px status reports the authoritative done lifecycle', async () => {
-    const lines = [];
+    const lines: string[] = [];
     await status(['task-2508'], {
       log: line => lines.push(line),
       exit: () => {},
       inferSlugFn: () => 'task-2508',
       getCurrentBranchFn: () => 'main',
-      getPrStatusFn: () => ({ exists: false }),
+      getPrStatusFn: () => ({ raw: '',  exists: false as const }),
       readAgentConfigOrExitFn: () => ({}),
       eligibleAgentsForStepFn: () => [],
       allWorkflowAgentNamesFn: () => [],
-      workflowLauncherStatusFn: () => ({ supported: true }),
+      workflowLauncherStatusFn: () => ({ agent: 'codex', supported: true, detail: 'fixture' }),
       getLastThreeCommitsFn: () => [],
       getUncommittedCountFn: () => 0,
-      detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
-      buildProjectionFn: async () => ({ build: async () => ({ stages: [{ cards: [{
-        id: 'task-2508', status: 'done', rawStatus: 'active', checkpoint: null,
-        checkpointDescription: null, reviewPhase: null, reviewHistory: [],
-      }] }] }) }),
+      detectRebaseStateFn: () => ({ inProgress: false, detached: false, rebaseDir: null, rebaseHead: '', unmergedFiles: [] }),
+      buildProjectionFn: async () => ({ build: async () => makeProjection({ done: [makeCard({
+        id: fixtureMissionId('task-2508'), lane: 'done', status: 'done', rawStatus: 'active',
+      })] }) }),
     });
 
     assert.ok(lines.includes('Mission status: done'));
@@ -633,10 +647,7 @@ describe("lifecycle not masked by completed backlog task", () => {
   const repository = repositoryId('task-2515-not-masked-repo');
 
   function mission(id: string, status: MissionStatus): Mission {
-    return {
-      id: missionId(id), repositoryId: repository, title: id, labels: [], assignee: null,
-      checkpoints: [], review: null, netEngineeringLines: null, status, closedAt: null,
-    };
+    return fixtureMission(id, { repositoryId: repository, status, checkpoints: [] });
   }
 
   function storeFor(persisted: readonly Mission[]): MissionStore {
@@ -644,26 +655,26 @@ describe("lifecycle not masked by completed backlog task", () => {
       async load(id: MissionId) {
         const found = persisted.find((candidate) => candidate.id === id);
         return found
-          ? { kind: 'found' as const, mission: found, version: 1 as never }
+          ? { kind: 'found' as const, mission: found, version: fixtureVersion(1) }
           : { kind: 'missing' as const };
       },
-      async save() { return 1 as never; },
+      async save() { return fixtureVersion(1); },
       async loadByRepository() { return persisted; },
     };
   }
 
   // Hermetic doubles: no shimmed git CLI, launcher probe, or OS process scan.
-  const gitDouble = () => ({ status: 0, stdout: '', stderr: '' });
+  const gitDouble: NonNullable<NonNullable<Parameters<typeof composeBoardProjection>[0]>["gitFn"]> = () => ({ status: 0, stdout: '', stderr: '' });
 
   function board(rootDir: string, store: MissionStore) {
     return composeBoardProjection({
       rootDir,
       missionStore: store,
       repositoryId: repository,
-      blocklistRepo: { async findAll() { return []; } } as never,
-      historyRepo: { async findAll() { return []; }, async findByType() { return []; } } as never,
-      laneEventRepo: { async findAll() { return []; } } as never,
-      usageRepo: { async findAll() { return []; } } as never,
+      blocklistRepo: { async findAll() { return []; }, async findByAgent() { return undefined; }, async save() { throw new Error('Unexpected blocklist write'); }, async deleteByAgent() {}, async clear() {} },
+      historyRepo: { async findAll() { return []; }, async findByType() { return []; }, async append() { throw new Error('Unexpected history write'); }, async clear() {} },
+      laneEventRepo: new FakeLaneEventRepository([]),
+      usageRepo: new FakeUsageRepository([]),
       knownAgentFamilies: [],
       launcherProbe: () => ({ available: true, detail: null }),
       readAgentConfig: () => null,
@@ -736,7 +747,7 @@ describe("lifecycle not masked by completed backlog task", () => {
 
 // ---- post-integrate hook (consolidated from test/post-integrate-hook.test.ts, TASK-2622.09) ----
 describe("post-integrate hook", () => {
-  function withTempDir(fn) {
+  function withTempDir(fn: (_arg0: string) => void) {
     const dir = registeredMkdtemp('workflow-post-integrate-hook-');
     try {
       fn(dir);
@@ -746,13 +757,13 @@ describe("post-integrate hook", () => {
   }
 
   test('resolvePostIntegrateCommand returns null when no workflow.config.json is present', () => {
-    withTempDir(root => {
+    withTempDir((root) => {
       assert.equal(resolvePostIntegrateCommand(root), null);
     });
   });
 
   test('resolvePostIntegrateCommand returns null when postIntegrateCommand is absent', () => {
-    withTempDir(root => {
+    withTempDir((root) => {
       fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
         adapters: { integrate: {} },
       }));
@@ -761,7 +772,7 @@ describe("post-integrate hook", () => {
   });
 
   test('resolvePostIntegrateCommand returns the trimmed configured command', () => {
-    withTempDir(root => {
+    withTempDir((root) => {
       fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
         adapters: { integrate: { postIntegrateCommand: '  ./scripts/refresh-px.sh  ' } },
       }));
@@ -785,7 +796,7 @@ describe("post-integrate hook", () => {
   });
 
   test('runPostIntegrateHook is a no-op when no command is configured', () => {
-    const runFn = () => { throw new Error('should not run a command'); };
+    const runFn: NonNullable<NonNullable<Parameters<typeof runPostIntegrateHook>[0]>["runFn"]> = () => { throw new Error('should not run a command'); };
     const result = runPostIntegrateHook({
       slug: 'task-1402',
       baseWorktree: '/repo',
@@ -799,14 +810,14 @@ describe("post-integrate hook", () => {
   });
 
   test('runPostIntegrateHook runs the configured command from the base worktree with hook env', () => {
-    let capturedCmd;
-    let capturedArgs;
-    let capturedOptions;
-    const runFn = (cmd, args, options) => {
-      capturedCmd = cmd;
-      capturedArgs = args;
-      capturedOptions = options;
-      return { status: 0, stdout: 'bumped to 1.3.5\n', stderr: '' };
+    let capturedCmd: { value: string | undefined } = { value: undefined };
+    let capturedArgs: { value: string[] | undefined } = { value: undefined };
+    let capturedOptions: { value: Parameters<NonNullable<Parameters<typeof runPostIntegrateHook>[0]['runFn']>>[2] | undefined } = { value: undefined };
+    const runFn: NonNullable<NonNullable<Parameters<typeof runPostIntegrateHook>[0]>["runFn"]> = (cmd, args, options) => {
+      capturedCmd.value = cmd;
+      capturedArgs.value = args;
+      capturedOptions.value = options;
+      return { signal: null,  status: 0, stdout: 'bumped to 1.3.5\n', stderr: '' };
     };
 
     const result = runPostIntegrateHook({
@@ -818,11 +829,15 @@ describe("post-integrate hook", () => {
       resolveCommandFn: () => './scripts/refresh-px.sh',
     });
 
-    assert.equal(capturedCmd, 'bash');
-    assert.deepEqual(capturedArgs, ['-lc', './scripts/refresh-px.sh']);
-    assert.equal(capturedOptions.cwd, '/repo');
-    assert.equal(capturedOptions.env.INTEGRATE_HOOK_SLUG, 'task-1402');
-    assert.equal(capturedOptions.env.INTEGRATE_HOOK_VARIANT, 'variant-b');
+    assert.equal(capturedCmd.value, 'bash');
+    assert.deepEqual(capturedArgs.value, ['-lc', './scripts/refresh-px.sh']);
+    assert.ok(capturedOptions.value != null);
+    assert.equal(capturedOptions.value.cwd, '/repo');
+    assert.ok(capturedOptions.value != null);
+    assert.ok(capturedOptions.value.env);
+    assert.equal(capturedOptions.value.env.INTEGRATE_HOOK_SLUG, 'task-1402');
+    assert.ok(capturedOptions.value != null);
+    assert.equal(capturedOptions.value.env.INTEGRATE_HOOK_VARIANT, 'variant-b');
     assert.deepEqual(result, {
       ran: true,
       ok: true,
@@ -833,7 +848,7 @@ describe("post-integrate hook", () => {
   });
 
   test('runPostIntegrateHook reports a non-zero exit as a failed hook, not thrown', () => {
-    const runFn = () => ({ status: 3, stdout: '', stderr: 'permission denied' });
+    const runFn: NonNullable<NonNullable<Parameters<typeof runPostIntegrateHook>[0]>["runFn"]> = () => ({ signal: null,  status: 3, stdout: '', stderr: 'permission denied' });
 
     const result = runPostIntegrateHook({
       slug: 'task-1402',
@@ -851,7 +866,7 @@ describe("post-integrate hook", () => {
   });
 
   test('resolvePreCommitCommand reads preCommitCommand independently of postIntegrateCommand', () => {
-    withTempDir(root => {
+    withTempDir((root) => {
       fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
         adapters: { integrate: { preCommitCommand: ' ./scripts/bump-version.sh ', postIntegrateCommand: './scripts/refresh-px.sh' } },
       }));
@@ -861,11 +876,11 @@ describe("post-integrate hook", () => {
   });
 
   test('runPreCommitHook resolves the pre-commit command from the base worktree', () => {
-    withTempDir(root => {
+    withTempDir((root) => {
       fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
         adapters: { integrate: { postIntegrateCommand: './scripts/refresh-px.sh' } },
       }));
-      const runFn = () => { throw new Error('no pre-commit command is configured'); };
+      const runFn: NonNullable<NonNullable<Parameters<typeof runPreCommitHook>[0]>["runFn"]> = () => { throw new Error('no pre-commit command is configured'); };
       assert.deepEqual(runPreCommitHook({ slug: 'task-2510', baseWorktree: root, baseBranch: 'main', variant: 'variant-b', runFn }), { ran: false, ok: true });
     });
   });
@@ -881,7 +896,7 @@ describe("landed integration refreshes the local px before cleanup (consolidated
       completeLandedCloseout({
         slug: 'task-2614',
         landedCommit: 'landed-commit',
-        missionServices: { store: { load: async () => ({ kind: 'found', mission: { status: 'integration', closedAt: null } }) } },
+        missionServices: integrationServices({ store: { load: async () => ({ kind: 'found' as const, version: fixtureVersion(1), mission: fixtureMission('task-closeout', { status: 'integration', closedAt: null }) }) } }),
         baseWorktree: '/repo/current-integration',
         baseBranch: 'main',
         variant: 'variant-b',
@@ -905,13 +920,13 @@ describe("landed integration refreshes the local px before cleanup (consolidated
 });
 
 test('landed closeout forwards the composition-bound statistics lifecycle reader (TASK-2637.04)', async () => {
-  const readMissionFlow = async () => [];
-  const store = { load: async () => ({ kind: 'found', mission: { status: 'done', closedAt: null } }) };
+  const readMissionFlow: () => Promise<readonly import("../../../../../src/application/ports/cli-workflows.js").StatsMissionFlow[] | null> = async () => [];
+  const store = integrationServices({ store: { load: async () => ({ kind: 'found' as const, version: fixtureVersion(1), mission: fixtureMission('task-closeout', { status: 'done', closedAt: null }) }) } }).store;
   const calls: string[] = [];
   await completeLandedCloseout({
     slug: 'task-stats-closeout', landedCommit: 'landed', baseWorktree: '/repo/base',
     baseBranch: 'main', variant: 'variant-b',
-    missionServices: { store, readStatsMissionFlow: readMissionFlow },
+    missionServices: integrationServices({ store, readStatsMissionFlow: readMissionFlow }),
     landing: {
       updateGraphifyRepository: () => {},
       createAbort: () => new Error('unexpected abort'),
@@ -937,7 +952,7 @@ test('landed closeout updates Graphify after bookkeeping and before cleanup (TAS
     await completeLandedCloseout({
       slug: 'ordinary-fixture', landedCommit: 'landed', baseWorktree: '/repo/feature-base',
       baseBranch: 'feature/base', variant: 'variant-b',
-      missionServices: { store: { load: async () => ({ kind: 'found', mission: { status: 'integration', closedAt: null } }) } },
+      missionServices: integrationServices({ store: { load: async () => ({ kind: 'found' as const, version: fixtureVersion(1), mission: fixtureMission('task-closeout', { status: 'integration', closedAt: null }) }) } }),
       landing: {
         createAbort: () => new Error('unexpected abort'),
         persistLandedIntegrationOrAbort: async () => { effects.push('persist'); },

@@ -53,14 +53,14 @@ describe('Domain agent selection', () => {
     const chosen = selectAgent(snapshot(), 'active');
     assert.deepEqual(eligible, [codex]);
     assert.equal(chosen, codex);
-    assert.equal((chosen as unknown as object) instanceof Promise, false);
+    assert.equal(typeof chosen, 'string');
   });
 
   test('empty pools report a typed exhaustion signal regardless of diagnostics (TASK-2668.04)', () => {
     const unavailable = {
       ...snapshot(),
       agents: snapshot().agents.map((candidate) => ({ ...candidate, launcherAvailable: false })),
-    };
+    } satisfies NonNullable<Parameters<typeof selectAgent>[0]>;
     assert.throws(
       () => selectAgent(unavailable, 'review'),
       (error: unknown) => error instanceof AgentPoolExhaustedError
@@ -76,7 +76,7 @@ describe('Domain agent selection', () => {
       agents: current.agents.map((candidate) => candidate.family === future
         ? { ...candidate, block: { kind: 'none' as const } }
         : candidate),
-    };
+    } satisfies NonNullable<Parameters<typeof selectAgent>[0]>;
     assert.equal(selectAgent(ready, 'active', { preferred: future }), future);
   });
 
@@ -87,7 +87,7 @@ describe('Domain agent selection', () => {
       agents: current.agents.map((candidate) => candidate.family === future
         ? { ...candidate, block: { kind: 'none' as const } }
         : candidate),
-    };
+    } satisfies NonNullable<Parameters<typeof selectAgent>[0]>;
     assert.equal(selectAgent(ready, 'active', { random: () => 0 }), codex);
     assert.equal(selectAgent(ready, 'active', { random: () => 0.99 }), future);
   });
@@ -109,7 +109,7 @@ describe('Domain agent selection', () => {
     const picks = ['active', 'review', 'draft'].map((step) => prepared.select(step));
     assert.equal(loads, 1);
     assert.deepEqual(picks, [codex, codex, codex]);
-    assert.ok(picks.every((pick) => !((pick as unknown as object) instanceof Promise)));
+    assert.ok(picks.every((pick) => typeof pick === 'string'));
   });
 });
 
@@ -138,7 +138,7 @@ describe("Workflow selection excludes runtime-blocked families", () => {
       run: async () =>
         startAgent('draft', {
           prompt: 'x',
-          exclude: opts.excludeFromDeps ?? [],
+          exclude: [...(opts.excludeFromDeps ?? [])],
           selectAgentFn: (step, options) => {
             const exclude = options?.exclude instanceof Set
               ? [...options.exclude]
@@ -150,18 +150,19 @@ describe("Workflow selection excludes runtime-blocked families", () => {
             }
             return pool[0];
           },
-          launchAgentFn: async (launchDeps: any) => {
+          launchAgentFn: (launchDeps) => {
+            assert.ok(launchDeps.env?.FORGEJO_USER);
             launched.push(launchDeps.env.FORGEJO_USER);
-            return { invocation: {}, result: { status: 0 } };
+            return { invocation: { command: 'fixture-agent', args: [] }, result: { status: 0 } };
           },
-          assertAgentSupportedFn: async () => {},
+          assertAgentSupportedFn: () => {},
           runtimeBlockContextFn: async (_step, tried) => resolveBlockContext(eligible, tried, new Set(opts.blocked)),
           detectLimitHitFn: () => null,
           resolveAgentModelFn: () => null,
           isAgentBlockedFn: async () => false,
-          updateAgentBlockFn: async () => ({ ok: true }),
+          updateAgentBlockFn: async () => ({}),
           onLaunch: async () => {},
-        } as any),
+        }),
       excludeSets,
     };
   }
@@ -209,27 +210,28 @@ describe("Workflow selection excludes runtime-blocked families", () => {
       run: async () =>
         startAgent('draft', {
           prompt: 'x',
-          selectAgentFn: (step: string, options: any) => {
-            const exclude = options.exclude instanceof Set ? [...options.exclude] : [...options.exclude];
+          selectAgentFn: (step, options) => {
+            const exclude = [...(options?.exclude ?? [])];
             const pool = ['qwen', 'claude'].filter((c) => !exclude.includes(c));
             if (pool.length === 0) {
               throw new AgentPoolExhaustedError(step, 'pool unavailable');
             }
             return pool[0];
           },
-          launchAgentFn: async (launchDeps: any) => {
+          launchAgentFn: (launchDeps) => {
+            assert.ok(launchDeps.env?.FORGEJO_USER);
             realLoop.launched.push(launchDeps.env.FORGEJO_USER);
-            return { invocation: {}, result: { status: 429 } };
+            return { invocation: { command: 'fixture-agent', args: [] }, result: { status: 429 } };
           },
-          assertAgentSupportedFn: async () => {},
+          assertAgentSupportedFn: () => {},
           runtimeBlockContextFn: async (_step, tried) => resolveBlockContext(['qwen', 'claude'], tried, new Set(['vibe'])),
-          detectLimitHitFn: () => ({ reroute: true, kind: 'rate-limit', until: 'now', reason: 'rate limit' }),
+          detectLimitHitFn: () => ({ reroute: true, kind: 'rate-limit' as const, reason: 'rate limit' as const }),
           resolveAgentModelFn: () => null,
           isAgentBlockedFn: async () => false,
-          updateAgentBlockFn: async () => ({ ok: true }),
+          updateAgentBlockFn: async () => ({}),
           onLimitHit: async () => {},
           onLaunch: async () => {},
-        } as any),
+        }),
     };
     await assert.rejects(
       () => realLoop.run(),
@@ -255,18 +257,19 @@ describe("Workflow selection excludes runtime-blocked families", () => {
           selectAgentFn: () => {
             throw new AgentPoolExhaustedError('draft', 'pool unavailable');
           },
-          launchAgentFn: async (launchDeps: any) => {
+          launchAgentFn: (launchDeps) => {
+            assert.ok(launchDeps.env?.FORGEJO_USER);
             realLoop.launched.push(launchDeps.env.FORGEJO_USER);
-            return { invocation: {}, result: { status: 0 } };
+            return { invocation: { command: 'fixture-agent', args: [] }, result: { status: 0 } };
           },
-          assertAgentSupportedFn: async () => {},
+          assertAgentSupportedFn: () => {},
           runtimeBlockContextFn: async (_step, tried) => resolveBlockContext(['vibe', 'claude'], tried, new Set(['vibe'])),
           detectLimitHitFn: () => null,
           resolveAgentModelFn: () => null,
           isAgentBlockedFn: async () => false,
-          updateAgentBlockFn: async () => ({ ok: true }),
+          updateAgentBlockFn: async () => ({}),
           onLaunch: async () => {},
-        } as any),
+        }),
     };
     await realLoop.run();
     assert.deepEqual(realLoop.launched, ['claude'], 'the fallback must skip the runtime-blocked excluded family and start claude');
@@ -282,7 +285,7 @@ describe("SQLite agent selection snapshot adapter", () => {
       knownAgentFamilies: families,
       blocklistRepo: { async findAll() { reads += 1; return [{ agent: 'codex', blocked: true, until: '2099-01-01 00', reason: 'limit' }]; }, async findByAgent() { return undefined; }, async save() {}, async deleteByAgent() {}, async clear() {} },
       readConfig: () => ({ blocklist: { claude: { blocked: true } }, steps: { review: { eligible: ['codex', 'claude'], selection: 'weighted', weights: { claude: 2 } } } }),
-      launcherStatus: (family) => ({ supported: family === 'codex', reason: 'mocked missing launcher' }),
+      launcherStatus: (family) => ({ supported: family === 'codex', reason: 'mocked missing launcher' as const }),
       now: () => 1_000,
     });
 
@@ -365,7 +368,7 @@ describe('Launcher availability', () => {
     let clock = 0;
     const commands: string[] = [];
     setCommandPathProbe(() => null);
-    setLauncherHealthProbe(command => { commands.push(command); return { ok: true }; });
+    setLauncherHealthProbe(command => { commands.push(command); return { ok: true as const }; });
     try {
       const configured = createLauncherProbe({
         configuration: resolveConfiguration({ HOME: root, PATH: '', OPENCODE_BIN: runner }),
@@ -389,7 +392,7 @@ describe('Launcher availability', () => {
       assert.deepEqual(configured(agentFamily('custom')), { available: false, detail: 'launcher missing' });
     } finally {
       setCommandPathProbe(name => name);
-      setLauncherHealthProbe(() => ({ ok: true }));
+      setLauncherHealthProbe(() => ({ ok: true as const }));
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
@@ -397,12 +400,12 @@ describe('Launcher availability', () => {
   test('real status mapping preserves failed health and inconclusive timeout (TASK-2724)', () => {
     setCommandPathProbe(name => name);
     try {
-      setLauncherHealthProbe(() => ({ ok: false, reason: 'exit 9' }));
+      setLauncherHealthProbe(() => ({ ok: false as const, reason: 'exit 9' as const }));
       assert.deepEqual(createLauncherProbe()(agentFamily('codex')), { available: false, detail: 'launcher probe-failed: exit 9' });
-      setLauncherHealthProbe(() => ({ ok: false, reason: 'ETIMEDOUT' }));
+      setLauncherHealthProbe(() => ({ ok: false as const, reason: 'ETIMEDOUT' as const }));
       assert.deepEqual(createLauncherProbe()(agentFamily('codex')), { available: true, detail: null });
     } finally {
-      setLauncherHealthProbe(() => ({ ok: true }));
+      setLauncherHealthProbe(() => ({ ok: true as const }));
     }
   });
 
@@ -452,7 +455,7 @@ describe('Launcher availability', () => {
 
   test('createLauncherProbe includes the probe failure reason', () => {
     const probe = createLauncherProbe({
-      probe: () => ({ supported: false, health: 'probe-failed', reason: 'exit 1' }),
+      probe: () => ({ supported: false, health: 'probe-failed', reason: 'exit 1' as const }),
     });
 
     assert.deepEqual(probe(agentFamily('claude')), {
@@ -500,7 +503,7 @@ describe('Launcher availability', () => {
       launcherAvailable: (family) => family === 'vibe'
         ? { available: false, detail: 'launcher missing' }
         : { available: true, detail: null },
-      resolveTaskFile: () => ({ ok: false, matches: [] }),
+      resolveTaskFile: () => ({ ok: false as const, matches: [] }),
     });
 
     const availability = await adapter.loadAgentAvailability();

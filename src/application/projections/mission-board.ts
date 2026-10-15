@@ -1,3 +1,5 @@
+import { projectReviewHistory } from './review-history.js';
+export { projectReviewHistory } from './review-history.js';
 import type { AgentFamily } from '../../domain/agents.js';
 import { isPlannedCheckpoint, latestEvidencedCheckpoint, type GoalCheckRow } from '../../domain/checkpoint.js';
 import { isClosedMission, type Mission, type MissionId, type MissionLabel, type MissionStatus } from '../../domain/mission.js';
@@ -8,10 +10,8 @@ import type { ApprovalCoverage } from '../../domain/approval-coverage.js';
 import {
   currentReviewRound,
   reviewApprovalOwed,
-  parseResolutionDispositions,
   sameReviewedRevision,
   type PullRequestReference,
-  type Review,
   type ReviewDisposition,
   type ReviewedRevision,
   type ReviewPhase,
@@ -159,6 +159,8 @@ export interface MissionCard {
 
 /** One past round, flattened for display and for handing to the next reviewer. */
 export interface ReviewRoundSummary {
+  readonly startRevision?: string;
+  readonly decidedRevision?: string | null;
   readonly integrationRepairAssessment?: import('../../domain/integration-approval-restoration.js').IntegrationRepairAssessment;
   readonly number: number;
   readonly reviewer: AgentFamily;
@@ -175,113 +177,6 @@ export interface ReviewRoundSummary {
   readonly revocation?: { readonly by: string; readonly reason: string; readonly at: string };
   /** A branch move after this round's approval: the revision that superseded it. */
   readonly supersession?: { readonly revision: string; readonly by: string; readonly at: string };
-}
-
-function outcomeComment(content: string): string | null {
-  const summary = content.match(/(?:^|\n)## Summary\s*\n+([^\n]+)/);
-  if (summary?.[1]) { return summary[1].trim(); }
-  const lines = content.split('\n').map((line) => line.trim());
-  const outcome = lines.findIndex((line) => /^Outcome:\s*/i.test(line));
-  if (outcome >= 0) {
-    const next = lines.slice(outcome + 1).find((line) => line && !line.startsWith('#'));
-    if (next) { return next; }
-    // Verdict inline on Outcome line (e.g. "Outcome: request-changes")
-    const inline = lines[outcome].replace(/^Outcome:\s*/i, '').trim();
-    if (inline) { return inline; }
-  }
-  return null;
-}
-
-function findingSummaries(content: string): readonly string[] {
-  return content.split('\n').flatMap((line) => {
-    const trimmed = line.trim();
-    if (!trimmed) { return []; }
-    // `\b` after the keyword is load-bearing: without it `Finding` matches the
-    // prefix of `Findings`, `[^—]*` eats the rest, and a findings document's own
-    // title ("# Findings — <slug> (round 1)") is reported as a finding.
-    //
-    // Linear by construction: `[^—]*` cannot cross the em dash, so there is one
-    // split point, and it already covers an optional finding number. Leading
-    // whitespace is trimmed here rather than matched with a `\s*` that would
-    // overlap the capture.
-    const heading = trimmed.match(/^#{1,3}\s+Finding\b[^—]*—(.*)$/i);
-    const headingSummary = heading?.[1]?.trim();
-    if (headingSummary) { return [headingSummary]; }
-    const numbered = trimmed.match(/^\d+\.\s+\*\*(?:\[[^\]]+\]\s*)?(.+?)\*\*/);
-    if (numbered?.[1]) { return [numbered[1]]; }
-    // Raw finding line: "path:line:", "path:Lline:" or a line range
-    // "path:L10-L20:" (🔴/🟡 type: description)
-    const raw = trimmed.match(/^[^:]+:L?\d+(?:-L?\d+)?:\s*(.+)$/);
-    if (raw?.[1]) { return [raw[1]]; }
-    // Same line shape with a subject that has no line number — reviewers scope
-    // findings to a command or a whole file too ("px status <slug>: 🔴 ...").
-    // Anchored on the severity marker so ordinary prose is not a finding.
-    const scoped = trimmed.match(/^[^:]+:\s*((?:🔴|🟡|🟠|🔵|⚪)\s*.+)$/u);
-    if (scoped?.[1]) { return [scoped[1]]; }
-    return [];
-  });
-}
-
-function outcomeDisposition(verdict: string | null): ReviewDisposition | null {
-  return verdict?.toLowerCase() === 'request-changes' ? 'REQUEST_CHANGES' : null;
-}
-
-export function projectReviewHistory(review: Review | null): readonly ReviewRoundSummary[] {
-  if (!review) { return []; }
-  return review.rounds.map((round) => {
-    const events = review.reviewEvents.filter((event) => event.roundNumber === round.number);
-    const outcome = [...events].reverse().find((event) => event.eventType === 'reviewer_outcome');
-    const findings = [...events].reverse().find((event) => event.eventType === 'reviewer_findings');
-    const summary = [...events].reverse().find((event) => event.eventType === 'implementer_round_summary');
-    const humanNotes = events
-      .filter((event) => event.eventType === 'human_note' && event.content.trim())
-      .map((event) => `Human feedback from ${event.actor ?? 'operator'}: ${event.content}`);
-    const resolutions = round.response?.resolutions;
-    const hasResolutions = resolutions && resolutions.length > 0;
-
-    // itemDispositions is populated from the implementer's round summary
-    // artifact. response.resolutions is the formal domain model path.
-    // Use itemDispositions as fallback when resolutions are not set. A summary
-    // stored before the artifact consumer parsed Markdown sections carries no
-    // dispositions, so the summary content itself is the last fallback.
-    const storedItems = round.itemDispositions ?? summary?.itemDispositions ?? [];
-    const items = hasResolutions
-      ? []
-      : storedItems.length > 0
-        ? storedItems
-        : summary ? parseResolutionDispositions(summary.content) : [];
-
-    return {
-      ...(round.integrationRepairAssessment ? { integrationRepairAssessment: round.integrationRepairAssessment } : {}),
-      number: round.number,
-      reviewer: round.reviewer,
-      implementer: round.implementer,
-      phase: round.phase,
-      disposition: round.disposition === 'CHANGES_MADE'
-        ? outcomeDisposition(outcome?.verdict ?? null) ?? round.disposition
-        : round.disposition,
-      comment: round.decision?.comment ?? outcomeComment(outcome?.content ?? ''),
-      findingSummaries: round.decision?.kind === 'changes-requested'
-        ? [...round.decision.findings.map((finding) => finding.summary), ...humanNotes]
-        : findings ? [...findingSummaries(findings.content), ...humanNotes] : humanNotes,
-      pushbacks: hasResolutions
-        ? resolutions.filter((r) => r.kind === 'disputed')
-            .map((r) => `${r.findingId}: ${r.rationale}`)
-        : items.filter((d) => d.kind === 'pushed_back')
-            .map((d) => String(d.findingId)),
-      fixes: hasResolutions
-        ? resolutions.filter((r) => r.kind === 'fixed')
-            .map((r) => `${r.findingId}: ${r.evidence}`)
-        : items.filter((d) => d.kind === 'fixed')
-            .map((d) => String(d.findingId)),
-      ...(round.decision?.kind === 'approved' && round.decision.revocation
-        ? { revocation: { by: round.decision.revocation.revokedBy, reason: round.decision.revocation.reason, at: round.decision.revocation.revokedAt } }
-        : {}),
-      ...(round.decision?.kind === 'approved' && round.decision.supersession
-        ? { supersession: { revision: round.decision.supersession.supersedingRevision, by: round.decision.supersession.recordedBy, at: round.decision.supersession.supersededAt } }
-        : {}),
-    };
-  });
 }
 
 /**
@@ -344,23 +239,7 @@ export function availableBoardCommands(
   // failed. Offering it only from `refined` left a mission in review with no
   // runnable action at all, and explained itself with a lane rule that did not
   // apply to it.
-  const reviewPhase = mission.review === null ? null : currentReviewRound(mission.review).phase;
-  const resumesFindings = mission.status === 'review' && reviewPhase === 'fixing';
-  const resumesGate = mission.status === 'active' && facts.latestGate === 'failed';
-  const activeReason = activeCommandReason(mission.status);
-  const canIntegrate = mission.status === 'integration'
-    || (['active', 'review'].includes(mission.status) && hasApprovedReview);
-  // An active mission with no live work at all is stranded: no agent holds the
-  // turn and the aggregate never left `active`. Re-running `px active` is the
-  // defined lifecycle resume for it (the `activate` transition accepts
-  // `active`), so the stranded case joins the findings and gate-failed resumes
-  // rather than advertising a one-off recovery command. A stale published fact
-  // is reported as stale-work, so this is limited to a mission that is active,
-  // holds no work fact, and has no failing gate.
-  const strandedActive = mission.status === 'active'
-    && (facts.currentWork === null || facts.currentWork === undefined)
-    && facts.latestGate !== 'failed';
-  const activeLabel = activeCommandLabel(resumesFindings, resumesGate, strandedActive);
+  const { resumesFindings, resumesGate, strandedActive, activeReason, canIntegrate, activeLabel } = activeCommandFacts(mission, facts, hasApprovedReview);
   return [
     availability(
       'active',
@@ -412,21 +291,9 @@ export function projectMissionCard(mission: Mission, facts: MissionOperationalFa
     rawStatus: mission.rawStatus ?? mission.status,
     closed: isClosedMission(mission),
     agent: mission.assignee,
-    checkpoint: checkpoint?.rawFilename ?? checkpoint?.name ?? null,
-    checkpointDescription: checkpoint?.firstLine ?? null,
-    checkpointEvidence: checkpointEvidence(mission.checkpoints, mission.status),
-    nextActionText: checkpoint?.nextActionText ?? null,
+    ...cardCheckpoint(mission, checkpoint),
     gate: facts.latestGate,
-    pullRequest: reviewedChange?.kind === 'pull-request' ? reviewedChange : null,
-    reviewApproved: facts.reviewApproval !== null
-      && reviewedSubject !== null
-      && sameReviewedRevision(reviewedSubject, facts.reviewApproval.subject),
-    reviewRound: currentRound?.number ?? null,
-    reviewPhase: currentRound?.phase ?? null,
-    reviewDisposition: currentRound?.disposition ?? null,
-    approvalOwed: reviewApprovalOwed(mission.review),
-    approvalCoverage: facts.approvalCoverage ?? null,
-    reviewHistory: projectReviewHistory(mission.review),
+    ...cardReview(mission, facts, reviewedSubject, reviewedChange, currentRound),
     currentWork: facts.currentWork,
     liveSession: facts.liveSession,
     blockingReason: facts.blockingReason,
@@ -487,4 +354,48 @@ export function wipCounts(cards: readonly MissionCard[]): Readonly<Record<BoardL
   };
   for (const card of cards) { result[card.lane] += 1; }
   return result;
+}
+
+function activeCommandFacts(mission: Mission, facts: Pick<MissionOperationalFacts, 'reviewApproval'> & Partial<Pick<MissionOperationalFacts, 'currentWork' | 'latestGate'>>, hasApprovedReview: boolean) {
+  const reviewPhase = mission.review === null ? null : currentReviewRound(mission.review).phase;
+  const resumesFindings = mission.status === 'review' && reviewPhase === 'fixing';
+  const resumesGate = mission.status === 'active' && facts.latestGate === 'failed';
+  const activeReason = activeCommandReason(mission.status);
+  const canIntegrate = mission.status === 'integration'
+    || (['active', 'review'].includes(mission.status) && hasApprovedReview);
+  // An active mission with no live work at all is stranded: no agent holds the
+  // turn and the aggregate never left `active`. Re-running `px active` is the
+  // defined lifecycle resume for it (the `activate` transition accepts
+  // `active`), so the stranded case joins the findings and gate-failed resumes
+  // rather than advertising a one-off recovery command. A stale published fact
+  // is reported as stale-work, so this is limited to a mission that is active,
+  // holds no work fact, and has no failing gate.
+  const strandedActive = mission.status === 'active'
+    && (facts.currentWork === null || facts.currentWork === undefined)
+    && facts.latestGate !== 'failed';
+  const activeLabel = activeCommandLabel(resumesFindings, resumesGate, strandedActive);
+  return { resumesFindings, resumesGate, strandedActive, activeReason, canIntegrate, activeLabel };
+}
+
+function cardCheckpoint(mission: Mission, checkpoint: ReturnType<typeof latestEvidencedCheckpoint>) {
+  return {
+    checkpoint: checkpoint?.rawFilename ?? checkpoint?.name ?? null,
+    checkpointDescription: checkpoint?.firstLine ?? null,
+    checkpointEvidence: checkpointEvidence(mission.checkpoints, mission.status),
+    nextActionText: checkpoint?.nextActionText ?? null,
+  };
+}
+function cardReview(mission: Mission, facts: MissionOperationalFacts, reviewedSubject: ReviewedRevision | null, reviewedChange: ReviewedRevision['change'] | null, currentRound: ReturnType<typeof currentReviewRound> | null) {
+  return {
+    pullRequest: reviewedChange?.kind === 'pull-request' ? reviewedChange : null,
+    reviewApproved: facts.reviewApproval !== null
+      && reviewedSubject !== null
+      && sameReviewedRevision(reviewedSubject, facts.reviewApproval.subject),
+    reviewRound: currentRound?.number ?? null,
+    reviewPhase: currentRound?.phase ?? null,
+    reviewDisposition: currentRound?.disposition ?? null,
+    approvalOwed: reviewApprovalOwed(mission.review),
+    approvalCoverage: facts.approvalCoverage ?? null,
+    reviewHistory: projectReviewHistory(mission.review),
+  };
 }

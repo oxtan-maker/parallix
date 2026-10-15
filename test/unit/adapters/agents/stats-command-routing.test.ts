@@ -15,14 +15,13 @@ const { resolveStageTelemetry } = resolveStageTelemetryModule;
 // mission-slug routing is covered, not just the renderer.
 
 test('resolveStageTelemetry returns null when the launcher attached no telemetry', () => {
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-  assert.equal(resolveStageTelemetry({ worktree: os.tmpdir(), result: { startedAt: 'x' } }), null);
+  assert.equal(resolveStageTelemetry({ worktree: os.tmpdir(), result: {} }), null);
   assert.equal(resolveStageTelemetry({ worktree: os.tmpdir(), result: null }), null);
 });
 
 test('resolveStageTelemetry falls back to launcher telemetry when no codex rollout exists', () => {
   // os.tmpdir() has no codex rollout, so extractCodexTelemetry returns null and
   // the launcher-attached telemetry is used unchanged.
-  const telemetry = { inputTokens: 42, provider: 'anthropic' };
+  const telemetry = { inputTokens: 42, provider: 'anthropic' } satisfies import("../../../../src/application/stats-recording-use-case.js").StageTelemetry;
   assert.deepEqual(resolveStageTelemetry({ worktree: os.tmpdir(), result: { telemetry }, sinceMs: 0 }), telemetry);
 });

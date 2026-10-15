@@ -1,3 +1,5 @@
+import type { IntegrationMissionServices } from '../ports/integration-records.js';
+import type { IntegrationContext } from './context.js';
 /**
  * `github-pr` integration mode: GitHub owns the merge. A local ref is never
  * evidence; the fresh PR observation is the sole route to lifecycle completion.
@@ -9,8 +11,8 @@ import type { IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
 
 export interface GithubPrLanding {
   slug: string;
-  context: any;
-  missionServices: any;
+  context: IntegrationContext;
+  missionServices: IntegrationMissionServices;
   strategy: ReturnType<typeof createIntegrationStrategy>;
 }
 

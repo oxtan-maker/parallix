@@ -1,5 +1,5 @@
 import type { Mission } from './mission.js';
-import { reviewStatus, type ReviewRevocationCause, type ReviewRound } from './review.js';
+import { decidedRevisionOf, reviewStatus, type ReviewRevocationCause, type ReviewRound } from './review.js';
 
 type WithdrawnApproval = ReviewRound & {
   readonly decision: Extract<NonNullable<ReviewRound['decision']>, { kind: 'approved' }>;
@@ -43,12 +43,12 @@ export interface IntegrationRepairFacts {
 }
 
 export function latestIntegrationRepair(mission: Mission): IntegrationRepairFacts | null {
-  const withdrawn = integrationGateWithdrawals(mission).at(-1);
+  const withdrawn = recordedWithdrawal(mission);
   const current = mission.review?.rounds.at(-1);
   if (!withdrawn || !current || current.number <= withdrawn.number) { return null; }
   const cause = withdrawn.decision.revocation!.cause as Extract<ReviewRevocationCause, { kind: 'integration-gate-failure' }>;
-  const approvedRevision = String(withdrawn.subject.revision);
-  const latest = String(current.subject.revision);
+  const approvedRevision = String(withdrawn.decision.revision);
+  const latest = repairRevision(current);
   return {
     gate: cause.gate,
     command: cause.command ?? null,
@@ -63,3 +63,14 @@ export function latestIntegrationRepair(mission: Mission): IntegrationRepairFact
   };
 }
 
+
+/** Pending repair rounds still name their submitted start; decisions name judged code. */
+function repairRevision(round: ReviewRound): string {
+  return String(decidedRevisionOf(round) ?? round.subject.revision);
+}
+
+/** Never skip an unknown latest approval in favour of an older known one. */
+function recordedWithdrawal(mission: Mission): WithdrawnApproval | undefined {
+  const round = integrationGateWithdrawals(mission).at(-1);
+  return decidedRevisionOf(round) ? round : undefined;
+}

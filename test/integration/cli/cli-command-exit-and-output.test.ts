@@ -73,7 +73,7 @@ test('composed command exits preserve status and cleanup without terminating the
   const child = spawnSync(process.execPath, ['--experimental-test-module-mocks', '--import', TSX_URL, '--input-type=module', '-e', script], {
     cwd: repoRoot, encoding: 'utf8', timeout: 8000,
   });
-  assert.equal(child.error, undefined, child.error?.message);
+  assert.equal(child.error, undefined, child.error?.message ?? '');
   assert.equal(child.status, 0, child.stderr);
   assert.match(child.stdout, /host survived/);
 });
@@ -181,7 +181,7 @@ function releaseHome(home: string | undefined, previousHome: string | undefined)
 
 test('SC1/SC2: a completed dev operation returns control with status 0 even with a loop anchor present', () => {
   const child = runDevWithAnchor(['version'], { timeoutMs: 8000 });
-  assert.equal(child.error, undefined, child.error?.message);
+  assert.equal(child.error, undefined, child.error?.message ?? '');
   assert.equal(child.status, 0, `expected a clean exit 0, got status=${child.status}`);
   assert.match(`${child.stdout ?? ''}${child.stderr ?? ''}`, /@magnusekdahl\/parallix/);
 });
@@ -194,7 +194,7 @@ test('SC3: a missing-classification integrate failure returns control with a non
     // Forgejo lookups; the fixture owns its own task file, so the test is
     // self-contained and independent of the test checkout's backlog state.
     const child = runDevWithAnchor(['integrate', slug, '--dry-run'], { home, cwd: repo, timeoutMs: 8000 });
-    assert.equal(child.error, undefined, child.error?.message);
+    assert.equal(child.error, undefined, child.error?.message ?? '');
     assert.notEqual(child.status, 0, `expected a non-zero exit, got status=${child.status}`);
     const output = `${child.stdout ?? ''}${child.stderr ?? ''}`;
     assert.match(output, /Mission classification: expected exactly one of/);
@@ -259,7 +259,7 @@ test('a rejected dev command flushes its error and exits despite a loop anchor',
   const child = spawnSync(process.execPath, ['--experimental-test-module-mocks', '--import', TSX_URL, '-e', script], {
     cwd: repoRoot, encoding: 'utf8', timeout: 8000,
   });
-  assert.equal(child.error, undefined, child.error?.message);
+  assert.equal(child.error, undefined, child.error?.message ?? '');
   assert.equal(child.status, 1);
   assert.match(child.stderr, /command rejected/);
 });
@@ -274,7 +274,7 @@ test('a failed px integrate exits even when an agent-style handle remains active
     // to load the px entry before treating that as a regression.
     cwd: process.cwd(), encoding: 'utf8', timeout: 20000,
   });
-  assert.equal(child.error, undefined, child.error?.message);
+  assert.equal(child.error, undefined, child.error?.message ?? '');
   assert.equal(child.status, 1, child.stderr);
   assert.match(child.stderr, /Unknown integrate option: --invalid-option/);
 });

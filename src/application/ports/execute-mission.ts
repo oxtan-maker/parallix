@@ -237,8 +237,8 @@ export interface ExecuteRepairLaunchPort {
     readonly worktree: string;
     readonly agent: string;
     readonly prompt: string;
-    readonly sessionPolicy?: unknown;
-  }): Promise<unknown>;
+    readonly sessionPolicy?: import('../../domain/session.js').SessionLaunchPolicy;
+  }): ReturnType<import('../rebound-kernel.js').ReboundStartAgent>;
   available(_agent: string): { readonly supported: boolean; readonly detail?: string; readonly reason?: string };
   readHead(_worktree: string): string | null;
 }

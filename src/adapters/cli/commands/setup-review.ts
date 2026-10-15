@@ -6,8 +6,7 @@ import { setupReview } from '../../review/setup-review.js';
  *
  * Usage: node parallix setup-review
  */
-/** @param {string[]} args @param {{[key: string]: any}} [options] */
-async function setupReviewCommand(args: string[], options?: {[key: string]: any}) {
+async function setupReviewCommand(args: string[], options?: Parameters<typeof setupReview>[1]) {
   await setupReview(args, options);
 }
 

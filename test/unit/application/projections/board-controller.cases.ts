@@ -1,3 +1,6 @@
+import { fixtureMission } from '../../../fixtures/mission-builders.js';
+import type { MissionEditService } from '../../../../src/application/mission-edit-service.js';
+import { missionVersion as fixtureVersion } from '../../../../src/application/domain-ports.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -20,7 +23,7 @@ import {
 function makeRequest(overrides: Partial<BoardCommandRequest> = {}): BoardCommandRequest {
   return {
     operationId: 'op-1',
-    kind: 'active:execute',
+    kind: 'active:execute' as const,
     missionId: 'task-0001',
     missionStatusAtRequest: 'refined',
     agent: 'codex',
@@ -66,6 +69,7 @@ test('controller rejects draft:create with the typed unavailable capability when
   const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest({ kind: 'draft:create' }));
   assert.equal(result.status, 'rejected');
+  assert.ok(result.error != null);
   assert.equal(result.error.kind, 'capability');
   assert.ok(result.error.message.includes('draft:create'));
   assert.ok(result.error.message.includes('Mission authority'));
@@ -79,6 +83,7 @@ test('controller rejects checkpoint:record without a payload', async () => {
   const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest({ kind: 'checkpoint:record' }));
   assert.equal(result.status, 'rejected');
+  assert.ok(result.error != null);
   assert.equal(result.error.kind, 'validation');
 });
 
@@ -87,6 +92,7 @@ test('controller rejects review:submit with capability kind', async () => {
   const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest({ kind: 'review:submit' }));
   assert.equal(result.status, 'rejected');
+  assert.ok(result.error != null);
   assert.equal(result.error.kind, 'capability');
 });
 
@@ -95,6 +101,7 @@ test('controller rejects review:act-on-findings with capability kind', async () 
   const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest({ kind: 'review:act-on-findings' }));
   assert.equal(result.status, 'rejected');
+  assert.ok(result.error != null);
   assert.equal(result.error.kind, 'capability');
 });
 
@@ -103,6 +110,7 @@ test('controller rejects approve:review with capability kind', async () => {
   const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest({ kind: 'approve:review' }));
   assert.equal(result.status, 'rejected');
+  assert.ok(result.error != null);
   assert.equal(result.error.kind, 'capability');
 });
 
@@ -111,6 +119,7 @@ test('controller rejects integrate:merge with capability kind', async () => {
   const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest({ kind: 'integrate:merge' }));
   assert.equal(result.status, 'rejected');
+  assert.ok(result.error != null);
   assert.equal(result.error.kind, 'capability');
 });
 
@@ -125,7 +134,7 @@ test('controller hands off and starts review from mission identity alone', async
     async ended(publication) { work.push(`ended:${publication.phase}`); },
     async blocked() { work.push('blocked'); },
   }, {
-    async load() { return { kind: 'found', mission: { status: 'active' }, version: 1 } as never; },
+    async load() { return { kind: 'found', mission: fixtureMission('task-0001', { status: 'active' }), version: fixtureVersion(1) }; },
   });
 
   const result = await controller.dispatch(makeRequest({
@@ -173,12 +182,13 @@ test('cancellation before launch returns cancelled outcome', async () => {
     cancellation: { requested: true },
   }));
   assert.equal(result.status, 'cancelled');
+  assert.ok(result.error != null);
   assert.equal(result.error.kind, 'cancelled');
   assert.deepEqual(calls, []);
 });
 
 test('controller passes cancellation to ExecuteMissionService for post-boundary cancellation', async () => {
-  const cancellation = { requested: false };
+  const cancellation: { requested: boolean } = { requested: false };
   const { ports } = makeExecutePorts({
     telemetry: {
       async recordLaunchTelemetry() { cancellation.requested = true; },
@@ -189,6 +199,7 @@ test('controller passes cancellation to ExecuteMissionService for post-boundary 
     cancellation,
   }));
   assert.equal(result.status, 'cancelled');
+  assert.ok(result.error != null);
   assert.equal(result.error.kind, 'cancelled');
   assert.ok(result.durableEvidence.length >= 2);
 });
@@ -200,10 +211,11 @@ test('controller passes cancellation to ExecuteMissionService for post-boundary 
 test('authoritative status rejects stale command with conflict kind', async () => {
   const { ports } = makeExecutePorts();
   const controller = new BoardCommandController(ports, undefined, {}, undefined, {
-    async load() { return { kind: 'found', mission: { status: 'active' }, version: 1 } as never; },
+    async load() { return { kind: 'found', mission: fixtureMission('task-0001', { status: 'active' }), version: fixtureVersion(1) }; },
   });
   const result = await controller.dispatch(makeRequest({ missionStatusAtRequest: 'refined' }));
   assert.equal(result.status, 'failed');
+  assert.ok(result.error != null);
   assert.equal(result.error.kind, 'conflict');
   assert.ok(result.error.message.includes('refined'));
   assert.ok(result.error.message.includes('active'));
@@ -291,10 +303,10 @@ test('mission:create dispatches the creation payload without a stored mission an
   const creation = {
     async execute(request: unknown) {
       requests.push(request);
-      return { status: 'completed', value: { mission: { id: 'px-0001', title: 'secret' }, version: 1 }, durableEvidence: [] };
+      return { status: 'completed' as const, value: { mission: fixtureMission('px-0001', { title: 'secret' }), version: fixtureVersion(1) }, durableEvidence: [] };
     },
   };
-  const controller = new BoardCommandController(ports, undefined, { creation: creation as never }, undefined, { load: async () => ({ kind: 'missing' }) } as never);
+  const controller = new BoardCommandController(ports, undefined, { creation: creation }, undefined, { load: async () => ({ kind: 'missing' as const }) });
   const result = await controller.dispatch(makeRequest({
     kind: 'mission:create', missionId: '', missionStatusAtRequest: undefined, capabilities: new Set(['mission:intake']),
     payload: { kind: 'mission:create', requestKey: 'k', title: 'Idea', labels: ['ux'] },
@@ -313,7 +325,7 @@ test('mission:create is unavailable without Mission authority and rejects a mism
     payload: { kind: 'mission:create', requestKey: 'k', title: 'Idea' },
   });
   assert.equal((await bare.dispatch(request)).status, 'rejected');
-  const wired = new BoardCommandController(ports, undefined, { creation: { execute: async () => ({ status: 'completed' }) } as never }, undefined, { load: async () => ({ kind: 'missing' }) } as never);
+  const wired = new BoardCommandController(ports, undefined, { creation: { execute: async () => ({ durableEvidence: [],  status: 'completed' as const }) } }, undefined, { load: async () => ({ kind: 'missing' as const }) });
   assert.equal((await wired.dispatch({ ...request, payload: undefined })).status, 'rejected');
 });
 
@@ -321,13 +333,13 @@ test('mission:create is unavailable without Mission authority and rejects a mism
 test('controller routes edit read and versioned save through the typed planning service (TASK-2702)', async () => {
   const { ports } = makeExecutePorts();
   const calls: unknown[] = [];
-  const editing = { read: async (request: unknown) => { calls.push(request); return { status: 'completed', value: { title: 'Read' }, durableEvidence: [] }; },
-    save: async (request: unknown) => { calls.push(request); return { status: 'completed', value: { missionId: 'task-0001' }, durableEvidence: [] }; } };
-  const controller = new BoardCommandController(ports, undefined, { editing } as never);
+  const editing: Pick<MissionEditService, 'read' | 'save'> = { read: async (request: unknown) => { calls.push(request); return { status: 'completed', value: { missionId: 'task-0001', version: fixtureVersion(1), title: 'Read', description: '', context: '', labels: [], successCriteria: [], dependencies: [] }, durableEvidence: [] }; },
+    save: async (request: unknown) => { calls.push(request); return { status: 'completed', value: { missionId: 'task-0001', version: fixtureVersion(2) }, durableEvidence: [] }; } };
+  const controller = new BoardCommandController(ports, undefined, { editing });
   const base = { capabilities: new Set(['mission:context'] as const) };
   assert.equal((await controller.dispatch(makeRequest({ ...base, kind: 'mission:edit-read', payload: { kind: 'mission:edit-read' } }))).status, 'completed');
-  const payload = { kind: 'mission:edit', expectedVersion: 1, title: 'Revised', description: '', context: '', labels: [], successCriteria: [], dependencies: [] } as const;
-  assert.equal((await controller.dispatch(makeRequest({ ...base, kind: 'mission:edit', payload: payload as never }))).status, 'completed');
+  const payload = { kind: 'mission:edit', expectedVersion: fixtureVersion(1), title: 'Revised', description: '', context: '', labels: [], successCriteria: [], dependencies: [] } as const;
+  assert.equal((await controller.dispatch(makeRequest({ ...base, kind: 'mission:edit', payload: payload }))).status, 'completed');
   assert.equal(calls.length, 2);
   assert.deepEqual(calls[1], { operationId: 'op-1', missionId: 'task-0001', capabilities: base.capabilities, ...payload });
 });

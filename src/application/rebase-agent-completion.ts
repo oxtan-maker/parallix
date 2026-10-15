@@ -31,7 +31,7 @@ export async function recoverAgentRebaseCompletion(
         : undefined,
       applyAgentFallback: async ({ launchResult, original }) =>
         await port.applyAgentFallback({ role: 'implementer', original, launchResult, state: {}, slug,
-          worktree, log: fmt.log.plain, writeReviewStateFn: port.writeReviewState }) as string || original,
+          worktree, log: fmt.log.plain, writeReviewStateFn: port.writeReviewState }) || original,
     },
   );
   if (outcome.outcome === 'fixed') { return { implementer: outcome.implementer, repaired: true }; }

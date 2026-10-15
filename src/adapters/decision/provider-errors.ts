@@ -4,8 +4,7 @@ function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** Inspect only known machine codes. Untrusted provider messages never escape the adapter. */
-export async function decisionHttpError(response: Response, provider: string): Promise<DecisionError> {
+async function readLimitCode(response: Response) {
   let code: unknown;
   let source: unknown;
   try {
@@ -14,6 +13,12 @@ export async function decisionHttpError(response: Response, provider: string): P
     code = error?.code ?? error?.type;
     source = error && record(error.metadata) ? error.metadata.limit_source : undefined;
   } catch { /* HTTP status still provides a safe failure category. */ }
+  return { code, source };
+}
+
+/** Inspect only known machine codes. Untrusted provider messages never escape the adapter. */
+export async function decisionHttpError(response: Response, provider: string): Promise<DecisionError> {
+  const { code, source } = await readLimitCode(response);
   if (source === 'openrouter_in_flight_budget') {
     return new DecisionError('rate-limited', 'Decision provider has reached its concurrent usage limit.', provider);
   }

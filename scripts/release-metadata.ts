@@ -147,7 +147,7 @@ function repositoryUrl(repository: unknown): string | null {
 }
 
 /** Dependencies whose declared license is outside ALLOWED_LICENSES. */
-function licenseViolations(packages: BundledPackage[]): string[] {
+function licenseViolations(packages: Pick<BundledPackage, 'name' | 'version' | 'license'>[]): string[] {
   return packages
     .filter(entry => !ALLOWED_LICENSES.has(entry.license))
     .map(entry => `${entry.name}@${entry.version}: unapproved license ${entry.license}`);
@@ -198,8 +198,9 @@ function renderNotices(packages: BundledPackage[], rootManifest: Record<string, 
     const text = licenseText(entry.packageDir);
     if (text === null) { withoutText.push(entry); continue; }
     const key = crypto.createHash('sha256').update(text).digest('hex');
-    if (!byText.has(key)) { byText.set(key, { text, packages: [] }); }
-    byText.get(key).packages.push(entry);
+    let group = byText.get(key);
+    if (!group) { group = { text, packages: [] }; byText.set(key, group); }
+    group.packages.push(entry);
   }
 
   lines.push('', '='.repeat(78), 'LICENSE TEXTS', '='.repeat(78));
@@ -225,7 +226,7 @@ function renderNotices(packages: BundledPackage[], rootManifest: Record<string, 
 }
 
 /** CycloneDX 1.5 SBOM. Deterministic: no timestamp, no serial number, sorted components. */
-function renderSbom(packages: BundledPackage[], rootManifest: Record<string, string>): Record<string, unknown> {
+function renderSbom(packages: BundledPackage[], rootManifest: Record<string, string>) {
   return {
     bomFormat: 'CycloneDX',
     specVersion: '1.5',

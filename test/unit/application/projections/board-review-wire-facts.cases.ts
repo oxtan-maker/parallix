@@ -4,6 +4,7 @@ import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js'
 import { makeFullCard, makeProjection } from '../../../fixtures/board-projection.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import type { ReviewRoundSummary } from '../../../../src/application/projections/mission-board.js';
+import { MissionId } from '../../../../src/domain/mission.js';
 
 /**
  * Red reproduction for TASK-2447: the shared MissionCard carries the
@@ -43,7 +44,7 @@ test('wire board card carries pullRequest, reviewApproved, and reviewHistory fro
   const card = makeFullCard({ reviewHistory });
 
   const snapshot = toWebBoardSnapshot(makeProjection({ review: [card] }));
-  const parsed = JSON.parse(JSON.stringify(snapshot));
+  const parsed = JSON.parse(JSON.stringify(snapshot)) as typeof snapshot;
   const wire = parsed.stages.flatMap((stage) => stage.cards).find((c) => c.id === card.id);
   assert.ok(wire !== undefined, 'the card must appear in the wire snapshot');
 

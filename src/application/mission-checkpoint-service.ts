@@ -1,5 +1,5 @@
 import { evaluateMissionEvidence } from './mission-evidence-readiness.js';
-import { completeNamedCriteria, criterionContract, identifyGoalCheckRows } from '../domain/mission-success-criteria.js';
+import { criterionContract, identifyGoalCheckRows } from '../domain/mission-success-criteria.js';
 import { RepairCheckpointService } from './repair-checkpoint-service.js';
 /**
  * Checkpoint use case.
@@ -41,8 +41,6 @@ const REQUIRED_CAPABILITY: Capability = 'checkpoint:record';
 
 export interface RecordCheckpointRequest extends MissionCommandRequest {
   readonly checkpoint: CheckpointData;
-  /** Atomically complete only the criteria explicitly evidenced in this request. */
-  readonly completeCriteria?: boolean;
   /** Explicit operator override of a reported blocker; evidence checks still apply. */
   readonly force?: boolean;
 }
@@ -94,10 +92,15 @@ export class MissionCheckpointService {
     private readonly _store: MissionStore,
     private readonly _evidence?: CheckpointEvidenceReferences,
     private readonly _now: () => string = () => new Date().toISOString(),
-  ) {}
+  ) { }
 
   reportInvalidContract(request: Parameters<RepairCheckpointService['report']>[0]) {
     return new RepairCheckpointService(this._store).report(request);
+  }
+
+  /** The operator resume write, composed through the same repair authority. */
+  acknowledgeOperatorResume(request: Parameters<RepairCheckpointService['acknowledgeOperatorResume']>[0]) {
+    return new RepairCheckpointService(this._store).acknowledgeOperatorResume(request);
   }
 
   /** Plan a checkpoint: a name and what it delivers, with no evidence yet. */
@@ -157,42 +160,9 @@ export class MissionCheckpointService {
     let updated: Mission;
     let merged: CheckpointData;
     try {
-      // A repair records only its affected criteria: retain prior rows for the
-      // other criteria so the final Goal Check table is not rewritten. Fresh
-      // evidence has no prior rows to retain, so this is a no-op then.
-      const prior = mission.checkpoints.find((checkpoint) => checkpoint.name === request.checkpoint.name);
-      // Rows are stamped with the review round they are recorded in, so a
-      // repair's fresh proof is distinguishable from rows kept from earlier rounds.
-      const round = mission.review ? currentReviewRound(mission.review).number : undefined;
-      const gate = openRepairFromReview(mission.review, mission.successCriteria ?? [], mission.checkpoints.flatMap((checkpoint) => checkpoint.goalCheck))?.gate;
-      const identified = { ...request.checkpoint, goalCheck: identifyGoalCheckRows(request.checkpoint.goalCheck, criterionContract(mission)) };
-      const stamped = round === undefined
-        ? identified
-        : { ...identified, goalCheck: identified.goalCheck.map((row) => {
-          const priorRows = mission.checkpoints.flatMap((checkpoint) => checkpoint.goalCheck)
-            .filter((priorRow) => (priorRow.criterionId ?? priorRow.criterion) === (row.criterionId ?? row.criterion));
-          const repairedGates = [...new Set(priorRows.flatMap((priorRow) => [
-            ...(priorRow.repairedGates ?? []), ...(priorRow.repairedGate ? [priorRow.repairedGate] : []),
-          ]).concat(gate ? [gate] : []))];
-          return { ...row, recordedRound: round, ...(gate ? { repairedGate: gate } : {}),
-            ...(repairedGates.length ? { repairedGates } : {}) };
-        }) };
-      merged = prior
-        ? { ...stamped, goalCheck: retainPriorGoalCheckRows(prior.goalCheck, stamped.goalCheck) }
-        : stamped;
-      if (prior?.repair) {
-        if (stamped.goalCheck.some(row => !(mission.successCriteria ?? []).includes(row.criterion))) {
-          return failure('validation', 'Repair evidence must name an exact recorded success criterion');
-        }
-        if (prior.repair.blocker && !request.force) { return failure('validation', 'Invalid locked contract awaits operator decision; an operator can re-record corrected evidence with --force'); }
-        merged = { ...merged, repair: { ...prior.repair, ...(request.force ? { blocker: undefined } : {}), evidenceRecorded: true, verified: false } };
-      }
-      merged = { ...merged, recording: { recordedAt: this._now(), recordedRound: round ?? null, missionRevision: version + 1 } };
-      updated = {
-        ...mission,
-        checkpoints: recordCheckpoint(mission.checkpoints, merged),
-        ...(request.completeCriteria ? { completedSuccessCriteria: completeNamedCriteria(mission, request.checkpoint.goalCheck) } : {}),
-      } as Mission;
+      const prepared = this.prepareCheckpointValues(request, mission, version);
+      if (!prepared.ok) { return prepared.failure; }
+      ({ updated, merged } = prepared);
     } catch (error) {
       return failure(
         'validation',
@@ -211,16 +181,14 @@ export class MissionCheckpointService {
         {
           mission: updated,
           version: nextVersion,
-          checkpoint: merged,
+          checkpoint: request.checkpoint,
           replaced,
         },
         [
           storeEvidence(
             mission.id,
             `checkpoint:${request.checkpoint.name}`,
-            `${updated.checkpoints.find((checkpoint) => checkpoint.name === request.checkpoint.name)?.goalCheck.length ?? request.checkpoint.goalCheck.length} Goal Check row(s) recorded`
-            + `${replaced ? ' (retained earlier evidence, updated affected criteria)' : ''}`
-            + `${request.force ? ' (operator forced evidence replacement)' : ''}`,
+            checkpointRecordDetail(updated, request, replaced),
           ),
         ],
       );
@@ -250,11 +218,38 @@ export class MissionCheckpointService {
     try { assertGoalCheckRows(request.checkpoint.goalCheck); } catch (error) {
       return failure('validation', error instanceof Error ? error.message : 'checkpoint evidence rejected');
     }
-    if (request.completeCriteria) {
-      const completionGuard = missingCapability<RecordCheckpointResult>(request, 'mission:context');
-      if (completionGuard) { return completionGuard; }
-    }
     return null;
+  }
+
+  private prepareCheckpointValues(request: RecordCheckpointRequest, mission: Mission, version: MissionVersion): PreparedCheckpointValues {
+    let merged: CheckpointData;
+    // A repair records only its affected criteria: retain prior rows for the
+    // other criteria so the final Goal Check table is not rewritten. Fresh
+    // evidence has no prior rows to retain, so this is a no-op then.
+    const prior = mission.checkpoints.find((checkpoint) => checkpoint.name === request.checkpoint.name);
+    // Rows are stamped with the review round they are recorded in, so a
+    // repair's fresh proof is distinguishable from rows kept from earlier rounds.
+    const round = mission.review ? currentReviewRound(mission.review).number : undefined;
+    const gate = openRepairFromReview(mission.review, mission.successCriteria ?? [], mission.checkpoints.flatMap((checkpoint) => checkpoint.goalCheck))?.gate;
+    const identified = { ...request.checkpoint, goalCheck: identifyGoalCheckRows(request.checkpoint.goalCheck, criterionContract(mission)) };
+    const stamped = stampCheckpointRecord(identified, mission, round, gate);
+    merged = prior
+      ? { ...stamped, goalCheck: retainPriorGoalCheckRows(prior.goalCheck, stamped.goalCheck) }
+      : stamped;
+    if (prior?.repair) {
+      if (stamped.goalCheck.some(row => !(mission.successCriteria ?? []).includes(row.criterion))) {
+        return { ok: false, failure: failure('validation', 'Repair evidence must name an exact recorded success criterion') };
+      }
+      if (prior.repair.blocker && !request.force) { return { ok: false, failure: failure('validation', 'Invalid locked contract awaits operator decision; an operator can re-record corrected evidence with --force') }; }
+      merged = { ...merged, repair: { ...prior.repair, ...(request.force ? { blocker: undefined } : {}), evidenceRecorded: true, verified: false } };
+    }
+    merged = { ...merged, recording: { recordedAt: this._now(), recordedRound: round ?? null, missionRevision: version + 1 } };
+    const updated: Mission = {
+      ...mission,
+      checkpoints: recordCheckpoint(mission.checkpoints, merged),
+    };
+
+    return { ok: true, updated, merged };
   }
 
   /**
@@ -383,4 +378,31 @@ export class MissionCheckpointService {
       goalCheck: checkpoints.flatMap((checkpoint) => checkpoint.goalCheck),
     });
   }
+}
+
+type PreparedCheckpointValues = { ok: true; updated: Mission; merged: CheckpointData }
+  | { ok: false; failure: ApplicationOutcome<RecordCheckpointResult> };
+function stampCheckpointRecord(identified: CheckpointData, mission: Mission, round: number | undefined, gate: string | null | undefined): CheckpointData {
+  return round === undefined
+    ? identified
+    : {
+      ...identified, goalCheck: identified.goalCheck.map((row) => {
+        const priorRows = mission.checkpoints.flatMap((checkpoint) => checkpoint.goalCheck)
+          .filter((priorRow) => (priorRow.criterionId ?? priorRow.criterion) === (row.criterionId ?? row.criterion));
+        const repairedGates = [...new Set(priorRows.flatMap((priorRow) => [
+          ...(priorRow.repairedGates ?? []), ...(priorRow.repairedGate ? [priorRow.repairedGate] : []),
+        ]).concat(gate ? [gate] : []))];
+        return {
+          ...row, recordedRound: round, ...(gate ? { repairedGate: gate } : {}),
+          ...(repairedGates.length ? { repairedGates } : {})
+        };
+      })
+    };
+
+}
+
+function checkpointRecordDetail(updated: Mission, request: RecordCheckpointRequest, replaced: boolean): string {
+  return `${updated.checkpoints.find((checkpoint) => checkpoint.name === request.checkpoint.name)?.goalCheck.length ?? request.checkpoint.goalCheck.length} Goal Check row(s) recorded`
+            + `${replaced ? ' (retained earlier evidence, updated affected criteria)' : ''}`
+            + `${request.force ? ' (operator forced evidence replacement)' : ''}`;
 }

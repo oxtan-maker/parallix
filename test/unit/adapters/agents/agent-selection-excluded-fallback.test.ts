@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 /**
  * TASK-2377: Reproduce reviewer fallback missing when all agents exhausted.
  *
@@ -20,7 +19,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 import { startAgent } from '../../../../src/adapters/agents/agents.js';
 import { AgentPoolExhaustedError } from '../../../../src/domain/agents.js';
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
 import { fakeLauncher } from '../../../lib/agent-mock.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 
@@ -32,7 +30,7 @@ test('startAgent tries excluded agents after non-excluded pool exhausts (TASK-23
     const launched = [];
     let callCount = 0;
 
-    const selectAgentFn = (step, opts = {}) => {
+    const selectAgentFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["selectAgentFn"]> = (step, opts = {}) => {
       callCount++;
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set();
 
@@ -58,7 +56,7 @@ test('startAgent tries excluded agents after non-excluded pool exhausts (TASK-23
       exclude: ['claude'], // implementer excluded for family separation
       isAgentBlockedFn: () => false,
       detectLimitHitFn: () => null,
-      updateAgentBlockFn: () => ({ path: tmpRoot }),
+      updateAgentBlockFn: () => ({}),
       selectAgentFn,
       launchAgentFn: () => {
         launched.push(launcherIndex);
@@ -85,7 +83,7 @@ test('startAgent throws exhaustion after both non-excluded and excluded agents f
   try {
     let callCount = 0;
 
-    const selectAgentFn = (step, opts = {}) => {
+    const selectAgentFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["selectAgentFn"]> = (step, opts = {}) => {
       callCount++;
       if (callCount === 1) return 'codex';
       if (callCount === 2) return 'qwen';
@@ -108,7 +106,7 @@ test('startAgent throws exhaustion after both non-excluded and excluded agents f
         exclude: ['claude'],
         isAgentBlockedFn: () => false,
         detectLimitHitFn: () => null,
-        updateAgentBlockFn: () => ({ path: tmpRoot }),
+        updateAgentBlockFn: () => ({}),
         selectAgentFn,
         launchAgentFn: () => {
           launched.push(launcherIndex);
@@ -139,7 +137,7 @@ test('startAgent does not try excluded agents when non-excluded agent succeeds (
       exclude: ['claude'],
       isAgentBlockedFn: () => false,
       detectLimitHitFn: () => null,
-      updateAgentBlockFn: () => ({ path: tmpRoot }),
+      updateAgentBlockFn: () => ({}),
       selectAgentFn: () => 'codex', // succeeds on first try
       launchAgentFn: fakeLauncher({ exitCode: 0 }),
       assertAgentSupportedFn: () => {},

@@ -1,3 +1,7 @@
+import { phaseGateResult } from '../../helpers/phase-gate-result.js';
+import { integrationServices } from '../../helpers/stub-integration-services.js';
+import { integrationContext } from '../../fixtures/integration-context.js';
+import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflow-ports.js';
 // TASK-2582 — red-to-green reproduction of the autonomous re-review approval
 // that leaves the authoritative Mission active (the TASK-2579 shape).
 //
@@ -28,7 +32,6 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pinnedCliBootstrap } from '../../../src/adapters/agents/launch-prompt-context.js';
 import { pinChildCli } from '../../../src/adapters/storage/child-cli.js';
 
 import { agentFamily } from '../../../src/domain/agents.js';
@@ -109,7 +112,7 @@ test('review gate repair commits active before launch and review before resuming
         launch: async (launch) => {
           assert.equal(await missionStatus(fixture), 'active');
           assert.equal(currentReviewRound(await currentReviewOf(fixture)).decision, null);
-          return { agent: launch.agent, result: { status: 0 } } as any;
+          return { agent: launch.agent, result: { status: 0 } };
         },
       },
     });
@@ -175,21 +178,21 @@ test('integration gates stop in the integration lane on a successful re-review a
   for (const refuseReview of [false, true]) {
     const fixture = await openFixture(seedMission('active', null));
     try {
-      const step = createIntegrationGateStep({
+      const step = createIntegrationGateStep(stubIntegrateWorkflowPorts({
         gates: {
           resolveIntegrationVerificationWorktree: () => fixture.root,
-          captureFinalIntegrationTree: () => ({ ok: true, rootDir: fixture.root, commit: 'rev-2', tree: 'tree' }),
-          loadPhaseGates: () => [{ key: 'unit', command: 'npm test' }],
+          captureFinalIntegrationTree: () => ({ ok: true as const, rootDir: fixture.root, commit: 'rev-2', tree: 'tree' }),
+          loadPhaseGates: () => [{ key: 'unit', command: 'npm test', order: 0 }],
           loadRequirePreIntegration: () => true,
-          runPhaseGates: async () => ({ ok: false, failedGate: 'unit', error: 'AssertionError' }),
+          runPhaseGates: async () => (phaseGateResult({ ok: false as const, failedGate: { key: 'unit', command: 'npm test', exitCode: 1 }, error: 'AssertionError' })),
         },
         verification: { formatVerificationCommand: () => 'npm test' },
         landing: { createAbort: () => new Error('integration aborted') },
-      } as any);
+      }));
       const run = step.runRequiredLocalGates({
-        slug: SLUG, context: { baseWorktree: fixture.root, taskAssignee: IMPLEMENTER },
+        slug: SLUG, context: integrationContext({ baseWorktree: fixture.root, taskAssignee: IMPLEMENTER }),
         missionLoad: await fixture.store.load(missionId(SLUG)),
-        missionServices: { store: fixture.store, lifecycle: fixture.lifecycle },
+        missionServices: integrationServices({ store: fixture.store, lifecycle: fixture.lifecycle }),
         dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
         seams: {
           startAgentFn: async () => assert.fail('launch belongs to the injected repair boundary'),
@@ -260,7 +263,7 @@ test('composed rebase conflict repair commits active before its agent and review
   const readMission = async () => {
     const loaded = await fixture.store.load(id);
     assert.equal(loaded.kind, 'found');
-    if (loaded.kind !== 'found') { assert.fail('recorded mission is required'); }
+    if (loaded.kind !== 'found') { return assert.fail('recorded mission is required'); }
     return loaded.mission;
   };
   const taskFile = path.join(fixture.root, 'backlog', 'tasks', 'task-2582 - Conflict repair.md');
@@ -277,25 +280,25 @@ test('composed rebase conflict repair commits active before its agent and review
       ['init', '-b', `mission/${slug}`], ['config', 'user.email', 'test@example.com'],
       ['config', 'user.name', 'test'], ['config', 'commit.gpgsign', 'false'], ['add', '.'], ['commit', '-m', 'fixture'],
     ]) { assert.equal(spawnSync('git', args, { cwd: fixture.root }).status, 0); }
-    let exitCode: number | null = null;
+    let exitCode: { value: number | null } = { value: null };
     let launches = 0;
     const port = createRebaseWorkflowPort({
       missionServicesFn: async () => ({ store: fixture.store, lifecycle: fixture.lifecycle }),
       inferSlugFn: () => slug, resolveWorktreeFn: () => fixture.root,
       findMissionDirFn: () => fixture.root, findMissionAreaFn: () => 'docs',
       getCurrentBranchFn: () => `mission/${slug}`,
-      resolveTaskFileFn: () => ({ ok: true, taskFile }), getTaskImplementerFn: () => IMPLEMENTER,
+      resolveTaskFileFn: () => ({ matches: [],  ok: true as const, taskFile }), getTaskImplementerFn: () => IMPLEMENTER,
       detectRebaseStateFn: () => ({ inProgress: false, unmergedFiles: [] }),
       resolveMissionBaseBranchFn: () => 'main', isForgejoReviewEnabledFn: () => false,
-      resolveConflictsFn: () => ({ ok: false, error: 'merge-failed' }),
+      resolveConflictsFn: () => ({ ok: false as const, error: 'merge-failed', conflictFiles: ['src/shared.ts'], missionSpecificFiles: [], sharedFiles: ['src/shared.ts'] }),
       gitFn: (args: string[]) => {
         if (args.includes('rebase') && args.includes('main')) {
-          return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in src/shared.ts' };
+          return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in src/shared.ts' };
         }
         if (args.includes('status') && args.includes('--porcelain')) {
-          return { status: 0, stdout: 'UU src/shared.ts\n', stderr: '' };
+          return { signal: null,  status: 0, stdout: 'UU src/shared.ts\n', stderr: '' };
         }
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
       startAgentFn: async () => {
         launches++;
@@ -303,12 +306,12 @@ test('composed rebase conflict repair commits active before its agent and review
         assert.match(fs.readFileSync(taskFile, 'utf8'), /status: active/);
         return { agent: IMPLEMENTER, result: { status: 0 } };
       },
-      exitFn: code => { exitCode = code; },
+      exitFn: code => { exitCode.value = code; },
     });
     port.readReviewState = async () => ({ implementer: IMPLEMENTER });
     await runRebaseWorkflow([slug], port);
     assert.equal(launches, 1);
-    assert.equal(exitCode, 0);
+    assert.equal(exitCode.value, 0);
     assert.equal((await readMission()).status, 'review');
     assert.match(fs.readFileSync(taskFile, 'utf8'), /status: review/);
     assert.deepEqual((await fixture.database.query<LaneEventRow>('SELECT from_status, to_status, trigger FROM board_lane_events WHERE mission_id = ? ORDER BY id', [slug])).map(event => [event.from_status, event.to_status, event.trigger]), [
@@ -324,12 +327,12 @@ test('operator correction of a stranded active approval preserves history and op
   try {
     const loaded = await fixture.store.load(missionId(SLUG));
     assert.equal(loaded.kind, 'found');
-    if (loaded.kind !== 'found') { assert.fail('recorded mission is required'); }
+    if (loaded.kind !== 'found') { return assert.fail('recorded mission is required'); }
     const useCase = new RevokeReviewDecisionUseCase(fixture.store, fixture.lifecycle);
     const request = {
       slug: SLUG, round: 2, reason: 'The operator rejected incomplete lifecycle verification',
       operator: 'human-operator', occurredAt: APPROVED_AT, expectedVersion: Number(loaded.version),
-    };
+    } satisfies Partial<NonNullable<Parameters<typeof useCase.execute>[0]>>;
     assert.equal((await useCase.execute({ ...request, expectedVersion: request.expectedVersion - 1 })).status, 'failed');
     assert.equal(await missionStatus(fixture), 'active');
     assert.deepEqual(await currentReviewOf(fixture), original);
@@ -611,7 +614,7 @@ test('request-changes -> fixes -> re-review -> approve moves the Mission active 
       lifecycleService: fixture.lifecycle,
     });
     if (round2Open.ok === false) {
-      assert.fail(`the round-open boundary did not commit: ${round2Open.diagnostic}`);
+      return assert.fail(`the round-open boundary did not commit: ${round2Open.diagnostic}`);
     }
 
     // 6. the reviewer approves round 2 — the approval boundary.
@@ -710,13 +713,13 @@ test('a round-open boundary whose authoritative transition cannot commit stops t
     // the boundary must fail rather than open the round over an uncommitted
     // transition.
     const base = fixture.store;
-    const refusingStore = {
+    const refusingStore = ({
       load: (id: Parameters<typeof base.load>[0]) => base.load(id),
       save: (mission: Parameters<typeof base.save>[0], version: Parameters<typeof base.save>[1]) => base.save(mission, version),
       saveWithTransition: async (..._args: unknown[]): Promise<MissionVersion> => {
         throw new Error('lane event storage unavailable');
       },
-    } as unknown as MissionTransitionStore;
+    });
     const state = new ReviewState(SLUG, {
       reviewer: REVIEWER,
       implementer: IMPLEMENTER,
@@ -897,43 +900,11 @@ test('native child CLI wrapper forwards commands without repeating the executabl
   try {
     const binary = path.join(root, 'native-px');
     fs.writeFileSync(binary, '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o700 });
-    const childEnvironment: NodeJS.ProcessEnv = { PATH: '/stale/global/bin' };
-    const wrapper = pinChildCli(binary, { node: binary, native: true, stateHome: root, env: childEnvironment });
-    assert.equal(childEnvironment.PATH?.split(path.delimiter)[0], path.dirname(wrapper));
-    const short = spawnSync('px', ['status', 'task-2747'], { env: childEnvironment, encoding: 'utf8' });
-    assert.equal(short.status, 0, short.stderr);
-    assert.deepEqual(short.stdout.trim().split('\n'), ['status', 'task-2747']);
+    const wrapper = pinChildCli(binary, { node: binary, native: true, stateHome: root, env: {} });
     const result = spawnSync(wrapper, ['verdict', 'approve', '--actor', 'reviewer'], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(result.stdout.trim().split('\n'), ['verdict', 'approve', '--actor', 'reviewer']);
     const scriptWrapper = pinChildCli(binary, { node: '/node', nodeArgs: ['--import', 'tsx'], native: false, stateHome: root, env: {} });
     assert.ok(fs.readFileSync(scriptWrapper, 'utf8').includes(`'/node' '--import' 'tsx' '${binary}'`));
-  } finally { fs.rmSync(root, { recursive: true, force: true }); }
-});
-
-
-test('pinned short px survives login and interactive profile shadows (TASK-2747)', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pinned-cli-'profile-"));
-  try {
-    const binary = path.join(root, 'native-px');
-    fs.writeFileSync(binary, '#!/bin/sh\nprintf "bundled:%s\\n" "$*"\n', { mode: 0o700 });
-    const wrapper = pinChildCli(binary, { node: binary, native: true, stateHome: root, env: {} });
-    const profile = path.join(root, 'profile');
-    fs.writeFileSync(profile, 'export PATH=/usr/bin:/bin\npx() { echo global-function; }\nalias px="echo global-alias"\n');
-    // Private profiles model nvm/PATH and px aliases without changing the operator's home.
-    for (const mode of ['-lc', '-ic']) {
-      const body = `source "$PROFILE"\n${pinnedCliBootstrap(wrapper)}\npx status task-2747`;
-      const result = spawnSync('/bin/bash', ['--noprofile', '--norc', mode, body], {
-        env: { ...process.env, PROFILE: profile }, encoding: 'utf8', timeout: 5000,
-      });
-      assert.equal(result.status, 0, result.stderr);
-      assert.equal(result.stdout.trim(), 'bundled:status task-2747');
-      // A nested shell needs its own bootstrap after its own profiles load.
-      const nested = spawnSync('/bin/bash', ['-c', 'exec /bin/bash --noprofile --norc "$MODE" "$BODY"'], {
-        env: { ...process.env, PROFILE: profile, MODE: mode, BODY: body }, encoding: 'utf8', timeout: 5000,
-      });
-      assert.equal(nested.status, 0, nested.stderr);
-      assert.equal(nested.stdout.trim(), 'bundled:status task-2747');
-    }
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

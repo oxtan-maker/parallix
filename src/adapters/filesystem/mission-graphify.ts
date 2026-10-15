@@ -6,8 +6,11 @@ import path from 'node:path';
 import * as fmt from '../../application/presentation/cli-format.js';
 import * as gitModule from '../git/git.js';
 
-/** @param {{commandRunner?: Function}} [options] */
-export function graphifyAvailable(options: { commandRunner?: Function | null; configuration?: ParallixConfiguration } = {}): boolean {
+type GraphifyCommandRunner = (command: string, args: string[], options?: gitModule.GitOptions) => { status: number | null; stdout?: string; stderr?: string };
+type GraphifyLog = (message: string) => void;
+
+/** @param {{commandRunner?: GraphifyCommandRunner}} [options] */
+export function graphifyAvailable(options: { commandRunner?: GraphifyCommandRunner | null; configuration?: ParallixConfiguration } = {}): boolean {
   const commandRunner = options.commandRunner ?? null;
   const cmdRunner = commandRunner || gitModule.run;
   return probeGraphifyAvailability({ commandRunner: cmdRunner, configuration: options.configuration }).available;
@@ -31,8 +34,8 @@ export function graphifyCommandCandidates(configuration: ParallixConfiguration =
   return candidates;
 }
 
-/** @param {{commandRunner?: Function}} [options] */
-export function probeGraphifyAvailability(options: { commandRunner?: Function | null; configuration?: ParallixConfiguration } = {}): { available: boolean; command?: string; status?: number | null; reason?: string; error?: unknown } {
+/** @param {{commandRunner?: GraphifyCommandRunner}} [options] */
+export function probeGraphifyAvailability(options: { commandRunner?: GraphifyCommandRunner | null; configuration?: ParallixConfiguration } = {}): { available: boolean; command?: string; status?: number | null; reason?: string; error?: unknown } {
   const commandRunner = options.commandRunner ?? null;
   const cmdRunner = commandRunner || gitModule.run;
   for (const command of graphifyCommandCandidates(options.configuration)) {
@@ -60,8 +63,8 @@ export function probeGraphifyAvailability(options: { commandRunner?: Function | 
   return { available: false, reason: 'missing-command' };
 }
 
-/** @param {{rootDir?: string, commandRunner?: Function, log?: Function, startMessage?: string, failureHint?: string}} [options] */
-export function updateGraphifyKnowledgeGraph(options: { configuration?: ParallixConfiguration; rootDir?: string; commandRunner?: Function; log?: Function; startMessage?: string; failureHint?: string } = {}): { updated: boolean; skipped: boolean; reason?: string; status?: number } {
+/** @param {{rootDir?: string, commandRunner?: GraphifyCommandRunner, log?: GraphifyLog, startMessage?: string, failureHint?: string}} [options] */
+export function updateGraphifyKnowledgeGraph(options: { configuration?: ParallixConfiguration; rootDir?: string; commandRunner?: GraphifyCommandRunner; log?: GraphifyLog; startMessage?: string; failureHint?: string } = {}): { updated: boolean; skipped: boolean; reason?: string; status?: number | null } {
   const rootDir = options.rootDir || process.cwd();
   const commandRunner = options.commandRunner;
   const logFn = options.log || fmt.log.plain;
@@ -90,7 +93,7 @@ export function updateGraphifyKnowledgeGraph(options: { configuration?: Parallix
 }
 
 /** Invoke the upstream operation; every process failure is advisory. */
-function runGraphifyUpdate(command: string, rootDir: string, cmdRunner: Function, logFn: Function, failureHint: string): { updated: boolean; skipped: boolean; reason?: string; status?: number } {
+function runGraphifyUpdate(command: string, rootDir: string, cmdRunner: GraphifyCommandRunner, logFn: GraphifyLog, failureHint: string): { updated: boolean; skipped: boolean; reason?: string; status?: number | null } {
   try {
     const result = cmdRunner(command, ['update', '.'], {
       cwd: rootDir,
@@ -134,10 +137,10 @@ export function resolveGraphPath(options: { configuration?: ParallixConfiguratio
  * Returns an actionable result when the graph is absent instead of an
  * uncaught `graph file not found` failure referencing another worktree.
  *
- * @param {{question: string, rootDir?: string, commandRunner?: Function, log?: Function}} options
+ * @param {{question: string, rootDir?: string, commandRunner?: GraphifyCommandRunner, log?: GraphifyLog}} options
  * @returns {{success: boolean; output?: string; reason?: string; status?: number}}
  */
-export function queryGraph(options: { configuration?: ParallixConfiguration; question: string; rootDir?: string; commandRunner?: Function; log?: Function }): { success: boolean; output?: string; reason?: string; status?: number } {
+export function queryGraph(options: { configuration?: ParallixConfiguration; question: string; rootDir?: string; commandRunner?: GraphifyCommandRunner; log?: GraphifyLog }): { success: boolean; output?: string; reason?: string; status?: number | null } {
   const rootDir = options.rootDir || process.cwd();
   const logFn = options.log || fmt.log.plain;
   const cmdRunner = options.commandRunner || gitModule.run;

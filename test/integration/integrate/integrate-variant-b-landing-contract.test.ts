@@ -1,3 +1,10 @@
+import { agentFamily } from '../../../src/domain/agents.js';
+import { changeRevision } from '../../../src/domain/review.js';
+import { missionLabels, type Mission } from '../../../src/domain/mission.js';
+import { missionVersion } from '../../../src/application/domain-ports.js';
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { integrationServices } from '../../helpers/stub-integration-services.js';
+import { integrationContext } from '../../fixtures/integration-context.js';
 // Historical regression provenance: TASK-1109, TASK-2367.
 // Behavior-owned suite (TASK-2622.09, integration-ci): `px integrate` Variant B landing — the full
 // squash-merge path and its guards (task-1109) and the completion persistence order before statistics
@@ -50,21 +57,20 @@ describe("Variant B landing", () => {
 
   const TEST_SLUG = 'task-integrate-v2';
   const FAKE_ROOT = path.join(os.tmpdir(), `integrate-v2-root-${process.pid}`);
-  let statsCalls = [];
+  let statsCalls: Parameters<typeof stats.recordIntegrationStats>[0][] = [];
 
   // The integrate module's command entry point is its default export; its
   // helpers are named exports. Expose both through the ESM mock facade so the
   // existing call sites (`integrate([...])` and `integrate.resolveConflicts...`)
   // keep working without a writable CommonJS `exports` object.
   function loadIntegrate() {
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    return Object.assign((...args) => __mm2.default(...args), __mm2);
+    return Object.assign((...args: Parameters<typeof __mm2.default>) => __mm2.default(...args), __mm2);
   }
   // TASK-2479: preflight success-path detail (approval/variant lines) is demoted
   // to DEBUG so the default happy path stays concise. The checks are unchanged —
   // failures still print and still block — so these regression locks ask for the
   // detail explicitly to keep coverage of the resolved value.
-  async function withDebug(fn) {
+  async function withDebug<T>(fn: () => T | Promise<T>): Promise<T> {
     const previous = process.env.DEBUG;
     process.env.DEBUG = '1';
     try {
@@ -80,7 +86,7 @@ describe("Variant B landing", () => {
     process.env.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS = '1';
     mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
     mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
-    mock.method(missionUtils, 'inferSlug', (s) => s || TEST_SLUG);
+    mock.method(missionUtils, 'inferSlug', (s: Parameters<(typeof missionUtils)["inferSlug"]>[0]) => s || TEST_SLUG);
     mock.method(missionUtils, 'findMissionDir', () => path.join(FAKE_ROOT, 'docs/missions/2026', TEST_SLUG));
     mock.method(missionUtils, 'findMissionArea', () => 'docs');
     mock.method(missionUtils, 'getPrimaryWorktree', () => FAKE_ROOT);
@@ -89,27 +95,27 @@ describe("Variant B landing", () => {
     mock.method(missionUtils, 'missionTitle', () => 'Test Mission');
     mock.method(missionUtils, 'updateGraphifyKnowledgeGraph', () => false);
     mock.method(git, 'getCurrentBranch', () => 'mission/' + TEST_SLUG);
-    mock.method(git, 'git', (args) => {
-      if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (args.includes('branch') && args.includes('--show-current')) return { status: 0, stdout: 'main', stderr: '' };
-      if (args.includes('status')) return { status: 0, stdout: '', stderr: '' };
-      if (args.includes('merge')) return { status: 0, stdout: '', stderr: '' };
-      if (args.includes('rev-parse')) return { status: 0, stdout: 'deadbeef', stderr: '' };
-      if (args.includes('show')) return { status: 0, stdout: '2026-05-15T12:00:00+02:00\n', stderr: '' };
-      return { status: 0, stdout: '', stderr: '' };
+    mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+      if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
+      if (args.includes('branch') && args.includes('--show-current')) return { signal: null,  status: 0, stdout: 'main', stderr: '' };
+      if (args.includes('status')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      if (args.includes('merge')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'deadbeef', stderr: '' };
+      if (args.includes('show')) return { signal: null,  status: 0, stdout: '2026-05-15T12:00:00+02:00\n', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
-    mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: path.join(FAKE_ROOT, 'backlog/tasks/task.md') }));
+    mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: path.join(FAKE_ROOT, 'backlog/tasks/task.md') }));
     mock.method(backlog, 'getTaskStatus', () => 'approved');
     mock.method(backlog, 'getTaskAssignee', () => 'claude');
     mock.method(backlog, 'setTaskStatus', () => true);
     mock.method(backlog, 'completeTask', () => true);
-    mock.method(forgejo, 'getPrStatus', () => ({ exists: true, state: 'open', merged: false, number: 41 }));
+    mock.method(forgejo, 'getPrStatus', () => ({ exists: true as const, state: 'open', merged: false, number: 41 }));
     mock.method(forgejo, 'listOpenPrsForSlug', () => []);
-    mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true, reviewState: 'APPROVED' }));
+    mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true as const, reviewState: 'APPROVED' }));
     mock.method(forgejo, 'readToken', () => 'token');
     mock.method(forgejo, 'resolveTokenFile', () => 'token-file');
-    mock.method(forgejo, 'syncMerged', () => ({ ok: true }));
-    mock.method(stats, 'recordIntegrationStats', (args) => {
+    mock.method(forgejo, 'syncMerged', () => ({ ok: true as const }));
+    mock.method(stats, 'recordIntegrationStats', (args: Parameters<(typeof stats)["recordIntegrationStats"]>[0]) => {
       statsCalls.push(args);
       return Promise.resolve({
         changed: false,
@@ -119,7 +125,7 @@ describe("Variant B landing", () => {
       });
     });
     mock.method(stats, 'resolveMissionClassification', () => ({ classification: 'ai_sdlc' }));
-    mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true, ref: 'refs/remotes/origin/main', sha: 'deadbeef' }));
+    mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true as const, ref: 'refs/remotes/origin/main', sha: 'deadbeef' }));
     mock.method(process, 'cwd', () => FAKE_ROOT);
     mock.method(process, 'exit', () => {});
 
@@ -131,43 +137,44 @@ describe("Variant B landing", () => {
     // pre-restore `review` lane. A mock that never persisted would leave the
     // store at `review` and contradict the production restore that precedes
     // finishLanding.
-    let storedMission = {
-      status: 'review', closedAt: null, assignee: 'claude', review: {
+    let storedMission: Mission = fixtureMission(TEST_SLUG, {
+      labels: missionLabels(['ai_sdlc']),
+      status: 'review', closedAt: null, assignee: agentFamily('claude'), review: {
         rounds: [{
           number: 1,
-          subject: { change: { kind: 'local-branch', sourceBranch: `mission/${TEST_SLUG}`, targetBranch: 'main' }, revision: 'fixture' },
-          reviewer: 'codex', implementer: 'claude', startedAt: '2026-05-15T10:00:00Z',
+          subject: { change: { kind: 'local-branch', sourceBranch: `mission/${TEST_SLUG}`, targetBranch: 'main' }, revision: changeRevision('fixture') },
+          reviewer: agentFamily('codex'), implementer: agentFamily('claude'), startedAt: '2026-05-15T10:00:00Z',
           decision: { kind: 'approved', decidedAt: '2026-05-15T10:30:00Z', comment: null, source: { kind: 'local' } },
           response: null, phase: 'approved', disposition: 'APPROVED', reviewerRetryCount: 0, implementerRetryCount: 0,
         }], intervention: null, stageLaunches: [], reviewEvents: [],
       },
-    };
+    });
     mock.method(composition, 'createMissionApplicationServices', async () => ({
       store: {
         _repoId: 'default',
-        load: async () => ({ kind: 'found', mission: storedMission, version: 1 }),
+        load: async () => ({ kind: 'found' as const, mission: storedMission, version: 1 }),
       },
      lifecycle: {
        transition: async () => {
-         storedMission.status = 'integration';
-         return { status: 'completed', value: { to: 'integration', version: 2 } };
+         storedMission = { ...storedMission, status: 'integration', closedAt: null };
+         return { durableEvidence: [],  status: 'completed' as const, value: { to: 'integration', version: 2 } };
        },
       },
       integration: {
         decideIntegration: async () => {
-          storedMission.status = 'done';
-          return { status: 'completed' };
+          storedMission = { ...storedMission, status: 'done' };
+          return { durableEvidence: [],  status: 'completed' as const };
         },
         close: async () => {
-          storedMission.closedAt = '2026-05-15T12:00:00.000Z';
-          return { status: 'completed' };
+          storedMission = { ...storedMission, status: 'done', closedAt: '2026-05-15T12:00:00.000Z' };
+          return { durableEvidence: [],  status: 'completed' as const };
         },
       },
       handoff: {
         recordNel: async () => ({}),
       },
     }));
-    
+
     if (!fs.existsSync(FAKE_ROOT)) fs.mkdirSync(FAKE_ROOT, { recursive: true });
     fs.writeFileSync(path.join(FAKE_ROOT, 'workflow.config.json'), JSON.stringify({
       adapters: { review: { provider: 'forgejo', baseUrl: 'http://localhost:3300', remote: 'review', repo: 'magnus/visualboard' }, verification: { command: 'true' } },
@@ -183,8 +190,8 @@ describe("Variant B landing", () => {
     setupMocks();
     const integrate = loadIntegrate();
     const originalLog = console.log;
-    const logs = [];
-    console.log = (msg) => logs.push(msg);
+    const logs: unknown[] = [];
+    console.log = (msg: unknown) => logs.push(msg);
     // TASK-2479: the variant-selection progress line is demoted to DEBUG so the
     // default happy path stays concise. Ask for it explicitly here so this
     // regression lock still verifies the Variant B squash-merge path runs and
@@ -196,7 +203,9 @@ describe("Variant B landing", () => {
       await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
     } catch { /* expected */ }
 
+    assert.ok(logs.every((message): message is string => typeof message === 'string'));
     assert.ok(logs.some(l => l.includes('Selecting integration variant: Variant B')));
+    assert.ok(logs.every((message): message is string => typeof message === 'string'));
     assert.ok(logs.some(l => l.includes('integrated into')));
     assert.equal(statsCalls.length, 1);
 
@@ -210,7 +219,7 @@ describe("Variant B landing", () => {
     const taskFile = path.join(FAKE_ROOT, 'backlog/tasks/task.md');
     fs.mkdirSync(path.dirname(taskFile), { recursive: true });
     fs.writeFileSync(taskFile, '---\nstatus: review\n---\n', 'utf8');
-    const events = [];
+    const events: string[] = [];
     mock.method(backlog, 'getTaskStatus', () => 'review');
     mock.method(backlog, 'setTaskStatus', () => {
       events.push('promote');
@@ -220,26 +229,26 @@ describe("Variant B landing", () => {
       events.push('complete');
       return true;
     });
-    mock.method(git, 'git', (args) => {
-      if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (args.includes('branch') && args.includes('--show-current')) return { status: 0, stdout: 'main', stderr: '' };
-      if (args.includes('status')) return { status: 0, stdout: '', stderr: '' };
+    mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+      if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
+      if (args.includes('branch') && args.includes('--show-current')) return { signal: null,  status: 0, stdout: 'main', stderr: '' };
+      if (args.includes('status')) return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('merge') && args.includes('--abort')) {
         events.push('abort');
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
       if (args.includes('merge') && args.includes('--squash')) {
         events.push('squash');
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
       if (args.includes('commit')) {
         events.push('commit');
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
-      if (args.includes('merge')) return { status: 0, stdout: '', stderr: '' };
-      if (args.includes('rev-parse')) return { status: 0, stdout: 'deadbeef', stderr: '' };
-      if (args.includes('show')) return { status: 0, stdout: '2026-05-15T12:00:00+02:00\n', stderr: '' };
-      return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('merge')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'deadbeef', stderr: '' };
+      if (args.includes('show')) return { signal: null,  status: 0, stdout: '2026-05-15T12:00:00+02:00\n', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
     const integrate = loadIntegrate();
 
@@ -253,22 +262,22 @@ describe("Variant B landing", () => {
 
   test('integrate Variant B preserves soft-reset backlog noise across squash merge', async () => {
     setupMocks();
-    const gitCalls = [];
+    const gitCalls: string[] = [];
     mock.method(missionUtils, 'softResetTrailingBacklogNoise', () => true);
-    mock.method(git, 'git', (args) => {
+    mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
       gitCalls.push(args.join(' '));
-      if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (args.includes('branch') && args.includes('--show-current')) return { status: 0, stdout: 'main', stderr: '' };
-      if (args.includes('status')) return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
+      if (args.includes('branch') && args.includes('--show-current')) return { signal: null,  status: 0, stdout: 'main', stderr: '' };
+      if (args.includes('status')) return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('diff') && args.includes('--cached') && args.includes('--binary')) {
-        return { status: 0, stdout: 'diff --git a/backlog/tasks/task.md b/backlog/tasks/task.md\n', stderr: '' };
+        return { signal: null,  status: 0, stdout: 'diff --git a/backlog/tasks/task.md b/backlog/tasks/task.md\n', stderr: '' };
       }
-      if (args.includes('reset') && args.includes('--hard')) return { status: 0, stdout: '', stderr: '' };
-      if (args.includes('merge')) return { status: 0, stdout: '', stderr: '' };
-      if (args.includes('apply') && args.includes('--index')) return { status: 0, stdout: '', stderr: '' };
-      if (args.includes('rev-parse')) return { status: 0, stdout: 'deadbeef', stderr: '' };
-      if (args.includes('show')) return { status: 0, stdout: '2026-05-15T12:00:00+02:00\n', stderr: '' };
-      return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('reset') && args.includes('--hard')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      if (args.includes('merge')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      if (args.includes('apply') && args.includes('--index')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'deadbeef', stderr: '' };
+      if (args.includes('show')) return { signal: null,  status: 0, stdout: '2026-05-15T12:00:00+02:00\n', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
     const integrate = loadIntegrate();
 
@@ -297,46 +306,41 @@ describe("Variant B landing", () => {
     process.env.FORGEJO_USER = 'claude'; // authorized
     delete process.env.WORKFLOW_AGENT;
 
-    const captured = {
-      prForgejoUser: null,
-      approvalForgejoUser: null
-    };
+    const captured: Record<'prForgejoUser' | 'approvalForgejoUser', string | null> = { prForgejoUser: null, approvalForgejoUser: null };
     mock.method(backlog, 'getTaskAssignee', () => 'gemini');
-    mock.method(forgejo, 'getPrStatus', (_branch, _rootDir, options = {}) => {
-  // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `prForgejoUser` absent from its inferred mock shape.
+    mock.method(forgejo, 'getPrStatus', (_branch: Parameters<(typeof forgejo)["getPrStatus"]>[0], _rootDir: Parameters<(typeof forgejo)["getPrStatus"]>[1], options: Parameters<(typeof forgejo)["getPrStatus"]>[2] = {}) => {
       captured.prForgejoUser = options.forgejoUser || null;
-  // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `forgejoUser` absent from its inferred mock shape.
       if (options.forgejoUser !== 'gemini') {
-        return { exists: false, error: 'api-failed', raw: 'failed to resolve PR for mission/task-integrate-v2' };
+        return { exists: false as const, error: 'api-failed', raw: 'failed to resolve PR for mission/task-integrate-v2' };
       }
-      return { exists: true, state: 'open', merged: false, number: 41 };
+      return { exists: true as const, state: 'open', merged: false, number: 41 };
     });
-    mock.method(forgejo, 'getLatestReviewDecision', (_branch, options = {}) => {
-  // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `approvalForgejoUser` absent from its inferred mock shape.
+    mock.method(forgejo, 'getLatestReviewDecision', (_branch: Parameters<(typeof forgejo)["getLatestReviewDecision"]>[0], options: Parameters<(typeof forgejo)["getLatestReviewDecision"]>[1] = {}) => {
       captured.approvalForgejoUser = options.forgejoUser || null;
-  // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `forgejoUser` absent from its inferred mock shape.
       if (options.forgejoUser !== 'gemini') {
-        return { ok: false, error: 'api-failed', reviewState: null };
+        return { ok: false as const, error: 'api-failed', reviewState: null };
       }
-      return { ok: true, reviewState: 'APPROVED' };
+      return { ok: true as const, reviewState: 'APPROVED' };
     });
 
     const integrate = loadIntegrate();
-    const logs = [];
-    const errors = [];
-    const exitCodes = [];
+    const logs: unknown[] = [];
+    const errors: unknown[] = [];
+    const exitCodes: (string | number | null | undefined)[] = [];
     const originalLog = console.log;
     const originalError = console.error;
-    console.log = (msg) => logs.push(msg);
-    console.error = (msg) => errors.push(msg);
-    mock.method(process, 'exit', (code) => exitCodes.push(code));
+    console.log = (msg: unknown) => logs.push(msg);
+    console.error = (msg: unknown) => errors.push(msg);
+    mock.method(process, 'exit', (code: Parameters<(typeof process)["exit"]>[0]) => exitCodes.push(code));
 
     try {
       await withDebug(() => integrate([TEST_SLUG, '--dry-run', '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices }));
 
       assert.equal(captured.prForgejoUser, 'gemini');
       assert.equal(captured.approvalForgejoUser, 'gemini');
+      assert.ok(logs.every((message): message is string => typeof message === 'string'));
       assert.ok(logs.some(l => l.includes('Forgejo PR: PR #41 open')));
+      assert.ok(logs.every((message): message is string => typeof message === 'string'));
       assert.ok(logs.some(l => l.includes('Forgejo approval: latest formal review state is APPROVED')));
       assert.ok(!exitCodes.includes(1));
     } finally {
@@ -351,30 +355,25 @@ describe("Variant B landing", () => {
   test('integrate passes the pre-resolved Forgejo token into syncMerged', async () => {
     setupMocks();
     let readTokenCalls = 0;
-    const captured = {
-      prToken: null,
-      approvalToken: null
-    };
+    const captured: Record<'prToken' | 'approvalToken', string | null> = { prToken: null, approvalToken: null };
 
     mock.method(forgejo, 'readToken', () => {
       readTokenCalls += 1;
       return readTokenCalls <= 2 ? 'preflight-token' : null;
     });
-    mock.method(forgejo, 'getPrStatus', (_branch, _rootDir, options = {}) => {
-  // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `prToken` absent from its inferred mock shape.
+    mock.method(forgejo, 'getPrStatus', (_branch: Parameters<(typeof forgejo)["getPrStatus"]>[0], _rootDir: Parameters<(typeof forgejo)["getPrStatus"]>[1], options: Parameters<(typeof forgejo)["getPrStatus"]>[2] = {}) => {
       captured.prToken = options.token || null;
-      return { exists: true, state: 'open', merged: false, number: 41 };
+      return { exists: true as const, state: 'open', merged: false, number: 41 };
     });
-    mock.method(forgejo, 'getLatestReviewDecision', (_branch, options = {}) => {
-  // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `approvalToken` absent from its inferred mock shape.
+    mock.method(forgejo, 'getLatestReviewDecision', (_branch: Parameters<(typeof forgejo)["getLatestReviewDecision"]>[0], options: Parameters<(typeof forgejo)["getLatestReviewDecision"]>[1] = {}) => {
       captured.approvalToken = options.token || null;
-      return { ok: true, reviewState: 'APPROVED' };
+      return { ok: true as const, reviewState: 'APPROVED' };
     });
 
     const integrate = loadIntegrate();
-    const logs = [];
+    const logs: unknown[] = [];
     const originalLog = console.log;
-    console.log = (msg) => logs.push(msg);
+    console.log = (msg: unknown) => logs.push(msg);
 
     try {
       await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
@@ -382,6 +381,7 @@ describe("Variant B landing", () => {
       assert.equal(captured.prToken, 'preflight-token');
       assert.equal(captured.approvalToken, 'preflight-token');
       assert.equal(readTokenCalls, 2);
+      assert.ok(logs.every((message): message is string => typeof message === 'string'));
       assert.ok(logs.some(l => l.includes('integrated into')));
     } finally {
       console.log = originalLog;
@@ -391,21 +391,21 @@ describe("Variant B landing", () => {
 
   test('integrate rejects a Forgejo PR that is already merged', async () => {
     setupMocks();
-    mock.method(forgejo, 'getPrStatus', () => ({ exists: true, state: 'closed', merged: true, number: 41 }));
+    mock.method(forgejo, 'getPrStatus', () => ({ exists: true as const, state: 'closed', merged: true, number: 41 }));
     const integrate = loadIntegrate();
-    const logs = [];
-    const errors = [];
-    const exitCodes = [];
+    const logs: unknown[] = [];
+    const errors: unknown[] = [];
+    const exitCodes: (string | number | null | undefined)[] = [];
     const originalLog = console.log;
     const originalError = console.error;
-    console.log = (msg) => logs.push(msg);
-    console.error = (msg) => errors.push(msg);
-    mock.method(process, 'exit', (code) => exitCodes.push(code));
+    console.log = (msg: unknown) => logs.push(msg);
+    console.error = (msg: unknown) => errors.push(msg);
+    mock.method(process, 'exit', (code: Parameters<(typeof process)["exit"]>[0]) => exitCodes.push(code));
 
     try {
       await integrate([TEST_SLUG, '--dry-run', '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
     } catch { /* expected */ }
-    
+
     const output = [...logs, ...errors].join('\n');
     assert.match(output, /Forgejo PR: PR #41 is already marked merged/);
     assert.match(output, /re-sync the local base branch/);
@@ -421,14 +421,15 @@ describe("Variant B landing", () => {
   test('integrate warns that --no-gate is ignored', async () => {
     setupMocks();
     const integrate = loadIntegrate();
-    const logs = [];
+    const logs: unknown[] = [];
     const originalLog = console.log;
-    console.log = (msg) => logs.push(msg);
+    console.log = (msg: unknown) => logs.push(msg);
 
     try {
       await integrate([TEST_SLUG, '--dry-run', '--no-gate', '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
     } catch { /* expected */ }
 
+    assert.ok(logs.every((message): message is string => typeof message === 'string'));
     assert.ok(logs.some(l => l.includes('integrate ignores --no-gate')));
     assert.equal(statsCalls.length, 0);
 
@@ -438,24 +439,25 @@ describe("Variant B landing", () => {
 
   test('integrate exits non-zero when post-integration stats recording fails', async () => {
     setupMocks();
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    stats.recordIntegrationStats.mock.mockImplementation((args) => {
+    mock.method(stats, 'recordIntegrationStats', (args: Parameters<typeof stats.recordIntegrationStats>[0]) => {
       statsCalls.push(args);
       throw new Error('stats write failed');
     });
     const integrate = loadIntegrate();
-    const errors = [];
-    const exitCodes = [];
+    const errors: unknown[] = [];
+    const exitCodes: (string | number | null | undefined)[] = [];
     const originalError = console.error;
-    console.error = (msg) => errors.push(msg);
-    mock.method(process, 'exit', (code) => exitCodes.push(code));
+    console.error = (msg: unknown) => errors.push(msg);
+    mock.method(process, 'exit', (code: Parameters<(typeof process)["exit"]>[0]) => exitCodes.push(code));
 
     try {
       await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
     } catch { /* expected */ }
 
     assert.equal(statsCalls.length, 1);
+    assert.ok(errors.every((message): message is string => typeof message === 'string'));
     assert.ok(errors.some(l => l.includes('Post-integration workflow stats failed')));
+    assert.ok(errors.every((message): message is string => typeof message === 'string'));
     assert.ok(errors.some(l => l.includes('stats write failed')));
     assert.equal(exitCodes.at(-1), 1);
 
@@ -465,16 +467,16 @@ describe("Variant B landing", () => {
 
   test('integrate reports merged-PR recovery guidance before any closeout work', async () => {
     setupMocks();
-    mock.method(forgejo, 'getPrStatus', () => ({ exists: true, state: 'closed', merged: true, number: 41 }));
+    mock.method(forgejo, 'getPrStatus', () => ({ exists: true as const, state: 'closed', merged: true, number: 41 }));
     const integrate = loadIntegrate();
-    const logs = [];
-    const errors = [];
-    const exitCodes = [];
+    const logs: unknown[] = [];
+    const errors: unknown[] = [];
+    const exitCodes: (string | number | null | undefined)[] = [];
     const originalLog = console.log;
     const originalError = console.error;
-    console.log = (msg) => logs.push(msg);
-    console.error = (msg) => errors.push(msg);
-    mock.method(process, 'exit', (code) => exitCodes.push(code));
+    console.log = (msg: unknown) => logs.push(msg);
+    console.error = (msg: unknown) => errors.push(msg);
+    mock.method(process, 'exit', (code: Parameters<(typeof process)["exit"]>[0]) => exitCodes.push(code));
 
     try {
       await integrate([TEST_SLUG, '--dry-run', '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
@@ -500,28 +502,29 @@ describe("Variant B landing", () => {
       taskStatusMutations++;
       return true;
     });
-    mock.method(git, 'git', (args) => {
-      if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (args.includes('branch') && args.includes('--show-current')) return { status: 0, stdout: 'main', stderr: '' };
-      if (args.includes('status')) return { status: 0, stdout: '', stderr: '' };
+    mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+      if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
+      if (args.includes('branch') && args.includes('--show-current')) return { signal: null,  status: 0, stdout: 'main', stderr: '' };
+      if (args.includes('status')) return { signal: null,  status: 0, stdout: '', stderr: '' };
       // F1 confirms the integration rebase by rev-parse-ing the primary and the
       // mission HEAD, then checking `--is-ancestor`; the rebase step needs these.
-      if (args.includes('rev-parse')) return { status: 0, stdout: 'deadbeef', stderr: '' };
-      if (args.includes('merge') && args.includes('--no-commit')) return { status: 0, stdout: '', stderr: '' };
-      if (args.includes('merge') && args.includes('--abort')) return { status: 1, stdout: '', stderr: 'fatal: abort failed' };
-      return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'deadbeef', stderr: '' };
+      if (args.includes('merge') && args.includes('--no-commit')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      if (args.includes('merge') && args.includes('--abort')) return { signal: null,  status: 1, stdout: '', stderr: 'fatal: abort failed' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
     const integrate = loadIntegrate();
-    const errors = [];
-    const exitCodes = [];
+    const errors: unknown[] = [];
+    const exitCodes: (string | number | null | undefined)[] = [];
     const originalError = console.error;
-    console.error = (msg) => errors.push(msg);
-    mock.method(process, 'exit', (code) => exitCodes.push(code));
+    console.error = (msg: unknown) => errors.push(msg);
+    mock.method(process, 'exit', (code: Parameters<(typeof process)["exit"]>[0]) => exitCodes.push(code));
 
     try {
       await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
     } catch { /* expected */ }
 
+    assert.ok(errors.every((message): message is string => typeof message === 'string'));
     assert.ok(errors.some(l => l.includes('Dry-run merge could not be aborted cleanly')));
     assert.equal(taskStatusMutations, 0, 'must not promote the task before the probe merge abort succeeds');
     assert.equal(statsCalls.length, 0);
@@ -533,33 +536,36 @@ describe("Variant B landing", () => {
 
   test('integrate Variant B resumed partial state prints sync diagnostics on sync failure', async () => {
     setupMocks();
-    mock.method(git, 'git', (args) => {
-      if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (args.includes('branch') && args.includes('--show-current')) return { status: 0, stdout: 'main', stderr: '' };
-      if (args.includes('status')) return { status: 0, stdout: '', stderr: '' };
-      if (args.includes('rev-parse')) return { status: 0, stdout: 'deadbeef', stderr: '' };
-      if (args.includes('merge') && args.includes('--no-commit')) return { status: 1, stdout: 'conflict', stderr: 'conflict' };
-      if (args.includes('merge') && args.includes('--abort')) return { status: 1, stdout: '', stderr: 'There is no merge to abort' };
-      if (args.includes('log') && args.includes('--format=%x00%H%x00%B')) return { status: 0, stdout: `\0deadbeef\0mission/${TEST_SLUG}: Test Mission\n`, stderr: '' };
-      return { status: 0, stdout: '', stderr: '' };
+    mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+      if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
+      if (args.includes('branch') && args.includes('--show-current')) return { signal: null,  status: 0, stdout: 'main', stderr: '' };
+      if (args.includes('status')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'deadbeef', stderr: '' };
+      if (args.includes('merge') && args.includes('--no-commit')) return { signal: null,  status: 1, stdout: 'conflict', stderr: 'conflict' };
+      if (args.includes('merge') && args.includes('--abort')) return { signal: null,  status: 1, stdout: '', stderr: 'There is no merge to abort' };
+      if (args.includes('log') && args.includes('--format=%x00%H%x00%B')) return { signal: null,  status: 0, stdout: `\0deadbeef\0mission/${TEST_SLUG}: Test Mission\n`, stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
-    mock.method(forgejo, 'syncMerged', () => ({ ok: false, error: 'api-failed', statusCode: 500 }));
+    mock.method(forgejo, 'syncMerged', () => ({ ok: false as const, error: 'api-failed', statusCode: 500 }));
     const integrate = loadIntegrate();
-    const logs = [];
-    const errors = [];
-    const exitCodes = [];
+    const logs: unknown[] = [];
+    const errors: unknown[] = [];
+    const exitCodes: (string | number | null | undefined)[] = [];
     const originalLog = console.log;
     const originalError = console.error;
-    console.log = (msg) => logs.push(msg);
-    console.error = (msg) => errors.push(msg);
-    mock.method(process, 'exit', (code) => exitCodes.push(code));
+    console.log = (msg: unknown) => logs.push(msg);
+    console.error = (msg: unknown) => errors.push(msg);
+    mock.method(process, 'exit', (code: Parameters<(typeof process)["exit"]>[0]) => exitCodes.push(code));
 
     try {
       await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
     } catch { /* expected */ }
 
+    assert.ok(logs.every((message): message is string => typeof message === 'string'));
     assert.ok(logs.some(l => l.includes('Resuming from sync-merged step')));
+    assert.ok(errors.every((message): message is string => typeof message === 'string'));
     assert.ok(errors.some(l => l.includes('Forgejo sync-merged failed (api-failed: 500).')));
+    assert.ok(logs.every((message): message is string => typeof message === 'string'));
     assert.ok(logs.some(l => l.includes('Node sync-merged Diagnostic Table')));
     assert.equal(statsCalls.length, 0);
     assert.equal(exitCodes.at(-1), 1);
@@ -570,12 +576,12 @@ describe("Variant B landing", () => {
   });
 
   test('integrate Variant B conflict path prints conflicting files and helper guidance', () => {
-    const logs = [];
-    const errors = [];
+    const logs: unknown[] = [];
+    const errors: unknown[] = [];
     const originalLog = console.log;
     const originalError = console.error;
-    console.log = (msg) => logs.push(msg);
-    console.error = (msg) => errors.push(msg);
+    console.log = (msg: unknown) => logs.push(msg);
+    console.error = (msg: unknown) => errors.push(msg);
 
     try {
       reportMergeConflicts(
@@ -589,9 +595,13 @@ describe("Variant B landing", () => {
       );
     } catch { /* expected */ }
 
+    assert.ok(errors.every((message): message is string => typeof message === 'string'));
     assert.ok(errors.some(l => l.includes('Merge conflicts detected. Rebase the mission branch before integrating.')));
+    assert.ok(logs.every((message): message is string => typeof message === 'string'));
     assert.ok(logs.some(l => l.includes('Conflicting files (2):')));
+    assert.ok(logs.every((message): message is string => typeof message === 'string'));
     assert.ok(logs.some(l => l.includes('matrix-line')));
+    assert.ok(logs.every((message): message is string => typeof message === 'string'));
     assert.ok(logs.some(l => l.includes('Conflict resolution options:')));
 
     console.log = originalLog;
@@ -604,51 +614,50 @@ describe("Variant B landing", () => {
     const { evaluateTaskStatusForIntegration } = integrate;
 
     // Case 1: Status review, PR merged
-    const res1 = evaluateTaskStatusForIntegration({
+    const res1 = evaluateTaskStatusForIntegration(integrationContext({
       taskStatus: 'review',
-      pr: { state: 'merged', merged: true },
+      pr: { exists: true, state: 'merged', merged: true },
       approval: { ok: false }
-    });
+    }));
     assert.strictEqual(res1.ok, false);
     assert.match(res1.message, /approved Forgejo PR/);
 
     // Case 2: Status review, review approved
-    const res2 = evaluateTaskStatusForIntegration({
+    const res2 = evaluateTaskStatusForIntegration(integrationContext({
       taskStatus: 'review',
-      pr: { merged: false },
+      pr: { exists: false, merged: false },
       approval: { ok: true, reviewState: 'APPROVED' }
-    });
+    }));
     assert.strictEqual(res2.ok, true);
     assert.match(res2.message, /latest formal review state is APPROVED/);
 
     // Case 3: Other status
-    const res3 = evaluateTaskStatusForIntegration({
+    const res3 = evaluateTaskStatusForIntegration(integrationContext({
       taskStatus: 'active',
-      pr: { merged: false },
+      pr: { exists: false, merged: false },
       approval: { ok: true, reviewState: 'APPROVED' }
-    });
+    }));
     assert.strictEqual(res3.ok, false);
   });
 
   test('recordPostIntegrationStats keeps operator-owned stats outside git', async () => {
     setupMocks();
-    const gitCalls = [];
+    const gitCalls: string[][] = [];
 
-    try {
-      const { recordPostIntegrationStats } = loadIntegrate();
-      const outcome = await recordPostIntegrationStats('task-1109', { configuration: resolveConfiguration(process.env),
-        rootDir: FAKE_ROOT,
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-        gitRunner(args) {
+    mock.method(gitModule, 'git', (args: string[]) => {
           gitCalls.push(args);
           if (args.join(' ').includes('log -1 --format=%cs')) {
-            return { status: 0, stdout: '2026-05-18\n', stderr: '' };
+            return { signal: null, status: 0, stdout: '2026-05-18\n', stderr: '' };
           }
           if (args.includes('add') || args.includes('commit') || args.includes('push') || args.includes('reset')) {
             throw new Error(`unexpected git args: ${JSON.stringify(args)}`);
           }
-          return { status: 0, stdout: '', stderr: '' };
-        },
+          return { signal: null, status: 0, stdout: '', stderr: '' };
+        });
+    try {
+      const { recordPostIntegrationStats } = loadIntegrate();
+      const outcome = await recordPostIntegrationStats('task-1109', { configuration: resolveConfiguration(process.env),
+        rootDir: FAKE_ROOT,
         recordIntegrationStatsFn() {
           return {
             changed: true,
@@ -664,6 +673,7 @@ describe("Variant B landing", () => {
         }
       });
 
+      assert.ok('changed' in outcome);
       assert.equal(outcome.changed, true);
       assert.ok(!gitCalls.some(args => args.includes('add')));
       assert.ok(!gitCalls.some(args => args.includes('commit')));
@@ -694,7 +704,7 @@ describe("integration completion order", () => {
     fs.writeFileSync(path.join(ROOT, 'workflow.config.json'), JSON.stringify({ adapters: { verification: { command: 'true' } } }));
     fs.writeFileSync(path.join(ROOT, 'backlog', 'tasks', 'task.md'), 'status: approved\n');
     const calls: string[] = [];
-    let status = 'integration';
+    let status: Mission['status'] = 'integration';
     let doneEvents = 0;
     mock.method(missionUtils, 'inferSlug', () => SLUG);
     mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
@@ -707,39 +717,38 @@ describe("integration completion order", () => {
     mock.method(missionUtils, 'updateGraphifyKnowledgeGraph', () => false);
     mock.method(git, 'getCurrentBranch', () => `mission/${SLUG}`);
     mock.method(git, 'git', (args: string[]) => {
-      if (args.includes('branch') && args.includes('--show-current')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (args.includes('diff') && args.includes('--cached')) return { status: 0, stdout: 'fixture.ts\n', stderr: '' };
+      if (args.includes('branch') && args.includes('--show-current')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
+      if (args.includes('diff') && args.includes('--cached')) return { signal: null,  status: 0, stdout: 'fixture.ts\n', stderr: '' };
       if (args.includes('commit')) calls.push('landed');
-      if (args.includes('rev-parse')) return { status: 0, stdout: 'landed-sha\n', stderr: '' };
-      if (args.includes('show')) return { status: 0, stdout: '2026-05-15T12:00:00+02:00\n', stderr: '' };
-      return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'landed-sha\n', stderr: '' };
+      if (args.includes('show')) return { signal: null,  status: 0, stdout: '2026-05-15T12:00:00+02:00\n', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
-    mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: path.join(ROOT, 'backlog', 'tasks', 'task.md') }));
+    mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: path.join(ROOT, 'backlog', 'tasks', 'task.md') }));
     mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
     mock.method(backlog, 'getTaskStatus', () => 'approved');
     mock.method(backlog, 'getTaskAssignee', () => 'codex');
     mock.method(backlog, 'completeTask', () => true);
-    mock.method(forgejo, 'getPrStatus', () => ({ exists: true, state: 'open', merged: false, number: 1 }));
-    mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true, reviewState: 'APPROVED' }));
+    mock.method(forgejo, 'getPrStatus', () => ({ exists: true as const, state: 'open', merged: false, number: 1 }));
+    mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true as const, reviewState: 'APPROVED' }));
     mock.method(forgejo, 'listOpenPrsForSlug', () => []);
     mock.method(forgejo, 'readToken', () => 'token');
     mock.method(forgejo, 'resolveTokenFile', () => 'token-file');
-    mock.method(forgejo, 'syncMerged', () => ({ ok: true }));
+    mock.method(forgejo, 'syncMerged', () => ({ ok: true as const }));
     mock.method(stats, 'recordIntegrationStats', async () => {
       calls.push('stats');
       return { changed: false, row: { mission: SLUG }, data: { rows: [] }, report: 'none' };
     });
     mock.method(stats, 'resolveMissionClassification', () => ({ classification: 'ai_sdlc' }));
-    mock.method(verification, 'captureVerifiedTreeProof', () => ({ ok: true, proof: { rootDir: ROOT } }));
-    mock.method(verification, 'assertVerifiedTreeProof', () => ({ ok: true }));
+    mock.method(verification, 'captureVerifiedTreeProof', () => ({ ok: true as const, proof: { rootDir: ROOT } }));
+    mock.method(verification, 'assertVerifiedTreeProof', () => ({ ok: true as const }));
     mock.method(process, 'cwd', () => ROOT);
     mock.method(process, 'exit', () => {});
-    const services = {
-      store: { load: async () => ({ kind: 'found', mission: { status, review: null }, version: 1 }) },
-      integration: { decideIntegration: async () => { calls.push('done'); status = 'done'; doneEvents += 1; return { status: 'completed', value: { mission: { status }, version: 2 } }; } },
-      lifecycle: { transition: async () => ({ status: 'completed', value: { to: 'review', version: 2 } }) },
-      handoff: { recordNel: async () => ({}) },
-    };
+    const services = integrationServices({
+      store: { load: async () => ({ kind: 'found', mission: fixtureMission(SLUG, { status, review: null, labels: missionLabels(['ai_sdlc']) }), version: missionVersion(1) }) },
+      integration: { decideIntegration: async () => { calls.push('done'); status = 'done'; doneEvents += 1; return { durableEvidence: [], status: 'completed', value: { mission: fixtureMission(SLUG, { status, labels: missionLabels(['ai_sdlc']) }), version: missionVersion(2) } }; } },
+      lifecycle: { transition: async request => ({ durableEvidence: [], status: 'completed', value: { mission: fixtureMission(request.missionId, { status: 'review' }), from: 'active', to: 'review', previousAssignee: null, laneChanged: true, version: missionVersion(2) } }) },
+    });
     try {
       await integrate.default([SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: async () => services });
       assert.equal(status, 'done');

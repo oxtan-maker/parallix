@@ -1,3 +1,4 @@
+import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflow-ports.js';
 // Behavior-owned suite (TASK-2622.09, integration-ci): integration-time gate scripting and cross-process
 // exclusivity — verify-local integrate, workflow gate recursion, and the exclusive Mission claim across
 // two processes. Legacy case names unchanged.
@@ -17,7 +18,7 @@ describe("verify-local integrate gate", () => {
   const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..');
   const scriptPath = path.join(repoRoot, 'scripts', 'verify-local.sh');
 
-  function runScript(args, env = {}) {
+  function runScript(args: readonly string[], env = {}) {
     // These dry-run and stubbed-gate contracts keep output small. Capture it
     // directly instead of writing, reopening, reading, and deleting two files
     // for every invoked gate plan.
@@ -25,6 +26,7 @@ describe("verify-local integrate gate", () => {
       cwd: repoRoot,
       env: { ...process.env, ...env },
       encoding: 'utf8',
+      timeout: 30_000,
     });
     if (result.error && result.status === null) {
       throw result.error;
@@ -32,21 +34,88 @@ describe("verify-local integrate gate", () => {
     return result;
   }
 
-  function staticAnalysisStubEnv(tmpDir, npxStatus = 0) {
+  function staticAnalysisStubEnv(tmpDir: string, npxStatus = 0, npmStatus = 0, compilerDiagnostic = '') {
     const binDir = path.join(tmpDir, 'bin');
     const nodePath = path.join(binDir, 'node');
-    const eslintJsonPath = path.join(tmpDir, 'eslint.json');
-    const baseline = JSON.parse(fs.readFileSync(path.join(repoRoot, 'config', 'lint-baseline.json'), 'utf8')) as Record<string, number>;
-    const messages = Object.entries(baseline).flatMap(([ruleId, count]) => Array.from({ length: count }, () => ({ ruleId })));
+    const diagnostic = path.join(tmpDir, 'compiler-diagnostic');
     fs.mkdirSync(binDir);
-    fs.writeFileSync(eslintJsonPath, JSON.stringify([{ messages }]));
+    fs.writeFileSync(diagnostic, compilerDiagnostic);
     fs.writeFileSync(nodePath, `#!/bin/sh\nexec ${process.execPath} "$@"\n`);
-    fs.writeFileSync(path.join(binDir, 'npx'), `#!/bin/sh\ncat ${eslintJsonPath}\nexit ${npxStatus}\n`);
-    fs.writeFileSync(path.join(binDir, 'npm'), '#!/bin/sh\nexit 0\n');
-    fs.chmodSync(nodePath, 0o755);
-    fs.chmodSync(path.join(binDir, 'npx'), 0o755);
-    fs.chmodSync(path.join(binDir, 'npm'), 0o755);
+    fs.writeFileSync(path.join(binDir, 'npx'), `#!/bin/sh\ncase "$*" in *eslint*) exit ${npxStatus} ;; esac\nexit 0\n`);
+    fs.writeFileSync(path.join(binDir, 'npm'), `#!/bin/sh\ncat '${diagnostic}'\nexit ${npmStatus}\n`);
+    for (const command of ['node', 'npx', 'npm']) { fs.chmodSync(path.join(binDir, command), 0o755); }
     return { PARALLIX_NODE: nodePath, PATH: `${binDir}:${process.env.PATH}` };
+  }
+
+  // Owns the real shell/tool boundary: tiny isolated projects use the repository
+  // ESLint configuration, compiler commands and hygiene scanner without a model,
+  // database, network request or change to the operator checkout.
+  function analysisProject(root: string) {
+    fs.mkdirSync(path.join(root, 'scripts'));
+    fs.mkdirSync(path.join(root, 'src'));
+    fs.mkdirSync(path.join(root, 'web'));
+    fs.mkdirSync(path.join(root, 'test', 'lib'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'test', 'unit'));
+    fs.symlinkSync(path.join(repoRoot, 'node_modules'), path.join(root, 'node_modules'), 'dir');
+    fs.copyFileSync(path.join(repoRoot, 'eslint.config.mjs'), path.join(root, 'eslint.config.mjs'));
+    fs.copyFileSync(path.join(repoRoot, 'scripts', 'test-hygiene.sh'), path.join(root, 'scripts', 'test-hygiene.sh'));
+    fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ type: 'module', scripts: {
+      typecheck: 'tsc --noEmit && tsc --noEmit --project tsconfig.scripts.json',
+    } }));
+    fs.writeFileSync(path.join(root, 'tsconfig.json'), JSON.stringify({ compilerOptions: {
+      strict: true, noEmit: true, skipLibCheck: true, module: 'NodeNext', moduleResolution: 'NodeNext', target: 'ES2024', types: [],
+    }, include: ['src/**/*.ts', 'web/**/*.ts'] }));
+    fs.writeFileSync(path.join(root, 'tsconfig.scripts.json'), JSON.stringify({ extends: './tsconfig.json', include: ['scripts/fixture.ts'] }));
+    fs.writeFileSync(path.join(root, 'tsconfig.test.json'), JSON.stringify({ extends: './tsconfig.json', include: ['test/unit/analysis-contract.test.ts'] }));
+    for (const file of ['src/fixture.ts', 'web/fixture.ts', 'scripts/fixture.ts', 'test/unit/analysis-contract.test.ts', 'test/lib/test-layout-validation.ts']) {
+      fs.writeFileSync(path.join(root, file), 'export const fixtureValue = 1;\n');
+    }
+  }
+
+  const invalidAnalysis = [
+    { name: 'explicit any', file: 'src/fixture.ts', source: 'export const invalidValue: any = 1;', diagnostic: /no-explicit-any/ },
+    { name: 'unsafe assignment', file: 'src/fixture.ts', source: 'export const invalidValue = JSON.parse("1");', diagnostic: /no-unsafe-assignment/ },
+    { name: 'floating promise', file: 'src/fixture.ts', source: 'Promise.resolve(1);', diagnostic: /no-floating-promises/ },
+    { name: 'misused promise', file: 'src/fixture.ts', source: '[1].forEach(async () => {});', diagnostic: /no-misused-promises/ },
+    { name: 'complexity limit', file: 'src/fixture.ts', source: `export function complex(value: number) { ${Array.from({ length: 16 }, (_, i) => `if (value === ${i}) { return ${i}; }`).join(' ')} return value; }`, diagnostic: /complexity/ },
+    { name: 'function length', file: 'src/fixture.ts', source: `export function longFunction() {\nlet value = 0;\n${'value += 1;\n'.repeat(100)}return value;\n}`, diagnostic: /max-lines-per-function/ },
+    { name: 'inline lint exception', file: 'src/fixture.ts', source: '/* eslint-disable @typescript-eslint/no-explicit-any */\nexport const invalidValue: any = 1;', diagnostic: /no-explicit-any/ },
+    { name: 'production compiler error', file: 'src/fixture.ts', source: 'export const invalidValue: string = 1;', diagnostic: /TS2322/ },
+    { name: 'script compiler error', file: 'scripts/fixture.ts', source: 'export const invalidValue: string = 1;', diagnostic: /TS2322/ },
+    { name: 'test compiler error', file: 'test/unit/analysis-contract.test.ts', source: 'export const invalidValue: string = 1;', diagnostic: /TS2322/ },
+    { name: 'focused test', file: 'test/unit/analysis-contract.test.ts', source: ['test', 'only'].join('.') + '("focused", () => {});', diagnostic: /test-hygiene scanner found violations/ },
+  ];
+
+  for (const scenario of [{ name: 'clean project', file: 'src/fixture.ts', source: 'export const validValue = 1;', diagnostic: null }, ...invalidAnalysis]) {
+    test(`static analysis enforces standard tools: ${scenario.name} (TASK-2746)`, () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'standard-analysis-contract-'));
+      try {
+        analysisProject(root);
+        fs.writeFileSync(path.join(root, scenario.file), scenario.source + '\n');
+        const result = runScript(['static-analysis'], { PARALLIX_EXECUTION_ROOT: root });
+        const output = result.stdout + result.stderr;
+        if (scenario.diagnostic === null) {
+          assert.equal(result.status, 0, output);
+          assert.match(output, /ALL STAGES PASSED/);
+        } else {
+          assert.notEqual(result.status, 0, output);
+          assert.match(output, scenario.diagnostic);
+          assert.doesNotMatch(output, /ALL STAGES PASSED/);
+        }
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
+  }
+
+  for (const diagnostic of ['', 'error TS18003: No inputs were found in config file.']) {
+    test(`static analysis rejects a compiler failure regardless of diagnostic text: ${diagnostic || 'empty output'} (TASK-2746)`, () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'compiler-status-contract-'));
+      try {
+        const result = runScript(['static-analysis'], staticAnalysisStubEnv(root, 0, 2, diagnostic));
+        assert.notEqual(result.status, 0, result.stdout + result.stderr);
+        assert.match(result.stdout, /tsc typecheck failed/);
+        assert.doesNotMatch(result.stdout, /ALL STAGES PASSED/);
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    });
   }
 
   test('verify-local Git shim handles init flags without mistaking them for the target directory', () => {
@@ -301,7 +370,7 @@ describe("integrate workflow gate", () => {
     }
   };
 
-  function makeEnv(tmpDir, { changedAreas, suiteContext = false }) {
+  function makeEnv(tmpDir: string, { changedAreas, suiteContext = false }: { changedAreas: string; suiteContext?: boolean; }) {
     const configPath = path.join(tmpDir, 'integration-pipelines.json');
     fs.writeFileSync(configPath, JSON.stringify(testFixtureConfig, null, 2));
     return {
@@ -313,7 +382,7 @@ describe("integrate workflow gate", () => {
     };
   }
 
-  function runIntegrate(env) {
+  function runIntegrate(env: { INTEGRATE_DRY_RUN: string; INTEGRATION_CONFIG_PATH: string; INTEGRATE_CHANGED_AREAS: string; WORKFLOW_SUITE_CONTEXT: string; }) {
     return child_process.spawnSync(scriptPath, ['integrate'], {
       cwd: import.meta.dirname,
       env,
@@ -322,7 +391,7 @@ describe("integrate workflow gate", () => {
   }
 
   function installSpawnMock() {
-    mock.method(child_process, 'spawnSync', (cmd, args, options) => {
+    mock.method(child_process, 'spawnSync', (cmd: Parameters<(typeof child_process)["spawnSync"]>[0], args: Parameters<(typeof child_process)["spawnSync"]>[1], options: Parameters<(typeof child_process)["spawnSync"]>[2]) => {
       assert.equal(cmd, scriptPath);
       assert.deepEqual(args, ['integrate']);
 
@@ -454,11 +523,11 @@ describe("exclusive integrate process claim", () => {
 
     const ports = createIntegratePorts();
     let missionReads = 0;
-    const workflow = createIntegrateWorkflow({
+    const workflow = createIntegrateWorkflow(stubIntegrateWorkflowPorts({
       ...ports,
       process: { ...ports.process, terminate: () => {} },
       missionPaths: { ...ports.missionPaths, inferSlug: () => slug },
-    });
+    }));
     const result = await workflow.integrate([slug], {
       missionServicesFn: async () => { missionReads++; throw new Error('must not read Mission'); },
       exitFn: () => {},

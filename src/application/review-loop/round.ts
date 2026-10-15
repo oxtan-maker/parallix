@@ -48,7 +48,6 @@ export class ReviewRound {
   preReviewSetupVerified = false;
   /** Revision captured only after the rebase, declared gate, and task mirror. */
   verifiedRevision: string | undefined;
-  normalReviewCostUsd: number | null = null;
   blockingFindings: { id: string; summary: string }[] = [];
   /** The integration repair the reviewer is told about (TASK-2620); empty otherwise. */
   integrationRepair = '';

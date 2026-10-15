@@ -24,7 +24,7 @@ test('TASK-2453 SC1: an unverified integrate fact spins the web fan', () => {
 });
 
 test('TASK-2453 SC3: a pending action changes from starting to working with current-work', () => {
-  const action = { kind: 'integrate:merge' as const, display: 'px integrate task-2453', state: 'enabled' as const, reason: null, targetLane: 'integration' as const };
+  const action = { kind: 'integrate:merge' as const, display: 'px integrate task-2453', state: 'enabled' as const, reason: null, targetLane: 'integration' as const } satisfies import("../../../../src/interfaces/web/transport-types.js").WebCommandAction;
 
   assert.match(renderToStaticMarkup(React.createElement(ActionButton, { action, pending: true })), /starting…/);
   assert.match(renderToStaticMarkup(React.createElement(ActionButton, { action, pending: true, working: true })), /working…/);

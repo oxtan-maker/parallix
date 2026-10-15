@@ -6,7 +6,7 @@ import {
   getPrimaryWorktree,
   inferSlug,
   missionBranchName,
-  missionBranchPrefix,
+  missionBranchPrefix, findMissionDir, findCheckpoints, getFirstLine,
 } from '../../filesystem/mission-utils.js';
 import { WORKFLOW_AGENT_NAMES, eligibleAgentsForStep, readAgentConfigOrExit, workflowLauncherStatus } from '../../agents/agents.js';
 import { getPrStatus } from '../../forgejo/forgejo.js';
@@ -21,6 +21,42 @@ import type {
 } from '../../../application/ports/agent-blocklist.js';
 import type { OperationalHistoryRepository, BoardLaneEventRepository } from '../../../application/ports/operation-history.js';
 import type { UsageRepository } from '../../../application/ports/mission-measurements.js';
+
+type StatusProjectionBuilder = Pick<BoardProjectionBuilder, 'build'>;
+type StatusLog = (message: string) => void;
+interface ProjectionServices {
+  presentationCapabilities: { boardProjection: StatusProjectionBuilder } | null;
+  operatorState: {
+    repositories: {
+      agentBlocklist: AgentBlocklistRepository;
+      operationalHistory: OperationalHistoryRepository;
+      boardLaneEvents: BoardLaneEventRepository;
+      usage: UsageRepository;
+    } | null
+  };
+}
+type ProjectionServicesFactory = (rootDir: string) => Promise<ProjectionServices>;
+interface StatusOptions {
+  exit?: (code: number) => void;
+  log?: StatusLog;
+  inferSlugFn?: typeof inferSlug;
+  getCurrentBranchFn?: typeof getCurrentBranch;
+  findTaskFileFn?: typeof findTaskFile;
+  getTaskStatusFn?: typeof getTaskStatus;
+  findMissionDirFn?: typeof findMissionDir;
+  findCheckpointsFn?: typeof findCheckpoints;
+  getFirstLineFn?: typeof getFirstLine;
+  getPrStatusFn?: typeof getPrStatus;
+  findStaleMissionWorktreesFn?: typeof findStaleMissionWorktrees;
+  readAgentConfigOrExitFn?: typeof readAgentConfigOrExit;
+  eligibleAgentsForStepFn?: typeof eligibleAgentsForStep;
+  allWorkflowAgentNamesFn?: () => readonly string[];
+  workflowLauncherStatusFn?: (...args: Parameters<typeof workflowLauncherStatus>) => Pick<ReturnType<typeof workflowLauncherStatus>, 'supported'>;
+  getLastThreeCommitsFn?: typeof getLastThreeCommits;
+  getUncommittedCountFn?: typeof getUncommittedCount;
+  detectRebaseStateFn?: (cwd?: string) => { inProgress: boolean; detached: boolean; unmergedFiles: string[]; rebaseHead?: string };
+  buildProjectionFn?: (rootDir: string) => Promise<StatusProjectionBuilder>;
+}
 
 /** @param {string} porcelain */
 function parseWorktreeList(porcelain: string) {
@@ -38,7 +74,7 @@ function parseWorktreeList(porcelain: string) {
     }
 
     if (line.startsWith('worktree ')) {
-      if (current) {entries.push(current);}
+      if (current) { entries.push(current); }
       current = { path: line.slice('worktree '.length).trim(), branch: null };
       continue;
     }
@@ -48,7 +84,7 @@ function parseWorktreeList(porcelain: string) {
     }
   }
 
-  if (current) {entries.push(current);}
+  if (current) { entries.push(current); }
   return entries;
 }
 
@@ -57,7 +93,7 @@ function findStaleMissionWorktrees({
   findTaskFileFn = findTaskFile,
   getTaskStatusFn = getTaskStatus,
   primaryWorktree = null
-} = {}) {
+}: { gitRun?: typeof run; findTaskFileFn?: typeof findTaskFile; getTaskStatusFn?: typeof getTaskStatus; primaryWorktree?: string | null } = {}) {
   const result = gitRun('git', ['worktree', 'list', '--porcelain']);
   if (result.status !== 0) {
     return [];
@@ -82,7 +118,7 @@ function findStaleMissionWorktrees({
       const match = branchRef.startsWith(normalizedRefPrefix)
         ? [branchRef, branchRef.slice(normalizedRefPrefix.length)]
         : null;
-      if (!match) {return null;}
+      if (!match) { return null; }
 
       const slug = match[1];
       const taskFile = findTaskFileFn(slug);
@@ -101,17 +137,17 @@ function findStaleMissionWorktrees({
         cleanupCommand: `px integrate ${slug} --recover-landed`
       };
     })
-    .filter(Boolean);
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
 }
 
 /** @param {string} ref */
 function formatWorktreeBranch(ref: string) {
-  if (!ref) {return '(detached HEAD)';}
+  if (!ref) { return '(detached HEAD)'; }
   return ref.replace(/^refs\/heads\//, '');
 }
 
 /** @param {Function} log @param {string} label @param {{detached?: boolean, unmergedFiles: string[]}} rebaseState */
-function logRebaseDiagnostics(log: Function, label: string, rebaseState: {detached?: boolean, unmergedFiles: string[]}) {
+function logRebaseDiagnostics(log: StatusLog, label: string, rebaseState: { detached?: boolean, unmergedFiles: string[] }) {
   const detachedText = rebaseState.detached ? 'detached HEAD, ' : '';
   log(`${label}: ${detachedText}${rebaseState.unmergedFiles.length} unmerged file(s)`);
   rebaseState.unmergedFiles.forEach(file => {
@@ -130,8 +166,8 @@ function logRebaseDiagnostics(log: Function, label: string, rebaseState: {detach
  * capabilities. Production always injects `buildProjectionFn` from
  * `src/composition/create-cli.ts`.
  */
-async function createProjectionDeps(rootDir: string, servicesFn?: Function): Promise<{
-  builder: BoardProjectionBuilder | null;
+async function createProjectionDeps(rootDir: string, servicesFn?: ProjectionServicesFactory): Promise<{
+  builder: StatusProjectionBuilder | null;
   rootDir: string;
   blocklistRepo: AgentBlocklistRepository;
   historyRepo: OperationalHistoryRepository;
@@ -140,7 +176,7 @@ async function createProjectionDeps(rootDir: string, servicesFn?: Function): Pro
 }> {
   try {
     const services = typeof servicesFn === 'function' ? await servicesFn(rootDir) : null;
-    if (services.presentationCapabilities) {
+    if (services?.presentationCapabilities) {
       return {
         builder: services.presentationCapabilities.boardProjection,
         rootDir,
@@ -158,23 +194,23 @@ async function createProjectionDeps(rootDir: string, servicesFn?: Function): Pro
   const emptyBlocklist: AgentBlocklistRepository = {
     async findAll() { return []; },
     async findByAgent() { return undefined; },
-    async save() {},
-    async deleteByAgent() {},
-    async clear() {},
+    async save() { },
+    async deleteByAgent() { },
+    async clear() { },
   };
   const emptyHistory: OperationalHistoryRepository = {
     async findAll() { return []; },
     async findByType() { return []; },
     async findByTypeForMission() { return []; },
-    async append() {},
-    async clear() {},
+    async append() { },
+    async clear() { },
   };
   const emptyLaneEvents: BoardLaneEventRepository = {
     async append() { return false; },
     async findByMissionId() { return []; },
     async findAll() { return []; },
     async findByRepositoryId() { return []; },
-    async clear() {},
+    async clear() { },
   };
   const emptyUsage: UsageRepository = {
     async findAll() { return []; },
@@ -192,7 +228,7 @@ async function createProjectionDeps(rootDir: string, servicesFn?: Function): Pro
 }
 
 /** Build BoardProjectionBuilder from production concrete adapters (architecture invariant). */
-async function buildProjectionBuilder(rootDir: string): Promise<BoardProjectionBuilder> {
+async function buildProjectionBuilder(rootDir: string): Promise<StatusProjectionBuilder> {
   const composed = await createProjectionDeps(rootDir);
   if (composed.builder) { return composed.builder; }
   throw new Error('status projection builder is not configured');
@@ -205,9 +241,9 @@ async function buildProjectionBuilder(rootDir: string): Promise<BoardProjectionB
  * SQLite store is the sole authority, so an unavailable projection is reported
  * as unknown rather than reconstructed.
  */
-function logMissionCardStatus(projection: any, slug: string, log: Function): void {
-  const card = projection?.stages.flatMap((stage: any) => stage.cards)
-    .find((candidate: any) => candidate.id.toLowerCase() === slug.toLowerCase());
+function logMissionCardStatus(projection: Awaited<ReturnType<BoardProjectionBuilder['build']>> | null, slug: string, log: StatusLog): void {
+  const card = projection?.stages.flatMap((stage) => stage.cards)
+    .find((candidate) => candidate.id.toLowerCase() === slug.toLowerCase());
   if (!card) {
     log(`Mission status: unknown (projection unavailable)`);
     log('Last checkpoint: none');
@@ -231,12 +267,12 @@ function logMissionCardStatus(projection: any, slug: string, log: Function): voi
   }
 }
 
-function logPullRequestStatus(pr: any, log: Function): void {
+function logPullRequestStatus(pr: ReturnType<typeof getPrStatus>, log: StatusLog): void {
   if (pr.exists) { log(`Forgejo PR: #${pr.number} (${pr.state})`); return; }
   log(pr.raw ? `Forgejo PR: unavailable (${pr.raw})` : 'Forgejo PR: none');
 }
 
-function logStaleWorktrees(staleWorktrees: any[], detectRebaseStateFn: Function, log: Function): void {
+function logStaleWorktrees(staleWorktrees: ReturnType<typeof findStaleMissionWorktrees>, detectRebaseStateFn: NonNullable<StatusOptions['detectRebaseStateFn']>, log: StatusLog): void {
   for (const entry of staleWorktrees as Array<{ path: string; branch: string | null; taskStatus: string | null; cleanupCommand?: string }>) {
     log(`Stale worktree: ${fmt.path(entry.path)} (task: ${entry.taskStatus})`);
     try {
@@ -251,7 +287,7 @@ function logStaleWorktrees(staleWorktrees: any[], detectRebaseStateFn: Function,
   }
 }
 
-function logAgentMatrix(deps: any, log: Function): void {
+function logAgentMatrix(deps: Required<Pick<StatusOptions, 'readAgentConfigOrExitFn' | 'eligibleAgentsForStepFn' | 'allWorkflowAgentNamesFn' | 'workflowLauncherStatusFn'>> & { configuration?: ParallixConfiguration }, log: StatusLog): void {
   const { readAgentConfigOrExitFn, eligibleAgentsForStepFn, allWorkflowAgentNamesFn, workflowLauncherStatusFn } = deps;
   const config = readAgentConfigOrExitFn();
   const draftEligible = eligibleAgentsForStepFn('draft', { config });
@@ -268,7 +304,7 @@ function logAgentMatrix(deps: any, log: Function): void {
   if (envOverride) { log(`  (WORKFLOW_AGENT override: ${fmt.agent(envOverride)})`); }
 }
 
-async function status(args: string[], opts: {exit?: Function, log?: Function, inferSlugFn?: Function, getCurrentBranchFn?: Function, findTaskFileFn?: Function, getTaskStatusFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, getPrStatusFn?: Function, findStaleMissionWorktreesFn?: Function, readAgentConfigOrExitFn?: Function, eligibleAgentsForStepFn?: Function, allWorkflowAgentNamesFn?: Function, workflowLauncherStatusFn?: Function, getLastThreeCommitsFn?: Function, getUncommittedCountFn?: Function, detectRebaseStateFn?: Function, buildProjectionFn?: Function}) {
+function statusDependencies(opts: StatusOptions) {
   const exit = opts.exit || process.exit;
   const log = opts.log || fmt.log.plain;
   const inferSlugFn = opts.inferSlugFn || inferSlug;
@@ -287,6 +323,12 @@ async function status(args: string[], opts: {exit?: Function, log?: Function, in
   const getUncommittedCountFn = opts.getUncommittedCountFn || getUncommittedCount;
   const detectRebaseStateFn = opts.detectRebaseStateFn || detectRebaseState;
   const buildProjectionFn = opts.buildProjectionFn || buildProjectionBuilder;
+
+  return { exit, log, inferSlugFn, getCurrentBranchFn, getPrStatusFn, findStaleMissionWorktreesFn, readAgentConfigOrExitFn, eligibleAgentsForStepFn, allWorkflowAgentNamesFn, workflowLauncherStatusFn, getLastThreeCommitsFn, getUncommittedCountFn, detectRebaseStateFn, buildProjectionFn };
+}
+
+async function status(args: string[], opts: StatusOptions) {
+  const { exit, log, inferSlugFn, getCurrentBranchFn, getPrStatusFn, findStaleMissionWorktreesFn, readAgentConfigOrExitFn, eligibleAgentsForStepFn, allWorkflowAgentNamesFn, workflowLauncherStatusFn, getLastThreeCommitsFn, getUncommittedCountFn, detectRebaseStateFn, buildProjectionFn } = statusDependencies(opts);
 
   const explicitSlug = args[0];
   const slug = inferSlugFn(explicitSlug);
@@ -318,7 +360,7 @@ async function status(args: string[], opts: {exit?: Function, log?: Function, in
     // called internally by the concrete adapters, not directly here.
     const projection: Awaited<ReturnType<BoardProjectionBuilder['build']>> | null =
       await buildProjectionFn(process.cwd()).then(
-        (builder: BoardProjectionBuilder) => builder.build(),
+        (builder: StatusProjectionBuilder) => builder.build(),
       ).catch(() => null);
     logMissionCardStatus(projection, slug, log);
     logPullRequestStatus(getPrStatusFn(missionBranchName(slug)), log);
@@ -339,9 +381,6 @@ async function status(args: string[], opts: {exit?: Function, log?: Function, in
   exit(0);
 }
 
-(status as any).parseWorktreeList = parseWorktreeList;
-(status as any).findStaleMissionWorktrees = findStaleMissionWorktrees;
-(status as any).createProjectionDeps = createProjectionDeps;
-(status as any).buildProjectionBuilder = buildProjectionBuilder;
+Object.assign(status, { parseWorktreeList, findStaleMissionWorktrees, createProjectionDeps, buildProjectionBuilder });
 export default status;
 export { status, parseWorktreeList, findStaleMissionWorktrees, createProjectionDeps, buildProjectionBuilder };

@@ -1,14 +1,15 @@
+import type { TestEvent } from 'node:test/reporters';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import unitTestBudgetReporter, { onGitHubActions } from '../../../lib/unit-test-budget-reporter.mjs';
 import { buildTestRunPlan } from '../../../lib/test-run-plan.js';
 
 test('reporter forwards results without treating elapsed time as compute cost', async () => {
-  async function* events() {
+  async function* events(): AsyncGenerator<TestEvent> {
     yield {
       type: 'test:pass' as const,
       data: {
-        name: 'low CPU wait', nesting: 0, testNumber: 1,
+        name: 'low CPU wait', parentId: undefined, testId: 1, tags: [], nesting: 0, testNumber: 1,
         details: { duration_ms: 10_000, type: 'test' as const },
         file: 'wait.test.ts', line: 1, column: 1,
       },

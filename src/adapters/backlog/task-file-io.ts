@@ -5,6 +5,12 @@ import * as fmt from '../../application/presentation/cli-format.js';
 import { resolveTaskStorage } from '../config/product-config.js';
 import { bookkeepingCommitMessage } from '../../domain/approval-coverage.js';
 
+type TaskResolution = { ok: true; taskFile: string; matches: string[]; reason?: never } | { ok: false; reason: 'missing' | 'ambiguous'; matches: string[]; taskFile?: never };
+type BacklogIntegrityIssue = { file: string } & (
+  { type: 'id-mismatch'; filenameId: string; frontmatterId: string } |
+  { type: 'duplicate-completed'; taskId: string; canonicalFile: string }
+);
+
 function resolveStableRepositoryId(rootDir: string): string {
   // Prefer the git common dir: shared by the primary checkout and every linked
   // worktree, so it is stable across worktrees and can never equal a worktree
@@ -121,7 +127,7 @@ function findTaskFilesById(candidateFiles: string[], targetId: string, cache?: T
   return candidateFiles.filter((file: string) => frontmatterTaskId(file, cache) === targetId);
 }
 
-function uniqueOrPreferredTask(matches: string[]) {
+function uniqueOrPreferredTask(matches: string[]): TaskResolution {
   if (matches.length === 1) { return { ok: true, taskFile: matches[0], matches }; }
   const preferred = preferSameTaskInHigherPriorityDir(matches);
   return preferred
@@ -140,7 +146,7 @@ function allTaskFiles(tasksDir: string, completedDir: string, archivedDir: strin
   return files;
 }
 
-function resolveMissingPrefixTask(slug: string, normalizedId: string, files: string[], cache?: TaskScanCache) {
+function resolveMissingPrefixTask(slug: string, normalizedId: string, files: string[], cache?: TaskScanCache): TaskResolution {
   // Only a single exact-id hit resolves here. Several files claiming one id is
   // not authority to pick one, so the base-task-id fallback still runs and the
   // unresolved answer stays `missing` — the reason this seam reported before the
@@ -163,7 +169,7 @@ function resolveMissingPrefixTask(slug: string, normalizedId: string, files: str
  * @param {TaskScanCache} [cache] share across resolutions that observe one filesystem state
  * @returns {{ok: boolean, taskFile?: string, matches: string[], reason?: string}}
  */
-function resolveTaskFile(slug: string, rootDir: string = process.cwd(), cache?: TaskScanCache) {
+function resolveTaskFile(slug: string, rootDir: string = process.cwd(), cache?: TaskScanCache): TaskResolution {
   const matches = findTaskFiles(slug, rootDir, cache);
   const normalizedId = slug.toUpperCase();
   const { tasksDir, completedDir, archiveTasksDir: archivedDir } = getTaskStorage(rootDir, cache);
@@ -202,7 +208,7 @@ function findTaskFile(slug: string, rootDir: string = process.cwd()) {
  * @param {string} slug
  * @param {Function} [log]
  */
-function reportTaskResolution(result: {ok: boolean, taskFile?: string, matches: string[], reason?: string}, slug: string, log: Function = fmt.log.plain) {
+function reportTaskResolution(result: {ok: boolean, taskFile?: string, matches: string[], reason?: string}, slug: string, log: (message: string) => void = fmt.log.plain) {
   if (result.ok) {return;}
   const { tasksDir, completedDir } = getTaskStorage(process.cwd());
   const taskHint = path.relative(process.cwd(), tasksDir).split(path.sep).join('/');
@@ -228,7 +234,7 @@ function taskIdFromFilename(file: string) {
   return filenameMatch ? filenameMatch[1].toUpperCase() : null;
 }
 
-function recordFrontmatterIdMismatch(filePath: string, relPath: string, filenameId: string, issues: any[]) {
+function recordFrontmatterIdMismatch(filePath: string, relPath: string, filenameId: string, issues: BacklogIntegrityIssue[]) {
   try {
     const idMatch = fs.readFileSync(filePath, 'utf8').match(/^id:\s*([^\r\n]+)/m);
     const frontmatterId = idMatch?.[1]?.trim().toUpperCase();
@@ -247,7 +253,7 @@ function scanBacklogDirectory(
   canonical: boolean,
   tasksLocations: Map<string, string>,
   canonicalLocations: Map<string, string>,
-  issues: any[],
+  issues: BacklogIntegrityIssue[],
 ) {
   if (!fs.existsSync(dir)) {return;}
   const files = fs.readdirSync(dir).filter((file: string) => file.endsWith('.md'));
@@ -270,15 +276,15 @@ function scanBacklogDirectory(
  */
 function checkBacklogIntegrity(rootDir: string = process.cwd(), slug: string | null = null) {
   const { tasksDir, completedDir, archiveTasksDir: archivedDir } = getTaskStorage(rootDir);
-  const issues: any[] = [];
+  const issues: BacklogIntegrityIssue[] = [];
   const normalizedSlug = slug ? slug.toLowerCase() : null;
 
   // Track where each task id lives so we can detect the same id appearing in
   // both backlog/tasks/ and backlog/completed/ (or backlog/archive/) — the
   // reorder-recreates-completed-task defect (architecture migration). The completed/archive
   // copy is canonical; a backlog/tasks/ copy alongside it is stale.
-  const tasksLocations = new Map();      // id -> rel path in tasks/
-  const canonicalLocations = new Map();  // id -> rel path in completed|archive
+  const tasksLocations = new Map<string, string>();      // id -> rel path in tasks/
+  const canonicalLocations = new Map<string, string>();  // id -> rel path in completed|archive
 
   scanBacklogDirectory(tasksDir, rootDir, normalizedSlug, false, tasksLocations, canonicalLocations, issues);
   scanBacklogDirectory(completedDir, rootDir, normalizedSlug, true, tasksLocations, canonicalLocations, issues);

@@ -8,8 +8,8 @@ import { SqliteClassifierStatisticsReader } from '../../../src/adapters/sqlite/c
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
 import { repeatReview, classificationAttempt } from '../../fixtures/repeat-review.js';
-import { applyClassifierReview } from '../../../src/domain/classifier-review.js';
-import { classifierStatistics, classifierGroups } from '../../../src/application/review-classification/statistics.js';
+import { applyClassifierReview, classifierPolicyForReview } from '../../../src/domain/classifier-review.js';
+import { reviewRounds } from '../../../src/application/review-classification/statistics.js';
 
 import { SqliteMeasurementStore } from '../../../src/adapters/sqlite/measurement-store.js';
 import { upsertMeasurementRow } from '../../../src/adapters/cli/commands/stats.js';
@@ -74,7 +74,7 @@ describe("defect C: unknown review-fix rounds survive to presentation", () => {
             implementer: 'claude',
             pr_fix_rounds: value === null ? null : String(value),
             stage: 'default',
-          } as never, { store });
+          }, { store });
         }
       } finally {
         store.close();
@@ -122,11 +122,11 @@ describe("defect C: unknown review-fix rounds survive to presentation", () => {
         upsertMeasurementRow({
           date: '2026-06-02', repo: REPO, mission: KNOWN_ZERO, classification: 'ai_sdlc',
           implementer: 'claude', pr_fix_rounds: '0', stage: 'default',
-        } as never, { store });
+        }, { store });
         upsertMeasurementRow({
           date: '2026-06-02', repo: REPO, mission: UNKNOWN_A, classification: 'ai_sdlc',
           implementer: 'claude', pr_fix_rounds: null, stage: 'default',
-        } as never, { store });
+        }, { store });
       } finally {
         store.close();
       }
@@ -143,21 +143,17 @@ describe("defect C: unknown review-fix rounds survive to presentation", () => {
   });
 });
 
-it('classifier measurements retain retry cost, precision and unobserved outcomes (TASK-2658)', async () => {
+it('classifier measurements retain retry cost and precision (TASK-2658)', async () => {
   await withStatisticsDatabase(async ({ db }) => {
     const store = new SqliteReviewClassificationStore(db);
     const first = classificationAttempt();
     await store.recordCall(first);
     await store.recordCall(first);
     await store.recordCall(classificationAttempt({ fingerprint: 'retry', preparationMs: null, classificationMs: 0.33 }));
-    const applied = { decisionId: 'decision', fingerprint: 'retry', decidedAt: first.observedAt, route: 'clear' as const };
     const attempts = await store.calls('parallix');
     assert.equal(attempts.length, 2);
-    const counts = classifierStatistics({ decisions: [], attempts, applied: [applied], observations: [], coverage: 'complete' }, weeklyDecisionWindows('2026-10-06').current);
-    assert.equal(counts.calls, 2);
-    assert.equal(counts.unobserved, 1);
-    assert.equal(counts.preparation.totalMs, 0.15);
-    assert.ok(Math.abs(counts.classification.totalMs! - 0.6) < 1e-9);
+    assert.equal(attempts.reduce((n, a) => n + (a.preparationMs ?? 0), 0), 0.15);
+    assert.ok(Math.abs(attempts.reduce((n, a) => n + (a.classificationMs ?? 0), 0) - 0.6) < 1e-9);
     await store.recordCall({ ...first, route: 'reviewer', reason: 'classifier-publication-failed' });
     const corrected = await store.calls('parallix');
     assert.equal(corrected.length, 2, 'publication fallback updates the observed route without inventing another call');
@@ -169,11 +165,12 @@ it('classifier measurements retain retry cost, precision and unobserved outcomes
   });
 });
 
-it('local review authority supplies weekly PR totals and completed full-history cohorts (TASK-2658)', async () => {
+it('local review authority supplies decided totals independently of cross-week samples (TASK-2658)', async () => {
   await withStatisticsDatabase(async ({ db }) => {
     const telemetry = new SqliteReviewClassificationStore(db), store = new SqliteMissionStore(db);
-    const sample = classificationAttempt({ repository: REPO, observedAt: '2026-09-27T00:00:00Z', policyVersion: 'jev-three-question-51-80-89-v1' });
-    const review = applyClassifierReview(repeatReview(), { kind: 'classifier', identity: 'jev', decisionId: sample.decisionId,
+    const initial = repeatReview();
+    const sample = classificationAttempt({ repository: REPO, observedAt: '2026-09-27T00:00:00Z', policyVersion: classifierPolicyForReview(initial) });
+    const review = applyClassifierReview(initial, { kind: 'classifier', identity: 'jev', decisionId: sample.decisionId,
       provider: 'typesafe', model: 'jev', priorRevision: sample.priorRevision, candidateRevision: sample.candidateRevision,
       findingIds: sample.findingIds, packetHash: sample.packetHash!, policyVersion: sample.policyVersion, label: 'addresses', score: 0.52 },
     'clear', '2026-10-06T00:00:00Z');
@@ -181,51 +178,26 @@ it('local review authority supplies weekly PR totals and completed full-history 
       netEngineeringLines: 1, review }), null);
     await store.save(fixtureMission('still-open', { repositoryId: REPO, status: 'review', review: repeatReview() }), null);
     await telemetry.recordCall(sample);
+    await db.execute('INSERT INTO review_classifier_observations (decision_id, payload) VALUES (?, ?)', [sample.decisionId, 'historical-unread-payload']);
     const read = await new SqliteClassifierStatisticsReader(db, telemetry, REPO).read();
     const window = weeklyDecisionWindows('2026-10-06').current;
-    const counts = classifierStatistics(read, window);
-    assert.equal(counts.total, 3, 'two verdicts on the closed mission and one on the still-open mission');
-    assert.equal(counts.classifier, 1);
-    assert.ok(Math.abs(counts.percentage! - 100 / 3) < 1e-9);
-    assert.equal(counts.unobserved, 1);
-    assert.equal(counts.calls, 0, 'the call happened before the decision week');
-    const group = classifierGroups(read, window)![0];
-    assert.equal(group.statistics.calls, 1, 'the completed cohort includes its full call history');
-    assert.equal(group.reviewRounds, 2);
-    assert.equal(group.fixRounds, 1);
-    assert.equal(group.missions, 1);
+    const counts = reviewRounds(read, window);
+    assert.equal(counts.rounds, 3, 'decided rounds include missing samples and exclude the open round');
+    assert.equal(counts.jevDecisions, 1);
+    assert.equal(counts.called, 0, 'the call happened before the decision week');
+    assert.equal(counts.coverage, 'partial');
+    assert.equal(reviewRounds(read, window, 'first review').rounds, 2);
+    assert.equal(reviewRounds(read, window, 're-review').rounds, 1);
     const legacyRounds = review.rounds.map(round => round.decision?.classifier
       ? { ...round, decision: { ...round.decision, classifier: { ...round.decision.classifier,
         decisionId: 'legacy-decision', policyVersion: 'repeat-findings-51-90-v1', score: 0.51 } } } : round);
-    const legacyReview = { ...review, rounds: [legacyRounds[0], ...legacyRounds.slice(1)] as const };
+    const legacyReview = { ...review, rounds: [legacyRounds[0], ...legacyRounds.slice(1)] as const } satisfies import("../../../src/domain/review.js").Review;
     await store.save(fixtureMission('legacy-policy', { repositoryId: REPO, status: 'review', review: legacyReview }), null);
     const historical = await new SqliteClassifierStatisticsReader(db, telemetry, REPO).read();
     assert.equal(historical.coverage, 'complete', 'historical policy provenance remains readable after tightening the cutoff');
-    assert.equal(classifierStatistics(historical, window).classifier, 2);
-  });
-});
-
-it('restored integration approvals are read back with what later happened to their missions (TASK-2736)', async () => {
-  const { WEAKENING_POLICY_VERSION } = await import('../../../src/domain/classifier-review.js');
-  await withStatisticsDatabase(async ({ db }) => {
-    const telemetry = new SqliteReviewClassificationStore(db), store = new SqliteMissionStore(db);
-    const initial = repeatReview();
-    const revokedAt = '2026-10-01T00:02:00Z';
-    const withdrawn = { ...initial.rounds[0], response: null, decision: { kind: 'approved' as const, decidedAt: '2026-10-01T00:01:00Z', comment: 'Prior approval',
-      source: { kind: 'local' as const }, revocation: { revokedAt, revokedBy: 'workflow', reason: 'Gate failed',
-        cause: { kind: 'integration-gate-failure' as const, gate: 'unit', command: 'npm test', log: 'x.java:1 failed' } } } };
-    const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'restored', provider: 'typesafe', model: 'jev',
-      packetHash: 'c'.repeat(64), priorRevision: 'a'.repeat(40), candidateRevision: 'b'.repeat(40), responseRevision: 'b'.repeat(40),
-      findingIds: ['integration-gate-repair'], integrationRepair: { revokedAt, gate: 'unit' }, policyVersion: WEAKENING_POLICY_VERSION, label: 'preserves', score: 0.7,
-      weakening: { decisionSource: 'integration-repair-weakening' as const, approvedRevision: 'a'.repeat(40), gate: 'unit', validationSha: 'b'.repeat(40),
-        validationRecordedAt: '2026-10-01T00:02:30Z', relation: 'same' as const } };
-    const restored = applyClassifierReview({ ...initial, rounds: [withdrawn, initial.rounds[1]] } as typeof initial, source, 'clear', '2026-10-06T00:00:00Z');
-    await store.save(fixtureMission('landed-repair', { repositoryId: REPO, status: 'done', closedAt: '2026-10-06T00:01:00Z', netEngineeringLines: 1, review: restored }), null);
-    await store.save(fixtureMission('open-repair', { repositoryId: REPO, status: 'integration', review: restored }), null);
-    const read = await new SqliteClassifierStatisticsReader(db, telemetry, REPO).read();
-    assert.deepEqual(read.repairClears?.map(fact => fact.outcome).sort(), ['landed', 'open']);
-    assert.equal(read.repairClears?.[0].decisionId, 'restored');
-    assert.equal(read.coverage, 'complete');
+    assert.equal(reviewRounds(historical, window).jevDecisions, 2);
+    assert.deepEqual((await db.query<{ payload: string }>('SELECT payload FROM review_classifier_observations')).map(row => row.payload),
+      ['historical-unread-payload'], 'historical observations remain stored and unread');
   });
 });
 
@@ -250,11 +222,9 @@ it('bounded panel telemetry survives persistence without multiplying workflow co
     assert.equal(rows[0].panel!.members[0].model, 'actual-jev');
     assert.equal(rows[0].panel!.members[0].configuredModel, 'jev-latest');
     assert.equal(rows[0].panel!.members[0].usage!.inputTokens, 500);
-    const counts = classifierStatistics({ decisions: [], attempts: rows,
-      applied: [{ decisionId: sample.decisionId, decidedAt: sample.observedAt, route: 'clear' }], observations: [], coverage: 'complete' },
-      weeklyDecisionWindows('2026-10-06').current);
-    assert.equal(counts.calls, 1, 'one workflow attempt retains all three provider calls');
-    assert.equal(counts.unobserved, 1);
+    const counts = reviewRounds({ decisions: [], attempts: rows, coverage: 'complete' }, weeklyDecisionWindows('2026-10-06').current);
+    assert.equal(counts.called, 1, 'one workflow attempt retains all provider calls');
+    assert.equal(counts.rounds, 0, 'samples do not fabricate decisions');
     await store.recordCall(classificationAttempt({ decisionId: 'historical', fingerprint: 'old' }));
     assert.equal((await store.calls('parallix')).find(row => row.decisionId === 'historical')!.panel, undefined);
     await assert.rejects(store.recordCall({ ...sample, fingerprint: 'oversize', model: 'x'.repeat(17000) }), /bounded allowance/);
@@ -262,11 +232,10 @@ it('bounded panel telemetry survives persistence without multiplying workflow co
   });
 });
 
-import { applyReviewerCommand, revokeApprovedDecision, currentReviewRound, startReview, changeRevision, reviewFindingId, ConfiguredReviewerEligibility } from '../../../src/domain/review.js';
+import { applyReviewerCommand, revokeApprovedDecision, currentReviewRound, startReview, changeRevision, ConfiguredReviewerEligibility } from '../../../src/domain/review.js';
 import { agentFamily } from '../../../src/domain/agents.js';
-import { integrationRestorationStatistics } from '../../../src/application/review-loop/integration-restoration-statistics.js';
 
-it('restoration audit and period stats survive SQLite reload and later human corrections before landing (TASK-2734)', async () => {
+it('mechanical attribution survives SQLite reload without samples (TASK-2734)', async () => {
   await withStatisticsDatabase(async ({ db }) => {
     const store = new SqliteMissionStore(db), telemetry = new SqliteReviewClassificationStore(db);
     const assessedAt = '2026-10-05T12:00:00Z';
@@ -274,35 +243,54 @@ it('restoration audit and period stats survive SQLite reload and later human cor
     let review = startReview({ change: { kind: 'pull-request', provider: 'forgejo', id: '1', url: null,
       sourceBranch: 'mission/task-9734', targetBranch: 'main' }, revision: changeRevision('approved'), baseline: changeRevision('base') },
     reviewer, implementer, '2026-10-04T12:00:00Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' }));
-    review = applyReviewerCommand(review, { type: 'approve', decidedAt: '2026-10-04T13:00:00Z', comment: 'reviewed', source: { kind: 'provider', provider: 'forgejo' } });
+    review = applyReviewerCommand(review, { type: 'approve', revision: changeRevision('approved'), decidedAt: '2026-10-04T13:00:00Z', comment: 'reviewed', source: { kind: 'provider', provider: 'forgejo' } });
     review = revokeApprovedDecision(review, 1, { revokedAt: '2026-10-05T10:00:00Z', revokedBy: 'parallix', reason: 'gate failed', cause: { kind: 'integration-gate-failure', gate: 'unit' } });
     const source = { kind: 'mechanical-restoration' as const, approvedRevision: 'approved', candidateRevision: 'approved', failedGate: 'unit',
-      validationRevision: 'approved', validatedAt: '2026-10-05T11:00:00Z', validationReference: 'operational_history:42' };
+      validationRevision: 'approved', validatedAt: '2026-10-05T11:00:00Z', validationReference: 'operational_history:42' } satisfies import("../../../src/domain/integration-approval-restoration.js").MechanicalApprovalSource;
     const current = currentReviewRound(review);
-    review = { ...review, rounds: [review.rounds[0], { ...current, integrationRepairAssessment: {
+    review = { ...review, rounds: [review.rounds[0], { ...current, subject: { ...current.subject, revision: changeRevision('round-start') }, integrationRepairAssessment: {
       assessedAt, outcome: 'restored', approvedRevision: 'approved', candidateRevision: 'approved', failedGate: 'unit', source } }] };
-    review = applyReviewerCommand(review, { type: 'approve', decidedAt: assessedAt, comment: 'mechanical', source });
+    review = applyReviewerCommand(review, { type: 'approve', revision: changeRevision('approved'), decidedAt: assessedAt, comment: 'mechanical', source });
     const mission = { ...fixtureMission('task-9734', { repositoryId: REPO }), status: 'integration' as const, closedAt: null, review };
-    let version = await store.save(mission, null);
-    const reader = new SqliteClassifierStatisticsReader(db, telemetry, REPO);
-    const window = weeklyDecisionWindows('2026-10-06', 'UTC').current;
-    const first = await reader.read();
-    assert.equal(first.decisions.length, 1, 'only the original reviewer decision, never the restoration');
-    assert.equal(first.attempts.length, 0, 'mechanical source does not become classifier telemetry');
-    const s = integrationRestorationStatistics(first.integrationRepairs!, window);
-    assert.deepEqual([s.restores, s.observed, s.unobserved, s.observedWrong], [1, 0, 1, 0]);
-    assert.equal(s.medianNormalReviewCostUsd, null);
-    const corrected = revokeApprovedDecision(review, 2, { revokedAt: '2026-10-12T10:00:00Z', revokedBy: 'human', reason: 'incorrect restore', cause: { kind: 'operator' } });
-    version = await store.save({ ...mission, status: 'review', review: corrected }, version);
-    const correctedStats = integrationRestorationStatistics((await reader.read()).integrationRepairs!, window);
-    assert.deepEqual([correctedStats.observedWrong, correctedStats.observed, correctedStats.unobserved], [1, 1, 0]);
-    // A later requested change also observes the restore, without double-counting the revocation.
-    const requested = applyReviewerCommand(corrected, { type: 'request-changes', decidedAt: '2026-10-12T11:00:00Z', comment: 'wrong',
-      findings: [{ id: reviewFindingId('F1'), summary: 'correct the repair', location: null }] });
-    version = await store.save({ ...mission, status: 'active', review: requested }, version);
-    assert.equal(integrationRestorationStatistics((await reader.read()).integrationRepairs!, window).observedWrong, 1);
-    // Ignore corrections after recorded landing; no correctness is inferred from landing itself.
-    await store.save({ ...mission, status: 'done', closedAt: '2026-10-10T12:00:00Z', review: requested }, version);
-    assert.equal(integrationRestorationStatistics((await reader.read()).integrationRepairs!, window).unobserved, 1);
+    await store.save(mission, null);
+    const first = await new SqliteClassifierStatisticsReader(db, telemetry, REPO).read();
+    const counts = reviewRounds(first, weeklyDecisionWindows('2026-10-06', 'UTC').current);
+    assert.equal(first.decisions.length, 2);
+    assert.equal(first.attempts.length, 0);
+    assert.deepEqual([counts.rounds, counts.mechanical, counts.reviewer, counts.jevDecisions], [2, 1, 1, 0]);
+    assert.equal(counts.coverage, 'partial');
+
+  });
+});
+
+it('classifier decision heads survive SQLite reload for both verdicts (TASK-2752)', async () => {
+  await withStatisticsDatabase(async ({ db }) => {
+    const store = new SqliteMissionStore(db);
+    for (const route of ['clear', 'implementer'] as const) {
+      const initial = repeatReview();
+      const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: route, provider: 'typesafe', model: 'jev',
+        packetHash: 'd'.repeat(64), priorRevision: 'a'.repeat(40), candidateRevision: 'c'.repeat(40), responseRevision: 'b'.repeat(40),
+        findingIds: ['F1'], policyVersion: classifierPolicyForReview(initial), label: route === 'clear' ? 'addresses' : 'does_not_address', score: 0.89 };
+      const review = applyClassifierReview(initial, source, route, '2026-10-06T00:00:00Z', [], 'c'.repeat(40));
+      const mission = fixtureMission('classifier-' + route, { repositoryId: REPO, status: 'review', review });
+      await store.save(mission, null);
+      const loaded = await store.load(mission.id);
+      assert.equal(loaded.kind, 'found');
+      if (loaded.kind !== 'found') { continue; }
+      const round = currentReviewRound(loaded.mission.review!);
+      assert.equal(round.subject.revision, 'b'.repeat(40));
+      assert.equal(round.decision?.revision, 'c'.repeat(40));
+      assert.deepEqual(round.decision?.classifier, source);
+    }
+  });
+});
+
+it('obligation shadow probabilities and aggregate survive SQLite readback (TASK-2753)', async () => {
+  await withStatisticsDatabase(async ({ db }) => {
+    const store = new SqliteReviewClassificationStore(db);
+    const sample = classificationAttempt({ shadow: true, policyVersion: 'general-obligations-97-97-v1', route: 'clear',
+      obligations: [{ id: 'F1', selected: 'addresses', probabilities: { addresses: 0.97, does_not_address: 0.02, insufficient_evidence: 0.01 }, failure: null }] });
+    await store.recordCall(sample);
+    assert.deepEqual(await new SqliteReviewClassificationStore(db).calls('parallix'), [sample]);
   });
 });

@@ -10,10 +10,10 @@ export async function transitionReviewRepair(
   slug: string,
   destination: 'active' | 'review',
   implementer: string,
-  store: MissionStore,
-  lifecycle: MissionLifecycleService | null,
+  store: Pick<MissionStore, 'load'>,
+  lifecycle: Pick<MissionLifecycleService, 'transition'> | null | undefined,
   reviewerEligibility?: ConfiguredReviewerEligibility,
-  cause: Exclude<ReboundCause, { kind: 'integration-gate-failure' }> = { kind: 'review-repair' },
+  cause?: Exclude<ReboundCause, { kind: 'integration-gate-failure' }>,
 ): Promise<void> {
   const loaded = await store.load(missionId(slug));
   if (loaded.kind !== 'found') { throw new Error(`Mission ${slug} is unavailable for review repair`); }
@@ -30,7 +30,7 @@ export async function transitionReviewRepair(
   // eligible reviewer, so the caller passes the configured eligibility and this
   // path throws when it is absent instead of falling back to [round.reviewer].
   const command: MissionCommand = destination === 'active'
-    ? { type: 'rebound-to-active', agent: agentFamily(implementer), cause, occurredAt: new Date().toISOString() }
+    ? { type: 'rebound-to-active', agent: agentFamily(implementer), cause: cause ?? { kind: 'review-repair' }, occurredAt: new Date().toISOString() }
     : reviewerEligibility
       ? { type: 'submit-for-review', gatesPassed: true, review: mission.review, reviewerEligibility }
       : (() => { throw new Error('transitionReviewRepair requires the configured review step reviewerEligibility for a review repair'); })();

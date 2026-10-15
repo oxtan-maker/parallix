@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2535: branch coverage for the pure `task-metadata.ts`
 // helpers. Every function here is pure text/fs surgery on temp task files — no
 // spawn, no network, no forgejo, no mock.module — so it runs to completion and
 // its coverage is flushed (unlike the ~30 installModuleMocks files that abort

@@ -29,6 +29,39 @@ interface BacklogPushContext {
 
 /** Publishes the handed-off branch to Forgejo. */
 export class HandoffForgejoPublisher {
+  async publishHandoffPr(slug: string, context: HandoffPublicationContext): Promise<HandoffPublication | HandoffResult> {
+    const ports = this.ports;
+    const { forgejoEnabled, rootDir, forgejoUser, branch, forceWithLease, area, log, error, internalLog } = context;
+    let token: string | null = null;
+    let fallbackUser: string | null = null;
+    /** The pull request this handoff hands to the reviewer, when there is one. */
+    let submittedPr: { id: string; url: string | null } | null = null;
+    if (forgejoEnabled) {
+      internalLog(`Updating/Creating Forgejo PR as user ${fmt.agent(forgejoUser)}...`);
+      const credentials = await this.resolveHandoffForgejoToken(slug, forgejoUser, { rootDir, log, error, internalLog });
+      if (!('token' in credentials)) { return credentials; }
+      token = credentials.token;
+      fallbackUser = credentials.fallbackUser;
+
+      const prResult = ports.forgejo.createPr(branch || '', String(fallbackUser || forgejoUser || 'default'), String(token || ''), {
+        rootDir,
+        log: internalLog,
+        forceWithLease,
+        verificationArea: area,
+      });
+      if (!prResult.ok) {
+        const msg = `Forgejo PR creation/update failed: ${prResult.error}`;
+        error(msg);
+        return { ok: false, error: msg, ...(prResult.gateFailure ? { gateFailure: prResult.gateFailure } : {}) };
+      }
+      if (prResult.prNumber) {
+        submittedPr = { id: String(prResult.prNumber), url: prResult.url ?? null };
+      }
+    }
+
+    return { token, fallbackUser, submittedPr };
+  }
+
   private readonly ports: HandoffWorkflowPorts;
   private readonly writeFallbackSummary: (_slug: string, _summary: string, _options: { rootDir?: string; log?: HandoffLog }) => boolean;
 
@@ -155,3 +188,6 @@ export class HandoffForgejoPublisher {
   }
 
 }
+
+export interface HandoffPublication { token: string | null; fallbackUser: string | null; submittedPr: { id: string; url: string | null } | null }
+interface HandoffPublicationContext { forgejoEnabled: boolean; rootDir: string; forgejoUser: string; branch: string; forceWithLease: boolean; area: string; log: HandoffLog; error: HandoffLog; internalLog: HandoffLog }

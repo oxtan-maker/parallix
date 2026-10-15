@@ -7,15 +7,13 @@ await installModuleMocks();
 const { mock } = test;
 
 test('git function defaults stdio to ignore stdin', async () => {
-  let capturedOptions: Record<string, unknown> | null = null;
+  let capturedOptions: { value: Record<string, unknown> | null } = { value: null };
 
   mock.module('node:child_process', {
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    fallback: true,
     ...moduleMockOptions({
       ...childProcess,
       spawnSync: (_cmd: string, _args: string[], options: Record<string, unknown>) => {
-        capturedOptions = options;
+        capturedOptions.value = options;
         return { status: 0, stdout: '', stderr: '' };
       },
     }),
@@ -23,20 +21,18 @@ test('git function defaults stdio to ignore stdin', async () => {
 
   const { git: gitFn } = await import('../../../../src/adapters/git/git.js?mock=' + Date.now());
   gitFn(['status']);
-  assert.deepEqual(capturedOptions!.stdio, ['ignore', 'pipe', 'pipe']);
+  assert.deepEqual(capturedOptions.value!.stdio, ['ignore', 'pipe', 'pipe']);
 });
 
 test('git function allows overriding stdio', async () => {
   mock.restoreAll();
-  let capturedOptions: Record<string, unknown> | null = null;
+  let capturedOptions: { value: Record<string, unknown> | null } = { value: null };
 
   mock.module('node:child_process', {
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    fallback: true,
     ...moduleMockOptions({
       ...childProcess,
       spawnSync: (_cmd: string, _args: string[], options: Record<string, unknown>) => {
-        capturedOptions = options;
+        capturedOptions.value = options;
         return { status: 0, stdout: '', stderr: '' };
       },
     }),
@@ -44,20 +40,18 @@ test('git function allows overriding stdio', async () => {
 
   const { git: gitFn } = await import('../../../../src/adapters/git/git.js?mock=' + Date.now());
   gitFn(['status'], { stdio: 'inherit' });
-  assert.equal(capturedOptions!.stdio, 'inherit');
+  assert.equal(capturedOptions.value!.stdio, 'inherit');
 });
 
 test('run function defaults stdio to ignore stdin', async () => {
   mock.restoreAll();
-  let capturedOptions: Record<string, unknown> | null = null;
+  let capturedOptions: { value: Record<string, unknown> | null } = { value: null };
 
   mock.module('node:child_process', {
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    fallback: true,
     ...moduleMockOptions({
       ...childProcess,
       spawnSync: (_cmd: string, _args: string[], options: Record<string, unknown>) => {
-        capturedOptions = options;
+        capturedOptions.value = options;
         return { status: 0, stdout: '', stderr: '' };
       },
     }),
@@ -65,5 +59,5 @@ test('run function defaults stdio to ignore stdin', async () => {
 
   const { run } = await import('../../../../src/adapters/git/git.js?mock=' + Date.now());
   run('echo', ['hello']);
-  assert.deepEqual(capturedOptions!.stdio, ['ignore', 'pipe', 'pipe']);
+  assert.deepEqual(capturedOptions.value!.stdio, ['ignore', 'pipe', 'pipe']);
 });

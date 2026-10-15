@@ -1,3 +1,9 @@
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { integrationBounceSeams } from '../../helpers/integration-bounce-seams.js';
+import { integrationServices } from '../../helpers/stub-integration-services.js';
+import { integrationContext } from '../../fixtures/integration-context.js';
+import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflow-ports.js';
+import { missionVersion as fixtureVersion } from '../../../src/application/domain-ports.js';
 // Historical regression provenance: TASK-2533, TASK-2534, TASK-2537, TASK-2349.
 // Behavior-owned suite (TASK-2622.09, integration-ci): squash landing payload and backlog noise over
 // disposable Git topologies — quoted/special-character pathspecs (task-2533), stale Backlog copies
@@ -160,7 +166,7 @@ describe("squash payload pathspec quoting", () => {
     writeFile(root, 'ambient.txt', 'not payload\n');
 
     const abort = new Error('IntegrationAbort');
-    const { squashAndLand } = createSquashLanding({
+    const { squashAndLand } = createSquashLanding(stubIntegrateWorkflowPorts({
       git: { git: gitRun },
       fileSystem: { existsSync: (target: string) => fs.existsSync(target) },
       backlog: { checkBacklogIntegrity: () => [] },
@@ -170,7 +176,7 @@ describe("squash payload pathspec quoting", () => {
       gates: { isIntendedPayloadAtHead: () => false },
       landing: {
         createAbort: () => abort,
-        classifyHookFailure: () => ({ isHookFailure: false }),
+        classifyHookFailure: () => ({ isHookFailure: false, hookType: null }),
         persistLandedIntegrationOrAbort: async () => {},
         closeLandedIntegrationOrAbort: async () => {},
         recordPostIntegrationStatsOrAbort: async () => {},
@@ -180,20 +186,18 @@ describe("squash payload pathspec quoting", () => {
       },
       verification: {
         formatVerificationCommand: () => 'verify',
-        captureVerifiedTreeProof: () => ({ ok: true, proof: {} }),
-        assertVerifiedTreeProof: () => ({ ok: true }),
       },
-    } as never, { promoteTaskForIntegrationIfNeeded: async () => {} });
+    }), { promoteTaskForIntegrationIfNeeded: async () => {} });
     const run = {
       slug: 'task-9001',
-      context: { area: 'all' },
-      missionServices: { store: { load: async () => ({ kind: 'found', mission: { status: 'integration' }, version: 1 }) } },
+      context: integrationContext({ area: 'all' }),
+      missionServices: integrationServices({ store: { load: async id => ({ kind: 'found', mission: fixtureMission(id, { status: 'integration' }), version: fixtureVersion(1) }) } }),
       baseWorktree: root,
       baseBranch: 'main',
-      seams: {},
+      seams: integrationBounceSeams(),
       state: { temporaryStash: null, nextActionMessage: null },
     };
-    await squashAndLand(run as never, {
+    await squashAndLand(run, {
       branch: 'mission/task-9001',
       summary: 'land',
       landedFromSha: 'base',
@@ -269,7 +273,7 @@ describe("stale Backlog copy at landing", () => {
 
   function landing(root: string, extraBacklog: Record<string, unknown> = {}) {
     const abort = new Error('IntegrationAbort');
-    const { squashAndLand } = createSquashLanding({
+    const { squashAndLand } = createSquashLanding(stubIntegrateWorkflowPorts({
       git: { git: gitRun },
       fileSystem: { existsSync: (target: string) => fs.existsSync(target) },
       backlog: { checkBacklogIntegrity: (rootDir: string) => checkBacklogIntegrity(rootDir), ...extraBacklog },
@@ -279,7 +283,7 @@ describe("stale Backlog copy at landing", () => {
       gates: { isIntendedPayloadAtHead: () => false },
       landing: {
         createAbort: () => abort,
-        classifyHookFailure: () => ({ isHookFailure: false }),
+        classifyHookFailure: () => ({ isHookFailure: false, hookType: null }),
         persistLandedIntegrationOrAbort: async () => {},
         closeLandedIntegrationOrAbort: async () => {},
         recordPostIntegrationStatsOrAbort: async () => {},
@@ -289,20 +293,18 @@ describe("stale Backlog copy at landing", () => {
       },
       verification: {
         formatVerificationCommand: () => 'verify',
-        captureVerifiedTreeProof: () => ({ ok: true, proof: {} }),
-        assertVerifiedTreeProof: () => ({ ok: true }),
       },
-    } as never, { promoteTaskForIntegrationIfNeeded: async () => {} });
+    }), { promoteTaskForIntegrationIfNeeded: async () => {} });
     const run = {
       slug: 'task-9002',
-      context: { area: 'all' },
-      missionServices: { store: { load: async () => ({ kind: 'found', mission: { status: 'integration' }, version: 1 }) } },
+      context: integrationContext({ area: 'all' }),
+      missionServices: integrationServices({ store: { load: async id => ({ kind: 'found', mission: fixtureMission(id, { status: 'integration' }), version: fixtureVersion(1) }) } }),
       baseWorktree: root,
       baseBranch: 'main',
-      seams: {},
+      seams: integrationBounceSeams(),
       state: { temporaryStash: null, nextActionMessage: null },
     };
-    const land = () => squashAndLand(run as never, {
+    const land = () => squashAndLand(run, {
       branch: 'mission/task-9002',
       summary: 'land',
       landedFromSha: 'base',
@@ -430,7 +432,7 @@ describe("unstaged task path at closeout", () => {
   /** Drive the production `squashAndLand` with only the non-git seams stubbed. */
   async function landMission(root: string): Promise<void> {
     const abort = new Error('IntegrationAbort');
-    const { squashAndLand } = createSquashLanding({
+    const { squashAndLand } = createSquashLanding(stubIntegrateWorkflowPorts({
       git: { git: gitRun },
       fileSystem: { existsSync: (target: string) => fs.existsSync(target) },
       backlog: {
@@ -445,7 +447,7 @@ describe("unstaged task path at closeout", () => {
           writeFile(root, AMBIENT_PATH, 'not payload\n');
           git(root, ['add', '--', AMBIENT_PATH]);
         },
-        resolveTaskFile: () => ({ ok: true, taskFile: path.join(root, COMPLETED_PATH) }),
+        resolveTaskFile: () => ({ ok: true as const, taskFile: path.join(root, COMPLETED_PATH) }),
       },
       missionPaths: { softResetTrailingBacklogNoise: () => false },
       productConfig: { isForgejoReviewEnabled: () => false },
@@ -453,7 +455,7 @@ describe("unstaged task path at closeout", () => {
       gates: { isIntendedPayloadAtHead: () => false },
       landing: {
         createAbort: () => abort,
-        classifyHookFailure: () => ({ isHookFailure: false }),
+        classifyHookFailure: () => ({ isHookFailure: false, hookType: null }),
         persistLandedIntegrationOrAbort: async () => {},
         closeLandedIntegrationOrAbort: async () => {},
         recordPostIntegrationStatsOrAbort: async () => {},
@@ -463,20 +465,18 @@ describe("unstaged task path at closeout", () => {
       },
       verification: {
         formatVerificationCommand: () => 'verify',
-        captureVerifiedTreeProof: () => ({ ok: true, proof: {} }),
-        assertVerifiedTreeProof: () => ({ ok: true }),
       },
-    } as never, { promoteTaskForIntegrationIfNeeded: async () => {} });
+    }), { promoteTaskForIntegrationIfNeeded: async () => {} });
 
     await squashAndLand({
       slug: SLUG,
-      context: { area: 'all' },
-      missionServices: { store: { load: async () => ({ kind: 'found', mission: { status: 'integration' }, version: 1 }) } },
+      context: integrationContext({ area: 'all' }),
+      missionServices: integrationServices({ store: { load: async () => ({ kind: 'found' as const, mission: fixtureMission(SLUG, { status: 'integration' }), version: fixtureVersion(1) }) } }),
       baseWorktree: root,
       baseBranch: 'main',
-      seams: {},
+      seams: integrationBounceSeams(),
       state: { temporaryStash: null, nextActionMessage: null },
-    } as never, {
+    }, {
       branch: `mission/${SLUG}`,
       summary: 'land',
       landedFromSha: 'base',
@@ -499,7 +499,7 @@ describe("unstaged task path at closeout", () => {
   }
 
   test('TASK-2537: a task file absent from the base branch lands without a pathspec abort', async (t) => {
-    quietLogs(t as never);
+    quietLogs(t);
     const root = seedRepository({ baseTracksTask: false });
 
     await landMission(root);
@@ -519,7 +519,7 @@ describe("unstaged task path at closeout", () => {
   });
 
   test('TASK-2537: a base-tracked task file still lands its removal and completed addition', async (t) => {
-    quietLogs(t as never);
+    quietLogs(t);
     const root = seedRepository({ baseTracksTask: true });
 
     await landMission(root);
@@ -562,25 +562,25 @@ describe("stage/commit race", () => {
     mock.method(missionUtils, 'missionTitle', () => 'Race test');
     mock.method(missionUtils, 'updateGraphifyKnowledgeGraph', () => false);
     mock.method(gitModule, 'getCurrentBranch', () => `mission/${TEST_SLUG}`);
-    mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: path.join(FAKE_ROOT, 'backlog/tasks/task.md') }));
+    mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: path.join(FAKE_ROOT, 'backlog/tasks/task.md') }));
     mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
     mock.method(backlog, 'getTaskStatus', () => 'approved');
     mock.method(backlog, 'getTaskAssignee', () => 'codex');
     mock.method(backlog, 'completeTask', () => true);
-    mock.method(forgejo, 'getPrStatus', () => ({ exists: true, state: 'open', merged: false, number: 1 }));
-    mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true, reviewState: 'APPROVED' }));
+    mock.method(forgejo, 'getPrStatus', () => ({ exists: true as const, state: 'open', merged: false, number: 1 }));
+    mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true as const, reviewState: 'APPROVED' }));
     mock.method(forgejo, 'listOpenPrsForSlug', () => []);
     mock.method(forgejo, 'readToken', () => 'token');
     mock.method(forgejo, 'resolveTokenFile', () => 'token-file');
-    mock.method(forgejo, 'syncMerged', () => ({ ok: true }));
-    mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true, sha: 'deadbeef' }));
+    mock.method(forgejo, 'syncMerged', () => ({ ok: true as const }));
+    mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true as const, sha: 'deadbeef' }));
     mock.method(stats, 'recordIntegrationStats', async () => ({ changed: false, row: { mission: TEST_SLUG }, data: { rows: [] }, report: 'none' }));
     mock.method(stats, 'resolveMissionClassification', () => ({ classification: 'ai_sdlc' }));
     mock.method(composition, 'createMissionApplicationServices', async () => ({
       // TASK-2376: the domain integrate command requires status=integration;
       // a review-status mission with no Review aggregate must stop, not integrate.
-      store: { _repoId: 'default', load: async () => ({ kind: 'found', mission: { status: 'integration', review: null }, version: 1 }) },
-      lifecycle: { transition: async () => ({ status: 'completed', value: { to: 'review', version: 2 } }) },
+      store: { _repoId: 'default', load: async () => ({ kind: 'found' as const, mission: { status: 'integration', review: null }, version: 1 }) },
+      lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: { to: 'review', version: 2 } }) },
       handoff: { recordNel: async () => ({}) },
     }));
     mock.method(process, 'cwd', () => FAKE_ROOT);
@@ -594,28 +594,28 @@ describe("stage/commit race", () => {
     let squashCommitArgs: string[] = [];
     fs.mkdirSync(path.join(FAKE_ROOT, 'notes'), { recursive: true });
     fs.writeFileSync(path.join(FAKE_ROOT, UNRELATED_DIRTY_FILE), 'leave me out');
-    mock.method(gitModule, 'git', (args) => {
-      if (args.includes('branch') && args.includes('--show-current')) return { status: 0, stdout: 'main', stderr: '' };
-      if (args.includes('branch') || args.includes('status') || args.includes('merge')) return { status: 0, stdout: '', stderr: '' };
+    mock.method(gitModule, 'git', (args: Parameters<(typeof gitModule)["git"]>[0]) => {
+      if (args.includes('branch') && args.includes('--show-current')) return { signal: null,  status: 0, stdout: 'main', stderr: '' };
+      if (args.includes('branch') || args.includes('status') || args.includes('merge')) return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('diff') && args.includes('--cached') && args.includes('--name-only')) {
         boardCommitPaths = [...stagedPaths]; // `git commit -m "Reorder tasks in review"` interleaves after payload preparation.
         // TASK-2533: the payload capture uses `git diff --cached --name-only -z`,
         // so the mock emits NUL-delimited output; splitting on NUL yields the
         // bare payload path with no trailing newline.
-        return { status: 0, stdout: `${MISSION_PAYLOAD}\0`, stderr: '' };
+        return { signal: null,  status: 0, stdout: `${MISSION_PAYLOAD}\0`, stderr: '' };
       }
       if (args.includes('add') && args.includes('-A')) {
         stagedPaths = [MISSION_PAYLOAD];
         boardCommitPaths = [...stagedPaths]; // `git commit -m "Reorder tasks in review"` interleaves here.
         stagedPaths = [];
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
       if (args.includes('commit')) {
         squashCommitArgs = args;
-        return { status: boardCommitPaths.length ? 1 : 0, stdout: '', stderr: boardCommitPaths.length ? 'nothing to commit' : '' };
+        return { signal: null,  status: boardCommitPaths.length ? 1 : 0, stdout: '', stderr: boardCommitPaths.length ? 'nothing to commit' : '' };
       }
-      if (args.includes('rev-parse')) return { status: 0, stdout: 'deadbeef', stderr: '' };
-      return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'deadbeef', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
 
     try {
@@ -638,14 +638,14 @@ describe("stage/commit race", () => {
     const originalError = console.error;
     console.log = message => logs.push(String(message));
     console.error = message => errors.push(String(message));
-    mock.method(gitModule, 'git', (args) => {
-      if (args.includes('branch') && args.includes('--show-current')) return { status: 0, stdout: 'main', stderr: '' };
-      if (args.includes('branch') || args.includes('status') || args.includes('merge')) return { status: 0, stdout: '', stderr: '' };
-      if (args.includes('diff') && args.includes('--cached')) return { status: 0, stdout: `${MISSION_PAYLOAD}\0`, stderr: '' };
-      if (args.includes('diff') && args.includes('--quiet')) return { status: !args.includes('HEAD') || payloadAtHead ? 0 : 1, stdout: '', stderr: '' };
-      if (args.includes('commit')) return { status: 1, stdout: '', stderr: 'hook rejected the commit' };
-      if (args.includes('rev-parse')) return { status: 0, stdout: 'carrying-commit', stderr: '' };
-      return { status: 0, stdout: '', stderr: '' };
+    mock.method(gitModule, 'git', (args: Parameters<(typeof gitModule)["git"]>[0]) => {
+      if (args.includes('branch') && args.includes('--show-current')) return { signal: null,  status: 0, stdout: 'main', stderr: '' };
+      if (args.includes('branch') || args.includes('status') || args.includes('merge')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      if (args.includes('diff') && args.includes('--cached')) return { signal: null,  status: 0, stdout: `${MISSION_PAYLOAD}\0`, stderr: '' };
+      if (args.includes('diff') && args.includes('--quiet')) return { signal: null,  status: !args.includes('HEAD') || payloadAtHead ? 0 : 1, stdout: '', stderr: '' };
+      if (args.includes('commit')) return { signal: null,  status: 1, stdout: '', stderr: 'hook rejected the commit' };
+      if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'carrying-commit', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
     try {
       await integrateModule.default([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
@@ -679,17 +679,16 @@ describe("backlog noise reduction", () => {
   test.afterEach(() => mock.restoreAll());
   const { findLastNonNoiseCommit } = findLastNonNoiseCommitModule;
   const { squashTrailingBacklogNoiseIntoPreviousMission, softResetTrailingBacklogNoise } = squashTrailingBacklogNoiseIntoPreviousMissionModule;
-  function git(args, cwd) {
+  function git(args: string[], cwd: string) {
     const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    if (result.error && !(result.error.code === 'EPERM' && result.status === 0)) {
+    if (result.error && !('code' in result.error && result.error.code === 'EPERM' && result.status === 0)) {
       throw result.error;
     }
     assert.equal(result.status, 0, `git ${args.join(' ')}\n${result.stderr}${result.stdout}`);
     return result.stdout || '';
   }
 
-  function withTempRepo(fn) {
+  function withTempRepo(fn: (_arg0: string) => void) {
     const previous = process.cwd();
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'noise-reduction-test-'));
 
@@ -709,7 +708,7 @@ describe("backlog noise reduction", () => {
   }
 
   test('findLastNonNoiseCommit identifies non-noise commits correctly', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       // 1. Initial commit (non-noise)
       fs.writeFileSync('README.md', '# Project\n');
       git(['add', 'README.md'], root);
@@ -735,12 +734,13 @@ describe("backlog noise reduction", () => {
 
       // HEAD should point to trailing noise, findLastNonNoiseCommit should return workSha
       const result = findLastNonNoiseCommit(root);
+      assert.ok(result !== null);
       assert.equal(git(['rev-parse', result], root).trim(), workSha);
     });
   });
 
   test('findLastNonNoiseCommit identifies generic noise messages as noise when only touching backlog', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       fs.writeFileSync('README.md', '# Project\n');
       git(['add', 'README.md'], root);
       git(['commit', '-m', 'initial commit'], root);
@@ -759,12 +759,13 @@ describe("backlog noise reduction", () => {
       }
 
       const result = findLastNonNoiseCommit(root);
+      assert.ok(result !== null);
       assert.equal(git(['rev-parse', result], root).trim(), workSha);
     });
   });
 
   test('findLastNonNoiseCommit identifies "fixes" with mission files as non-noise', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       fs.writeFileSync('README.md', '# Project\n');
       git(['add', 'README.md'], root);
       git(['commit', '-m', 'initial commit'], root);
@@ -778,12 +779,13 @@ describe("backlog noise reduction", () => {
       const mixedSha = git(['rev-parse', 'HEAD'], root).trim();
 
       const result = findLastNonNoiseCommit(root);
+      assert.ok(result !== null);
       assert.equal(git(['rev-parse', result], root).trim(), mixedSha);
     });
   });
 
   test('findLastNonNoiseCommit stops at branch-off points even if they are noise', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       const currentBranch = git(['symbolic-ref', '--short', 'HEAD'], root).trim();
 
       // 1. Initial commit
@@ -822,7 +824,7 @@ describe("backlog noise reduction", () => {
   });
 
   test('findLastNonNoiseCommit returns null if the non-noise commit is shared', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       // 1. Initial commit (pushed/shared)
       fs.writeFileSync('README.md', '# Project\n');
       git(['add', 'README.md'], root);
@@ -844,7 +846,7 @@ describe("backlog noise reduction", () => {
   });
 
   test('squashTrailingBacklogNoiseIntoPreviousMission skips when worktree is dirty', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       // 1. Initial commit
       fs.writeFileSync('README.md', '# Project\n');
       git(['add', 'README.md'], root);
@@ -861,9 +863,9 @@ describe("backlog noise reduction", () => {
       fs.writeFileSync('README.md', '# Project updated\n');
 
       // Should skip squash
-      const logs = [];
+      const logs: unknown[] = [];
       const originalLog = console.log;
-      console.log = line => logs.push(line);
+      console.log = (line: unknown) => logs.push(line);
       let result;
       try { result = squashTrailingBacklogNoiseIntoPreviousMission(root); }
       finally { console.log = originalLog; }
@@ -877,7 +879,7 @@ describe("backlog noise reduction", () => {
   });
 
   test('squashTrailingBacklogNoiseIntoPreviousMission skips when index is dirty', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       // 1. Initial commit
       fs.writeFileSync('README.md', '# Project\n');
       git(['add', 'README.md'], root);
@@ -900,7 +902,7 @@ describe("backlog noise reduction", () => {
   });
 
   test('softResetTrailingBacklogNoise skips when worktree is dirty', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       // 1. Initial commit
       fs.writeFileSync('README.md', '# Project\n');
       git(['add', 'README.md'], root);
@@ -922,7 +924,7 @@ describe("backlog noise reduction", () => {
   });
 
   test('squashTrailingBacklogNoiseIntoPreviousMission succeeds when clean', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       // 1. Initial commit
       fs.writeFileSync('README.md', '# Project\n');
       git(['add', 'README.md'], root);

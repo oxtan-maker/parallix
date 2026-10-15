@@ -20,10 +20,10 @@ interface GitignoreResult {
 }
 
 interface EnsureOptions {
-  existsSyncFn?: typeof fs.existsSync;
-  lstatSyncFn?: typeof fs.lstatSync;
-  readFileSyncFn?: typeof fs.readFileSync;
-  writeFileSyncFn?: typeof fs.writeFileSync;
+  existsSyncFn?: (_path: string) => boolean;
+  lstatSyncFn?: (_path: string) => Pick<fs.Stats, 'isSymbolicLink'>;
+  readFileSyncFn?: (_path: string, _encoding: 'utf8') => string;
+  writeFileSyncFn?: (_path: string, _content: string, _encoding: 'utf8') => void;
   logFn?: (_msg: string) => void;
 }
 

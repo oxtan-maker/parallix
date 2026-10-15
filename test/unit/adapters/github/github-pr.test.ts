@@ -213,7 +213,7 @@ describe("github pr observe pure", { concurrency: false }, () => {
 
 // Regression provenance: TASK-2622.08.
 describe("github pr integration", { concurrency: false }, () => {
-  const expected = { number: 7, head: 'mission/task-2500.03', base: 'main', candidateSha: 'candidate' };
+  const expected = { number: 7, head: 'mission/task-2500.03', base: 'main', candidateSha: 'candidate' } satisfies Partial<NonNullable<Parameters<typeof observeGithubPr>[0]>>;
   const open = { number: 7, state: 'OPEN', merged: false, head: { ref: expected.head, sha: 'candidate' }, base: { ref: 'main' } };
 
   function observe(pr: GithubPr, treeMatches = true) {

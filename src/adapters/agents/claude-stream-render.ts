@@ -122,7 +122,7 @@ export class ClaudeStreamNormalizer {
     }
   }
 
-  private consumeEvent(outer: Record<string, any>, events: NormalizedEvent[]): void {
+  private consumeEvent(outer: Record<string, unknown>, events: NormalizedEvent[]): void {
     const agent = this.tools.agentLabel(outer.parent_tool_use_id);
     if (agent && typeof outer.parent_tool_use_id === 'string') {this.relayedAgents.add(outer.parent_tool_use_id);}
 
@@ -157,7 +157,7 @@ export class ClaudeStreamNormalizer {
     this.consumeSseEvent(inner, agent, events);
   }
 
-  private consumeSystemEvent(outer: Record<string, any>, events: NormalizedEvent[]): void {
+  private consumeSystemEvent(outer: Record<string, unknown>, events: NormalizedEvent[]): void {
     if (outer.subtype === 'thinking_tokens') {
       this.thinkingTokens = finiteOrNull(outer.estimated_tokens) ?? this.thinkingTokens;
       events.push({ kind: 'thinking_progress', tokens: this.thinkingTokens });
@@ -170,7 +170,7 @@ export class ClaudeStreamNormalizer {
       tools: Array.isArray(outer.tools) ? outer.tools.length : null });
   }
 
-  private consumeResultEvent(outer: Record<string, any>, events: NormalizedEvent[]): void {
+  private consumeResultEvent(outer: Record<string, unknown>, events: NormalizedEvent[]): void {
     const usage = asRecord(outer.usage) || {};
     events.push({ kind: 'result',
       isError: outer.is_error === true || (typeof outer.subtype === 'string' && outer.subtype !== 'success'),
@@ -184,7 +184,7 @@ export class ClaudeStreamNormalizer {
    * are relayed inline needs no second narration, so this only speaks for the
    * ones that stay silent — a backgrounded agent has no other visible signal.
    */
-  private consumeTaskProgress(outer: Record<string, any>, events: NormalizedEvent[]): void {
+  private consumeTaskProgress(outer: Record<string, unknown>, events: NormalizedEvent[]): void {
     const id = typeof outer.tool_use_id === 'string' ? outer.tool_use_id : null;
     if (!id || this.relayedAgents.has(id)) {return;}
     const description = typeof outer.description === 'string' ? outer.description : '';
@@ -198,7 +198,7 @@ export class ClaudeStreamNormalizer {
     });
   }
 
-  private consumeSseEvent(evt: Record<string, any>, agent: string | null, events: NormalizedEvent[]): void {
+  private consumeSseEvent(evt: Record<string, unknown>, agent: string | null, events: NormalizedEvent[]): void {
     const blockKey = `${agent ?? 'main'}:${evt.index}`;
     switch (evt.type) {
       case 'message_start': {
@@ -224,7 +224,7 @@ export class ClaudeStreamNormalizer {
     }
   }
 
-  private startSseMessage(evt: Record<string, any>, agent: string | null): void {
+  private startSseMessage(evt: Record<string, unknown>, agent: string | null): void {
     const startedId = asRecord(evt.message)?.id;
     if (typeof startedId === 'string' && startedId) {this.streamedMessageIds.add(startedId);}
     this.thinkingTokens = null;
@@ -232,14 +232,14 @@ export class ClaudeStreamNormalizer {
     for (const key of this.blocks.keys()) {if (key.startsWith(prefix)) {this.blocks.delete(key);}}
   }
 
-  private startContentBlock(evt: Record<string, any>, blockKey: string, agent: string | null, events: NormalizedEvent[]): void {
+  private startContentBlock(evt: Record<string, unknown>, blockKey: string, agent: string | null, events: NormalizedEvent[]): void {
     const block = asRecord(evt.content_block) || {};
     if (block.type === 'thinking') {events.push({ kind: 'thinking_progress', tokens: this.thinkingTokens });}
     this.blocks.set(blockKey, { type: String(block.type ?? 'text'), name: typeof block.name === 'string' ? block.name : '',
       id: typeof block.id === 'string' ? block.id : null, partialJson: '', agent, sawText: false });
   }
 
-  private consumeBlockDelta(evt: Record<string, any>, blockKey: string, agent: string | null, events: NormalizedEvent[]): void {
+  private consumeBlockDelta(evt: Record<string, unknown>, blockKey: string, agent: string | null, events: NormalizedEvent[]): void {
     const delta = asRecord(evt.delta) || {};
     const open = this.blocks.get(blockKey);
     if (delta.type === 'text_delta' && typeof delta.text === 'string') {events.push({ kind: 'text', text: delta.text, agent }); return;}
@@ -264,9 +264,9 @@ export class ClaudeStreamNormalizer {
   }
 
   /** A whole `assistant` message: render its text/thinking/tool_use blocks. */
-  private consumeCompleteMessage(outer: Record<string, any>, agent: string | null, events: NormalizedEvent[]): void {
+  private consumeCompleteMessage(outer: Record<string, unknown>, agent: string | null, events: NormalizedEvent[]): void {
     const message = asRecord(outer.message);
-    const content = message && Array.isArray(message.content) ? message.content : [];
+    const content: unknown[] = message && Array.isArray(message.content) ? message.content : [];
     for (const raw of content) {
       const block = asRecord(raw);
       if (!block) {continue;}
@@ -280,9 +280,9 @@ export class ClaudeStreamNormalizer {
     }
   }
 
-  private consumeToolResults(outer: Record<string, any>, agent: string | null, events: NormalizedEvent[]): void {
+  private consumeToolResults(outer: Record<string, unknown>, agent: string | null, events: NormalizedEvent[]): void {
     const message = asRecord(outer.message);
-    const content = message && Array.isArray(message.content) ? message.content : [];
+    const content: unknown[] = message && Array.isArray(message.content) ? message.content : [];
     for (const raw of content) {
       const block = asRecord(raw);
       if (!block || block.type !== 'tool_result') {continue;}

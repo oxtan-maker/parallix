@@ -19,7 +19,7 @@ function fixture() {
   let writes = 0;
   let race = false;
   const store: MissionStore = {
-    load: async () => ({ kind: 'found', mission, version: missionVersion(version) }),
+    load: async () => ({ kind: 'found' as const, mission, version: missionVersion(version) }),
     save: async (next, expected) => {
       if (race) { throw new MissionStaleVersion(mission.id, expected!, missionVersion(version + 1)); }
       assert.equal(expected, version); mission = next; writes++; return missionVersion(++version);
@@ -66,7 +66,7 @@ test('authoring rejects invalid, unauthorized, locked and stale batches without 
 });
 
 test('public typed author command dispatches one batch and retains single goal behavior (TASK-2731)', async () => {
-  const f = fixture(); const services = { brief: f.brief, resolveSlug: () => 'task-author' } as never;
+  const f = fixture(); const services = { brief: f.brief, resolveSlug: () => 'task-author' };
   const command = createMissionCommand(services, gate => gate === 'bad gate' ? 'invalid gate' : null);
   const args = ['author', '--goal', 'Goal', '--why', 'Why', '--scope', 'Scope', '--out-of-scope', 'Excluded',
     '--criterion', 'first', '--criterion', 'second', '--checkpoint', 'CP-2', '--checkpoint-text', 'second slice',

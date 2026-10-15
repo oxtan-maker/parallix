@@ -170,9 +170,11 @@ test('SC10: status-projection.ts removed (dead code eliminated)', () => {
   // Composition should register the canonical status command.
   const indexPath = path.join(repoRoot, 'src/composition/create-cli.ts');
   const indexContent = fs.readFileSync(indexPath, 'utf8');
+  assert.match(indexContent, /\.\.\.createReadCommands\(context\)/, 'CLI must register its canonical read commands');
+  const readCommands = fs.readFileSync(path.join(repoRoot, 'src/composition/cli-read-commands.ts'), 'utf8');
   assert.ok(
-    indexContent.includes('../adapters/cli/commands/status.js')
-    || indexContent.includes('../adapters/cli/commands/status-adapter.js'),
+    readCommands.includes('../adapters/cli/commands/status.js')
+    || readCommands.includes('../adapters/cli/commands/status-adapter.js'),
     'CLI composition must import status.ts or status-adapter.ts (the dispatched command)',
   );
 });

@@ -1,4 +1,6 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import { reviewFindingId } from '../../../src/domain/review.js';
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { missionVersion as fixtureVersion } from '../../../src/application/domain-ports.js';
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -46,7 +48,7 @@ const TEST_SLUG = 'task-test-events';
 // aggregate, so anything that creates or reads one needs a real operator
 // database with a mission that has a Review. Each call gets its own
 // PARALLIX_HOME so the seeds can't collide.
-async function withSeededReview(fn) {
+async function withSeededReview<T>(fn: (missionStore: Awaited<ReturnType<typeof seedMissionDatabase>>['store']) => Promise<T>): Promise<T> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'review-events-home-'));
   const restoreHome = await seedMissionDatabase(home, TEST_SLUG, tempDir);
   try {
@@ -81,6 +83,7 @@ test('sanitizeFilename produces filesystem-safe strings', () => {
   assert.equal(sanitizeFilename('Codex Agent'), 'codex-agent');
   assert.equal(sanitizeFilename('claude@example.com'), 'claudeexamplecom');
   assert.equal(sanitizeFilename(''), 'unknown');
+  // @ts-expect-error Intentional non-string filename from an unchecked caller.
   assert.equal(sanitizeFilename(null), 'unknown');
   assert.equal(sanitizeFilename('---test---'), 'test');
   assert.equal(sanitizeFilename('UPPERCASE'), 'uppercase');
@@ -92,6 +95,7 @@ test('isValidEventType validates against taxonomy', () => {
   }
   assert.ok(!isValidEventType('invalid_type'));
   assert.ok(!isValidEventType(''));
+  // @ts-expect-error Intentional non-string event taxonomy input.
   assert.ok(!isValidEventType(null));
   assert.ok(!isValidEventType('reviewer_findings_extra'));
 });
@@ -136,6 +140,7 @@ test('createEvent fails for invalid event type', async () => {
     skipGit: true
   });
   assert.ok(!result.ok);
+  assert.ok(result.error);
   assert.match(result.error, /Invalid event type/);
 });
 
@@ -148,6 +153,7 @@ test('createEvent fails for invalid disposition', async () => {
     skipGit: true
   });
   assert.ok(!result.ok);
+  assert.ok(result.error);
   assert.match(result.error, /Invalid disposition/);
 });
 
@@ -160,6 +166,7 @@ test('createEvent fails for invalid verdict', async () => {
     skipGit: true
   });
   assert.ok(!result.ok);
+  assert.ok(result.error);
   assert.match(result.error, /Invalid verdict/);
 });
 
@@ -219,6 +226,7 @@ test('createEvent requires verdict for reviewer_outcome', async () => {
   });
   
   assert.ok(!result.ok);
+  assert.ok(result.error);
   assert.match(result.error, /reviewer_outcome event requires verdict/);
 });
 
@@ -234,6 +242,7 @@ test('createEvent requires disposition for implementer_disposition', async () =>
   });
   
   assert.ok(!result.ok);
+  assert.ok(result.error);
   assert.match(result.error, /implementer_disposition event requires disposition/);
 });
 
@@ -280,14 +289,15 @@ test('buildEventFrontmatter includes all fields', () => {
   const event = {
     eventType: 'reviewer_findings',
     timestamp: '2026-05-25T14:30:22.000Z',
+    content: '# Findings',
     round: 1,
     phase: 'reviewing',
     actor: 'codex',
     slug: 'task-test',
     disposition: 'CHANGES_MADE',
     itemDispositions: [
-      { kind: 'fixed' as const, findingId: 'item1' as const },
-      { kind: 'fixed' as const, findingId: 'item2' as const },
+      { kind: 'fixed' as const, findingId: reviewFindingId('item1') },
+      { kind: 'fixed' as const, findingId: reviewFindingId('item2') },
     ],
   };
 
@@ -335,6 +345,7 @@ test('createEvent fails loudly when no Mission store was supplied', async () => 
   }, { worktree: tempDir, skipGit: true, error: () => {} });
 
   assert.ok(!result.ok);
+  assert.ok(result.error);
   assert.match(result.error, /No Mission store supplied/i);
   assert.equal(result.path, null);
   assert.deepEqual(fs.readdirSync(eventsDir), before, 'no event file may be written without a stored event');
@@ -347,10 +358,10 @@ test('createEvent fails loudly when the mission has no Review in the database', 
   fs.mkdirSync(eventsDir, { recursive: true });
   const before = fs.readdirSync(eventsDir);
   const missionStore = {
-    async load() { return { kind: 'found', mission: { id: TEST_SLUG, review: null }, version: 1 }; },
+    async load() { return { kind: 'found' as const, mission: fixtureMission(TEST_SLUG, { review: null }), version: fixtureVersion(1) }; },
     async save() { throw new Error('must not save without a Review'); },
     async saveWithTransition() { throw new Error('must not save without a Review'); },
-  };
+  } satisfies import("../../../src/application/domain-ports.js").MissionTransitionStore;
 
   const result = await createEvent(TEST_SLUG, VALID_EVENT_TYPES.REVIEWER_FINDINGS, {
     content: '# Findings',
@@ -360,6 +371,7 @@ test('createEvent fails loudly when the mission has no Review in the database', 
   }, { worktree: tempDir, skipGit: true, error: () => {}, missionStore });
 
   assert.ok(!result.ok);
+  assert.ok(result.error);
   assert.match(result.error, /no Review in the operator database/i);
   assert.equal(result.path, null);
   assert.deepEqual(fs.readdirSync(eventsDir), before, 'no event file may be written without a stored event');
@@ -445,7 +457,7 @@ test('consumeHumanNotes creates human_note events and skips workflow comments', 
   const missionStore = restoreHome.store;
   try {
 
-    const seen = { branch: null, token: null };
+    const seen: { branch: string | null; token: string | null } = { branch: null, token: null };
     const result = await consumeHumanNotes(TEST_SLUG, 'claude', {
       worktree: tempDir,
       forgejoUser: 'claude',
@@ -478,6 +490,7 @@ test('consumeHumanNotes creates human_note events and skips workflow comments', 
     assert.equal(result.skipped.length, 1);
 
     const eventPath = result.created[0].path;
+    assert.ok(eventPath);
     // After TASK-2322.12 cutover, events are stored in SQLite (path starts with 'sqlite:').
     // The .md file path remains as a compatibility fallback.
     if (typeof eventPath === 'string' && eventPath.startsWith('sqlite:')) {

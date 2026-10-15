@@ -143,8 +143,8 @@ is unset, Parallix detects `main` or `master`.
 
 ## Verification
 
-This repository's type-aware lint baseline and its one-way debt-ratchet
-procedure are described in [Lint baseline ratchet](lint-baseline.md).
+This repository's lint and compiler enforcement is described in
+[Static analysis](static-analysis.md).
 
 `adapters.verification.command` is an optional string. When present, it is run
 through the shell and every `{{area}}` token is replaced with the selected
@@ -361,16 +361,11 @@ default; there is no environment, per-user, per-agent or per-stage override for
 this policy. An opinion override does not replace the core policy. Inspect
 repository configuration with `px config` and the public schema.
 
-Execute prompts use launch snapshots and successful mutation output as readback;
-checkpoints and checks do not require additional status reads or prompted
-compaction. The enabled policy adds recovery guidance for Claude and Codex,
-which compact natively, and for Pi when its runtime reports automatic compaction
-enabled. The guidance applies when context is lost after compaction. Runners without a
-confirmed compaction capability receive no execute compaction instruction.
-Review starts from its fresh launch snapshot. Act-on-review prompts retain the
-configured context action before findings are addressed. A conflict or missing
-Mission context still requires a fresh authoritative status read, and failed
-gates retain their diagnostics during repair.
+Enabled prompts request compaction after recorded checkpoints and successful
+mission gates, before review rounds after the first, and before acting on review
+findings, including missions with no gates. Both policies use `px status` as the Mission-state authority and retain
+mission-state reloads, durable evidence, failed-gate diagnostics and review
+rules. Failed gates retain their diagnostics during repair.
 
 This policy controls Parallix's instructions, not the provider's automatic
 near-context-limit safeguards. Those remain governed by the agent runtime's
@@ -520,7 +515,7 @@ keys to carry data.
     "gates": {
       "parallel": { "preIntegration": 2 },
       "preHandoff": [
-        { "key": "docs-verification", "command": "./scripts/verify-local.sh docs", "order": 0 }
+        { "key": "build", "command": "npm run build", "order": 0 }
       ],
       "preIntegration": [
         { "key": "build", "command": "npm run build", "order": 1 },
@@ -590,20 +585,39 @@ the integration consistency gate rejects an unmatched fixture before landing.
 
 ## Review classification
 
-First reviews always use the general reviewer, including in shadow mode. A prior
-classifier decision does not prevent normal classification of an eligible
-re-review. After two consecutive classifier returns to the implementer on the
-same mission, the following eligible round hands off to the general reviewer
-before another classifier decision. A general-reviewer decision resets the count,
-and a classifier clear breaks the sequence. The handoff is reported separately
-as `consecutive-classifier-returns` in classifier telemetry and `px stats`.
-Classification judges the retained findings and comment or withdrawn gate without
-requiring an additional provenance chain. Eligible re-reviews run after configured
-verification and use one immutable mechanically packed state from the previous
-findings/comment, implementer response and pinned source. A repaired integration
-failure is judged against the withdrawn gate. Human feedback and recorded
-verification retain their stated authority; implementer claims are not execution
-proof.
+First reviews always use the general reviewer. Re-reviews with prior reviewer
+findings or human/operator requests use one frozen obligation question per
+obligation, against the last general-reviewer decided revision and the verified
+current head. Intervening classifier returns retain that general-decision
+baseline. Prior changes-requested F findings and human notes since that decision
+are obligations, including requests revoking approval; system notes, cleared
+stops and workflow trailers are excluded. Missing recorded revisions retain the
+general reviewer.
+
+This obligation route defaults to **shadow**: telemetry records each obligation's
+probabilities and the aggregate decision, while the general reviewer retains
+decision authority. Set `PARALLIX_JEV_OBLIGATION_REVIEW=on` explicitly to act on
+its clear/return decisions. Before activation, collect at least 50 qualifying
+post-change shadow rounds with no clear leaving a prior obligation unfixed
+according to the general reviewer and no return on a reviewer-approved round.
+New findings alone do not count as an unfixed prior obligation. Historical
+px-0010 results do not satisfy this prospective confirmation requirement.
+`PARALLIX_JEV_REVIEW=shadow` still keeps all classification in shadow, and its
+opt-out disables classification.
+
+The versioned obligation policy clears only when every obligation selects
+`addresses` at probability at least 0.97. It returns when any obligation selects
+`does_not_address` at probability at least 0.97, naming the failing obligations,
+only after every call has returned a valid answer. Scores below either bar,
+missing or failed calls, invalid answers and oversized mandatory packets defer
+to the general reviewer. Each request includes the obligation, prior review
+comment, implementer response and diff; budget fitting discloses omitted changes.
+
+Nonqualifying re-reviews retain the experimental panel below. After two
+consecutive classifier returns on those rounds, the next eligible panel round
+hands off to the general reviewer. A general-reviewer decision or classifier
+clear resets that count. Integration repair without human/operator requests
+retains its weakening route.
 
 The operator-selected experimental baseline asks three frozen resolution
 questions in separate configured Jev calls. All three must finish successfully:
@@ -616,15 +630,14 @@ without approval return them to the implementer. Conflicts, no votes, incomplete
 or invalid results, provider failures and stale revision/version results retain
 the general reviewer. No partial panel can approve.
 
-An integration repair is not judged by that panel. Parallix already records the
-authoritative answer to whether the failure is fixed: integration validation
-records the failed gate's hooks green at a revision. The prior approval is
-restored without a reviewer run only when a validation recorded the failed gate
-before the review round started, at the candidate or at a revision whose
-difference from it is Backlog task records only or a rebase that leaves the mission
-patch unchanged (a version bump is ignored). Any other code change after the
-validated revision, or a validation recorded after the round started, is not
-admitted. The frozen V4 question first asks whether the repair weakened or bypassed
+An integration repair without human/operator requests is judged by the weakening questions rather than that panel.
+A substantive repair can be classified with or without an admitted green gate
+re-run. A recorded result is admitted only when it names the failed gate, precedes
+the review round, and covers the candidate or an equivalent mission patch.
+Without an admitted fact, the packet says the failed gate has not been re-run at
+this revision and that Parallix re-runs every integration gate before integration,
+refusing integration if any fails. The classifier judges preservation, not whether
+the failure is fixed. The frozen V4 question first asks whether the repair weakened or bypassed
 the checked obligation (deleted, skipped or excluded the check, loosened
 assertions, or raised a budget without measurement evidence); the approval is
 restored when the answer selects `preserves` with probability at least 0.60.
@@ -637,16 +650,20 @@ or lowering a quality bar is weakening. A V4 clear makes no V5 call. The packet 
 failed gate, its extracted failure lines, the plain prior-to-candidate diff
 restricted to the files whose mission change differs (Backlog records excluded),
 the repair commit subjects, both main baselines with the main commits a rebase
-brought in, and the recorded gate fact; only the token budget can refuse it.
-Every other outcome (no admissible fact, below threshold, weakens, insufficient
-evidence, call failure, over-budget packet) leaves the round with the general
+brought in, and the admitted gate fact or integration re-run guarantee. Baselines
+are the recorded main commits each revision was built on, including when main
+was rewritten; missing provenance retains general review.
+Every other outcome (below threshold, weakens, insufficient
+evidence, call failure, unavailable evidence, empty or bookkeeping-only repair,
+over-budget packet) leaves the round with the general
 reviewer, and the weakening answer can never return a mission to the implementer.
 The restored approval records its own decision source and policy version with the
-approved revision, candidate, gate, validation revision and `preserves`
-probability, the clearing question and both question versions (`weakening-v4` and
-`weakening-v5`).
+approved revision, candidate, gate, whether a fact was admitted, `preserves`
+probability, the clearing question and both question versions. Validation revision,
+time and relation are recorded only with an admitted fact. Classification never
+replaces mandatory pre-integration gates.
 
-Re-review packets include the complete repair delta and changed paths even when
+Re-review packets start with the repair delta and changed paths even when
 the prior findings and response do not cite them. When both review subjects
 retain baselines, the repair is a comparison of their baseline-relative mission
 changes, excluding changes made only on main. Both baselines and main commits
@@ -655,13 +672,22 @@ fixed by main remains visible. Missing baselines are explicitly labelled as a
 plain revision comparison that may include main changes.
 
 Complete selected candidate files provide context. Admission uses the decision
-provider's tokenizer accounting and transport limits, with no fixed diff or
-packet byte ceiling. Under token pressure, whole context files are omitted in
-descending token cost with explicit omissions; repair hunks, findings and other
-mandatory obligations are retained. Obligations that cannot fit defer the
-whole panel. No selectable candidate excerpt defers before any decision call
-and records `evidence-preparation-fallback`; token exhaustion records
-`evidence-over-budget`, while pinned read failures record `evidence-read-failed`.
+provider's tokenizer accounting, with no fixed diff or packet byte ceiling.
+All packet builders use the same omission order: optional whole-file context
+first, then per-file diffs from largest to smallest token cost, then long commit
+lists shortened with kept and dropped counts. Each omitted diff is named with
+its added and removed line counts, and the packet states that those changes
+were not shown. The panel must select insufficient evidence, and the weakening
+question must not select preserves, when an omitted change could decide the answer.
+The minimum mandatory request includes obligations, failure lines, validation,
+the required omission manifest and fixed request/question overhead. If that
+minimum cannot fit, the round defers to the general reviewer with
+`evidence-over-budget` (or `weakening-over-budget`). No selectable candidate
+excerpt records `evidence-preparation-fallback`; pinned read failures record
+`evidence-read-failed`.
+Classifier measurements record omitted diff counts and omitted token counts.
+`px stats` separates clears with omissions from clears without omissions;
+historical measurements without omission fields are shown as unknown.
 Each final panel question also needs known provider accounting within 32,000
 input tokens and 30,000 state-plus-longest-question tokens. `px stats` retains
 fallback reasons for evidence, provider, conflict and stale-result failures.
@@ -694,46 +720,27 @@ The default is enabled when the decision adapter and review identity are
 available. Invalid mode values disable routing. Missing classifier credentials or
 review tokens leave ordinary review usable.
 
-`px stats` shows one local-time PR Classification analysis table with comparable This week and Last week rows,
-including open missions. It counts review rounds overall and split into first review and re-review rows, each round with exactly one
-recorded reason: rounds where the classifier was not attempted, attempted but fell back,
-called, cleared or returned, as counts and percentages of rounds, plus the classifier's
-share of decisions and the share of rounds where the classifier was called. Observed wrong
-is n/a while the classifier has made no decision, and an automatic decision without an
-independent observation stays unobserved rather than correct. A separate table
-lists the reasons the general reviewer decided. Unavailable or partial
-historical coverage stays labelled as such rather than becoming a zero.
-Statistics read local operational state and do not query Forgejo.
+`px stats` shows one local-time PR Classification analysis table comparing this
+week and last week for re-reviews, including open missions. Decided pull-request
+rounds count once in the period of their approval or changes-requested decision.
+Undecided rounds are excluded; decisions without classifier samples still count.
+First-review totals use the same rule, although the displayed comparison is for
+re-reviews.
 
-Below it, `px stats` reports integration-repair re-reviews per period: repair rounds,
-rounds with an admissible gate fact, weakening calls, clears and clear share, the
-reasons rounds fell back (no fact, below threshold, weakens, insufficient evidence,
-failure, over budget), and the `preserves` probability of clears and fallbacks in
-the buckets at least 0.60, 0.40 to 0.60 and below 0.40. Beside these rows, V5
-call and clear counts and its own `preserves` distribution show how often the
-second question runs and restores approval. Failed or malformed V5 calls count
-as calls without a probability; historical single-question rounds remain in
-the existing tables. Observed wrong clears
-count a restored approval later revoked by a human or followed by changes requested
-on the same mission; clears whose mission is still open without either signal are
-shown as unobserved, so a zero always carries its denominator.
+Each decided round has one decider: classifier, mechanical restoration or general
+reviewer. Classifier share divides classifier-decided rounds by all decided
+rounds; an empty period shows n/a. Mechanical restorations have their own column
+and do not contribute to the classifier numerator.
 
-Weekly and range reports show integration-repair rounds, actual mechanical
-restores, restore share and fallback counts beside the classifier report.
-Restores are separate from reviewer and classifier decisions. Historical
-rounds without a recorded restoration assessment remain explicitly unrecorded.
-An observed wrong restore means a later human revocation or request for changes
-before landing; it is attributed to the restore's period even when the
-correction comes later. The report gives observed and unobserved denominators.
-Silence and landing leave a restore unobserved, so zero observed errors does
-not establish correctness.
-
-Avoided review work is an estimate: actual restores multiplied by the median
-measured normal integration-repair re-review duration and cost in the same
-period. Duration and cost have separate sample counts. Round cost is available
-only when the reviewer launch supplied a measurement and no unmeasured model
-call or recovery makes that cost incomplete. Missing measurements display
-unavailable; cumulative mission usage is not allocated to individual rounds.
+Attempted, fell-back, called, omission-evidence and fallback-reason measurements
+come from samples, grouped by round and attributed by the latest sample time.
+Retries count once per sampled round; any timed invocation counts as called.
+These measurements are marked partial when the period predates sample coverage
+or decided rounds lack samples. The first recorded sample time is shown.
+Decided counts and classifier share remain available independently, including
+periods before telemetry began. Statistics read local operational state without
+querying Forgejo. Historical observation records remain stored but are no longer
+read or written by classification or reported as correctness measurements.
 
 Weekly and range reports also show the [bug-labeled mission trend](metric-contract.md#bug-labeled-mission-trend):
 counts and shares for the current and previous rolling seven-day local-time delivery
@@ -806,7 +813,7 @@ and Backlog labels.
 | `TMUX` | string | unset | set by tmux | Detects a surrounding tmux session. |
 | `TYPESAFE_API_KEY` | secret | unset | any | Credential for the Typesafe decision provider. |
 | `TYPESAFE_BASE_URL` | URL | provider default | absolute HTTPS URL without credentials, query or fragment | Decision endpoint override. |
-| `TYPESAFE_DEFAULT_MODEL` | string | provider default | model id | Decision model override. |
+| `TYPESAFE_DEFAULT_MODEL` | string | `typesafe/jev-1.13-20260917` (Typesafe/OpenRouter); `typesafe-ai/jev` (Vercel) | model id | Decision model override. Vercel offers only a moving alias; its returned model may differ from the calibrated build. Token budgeting requires a supported tokenizer. |
 | `USER` | string | OS | any | User name for host identity. |
 | `VERIFY_AREA` | string | default area | area name | Default `px verify` area. |
 | `WORKFLOW_AGENT` | enum | config | agent family | Overrides the selected agent. |

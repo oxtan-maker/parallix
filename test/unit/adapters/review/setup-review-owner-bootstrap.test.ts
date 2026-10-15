@@ -21,22 +21,28 @@ test('owner-token setup creates a missing parallix account before granting admin
       agentPasswords: [{ user: 'parallix', password: '' }],
     }, {
       interactive: false, forgejoHome: home, reviewRemoteUrlFn: () => null, log: () => {},
-      requestFn(method: string, url: string, options: { token?: string; body?: Record<string, unknown> }) {
+      requestFn(method, url, options) {
+        assert.ok(options);
         calls.push(`${method} ${new URL(url).pathname}`);
         assert.equal(options.token, 'owner-token');
-        if (method === 'GET' && url.endsWith('/users/parallix')) return { ok: false, statusCode: 404 };
+        if (method === 'GET' && url.endsWith('/users/parallix')) return { error: null, data: null,  ok: false as const, statusCode: 404 };
         if (url.endsWith('/admin/users')) {
+          assert.ok(options.body && typeof options.body === 'object' && 'username' in options.body && 'must_change_password' in options.body && 'password' in options.body);
           assert.equal(options.body?.username, 'parallix');
           assert.equal(options.body?.must_change_password, false);
           assert.ok(String(options.body?.password).length >= 32);
-          return { ok: true, statusCode: 201 };
+          return { error: null, data: null,  ok: true as const, statusCode: 201 };
         }
-        if (method === 'PUT') assert.equal(options.body?.permission, 'admin');
+        if (method === 'PUT') {
+          assert.ok(options.body && typeof options.body === 'object' && 'permission' in options.body);
+          assert.equal(options.body.permission, 'admin');
+        }
         if (url.endsWith('/users/parallix/tokens')) {
-          assert.ok(!(options.body?.scopes as string[]).includes('write:admin'), 'the service token receives repository privileges only');
-          return { ok: true, statusCode: 201, data: { sha1: 'service-token' } };
+          assert.ok(options.body && typeof options.body === 'object' && 'scopes' in options.body && Array.isArray(options.body.scopes));
+          assert.ok(!options.body.scopes.includes('write:admin'), 'the service token receives repository privileges only');
+          return { error: null,  ok: true as const, statusCode: 201, data: { sha1: 'service-token' } };
         }
-        return { ok: true, statusCode: 200 };
+        return { error: null, data: null,  ok: true as const, statusCode: 200 };
       },
     });
     assert.equal(result.ok, true, JSON.stringify(result));
@@ -52,7 +58,7 @@ test('a rejected user lookup stops bootstrap without attempting account creation
   let calls = 0;
   const result = ensureForgejoUser('http://fixture', 'parallix', 'human', '', 'unused', () => {
     calls++;
-    return { ok: false, statusCode: 403, data: {} };
+    return { error: null,  ok: false as const, statusCode: 403, data: {} };
   }, { ownerToken: 'old-token' });
   assert.equal(result.ok, false);
   assert.match(result.error ?? '', /failed to check Forgejo user parallix \(HTTP 403\)/);

@@ -1,3 +1,4 @@
+import { missionId } from '../../../src/domain/mission.js';
 import { createRequire } from 'node:module';
 const _require = createRequire(import.meta.url);
 
@@ -19,7 +20,7 @@ import { backfillReviewFromLegacyState, readExportedReviewEvents, readReviewStat
 import { ReviewCommandUseCase } from '../../../src/application/review-command-use-case.js';
 import { createReviewCommand } from '../../../src/interfaces/cli/review.js';
 import { createReviewWorkflowAdapter } from '../../../src/adapters/review/review-commands.js';
-const review = (args, options = {}) => createReviewCommand(new ReviewCommandUseCase(createReviewWorkflowAdapter(options)))(args, options);
+const review = (args: string[], options: NonNullable<Parameters<typeof createReviewWorkflowAdapter>[0]> = {}) => createReviewCommand(new ReviewCommandUseCase(createReviewWorkflowAdapter(options)))(args, options);
 /** The shape the file-backed loop left behind: round 3, mid-fix, blocked. */
 const LEGACY_STATE = {
   reviewer: 'codex',
@@ -34,14 +35,14 @@ const LEGACY_STATE = {
       'follow-up:claude': ['claude|abc|2026-08-02T17:20:52.117Z|2026-08-02T17:20:52.117Z|0'],
     },
   },
-};
+} satisfies Partial<NonNullable<Parameters<typeof writeReviewState>[1]>>;
 
 function writeLegacyState(missionDir: string, state: unknown = LEGACY_STATE): void {
   fs.writeFileSync(path.join(missionDir, 'review-state.json'), JSON.stringify(state, null, 2));
 }
 
 test('backfill seeds a Review for a mission handed off before the cutover', async () => {
-  await withMissionDatabase('task-bf-1', async ({ root, slug, missionDir, store }: any) => {
+  await withMissionDatabase('task-bf-1', async ({ root, slug, missionDir, store }) => {
     writeLegacyState(missionDir);
     assert.equal(await readReviewState(slug, root, store), null, 'precondition: no Review yet');
 
@@ -62,11 +63,12 @@ test('backfill seeds a Review for a mission handed off before the cutover', asyn
 });
 
 test('backfill preserves recorded stage launches so the loop does not relaunch finished stages', async () => {
-  await withMissionDatabase('task-bf-2', async ({ root, slug, missionDir, store }: any) => {
+  await withMissionDatabase('task-bf-2', async ({ root, slug, missionDir, store }) => {
     writeLegacyState(missionDir);
     await backfillReviewFromLegacyState(slug, root, { missionStore: store });
 
     const state = await readReviewState(slug, root, store);
+    assert.ok(state != null);
     assert.deepEqual(
       state.metadata.recordedStageLaunches,
       LEGACY_STATE.metadata.recordedStageLaunches,
@@ -76,7 +78,7 @@ test('backfill preserves recorded stage launches so the loop does not relaunch f
 });
 
 test('backfill unblocks the write path that fails closed before it', async () => {
-  await withMissionDatabase('task-bf-3', async ({ root, slug, missionDir, store }: any) => {
+  await withMissionDatabase('task-bf-3', async ({ root, slug, missionDir, store }) => {
     writeLegacyState(missionDir);
 
     const before = await writeReviewState(slug, { ...LEGACY_STATE, phase: 'reviewing' }, root, store);
@@ -93,7 +95,7 @@ test('backfill unblocks the write path that fails closed before it', async () =>
 });
 
 test('backfill dry run reports the migration without writing', async () => {
-  await withMissionDatabase('task-bf-4', async ({ root, slug, missionDir, store }: any) => {
+  await withMissionDatabase('task-bf-4', async ({ root, slug, missionDir, store }) => {
     writeLegacyState(missionDir);
 
     const result = await backfillReviewFromLegacyState(slug, root, { apply: false, missionStore: store });
@@ -104,33 +106,37 @@ test('backfill dry run reports the migration without writing', async () => {
 });
 
 test('backfill leaves an existing Review untouched', async () => {
-  await withMissionDatabase('task-bf-5', async ({ root, slug, missionDir, store }: any) => {
+  await withMissionDatabase('task-bf-5', async ({ root, slug, missionDir, store }) => {
     writeLegacyState(missionDir);
     const before = await readReviewState(slug, root, store);
+    assert.ok(before != null);
     assert.equal(before.round, 1, 'precondition: the seeded review is at round 1');
 
     const result = await backfillReviewFromLegacyState(slug, root, { missionStore: store });
     assert.equal(result.outcome, 'already-present');
 
     const after = await readReviewState(slug, root, store);
+    assert.ok(after != null);
     assert.equal(after.round, 1, 'the legacy file does not overwrite live state');
     assert.equal(after.phase, 'reviewing');
   });
 });
 
 test('backfill is idempotent: a second run does not duplicate rounds', async () => {
-  await withMissionDatabase('task-bf-6', async ({ root, slug, missionDir, store }: any) => {
+  await withMissionDatabase('task-bf-6', async ({ root, slug, missionDir, store }) => {
     writeLegacyState(missionDir);
     await backfillReviewFromLegacyState(slug, root, { missionStore: store });
     const second = await backfillReviewFromLegacyState(slug, root, { missionStore: store });
 
     assert.equal(second.outcome, 'already-present');
-    assert.equal((await readReviewState(slug, root, store)).round, 3);
+    const state = await readReviewState(slug, root, store);
+    assert.ok(state);
+    assert.equal(state.round, 3);
   }, { seedReview: false });
 });
 
 test('backfill repairs a partial export import only when recorded events are an ordered subset', async () => {
-  await withMissionDatabase('task-bf-partial', async ({ root, slug, missionDir, store }: any) => {
+  await withMissionDatabase('task-bf-partial', async ({ root, slug, missionDir, store }) => {
     const dir = path.join(missionDir, 'review-events');
     fs.mkdirSync(dir);
     for (const [time, body] of [['120000', 'First'], ['120100', 'Second']]) {
@@ -138,23 +144,30 @@ test('backfill repairs a partial export import only when recorded events are an 
         `---\nevent_type: human_note\ntimestamp: 2026-01-01T${time}Z\nround: 1\nactor: codex\n---\n\n${body}\n`);
     }
     const events = readExportedReviewEvents(slug, root);
-    const read = await store.load(slug);
+    const read = await store.load(missionId(slug));
+    assert.equal(read.kind, 'found');
+    assert.ok(read.mission.review);
     await store.save({ ...read.mission, review: { ...read.mission.review, reviewEvents: [events[0]] } }, read.version);
     assert.equal((await backfillReviewFromLegacyState(slug, root, { apply: false, missionStore: store })).outcome, 'would-backfill-events');
     assert.equal((await backfillReviewFromLegacyState(slug, root, { missionStore: store })).outcome, 'events-backfilled');
-    const after = await store.load(slug);
+    const after = await store.load(missionId(slug));
+    assert.equal(after.kind, 'found');
+    assert.ok(after.mission.review);
     assert.deepEqual(after.mission.review.reviewEvents, events);
     await store.save({ ...after.mission, review: { ...after.mission.review,
       reviewEvents: [{ ...events[0], createdAt: '2026-01-01T120000Z' }, events[1]],
     } }, after.version);
     assert.equal((await backfillReviewFromLegacyState(slug, root, { missionStore: store })).outcome, 'events-backfilled');
-    assert.deepEqual((await store.load(slug)).mission.review.reviewEvents, events);
+    const rewritten = await store.load(missionId(slug));
+    assert.equal(rewritten.kind, 'found');
+    assert.ok(rewritten.mission.review);
+    assert.deepEqual(rewritten.mission.review.reviewEvents, events);
     assert.equal((await backfillReviewFromLegacyState(slug, root, { missionStore: store })).outcome, 'no-legacy-state');
   });
 });
 
 test('backfill reports a mission with no legacy state instead of inventing a Review', async () => {
-  await withMissionDatabase('task-bf-7', async ({ root, slug, store }: any) => {
+  await withMissionDatabase('task-bf-7', async ({ root, slug, store }) => {
     const result = await backfillReviewFromLegacyState(slug, root, { missionStore: store });
     assert.equal(result.outcome, 'no-legacy-state');
     assert.equal(await readReviewState(slug, root, store), null, 'no Review is invented');
@@ -162,7 +175,7 @@ test('backfill reports a mission with no legacy state instead of inventing a Rev
 });
 
 test('backfill fails loudly on a review-state.json it cannot reconstruct a round from', async () => {
-  await withMissionDatabase('task-bf-8', async ({ root, slug, missionDir, store }: any) => {
+  await withMissionDatabase('task-bf-8', async ({ root, slug, missionDir, store }) => {
     writeLegacyState(missionDir, { round: 2, phase: 'fixing' });
 
     const result = await backfillReviewFromLegacyState(slug, root, { missionStore: store });
@@ -173,7 +186,7 @@ test('backfill fails loudly on a review-state.json it cannot reconstruct a round
 });
 
 test('backfill fails loudly on unparseable legacy state', async () => {
-  await withMissionDatabase('task-bf-9', async ({ root, slug, missionDir, store }: any) => {
+  await withMissionDatabase('task-bf-9', async ({ root, slug, missionDir, store }) => {
     fs.writeFileSync(path.join(missionDir, 'review-state.json'), '{ not json');
 
     const result = await backfillReviewFromLegacyState(slug, root, { missionStore: store });
@@ -183,13 +196,13 @@ test('backfill fails loudly on unparseable legacy state', async () => {
 });
 
 test('px review <slug> --backfill-review dispatches the migration', async () => {
-  await withMissionDatabase('task-bf-10', async ({ root, slug, missionDir, store }: any) => {
+  await withMissionDatabase('task-bf-10', async ({ root, slug, missionDir, store }) => {
     writeLegacyState(missionDir);
 
     const out: string[] = [];
     await review([slug, '--backfill-review', '--dry-run'], {
       log: (m: string) => out.push(m), error: (m: string) => out.push(m),
-      backfillReviewFn: (target: string, worktree: string, options: any) => backfillReviewFromLegacyState(target, worktree, { ...options, missionStore: store }),
+      backfillReviewFn: (target: string, worktree: string | undefined, options) => backfillReviewFromLegacyState(target, worktree, { ...options, missionStore: store }),
     });
     assert.equal(await readReviewState(slug, root, store), null, '--dry-run writes nothing');
     assert.ok(out.join('\n').includes('Would backfill'), `expected a dry-run report, got:\n${out.join('\n')}`);
@@ -197,11 +210,12 @@ test('px review <slug> --backfill-review dispatches the migration', async () => 
     out.length = 0;
     await review([slug, '--backfill-review'], {
       log: (m: string) => out.push(m), error: (m: string) => out.push(m),
-      backfillReviewFn: (target: string, worktree: string, options: any) => backfillReviewFromLegacyState(target, worktree, { ...options, missionStore: store }),
+      backfillReviewFn: (target: string, worktree: string | undefined, options) => backfillReviewFromLegacyState(target, worktree, { ...options, missionStore: store }),
     });
     assert.ok(out.join('\n').includes('Backfilled review'), `expected a backfill report, got:\n${out.join('\n')}`);
 
     const state = await readReviewState(slug, root, store);
+    assert.ok(state != null);
     assert.equal(state.round, 3);
     assert.equal(state.phase, 'fixing');
     assert.equal(state.disposition, 'BLOCKED');

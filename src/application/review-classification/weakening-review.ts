@@ -1,13 +1,15 @@
+import { decidedRevisionOf } from '../../domain/review.js';
+import { omissionMeasurements } from './fit-packet.js';
 import type { DecisionAnswer, DecisionResult, DecisionRequest } from '../ports/decision.js';
 import { EvidenceOverBudgetError } from '../ports/review-evidence.js';
 import type { LoopContext, ReviewRound } from '../review-loop/round.js';
 import { WEAKENING_DECISION_SOURCE, type ClassifierReviewSource } from '../../domain/classifier-review.js';
 import type { ReviewScope, Decision } from './classify-review.js';
-import { admitGateFact, relateToCandidate } from './gate-fact.js';
+import { admitGateFact, relateToCandidate, type GateFact } from './gate-fact.js';
 import type { ReviewClassificationPorts } from '../ports/review-classification.js';
 import type { RoundTelemetry } from './round-telemetry.js';
 import { buildWeakeningPacket } from './weakening-packet.js';
-import { WEAKENING_V5, WEAKENING_V5_PROMPT_VERSION, WEAKENING_LABELS, WEAKENING_PACKET_VERSION, WEAKENING_PROMPT_VERSION, WEAKENING_POLICY_VERSION, WEAKENING_THRESHOLD } from './weakening-policy.js';
+import { weakeningQuestion, WEAKENING_V5_PROMPT_VERSION, WEAKENING_LABELS, WEAKENING_PACKET_VERSION, WEAKENING_PROMPT_VERSION, WEAKENING_POLICY_VERSION, WEAKENING_THRESHOLD } from './weakening-policy.js';
 
 /** A weakening decision can only clear, so its packet and provenance are all a caller needs to commit it. */
 export type WeakeningDecision = Decision & { readonly weakening: NonNullable<ClassifierReviewSource['weakening']> };
@@ -37,7 +39,7 @@ function fallbackReason(answer: Extract<DecisionAnswer, { type: 'choice' }>): st
 }
 
 /** Sequential questions share evidence; failed or malformed V4 answers are non-clears too. */
-async function askWeakening(request: DecisionRequest, ports: ReviewClassificationPorts, rows: RoundTelemetry) {
+async function askWeakening(request: DecisionRequest, ports: ReviewClassificationPorts, rows: RoundTelemetry, factAdmitted: boolean) {
   const classifyStart = ports.clock();
   const ask = async (candidate: DecisionRequest) => {
     try { return await ports.decision.decide(candidate); }
@@ -47,9 +49,9 @@ async function askWeakening(request: DecisionRequest, ports: ReviewClassificatio
   let result = await ask(request);
   let answer = result && resolutionOf(result);
   rows.note({ weakening: { v4: { preserves: answer ? answer.probabilities.preserves : null } } });
-  let clearedBy: 'weakening-v4' | 'weakening-v5' = WEAKENING_PROMPT_VERSION;
+  let clearedBy: NonNullable<NonNullable<ClassifierReviewSource['weakening']>['question']>['clearedBy'] = WEAKENING_PROMPT_VERSION;
   if (!answer || answer.selected !== 'preserves' || answer.probabilities.preserves < WEAKENING_THRESHOLD) {
-    const v5Request = { state: request.state, questions: { resolution: WEAKENING_V5 } };
+    const v5Request = { state: request.state, questions: { resolution: weakeningQuestion(factAdmitted, true) } };
     const budget = ports.decision.requestBudget(v5Request);
     if (budget.inputTokens > budget.maxInputTokens || budget.contextTokens > budget.maxContextTokens) {
       throw new EvidenceOverBudgetError('Weakening V5 evidence exceeds the decision budget');
@@ -66,41 +68,51 @@ async function askWeakening(request: DecisionRequest, ports: ReviewClassificatio
   return { result, answer, clearedBy };
 }
 
+async function admissionFor(slug: string, scope: ReviewScope, round: ReviewRound, ports: ReviewClassificationPorts) {
+  const validations = await ports.validations(slug);
+  const admission = await admitGateFact({ validations, gate: scope.repairCause!.gate, roundStartedAt: scope.current.startedAt, candidate: scope.candidateRevision,
+    relate: (sha, validation) => relateToCandidate(sha, scope.candidateRevision, ports.evidence, round.reviewBaseline ?? null, validation.baseline ?? null) });
+  return { admitted: admission.admitted, fact: admission.admitted ? admission.fact : undefined };
+}
+
+function gateProvenance(fact: GateFact | undefined) {
+  return fact ? { validationSha: fact.validationSha, validationRecordedAt: fact.recordedAt, relation: fact.relation } : {};
+}
+
 /**
- * The two weakening questions for an integration repair: Parallix's recorded green gate answers whether the
- * failure is fixed, so the classifier only judges whether the repair weakened the checked obligation. Every
+ * The two weakening questions for an integration repair: mandatory integration gates determine whether the
+ * failure is fixed; the classifier only judges whether the repair weakened the checked obligation. Every
  * outcome other than `preserves` at the threshold returns null and leaves the round to the general reviewer.
  */
 export async function decideWeakening(context: LoopContext, round: ReviewRound, scope: ReviewScope, rows: RoundTelemetry, started: number): Promise<WeakeningDecision | null> {
   const ports = context.ports.classification!;
   const fallback = async (reason: string) => { await rows.finish(reason); context.emit({ kind: 'reviewer-classification', reason }); return null; };
   rows.note({ policyVersion: WEAKENING_POLICY_VERSION, promptVersion: WEAKENING_PROMPT_VERSION, packetVersion: WEAKENING_PACKET_VERSION, panel: undefined });
-  const { prior, current, repairCause, candidateRevision, missionRange } = scope;
-  let validations: Awaited<ReturnType<typeof ports.validations>>;
-  try { validations = await ports.validations(context.slug); } catch { return await fallback('weakening-failure'); }
-  const admitted = await admitGateFact({ validations, gate: repairCause!.gate, roundStartedAt: current.startedAt, candidate: candidateRevision,
-    relate: sha => relateToCandidate(sha, candidateRevision, ports.evidence, round.reviewBaseline ?? null, current.subject.change.targetBranch) });
-  if (admitted.admitted === false) { return await fallback(admitted.reason === 'relation-unavailable' ? 'weakening-failure' : `weakening-${admitted.reason}`); }
-  rows.note({ admissibleFact: true });
+  const { prior, repairCause, missionRange } = scope;
+  if (!repairCause?.gate) { return await fallback('weakening-failure'); }
+  const gate = repairCause.gate;
+  let admitted: Awaited<ReturnType<typeof admissionFor>>;
+  try { admitted = await admissionFor(context.slug, scope, round, ports); } catch { return await fallback('weakening-failure'); }
+  const fact = admitted.fact;
+  rows.note({ admissibleFact: admitted.admitted });
   if (!missionRange) { return await fallback('weakening-failure'); }
   try {
     const availability = await ports.decision.available();
     if (availability.status !== 'available') { return await fallback(availability.cause === 'credentials-missing' ? 'provider-key-missing' : 'provider-unavailable'); }
     rows.note({ provider: availability.provider, model: availability.model });
-    const request = await buildWeakeningPacket({ gate: admitted.fact.gate, log: repairCause!.log ?? null, approved: missionRange.approved, candidate: missionRange.candidate,
-      fact: admitted.fact }, ports.evidence, candidate => ports.decision.requestBudget(candidate));
+    const request = await buildWeakeningPacket({ gate, log: repairCause!.log ?? null, approved: missionRange.approved, candidate: missionRange.candidate,
+      fact }, ports.evidence, candidate => ports.decision.requestBudget(candidate));
     const packetHash = ports.hash(JSON.stringify(request.state));
-    rows.note({ preparationMs: ports.clock() - started, packetHash });
-    const { result, answer, clearedBy } = await askWeakening(request, ports, rows);
+    rows.note({ preparationMs: ports.clock() - started, packetHash, ...omissionMeasurements(request.state) });
+    const { result, answer, clearedBy } = await askWeakening(request, ports, rows, admitted.admitted);
     if (!answer || !result) { return await fallback('weakening-failure'); }
     const preserves = answer.probabilities.preserves;
     rows.note({ label: answer.selected, score: preserves, provider: result.provider, model: result.model });
     if (answer.selected !== 'preserves' || preserves < WEAKENING_THRESHOLD) { return await fallback(fallbackReason(answer)); }
     if (ports.mode === 'shadow') { await rows.finish('weakening-preserves', { route: 'clear' }); context.emit({ kind: 'reviewer-classification', reason: 'shadow fallback' }); return null; }
-    const { fact } = admitted;
     return { selected: { route: 'clear', label: 'preserves', score: preserves, reason: 'weakening-preserves' }, provider: result.provider, model: result.model, packetHash,
-      weakening: { decisionSource: WEAKENING_DECISION_SOURCE, approvedRevision: String(prior!.subject.revision), gate: fact.gate, validationSha: fact.validationSha,
-        validationRecordedAt: fact.recordedAt, relation: fact.relation,
+      weakening: { decisionSource: WEAKENING_DECISION_SOURCE, approvedRevision: String(decidedRevisionOf(prior)), gate, factAdmitted: admitted.admitted,
+        ...gateProvenance(fact),
         question: { clearedBy, preserves, versions: [WEAKENING_PROMPT_VERSION, WEAKENING_V5_PROMPT_VERSION] } } };
   } catch (error) {
     return await fallback(error instanceof EvidenceOverBudgetError ? 'weakening-over-budget' : 'weakening-failure');

@@ -332,12 +332,12 @@ export function isNestedWorkPublisher(value: unknown): value is NestedWorkPublis
  * Wrap an agent launch port so each launch inside an outer operation shows
  * its phase and actual family, then hands the board back to the outer operation.
  */
-export function publishedAgentLaunch<T>(
-  start: (_step: string, _options: Record<string, unknown>) => Promise<T>,
+export function publishedAgentLaunch<T, Options extends Record<string, unknown>>(
+  start: (_step: string, _options: Options) => Promise<T>,
   nested: NestedWorkPublisher,
   phase: CurrentWorkPhase,
   describe: (_agent: string) => string,
-): (_step: string, _options: Record<string, unknown>) => Promise<T> {
+): (_step: string, _options: Options) => Promise<T> {
   return async (step, launchOptions) => {
     const requested = typeof launchOptions.agent === 'string' ? launchOptions.agent : null;
     const onLaunch = launchOptions.onLaunch as ((_info: { agent: string }) => unknown) | undefined;

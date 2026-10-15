@@ -54,11 +54,11 @@ export interface ReviewLoopFake {
 export function fakeProvider(overrides: Partial<ReviewProviderPort> = {}): ReviewProviderPort {
   return {
     ensureReachable: async () => true,
-    openPullRequest: () => ({ kind: 'pull-request', provider: 'forgejo', id: '7', url: null, sourceBranch: 'mission/fake', targetBranch: 'main' }),
+    openPullRequest: () => ({ kind: 'pull-request' as const, provider: 'forgejo', id: '7', url: null, sourceBranch: 'mission/fake', targetBranch: 'main' }),
     latestReview: async () => null,
     pollReview: async () => null,
     pollDisposition: async () => null,
-    publishRevision: () => ({ ok: true, status: 0, detail: '' }),
+    publishRevision: () => ({ ok: true as const, status: 0, detail: '' }),
     ...overrides,
   };
 }
@@ -128,8 +128,8 @@ export function fakeReviewLoopPorts(overrides: ReviewLoopFakeOverrides = {}): Re
       ...overrides.artifacts,
     },
     preReview: {
-      rebase: async () => ({ ok: true }),
-      runGate: async () => ({ ok: true }),
+      rebase: async () => ({ ok: true as const }),
+      runGate: async () => ({ ok: true as const }),
       reviewBaseline: () => 'baseline',
       head: () => 'head-1',
       ...overrides.preReview,

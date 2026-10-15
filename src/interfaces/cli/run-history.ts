@@ -34,7 +34,7 @@ const VALUE_FLAGS = new Set(['--run', '--stream', '--max', '--context', '--role'
 function split(args: readonly string[]): { positionals: string[]; flags: Map<string, string | true> } {
   const positionals: string[] = [];
   const flags = new Map<string, string | true>();
-  for (let i = 0; i < args.length; i += 1) {
+  for (let i = 0;i < args.length;i += 1) {
     const arg = args[i];
     if (!arg.startsWith('--')) { positionals.push(arg); continue; }
     if (VALUE_FLAGS.has(arg)) {
@@ -67,22 +67,26 @@ export function parseHistoryCliRequest(args: readonly string[]): HistoryCliReque
   }
   if (verb === 'list' && positionals.length === 0) { return { verb, slug, json }; }
   if (verb === 'search' && positionals.length === 1) {
-    const stream = flags.get('--stream');
-    if (stream !== undefined && stream !== 'stdout' && stream !== 'stderr') { throw new Error('--stream must be stdout or stderr'); }
-    const runId = flags.get('--run');
-    return {
-      verb, slug, json,
-      pattern: positionals[0],
-      regex: flags.get('--regex') === true,
-      ...(typeof runId === 'string' ? { runId } : {}),
-      ...(stream ? { stream: stream as RunStreamName } : {}),
-      ...(flags.has('--max') ? { maxHits: nonNegativeInt(flags.get('--max'), '--max') } : {}),
-    };
+    return parseHistorySearch(flags, slug, json, positionals[0]);
   }
   if (verb === 'show' && positionals.length === 1) {
     return { verb, slug, json, ref: positionals[0], context: nonNegativeInt(flags.get('--context'), '--context') ?? 0 };
   }
   throw new Error(HISTORY_USAGE);
+}
+
+function parseHistorySearch(flags: ReturnType<typeof split>['flags'], slug: string | undefined, json: boolean, pattern: string): Extract<HistoryCliRequest, { verb: 'search' }> {
+  const stream = flags.get('--stream');
+  if (stream !== undefined && stream !== 'stdout' && stream !== 'stderr') { throw new Error('--stream must be stdout or stderr'); }
+  const runId = flags.get('--run');
+  return {
+    verb: 'search', slug, json,
+    pattern,
+    regex: flags.get('--regex') === true,
+    ...(typeof runId === 'string' ? { runId } : {}),
+    ...(stream ? { stream: stream } : {}),
+    ...(flags.has('--max') ? { maxHits: nonNegativeInt(flags.get('--max'), '--max') } : {}),
+  };
 }
 
 export function parseAttachCliRequest(args: readonly string[]): AttachCliRequest {

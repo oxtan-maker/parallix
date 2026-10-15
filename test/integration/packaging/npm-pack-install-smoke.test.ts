@@ -83,7 +83,7 @@ test('task-2285 install: the tarball contains only the bundle payload and releas
 
 test('task-2285 install: SC4 — no node_modules anywhere in the installed package', () => {
   const walk = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true })
-    .flatMap((entry: any) => (entry.isDirectory()
+    .flatMap((entry) => (entry.isDirectory()
       ? [path.join(dir, entry.name), ...walk(path.join(dir, entry.name))]
       : []));
   const nested = walk(installedPackage).filter(dir => path.basename(dir) === 'node_modules');

@@ -1,5 +1,4 @@
-// @ts-nocheck -- TASK-2535: inline doubles for product-config seams; mirrors the
-// mockModule/@ts-nocheck pattern in test/integration/stats/stats-backfill.test.ts.
+// Product configuration contracts use isolated directories and injected Git processes.
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,15 +13,15 @@ import {
   DEFAULT_INTEGRATION_MODE,
 } from '../../../src/domain/integration.js';
 
-function withTempDir(fn) {
+function withTempDir(fn: (_arg0: string) => void) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'product-config-cp-'));
   try { return fn(dir); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
-function tempDir(prefix) {
+function tempDir(prefix: string) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix || 'pc-'));
 }
-function cleanup(dir) { fs.rmSync(dir, { recursive: true, force: true }); }
+function cleanup(dir: fs.PathLike) { fs.rmSync(dir, { recursive: true, force: true }); }
 
 // ---------- domain/integration (pure) ----------
 
@@ -45,20 +44,20 @@ test('parseIntegrationMode defaults and rejects unknown modes', () => {
 // ---------- resolveTaskProvider ----------
 
 test('resolveTaskProvider returns the backlog-md default when no config exists', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     assert.equal(pc.resolveTaskProvider(root), 'backlog-md');
   });
 });
 
 test('resolveTaskProvider returns the configured supported provider', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { tasks: { provider: 'backlog-md' } } }));
     assert.equal(pc.resolveTaskProvider(root), 'backlog-md');
   });
 });
 
 test('resolveTaskProvider throws for an unsupported provider', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { tasks: { provider: 'not-real' } } }));
     assert.throws(() => pc.resolveTaskProvider(root), /must be one of: backlog-md/);
   });
@@ -67,7 +66,7 @@ test('resolveTaskProvider throws for an unsupported provider', () => {
 // ---------- resolveIntegrationMode ----------
 
 test('resolveIntegrationMode defaults to local and reads a configured mode', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     assert.equal(pc.resolveIntegrationMode(root), 'local');
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ integration: { mode: 'github-publish' } }));
     assert.equal(pc.resolveIntegrationMode(root), 'github-publish');
@@ -75,7 +74,7 @@ test('resolveIntegrationMode defaults to local and reads a configured mode', () 
 });
 
 test('resolveIntegrationMode throws when integration is not an object', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ integration: 'local' }));
     assert.throws(() => pc.resolveIntegrationMode(root), /integration must be an object/);
   });
@@ -84,7 +83,7 @@ test('resolveIntegrationMode throws when integration is not an object', () => {
 // ---------- resolveGithubPublishConfig ----------
 
 test('resolveGithubPublishConfig defaults and reads configured values', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     const def = pc.resolveGithubPublishConfig(root);
     assert.equal(def.enabled, false);
     assert.equal(def.mainBranch, null);
@@ -93,7 +92,7 @@ test('resolveGithubPublishConfig defaults and reads configured values', () => {
     assert.equal(def.pollIntervalMs, 30000);
     assert.equal(def.maxPollAttempts, null);
   });
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       adapters: { githubPublish: { enabled: true, mainBranch: 'main', pollIntervalMs: 5000, maxPollAttempts: 3 } },
     }));
@@ -106,7 +105,7 @@ test('resolveGithubPublishConfig defaults and reads configured values', () => {
 });
 
 test('resolveGithubPublishConfig coerces invalid numeric fields to defaults', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       adapters: { githubPublish: { pollIntervalMs: 0, maxPollAttempts: -1 } },
     }));
@@ -119,24 +118,24 @@ test('resolveGithubPublishConfig coerces invalid numeric fields to defaults', ()
 // ---------- resolvePromptOverride ----------
 
 test('resolvePromptOverride returns null when unconfigured or invalid', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     assert.equal(pc.resolvePromptOverride(root), null);
   });
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { prompts: { override: '   ' } } }));
     assert.equal(pc.resolvePromptOverride(root), null);
   });
 });
 
 test('resolvePromptOverride resolves relative overrides against the root', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { prompts: { override: 'prompts/opinion.md' } } }));
     assert.equal(pc.resolvePromptOverride(root), path.resolve(root, 'prompts/opinion.md'));
   });
 });
 
 test('resolvePromptOverride keeps an absolute override unchanged', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     const abs = path.join(root, 'absolute-opinion.md');
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { prompts: { override: abs } } }));
     assert.equal(pc.resolvePromptOverride(root), abs);
@@ -146,7 +145,7 @@ test('resolvePromptOverride keeps an absolute override unchanged', () => {
 // ---------- resolveReviewAdapter / resolveReviewArtifactDir / isForgejoReviewEnabled ----------
 
 test('resolveReviewAdapter returns nulls by default and reads configured values', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     assert.deepEqual(pc.resolveReviewAdapter(root), { provider: null, remote: null, baseUrl: null, repo: null });
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { review: { provider: 'forgejo', remote: 'g', repo: 'o/r' } } }));
     const r = pc.resolveReviewAdapter(root);
@@ -156,21 +155,21 @@ test('resolveReviewAdapter returns nulls by default and reads configured values'
 });
 
 test('isForgejoReviewEnabled distinguishes forgejo from other providers', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     assert.equal(pc.isForgejoReviewEnabled(root), false);
   });
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { review: { provider: 'forgejo' } } }));
     assert.equal(pc.isForgejoReviewEnabled(root), true);
   });
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { review: { provider: 'none' } } }));
     assert.equal(pc.isForgejoReviewEnabled(root), false);
   });
 });
 
 test('resolveReviewArtifactDir uses os.tmpdir() by default and the configured path when set', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     assert.equal(pc.resolveReviewArtifactDir(root), os.tmpdir());
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { review: { tmpDir: 'artifacts' } } }));
     assert.equal(pc.resolveReviewArtifactDir(root), path.resolve(root, 'artifacts'));
@@ -180,14 +179,14 @@ test('resolveReviewArtifactDir uses os.tmpdir() by default and the configured pa
 // ---------- resolveCustomRunner / resolveAgentAdapter ----------
 
 test('resolveCustomRunner defaults to opencode and reads supported runners', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     assert.equal(pc.resolveCustomRunner(root), 'opencode');
   });
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { agents: { runners: { custom: 'pi' } } } }));
     assert.equal(pc.resolveCustomRunner(root), 'pi');
   });
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { agents: { runners: { custom: 'claude' } } } }));
     assert.equal(pc.resolveCustomRunner(root), 'opencode');
   });
@@ -209,17 +208,17 @@ test('adapterChecklist returns the seven guidance lines', () => {
 // ---------- resolveMaxConcurrentCustom (pure: reads config, no git) ----------
 
 test('resolveMaxConcurrentCustom returns the configured positive integer', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { agents: { maxConcurrentCustom: 4 } } }));
     assert.equal(pc.resolveMaxConcurrentCustom(root), 4);
   });
 });
 
 test('resolveMaxConcurrentCustom falls back to Infinity when unconfigured or invalid', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     assert.equal(pc.resolveMaxConcurrentCustom(root), Infinity);
   });
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { agents: { maxConcurrentCustom: -1 } } }));
     assert.equal(pc.resolveMaxConcurrentCustom(root), Infinity);
   });
@@ -228,7 +227,7 @@ test('resolveMaxConcurrentCustom falls back to Infinity when unconfigured or inv
 // ---------- loadWorkflowConfig branches ----------
 
 test('loadWorkflowConfig reports missing config, parse error, and default fallback', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     const missing = pc.loadWorkflowConfig(root);
     assert.equal(missing.found, false);
     assert.equal(missing.parseError, null);
@@ -263,7 +262,7 @@ test('validateWorkflowConfig accepts a supported integration.mode', () => {
 // ---------- resolveTaskStorage storage object fallbacks ----------
 
 test('resolveTaskStorage falls back when storage is an object without tasksDir', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       adapters: { tasks: { storage: { completedDir: 'done' } } },
     }));
@@ -305,28 +304,29 @@ test('gitIdentityEnv preserves a configured author name for the committer', () =
 
 test('initializeGitRepository succeeds with git init -b main', () => {
   const result = pc.initializeGitRepository('/repo', {
-    spawnSyncFn: (cmd, args) => ({ status: 0, stdout: '', stderr: '' }),
+    spawnSyncFn: (cmd, args) => ({ signal: null,  status: 0, stdout: '', stderr: '' }),
   });
   assert.deepEqual(result, { ok: true, branch: 'main', mode: 'init-main' });
 });
 
 test('initializeGitRepository falls back to init + symbolic-ref', () => {
-  const calls: string[][] = [];
+  const calls: (readonly string[])[] = [];
   const result = pc.initializeGitRepository('/repo', {
     spawnSyncFn: (cmd, args) => {
       calls.push(args);
-      if (args[1] === '-b') return { status: 1, stdout: '', stderr: 'unsupported' };
-      if (args[0] === 'init') return { status: 0, stdout: '', stderr: '' };
-      return { status: 0, stdout: '', stderr: '' }; // symbolic-ref
+      if (args[1] === '-b') return { signal: null,  status: 1, stdout: '', stderr: 'unsupported' };
+      if (args[0] === 'init') return { signal: null,  status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' }; // symbolic-ref
     },
   });
+  assert.equal(result.ok, true);
   assert.equal(result.mode, 'init-fallback');
   assert.deepEqual(calls.map(a => a.join(' ')), ['init -b main', 'init', 'symbolic-ref HEAD refs/heads/main']);
 });
 
 test('initializeGitRepository reports a failure when both init attempts fail', () => {
   const result = pc.initializeGitRepository('/repo', {
-    spawnSyncFn: () => ({ status: 1, stdout: '', stderr: 'fatal' }),
+    spawnSyncFn: () => ({ signal: null,  status: 1, stdout: '', stderr: 'fatal' }),
   });
   assert.equal(result.ok, false);
   if (!result.ok) { assert.match(result.message, /fatal/); }
@@ -343,10 +343,10 @@ test('commitWorkflowBaseline reports no-workflow-files when nothing is present',
 });
 
 test('commitWorkflowBaseline commits when workflow files are present', () => {
-  const spawned: string[][] = [];
+  const spawned: (readonly string[])[] = [];
   const result = pc.commitWorkflowBaseline('/repo', {
     existsSyncFn: (p) => ['workflow', 'workflow.config.json'].includes(path.basename(String(p))),
-    spawnSyncFn: (cmd, args) => { spawned.push(args); return { status: 0, stdout: '', stderr: '' }; },
+    spawnSyncFn: (cmd, args) => { spawned.push(args); return { signal: null,  status: 0, stdout: '', stderr: '' }; },
   });
   assert.equal(result.committed, true);
   assert.deepEqual(result.files, ['workflow', 'workflow.config.json']);
@@ -356,10 +356,10 @@ test('commitWorkflowBaseline commits when workflow files are present', () => {
 test('commitWorkflowBaseline reports git add failure', () => {
   const result = pc.commitWorkflowBaseline('/repo', {
     existsSyncFn: () => true,
-    spawnSyncFn: () => ({ status: 1, stdout: '', stderr: 'add denied' }),
+    spawnSyncFn: () => ({ signal: null,  status: 1, stdout: '', stderr: 'add denied' }),
   });
   assert.equal(result.committed, false);
-  if (!result.ok) { assert.match(result.message, /add denied/); }
+  if (!result.ok) { assert.ok(result.message); assert.match(result.message, /add denied/); }
 });
 
 // ---------- ensureStandaloneMissionBaseline (injected spawnSyncFn) ----------
@@ -386,10 +386,10 @@ test('ensureStandaloneMissionBaseline reports a git status failure', () => {
   const repo = standaloneRepo();
   try {
     const result = pc.ensureStandaloneMissionBaseline(repo, {
-      spawnSyncFn: () => ({ status: 1, stdout: '', stderr: 'status failed' }),
+      spawnSyncFn: () => ({ signal: null,  status: 1, stdout: '', stderr: 'status failed' }),
     });
     assert.equal(result.failed, true);
-    if (!result.ok && result.message) { assert.match(result.message, /status failed/); }
+    if (result.failed && result.message) { assert.match(result.message, /status failed/); }
   } finally { cleanup(repo); }
 });
 
@@ -397,10 +397,10 @@ test('ensureStandaloneMissionBaseline fails on conflicted entries', () => {
   const repo = standaloneRepo();
   try {
     const result = pc.ensureStandaloneMissionBaseline(repo, {
-      spawnSyncFn: () => ({ status: 0, stdout: 'DD\tsome/file.js\n', stderr: '' }),
+      spawnSyncFn: () => ({ signal: null,  status: 0, stdout: 'DD\tsome/file.js\n', stderr: '' }),
     });
     assert.equal(result.failed, true);
-    if (!result.ok && result.message) { assert.match(result.message, /conflicted files block/); }
+    if (result.failed && result.message) { assert.match(result.message, /conflicted files block/); }
   } finally { cleanup(repo); }
 });
 
@@ -409,8 +409,8 @@ test('ensureStandaloneMissionBaseline commits clean changes and returns entries'
   try {
     const result = pc.ensureStandaloneMissionBaseline(repo, {
       spawnSyncFn: (cmd, args) => {
-        if (args.includes('commit')) return { status: 0, stdout: '', stderr: '' };
-        return { status: 0, stdout: ' M backlog/tasks/task-1 - X.md\n', stderr: '' };
+        if (args.includes('commit')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: ' M backlog/tasks/task-1 - X.md\n', stderr: '' };
       },
     });
     assert.equal(result.committed, true);
@@ -424,8 +424,8 @@ test('ensureStandaloneGitRepo initializes a standalone repo and commits baseline
   const result = pc.ensureStandaloneGitRepo('/standalone', {
     isStandaloneWorkflowLayoutFn: () => true,
     hasGitRepositoryFn: () => false,
-    initializeGitRepositoryFn: () => ({ ok: true, branch: 'main', mode: 'init-main' }),
-    commitWorkflowBaselineFn: () => ({ ok: true, committed: true, files: ['workflow'] }),
+    initializeGitRepositoryFn: () => ({ ok: true as const, branch: 'main', mode: 'init-main' }),
+    commitWorkflowBaselineFn: () => ({ ok: true as const, committed: true, files: ['workflow'] }),
   });
   assert.equal(result.initialized, true);
   assert.equal(result.branch, 'main');
@@ -445,7 +445,7 @@ test('ensureStandaloneGitRepo reports a failed initialization', () => {
   const result = pc.ensureStandaloneGitRepo('/standalone', {
     isStandaloneWorkflowLayoutFn: () => true,
     hasGitRepositoryFn: () => false,
-    initializeGitRepositoryFn: () => ({ ok: false, message: 'boom' }),
+    initializeGitRepositoryFn: () => ({ ok: false as const, message: 'boom' }),
   });
   assert.equal(result.failed, true);
   assert.equal(result.message, 'boom');
@@ -454,12 +454,12 @@ test('ensureStandaloneGitRepo reports a failed initialization', () => {
 // ---------- resolveAgentModel ----------
 
 test('resolveAgentModel returns the configured model and null for missing families', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { agents: { models: { codex: 'gpt-x' } } } }));
     assert.equal(pc.resolveAgentModel('codex', root), 'gpt-x');
     assert.equal(pc.resolveAgentModel('gemini', root), null);
   });
-  withTempDir(root => {
+  withTempDir((root) => {
     assert.equal(pc.resolveAgentModel('codex', root), null);
     assert.equal(pc.resolveAgentModel('', root), null);
   });
@@ -468,22 +468,22 @@ test('resolveAgentModel returns the configured model and null for missing famili
 // ---------- evaluateRepositoryReadiness ----------
 
 test('evaluateRepositoryReadiness distinguishes default, invalid-JSON, and configured repos', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     assert.deepEqual(pc.evaluateRepositoryReadiness(root), { mode: 'default', configPath: null, issues: [] });
   });
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), '{ broken');
     const r = pc.evaluateRepositoryReadiness(root);
     assert.equal(r.mode, 'invalid');
     assert.ok(r.issues[0].startsWith('invalid JSON:'));
   });
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { tasks: {} } }));
     const r = pc.evaluateRepositoryReadiness(root);
     assert.equal(r.mode, 'configured');
     assert.deepEqual(r.issues, []);
   });
-  withTempDir(root => {
+  withTempDir((root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { agents: { maxConcurrentCustom: 0 } } }));
     const r = pc.evaluateRepositoryReadiness(root);
     assert.equal(r.mode, 'invalid');

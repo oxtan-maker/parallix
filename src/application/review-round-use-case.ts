@@ -29,6 +29,7 @@ export class ReviewRoundUseCase {
     // Clearing the explicit stop is necessarily before invalidating its blocker
     // and before any relaunch. Keeping this order here makes it independent of
     // the CLI adapter that received the command.
+    if (!request.dryRun) { await this._entry.operatorResume?.acknowledge(request.slug); }
     await this._entry.clearHumanIntervention(request.slug);
     if (!request.dryRun) { await this._entry.invalidateResolvedBlocker(request.slug); }
     const parsed = request.rawMaxAttempts === null ? null : Number.parseInt(request.rawMaxAttempts, 10);

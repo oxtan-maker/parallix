@@ -36,19 +36,19 @@ const DEFAULT_IDLE_MS = 2000;
  * codes themselves still come from `styleText`.
  */
 export function colorEnabled(sink: RenderSink, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): boolean {
-  if (configuration.runtime.noColor !== undefined && configuration.runtime.noColor !== '') {return false;}
+  if (configuration.runtime.noColor !== undefined && configuration.runtime.noColor !== '') { return false; }
   // FORCE_COLOR=0 is the conventional force-disable, as `supports-color` and
   // the repo's own `FORCE_COLOR=0` test invocation use it.
-  if (configuration.runtime.forceColor === '0') {return false;}
-  if (configuration.runtime.forceColor !== undefined && configuration.runtime.forceColor !== '') {return true;}
-  if (configuration.runtime.term === 'dumb') {return false;}
+  if (configuration.runtime.forceColor === '0') { return false; }
+  if (configuration.runtime.forceColor !== undefined && configuration.runtime.forceColor !== '') { return true; }
+  if (configuration.runtime.term === 'dumb') { return false; }
   return sink.isTTY === true;
 }
 
 function formatDuration(ms: number): string {
-  if (ms < 1000) {return `${ms}ms`;}
+  if (ms < 1000) { return `${ms}ms`; }
   const seconds = ms / 1000;
-  if (seconds < 60) {return `${seconds.toFixed(1)}s`;}
+  if (seconds < 60) { return `${seconds.toFixed(1)}s`; }
   const minutes = Math.floor(seconds / 60);
   return `${minutes}m${String(Math.round(seconds - minutes * 60)).padStart(2, '0')}s`;
 }
@@ -92,7 +92,7 @@ export class AgentStreamView {
   }
 
   render(events: NormalizedEvent[]): void {
-    for (const event of events) {this.renderEvent(event);}
+    for (const event of events) { this.renderEvent(event); }
   }
 
   /**
@@ -100,11 +100,11 @@ export class AgentStreamView {
    * directly from tests so no real clock is involved.
    */
   tick(): void {
-    if (!this.showSpinner) {return;}
-    if (this.now() - this.lastOutputAt < this.idleMs) {return;}
+    if (!this.showSpinner) { return; }
+    if (this.now() - this.lastOutputAt < this.idleMs) { return; }
     const frame = SPINNER_FRAMES[this.spinnerFrame % SPINNER_FRAMES.length];
     this.spinnerFrame += 1;
-    if (!this.atLineStart) {this.write('\n');}
+    if (!this.atLineStart) { this.write('\n'); }
     const since = this.activity === null ? this.startedAt : this.activityStartedAt;
     this.sink.write(`\r${this.style(['dim'], `${frame} ${this.activity ?? 'working'}… ${formatDuration(this.now() - since)}`)}`);
     this.spinnerVisible = true;
@@ -113,19 +113,14 @@ export class AgentStreamView {
   /** Clear any spinner residue and terminate a half-written line. */
   end(): void {
     this.clearSpinner();
-    if (!this.atLineStart) {this.write('\n');}
+    if (!this.atLineStart) { this.write('\n'); }
   }
 
   // ---------- event formatting ----------
 
   private renderEvent(event: NormalizedEvent): void {
     switch (event.kind) {
-      case 'system': {
-        const parts = [event.model, event.sessionId ? `session ${event.sessionId}` : null, event.tools === null ? null : `${event.tools} tools`]
-          .filter(Boolean).join(' · ');
-        this.line(`${this.style(['cyan'], '●')} ${this.style(['bold'], parts || 'agent')}`);
-        return;
-      }
+      case 'system': this.renderSystem(event); return;
       case 'text':
         this.setActivity(null);
         this.text(event.text, event.agent, null, 'text', '');
@@ -137,20 +132,10 @@ export class AgentStreamView {
       case 'thinking_progress':
         // Never printed: thinking that the CLI returns encrypted is only
         // observable as a token counter, so it drives the live indicator.
-        this.setActivity(event.tokens === null ? 'thinking' : `thinking ${event.tokens} tokens`, 'thinking');
+        this.renderThinkingProgress(event);
         return;
-      case 'thinking_summary': {
-        this.setActivity(null);
-        const count = event.tokens === null ? '' : ` · ${event.tokens} tokens`;
-        this.line(this.withAgent(this.style(['gray'], `✳ thinking${count}`), event.agent));
-        return;
-      }
-      case 'agent_progress': {
-        const uses = event.toolUses === null ? '' : ` · ${event.toolUses} tool uses`;
-        this.setActivity(`${event.agent} ${event.description}`);
-        this.line(this.style(['magenta'], `  ↳ ${event.agent} `) + this.style(['gray'], `${event.description}${uses}`));
-        return;
-      }
+      case 'thinking_summary': this.renderThinkingSummary(event); return;
+      case 'agent_progress': this.renderAgentProgress(event); return;
       case 'tool_start': {
         this.renderToolStart(event);
         return;
@@ -164,11 +149,10 @@ export class AgentStreamView {
         return;
       }
       case 'activity':
-        this.setActivity(event.label, event.group);
-        if (event.message) {this.line(this.style(['gray'], event.message));}
+        this.renderActivity(event);
         return;
       case 'diagnostic':
-        this.line(this.style([event.isError ? 'red' : 'gray'], event.text));
+        this.renderDiagnostic(event);
         return;
       case 'passthrough':
         this.line(event.text);
@@ -178,6 +162,37 @@ export class AgentStreamView {
     }
   }
 
+  private renderSystem(event: Extract<NormalizedEvent, { kind: 'system' }>): void {
+    const parts = [event.model, event.sessionId ? `session ${event.sessionId}` : null, event.tools === null ? null : `${event.tools} tools`]
+      .filter(Boolean).join(' · ');
+    this.line(`${this.style(['cyan'], '●')} ${this.style(['bold'], parts || 'agent')}`);
+  }
+
+  private renderThinkingSummary(event: Extract<NormalizedEvent, { kind: 'thinking_summary' }>): void {
+    this.setActivity(null);
+    const count = event.tokens === null ? '' : ` · ${event.tokens} tokens`;
+    this.line(this.withAgent(this.style(['gray'], `✳ thinking${count}`), event.agent));
+  }
+
+  private renderAgentProgress(event: Extract<NormalizedEvent, { kind: 'agent_progress' }>): void {
+    const uses = event.toolUses === null ? '' : ` · ${event.toolUses} tool uses`;
+    this.setActivity(`${event.agent} ${event.description}`);
+    this.line(this.style(['magenta'], `  ↳ ${event.agent} `) + this.style(['gray'], `${event.description}${uses}`));
+  }
+
+  private renderThinkingProgress(event: Extract<NormalizedEvent, { kind: 'thinking_progress' }>): void {
+    this.setActivity(event.tokens === null ? 'thinking' : `thinking ${event.tokens} tokens`, 'thinking');
+  }
+
+  private renderActivity(event: Extract<NormalizedEvent, { kind: 'activity' }>): void {
+    this.setActivity(event.label, event.group);
+    if (event.message) { this.line(this.style(['gray'], event.message)); }
+  }
+
+  private renderDiagnostic(event: Extract<NormalizedEvent, { kind: 'diagnostic' }>): void {
+    this.line(this.style([event.isError ? 'red' : 'gray'], event.text));
+  }
+
   private renderToolStart(event: Extract<NormalizedEvent, { kind: 'tool_start' }>): void {
     this.setActivity(event.isSubagent ? `sub-agent ${event.input || event.name}` : ['Bash', 'bash'].includes(event.name) ? 'running command' : event.name);
     const label = event.isSubagent
@@ -185,7 +200,7 @@ export class AgentStreamView {
       : `${this.style(['cyan'], '⚒')}${['Bash', 'bash'].includes(event.name) ? '' : ` ${this.style(['bold'], event.name)}`}${event.input ? ` ${event.input}` : ''}`;
     // A shell call without a command still drives the indicator, but has no
     // useful line to print. Never fall back to a Bash/bash label.
-    if (['Bash', 'bash'].includes(event.name) && !event.input) {return;}
+    if (['Bash', 'bash'].includes(event.name) && !event.input) { return; }
     this.line(this.withAgent(label, event.agent));
   }
 
@@ -201,8 +216,8 @@ export class AgentStreamView {
   private renderResult(event: Extract<NormalizedEvent, { kind: 'result' }>): void {
     this.setActivity(null);
     const parts = [event.durationMs === null ? null : formatDuration(event.durationMs), event.numTurns === null ? null : `${event.numTurns} turns`,
-      event.inputTokens === null && event.outputTokens === null ? null : `${event.inputTokens ?? 0} in / ${event.outputTokens ?? 0} out`,
-      event.costUsd === null ? null : `$${event.costUsd.toFixed(4)}`].filter(Boolean).join(' · ');
+    event.inputTokens === null && event.outputTokens === null ? null : `${event.inputTokens ?? 0} in / ${event.outputTokens ?? 0} out`,
+    event.costUsd === null ? null : `$${event.costUsd.toFixed(4)}`].filter(Boolean).join(' · ');
     this.line(`${event.isError ? this.style(['red'], '● failed') : this.style(['green'], '● done')}${parts ? ` ${parts}` : ''}`);
   }
 
@@ -215,33 +230,33 @@ export class AgentStreamView {
     const currentGroup = this.activityGroup;
     this.activity = label;
     this.activityGroup = label === null ? null : group;
-    if (currentGroup !== this.activityGroup) {this.activityStartedAt = this.now();}
+    if (currentGroup !== this.activityGroup) { this.activityStartedAt = this.now(); }
   }
 
   // ---------- writing ----------
 
   /** Stream text, re-applying the sub-agent prefix at every line start. */
   private text(text: string, agent: string | null, format: Format | null, kind: string, mark: string): void {
-    if (!text) {return;}
+    if (!text) { return; }
     this.clearSpinner();
     const stream = `${kind}:${agent ?? ''}`;
-    if (stream !== this.lastStream && !this.atLineStart) {this.write('\n');}
+    if (stream !== this.lastStream && !this.atLineStart) { this.write('\n'); }
     this.lastStream = stream;
     const prefix = `${agent ? this.agentPrefix(agent) : ''}${mark ? this.style(['gray'], mark) : ''}`;
     for (const segment of text.split(/(\n)/)) {
-      if (segment === '') {continue;}
+      if (segment === '') { continue; }
       if (segment === '\n') {
         this.write('\n');
         continue;
       }
-      if (this.atLineStart && prefix) {this.write(prefix);}
+      if (this.atLineStart && prefix) { this.write(prefix); }
       this.write(format ? this.style(format, segment) : segment);
     }
   }
 
   private line(text: string): void {
     this.clearSpinner();
-    if (!this.atLineStart) {this.write('\n');}
+    if (!this.atLineStart) { this.write('\n'); }
     this.lastStream = null;
     this.write(`${text}\n`);
   }
@@ -261,7 +276,7 @@ export class AgentStreamView {
   }
 
   private clearSpinner(): void {
-    if (!this.spinnerVisible) {return;}
+    if (!this.spinnerVisible) { return; }
     this.spinnerVisible = false;
     this.sink.write(`\r${' '.repeat(this.clearWidth)}\r`);
     this.atLineStart = true;

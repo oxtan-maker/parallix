@@ -110,11 +110,39 @@ export function getRun(scope: RunHistoryScope, runId: string): RunLookup {
 }
 
 // CSI, OSC and two-byte escape sequences: terminal control, not content.
-const ANSI = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])/g;
+function codeInRange(code: number, min: number, max: number): boolean { return code >= min && code <= max; }
+function terminalSequenceEnd(text: string, start: number): number {
+  const next = text.charCodeAt(start + 1);
+  let end = start + 2;
+  if (next === 91) {
+    while (codeInRange(text.charCodeAt(end), 48, 63)) { end += 1; }
+    while (codeInRange(text.charCodeAt(end), 32, 47)) { end += 1; }
+    if (codeInRange(text.charCodeAt(end), 64, 126)) { return end + 1; }
+  }
+  if (next === 93) {
+    while (end < text.length && text.charCodeAt(end) !== 7 && text.charCodeAt(end) !== 27) { end += 1; }
+    if (text.charCodeAt(end) === 7) { return end + 1; }
+    if (text.charCodeAt(end) === 27 && text[end + 1] === '\\') { return end + 2; }
+  }
+  return codeInRange(next, 64, 90) || codeInRange(next, 92, 95) ? start + 2 : start;
+}
+
+function* terminalSequences(text: string): Generator<{ start: number; end: number }> {
+  let start = 0;
+  while (start < text.length) {
+    const end = text.charCodeAt(start) === 27 ? terminalSequenceEnd(text, start) : start;
+    if (end > start) { yield { start, end }; start = end; }
+    else { start += 1; }
+  }
+}
 
 /** Strip terminal control sequences for display; alternate-screen text is kept. */
 export function stripTerminalControl(text: string): string {
-  return text.replace(ANSI, '').replace(/\r\n/g, '\n').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '');
+  const visible = searchable(text).text.replace(/\r\n/g, '\n');
+  return Array.from(visible).filter(character => {
+    const code = character.charCodeAt(0);
+    return code === 9 || code === 10 || (code >= 32 && code !== 127);
+  }).join('');
 }
 
 /**
@@ -129,9 +157,9 @@ function searchable(raw: string): { text: string; map: number[] } {
   const pushRange = (from: number, to: number) => {
     for (let i = from; i < to; i += 1) { text += raw[i]; map.push(i); }
   };
-  for (const match of raw.matchAll(ANSI)) {
-    pushRange(last, match.index);
-    last = match.index + match[0].length;
+  for (const match of terminalSequences(raw)) {
+    pushRange(last, match.start);
+    last = match.end;
   }
   pushRange(last, raw.length);
   return { text, map };
@@ -192,12 +220,7 @@ function matcher(query: RunSearchQuery): RegExp {
   return new RegExp(literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
 }
 
-/** Bounded search across the Mission's runs (or one run), newest run first. */
-export function searchRuns(scope: RunHistoryScope, query: RunSearchQuery): RunSearchResult {
-  if (!query.pattern) { throw new Error('search pattern must not be empty'); }
-  const maxHits = Math.min(Math.max(query.maxHits ?? MAX_RUN_SEARCH_HITS, 1), MAX_RUN_SEARCH_HITS);
-  const pattern = matcher(query);
-  const errors: string[] = [];
+function searchableRuns(scope: RunHistoryScope, query: RunSearchQuery, errors: string[]): RunSummary[] {
   let runs: RunSummary[];
   if (query.runId) {
     const lookup = getRun(scope, query.runId);
@@ -206,6 +229,16 @@ export function searchRuns(scope: RunHistoryScope, query: RunSearchQuery): RunSe
   } else {
     runs = listRuns(scope);
   }
+  return runs;
+}
+
+/** Bounded search across the Mission's runs (or one run), newest run first. */
+export function searchRuns(scope: RunHistoryScope, query: RunSearchQuery): RunSearchResult {
+  if (!query.pattern) { throw new Error('search pattern must not be empty'); }
+  const maxHits = Math.min(Math.max(query.maxHits ?? MAX_RUN_SEARCH_HITS, 1), MAX_RUN_SEARCH_HITS);
+  const pattern = matcher(query);
+  const errors: string[] = [];
+  const runs = searchableRuns(scope, query, errors);
   const hits: RunSearchHit[] = [];
   let totalHits = 0;
   let budget = Math.max(0, query.maxScanBytes ?? MAX_RUN_SEARCH_SCAN_BYTES);
@@ -214,7 +247,7 @@ export function searchRuns(scope: RunHistoryScope, query: RunSearchQuery): RunSe
   for (const run of runs) {
     if (scanLimited) { break; }
     searched.push(run);
-    for (const stream of query.stream ? [query.stream] : (['stdout', 'stderr'] as const)) {
+    for (const stream of searchStreams(query)) {
       if (scanLimited) { break; }
       for (const segment of segments(scope, run.record.runId, stream)) {
         const size = scope.fs.size(segment.path) ?? 0;
@@ -222,19 +255,7 @@ export function searchRuns(scope: RunHistoryScope, query: RunSearchQuery): RunSe
         budget -= size;
         const bytes = scope.fs.readBytes(segment.path, 0, size);
         if (!bytes) { errors.push(`access-denied: cannot read ${run.record.runId} ${stream} segment at ${segment.start}`); continue; }
-        const { text, map } = searchable(latin1(bytes));
-        pattern.lastIndex = 0;
-        for (const match of text.matchAll(pattern)) {
-          if (match[0].length === 0) { break; }
-          totalHits += 1;
-          if (hits.length >= maxHits) { continue; }
-          const rawStart = map[match.index];
-          const rawEnd = map[match.index + match[0].length - 1] + 1;
-          const from = Math.max(0, rawStart - RUN_SEARCH_CONTEXT_BYTES);
-          const to = Math.min(bytes.length, rawEnd + RUN_SEARCH_CONTEXT_BYTES);
-          const ref: RunHistoryRef = { runId: run.record.runId, stream, offset: segment.start + rawStart, length: rawEnd - rawStart };
-          hits.push({ ref: formatRunHistoryRef(ref), runId: ref.runId, stream, offset: ref.offset, preview: stripTerminalControl(decode(bytes.subarray(from, to))) });
-        }
+        totalHits += collectSegmentHits(bytes, pattern, run.record.runId, stream, segment.start, hits, maxHits);
       }
     }
   }
@@ -417,4 +438,26 @@ function concat(parts: readonly Uint8Array[]): Uint8Array {
   let cursor = 0;
   for (const part of parts) { joined.set(part, cursor); cursor += part.length; }
   return joined;
+}
+
+function collectSegmentHits(bytes: Uint8Array, pattern: RegExp, runId: string, stream: RunHistoryRef['stream'], segmentStart: number, hits: RunSearchHit[], maxHits: number): number {
+  let count = 0;
+  const { text, map } = searchable(latin1(bytes));
+  pattern.lastIndex = 0;
+  for (const match of text.matchAll(pattern)) {
+    if (match[0].length === 0) { break; }
+    count += 1;
+    if (hits.length >= maxHits) { continue; }
+    const rawStart = map[match.index];
+    const rawEnd = map[match.index + match[0].length - 1] + 1;
+    const from = Math.max(0, rawStart - RUN_SEARCH_CONTEXT_BYTES);
+    const to = Math.min(bytes.length, rawEnd + RUN_SEARCH_CONTEXT_BYTES);
+    const ref: RunHistoryRef = { runId, stream, offset: segmentStart + rawStart, length: rawEnd - rawStart };
+    hits.push({ ref: formatRunHistoryRef(ref), runId: ref.runId, stream, offset: ref.offset, preview: stripTerminalControl(decode(bytes.subarray(from, to))) });
+  }
+  return count;
+}
+
+function searchStreams(query: RunSearchQuery): readonly RunHistoryRef['stream'][] {
+  return query.stream ? [query.stream] : ['stdout', 'stderr'];
 }

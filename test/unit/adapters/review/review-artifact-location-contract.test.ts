@@ -9,7 +9,7 @@ import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 import { reviewArtifactPath, resolveArtifactDir } from '../../../../src/adapters/review/review-artifacts.js';
 
 // Regression provenance: TASK-1209.
-function withTempRepo(config, fn) {
+function withTempRepo(config: unknown, fn: (_arg0: string) => void) {
   const root = registeredMkdtemp('task-1209-artifact-dir-');
   try {
     if (config !== null) {
@@ -44,31 +44,31 @@ test('reviewArtifactPath falls back to os.tmpdir() when tmpDir omitted', () => {
 // ============================================================================
 
 test('resolveArtifactDir returns configured adapters.review.tmpDir when present (task-1209 SC2)', () => {
-  withTempRepo({ product: {}, adapters: { review: { provider: 'none', tmpDir: '/tmp/task-1209-tests' } } }, root => {
+  withTempRepo({ product: {}, adapters: { review: { provider: 'none', tmpDir: '/tmp/task-1209-tests' } } }, (root) => {
     assert.equal(resolveArtifactDir(root), '/tmp/task-1209-tests');
   });
 });
 
 test('resolveArtifactDir falls back to os.tmpdir() when tmpDir absent (task-1209 SC2)', () => {
-  withTempRepo({ product: {}, adapters: { review: { provider: 'none' } } }, root => {
+  withTempRepo({ product: {}, adapters: { review: { provider: 'none' } } }, (root) => {
     assert.equal(resolveArtifactDir(root), os.tmpdir());
   });
 });
 
 test('resolveArtifactDir falls back to os.tmpdir() when no config file exists', () => {
-  withTempRepo(null, root => {
+  withTempRepo(null, (root) => {
     assert.equal(resolveArtifactDir(root), os.tmpdir());
   });
 });
 
 test('resolveArtifactDir resolves a relative tmpDir against the repo root', () => {
-  withTempRepo({ product: {}, adapters: { review: { provider: 'none', tmpDir: '.review-artifacts' } } }, root => {
+  withTempRepo({ product: {}, adapters: { review: { provider: 'none', tmpDir: '.review-artifacts' } } }, (root) => {
     assert.equal(resolveArtifactDir(root), path.resolve(root, '.review-artifacts'));
   });
 });
 
 test('resolveArtifactDir ignores a blank tmpDir', () => {
-  withTempRepo({ product: {}, adapters: { review: { provider: 'none', tmpDir: '   ' } } }, root => {
+  withTempRepo({ product: {}, adapters: { review: { provider: 'none', tmpDir: '   ' } } }, (root) => {
     assert.equal(resolveArtifactDir(root), os.tmpdir());
   });
 });

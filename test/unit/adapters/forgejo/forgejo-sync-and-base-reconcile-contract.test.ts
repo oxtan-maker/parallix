@@ -1,3 +1,5 @@
+import type { PushReviewRefOptions, GitRunner } from '../../../../src/adapters/forgejo/forgejo-git.js';
+import { forgejoApiFixture } from '../../../fixtures/forgejo-api.js';
 // Historical regression provenance: TASK-2520.
 // Behavior-owned suite (TASK-2622.09): Forgejo base synchronisation safety over recorded Git/Forgejo
 // doubles — stale-info push detection (task-1080), syncMerged retry/force fallback, and diverged-base
@@ -27,9 +29,10 @@ describe("stale push rejection detection", () => {
   const { mock } = test;
 
   test('pushReviewRef captures output allowing stale info detection (FIXED)', (t) => {
-    mock.method(git, 'git', (args, options) => {
+    mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0], options: Parameters<(typeof git)["git"]>[1]) => {
+      assert.ok(options != null);
       assert.deepEqual(options.stdio, ['ignore', 'pipe', 'pipe'], 'Implementation should now use pipes');
-      return {
+      return { signal: null, 
         status: 1,
         stdout: '',
         stderr: 'error: failed to push some refs to ... stale info'
@@ -75,8 +78,8 @@ describe("syncMerged retry on stale info", () => {
     const mergedCommit = 'abcd123';
     const rootDir = '/tmp/fake-root';
 
-    let pushCalls = [];
-    let fetchCalls = [];
+    let pushCalls: { commit: string; ref: string; opts: PushReviewRefOptions; }[] = [];
+    let fetchCalls: string[] = [];
 
     const options = {
       branch,
@@ -86,35 +89,35 @@ describe("syncMerged retry on stale info", () => {
       token: 'fake-token',
       log: () => {},
       resolvePrNumber: () => 1065,
-      verifyCommit: () => ({ status: 0 }),
+      verifyCommit: () => ({ stdout: '', stderr: '', signal: null,  status: 0 }),
       // task-2520: reconcile reads the local/Forgejo base SHAs; a stable value for
       // both refs keeps the base in sync so reconciliation is a no-op.
-      gitRunner: () => ({ status: 0, stdout: 'same-base-sha', stderr: '' }),
+      gitRunner: () => ({ signal: null,  status: 0, stdout: 'same-base-sha', stderr: '' }),
       // Mocking the inner functions passed via options
       gitPush: (commit, ref, dir, opts = {}) => {
         pushCalls.push({ commit, ref, opts });
-        if (ref.includes('master') || ref.includes('main')) return { status: 0 };
+        if (ref.includes('master') || ref.includes('main')) return { stdout: '', stderr: '', signal: null,  status: 0 };
 
         // First call for branch sync: return stale info
         if (pushCalls.length === 2) {
-          return {
+          return { signal: null, 
             status: 1,
             stderr: 'error: failed to push some refs to ... stale info',
             stdout: ''
           };
         }
         // Second call after fetch: success
-        return { status: 0 };
+        return { stdout: '', stderr: '', signal: null,  status: 0 };
       },
       gitFetch: (b, dir) => {
         fetchCalls.push(b);
-        return { status: 0 };
+        return { stdout: '', stderr: '', signal: null,  status: 0 };
       },
-      apiCall: (method, path) => {
-        if (path.includes('/merge')) return { ok: true };
-        return { ok: true, data: {} };
-      }
-    };
+      apiCall: forgejoApiFixture((method, path) => {
+        if (path.includes('/merge')) return { ok: true as const };
+        return { ok: true as const, data: {} };
+      })
+    } satisfies NonNullable<Parameters<typeof syncMerged>[2]>;
 
     const result = await syncMerged(branch, mergedCommit, options);
 
@@ -149,7 +152,7 @@ describe("syncMerged retry on stale info", () => {
     const branch = 'mission/task-1065';
     const mergedCommit = 'abcd123';
 
-    let pushCalls = [];
+    let pushCalls: { commit: string; ref: string; opts: PushReviewRefOptions; }[] = [];
 
     const options = {
       branch,
@@ -158,29 +161,28 @@ describe("syncMerged retry on stale info", () => {
       token: 'fake-token',
       log: () => {},
       resolvePrNumber: () => 1065,
-      verifyCommit: () => ({ status: 0 }),
+      verifyCommit: () => ({ stdout: '', stderr: '', signal: null,  status: 0 }),
       // task-2520: reconcile reads the local/Forgejo base SHAs; a stable value for
       // both refs keeps the base in sync so reconciliation is a no-op.
-      gitRunner: () => ({ status: 0, stdout: 'same-base-sha', stderr: '' }),
+      gitRunner: () => ({ signal: null,  status: 0, stdout: 'same-base-sha', stderr: '' }),
       gitPush: (commit, ref, dir, opts = {}) => {
         pushCalls.push({ commit, ref, opts });
-        if (ref.includes('master') || ref.includes('main')) return { status: 0 };
+        if (ref.includes('master') || ref.includes('main')) return { stdout: '', stderr: '', signal: null,  status: 0 };
 
         // Always return stale info for force-with-lease
-  // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `forceWithLease` absent from its inferred mock shape.
         if (opts.forceWithLease) {
-          return {
+          return { signal: null, 
             status: 1,
             stderr: 'error: failed to push some refs to ... stale info',
             stdout: ''
           };
         }
         // Success for plain force
-        return { status: 0 };
+        return { stdout: '', stderr: '', signal: null,  status: 0 };
       },
-      gitFetch: () => ({ status: 0 }),
-      apiCall: (method, path) => ({ ok: true })
-    };
+      gitFetch: () => ({ stdout: '', stderr: '', signal: null,  status: 0 }),
+      apiCall: forgejoApiFixture((method, path) => ({ ok: true as const }))
+    } satisfies NonNullable<Parameters<typeof syncMerged>[2]>;
 
     const result = await syncMerged(branch, mergedCommit, options);
 
@@ -223,19 +225,19 @@ describe("diverged base reconcile", () => {
   const PRIMARY = 'main';
 
   /** gitRunner double: resolve base SHAs, divergence ancestry, and tree SHAs. */
-  function baseGitRunner({ fetchedSha, localSha, ancestor }: { fetchedSha: string, localSha: string, ancestor: boolean }) {
+  function baseGitRunner({ fetchedSha, localSha, ancestor }: { fetchedSha: string, localSha: string, ancestor: boolean }): GitRunner {
     return (args: string[]) => {
       const cmd = args.join(' ');
       if (cmd.includes('^{tree}')) {
         // Content-equivalent bases share a tree; content-different bases differ.
-        return { status: 0, stdout: (cmd.includes(fetchedSha) ? 'tree-remote' : 'tree-remote'), stderr: '' };
+        return { signal: null, status: 0, stdout: (cmd.includes(fetchedSha) ? 'tree-remote' : 'tree-remote'), stderr: '' };
       }
       if (cmd.includes('rev-parse')) {
-        if (cmd.includes('review/')) { return { status: 0, stdout: fetchedSha, stderr: '' }; }
-        return { status: 0, stdout: localSha, stderr: '' };
+        if (cmd.includes('review/')) { return { signal: null, status: 0, stdout: fetchedSha, stderr: '' }; }
+        return { signal: null, status: 0, stdout: localSha, stderr: '' };
       }
-      if (cmd.includes('is-ancestor')) { return { status: ancestor ? 0 : 1 }; }
-      return { status: 0, stdout: '', stderr: '' };
+      if (cmd.includes('is-ancestor')) { return { signal: null, status: ancestor ? 0 : 1, stdout: '', stderr: '' }; }
+      return { signal: null, status: 0, stdout: '', stderr: '' };
     };
   }
 
@@ -246,7 +248,7 @@ describe("diverged base reconcile", () => {
     const localSha = 'localsha00000000';
 
     let baseDiverged: boolean = true;
-    const pushCalls: { src: string, dest: string, opts: any }[] = [];
+    const pushCalls: { src: string, dest: string, opts: PushReviewRefOptions | undefined }[] = [];
 
     const result = await syncMerged(branch, mergedCommit, {
       branch,
@@ -257,38 +259,38 @@ describe("diverged base reconcile", () => {
       baseBranch: PRIMARY,
       log: () => {},
       resolvePrNumber: () => 2520,
-      verifyCommit: () => ({ status: 0 }),
-      gitContainsCommit: () => ({ status: 1 }),
+      verifyCommit: () => ({ stdout: '', stderr: '', signal: null,  status: 0 }),
+      gitContainsCommit: () => ({ stdout: '', stderr: '', signal: null,  status: 1 }),
       gitRunner: baseGitRunner({ fetchedSha, localSha, ancestor: false }),
-      gitFetch: () => ({ status: 0 }),
-      gitPush: (src: string, dest: string, _dir: string, opts: any) => {
+      gitFetch: () => ({ stdout: '', stderr: '', signal: null,  status: 0 }),
+      gitPush: (src: string, dest: string, _dir: string | undefined, opts) => {
         pushCalls.push({ src, dest, opts });
         if (dest.includes(`/${PRIMARY}`)) {
           // Forgejo `main` diverged from local `main`. A pinned lease rewrites it;
           // once rewritten the landed commit is a fast-forward.
-          if (opts?.forceWithLease) { baseDiverged = false; return { status: 0 }; }
+          if (opts?.forceWithLease) { baseDiverged = false; return { stdout: '', stderr: '', signal: null,  status: 0 }; }
           if (baseDiverged) {
-            return { status: 1, stderr: '! [rejected] Updates were rejected ... non-fast-forward', stdout: '' };
+            return { signal: null,  status: 1, stderr: '! [rejected] Updates were rejected ... non-fast-forward', stdout: '' };
           }
-          return { status: 0 };
+          return { stdout: '', stderr: '', signal: null,  status: 0 };
         }
         // Branch sync push.
-        return { status: 0 };
+        return { stdout: '', stderr: '', signal: null,  status: 0 };
       },
-      apiCall: () => ({ ok: true }),
-      gitDelete: () => ({ status: 0 })
+      apiCall: forgejoApiFixture(() => ({ ok: true as const })),
+      gitDelete: () => ({ stdout: '', stderr: '', signal: null,  status: 0 })
     });
 
     assert.strictEqual(result.ok, true, 'landed commit reaches Forgejo after base reconciliation');
 
     // First primary push reconciles the base with a SHA-pinned force-with-lease.
-    const reconcilePush = pushCalls.find(c => c.dest === `refs/heads/${PRIMARY}` && !!c.opts.forceWithLease);
+    const reconcilePush = pushCalls.find(c => c.dest === `refs/heads/${PRIMARY}` && !!c.opts?.forceWithLease);
     assert.ok(reconcilePush, 'a force-with-lease push reconciles the Forgejo base');
-    assert.strictEqual(reconcilePush?.opts.forceWithLeaseRef, `${PRIMARY}:${fetchedSha}`, 'lease pinned to the freshly fetched Forgejo base SHA');
+    assert.strictEqual(reconcilePush?.opts?.forceWithLeaseRef, `${PRIMARY}:${fetchedSha}`, 'lease pinned to the freshly fetched Forgejo base SHA');
     assert.strictEqual(reconcilePush?.src, fetchedSha, 'pushes the fetched base SHA as the source ref');
 
     // The landed commit then reaches Forgejo through a fast-forward push.
-    const landedPush = pushCalls.find(c => c.dest === `refs/heads/${PRIMARY}` && !c.opts.forceWithLease);
+    const landedPush = pushCalls.find(c => c.dest === `refs/heads/${PRIMARY}` && !c.opts?.forceWithLease);
     assert.ok(landedPush, 'the landed commit is pushed to the Forgejo base');
     assert.ok(landedPush?.src === mergedCommit, 'landed commit is the merge result');
 
@@ -303,7 +305,7 @@ describe("diverged base reconcile", () => {
     const fetchedSha = 'fetchedshaAnc';
     const localSha = 'localshaAdv';
 
-    const pushCalls: { dest: string, opts: any }[] = [];
+    const pushCalls: { dest: string, opts: PushReviewRefOptions | undefined }[] = [];
     const result = await syncMerged(branch, mergedCommit, {
       branch,
       mergedCommit,
@@ -313,24 +315,24 @@ describe("diverged base reconcile", () => {
       baseBranch: PRIMARY,
       log: () => {},
       resolvePrNumber: () => 2520,
-      verifyCommit: () => ({ status: 0 }),
-      gitContainsCommit: () => ({ status: 1 }),
+      verifyCommit: () => ({ stdout: '', stderr: '', signal: null,  status: 0 }),
+      gitContainsCommit: () => ({ stdout: '', stderr: '', signal: null,  status: 1 }),
       gitRunner: baseGitRunner({ fetchedSha, localSha, ancestor: true }),
-      gitFetch: () => ({ status: 0 }),
-      gitPush: (_src: string, dest: string, _dir: string, opts: any) => {
+      gitFetch: () => ({ stdout: '', stderr: '', signal: null,  status: 0 }),
+      gitPush: (_src: string, dest: string, _dir: string | undefined, opts) => {
         pushCalls.push({ dest, opts });
-        if (dest.includes(`/${PRIMARY}`)) { return { status: 0 }; }
-        return { status: 0 };
+        if (dest.includes(`/${PRIMARY}`)) { return { stdout: '', stderr: '', signal: null,  status: 0 }; }
+        return { stdout: '', stderr: '', signal: null,  status: 0 };
       },
-      apiCall: () => ({ ok: true }),
-      gitDelete: () => ({ status: 0 })
+      apiCall: forgejoApiFixture(() => ({ ok: true as const })),
+      gitDelete: () => ({ stdout: '', stderr: '', signal: null,  status: 0 })
     });
 
     assert.strictEqual(result.ok, true);
     const primaryPush = pushCalls.find(c => c.dest === `refs/heads/${PRIMARY}`);
     assert.ok(primaryPush, 'a push reaches the Forgejo base');
-    assert.strictEqual(primaryPush?.opts.forceWithLease, undefined, 'ancestor base uses a normal push, not a force');
-    assert.strictEqual(primaryPush?.opts.forceWithLeaseRef, undefined, 'and no lease is pinned');
+    assert.strictEqual(primaryPush?.opts?.forceWithLease, undefined, 'ancestor base uses a normal push, not a force');
+    assert.strictEqual(primaryPush?.opts?.forceWithLeaseRef, undefined, 'and no lease is pinned');
   });
 
   test('content-different Forgejo base refuses the force push before any force update', async () => {
@@ -339,7 +341,7 @@ describe("diverged base reconcile", () => {
     const fetchedSha = 'fetchedshaRem';
     const localSha = 'localshaNew';
 
-    const pushCalls: { dest: string }[] = [];
+    const pushCalls: { dest: string; }[] = [];
     const result = await syncMerged(branch, mergedCommit, {
       branch,
       mergedCommit,
@@ -349,29 +351,29 @@ describe("diverged base reconcile", () => {
       baseBranch: PRIMARY,
       log: () => {},
       resolvePrNumber: () => 2520,
-      verifyCommit: () => ({ status: 0 }),
-      gitContainsCommit: () => ({ status: 1 }),
+      verifyCommit: () => ({ stdout: '', stderr: '', signal: null,  status: 0 }),
+      gitContainsCommit: () => ({ stdout: '', stderr: '', signal: null,  status: 1 }),
       // Diverged (non-ancestor) with a remote tree that differs from the local
       // base: the Forgejo base holds content absent from local `main`.
       gitRunner: ((args: string[]) => {
         const cmd = args.join(' ');
         if (cmd.includes('^{tree}')) {
-          return { status: 0, stdout: cmd.includes(fetchedSha) ? 'tree-remote-unique' : 'tree-local-changed', stderr: '' };
+          return { signal: null,  status: 0, stdout: cmd.includes(fetchedSha) ? 'tree-remote-unique' : 'tree-local-changed', stderr: '' };
         }
         if (cmd.includes('rev-parse')) {
-          if (cmd.includes('review/')) { return { status: 0, stdout: fetchedSha, stderr: '' }; }
-          return { status: 0, stdout: localSha, stderr: '' };
+          if (cmd.includes('review/')) { return { signal: null,  status: 0, stdout: fetchedSha, stderr: '' }; }
+          return { signal: null,  status: 0, stdout: localSha, stderr: '' };
         }
-        if (cmd.includes('is-ancestor')) { return { status: 1 }; }
-        return { status: 0, stdout: '', stderr: '' };
+        if (cmd.includes('is-ancestor')) { return { stdout: '', stderr: '', signal: null,  status: 1 }; }
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }),
-      gitFetch: () => ({ status: 0 }),
-      gitPush: (_src: string, dest: string, _dir: string) => {
+      gitFetch: () => ({ stdout: '', stderr: '', signal: null,  status: 0 }),
+      gitPush: (_src: string, dest: string, _dir: string | undefined) => {
         pushCalls.push({ dest });
-        return { status: 0 };
+        return { stdout: '', stderr: '', signal: null,  status: 0 };
       },
-      apiCall: () => ({ ok: true }),
-      gitDelete: () => ({ status: 0 })
+      apiCall: forgejoApiFixture(() => ({ ok: true as const })),
+      gitDelete: () => ({ stdout: '', stderr: '', signal: null,  status: 0 })
     });
 
     assert.strictEqual(result.ok, false, 'integration aborts before any force push');

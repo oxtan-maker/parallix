@@ -1,3 +1,6 @@
+type ForgejoOptions = NonNullable<Parameters<typeof import('../../../src/adapters/forgejo/forgejo-pr.js').createPr>[3]>;
+import type { PushReviewRefOptions } from "../../../src/adapters/forgejo/forgejo-git.js";
+import { forgejoApiFixture } from '../../fixtures/forgejo-api.js';
 // Historical regression provenance: TASK-1049, TASK-1080.
 // Behavior-owned suite (TASK-2622.09, integration-ci): force-push safety and syncMerged hardening —
 // review-ref force push (task-1049) and stale-info retry capture (task-1080). Legacy case names unchanged.
@@ -32,42 +35,13 @@ describe("review ref force push", () => {
 
   const { createPr, pushReviewRef } = createPrModule;
   const rebase = rebaseModule.default;
-  const review = (args, options = {}) =>
+  const review = (args: string[], options: NonNullable<Parameters<typeof reviewModule.createReviewWorkflowAdapter>[0]> = {}) =>
     createReviewCommand(new ReviewCommandUseCase(reviewModule.createReviewWorkflowAdapter(options)))(args, options);
   const { mock } = test;
-  const serialTest = (name, fn) => test(name, { concurrency: false }, fn);
+  const serialTest = (name: string|undefined, fn: test.TestFn|undefined) => test(name, { concurrency: false }, fn);
 
   const FAKE_ROOT = `/tmp/fake-root-${process.pid}`;
 
-  // task-1335 added a tree-verification proof to the createPr publish path. These
-  // tests exercise push-arg/force-with-lease behaviour against a synthetic rootDir
-  // that does not exist on disk, so the real proof capture would hit
-  // fs.realpathSync(rootDir) and throw ENOENT. Inject per-call stubs instead of
-  // mocking the shared verification module globally — module-level mocks plus the
-  // restoreAll() below churn global state that leaks into other test files during
-  // the bulk `node --test test/*.test.js` run. These stubs keep the createPr
-  // publish-guard regression coverage where it belongs (forgejo.test.js,
-  // integrate.test.js) untouched.
-  const stubVerifiedTreeProof = {
-    captureVerifiedTreeProofFn: (area, rootDir) => ({
-      ok: true,
-      proof: {
-        rootDir: path.resolve(rootDir),
-        area,
-        command: 'mock-verification',
-        commit: 'abc123',
-        tree: 'tree123',
-        verifiedAt: '2026-01-01T00:00:00.000Z'
-      }
-    }),
-    assertVerifiedTreeProofFn: (proof, rootDir) => {
-      const resolvedRoot = path.resolve(rootDir);
-      if (!proof || proof.rootDir !== resolvedRoot) {
-        return { ok: false, error: 'verification proof does not match the tree being published' };
-      }
-      return { ok: true, proof };
-    }
-  };
 
   test.afterEach(() => {
     mock.restoreAll();
@@ -87,32 +61,32 @@ describe("review ref force push", () => {
     const token = 'fake-token';
     const rootDir = FAKE_ROOT;
 
-    let pushArgs = [];
-    mock.method(git, 'git', (args) => {
-      if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
+    let pushArgs: (string | string)[] = [];
+    mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+      if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
       if (args.includes('rev-parse') && args.includes(`refs/remotes/review/${branch}^{commit}`)) {
-        return { status: 0, stdout: 'lease-sha\n', stderr: '' };
+        return { signal: null,  status: 0, stdout: 'lease-sha\n', stderr: '' };
       }
       if (args.includes('push') && args.includes(branch)) {
         pushArgs = args;
       }
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
 
-    const apiCall = mock.fn((method, apiPath) => {
+    const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
       if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
-        return { ok: true, data: [] };
+        return { ok: true as const, data: [] };
       }
       if (method === 'GET' && apiPath.includes('/pulls?state=all')) {
-        return { ok: true, data: [] };
+        return { ok: true as const, data: [] };
       }
       if (method === 'POST' && apiPath === '/pulls') {
-        return { ok: true, data: { html_url: 'http://pr/1049', number: 1049 } };
+        return { ok: true as const, data: { html_url: 'http://pr/1049', number: 1049 } };
       }
-      return { ok: false };
-    });
+      return { ok: false as const };
+    }));
 
-    const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: true, ...stubVerifiedTreeProof });
+    const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: true });
     assert.strictEqual(result.ok, true);
     assert.ok(
       pushArgs.includes(`--force-with-lease=refs/heads/${branch}:lease-sha`),
@@ -126,40 +100,40 @@ describe("review ref force push", () => {
     const token = 'fake-token';
     const rootDir = FAKE_ROOT;
 
-    let pushArgs = [];
-    mock.method(git, 'git', (args) => {
-      if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
+    let pushArgs: (string | string)[] = [];
+    mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+      if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
       if (args.includes('push') && args.includes(branch)) {
         pushArgs = args;
       }
-      return { status: 0, stdout: '' };
+      return { signal: null, stderr: '',  status: 0, stdout: '' };
     });
 
-    const apiCall = mock.fn((method, apiPath) => {
+    const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
       if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
-        return { ok: true, data: [] };
+        return { ok: true as const, data: [] };
       }
       if (method === 'GET' && apiPath.includes('/pulls?state=all')) {
-        return { ok: true, data: [] };
+        return { ok: true as const, data: [] };
       }
       if (method === 'POST' && apiPath === '/pulls') {
-        return { ok: true, data: { html_url: 'http://pr/1049', number: 1049 } };
+        return { ok: true as const, data: { html_url: 'http://pr/1049', number: 1049 } };
       }
-      return { ok: false };
-    });
+      return { ok: false as const };
+    }));
 
-    const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: false, ...stubVerifiedTreeProof });
+    const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: false });
     assert.strictEqual(result.ok, true);
     assert.ok(!pushArgs.includes('--force-with-lease'), 'git push should NOT include --force-with-lease');
   });
 
   serialTest('pushReviewRef prioritizes forceWithLease over force', (t) => {
-    let pushArgs = [];
-    mock.method(git, 'git', (args) => {
+    let pushArgs: (string | string)[] = [];
+    mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
       if (args.includes('push')) {
         pushArgs = args;
       }
-      return { status: 0 };
+      return { signal: null, stdout: '', stderr: '',  status: 0 };
     });
 
     // forceWithLease: true, force: true -> --force-with-lease
@@ -179,55 +153,56 @@ describe("review ref force push", () => {
   });
 
   serialTest('review --push --force passes force:true to pushRound', async (t) => {
-    let pushRoundArgs = null;
-    const options = {
+    const pushRoundArgs: { value: Parameters<NonNullable<NonNullable<Parameters<typeof review>[1]>['pushRoundFn']>>[1] | null } = { value: null };
+    const options: NonNullable<Parameters<typeof review>[1]> = {
       inferSlugFn: (s) => s || 'task-1049',
-      pushRoundFn: (slug, opts) => { pushRoundArgs = opts; },
+      pushRoundFn: (slug, opts) => { pushRoundArgs.value = opts; },
       exit: () => {},
       log: () => {},
       error: () => {}
     };
 
     await review(['task-1049', '--push', '--force'], options);
-    assert.strictEqual(pushRoundArgs.force, true);
+    assert.ok(pushRoundArgs.value != null);
+    assert.strictEqual(pushRoundArgs.value.force, true);
 
     await review(['task-1049', '--push'], options);
-    assert.strictEqual(pushRoundArgs.force, false);
+    assert.ok(pushRoundArgs.value != null);
+    assert.strictEqual(pushRoundArgs.value.force, false);
   });
 
   serialTest('rebase --push calls createPrFn with forceWithLease:true on success', async (t) => {
 
-    let createPrOptions = null;
+    const createPrOptions: { value: ForgejoOptions | null | undefined } = { value: null };
     const options = {
       inferSlugFn: (s) => s || 'task-1049',
       getCurrentBranchFn: () => 'mission/task-1049',
       findMissionDirFn: () => `${FAKE_ROOT}/docs/missions/2026/task-1049`,
       findMissionAreaFn: () => 'workflow',
       gitFn: (args) => {
-        if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
+        if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
         if (args.includes('rebase')) {
-          if (args.includes('main')) return { status: 0, stdout: '', stderr: '' };
-          if (args.includes('--show-current')) return { status: 0, stdout: '', stderr: '' };
-          return { status: 0, stdout: '', stderr: '' };
+          if (args.includes('main')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+          if (args.includes('--show-current')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+          return { signal: null,  status: 0, stdout: '', stderr: '' };
         }
-        if (args.includes('fetch')) return { status: 0, stdout: '', stderr: '' };
-        return { status: 0, stdout: '', stderr: '' };
+        if (args.includes('fetch')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
       createPrFn: (branch, user, token, opts) => {
-        createPrOptions = opts;
-        return { ok: true, url: 'http://pr/1049' };
+        createPrOptions.value = opts;
+        return { ok: true as const, url: 'http://pr/1049' };
       },
-      fetchReviewBranchFn: () => ({ status: 0, stdout: '', stderr: '' }),
+      fetchReviewBranchFn: () => ({ signal: null,  status: 0, stdout: '', stderr: '' }),
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => 'fake-token',
       resolveForgejoUserFn: () => 'gemini',
-      exitFn: () => {},
-      log: () => {},
-      error: () => {}
-    };
+      exitFn: () => {}
+    } satisfies NonNullable<Parameters<typeof rebase>[1]>;
 
     await rebase(['task-1049', '--push'], options);
-    assert.strictEqual(createPrOptions.forceWithLease, true);
+    assert.ok(createPrOptions.value != null);
+    assert.strictEqual(createPrOptions.value.forceWithLease, true);
   });
 
   serialTest('rebase without --push does NOT call createPrFn', async (t) => {
@@ -239,31 +214,29 @@ describe("review ref force push", () => {
       findMissionDirFn: () => `${FAKE_ROOT}/docs/missions/2026/task-1049`,
       findMissionAreaFn: () => 'workflow',
       gitFn: (args) => {
-        if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
+        if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
         if (args.includes('rebase')) {
-          if (args.includes('main')) return { status: 0, stdout: '', stderr: '' };
-          if (args.includes('--show-current')) return { status: 0, stdout: '', stderr: '' };
-          return { status: 0, stdout: '', stderr: '' };
+          if (args.includes('main')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+          if (args.includes('--show-current')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+          return { signal: null,  status: 0, stdout: '', stderr: '' };
         }
-        if (args.includes('fetch')) return { status: 0, stdout: '', stderr: '' };
-        return { status: 0, stdout: '', stderr: '' };
+        if (args.includes('fetch')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
       createPrFn: () => {
         createPrCalled = true;
-        return { ok: true };
+        return { ok: true as const };
       },
       isForgejoReviewEnabledFn: () => true,
-      exitFn: () => {},
-      log: () => {},
-      error: () => {}
-    };
+      exitFn: () => {}
+    } satisfies NonNullable<Parameters<typeof rebase>[1]>;
 
     await rebase(['task-1049'], options);
     assert.strictEqual(createPrCalled, false);
   });
 
   serialTest('rebase --push preserves push and dependencies in recursive calls (chained conflicts)', async (t) => {
-    let createPrOptions = null;
+    const createPrOptions: { value: ForgejoOptions | null | undefined } = { value: null };
     let rebaseAttempts = 0;
     let firstRebaseStarted = false;
     let unmergedFiles: string[] = [];
@@ -276,21 +249,21 @@ describe("review ref force push", () => {
       findMissionDirFn: () => `${FAKE_ROOT}/docs/missions/2026/task-1049`,
       findMissionAreaFn: () => 'workflow',
       gitFn: (args) => {
-        if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
+        if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
         if (args.includes('rebase')) {
           if (args.includes('main')) {
             if (!firstRebaseStarted) {
               firstRebaseStarted = true;
               unmergedFiles = ['file.md'];
               // First call starts rebase and hits conflict
-              return { status: 1, stdout: 'CONFLICT (content): Merge conflict in file.md', stderr: '' };
+              return { signal: null,  status: 1, stdout: 'CONFLICT (content): Merge conflict in file.md', stderr: '' };
             }
             // Recursive call: git rebase main reports "already in progress"
-            return { status: 1, stdout: 'CONFLICT', stderr: '' };
+            return { signal: null,  status: 1, stdout: 'CONFLICT', stderr: '' };
           }
           if (args.includes('--show-current')) {
              // If we are in conflict resolution, rebase is in progress
-             return { status: 0, stdout: rebaseAttempts < 2 ? 'mission/task-1049' : '', stderr: '' };
+             return { signal: null,  status: 0, stdout: rebaseAttempts < 2 ? 'mission/task-1049' : '', stderr: '' };
           }
           if (args.includes('--continue')) {
              stagedSets.push([...staged]); staged = [];
@@ -299,40 +272,38 @@ describe("review ref force push", () => {
              if (rebaseAttempts === 1) {
                unmergedFiles = ['some-file.js'];
                // First continue: report another conflict to trigger recursion
-               return { status: 1, stdout: 'CONFLICT (content): Merge conflict in some-file.js', stderr: '' };
+               return { signal: null,  status: 1, stdout: 'CONFLICT (content): Merge conflict in some-file.js', stderr: '' };
              }
              // Second continue: success
-             return { status: 0, stdout: '', stderr: '' };
+             return { signal: null,  status: 0, stdout: '', stderr: '' };
           }
-          return { status: 0, stdout: '', stderr: '' };
+          return { signal: null,  status: 0, stdout: '', stderr: '' };
         }
-        if (args.includes('fetch')) return { status: 0, stdout: '', stderr: '' };
-        if (args.includes('checkout')) return { status: 0, stdout: '', stderr: '' };
-        if (args.includes('add')) { staged.push(...args.slice(args.indexOf('add') + 1)); unmergedFiles = unmergedFiles.filter(file => !staged.includes(file)); return { status: 0, stdout: '', stderr: '' }; }
-        return { status: 0, stdout: '', stderr: '' };
+        if (args.includes('fetch')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+        if (args.includes('checkout')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+        if (args.includes('add')) { staged.push(...args.slice(args.indexOf('add') + 1)); unmergedFiles = unmergedFiles.filter(file => !staged.includes(file)); return { signal: null,  status: 0, stdout: '', stderr: '' }; }
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
       detectRebaseStateFn: () => ({ inProgress: firstRebaseStarted && rebaseAttempts < 2, unmergedFiles: [...unmergedFiles] }),
-      resolveConflictsFn: () => ({ ok: true, conflictFiles: [...unmergedFiles], missionSpecificFiles: [...unmergedFiles], sharedFiles: [] }),
+      resolveConflictsFn: () => ({ ok: true as const, conflictFiles: [...unmergedFiles], missionSpecificFiles: [...unmergedFiles], sharedFiles: [] }),
       createPrFn: (branch, user, token, opts) => {
-        createPrOptions = opts;
-        return { ok: true, url: 'http://pr/1049' };
+        createPrOptions.value = opts;
+        return { ok: true as const, url: 'http://pr/1049' };
       },
-      fetchReviewBranchFn: () => ({ status: 0, stdout: '', stderr: '' }),
+      fetchReviewBranchFn: () => ({ signal: null,  status: 0, stdout: '', stderr: '' }),
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => 'fake-token',
       resolveForgejoUserFn: () => 'gemini',
-      exitFn: () => {},
-      log: () => {},
-      error: () => {}
-    };
+      exitFn: () => {}
+    } satisfies NonNullable<Parameters<typeof rebase>[1]>;
 
     // Run with --push
     await rebase(['task-1049', '--push'], options);
 
     assert.strictEqual(rebaseAttempts, 2, 'Should have attempted rebase continue twice');
     assert.deepEqual(stagedSets, [['file.md'], ['some-file.js']]);
-    assert.ok(createPrOptions, 'createPrFn should have been called');
-    assert.strictEqual(createPrOptions.forceWithLease, true, 'Should have preserved forceWithLease');
+    assert.ok(createPrOptions.value, 'createPrFn should have been called');
+    assert.strictEqual(createPrOptions.value.forceWithLease, true, 'Should have preserved forceWithLease');
   });
 
   serialTest('rebase --push does NOT push if agent returns success but rebase is still in progress', async (t) => {
@@ -344,27 +315,25 @@ describe("review ref force push", () => {
       findMissionDirFn: () => `${FAKE_ROOT}/docs/missions/2026/task-1049`,
       findMissionAreaFn: () => 'workflow',
       gitFn: (args) => {
-        if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
+        if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
         if (args.includes('rebase')) {
-          if (args.includes('main')) return { status: 1, stdout: 'CONFLICT', stderr: '' };
+          if (args.includes('main')) return { signal: null,  status: 1, stdout: 'CONFLICT', stderr: '' };
           if (args.includes('--show-current')) {
              // Rebase is still in progress even after agent "success"
-             return { status: 0, stdout: 'mission/task-1049', stderr: '' };
+             return { signal: null,  status: 0, stdout: 'mission/task-1049', stderr: '' };
           }
         }
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
-      resolveConflictsFn: () => ({ ok: true, conflictFiles: ['shared.js'], missionSpecificFiles: [], sharedFiles: ['shared.js'] }),
-      startAgentFn: () => ({ agent: 'test-agent', result: { status: 0 } }),
+      resolveConflictsFn: () => ({ ok: true as const, conflictFiles: ['shared.js'], missionSpecificFiles: [], sharedFiles: ['shared.js'] }),
+      startAgentFn: async () => ({ agent: 'test-agent', result: { status: 0 } }),
       createPrFn: () => {
         createPrCalled = true;
-        return { ok: true };
+        return { ok: true as const };
       },
       isForgejoReviewEnabledFn: () => true,
-      exitFn: () => {},
-      log: () => {},
-      error: () => {}
-    };
+      exitFn: () => {}
+    } satisfies NonNullable<Parameters<typeof rebase>[1]>;
 
     await rebase(['task-1049', '--push'], options);
     assert.strictEqual(createPrCalled, false, 'Should not have pushed because rebase was still in progress');
@@ -379,22 +348,20 @@ describe("review ref force push", () => {
       findMissionDirFn: () => `${FAKE_ROOT}/docs/missions/2026/task-1049`,
       findMissionAreaFn: () => 'workflow',
       gitFn: (args) => {
-        if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
+        if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
         if (args.includes('rebase')) {
-          if (args.includes('main')) return { status: 0, stdout: 'Already up to date', stderr: '' };
-          if (args.includes('--show-current')) return { status: 0, stdout: 'mission/task-1049', stderr: '' };
+          if (args.includes('main')) return { signal: null,  status: 0, stdout: 'Already up to date', stderr: '' };
+          if (args.includes('--show-current')) return { signal: null,  status: 0, stdout: 'mission/task-1049', stderr: '' };
         }
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
       createPrFn: () => {
         createPrCalled = true;
-        return { ok: true };
+        return { ok: true as const };
       },
       isForgejoReviewEnabledFn: () => true,
-      exitFn: () => {},
-      log: () => {},
-      error: () => {}
-    };
+      exitFn: () => {}
+    } satisfies NonNullable<Parameters<typeof rebase>[1]>;
 
     await rebase(['task-1049', '--push'], options);
     assert.strictEqual(createPrCalled, false, 'Should not have pushed because rebase --show-current was non-empty');
@@ -408,24 +375,24 @@ describe("review ref force push", () => {
 
     let pushCallCount = 0;
     let sawForcePush = false;
-    mock.method(git, 'git', (args) => {
-      if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
+    mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+      if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
       if (args.includes('rev-parse') && args.includes(`refs/remotes/review/${branch}^{commit}`)) {
-        return { status: 0, stdout: 'lease-sha\n', stderr: '' };
+        return { signal: null,  status: 0, stdout: 'lease-sha\n', stderr: '' };
       }
       if (args.includes('push') && args.includes(branch)) {
         pushCallCount++;
         if (args.includes('--force') && !args.includes('--force-with-lease')) sawForcePush = true;
-        return { status: 1, stdout: '', stderr: 'error: failed to push some refs stale info' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'error: failed to push some refs stale info' };
       }
-      if (args.includes('fetch')) return { status: 0, stdout: '' };
-      return { status: 0, stdout: '' };
+      if (args.includes('fetch')) return { signal: null, stderr: '',  status: 0, stdout: '' };
+      return { signal: null, stderr: '',  status: 0, stdout: '' };
     });
 
     mock.method(process.stderr, 'write', () => {});
     mock.method(process.stdout, 'write', () => {});
 
-    const result = createPr(branch, user, token, { rootDir, apiCall: () => ({ ok: false }), log: () => {}, forceWithLease: true, ...stubVerifiedTreeProof });
+    const result = createPr(branch, user, token, { rootDir, apiCall: forgejoApiFixture(() => ({ ok: false as const })), log: () => {}, forceWithLease: true });
     assert.strictEqual(result.ok, false, 'Should fail cleanly after two stale rejections');
     assert.strictEqual(pushCallCount, 2, 'Should attempt push exactly twice (no --force fallback)');
     assert.strictEqual(sawForcePush, false, 'Should never attempt a bare --force push');
@@ -436,34 +403,32 @@ describe("review ref force push", () => {
     process.env.FORGEJO_USER = 'rebase-override';
 
     try {
-      let resolvedUser = null;
+      let resolvedUser: { value: string | null } = { value: null };
       const options = {
         inferSlugFn: (s) => s || 'task-1049',
         getCurrentBranchFn: () => 'mission/task-1049',
         findMissionDirFn: () => `${FAKE_ROOT}/docs/missions/2026/task-1049`,
         findMissionAreaFn: () => 'workflow',
         gitFn: (args) => {
-          if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-          if (args.includes('--show-current')) return { status: 0, stdout: '', stderr: '' };
-          return { status: 0, stdout: '', stderr: '' };
+          if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
+          if (args.includes('--show-current')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+          return { signal: null,  status: 0, stdout: '', stderr: '' };
         },
-        resolveTaskFileFn: (slug) => ({ ok: true, taskFile: '/tmp/task.md' }),
+        resolveTaskFileFn: (slug) => ({ matches: ['/tmp/task.md'],  ok: true as const, taskFile: '/tmp/task.md' }),
         getTaskImplementerFn: (file) => 'backlog-agent',
         resolveForgejoUserFn: (user) => user || 'fallback-magnus',
-        fetchReviewBranchFn: () => ({ status: 0, stdout: '', stderr: '' }),
+        fetchReviewBranchFn: () => ({ signal: null,  status: 0, stdout: '', stderr: '' }),
         isForgejoReviewEnabledFn: () => true,
         createPrFn: (branch, user) => {
-          resolvedUser = user;
-          return { ok: true, url: 'http://pr/1049' };
+          resolvedUser.value = user;
+          return { ok: true as const, url: 'http://pr/1049' };
         },
         readTokenFn: () => 'fake-token',
-        exitFn: () => {},
-        log: () => {},
-        error: () => {}
-      };
+        exitFn: () => {}
+      } satisfies NonNullable<Parameters<typeof rebase>[1]>;
 
       await rebase(['task-1049', '--push'], options);
-      assert.strictEqual(resolvedUser, 'backlog-agent', 'Should have resolved user from backlog identity');
+      assert.strictEqual(resolvedUser.value, 'backlog-agent', 'Should have resolved user from backlog identity');
     } finally {
       if (previousUser) process.env.FORGEJO_USER = previousUser;
       else delete process.env.FORGEJO_USER;
@@ -480,9 +445,9 @@ describe("syncMerged hardening", () => {
   test('syncMerged retries twice on stale info rejection with strong assertions', (t) => {
     const branch = 'mission/task-1080';
     const mergedCommit = 'abc1234';
-    const logMessages = [];
-    const pushCalls = [];
-    const fetchCalls = [];
+    const logMessages: string[] = [];
+    const pushCalls: { src: string; dest: string; opts: PushReviewRefOptions | undefined; }[] = [];
+    const fetchCalls: { b: string; dir: string | undefined; }[] = [];
 
     const options = {
       log: (msg) => logMessages.push(msg),
@@ -490,11 +455,11 @@ describe("syncMerged hardening", () => {
         pushCalls.push({ src, dest, opts });
         if (pushCalls.length === 1) {
           // First push: primary branch (SUCCESS)
-          return { status: 0, stdout: '', stderr: '' };
+          return { signal: null,  status: 0, stdout: '', stderr: '' };
         }
         if (pushCalls.length === 2) {
           // Second push: mission branch (FAIL - stale)
-          return {
+          return { signal: null, 
             status: 1,
             stdout: '',
             stderr: 'error: failed to push some refs to ... stale info'
@@ -502,29 +467,29 @@ describe("syncMerged hardening", () => {
         }
         if (pushCalls.length === 3) {
           // Third push: mission branch retry after fetch (FAIL - still stale)
-          return {
+          return { signal: null, 
             status: 1,
             stdout: '',
             stderr: 'error: failed to push some refs to ... fetch first'
           };
         }
         // Fourth push: mission branch retry with force (SUCCESS)
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
       gitFetch: (b, dir) => {
         fetchCalls.push({ b, dir });
-        return { status: 0 };
+        return { stdout: '', stderr: '', signal: null,  status: 0 };
       },
-      verifyCommit: () => ({ status: 0 }),
+      verifyCommit: () => ({ stdout: '', stderr: '', signal: null,  status: 0 }),
       resolvePrNumber: () => 123,
-      apiCall: () => ({ ok: true }),
-      gitDelete: () => ({ status: 0 }),
+      apiCall: forgejoApiFixture(() => ({ ok: true as const })),
+      gitDelete: () => ({ stdout: '', stderr: '', signal: null,  status: 0 }),
       // task-2520: reconcile reads the local/Forgejo base SHAs; a stable value for
       // both refs keeps the base in sync so reconciliation is a no-op.
-      gitRunner: () => ({ status: 0, stdout: 'same-base-sha', stderr: '' }),
+      gitRunner: () => ({ signal: null,  status: 0, stdout: 'same-base-sha', stderr: '' }),
       forgejoUser: 'test-user',
       token: 'test-token'
-    };
+    } satisfies NonNullable<Parameters<typeof syncMerged>[2]>;
 
     const result = syncMerged(branch, mergedCommit, options);
 
@@ -538,14 +503,17 @@ describe("syncMerged hardening", () => {
 
     // Call 2: Mission branch push (initial)
     assert.strictEqual(pushCalls[1].dest, 'refs/heads/mission/task-1080');
+    assert.ok(pushCalls[1].opts != null);
     assert.strictEqual(pushCalls[1].opts.forceWithLease, true);
 
     // Call 3: Mission branch retry 1 (force-with-lease again)
     assert.strictEqual(pushCalls[2].dest, 'refs/heads/mission/task-1080');
+    assert.ok(pushCalls[2].opts != null);
     assert.strictEqual(pushCalls[2].opts.forceWithLease, true);
 
     // Call 4: Mission branch retry 2 (force)
     assert.strictEqual(pushCalls[3].dest, 'refs/heads/mission/task-1080');
+    assert.ok(pushCalls[3].opts != null);
     assert.strictEqual(pushCalls[3].opts.force, true);
 
     // A base reconciliation fetch of the Forgejo primary precedes the branch
@@ -562,27 +530,27 @@ describe("syncMerged hardening", () => {
   test('syncMerged fails to retry if output is not captured (REPRODUCTION)', (t) => {
     const branch = 'mission/task-1080';
     const mergedCommit = 'abc1234';
-    const pushCalls = [];
+    const pushCalls: { src: string; dest: string; opts: PushReviewRefOptions | undefined; }[] = [];
 
     const options = {
       log: () => {},
       gitPush: (src, dest, dir, opts) => {
         pushCalls.push({ src, dest, opts });
-        if (pushCalls.length === 1) return { status: 0 };
+        if (pushCalls.length === 1) return { stdout: '', stderr: '', signal: null,  status: 0 };
         // Simulate stdio: inherit behavior (status 1, but no captured output)
-        return { status: 1, stdout: '', stderr: '' };
+        return { signal: null,  status: 1, stdout: '', stderr: '' };
       },
-      gitFetch: () => ({ status: 0 }),
-      verifyCommit: () => ({ status: 0 }),
+      gitFetch: () => ({ stdout: '', stderr: '', signal: null,  status: 0 }),
+      verifyCommit: () => ({ stdout: '', stderr: '', signal: null,  status: 0 }),
       resolvePrNumber: () => 123,
-      apiCall: () => ({ ok: true }),
-      gitDelete: () => ({ status: 0 }),
+      apiCall: forgejoApiFixture(() => ({ ok: true as const })),
+      gitDelete: () => ({ stdout: '', stderr: '', signal: null,  status: 0 }),
       // task-2520: reconcile reads the local/Forgejo base SHAs; a stable value for
       // both refs keeps the base in sync so reconciliation is a no-op.
-      gitRunner: () => ({ status: 0, stdout: 'same-base-sha', stderr: '' }),
+      gitRunner: () => ({ signal: null,  status: 0, stdout: 'same-base-sha', stderr: '' }),
       forgejoUser: 'test-user',
       token: 'test-token'
-    };
+    } satisfies NonNullable<Parameters<typeof syncMerged>[2]>;
 
     const result = syncMerged(branch, mergedCommit, options);
 

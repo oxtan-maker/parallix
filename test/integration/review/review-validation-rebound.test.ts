@@ -17,6 +17,7 @@ const { mock } = test;
 import { createReviewLoopPorts } from '../../../src/adapters/review/review-loop.js';
 import { runReviewLoop } from '../../../src/application/review-loop/review-loop.js';
 import { fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
+import { HandoffFacts } from '../../../src/application/ports/review-round.js';
 
 // Reproduction tests for task-2234 (push-to-reviewer autobounce).
 //
@@ -86,7 +87,7 @@ test('task-2234 repro: runDeclaredGates rejects explanatory en-dash and double-d
 // CP-2: Auto-bounce behavior (behavioral via the application review loop)
 // ============================================================================
 
-async function withTempGitRepo(fn) {
+async function withTempGitRepo(fn: (_arg0: string) => void | Promise<void>) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2234-rebound-'));
   try {
     childProcess.spawnSync('git', ['init', '-b', 'master'], { cwd: root });
@@ -110,8 +111,8 @@ async function withTempGitRepo(fn) {
 // branch, so the harness binds a reachable provider with no PR. Every test
 // asserts on `logs`/`errors` that the self-heal path actually executed, so
 // these tests cannot pass by skipping the code under test.
-function baseLoopHarness(root, handoff, overrides: Record<string, unknown> = {}) {
-  const transitions = [];
+function baseLoopHarness(root: string, handoff: HandoffFacts|PromiseLike<HandoffFacts|null|undefined>|null|undefined, overrides: Record<string, unknown> = {}) {
+  const transitions: { slug: string; status: "review" | "active"; }[] = [];
   const fake = fakeReviewLoopPorts({
     slug: 'task-2234',
     worktree: root,
@@ -125,9 +126,9 @@ function baseLoopHarness(root, handoff, overrides: Record<string, unknown> = {})
   return { fake, run, transitions, logs: fake.logs, errors: fake.errors, exitCodes: fake.exits };
 }
 
-function assertSelfHealAttempted(logs) {
+function assertSelfHealAttempted(logs: string[]) {
   assert.ok(
-    logs.some(m => /attempting automatic handoff/.test(m)),
+    logs.some((m: string) => /attempting automatic handoff/.test(m)),
     'test harness must reach the self-heal handoff path (guards against vacuous pass)'
   );
 }
@@ -175,7 +176,7 @@ test('task-2234 repro: review-loop self-heal fails closed when validation-failur
     const bound = createReviewLoopPorts('task-2234', { worktree: root }, {
       log: () => {}, error: () => {},
       readReviewState: () => null,
-      writeReviewState: (() => ({ outcome: 'commit-failed-dirty', stage: 'commit', diagnostic: 'simulated commit failure' })) as never,
+      writeReviewState: (async () => ({ outcome: 'commit-failed-dirty' as const, stage: 'commit', diagnostic: 'simulated commit failure' })),
     });
     const { run, logs, exitCodes } = baseLoopHarness(root, { ok: false, reason: 'validation-failed', error: 'Declared gate is invalid' }, { stateport: bound.state });
 
@@ -239,20 +240,20 @@ test('task-2234 repro: infra/auth errors do NOT bounce (mission risk: narrow cla
 // CP-2: Auto-bounce in submitForReview (px review --submit path)
 // ============================================================================
 
-function submitHarness(root, performHandoffResult) {
+function submitHarness(root: string, performHandoffResult: { ok: boolean; reason: string; error: string; }) {
   const taskFile = path.join(root, 'task.md');
   fs.writeFileSync(taskFile, '# task');
-  const transitions = [];
-  const logs = [];
-  const exitCodes = [];
-  const options = {
+  const transitions: { slug: string; status: string }[] = [];
+  const logs: string[] = [];
+  const exitCodes: number[] = [];
+  const options: NonNullable<Parameters<typeof submitForReview>[2]> = {
     resolveWorktreeFn: () => root,
     readReviewStateFn: () => null,
-    resolveTaskFileFn: () => ({ ok: true, taskFile }),
+    resolveTaskFileFn: () => ({ matches: [],  ok: true as const, taskFile }),
     getTaskImplementerFn: () => 'claude',
     isReviewProviderEnabledFn: () => false,
     performHandoffFn: async () => performHandoffResult,
-    transitionTaskFn: (slug, status) => { transitions.push({ slug, status }); return true; },
+    transitionTaskFn: async (slug, status) => { transitions.push({ slug, status }); return true; },
     log: (m) => logs.push(m),
     exit: (c) => { exitCodes.push(c); },
   };
@@ -266,8 +267,6 @@ test('task-2234 repro: submitForReview auto-bounces to active on validation-fail
       reason: 'validation-failed',
       error: 'Declared gate "true — some description" failed for task-2234: Gate declaration must contain an exact runnable command only.'
     });
-
-    // @ts-expect-error -- test stub captures exit code instead of calling process.exit()
     await submitForReview('task-2234', false, options);
 
     assert.deepEqual(
@@ -290,8 +289,6 @@ test('task-2234 repro: submitForReview does NOT bounce on gate-failed (execution
       reason: 'gate-failed',
       error: 'Declared gate "./scripts/verify-local.sh all" failed for task-2234: Gate exited with status 1.'
     });
-
-    // @ts-expect-error -- test stub captures exit code instead of calling process.exit()
     await submitForReview('task-2234', false, options);
 
     assert.deepEqual(

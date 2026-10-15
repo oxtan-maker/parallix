@@ -16,17 +16,8 @@ export function hasApprovedCheckpointException(rootDir: string, mission: Mission
     const raw = fs.readFileSync(path.join(rootDir, name), 'utf8');
     const committed = git(['show', `HEAD:${name}`], { cwd: rootDir });
     if (committed.status !== 0 || committed.stdout !== raw) { return false; }
-    const artifact = JSON.parse(raw) as {
-      missionId: string;
-      exception?: { approvedBy: string; reason: string };
-      source: { file: string; sourceCommit: string; sha256: string; content: string };
-      recordedCheckpoints: unknown;
-    };
-    if (artifact.missionId !== mission.id || artifact.exception?.approvedBy !== 'operator'
-      || !artifact.exception.reason?.trim() || artifact.source.file !== file
-      || !/^[a-f0-9]{40,64}$/.test(artifact.source.sourceCommit)
-      || artifact.source.content !== content
-      || createHash('sha256').update(content).digest('hex') !== artifact.source.sha256) { return false; }
+    const artifact = JSON.parse(raw) as ApprovedCheckpointComparison;
+    if (!checkpointExceptionMatches(artifact, mission, file, content)) { return false; }
     const source = git(['show', `${artifact.source.sourceCommit}:${file}`], { cwd: rootDir });
     if (source.status !== 0 || source.stdout !== content) { return false; }
     const current = mission.checkpoints.map(checkpoint => ({
@@ -78,4 +69,18 @@ function readArchivedMissionText(slug: string, rootDir: string, archiveFile: str
   } catch (error) {
     return { content: null, error: `Historical Mission archive unavailable: ${error instanceof Error ? error.message : String(error)}` };
   }
+}
+
+interface ApprovedCheckpointComparison {
+  missionId: string;
+  exception?: { approvedBy: string; reason: string };
+  source: { file: string; sourceCommit: string; sha256: string; content: string };
+  recordedCheckpoints: unknown;
+}
+function checkpointExceptionMatches(artifact: ApprovedCheckpointComparison, mission: Mission, file: string, content: string): boolean {
+  return !(artifact.missionId !== mission.id || artifact.exception?.approvedBy !== 'operator'
+    || !artifact.exception.reason?.trim() || artifact.source.file !== file
+    || !/^[a-f0-9]{40,64}$/.test(artifact.source.sourceCommit)
+    || artifact.source.content !== content
+    || createHash('sha256').update(content).digest('hex') !== artifact.source.sha256);
 }

@@ -1,3 +1,4 @@
+import type { IntegrationContext } from './context.js';
 /**
  * Preflight section for the integration checkout itself: its branch, any
  * in-progress rebase or unresolved index entries, dirty paths that would
@@ -24,7 +25,7 @@ interface CheckoutTarget {
   conventionalWorktreePathFn: IntegrateMissionPathsPort['conventionalWorktreePath'];
 }
 
-function checkRebaseAndIndex(report: PreflightReport, context: any, { baseWorktree, detectRebaseStateFn, getUnresolvedIndexConflictsFn }: CheckoutTarget) {
+function checkRebaseAndIndex(report: PreflightReport, context: IntegrationContext, { baseWorktree, detectRebaseStateFn, getUnresolvedIndexConflictsFn }: CheckoutTarget) {
   const { failures, log, detail } = report;
   const rebaseState = detectRebaseStateFn(baseWorktree);
   if (rebaseState.inProgress) {
@@ -66,7 +67,7 @@ function checkRebaseAndIndex(report: PreflightReport, context: any, { baseWorktr
  * stash and restore; only this mission's task, mission artifacts, and the
  * squash payload can collide with writes.
  */
-function closeoutPaths(report: PreflightReport, context: any, { baseWorktree, baseBranch, gitFn }: CheckoutTarget): string[] {
+function closeoutPaths(report: PreflightReport, context: IntegrationContext, { baseWorktree, baseBranch, gitFn }: CheckoutTarget): string[] {
   const overlapPaths: string[] = [];
   const payloadResult = gitFn(['-C', baseWorktree, 'diff', '--name-only', '--no-renames', `${baseBranch}...${context.branch}`]);
   if (payloadResult.status === 0) {
@@ -91,7 +92,7 @@ function closeoutPaths(report: PreflightReport, context: any, { baseWorktree, ba
   return overlapPaths;
 }
 
-function checkDirtyEntries(report: PreflightReport, context: any, target: CheckoutTarget) {
+function checkDirtyEntries(report: PreflightReport, context: IntegrationContext, target: CheckoutTarget) {
   if (!context.mainDirty) {
     report.detail('Integration checkout dirty state: clean');
     return;
@@ -132,7 +133,7 @@ function checkDirtyEntries(report: PreflightReport, context: any, target: Checko
   }
 }
 
-export function checkIntegrationCheckout(report: PreflightReport, context: any, ports: IntegrateWorkflowPorts, target: CheckoutTarget) {
+export function checkIntegrationCheckout(report: PreflightReport, context: IntegrationContext, ports: IntegrateWorkflowPorts, target: CheckoutTarget) {
   const { failures, warnings, log, detail } = report;
   const { baseWorktree, baseBranch } = target;
 

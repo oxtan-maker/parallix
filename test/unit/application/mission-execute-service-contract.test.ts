@@ -1,3 +1,6 @@
+import { makeExecutePorts } from '../../fixtures/execute-mission-ports.js';
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { missionVersion } from '../../../src/application/domain-ports.js';
 // Mission execute service contract: ExecuteMission use case ordering and rollback against in-memory
 // mechanism ports.
 //
@@ -13,20 +16,14 @@ import type { ExecuteMissionPorts } from '../../../src/application/ports/execute
 // test/unit/adapters/mission/mission-execute-adapter-contract.test.ts (Execute Mission characterization section), which drives the same workflow
 // through the real adapters.
 
-function strictPorts(overrides: Record<string, unknown> = {}) {
+function strictPorts(overrides: Parameters<typeof makeExecutePorts>[0] = {}) {
   const calls: string[] = [];
-  let mission = {
-    id: 'task-1', repositoryId: 'repo', title: 'Fixture', labels: [],
-    assignee: null, checkpoints: [{ missionId: 'task-1', name: 'CP-1', firstLine: 'Do the work', goalCheck: [], nextActionText: '' }], review: null, netEngineeringLines: null,
-    brief: { goal: 'Fixture goal', why: 'Fixture why', scope: 'Fixture scope', outOfScope: [] },
-    declaredGates: ['npm test'], successCriteria: ['The mission is done'], predictedNelBucket: 'Small',
-    status: 'refined' as const, closedAt: null,
-  };
-  const parts = {
+  let mission = fixtureMission('task-1', { title: 'Fixture', status: 'refined', brief: { goal: 'Fixture goal', why: 'Fixture why', scope: 'Fixture scope', outOfScope: [] }, declaredGates: ['npm test'], successCriteria: ['The mission is done'], predictedNelBucket: 'Small' });
+  const parts = makeExecutePorts({
     workspace: {
       async preflight(slug: string) { calls.push(`preflight:${slug}`); return true; },
       async resolveWorktree(slug: string) { calls.push(`worktree:${slug}`); return '/worktree'; },
-      async resolveTaskFile(slug: string) { calls.push(`task:${slug}`); return { ok: true, taskFile: '/worktree/task.md' }; },
+      async resolveTaskFile(slug: string) { calls.push(`task:${slug}`); return { ok: true as const, taskFile: '/worktree/task.md' }; },
       async readTaskStatus() { calls.push('status'); return 'active'; },
       async enforceCommitSafety() { calls.push('safety'); },
     },
@@ -40,31 +37,31 @@ function strictPorts(overrides: Record<string, unknown> = {}) {
     missionTransitions: {
       async load() {
         calls.push('load');
-        return { kind: 'found', version: 3, mission };
+        return { kind: 'found' as const, version: missionVersion(3), mission };
       },
-      async save(next: typeof mission, expectedVersion: number) { mission = next; calls.push('synchronize'); return expectedVersion + 1; },
-      async saveWithTransition(next: typeof mission, expectedVersion: number) { mission = next; calls.push('synchronize'); return expectedVersion + 1; },
+      async save(next, expectedVersion) { assert.ok(expectedVersion); mission = next; calls.push('synchronize'); return missionVersion(expectedVersion + 1); },
+      async saveWithTransition(next, expectedVersion) { assert.ok(expectedVersion); mission = next; calls.push('synchronize'); return missionVersion(expectedVersion + 1); },
     },
     telemetry: {
       async recordLaunchTelemetry(record: { agent: string }) { calls.push(`telemetry:${record.agent}`); },
     },
     checkpointValidation: {
-      async validateBeforeHandoff() { calls.push('checkpoints'); return { ok: true }; },
+      async validateBeforeHandoff() { calls.push('checkpoints'); return { ok: true as const }; },
     },
     handoffExecution: {
-      async run(request: { agent: string }) { calls.push(`handoff:${request.agent}`); return { ok: true }; },
+      async run(request: { agent: string }) { calls.push(`handoff:${request.agent}`); return { ok: true as const }; },
       async repairHygiene() { return { repaired: false }; },
       classifyFailure() { return null; },
     },
     autonomousReview: { async start() {} },
     repairLaunch: {
-      async launch() {}, available() { return { supported: false }; }, readHead() { return null; },
+      async launch() { return undefined; }, available() { return { supported: false }; }, readHead() { return null; },
     },
     output: {
       log() {}, error() {}, command(command: string) { return command; }, formatSlug(slug: string) { return slug; }, formatAgent(agent: string) { return agent; },
     },
-  };
-  const ports = { ...parts, ...overrides } as unknown as ExecuteMissionPorts;
+  }).ports;
+  const ports = makeExecutePorts({ ...parts, ...overrides }).ports;
   return { ports, calls };
 }
 
@@ -75,7 +72,7 @@ function request(overrides: Record<string, unknown> = {}) {
     agent: 'codex',
     capabilities: new Set(['active:execute'] as const),
     ...overrides,
-  } as never;
+  };
 }
 
 test('execute mission use case activates before launch, then records telemetry and handoff', async () => {
@@ -86,13 +83,13 @@ test('execute mission use case activates before launch, then records telemetry a
     async running(publication: { phase: string; agent?: string | null }) { work.push({ phase: publication.phase, agent: publication.agent ?? null }); },
     async ended() {},
     async blocked() {},
-  };
+  } satisfies NonNullable<ConstructorParameters<typeof ExecuteMissionService>[2]>;
   const outcome = await new ExecuteMissionService(ports, (event) => events.push(event), currentWork)
     .execute(request());
   assert.equal(outcome.status, 'completed');
   assert.deepEqual(calls, [
-    'preflight:task-1', 'worktree:task-1', 'task:task-1', 'prepare', 'load', 'synchronize',
-    'launch:codex', 'safety', 'telemetry:codex', 'checkpoints', 'handoff:codex',
+    'preflight:task-1', 'worktree:task-1', 'task:task-1', 'load', 'prepare', 'load', 'synchronize',
+    'launch:codex', 'load', 'safety', 'telemetry:codex', 'checkpoints', 'handoff:codex',
   ]);
   assert.deepEqual(events.map((event) => event.sequence), [1, 2, 3]);
   assert.deepEqual(work.filter((entry) => entry.phase === 'handoff'), [
@@ -104,10 +101,10 @@ test('execute mission use case activates before launch, then records telemetry a
 test('execute mission use case sequences typed checkpoint, handoff, and review ports instead of the legacy delegation', async () => {
   const { ports, calls } = strictPorts({
     checkpointValidation: {
-      async validateBeforeHandoff() { calls.push('checkpoints'); return { ok: true }; },
+      async validateBeforeHandoff() { calls.push('checkpoints'); return { ok: true as const }; },
     },
     handoffExecution: {
-      async run() { calls.push('typed-handoff'); return { ok: true }; },
+      async run() { calls.push('typed-handoff'); return { ok: true as const }; },
       async repairHygiene() { throw new Error('unexpected hygiene repair'); },
       classifyFailure() { return null; },
       isRelaunchableFailure() { return false; },
@@ -195,7 +192,7 @@ test('execute mission use case cancels after the durable record without a rollba
 test('execute mission use case reports a refused handoff as an execution failure', async () => {
   const { ports } = strictPorts({
     handoffExecution: {
-      async run() { return { ok: false }; },
+      async run() { return { ok: false as const }; },
       async repairHygiene() { return { repaired: false }; },
       classifyFailure() { return null; },
       isRelaunchableFailure() { return false; },
@@ -280,9 +277,9 @@ test('execute mission use case blocks work and preserves the launch error when a
 test('execute mission use case fails closed when the checked Mission authority refuses activation', async () => {
   const { ports, calls } = strictPorts({
     missionTransitions: {
-      async load() { calls.push('load'); return { kind: 'missing' }; },
-      async save() { calls.push('synchronize'); return 1; },
-      async saveWithTransition() { calls.push('synchronize'); return 1; },
+      async load() { calls.push('load'); return { kind: 'missing' as const }; },
+      async save() { calls.push('synchronize'); return missionVersion(1); },
+      async saveWithTransition() { calls.push('synchronize'); return missionVersion(1); },
     },
   });
   const outcome = await new ExecuteMissionService(ports).execute(request());
@@ -297,7 +294,7 @@ test('execute mission use case carries run state per call instead of holding it 
     workspace: {
       async preflight() { return true; },
       async resolveWorktree(slug: string) { calls.push(`worktree:${slug}`); return `/worktrees/${slug}`; },
-      async resolveTaskFile() { return { ok: true, taskFile: '/task.md' }; },
+      async resolveTaskFile() { return { ok: true as const, taskFile: '/task.md' }; },
       async readTaskStatus() { return 'active'; },
       async enforceCommitSafety(input: { slug: string; worktree: string }) { calls.push(`safety:${input.slug}:${input.worktree}`); },
     },
@@ -330,7 +327,7 @@ test('recorded contract blocker stops checkpoint repair despite missing CP-5 and
   const { ports } = strictPorts();
   const service = new ExecuteHandoffService({ checkpoints: { validateBeforeHandoff: async () => verdict },
     handoff: { ...ports.handoffExecution, run: async () => { handoffs++; return { ok: true }; }, repairHygiene: async () => { hygiene++; return { repaired: false }; } },
-    review: ports.autonomousReview, repairLaunch: { ...ports.repairLaunch, launch: async () => { launches++; } }, output: ports.output });
+    review: ports.autonomousReview, repairLaunch: { ...ports.repairLaunch, launch: async () => { launches++; return undefined; } }, output: ports.output });
   for (let attempt = 0; attempt < 2; attempt++) {
     assert.equal(await service.run({ slug: 'task-1', worktree: '/worktree', agent: 'codex', taskFile: null,
       onAutonomousStop: async reason => { stops.push(reason); } }), false);
@@ -347,7 +344,7 @@ test('handoff typed contract blocker stops hygiene and evidence repair after val
   const service = new ExecuteHandoffService({ checkpoints: ports.checkpointValidation,
     handoff: { ...ports.handoffExecution, run: async () => ({ ok: false, reason: 'human-only-contract-blocker', error: 'Invalid locked contract requires human review' }),
       repairHygiene: async () => { repairs++; return { repaired: true }; } },
-    review: ports.autonomousReview, repairLaunch: { ...ports.repairLaunch, launch: async () => { repairs++; } }, output: ports.output });
+    review: ports.autonomousReview, repairLaunch: { ...ports.repairLaunch, launch: async () => { repairs++; return undefined; } }, output: ports.output });
   assert.equal(await service.run({ slug: 'task-1', worktree: '/worktree', agent: 'codex', taskFile: null }), false);
   assert.equal(repairs, 0);
 });

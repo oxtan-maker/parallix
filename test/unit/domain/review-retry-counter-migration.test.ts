@@ -1,4 +1,4 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
 
 // TASK-2377.04 CP-4 (SC6): the forward-only drop migration for the persisted
 // review-level retry counters.
@@ -54,7 +54,7 @@ async function columnNames(db: SqliteDatabaseAdapter, tableName: string): Promis
 }
 
 function missionWithRoundRetryCounts(slug: string, rootDir: string) {
-  return {
+  return completeMissionFixture(String(missionId(slug)), {
     id: missionId(slug),
     repositoryId: repositoryId(rootDir),
     title: `Mission ${slug}`,
@@ -66,7 +66,7 @@ function missionWithRoundRetryCounts(slug: string, rootDir: string) {
     netEngineeringLines: null,
     closedAt: null,
     externalTaskRef: null,
-    intakeTrace: null,
+    
     review: {
       rounds: [{
         number: 1,
@@ -90,7 +90,7 @@ function missionWithRoundRetryCounts(slug: string, rootDir: string) {
       stageLaunches: [],
       reviewEvents: [],
     },
-  };
+  });
 }
 
 describe('0016-review-drop-retry-counters migration (SC6)', () => {
@@ -190,8 +190,8 @@ describe('0016-review-drop-retry-counters migration (SC6)', () => {
       assert.equal(reloaded.kind, 'found', 'the mission round-trips through the store');
       assert.ok(reloaded.mission.review, 'the review round-trips');
       const review = reloaded.mission.review;
-      assert.equal(review.gateFailureRetryCount, undefined, 'the removed gate field is gone after a round-trip');
-      assert.equal(review.hookFailureRetryCount, undefined, 'the removed hook field is gone after a round-trip');
+      assert.equal('gateFailureRetryCount' in review, false, 'the removed gate field is gone after a round-trip');
+      assert.equal('hookFailureRetryCount' in review, false, 'the removed hook field is gone after a round-trip');
       const round = review.rounds[review.rounds.length - 1];
       assert.equal(round.reviewerRetryCount, 2, 'historical round-level retry counts round-trip unchanged');
       assert.equal(round.implementerRetryCount, 1, 'historical round-level retry counts round-trip unchanged');

@@ -1,3 +1,4 @@
+import { fixtureMission as completeMissionFixture } from '../../../fixtures/mission-builders.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -320,36 +321,36 @@ test('buildBoardProjection stages cover all six lanes', () => {
 // ---------------------------------------------------------------------------
 
 test('BoardLane maps backlog status to backlog lane', () => {
-  const mission = { id: id1, repositoryId: repo, title: 'x', labels: missionLabels(['a']), status: 'backlog' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
+  const mission = completeMissionFixture(String(id1), { id: id1, repositoryId: repo, title: 'x', labels: missionLabels(['a']), status: 'backlog' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null });
   assert.equal(boardLane(mission), 'backlog');
 });
 
 test('BoardLane maps refined status to refined lane', () => {
-  const mission = { id: id1, repositoryId: repo, title: 'x', labels: missionLabels(['a']), status: 'refined' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
+  const mission = completeMissionFixture(String(id1), { id: id1, repositoryId: repo, title: 'x', labels: missionLabels(['a']), status: 'refined' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null });
   assert.equal(boardLane(mission), 'refined');
 });
 
 test('BoardLane maps active status to active lane', () => {
-  const mission = { id: id1, repositoryId: repo, title: 'x', labels: missionLabels(['a']), status: 'active' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
+  const mission = completeMissionFixture(String(id1), { id: id1, repositoryId: repo, title: 'x', labels: missionLabels(['a']), status: 'active' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null });
   assert.equal(boardLane(mission), 'active');
 });
 
 test('BoardLane maps review status to review lane', () => {
-  const mission = { id: id1, repositoryId: repo, title: 'x', labels: missionLabels(['a']), status: 'review' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
+  const mission = completeMissionFixture(String(id1), { id: id1, repositoryId: repo, title: 'x', labels: missionLabels(['a']), status: 'review' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null });
   assert.equal(boardLane(mission), 'review');
 });
 
 test('BoardLane maps integration status to integration lane', () => {
-  const mission = { id: id1, repositoryId: repo, title: 'x', labels: missionLabels(['a']), status: 'integration' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
+  const mission = completeMissionFixture(String(id1), { id: id1, repositoryId: repo, title: 'x', labels: missionLabels(['a']), status: 'integration' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null });
   assert.equal(boardLane(mission), 'integration');
 });
 
 test('BoardLane maps done (open) to done lane', () => {
-  const mission = { id: id1, repositoryId: repo, title: 'x', labels: missionLabels(['a']), status: 'done' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
+  const mission = completeMissionFixture(String(id1), { id: id1, repositoryId: repo, title: 'x', labels: missionLabels(['a']), status: 'done' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null });
   assert.equal(boardLane(mission), 'done');
 });
 
 test('BoardLane maps done (closed) to done lane', () => {
-  const mission = { id: id1, repositoryId: repo, title: 'x', labels: missionLabels(['a']), status: 'done' as const, closedAt: '2026-01-01', assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
+  const mission = completeMissionFixture(String(id1), { id: id1, repositoryId: repo, title: 'x', labels: missionLabels(['a']), status: 'done' as const, closedAt: '2026-01-01', assignee: null, checkpoints: [], review: null, netEngineeringLines: null });
   assert.equal(boardLane(mission), 'done');
 });

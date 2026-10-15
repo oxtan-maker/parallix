@@ -525,6 +525,8 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     'src/adapters/filesystem/package-root.ts',
     // Database adapter (SQLite infrastructure)
     'src/adapters/sqlite/database-adapter.ts',
+    // Snapshot retention belongs to the same SQLite infrastructure boundary.
+    'src/adapters/sqlite/database-backups.ts',
     // Agent launchers — write config files for the agent runtime, not domain state
     'src/adapters/agents/codex.ts',
     'src/adapters/agents/vibe.ts',

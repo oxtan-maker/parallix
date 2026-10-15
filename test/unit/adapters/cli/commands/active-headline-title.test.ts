@@ -1,3 +1,7 @@
+import { fixtureMission } from '../../../../fixtures/mission-builders.js';
+import { makeCard } from '../../../../fixtures/board-projection.js';
+import { missionVersion } from '../../../../../src/application/domain-ports.js';
+import { agentFamily } from '../../../../../src/domain/agents.js';
 /**
  * TASK-2606 reproduction: Mission directories are retired, so a Mission has no
  * MISSION.md. `px active <slug>` must still open with the authoritative title
@@ -16,25 +20,22 @@ import { mkdtemp } from '../../../../helpers/temp-dir.js';
 const SLUG = 'task-2606';
 
 function servicesWith(recordedTitle: string, cardTitle: string | null) {
-  const mission = {
-    id: SLUG, title: recordedTitle, status: 'active', assignee: 'claude', checkpoints: [],
-    brief: null, declaredGates: [], successCriteria: [], dependencies: [], externalTaskRef: null, closedAt: null,
-  };
+  const mission = fixtureMission(SLUG, { title: recordedTitle, assignee: agentFamily('claude'), checkpoints: [] });
   return {
     presentationCapabilities: {
-      boardProjection: { buildMissionCard: async () => (cardTitle === null ? null : { id: SLUG, title: cardTitle, status: 'active' }) },
+      boardProjection: { buildMissionCard: async () => (cardTitle === null ? null : makeCard({ id: mission.id, title: cardTitle, status: 'active' })) },
     },
-    mission: { store: { load: async () => ({ kind: 'found', mission, version: 3 }) } },
-  } as never;
+    mission: { store: { load: async () => ({ kind: 'found' as const, mission, version: missionVersion(3) }) } },
+  };
 }
 
-async function headline(services: never, rootDir: string): Promise<string> {
+async function headline(services: Parameters<typeof createStatusBoardFor>[0], rootDir: string): Promise<string> {
   const logs: string[] = [];
   await active([SLUG], {
     inferSlugFn: () => SLUG,
     rootDir,
     missionTitleFn: (slug: string) => statusMissionTitle(services, slug, rootDir),
-    serviceFactory: async () => ({ execute: async () => ({ status: 'completed', value: { agent: 'claude' }, durableEvidence: [] }) }),
+    serviceFactory: async () => ({ execute: async () => ({ status: 'completed' as const, value: { agent: 'claude' }, durableEvidence: [] }) }),
     exitFn: (code: number) => { throw new Error(`unexpected exit ${code}`); },
     logFn: (message: string) => logs.push(message),
     errorFn: (message: string) => { throw new Error(`unexpected error: ${message}`); },

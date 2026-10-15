@@ -1,4 +1,5 @@
-// @ts-nocheck -- Retained legacy partial request doubles (TASK-2328).
+import type { ReviewStateData } from "../../../../src/application/ports/review-persistence.js";
+import type { ReviewState } from "../../../../src/adapters/review/review-state.js";
 // review human note consumption.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
 import test from 'node:test';
@@ -6,7 +7,7 @@ import assert from 'node:assert/strict';
 import { consumeHumanNotes } from '../../../../src/adapters/review/review-events.js';
 
 // Regression provenance: TASK-2342.
-function makeComment(user, created, body) {
+function makeComment(user: string, created: string, body: string) {
   return { user, created, body };
 }
 
@@ -20,21 +21,22 @@ test('consumeHumanNotes dedup by comment body on re-invocation', async () => {
     makeComment('alice', '2026-01-01T02:00:00Z', 'Also check the edge case'),
   ];
 
-  const getCommentsFn = async () => comments;
-  const createEventFn = async () => {
+  const getCommentsFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["getCommentsFn"]> = async () => comments;
+  const createEventFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["createEventFn"]> = async () => {
     eventsCreated += 1;
-    return { ok: true, path: `/tmp/event-${eventsCreated}.md` };
+    return { ok: true as const, path: `/tmp/event-${eventsCreated}.md` };
   };
-  const readReviewStateFn = async () => ({
+  const readReviewStateFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["readReviewStateFn"]> = async () => ({
     round: 1,
-    phase: 'reviewing',
+    phase: 'reviewing' as const,
     metadata: storedMetadata,
   });
-  const writeReviewStateFn = async (_slug, state) => {
-    storedMetadata = state.metadata;
-    return { outcome: 'committed' };
+  const writeReviewStateFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["writeReviewStateFn"]> = async (_slug, state) => {
+    assert.ok(state.metadata && typeof state.metadata === 'object' && !Array.isArray(state.metadata));
+    storedMetadata = state.metadata as Record<string, unknown>;
+    return { outcome: 'committed' as const };
   };
-  const readTokenFn = () => 'test-token';
+  const readTokenFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["readTokenFn"]> = () => 'test-token';
 
   // First invocation: all 3 comments processed
   const result1 = await consumeHumanNotes('task-2342', 'alice', {
@@ -77,21 +79,22 @@ test('consumeHumanNotes dedup survives across invocations via metadata', async (
     makeComment('alice', '2026-01-01T00:00:00Z', 'Fix this'),
   ];
 
-  const getCommentsFn = async () => comments;
-  const createEventFn = async () => {
+  const getCommentsFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["getCommentsFn"]> = async () => comments;
+  const createEventFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["createEventFn"]> = async () => {
     eventsCreated += 1;
-    return { ok: true, path: `/tmp/event-${eventsCreated}.md` };
+    return { ok: true as const, path: `/tmp/event-${eventsCreated}.md` };
   };
-  const readReviewStateFn = async () => ({
+  const readReviewStateFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["readReviewStateFn"]> = async () => ({
     round: 1,
-    phase: 'reviewing',
+    phase: 'reviewing' as const,
     metadata: storedMetadata,
   });
-  const writeReviewStateFn = async (_slug, state) => {
-    storedMetadata = state.metadata;
-    return { outcome: 'committed' };
+  const writeReviewStateFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["writeReviewStateFn"]> = async (_slug, state) => {
+    assert.ok(state.metadata && typeof state.metadata === 'object' && !Array.isArray(state.metadata));
+    storedMetadata = state.metadata as Record<string, unknown>;
+    return { outcome: 'committed' as const };
   };
-  const readTokenFn = () => 'test-token';
+  const readTokenFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["readTokenFn"]> = () => 'test-token';
 
   // First call: comment processed
   await consumeHumanNotes('task-2342', 'alice', {
@@ -122,15 +125,15 @@ test('consumeHumanNotes skips workflow-generated comments and dedup by body', as
     makeComment('bob', '2026-01-01T01:00:00Z', 'Real human comment'),
   ];
 
-  const getCommentsFn = async () => comments;
+  const getCommentsFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["getCommentsFn"]> = async () => comments;
   let eventsCreated = 0;
-  const createEventFn = async () => {
+  const createEventFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["createEventFn"]> = async () => {
     eventsCreated += 1;
-    return { ok: true, path: `/tmp/event-${eventsCreated}.md` };
+    return { ok: true as const, path: `/tmp/event-${eventsCreated}.md` };
   };
-  const readReviewStateFn = async () => ({ round: 1, phase: 'reviewing', metadata: {} });
-  const writeReviewStateFn = async () => ({ outcome: 'committed' });
-  const readTokenFn = () => 'test-token';
+  const readReviewStateFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["readReviewStateFn"]> = async () => ({ round: 1, phase: 'reviewing' as const, metadata: {} });
+  const writeReviewStateFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["writeReviewStateFn"]> = async () => ({ outcome: 'committed' as const });
+  const readTokenFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["readTokenFn"]> = () => 'test-token';
 
   const result = await consumeHumanNotes('task-2342', 'alice', {
     getCommentsFn,
@@ -152,12 +155,12 @@ test('consumeHumanNotes merges dedup into currentState in-place', async () => {
     makeComment('alice', '2026-01-01T00:00:00Z', 'First comment'),
   ];
 
-  const getCommentsFn = async () => comments;
-  const createEventFn = async () => {
+  const getCommentsFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["getCommentsFn"]> = async () => comments;
+  const createEventFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["createEventFn"]> = async () => {
     eventsCreated += 1;
-    return { ok: true, path: `/tmp/event-${eventsCreated}.md` };
+    return { ok: true as const, path: `/tmp/event-${eventsCreated}.md` };
   };
-  const readTokenFn = () => 'test-token';
+  const readTokenFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["readTokenFn"]> = () => 'test-token';
 
   // Pass currentState — dedup metadata merged in-place (N1 fix)
   // No writeReviewStateFn needed — caller owns the persist.
@@ -184,14 +187,14 @@ test('consumeHumanNotes dedup key includes author (N4)', async () => {
     makeComment('bob', '2026-01-01T01:00:00Z', 'LGTM'),
   ];
 
-  const getCommentsFn = async () => comments;
-  const createEventFn = async () => {
+  const getCommentsFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["getCommentsFn"]> = async () => comments;
+  const createEventFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["createEventFn"]> = async () => {
     eventsCreated += 1;
-    return { ok: true, path: `/tmp/event-${eventsCreated}.md` };
+    return { ok: true as const, path: `/tmp/event-${eventsCreated}.md` };
   };
-  const readReviewStateFn = async () => ({ round: 1, phase: 'reviewing', metadata: {} });
-  const writeReviewStateFn = async () => ({ outcome: 'committed' });
-  const readTokenFn = () => 'test-token';
+  const readReviewStateFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["readReviewStateFn"]> = async () => ({ round: 1, phase: 'reviewing' as const, metadata: {} });
+  const writeReviewStateFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["writeReviewStateFn"]> = async () => ({ outcome: 'committed' as const });
+  const readTokenFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["readTokenFn"]> = () => 'test-token';
 
   const result = await consumeHumanNotes('task-2342', 'alice', {
     getCommentsFn,
@@ -215,12 +218,12 @@ test('consumeHumanNotes retains all dedup keys (no cap)', async () => {
     makeComment(`user-${i}`, `2026-01-01T00:00:00Z`, `Comment body ${i}`)
   );
 
-  const getCommentsFn = async () => comments;
-  const createEventFn = async () => {
+  const getCommentsFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["getCommentsFn"]> = async () => comments;
+  const createEventFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["createEventFn"]> = async () => {
     eventsCreated += 1;
-    return { ok: true, path: `/tmp/event-${eventsCreated}.md` };
+    return { ok: true as const, path: `/tmp/event-${eventsCreated}.md` };
   };
-  const readTokenFn = () => 'test-token';
+  const readTokenFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["readTokenFn"]> = () => 'test-token';
 
   const state: { round: number; phase: string; metadata: Record<string, unknown> } = { round: 1, phase: 'reviewing', metadata: {} };
   const result = await consumeHumanNotes('task-2342', 'alice', {
@@ -237,24 +240,24 @@ test('consumeHumanNotes retains all dedup keys (no cap)', async () => {
 
 test('consumeHumanNotes dedup works for 201+ comments (two invocations)', async () => {
   let eventsCreated = 0;
-  let persistedState = null;
+  let persistedState: { value: Record<string, unknown> | ReviewStateData | ReviewState | null } = { value: null };
 
   // 205 unique comments
   const comments = Array.from({ length: 205 }, (_, i) =>
     makeComment(`user-${i}`, `2026-01-01T00:00:00Z`, `Comment body ${i}`)
   );
 
-  const getCommentsFn = async () => comments;
-  const createEventFn = async () => {
+  const getCommentsFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["getCommentsFn"]> = async () => comments;
+  const createEventFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["createEventFn"]> = async () => {
     eventsCreated += 1;
-    return { ok: true, path: `/tmp/event-${eventsCreated}.md` };
+    return { ok: true as const, path: `/tmp/event-${eventsCreated}.md` };
   };
-  const readReviewStateFn = async () => persistedState;
-  const writeReviewStateFn = async (_slug, state) => {
-    persistedState = state;
-    return { outcome: 'committed' };
+  const readReviewStateFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["readReviewStateFn"]> = async () => persistedState.value;
+  const writeReviewStateFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["writeReviewStateFn"]> = async (_slug, state) => {
+    persistedState.value = state;
+    return { outcome: 'committed' as const };
   };
-  const readTokenFn = () => 'test-token';
+  const readTokenFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["readTokenFn"]> = () => 'test-token';
 
   // First invocation: all 205 created
   const result1 = await consumeHumanNotes('task-2342', 'alice', {
@@ -282,23 +285,23 @@ test('consumeHumanNotes dedup works for 201+ comments (two invocations)', async 
 
 test('consumeHumanNotes dedup durable from first invocation (no prior state)', async () => {
   let eventsCreated = 0;
-  let persistedState = null;
+  const persistedState: { value: Record<string, unknown> | ReviewStateData | ReviewState | null } = { value: null };
 
   const comments = [
     makeComment('alice', '2026-01-01T00:00:00Z', 'First comment'),
   ];
 
-  const getCommentsFn = async () => comments;
-  const createEventFn = async () => {
+  const getCommentsFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["getCommentsFn"]> = async () => comments;
+  const createEventFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["createEventFn"]> = async () => {
     eventsCreated += 1;
-    return { ok: true, path: `/tmp/event-${eventsCreated}.md` };
+    return { ok: true as const, path: `/tmp/event-${eventsCreated}.md` };
   };
-  const readReviewStateFn = async () => persistedState;
-  const writeReviewStateFn = async (_slug, state) => {
-    persistedState = state;
-    return { outcome: 'committed' };
+  const readReviewStateFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["readReviewStateFn"]> = async () => persistedState.value;
+  const writeReviewStateFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["writeReviewStateFn"]> = async (_slug, state) => {
+    persistedState.value = state;
+    return { outcome: 'committed' as const };
   };
-  const readTokenFn = () => 'test-token';
+  const readTokenFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["readTokenFn"]> = () => 'test-token';
 
   // First call: no prior state — creates events and persists dedup keys
   const result1 = await consumeHumanNotes('task-2342', 'alice', {
@@ -312,8 +315,9 @@ test('consumeHumanNotes dedup durable from first invocation (no prior state)', a
 
   assert.equal(result1.created.length, 1, 'first call creates 1 event');
   assert.equal(eventsCreated, 1, 'createEventFn called once');
-  assert.ok(persistedState, 'state persisted on first call');
-  assert.ok(Array.isArray(persistedState.metadata.processedCommentBodies), 'dedup keys persisted');
+  assert.ok(persistedState.value, 'state persisted on first call');
+  assert.ok(persistedState.value.metadata && typeof persistedState.value.metadata === 'object' && 'processedCommentBodies' in persistedState.value.metadata);
+  assert.ok(Array.isArray(persistedState.value.metadata.processedCommentBodies), 'dedup keys persisted');
 
   // Second call: same comment, dedup via persisted metadata
   const result2 = await consumeHumanNotes('task-2342', 'alice', {

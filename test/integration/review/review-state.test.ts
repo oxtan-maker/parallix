@@ -11,7 +11,7 @@ import { agentFamily } from '../../../src/domain/agents.js';
 import { missionId } from '../../../src/domain/mission.js';
 import {
   beginNextReviewRound, changeRevision, ConfiguredReviewerEligibility,
-  currentReviewRound, startReview,
+  currentReviewRound, startReview, reviewFindingId, applyReviewerCommand,
 } from '../../../src/domain/review.js';
 import {
   parseReviewFindings, recordApproval, recordImplementerResolution, recordRequestedChanges,
@@ -78,7 +78,7 @@ test('requested changes and resolution persist into a new round after SQLite reo
       decidedAt: '2026-08-21T08:00:00.000Z',
     }, { missionStore: fixture.store, lifecycleService: fixture.lifecycle }), { outcome: 'recorded' });
     assert.deepEqual(await recordImplementerResolution(slug, {
-      itemDispositions: [{ kind: 'pushed_back', findingId: 'F2' as never }],
+      itemDispositions: [{ kind: 'pushed_back', findingId: reviewFindingId('F2') }],
       evidence: 'CHANGES_MADE', resultingRevision: 'rev-2', respondedAt: '2026-08-21T09:00:00.000Z',
     }, { missionStore: fixture.store }), { outcome: 'recorded' });
     const resolved = await fixture.store.load(missionId(slug));
@@ -159,22 +159,18 @@ test('writeReviewState round-trips workflow state through the operator database'
 test('a stale reviewer-launch state cannot erase a recorded approval', async () => {
   await withMissionDatabase('task-rs-approval', async ({ root, slug, store }) => {
     const stale = await readReviewState(slug, root, store);
-    const loaded = await store.load(slug);
+    const loaded = await store.load(missionId(slug));
     assert.ok(stale && loaded.kind === 'found' && loaded.mission.review);
-    const round = loaded.mission.review.rounds[0];
     const decided = {
       ...loaded.mission,
-      review: {
-        ...loaded.mission.review,
-        rounds: [{ ...round, phase: 'approved' as const, disposition: 'APPROVED' as const,
-          decision: { kind: 'approved' as const, decidedAt: '2026-08-02T11:00:00.000Z', comment: 'passed', source: { kind: 'local' as const } },
-        }],
-      },
+      review: applyReviewerCommand(loaded.mission.review, {
+        type: 'approve', decidedAt: '2026-08-02T11:00:00.000Z', comment: 'passed', source: { kind: 'local' },
+      }),
     };
-    await store.save(decided as typeof loaded.mission, loaded.version);
+    await store.save(decided, loaded.version);
 
     assert.deepEqual(await writeReviewState(slug, stale, root, store), { outcome: 'committed' });
-    const after = await store.load(slug);
+    const after = await store.load(missionId(slug));
     assert.equal(after.kind, 'found');
     assert.equal(after.mission.review?.rounds[0].decision?.kind, 'approved');
     assert.equal((await readReviewState(slug, root, store))?.phase, 'approved');
@@ -197,6 +193,7 @@ test('writeReviewState records a human escalation as a review intervention', asy
     }, root, store);
 
     const read = await readReviewState(slug, root, store);
+    assert.ok(read != null);
     assert.equal(read.metadata.humanEscalationReason, 'MAX_ATTEMPTS');
     assert.equal(read.metadata.humanEscalatedAt, '2026-08-02T12:00:00.000Z');
   });
@@ -227,7 +224,7 @@ test('resetReviewState returns unchanged when the mission has no review', async 
 test('resetReviewState clears loop bookkeeping but keeps the review conversation', async () => {
   await withMissionDatabase('task-rs-9', async ({ root, slug, store }) => {
     const before = await readReviewState(slug, root, store);
-    const deleted = [];
+    const deleted: (import("../../../src/domain/mission.js").MissionId | import("../../../src/domain/session.js").SessionRole)[][] = [];
     await writeReviewState(slug, {
       reviewer: 'codex',
       implementer: 'claude',
@@ -240,13 +237,15 @@ test('resetReviewState clears loop bookkeeping but keeps the review conversation
     }, root, store);
 
     assert.deepEqual(await resetReviewState(slug, root, store, {
+      find: async () => null, save: async () => { throw new Error('Unexpected marker save'); }, shouldResume: async () => false,
       delete: async (mission, role) => { deleted.push([mission, role]); },
-    } as never), { outcome: 'committed' });
+    }), { outcome: 'committed' });
 
     const read = await readReviewState(slug, root, store);
     assert.ok(read, 'the review itself survives a reset');
     assert.equal(read.phase, 'reviewing');
     assert.equal(read.disposition, null);
+    assert.ok(before != null);
     assert.ok(Date.parse(read.startedAt) > Date.parse(before.startedAt));
     assert.deepEqual(read.metadata, {}, 'stage launches are cleared');
     assert.deepEqual(deleted, [[slug, 'review']], 'the old reviewer session is cleared');
@@ -255,10 +254,11 @@ test('resetReviewState clears loop bookkeeping but keeps the review conversation
 
 test('review loop reset clears the reviewer session marker', async () => {
   await withMissionDatabase('task-rs-session', async ({ root, slug, store }) => {
-    const deleted = [];
+    const deleted: (import("../../../src/domain/mission.js").MissionId | import("../../../src/domain/session.js").SessionRole)[][] = [];
     const bindings = reviewLoopBindings(store, null, {
+      find: async () => null, save: async () => { throw new Error('Unexpected marker save'); }, shouldResume: async () => false,
       delete: async (mission, role) => { deleted.push([mission, role]); },
-    } as never);
+    });
 
     assert.deepEqual(await bindings.resetReviewState(slug, root), { outcome: 'committed' });
     assert.deepEqual(deleted, [[slug, 'review']]);

@@ -207,7 +207,9 @@ test('extractOpencodeTelemetryFromExport parses the real opencode v2 export fixt
 test('extractOpencodeTelemetryFromExport returns null for empty string', () => {
   assert.equal(extractOpencodeTelemetryFromExport(''), null);
   assert.equal(extractOpencodeTelemetryFromExport('  '), null);
+  // @ts-expect-error Intentional absent input exercises the parser fallback.
   assert.equal(extractOpencodeTelemetryFromExport(null), null);
+  // @ts-expect-error Intentional absent input exercises the parser fallback.
   assert.equal(extractOpencodeTelemetryFromExport(undefined), null);
 });
 
@@ -339,6 +341,7 @@ test('extractOpencodeTelemetryFromExport verifies telemetry shape matches teleme
     },
   });
   const result2 = extractOpencodeTelemetryFromExport(jsonNoTotal);
+  assert.ok(result2 != null);
   assert.equal(result2.totalTokens, result2.inputTokens + result2.outputTokens);
 });
 
@@ -365,7 +368,9 @@ test('extractOpencodeTelemetryFromExport handles all-zeros token usage', () => {
 // --- Backward compat: extractOpencodeTelemetry ---
 
 test('extractOpencodeTelemetry returns null for undefined/null/empty result', () => {
+  // @ts-expect-error Intentional absent input exercises the parser fallback.
   assert.equal(extractOpencodeTelemetry(undefined), null);
+  // @ts-expect-error Intentional absent input exercises the parser fallback.
   assert.equal(extractOpencodeTelemetry(null), null);
   assert.equal(extractOpencodeTelemetry({}), null);
 });
@@ -385,7 +390,7 @@ test('extractOpencodeTelemetry parses result.exportJson string', () => {
 });
 
 test('extractOpencodeTelemetry passes through result.telemetry', () => {
-  const existing = { sessionId: 'ses_existing', inputTokens: 999 };
+  const existing = { sessionId: 'ses_existing', inputTokens: 999, outputTokens: 0, cachedTokens: 0, totalTokens: 999, toolCalls: 0, usagePercent: null, provider: 'fixture', model: 'fixture' } satisfies { sessionId: string | null; provider: string; model: string; inputTokens: number; outputTokens: number; cachedTokens: number; totalTokens: number; toolCalls: number; usagePercent: null; };
   const result = extractOpencodeTelemetry({ telemetry: existing });
   assert.equal(result, existing);
 });
@@ -397,8 +402,9 @@ test('extractOpencodeTelemetry prefers exportJson over telemetry', () => {
   });
   const result = extractOpencodeTelemetry({
     exportJson: json,
-    telemetry: { sessionId: 'other', inputTokens: 999 },
+    telemetry: { sessionId: 'other', inputTokens: 999, outputTokens: 0, cachedTokens: 0, totalTokens: 999, toolCalls: 0, usagePercent: null, provider: 'fixture', model: 'fixture' },
   });
+  assert.ok(result != null);
   assert.equal(result.inputTokens, 111);
 });
 

@@ -28,7 +28,7 @@ test('integration approval restore requires equivalent patches and preceding gre
   const input = { missionId: 'm', approvedRevision: 'a', candidateRevision: 'b', failedGate: 'unit',
     withdrawnAt: '2026-10-01T10:00:00Z', decidedAt: '2026-10-01T12:00:00Z', patchEqual: true,
     validationEqual: true, validation: { missionId: 'm', sha: 'b', hooks: ['unit'], baseline: 'main',
-      createdAt: '2026-10-01T11:00:00Z', reference: 'operational_history:42' } };
+      createdAt: '2026-10-01T11:00:00Z', reference: 'operational_history:42' } } satisfies Partial<NonNullable<Parameters<typeof restorationEligibility>[0]>>;
   assert.equal(restorationEligibility(input).outcome, 'restored');
   assert.equal(restorationEligibility({ ...input, patchEqual: false }).outcome, 'mission-change-differs');
   assert.equal(restorationEligibility({ ...input, patchEqual: null }).outcome, 'comparison-error');

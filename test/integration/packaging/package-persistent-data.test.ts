@@ -15,7 +15,7 @@ type RunOptions = import('node:child_process').SpawnSyncOptions & {
   env?: Record<string, string>;
 };
 
-function packFilename(stdout) {
+function packFilename(stdout: string|NonSharedBuffer) {
   const jsonMatches = [...String(stdout || '').matchAll(/"filename"\s*:\s*"([^"]+\.tgz)"/g)];
   if (jsonMatches.length > 0) {
     return jsonMatches[jsonMatches.length - 1][1];
@@ -24,7 +24,7 @@ function packFilename(stdout) {
 }
 
 function run(command: string, args: string[], options: RunOptions = {}) {
-  const runOptions = options as RunOptions;
+  const runOptions = options;
   const callerProvided = runOptions.tempHome !== undefined;
   const tempHome = runOptions.tempHome || fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-npm-home-'));
   const result = spawnSync(command, args, {
@@ -43,8 +43,7 @@ function run(command: string, args: string[], options: RunOptions = {}) {
   if (!callerProvided) {
     try { fs.rmSync(tempHome, { recursive: true, force: true }); } catch (_) {}
   }
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-  if (result.error && result.error.code === 'EPERM') {
+  if (result.error && 'code' in result.error && result.error.code === 'EPERM') {
     return result;
   }
   assert.equal(
@@ -133,10 +132,8 @@ test('global tarball reinstall preserves PARALLIX_HOME measurements and agent bl
       [path.join(installedRoot, 'build', 'px.mjs'), 'stats', '--today', '2026-06-06'],
       { cwd: repoTwo, env }
     );
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    assert.match(pxStats.stdout, /Loaded \d+ measurements from the statistics database/);
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    assert.doesNotMatch(pxStats.stdout, /Loading CSV/);
+    assert.match(String(pxStats.stdout), /Loaded \d+ measurements from the statistics database/);
+    assert.doesNotMatch(String(pxStats.stdout), /Loading CSV/);
 
     run('npm', installArgs, { tempHome: npmHome });
 

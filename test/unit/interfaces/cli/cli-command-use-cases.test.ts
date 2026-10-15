@@ -5,7 +5,7 @@ import { createIntegrateCommand } from '../../../../src/interfaces/cli/integrate
 import { parseIntegrateCliRequest } from '../../../../src/interfaces/cli/integrate.js';
 
 test('integrate CLI interface delegates the unchanged argv and options to its application use case', async () => {
-  const calls: unknown[][] = [];
+  const calls: [_args: string[], _options?: Record<string, unknown> | undefined][] = [];
   const command = createIntegrateCommand(new IntegrateCommandUseCase({ execute: (...args) => calls.push(args) }));
   await command(['task-2332.07', '--dry-run'], { source: 'test' });
   assert.equal(calls.length, 1);

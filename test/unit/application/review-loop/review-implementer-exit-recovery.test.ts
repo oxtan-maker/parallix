@@ -1,21 +1,36 @@
+import { fixtureMission, requestedChangesReview, inMemoryTransitionStore } from '../../../fixtures/mission-builders.js';
+import { missionVersion, type MissionStore } from '../../../../src/application/domain-ports.js';
+import { changeRevision } from '../../../../src/domain/review.js';
+import { agentFamily } from '../../../../src/domain/agents.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 
-function missingOutput(events: string[], options: { missionStore?: unknown; head?: () => string; onLaunch?: (_role: string) => void } = {}) {
+function storedResolution(resolved: boolean, overrides: { number?: number; implementer?: string; resultingRevision?: string } = {}) {
+  const review = requestedChangesReview('task-2623', { startedAt: '2026-08-04T10:00:00Z', decidedAt: '2026-08-04T10:10:00Z' });
+  return fixtureMission('task-2623', {
+    review: { ...review, rounds: [{ ...review.rounds[0],
+      number: overrides.number ?? 1, reviewer: agentFamily('codex'), implementer: agentFamily(overrides.implementer ?? 'claude'),
+      disposition: resolved ? 'CHANGES_MADE' : null,
+      response: resolved ? { kind: 'resolved', respondedAt: '2026-08-04T10:30:00Z', resolutions: [], resultingRevision: changeRevision(overrides.resultingRevision ?? 'committed-fix') } : null,
+    }] },
+  });
+}
+
+function missingOutput(events: string[], options: { missionStore?: MissionStore; head?: () => string; onLaunch?: (_role: string) => void } = {}) {
   let headReads = 0;
   return fakeReviewLoopPorts({
     slug: 'task-2623',
     routing: { eligibleFamilies: () => ['codex'] },
-    handoff: { handoff: async () => ({ ok: true }) },
-    missionStore: (options.missionStore ?? null) as never,
+    handoff: { handoff: async () => ({ ok: true as const }) },
+    missionStore: (options.missionStore ?? null),
     provider: {
       pollReview: async () => 'REQUEST_CHANGES',
       pollDisposition: async () => { events.push('provider-poll'); return 'CHANGES_MADE'; },
     },
     artifacts: {
-      consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'REQUEST_CHANGES', reviewFindings: [{ id: 'F1', summary: 'preserve committed fix' }] }),
+      consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'REQUEST_CHANGES', reviewFindings: [{ id: 'F1', summary: 'preserve committed fix' }] }),
       consumeImplementer: async () => ({ consumed: false }),
     },
     agents: { launch: async launch => { events.push(`launch:${launch.role}`); options.onLaunch?.(launch.role); return { agent: launch.agent, result: { status: 0 } }; } },
@@ -49,11 +64,9 @@ test('task-2623: recovery accepts a matching stored resolution written by the re
   const events: string[] = [];
   let actOnReviewLaunches = 0;
   let resolved = false;
-  const missionStore = {
-    load: async () => ({ kind: 'found', mission: { review: { rounds: [{
-      number: 1, implementer: 'claude', disposition: resolved ? 'CHANGES_MADE' : null,
-      response: resolved ? { resultingRevision: 'committed-fix' } : null,
-    }] } } }),
+  const missionStore: MissionStore = {
+    async load() { return { kind: 'found', mission: storedResolution(resolved), version: missionVersion(1) }; },
+    async save(): Promise<never> { throw new Error('Unexpected resolution fixture save'); },
   };
   const fake = missingOutput(events, { missionStore, onLaunch: role => { if (role === 'implementer') { resolved = ++actOnReviewLaunches >= 2; } } });
   await runReviewLoop(request, fake.ports);
@@ -64,12 +77,7 @@ test('task-2623: recovery accepts a matching stored resolution written by the re
 
 test('task-2623: a stored resolution is consumed only for the exiting implementer, round, and committed revision', async () => {
   const events: string[] = [];
-  const matchingStore = {
-    load: async () => ({ kind: 'found', mission: { review: { rounds: [{
-      number: 1, implementer: 'claude', disposition: 'CHANGES_MADE',
-      response: { resultingRevision: 'committed-fix' },
-    }] } } }),
-  };
+  const matchingStore = inMemoryTransitionStore(storedResolution(true));
   await runReviewLoop(request, missingOutput(events, { missionStore: matchingStore }).ports);
   assert.ok(events.some(event => /recognized stored workflow resolution/.test(event)), `matching resolution is recognized: ${events.join(' | ')}`);
   assert.ok(!events.includes('provider-poll'), `matching workflow resolution avoids provider polling: ${events.join(' | ')}`);
@@ -81,7 +89,7 @@ test('task-2623: a stored resolution is consumed only for the exiting implemente
   ];
   for (const mismatch of mismatches) {
     const rejected: string[] = [];
-    const missionStore = { load: async () => ({ kind: 'found', mission: { review: { rounds: [{ ...mismatch, disposition: 'CHANGES_MADE', response: { resultingRevision: mismatch.resultingRevision } }] } } }) };
+    const missionStore = inMemoryTransitionStore(storedResolution(true, mismatch));
     await runReviewLoop(request, missingOutput(rejected, { missionStore }).ports);
     assert.ok(!rejected.some(event => /recognized stored workflow resolution/.test(event)), `mismatch is not accepted: ${JSON.stringify(mismatch)}`);
     assert.ok(rejected.some(event => /missing protocol output/.test(event)), `mismatch starts recovery and preserves the unanswered finding: ${JSON.stringify(mismatch)}`);

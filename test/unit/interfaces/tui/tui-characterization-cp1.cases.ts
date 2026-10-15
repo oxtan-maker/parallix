@@ -1,3 +1,5 @@
+import { missionLabels, type MissionStatus } from '../../../../src/domain/mission.js';
+import { agentFamily as fixtureAgentFamily } from '../../../../src/domain/agents.js';
 /**
  * CP-1 characterization tests for task-2329: bring TUI board to design parity.
  *
@@ -34,9 +36,9 @@ const ESC = String.fromCharCode(27);
 const ANSI_RE = new RegExp(`${ESC}\\[[0-9;?]*[ -/]*[@-~]`, 'g');
 function plain(text: string): string { return text.replace(ANSI_RE, ''); }
 
-function makeMedianCycleByState(values: ReadonlyArray<{ lane: string; value: number }>): LaneMetricSeries {
+function makeMedianCycleByState(values: ReadonlyArray<{ lane: MissionStatus; value: number }>): LaneMetricSeries {
   return {
-    series: values.map((v) => ({ lane: v.lane as never, value: v.value })),
+    series: values.map((v) => ({ lane: v.lane, value: v.value })),
     missingHistoryFallback: 'skip',
   };
 }
@@ -60,8 +62,8 @@ function projectionWithMetrics(metrics: BoardMetrics): BoardProjection {
 describe('SC1: Agent availability — current rendering path', () => {
   it('FlowPanel renders agent availability as "family available/unavailable" lines', async () => {
     const agents = [
-      { family: 'codex' as AgentFamily, available: true, blockedForMs: 0 },
-      { family: 'claude' as AgentFamily, available: false, blockedForMs: Infinity },
+      { family: fixtureAgentFamily('codex') as AgentFamily, available: true, blockedForMs: 0 },
+      { family: fixtureAgentFamily('claude') as AgentFamily, available: false, blockedForMs: Infinity },
     ];
     const output = plain(renderToString(
       React.createElement(FlowPanel, { metrics: metricsWithAgents(agents), columns: 120 }),
@@ -92,8 +94,8 @@ describe('SC1: Agent availability — current rendering path', () => {
     const { BoardShell } = await import('../../../../src/interfaces/tui/shell.js');
 
     const agents = [
-      { family: 'codex' as AgentFamily, available: true, blockedForMs: 0 },
-      { family: 'claude' as AgentFamily, available: false, blockedForMs: 3600000 },
+      { family: fixtureAgentFamily('codex') as AgentFamily, available: true, blockedForMs: 0 },
+      { family: fixtureAgentFamily('claude') as AgentFamily, available: false, blockedForMs: 3600000 },
     ];
     const projection = projectionWithMetrics(metricsWithAgents(agents));
     const output = plain(ink.renderToString(
@@ -193,7 +195,7 @@ describe('SC5: Classification label badge — current rendering path', () => {
     const { MissionCard } = await import('../../../../src/interfaces/tui/mission-card.js');
 
     const card = makeCard({
-      labels: ['user_value' as never, 'bug' as never],
+      labels: missionLabels(['user_value', 'bug']),
     });
     const output = plain(ink.renderToString(
       React.createElement(MissionCard, { card, width: 60 }),
@@ -225,7 +227,7 @@ describe('SC5: Classification label badge — current rendering path', () => {
     const { MissionCard } = await import('../../../../src/interfaces/tui/mission-card.js');
 
     const card = makeCard({
-      labels: ['user_value' as never],
+      labels: missionLabels(['user_value']),
     });
     /* MIN_LANE_WIDTH is 12, so inner = 11. Label is 10 chars, badge = 14 chars.
      * slugBudget = max(8, 11 - 14) = 8. Mission id is truncated but must not

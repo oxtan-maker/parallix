@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 const _require = createRequire(import.meta.url);
@@ -16,7 +15,7 @@ import { SqliteMeasurementStore } from '../../../../../src/adapters/sqlite/measu
 
 // Compose each invocation with its isolated storage dependencies.
 const statsCommand = (args: string[], options: StatsCompositionOptions = {}) => createStatisticsCommand(options)(args, options);
-import { ADR0053_PERSISTENCE_INVENTORY } from '../../../../fixtures/durable-state-inventory';
+import { ADR0053_PERSISTENCE_INVENTORY } from '../../../../fixtures/durable-state-inventory.js';
 import { mkdtemp as registeredMkdtemp } from '../../../../helpers/temp-dir.js';
 /**
  * TASK-2322.08 CP-4: prove no UNCLASSIFIED `stats.csv` read or write survives.
@@ -82,19 +81,19 @@ test('no source file resolves a default stats CSV path or writes CSV for statist
 
 test('the ADR 0053 inventory has no stats CSV compatibility boundary', () => {
   const statsEntries = ADR0053_PERSISTENCE_INVENTORY.filter(
-    (entry: any) => entry.fileLocation === 'src/adapters/cli/commands/stats.ts'
+    (entry) => entry.fileLocation === 'src/adapters/cli/commands/stats.ts'
       && (entry.concept === 'AgentRunMeasurement' || entry.concept === 'MissionOutcome'),
   );
   assert.deepEqual(
-    statsEntries.map((entry: any) => [entry.id, entry.operation, entry.classification]),
+    statsEntries.map((entry) => [entry.id, entry.operation, entry.classification]),
     [],
   );
 
   // The default measurement authority is the SQLite store, for both concepts.
   const defaults = ADR0053_PERSISTENCE_INVENTORY
-    .filter((entry: any) => (entry.concept === 'AgentRunMeasurement' || entry.concept === 'MissionOutcome')
+    .filter((entry) => (entry.concept === 'AgentRunMeasurement' || entry.concept === 'MissionOutcome')
       && entry.pathType === 'default')
-    .map((entry: any) => entry.fileLocation);
+    .map((entry) => entry.fileLocation);
   assert.ok(defaults.includes('src/adapters/sqlite/measurement-store.ts'));
 });
 
@@ -113,17 +112,17 @@ test('px stats fails with the database error instead of reading a CSV when the s
 
   const logs: string[] = [];
   const errors: string[] = [];
-  let exitCode: number | null = null;
+  let exitCode: { value: number | null } = { value: null };
   try {
     await statsCommand(['--today', '2026-06-23'], {
       rootDir: dir,
       dbPath,
       log: (line: string) => logs.push(String(line)),
       error: (line: string) => errors.push(String(line)),
-      exit: (code: number) => { exitCode = code; },
+      exit: (code = 0) => { exitCode.value = code; },
     });
 
-    assert.equal(exitCode, 1);
+    assert.equal(exitCode.value, 1);
     assert.match(errors.join('\n'), /Measurement database unavailable/);
     assert.doesNotMatch(logs.join('\n'), /task-decoy/);
     assert.equal(fs.readFileSync(decoy, 'utf8'), decoyBefore);
@@ -160,7 +159,7 @@ test('a recorded measurement survives a full store restart and is still reported
       dbPath,
       log: (line: string) => logs.push(String(line)),
       error: (line: string) => logs.push(`ERR:${String(line)}`),
-      exit: (code: number) => { throw new Error(`unexpected exit ${code}`); },
+      exit: (code = 0) => { throw new Error(`unexpected exit ${code}`); },
     });
     assert.match(logs.join('\n'), /Loaded 1 measurements from the statistics database/);
     assert.deepEqual(fs.readdirSync(dir).filter(name => name.endsWith('.csv')), []);
@@ -180,7 +179,7 @@ test('concurrent measurement updates through the command layer retain every requ
     const base = {
       date: '2026-06-23', repo: 'parallix', classification: 'ai_sdlc',
       implementer: 'codex', pr_fix_rounds: '0',
-    };
+    } satisfies Partial<NonNullable<Parameters<typeof stats.upsertMeasurementRow>[0]>>;
     stats.upsertMeasurementRow({ ...base, mission: 'task-one', stage: 'active' }, { store: writerA, rootDir: dir });
     stats.upsertMeasurementRow({ ...base, mission: 'task-two', stage: 'active' }, { store: writerB, rootDir: dir });
     stats.upsertMeasurementRow({ ...base, mission: 'task-one', stage: 'review', implementer: 'claude' }, { store: writerB, rootDir: dir });
@@ -188,7 +187,7 @@ test('concurrent measurement updates through the command layer retain every requ
 
     const rows = stats.loadMeasurementRows({ dbPath }).rows;
     assert.deepEqual(
-      rows.map((r: any) => `${r.mission}:${r.stage}`).sort(),
+      rows.map((r) => `${r.mission}:${r.stage}`).sort(),
       ['task-one:active', 'task-one:review', 'task-two:active', 'task-two:draft'],
     );
   } finally {

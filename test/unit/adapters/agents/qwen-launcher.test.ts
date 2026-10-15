@@ -183,7 +183,7 @@ test('isSpuriousQwenExit: returns false for exit 1 with no telemetry', () => {
 
 test('qwen quota exhaustion: an exit-0 provider rejection is normalized to a failed launch', () => {
   const transcript = 'Quota exhausted: Your token-plan 1-week quota has been exhausted.\nPlease retry after the reset time. (cause: insufficient_quota: 429)';
-  const result: any = processResult({ status: 0, signal: null, error: null, stdout: transcript, stderr: '' }, '/tmp/qwen-quota-test', new Date().toISOString());
+  const result = processResult({ status: 0, signal: null, error: null, stdout: transcript, stderr: '' }, '/tmp/qwen-quota-test', new Date().toISOString());
 
   assert.equal(isQwenQuotaExhausted({ status: 0, signal: null, error: null, stdout: transcript, stderr: '' }), true);
   assert.equal(result.status, 1, 'the Qwen-specific provider rejection must reach limit detection');
@@ -253,7 +253,7 @@ test('qwen telemetry: processResult attaches result.telemetry from QWEN_HOME art
     }) + '\n',
   );
 
-  const result: any = processResult({ status: 0, stdout: '', stderr: '' }, tmp, invocationStart);
+  const result = processResult({ status: 0, stdout: '', stderr: '' }, tmp, invocationStart);
 
   assert.ok(result.telemetry, 'telemetry attached — resolveStageTelemetry returns null without it');
   assert.equal(result.telemetry.inputTokens, 1000);
@@ -264,7 +264,7 @@ test('qwen telemetry: processResult attaches result.telemetry from QWEN_HOME art
 
 test('qwen telemetry: processResult leaves telemetry unset when no artifacts exist', () => {
   const tmp = mkdtemp('qwen-launch-notel-');
-  const result: any = processResult({ status: 0, stdout: '', stderr: '' }, tmp, new Date().toISOString());
+  const result = processResult({ status: 0, stdout: '', stderr: '' }, tmp, new Date().toISOString());
   assert.equal(result.telemetry, undefined);
 });
 

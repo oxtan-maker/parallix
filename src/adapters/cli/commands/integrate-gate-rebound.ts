@@ -19,8 +19,9 @@
 // The dependency direction matches `integrate-gates.ts`: `integrate.ts` imports
 // from here, never the other way round.
 import * as fmt from '../../../application/presentation/cli-format.js';
+import type { IntegrationApproval } from '../../../application/ports/integration-records.js';
 import { missionId } from '../../../domain/mission.js';
-import { rebound, type GateFailureReason, type ReboundContext } from '../../../application/rebound-kernel.js';
+import { rebound, type GateFailureReason, type ReboundContext, type ReboundOutcome } from '../../../application/rebound-kernel.js';
 import { runPhaseGates, type GateRunOutcome, type RepositoryGate } from '../../config/repository-gates.js';
 import { captureFinalIntegrationTree } from './integrate-gates.js';
 
@@ -124,7 +125,7 @@ export interface ApprovalInvalidation {
 export async function invalidateApprovedPrReview(opts: {
   slug: string;
   branch: string;
-  approval: any;
+  approval: IntegrationApproval | null | undefined;
   summary: string;
   readTokenFn?: typeof readToken;
   dismissFn?: typeof dismissStandingApprovals;
@@ -156,7 +157,7 @@ async function routeFixedIntegrationGateRebound({
 }: {
   opts: IntegrationGateRouteOptions;
   failedGate: GateRunOutcome;
-  outcome: any;
+  outcome: ReboundOutcome;
   rebounds: number;
   approvedRevision: string | null;
   /** HEAD before the repair; an unchanged HEAD means the repair changed nothing. */
@@ -169,7 +170,7 @@ async function routeFixedIntegrationGateRebound({
 }): Promise<IntegrationGateRoute> {
   log(fmt.status('PASS', `Integration gate ${failedGate.key} repaired by ${outcome.implementer} and re-ran green (${rebounds}/${INTEGRATION_GATE_REBOUND_ATTEMPTS_PER_INVOCATION} integration-gate repairs allowed per integrate).`));
   const repairedTree = captureFinalTreeFn(opts.missionWorktree);
-  const repairedRevision = repairedTree.ok ? (repairedTree.commit ?? null) : null;
+  const repairedRevision = committedRevision(repairedTree);
   if (!initialInvalidation && preRepairRevision !== null && repairedRevision !== null && preRepairRevision === repairedRevision) {
     log(fmt.status('INFO', `The repair left the mission at ${preRepairRevision}, unchanged since the review approved it; the existing approval still covers what would land.`));
     return { route: 'fixed', rebounds };
@@ -194,6 +195,15 @@ async function routeFixedIntegrationGateRebound({
   for (const problem of invalidation.errors) {
     error(fmt.status('WARN', `Provider approval was not updated: ${problem}. The old local decision remains invalid; the fresh review excludes it.`));
   }
+  reportFreshReviewRoute(opts, invalidation, repairedLabel, log, error);
+  return { route: 'revision-changed', rebounds, approvedRevision: approvedLabel, repairedRevision: repairedLabel, invalidation };
+}
+
+function committedRevision(tree: ReturnType<typeof captureFinalIntegrationTree>): string | null {
+  return tree.ok ? (tree.commit ?? null) : null;
+}
+
+function reportFreshReviewRoute(opts: IntegrationGateRouteOptions, invalidation: ApprovalInvalidation, repairedLabel: string, log: (_msg: string) => void, error: (_msg: string) => void): void {
   if (!(opts.reReviewFollows && invalidation.ok)) {
     error(fmt.status('INFO', `${opts.slug} must go back through review: run px review ${opts.slug} --continue to review the repaired revision ${repairedLabel}; an approval returns it to the integration lane.`));
   }
@@ -205,7 +215,6 @@ async function routeFixedIntegrationGateRebound({
   if (opts.reReviewFollows && invalidation.ok) {
     log(fmt.status('INFO', `The repair is recoverable: the workflow resumes review of the repaired revision ${repairedLabel} automatically (automatic revbounce).`));
   }
-  return { route: 'revision-changed', rebounds, approvedRevision: approvedLabel, repairedRevision: repairedLabel, invalidation };
 }
 
 // ── Route ────────────────────────────────────────────────────────────────────
@@ -216,7 +225,7 @@ export interface IntegrationGateRouteOptions {
   missionWorktree: string;
   /** The mission's ordinary verification command, for the coverage note. */
   verificationCommand?: string | null;
-  failedGate: GateRunOutcome | null;
+  failedGate: GateRunOutcome | null | undefined;
   gateError?: string | null;
   /** The full configured gate set, re-run verbatim to verify a repair. */
   gates: RepositoryGate[];
@@ -227,7 +236,7 @@ export interface IntegrationGateRouteOptions {
   /** Mission pull-request branch, for dismissing a stale approval (TASK-2528). */
   branch?: string | null;
   /** Provider approval as read at context-build time (TASK-2528). */
-  approval?: any;
+  approval?: IntegrationApproval | null;
   /** Staleness already reported for this approval before integration (TASK-2555), named in the refusal. */
   reportedStaleness?: string | null;
   /** The caller re-reviews a changed revision itself, so no manual instruction is printed. */
@@ -247,7 +256,7 @@ export interface IntegrationGateRouteOptions {
     missionId: string;
     sha: string;
     hooks: readonly string[];
-  }) => Promise<void>;
+  }) => Promise<void> | void;
   // Injected so tests exercise the routing without a database, an agent, or a
   // second gate execution.
   runPhaseGatesFn?: typeof runPhaseGates;
@@ -302,7 +311,7 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
   //    from an unchanged retry (TASK-2528); an unreadable tree is treated as
   //    changed, because "unchanged" is the claim that must be proven.
   const approvedTree = captureFinalTreeFn(missionWorktree);
-  const preRepairRevision = approvedTree.ok ? (approvedTree.commit ?? null) : null;
+  const preRepairRevision = committedRevision(approvedTree);
   // The revision the reviewer approved (A); HEAD may already carry bookkeeping after it.
   const approvedRevision = opts.approvedRevision ?? preRepairRevision;
   let initialInvalidation: ApprovalInvalidation | null = null;

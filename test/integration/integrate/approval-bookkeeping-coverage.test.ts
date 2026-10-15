@@ -45,7 +45,7 @@ function approval(revision: string) {
     { change: { kind: 'local-branch', sourceBranch: branch, targetBranch: 'main' }, revision: changeRevision(revision) },
     agentFamily('codex'), agentFamily('custom'), '2026-09-30T00:00:00Z',
     ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily('codex')], strategy: 'random' }),
-  ), { type: 'approve', decidedAt: '2026-09-30T00:01:00Z', comment: null, source: { kind: 'local' } });
+  ), { type: 'approve', revision: changeRevision(revision), decidedAt: '2026-09-30T00:01:00Z', comment: null, source: { kind: 'local' } });
 }
 
 test('an approval of A covers A plus a recognised pre-commit-hook bookkeeping commit', () => {
@@ -80,6 +80,7 @@ test('repeated change-identity reads spawn no git for immutable commit answers a
     return spawnSync('git', args, { encoding: 'utf8', ...options }) as { status: number | null; stdout: string };
   };
   const identity = createGitChangeIdentity(root, countingGit, { snapshotBranchHeads: true });
+  assert.ok(identity.onlyBookkeepingSince);
   const first = identity.changeIdentity(approved, 'main');
   assert.ok(first);
   assert.equal(identity.onlyBookkeepingSince(approved, approved), true);

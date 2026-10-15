@@ -34,3 +34,10 @@ test('panel uses the configured Jev route and admits every frozen question throu
     assert.ok(budget.requestBytes <= budget.maxRequestBytes);
   }
 });
+
+test('obligation activation is explicit and defaults to shadow (TASK-2753)', () => {
+  for (const value of [undefined, '', 'off', 'shadow', 'unknown']) {
+    assert.equal(classify({ PARALLIX_JEV_OBLIGATION_REVIEW: value }).obligationMode, 'shadow');
+  }
+  assert.equal(classify({ PARALLIX_JEV_OBLIGATION_REVIEW: ' ON ' }).obligationMode, 'enabled');
+});

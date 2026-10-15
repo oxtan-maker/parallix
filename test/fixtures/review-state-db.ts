@@ -1,3 +1,4 @@
+import { fixtureMission as completeMissionFixture } from './mission-builders.js';
 // Seed a real operator database for the review-state cutover tests.
 //
 // After TASK-2322.12 the review loop's state lives on the Review aggregate, so
@@ -18,14 +19,18 @@ import { missionId, missionLabels } from '../../src/domain/mission.js';
 import { repositoryId } from '../../src/domain/repository.js';
 import { agentFamily } from '../../src/domain/agents.js';
 import { changeRevision } from '../../src/domain/review.js';
+import type { Mission } from '../../src/domain/mission.js';
+import type { Review, ReviewRound } from '../../src/domain/review.js';
+import { fixtureMission } from './mission-builders.js';
 
 /**
  * A Mission carrying a round-1 Review, the shape `px handoff` produces. It is
  * classified in Mission state, which is the classification authority after
  * TASK-2521.03 (TASK-2601).
  */
-function missionWithReview(slug, rootDir, overrides = {}) {
-  return {
+function missionWithReview(slug: string, rootDir: string, overrides: Partial<Review> = {}): Mission & { review: Review } {
+  const mission = completeMissionFixture(String(missionId(slug)), {
+    ...fixtureMission(slug),
     id: missionId(slug),
     repositoryId: repositoryId(rootDir),
     title: `Mission ${slug}`,
@@ -37,7 +42,6 @@ function missionWithReview(slug, rootDir, overrides = {}) {
     netEngineeringLines: null,
     closedAt: null,
     externalTaskRef: null,
-    intakeTrace: null,
     review: {
       rounds: [{
         number: 1,
@@ -60,7 +64,9 @@ function missionWithReview(slug, rootDir, overrides = {}) {
       reviewEvents: [],
       ...overrides,
     },
-  };
+  });
+  if (!mission.review) { throw new Error('Review fixture must carry a review'); }
+  return { ...mission, review: mission.review };
 }
 
 /**
@@ -68,7 +74,15 @@ function missionWithReview(slug, rootDir, overrides = {}) {
  * database. When `seedReview` is false the mission is stored without a Review,
  * which is how a mission looks before `px handoff`.
  */
-async function withMissionDatabase(slug, fn, { seedReview = true, reviewOverrides = {} } = {}) {
+interface MissionDatabaseFixture {
+  root: string;
+  missionDir: string;
+  slug: string;
+  home: string;
+  store: SqliteMissionStore;
+  openStore(): Promise<{ db: SqliteDatabaseAdapter; store: SqliteMissionStore }>;
+}
+async function withMissionDatabase(slug: string, fn: (fixture: MissionDatabaseFixture) => Promise<void>, { seedReview = true, reviewOverrides = {} }: { seedReview?: boolean; reviewOverrides?: Partial<Review> } = {}) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'review-state-db-'));
   const home = path.join(tmpRoot, 'parallix-home');
   fs.mkdirSync(home, { recursive: true });
@@ -95,7 +109,7 @@ async function withMissionDatabase(slug, fn, { seedReview = true, reviewOverride
   await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
   const store = new SqliteMissionStore(database);
 
-  const mission = missionWithReview(slug, tmpRoot, reviewOverrides) as unknown as import('../../src/domain/mission.js').Mission;
+  const mission = missionWithReview(slug, tmpRoot, reviewOverrides);
   await store.save(seedReview ? mission : { ...mission, review: null }, null);
   try {
     await fn({ root: tmpRoot, missionDir, slug, home, store, openStore: async () => {
@@ -120,7 +134,7 @@ async function withMissionDatabase(slug, fn, { seedReview = true, reviewOverride
  *
  * Returns a restore function.
  */
-async function seedMissionDatabase(home, slug, rootDir, roundOverrides = {}, laterRounds = []) {
+async function seedMissionDatabase(home: string, slug: string, rootDir: string, roundOverrides: Partial<ReviewRound> = {}, laterRounds: readonly Partial<ReviewRound>[] = []) {
   fs.mkdirSync(home, { recursive: true });
   const previousHome = process.env.PARALLIX_HOME;
   process.env.PARALLIX_HOME = home;
@@ -136,14 +150,14 @@ async function seedMissionDatabase(home, slug, rootDir, roundOverrides = {}, lat
   const [round] = mission.review.rounds;
   // `laterRounds` are numbered after the first, so a caller can seed the
   // multi-round history a fix-round count is derived from.
-  const rounds = [
+  const rounds: Review['rounds'] = [
     { ...round, ...roundOverrides },
     ...laterRounds.map((overrides, index) => ({ ...round, number: index + 2, ...overrides })),
   ];
   await new SqliteMissionStore(database).save({
     ...mission,
-    review: { ...mission.review, rounds: rounds as unknown as import('../../src/domain/review.js').Review['rounds'] },
-  } as unknown as import('../../src/domain/mission.js').Mission, null);
+    review: { ...mission.review, rounds },
+  }, null);
 
   // The fixture seeds the post-cutover database directly, so `rootDir` has
   // already been imported by construction. Without the ledger row the

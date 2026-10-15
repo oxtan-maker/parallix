@@ -3,7 +3,8 @@ import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js"
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnAndTee } from '../process/spawn-tee.js';
+import type { AgentProcessResult, AgentProcessSpawn } from './agent-process-types.js';
+import { spawnAndTee, type SpawnTeeOptions } from '../process/spawn-tee.js';
 import { extractCodexTelemetry } from './codex-telemetry.js';
 import { codexHomeRoot, originatingCodexStateRoot } from '../config/state-homes.js';
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
@@ -15,7 +16,7 @@ interface CodexInvocationOptions {
   prompt: string;
   worktree: string;
   interactive?: boolean;
-  env?: {[key: string]: string};
+  env?: NodeJS.ProcessEnv;
   resume?: boolean;
   sessionId?: string | null;
   model?: string | null;
@@ -23,8 +24,26 @@ interface CodexInvocationOptions {
   sandbox?: boolean;
 }
 
+/**
+ * A Codex launch handed to spawn-tee: argv plus the spawn options.
+ *
+ * `input` carries the prompt on stdin for the headless `exec` paths; the
+ * interactive TUI owns stdin and therefore omits it. `CODEX_HOME` is present
+ * only for the headless paths, which keep worktree-local Codex state.
+ */
+interface CodexInvocation {
+  command: string;
+  args: string[];
+  options: {
+    stdio: 'inherit';
+    input?: string;
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+  };
+}
+
 interface StartCodexAgentOptions extends CodexInvocationOptions {
-  teeOptions?: object;
+  teeOptions?: SpawnTeeOptions;
   slug?: MissionId | null;
   role?: SessionRole | null;
   /** Checked application port for session markers (architecture migration cutover). */
@@ -32,13 +51,13 @@ interface StartCodexAgentOptions extends CodexInvocationOptions {
 }
 
 // Injectable I/O for tests. Production uses the real spawn-tee / export capture.
-let _spawnAndTee: any = spawnAndTee;
+let _spawnAndTee: AgentProcessSpawn = spawnAndTee;
 let _sessionPort: SessionMarkerPort | null = null;
 
 // Test hooks: override the launcher's I/O without touching the public signature.
-function __setSpawnAndTeeForTest(fn: any) { _spawnAndTee = fn || spawnAndTee; }
+function __setSpawnAndTeeForTest(fn: AgentProcessSpawn | null) { _spawnAndTee = fn || spawnAndTee; }
 /** @deprecated Test compatibility hook; file-backed sessions are no longer used. */
-function __setSessionsForTest(_mod: any) { /* no-op */ }
+function __setSessionsForTest(_mod: unknown) { /* no-op */ }
 function __setSessionPortForTest(port: SessionMarkerPort | null) { _sessionPort = port; }
 
 // Codex outputs "To continue this session, run codex resume <id>" at the end.
@@ -65,7 +84,13 @@ function hasLiveTty() {
 
 function codexModelArgs(model: string | null) { return model ? ['-m', model] : []; }
 
-function buildCodexDraftInvocation({ configuration = DEFAULT_CONFIGURATION, prompt, worktree, interactive = hasLiveTty(), env = {}, resume = false, sessionId = null, model = null, sandbox = false }: CodexInvocationOptions) {
+// Headless `codex exec` and `codex exec resume` read the prompt from stdin when
+// it is `-` (verified against codex-cli 0.162.1). One argv element is capped at
+// 128 KiB on Linux, so a large recovery prompt passed as an argument fails the
+// spawn with E2BIG before Codex runs.
+const CODEX_STDIN_PROMPT = '-';
+
+function buildCodexDraftInvocation({ configuration = DEFAULT_CONFIGURATION, prompt, worktree, interactive = hasLiveTty(), env: extraEnv = {}, resume = false, sessionId = null, model = null, sandbox = false }: CodexInvocationOptions): CodexInvocation {
   const configArgs = headlessCodexOverrides(worktree);
   const baseEnv = configuration.forwardedEnvironment;
   if (resume) {
@@ -78,31 +103,33 @@ function buildCodexDraftInvocation({ configuration = DEFAULT_CONFIGURATION, prom
       args.push('--last');
     }
     if (model) {args.push('-m', model);}
-    args.push(prompt);
+    args.push(CODEX_STDIN_PROMPT);
     return {
       command: resolveCodexCommand(),
       args,
       options: {
         stdio: 'inherit',
+        input: prompt,
         cwd: worktree,
-        env: { ...baseEnv, ...env, ...({ HOME: configuration.storage.homeDirectory } as NodeJS.ProcessEnv), CODEX_HOME: codexStateRoot(worktree) }
+        env: { ...baseEnv, ...extraEnv, HOME: configuration.storage.homeDirectory, CODEX_HOME: codexStateRoot(worktree) }
       }
     };
   }
 
   const modelArgs = codexModelArgs(model);
-  const args = interactive
-    ? [...configArgs, '--full-auto', ...modelArgs, '--cd', worktree, prompt]
-    : [...configArgs, 'exec', ...(sandbox ? ['--sandbox', 'workspace-write'] : []), ...modelArgs, '--cd', worktree, prompt];
-
+  const env = { ...baseEnv, ...extraEnv, HOME: configuration.storage.homeDirectory };
+  if (interactive) {
+    // The interactive TUI owns the terminal's stdin, so only headless exec reads the prompt there.
+    return {
+      command: resolveCodexCommand(),
+      args: [...configArgs, '--full-auto', ...modelArgs, '--cd', worktree, prompt],
+      options: { stdio: 'inherit', cwd: worktree, env }
+    };
+  }
   return {
     command: resolveCodexCommand(),
-    args,
-    options: {
-      stdio: 'inherit',
-      cwd: worktree,
-      env: { ...baseEnv, ...env, ...({ HOME: configuration.storage.homeDirectory } as NodeJS.ProcessEnv), ...(!interactive ? { CODEX_HOME: codexStateRoot(worktree) } : {}) }
-    }
+    args: [...configArgs, 'exec', ...(sandbox ? ['--sandbox', 'workspace-write'] : []), ...modelArgs, '--cd', worktree, CODEX_STDIN_PROMPT],
+    options: { stdio: 'inherit', input: prompt, cwd: worktree, env: { ...env, CODEX_HOME: codexStateRoot(worktree) } }
   };
 }
 
@@ -115,15 +142,16 @@ function startCodexDraftAgent({ configuration = DEFAULT_CONFIGURATION, prompt, w
 
   const invocationStartMs = Date.now();
 
-  function isStaleSessionResult(result: any) {
+  function isStaleSessionResult(result: AgentProcessResult) {
     // Adapter-owned parsing of Codex CLI diagnostics; never exposed as a workflow signal.
     if (!result) {return false;}
     const stderr = result.stderr || '';
     const stdout = result.stdout || '';
-    return (stderr.includes('Session not found') || stdout.includes('Session not found'));
+    // codex-cli 0.162 reports an unknown session as "no rollout found for thread id".
+    return [stderr, stdout].some(text => text.includes('Session not found') || text.includes('no rollout found for thread id'));
   }
 
-  function processResult(result: any) {
+  function processResult(result: AgentProcessResult) {
     if (result && result.stdout) {
       result.sessionId = extractCodexSessionId(result.stdout) || undefined;
     }
@@ -144,9 +172,9 @@ function startCodexDraftAgent({ configuration = DEFAULT_CONFIGURATION, prompt, w
     return result;
   }
 
-  function staleSessionHandler(invocation: any) {
+  function staleSessionHandler(invocation: ReturnType<typeof buildCodexDraftInvocation>) {
     return _spawnAndTee(invocation.command, invocation.args, { ...invocation.options, ...teeOptions, configuration })
-      .then(async (result: any) => {
+      .then(async (result: AgentProcessResult) => {
         if (isStaleSessionResult(result) && worktree && resume) {
           try {
             const port = sessionMarkerPort || _sessionPort;
@@ -182,7 +210,7 @@ function codexAuthPath(worktree: string) {
   return path.join(codexHomeRoot(worktree), '.codex', 'auth.json');
 }
 
-function tomlString(value: any) {
+function tomlString(value: unknown) {
   return `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
@@ -190,8 +218,8 @@ function replaceWithLink(source: string, target: string) {
   if (path.resolve(source) === path.resolve(target)) {return;}
   try {
     fs.unlinkSync(target);
-  } catch (error: any) {
-    if (error && error.code !== 'ENOENT') {throw error;}
+  } catch (error: unknown) {
+    if (error && (error as NodeJS.ErrnoException).code !== 'ENOENT') {throw error;}
   }
   if (!fs.existsSync(source)) {return;}
   fs.symlinkSync(source, target);
@@ -233,7 +261,7 @@ function ensureCodexHome(worktree: string, configuration: ParallixConfiguration 
 // processes the turn, so a non-zero-usage token_count event there is
 // trustworthy evidence the run produced real work, independent of the
 // final exit code. Mirrors isSpuriousOpencodeExit() in opencode.ts.
-function isSpuriousCodexExit(result: any) {
+function isSpuriousCodexExit(result: AgentProcessResult) {
   if (!result || result.status !== 1 || result.signal || result.error) {return false;}
   const t = result.telemetry;
   return Boolean(t && ((t.totalTokens || 0) > 0 || (t.inputTokens || 0) > 0 || (t.outputTokens || 0) > 0));

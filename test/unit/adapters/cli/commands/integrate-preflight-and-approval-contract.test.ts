@@ -1,3 +1,7 @@
+import { integrationServices } from '../../../../helpers/stub-integration-services.js';
+import { fixtureMission } from '../../../../fixtures/mission-builders.js';
+import { integrationContext } from '../../../../fixtures/integration-context.js';
+import { missionVersion as fixtureVersion } from '../../../../../src/application/domain-ports.js';
 import { resolveConfiguration } from '../../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 // Historical regression provenance: TASK-1039, TASK-1219, TASK-1431, TASK-2204.
@@ -43,11 +47,11 @@ describe("preflight reporting", () => {
 
   // Hermetic doubles: the un-overridden defaults spawn the shimmed git CLI
   // against the operator's real repository (a subprocess per call).
-  const cleanRebaseState = () => ({ inProgress: false, rebaseHead: '', detached: false, unmergedFiles: [], rebaseDir: null });
-  const noMissionDocBranches = () => [];
+  const cleanRebaseState: typeof import("../../../../../src/adapters/git/git.js").detectRebaseState = () => ({ inProgress: false, rebaseHead: '', detached: false, unmergedFiles: [], rebaseDir: null });
+  const noMissionDocBranches: (slug: string, rootDir?: string, gitRunner?: import("../../../../../src/adapters/git/worktree.js").GitReader) => Array<{ branch: string; path: string; }> = () => [];
 
   test('printIntegrationPreflight branch failure', (t) => {
-    const context = {
+    const context = integrationContext({
       slug: TEST_SLUG,
       branch: 'mission/' + TEST_SLUG,
       currentBranch: 'main', // Fails
@@ -62,12 +66,12 @@ describe("preflight reporting", () => {
       missionWorktree: '/tmp/mission',
       mainDirty: false,
       mainDirtyEntries: []
-    };
+    });
 
     const result = printIntegrationPreflight(context, { ...({
       readTokenFn: () => 'token',
       resolveTokenFileFn: () => 'file',
-      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+      getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] }),
       detectRebaseStateFn: cleanRebaseState,
       findMissionDocInBranchesFn: noMissionDocBranches,
       conventionalWorktreePathFn: () => '/tmp/mission'
@@ -77,7 +81,7 @@ describe("preflight reporting", () => {
   });
 
   test('printIntegrationPreflight mission-doc failure', (t) => {
-    const context = {
+    const context = integrationContext({
       slug: TEST_SLUG,
       branch: 'mission/' + TEST_SLUG,
       currentBranch: 'mission/' + TEST_SLUG,
@@ -92,12 +96,12 @@ describe("preflight reporting", () => {
       missionWorktree: '/tmp/mission',
       mainDirty: false,
       mainDirtyEntries: []
-    };
+    });
 
     const result = printIntegrationPreflight(context, { ...({
       readTokenFn: () => 'token',
       resolveTokenFileFn: () => 'file',
-      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+      getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] }),
       detectRebaseStateFn: cleanRebaseState,
       findMissionDocInBranchesFn: noMissionDocBranches,
       conventionalWorktreePathFn: () => '/tmp/mission'
@@ -108,7 +112,7 @@ describe("preflight reporting", () => {
 
   test('printIntegrationPreflight task failures', (t) => {
     // Case 1: Ambiguous task
-    const context1 = {
+    const context1 = integrationContext({
       slug: TEST_SLUG,
       branch: 'mission/' + TEST_SLUG,
       currentBranch: 'mission/' + TEST_SLUG,
@@ -122,12 +126,12 @@ describe("preflight reporting", () => {
       missionWorktree: '/tmp/mission',
       mainDirty: false,
       mainDirtyEntries: []
-    };
+    });
 
     const res1 = printIntegrationPreflight(context1, { ...({
       readTokenFn: () => 'token',
       resolveTokenFileFn: () => 'file',
-      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+      getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] }),
       detectRebaseStateFn: cleanRebaseState,
       findMissionDocInBranchesFn: noMissionDocBranches,
       conventionalWorktreePathFn: () => '/tmp/mission'
@@ -135,11 +139,11 @@ describe("preflight reporting", () => {
     assert.ok(res1.failures.includes('task-ambiguity'));
 
     // Case 2: Missing task warns and falls back to unknown classification
-    const context2 = { ...context1, task: { ok: false, reason: 'missing' } };
+    const context2 = integrationContext({ ...context1, task: { ok: false, reason: 'missing' } });
     const res2 = printIntegrationPreflight(context2, { ...({
       readTokenFn: () => 'token',
       resolveTokenFileFn: () => 'file',
-      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+      getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] }),
       detectRebaseStateFn: cleanRebaseState,
       findMissionDocInBranchesFn: noMissionDocBranches,
       conventionalWorktreePathFn: () => '/tmp/mission'
@@ -149,7 +153,7 @@ describe("preflight reporting", () => {
 
   test('printIntegrationPreflight PR approval failures', (t) => {
     // Case 1: could not verify approval
-    const context1 = {
+    const context1 = integrationContext({
       slug: TEST_SLUG,
       branch: 'mission/' + TEST_SLUG,
       currentBranch: 'mission/' + TEST_SLUG,
@@ -164,15 +168,14 @@ describe("preflight reporting", () => {
       missionWorktree: '/tmp/mission',
       mainDirty: false,
       mainDirtyEntries: []
-    };
+    });
 
     const res1 = printIntegrationPreflight(context1, { ...({
-      isForgejoReviewEnabledFn: () => true,
+
       readTokenFn: () => 'token',
       resolveTokenFileFn: () => 'file',
-  // @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
       isForgejoReviewEnabledFn: () => true,
-      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+      getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] }),
       detectRebaseStateFn: cleanRebaseState,
       findMissionDocInBranchesFn: noMissionDocBranches,
       conventionalWorktreePathFn: () => '/tmp/mission'
@@ -180,14 +183,13 @@ describe("preflight reporting", () => {
     assert.ok(res1.failures.includes('pr-approval'));
 
     // Case 2: review state not APPROVED
-    const context2 = { ...context1, approval: { ok: true, reviewState: 'COMMENT' } };
+    const context2 = integrationContext({ ...context1, approval: { ok: true, reviewState: 'COMMENT' } });
     const res2 = printIntegrationPreflight(context2, { ...({
-      isForgejoReviewEnabledFn: () => true,
+
       readTokenFn: () => 'token',
       resolveTokenFileFn: () => 'file',
-  // @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
       isForgejoReviewEnabledFn: () => true,
-      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+      getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] }),
       detectRebaseStateFn: cleanRebaseState,
       findMissionDocInBranchesFn: noMissionDocBranches,
       conventionalWorktreePathFn: () => '/tmp/mission'
@@ -196,7 +198,7 @@ describe("preflight reporting", () => {
   });
 
   test('printIntegrationPreflight main-index-conflict-check failure', (t) => {
-    const context = {
+    const context = integrationContext({
       slug: TEST_SLUG,
       branch: 'mission/' + TEST_SLUG,
       currentBranch: 'mission/' + TEST_SLUG,
@@ -211,12 +213,12 @@ describe("preflight reporting", () => {
       missionWorktree: '/tmp/mission',
       mainDirty: false,
       mainDirtyEntries: []
-    };
+    });
 
     const result = printIntegrationPreflight(context, { ...({
       readTokenFn: () => 'token',
       resolveTokenFileFn: () => 'file',
-      getUnresolvedIndexConflictsFn: () => ({ ok: false, files: [], error: 'git error' }),
+      getUnresolvedIndexConflictsFn: () => ({ ok: false as const, files: [], error: 'git error' }),
       detectRebaseStateFn: cleanRebaseState,
       findMissionDocInBranchesFn: noMissionDocBranches,
       conventionalWorktreePathFn: () => '/tmp/mission'
@@ -226,7 +228,7 @@ describe("preflight reporting", () => {
   });
 
   test('printIntegrationPreflight main-dirty warning', (t) => {
-    const context = {
+    const context = integrationContext({
       slug: TEST_SLUG,
       branch: 'mission/' + TEST_SLUG,
       currentBranch: 'mission/' + TEST_SLUG,
@@ -241,12 +243,12 @@ describe("preflight reporting", () => {
       missionWorktree: '/tmp/mission',
       mainDirty: true,
       mainDirtyEntries: ['modified.js']
-    };
+    });
 
     const result = printIntegrationPreflight(context, { ...({
       readTokenFn: () => 'token',
       resolveTokenFileFn: () => 'file',
-      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+      getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] }),
       detectRebaseStateFn: cleanRebaseState,
       findMissionDocInBranchesFn: noMissionDocBranches,
       conventionalWorktreePathFn: () => '/tmp/mission'
@@ -257,14 +259,14 @@ describe("preflight reporting", () => {
 
   test('getUnresolvedIndexConflicts failure path', (t) => {
     const result = getUnresolvedIndexConflicts('/tmp/dir', {
-      gitRunner: () => ({ status: 1, stdout: 'git error' })
+      gitRunner: () => ({ stderr: '',  status: 1, stdout: 'git error' })
     });
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.error, 'git error');
   });
 
   test('promoteTaskForIntegrationIfNeeded failure path', async (t) => {
-    const context = {
+    const context = integrationContext({
       task: { ok: true, taskFile: '/tmp/task.md' },
       taskStatus: 'review',
       approval: { ok: true, reviewState: 'APPROVED' },
@@ -272,24 +274,15 @@ describe("preflight reporting", () => {
       missionDir: '/tmp/mission',
       slug: 'test-task',
       forgejoUser: 'custom'
-    };
+    });
 
     // Mock backlog.setTaskStatus to fail
     const originalSetTaskStatus = backlog.setTaskStatus;
     backlog.setTaskStatus = () => false;
 
-    // Mock createMissionApplicationServices for SQLite-first transitions
-    const composition = __mm1;
-    const originalCreate = composition.createMissionApplicationServices;
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    composition.createMissionApplicationServices = async () => ({
-      store: {
-        _repoId: 'default',
-        load: async () => ({ kind: 'found', mission: { status: 'review', review: null }, version: 1 }),
-      },
-      lifecycle: {
-        transition: async () => ({ status: 'completed', value: { to: 'integration', version: 2 } }),
-      },
+    const services = integrationServices({
+      store: { load: async () => ({ kind: 'found', mission: fixtureMission('test-task', { status: 'review', review: null }), version: fixtureVersion(1) }) },
+      lifecycle: { transition: async request => ({ durableEvidence: [], status: 'completed', value: { mission: fixtureMission(request.missionId, { status: 'integration' }), version: fixtureVersion(2), from: 'review', to: 'integration', previousAssignee: null, laneChanged: true } }) },
     });
 
     const originalError = console.error;
@@ -299,16 +292,16 @@ describe("preflight reporting", () => {
       let threw = false;
       try {
         await promoteTaskForIntegrationIfNeeded(context, {
-          missionServicesFn: composition.createMissionApplicationServices,
+          missionServicesFn: async () => services,
         });
       } catch (err) {
         threw = true;
+        assert.ok(err instanceof Error && "constructor" in err);
         assert.equal(err.constructor.name, 'IntegrationAbort', 'should throw IntegrationAbort');
       }
       assert.ok(threw, 'should have thrown');
     } finally {
       backlog.setTaskStatus = originalSetTaskStatus;
-      composition.createMissionApplicationServices = originalCreate;
       console.error = originalError;
     }
   });
@@ -330,7 +323,7 @@ describe("local review-state approval fallback", () => {
   // is demoted to DEBUG so the default happy path stays concise. The checks are
   // unchanged — failures still print and still block — so these regression locks
   // ask for the detail explicitly to keep coverage of the resolved value.
-  function withDebug(fn) {
+  function withDebug<T>(fn: () => T): T {
     const previous = environment.DEBUG;
     environment.DEBUG = '1';
     try {
@@ -358,11 +351,11 @@ describe("local review-state approval fallback", () => {
 
   // SC 1a: evaluateTaskStatusForIntegration accepts locally-derived reviewState: 'APPROVED' for tasks in status 'review'
   test('evaluateTaskStatusForIntegration accepts local-review-state approval for review status', () => {
-    const result = evaluateTaskStatusForIntegration({
+    const result = evaluateTaskStatusForIntegration(integrationContext({
       taskStatus: 'review',
-      pr: { merged: false },
+      pr: { exists: false, merged: false },
       approval: { ok: true, reviewState: 'APPROVED', source: 'local-review-state' }
-    });
+    }));
 
     assert.equal(result.ok, true);
     assert.equal(result.level, 'warn');
@@ -372,11 +365,11 @@ describe("local review-state approval fallback", () => {
 
   // SC 1b: evaluateTaskStatusForIntegration rejects when only Forgejo is unavailable and local state is missing
   test('evaluateTaskStatusForIntegration rejects when token and review-state both missing', () => {
-    const result = evaluateTaskStatusForIntegration({
+    const result = evaluateTaskStatusForIntegration(integrationContext({
       taskStatus: 'review',
-      pr: { merged: false },
+      pr: { exists: false, merged: false },
       approval: { ok: false, error: 'forgejo-off', reviewState: null, source: undefined }
-    });
+    }));
 
     assert.equal(result.ok, false);
     assert.equal(result.level, 'fail');
@@ -388,32 +381,32 @@ describe("local review-state approval fallback", () => {
   // the override is persisted as a ReviewerDecision by recovery, and the preflight
   // accepts the Mission lifecycle instead of the boolean.
   test('evaluateTaskStatusForIntegration: defaultUserApproved boolean is not an approval authority without the lifecycle', () => {
-    const context = {
+    const context = integrationContext({
       taskStatus: 'review',
-      pr: { merged: false },
+      pr: { exists: false, merged: false },
       approval: { ok: true, reviewState: 'REQUEST_CHANGES', defaultUserApproved: true }
-    };
+    }) satisfies Partial<NonNullable<Parameters<typeof evaluateTaskStatusForIntegration>[0]>>;
 
     const result = evaluateTaskStatusForIntegration(context);
     assert.equal(result.ok, false);
     assert.equal(result.level, 'fail');
 
-    const recovered = evaluateTaskStatusForIntegration({ ...context, missionStatus: 'integration' });
+    const recovered = evaluateTaskStatusForIntegration(integrationContext({ ...context, missionStatus: 'integration' }));
     assert.equal(recovered.ok, true);
     assert.match(recovered.message, /Mission lifecycle/i);
   });
 
   // SC 3a: printIntegrationPreflight passes preflight when approval is local-only (token missing + review-state approved)
   test('printIntegrationPreflight logs INFO instead of FAIL for token + approval when local review-state is approved', () => {
-    const lines = [];
-    const logs = [];
+    const lines: string[] = [];
+    const logs: unknown[] = [];
     const originalLog = console.log;
     const originalError = console.error;
-    console.log = line => logs.push(line);
-    console.error = line => logs.push(line);
+    console.log = (line: unknown) => logs.push(line);
+    console.error = (line: unknown) => logs.push(line);
 
     try {
-      const result = printIntegrationPreflight({
+      const result = printIntegrationPreflight(integrationContext({
         slug: 'task-1219',
         branch: 'mission/task-1219',
         currentBranch: 'mission/task-1219',
@@ -428,11 +421,11 @@ describe("local review-state approval fallback", () => {
         mainBranch: 'main',
         mainDirty: false,
         mainDirtyEntries: []
-      }, { ...({
+      }), { ...({
         readTokenFn: () => null,
         resolveTokenFileFn: () => null,
         isForgejoReviewEnabledFn: () => true,
-        getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+        getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] })
       }), configuration: resolveConfiguration(environment) });
 
       // The approval should not be a failure — local review-state fallback applies
@@ -450,15 +443,15 @@ describe("local review-state approval fallback", () => {
 
   // SC 3b: printIntegrationPreflight fails preflight when token missing AND no local review-state
   test('printIntegrationPreflight still fails when no token AND no local review-state', () => {
-    const lines = [];
-    const logs = [];
+    const lines: string[] = [];
+    const logs: unknown[] = [];
     const originalLog = console.log;
     const originalError = console.error;
-    console.log = line => logs.push(line);
-    console.error = line => logs.push(line);
+    console.log = (line: unknown) => logs.push(line);
+    console.error = (line: unknown) => logs.push(line);
 
     try {
-      const result = printIntegrationPreflight({
+      const result = printIntegrationPreflight(integrationContext({
         slug: 'task-1219',
         branch: 'mission/task-1219',
         currentBranch: 'mission/task-1219',
@@ -473,11 +466,11 @@ describe("local review-state approval fallback", () => {
         mainBranch: 'main',
         mainDirty: false,
         mainDirtyEntries: []
-      }, { ...({
+      }), { ...({
         readTokenFn: () => null,
         resolveTokenFileFn: () => null,
         isForgejoReviewEnabledFn: () => true,
-        getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+        getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] })
       }), configuration: resolveConfiguration(environment) });
 
       // Without local fallback, this should have the failures as before
@@ -491,14 +484,14 @@ describe("local review-state approval fallback", () => {
 
   // SC 3c: printIntegrationPreflight passes when local review-state + token available (happy case unchanged)
   test('printIntegrationPreflight PASS for approval when token and forgejo report approved', () => {
-    const logs = [];
+    const logs: unknown[] = [];
     const originalLog = console.log;
     const originalError = console.error;
-    console.log = line => logs.push(line);
-    console.error = line => logs.push(line);
+    console.log = (line: unknown) => logs.push(line);
+    console.error = (line: unknown) => logs.push(line);
 
     try {
-      const result = withDebug(() => printIntegrationPreflight({
+      const result = withDebug(() => printIntegrationPreflight(integrationContext({
         slug: 'task-1219',
         branch: 'mission/task-1219',
         currentBranch: 'mission/task-1219',
@@ -513,11 +506,11 @@ describe("local review-state approval fallback", () => {
         mainBranch: 'main',
         mainDirty: false,
         mainDirtyEntries: []
-      }, { ...({
+      }), { ...({
         readTokenFn: () => 'secret-token',
         resolveTokenFileFn: () => '/tmp/tokens/codex',
         isForgejoReviewEnabledFn: () => true,
-        getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+        getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] })
       }), configuration: resolveConfiguration(environment) }));
 
       // Forgejo path should PASS
@@ -557,15 +550,15 @@ describe("local review-state approval fallback", () => {
         baseWorktree: tmpRoot,
         isForgejoReviewEnabledFn: () => true,
         readTokenFn: () => null,
-        getPrStatusFn: () => ({ exists: true, state: 'open', merged: false, number: 1219 }),
+        getPrStatusFn: () => ({ raw: '', title: undefined, url: undefined, createdAt: null,  exists: true as const, state: 'open', merged: false, number: 1219 }),
         readReviewStateFn: (slug, rootDir) => {
           const statePath = path.join(rootDir, 'docs', 'missions', '2026', slug, 'review-state.json');
           try { return JSON.parse(fs.readFileSync(statePath, 'utf8')); }
           catch { return null; }
         },
-        getLatestReviewDecisionFn: () => ({ ok: false, error: 'connection-refused', reviewState: null }),
+        getLatestReviewDecisionFn: () => ({ ok: false as const, error: 'connection-refused', reviewState: null }),
         getCurrentBranchFn: () => 'mission/task-1219',
-        gitFn: () => ({ status: 0, stdout: 'main', stderr: '' })
+        gitFn: () => ({ signal: null,  status: 0, stdout: 'main', stderr: '' })
       });
 
       assert.ok(result.approval, 'approval should be present');
@@ -597,15 +590,15 @@ describe("local review-state approval fallback", () => {
         baseWorktree: tmpRoot,
         isForgejoReviewEnabledFn: () => true,
         readTokenFn: () => null,
-        getPrStatusFn: () => ({ exists: true, state: 'open', merged: false, number: 1219 }),
+        getPrStatusFn: () => ({ raw: '', title: undefined, url: undefined, createdAt: null,  exists: true as const, state: 'open', merged: false, number: 1219 }),
         readReviewStateFn: (slug, rootDir) => {
           const statePath = path.join(rootDir, 'docs', 'missions', '2026', slug, 'review-state.json');
           try { return JSON.parse(fs.readFileSync(statePath, 'utf8')); }
           catch { return null; }
         },
-        getLatestReviewDecisionFn: () => ({ ok: false, error: 'connection-refused', reviewState: null }),
+        getLatestReviewDecisionFn: () => ({ ok: false as const, error: 'connection-refused', reviewState: null }),
         getCurrentBranchFn: () => 'mission/task-1219',
-        gitFn: () => ({ status: 0, stdout: 'main', stderr: '' })
+        gitFn: () => ({ signal: null,  status: 0, stdout: 'main', stderr: '' })
       });
       assert.equal(result.approval.source, undefined, 'without review-state.json, fallback source must be absent');
     } finally {
@@ -637,15 +630,15 @@ describe("local review-state approval fallback", () => {
         baseWorktree: tmpRoot,
         isForgejoReviewEnabledFn: () => true,
         readTokenFn: () => null,
-        getPrStatusFn: () => ({ exists: true, state: 'open', merged: false, number: 1219 }),
+        getPrStatusFn: () => ({ raw: '', title: undefined, url: undefined, createdAt: null,  exists: true as const, state: 'open', merged: false, number: 1219 }),
         readReviewStateFn: (slug, rootDir) => {
           const statePath = path.join(rootDir, 'docs', 'missions', '2026', slug, 'review-state.json');
           try { return JSON.parse(fs.readFileSync(statePath, 'utf8')); }
           catch { return null; }
         },
-        getLatestReviewDecisionFn: () => ({ ok: false, error: 'connection-refused', reviewState: null }),
+        getLatestReviewDecisionFn: () => ({ ok: false as const, error: 'connection-refused', reviewState: null }),
         getCurrentBranchFn: () => 'mission/task-1219',
-        gitFn: () => ({ status: 0, stdout: 'main', stderr: '' })
+        gitFn: () => ({ signal: null,  status: 0, stdout: 'main', stderr: '' })
       });
       assert.notEqual(result.approval.source, 'local-review-state', 'phase=approved with disposition=REQUEST_CHANGES should not fallback');
       assert.equal(result.approval.ok, false, 'fallback should not apply when disposition is not APPROVED');
@@ -658,14 +651,14 @@ describe("local review-state approval fallback", () => {
 
   // End-to-end: buildIntegrationContext output → printIntegrationPreflight validates local fallback path
   test('printIntegrationPreflight accepts buildIntegrationContext local-review-state output without forgejo-token FAIL', () => {
-    const logs = [];
+    const logs: unknown[] = [];
     const originalLog = console.log;
     const originalError = console.error;
-    console.log = line => logs.push(line);
-    console.error = line => logs.push(line);
+    console.log = (line: unknown) => logs.push(line);
+    console.error = (line: unknown) => logs.push(line);
 
     try {
-      const ctx = {
+      const ctx = integrationContext({
         slug: 'task-1219',
         branch: 'mission/task-1219',
         currentBranch: 'mission/task-1219',
@@ -683,13 +676,13 @@ describe("local review-state approval fallback", () => {
         mainBranch: 'main',
         mainDirty: false,
         mainDirtyEntries: []
-      };
+      });
 
       const result = withDebug(() => printIntegrationPreflight(ctx, { ...({
         readTokenFn: () => null,
         resolveTokenFileFn: () => null,
         isForgejoReviewEnabledFn: () => true,
-        getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+        getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] })
       }), configuration: resolveConfiguration(environment) }));
 
       // Prevalent success criteria: no pr-approval or forgejo-token failure when local fallback is active
@@ -728,7 +721,7 @@ describe("preflight classification source", () => {
   // default happy path stays concise. The checks are unchanged, so these
   // regression locks ask for the detail explicitly to keep coverage of the
   // resolved classification value.
-  function withDebug(fn) {
+  function withDebug<T>(fn: () => T): T {
     const previous = environment.DEBUG;
     environment.DEBUG = '1';
     try {
@@ -738,7 +731,7 @@ describe("preflight classification source", () => {
     }
   }
 
-  function withTempBaseWorktree(fn) {
+  function withTempBaseWorktree(fn: (_arg0: string) => void) {
     const root = registeredMkdtemp('task-1431-base-');
     try {
       fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
@@ -748,7 +741,7 @@ describe("preflight classification source", () => {
     }
   }
 
-  function baseContext(overrides) {
+  function baseContext(overrides: { task: { ok: boolean; taskFile: string; }|{ ok: boolean; reason: string; matches: string[]; }|{ ok: boolean; reason: string; }|{ ok: boolean; taskFile: string; }; taskStatus: string|null; baseWorktree?: string; slug?: null; branch?: string; }) {
     return Object.assign({
       slug: 'task-preflight-test',
       branch: 'mission/task-preflight-test',
@@ -769,8 +762,8 @@ describe("preflight classification source", () => {
   }
 
   function captureLines() {
-    const lines = [];
-    return { lines, log: line => lines.push(line) };
+    const lines: string[] = [];
+    return { lines, log: (line: string) => lines.push(line) };
   }
 
   const defaultPreflightOpts = {
@@ -778,8 +771,8 @@ describe("preflight classification source", () => {
     resolveTokenFileFn: () => '/tmp/tokens/codex',
     isForgejoReviewEnabledFn: () => false,
     conventionalWorktreePathFn: () => '/tmp/mission',
-    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
-  };
+    getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] })
+  } satisfies NonNullable<Parameters<typeof Object.assign>[1]>;
 
   test('printIntegrationPreflight resolves classification from the mission base worktree, not process.cwd()', () => {
     withTempBaseWorktree(root => {
@@ -797,8 +790,6 @@ describe("preflight classification source", () => {
       // NOT contain this fixture task, so any resolution that ignores
       // context.baseWorktree and defaults to process.cwd() must fail.
       assert.notEqual(process.cwd(), root);
-
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       const result = withDebug(() => printIntegrationPreflight(context, { ...(Object.assign({ log }, defaultPreflightOpts)), configuration: resolveConfiguration(environment) }));
 
       const output = lines.join('\n');
@@ -814,8 +805,6 @@ describe("preflight classification source", () => {
       task: { ok: false, reason: 'ambiguous', matches: ['a.md', 'b.md'] },
       taskStatus: null
     });
-
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     const result = printIntegrationPreflight(context, { ...(Object.assign({ log }, defaultPreflightOpts)), configuration: resolveConfiguration(environment) });
 
     const output = lines.join('\n');
@@ -833,8 +822,6 @@ describe("preflight classification source", () => {
       task: { ok: false, reason: 'missing' },
       taskStatus: null
     });
-
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     const result = withDebug(() => printIntegrationPreflight(context, { ...(Object.assign({ log }, defaultPreflightOpts)), configuration: resolveConfiguration(environment) }));
 
     const output = lines.join('\n');
@@ -854,7 +841,6 @@ describe("preflight classification source", () => {
     });
 
     assert.throws(
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       () => printIntegrationPreflight(context, { ...(Object.assign({ log }, defaultPreflightOpts)), configuration: resolveConfiguration(environment) }),
       /non-null mission slug/
     );
@@ -865,7 +851,9 @@ describe("preflight classification source", () => {
   });
 
   test('buildIntegrationContext refuses to build a context for a null mission slug', async () => {
+    // @ts-expect-error Intentional null slug at the unchecked CLI boundary.
     await assert.rejects(() => buildIntegrationContext(null), /non-null mission slug/);
+    // @ts-expect-error Intentional absent slug at the unchecked CLI boundary.
     await assert.rejects(() => buildIntegrationContext(undefined), /non-null mission slug/);
   });
 });
@@ -874,16 +862,16 @@ describe("preflight classification source", () => {
 describe("merged Forgejo PR rejection", () => {
   test('integrate rejects merged Forgejo PRs during preflight with recovery guidance', () => {
     const output: string[] = [];
-    const report = { failures: [], warnings: [], log: (line: string) => output.push(line), detail: () => {} };
+    const report = { failures: [], warnings: [], log: (line: string) => output.push(line), detail: () => {} } satisfies NonNullable<Parameters<typeof checkReviewProvider>[0]>;
 
-    checkReviewProvider(report, {
+    checkReviewProvider(report, integrationContext({
       slug: 'task-2204',
       missionStatus: 'review',
       pr: { exists: true, state: 'merged', number: 2204 },
       approval: { ok: true, reviewState: 'APPROVED' },
       siblingPrs: [],
       forgejoUser: null,
-    }, { baseWorktree: '/repo', baseBranch: 'main', readTokenFn: () => null, resolveTokenFileFn: () => null });
+    }), { baseWorktree: '/repo', baseBranch: 'main', readTokenFn: () => null, resolveTokenFileFn: () => null });
 
     assert.deepEqual(report.failures, ['pr-merged', 'forgejo-token']);
     assert.match(output.join('\n'), /Forgejo PR: PR #2204 is already marked merged/i);

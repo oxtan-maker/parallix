@@ -1,3 +1,5 @@
+import type { ReviewedRevision, Review } from '../../../../src/domain/review.js';
+import { agentFamily as fixtureAgentFamily } from '../../../../src/domain/agents.js';
 import { reviewLoopReporter } from '../../../../src/adapters/review/review-loop-presentation.js';
 // reviewer independence contract.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
@@ -17,15 +19,14 @@ import { renderStatus } from '../../../../src/interfaces/cli/status.js';
 
 // Regression provenance: TASK-2339.
 describe("self review forbidden", { concurrency: false }, () => {
-  const SUBJECT = {
+  const SUBJECT: ReviewedRevision = {
     change: { kind: 'local-branch', sourceBranch: 'mission/task-9001', targetBranch: 'main' },
     revision: changeRevision('handoff-1'),
   };
   const STARTED_AT = '2026-08-04T09:00:00.000Z';
 
   function eligibility(families: string[]) {
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    return ConfiguredReviewerEligibility.fromReviewStep({ eligible: families, strategy: 'random' });
+    return ConfiguredReviewerEligibility.fromReviewStep({ eligible: families.map(fixtureAgentFamily), strategy: 'random' });
   }
 
   // ---------------------------------------------------------------------------
@@ -34,29 +35,27 @@ describe("self review forbidden", { concurrency: false }, () => {
 
   test('startReview rejects a reviewer who is the implementer while other families are eligible', () => {
     assert.throws(
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-      () => startReview(SUBJECT, 'claude', 'claude', STARTED_AT, eligibility(['codex', 'claude', 'custom', 'vibe'])),
+      () => startReview(SUBJECT, fixtureAgentFamily('claude'), fixtureAgentFamily('claude'), STARTED_AT, eligibility(['codex', 'claude', 'custom', 'vibe'])),
       /may not review its own work/,
     );
   });
 
   test('startReview allows self-review only when the implementer is the sole eligible family', () => {
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    const review = startReview(SUBJECT, 'claude', 'claude', STARTED_AT, eligibility(['claude']));
+    const review = startReview(SUBJECT, fixtureAgentFamily('claude'), fixtureAgentFamily('claude'), STARTED_AT, eligibility(['claude']));
     assert.equal(review.rounds[0].reviewer, 'claude');
     assert.equal(review.rounds[0].implementer, 'claude');
   });
 
   test('beginNextReviewRound rejects a self-reviewing round the same way', () => {
-    const readyForNextRound = {
+    const readyForNextRound: Review = {
       rounds: [{
         number: 1,
         subject: SUBJECT,
-        reviewer: 'codex',
-        implementer: 'claude',
+        reviewer: fixtureAgentFamily('codex'),
+        implementer: fixtureAgentFamily('claude'),
         startedAt: STARTED_AT,
         decision: { kind: 'changes-requested', decidedAt: STARTED_AT, comment: null, findings: [] },
-        response: { resultingRevision: changeRevision('handoff-2'), respondedAt: STARTED_AT },
+        response: { kind: 'resolved', resolutions: [], resultingRevision: changeRevision('handoff-2'), respondedAt: STARTED_AT },
         phase: 'fixing',
         disposition: 'CHANGES_MADE',
         reviewerRetryCount: 0,
@@ -68,8 +67,7 @@ describe("self review forbidden", { concurrency: false }, () => {
     };
 
     assert.throws(
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-      () => beginNextReviewRound(readyForNextRound, 'claude', 'claude', STARTED_AT, eligibility(['codex', 'claude'])),
+      () => beginNextReviewRound(readyForNextRound, fixtureAgentFamily('claude'), fixtureAgentFamily('claude'), STARTED_AT, eligibility(['codex', 'claude'])),
       /may not review its own work/,
     );
   });
@@ -109,7 +107,6 @@ describe("self review forbidden", { concurrency: false }, () => {
     // four-family policy here is what let a self-reviewed round look legitimate.
     assert.deepEqual([...result.reviewerEligibility.reviewers], ['claude']);
     assert.match(logged.join('\n'), /falling back to self-review/i);
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     assert.doesNotThrow(() => startReview(SUBJECT, result.reviewer, result.implementer, STARTED_AT, result.reviewerEligibility));
   });
 
@@ -166,21 +163,21 @@ describe("reviewer self review approval owed", { concurrency: false }, () => {
       `fallback diagnostics must name every unavailable family and reason: ${selectionLogs.join(' | ')}`,
     );
 
-    let writtenState: any = null;
-    const events: any[] = [];
+    let writtenState: { value: import('../../../../src/application/ports/review-persistence.js').ReviewStateData | null } = { value: null };
+    const events: { type: string; params: unknown; }[] = [];
     const outcome = await postWorkflowReview('task-2384', 'approve', 'looks good', {
       reviewIdentity: 'custom',
       readTokenFn: () => 'token',
       getPrAuthorFn: () => 'custom',
       postReviewFn: () => { throw new Error('self approval must not reach Forgejo'); },
       readReviewStateFn: () => ({ mission: 'task-2384', reviewer: 'custom', implementer: 'custom' }),
-      writeReviewStateFn: async (_slug: string, state: unknown) => {
-        writtenState = state;
+      writeReviewStateFn: async (_slug: string, state) => {
+        writtenState.value = state;
         return { outcome: 'committed' as const };
       },
       createEventFn: (_slug: string, type: string, params: unknown) => {
         events.push({ type, params });
-        return { ok: true, path: '/mock' };
+        return { ok: true as const, path: '/mock' };
       },
       buildMetadataFooterFn: () => '',
       log: () => {},
@@ -188,8 +185,9 @@ describe("reviewer self review approval owed", { concurrency: false }, () => {
     });
 
     assert.equal(outcome.skipped, true);
-    assert.equal(writtenState.disposition, 'APPROVED', 'the local self-review verdict must remain recorded');
-    assert.equal(writtenState.metadata?.approvalOwed, true, 'self-review must persist that external formal approval is owed');
+    assert.ok(writtenState.value);
+    assert.equal(writtenState.value.disposition, 'APPROVED', 'the local self-review verdict must remain recorded');
+    assert.equal(writtenState.value.metadata?.approvalOwed, true, 'self-review must persist that external formal approval is owed');
     assert.deepEqual(events, [{
       type: 'reviewer_outcome',
       params: { verdict: 'approve', content: 'Review verdict: approve', blockedReason: 'external-formal-approval-owed' },
@@ -202,7 +200,7 @@ describe("reviewer self review approval owed", { concurrency: false }, () => {
         backlogStatus: 'review', reviewPhase: 'approved', reviewRound: 1, reviewDisposition: 'APPROVED',
         approvalOwed: true,
         reviewHistory: [],
-      } as any,
+      },
       prInfo: { exists: true, number: 2384, state: 'open' }, staleWorktrees: [], staleWorktreeRebase: {},
       agents: [], lastThreeCommits: [], uncommittedCount: 0,
     }, (message) => statusLines.push(message));

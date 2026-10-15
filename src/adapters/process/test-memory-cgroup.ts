@@ -63,13 +63,13 @@ export function wrapInScope(limitMiB: number, command: string, args: readonly st
 }
 
 /** systemd's terminal Result of a retained scope, e.g. `oom-kill`; null when unreadable. */
-export function scopeResult(unit: string, spawnImpl: SpawnSyncLike = spawnSync as unknown as SpawnSyncLike): string | null {
+export function scopeResult(unit: string, spawnImpl: SpawnSyncLike = spawnSync): string | null {
   const result = spawnImpl('systemctl', ['--user', 'show', '-p', 'Result', '--value', unit], { encoding: 'utf8', timeout: 5_000 });
   return result.error || result.status !== 0 ? null : result.stdout.trim() || null;
 }
 
 /** Drop a retained failed scope so no unit outlives its runner. */
-export function forgetScope(unit: string, spawnImpl: SpawnSyncLike = spawnSync as unknown as SpawnSyncLike): void {
+export function forgetScope(unit: string, spawnImpl: SpawnSyncLike = spawnSync): void {
   spawnImpl('systemctl', ['--user', 'reset-failed', unit], { encoding: 'utf8', timeout: 5_000 });
 }
 
@@ -81,7 +81,7 @@ const PROBE_SCRIPT = 'p="/sys/fs/cgroup$(sed -n "s/^0:://p" /proc/self/cgroup)";
  * missing user manager, an undelegated controller or a read-only cgroup tree
  * all fail here instead of silently running unbounded.
  */
-export function assertCgroupEnforcement(limitMiB: number, spawnImpl: SpawnSyncLike = spawnSync as unknown as SpawnSyncLike): void {
+export function assertCgroupEnforcement(limitMiB: number, spawnImpl: SpawnSyncLike = spawnSync): void {
   if (process.platform !== 'linux') { throw new MemoryBoundaryUnavailableError(`platform ${process.platform} is not Linux`); }
   const probe = wrapInScope(limitMiB, 'sh', ['-c', PROBE_SCRIPT]);
   const result = spawnImpl(probe.command, probe.args, { encoding: 'utf8', timeout: 15_000 });

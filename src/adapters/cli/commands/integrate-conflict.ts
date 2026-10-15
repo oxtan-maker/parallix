@@ -1,3 +1,4 @@
+import type { GitReader } from '../../git/worktree.js';
 import { AGENT_COMMAND_COMPLETION_CONTRACT } from '../../../application/agent-completion-contract.js';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,9 +15,9 @@ export { findExistingSquashCommit, findLandedSquashOnBaseBranch, isLandedSquashM
 
 const { formatVerificationCommand } = verification;
 
-/** @param {string} rootDir @param {{gitRunner?: Function, tmpDir?: string}} opts */
-export function prepareNoisePatchForSquash(rootDir: string, opts: {gitRunner?: Function, tmpDir?: string} = {}) {
-  const runner = (opts.gitRunner || git) as Function;
+/** @param {string} rootDir @param {{gitRunner?: GitReader, tmpDir?: string}} opts */
+export function prepareNoisePatchForSquash(rootDir: string, opts: {gitRunner?: GitReader, tmpDir?: string} = {}) {
+  const runner = opts.gitRunner || git;
   const diffResult = runner(['-C', rootDir, 'diff', '--cached', '--binary']);
   if (diffResult.status !== 0) {
     return {
@@ -53,10 +54,10 @@ export function prepareNoisePatchForSquash(rootDir: string, opts: {gitRunner?: F
   };
 }
 
-/** @param {string} rootDir @param {string|null} patchPath @param {{gitRunner?: Function}} opts */
-export function restoreNoisePatchAfterSquash(rootDir: string, patchPath: string | null, opts: {gitRunner?: Function} = {}) {
+/** @param {string} rootDir @param {string|null} patchPath @param {{gitRunner?: GitReader}} opts */
+export function restoreNoisePatchAfterSquash(rootDir: string, patchPath: string | null, opts: {gitRunner?: GitReader} = {}) {
   if (!patchPath) {return { ok: true };}
-  const runner = (opts.gitRunner || git) as Function;
+  const runner = opts.gitRunner || git;
   const applyResult = runner(['-C', rootDir, 'apply', '--index', patchPath]);
   if (applyResult.status !== 0) {
     return {
@@ -67,9 +68,9 @@ export function restoreNoisePatchAfterSquash(rootDir: string, patchPath: string 
   return { ok: true };
 }
 
-/** @param {string} rootDir @param {{gitRunner?: Function}} opts */
-export function getUnresolvedIndexConflicts(rootDir = getPrimaryWorktree(), opts: {gitRunner?: Function} = {}) {
-  const runner = (opts.gitRunner || git) as Function;
+/** @param {string} rootDir @param {{gitRunner?: GitReader}} opts */
+export function getUnresolvedIndexConflicts(rootDir = getPrimaryWorktree(), opts: {gitRunner?: GitReader} = {}) {
+  const runner = opts.gitRunner || git;
   const result = runner(['-C', rootDir, 'ls-files', '-u']);
   if (result.status !== 0) {
     return {
@@ -119,11 +120,11 @@ export function parseStashPopCollisionFiles(output = '') {
 /**
  * @param {string} slug
  * @param {{stdout: string, stderr: string, status: number}} restoreResult
- * @param {{rootDir?: string, gitRunner?: Function, getUnresolvedIndexConflictsFn?: Function}} opts
+ * @param {{rootDir?: string, gitRunner?: GitReader, getUnresolvedIndexConflictsFn?: typeof getUnresolvedIndexConflicts}} opts
  */
-export function reportStashPopFailure(slug: string, restoreResult: any, opts: {rootDir?: string, gitRunner?: Function, getUnresolvedIndexConflictsFn?: Function} = {}) {
+export function reportStashPopFailure(slug: string, restoreResult: Pick<ReturnType<typeof git>, 'stdout' | 'stderr'>, opts: {rootDir?: string, gitRunner?: GitReader, getUnresolvedIndexConflictsFn?: typeof getUnresolvedIndexConflicts} = {}) {
   const output = [restoreResult.stdout, restoreResult.stderr].filter(Boolean).join('\n').trim();
-  const runner = (opts.gitRunner || git) as Function;
+  const runner = opts.gitRunner || git;
   const rootDir = opts.rootDir || getPrimaryWorktree();
   const headResult = runner(['-C', rootDir, 'log', '-1', '--oneline']);
   const headLine = headResult.status === 0 ? headResult.stdout.trim() : '(unavailable)';
@@ -192,13 +193,13 @@ export function rewriteWorktreePaths(taskFilePath: string, slug: string, options
   }
 }
 
-/** @param{{slug: string, dirtyEntries?: string[], rootDir?: string, gitRunner?: Function}} params */
+/** @param{{slug: string, dirtyEntries?: string[], rootDir?: string, gitRunner?: GitReader}} params */
 export function stashMainCheckoutIfNeeded({
   slug,
   dirtyEntries = [],
   rootDir = getPrimaryWorktree(),
   gitRunner = git
-}: {slug: string, dirtyEntries?: string[], rootDir?: string, gitRunner?: Function}) {
+}: {slug: string, dirtyEntries?: string[], rootDir?: string, gitRunner?: GitReader}) {
   if (dirtyEntries.length === 0) {
     return { created: false };
   }
@@ -230,8 +231,8 @@ export function stashMainCheckoutIfNeeded({
   };
 }
 
-/** @param{{message: string, rootDir?: string, gitRunner?: Function}} params */
-export function restoreMainCheckoutStash({ message, rootDir = getPrimaryWorktree(), gitRunner = git }: {message: string, rootDir?: string, gitRunner?: Function}) {
+/** @param{{message?: string, rootDir?: string, gitRunner?: GitReader}} params */
+export function restoreMainCheckoutStash({ message, rootDir = getPrimaryWorktree(), gitRunner = git }: {message?: string, rootDir?: string, gitRunner?: GitReader}) {
   fmt.log.info(`[RESTORE] Restoring temporarily stashed local integration checkout changes: ${message}`);
   // Use --index for safer restore semantics: git attempts to reinstage the index
   // changes from the stash alongside the working-tree changes. Collisions are
@@ -254,9 +255,9 @@ export function restoreMainCheckoutStash({ message, rootDir = getPrimaryWorktree
  *   or null when the failure needs a human.
  */
 export function maybeDropStashAfterCollision(
-  restoreResult: {stdout: string, stderr: string, status: number},
+  restoreResult: {stdout: string, stderr: string, status: number | null},
   rootDir: string,
-  opts: {gitRunner?: Function} = {}
+  opts: {gitRunner?: GitReader} = {}
 ): {ok: true, ref: string} | null {
   const runner = opts.gitRunner || git;
   const output = [restoreResult.stdout, restoreResult.stderr].filter(Boolean).join('\n');
@@ -301,8 +302,7 @@ export function maybeDropStashAfterCollision(
  * @param {string} area
  * @param{{getConflictFilesFn: Function, resolveWorktreeFn?: Function, worktreePathOverride?: string|null, rootDir?: string, baseBranch?: string|null}} options
  */
-// @ts-expect-error resolveConflictsForMission options missing getConflictFilesFn
-export function resolveConflictsForMission(slug, area, { getConflictFilesFn, resolveWorktreeFn = resolveWorktree, worktreePathOverride = null, rootDir = getPrimaryWorktree(), baseBranch = null } = {}) {
+export function resolveConflictsForMission(slug: string, area: string, { getConflictFilesFn, resolveWorktreeFn = resolveWorktree, worktreePathOverride = null, rootDir = getPrimaryWorktree(), baseBranch = null }: { getConflictFilesFn?: typeof getConflictFiles; resolveWorktreeFn?: typeof resolveWorktree; worktreePathOverride?: string | null; rootDir?: string; baseBranch?: string | null } = {}) {
   // Resolve the actual attached worktree dynamically; fall back to the conventional
   // path only when git worktree list has no entry for this mission branch.
   const conventionalPath = `${conventionalWorktreePath(slug, rootDir)}`;
@@ -316,10 +316,7 @@ export function resolveConflictsForMission(slug, area, { getConflictFilesFn, res
   // into. For a feature-branch mission that is the recorded base branch, not the
   // primary branch; for legacy missions resolveMissionBaseBranch returns primary.
   /** @type {string} */
-  let targetBranch = /** @type {string} */ (baseBranch || getPrimaryBranch());
-  if (!targetBranch) {
-    try { targetBranch = resolveMissionBaseBranch(slug, rootDir); } catch (_) { targetBranch = getPrimaryBranch(); }
-  }
+  const targetBranch = conflictTargetBranch(slug, rootDir, baseBranch);
 
   const detectFn = getConflictFilesFn || (() => getConflictFiles(worktreePath, targetBranch));
 
@@ -333,9 +330,9 @@ export function resolveConflictsForMission(slug, area, { getConflictFilesFn, res
   let conflictFiles;
   try {
     conflictFiles = detectFn(worktreePath, targetBranch);
-  } catch (err: any) {
+  } catch (err) {
     fmt.log.fail('Merge check failed with a non-conflict error:');
-    fmt.log.fail(err.message);
+    fmt.log.fail((err as Error).message);
     return { ok: false, error: 'merge-failed', conflictFiles: [], sharedFiles: [], missionSpecificFiles: [], worktreePath };
   }
 
@@ -415,4 +412,12 @@ export function buildConflictResolutionPrompt(slug: string = '<slug>', area: str
     `  3. Re-run the mission gate: ${formatVerificationCommand(area, worktreePath)}`,
     `  4. Retry the dry-run integration preflight: px integrate ${slug} --dry-run`
   ];
+}
+
+function conflictTargetBranch(slug: string, rootDir: string, baseBranch: string | null): string {
+  let targetBranch = /** @type {string} */ (baseBranch || getPrimaryBranch());
+  if (!targetBranch) {
+    try { targetBranch = resolveMissionBaseBranch(slug, rootDir); } catch (_) { targetBranch = getPrimaryBranch(); }
+  }
+  return targetBranch;
 }

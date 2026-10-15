@@ -1,9 +1,10 @@
 import type { DecisionRequest } from '../ports/decision.js';
-import { EvidenceOverBudgetError, EvidencePreparationError, EvidenceReadError, type MissionRevision, type ReviewEvidencePort } from '../ports/review-evidence.js';
+import { EvidencePreparationError, EvidenceReadError, type MissionRevision, type ReviewEvidencePort } from '../ports/review-evidence.js';
 import { isBookkeepingPath } from '../../domain/integration-validation-policy.js';
 import type { GateFact } from './gate-fact.js';
 import type { MeasureBudget } from './repair-evidence-packet.js';
-import { WEAKENING_QUESTION } from './weakening-policy.js';
+import { fitPacket } from './fit-packet.js';
+import { weakeningQuestion, INTEGRATION_RERUN_GUARANTEE } from './weakening-policy.js';
 
 /** Lines of a retained gate log which name a failure; the whole tail stands in when none match. */
 /** Only the decision token budget limits this packet, so repository reads carry no byte ceiling. */
@@ -21,7 +22,7 @@ export interface WeakeningEvidence {
   readonly log: string | null;
   readonly approved: MissionRevision;
   readonly candidate: MissionRevision;
-  readonly fact: GateFact;
+  readonly fact?: GateFact;
 }
 
 /** Both main baselines and the main commits a rebase brought in, so rebase-delivered changes are named as such. */
@@ -34,7 +35,7 @@ async function rebaseFact(approved: MissionRevision, candidate: MissionRevision,
 /**
  * Packet for the single weakening question. The diff is the plain prior-to-candidate diff restricted to the
  * files whose mission change differs between the two revisions, so main-only changes and Backlog records
- * stay out. Only the decision token budget can refuse it; nothing is cut.
+ * stay out. Optional evidence is fitted to the decision token budget.
  */
 export async function buildWeakeningPacket(input: WeakeningEvidence, repository: ReviewEvidencePort, measure: MeasureBudget): Promise<DecisionRequest> {
   let state: DecisionRequest['state'];
@@ -45,6 +46,7 @@ export async function buildWeakeningPacket(input: WeakeningEvidence, repository:
     const [diff, subjects, rebase] = await Promise.all([
       repository.diff(input.approved.revision, input.candidate.revision, paths, UNBOUNDED),
       repository.subjects(input.approved.revision, input.candidate.revision, UNBOUNDED), rebaseFact(input.approved, input.candidate, repository)]);
+    if (!diff.trim()) { throw new EvidencePreparationError('The repair diff is empty'); }
     state = {
       failedGate: input.gate,
       failureLines: [...failureLines(input.log)],
@@ -54,16 +56,20 @@ export async function buildWeakeningPacket(input: WeakeningEvidence, repository:
       repairDiff: diff,
       repairCommitSubjects: [...subjects],
       rebase,
-      validation: { status: 'passed', failedIntegrationGateRerun: 'passed', gate: input.fact.gate, validationRevision: input.fact.validationSha,
+      validation: input.fact ? { status: 'passed', failedIntegrationGateRerun: 'passed', gate: input.fact.gate, validationRevision: input.fact.validationSha,
         candidateRevision: input.fact.candidate, relationToCandidate: input.fact.relation, recordedAt: input.fact.recordedAt,
-        provenance: 'Parallix integration validation recorded the failed gate green at the validation revision before this review round started.' },
+        provenance: 'Parallix integration validation recorded the failed gate green at the validation revision before this review round started.' } : { status: 'not-rerun-before-review',
+        failedIntegrationGateRerun: INTEGRATION_RERUN_GUARANTEE },
     };
   } catch (error) {
     if (error instanceof EvidencePreparationError || error instanceof EvidenceReadError) { throw error; }
     throw new EvidenceReadError('Repair evidence could not be read');
   }
-  const request: DecisionRequest = { state, questions: { resolution: WEAKENING_QUESTION } };
-  const budget = measure(request);
-  if (budget.inputTokens > budget.maxInputTokens || budget.contextTokens > budget.maxContextTokens) { throw new EvidenceOverBudgetError('Weakening evidence exceeds the decision budget'); }
-  return request;
+  const request: DecisionRequest = { state, questions: { resolution: weakeningQuestion(!!input.fact) } };
+  const data = state as Record<string, import('../ports/decision.js').DecisionData>;
+  const rebase = data.rebase as Record<string, import('../ports/decision.js').DecisionData>;
+  return fitPacket(request, measure, { diffKey: 'repairDiff', commits: [
+    { values: data.repairCommitSubjects as string[], set: (values, counts) => { data.repairCommitSubjects = [...values]; data.repairCommitCounts = counts; } },
+    { values: rebase.incorporatedMainCommits as string[], set: (values, counts) => { rebase.incorporatedMainCommits = [...values]; rebase.commitCounts = counts; } },
+  ] });
 }

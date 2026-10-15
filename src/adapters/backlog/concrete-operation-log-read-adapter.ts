@@ -61,7 +61,7 @@ export class ConcreteOperationLogReadAdapter implements OperationLogReadAdapter 
 
       // Try to parse eventData as JSON for richer info
       try {
-        const data = JSON.parse(entry.eventData);
+        const data = JSON.parse(entry.eventData) as Record<string, unknown>;
         identity = data;
         if (typeof data.message === 'string') {
           message = data.message;

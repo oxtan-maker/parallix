@@ -123,7 +123,7 @@ export function createHandoffPorts(configuration?: ParallixConfiguration): Hando
       isForgejoReviewEnabled: (rootDir) => isForgejoReviewEnabled(rootDir),
     },
     agents: {
-      startAgent: (step, options) => startAgent(step, { ...options, configuration } as unknown as Parameters<typeof startAgent>[1]),
+      startAgent: (step, options) => startAgent(step, { ...options, configuration }),
     },
     agentSelection: {
       eligibleAgentsForStep: (step, options) => eligibleAgentsForStep(step, { ...options, configuration }),
@@ -149,14 +149,15 @@ function verifyHandoff(...args: UseCaseArgs<'verifyHandoff'>) {
   return useCase.verifyHandoff(...args);
 }
 
-/**
- * @see HandoffCommandUseCase.performHandoff
- *
- * Legacy callers hand this seam a loose option bag (some still pass identity
- * hints the workflow never reads); the use case reads only its typed options.
- */
-function performHandoff(slug: string, options: Record<string, unknown> & { configuration?: ParallixConfiguration } = {}) {
-  return new HandoffCommandUseCase(createHandoffPorts(options.configuration)).performHandoff(slug, options as PerformHandoffOptions);
+/** Checked adapter options; lifecycle authority remains in the application use case. */
+type HandoffAdapterOptions = PerformHandoffOptions & {
+  configuration?: ParallixConfiguration;
+  /** Caller metadata retained for bound handoff mechanisms; the use case resolves its own authority. */
+  forgejoUser?: string | null;
+  reviewIdentity?: string | null;
+};
+function performHandoff(slug: string, options: HandoffAdapterOptions = {}) {
+  return new HandoffCommandUseCase(createHandoffPorts(options.configuration)).performHandoff(slug, options);
 }
 
 /** @see HandoffCommandUseCase.resolveHandoffReviewAssignment */
@@ -175,8 +176,8 @@ function validateDeclaredGates(...args: UseCaseArgs<'validateDeclaredGates'>) {
 }
 
 /** @see HandoffCommandUseCase.captureNelAtHandoff */
-function captureNelAtHandoff(slug: string, options: Record<string, unknown>) {
-  return useCase.captureNelAtHandoff(slug, options as unknown as CaptureNelOptions);
+function captureNelAtHandoff(slug: string, options: CaptureNelOptions) {
+  return useCase.captureNelAtHandoff(slug, options);
 }
 
 function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string) {

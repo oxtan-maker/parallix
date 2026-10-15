@@ -1,9 +1,11 @@
+import { missionOutcome } from '../../../fixtures/mission-outcome.js';
+import { missionLabels } from '../../../../src/domain/mission.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import { assertVelocityOutcomesAreUnambiguous, assertVelocitySnapshot, renderVelocitySvg, weeklyComparableOutcomes } from '../../../../src/application/docs/velocity.js';
 
-const outcome = (closedAt: string, labels = ['user_value']) => ({ closedAt, labels }) as any;
+const outcome = (closedAt: string, labels = ['user_value']) => missionOutcome({ closedAt, labels: missionLabels(labels) });
 
 test('weeklyComparableOutcomes keeps zero weeks and excludes the current partial week', () => {
   assert.deepEqual(weeklyComparableOutcomes([outcome('2026-09-07T12:00:00Z'), outcome('2026-09-21T12:00:00Z')], '2026-09-26T12:00:00Z'), [

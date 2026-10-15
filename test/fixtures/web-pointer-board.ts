@@ -1,4 +1,14 @@
 import { build } from 'esbuild';
+// Browser fixture bootstrapping installs these globals before a page is returned.
+declare global {
+  interface Window {
+    unsafeDrag: boolean;
+    boardInput: { downs: number; ups: number; kind: string | null };
+    boardRenders: number;
+    renderBoard: (_snapshot: unknown, _reset: boolean) => void;
+  }
+}
+
 import { createServer } from 'node:http';
 import { chromium } from 'playwright-core';
 import { createHash } from 'node:crypto';
@@ -101,35 +111,35 @@ export async function pointerBoard(onCommand?: (request: WebCommandRequest) => P
     /** Press at a coordinate and wait until the page has processed the press. */
     async press(x: number, y: number, kind: string | null = null) {
       await page.mouse.move(x, y);
-      const seen = await page.evaluate(() => (window as unknown as { boardInput: { downs: number } }).boardInput.downs);
+      const seen = await page.evaluate(() => window.boardInput.downs);
       await page.mouse.down();
       await page.waitForFunction(([previous, expected]: [number, string | null]) => {
-        const state = (window as unknown as { boardInput: { downs: number; kind: string | null } }).boardInput;
+        const state = window.boardInput;
         return state.downs > previous && (expected === null || state.kind === expected);
       }, [seen, kind] as [number, string | null], { timeout: 5000 });
     },
     /** Release and wait until the page has processed it and settled. */
     async releasePress() {
-      const seen = await page.evaluate(() => (window as unknown as { boardInput: { ups: number } }).boardInput.ups);
+      const seen = await page.evaluate(() => window.boardInput.ups);
       await page.mouse.up();
-      await page.waitForFunction((previous: number) => (window as unknown as { boardInput: { ups: number } }).boardInput.ups > previous, seen, { timeout: 5000 });
+      await page.waitForFunction((previous: number) => window.boardInput.ups > previous, seen, { timeout: 5000 });
       await page.evaluate('window.boardSettled()');
     },
     async render(snapshot: ReturnType<typeof toWebBoardSnapshot>, sse = false) {
-      const applied = await page.evaluate(() => (window as unknown as { boardRenders: number }).boardRenders);
+      const applied = await page.evaluate(() => window.boardRenders);
       if (sse) {
         // A frame can only land once the page's EventSource is registered.
         const connected = Date.now() + 3000;
         while (streams.size === 0 && Date.now() < connected) { await new Promise((resolve) => setTimeout(resolve, 20)); }
         for (const stream of streams) { stream.write(`data: ${JSON.stringify(snapshot)}\n\n`); }
       }
-      else { await page.evaluate((value) => (window as unknown as {renderBoard: (s: unknown, reset: boolean) => void}).renderBoard(value, true), snapshot); }
+      else { await page.evaluate((value) => window.renderBoard(value, true), snapshot); }
       // An SSE frame is delivered asynchronously. The previous fixed 30 ms sleep
       // left a loaded runner on the pre-refresh DOM, so a coordinate press held
       // across a refresh still activated the control that refresh had removed.
       // Wait for the committed projection instead: the press precondition is now
       // observable, and every assertion in the pointer contracts is unchanged.
-      await page.waitForFunction((previous: number) => (window as unknown as { boardRenders: number }).boardRenders > previous, applied, { timeout: 5000 });
+      await page.waitForFunction((previous: number) => window.boardRenders > previous, applied, { timeout: 5000 });
       await page.waitForTimeout(30);
     },
     close,

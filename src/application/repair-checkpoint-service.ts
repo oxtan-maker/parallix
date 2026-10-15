@@ -1,10 +1,13 @@
 import type { MissionStore } from './domain-ports.js';
-import type { RepairCheckpointPort } from './ports/repair-checkpoint.js';
+import type { OperatorResumeVerdict, RepairCheckpointPort } from './ports/repair-checkpoint.js';
 import { missionId, type Mission } from '../domain/mission.js';
 import { assertInvalidContractBlocker, type InvalidContractBlocker } from '../domain/rebound-policy.js';
 import { loadForCommand, isLoaded, writeFailure, type MissionCommandRequest } from './mission-command-support.js';
-import { completed, failure, type ApplicationOutcome } from './contracts.js';
-import { missingCheckpointEvidence, type CheckpointData } from '../domain/checkpoint.js';
+import { completed, failure, type ApplicationOutcome, type Capability } from './contracts.js';
+import { carriedGoalCheckRows, freshGoalCheckRows, missingCheckpointEvidence, type CheckpointData } from '../domain/checkpoint.js';
+
+/** Writing an acknowledged stop is a checkpoint write; the same authority as recording over it. */
+const RESUME_CAPABILITY: Capability = 'checkpoint:record';
 
 /** Writes through MissionStore CAS; no legacy documents and no agent-authored proof. */
 export class RepairCheckpointService implements RepairCheckpointPort {
@@ -22,18 +25,20 @@ export class RepairCheckpointService implements RepairCheckpointPort {
     const checkpoints = loaded.mission.checkpoints;
     if (checkpoints.some(cp => cp.repair?.blocker)) { throw new Error('Invalid locked contract awaits operator decision'); }
     const prior = checkpoints.find(cp => cp.repair?.incidentId === request.incidentId);
+    const priorRepair = prior?.repair;
     const number = Math.max(0, ...checkpoints.map(cp => Number(cp.name.slice(3)))) + 1;
-    if (prior?.repair && (JSON.stringify(prior.repair.authorizedGates) !== JSON.stringify(loaded.mission.declaredGates ?? [])
-      || JSON.stringify(prior.repair.authorizedCriteria) !== JSON.stringify(loaded.mission.successCriteria ?? []))) {
+    if (priorRepair && (JSON.stringify(priorRepair.authorizedGates) !== JSON.stringify(loaded.mission.declaredGates ?? [])
+      || JSON.stringify(priorRepair.authorizedCriteria) !== JSON.stringify(loaded.mission.successCriteria ?? []))) {
       throw new Error('Authorized required checks changed during repair; operator decision required');
     }
     const name = prior?.name ?? `CP-${number}`;
     const checkpoint: CheckpointData = {
       missionId: loaded.mission.id, name,
       firstLine: `Repair incident ${request.incidentId}: ${request.command}`,
-      goalCheck: prior?.goalCheck ?? [],
+      // Reopening keeps its rows and provenance; a new incident carries accepted coverage.
+      goalCheck: prior?.goalCheck ?? carriedGoalCheckRows(checkpoints),
       nextActionText: 'Record authorized repair evidence, complete remaining checkpoints and rerun the authorized required check.',
-      repair: { incidentId: request.incidentId, command: request.command, authorizedGates: loaded.mission.declaredGates ?? [], authorizedCriteria: loaded.mission.successCriteria ?? [], attempt: request.attempt, evidenceRecorded: false, verified: false },
+      repair: { ...priorRepair, incidentId: request.incidentId, command: request.command, authorizedGates: loaded.mission.declaredGates ?? [], authorizedCriteria: loaded.mission.successCriteria ?? [], attempt: request.attempt, evidenceRecorded: false, verified: false },
     };
     const version = await this._store.save({ ...loaded.mission,
       checkpoints: [...checkpoints.filter(cp => cp.name !== name), checkpoint],
@@ -46,10 +51,54 @@ export class RepairCheckpointService implements RepairCheckpointPort {
     return loaded.mission.checkpoints.find(cp => cp.name === name)?.repair?.blocker;
   }
 
+  /**
+   * The operator resume write (TASK-2756).
+   *
+   * An explicit `px active` acknowledges a retained human-only contract stop:
+   * the blocker moves to `acknowledgedBlocker` with its proposal, the
+   * acknowledgment names its actor and time, and that checkpoint's repair
+   * authorization is refreshed to the current recorded success criteria and
+   * declared gates so the resumed work is authorized against the corrected
+   * contract. It records no evidence, marks no criterion complete and leaves
+   * `verified` as it was: clearing a stop is not a claim that the repair works.
+   *
+   * A Mission with no aggregate has no stop to clear, so it yields an empty
+   * verdict instead of failing the invocation that asked.
+   */
+  async acknowledgeOperatorResume(request: MissionCommandRequest & { actor: string; occurredAt: string }): Promise<OperatorResumeVerdict> {
+    if (!request.capabilities.has(RESUME_CAPABILITY)) { throw new Error(`${RESUME_CAPABILITY} capability is required to acknowledge a recorded execution stop`); }
+    const loaded = await this._store.load(request.missionId);
+    if (loaded.kind !== 'found') { return { cleared: [], refreshed: [], priorBlockers: [] }; }
+    const gates = loaded.mission.declaredGates ?? [];
+    const criteria = loaded.mission.successCriteria ?? [];
+    const cleared: string[] = [];
+    const refreshed: string[] = [];
+    const priorBlockers: InvalidContractBlocker[] = [];
+    const checkpoints = loaded.mission.checkpoints.map(checkpoint => {
+      const repair = checkpoint.repair;
+      // A settled repair is history: only an open one owes refreshed authorization.
+      if (!repair || repair.verified) { return checkpoint; }
+      const staleAuthorization = JSON.stringify(repair.authorizedGates) !== JSON.stringify(gates)
+        || JSON.stringify(repair.authorizedCriteria) !== JSON.stringify(criteria);
+      if (!repair.blocker && !staleAuthorization) { return checkpoint; }
+      if (repair.blocker) {
+        const { blocker, ...rest } = repair;
+        cleared.push(checkpoint.name);
+        priorBlockers.push(blocker);
+        return { ...checkpoint, repair: { ...rest, acknowledgedBlocker: blocker, acknowledgedBy: request.actor, acknowledgedAt: request.occurredAt, authorizedGates: gates, authorizedCriteria: criteria } };
+      }
+      refreshed.push(checkpoint.name);
+      return { ...checkpoint, repair: { ...repair, authorizedGates: gates, authorizedCriteria: criteria } };
+    });
+    if (cleared.length === 0 && refreshed.length === 0) { return { cleared, refreshed, priorBlockers }; }
+    await this._store.save({ ...loaded.mission, checkpoints } as Mission, loaded.version);
+    return { cleared, refreshed, priorBlockers };
+  }
+
   async verify(slug: string, name: string): Promise<void> {
     const loaded = await this.load(slug);
     const checkpoint = loaded.mission.checkpoints.find(cp => cp.name === name);
-    if (!checkpoint?.repair || checkpoint.repair.blocker || !checkpoint.repair.evidenceRecorded || !checkpoint.goalCheck.length) {
+    if (!checkpoint?.repair || checkpoint.repair.blocker || !checkpoint.repair.evidenceRecorded || !freshGoalCheckRows(checkpoint.goalCheck).length) {
       throw new Error(`Repair checkpoint ${name} needs fresh authorized evidence before repair success`);
     }
     if (JSON.stringify(checkpoint.repair.authorizedGates) !== JSON.stringify(loaded.mission.declaredGates ?? [])

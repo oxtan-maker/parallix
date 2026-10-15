@@ -175,18 +175,51 @@ function renderRangeStatsReport(rows: readonly StatsRow[], options: StatsReportO
  * Render a single-mission, per-phase telemetry breakdown.
  *
  */
+function missionReportRepositories(opts: StatsReportOptions): Set<string> {
+  return new Set(
+    (opts.repos && opts.repos.length > 0
+      ? opts.repos
+      : [opts.repo || resolveStatsRepoName(opts.rootDir)]
+    ).map(identity => String(identity).trim()),
+  );
+}
+
+function statsPhaseActor(row: StatsRow, stage: string, fallback: string): string {
+  return stage === 'review' ? (row.reviewer_agent || row.implementer_agent || row.implementer || fallback)
+    : (row.implementer_agent || row.implementer || fallback);
+}
+
+function missionPhaseTableRow(row: StatsRow, stage: string, label: string, num: (_row: StatsRow, _key: StatsField) => string, cost: (_value: unknown) => string): string[] {
+  const actor = statsPhaseActor(row, stage, '\u2014');
+  return [
+    label,
+    row.provider || '\u2014',
+    row.model || '\u2014',
+    actor,
+    num(row, 'input_tokens'),
+    num(row, 'output_tokens'),
+    num(row, 'cached_tokens'),
+    num(row, 'tool_calls'),
+    num(row, 'duration_minutes'),
+    (() => {
+      const displayActor = statsPhaseActor(row, stage, '');
+      const actorLower = displayActor.trim().toLowerCase();
+      if (actorLower === 'claude') { return '\u2014'; }
+      return (row.provider && row.provider.toLowerCase() === 'openai')
+        ? num(row, 'openai_usage_after')
+        : '\u2014';
+    })(),
+    cost(row.cost_usd),
+  ];
+}
+
 function renderMissionPhaseReport(rows: readonly StatsRow[], slug: string, options: StatsReportOptions = {}) {
   const wanted = String(slug || '').trim().toLowerCase();
   const opts = options;
   // The canonical identity, plus any explicitly declared legacy alias this
   // repository's older rows were persisted under. Never a broadened query: the
   // caller supplies the exact identities, and new rows only use the canonical one.
-  const wantedRepos = new Set(
-    (opts.repos && opts.repos.length > 0
-      ? opts.repos
-      : [opts.repo || resolveStatsRepoName(opts.rootDir)]
-    ).map(identity => String(identity).trim()),
-  );
+  const wantedRepos = missionReportRepositories(opts);
   const missionRows = (rows || []).filter(row =>
     String(row.mission || '').trim().toLowerCase() === wanted &&
     wantedRepos.has(String(row.repo || '').trim())
@@ -233,7 +266,7 @@ function renderMissionPhaseReport(rows: readonly StatsRow[], slug: string, optio
   const num = (row: StatsRow, key: StatsField) => String(Number.parseInt(String(row[key]), 10) || 0);
   const cost = (value: unknown) => {
     const n = Number.parseFloat(String(value));
-    if (!Number.isFinite(n) || n === 0) {return '0';}
+    if (!Number.isFinite(n) || n === 0) { return '0'; }
     return String(Math.round(n * 100) / 100);
   };
   const tableRows: string[][] = [];
@@ -244,31 +277,7 @@ function renderMissionPhaseReport(rows: readonly StatsRow[], slug: string, optio
       continue;
     }
     for (const row of stageRows) {
-      const actor = stage === 'review'
-        ? (row.reviewer_agent || row.implementer_agent || row.implementer || '\u2014')
-        : (row.implementer_agent || row.implementer || '\u2014');
-      tableRows.push([
-        label,
-        row.provider || '\u2014',
-        row.model || '\u2014',
-        actor,
-        num(row, 'input_tokens'),
-        num(row, 'output_tokens'),
-        num(row, 'cached_tokens'),
-        num(row, 'tool_calls'),
-        num(row, 'duration_minutes'),
-        (() => {
-          const displayActor = (stage === 'review'
-            ? (row.reviewer_agent || row.implementer_agent || row.implementer || '')
-            : (row.implementer_agent || row.implementer || ''));
-          const actorLower = displayActor.trim().toLowerCase();
-          if (actorLower === 'claude') {return '\u2014';}
-          return (row.provider && row.provider.toLowerCase() === 'openai')
-            ? num(row, 'openai_usage_after')
-            : '\u2014';
-        })(),
-        cost(row.cost_usd),
-      ]);
+      tableRows.push(missionPhaseTableRow(row, stage, label, num, cost));
     }
   }
 

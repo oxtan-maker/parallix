@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -101,7 +100,7 @@ test('performStaticReview accepts Goal Check with recognized repo command', () =
       findMissionDir: () => missionDir,
       findCheckpoints: () => [checkpoint],
       readFileSync: fs.readFileSync,
-      run: () => ({ status: 0, stdout: '' }),
+      run: () => ({ signal: null, stderr: '',  status: 0, stdout: '' }),
       resolveWorktree: () => tmpDir,
       rootDir: tmpDir,
     });
@@ -141,7 +140,7 @@ test('performStaticReview accepts Goal Check with recognized test name', () => {
       findMissionDir: () => missionDir,
       findCheckpoints: () => [checkpoint],
       readFileSync: fs.readFileSync,
-      run: () => ({ status: 0, stdout: '' }),
+      run: () => ({ signal: null, stderr: '',  status: 0, stdout: '' }),
       resolveWorktree: () => tmpDir,
       rootDir: tmpDir,
     });
@@ -175,7 +174,7 @@ test('performStaticReview accepts Goal Check with test file path', () => {
       findMissionDir: () => missionDir,
       findCheckpoints: () => [checkpoint],
       readFileSync: fs.readFileSync,
-      run: () => ({ status: 0, stdout: '' }),
+      run: () => ({ signal: null, stderr: '',  status: 0, stdout: '' }),
       resolveWorktree: () => tmpDir,
       rootDir: tmpDir,
     });
@@ -226,7 +225,7 @@ test('performStaticReview accepts a bare repo path whose file exists (may contai
       findMissionDir: () => missionDir,
       findCheckpoints: () => [checkpoint],
       readFileSync: fs.readFileSync,
-      run: () => ({ status: 0, stdout: '' }),
+      run: () => ({ signal: null, stderr: '',  status: 0, stdout: '' }),
       // Resolve evidence against the fixture root, not the live checkout: the
       // cited follow-up task file is created here, so the case no longer breaks
       // when the real backlog task moves from `tasks/` to `completed/`.
@@ -267,7 +266,7 @@ test('performStaticReview accepts a bare repo path without a :line suffix', () =
       findMissionDir: () => missionDir,
       findCheckpoints: () => [checkpoint],
       readFileSync: fs.readFileSync,
-      run: () => ({ status: 0, stdout: '' }),
+      run: () => ({ signal: null, stderr: '',  status: 0, stdout: '' }),
       resolveWorktree: () => tmpDir,
       rootDir: tmpDir,
     });
@@ -303,7 +302,7 @@ test('performStaticReview accepts a bare repo path named mid-sentence', () => {
       findMissionDir: () => missionDir,
       findCheckpoints: () => [checkpoint],
       readFileSync: fs.readFileSync,
-      run: () => ({ status: 0, stdout: '' }),
+      run: () => ({ signal: null, stderr: '',  status: 0, stdout: '' }),
       resolveWorktree: () => tmpDir,
       rootDir: tmpDir,
     });
@@ -334,7 +333,7 @@ test('performStaticReview rejects placeholder-only evidence', () => {
       findMissionDir: () => missionDir,
       findCheckpoints: () => [checkpoint],
       readFileSync: fs.readFileSync,
-      run: () => ({ status: 0, stdout: '' }),
+      run: () => ({ signal: null, stderr: '',  status: 0, stdout: '' }),
       resolveWorktree: () => tmpDir,
       rootDir: tmpDir,
     });
@@ -364,7 +363,7 @@ test('performStaticReview rejects separator-only table', () => {
       findMissionDir: () => missionDir,
       findCheckpoints: () => [checkpoint],
       readFileSync: fs.readFileSync,
-      run: () => ({ status: 0, stdout: '' }),
+      run: () => ({ signal: null, stderr: '',  status: 0, stdout: '' }),
       resolveWorktree: () => tmpDir,
       rootDir: tmpDir,
     });
@@ -396,7 +395,7 @@ test('performStaticReview rejects prose-only evidence', () => {
       findMissionDir: () => missionDir,
       findCheckpoints: () => [checkpoint],
       readFileSync: fs.readFileSync,
-      run: () => ({ status: 0, stdout: '' }),
+      run: () => ({ signal: null, stderr: '',  status: 0, stdout: '' }),
       resolveWorktree: () => tmpDir,
       rootDir: tmpDir,
     });
@@ -466,7 +465,7 @@ test('a basename-only case module reference is rejected with a repository-relati
 test('existing files outside the repository are not evidence, including file:line and command forms (TASK-2662)', () => {
   const outside = { '/etc/ssl/openssl.cnf': '', '/code/package.json': '' };
   const { root, fileSystem } = caseRepository();
-  const escaping = { ...fileSystem, existsSync: (target: string) => target in outside || fileSystem.existsSync(target) };
+  const escaping = { ...fileSystem, existsSync: (target: string) => target in outside || fileSystem.existsSync(target) } satisfies NonNullable<Parameters<typeof findUnverifiableRecordedRow>[0]>;
   for (const evidence of ['/etc/ssl/openssl.cnf', '/etc/ssl/openssl.cnf:3', '../code/package.json', '`cat ../code/package.json`', '`./../code/package.json`']) {
     assert.ok(findUnverifiableRecordedRow(escaping, [{ criterion: 'covered', evidence }], root), `${evidence} lies outside the repository`);
   }

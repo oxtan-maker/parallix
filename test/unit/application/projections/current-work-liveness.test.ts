@@ -82,7 +82,7 @@ test('SC13: an unreadable identity falls back to the bare pid check rather than 
 });
 
 test('SC14: an abnormally terminated publisher ages its work out instead of staying WORKING', () => {
-  const options = { ttlMs: 1_000, isProcessAlive: () => null as boolean | null };
+  const options = { ttlMs: 1_000, isProcessAlive: () => null as boolean | null } satisfies Partial<NonNullable<Parameters<typeof reconcileCurrentWork>[1]>>;
   // Killed without publishing a terminal event, and no longer observable.
   const fresh = reconcileCurrentWork([event()], { ...options, nowMs: NOW });
   const aged = reconcileCurrentWork([event()], { ...options, nowMs: NOW + 10_000 });

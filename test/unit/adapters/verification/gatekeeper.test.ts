@@ -13,7 +13,7 @@ await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const { DEFAULT_GATEKEEPER_USER } = gatekeeper;
 
-function withTempRoot(run) {
+function withTempRoot(run: (_arg0: string) => void) {
   const tmpRoot = registeredMkdtemp('gatekeeper-test-');
   try {
     run(tmpRoot);
@@ -97,7 +97,7 @@ test('buildPushbackBody includes all three artifact-creation instructions when a
 // ---------- runGatekeeper ----------
 
 test('runGatekeeper returns ok=true when all artifacts present and does not post', async (t) => {
-  withTempRoot(rootDir => {
+  withTempRoot((rootDir) => {
     const missionDir = path.join(rootDir, 'docs', 'missions', '2026', 'task-gk-007');
     fs.mkdirSync(missionDir, { recursive: true });
     fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Task GK 007');
@@ -107,7 +107,7 @@ test('runGatekeeper returns ok=true when all artifacts present and does not post
     fs.mkdirSync(tasksDir, { recursive: true });
     fs.writeFileSync(path.join(tasksDir, 'task-gk-007 - test task.md'), 'status: active');
 
-    const logLines = [];
+    const logLines: string[] = [];
     const result = gatekeeper.runGatekeeper('task-gk-007', {
       rootDir,
       log: (msg) => logLines.push(msg),
@@ -124,13 +124,13 @@ test('runGatekeeper returns ok=true when all artifacts present and does not post
 
 test('runGatekeeper skips posting when no Forgejo token is available and artifacts are missing', async (t) => {
   withTempRoot(rootDir => {
-    const logLines = [];
+    const logLines: string[] = [];
     const result = gatekeeper.runGatekeeper('task-gk-008', {
       rootDir,
       log: (msg) => logLines.push(msg),
       readTokenFn: () => null, // no token
       postReviewFn: () => { throw new Error('should not be called'); },
-      checkFn: () => ({ ok: false, missing: ['docs/missions/2026/task-gk-008/MISSION.md'] })
+      checkFn: () => ({ ok: false as const, missing: ['docs/missions/2026/task-gk-008/MISSION.md'] })
     });
 
     assert.strictEqual(result.ok, false);
@@ -142,9 +142,9 @@ test('runGatekeeper skips posting when no Forgejo token is available and artifac
 
 test('runGatekeeper posts request-changes when artifacts are missing', async (t) => {
   withTempRoot(rootDir => {
-    const logLines = [];
+    const logLines: string[] = [];
     let postReviewCalled = false;
-    let postReviewArgs = null;
+    let postReviewArgs: { value: { branch: string; token: string; outcome: string; body: string; } | null } = { value: null };
 
     const result = gatekeeper.runGatekeeper('task-gk-009', {
       rootDir,
@@ -152,31 +152,32 @@ test('runGatekeeper posts request-changes when artifacts are missing', async (t)
       readTokenFn: () => 'fake-token',
       postReviewFn: (branch, token, outcome, body) => {
         postReviewCalled = true;
-        postReviewArgs = { branch, token, outcome, body };
-        return { ok: true };
+        postReviewArgs.value = { branch, token, outcome, body };
+        return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const };
       },
-      checkFn: () => ({ ok: false, missing: ['docs/missions/2026/task-gk-009/MISSION.md'] })
+      checkFn: () => ({ ok: false as const, missing: ['docs/missions/2026/task-gk-009/MISSION.md'] })
     });
 
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.posted, true);
     assert.strictEqual(result.skipped, false);
     assert.strictEqual(postReviewCalled, true);
-    assert.strictEqual(postReviewArgs.outcome, 'request-changes');
-    assert.ok(postReviewArgs.body.includes('Pre-review gatekeeper'));
+    assert.ok(postReviewArgs.value != null);
+    assert.strictEqual(postReviewArgs.value.outcome, 'request-changes');
+    assert.ok(postReviewArgs.value.body.includes('Pre-review gatekeeper'));
     assert.ok(logLines.some(l => l.includes('[INFO] Gatekeeper: posting request-changes')));
   });
 });
 
 test('runGatekeeper handles postReview failure gracefully', async (t) => {
   withTempRoot(rootDir => {
-    const logLines = [];
+    const logLines: string[] = [];
     const result = gatekeeper.runGatekeeper('task-gk-010', {
       rootDir,
       log: (msg) => logLines.push(msg),
       readTokenFn: () => 'fake-token',
-      postReviewFn: () => ({ ok: false, error: 'network error' }),
-      checkFn: () => ({ ok: false, missing: ['docs/missions/2026/task-gk-010/MISSION.md'] })
+      postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null,  ok: false as const, error: 'network error' }),
+      checkFn: () => ({ ok: false as const, missing: ['docs/missions/2026/task-gk-010/MISSION.md'] })
     });
 
     assert.strictEqual(result.ok, false);
@@ -187,7 +188,7 @@ test('runGatekeeper handles postReview failure gracefully', async (t) => {
 
 test('runGatekeeper uses custom branch and user from options', async (t) => {
   withTempRoot(rootDir => {
-    let postReviewArgs = null;
+    let postReviewArgs: { value: { branch: string; token: string; outcome: string; } | null } = { value: null };
     const result = gatekeeper.runGatekeeper('task-gk-011', {
       rootDir,
       branch: 'custom/branch',
@@ -198,14 +199,15 @@ test('runGatekeeper uses custom branch and user from options', async (t) => {
         return 'fake-token';
       },
       postReviewFn: (branch, token, outcome, body) => {
-        postReviewArgs = { branch, token, outcome };
-        return { ok: true };
+        postReviewArgs.value = { branch, token, outcome };
+        return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const };
       },
-      checkFn: () => ({ ok: false, missing: ['docs/missions/2026/task-gk-011/MISSION.md'] })
+      checkFn: () => ({ ok: false as const, missing: ['docs/missions/2026/task-gk-011/MISSION.md'] })
     });
 
     assert.strictEqual(result.posted, true);
-    assert.strictEqual(postReviewArgs.branch, 'custom/branch');
+    assert.ok(postReviewArgs.value != null);
+    assert.strictEqual(postReviewArgs.value.branch, 'custom/branch');
   });
 });
 

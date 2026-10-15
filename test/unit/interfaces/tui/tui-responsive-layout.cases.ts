@@ -1,3 +1,4 @@
+import { TerminalStream } from '../../../helpers/terminal-stream.js';
 /**
  * SC3/SC4/SC7 — responsive board layout and terminal-resize behaviour.
  *
@@ -27,11 +28,11 @@ function plain(text: string): string {
   return text.replace(ANSI, '');
 }
 
-async function renderLayout(props: Record<string, unknown>, columns: number): Promise<string> {
+async function renderLayout(props: import('react').ComponentProps<typeof import('../../../../src/interfaces/tui/board-layout.js').BoardLayout>, columns: number): Promise<string> {
   const ink = await import('ink');
   const React = await import('react');
   const { BoardLayout } = await import('../../../../src/interfaces/tui/board-layout.js');
-  return plain(ink.renderToString(React.createElement(BoardLayout, props as never), { columns }));
+  return plain(ink.renderToString(React.createElement(BoardLayout, props), { columns }));
 }
 
 /** Lines that carry at least one lane header, in render order. */
@@ -82,21 +83,11 @@ function shellHeaderLines(output: string): { index: number; line: string; header
 }
 
 /** Minimal stand-in for a TTY write stream, with a settable size. */
-class FakeStdout extends EventEmitter {
-  public columns: number;
-  public rows: number;
-  public readonly isTTY = true;
-  public readonly writes: string[] = [];
-
+class FakeStdout extends TerminalStream {
   constructor(columns: number, rows: number) {
     super();
     this.columns = columns;
     this.rows = rows;
-  }
-
-  write(data: string): boolean {
-    this.writes.push(data);
-    return true;
   }
 
   /** Change the reported size and emit the event a real terminal emits. */
@@ -224,8 +215,8 @@ describe('board layout re-lays out on terminal resize', () => {
 
     const stdout = new FakeStdout(120, 40);
     const instance = ink.render(
-      React.createElement(BoardLayout, { projection } as never),
-      { stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false },
+      React.createElement(BoardLayout, { projection }),
+      { stdout: stdout, patchConsole: false, exitOnCtrlC: false },
     );
 
     await delay(80);
@@ -281,7 +272,7 @@ describe('board layout re-lays out on terminal resize', () => {
     const stdout = new FakeStdout(120, 40);
     const instance = ink.render(
       React.createElement(Probe),
-      { stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false },
+      { stdout: stdout, patchConsole: false, exitOnCtrlC: false },
     );
 
     await delay(60);
@@ -307,7 +298,7 @@ describe('BoardShell responsive layout accounts for the attention rail', () => {
     const React = await import('react');
     const { BoardShell } = await import('../../../../src/interfaces/tui/shell.js');
     return plain(ink.renderToString(
-      React.createElement(BoardShell, { projection, columns } as never),
+      React.createElement(BoardShell, { projection, columns }),
       { columns },
     ));
   }

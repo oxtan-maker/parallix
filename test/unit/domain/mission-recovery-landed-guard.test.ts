@@ -1,3 +1,8 @@
+import type { MissionVersion } from '../../../src/application/domain-ports.js';
+import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
+import { repositoryId as completeRepositoryFixture } from '../../../src/domain/repository.js';
+import { missionVersion as fixtureVersion } from '../../../src/application/domain-ports.js';
+import { repositoryId as fixtureRepositoryId } from '../../../src/domain/repository.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -14,22 +19,22 @@ import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
 
 test('TASK-2438-shaped active task and closed aggregate reports supported recovery and resumes active', async () => {
   const events: Array<{ from: string | null; to: string; trigger: string }> = [];
-  let mission = {
-    id: missionId('task-2438'), repositoryId: 'repo' as never, title: 'Fixture', labels: [], assignee: null,
+  let mission = completeMissionFixture(String(missionId('task-2438')), {
+    id: missionId('task-2438'), repositoryId: completeRepositoryFixture('repo'), title: 'Fixture', labels: [], assignee: null,
     checkpoints: [], review: null, netEngineeringLines: null, status: 'done' as const, closedAt: '2026-08-30T12:00:00.000Z',
-  };
+  });
   const result = await recoverMissionLifecycle({
     missionId: mission.id,
     taskStatus: 'active',
     actor: 'codex',
     occurredAt: '2026-08-30T12:01:00.000Z',
     store: {
-      async load() { return { kind: 'found' as const, mission, version: 18 as never }; },
+      async load() { return { kind: 'found' as const, mission, version: fixtureVersion(18) }; },
       async save() { throw new Error('recovery must keep a lane event'); },
-      async saveWithTransition(next: typeof mission, _version: never, event: typeof events[number]) {
+      async saveWithTransition(next: typeof mission, _version: MissionVersion | null, event: typeof events[number]) {
         mission = next;
         events.push(event);
-        return 19 as never;
+        return fixtureVersion(19);
       },
       async findTransitions() { return []; },
     },
@@ -43,17 +48,17 @@ test('TASK-2438-shaped active task and closed aggregate reports supported recove
 });
 
 test('integrated mission recovery is refused without changing its aggregate or history', async () => {
-  const mission = {
-    id: missionId('task-integrated'), repositoryId: 'repo' as never, title: 'Fixture', labels: [], assignee: null,
+  const mission = completeMissionFixture(String(missionId('task-integrated')), {
+    id: missionId('task-integrated'), repositoryId: completeRepositoryFixture('repo'), title: 'Fixture', labels: [], assignee: null,
     checkpoints: [], review: null, netEngineeringLines: null, status: 'done' as const, closedAt: '2026-08-30T12:00:00.000Z',
-  };
+  });
   const result = await recoverMissionLifecycle({
     missionId: mission.id, taskStatus: 'active', actor: 'codex', occurredAt: '2026-08-30T12:01:00.000Z',
     store: {
-      async load() { return { kind: 'found' as const, mission, version: 18 as never }; },
+      async load() { return { kind: 'found' as const, mission, version: fixtureVersion(18) }; },
       async save() { throw new Error('must not save'); },
       async saveWithTransition() { throw new Error('must not save'); },
-      async findTransitions() { return [{ trigger: 'integrate' } as never]; },
+      async findTransitions() { return [{ trigger: 'integrate' }]; },
     },
   });
   assert.equal(result.value?.action, 'refused-integrated');
@@ -61,36 +66,36 @@ test('integrated mission recovery is refused without changing its aggregate or h
 });
 
 test('TASK-2492: an active mission already on main is refused, not re-reviewed', async () => {
-  const mission = {
-    id: missionId('task-2492'), repositoryId: 'repo' as never, title: 'Fixture', labels: [], assignee: null,
+  const mission = completeMissionFixture(String(missionId('task-2492')), {
+    id: missionId('task-2492'), repositoryId: completeRepositoryFixture('repo'), title: 'Fixture', labels: [], assignee: null,
     checkpoints: [], review: null, netEngineeringLines: null, status: 'active' as const, closedAt: null,
-  };
+  });
   const result = await recoverMissionLifecycle({
     missionId: mission.id, taskStatus: 'active', actor: 'codex', occurredAt: '2026-09-12T12:00:00.000Z',
     alreadyMerged: async () => true,
     store: {
-      async load() { return { kind: 'found' as const, mission, version: 18 as never }; },
+      async load() { return { kind: 'found' as const, mission, version: fixtureVersion(18) }; },
       async save() { throw new Error('must not reopen or hand off'); },
       async saveWithTransition() { throw new Error('must not reopen or hand off'); },
       async findTransitions() { return []; },
     },
-  } as any);
+  });
 
   assert.equal(result.value?.action, 'refused-integrated');
   assert.equal(result.value?.recovered, null);
 });
 
 test('TASK-2492: recover command does not resume a landed active mission', async () => {
-  const mission = {
-    id: missionId('task-2492'), repositoryId: 'repo' as never, title: 'Fixture', labels: [], assignee: null,
+  const mission = completeMissionFixture(String(missionId('task-2492')), {
+    id: missionId('task-2492'), repositoryId: completeRepositoryFixture('repo'), title: 'Fixture', labels: [], assignee: null,
     checkpoints: [], review: null, netEngineeringLines: null, status: 'active' as const, closedAt: null,
-  };
+  });
   const errors: string[] = [];
   let cleanupCalls = 0;
   const resumed = await recoverMissionCommand(['task-2492'], {
     taskStatus: () => 'active', alreadyMerged: async () => true, cleanup: () => { cleanupCalls += 1; return true; }, error: (message) => errors.push(message),
     store: {
-      async load() { return { kind: 'found' as const, mission, version: 18 as never }; },
+      async load() { return { kind: 'found' as const, mission, version: fixtureVersion(18) }; },
       async save() { throw new Error('must not reopen or hand off'); },
       async saveWithTransition() { throw new Error('must not reopen or hand off'); },
       async findTransitions() { return []; },
@@ -103,15 +108,15 @@ test('TASK-2492: recover command does not resume a landed active mission', async
 });
 
 test('TASK-2492: cleanup failure leaves recovery actionable', async () => {
-  const mission = {
-    id: missionId('task-2492'), repositoryId: 'repo' as never, title: 'Fixture', labels: [], assignee: null,
+  const mission = completeMissionFixture(String(missionId('task-2492')), {
+    id: missionId('task-2492'), repositoryId: completeRepositoryFixture('repo'), title: 'Fixture', labels: [], assignee: null,
     checkpoints: [], review: null, netEngineeringLines: null, status: 'active' as const, closedAt: null,
-  };
+  });
   const errors: string[] = [];
   const recovered = await recoverMissionCommand(['task-2492'], {
     taskStatus: () => 'active', alreadyMerged: async () => true, cleanup: () => false, error: (message) => errors.push(message),
     store: {
-      async load() { return { kind: 'found' as const, mission, version: 18 as never }; },
+      async load() { return { kind: 'found' as const, mission, version: fixtureVersion(18) }; },
       async save() { throw new Error('must not reopen or hand off'); },
       async saveWithTransition() { throw new Error('must not reopen or hand off'); },
       async findTransitions() { return []; },
@@ -123,14 +128,14 @@ test('TASK-2492: cleanup failure leaves recovery actionable', async () => {
 });
 
 test('recovery reports a stale lifecycle write as a conflict', async () => {
-  const mission = {
-    id: missionId('task-stale'), repositoryId: 'repo' as never, title: 'Fixture', labels: [], assignee: null,
+  const mission = completeMissionFixture(String(missionId('task-stale')), {
+    id: missionId('task-stale'), repositoryId: completeRepositoryFixture('repo'), title: 'Fixture', labels: [], assignee: null,
     checkpoints: [], review: null, netEngineeringLines: null, status: 'done' as const, closedAt: '2026-08-30T12:00:00.000Z',
-  };
+  });
   const result = await recoverMissionLifecycle({
     missionId: mission.id, taskStatus: 'active', actor: 'codex', occurredAt: '2026-08-30T12:01:00.000Z',
     store: {
-      async load() { return { kind: 'found' as const, mission, version: 18 as never }; },
+      async load() { return { kind: 'found' as const, mission, version: fixtureVersion(18) }; },
       async save() { throw new Error('must not save'); },
       async saveWithTransition() { throw Object.assign(new Error('concurrent lifecycle write; re-run px recover task-stale'), { disposition: 'stale-write' }); },
       async findTransitions() { return []; },
@@ -149,7 +154,7 @@ test('TASK-2438 durable fixture persists recovery and its lane-history record', 
     const store = new SqliteMissionStore(database);
     const id = missionId('task-2438');
     await store.save({
-      id, repositoryId: 'repo' as never, title: 'TASK-2438 fixture', labels: [], assignee: null,
+      id, repositoryId: fixtureRepositoryId('repo'), title: 'TASK-2438 fixture', labels: [], assignee: null,
       checkpoints: [], review: null, netEngineeringLines: null, status: 'done', closedAt: '2026-08-30T12:00:00.000Z',
     }, null);
     const result = await recoverMissionLifecycle({

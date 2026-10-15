@@ -1,3 +1,5 @@
+import { agentFamily as fixtureAgentFamily } from '../../../../src/domain/agents.js';
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
@@ -28,7 +30,7 @@ const plain = (value: string): string => value.replace(ANSI, '');
 
 function makeUnavailableAgent(): AgentAvailabilityMetric {
   return {
-    family: 'qwen' as never,
+    family: fixtureAgentFamily('qwen'),
     available: false,
     blockedForMs: 0,
     reason: RAW_REASON,
@@ -38,17 +40,17 @@ function makeUnavailableAgent(): AgentAvailabilityMetric {
 
 function renderBoard(): string {
   const live = makeCard({
-    id: 'task-2406' as never,
+    id: fixtureMissionId('task-2406'),
     currentWork: {
       operationId: 'work-1',
       phase: 'execute',
       summary: 'working',
-      agent: 'codex' as never,
+      agent: fixtureAgentFamily('codex'),
       updatedAt: new Date().toISOString(),
       freshness: 'live',
     },
   });
-  const attention = makeCard({ id: 'task-9000' as never, lane: 'review', status: 'review' });
+  const attention = makeCard({ id: fixtureMissionId('task-9000'), lane: 'review', status: 'review' });
   const base = makeProjection({ active: [live] });
   const projection = {
     ...base,
@@ -56,7 +58,7 @@ function renderBoard(): string {
     attentionQueue: [
       makeAttentionItem(attention, { kind: 'review-lane', detail: 'Awaiting review decision' }, 1),
     ],
-  };
+  } satisfies import("../../../../src/application/projections/board.js").BoardProjection;
 
   return plain(
     renderToString(React.createElement(BoardShell, { projection, columns: 120, rows: 30 }), {

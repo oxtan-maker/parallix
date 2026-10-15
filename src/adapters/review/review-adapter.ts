@@ -9,6 +9,7 @@ import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js"
 
 import { resolveReviewAdapter, isForgejoReviewEnabled, resolveReviewArtifactDir } from '../config/product-config.js';
 import * as forgejo from '../forgejo/forgejo.js';
+import type { HttpRequestFn } from '../forgejo/forgejo-auth.js';
 
 const NOOP_PR_STATUS = Object.freeze({
   exists: false,
@@ -47,7 +48,7 @@ export function resolveArtifactDir(rootDir = process.cwd()): string {
  * @param {*} noopValue
  * @returns {*}
  */
-function withForgejo(rootDir: string, liveFn: () => any, noopValue: any): any {
+function withForgejo<T, N>(rootDir: string, liveFn: () => T, noopValue: N): T | N {
   return isEnabled(rootDir) ? liveFn() : noopValue;
 }
 
@@ -57,7 +58,7 @@ function withForgejo(rootDir: string, liveFn: () => any, noopValue: any): any {
  * @param {{[key: string]: any}} [options]
  * @returns {*}
  */
-export function getPrStatus(branch: string, rootDir = process.cwd(), options: { [key: string]: any } = {}) {
+export function getPrStatus(branch: string, rootDir = process.cwd(), options: Parameters<typeof forgejo.getPrStatus>[2] = {}) {
   return withForgejo(rootDir, () => forgejo.getPrStatus(branch, rootDir, options), NOOP_PR_STATUS);
 }
 
@@ -79,12 +80,12 @@ export function readToken(user: string, options: { rootDir?: string; configurati
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {Promise<*|null>}
  */
-export async function getLatestReviewForPr(prNumber: number, reviewerUser: string, sinceIso: string, token: string, options: { rootDir?: string; [key: string]: any } = {}) {
+export async function getLatestReviewForPr(prNumber: number, reviewerUser: string, sinceIso: string, token: string, options: Parameters<typeof forgejo.getLatestReviewForPr>[4] = {}) {
   if (!token) {return null;}
   return withForgejo(options.rootDir || process.cwd(), () => forgejo.getLatestReviewForPr(prNumber, reviewerUser, sinceIso, token, options), null);
 }
 
-export function dismissProviderApproval(branch: string, decidedAt: string, reason: string, options: { rootDir?: string; [key: string]: any } = {}) {
+export function dismissProviderApproval(branch: string, decidedAt: string, reason: string, options: Parameters<typeof forgejo.dismissApproval>[4] = {}) {
   const rootDir = options.rootDir || process.cwd();
   if (!isProviderEnabled(rootDir)) { throw new Error('review provider is disabled'); }
   const token = readToken(rootDir);
@@ -101,7 +102,7 @@ export function dismissProviderApproval(branch: string, decidedAt: string, reaso
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {Promise<*|null>}
  */
-export async function getLatestDispositionForPr(prNumber: number, implementerUser: string, sinceIso: string, token: string, options: { rootDir?: string; [key: string]: any } = {}) {
+export async function getLatestDispositionForPr(prNumber: number, implementerUser: string, sinceIso: string, token: string, options: Parameters<typeof forgejo.getLatestDispositionForPr>[4] = {}) {
   if (!token) {return null;}
   return withForgejo(options.rootDir || process.cwd(), () => forgejo.getLatestDispositionForPr(prNumber, implementerUser, sinceIso, token, options), null);
 }
@@ -113,8 +114,8 @@ export async function getLatestDispositionForPr(prNumber: number, implementerUse
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {*}
  */
-export function postComment(branch: string, token: string, body: string, options: { rootDir?: string; [key: string]: any } = {}) {
-  return withForgejo(options.rootDir || process.cwd(), () => forgejo.postComment(branch, token, body, options), { ok: true, skipped: true, reason: 'review-provider-disabled' });
+export function postComment(branch: string, token: string, body: string, options: Parameters<typeof forgejo.postComment>[3] = {}) {
+  return withForgejo(options.rootDir || process.cwd(), () => forgejo.postComment(branch, token, body, options), { ok: true as const, skipped: true, reason: 'review-provider-disabled' });
 }
 
 /**
@@ -125,8 +126,8 @@ export function postComment(branch: string, token: string, body: string, options
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {*}
  */
-export function postReview(branch: string, token: string, outcome: string, summary: string, options: { rootDir?: string; [key: string]: any } = {}) {
-  return withForgejo(options.rootDir || process.cwd(), () => forgejo.postReview(branch, token, outcome, summary, options), { ok: true, skipped: true, reason: 'review-provider-disabled' });
+export function postReview(branch: string, token: string, outcome: string, summary: string, options: Parameters<typeof forgejo.postReview>[4] = {}) {
+  return withForgejo(options.rootDir || process.cwd(), () => forgejo.postReview(branch, token, outcome, summary, options), { ok: true as const, skipped: true, reason: 'review-provider-disabled' });
 }
 
 /**
@@ -136,7 +137,7 @@ export function postReview(branch: string, token: string, outcome: string, summa
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {*}
  */
-export function createPr(branch: string, user: string, token: string, options: { rootDir?: string; [key: string]: any } = {}) {
+export function createPr(branch: string, user: string, token: string, options: Parameters<typeof forgejo.createPr>[3] = {}) {
   return withForgejo(options.rootDir || process.cwd(), () => forgejo.createPr(branch, user, token, options), { ok: true, skipped: true, url: null });
 }
 
@@ -145,8 +146,8 @@ export function createPr(branch: string, user: string, token: string, options: {
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {*}
  */
-export function forgejoAvailable(url: string | undefined = undefined, /** @type {{rootDir?: string, [key: string]: any}} */ options: { rootDir?: string; [key: string]: any } = {}) {
-  return withForgejo(options.rootDir || process.cwd(), () => forgejo.forgejoAvailable(url, options as { request?: Function; timeout?: number }), false);
+export function forgejoAvailable(url: string | undefined = undefined, options: { rootDir?: string; request?: HttpRequestFn; timeout?: number; configuration?: ParallixConfiguration; [key: string]: unknown } = {}) {
+  return withForgejo(options.rootDir || process.cwd(), () => forgejo.forgejoAvailable(url, options), false);
 }
 
 /**
@@ -154,7 +155,7 @@ export function forgejoAvailable(url: string | undefined = undefined, /** @type 
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {*}
  */
-export function providerAvailable(url: string | undefined = undefined, options: { rootDir?: string; [key: string]: any } = {}) {
+export function providerAvailable(url: string | undefined = undefined, options: Parameters<typeof forgejo.forgejoAvailable>[1] & { rootDir?: string } = {}) {
   return forgejoAvailable(url, options);
 }
 
@@ -175,8 +176,8 @@ export async function getComments(branch: string, token: string, options: { root
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {*}
  */
-export function closePr(branch: string, token: string, user: string, /** @type {{rootDir?: string, [key: string]: any}} */ options: { rootDir?: string; [key: string]: any } = {}) {
-  return withForgejo(options.rootDir || process.cwd(), () => ((forgejo as any).closePr as Function)(branch, token, user, options), { ok: true, skipped: true, reason: 'review-provider-disabled' });
+export function closePr(branch: string, token: string, _user: string, options: Parameters<typeof forgejo.postComment>[3] = {}) {
+  return withForgejo(options.rootDir || process.cwd(), () => forgejo.closePr(branch, token), { ok: true as const, skipped: true, reason: 'review-provider-disabled' });
 }
 
 /** @param {string} explicitUser */
@@ -195,6 +196,6 @@ export function resolveReviewUser(explicitUser: string, configuration: ParallixC
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {*|null}
  */
-export function getPrAuthor(branch: string, token: string, options: { rootDir?: string; [key: string]: any } = {}) {
+export function getPrAuthor(branch: string, token: string, options: Parameters<typeof forgejo.getPrAuthor>[2] = {}) {
   return withForgejo(options.rootDir || process.cwd(), () => forgejo.getPrAuthor(branch, token, options), null);
 }

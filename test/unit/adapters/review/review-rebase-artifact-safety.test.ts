@@ -1,4 +1,5 @@
-// @ts-nocheck -- Retained legacy partial request doubles (TASK-2328).
+import { rebaseWorkflowFixture } from '../../../helpers/rebase-workflow-fixture.js';
+import type { RebaseWorkflowPort } from '../../../../src/application/ports/rebase-workflow.js';
 // review rebase artifact safety.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
 import test, { describe } from 'node:test';
@@ -8,7 +9,7 @@ import { isMissionArtifact, isWorkflowGeneratedArtifact } from '../../../../src/
 
 // Regression provenance: TASK-1107.
 describe("repro", { concurrency: false }, () => {
-  function porcelainZ(entries) {
+  function porcelainZ(entries: readonly string[]) {
     return `${entries.join('\0')}\0`;
   }
 
@@ -17,9 +18,9 @@ describe("repro", { concurrency: false }, () => {
    * longer spawns a CLI, so these tests drive the `RebaseWorkflowPort` seam and
    * record the argv the workflow is asked to run.
    */
-  function inProcessWorkflow(runs, { exitCode = 0, port = {}, onRun = null } = {}) {
+  function inProcessWorkflow(runs: string[][], { exitCode = 0, port = {}, onRun = null }: { exitCode?: number; port?: Partial<RebaseWorkflowPort>; onRun?: ((port: RebaseWorkflowPort) => void) | null } = {}): Pick<NonNullable<Parameters<typeof rebaseBeforeReviewRound>[1]>, 'createRebaseWorkflowPortFn' | 'runRebaseWorkflowFn'> {
     return {
-      createRebaseWorkflowPortFn: () => ({ exit: () => {}, ...port }),
+      createRebaseWorkflowPortFn: () => rebaseWorkflowFixture({ exit: () => {}, ...port }),
       runRebaseWorkflowFn: async (args, workflowPort) => {
         runs.push(args);
         if (onRun) { onRun(workflowPort); }
@@ -58,9 +59,9 @@ describe("repro", { concurrency: false }, () => {
   });
 
   test('rebaseBeforeReviewRound auto-commits safe mission artifacts before rebase', async () => {
-    const logs = [];
-    const gitCalls = [];
-    const rebaseCalls = [];
+    const logs: string[] = [];
+    const gitCalls: string[][] = [];
+    const rebaseCalls: string[][] = [];
     const slug = 'task-1107';
     const year = new Date().getFullYear().toString();
 
@@ -70,9 +71,9 @@ describe("repro", { concurrency: false }, () => {
       gitFn: (args) => {
         gitCalls.push(args);
         if (args.includes('status')) {
-          return { status: 0, stdout: porcelainZ([` M docs/missions/${year}/${slug}/MISSION.md`, `?? backlog/tasks/${slug} - title.md`]), stderr: '' };
+          return { signal: null,  status: 0, stdout: porcelainZ([` M docs/missions/${year}/${slug}/MISSION.md`, `?? backlog/tasks/${slug} - title.md`]), stderr: '' };
         }
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
       ...inProcessWorkflow(rebaseCalls),
       log: message => logs.push(message),
@@ -91,7 +92,7 @@ describe("repro", { concurrency: false }, () => {
   });
 
   test('rebaseBeforeReviewRound parses rename, copy, and space paths from porcelain z output', async () => {
-    const gitCalls = [];
+    const gitCalls: string[][] = [];
     const slug = 'task-1107';
 
     const result = await rebaseBeforeReviewRound(slug, {
@@ -100,7 +101,7 @@ describe("repro", { concurrency: false }, () => {
       gitFn: (args) => {
         gitCalls.push(args);
         if (args.includes('status')) {
-          return {
+          return { signal: null, 
             status: 0,
             stdout: porcelainZ([
               `R  docs/missions/2026/${slug}/Renamed File.md`,
@@ -112,7 +113,7 @@ describe("repro", { concurrency: false }, () => {
             stderr: ''
           };
         }
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
       ...inProcessWorkflow([]),
       log: () => {},
@@ -126,7 +127,7 @@ describe("repro", { concurrency: false }, () => {
   });
 
   test('rebaseBeforeReviewRound leaves rename records with unsafe sources unstaged', async () => {
-    const gitCalls = [];
+    const gitCalls: string[][] = [];
     const slug = 'task-1107';
 
     const result = await rebaseBeforeReviewRound(slug, {
@@ -135,7 +136,7 @@ describe("repro", { concurrency: false }, () => {
       gitFn: (args) => {
         gitCalls.push(args);
         if (args.includes('status')) {
-          return {
+          return { signal: null, 
             status: 0,
             stdout: porcelainZ([
               `R  docs/missions/2026/${slug}/MISSION.md`,
@@ -144,7 +145,7 @@ describe("repro", { concurrency: false }, () => {
             stderr: ''
           };
         }
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
       ...inProcessWorkflow([]),
       log: () => {},
@@ -158,7 +159,7 @@ describe("repro", { concurrency: false }, () => {
   });
 
   test('rebaseBeforeReviewRound commits mission files despite non-mission files', async () => {
-    const gitCalls = [];
+    const gitCalls: string[][] = [];
     const slug = 'task-1107';
 
     const result = await rebaseBeforeReviewRound(slug, {
@@ -167,9 +168,9 @@ describe("repro", { concurrency: false }, () => {
       gitFn: (args) => {
         gitCalls.push(args);
         if (args.includes('status')) {
-          return { status: 0, stdout: porcelainZ([` M docs/missions/2026/${slug}/MISSION.md`, ' M workflow/lib/review/review.js']), stderr: '' };
+          return { signal: null,  status: 0, stdout: porcelainZ([` M docs/missions/2026/${slug}/MISSION.md`, ' M workflow/lib/review/review.js']), stderr: '' };
         }
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
       ...inProcessWorkflow([]),
       log: () => {},
@@ -191,7 +192,7 @@ describe("repro", { concurrency: false }, () => {
       isForgejoReviewEnabledFn: () => true,
       gitFn: (args) => {
         if (args.includes('status')) {
-          return {
+          return { signal: null, 
             status: 0,
             stdout: porcelainZ([
               '?? .workflow/codex-home/.codex/logs_2.sqlite',
@@ -202,7 +203,7 @@ describe("repro", { concurrency: false }, () => {
             stderr: ''
           };
         }
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
       ...inProcessWorkflow([]),
       log: () => {},
@@ -213,8 +214,8 @@ describe("repro", { concurrency: false }, () => {
   });
 
   test('rebaseBeforeReviewRound refuses to auto-commit when unmerged conflicts exist', async () => {
-    const logs = [];
-    const errors = [];
+    const logs: string[] = [];
+    const errors: string[] = [];
     const slug = 'task-1107';
 
     const result = await rebaseBeforeReviewRound(slug, {
@@ -222,9 +223,9 @@ describe("repro", { concurrency: false }, () => {
       isForgejoReviewEnabledFn: () => true,
       gitFn: (args) => {
         if (args.includes('status')) {
-          return { status: 0, stdout: porcelainZ([`UU docs/missions/2026/${slug}/MISSION.md`]), stderr: '' };
+          return { signal: null,  status: 0, stdout: porcelainZ([`UU docs/missions/2026/${slug}/MISSION.md`]), stderr: '' };
         }
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
       ...inProcessWorkflow([], { onRun: () => assert.fail('Should not have run rebase') }),
       log: message => logs.push(message),
@@ -234,24 +235,25 @@ describe("repro", { concurrency: false }, () => {
     assert.equal(result.ok, false);
     assert.equal(result.sharedFileConflicts, false);
     assert.equal(result.hookFailure, false);
+    assert.ok(result.failure != null);
     assert.equal(result.failure.kind, 'unsafe-worktree');
     assert.ok(errors.some(m => m.includes('Cannot auto-commit: unmerged/conflicting files detected')), 'Should report unmerged conflicts');
   });
 
   test('rebaseBeforeReviewRound reports shared-file rebase conflicts', async () => {
-    const logs = [];
-    const errors = [];
+    const logs: string[] = [];
+    const errors: string[] = [];
     const slug = 'task-1107';
 
     const result = await rebaseBeforeReviewRound(slug, {
       worktree: '/tmp/worktree',
       isForgejoReviewEnabledFn: () => true,
-      gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
+      gitFn: () => ({ signal: null,  status: 0, stdout: '', stderr: '' }),
       ...inProcessWorkflow([], {
         exitCode: 1,
         port: {
           resolveConflictsForMission: () => ({
-            ok: true,
+            ok: true as const,
             conflictFiles: ['workflow/lib/review/review.js'],
             missionSpecificFiles: [],
             sharedFiles: ['workflow/lib/review/review.js'],
@@ -266,19 +268,20 @@ describe("repro", { concurrency: false }, () => {
     assert.equal(result.ok, false);
     assert.equal(result.sharedFileConflicts, true);
     assert.equal(result.hookFailure, false);
+    assert.ok(result.failure != null);
     assert.equal(result.failure.kind, 'conflict');
     assert.deepEqual(result.failure.sharedFiles, ['workflow/lib/review/review.js']);
     assert.ok(errors.some(m => m.includes('Shared-file rebase conflicts detected')), 'Should report shared-file conflicts');
   });
 
   test('rebaseBeforeReviewRound reports missing Forgejo token failure from rebase push', async () => {
-    const errors = [];
+    const errors: string[] = [];
     const slug = 'task-1107';
 
     const result = await rebaseBeforeReviewRound(slug, {
       worktree: '/tmp/worktree',
       isForgejoReviewEnabledFn: () => true,
-      gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
+      gitFn: () => ({ signal: null,  status: 0, stdout: '', stderr: '' }),
       // The workflow reports a missing Forgejo token by exiting non-zero before it
       // ever reaches `createPr`, so no gate or hook evidence is produced.
       ...inProcessWorkflow([], { exitCode: 1 }),
@@ -289,20 +292,21 @@ describe("repro", { concurrency: false }, () => {
     assert.equal(result.ok, false);
     assert.equal(result.sharedFileConflicts, false);
     assert.equal(result.hookFailure, false);
+    assert.ok(result.failure != null);
     assert.equal(result.failure.kind, 'other');
     assert.equal(result.failure.operation, 'rebase');
     assert.ok(errors.some(m => m.includes('Rebase failed before launching reviewer')), 'Should keep missing-token failure blocking');
   });
 
   test('rebaseBeforeReviewRound reports generic rebase failure', async () => {
-    const logs = [];
-    const errors = [];
+    const logs: string[] = [];
+    const errors: string[] = [];
     const slug = 'task-1107';
 
     const result = await rebaseBeforeReviewRound(slug, {
       worktree: '/tmp/worktree',
       isForgejoReviewEnabledFn: () => true,
-      gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
+      gitFn: () => ({ signal: null,  status: 0, stdout: '', stderr: '' }),
       ...inProcessWorkflow([], { exitCode: 1 }),
       log: message => logs.push(message),
       error: message => errors.push(message)
@@ -311,6 +315,7 @@ describe("repro", { concurrency: false }, () => {
     assert.equal(result.ok, false);
     assert.equal(result.sharedFileConflicts, false);
     assert.equal(result.hookFailure, false);
+    assert.ok(result.failure != null);
     assert.equal(result.failure.kind, 'other');
     assert.ok(errors.some(m => m.includes('Rebase failed before launching reviewer')), 'Should report generic failure');
   });
@@ -325,18 +330,18 @@ describe("autocommit nonmission", { concurrency: false }, () => {
     const result = await commitSafeMissionArtifacts('task-2592', '/tmp/worktree', {
       gitFn: (args) => {
         if (args.includes('status')) {
-          return {
+          return { signal: null, 
             status: 0,
-            stdout: Buffer.from('M  docs/missions/2026/task-2592/MISSION.md\0 M scratch-notes.txt\0'),
+            stdout: 'M  docs/missions/2026/task-2592/MISSION.md\0 M scratch-notes.txt\0',
             stderr: '',
           };
         }
         if (args.includes('add')) {
           added.push(args.at(-1) ?? '');
-          return { status: 0, stdout: '', stderr: '' };
+          return { signal: null,  status: 0, stdout: '', stderr: '' };
         }
-        if (args.includes('commit')) return { status: 0, stdout: '', stderr: '' };
-        return { status: 0, stdout: '', stderr: '' };
+        if (args.includes('commit')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
       isMissionArtifactFn: file => file === 'docs/missions/2026/task-2592/MISSION.md',
       isWorkflowGeneratedArtifactFn: () => false,

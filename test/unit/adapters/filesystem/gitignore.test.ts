@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 
 
@@ -17,19 +16,19 @@ function mktempDir(prefix = 'gitignore-test-') {
   return registeredMkdtemp(prefix);
 }
 
-function cleanupDir(dir) {
+function cleanupDir(dir: fs.PathLike) {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
-function writeGitignore(dir, content) {
+function writeGitignore(dir: string, content: string|NodeJS.ArrayBufferView<ArrayBufferLike>) {
   fs.writeFileSync(path.join(dir, '.gitignore'), content, 'utf8');
 }
 
-function readGitignore(dir) {
+function readGitignore(dir: string) {
   return fs.readFileSync(path.join(dir, '.gitignore'), 'utf8');
 }
 
-function initGitRepo(dir) {
+function initGitRepo(dir: string) {
   fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
 }
 
@@ -41,7 +40,7 @@ test('ignored-source defense skips operator-local workflow caches', () => {
     fs.writeFileSync(path.join(dir, '.workflow', 'codex-home', 'plugin.js'), 'generated');
     fs.writeFileSync(path.join(dir, 'src', 'missing.js'), 'source');
 
-    const gitFn = () => ({ status: 0, stdout: '', stderr: '' });
+    const gitFn = () => ({ signal: null,  status: 0, stdout: '', stderr: '' });
     assert.deepEqual(findIgnoredSourceFiles(dir, gitFn), ['src/missing.js']);
   } finally {
     cleanupDir(dir);

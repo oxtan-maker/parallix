@@ -10,11 +10,11 @@ import { spawnSync } from 'child_process';
 import { setCommandPathProbe, setLauncherHealthProbe } from '../../../src/adapters/agents/launcher-probes.js';
 
 test('bootstrap probe doubles reach launcher selection loaded afterwards (TASK-2622.18)', async () => {
-  const observed: { command: string; args: string[] }[] = [];
+  const observed: { command: string; args: string[]; }[] = [];
   setCommandPathProbe(name => name === 'bootstrap-probe-fixture' ? name : null);
   setLauncherHealthProbe((command, args) => {
     observed.push({ command, args });
-    return { ok: false, reason: 'fixture rejection' };
+    return { ok: false as const, reason: 'fixture rejection' as const };
   });
   try {
     const { workflowLauncherStatus } = await import('../../../src/adapters/agents/launcher-selection.js');
@@ -25,13 +25,14 @@ test('bootstrap probe doubles reach launcher selection loaded afterwards (TASK-2
     assert.deepEqual(observed, [{ command: 'bootstrap-probe-fixture', args: ['--help'] }]);
   } finally {
     setCommandPathProbe(name => name);
-    setLauncherHealthProbe(() => ({ ok: true }));
+    setLauncherHealthProbe(() => ({ ok: true as const }));
   }
 });
 
 test('bootstrap forces a temp PARALLIX_HOME with an isolated agents.local.json', () => {
   assert.match(process.env.PARALLIX_HOME || '', new RegExp(`^${os.tmpdir().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
   assert.match(process.env.NPM_CONFIG_CACHE || '', /parallix-test-npm-cache-/);
+  assert.ok(process.env.PARALLIX_HOME);
   assert.ok(fs.existsSync(path.join(process.env.PARALLIX_HOME, 'agents.local.json')));
 });
 
@@ -44,6 +45,7 @@ test('bootstrap pins dummy agent launchers so tests do not hit real workstation 
     assert.equal(helpResult.status, 0, `${agent} dummy launcher should exit 0 for --help`);
   }
 
+  assert.ok(process.env.PI_BIN);
   const piHelp = spawnSync(process.env.PI_BIN, ['--help'], { encoding: 'utf8', env: process.env });
   assert.equal(piHelp.status, 0, 'PI_BIN dummy launcher should exit 0 for --help');
 });

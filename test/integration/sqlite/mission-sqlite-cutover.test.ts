@@ -73,8 +73,7 @@ function createMinimalMission(slug: string, status: MissionStatus = 'refined'): 
 
 function createReviewWithRounds(rounds: number): Review {
   const findingId = reviewFindingId(`finding-${rounds}`);
-  return {
-    rounds: Array.from({ length: rounds }, (_, i) => ({
+  const recordedRounds = Array.from({ length: rounds }, (_, i) => ({
       number: i + 1,
       subject: {
         change: {
@@ -109,15 +108,15 @@ function createReviewWithRounds(rounds: number): Review {
           evidence: 'Fixed',
         }],
         resultingRevision: changeRevision(`rev-${i + 1}`),
-      } : undefined,
+      } : null,
       phase: i === 0 ? 'pending-approval' as const : 'fixing' as const,
       disposition: i === 0 ? 'CHANGES_MADE' as const : 'REQUEST_CHANGES' as const,
       reviewerRetryCount: 0,
       implementerRetryCount: 0,
-    })),
-    stageLaunches: [],
-    reviewEvents: [],
-  } as unknown as Review;
+    }));
+  const [first, ...rest] = recordedRounds;
+  assert.ok(first);
+  return { rounds: [first, ...rest], intervention: null, stageLaunches: [], reviewEvents: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -242,8 +241,9 @@ test('concurrent stale writers: stale version is rejected', async () => {
   const updated2: Mission = { ...load2.mission, status: 'active' } as Mission;
   try {
     await store.save(updated2, load2.version);
-    assert.fail('second writer should have thrown stale write error');
-  } catch (error: any) {
+    return assert.fail('second writer should have thrown stale write error');
+  } catch (error) {
+    assert.ok(error instanceof Error);
     assert.match(error.message, /Stale write/, 'second writer should get stale write error');
   }
 
@@ -309,7 +309,9 @@ test('review and integration flow: review rounds persisted through SQLite', asyn
   assert.ok(loadResult.kind === 'found');
   assert.ok(loadResult.mission.review, 'review should be loaded');
   assert.equal(loadResult.mission.review.rounds.length, 2, 'should have 2 review rounds');
+  assert.ok(loadResult.mission.review.rounds[0].decision != null);
   assert.equal(loadResult.mission.review.rounds[0].decision.kind, 'changes-requested');
+  assert.ok(loadResult.mission.review.rounds[1].decision != null);
   assert.equal(loadResult.mission.review.rounds[1].decision.kind, 'changes-requested');
 
   await db.close();

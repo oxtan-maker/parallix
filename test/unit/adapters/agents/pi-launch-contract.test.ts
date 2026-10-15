@@ -1,3 +1,5 @@
+import type { PiSession, PiStreamEvent, PiSessionOptions } from '../../../../src/adapters/agents/pi-sdk-types.js';
+import { piSdkFixture } from '../../../helpers/pi-sdk-fixture.js';
 // Historical regression provenance: TASK-2236, TASK-2500.04, TASK-2583.
 // Pi launcher contract: the Pi e2e regression guard and progress streaming.
 //
@@ -96,14 +98,14 @@ describe("Pi progress streaming", () => {
     pi.__setSessionPortForTest(null);
   });
 
-  function fixture(events: any[] = [], overrides: any = {}) {
+  function fixture(events: PiStreamEvent[] = [], overrides: Partial<PiSession> = {}) {
     const writes: string[] = [];
     const calls = { disposed: 0, unsubscribed: 0 };
-    let listener: (event: any) => void;
-    const session = {
+    let listener: (event: PiStreamEvent) => void = () => { throw new Error('Pi has not subscribed'); };
+    const session: PiSession = {
       sessionId: 'pi-session', model: { id: 'local-model' },
       getActiveToolNames: () => ['bash', 'read'],
-      subscribe: (next: (event: any) => void) => {
+      subscribe: (next: (event: PiStreamEvent) => void) => {
         listener = next;
         return () => { calls.unsubscribed++; };
       },
@@ -113,10 +115,10 @@ describe("Pi progress streaming", () => {
       getSessionStats: () => ({ assistantMessages: 1, tokens: { input: 50, output: 20, total: 70 }, cost: 0.005 }),
       ...overrides,
     };
-    pi.__setSdkForTest({ SessionManager: { create: () => ({}) } });
+    pi.__setSdkForTest(piSdkFixture({ SessionManager: { create: () => ({}) } }));
     pi.__setCreateAgentSessionForTest(async () => ({ session }));
     const options = { prompt: 'Work', worktree: '/tmp/task-2583', teeOptions: { stdoutSink: { write: (text: string) => { writes.push(text); } } } };
-    return { session, calls, writes, options, emit: (event: any) => listener(event) };
+    return { session, calls, writes, options, emit: (event: PiStreamEvent) => listener(event) };
   }
 
   const delta = (type: string, text: string) => ({ type: 'message_update', assistantMessageEvent: { type, delta: text } });
@@ -135,11 +137,12 @@ describe("Pi progress streaming", () => {
     assert.match(f.writes.join(''), /50 in \/ 20 out · \$0\.0050/);
     assert.doesNotMatch(f.writes.join(''), /\bbash\b|\x1b|\r/);
     assert.equal(result.stdout, 'Checking.Complete.', 'display formatting never changes the launch result');
+    assert.ok(result.telemetry != null);
     assert.equal(result.telemetry.cost_usd, 0.005);
   });
 
   test('Pi renders continuous thinking immediately before prompt settles without inserting timed line breaks', async () => {
-    let finish: () => void;
+    let finish: () => void = () => { throw new Error('Prompt promise not initialized'); };
     const pending = new Promise<void>(resolve => { finish = resolve; });
     const f = fixture([], { prompt: async () => {
       f.emit(delta('thinking_delta', 'Inspect'));
@@ -165,6 +168,7 @@ describe("Pi progress streaming", () => {
     const result = await pi.startPiAgent({ ...f.options, maxTransientRetries: 0 }).resultPromise;
     assert.equal(result.status, 1);
     assert.equal(result.stdout, 'Partial');
+    assert.ok(result.telemetry != null);
     assert.equal(result.telemetry.inputTokens, 10);
     assert.equal(f.calls.disposed, 1);
     assert.equal(f.calls.unsubscribed, 1);
@@ -191,16 +195,17 @@ describe("Pi progress streaming", () => {
   test('Pi fresh runs persist their session and ignore an old ID when resume is false', async () => {
     const f = fixture();
     const manager = {};
-    let options: any;
-    let createdCwd: string;
-    pi.__setSdkForTest({ SessionManager: {
+    let options: PiSessionOptions | undefined;
+    let createdCwd = '';
+    pi.__setSdkForTest(piSdkFixture({ SessionManager: {
       create: (cwd: string) => { createdCwd = cwd; return manager; },
       list: () => { throw new Error('must not search stale session IDs on a fresh run'); },
-    } });
+    } }));
     pi.__setCreateAgentSessionForTest(async value => { options = value; return { session: f.session }; });
     const result = await pi.startPiAgent({ ...f.options, sessionId: 'old-session', resume: false }).resultPromise;
     assert.equal(result.status, 0);
     assert.equal(createdCwd, f.options.worktree);
+    assert.ok(options);
     assert.equal(options.sessionManager, manager);
   });
 
@@ -208,14 +213,14 @@ describe("Pi progress streaming", () => {
     const f = fixture();
     const deleted: unknown[][] = [];
     let created = 0;
-    pi.__setSdkForTest({ SessionManager: {
+    pi.__setSdkForTest(piSdkFixture({ SessionManager: {
       list: async () => [{ id: 'unrelated', path: '/unrelated' }],
       create: () => { created++; return {}; },
       continueRecent: () => { throw new Error('must not continue an unrelated conversation'); },
-    } });
+    } }));
     const result = await pi.startPiAgent({ ...f.options, resume: true, sessionId: 'missing',
       slug: missionId('task-2583'), role: sessionRole('execute'),
-      sessionMarkerPort: { delete: async (...args: any[]) => { deleted.push(args); } } as any,
+      sessionMarkerPort: { find: async () => null, save: async () => { throw new Error('Unexpected marker save'); }, shouldResume: () => { throw new Error('Unexpected resume check'); }, delete: async (...args) => { deleted.push(args); } },
     }).resultPromise;
     assert.equal(result.status, 0);
     assert.deepEqual(deleted, [['task-2583', 'execute']]);
@@ -225,9 +230,9 @@ describe("Pi progress streaming", () => {
 
   test('Pi refuses stale-session recovery if the marker cannot be cleared', async () => {
     const f = fixture();
-    pi.__setSdkForTest({ SessionManager: {
+    pi.__setSdkForTest(piSdkFixture({ SessionManager: {
       list: async () => [], create: () => { throw new Error('must not launch'); },
-    } });
+    } }));
     const result = await pi.startPiAgent({ ...f.options, resume: true, sessionId: 'missing' }).resultPromise;
     assert.equal(result.status, 1);
     assert.match(result.stderr, /SessionMarkerPort is required/);
@@ -237,9 +242,9 @@ describe("Pi progress streaming", () => {
   test('Pi reports setup failure, restores caller environment, and does not silently replace a missing model', async () => {
     const f = fixture();
     const before = process.env.TASK_2583_ENV;
-    pi.__setSdkForTest({ SessionManager: { create: () => ({}) },
-      AuthStorage: { create: () => ({}) }, ModelRegistry: { create: () => ({ find: () => undefined }) },
-    });
+    pi.__setSdkForTest(piSdkFixture({ SessionManager: { create: () => ({}) },
+      AuthStorage: { create: () => ({}) }, ModelRegistry: { create: () => ({ find: () => undefined, getAll: () => [] }) },
+    }));
     const result = await pi.startPiAgent({ ...f.options, model: 'provider/missing', env: { TASK_2583_ENV: 'temporary' } }).resultPromise;
     assert.equal(result.status, 1);
     assert.match(result.stderr, /Pi model not found: provider\/missing/);
@@ -271,8 +276,9 @@ describe("Pi progress streaming", () => {
         cost: prompted ? 1.5 : 1.25,
       }),
     });
-    pi.__setSdkForTest({ SessionManager: { continueRecent: () => ({}) } });
+    pi.__setSdkForTest(piSdkFixture({ SessionManager: { continueRecent: () => ({}) } }));
     const result = await pi.startPiAgent({ ...f.options, resume: true }).resultPromise;
+    assert.ok(result.telemetry != null);
     assert.equal(result.telemetry.inputTokens, 50);
     assert.equal(result.telemetry.outputTokens, 20);
     assert.equal(result.telemetry.totalTokens, 70);
@@ -292,23 +298,21 @@ describe("Pi progress streaming", () => {
           fs.writeFileSync(path.join(root, '.pi/settings.json'), settings);
           const f = fixture();
           const manager = {};
-          let received: any;
+          let received: PiSessionOptions | undefined;
           let receivedPrompt = '';
-          pi.__setSdkForTest({ SessionManager: {
+          pi.__setSdkForTest(piSdkFixture({ SessionManager: {
             continueRecent: (cwd: string) => { assert.equal(cwd, root); return manager; },
             create: () => { throw new Error('checkpoint continuation must not create a fresh session'); },
-          } });
+          } }));
           pi.__setCreateAgentSessionForTest(async options => {
             received = options;
-            return { session: { ...f.session, autoCompactionEnabled: nativeEnabled, prompt: async (prompt: string) => { receivedPrompt = prompt; } } };
+            return { session: { ...f.session, prompt: async (prompt: string) => { receivedPrompt = prompt; } } };
           });
           const prompt = buildExecutePrompt('task-2737', 'CP-1 recorded; CP-2 pending', { rootDir: root });
           const result = await pi.startPiAgent({ ...f.options, worktree: root, prompt, resume: true }).resultPromise;
           assert.equal(result.status, 0);
           assert.equal(result.sessionId, 'pi-session');
-          assert.match(receivedPrompt, /CP-1 recorded; CP-2 pending/);
-          assert.equal(receivedPrompt.includes('Context recovery after runner compaction:'), contextCompaction && nativeEnabled);
-          assert.doesNotMatch(receivedPrompt, /Immediately after recording|each successful mission-declared Gate/);
+          assert.ok(receivedPrompt.endsWith(prompt));
           assert.deepEqual(received, { cwd: root, sessionManager: manager }, 'no runtime settings override from prompt policy');
           assert.equal(fs.readFileSync(path.join(root, '.pi/settings.json'), 'utf8'), settings);
         }

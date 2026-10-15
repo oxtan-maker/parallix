@@ -22,10 +22,12 @@ test('PROMPT_ENTRYPOINTS covers all supported agent families', () => {
   // Sourced from the launcher registry so a newly added agent family cannot
   // ship without a review / act-on-review entrypoint (task-2362: qwen was
   // launchable but had no entrypoint, so every review launch failed).
-  for (const agent of [...WORKFLOW_AGENT_NAMES, 'autonomous']) {
-    assert.ok(PROMPT_ENTRYPOINTS[agent], `missing entry for ${agent}`);
-    assert.ok(PROMPT_ENTRYPOINTS[agent].review, `missing review entrypoint for ${agent}`);
-    assert.ok(PROMPT_ENTRYPOINTS[agent].actOnReview, `missing actOnReview entrypoint for ${agent}`);
+  for (const agent of [...WORKFLOW_AGENT_NAMES, 'autonomous'] as const) {
+    assert.ok(Object.hasOwn(PROMPT_ENTRYPOINTS, agent), `missing entry for ${agent}`);
+  }
+  for (const [agent, entry] of Object.entries(PROMPT_ENTRYPOINTS)) {
+    assert.ok(entry.review, `missing review entrypoint for ${agent}`);
+    assert.ok(entry.actOnReview, `missing actOnReview entrypoint for ${agent}`);
   }
 });
 
@@ -391,7 +393,7 @@ test('all four builders substitute {{artifactDir}} (no literal placeholder leaks
   }
 });
 
-test('review prompt uses launch snapshot for history and px verdict for the decision (TASK-2747)', () => {
+test('task-2337: review prompt uses px status for history and px verdict for the decision', () => {
   const prompt = buildCompactReviewPrompt({
     reviewer: 'codex',
     branch: 'mission/task-2337',
@@ -399,7 +401,6 @@ test('review prompt uses launch snapshot for history and px verdict for the deci
     attempt: 5
   });
 
-  assert.match(prompt, /review history: the launch snapshot reports/);
-  assert.match(prompt, /Read px status task-2337 only for missing context or a conflict/);
+  assert.match(prompt, /review history: `px status task-2337`/);
   assert.match(prompt, /px verdict request-changes --slug task-2337/);
 });

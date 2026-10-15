@@ -1,3 +1,5 @@
+import { missionId as fixtureMissionId } from '../../../src/domain/mission.js';
+import { repositoryId as fixtureRepositoryId } from '../../../src/domain/repository.js';
 // Historical regression provenance: TASK-2347.01, TASK-2357, TASK-2363.
 /**
  * Canonical repository identity for the metrics slice (TASK-2622.13
@@ -101,8 +103,8 @@ function r2347_01_laneEvent(
   overrides: Partial<LaneTransitionEvent> = {},
 ): LaneTransitionEvent {
   return {
-    missionId: 'task-9001' as MissionId,
-    repositoryId: 'alpha' as RepositoryId,
+    missionId: fixtureMissionId('task-9001') as MissionId,
+    repositoryId: fixtureRepositoryId('alpha') as RepositoryId,
     from: 'backlog' as MissionStatus,
     to: 'active' as MissionStatus,
     trigger: 'activate',
@@ -151,14 +153,14 @@ describe("repository identity through lane events and board metrics", () => {
         // Beta's mission is NOT in initialStates — without scoping its
         // transitions still create WIP that inflates alpha's metrics.
         await recorder.append(r2347_01_laneEvent({
-          missionId: 'task-7001' as MissionId,
-          repositoryId: 'beta' as RepositoryId,
+          missionId: fixtureMissionId('task-7001') as MissionId,
+          repositoryId: fixtureRepositoryId('beta') as RepositoryId,
           idempotencyKey: 'beta-activate',
           occurredAt: '2026-07-24T09:00:00Z',
         }));
         await recorder.append(r2347_01_laneEvent({
-          missionId: 'task-7001' as MissionId,
-          repositoryId: 'beta' as RepositoryId,
+          missionId: fixtureMissionId('task-7001') as MissionId,
+          repositoryId: fixtureRepositoryId('beta') as RepositoryId,
           from: 'active' as MissionStatus,
           to: 'done' as MissionStatus,
           trigger: 'integrate',
@@ -186,7 +188,7 @@ describe("repository identity through lane events and board metrics", () => {
         const adapter = new ConcreteMetricsReadAdapter({
           laneEventRepo: laneRepo,
           usageRepo,
-          repositoryId: 'alpha' as RepositoryId,
+          repositoryId: fixtureRepositoryId('alpha') as RepositoryId,
           // Completed-mission metrics report a rolling seven-day window, so the
           // projection clock is pinned beside the fixture's fixed dates.
           clock: () => '2026-07-24T12:00:00Z',
@@ -194,7 +196,7 @@ describe("repository identity through lane events and board metrics", () => {
 
         // Only alpha's mission in initial states
         const initialStates = new Map<MissionId, MissionStatus>();
-        initialStates.set('task-9001' as MissionId, 'review' as MissionStatus);
+        initialStates.set(fixtureMissionId('task-9001') as MissionId, 'review' as MissionStatus);
 
         const metrics = await adapter.buildMetrics(initialStates);
 
@@ -229,7 +231,7 @@ describe("repository identity through lane events and board metrics", () => {
       const ev: LaneTransitionEvent = r2347_01_laneEvent({
         from: 'backlog' as MissionStatus,
         to: 'active' as MissionStatus,
-        repositoryId: 'alpha' as RepositoryId,
+        repositoryId: fixtureRepositoryId('alpha') as RepositoryId,
       });
       const entry = eventToEntry(ev);
       const restored = entryToEvent(entry);
@@ -246,7 +248,7 @@ describe("repository identity through lane events and board metrics", () => {
         from: null,
         to: 'active' as MissionStatus,
         trigger: 'activate',
-        repositoryId: 'alpha' as RepositoryId,
+        repositoryId: fixtureRepositoryId('alpha') as RepositoryId,
         idempotencyKey: 'alpha-null-from',
       });
       const entry = eventToEntry(ev);
@@ -268,11 +270,11 @@ describe("repository identity through lane events and board metrics", () => {
         // Same idempotency key, different repos
         const key = 'shared-key-001';
         await recorder.append(r2347_01_laneEvent({
-          repositoryId: 'alpha' as RepositoryId,
+          repositoryId: fixtureRepositoryId('alpha') as RepositoryId,
           idempotencyKey: key,
         }));
         await recorder.append(r2347_01_laneEvent({
-          repositoryId: 'beta' as RepositoryId,
+          repositoryId: fixtureRepositoryId('beta') as RepositoryId,
           idempotencyKey: key,
         }));
 
@@ -310,11 +312,11 @@ describe("repository identity through lane events and board metrics", () => {
         const adapter = new ConcreteMetricsReadAdapter({
           laneEventRepo: laneRepo,
           usageRepo,
-          repositoryId: 'alpha' as RepositoryId,
+          repositoryId: fixtureRepositoryId('alpha') as RepositoryId,
         });
 
         const initialStates = new Map<MissionId, MissionStatus>();
-        initialStates.set('task-9001' as MissionId, 'active' as MissionStatus);
+        initialStates.set(fixtureMissionId('task-9001') as MissionId, 'active' as MissionStatus);
 
         const metrics = await adapter.buildMetrics(initialStates);
 
@@ -534,7 +536,7 @@ describe("defect B: a display product name never splits repository identity", ()
             upsertMeasurementRow({
               date: '2026-06-02', mission, classification: 'ai_sdlc',
               implementer: 'claude', pr_fix_rounds: '1', stage: 'default',
-            } as never, { rootDir: root, store });
+            }, { rootDir: root, store });
           } finally {
             store.close();
           }

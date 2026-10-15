@@ -1,3 +1,8 @@
+import { TerminalStream as Stream } from '../../helpers/terminal-stream.js';
+import type { CurrentWorkEvent } from '../../../src/application/recording/current-work-recorder.js';
+import type { BoardProjection } from '../../../src/application/projections/board.js';
+import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
+import { missionId as fixtureMissionId } from '../../../src/domain/mission.js';
 /**
  * TASK-2370 reproduction — the board cannot tell live mission work from work
  * that needs an operator, and an open interactive board never notices an
@@ -19,7 +24,6 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
 import { BoardProjectionBuilder } from '../../../src/application/projections/board-readers.js';
 import type {
   AgentReadAdapter,
@@ -75,7 +79,7 @@ function makeAgentAdapter(
 }
 
 function mission(overrides: Partial<Mission> = {}): Mission {
-  return {
+  return completeMissionFixture(String(liveMission), {
     id: liveMission,
     repositoryId: repo,
     title: 'Live mission',
@@ -87,14 +91,14 @@ function mission(overrides: Partial<Mission> = {}): Mission {
     review: null,
     netEngineeringLines: null,
     ...overrides,
-  } as Mission;
+  });
 }
 
 /**
  * An in-memory current-work authority. Production supplies the operational-fact
  * reader; the shape asserted here is the one the board consumes.
  */
-function makeCurrentWorkAdapter(records: readonly unknown[]) {
+function makeCurrentWorkAdapter(records: readonly CurrentWorkEvent[]) {
   return { async loadCurrentWork() { return records; } };
 }
 
@@ -122,7 +126,7 @@ test('TASK-2370 repro A: a live operation is projected as current work on the bo
         occurredAt: new Date().toISOString(),
         blockedReason: null,
       }]),
-    } as never,
+    },
   );
 
   const projection = await builder.build();
@@ -161,7 +165,7 @@ test('TASK-2370 repro B: a live review phase is not misidentified as needing a h
         occurredAt: new Date().toISOString(),
         blockedReason: null,
       }]),
-    } as never,
+    },
   );
 
   const projection = await builder.build();
@@ -180,49 +184,36 @@ test('TASK-2370 repro B: a live review phase is not misidentified as needing a h
 // C. An open interactive board does not observe an external change
 // ---------------------------------------------------------------------------
 
-class Stream extends EventEmitter {
-  public columns = 120;
-  public rows = 30;
-  public readonly isTTY = true;
-  public readonly writes: string[] = [];
-  write(value: string): boolean { this.writes.push(value); return true; }
-  setRawMode(_enabled: boolean): void {}
-  setEncoding(_encoding: string): void {}
-  resume(): void {}
-  ref(): void {}
-  unref(): void {}
-  read(): string | null { return null; }
-}
 
 test('TASK-2370 repro C: an already-open interactive board rebuilds after an external board-relevant change', async () => {
   const ink = await import('ink');
   const React = await import('react');
   const { BoardShell } = await import('../../../src/interfaces/tui/shell.js');
 
-  const before = makeProjection({ refined: [makeCard({ id: 'task-before' as never, lane: 'refined', status: 'refined', rawStatus: 'refined' })] });
+  const before = makeProjection({ refined: [makeCard({ id: fixtureMissionId('task-before'), lane: 'refined', status: 'refined', rawStatus: 'refined' })] });
   const after = makeProjection(
-    { active: [makeCard({ id: 'task-after' as never, lane: 'active', status: 'active', rawStatus: 'active' })] },
+    { active: [makeCard({ id: fixtureMissionId('task-after'), lane: 'active', status: 'active', rawStatus: 'active' })] },
     'after-repository',
   );
 
   // Stands in for another `px` process changing shared state: the application
   // boundary hands the shell a new projection; the shell must re-render it.
-  let publish: ((_projection: unknown) => void) | null = null;
-  const subscribeProjection = (onChange: (_projection: unknown) => void) => {
-    publish = onChange;
-    return () => { publish = null; };
+  let publish: { value: ((_projection: BoardProjection) => void) | null } = { value: null };
+  const subscribeProjection = (onChange: (_projection: BoardProjection) => void) => {
+    publish.value = onChange;
+    return () => { publish.value = null; };
   };
 
   const stdin = new Stream();
   const stdout = new Stream();
   const instance = ink.render(
-    React.createElement(BoardShell, { projection: before, subscribeProjection } as never),
-    { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false },
+    React.createElement(BoardShell, { projection: before, subscribeProjection }),
+    { stdin, stdout, patchConsole: false, exitOnCtrlC: false },
   );
 
   await new Promise((resolve) => setTimeout(resolve, 35));
-  assert.ok(publish, 'the shell must subscribe to shared projection changes while it is open');
-  publish(after);
+  assert.ok(publish.value, 'the shell must subscribe to shared projection changes while it is open');
+  publish.value(after);
   await new Promise((resolve) => setTimeout(resolve, 60));
   instance.unmount();
 

@@ -53,8 +53,7 @@ describe('Limit-hit detection', () => {
   });
 
   test('findLimitHitMatch returns null when no match', () => {
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    const match = findLimitHitMatch('Hello world', ['claude'], 'stdout');
+    const match = findLimitHitMatch('claude', 'Hello world');
     assert.equal(match, null);
   });
 
@@ -126,6 +125,7 @@ describe('Limit-hit detection', () => {
   test('parseRetryAfter parses numeric seconds', () => {
     const now = new Date('2026-05-01T10:00:00Z');
     const result = parseRetryAfter('retry-after: 3600', now);
+    assert.ok(result != null);
     assert.equal(result.getTime(), now.getTime() + 3600 * 1000);
   });
 
@@ -221,7 +221,6 @@ describe('Limit-hit detection', () => {
       stderr: '',
       status: null,
       signal: null,
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       error: new Error('ENOENT')
     });
     assert.equal(result, null);
@@ -335,6 +334,7 @@ describe('Limit-hit detection', () => {
     });
 
     assert.ok(result);
+    assert.ok(result.until != null);
     assert.equal(new Date(result.until.replace(' ', 'T') + ':00').getTime(), Date.UTC(2026, 9, 1));
     assert.equal(result.source, 'month-end');
     assert.ok(result.reason.startsWith('month-end:'));
@@ -353,6 +353,7 @@ describe('Limit-hit detection', () => {
     });
 
     assert.ok(result);
+    assert.ok(result.until != null);
     assert.equal(new Date(result.until.replace(' ', 'T') + ':00').getTime(), Date.UTC(2026, 9, 1));
     assert.equal(result.source, 'month-end');
   });
@@ -369,6 +370,7 @@ describe('Limit-hit detection', () => {
     });
 
     assert.ok(result);
+    assert.ok(result.until != null);
     assert.equal(new Date(result.until.replace(' ', 'T') + ':00').getTime(), Date.UTC(2026, 8, 20, 13));
     assert.equal(result.source, 'parsed');
   });
@@ -665,13 +667,14 @@ describe("Qwen 403 and Vibe rate limit", () => {
       prompt: 'Review.', agent: 'vibe', worktree: '/tmp/task-2616-liveness',
       noOutputWatchdog: { initialDelayMs: 1, intervalMs: 1, maxNoOutputMs: 5 },
       isAgentBlockedFn: () => false, assertAgentSupportedFn: () => {}, resolveAgentModelFn: () => null,
-      selectAgentFn: (_step: string, options: { exclude: Set<string> }) => options.exclude.has('vibe') ? 'custom' : 'vibe',
-      launchAgentFn: (options: { env: { FORGEJO_USER: string }, teeOptions: { noOutputWatchdog: { maxNoOutputMs: number } } }) => {
-        const agent = options.env.FORGEJO_USER;
+      selectAgentFn: (_step, options) => new Set(options?.exclude ?? []).has('vibe') ? 'custom' : 'vibe',
+      launchAgentFn: options => {
+        const agent = options.env?.FORGEJO_USER;
+        assert.ok(agent);
         launched.push(agent);
         if (agent === 'vibe') {
-          assert.equal(options.teeOptions.noOutputWatchdog.maxNoOutputMs, 5);
-          return { invocation: { command: agent, args: [], options: {} }, resultPromise: Promise.resolve({ status: null, signal: null, stdout: '', stderr: '', error: { code: 'NO_OUTPUT_TIMEOUT' } }) };
+          assert.equal(options.teeOptions?.noOutputWatchdog?.maxNoOutputMs, 5);
+          return { invocation: { command: agent, args: [], options: {} }, resultPromise: Promise.resolve({ status: null, signal: null, stdout: '', stderr: '', error: Object.assign(new Error('No output'), { code: 'NO_OUTPUT_TIMEOUT' }) }) };
         }
         return { invocation: { command: agent, args: [], options: {} }, resultPromise: Promise.resolve({ status: 0, signal: null, stdout: '', stderr: '', error: null }) };
       },

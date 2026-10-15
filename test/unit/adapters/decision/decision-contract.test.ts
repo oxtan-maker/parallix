@@ -1,7 +1,8 @@
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createDecisionPort } from '../../../../src/composition/decision.js';
-import { resolveDecisionProvider } from '../../../../src/adapters/decision/provider.js';
+import { measureDecisionBudget, supportsDecisionBudget } from '../../../../src/adapters/decision/token-budget.js';
+import { DECISION_MODEL, resolveDecisionProvider } from '../../../../src/adapters/decision/provider.js';
 import type { DecisionRequest } from '../../../../src/application/ports/decision.js';
 import { DecisionError } from '../../../../src/application/ports/decision.js';
 import { resolveConfiguration } from '../../../../src/composition/config.js';
@@ -33,6 +34,24 @@ test('discovers each sole conventional provider without prompting (TASK-2664)', 
     assert.equal(resolved.route?.provider, provider);
     assert.equal(resolved.route?.apiKey, 'opaque-key');
     assert.ok(!JSON.stringify(resolved.availability).includes('opaque-key'));
+  }
+});
+
+test('routes send the calibrated pinned model with the catalog-only gateway exception (TASK-2763)', async () => {
+  for (const [key, model] of [
+    ['TYPESAFE_API_KEY', 'typesafe/jev-1.13-20260917'],
+    ['OPENROUTER_API_KEY', 'typesafe/jev-1.13-20260917'],
+    ['AI_GATEWAY_API_KEY', 'typesafe-ai/jev'],
+  ]) {
+    const env = { [key]: 'opaque-key' };
+    assert.equal(resolveFromEnvironment(env).route?.model, model);
+    let calls = 0;
+    await portFromEnvironment({ env, transport: async (_url, init) => {
+      calls++;
+      assert.equal(JSON.parse(String(init?.body)).model, model);
+      return new Response(JSON.stringify(response()));
+    } }).decide(request);
+    assert.equal(calls, 1);
   }
 });
 
@@ -208,6 +227,20 @@ test('Jev budget counts structured state and wire-normalized questions (TASK-269
   assert.equal(port.requestBudget(request).requestBytes, port.requestBytes(request));
 });
 
+test('pinned model budgeting requires a matching tokenizer (TASK-2763)', () => {
+  assert.equal(supportsDecisionBudget(DECISION_MODEL), true);
+  const port = portFromEnvironment({ env: { TYPESAFE_API_KEY: 'dummy', TYPESAFE_DEFAULT_MODEL: DECISION_MODEL } });
+  const body = JSON.stringify({ state: '', questions: { q: { type: 'noul', instructions: 'x' } } });
+  assert.equal(measureDecisionBudget(body, DECISION_MODEL).tokenizerModel, 'jev-1.13-20260917');
+  assert.equal(port.requestBudget(request).tokenizerModel, 'jev-1.13-20260917');
+  for (const model of ['typesafe/jev-1.14-20261014', 'jev-1.14-20261014', 'typesafe/jev-1.13-20990101']) {
+    assert.equal(supportsDecisionBudget(model), false);
+    assert.throws(() => measureDecisionBudget(body, model), /Unsupported decision tokenizer/);
+    const unsupported = portFromEnvironment({ env: { TYPESAFE_API_KEY: 'dummy', TYPESAFE_DEFAULT_MODEL: model } });
+    assert.throws(() => unsupported.requestBudget(request), /token budget cannot be measured/);
+  }
+});
+
 test('byte-small requests exceeding Jev token limits never reach transport (TASK-2692)', async () => {
   let calls = 0;
   const port = portFromEnvironment({ env: { OPENROUTER_API_KEY: 'dummy' }, transport: async () => {
@@ -246,20 +279,21 @@ test('frozen panel sends three separate configured requests and retains actual m
   const { runPanel } = await import('../../../../src/application/review-classification/panel.js');
   const { PANEL_QUESTIONS } = await import('../../../../src/application/review-classification/panel-questions.js');
   const bodies: { model: string; state: unknown; questions: unknown }[] = [];
-  const port = portFromEnvironment({ env: { JEV_CODE_PROVIDER: 'vercel', AI_GATEWAY_API_KEY: 'disposable', TYPESAFE_DEFAULT_MODEL: 'typesafe-ai/jev' },
+  const port = portFromEnvironment({ env: { JEV_CODE_PROVIDER: 'vercel', AI_GATEWAY_API_KEY: 'disposable', TYPESAFE_DEFAULT_MODEL: DECISION_MODEL },
     transport: async (_url, options) => {
       bodies.push(JSON.parse(String(options?.body)));
-      return new Response(JSON.stringify({ model: 'typesafe/jev-1.13-20260917', usage: { input_tokens: 500, output_tokens: 1, cost: 0.001 },
+      return new Response(JSON.stringify({ model: 'typesafe/jev-1.14-20261014', usage: { input_tokens: 500, output_tokens: 1, cost: 0.001 },
         answers: { resolution: { type: 'choice', choice: 'addresses', probabilities: { addresses: 0.8, does_not_address: 0.1, insufficient_evidence: 0.1 }, confidence: 0.01 } } }));
     } });
-  const outcome = await runPanel({ finding: 'a.java:1 preserve output' }, port, { provider: 'vercel', model: 'typesafe-ai/jev' }, () => 'hash');
+  const outcome = await runPanel({ finding: 'a.java:1 preserve output' }, port, { provider: 'vercel', model: DECISION_MODEL }, () => 'hash');
   assert.equal(outcome.selected.route, 'clear');
   assert.equal(bodies.length, 3);
   for (const [index, body] of bodies.entries()) {
-    assert.equal(body.model, 'typesafe-ai/jev');
+    assert.equal(body.model, DECISION_MODEL);
+    assert.equal(outcome.measurement.members[index].configuredModel, DECISION_MODEL);
     assert.deepEqual(body.questions, { resolution: Object.values(PANEL_QUESTIONS)[index] });
     assert.deepEqual(body.state, bodies[0].state);
-    assert.equal(outcome.measurement.members[index].model, 'typesafe/jev-1.13-20260917');
+    assert.equal(outcome.measurement.members[index].model, 'typesafe/jev-1.14-20261014');
     assert.deepEqual(outcome.measurement.members[index].usage, { inputTokens: 500, outputTokens: 1, cost: 0.001 });
   }
 });
@@ -273,4 +307,11 @@ test('the one megabyte body ceiling applies only to models without token account
   const port = portFromEnvironment({ env: { OPENROUTER_API_KEY: 'dummy' }, transport: async () => new Response('{}') });
   const budget = port.requestBudget(request);
   assert.equal(budget.maxRequestBytes, 1_000_000, 'application callers keep their own byte check through the budget');
+});
+
+test('provider endpoints strip every trailing slash without changing the path (TASK-2746)', () => {
+  for (const suffix of ['', '/', '////', '/'.repeat(10000)]) {
+    const result = resolveFromEnvironment({ JEV_CODE_PROVIDER: 'typesafe', TYPESAFE_API_KEY: 'secret', TYPESAFE_BASE_URL: `https://proxy.example/api${suffix}` });
+    assert.equal(result.route?.endpoint, 'https://proxy.example/api/v1/systemone');
+  }
 });

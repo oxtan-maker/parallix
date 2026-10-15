@@ -24,8 +24,8 @@ import { projectReviewHistory } from '../../../src/application/projections/missi
 const reviewer = agentFamily('codex');
 const implementer = agentFamily('custom');
 const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({
-  eligible: [reviewer],
-} as never);
+  eligible: [reviewer], strategy: 'random',
+});
 
 const subject = {
   change: {
@@ -224,7 +224,7 @@ test('review history carries prior verdicts and pushbacks across a reviewer fami
   // usage-blocked, so none of its context carries over in-process.
   const next = beginNextReviewRound(
     review, blocked, implementer, '2026-08-02T11:00:00Z',
-    ConfiguredReviewerEligibility.fromReviewStep({ eligible: [blocked] } as never),
+    ConfiguredReviewerEligibility.fromReviewStep({ eligible: [blocked], strategy: 'random' }),
   );
 
   const history = projectReviewHistory(next);
@@ -309,6 +309,7 @@ test('projectReviewHistory restores legacy detail from persisted review events',
 
   assert.deepEqual(history[0], {
     number: 1, reviewer, implementer, phase: 'reviewing', disposition: 'REQUEST_CHANGES',
+    startRevision: subject.revision, decidedRevision: null,
     comment: 'Persist the review continuity.', findingSummaries: ['Persist review details'],
     fixes: ['F1'], pushbacks: [],
   });
@@ -476,6 +477,7 @@ test('a findings document title is not projected as a finding', () => {
   const withEvents = {
     ...review,
     reviewEvents: [{
+      position: 0, phase: 'reviewing', disposition: null, verdict: null, itemDispositions: null, blockedReason: null, followUpReference: null, createdAt: '2026-08-02T09:00:00Z',
       roundNumber: 1,
       eventType: 'reviewer_findings' as const,
       actor: reviewer,
@@ -486,7 +488,7 @@ test('a findings document title is not projected as a finding', () => {
         '',
         '## Finding 2 — a real one, which must still be reported',
       ].join('\n'),
-    }] as unknown as typeof review.reviewEvents,
+    }],
   };
 
   const [round] = projectReviewHistory(withEvents);

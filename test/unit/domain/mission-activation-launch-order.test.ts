@@ -1,3 +1,4 @@
+import { makeExecutePorts } from '../../fixtures/execute-mission-ports.js';
 // TASK-2582 CP-5 — regression coverage for lifecycle transition ordering,
 // with external boundaries (the agent run) mocked and made slow.
 //
@@ -55,11 +56,11 @@ async function openFixture(
 ): Promise<Fixture> {
   const migrated = await openMigratedMissionStore([mission]);
   const { store } = migrated;
-  const ports = {
+  const ports = makeExecutePorts({
     workspace: {
       async preflight() { return true; },
       async resolveWorktree() { return '/worktree'; },
-      async resolveTaskFile() { return { ok: false }; },
+      async resolveTaskFile() { return { ok: false as const }; },
       async readTaskStatus() { return null; },
       async enforceCommitSafety() {},
     },
@@ -68,14 +69,14 @@ async function openFixture(
       launch,
     },
     // The real mission store: the authoritative boundary under test.
-    missionTransitions: store as unknown as ExecuteMissionPorts['missionTransitions'],
+    missionTransitions: (store),
     telemetry: { async recordLaunchTelemetry() {} },
-    checkpointValidation: { async validateBeforeHandoff() { return { ok: true }; } },
-    handoffExecution: { async run() { return { ok: true }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } },
+    checkpointValidation: { async validateBeforeHandoff() { return { ok: true as const }; } },
+    handoffExecution: { async run() { return { ok: true as const }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } },
     autonomousReview: { async start() {} },
-    repairLaunch: { async launch() {}, available() { return { supported: false }; }, readHead() { return null; } },
+    repairLaunch: { async launch() { return undefined; }, available() { return { supported: false }; }, readHead() { return null; } },
     output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
-  } as unknown as ExecuteMissionPorts;
+  }).ports;
   return { ...migrated, ports };
 }
 
@@ -106,7 +107,7 @@ test('a slow downstream agent run does not delay the active transition', async (
       slug: SLUG,
       agent: 'claude',
       capabilities: new Set(['active:execute']),
-    } as never);
+    });
 
     await until(() => launchEntered, 'the launch to confirm');
     // Downstream work is still running: the committed boundary must already
@@ -145,7 +146,7 @@ test('a fallback relaunch re-asserts the active boundary with no second lane eve
       slug: SLUG,
       agent: 'claude',
       capabilities: new Set(['active:execute']),
-    } as never);
+    });
     assert.equal(outcome.status, 'completed');
     assert.deepEqual(boundaryAgents, [AGENT, FALLBACK_AGENT]);
 
@@ -174,7 +175,7 @@ test('an immediate activation blocker stops before launching the agent', async (
     const outcome = await new ExecuteMissionService(ports).execute({
       operationId: `active:${SLUG}:blocked`, slug: SLUG, agent: 'claude',
       capabilities: new Set(['active:execute']),
-    } as never);
+    });
     assert.equal(outcome.status, 'failed');
     assert.equal(launched, false);
     const loaded = await store.load(missionId(SLUG));

@@ -38,15 +38,15 @@ interface HandoffTestOptions {
   readonly performHandoff?: (_slug: string, _request: { forgejoUser: string; worktree: string; force?: boolean }) => Promise<{ ok: boolean; error?: string; gateFailure?: import('../../../src/application/rebound-kernel.js').GateFailureReason; gateOutput?: { stdout?: string; stderr?: string }; gatekeeperPushedBack?: boolean }>;
   readonly repairHandoffFn?: (_slug: string, _worktree: string, _error: string, _options: { taskFile: string | null; log: (_message: string) => void; error: (_message: string) => void }) => Promise<{ repaired: boolean; blocker?: string }>;
   readonly startReviewLoop?: (_slug: string, _options: { implementer: string; worktree: string; skipHandoff: boolean; onAgentLaunched?: (_agent: string, _phase: 'review' | 'review-response') => Promise<void>; onAutonomousStop?: (_reason: string) => Promise<void> }) => Promise<void>;
-  readonly startAgentFn?: (_step: string, _options: { prompt: string; worktree: string; agent: string; slug: string; role: string; sessionPolicy?: unknown }) => Promise<unknown>;
+  readonly startAgentFn?: (_step: string, _options: { prompt: string; worktree: string; agent: string; slug: string; role: string; sessionPolicy?: unknown }) => Promise<{ agent?: string | null; result?: { status?: number | null } } | undefined>;
   readonly workflowLauncherStatusFn?: (_agent: string) => { supported: boolean; detail?: string; reason?: string };
   readonly log?: (_message: string) => void;
   readonly error?: (_message: string) => void;
 }
 
 function handoffService(slug: string, worktree: string, agent: string, options: HandoffTestOptions = {}) {
-  const validate = options.validateCheckpointsBeforeHandoffFn ?? (async () => ({ ok: true }));
-  const perform = options.performHandoff ?? (async () => ({ ok: true }));
+  const validate = options.validateCheckpointsBeforeHandoffFn ?? (async () => ({ ok: true as const }));
+  const perform = options.performHandoff ?? (async () => ({ ok: true as const }));
   const repair = options.repairHandoffFn ?? (async () => ({ repaired: false }));
   const review = options.startReviewLoop ?? (async () => {});
   const launch = options.startAgentFn ?? (async () => ({}));
@@ -105,7 +105,7 @@ describe('Handoff bounce', () => {
         return validations === 1 ? { ok: false, error: CHECKPOINT_GAP } : { ok: true };
       },
       startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
-      performHandoff: async () => { handoffCalls++; return { ok: true }; },
+      performHandoff: async () => { handoffCalls++; return { ok: true as const }; },
       startReviewLoop: async () => {},
       log: () => {},
       error: () => {},
@@ -123,9 +123,9 @@ describe('Handoff bounce', () => {
     let handoffCalls = 0;
     const errors: string[] = [];
     const result = await runHandoffScenario(SLUG, WORKTREE, 'codex', {
-      validateCheckpointsBeforeHandoffFn: () => { validations++; return { ok: false, error: CHECKPOINT_GAP }; },
+      validateCheckpointsBeforeHandoffFn: () => { validations++; return { ok: false as const, error: CHECKPOINT_GAP }; },
       startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
-      performHandoff: async () => { handoffCalls++; return { ok: true }; },
+      performHandoff: async () => { handoffCalls++; return { ok: true as const }; },
       startReviewLoop: async () => {},
       log: () => {},
       error: (msg: string) => errors.push(msg),
@@ -149,11 +149,11 @@ describe('Handoff bounce', () => {
     // nextCheckpoint — so the guard declines to call the kernel.
     const result = await runHandoffScenario(SLUG, WORKTREE, 'codex', {
       validateCheckpointsBeforeHandoffFn: () => ({
-        ok: false,
+        ok: false as const,
         error: 'Checkpoint documents are uncommitted in the worktree; commit them before handoff.',
       }),
       startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
-      performHandoff: async () => { handoffCalls++; return { ok: true }; },
+      performHandoff: async () => { handoffCalls++; return { ok: true as const }; },
       startReviewLoop: async () => {},
       log: () => {},
       error: (msg: string) => errors.push(msg),
@@ -172,7 +172,7 @@ describe('Handoff bounce', () => {
     let handoffCalls = 0;
     let reviewLoopStarted = false;
     const result = await runHandoffScenario(SLUG, WORKTREE, 'codex', {
-      validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+      validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
       performHandoff: async () => {
         handoffCalls++;
         return handoffCalls === 1
@@ -196,7 +196,7 @@ describe('Handoff bounce', () => {
     let launches = 0;
     let reviewed = false;
     const result = await runHandoffScenario(SLUG, WORKTREE, 'codex', {
-      validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+      validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
       performHandoff: async () => ++handoffs === 1
         ? { ok: false, error: 'Success criteria 1 are incomplete before handoff.' }
         : { ok: true },
@@ -219,9 +219,9 @@ describe('Handoff bounce', () => {
   test('SC4: the kernel carries the captured gate output into the bounce', async () => {
     let promptSeen = '';
     await runHandoffScenario(SLUG, WORKTREE, 'codex', {
-      validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+      validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
       performHandoff: async () => ({
-        ok: false, error: GATE_FAILURE, gateOutput: { stdout: 'gate stdout', stderr: 'gate stderr' },
+        ok: false as const, error: GATE_FAILURE, gateOutput: { stdout: 'gate stdout', stderr: 'gate stderr' },
       }),
       startAgentFn: async (_step: string, opts: { prompt?: unknown }) => {
         // Only the first attempt's prompt carries the original gate output; the
@@ -247,8 +247,8 @@ describe('Handoff bounce', () => {
     let reviewLoopStarted = false;
     const errors: string[] = [];
     const result = await runHandoffScenario(SLUG, WORKTREE, 'codex', {
-      validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
-      performHandoff: async () => { handoffCalls++; return { ok: false, error: GATE_FAILURE }; },
+      validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
+      performHandoff: async () => { handoffCalls++; return { ok: false as const, error: GATE_FAILURE }; },
       startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
       startReviewLoop: async () => { reviewLoopStarted = true; },
       log: () => {},
@@ -269,9 +269,9 @@ describe('Handoff bounce', () => {
     let launches = 0;
     let repairCalls = 0;
     await runHandoffScenario(SLUG, WORKTREE, 'codex', {
-      validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+      validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
       performHandoff: async () => ({
-        ok: false,
+        ok: false as const,
         error: 'ENOSPC: no space left on device while writing the review artifact.',
       }),
       repairHandoffFn: async () => { repairCalls++; return { repaired: false, blocker: 'disk full' }; },
@@ -291,7 +291,7 @@ describe('Handoff bounce', () => {
     let handoffCalls = 0;
     const logs: string[] = [];
     const result = await runHandoffScenario(SLUG, WORKTREE, 'codex', {
-      validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+      validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
       performHandoff: async () => {
         handoffCalls++;
         return handoffCalls === 1
@@ -316,9 +316,9 @@ describe('Handoff bounce', () => {
   test('SC4: structured gate failure reaches the kernel without losing its reason kind', async () => {
     let prompt = '';
     await runHandoffScenario(SLUG, WORKTREE, 'codex', {
-      validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+      validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
       performHandoff: async () => ({
-        ok: false,
+        ok: false as const,
         error: GATE_FAILURE,
         gateFailure: { kind: 'gate-failure', area: 'unit', command: 'npm test', exitCode: 1, stdout: 'stdout', stderr: 'stderr' },
       }),
@@ -338,8 +338,8 @@ describe('Handoff bounce', () => {
     for (const _run of [1, 2]) {
       let launches = 0;
       await runHandoffScenario(SLUG, WORKTREE, 'codex', {
-        validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
-        performHandoff: async () => ({ ok: false, error: GATE_FAILURE }),
+        validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
+        performHandoff: async () => ({ ok: false as const, error: GATE_FAILURE }),
         startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
         startReviewLoop: async () => {},
         log: () => {},
@@ -399,7 +399,7 @@ describe('Handoff bounce', () => {
         return validations === 1 ? { ok: false, error: DECLARED_GAP, nextCheckpoint: 'CP-2' } : { ok: true };
       },
       startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
-      performHandoff: async () => { handoffCalls++; return { ok: true }; },
+      performHandoff: async () => { handoffCalls++; return { ok: true as const }; },
       startReviewLoop: async () => { reviewLoopStarted = true; },
       log: () => {},
       error: () => {},
@@ -711,7 +711,7 @@ describe('Active lane projection', () => {
 });
 
 test('handoff evidence and self-review eligibility are pure decisions (TASK-2668.07)', () => {
-  const contract = { checkpoints: [], successCriteria: ['one', 'two'], completedSuccessCriteria: [0], draftedInDb: true };
+  const contract = { checkpoints: [], successCriteria: ['one', 'two'], completedSuccessCriteria: [0], draftedInDb: true } satisfies Partial<NonNullable<Parameters<typeof handoffEvidencePolicy>[0]>>;
   // Coverage is distinct success-criterion identities, not a sum of row counts:
   // a row covers the criterion whose identity its `criterion` field equals.
   assert.deepEqual(handoffEvidencePolicy(contract), { source: 'missing', incomplete: [2], insufficientRows: false });

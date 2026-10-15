@@ -1,3 +1,4 @@
+import type { IntegrationMissionServicesFactory } from '../ports/integration-records.js';
 /**
  * Integration-time rebase: run the shared `px rebase` workflow against the
  * resolved ADR 0043 target, or predict (without mutating) whether a dry run
@@ -37,7 +38,7 @@ export function createIntegrationRebase({ missionPaths, rebase, landing }: Integ
    */
   async function runIntegrationRebase(
     slug: string,
-    { baseWorktree, baseBranch, git, missionServicesFn }: IntegrationRebaseTarget & { missionServicesFn?: Function },
+    { baseWorktree, baseBranch, git, missionServicesFn }: IntegrationRebaseTarget & { missionServicesFn?: IntegrationMissionServicesFactory },
   ): Promise<void> {
     let rebaseExitCode: number | null = null;
     const port = rebase.createRebaseWorkflowPort({

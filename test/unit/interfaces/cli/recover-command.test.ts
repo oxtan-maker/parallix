@@ -5,7 +5,7 @@ import { reportRecovery } from '../../../../src/interfaces/cli/recover.js';
 test('reportRecovery preserves landed-cleanup and integrated-refusal outcomes', () => {
   const logs: string[] = [];
   const errors: string[] = [];
-  const deps = { cleanup: () => false, log: (message: string) => logs.push(message), error: (message: string) => errors.push(message) };
+  const deps = { cleanup: () => false, log: (message: string) => logs.push(message), error: (message: string) => errors.push(message) } satisfies NonNullable<Parameters<typeof reportRecovery>[2]>;
 
   assert.equal(reportRecovery('recovered-landed', 'task-1', deps), false);
   assert.match(errors[0], /cleanup failed/);

@@ -1,3 +1,4 @@
+import type { ReviewLoopState } from '../../application/ports/review-round.js';
 /**
  * The review loop's round-open handoff boundary (TASK-2582).
  *
@@ -34,7 +35,6 @@ import {
 import {
   persistReviewStateOrThrow,
   writeReviewState,
-  type ReviewState,
 } from './review-state.js';
 
 export interface OpenReviewRoundOptions {
@@ -59,7 +59,7 @@ export type OpenReviewRoundResult =
  */
 export async function openReviewRound(
   slug: string,
-  state: ReviewState,
+  state: ReviewLoopState,
   options: OpenReviewRoundOptions,
 ): Promise<OpenReviewRoundResult> {
   const {
@@ -99,7 +99,7 @@ export async function openReviewRound(
  */
 async function settleReviewLane(
   slug: string,
-  state: ReviewState,
+  state: ReviewLoopState,
   ports: { missionStore: MissionStore; lifecycleService: MissionLifecycleService | null },
 ): Promise<OpenReviewRoundResult> {
   let loaded;

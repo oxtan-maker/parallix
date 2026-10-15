@@ -3,7 +3,7 @@ import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js"
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from 'node:child_process';
 import { validateRepositoryGates } from './repository-gates.js';
 import { validateTerminalSection } from './terminal-host-config.js';
 import {
@@ -430,11 +430,15 @@ export function hasGitRepository(rootDir: string = process.cwd()): boolean {
   return fs.existsSync(path.join(rootDir, '.git'));
 }
 
+type ProductGitSpawn = (command: string, args: readonly string[], options: SpawnSyncOptionsWithStringEncoding) => {
+  status: number | null; stdout: string; stderr: string;
+};
+
 interface InitializeGitOptions {
-  spawnSyncFn?: typeof spawnSync;
+  spawnSyncFn?: ProductGitSpawn;
 }
 
-export function initializeGitRepository(rootDir: string = process.cwd(), options: InitializeGitOptions = {}): { ok: boolean; branch: string; mode: string } | { ok: boolean; message: string } {
+export function initializeGitRepository(rootDir: string = process.cwd(), options: InitializeGitOptions = {}): { ok: true; branch: string; mode: string } | { ok: false; message: string } {
   const spawnSyncFn = options.spawnSyncFn || spawnSync;
   const initMain = spawnSyncFn('git', ['init', '-b', 'main'], {
     cwd: rootDir,
@@ -470,7 +474,7 @@ export function gitIdentityEnv(configuration: ParallixConfiguration = DEFAULT_CO
 
 interface CommitWorkflowOptions {
   configuration?: ParallixConfiguration;
-  spawnSyncFn?: typeof spawnSync;
+  spawnSyncFn?: ProductGitSpawn;
   existsSyncFn?: typeof fs.existsSync;
 }
 
@@ -513,7 +517,7 @@ export function commitWorkflowBaseline(rootDir: string, options: CommitWorkflowO
 
 interface StandaloneBaselineOptions {
   configuration?: ParallixConfiguration;
-  spawnSyncFn?: typeof spawnSync;
+  spawnSyncFn?: ProductGitSpawn;
 }
 
 export function ensureStandaloneMissionBaseline(rootDir: string = process.cwd(), { spawnSyncFn = spawnSync, configuration = DEFAULT_CONFIGURATION }: StandaloneBaselineOptions = {}): { changed: boolean; committed: boolean; skipped?: boolean; failed?: boolean; message?: string; entries?: string[] } {
@@ -530,7 +534,7 @@ export function ensureStandaloneMissionBaseline(rootDir: string = process.cwd(),
       changed: false,
       committed: false,
       failed: true,
-      message: (statusResult.stderr || statusResult.stdout || 'git status failed').trim(),
+      message: baselineGitMessage(statusResult, 'git status failed'),
     };
   }
 
@@ -569,7 +573,7 @@ export function ensureStandaloneMissionBaseline(rootDir: string = process.cwd(),
       changed: true,
       committed: false,
       failed: true,
-      message: (addResult.stderr || addResult.stdout || 'git add failed').trim(),
+      message: baselineGitMessage(addResult, 'git add failed'),
     };
   }
 
@@ -583,7 +587,7 @@ export function ensureStandaloneMissionBaseline(rootDir: string = process.cwd(),
       changed: true,
       committed: false,
       failed: true,
-      message: (commitResult.stderr || commitResult.stdout || 'git commit failed').trim(),
+      message: baselineGitMessage(commitResult, 'git commit failed'),
     };
   }
 
@@ -595,6 +599,8 @@ export function ensureStandaloneMissionBaseline(rootDir: string = process.cwd(),
 }
 
 interface EnsureStandaloneGitRepoOptions {
+  spawnSyncFn?: ProductGitSpawn;
+  existsSyncFn?: typeof fs.existsSync;
   isStandaloneWorkflowLayoutFn?: typeof isStandaloneWorkflowLayout;
   hasGitRepositoryFn?: typeof hasGitRepository;
   initializeGitRepositoryFn?: typeof initializeGitRepository;
@@ -612,25 +618,25 @@ export function ensureStandaloneGitRepo(rootDir: string = process.cwd(), options
     return { changed: false, initialized: false };
   }
 
-  const initOpts = { spawnSyncFn: (options as unknown as InitializeGitOptions).spawnSyncFn };
+  const initOpts = { spawnSyncFn: options.spawnSyncFn };
   const result = initializeGitRepositoryFn(rootDir, initOpts);
   if (!result.ok) {
     return {
       changed: false,
       initialized: false,
       failed: true,
-      message: (result as { message: string }).message || 'git init failed',
+      message: result.message || 'git init failed',
     };
   }
 
-  const commitOpts = { spawnSyncFn: (options as unknown as CommitWorkflowOptions).spawnSyncFn, existsSyncFn: (options as unknown as CommitWorkflowOptions).existsSyncFn };
+  const commitOpts = { spawnSyncFn: options.spawnSyncFn, existsSyncFn: options.existsSyncFn };
   const commit = commitWorkflowBaselineFn(rootDir, commitOpts);
 
   return {
     changed: true,
     initialized: true,
-    branch: (result as { branch: string }).branch || 'main',
-    mode: (result as { mode: string }).mode || 'init-main',
+    branch: result.branch || 'main',
+    mode: result.mode || 'init-main',
     baselineCommit: commit,
   };
 }
@@ -775,8 +781,8 @@ export function resolveGithubPublishConfig(rootDir: string = process.cwd()): Git
     mainBranch: typeof cfg.mainBranch === 'string' && cfg.mainBranch.trim() !== '' ? cfg.mainBranch : null,
     verificationRemote: typeof cfg.verificationRemote === 'string' && cfg.verificationRemote.trim() !== '' ? cfg.verificationRemote : 'origin',
     verificationRefPrefix: typeof cfg.verificationRefPrefix === 'string' && cfg.verificationRefPrefix.trim() !== '' ? cfg.verificationRefPrefix : 'github-publish',
-    pollIntervalMs: typeof cfg.pollIntervalMs === 'number' && Number.isInteger(cfg.pollIntervalMs) && cfg.pollIntervalMs > 0 ? cfg.pollIntervalMs : 30000,
-    maxPollAttempts: cfg.maxPollAttempts === null ? null : (typeof cfg.maxPollAttempts === 'number' && Number.isInteger(cfg.maxPollAttempts) && cfg.maxPollAttempts > 0 ? cfg.maxPollAttempts : null),
+    pollIntervalMs: positiveConfigInteger(cfg.pollIntervalMs) ? cfg.pollIntervalMs : 30000,
+    maxPollAttempts: cfg.maxPollAttempts === null ? null : (positiveConfigInteger(cfg.maxPollAttempts) ? cfg.maxPollAttempts : null),
   };
 }
 
@@ -884,3 +890,10 @@ export function evaluateRepositoryReadiness(rootDir: string = process.cwd()): Re
 }
 
 export { REQUIRED_ADAPTER_KEYS, DEFAULT_CONFIG };
+
+function baselineGitMessage(result: { stderr?: string | null; stdout?: string | null }, fallback: string): string {
+  return (result.stderr || result.stdout || fallback).trim();
+}
+function positiveConfigInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0;
+}

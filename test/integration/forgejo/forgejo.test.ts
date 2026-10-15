@@ -1,4 +1,6 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import type { ForgejoApiOptions } from "../../../src/adapters/forgejo/forgejo-types.js";
+import { forgejoApiFixture } from '../../fixtures/forgejo-api.js';
+import type { PushReviewRefOptions } from "../../../src/adapters/forgejo/forgejo-git.js";
 
 
 
@@ -28,10 +30,10 @@ const { ensureRemoteBaseBranch } = ensureRemoteBaseBranchModule;
 const { mock } = test;
 
 function installVerificationMocks() {
-  mock.method(verification, 'captureVerifiedTreeProof', (area, rootDir) => ({
-    ok: true,
+  mock.method(verification, 'captureVerifiedTreeProof', (area: Parameters<(typeof verification)["captureVerifiedTreeProof"]>[0], rootDir: Parameters<(typeof verification)["captureVerifiedTreeProof"]>[1]) => ({
+    ok: true as const,
     proof: {
-      rootDir: path.resolve(rootDir),
+      rootDir: path.resolve(rootDir ?? process.cwd()),
       area,
       command: 'mock-verification',
       commit: 'abc123',
@@ -39,12 +41,13 @@ function installVerificationMocks() {
       verifiedAt: '2026-01-01T00:00:00.000Z'
     }
   }));
-  mock.method(verification, 'assertVerifiedTreeProof', (proof, rootDir) => {
+  mock.method(verification, 'assertVerifiedTreeProof', (proof: Parameters<(typeof verification)["assertVerifiedTreeProof"]>[0], rootDir: Parameters<(typeof verification)["assertVerifiedTreeProof"]>[1]) => {
+    assert.ok(rootDir);
     const resolvedRoot = path.resolve(rootDir);
     if (!proof || proof.rootDir !== resolvedRoot) {
-      return { ok: false, error: 'verification proof does not match the tree being published' };
+      return { ok: false as const, error: 'verification proof does not match the tree being published' };
     }
-    return { ok: true, proof };
+    return { ok: true as const, proof };
   });
 }
 
@@ -78,9 +81,9 @@ test('resolveTokenFile discovers Forgejo tokens from sibling feature-branch work
     fs.writeFileSync(tokenPath, 'feature-token\n', 'utf8');
 
     mock.method(missionUtils, 'getPrimaryWorktree', () => mainRoot);
-    mock.method(git, 'git', (args) => {
+    mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
       if (args.includes('worktree') && args.includes('--porcelain')) {
-        return {
+        return { signal: null,
           status: 0,
           stdout: [
             `worktree ${mainRoot}`,
@@ -96,7 +99,7 @@ test('resolveTokenFile discovers Forgejo tokens from sibling feature-branch work
           stderr: '',
         };
       }
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
 
     process.chdir(sandboxRoot);
@@ -152,31 +155,31 @@ test('createPr uses configured primaryBranch and configured Forgejo repo', () =>
       },
     }, null, 2), 'utf8');
 
-    const gitCalls = [];
-    mock.method(git, 'git', (args) => {
+    const gitCalls: string[][] = [];
+    mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
       gitCalls.push(args);
-      if (args.includes('show-ref')) return { status: 0, stdout: '', stderr: '' };
-      if (args.includes('push')) return { status: 0, stdout: '', stderr: '' };
-      if (args.includes('rev-parse')) return { status: 0, stdout: 'abc123\n', stderr: '' };
-      return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('show-ref')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      if (args.includes('push')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'abc123\n', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
 
-    const apiCalls = [];
-    const apiCall = mock.fn((method, apiPath, token, body, options = {}) => {
+    const apiCalls: { method: string; apiPath: string; token: string | undefined; body: unknown; options: ForgejoApiOptions; }[] = [];
+    const apiCall = mock.fn(forgejoApiFixture((method, apiPath, token, body, options = {}) => {
       apiCalls.push({ method, apiPath, token, body, options });
-      if (method === 'GET' && apiPath.includes('/pulls?state=open')) return { ok: true, data: [] };
-      if (method === 'GET' && apiPath.includes('/pulls?state=all')) return { ok: true, data: [] };
+      if (method === 'GET' && apiPath.includes('/pulls?state=open')) return { ok: true as const, data: [] };
+      if (method === 'GET' && apiPath.includes('/pulls?state=all')) return { ok: true as const, data: [] };
       if (method === 'POST' && apiPath === '/pulls') {
-        return { ok: true, data: { html_url: 'http://localhost:3300/magnus/testproj/pulls/1', number: 1 } };
+        return { ok: true as const, data: { html_url: 'http://localhost:3300/magnus/testproj/pulls/1', number: 1 } };
       }
-      return { ok: false, data: null };
-    });
+      return { ok: false as const, data: null };
+    }));
 
     const result = createPr('mission/task-200', 'claude', 'token-123', { configuration: resolveConfiguration(process.env), rootDir: root, apiCall, log: () => {}, forceWithLease: true });
     assert.equal(result.ok, true);
     const baseUrl = process.env.FORGEJO_URL || 'http://localhost:3300';
     assert.ok(gitCalls.some(args => args.includes(`http://claude:token-123@${baseUrl.replace(/^https?:\/\//, '')}/magnus/testproj.git`)));
-    assert.ok(apiCalls.some(call => call.method === 'POST' && call.body && call.body.base === 'main'));
+    assert.ok(apiCalls.some(call => call.method === 'POST' && call.body && typeof call.body === 'object' && 'base' in call.body && typeof call.body === 'object' && 'base' in call.body && call.body.base === 'main'));
     assert.ok(apiCalls.every(call => call.options.rootDir === root));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -202,25 +205,25 @@ test('createPr uses the implementer token for PR APIs and the repo-owner token f
       },
     }, null, 2), 'utf8');
 
-    const gitCalls = [];
-    mock.method(git, 'git', (args) => {
+    const gitCalls: string[][] = [];
+    mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
       gitCalls.push(args);
-      if (args.includes('show-ref')) return { status: 0, stdout: '', stderr: '' };
-      if (args.includes('push')) return { status: 0, stdout: '', stderr: '' };
-      if (args.includes('rev-parse')) return { status: 0, stdout: 'abc123\n', stderr: '' };
-      return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('show-ref')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      if (args.includes('push')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'abc123\n', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
 
-    const apiCalls = [];
-    const apiCall = mock.fn((method, apiPath, token, body, options = {}) => {
+    const apiCalls: { method: string; apiPath: string; token: string | undefined; body: unknown; options: ForgejoApiOptions; }[] = [];
+    const apiCall = mock.fn(forgejoApiFixture((method, apiPath, token, body, options = {}) => {
       apiCalls.push({ method, apiPath, token, body, options });
-      if (token === 'reviewer-token' && method === 'GET' && apiPath.includes('/pulls?state=open')) return { ok: true, data: [] };
-      if (token === 'reviewer-token' && method === 'GET' && apiPath.includes('/pulls?state=all')) return { ok: true, data: [] };
+      if (token === 'reviewer-token' && method === 'GET' && apiPath.includes('/pulls?state=open')) return { ok: true as const, data: [] };
+      if (token === 'reviewer-token' && method === 'GET' && apiPath.includes('/pulls?state=all')) return { ok: true as const, data: [] };
       if (token === 'reviewer-token' && method === 'POST' && apiPath === '/pulls') {
-        return { ok: true, data: { html_url: 'http://localhost:3300/magnus/testproj/pulls/9', number: 9 } };
+        return { ok: true as const, data: { html_url: 'http://localhost:3300/magnus/testproj/pulls/9', number: 9 } };
       }
-      return { ok: false, data: { message: 'The target could not be found.' }, statusCode: 404 };
-    });
+      return { ok: false as const, data: { message: 'The target could not be found.' }, statusCode: 404 };
+    }));
 
     const result = createPr('mission/task-200', 'claude', 'reviewer-token', { configuration: resolveConfiguration(process.env), rootDir: root, apiCall, log: () => {}, forceWithLease: true });
     assert.equal(result.ok, true);
@@ -254,23 +257,23 @@ test('createPr falls back to the repo-owner token for PR lookup when the impleme
       },
     }, null, 2), 'utf8');
 
-    mock.method(git, 'git', (args) => {
-      if (args.includes('show-ref')) return { status: 0, stdout: '', stderr: '' };
-      if (args.includes('push')) return { status: 0, stdout: '', stderr: '' };
-      if (args.includes('rev-parse')) return { status: 0, stdout: 'abc123\n', stderr: '' };
-      return { status: 0, stdout: '', stderr: '' };
+    mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+      if (args.includes('show-ref')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      if (args.includes('push')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'abc123\n', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
 
-    const apiCalls = [];
-    const apiCall = mock.fn((method, apiPath, token, body, options = {}) => {
+    const apiCalls: { method: string; apiPath: string; token: string | undefined; body: unknown; options: ForgejoApiOptions; }[] = [];
+    const apiCall = mock.fn(forgejoApiFixture((method, apiPath, token, body, options = {}) => {
       apiCalls.push({ method, apiPath, token, body, options });
       if (token === 'reviewer-token') {
-        return { ok: false, data: { message: 'permission denied' }, statusCode: 403 };
+        return { ok: false as const, data: { message: 'permission denied' }, statusCode: 403 };
       }
-      if (token === 'owner-token' && method === 'GET' && apiPath.includes('/pulls?state=open')) return { ok: true, data: [{ number: 9, head: { ref: 'mission/task-200' } }] };
-      if (token === 'owner-token' && method === 'GET' && apiPath === '/pulls/9') return { ok: true, data: { html_url: 'http://localhost:3300/magnus/testproj/pulls/9', number: 9 } };
-      return { ok: false, data: { message: 'unexpected' }, statusCode: 404 };
-    });
+      if (token === 'owner-token' && method === 'GET' && apiPath.includes('/pulls?state=open')) return { ok: true as const, data: [{ number: 9, head: { ref: 'mission/task-200' } }] };
+      if (token === 'owner-token' && method === 'GET' && apiPath === '/pulls/9') return { ok: true as const, data: { html_url: 'http://localhost:3300/magnus/testproj/pulls/9', number: 9 } };
+      return { ok: false as const, data: { message: 'unexpected' }, statusCode: 404 };
+    }));
 
     const result = createPr('mission/task-200', 'claude', 'reviewer-token', { configuration: resolveConfiguration(process.env), rootDir: root, apiCall, log: () => {}, forceWithLease: true });
     assert.equal(result.ok, true);
@@ -293,26 +296,26 @@ test('createPr always calls syncPrimaryBaseline even when PR already exists', (t
 
   let syncCalled = false;
   // Mocking
-  mock.method(git, 'git', (args) => {
-    if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
     if (args.includes('push') && args.some(a => a.includes('main:main'))) {
       syncCalled = true;
     }
-    return { status: 0, stdout: '' };
+    return { signal: null, stderr: '',  status: 0, stdout: '' };
   });
 
-  const apiCall = mock.fn((method, apiPath) => {
+  const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
     if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
       return {
-        ok: true,
+        ok: true as const,
         data: [{ number: 32, head: { ref: branch }, html_url: 'http://pr/32' }]
       };
     }
     if (method === 'GET' && apiPath === '/pulls/32') {
-      return { ok: true, data: { html_url: 'http://pr/32' } };
+      return { ok: true as const, data: { html_url: 'http://pr/32' } };
     }
-    return { ok: false };
-  });
+    return { ok: false as const };
+  }));
 
   const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {} });
   assert.strictEqual(result.ok, true);
@@ -328,26 +331,26 @@ test('createPr calls syncPrimaryBaseline when PR does not exist', (t) => {
 
   let syncCalled = false;
   // Mocking
-  mock.method(git, 'git', (args) => {
-    if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
     if (args.includes('push') && args.some(a => a.includes('main:main'))) {
       syncCalled = true;
     }
-    return { status: 0, stdout: '' };
+    return { signal: null, stderr: '',  status: 0, stdout: '' };
   });
 
-  const apiCall = mock.fn((method, apiPath) => {
+  const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
     if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
-      return { ok: true, data: [] };
+      return { ok: true as const, data: [] };
     }
     if (method === 'GET' && apiPath.includes('/pulls?state=all')) {
-      return { ok: true, data: [] };
+      return { ok: true as const, data: [] };
     }
     if (method === 'POST' && apiPath === '/pulls') {
-      return { ok: true, data: { html_url: 'http://pr/33', number: 33 } };
+      return { ok: true as const, data: { html_url: 'http://pr/33', number: 33 } };
     }
-    return { ok: false };
-  });
+    return { ok: false as const };
+  }));
 
   const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {} });
   assert.strictEqual(result.ok, true);
@@ -363,23 +366,23 @@ test('createPr uses --force-with-lease flag when force: true is specified', (t) 
 
   let forceFlagUsed = false;
   // Mocking
-  mock.method(git, 'git', (args) => {
-    if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
     if (args.includes('push') && args.includes('--force-with-lease') && args.includes(branch)) {
       forceFlagUsed = true;
     }
-    return { status: 0, stdout: '' };
+    return { signal: null, stderr: '',  status: 0, stdout: '' };
   });
 
-  const apiCall = mock.fn((method, apiPath) => {
+  const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
     if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
-      return { ok: true, data: [{ number: 100, head: { ref: branch } }] };
+      return { ok: true as const, data: [{ number: 100, head: { ref: branch } }] };
     }
     if (method === 'GET' && apiPath === '/pulls/100') {
-      return { ok: true, data: { html_url: 'http://pr/100' } };
+      return { ok: true as const, data: { html_url: 'http://pr/100' } };
     }
-    return { ok: false };
-  });
+    return { ok: false as const };
+  }));
 
   const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, force: true });
   assert.strictEqual(result.ok, true);
@@ -392,26 +395,26 @@ test('createPr uses explicit force-with-lease sha when forceWithLease is true', 
   const token = 'fake-token';
   const rootDir = '/tmp/fake-root';
 
-  let pushArgs = [];
-  mock.method(git, 'git', (args) => {
-    if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
+  let pushArgs: (string | string)[] = [];
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
     if (args.includes('rev-parse') && args.includes(`refs/remotes/review/${branch}^{commit}`)) {
-      return { status: 0, stdout: 'abc123\n', stderr: '' };
+      return { signal: null,  status: 0, stdout: 'abc123\n', stderr: '' };
     }
     if (args.includes('push') && args.includes(branch)) {
       pushArgs = args;
     }
-    return { status: 0, stdout: '', stderr: '' };
+    return { signal: null,  status: 0, stdout: '', stderr: '' };
   });
 
-  const apiCall = mock.fn((method, apiPath) => {
-    if (method === 'GET' && apiPath.includes('/pulls?state=open')) return { ok: true, data: [] };
-    if (method === 'GET' && apiPath.includes('/pulls?state=all')) return { ok: true, data: [] };
+  const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
+    if (method === 'GET' && apiPath.includes('/pulls?state=open')) return { ok: true as const, data: [] };
+    if (method === 'GET' && apiPath.includes('/pulls?state=all')) return { ok: true as const, data: [] };
     if (method === 'POST' && apiPath === '/pulls') {
-      return { ok: true, data: { html_url: 'http://pr/100a', number: 100 } };
+      return { ok: true as const, data: { html_url: 'http://pr/100a', number: 100 } };
     }
-    return { ok: false };
-  });
+    return { ok: false as const };
+  }));
 
   const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, true);
@@ -428,28 +431,29 @@ test('createPr fails when review tracking ref is unavailable and origin is no lo
   const rootDir = '/tmp/fake-root';
 
   let pushArgs = [];
-  mock.method(git, 'git', (args) => {
-    if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
     if (args.includes('rev-parse') && args.includes(`refs/remotes/review/${branch}^{commit}`)) {
-      return { status: 128, stdout: '', stderr: 'unknown revision' };
+      return { signal: null,  status: 128, stdout: '', stderr: 'unknown revision' };
     }
     if (args.includes('push') && args.includes(branch)) {
       pushArgs = args;
     }
-    return { status: 0, stdout: '', stderr: '' };
+    return { signal: null,  status: 0, stdout: '', stderr: '' };
   });
 
-  const apiCall = mock.fn((method, apiPath) => {
-    if (method === 'GET' && apiPath.includes('/pulls?state=open')) return { ok: true, data: [] };
-    if (method === 'GET' && apiPath.includes('/pulls?state=all')) return { ok: true, data: [] };
+  const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
+    if (method === 'GET' && apiPath.includes('/pulls?state=open')) return { ok: true as const, data: [] };
+    if (method === 'GET' && apiPath.includes('/pulls?state=all')) return { ok: true as const, data: [] };
     if (method === 'POST' && apiPath === '/pulls') {
-      return { ok: true, data: { html_url: 'http://pr/100b', number: 100 } };
+      return { ok: true as const, data: { html_url: 'http://pr/100b', number: 100 } };
     }
-    return { ok: false };
-  });
+    return { ok: false as const };
+  }));
 
   const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, false, 'createPr should fail when no tracking ref is available');
+  assert.ok(result.error != null);
   assert.ok(result.error.includes('could not resolve tracking ref'), 'error should mention unresolved tracking ref');
 });
 
@@ -459,42 +463,42 @@ test('createPr uses a plain push when the branch is absent from the review remot
   const token = 'fake-token';
   const rootDir = '/tmp/fake-root';
 
-  let pushArgs = null;
-  mock.method(git, 'git', (args) => {
-    if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
+  let pushArgs: { value: string[] | null } = { value: null };
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
     // First push: the mission branch does not exist on the review remote yet.
     if (args.includes('fetch') && args.some(a => typeof a === 'string' && a.includes(`+refs/heads/${branch}:`))) {
-      return { status: 128, stdout: '', stderr: `fatal: could not find remote ref refs/heads/${branch}` };
+      return { signal: null,  status: 128, stdout: '', stderr: `fatal: could not find remote ref refs/heads/${branch}` };
     }
     // No tracking ref resolvable (neither review nor origin).
     if (args.includes('rev-parse') && args.some(a => typeof a === 'string' && a.includes(`refs/remotes/review/${branch}`))) {
-      return { status: 128, stdout: '', stderr: 'unknown revision' };
+      return { signal: null,  status: 128, stdout: '', stderr: 'unknown revision' };
     }
     if (args.includes('rev-parse') && args.some(a => typeof a === 'string' && a.includes(`refs/remotes/origin/${branch}`))) {
-      return { status: 128, stdout: '', stderr: 'unknown revision' };
+      return { signal: null,  status: 128, stdout: '', stderr: 'unknown revision' };
     }
     if (args.includes('push') && args.includes(branch)) {
-      pushArgs = args;
-      return { status: 0, stdout: '', stderr: '' };
+      pushArgs.value = args;
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     }
-    return { status: 0, stdout: '', stderr: '' };
+    return { signal: null,  status: 0, stdout: '', stderr: '' };
   });
 
-  const apiCall = mock.fn((method, apiPath) => {
-    if (method === 'GET' && apiPath.includes('/pulls?state=open')) return { ok: true, data: [] };
-    if (method === 'GET' && apiPath.includes('/pulls?state=all')) return { ok: true, data: [] };
+  const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
+    if (method === 'GET' && apiPath.includes('/pulls?state=open')) return { ok: true as const, data: [] };
+    if (method === 'GET' && apiPath.includes('/pulls?state=all')) return { ok: true as const, data: [] };
     if (method === 'POST' && apiPath === '/pulls') {
-      return { ok: true, data: { html_url: 'http://pr/999', number: 999 } };
+      return { ok: true as const, data: { html_url: 'http://pr/999', number: 999 } };
     }
-    return { ok: false };
-  });
+    return { ok: false as const };
+  }));
 
   const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, true);
-  assert.ok(pushArgs, 'a git push should be attempted');
-  assert.ok(pushArgs.includes(branch), 'push should target the mission branch');
+  assert.ok(pushArgs.value, 'a git push should be attempted');
+  assert.ok(pushArgs.value.includes(branch), 'push should target the mission branch');
   assert.ok(
-    !pushArgs.some(a => typeof a === 'string' && a.startsWith('--force-with-lease')),
+    !pushArgs.value.some((a) => typeof a === 'string' && a.startsWith('--force-with-lease')),
     'first push of a new branch must not use --force-with-lease'
   );
 });
@@ -506,26 +510,26 @@ test('createPr aborts without pushing when the tracking-ref fetch fails for a no
   const rootDir = '/tmp/fake-root';
 
   let pushAttempted = false;
-  mock.method(git, 'git', (args) => {
-    if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
     // Mission-branch fetch fails for an auth reason, not a missing ref.
     if (args.includes('fetch') && args.some(a => typeof a === 'string' && a.includes(`+refs/heads/${branch}:`))) {
-      return { status: 128, stdout: '', stderr: 'fatal: Authentication failed for review remote' };
+      return { signal: null,  status: 128, stdout: '', stderr: 'fatal: Authentication failed for review remote' };
     }
     if (args.includes('rev-parse') && args.some(a => typeof a === 'string' && a.includes(`refs/remotes/review/${branch}`))) {
-      return { status: 128, stdout: '', stderr: 'unknown revision' };
+      return { signal: null,  status: 128, stdout: '', stderr: 'unknown revision' };
     }
     if (args.includes('rev-parse') && args.some(a => typeof a === 'string' && a.includes(`refs/remotes/origin/${branch}`))) {
-      return { status: 128, stdout: '', stderr: 'unknown revision' };
+      return { signal: null,  status: 128, stdout: '', stderr: 'unknown revision' };
     }
     if (args.includes('push') && args.includes(branch)) {
       pushAttempted = true;
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     }
-    return { status: 0, stdout: '', stderr: '' };
+    return { signal: null,  status: 0, stdout: '', stderr: '' };
   });
 
-  const apiCall = mock.fn(() => ({ ok: false }));
+  const apiCall = mock.fn(forgejoApiFixture(() => ({ ok: false as const })));
 
   const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, false);
@@ -534,13 +538,13 @@ test('createPr aborts without pushing when the tracking-ref fetch fails for a no
 });
 
 test('getPrStatus returns PR details when PR exists', () => {
-  const apiCall = mock.fn((method, apiPath) => {
+  const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
     if (method === 'GET' && apiPath.includes('/pulls?state=all')) {
-      return { ok: true, data: [{ number: 41, head: { ref: 'mission/task-081' } }] };
+      return { ok: true as const, data: [{ number: 41, head: { ref: 'mission/task-081' } }] };
     }
     if (method === 'GET' && apiPath === '/pulls/41') {
       return {
-        ok: true,
+        ok: true as const,
         data: {
           number: 41,
           title: 'Mission task-081',
@@ -550,8 +554,8 @@ test('getPrStatus returns PR details when PR exists', () => {
         }
       };
     }
-    return { ok: false };
-  });
+    return { ok: false as const };
+  }));
 
   const pr = getPrStatus('mission/task-081', '/tmp', { configuration: resolveConfiguration(process.env), token: 'fake-token', apiCall });
   assert.equal(pr.exists, true);
@@ -561,19 +565,19 @@ test('getPrStatus returns PR details when PR exists', () => {
 });
 
 test('getComments returns null when the comment APIs fail', async () => {
-  const logs = [];
-  const apiCall = mock.fn((method, apiPath) => {
+  const logs: string[] = [];
+  const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
     if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
-      return { ok: true, data: [{ number: 121, head: { ref: 'mission/task-121' } }] };
+      return { ok: true as const, data: [{ number: 121, head: { ref: 'mission/task-121' } }] };
     }
     if (method === 'GET' && apiPath === '/issues/121/comments') {
-      return { ok: false, data: null };
+      return { ok: false as const, data: null };
     }
     if (method === 'GET' && apiPath === '/pulls/121/reviews') {
-      return { ok: true, data: [] };
+      return { ok: true as const, data: [] };
     }
-    return { ok: false, data: null };
-  });
+    return { ok: false as const, data: null };
+  }));
 
   const comments = await getComments('mission/task-121', 'fake-token', { configuration: resolveConfiguration(process.env),
     apiCall,
@@ -586,18 +590,18 @@ test('getComments returns null when the comment APIs fail', async () => {
 });
 
 test('getComments failure path works with the production default logger', async () => {
-  const apiCall = mock.fn((method, apiPath) => {
+  const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
     if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
-      return { ok: true, data: [{ number: 121, head: { ref: 'mission/task-121' } }] };
+      return { ok: true as const, data: [{ number: 121, head: { ref: 'mission/task-121' } }] };
     }
     if (method === 'GET' && apiPath === '/issues/121/comments') {
-      return { ok: false, data: null };
+      return { ok: false as const, data: null };
     }
     if (method === 'GET' && apiPath === '/pulls/121/reviews') {
-      return { ok: true, data: [] };
+      return { ok: true as const, data: [] };
     }
-    return { ok: false, data: null };
-  });
+    return { ok: false as const, data: null };
+  }));
 
   const comments = await getComments('mission/task-121', 'fake-token', { configuration: resolveConfiguration(process.env), apiCall });
 
@@ -624,32 +628,33 @@ assignee: [custom]
 `, 'utf8');
 
   try {
-    const calls = [];
+    const calls: { method: string; apiPath: string; token: string | undefined; }[] = [];
     const comments = await getComments('mission/task-204', 'codex-token', { configuration: resolveConfiguration(process.env),
-      apiCall(method, apiPath, token) {
+      apiCall: forgejoApiFixture((method, apiPath, token) => {
         calls.push({ method, apiPath, token });
         if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
-          if (token === 'codex-token') return { ok: true, data: [], status: 0 };
+          if (token === 'codex-token') return { ok: true as const, data: [], status: 0 };
           if (token === 'custom-token') {
-            return { ok: true, data: [{ number: 204, head: { ref: 'mission/task-204' } }], status: 0 };
+            return { ok: true as const, data: [{ number: 204, head: { ref: 'mission/task-204' } }], status: 0 };
           }
         }
         if (method === 'GET' && apiPath === '/issues/204/comments') {
-          if (token !== 'custom-token') return { ok: false, data: null, status: 401 };
+          if (token !== 'custom-token') return { ok: false as const, data: null, status: 401 };
           return {
-            ok: true,
+            ok: true as const,
             data: [{ user: { login: 'custom' }, created_at: '2026-05-22T10:00:00Z', body: 'resolved' }],
             status: 0
           };
         }
         if (method === 'GET' && apiPath === '/pulls/204/reviews') {
-          if (token !== 'custom-token') return { ok: false, data: null, status: 401 };
-          return { ok: true, data: [], status: 0 };
+          if (token !== 'custom-token') return { ok: false as const, data: null, status: 401 };
+          return { ok: true as const, data: [], status: 0 };
         }
-        return { ok: false, data: null, status: 404 };
-      }
+        return { ok: false as const, data: null, status: 404 };
+      })
     });
 
+    assert.ok(comments != null);
     assert.equal(comments.length, 1);
     assert.equal(comments[0].user, 'custom');
     assert.ok(calls.some(call => call.apiPath === '/issues/204/comments' && call.token === 'custom-token'));
@@ -666,21 +671,21 @@ assignee: [custom]
 
 test('getComments preserves provider identities and review context for reconciliation', async () => {
   const comments = await getComments('mission/task-2641', 'token', { configuration: resolveConfiguration(process.env),
-    apiCall(method, apiPath) {
+    apiCall: forgejoApiFixture((method, apiPath) => {
       if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
-        return { ok: true, data: [{ number: 2641, head: { ref: 'mission/task-2641' } }] };
+        return { ok: true as const, data: [{ number: 2641, head: { ref: 'mission/task-2641' } }] };
       }
       if (method === 'GET' && apiPath === '/issues/2641/comments') {
-        return { ok: true, data: [{ id: 1, user: { login: 'operator', type: 'user' }, created_at: '2026-10-05T10:00:00Z', updated_at: '2026-10-05T10:01:00Z', body: 'Context only' }] };
+        return { ok: true as const, data: [{ id: 1, user: { login: 'operator', type: 'user' }, created_at: '2026-10-05T10:00:00Z', updated_at: '2026-10-05T10:01:00Z', body: 'Context only' }] };
       }
       if (method === 'GET' && apiPath === '/pulls/2641/reviews') {
-        return { ok: true, data: [{ id: 42, user: { login: 'operator', type: 'user' }, created_at: '2026-10-05T10:02:00Z', updated_at: '2026-10-05T10:03:00Z', submitted_at: '2026-10-05T10:02:30Z', body: 'Please repair', state: 'REQUEST_CHANGES', dismissed: true }] };
+        return { ok: true as const, data: [{ id: 42, user: { login: 'operator', type: 'user' }, created_at: '2026-10-05T10:02:00Z', updated_at: '2026-10-05T10:03:00Z', submitted_at: '2026-10-05T10:02:30Z', body: 'Please repair', state: 'REQUEST_CHANGES', dismissed: true }] };
       }
       if (method === 'GET' && apiPath === '/pulls/2641/reviews/42/comments') {
-        return { ok: true, data: [{ id: 43, user: { login: 'forgejo[bot]', type: 'bot' }, created_at: '2026-10-05T10:04:00Z', updated_at: '2026-10-05T10:05:00Z', body: 'Inline detail', path: 'src/review.ts', original_line: 9 }] };
+        return { ok: true as const, data: [{ id: 43, user: { login: 'forgejo[bot]', type: 'bot' }, created_at: '2026-10-05T10:04:00Z', updated_at: '2026-10-05T10:05:00Z', body: 'Inline detail', path: 'src/review.ts', original_line: 9 }] };
       }
-      return { ok: false, data: null };
-    },
+      return { ok: false as const, data: null };
+    }),
   });
 
   assert.deepEqual(comments, [
@@ -722,27 +727,27 @@ assignee: [custom]
 `, 'utf8');
 
   try {
-    const calls = [];
+    const calls: { method: string; apiPath: string; token: string | undefined; }[] = [];
     const decision = getLatestReviewDecision('mission/task-205', { configuration: resolveConfiguration(process.env),
       token: 'codex-token',
-      apiCall(method, apiPath, token) {
+      apiCall: forgejoApiFixture((method, apiPath, token) => {
         calls.push({ method, apiPath, token });
         if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
-          if (token === 'codex-token') return { ok: true, data: [], status: 0 };
+          if (token === 'codex-token') return { ok: true as const, data: [], status: 0 };
           if (token === 'custom-token') {
-            return { ok: true, data: [{ number: 205, head: { ref: 'mission/task-205' } }], status: 0 };
+            return { ok: true as const, data: [{ number: 205, head: { ref: 'mission/task-205' } }], status: 0 };
           }
         }
         if (method === 'GET' && apiPath === '/pulls/205/reviews') {
-          if (token !== 'custom-token') return { ok: false, data: null, status: 401 };
+          if (token !== 'custom-token') return { ok: false as const, data: null, status: 401 };
           return {
-            ok: true,
+            ok: true as const,
             data: [{ state: 'APPROVED', submitted_at: '2026-05-22T10:00:00Z', user: { login: 'custom' } }],
             status: 0
           };
         }
-        return { ok: false, data: null, status: 404 };
-      }
+        return { ok: false as const, data: null, status: 404 };
+      })
     });
 
     assert.deepEqual(decision, {
@@ -773,53 +778,53 @@ test('getPrStatus and syncMerged share the same FORGEJO_USER fallback contract',
   fs.writeFileSync(path.join(tmpRoot, 'tokens', 'human'), 'fallback-token\n', 'utf8');
 
   try {
-    const statusCalls = [];
+    const statusCalls: { method: string; apiPath: string; token: string | undefined; }[] = [];
     const pr = getPrStatus('mission/task-081', '/tmp', { configuration: resolveConfiguration(process.env),
-      apiCall(method, apiPath, token) {
+      apiCall: forgejoApiFixture((method, apiPath, token) => {
         statusCalls.push({ method, apiPath, token });
         if (method === 'GET' && apiPath.includes('/pulls?state=all')) {
-          return { ok: true, data: [{ number: 41, head: { ref: 'mission/task-081' } }] };
+          return { ok: true as const, data: [{ number: 41, head: { ref: 'mission/task-081' } }] };
         }
         if (method === 'GET' && apiPath === '/pulls/41') {
           return {
-            ok: true,
+            ok: true as const,
             data: { number: 41, title: 'Mission task-081', state: 'open', merged: false, html_url: 'http://localhost:3300/example' }
           };
         }
-        return { ok: false, data: null, status: 1 };
-      }
+        return { ok: false as const, data: null, status: 1 };
+      })
     });
     assert.equal(pr.exists, true);
     assert.ok(statusCalls.every(call => call.token === 'fallback-token'));
 
-    const mergeCalls = [];
+    const mergeCalls: ({ type: "resolve-pr"; token: string; } | { type: "api"; method: string; apiPath: string; token: string | undefined; body: unknown; })[] = [];
     const merged = syncMerged('mission/task-081', 'abc123', { configuration: resolveConfiguration(process.env),
       resolvePrNumber(branch, token) {
-        mergeCalls.push({ type: 'resolve-pr', token });
+        mergeCalls.push({ type: 'resolve-pr' as const, token });
         return 41;
       },
-      apiCall(method, apiPath, token, body) {
-        mergeCalls.push({ type: 'api', method, apiPath, token, body });
+      apiCall: forgejoApiFixture((method, apiPath, token, body) => {
+        mergeCalls.push({ type: 'api' as const, method, apiPath, token, body });
         if (method === 'POST' && apiPath === '/pulls/41/merge') {
-          return { ok: true, data: { merged: true }, status: 0 };
+          return { ok: true as const, data: { merged: true }, status: 0 };
         }
-        return { ok: false, data: null, status: 1 };
-      },
+        return { ok: false as const, data: null, status: 1 };
+      }),
       // task-2545: benign gitRunner so reconcileForgejoBase never touches the
       // real checkout (clean runner has no review remote). Same contract as the
       // other syncMerged fixtures above.
-      gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
+      gitRunner: () => ({ stderr: '', signal: null,  stdout: 'shared-base-sha', status: 0 }),
       verifyCommit() {
-        return { status: 0 };
+        return { stdout: '', stderr: '', signal: null,  status: 0 };
       },
       gitPush() {
-        return { status: 0 };
+        return { stdout: '', stderr: '', signal: null,  status: 0 };
       },
       gitFetch() {
-        return { status: 0 };
+        return { stdout: '', stderr: '', signal: null,  status: 0 };
       },
       gitDelete() {
-        return { status: 0 };
+        return { stdout: '', stderr: '', signal: null,  status: 0 };
       },
       log() {}
     });
@@ -835,7 +840,7 @@ test('getPrStatus and syncMerged share the same FORGEJO_USER fallback contract',
 });
 
 test('getPrStatus reports missing PRs without throwing', () => {
-  const apiCall = mock.fn(() => ({ ok: true, data: [] }));
+  const apiCall = mock.fn(forgejoApiFixture(() => ({ ok: true as const, data: [] })));
 
   const pr = getPrStatus('mission/task-081', '/tmp', { configuration: resolveConfiguration(process.env), token: 'fake-token', apiCall });
   assert.equal(pr.exists, false);
@@ -843,15 +848,15 @@ test('getPrStatus reports missing PRs without throwing', () => {
 });
 
 test('getPrStatus surfaces sandbox guidance when PR detail API is unavailable', () => {
-  const apiCall = mock.fn((method, apiPath) => {
+  const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
     if (method === 'GET' && apiPath.includes('/pulls?state=all')) {
-      return { ok: true, data: [{ number: 42, head: { ref: 'mission/task-104' } }] };
+      return { ok: true as const, data: [{ number: 42, head: { ref: 'mission/task-104' } }] };
     }
     if (method === 'GET' && apiPath === '/pulls/42') {
-      return { ok: false, data: null, status: 7 };
+      return { ok: false as const, data: null, status: 7 };
     }
-    return { ok: false };
-  });
+    return { ok: false as const };
+  }));
 
   const pr = getPrStatus('mission/task-104', '/tmp', { configuration: resolveConfiguration(process.env),
     token: 'fake-token',
@@ -864,12 +869,12 @@ test('getPrStatus surfaces sandbox guidance when PR detail API is unavailable', 
 });
 
 test('getPrStatus surfaces Forgejo authentication failures clearly', () => {
-  const apiCall = mock.fn(() => ({
-    ok: false,
+  const apiCall = mock.fn(forgejoApiFixture(() => ({
+    ok: false as const,
     data: { message: 'user does not exist [uid: 0, name: ]' },
     status: 0,
     statusCode: 401,
-  }));
+  })));
 
   const pr = getPrStatus('mission/task-104', '/tmp', { configuration: resolveConfiguration(process.env),
     token: 'fake-token',
@@ -882,42 +887,42 @@ test('getPrStatus surfaces Forgejo authentication failures clearly', () => {
 });
 
 test('syncMerged pushes landed commit, marks PR merged, and deletes the remote branch', () => {
-  const calls = [];
+  const calls: ({ type: "resolve-pr"; branch: string; token: string; } | { type: "api"; method: string; apiPath: string; token: string | undefined; body: unknown; } | { type: "verify"; commit: string; rootDir: string | undefined; } | { type: "push"; sourceRef: string; destinationRef: string; rootDir: string | undefined; } | { type: "fetch"; branch: string; rootDir: string | undefined; } | { type: "delete"; branch: string; rootDir: string | undefined; } | { type: "log"; message: string; })[] = [];
   const result = syncMerged('mission/task-097', 'abc123', { configuration: resolveConfiguration(process.env),
     token: 'test-token',
     resolvePrNumber(branch, token) {
-      calls.push({ type: 'resolve-pr', branch, token });
+      calls.push({ type: 'resolve-pr' as const, branch, token });
       return 97;
     },
-    apiCall(method, apiPath, token, body) {
-      calls.push({ type: 'api', method, apiPath, token, body });
+    apiCall: forgejoApiFixture((method, apiPath, token, body) => {
+      calls.push({ type: 'api' as const, method, apiPath, token, body });
       if (method === 'POST' && apiPath === '/pulls/97/merge') {
-        return { ok: true, data: { merged: true }, status: 0 };
+        return { ok: true as const, data: { merged: true }, status: 0 };
       }
 
-      return { ok: false, data: null, status: 1 };
-    },
+      return { ok: false as const, data: null, status: 1 };
+    }),
     verifyCommit(commit, rootDir) {
-      calls.push({ type: 'verify', commit, rootDir });
-      return { status: 0 };
+      calls.push({ type: 'verify' as const, commit, rootDir });
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitPush(sourceRef, destinationRef, rootDir) {
-      calls.push({ type: 'push', sourceRef, destinationRef, rootDir });
-      return { status: 0 };
+      calls.push({ type: 'push' as const, sourceRef, destinationRef, rootDir });
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitFetch(branch, rootDir) {
-      calls.push({ type: 'fetch', branch, rootDir });
-      return { status: 0 };
+      calls.push({ type: 'fetch' as const, branch, rootDir });
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     // task-2520 reconcileForgejoBase pre-step: benign gitRunner makes the base
     // reconciliation an 'unchanged' no-op, so only the landed-commit flow runs.
-    gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
+    gitRunner: () => ({ stderr: '', signal: null,  stdout: 'shared-base-sha', status: 0 }),
     gitDelete(branch, rootDir) {
-      calls.push({ type: 'delete', branch, rootDir });
-      return { status: 0 };
+      calls.push({ type: 'delete' as const, branch, rootDir });
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     log(message) {
-      calls.push({ type: 'log', message });
+      calls.push({ type: 'log' as const, message });
     }
   });
 
@@ -931,8 +936,10 @@ test('syncMerged pushes landed commit, marks PR merged, and deletes the remote b
       ['abc123', 'refs/heads/mission/task-097']
     ]
   );
+  const mergeCall = calls.filter(call => call.type === 'api').find(call => call.method === 'POST');
+  assert.ok(mergeCall);
   assert.deepEqual(
-    calls.find(call => call.type === 'api' && call.method === 'POST').body,
+    mergeCall.body,
     {
       Do: 'manually-merged',
       MergeCommitID: 'abc123',
@@ -943,35 +950,35 @@ test('syncMerged pushes landed commit, marks PR merged, and deletes the remote b
 });
 
 test('syncMerged pushes the landed commit to the recorded base branch for feature-branch missions', () => {
-  const calls = [];
+  const calls: { type: "push"; sourceRef: string; destinationRef: string; rootDir: string | undefined; }[] = [];
   const result = syncMerged('mission/task-097', 'abc123', { configuration: resolveConfiguration(process.env),
     token: 'test-token',
     baseBranch: 'skunkworks',
     resolvePrNumber() {
       return 97;
     },
-    apiCall(method, apiPath) {
+    apiCall: forgejoApiFixture((method, apiPath) => {
       if (method === 'POST' && apiPath === '/pulls/97/merge') {
-        return { ok: true, data: { merged: true }, status: 0 };
+        return { ok: true as const, data: { merged: true }, status: 0 };
       }
-      return { ok: false, data: null, status: 1 };
-    },
+      return { ok: false as const, data: null, status: 1 };
+    }),
     verifyCommit() {
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitPush(sourceRef, destinationRef, rootDir) {
-      calls.push({ type: 'push', sourceRef, destinationRef, rootDir });
-      return { status: 0 };
+      calls.push({ type: 'push' as const, sourceRef, destinationRef, rootDir });
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitFetch() {
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     // task-2520 reconcileForgejoBase pre-step: benign gitRunner resolves the
     // local and fetched base SHAs equal, so reconciliation is an 'unchanged'
     // no-op and this test still exercises only the landed-commit push/fetch flow.
-    gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
+    gitRunner: () => ({ stderr: '', signal: null,  stdout: 'shared-base-sha', status: 0 }),
     gitDelete() {
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     log() {}
   });
@@ -987,51 +994,51 @@ test('syncMerged pushes the landed commit to the recorded base branch for featur
 });
 
 test('syncMerged continues when main push fails but review main already contains landed commit', () => {
-  const calls = [];
+  const calls: ({ type: "resolve-pr"; branch: string; token: string; } | { type: "api"; method: string; apiPath: string; token: string | undefined; body: unknown; } | { type: "verify"; commit: string; rootDir: string | undefined; } | { type: "push"; sourceRef: string; destinationRef: string; rootDir: string | undefined; options: PushReviewRefOptions | undefined; } | { type: "fetch"; branch: string; rootDir: string | undefined; } | { type: "contains"; commit: string; remoteRef: string | undefined; rootDir: string | undefined; } | { type: "delete"; branch: string; rootDir: string | undefined; } | { type: "log"; message: string; })[] = [];
   const result = syncMerged('mission/task-1062', 'abc123', { configuration: resolveConfiguration(process.env),
     token: 'test-token',
     resolvePrNumber(branch, token) {
-      calls.push({ type: 'resolve-pr', branch, token });
+      calls.push({ type: 'resolve-pr' as const, branch, token });
       return 1062;
     },
-    apiCall(method, apiPath, token, body) {
-      calls.push({ type: 'api', method, apiPath, token, body });
+    apiCall: forgejoApiFixture((method, apiPath, token, body) => {
+      calls.push({ type: 'api' as const, method, apiPath, token, body });
       if (method === 'POST' && apiPath === '/pulls/1062/merge') {
-        return { ok: true, data: { merged: true }, status: 0 };
+        return { ok: true as const, data: { merged: true }, status: 0 };
       }
-      return { ok: false, data: null, status: 1 };
-    },
+      return { ok: false as const, data: null, status: 1 };
+    }),
     verifyCommit(commit, rootDir) {
-      calls.push({ type: 'verify', commit, rootDir });
-      return { status: 0 };
+      calls.push({ type: 'verify' as const, commit, rootDir });
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitPush(sourceRef, destinationRef, rootDir, options) {
-      calls.push({ type: 'push', sourceRef, destinationRef, rootDir, options });
+      calls.push({ type: 'push' as const, sourceRef, destinationRef, rootDir, options });
       if (destinationRef === 'refs/heads/main') {
-        return {
+        return { stdout: '', signal: null,
           status: 1,
           stderr: '! [rejected] abc123 -> main (non-fast-forward)'
         };
       }
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitFetch(branch, rootDir) {
-      calls.push({ type: 'fetch', branch, rootDir });
-      return { status: 0 };
+      calls.push({ type: 'fetch' as const, branch, rootDir });
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     // task-2520 reconcileForgejoBase pre-step: benign gitRunner makes the base
     // reconciliation an 'unchanged' no-op, so only the landed-commit flow runs.
-    gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
+    gitRunner: () => ({ stderr: '', signal: null,  stdout: 'shared-base-sha', status: 0 }),
     gitContainsCommit(commit, remoteRef, rootDir) {
-      calls.push({ type: 'contains', commit, remoteRef, rootDir });
-      return { status: 0 };
+      calls.push({ type: 'contains' as const, commit, remoteRef, rootDir });
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitDelete(branch, rootDir) {
-      calls.push({ type: 'delete', branch, rootDir });
-      return { status: 0 };
+      calls.push({ type: 'delete' as const, branch, rootDir });
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     log(message) {
-      calls.push({ type: 'log', message });
+      calls.push({ type: 'log' as const, message });
     }
   });
 
@@ -1056,52 +1063,52 @@ test('syncMerged continues when main push fails but review main already contains
 });
 
 test('syncMerged recovers from stale-info branch push rejection by fetching and retrying', () => {
-  const calls = [];
+  const calls: ({ type: "resolve-pr"; branch: string; token: string; } | { type: "api"; method: string; apiPath: string; token: string | undefined; body: unknown; } | { type: "verify"; commit: string; rootDir: string | undefined; } | { type: "push"; sourceRef: string; destinationRef: string; rootDir: string | undefined; options: PushReviewRefOptions | undefined; } | { type: "fetch"; branch: string; rootDir: string | undefined; } | { type: "delete"; branch: string; rootDir: string | undefined; } | { type: "log"; message: string; })[] = [];
   let branchPushAttempts = 0;
   const result = syncMerged('mission/task-1062', 'abc123', { configuration: resolveConfiguration(process.env),
     token: 'test-token',
     resolvePrNumber(branch, token) {
-      calls.push({ type: 'resolve-pr', branch, token });
+      calls.push({ type: 'resolve-pr' as const, branch, token });
       return 1062;
     },
-    apiCall(method, apiPath, token, body) {
-      calls.push({ type: 'api', method, apiPath, token, body });
+    apiCall: forgejoApiFixture((method, apiPath, token, body) => {
+      calls.push({ type: 'api' as const, method, apiPath, token, body });
       if (method === 'POST' && apiPath === '/pulls/1062/merge') {
-        return { ok: true, data: { merged: true }, status: 0 };
+        return { ok: true as const, data: { merged: true }, status: 0 };
       }
-      return { ok: false, data: null, status: 1 };
-    },
+      return { ok: false as const, data: null, status: 1 };
+    }),
     verifyCommit(commit, rootDir) {
-      calls.push({ type: 'verify', commit, rootDir });
-      return { status: 0 };
+      calls.push({ type: 'verify' as const, commit, rootDir });
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitPush(sourceRef, destinationRef, rootDir, options) {
-      calls.push({ type: 'push', sourceRef, destinationRef, rootDir, options });
+      calls.push({ type: 'push' as const, sourceRef, destinationRef, rootDir, options });
       if (destinationRef === 'refs/heads/mission/task-1062') {
         branchPushAttempts++;
         if (branchPushAttempts > 1) {
-          return { status: 0 };
+          return { stdout: '', stderr: '', signal: null,  status: 0 };
         }
-        return {
+        return { stdout: '', signal: null,
           status: 1,
           stderr: '! [rejected] abc123 -> mission/task-1062 (stale info)'
         };
       }
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitFetch(branch, rootDir) {
-      calls.push({ type: 'fetch', branch, rootDir });
-      return { status: 0 };
+      calls.push({ type: 'fetch' as const, branch, rootDir });
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     // task-2520 reconcileForgejoBase pre-step: benign gitRunner makes the base
     // reconciliation an 'unchanged' no-op, so only the landed-commit flow runs.
-    gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
+    gitRunner: () => ({ stderr: '', signal: null,  stdout: 'shared-base-sha', status: 0 }),
     gitDelete(branch, rootDir) {
-      calls.push({ type: 'delete', branch, rootDir });
-      return { status: 0 };
+      calls.push({ type: 'delete' as const, branch, rootDir });
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     log(message) {
-      calls.push({ type: 'log', message });
+      calls.push({ type: 'log' as const, message });
     }
   });
 
@@ -1126,41 +1133,41 @@ test('syncMerged recovers from stale-info branch push rejection by fetching and 
 });
 
 test('syncMerged falls back to force push when stale-info persists after fetch retry', () => {
-  const calls = [];
+  const calls: ({ type: "api"; method: string; apiPath: string; } | { type: "push"; sourceRef: string; destinationRef: string; options: PushReviewRefOptions | undefined; } | { type: "fetch"; branch: string; })[] = [];
   const result = syncMerged('mission/task-1062', 'abc123', { configuration: resolveConfiguration(process.env),
     token: 'test-token',
     resolvePrNumber() {
       return 1062;
     },
-    apiCall(method, apiPath) {
-      calls.push({ type: 'api', method, apiPath });
+    apiCall: forgejoApiFixture((method, apiPath) => {
+      calls.push({ type: 'api' as const, method, apiPath });
       if (method === 'POST' && apiPath === '/pulls/1062/merge') {
-        return { ok: true, data: { merged: true }, status: 0 };
+        return { ok: true as const, data: { merged: true }, status: 0 };
       }
-      return { ok: false, data: null, status: 1 };
-    },
+      return { ok: false as const, data: null, status: 1 };
+    }),
     verifyCommit() {
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitPush(sourceRef, destinationRef, rootDir, options) {
-      calls.push({ type: 'push', sourceRef, destinationRef, options });
+      calls.push({ type: 'push' as const, sourceRef, destinationRef, options });
       if (destinationRef === 'refs/heads/mission/task-1062' && options && options.forceWithLease) {
-        return {
+        return { stdout: '', signal: null,
           status: 1,
           stderr: '! [rejected] abc123 -> mission/task-1062 (stale info)'
         };
       }
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitFetch(branch) {
-      calls.push({ type: 'fetch', branch });
-      return { status: 0 };
+      calls.push({ type: 'fetch' as const, branch });
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     // task-2520 reconcileForgejoBase pre-step: benign gitRunner makes the base
     // reconciliation an 'unchanged' no-op, so only the landed-commit flow runs.
-    gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
+    gitRunner: () => ({ stderr: '', signal: null,  stdout: 'shared-base-sha', status: 0 }),
     gitDelete() {
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     log() {}
   });
@@ -1178,36 +1185,36 @@ test('syncMerged falls back to force push when stale-info persists after fetch r
 });
 
 test('syncMerged does not treat unrelated stale output as stale-info branch rejection', () => {
-  const calls = [];
+  const calls: ({ type: "api"; method: string; apiPath: string; } | { type: "push"; sourceRef: string; destinationRef: string; options: PushReviewRefOptions | undefined; } | { type: "fetch"; branch: string; })[] = [];
   const result = syncMerged('mission/task-1062', 'abc123', { configuration: resolveConfiguration(process.env),
     token: 'test-token',
     resolvePrNumber() {
       return 1062;
     },
-    apiCall(method, apiPath) {
-      calls.push({ type: 'api', method, apiPath });
-      return { ok: false, data: null, status: 1 };
-    },
+    apiCall: forgejoApiFixture((method, apiPath) => {
+      calls.push({ type: 'api' as const, method, apiPath });
+      return { ok: false as const, data: null, status: 1 };
+    }),
     verifyCommit() {
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitPush(sourceRef, destinationRef, rootDir, options) {
-      calls.push({ type: 'push', sourceRef, destinationRef, options });
+      calls.push({ type: 'push' as const, sourceRef, destinationRef, options });
       if (destinationRef === 'refs/heads/mission/task-1062') {
-        return {
+        return { stdout: '', signal: null,
           status: 1,
           stderr: 'fatal: stale remote certificate cache'
         };
       }
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitFetch(branch) {
-      calls.push({ type: 'fetch', branch });
-      return { status: 0 };
+      calls.push({ type: 'fetch' as const, branch });
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     // task-2520 reconcileForgejoBase pre-step: benign gitRunner makes the base
     // reconciliation an 'unchanged' no-op, so only the landed-commit flow runs.
-    gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
+    gitRunner: () => ({ stderr: '', signal: null,  stdout: 'shared-base-sha', status: 0 }),
     gitDelete() {
       throw new Error('gitDelete should not be called when branch push fails');
     },
@@ -1232,11 +1239,11 @@ test('syncMerged fails cleanly when the landed commit does not exist locally', (
     resolvePrNumber() {
       return 97;
     },
-    apiCall() {
-      return { ok: false, data: null, status: 1 };
-    },
+    apiCall: forgejoApiFixture(() => {
+      return { ok: false as const, data: null, status: 1 };
+    }),
     verifyCommit() {
-      return { status: 1 };
+      return { stdout: '', stderr: '', signal: null,  status: 1 };
     },
     gitPush() {
       throw new Error('gitPush should not be called when commit verification fails');
@@ -1251,16 +1258,16 @@ test('syncMerged fails cleanly when the landed commit does not exist locally', (
 });
 
 test('getPrNumber follows pagination until it finds the matching branch', () => {
-  const calls = [];
+  const calls: { method: string; apiPath: string; token: string | undefined; }[] = [];
   const prNumber = getPrNumber('mission/task-097', 'test-token', { configuration: resolveConfiguration(process.env),
-    apiCall(method, apiPath, token) {
+    apiCall: forgejoApiFixture((method, apiPath, token) => {
       calls.push({ method, apiPath, token });
       if (apiPath.includes('state=open')) {
-        return { ok: true, data: [], status: 0 };
+        return { ok: true as const, data: [], status: 0 };
       }
       if (apiPath.includes('state=all') && apiPath.includes('page=1')) {
         return {
-          ok: true,
+          ok: true as const,
           data: Array.from({ length: 50 }, (_, index) => ({
             number: index + 1,
             head: { ref: `mission/task-${index}`, label: `magnus:mission/task-${index}` }
@@ -1270,7 +1277,7 @@ test('getPrNumber follows pagination until it finds the matching branch', () => 
       }
       if (apiPath.includes('state=all') && apiPath.includes('page=2')) {
         return {
-          ok: true,
+          ok: true as const,
           data: [
             {
               number: 97,
@@ -1280,8 +1287,8 @@ test('getPrNumber follows pagination until it finds the matching branch', () => 
           status: 0
         };
       }
-      return { ok: true, data: [], status: 0 };
-    }
+      return { ok: true as const, data: [], status: 0 };
+    })
   });
 
   assert.equal(prNumber, 97);
@@ -1290,11 +1297,11 @@ test('getPrNumber follows pagination until it finds the matching branch', () => 
 test('getPrAuthor returns the PR author login from GET /pulls/{n}', () => {
   const author = getPrAuthor('mission/task-1255', 'test-token', {
     resolvePrNumber: () => 214,
-    apiCall(method, apiPath) {
+    apiCall: forgejoApiFixture((method, apiPath) => {
       assert.equal(method, 'GET');
       assert.equal(apiPath, '/pulls/214');
-      return { ok: true, status: 0, statusCode: 200, data: { user: { login: 'custom' } } };
-    }
+      return { ok: true as const, status: 0, statusCode: 200, data: { user: { login: 'custom' } } };
+    })
   });
   assert.equal(author, 'custom');
 });
@@ -1302,9 +1309,9 @@ test('getPrAuthor returns the PR author login from GET /pulls/{n}', () => {
 test('getPrAuthor degrades to null when the PR cannot be resolved', () => {
   const author = getPrAuthor('mission/task-1255', 'test-token', {
     resolvePrNumber: () => null,
-    apiCall() {
+    apiCall: forgejoApiFixture(() => {
       throw new Error('apiCall should not be invoked when PR is unresolved');
-    }
+    })
   });
   assert.equal(author, null);
 });
@@ -1312,13 +1319,13 @@ test('getPrAuthor degrades to null when the PR cannot be resolved', () => {
 test('getPrAuthor degrades to null when the PR detail API fails or lacks a user', () => {
   const failAuthor = getPrAuthor('mission/task-1255', 'test-token', {
     resolvePrNumber: () => 214,
-    apiCall: () => ({ ok: false, status: 0, statusCode: 500, data: null })
+    apiCall: forgejoApiFixture(() => ({ ok: false as const, status: 0, statusCode: 500, data: null }))
   });
   assert.equal(failAuthor, null);
 
   const noUserAuthor = getPrAuthor('mission/task-1255', 'test-token', {
     resolvePrNumber: () => 214,
-    apiCall: () => ({ ok: true, status: 0, statusCode: 200, data: {} })
+    apiCall: forgejoApiFixture(() => ({ ok: true as const, status: 0, statusCode: 200, data: {} }))
   });
   assert.equal(noUserAuthor, null);
 });
@@ -1329,10 +1336,10 @@ test('getLatestReviewDecision returns the latest formal review state for the bra
   try {
     const decision = getLatestReviewDecision('mission/task-097', { configuration: resolveConfiguration(process.env),
       token: 'test-token',
-      apiCall(method, apiPath, token) {
+      apiCall: forgejoApiFixture((method, apiPath, token) => {
         if (apiPath.includes('/pulls?state=')) {
           return {
-            ok: true,
+            ok: true as const,
             data: [
               {
                 number: 97,
@@ -1344,7 +1351,7 @@ test('getLatestReviewDecision returns the latest formal review state for the bra
         }
         if (apiPath === '/pulls/97/reviews') {
           return {
-            ok: true,
+            ok: true as const,
             data: [
               { state: 'REQUEST_CHANGES', submitted_at: '2026-04-12T10:00:00Z', user: { login: 'codex' } },
               { state: 'APPROVED', submitted_at: '2026-04-12T11:00:00Z', user: { login: 'human' } }
@@ -1352,8 +1359,8 @@ test('getLatestReviewDecision returns the latest formal review state for the bra
             status: 0
           };
         }
-        return { ok: false, data: null, status: 1 };
-      }
+        return { ok: false as const, data: null, status: 1 };
+      })
     });
 
     assert.deepEqual(decision, {
@@ -1375,10 +1382,10 @@ test('getLatestReviewDecision rejects an older default-user approval after a lat
   try {
     const decision = getLatestReviewDecision('mission/task-097', { configuration: resolveConfiguration(process.env),
       token: 'test-token',
-      apiCall(method, apiPath, token) {
+      apiCall: forgejoApiFixture((method, apiPath, token) => {
         if (apiPath.includes('/pulls?state=')) {
           return {
-            ok: true,
+            ok: true as const,
             data: [
               {
                 number: 97,
@@ -1390,7 +1397,7 @@ test('getLatestReviewDecision rejects an older default-user approval after a lat
         }
         if (apiPath === '/pulls/97/reviews') {
           return {
-            ok: true,
+            ok: true as const,
             data: [
               { state: 'APPROVED', submitted_at: '2026-04-12T10:00:00Z', user: { login: 'human' } },
               { state: 'REQUEST_CHANGES', submitted_at: '2026-04-12T11:00:00Z', user: { login: 'codex' } }
@@ -1398,8 +1405,8 @@ test('getLatestReviewDecision rejects an older default-user approval after a lat
             status: 0
           };
         }
-        return { ok: false, data: null, status: 1 };
-      }
+        return { ok: false as const, data: null, status: 1 };
+      })
     });
 
     assert.deepEqual(decision, {
@@ -1420,10 +1427,10 @@ test('getLatestReviewDecision returns defaultUserApproved false when default use
   try {
     const decision = getLatestReviewDecision('mission/task-097', { configuration: resolveConfiguration(process.env),
       token: 'test-token',
-      apiCall(method, apiPath, token) {
+      apiCall: forgejoApiFixture((method, apiPath, token) => {
         if (apiPath.includes('/pulls?state=')) {
           return {
-            ok: true,
+            ok: true as const,
             data: [
               {
                 number: 97,
@@ -1435,7 +1442,7 @@ test('getLatestReviewDecision returns defaultUserApproved false when default use
         }
         if (apiPath === '/pulls/97/reviews') {
           return {
-            ok: true,
+            ok: true as const,
             data: [
               { state: 'APPROVED', submitted_at: '2026-04-12T10:00:00Z', user: { login: 'codex' } },
               { state: 'REQUEST_CHANGES', submitted_at: '2026-04-12T11:00:00Z', user: { login: 'gemini' } }
@@ -1443,8 +1450,8 @@ test('getLatestReviewDecision returns defaultUserApproved false when default use
             status: 0
           };
         }
-        return { ok: false, data: null, status: 1 };
-      }
+        return { ok: false as const, data: null, status: 1 };
+      })
     });
 
     assert.deepEqual(decision, {
@@ -1469,10 +1476,10 @@ test('getLatestReviewDecision ignores a default-user approval superseded by the 
   try {
     const decision = getLatestReviewDecision('mission/task-097', { configuration: resolveConfiguration(process.env),
       token: 'test-token',
-      apiCall(method, apiPath, token) {
+      apiCall: forgejoApiFixture((method, apiPath, token) => {
         if (apiPath.includes('/pulls?state=')) {
           return {
-            ok: true,
+            ok: true as const,
             data: [
               {
                 number: 97,
@@ -1484,7 +1491,7 @@ test('getLatestReviewDecision ignores a default-user approval superseded by the 
         }
         if (apiPath === '/pulls/97/reviews') {
           return {
-            ok: true,
+            ok: true as const,
             data: [
               { state: 'APPROVED', submitted_at: '2026-04-12T10:00:00Z', user: { login: 'human' } },
               { state: 'REQUEST_CHANGES', submitted_at: '2026-04-12T11:00:00Z', user: { login: 'human' } }
@@ -1492,8 +1499,8 @@ test('getLatestReviewDecision ignores a default-user approval superseded by the 
             status: 0
           };
         }
-        return { ok: false, data: null, status: 1 };
-      }
+        return { ok: false as const, data: null, status: 1 };
+      })
     });
 
     assert.deepEqual(decision, {
@@ -1509,39 +1516,39 @@ test('getLatestReviewDecision ignores a default-user approval superseded by the 
 });
 
 test('syncMerged treats 409 Conflict as success if commits match (already merged)', () => {
-  const calls = [];
+  const calls: ({ type: "api"; method: string; apiPath: string; token: string | undefined; body: unknown; } | { type: "log"; message: string; })[] = [];
   const result = syncMerged('mission/task-101', 'abc123', { configuration: resolveConfiguration(process.env),
     token: 'test-token',
     resolvePrNumber(branch, token) {
       return 101;
     },
-    apiCall(method, apiPath, token, body) {
-      calls.push({ type: 'api', method, apiPath, token, body });
+    apiCall: forgejoApiFixture((method, apiPath, token, body) => {
+      calls.push({ type: 'api' as const, method, apiPath, token, body });
       if (method === 'POST' && apiPath === '/pulls/101/merge') {
-        return { ok: false, data: { message: 'base and head are the same' }, status: 0, statusCode: 409 };
+        return { ok: false as const, data: { message: 'base and head are the same' }, status: 0, statusCode: 409 };
       }
       if (method === 'GET' && apiPath === '/pulls/101') {
-        return { ok: true, data: { base: { sha: 'abc123' }, head: { sha: 'abc123' } }, status: 0 };
+        return { ok: true as const, data: { base: { sha: 'abc123' }, head: { sha: 'abc123' } }, status: 0 };
       }
-      return { ok: false, data: null, status: 1 };
-    },
+      return { ok: false as const, data: null, status: 1 };
+    }),
     // task-2545: benign gitRunner makes reconcileForgejoBase an 'unchanged'
     // no-op so no real checkout is touched (clean runner has no review remote).
-    gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
+    gitRunner: () => ({ stderr: '', signal: null,  stdout: 'shared-base-sha', status: 0 }),
     verifyCommit(commit, rootDir) {
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitFetch() {
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitPush(sourceRef, destinationRef, rootDir) {
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitDelete(branch, rootDir) {
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     log(message) {
-      calls.push({ type: 'log', message });
+      calls.push({ type: 'log' as const, message });
     }
   });
 
@@ -1551,39 +1558,39 @@ test('syncMerged treats 409 Conflict as success if commits match (already merged
 });
 
 test('syncMerged treats 405 Method Not Allowed as success if commits match (already merged)', () => {
-  const calls = [];
+  const calls: ({ type: "api"; method: string; apiPath: string; token: string | undefined; body: unknown; } | { type: "log"; message: string; })[] = [];
   const result = syncMerged('mission/task-101', 'abc123', { configuration: resolveConfiguration(process.env),
     token: 'test-token',
     resolvePrNumber(branch, token) {
       return 101;
     },
-    apiCall(method, apiPath, token, body) {
-      calls.push({ type: 'api', method, apiPath, token, body });
+    apiCall: forgejoApiFixture((method, apiPath, token, body) => {
+      calls.push({ type: 'api' as const, method, apiPath, token, body });
       if (method === 'POST' && apiPath === '/pulls/101/merge') {
-        return { ok: false, data: { message: 'Method Not Allowed' }, status: 0, statusCode: 405 };
+        return { ok: false as const, data: { message: 'Method Not Allowed' }, status: 0, statusCode: 405 };
       }
       if (method === 'GET' && apiPath === '/pulls/101') {
-        return { ok: true, data: { base: { sha: 'abc123' }, head: { sha: 'abc123' } }, status: 0 };
+        return { ok: true as const, data: { base: { sha: 'abc123' }, head: { sha: 'abc123' } }, status: 0 };
       }
-      return { ok: false, data: null, status: 1 };
-    },
+      return { ok: false as const, data: null, status: 1 };
+    }),
     // task-2545: benign gitRunner makes reconcileForgejoBase an 'unchanged'
     // no-op so no real checkout is touched (clean runner has no review remote).
-    gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
+    gitRunner: () => ({ stderr: '', signal: null,  stdout: 'shared-base-sha', status: 0 }),
     verifyCommit(commit, rootDir) {
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitFetch() {
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitPush(sourceRef, destinationRef, rootDir) {
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitDelete(branch, rootDir) {
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     log(message) {
-      calls.push({ type: 'log', message });
+      calls.push({ type: 'log' as const, message });
     }
   });
 
@@ -1598,29 +1605,29 @@ test('syncMerged fails on 409 Conflict if commits do NOT match', () => {
     resolvePrNumber(branch, token) {
       return 101;
     },
-    apiCall(method, apiPath, token, body) {
+    apiCall: forgejoApiFixture((method, apiPath, token, body) => {
       if (method === 'POST' && apiPath === '/pulls/101/merge') {
-        return { ok: false, data: { message: 'Conflict' }, status: 0, statusCode: 409 };
+        return { ok: false as const, data: { message: 'Conflict' }, status: 0, statusCode: 409 };
       }
       if (method === 'GET' && apiPath === '/pulls/101') {
-        return { ok: true, data: { base: { sha: 'some-other-sha' }, head: { sha: 'abc123' } }, status: 0 };
+        return { ok: true as const, data: { base: { sha: 'some-other-sha' }, head: { sha: 'abc123' } }, status: 0 };
       }
-      return { ok: false, data: null, status: 1 };
-    },
+      return { ok: false as const, data: null, status: 1 };
+    }),
     // task-2545: benign gitRunner makes reconcileForgejoBase an 'unchanged'
     // no-op so no real checkout is touched (clean runner has no review remote).
-    gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
+    gitRunner: () => ({ stderr: '', signal: null,  stdout: 'shared-base-sha', status: 0 }),
     verifyCommit(commit, rootDir) {
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitFetch() {
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitPush(sourceRef, destinationRef, rootDir) {
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     gitDelete(branch, rootDir) {
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     },
     log(message) {}
   });
@@ -1631,8 +1638,11 @@ test('syncMerged fails on 409 Conflict if commits do NOT match', () => {
 });
 
 test('forgejoAvailable returns true when Forgejo is reachable', async () => {
-  const req = new EventEmitter();
-  req.destroy = mock.fn();
+  const req = Object.assign(new EventEmitter(), {
+    destroy: mock.fn<() => void>(),
+    end: mock.fn<() => void>(),
+    _onResponse: (_response: { statusCode?: number }): void => { throw new Error('response callback was not installed'); },
+  });
   req.end = mock.fn(() => {
     process.nextTick(() => req._onResponse({ statusCode: 200 }));
   });
@@ -1652,8 +1662,11 @@ test('forgejoAvailable returns true when Forgejo is reachable', async () => {
 });
 
 test('forgejoAvailable returns false when Forgejo is unreachable', async () => {
-  const req = new EventEmitter();
-  req.destroy = mock.fn();
+  const req = Object.assign(new EventEmitter(), {
+    destroy: mock.fn<() => void>(),
+    end: mock.fn<() => void>(),
+    _onResponse: (_response: { statusCode?: number }): void => { throw new Error('response callback was not installed'); },
+  });
   req.end = mock.fn(() => {
     process.nextTick(() => req.emit('error', new Error('ECONNREFUSED')));
   });
@@ -1672,41 +1685,47 @@ test('forgejoAvailable returns false when Forgejo is unreachable', async () => {
 });
 
 test('postReview includes commit_id', () => {
-  const calls = [];
-  const apiCall = mock.fn((method, apiPath, token, body) => {
+  const calls: { method: string; apiPath: string; body: unknown; }[] = [];
+  const apiCall = mock.fn(forgejoApiFixture((method, apiPath, token, body) => {
     calls.push({ method, apiPath, body });
     if (method === 'GET' && apiPath === '/pulls/123') {
-      return { ok: true, data: { head: { sha: 'head-sha-456' } } };
+      return { ok: true as const, data: { head: { sha: 'head-sha-456' } } };
     }
     if (method === 'GET' && apiPath.includes('/pulls?state=')) {
-      return { ok: true, data: [{ number: 123, head: { ref: 'mission/task-001' } }] };
+      return { ok: true as const, data: [{ number: 123, head: { ref: 'mission/task-001' } }] };
     }
-    return { ok: true };
-  });
+    return { ok: true as const };
+  }));
 
   postReview('mission/task-001', 'fake-token', 'approve', 'LGTM', { configuration: resolveConfiguration(process.env), apiCall });
 
   const postCall = calls.find(c => c.method === 'POST');
   assert.ok(postCall, 'Should have made a POST call');
+  assert.ok(postCall.body && typeof postCall.body === 'object' && 'commit_id' in postCall.body);
   assert.equal(postCall.body.commit_id, 'head-sha-456');
 });
 
 test('classifier publication uses its own identity and rejects a different PR revision (TASK-2658)', () => {
   for (const head of ['candidate', 'drifted']) {
-    const posts = [];
-    const apiCall = (method, apiPath, token, body, options) => {
+    const posts: unknown[] = [];
+    const apiCall = forgejoApiFixture((method, apiPath, token, body, options) => {
       assert.equal(token, 'jev-token');
+      assert.ok(options != null);
       assert.equal(options.rootDir, '/classifier-worktree');
       if (method === 'POST') { posts.push(body); }
-      return { ok: true, data: { head: { sha: head } } };
-    };
+      return { ok: true as const, data: { head: { sha: head } } };
+    });
     const result = postReview('mission/task-2658', 'jev-token', 'approve', 'Scope F1', { configuration: resolveConfiguration(process.env),
       apiCall, rootDir: '/classifier-worktree', forgejoUser: 'jev', expectedRevision: 'candidate',
       resolvePrNumber: (_branch, _token, options) => { assert.equal(options.forgejoUser, 'jev'); return 1; },
     });
     assert.equal(result.ok, head === 'candidate');
     assert.equal(posts.length, head === 'candidate' ? 1 : 0);
-    if (posts.length) { assert.equal(posts[0].commit_id, 'candidate'); }
+    if (posts.length) {
+      const posted = posts[0];
+      assert.ok(posted && typeof posted === 'object' && 'commit_id' in posted);
+      assert.equal(posted.commit_id, 'candidate');
+    }
   }
 });
 
@@ -1719,16 +1738,16 @@ test('postComment resolves PR via default token fallback while posting as codex'
   fs.writeFileSync(path.join(tmpRoot, 'token'), 'default-token\n', 'utf8');
 
   try {
-    const calls = [];
+    const calls: { method: string; apiPath: string; token: string | undefined; body: unknown; }[] = [];
     const result = postComment('mission/task-111', 'codex-token', 'review comment', { configuration: resolveConfiguration(process.env),
-      apiCall(method, apiPath, token, body) {
+      apiCall: forgejoApiFixture((method, apiPath, token, body) => {
         calls.push({ method, apiPath, token, body });
         if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
-          if (token === 'codex-token') return { ok: true, data: [], status: 0 };
-          if (token === 'default-token') return { ok: true, data: [{ number: 39, head: { ref: 'mission/task-111' } }], status: 0 };
+          if (token === 'codex-token') return { ok: true as const, data: [], status: 0 };
+          if (token === 'default-token') return { ok: true as const, data: [{ number: 39, head: { ref: 'mission/task-111' } }], status: 0 };
         }
-        return { ok: true, data: { ok: true }, status: 0 };
-      }
+        return { ok: true as const, data: { ok: true }, status: 0 };
+      })
     });
 
     assert.equal(result.ok, true);
@@ -1752,19 +1771,19 @@ test('postReview resolves PR via default token fallback while posting as codex',
   fs.writeFileSync(path.join(tmpRoot, 'token'), 'default-token\n', 'utf8');
 
   try {
-    const calls = [];
+    const calls: { method: string; apiPath: string; token: string | undefined; body: unknown; }[] = [];
     const result = postReview('mission/task-111', 'codex-token', 'request-changes', 'needs fixes', { configuration: resolveConfiguration(process.env),
-      apiCall(method, apiPath, token, body) {
+      apiCall: forgejoApiFixture((method, apiPath, token, body) => {
         calls.push({ method, apiPath, token, body });
         if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
-          if (token === 'codex-token') return { ok: true, data: [], status: 0 };
-          if (token === 'default-token') return { ok: true, data: [{ number: 39, head: { ref: 'mission/task-111' } }], status: 0 };
+          if (token === 'codex-token') return { ok: true as const, data: [], status: 0 };
+          if (token === 'default-token') return { ok: true as const, data: [{ number: 39, head: { ref: 'mission/task-111' } }], status: 0 };
         }
         if (method === 'GET' && apiPath === '/pulls/39') {
-          return { ok: true, data: { head: { sha: 'review-head-sha' } }, status: 0 };
+          return { ok: true as const, data: { head: { sha: 'review-head-sha' } }, status: 0 };
         }
-        return { ok: true, data: { ok: true }, status: 0 };
-      }
+        return { ok: true as const, data: { ok: true }, status: 0 };
+      })
     });
 
     assert.equal(result.ok, true);
@@ -1772,6 +1791,7 @@ test('postReview resolves PR via default token fallback while posting as codex',
     const postCall = calls.find(call => call.method === 'POST' && call.apiPath === '/pulls/39/reviews');
     assert.ok(postCall);
     assert.equal(postCall.token, 'codex-token');
+    assert.ok(postCall.body && typeof postCall.body === 'object' && 'commit_id' in postCall.body);
     assert.equal(postCall.body.commit_id, 'review-head-sha');
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -1788,12 +1808,12 @@ test('FORGEJO_USER defaults to human', () => {
   delete process.env.FORGEJO_USER;
   process.env.FORGEJO_TOKEN = 'fake-token';
   try {
-    const apiCall = (method, apiPath, token, body) => {
+    const apiCall = forgejoApiFixture((method, apiPath, token, body) => {
       if (apiPath.includes('/pulls?state=')) {
-        return { ok: true, data: [{ number: 1, head: { ref: 'mission/task-001' } }] };
+        return { ok: true as const, data: [{ number: 1, head: { ref: 'mission/task-001' } }] };
       }
-      return { ok: true, data: { number: 1, title: 'test', state: 'open', html_url: 'http://test' } };
-    };
+      return { ok: true as const, data: { number: 1, title: 'test', state: 'open', html_url: 'http://test' } };
+    });
     const pr = getPrStatus('mission/task-001', '/tmp', { configuration: resolveConfiguration(process.env), apiCall });
     assert.ok(pr.exists);
   } finally {
@@ -1829,23 +1849,23 @@ assignee: [codex]
   try {
     // Current user (magnus) has no matching PR — both open and all return empty
     // Implementer (codex) has the matching PR
-    const calls = [];
+    const calls: { method: string; apiPath: string; token: string | undefined; }[] = [];
     const prNumber = getPrNumber('mission/task-999', 'magnus-token', { configuration: resolveConfiguration(process.env),
-      apiCall(method, apiPath, token) {
+      apiCall: forgejoApiFixture((method, apiPath, token) => {
         calls.push({ method, apiPath, token });
         if (apiPath.includes('state=open')) {
-          return { ok: true, data: [] };
+          return { ok: true as const, data: [] };
         }
         if (apiPath.includes('state=all')) {
           // magnus-token lookup finds nothing
           if (token === 'magnus-token') {
-            return { ok: true, data: [] };
+            return { ok: true as const, data: [] };
           }
           // codex-token lookup finds the PR
-          return { ok: true, data: [{ number: 999, head: { ref: 'mission/task-999' } }] };
+          return { ok: true as const, data: [{ number: 999, head: { ref: 'mission/task-999' } }] };
         }
-        return { ok: true, data: [] };
-      },
+        return { ok: true as const, data: [] };
+      }),
       slug: 'task-999'
     });
 
@@ -1866,12 +1886,12 @@ assignee: [codex]
 
 test('getPrNumber API failure returns structured error with _apiError and _notFound', () => {
   const result = getPrNumber('mission/task-100', 'fake-token', { configuration: resolveConfiguration(process.env),
-    apiCall(method, apiPath) {
+    apiCall: forgejoApiFixture((method, apiPath) => {
       if (apiPath.includes('state=open') || apiPath.includes('state=all')) {
-        return { ok: false, data: null, status: 7, error: 'connection refused' };
+        return { ok: false as const, data: null, status: 7, error: 'connection refused' };
       }
-      return { ok: false, data: null };
-    },
+      return { ok: false as const, data: null };
+    }),
     slug: 'task-100',
     reportNotFound: true
   });
@@ -1883,12 +1903,12 @@ test('getPrNumber API failure returns structured error with _apiError and _notFo
 });
 
 test('getPrStatus surfaces sandbox hint when API returns status 7', () => {
-  const apiCall = mock.fn((method, apiPath) => {
+  const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
     if (apiPath.includes('/pulls?state=')) {
-      return { ok: false, data: null, status: 7, error: 'connection refused' };
+      return { ok: false as const, data: null, status: 7, error: 'connection refused' };
     }
-    return { ok: false, data: null };
-  });
+    return { ok: false as const, data: null };
+  }));
 
   const pr = getPrStatus('mission/task-100', '/tmp', { configuration: resolveConfiguration(process.env),
     token: 'fake-token',
@@ -1926,18 +1946,18 @@ assignee: [codex]
 
   try {
     const prNumber = getPrNumber('mission/task-1100', 'magnus-token', { configuration: resolveConfiguration(process.env),
-      apiCall(method, apiPath, token) {
+      apiCall: forgejoApiFixture((method, apiPath, token) => {
         if (apiPath.includes('state=open')) {
-          return { ok: false, data: null, status: 7, error: 'connection refused' };
+          return { ok: false as const, data: null, status: 7, error: 'connection refused' };
         }
         if (apiPath.includes('state=all')) {
           if (token === 'magnus-token') {
-            return { ok: false, data: null, status: 7, error: 'connection refused' };
+            return { ok: false as const, data: null, status: 7, error: 'connection refused' };
           }
-          return { ok: true, data: [{ number: 1100, head: { ref: 'mission/task-1100' } }] };
+          return { ok: true as const, data: [{ number: 1100, head: { ref: 'mission/task-1100' } }] };
         }
-        return { ok: false, data: null };
-      },
+        return { ok: false as const, data: null };
+      }),
       slug: 'task-1100',
       reportNotFound: true
     });
@@ -1955,12 +1975,12 @@ assignee: [codex]
 });
 
 test('getLatestReviewDecision returns api-failed when getPrNumber returns _apiError', () => {
-  const apiCall = mock.fn((method, apiPath) => {
+  const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
     if (apiPath.includes('/pulls?state=')) {
-      return { ok: false, data: null, status: 7, error: 'connection refused' };
+      return { ok: false as const, data: null, status: 7, error: 'connection refused' };
     }
-    return { ok: false, data: null };
-  });
+    return { ok: false as const, data: null };
+  }));
 
   const result = getLatestReviewDecision('mission/task-200', { configuration: resolveConfiguration(process.env),
     forgejoUser: 'custom',
@@ -1971,47 +1991,51 @@ test('getLatestReviewDecision returns api-failed when getPrNumber returns _apiEr
   assert.equal(result.ok, false);
   assert.equal(result.error, 'api-failed');
   assert.equal(result.reviewState, null);
+  assert.ok(result.raw != null);
   assert.match(result.raw, /failed to resolve PR/);
+  assert.ok(result.raw != null);
   assert.match(result.raw, /Codex runtime cannot reach local Forgejo/i);
 });
 
 test('postComment returns api-failed when getPrNumber returns _apiError', () => {
-  const apiCall = mock.fn((method, apiPath) => {
+  const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
     if (apiPath.includes('/pulls?state=')) {
-      return { ok: false, data: null, status: 7, error: 'connection refused' };
+      return { ok: false as const, data: null, status: 7, error: 'connection refused' };
     }
-    return { ok: false, data: null };
-  });
+    return { ok: false as const, data: null };
+  }));
 
   const result = postComment('mission/task-201', 'fake-token', 'review comment', { configuration: resolveConfiguration(process.env), apiCall });
 
   assert.equal(result.ok, false);
   assert.equal(result.error, 'api-failed');
+  assert.ok(result.raw != null);
   assert.match(result.raw, /failed to resolve PR/);
 });
 
 test('postReview returns api-failed when getPrNumber returns _apiError', () => {
-  const apiCall = mock.fn((method, apiPath) => {
+  const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
     if (apiPath.includes('/pulls?state=')) {
-      return { ok: false, data: null, status: 7, error: 'connection refused' };
+      return { ok: false as const, data: null, status: 7, error: 'connection refused' };
     }
-    return { ok: false, data: null };
-  });
+    return { ok: false as const, data: null };
+  }));
 
   const result = postReview('mission/task-202', 'fake-token', 'approve', 'looks good', { configuration: resolveConfiguration(process.env), apiCall });
 
   assert.equal(result.ok, false);
   assert.equal(result.error, 'api-failed');
+  assert.ok(result.raw != null);
   assert.match(result.raw, /failed to resolve PR/);
 });
 
 test('getComments returns null when getPrNumber returns _apiError', async () => {
-  const apiCall = mock.fn((method, apiPath) => {
+  const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
     if (apiPath.includes('/pulls?state=')) {
-      return { ok: false, data: null, status: 7, error: 'connection refused' };
+      return { ok: false as const, data: null, status: 7, error: 'connection refused' };
     }
-    return { ok: false, data: null };
-  });
+    return { ok: false as const, data: null };
+  }));
 
   const result = await getComments('mission/task-203', 'fake-token', { configuration: resolveConfiguration(process.env), apiCall });
 
@@ -2027,37 +2051,39 @@ test('createPr retries push after stale-info rejection when forceWithLease is tr
   let pushAttempts = 0;
   let fetchCalled = false;
   let revParseAttempts = 0;
-  const leaseArgs = [];
+  const leaseArgs: string[] = [];
 
-  mock.method(git, 'git', (args) => {
-    if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
     if (args.includes('fetch')) {
       fetchCalled = true;
-      return { status: 0, stdout: '' };
+      return { signal: null, stderr: '',  status: 0, stdout: '' };
     }
     if (args.includes('rev-parse') && args.includes(`refs/remotes/review/${branch}^{commit}`)) {
       revParseAttempts++;
-      return { status: 0, stdout: `${revParseAttempts === 1 ? 'oldsha' : 'newsha'}\n`, stderr: '' };
+      return { signal: null,  status: 0, stdout: `${revParseAttempts === 1 ? 'oldsha' : 'newsha'}\n`, stderr: '' };
     }
     if (args.includes('push') && args[args.length - 1] === branch) {
       pushAttempts++;
-      leaseArgs.push(args.find(arg => arg.startsWith('--force-with-lease=')));
+      const lease = args.find(arg => arg.startsWith('--force-with-lease='));
+      assert.ok(lease);
+      leaseArgs.push(lease);
       if (pushAttempts === 1) {
-        return { status: 1, stderr: `! [rejected] ${branch} (stale info)` };
+        return { signal: null, stdout: '',  status: 1, stderr: `! [rejected] ${branch} (stale info)` };
       }
-      return { status: 0, stdout: '' };
+      return { signal: null, stderr: '',  status: 0, stdout: '' };
     }
-    return { status: 0, stdout: '' };
+    return { signal: null, stderr: '',  status: 0, stdout: '' };
   });
 
-  const apiCall = mock.fn((method, apiPath) => {
-    if (method === 'GET' && apiPath.includes('/pulls?state=open')) return { ok: true, data: [] };
-    if (method === 'GET' && apiPath.includes('/pulls?state=all')) return { ok: true, data: [] };
+  const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
+    if (method === 'GET' && apiPath.includes('/pulls?state=open')) return { ok: true as const, data: [] };
+    if (method === 'GET' && apiPath.includes('/pulls?state=all')) return { ok: true as const, data: [] };
     if (method === 'POST' && apiPath === '/pulls') {
-      return { ok: true, data: { html_url: 'http://pr/1089', number: 1089 } };
+      return { ok: true as const, data: { html_url: 'http://pr/1089', number: 1089 } };
     }
-    return { ok: false };
-  });
+    return { ok: false as const };
+  }));
 
   const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, true, 'createPr should succeed after stale-info retry');
@@ -2081,19 +2107,19 @@ test('createPr does not retry push on non-stale push failure', (t) => {
 
   let pushAttempts = 0;
 
-  mock.method(git, 'git', (args) => {
-    if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
     if (args.includes('rev-parse') && args.includes(`refs/remotes/review/${branch}^{commit}`)) {
-      return { status: 0, stdout: 'abc123\n', stderr: '' };
+      return { signal: null,  status: 0, stdout: 'abc123\n', stderr: '' };
     }
     if (args.includes('push') && args[args.length - 1] === branch) {
       pushAttempts++;
-      return { status: 1, stderr: 'remote: Permission denied' };
+      return { signal: null, stdout: '',  status: 1, stderr: 'remote: Permission denied' };
     }
-    return { status: 0, stdout: '' };
+    return { signal: null, stderr: '',  status: 0, stdout: '' };
   });
 
-  const apiCall = mock.fn(() => ({ ok: false }));
+  const apiCall = mock.fn(forgejoApiFixture(() => ({ ok: false as const })));
 
   const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, false, 'createPr should fail on non-stale push failure');
@@ -2108,20 +2134,20 @@ test('createPr fails cleanly on second consecutive stale rejection', (t) => {
 
   let pushAttempts = 0;
 
-  mock.method(git, 'git', (args) => {
-    if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
-    if (args.includes('fetch')) return { status: 0, stdout: '' };
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
+    if (args.includes('fetch')) return { signal: null, stderr: '',  status: 0, stdout: '' };
     if (args.includes('rev-parse') && args.includes(`refs/remotes/review/${branch}^{commit}`)) {
-      return { status: 0, stdout: 'abc123\n', stderr: '' };
+      return { signal: null,  status: 0, stdout: 'abc123\n', stderr: '' };
     }
     if (args.includes('push') && args[args.length - 1] === branch) {
       pushAttempts++;
-      return { status: 1, stderr: `! [rejected] ${branch} (stale info)` };
+      return { signal: null, stdout: '',  status: 1, stderr: `! [rejected] ${branch} (stale info)` };
     }
-    return { status: 0, stdout: '' };
+    return { signal: null, stderr: '',  status: 0, stdout: '' };
   });
 
-  const apiCall = mock.fn(() => ({ ok: false }));
+  const apiCall = mock.fn(forgejoApiFixture(() => ({ ok: false as const })));
 
   const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, false, 'createPr should fail cleanly after second consecutive stale rejection');
@@ -2135,36 +2161,36 @@ test('createPr fetches tracking ref before first push when local review ref is m
   const rootDir = '/tmp/fake-root';
 
   let fetchCalls = 0;
-  let pushArgs = [];
+  let pushArgs: (string | string)[] = [];
 
-  mock.method(git, 'git', (args) => {
-    if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
     if (args.includes('fetch')) {
       fetchCalls++;
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     }
     if (args.includes('rev-parse') && args.includes(`refs/remotes/review/${branch}^{commit}`)) {
-      if (fetchCalls === 0) return { status: 128, stdout: '', stderr: 'unknown revision' };
-      return { status: 0, stdout: 'fetchedsha\n', stderr: '' };
+      if (fetchCalls === 0) return { signal: null,  status: 128, stdout: '', stderr: 'unknown revision' };
+      return { signal: null,  status: 0, stdout: 'fetchedsha\n', stderr: '' };
     }
     if (args.includes('rev-parse') && args.includes(`refs/remotes/origin/${branch}^{commit}`)) {
-      return { status: 128, stdout: '', stderr: 'unknown revision' };
+      return { signal: null,  status: 128, stdout: '', stderr: 'unknown revision' };
     }
     if (args.includes('push') && args[args.length - 1] === branch) {
       pushArgs = args;
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     }
-    return { status: 0, stdout: '', stderr: '' };
+    return { signal: null,  status: 0, stdout: '', stderr: '' };
   });
 
-  const apiCall = mock.fn((method, apiPath) => {
-    if (method === 'GET' && apiPath.includes('/pulls?state=open')) return { ok: true, data: [] };
-    if (method === 'GET' && apiPath.includes('/pulls?state=all')) return { ok: true, data: [] };
+  const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
+    if (method === 'GET' && apiPath.includes('/pulls?state=open')) return { ok: true as const, data: [] };
+    if (method === 'GET' && apiPath.includes('/pulls?state=all')) return { ok: true as const, data: [] };
     if (method === 'POST' && apiPath === '/pulls') {
-      return { ok: true, data: { html_url: 'http://pr/1095', number: 1095 } };
+      return { ok: true as const, data: { html_url: 'http://pr/1095', number: 1095 } };
     }
-    return { ok: false };
-  });
+    return { ok: false as const };
+  }));
 
   const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, true, 'createPr should fetch tracking ref before first push');
@@ -2184,28 +2210,30 @@ test('createPr fails cleanly when tracking ref remains missing after fetch', (t)
   let fetchCalls = 0;
   let pushAttempts = 0;
 
-  mock.method(git, 'git', (args) => {
-    if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
     if (args.includes('fetch')) {
       fetchCalls++;
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     }
     if (args.includes('rev-parse') && args.includes(`refs/remotes/review/${branch}^{commit}`)) {
-      return { status: 128, stdout: '', stderr: 'unknown revision' };
+      return { signal: null,  status: 128, stdout: '', stderr: 'unknown revision' };
     }
     if (args.includes('push') && args[args.length - 1] === branch) {
       pushAttempts++;
     }
-    return { status: 0, stdout: '', stderr: '' };
+    return { signal: null,  status: 0, stdout: '', stderr: '' };
   });
 
-  const apiCall = mock.fn(() => ({ ok: false }));
+  const apiCall = mock.fn(forgejoApiFixture(() => ({ ok: false as const })));
 
   const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, false, 'createPr should fail when no tracking ref is available after fetch');
   assert.strictEqual(fetchCalls, 1, 'should fetch once before failing');
   assert.strictEqual(pushAttempts, 0, 'should not push without an explicit lease sha');
+  assert.ok(result.error != null);
   assert.match(result.error, new RegExp(`could not resolve tracking ref for ${branch}`));
+  assert.ok(result.error != null);
   assert.match(result.error, new RegExp(`refs/remotes/review/${branch}`));
 });
 
@@ -2218,29 +2246,31 @@ test('createPr fails without retrying push when stale-info refresh fetch fails',
   let pushAttempts = 0;
   let fetchCalls = 0;
 
-  mock.method(git, 'git', (args) => {
-    if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
     if (args.includes('fetch')) {
       fetchCalls++;
-      return { status: 1, stdout: '', stderr: 'remote unavailable' };
+      return { signal: null,  status: 1, stdout: '', stderr: 'remote unavailable' };
     }
     if (args.includes('rev-parse') && args.includes(`refs/remotes/review/${branch}^{commit}`)) {
-      return { status: 0, stdout: 'abc123\n', stderr: '' };
+      return { signal: null,  status: 0, stdout: 'abc123\n', stderr: '' };
     }
     if (args.includes('push') && args[args.length - 1] === branch) {
       pushAttempts++;
-      return { status: 1, stderr: `! [rejected] ${branch} (stale info)` };
+      return { signal: null, stdout: '',  status: 1, stderr: `! [rejected] ${branch} (stale info)` };
     }
-    return { status: 0, stdout: '', stderr: '' };
+    return { signal: null,  status: 0, stdout: '', stderr: '' };
   });
 
-  const apiCall = mock.fn(() => ({ ok: false }));
+  const apiCall = mock.fn(forgejoApiFixture(() => ({ ok: false as const })));
 
   const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, false, 'createPr should fail when retry refresh cannot fetch');
   assert.strictEqual(pushAttempts, 1, 'should not attempt a second push after refresh fetch failure');
   assert.strictEqual(fetchCalls, 1, 'should attempt the retry refresh once');
+  assert.ok(result.error != null);
   assert.match(result.error, new RegExp(`failed to refresh tracking ref for ${branch}`));
+  assert.ok(result.error != null);
   assert.match(result.error, /remote unavailable/);
 });
 
@@ -2283,16 +2313,16 @@ test('isForgejoPath matches forgejo home descendants after path normalization', 
 // Regression: fetchReviewBranch must use '+' prefix so non-fast-forward tracking ref
 // updates succeed after rebases. Fixed in task-1107, task-1130, and task-1134.
 test('fetchReviewBranch uses force-update refspec to handle rebased branches', (t) => {
-  let capturedArgs = null;
-  mock.method(git, 'git', (args) => {
-    capturedArgs = args;
-    return { status: 0, stdout: '', stderr: '' };
+  let capturedArgs: { value: string[] | null } = { value: null };
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    capturedArgs.value = args;
+    return { signal: null,  status: 0, stdout: '', stderr: '' };
   });
 
   fetchReviewBranch('mission/task-regression', '/tmp/fake-root', { configuration: resolveConfiguration(process.env) });
 
-  assert.ok(capturedArgs, 'git should have been called');
-  const refspec = capturedArgs.find(a => a.includes('refs/heads/'));
+  assert.ok(capturedArgs.value, 'git should have been called');
+  const refspec = capturedArgs.value.find((a) => a.includes('refs/heads/'));
   assert.ok(refspec, 'refspec argument should be present');
   assert.ok(
     refspec.startsWith('+'),
@@ -2306,23 +2336,23 @@ test('fetchReviewBranch uses force-update refspec to handle rebased branches', (
 // routine first push of a new mission branch aborted. fetchReviewBranch must
 // force a stable C locale so detection stays language-independent (task-1317).
 test('fetchReviewBranch forces a C locale so git diagnostics are English', (t) => {
-  let capturedOptions = null;
-  mock.method(git, 'git', (_args, options) => {
-    capturedOptions = options;
-    return { status: 0, stdout: '', stderr: '' };
+  let capturedOptions: { value: import("../../../src/adapters/git/git.js").GitOptions | undefined | null } = { value: null };
+  mock.method(git, 'git', (_args: Parameters<(typeof git)["git"]>[0], options: Parameters<(typeof git)["git"]>[1]) => {
+    capturedOptions.value = options;
+    return { signal: null,  status: 0, stdout: '', stderr: '' };
   });
 
   fetchReviewBranch('mission/task-1317', '/tmp/fake-root', { configuration: resolveConfiguration(process.env) });
 
-  assert.ok(capturedOptions, 'git should have been called with options');
-  assert.ok(capturedOptions.env, 'fetch should pass an env override');
-  assert.strictEqual(capturedOptions.env.LC_ALL, 'C', 'LC_ALL must be forced to C');
-  assert.strictEqual(capturedOptions.env.LANG, 'C', 'LANG must be forced to C');
+  assert.ok(capturedOptions.value, 'git should have been called with options');
+  assert.ok(capturedOptions.value.env, 'fetch should pass an env override');
+  assert.strictEqual(capturedOptions.value.env.LC_ALL, 'C', 'LC_ALL must be forced to C');
+  assert.strictEqual(capturedOptions.value.env.LANG, 'C', 'LANG must be forced to C');
 });
 
 test('fetchReviewBranch uses authenticated review url when a token is available', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forgejo-fetch-auth-'));
-  let capturedArgs = null;
+  let capturedArgs: { value: string[] | null } = { value: null };
   try {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       product: { name: 'Test Project' },
@@ -2335,18 +2365,18 @@ test('fetchReviewBranch uses authenticated review url when a token is available'
       },
     }, null, 2), 'utf8');
 
-    mock.method(git, 'git', (args) => {
-      capturedArgs = args;
-      return { status: 0, stdout: '', stderr: '' };
+    mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+      capturedArgs.value = args;
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
 
     fetchReviewBranch('main', root, { configuration: resolveConfiguration(process.env), user: 'codex', token: 'token-123' });
 
-    assert.ok(capturedArgs, 'git should have been called');
+    assert.ok(capturedArgs.value, 'git should have been called');
     const baseUrl = process.env.FORGEJO_URL || 'http://localhost:3300';
     assert.ok(
-      capturedArgs.includes(`http://codex:token-123@${baseUrl.replace(/^https?:\/\//, '')}/magnus/testproj.git`),
-      `expected authenticated fetch url, got: ${capturedArgs.join(' ')}`
+      capturedArgs.value.includes(`http://codex:token-123@${baseUrl.replace(/^https?:\/\//, '')}/magnus/testproj.git`),
+      `expected authenticated fetch url, got: ${capturedArgs.value.join(' ')}`
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -2373,30 +2403,30 @@ test('createPr targets the recorded feature-branch base when MISSION.md has Base
     fs.mkdirSync(missionDir, { recursive: true });
     fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: task-300\n\nBase-Branch: feat/x\n');
 
-    const gitCalls = [];
-    mock.method(git, 'git', (args) => {
+    const gitCalls: string[][] = [];
+    mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
       gitCalls.push(args);
-      if (args.includes('show-ref')) return { status: 0, stdout: '', stderr: '' };
-      if (args.includes('push')) return { status: 0, stdout: '', stderr: '' };
-      if (args.includes('rev-parse')) return { status: 0, stdout: 'abc123\n', stderr: '' };
-      return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('show-ref')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      if (args.includes('push')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'abc123\n', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
 
-    const apiCalls = [];
-    const apiCall = mock.fn((method, apiPath, token, body, options = {}) => {
+    const apiCalls: { method: string; apiPath: string; token: string | undefined; body: unknown; options: ForgejoApiOptions; }[] = [];
+    const apiCall = mock.fn(forgejoApiFixture((method, apiPath, token, body, options = {}) => {
       apiCalls.push({ method, apiPath, token, body, options });
-      if (method === 'GET' && apiPath.includes('/pulls?state=open')) return { ok: true, data: [] };
-      if (method === 'GET' && apiPath.includes('/pulls?state=all')) return { ok: true, data: [] };
+      if (method === 'GET' && apiPath.includes('/pulls?state=open')) return { ok: true as const, data: [] };
+      if (method === 'GET' && apiPath.includes('/pulls?state=all')) return { ok: true as const, data: [] };
       if (method === 'POST' && apiPath === '/pulls') {
-        return { ok: true, data: { html_url: 'http://localhost:3300/magnus/testproj/pulls/2', number: 2 } };
+        return { ok: true as const, data: { html_url: 'http://localhost:3300/magnus/testproj/pulls/2', number: 2 } };
       }
-      return { ok: false, data: null };
-    });
+      return { ok: false as const, data: null };
+    }));
 
     const result = createPr('mission/task-300', 'mistral', 'token-456', { configuration: resolveConfiguration(process.env), rootDir: root, apiCall, log: () => {} });
     assert.equal(result.ok, true);
     // The PR base should be the recorded feature-branch, not 'main'
-    assert.ok(apiCalls.some(call => call.method === 'POST' && call.body && call.body.base === 'feat/x'), `Expected PR base 'feat/x', found: ${JSON.stringify(apiCalls.find(c => c.method === 'POST' && c.body)?.body)}`);
+    assert.ok(apiCalls.some(call => call.method === 'POST' && call.body && typeof call.body === 'object' && 'base' in call.body && call.body.base === 'feat/x'), `Expected PR base 'feat/x', found: ${JSON.stringify(apiCalls.find(c => c.method === 'POST' && c.body)?.body)}`);
     // The feature base branch must be mirrored to the review remote so the PR
     // base resolves server-side; otherwise PR creation fails.
     assert.ok(
@@ -2421,12 +2451,12 @@ test('ensureRemoteBaseBranch mirrors an existing local base branch with a force 
       },
     }, null, 2), 'utf8');
 
-    const calls = [];
+    const calls: string[][] = [];
     // Fully injected runner — no real git process is spawned and nothing is pushed.
-    const gitRunner = (args) => {
+    const gitRunner: NonNullable<NonNullable<Parameters<typeof ensureRemoteBaseBranch>[4]>["gitRunner"]> = (args) => {
       calls.push(args);
-      if (args.includes('show-ref')) return { status: 0, stdout: '', stderr: '' };
-      return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('show-ref')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     };
 
     const result = ensureRemoteBaseBranch('feat/x', 'mistral', 'token-456', root, { gitRunner });
@@ -2439,14 +2469,15 @@ test('ensureRemoteBaseBranch mirrors an existing local base branch with a force 
 });
 
 test('ensureRemoteBaseBranch fails when the base branch is absent locally', () => {
-  const calls = [];
-  const gitRunner = (args) => {
+  const calls: string[][] = [];
+  const gitRunner: NonNullable<NonNullable<Parameters<typeof ensureRemoteBaseBranch>[4]>["gitRunner"]> = (args) => {
     calls.push(args);
-    if (args.includes('show-ref')) return { status: 1, stdout: '', stderr: '' };
-    return { status: 0, stdout: '', stderr: '' };
+    if (args.includes('show-ref')) return { signal: null,  status: 1, stdout: '', stderr: '' };
+    return { signal: null,  status: 0, stdout: '', stderr: '' };
   };
   const result = ensureRemoteBaseBranch('feat/missing', 'mistral', 'token-456', process.cwd(), { gitRunner });
   assert.equal(result.ok, false);
+  assert.ok(result.error != null);
   assert.match(result.error, /does not exist locally/);
   // It must never attempt a push when the local base branch is missing.
   assert.ok(!calls.some(args => args.includes('push')), 'Should not push when base branch is absent');

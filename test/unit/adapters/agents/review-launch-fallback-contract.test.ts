@@ -1,5 +1,3 @@
-import { fixtureMission } from '../../../fixtures/mission-builders.js';
-import { missionVersion } from '../../../../src/application/domain-ports.js';
 import { resolveConfiguration } from '../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 // review launch fallback contract.
@@ -8,41 +6,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { nativeRunnerRecoveryEnabled } from '../../../../src/adapters/agents/launch-prompt-context.js';
 import { fakeLauncher } from '../../../lib/agent-mock.js';
 import { eligibleAgentsForStep, startAgent } from '../../../../src/adapters/agents/agents.js';
 import { setBubblewrapProbeForTest } from '../../../../src/adapters/process/bubblewrap.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 
 // Regression provenance: TASK-1036.
-
-function withStubbedMathRandom(value, fn) {
-  const previousRandom = Math.random;
-  Math.random = () => value;
-  const restore = () => {
-    Math.random = previousRandom;
-  };
-
-  try {
-    const result = fn();
-    if (result && typeof result.then === 'function') {
-      return result.finally(restore);
-    }
-    restore();
-    return result;
-  } catch (error) {
-    restore();
-    throw error;
-  }
-}
-
-function writeAgentConfig(root, config) {
-  const configDir = path.join(root, 'workflow', 'config');
-  fs.mkdirSync(configDir, { recursive: true });
-  const configPath = path.join(configDir, 'agents.json');
-  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
-  return configPath;
-}
 
 // ---------- TASK-1036: review/act-on-review fallback pool tracks current launchers ----------
 
@@ -54,7 +23,7 @@ test('eligibleAgentsForStep returns all current launchers when review step is mi
       draft: { eligible: ['vibe', 'codex', 'custom'], selection: 'random' },
       active: { eligible: ['codex', 'claude', 'vibe', 'custom'], selection: 'random' }
     }
-  };
+  } satisfies import("../../../../src/adapters/agents/agent-config.js").AgentConfig;
   const eligible = eligibleAgentsForStep('review', { config: configWithoutReview });
   assert.ok(eligible.includes('vibe'), 'mistral must be in fallback pool when review step is absent');
   assert.ok(eligible.includes('claude'), 'claude must also be present');
@@ -67,7 +36,7 @@ test('eligibleAgentsForStep returns all current launchers when act-on-review ste
       draft: { eligible: ['vibe', 'codex', 'custom'], selection: 'random' },
       active: { eligible: ['codex', 'claude', 'vibe', 'custom'], selection: 'random' }
     }
-  };
+  } satisfies import("../../../../src/adapters/agents/agent-config.js").AgentConfig;
   const eligible = eligibleAgentsForStep('act-on-review', { config: configWithoutActOnReview });
   assert.ok(eligible.includes('vibe'), 'mistral must be in fallback pool when act-on-review step is absent');
 });
@@ -78,21 +47,22 @@ test('startAgent review fallback selects vibe when claude hits limit and review 
   const tmpRoot = registeredMkdtemp('task-1036-review-fallback-');
   try {
     const order = ['claude', 'vibe'];
-    const selectAgentFn = (step, opts = {}) => {
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `exclude` absent from its inferred mock shape.
+    const selectAgentFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["selectAgentFn"]> = (step, opts = {}) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set();
-      return order.find(a => !exclude.has(a));
+      const selected = order.find(a => !exclude.has(a));
+      assert.ok(selected, 'a fixture launcher must remain eligible');
+      return selected;
     };
 
-    const detectLimitHitFn = ({ agent }) => {
-      if (agent === 'claude') return { until: '2026-05-01 18', source: 'parsed' };
+    const detectLimitHitFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["detectLimitHitFn"]> = ({ agent } = { agent: '' }) => {
+      if (agent === 'claude') return { until: '2026-05-01 18', source: 'parsed', reason: 'fixture usage limit' };
       return null;
     };
 
-    const blocks = [];
-    const updateAgentBlockFn = (agent, until) => {
+    const blocks: { agent: string; until: string; }[] = [];
+    const updateAgentBlockFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["updateAgentBlockFn"]> = (agent, until) => {
       blocks.push({ agent, until });
-      return { path: path.join(tmpRoot, 'agents.local.json') };
+      return { reason: null };
     };
 
     const previousAgent = environment.WORKFLOW_AGENT;
@@ -107,21 +77,19 @@ test('startAgent review fallback selects vibe when claude hits limit and review 
         }
       };
 
+      assert.ok(eligibleAgentsForStep('review', { config: configWithoutReview }).includes('vibe'));
       const result = await startAgent('review', { configuration: resolveConfiguration(environment),
         prompt: 'Execute the mission.',
         worktree: tmpRoot,
         agent: 'claude',
         exclude: ['codex'], // implementer excluded for family separation
-        isAgentBlockedFn: () => false,
+        
         detectLimitHitFn,
         updateAgentBlockFn,
         selectAgentFn,
         launchAgentFn: fakeLauncher(),
         assertAgentSupportedFn: () => {},
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
         isAgentBlockedFn: () => false,
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-        config: configWithoutReview,
         log: () => {}
       });
 
@@ -143,21 +111,22 @@ test('startAgent act-on-review fallback selects vibe when implementer hits limit
   const tmpRoot = registeredMkdtemp('task-1036-act-on-review-fallback-');
   try {
     const order = ['custom', 'vibe'];
-    const selectAgentFn = (step, opts = {}) => {
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `exclude` absent from its inferred mock shape.
+    const selectAgentFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["selectAgentFn"]> = (step, opts = {}) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set();
-      return order.find(a => !exclude.has(a));
+      const selected = order.find(a => !exclude.has(a));
+      assert.ok(selected, 'a fixture launcher must remain eligible');
+      return selected;
     };
 
-    const detectLimitHitFn = ({ agent }) => {
-      if (agent === 'custom') return { until: '2026-05-01 18', source: 'parsed' };
+    const detectLimitHitFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["detectLimitHitFn"]> = ({ agent } = { agent: '' }) => {
+      if (agent === 'custom') return { until: '2026-05-01 18', source: 'parsed', reason: 'fixture usage limit' };
       return null;
     };
 
-    const blocks = [];
-    const updateAgentBlockFn = (agent, until) => {
+    const blocks: { agent: string; until: string; }[] = [];
+    const updateAgentBlockFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["updateAgentBlockFn"]> = (agent, until) => {
       blocks.push({ agent, until });
-      return { path: path.join(tmpRoot, 'agents.local.json') };
+      return { reason: null };
     };
 
     const previousAgent = environment.WORKFLOW_AGENT;
@@ -180,16 +149,13 @@ test('startAgent act-on-review fallback selects vibe when implementer hits limit
         worktree: tmpRoot,
         agent: 'custom',
         exclude: ['claude'], // reviewer excluded for family separation
-        isAgentBlockedFn: () => false,
+        
         detectLimitHitFn,
         updateAgentBlockFn,
         selectAgentFn,
         launchAgentFn: fakeLauncher(),
         assertAgentSupportedFn: () => {},
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
         isAgentBlockedFn: () => false,
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-        config: configWithoutActOnReview,
         log: () => {}
       });
 
@@ -203,62 +169,4 @@ test('startAgent act-on-review fallback selects vibe when implementer hits limit
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
-});
-
-
-for (const step of ['draft', 'active', 'review']) {
-  test(`${step} launches with authoritative snapshot and short pinned px (TASK-2747)`, async () => {
-    const mission = fixtureMission('task-2747', { brief: { goal: 'Short launches', why: 'Fewer calls', scope: 'Prompts', outOfScope: [] }, successCriteria: ['works'] });
-    let reads = 0;
-    const result = await startAgent(step, {
-      configuration: resolveConfiguration({ ...environment, PARALLIX_CLI_COMMAND: '/bundled cli/px', PATH: '/global/bin' }),
-      agent: 'claude', slug: 'task-2747', prompt: 'Run px checkpoint record\nContext recovery after runner compaction: recover',
-      missionStore: { load: async () => { reads++; return { kind: 'found', mission, version: missionVersion(7) }; } },
-      isAgentBlockedFn: () => false, assertAgentSupportedFn: () => {}, detectLimitHitFn: () => null,
-      resolveAgentModelFn: () => null, log: () => {},
-      launchAgentFn: ({ prompt, env }) => {
-        assert.match(prompt, /current as of launch/);
-        assert.match(prompt, /"version": 7/);
-        assert.match(prompt, /"goal": "Short launches"/);
-        assert.match(prompt, /"successCriteria"/);
-        assert.match(prompt, /"checkpoints"/);
-        assert.match(prompt, /Run px checkpoint record/);
-        assert.match(prompt, /command '\/bundled cli\/px'/);
-        assert.match(prompt, /inside the final shell body/);
-        assert.doesNotMatch(prompt, /Context recovery after runner compaction:/);
-        assert.equal(env.PATH, '/bundled cli:/global/bin');
-        return { invocation: { command: 'mock', args: [], options: {} }, resultPromise: Promise.resolve({ status: 0 }) };
-      },
-    });
-    assert.equal(reads, 1);
-    assert.equal(result.result.status, 0);
-  });
-}
-
-for (const step of ['draft', 'active', 'review']) {
-  for (const family of ['claude', 'codex', 'qwen', 'vibe', 'custom']) {
-    test(`${family} ${step} preserves recovery policy and pinned bootstrap (TASK-2747)`, async () => {
-      await startAgent(step, {
-        configuration: resolveConfiguration({ ...environment, PARALLIX_CLI_COMMAND: '/bundled/px' }),
-        agent: family, prompt: `${step === 'active' ? 'Mode: execute after lock.' : `Mode: ${step}.`}\nRun px checkpoint record`,
-        isAgentBlockedFn: () => false, assertAgentSupportedFn: () => {}, detectLimitHitFn: () => null,
-        resolveAgentModelFn: () => null, log: () => {},
-        launchAgentFn: ({ prompt }) => {
-          assert.equal(prompt.includes('Context recovery after runner compaction:'), step === 'active' && ['claude', 'codex'].includes(family));
-          assert.match(prompt, /command '\/bundled\/px'/);
-          return { invocation: { command: 'mock', args: [], options: {} }, resultPromise: Promise.resolve({ status: 0 }) };
-        },
-      });
-    });
-  }
-}
-
-test('repository opt-out disables known native runner recovery (TASK-2747)', () => {
-  const root = registeredMkdtemp('task-2747-recovery-');
-  try {
-    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { prompts: { contextCompaction: false } } }));
-    for (const family of ['claude', 'codex']) {
-      assert.equal(nativeRunnerRecoveryEnabled(family, root), false);
-    }
-  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

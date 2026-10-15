@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as rg from '../../../../src/adapters/verification/redgreen.js';
 
-const noopLog = () => {};
+const noopLog: NonNullable<NonNullable<Parameters<typeof rg.verifyRedGreenProof>[1]>["log"]> = () => {};
 
 // ---------- findReproTestPath ----------
 
@@ -13,8 +13,9 @@ test('findReproTestPath uses the recorded Mission test path', () => {
 test('findReproTestPath ignores legacy document lookup hooks', () => {
   assert.equal(rg.findReproTestPath('task-9', '/repo', {
     testPath: 'test/recorded.repro.ts',
+    // @ts-expect-error Intentional legacy option proves retired document hooks are ignored.
     findMissionDirFn: () => { throw new Error('legacy lookup'); },
-  } as any), 'test/recorded.repro.ts');
+  }), 'test/recorded.repro.ts');
 });
 
 test('findReproTestPath returns null when no path is recorded', () => {
@@ -32,10 +33,10 @@ test('resolveMissionParentCommit returns the merge-base sha', () => {
     branch: 'mission/task-1',
     gitFn: (args) => {
       const joined = (args || []).join(' ');
-      if (joined.includes('merge-base')) {return { status: 0, stdout: 'abc123def\n' };}
+      if (joined.includes('merge-base')) {return { signal: null, stderr: '',  status: 0, stdout: 'abc123def\n' };}
       // getPrimaryBranch needs 'main' present as a detectable primary branch.
-      if (joined.includes('branch')) {return { status: 0, stdout: 'main\n' };}
-      return { status: 0, stdout: '' };
+      if (joined.includes('branch')) {return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };}
+      return { signal: null, stderr: '',  status: 0, stdout: '' };
     },
   });
   assert.equal(sha, 'abc123def');
@@ -43,7 +44,7 @@ test('resolveMissionParentCommit returns the merge-base sha', () => {
 
 test('resolveMissionParentCommit returns null on a non-zero merge-base', () => {
   assert.equal(rg.resolveMissionParentCommit('task-1', '/repo', {
-    gitFn: () => ({ status: 1, stdout: '' }),
+    gitFn: () => ({ signal: null, stderr: '',  status: 1, stdout: '' }),
   }), null);
 });
 
@@ -104,14 +105,14 @@ test('verifyRedGreenProof skips when no test runner is available for the red ste
     log: noopLog,
     findReproTestPathFn: () => 'test/x.repro.ts',
     resolveMissionParentCommitFn: () => 'parent-sha',
-    runReproAtRefFn: () => ({ status: null, skipped: true, reason: 'no-test-runner' }),
+    runReproAtRefFn: () => ({ status: null, skipped: true, reason: 'no-test-runner' as const }),
   });
   assert.equal(res.ok, true);
   assert.equal(res.skipped, true);
 });
 
 test('verifyRedGreenProof verifies red-then-green', () => {
-  const seen = [];
+  const seen: string[] = [];
   const res = rg.verifyRedGreenProof('task-1', { rootDir: '/repo', 
     log: noopLog,
     findReproTestPathFn: () => 'test/x.repro.ts',

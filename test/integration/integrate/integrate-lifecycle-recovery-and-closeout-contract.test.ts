@@ -1,5 +1,8 @@
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { missionVersion } from '../../../src/application/domain-ports.js';
+import { integrationContext } from '../../fixtures/integration-context.js';
+import { integrationServices } from '../../helpers/stub-integration-services.js';
 // Historical regression provenance: TASK-2397, TASK-2517.
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 // Behavior-owned suite (TASK-2622.09, integration-ci): integration lifecycle recovery and closeout over
 // disposable Git topologies and a migrated SQLite store — active+approved lane recovery without
 // resubmitting review (task-2397) and closeout failing when worktree cleanup fails (task-2517 CP-3).
@@ -53,7 +56,7 @@ describe("active+approved recovery", async () => {
     const implementer = agentFamily('configured-implementer');
     const reviewer = agentFamily('configured-reviewer');
     const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' });
-    const pullRequest = { kind: 'pull-request', provider: 'forgejo', id: '2397', url: null, sourceBranch: 'mission/task-2397', targetBranch: 'main' };
+    const pullRequest = { kind: 'pull-request', provider: 'forgejo', id: '2397', url: null, sourceBranch: 'mission/task-2397', targetBranch: 'main' } satisfies import("../../../src/domain/review.js").ReviewedChange;
 
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2397-'));
     fs.mkdirSync(path.join(root, 'missions'), { recursive: true });
@@ -92,7 +95,7 @@ describe("active+approved recovery", async () => {
     });
 
     const slug = 'task-2397';
-    const mission = {
+    const mission = fixtureMission(slug, {
       id: missionId(slug),
       repositoryId: repositoryId('parallix'),
       title: 'task-2397 active approved recovery',
@@ -113,21 +116,20 @@ describe("active+approved recovery", async () => {
       netEngineeringLines: null,
       closedAt: null,
       externalTaskRef: null,
-      intakeTrace: null,
       review: approvedReview,
-    };
+    });
     await store.save(mission, null);
 
     try {
       let submitForReviewCalled = false;
-      const submitForReviewFn = async () => {
+      const submitForReviewFn: NonNullable<NonNullable<Parameters<typeof recoverMissionForIntegration>[1]>["submitForReviewFn"]> = async () => {
         submitForReviewCalled = true;
         // Stands in for the workflow guard rejection the real handoff path throws.
         throw new Error('A submitted review must be awaiting a reviewer decision');
       };
 
       const result = await recoverMissionForIntegration(
-        {
+        integrationContext({
           slug,
           approval: {
             ok: true,
@@ -135,8 +137,8 @@ describe("active+approved recovery", async () => {
             defaultUserApproved: true,
             defaultUserApprovedAt: decidedAt,
           },
-        },
-        { missionServices: { store, lifecycle }, submitForReviewFn },
+        }),
+        { missionServices: integrationServices({ store, lifecycle }), submitForReviewFn },
       );
 
       assert.equal(submitForReviewCalled, false, 'recovery skips the submit-for-review handoff replay for an already-approved round');
@@ -149,13 +151,16 @@ describe("active+approved recovery", async () => {
       const reloaded = await store.load(missionId(slug));
       assert.equal(reloaded.kind, 'found');
       assert.equal(reloaded.mission.status, 'integration', 'mission reaches integration');
+      assert.ok(reloaded.mission.review);
       const round = reloaded.mission.review.rounds[reloaded.mission.review.rounds.length - 1];
+      assert.ok(round.decision != null);
       assert.equal(round.decision.kind, 'approved', 'the recorded decision is preserved');
       assert.equal(round.decision.decidedAt, decidedAt, 'the recorded decidedAt is preserved');
       assert.equal(round.subject.change.sourceBranch, pullRequest.sourceBranch, 'the reviewed change/PR is preserved');
+      assert.equal(round.subject.change.kind, 'pull-request');
       assert.equal(round.subject.change.id, pullRequest.id, 'the reviewed PR id is preserved');
 
-      const events = await database.query(
+      const events = await database.query<{ from_status: string; to_status: string; trigger: string; occurred_at: string }>(
         'SELECT from_status, to_status, trigger, occurred_at FROM board_lane_events WHERE mission_id = ?',
         [missionId(slug)],
       );
@@ -180,7 +185,7 @@ describe("active+approved recovery", async () => {
     const implementer = agentFamily('configured-implementer');
     const reviewer = agentFamily('configured-reviewer');
     const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' });
-    const pullRequest = { kind: 'pull-request', provider: 'forgejo', id: '2397-b', url: null, sourceBranch: 'mission/task-2397', targetBranch: 'main' };
+    const pullRequest = { kind: 'pull-request', provider: 'forgejo', id: '2397-b', url: null, sourceBranch: 'mission/task-2397', targetBranch: 'main' } satisfies import("../../../src/domain/review.js").ReviewedChange;
 
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2397-b-'));
     fs.mkdirSync(path.join(root, 'missions'), { recursive: true });
@@ -216,7 +221,7 @@ describe("active+approved recovery", async () => {
     });
 
     const slug = 'task-2397-b';
-    const mission = {
+    const mission = fixtureMission(slug, {
       id: missionId(slug),
       repositoryId: repositoryId('parallix'),
       title: 'task-2397-b round preservation',
@@ -237,20 +242,19 @@ describe("active+approved recovery", async () => {
       netEngineeringLines: null,
       closedAt: null,
       externalTaskRef: null,
-      intakeTrace: null,
       review: approvedReview,
-    };
+    });
     await store.save(mission, null);
 
     const roundBefore = approvedReview.rounds[approvedReview.rounds.length - 1];
 
     try {
-      const submitForReviewFn = async () => {
+      const submitForReviewFn: NonNullable<NonNullable<Parameters<typeof recoverMissionForIntegration>[1]>["submitForReviewFn"]> = async () => {
         throw new Error('A submitted review must be awaiting a reviewer decision');
       };
 
       await recoverMissionForIntegration(
-        {
+        integrationContext({
           slug,
           approval: {
             ok: true,
@@ -258,12 +262,16 @@ describe("active+approved recovery", async () => {
             defaultUserApproved: true,
             defaultUserApprovedAt: decidedAt,
           },
-        },
-        { missionServices: { store, lifecycle: new MissionLifecycleService(store) }, submitForReviewFn },
+        }),
+        { missionServices: integrationServices({ store, lifecycle: new MissionLifecycleService(store) }), submitForReviewFn },
       );
 
       const reloaded = await store.load(missionId(slug));
+      assert.equal(reloaded.kind, 'found');
+      assert.ok(reloaded.mission.review);
       const roundAfter = reloaded.mission.review.rounds[reloaded.mission.review.rounds.length - 1];
+      assert.ok(roundBefore.decision != null);
+      assert.ok(roundAfter.decision != null);
       assert.equal(roundAfter.decision.kind, roundBefore.decision.kind, 'round keeps its approved decision');
       assert.equal(roundAfter.decision.decidedAt, roundBefore.decision.decidedAt, 'round keeps its original decidedAt');
       assert.equal(roundAfter.subject.change.sourceBranch, roundBefore.subject.change.sourceBranch, 'round keeps its reviewed source branch');
@@ -311,13 +319,13 @@ describe("CP-3 landed closeout", async () => {
   const { findExistingSquashCommit } = await import('../../../src/adapters/cli/commands/integrate-conflict.js');
   const { recoverLandedIntegration } = await import('../../../src/application/integrate/landed-recovery.js');
 
-  for (const status of ['active', 'review']) test(`TASK-2517 CP-3: stranded ${status} mission closes to done with a landed squash`, async () => {
+  for (const status of ['active', 'review'] as const) test(`TASK-2517 CP-3: stranded ${status} mission closes to done with a landed squash`, async () => {
     const decidedAt = '2026-02-01T09:00:00Z';
     const submittedAt = '2026-02-01T08:00:00Z';
     const implementer = agentFamily('configured-implementer');
     const reviewer = agentFamily('configured-reviewer');
     const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' });
-    const pullRequest = { kind: 'pull-request', provider: 'forgejo', id: '2517c', url: null, sourceBranch: 'mission/task-2517-cp3', targetBranch: 'main' };
+    const pullRequest = { kind: 'pull-request', provider: 'forgejo', id: '2517c', url: null, sourceBranch: 'mission/task-2517-cp3', targetBranch: 'main' } satisfies import("../../../src/domain/review.js").ReviewedChange;
 
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2517-cp3-'));
     fs.mkdirSync(path.join(root, 'missions'), { recursive: true });
@@ -356,7 +364,7 @@ describe("CP-3 landed closeout", async () => {
     });
 
     const slug = 'task-2517-cp3';
-    const mission = {
+    const mission = fixtureMission(slug, {
       id: missionId(slug),
       repositoryId: repositoryId('parallix'),
       title: 'task-2517-cp3 stranded review closeout',
@@ -375,14 +383,13 @@ describe("CP-3 landed closeout", async () => {
       netEngineeringLines: null,
       closedAt: null,
       externalTaskRef: null,
-      intakeTrace: null,
       review: approvedReview,
-    };
+    });
     await store.save(mission, null);
 
-    const cleaned = [];
+    const cleaned: string[] = [];
     const hookRan: string[] = [];
-    const missionServices = { store, lifecycle, integration: new MissionIntegrationService(store) };
+    const missionServices = integrationServices({ store, lifecycle, integration: new MissionIntegrationService(store) });
     await recoverLandedIntegration(slug, missionServices, root, {
       findSquashCommit: (dir, s) => findExistingSquashCommit(dir, s),
       recoverMissionForIntegration,
@@ -391,6 +398,7 @@ describe("CP-3 landed closeout", async () => {
       closeLandedIntegrationOrAbort,
       cleanupMissionWorktree: (s) => { cleaned.push(s); return true; },
       runPostIntegrateHookOrAbort: () => { hookRan.push(slug); },
+      updateGraphifyRepository: async () => {},
       createAbort: () => new Error('IntegrationAbort'),
       baseBranch: 'main',
     });
@@ -406,7 +414,7 @@ describe("CP-3 landed closeout", async () => {
   test('TASK-2517 CP-3: closeout fails when worktree cleanup fails', async () => {
     const hookCalls: string[] = [];
     await assert.rejects(
-      recoverLandedIntegration('task-2517-cleanup', { store: { load: async () => ({ kind: 'found', mission: {} }) } }, '.', {
+      recoverLandedIntegration('task-2517-cleanup', integrationServices({ store: { load: async () => ({ kind: 'found' as const, mission: fixtureMission('task-2517-cleanup'), version: missionVersion(1) }) } }), '.', {
         findSquashCommit: () => 'abc123',
         recoverMissionForIntegration: async () => ({ status: 'integration' }),
         persistLandedIntegrationOrAbort: async () => {},
@@ -414,7 +422,8 @@ describe("CP-3 landed closeout", async () => {
         closeLandedIntegrationOrAbort: async () => { throw new Error('closed before cleanup'); },
         cleanupMissionWorktree: () => false,
         runPostIntegrateHookOrAbort: (s: string) => { hookCalls.push(s); },
-        createAbort: () => new Error('IntegrationAbort'),
+        updateGraphifyRepository: async () => {},
+      createAbort: () => new Error('IntegrationAbort'),
         baseBranch: 'main',
       }),
       /IntegrationAbort/,

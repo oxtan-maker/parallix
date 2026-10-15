@@ -36,7 +36,7 @@ test('task-2428: approve:review cannot reach authority or fabricate approval fro
   const result = await controller.dispatch({
     operationId: 'forged-approval', kind: 'approve:review', missionId: 'task-2428',
     capabilities: new Set(),
-    payload: { kind: 'handoff:record', netEngineeringLines: 0, capturedAt: 'never' } as never,
+    payload: { kind: 'handoff:record', netEngineeringLines: 0, capturedAt: 'never' },
   });
 
   assert.equal(result.status, 'rejected');

@@ -49,6 +49,8 @@ const REPOSITORY_MODULE = 'src/adapters/sqlite/board-lane-event-repository.ts';
 const PORTS_MODULE = 'src/adapters/sqlite/ports.ts';
 const AUTHORITY_MAP_MODULE = 'src/adapters/sqlite/authority-map.ts';
 const METRICS_ADAPTER_MODULE = 'src/application/projections/metrics-read-adapter.ts';
+/** Pure lane-history mapping for delivery outcomes; it has no writer port. */
+const METRICS_OUTCOMES_MODULE = 'src/application/projections/metrics-outcomes.ts';
 const STATUS_COMMAND_MODULE = 'src/adapters/cli/commands/status.ts';
 /** Reads lane history to compare cohorts; it never appends. */
 const STATS_COHORTS_COMMAND_MODULE = 'src/adapters/cli/commands/stats-cohorts.ts';
@@ -69,6 +71,7 @@ const CONTRACT_MODULES = new Set([
   PORTS_MODULE,
   AUTHORITY_MAP_MODULE,
   METRICS_ADAPTER_MODULE,
+  METRICS_OUTCOMES_MODULE,
   STATUS_COMMAND_MODULE,
   STATS_COHORTS_COMMAND_MODULE,
   TUI_COMMAND_MODULE,

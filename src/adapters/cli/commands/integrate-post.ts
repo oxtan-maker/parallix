@@ -1,3 +1,6 @@
+import { commandErrorMessage } from './agent-result.js';
+import type { IntegrationDecisionServices } from '../../../application/ports/integration-records.js';
+import type { StatsRow } from '../../../application/services/statistics-row.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 import { DEFAULT_CONFIGURATION } from '../../../application/ports/configuration.js';
 import fs from 'node:fs';
@@ -5,7 +8,14 @@ import { git } from '../../git/git.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import { resolveForgejoUser, resolveForgejoHome, isForgejoPath } from '../../forgejo/forgejo.js';
 import { getPrimaryWorktree, conventionalWorktreePath, missionBranchName } from '../../filesystem/mission-utils.js';
-import stats from './stats.js';
+import stats, { type StatsRecordingOptions } from './stats.js';
+
+interface IntegrationStatsReceipt {
+  row: StatsRow;
+  report?: string | null;
+  reportError?: string;
+}
+type IntegrationStatsRecorder = (options: StatsRecordingOptions) => IntegrationStatsReceipt | Promise<IntegrationStatsReceipt>;
 // SC2: re-export post-integration stats helpers defined in stats.ts
 // (MISSION.md scope lists them as integrate-post exports; stats.ts is their home)
 export {
@@ -59,7 +69,7 @@ export function printDiagnosticTable() {
 }
 
 /** @param {{statusCode?: number, error: string, raw?: string}} syncResult */
-export function reportSyncMergedFailure(syncResult: any) {
+export function reportSyncMergedFailure(syncResult: { statusCode?: number | null; error?: string; raw?: string }) {
   const detail = syncResult.statusCode ? ` (${syncResult.error}: ${syncResult.statusCode})` : ` (${syncResult.error})`;
   fmt.log.fail(`Forgejo sync-merged failed${detail}.`);
   if (syncResult.raw) {
@@ -70,7 +80,7 @@ export function reportSyncMergedFailure(syncResult: any) {
 }
 
 /** @param {{mission: string, implementer: string, pr_fix_rounds: string, classification: string, date: string}} row */
-export function formatRecordedStatsRow(row: any) {
+export function formatRecordedStatsRow(row: Partial<Record<'mission' | 'implementer' | 'pr_fix_rounds' | 'classification' | 'date', unknown>>) {
   const display = (value: unknown) => value === null || value === undefined || value === '' ? 'n/a' : String(value);
   return `${display(row.mission)}: implementer=${display(row.implementer)}, pr_fix_rounds=${display(row.pr_fix_rounds)}, classification=${display(row.classification)}, date=${display(row.date)}`;
 }
@@ -100,7 +110,7 @@ export function resolveForgejoUserForIntegration(taskAssignee: string | null) {
 }
 
 /** @param{{stdout: string, stderr: string, status: number}} result */
-export function isNoMergeToAbortResult(result: any) {
+export function isNoMergeToAbortResult(result: Pick<ReturnType<typeof git>, 'stdout' | 'stderr'>) {
   const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
   return /MERGE_HEAD missing|There is no merge to abort/i.test(output);
 }
@@ -114,13 +124,13 @@ export async function recordPostIntegrationStats(
   {
     configuration,
     rootDir = getPrimaryWorktree(configuration),
-    recordIntegrationStatsFn = (stats as any).recordIntegrationStats,
+    recordIntegrationStatsFn = stats.recordIntegrationStats,
     missionStore,
     readMissionFlow,
   }: {
     configuration?: ParallixConfiguration;
     rootDir?: string;
-    recordIntegrationStatsFn?: Function;
+    recordIntegrationStatsFn?: IntegrationStatsRecorder;
     readMissionFlow?: () => Promise<readonly import('../../../application/ports/cli-workflows.js').StatsMissionFlow[] | null>;
     /**
      * Operator Mission authority for the authoritative stats derivation. There
@@ -158,7 +168,7 @@ export async function recordPostIntegrationStats(
 }
 
 /** Print the weekly report carried by a recording outcome without ever throwing. */
-function printWeeklyStatsReport(outcome: any): void {
+function printWeeklyStatsReport(outcome: Pick<IntegrationStatsReceipt, 'report' | 'reportError'>): void {
   try {
     if (typeof outcome.report !== 'string' || outcome.report === '') {
       const detail = outcome.reportError ? `: ${outcome.reportError}` : '';
@@ -166,8 +176,8 @@ function printWeeklyStatsReport(outcome: any): void {
       return;
     }
     fmt.log.plain(outcome.report);
-  } catch (error: any) {
-    fmt.log.warn(`Weekly stats report unavailable: ${error && error.message ? error.message : String(error)}`);
+  } catch (error) {
+    fmt.log.warn(`Weekly stats report unavailable: ${commandErrorMessage(error) || String(error)}`);
   }
 }
 
@@ -175,8 +185,8 @@ function printWeeklyStatsReport(outcome: any): void {
 export async function recordPostIntegrationStatsOrAbort(slug: string, options: {configuration?: ParallixConfiguration, rootDir?: string, missionStore?: import('../../../application/domain-ports.js').MissionStore|null, readMissionFlow?: () => Promise<readonly import('../../../application/ports/cli-workflows.js').StatsMissionFlow[] | null>} = {}) {
   try {
     return await recordPostIntegrationStats(slug, options);
-  } catch (error: any) {
-    const detail = error && error.message ? error.message : String(error);
+  } catch (error) {
+    const detail = commandErrorMessage(error) || String(error);
     fmt.log.fail(`Post-integration workflow stats failed for ${slug}: ${detail}`);
     throw new IntegrationAbort();
   }
@@ -185,7 +195,7 @@ export async function recordPostIntegrationStatsOrAbort(slug: string, options: {
 /** Read the operator measurement database before retrying a legacy closeout. */
 export function hasIntegrationMeasurement(slug: string, rootDir: string): boolean {
   const repo = stats.resolveStatsRepoName(rootDir);
-  return stats.loadMeasurementRows({ rootDir }).rows.some((row: any) =>
+  return stats.loadMeasurementRows({ rootDir }).rows.some((row) =>
     row.repo === repo && row.mission === slug && row.stage === 'default');
 }
 
@@ -227,7 +237,7 @@ function resolveLandedCommitTimestamp(landedCommit: string, rootDir: string) {
  * @param {string} slug @param {string} landedCommit @param {any} missionServices
  * @param{{rootDir?: string; landedAt?: string}} options
  */
-export async function persistLandedIntegrationOrAbort(slug: string, landedCommit: string, missionServices: any, { rootDir = process.cwd(), landedAt: landedAtOpt }: { rootDir?: string; landedAt?: string } = {}) {
+export async function persistLandedIntegrationOrAbort(slug: string, landedCommit: string, missionServices: IntegrationDecisionServices, { rootDir = process.cwd(), landedAt: landedAtOpt }: { rootDir?: string; landedAt?: string } = {}) {
   let loaded = await missionServices.store.load(missionId(slug));
   if (loaded.kind !== 'found') {
     fmt.log.fail(`Mission ${missionId(slug)} is unavailable after landing; statistics will not run.`);
@@ -269,7 +279,7 @@ export async function persistLandedIntegrationOrAbort(slug: string, landedCommit
 }
 
 /** Record administrative closure only after cleanup and the post-integrate hook. */
-export async function closeLandedIntegrationOrAbort(slug: string, landedCommit: string, missionServices: any) {
+export async function closeLandedIntegrationOrAbort(slug: string, landedCommit: string, missionServices: IntegrationDecisionServices) {
   const loaded = await missionServices.store.load(missionId(slug));
   if (loaded.kind !== 'found' || loaded.mission.status !== 'done') {
     fmt.log.fail(`Mission ${missionId(slug)} is unavailable for closure after landing.`);
@@ -310,7 +320,7 @@ export function runPreCommitHookOrAbort(slug: string, {
   variant,
   runPreCommitHookFn = postIntegrateHook.runPreCommitHook,
   gitRunner = git,
-}: {missionWorktree: string, baseWorktree: string, baseBranch: string, variant: string, runPreCommitHookFn?: Function, gitRunner?: Function}) {
+}: {missionWorktree: string, baseWorktree: string, baseBranch: string, variant: string, runPreCommitHookFn?: typeof postIntegrateHook.runPreCommitHook, gitRunner?: typeof git}) {
   // ponytail: only modified tracked files are committed; a hook that creates
   // new files must `git add` them itself.
   const modifiedPaths = () => new Set<string>(
@@ -353,14 +363,14 @@ export function runPreCommitHookOrAbort(slug: string, {
  * exactly once from the base checkout, after a successful non-dry-run integrate closeout.
  * A repo with no hook configured is a silent no-op, so integrate's behavior is unchanged.
  * @param {string} slug
- * @param{{baseWorktree: string, baseBranch: string, variant: string, runPostIntegrateHookFn?: Function}} opts
+ * @param{{baseWorktree: string, baseBranch: string, variant: string, runPostIntegrateHookFn?: typeof postIntegrateHook.runPostIntegrateHook}} opts
  */
 export function runPostIntegrateHookOrAbort(slug: string, {
   baseWorktree,
   baseBranch,
   variant,
   runPostIntegrateHookFn = postIntegrateHook.runPostIntegrateHook
-}: {baseWorktree: string, baseBranch: string, variant: string, runPostIntegrateHookFn?: Function}) {
+}: {baseWorktree: string, baseBranch: string, variant: string, runPostIntegrateHookFn?: typeof postIntegrateHook.runPostIntegrateHook}) {
   const result = runPostIntegrateHookFn({ slug, baseWorktree, baseBranch, variant });
   if (!result.ran) {
     return result;
@@ -383,7 +393,7 @@ export function runPostIntegrateHookOrAbort(slug: string, {
 
 /**
  * @param {string} slug
- * @param{{rootDir?: string, gitRunner?: Function, removeDir?: Function, existsSync?: Function}} options
+ * @param{{rootDir?: string, gitRunner?: typeof git, removeDir?: (target: string) => void, existsSync?: typeof fs.existsSync}} options
  */
 export function cleanupMissionWorktree(
   slug: string,
@@ -391,16 +401,11 @@ export function cleanupMissionWorktree(
     configuration,
     rootDir = getPrimaryWorktree(configuration),
     gitRunner = git,
-    removeDir = (target: string) => {
-      if (isForgejoPath(target, { forgejoHome: resolveForgejoHome(rootDir, configuration), configuration })) {
-        throw new Error(`CRITICAL SAFETY VIOLATION: cleanupMissionWorktree attempted to delete Forgejo home: ${target}`);
-      }
-      return fs.rmSync(target, { recursive: true, force: true });
-    },
+    removeDir = (target: string) => removeMissionDirectory(target, rootDir, configuration),
     existsSync = fs.existsSync,
-    retireTerminal = (mission: string, root: string) => createMissionTerminalResources(root, { configuration: configuration ?? DEFAULT_CONFIGURATION }).retire(mission),
+    retireTerminal = (mission: string, root: string) => retireMissionResources(mission, root, configuration),
     preserveHistory = (mission: string, worktree: string, root: string) => preserveWorktreeRunHistory(worktree, historyRepositoryRoot(root), { repositoryKey: missionRepositoryKey(historyRepositoryRoot(root)), missionId: mission }),
-  }: {configuration?: ParallixConfiguration, rootDir?: string, gitRunner?: Function, removeDir?: Function, existsSync?: Function, retireTerminal?: (_slug: string, _root: string) => void, preserveHistory?: (_slug: string, _worktree: string, _root: string) => unknown} = {}
+  }: {configuration?: ParallixConfiguration, rootDir?: string, gitRunner?: typeof git, removeDir?: (target: string) => void, existsSync?: typeof fs.existsSync, retireTerminal?: (_slug: string, _root: string) => void, preserveHistory?: (_slug: string, _worktree: string, _root: string) => unknown} = {}
 ) {
   const retire = () => {
     try { retireTerminal(slug, rootDir); }
@@ -431,16 +436,8 @@ export function cleanupMissionWorktree(
   const worktreeList = gitRunner(['-C', rootDir, 'worktree', 'list', '--porcelain']).stdout;
   const isRegistered = worktreeList.split('\n').some((line: string) => line.trim() === `worktree ${worktreePath}`);
 
-  if (existsSync(worktreePath)) { preserve(); }
-  if (existsSync(worktreePath) && isRegistered) {
-    let removeResult = gitRunner(['-C', rootDir, 'worktree', 'remove', worktreePath]);
-    if (removeResult.status !== 0) {
-      removeResult = gitRunner(['-C', rootDir, 'worktree', 'remove', '--force', worktreePath]);
-      if (removeResult.status !== 0) {
-        return false;
-      }
-    }
-  }
+  preserveExistingHistory(worktreePath, existsSync, preserve);
+  if (!removeRegisteredWorktree(rootDir, worktreePath, isRegistered, gitRunner, existsSync)) { return false; }
 
   if (existsSync(worktreePath)) {
     removeDir(worktreePath);
@@ -460,4 +457,26 @@ export function cleanupMissionWorktree(
   }
 
   return !existsSync(worktreePath);
+}
+
+function removeRegisteredWorktree(rootDir: string, worktreePath: string, isRegistered: boolean, gitRunner: typeof git, existsSync: typeof fs.existsSync): boolean {
+  if (!existsSync(worktreePath) || !isRegistered) { return true; }
+  const removed = gitRunner(['-C', rootDir, 'worktree', 'remove', worktreePath]);
+  if (removed.status === 0) { return true; }
+  return gitRunner(['-C', rootDir, 'worktree', 'remove', '--force', worktreePath]).status === 0;
+}
+
+function removeMissionDirectory(target: string, rootDir: string, configuration?: ParallixConfiguration): void {
+  if (isForgejoPath(target, { forgejoHome: resolveForgejoHome(rootDir, configuration), configuration })) {
+    throw new Error(`CRITICAL SAFETY VIOLATION: cleanupMissionWorktree attempted to delete Forgejo home: ${target}`);
+  }
+  fs.rmSync(target, { recursive: true, force: true });
+}
+
+function retireMissionResources(mission: string, root: string, configuration = DEFAULT_CONFIGURATION): void {
+  createMissionTerminalResources(root, { configuration }).retire(mission);
+}
+
+function preserveExistingHistory(worktreePath: string, existsSync: typeof fs.existsSync, preserve: () => void): void {
+  if (existsSync(worktreePath)) { preserve(); }
 }

@@ -35,6 +35,11 @@ export function isCreateMissionBody(payload: unknown): boolean {
 export function validateWebCreateMissionRequest(payload: unknown): WebCreateMissionValidation {
   if (!isPlainObject(payload)) { return { ok: false, problems: ['request must be a JSON object'] }; }
   const problems: string[] = [];
+  if (!checkCreateFields(payload, problems)) { return { ok: false, problems }; }
+  return { ok: true, value: payload };
+}
+
+function checkCreateFields(payload: Record<string, unknown>, problems: string[]): payload is Record<string, unknown> & WebCreateMissionRequest {
   checkKeys(payload,
     ['kind', 'requestKey', 'title', 'description', 'context', 'labels', 'successCriteria', 'dependencies'],
     ['kind', 'requestKey', 'title', 'labels', 'successCriteria', 'dependencies'],
@@ -48,6 +53,5 @@ export function validateWebCreateMissionRequest(payload: unknown): WebCreateMiss
     if (Object.prototype.hasOwnProperty.call(payload, key)) { checkString(payload, key, 'request', problems); }
   }
   for (const key of ['labels', 'successCriteria', 'dependencies'] as const) { checkStringArray(payload, key, 'request', problems); }
-  if (problems.length > 0) { return { ok: false, problems }; }
-  return { ok: true, value: payload as unknown as WebCreateMissionRequest };
+  return problems.length === 0;
 }

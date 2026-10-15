@@ -1,3 +1,5 @@
+import type { ReviewEventRecord } from '../../../src/domain/review.js';
+import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
 // Lifecycle approval timing and persisted metrics contract (TASK-2376, TASK-2622.13).
 // Real disposable SQLite/Git, controlled provider, no workstation dependencies.
 // TASK-2717 audit: ADR 0057 integration-ci; recorded reviewer decidedAt owns dwell.
@@ -181,7 +183,7 @@ test('R1 production: local approval path transitions Mission to integration befo
   const decidedAt = '2026-01-01T10:30:00.000Z';
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse(decidedAt) });
   const slug = 'task-2376-r1prod';
-  const mission = {
+  const mission = completeMissionFixture(String(missionId(slug)), {
     id: missionId(slug),
     repositoryId: repo,
     title: 'R1 production test',
@@ -193,7 +195,7 @@ test('R1 production: local approval path transitions Mission to integration befo
     netEngineeringLines: null,
     closedAt: null,
     externalTaskRef: null,
-    intakeTrace: null,
+    
     review: {
       rounds: [{
         number: 1,
@@ -212,8 +214,7 @@ test('R1 production: local approval path transitions Mission to integration befo
       stageLaunches: [],
       reviewEvents: [],
     },
-  };
-  // @ts-expect-error -- partial mission for test seed
+  });
   await store.save(mission, null);
 
   try {
@@ -326,7 +327,7 @@ test('R2: delayed integration dwell — review 30m, integration 225m (task-2376)
   const reviewInterval = intervals.find(
     (i) => i.state === 'review' && i.exitedAt !== null,
   );
-  assert.ok(reviewInterval, 'review interval exists');
+  assert.ok(reviewInterval?.exitedAt, 'review interval exists');
   const reviewMinutes = (Date.parse(reviewInterval.exitedAt) - Date.parse(reviewInterval.enteredAt)) / 60_000;
   assert.equal(
     reviewMinutes,
@@ -338,7 +339,7 @@ test('R2: delayed integration dwell — review 30m, integration 225m (task-2376)
   const integrationInterval = intervals.find(
     (i) => i.state === 'integration' && i.exitedAt !== null,
   );
-  assert.ok(integrationInterval, 'integration interval exists');
+  assert.ok(integrationInterval?.exitedAt, 'integration interval exists');
   const integrationMinutes = (Date.parse(integrationInterval.exitedAt) - Date.parse(integrationInterval.enteredAt)) / 60_000;
   assert.equal(
     integrationMinutes,
@@ -512,7 +513,7 @@ test('R10: first-pass approval yields known reviewFixRounds=0 (task-2376)', asyn
     comment: null,
     source: { kind: 'local' },
   });
-  const mission = {
+  const mission = completeMissionFixture(String(missionId(slug)), {
     id: missionId(slug),
     repositoryId: repo,
     title: 'R10 test',
@@ -524,7 +525,7 @@ test('R10: first-pass approval yields known reviewFixRounds=0 (task-2376)', asyn
     netEngineeringLines: null,
     closedAt: null,
     externalTaskRef: null,
-    intakeTrace: null,
+    
     review: {
       ...approvedReview,
       // reviewEvents with approve verdict = known zero fix rounds
@@ -532,8 +533,7 @@ test('R10: first-pass approval yields known reviewFixRounds=0 (task-2376)', asyn
         { position: 0, eventType: 'reviewer_outcome', roundNumber: 1, phase: 'reviewing', actor: reviewer, content: 'Approved on first review', disposition: null, verdict: 'approve', itemDispositions: null, blockedReason: null, followUpReference: null, createdAt: '2026-01-01T10:30:00Z' },
       ],
     },
-  };
-  // @ts-expect-error -- partial mission for test seed
+  });
   await store.save(mission, null);
 
   try {
@@ -577,12 +577,12 @@ test('R11: two request-changes cycles yield known reviewFixRounds=2 (task-2376)'
   const store = new SqliteMissionStore(database);
 
   const slug = 'task-2376-r11';
-  const reviewEvents = [
+  const reviewEvents: ReviewEventRecord[] = [
     { position: 0, eventType: 'reviewer_outcome', roundNumber: 1, phase: 'reviewing', actor: reviewer, content: 'Changes requested', disposition: null, verdict: 'request-changes', itemDispositions: null, blockedReason: null, followUpReference: null, createdAt: '2026-01-01T10:00:00Z' },
     { position: 1, eventType: 'reviewer_outcome', roundNumber: 2, phase: 'reviewing', actor: reviewer, content: 'Changes requested again', disposition: null, verdict: 'request-changes', itemDispositions: null, blockedReason: null, followUpReference: null, createdAt: '2026-01-01T11:00:00Z' },
     { position: 2, eventType: 'reviewer_outcome', roundNumber: 3, phase: 'reviewing', actor: reviewer, content: 'Approved', disposition: null, verdict: 'approve', itemDispositions: null, blockedReason: null, followUpReference: null, createdAt: '2026-01-01T12:00:00Z' },
   ];
-  const mission = {
+  const mission = completeMissionFixture(String(missionId(slug)), {
     id: missionId(slug),
     repositoryId: repo,
     title: 'R11 test',
@@ -594,7 +594,7 @@ test('R11: two request-changes cycles yield known reviewFixRounds=2 (task-2376)'
     netEngineeringLines: null,
     closedAt: null,
     externalTaskRef: null,
-    intakeTrace: null,
+    
     review: {
       rounds: [{
         number: 1,
@@ -613,8 +613,7 @@ test('R11: two request-changes cycles yield known reviewFixRounds=2 (task-2376)'
       stageLaunches: [],
       reviewEvents,
     },
-  };
-  // @ts-expect-error -- partial mission for test seed
+  });
   await store.save(mission, null);
 
   try {
@@ -664,11 +663,11 @@ test('R12: external artifacts with misleading values do not affect authoritative
   const taskFile = path.join(root, 'backlog', 'tasks', `${slug} - Test.md`);
   fs.writeFileSync(taskFile, '---\nid: TASK-2376-R12\nlabels: [ai_sdlc]\nassignee: [codex]\nstatus: done\n---\nReview round 5\n');
 
-  const reviewEvents = [
+  const reviewEvents: ReviewEventRecord[] = [
     { position: 0, eventType: 'reviewer_outcome', roundNumber: 1, phase: 'reviewing', actor: reviewer, content: 'Changes', disposition: null, verdict: 'request-changes', itemDispositions: null, blockedReason: null, followUpReference: null, createdAt: '2026-01-01T10:00:00Z' },
     { position: 1, eventType: 'reviewer_outcome', roundNumber: 2, phase: 'reviewing', actor: reviewer, content: 'Approved', disposition: null, verdict: 'approve', itemDispositions: null, blockedReason: null, followUpReference: null, createdAt: '2026-01-01T12:00:00Z' },
   ];
-  const mission = {
+  const mission = completeMissionFixture(String(missionId(slug)), {
     id: missionId(slug),
     repositoryId: repo,
     title: 'R12 test',
@@ -680,7 +679,7 @@ test('R12: external artifacts with misleading values do not affect authoritative
     netEngineeringLines: null,
     closedAt: null,
     externalTaskRef: null,
-    intakeTrace: null,
+    
     review: {
       rounds: [{
         number: 1,
@@ -699,8 +698,7 @@ test('R12: external artifacts with misleading values do not affect authoritative
       stageLaunches: [],
       reviewEvents,
     },
-  };
-  // @ts-expect-error -- partial mission for test seed
+  });
   await store.save(mission, null);
 
   try {

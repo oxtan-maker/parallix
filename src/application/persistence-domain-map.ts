@@ -58,7 +58,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'Checkpoint evidence from another mission is rejected, and a checkpoint that is not handoff-ready cannot be recorded; a same-named checkpoint replaces the latest-state projection while durable storage retains recorded versions.',
     fileLocation: 'src/domain/checkpoint.ts',
-    line: 77,
+    line: 92,
     anchor: 'export function recordCheckpoint',
   },
   Review: {
@@ -66,7 +66,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'A reviewer decision is rejected unless the review is awaiting one, and request-changes is rejected without at least one identified finding carrying an id and summary.',
     fileLocation: 'src/domain/review.ts',
-    line: 756,
+    line: 769,
     anchor: 'export function applyReviewerCommand',
   },
   MissionOutcome: {
@@ -106,7 +106,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'A lane transition is only recorded for a status pair the mission state machine owns; an unmodelled pair yields no trigger rather than a synthesised one.',
     fileLocation: 'src/domain/board-event.ts',
-    line: 77,
+    line: 92,
     anchor: 'export function triggerFromTransition',
   },
   AgentBlock: {
@@ -156,7 +156,7 @@ export const TECHNICAL_PERSISTENCE_METADATA: readonly TechnicalPersistenceMetada
     id: 'sqlite-import-identity',
     kind: 'import-identity',
     fileLocation: 'src/adapters/sqlite/importer.ts',
-    line: 59,
+    line: 44,
     anchor: 'export class SqliteImporter',
     whyNotDomain:
       'Source path plus content digest exist to make an import idempotent. They identify a file that was read, not a domain entity, and are never surfaced to a consumer.',
@@ -165,7 +165,7 @@ export const TECHNICAL_PERSISTENCE_METADATA: readonly TechnicalPersistenceMetada
     id: 'stage-launch-fingerprint',
     kind: 'idempotency-key',
     fileLocation: 'src/adapters/review/review-agent-fallback.ts',
-    line: 37,
+    line: 42,
     anchor: 'function stageLaunchFingerprint',
     whyNotDomain:
       'An opaque token kept in review-state metadata, bounded to the last 20 per stage window, whose only use is refusing to accumulate the same measurement twice. Nothing resolves it back to a launch, so it is not an Attempt identity (see PER_LAUNCH_IDENTITY_DECISION).',

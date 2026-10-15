@@ -14,7 +14,7 @@ function captureBareInvocation(overrides: MainOverrides) {
     options: {
       ...overrides,
       printUsageFn: () => calls.push('usage bytes'),
-      exitFn: ((code?: number) => { calls.push(['exit', code]); }) as (_code?: number) => never,
+      exitFn: (code?: number) => { calls.push(['exit', code]); },
       errorFn: () => { calls.push('error'); return ''; },
     } satisfies MainOverrides,
   };
@@ -22,8 +22,8 @@ function captureBareInvocation(overrides: MainOverrides) {
 
 test('no-command TTY dispatches the same ui command as explicit px ui', async () => {
   const calls: Array<[string, string[], { command: string }]> = [];
-  const commandFns = {
-    ui: async (args: string[], options: { command: string }) => calls.push(['ui', args, { command: options.command }]),
+  const commandFns: NonNullable<Parameters<typeof main>[1]['commandFns']> = {
+    ui: async (args, options = {}) => calls.push(['ui', args, { command: String(options.command) }]),
   };
 
   await main([], {
@@ -31,7 +31,7 @@ test('no-command TTY dispatches the same ui command as explicit px ui', async ()
     isInteractiveTTYFn: () => true,
     runtime: runtimeOf(),
     printUsageFn: () => assert.fail('TTY default must not print usage'),
-    exitFn: (() => assert.fail('TTY default must not exit through usage')) as never,
+    exitFn: (() => assert.fail('TTY default must not exit through usage')),
   });
   await main(['ui'], { commandFns, runtime: runtimeOf() });
 

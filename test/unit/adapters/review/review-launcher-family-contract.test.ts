@@ -1,4 +1,3 @@
-// @ts-nocheck -- Retained legacy partial request doubles (TASK-2328).
 import { resolveConfiguration } from '../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 import { reviewLoopReporter } from '../../../../src/adapters/review/review-loop-presentation.js';
@@ -52,7 +51,7 @@ const originalCodexHome = environment.CODEX_HOME;
 function availableLaunchers(_tmpRoot: string) {
   const available = new Set(['codex', 'claude', 'gemini', 'opencode', 'vibe']);
   setCommandPathProbe((name: string) => available.has(name) ? name : null);
-  setLauncherHealthProbe(() => ({ ok: true }));
+  setLauncherHealthProbe(() => ({ ok: true as const }));
 }
 
 test.afterEach(() => {
@@ -62,7 +61,7 @@ test.afterEach(() => {
   if (originalWorkflowAgent === undefined) delete environment.WORKFLOW_AGENT;
   else environment.WORKFLOW_AGENT = originalWorkflowAgent;
   setCommandPathProbe((name: string) => name);
-  setLauncherHealthProbe(() => ({ ok: true }));
+  setLauncherHealthProbe(() => ({ ok: true as const }));
   Math.random = originalRandom;
 });
 
@@ -71,15 +70,15 @@ test.afterEach(() => {
 // =============================================================================
 
 test('handoff persists a configured cross-family reviewer instead of the PR author', () => {
-  const calls: unknown[][] = [];
+  const calls: (["eligible", string] | ["select", string, readonly string[]])[] = [];
   const assignment = resolveHandoffReviewAssignment('claude', {
     worktree: '/tmp/task-2335',
     eligibleAgentsForStepFn: (step: string) => {
-      calls.push(['eligible', step]);
+      calls.push(['eligible', step] as const);
       return ['codex', 'claude', 'custom', 'vibe'];
     },
     selectAgentFn: (step: string, options: { exclude: Set<string> }) => {
-      calls.push(['select', step, [...options.exclude]]);
+      calls.push(['select', step, [...options.exclude]] as const);
       return 'custom';
     }
   });
@@ -257,17 +256,17 @@ test('review-loop reviewer selection excludes the author family (review-loop pat
     availableLaunchers(tmpRoot);
     delete environment.WORKFLOW_AGENT;
     const logs: string[] = [];
-    let selectAgentCallArgs: { step: string; exclude: string[] } | null = null;
+    let selectAgentCallArgs: { value: { step: string; exclude: string[] } | null } = { value: null };
     // Stub Math.random so selectAgent returns a deterministic agent.
     Math.random = () => 0.33;
     const selected = selectFor('codex', routingOver(excluded => {
-      selectAgentCallArgs = { step: 'review', exclude: [...excluded] };
+      selectAgentCallArgs.value = { step: 'review', exclude: [...excluded] };
       // Real selectAgent — reads config/agents.json from disk.
       return selectAgent('review', { configuration: resolveConfiguration(environment), exclude: new Set(excluded), mainWorktreePath: null });
     }, agent => ({ supported: true, detail: agent })), logs);
 
-    assert.ok(selectAgentCallArgs, 'the selector should have been asked during reviewer selection');
-    assert.ok(selectAgentCallArgs.exclude.includes('codex'), `exclude set should contain the implementer 'codex'; got: ${JSON.stringify(selectAgentCallArgs.exclude)}`);
+    assert.ok(selectAgentCallArgs.value, 'the selector should have been asked during reviewer selection');
+    assert.ok(selectAgentCallArgs.value.exclude.includes('codex'), `exclude set should contain the implementer 'codex'; got: ${JSON.stringify(selectAgentCallArgs.value.exclude)}`);
     assert.notEqual(selected?.reviewer, 'codex', `selected reviewer must NOT be the implementer family 'codex'; got '${selected?.reviewer}'`);
     assert.ok(['claude', 'custom', 'vibe'].includes(selected!.reviewer), `selected reviewer must be an eligible cross-family agent; got '${selected?.reviewer}'`);
   } finally {
@@ -287,7 +286,7 @@ test('review-loop single-family fallback when no cross-family reviewer is runnab
   const tmpRoot = registeredMkdtemp('task-2335-repro-sff-');
   try {
     setCommandPathProbe((name: string) => name === 'codex' ? name : null);
-    setLauncherHealthProbe(() => ({ ok: true }));
+    setLauncherHealthProbe(() => ({ ok: true as const }));
     delete environment.WORKFLOW_AGENT;
     const logs: string[] = [];
     let selectAgentThrew = false;

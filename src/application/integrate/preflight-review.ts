@@ -1,3 +1,4 @@
+import type { IntegrationContext } from './context.js';
 /**
  * Preflight section for the Forgejo review provider: PR state, approval
  * authority, stale sibling PRs, and the integrating user's token.
@@ -23,7 +24,7 @@ function printMergedPrRecoveryGuidance(log: PreflightReport['log'], slug: string
   log(fmt.status('INFO', `  px integrate ${slug} --dry-run`));
 }
 
-function checkOpenPullRequest(report: PreflightReport, context: any, localApprovalFallback: boolean) {
+function checkOpenPullRequest(report: PreflightReport, context: IntegrationContext, localApprovalFallback: boolean) {
   const { failures, log, detail } = report;
   const lifecycleAuthoritative = context.missionStatus === 'integration' || context.missionStatus === 'done';
   const recoveryDecision = recoveryEstablishesApproval(context);
@@ -44,7 +45,7 @@ function checkOpenPullRequest(report: PreflightReport, context: any, localApprov
   } else { detail(`Forgejo approval: latest formal review state is ${context.approval.reviewState}`); }
 }
 
-function checkPullRequest(report: PreflightReport, context: any, { baseWorktree, baseBranch }: ReviewProviderTarget, localApprovalFallback: boolean) {
+function checkPullRequest(report: PreflightReport, context: IntegrationContext, { baseWorktree, baseBranch }: ReviewProviderTarget, localApprovalFallback: boolean) {
   const { failures, log, detail } = report;
   if (context.pr.exists && context.pr.state === 'open') { checkOpenPullRequest(report, context, localApprovalFallback); return; }
   const lifecycleAuthoritative = context.missionStatus === 'integration' || context.missionStatus === 'done';
@@ -65,7 +66,7 @@ function checkPullRequest(report: PreflightReport, context: any, { baseWorktree,
   }
 }
 
-export function checkReviewProvider(report: PreflightReport, context: any, target: ReviewProviderTarget) {
+export function checkReviewProvider(report: PreflightReport, context: IntegrationContext, target: ReviewProviderTarget) {
   const { failures, warnings, log, detail } = report;
   const localApprovalFallback = context.approval?.source === 'local-review-state';
 
@@ -74,7 +75,7 @@ export function checkReviewProvider(report: PreflightReport, context: any, targe
   if (context.siblingPrs && context.siblingPrs.length > 0) {
     warnings.push('sibling-prs');
     log(fmt.status('WARN', `Multiple open PRs detected for ${baseTaskSlug(context.slug)}. Close stale PRs before integrating:`));
-    context.siblingPrs.forEach((sibling: any) => {
+    context.siblingPrs.forEach((sibling) => {
       log(fmt.status('INFO', `  - PR #${sibling.number} (${sibling.head}): ${sibling.html_url}`));
     });
   }

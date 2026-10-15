@@ -1,3 +1,6 @@
+import { fixtureMission as completeMissionFixture } from '../../../fixtures/mission-builders.js';
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
+import { repositoryId as fixtureRepositoryId } from '../../../../src/domain/repository.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { agentFamily } from '../../../../src/domain/agents.js';
@@ -96,7 +99,7 @@ test('projectMissionActivity calls a live px process recovery evidence, not a ru
   const activity = projectMissionActivity({
     currentWork: null,
     blockingReason: null,
-    liveSession: { missionId: 'task-2389' as never, family: agentFamily('claude') },
+    liveSession: { missionId: fixtureMissionId('task-2389'), family: agentFamily('claude') },
   });
 
   assert.equal(activity.coordinator.state, 'live');
@@ -116,11 +119,11 @@ test('projectMissionActivity separates an observed-stopped coordinator from an u
 });
 
 test('projectMissionCard preserves unobserved coordinator liveness for mission activity', () => {
-  const card = projectMissionCard({
-    id: 'task-2389' as never,
-    repositoryId: 'parallix' as never,
+  const card = projectMissionCard(completeMissionFixture(String(fixtureMissionId('task-2389')), {
+    id: fixtureMissionId('task-2389'),
+    repositoryId: fixtureRepositoryId('parallix'),
     title: 'Mission activity',
-    labels: [] as never,
+    labels: [],
     status: 'active',
     rawStatus: 'active',
     closedAt: null,
@@ -128,7 +131,7 @@ test('projectMissionCard preserves unobserved coordinator liveness for mission a
     checkpoints: [],
     review: null,
     netEngineeringLines: null,
-  }, {
+  }), {
     latestGate: 'unknown',
     liveSession: undefined,
     reviewApproval: null,
@@ -145,7 +148,7 @@ test('projectMissionActivity leaves an unattributed coordinator family null inst
   const activity = projectMissionActivity({
     currentWork: null,
     blockingReason: null,
-    liveSession: { missionId: 'task-2389' as never, family: null },
+    liveSession: { missionId: fixtureMissionId('task-2389'), family: null },
   });
 
   assert.equal(activity.coordinator.state === 'live' && activity.coordinator.family, null);
@@ -158,16 +161,16 @@ test('projectMissionActivity restates the one operation the reconciler resolved 
   // or turn two operations into a count.
   const facts = reconcileCurrentWork(
     [
-      { missionId: 'task-2389' as never, operationId: 'op-old', state: 'running', phase: 'draft', summary: 'old', agent: null, occurredAt: '2026-08-22T10:00:00Z', processId: null, sequence: 1 },
-      { missionId: 'task-2389' as never, operationId: 'op-new', state: 'running', phase: 'execute', summary: 'new', agent: null, occurredAt: '2026-08-22T10:01:00Z', processId: null, sequence: 2 },
-      { missionId: 'task-2389' as never, operationId: 'op-old', state: 'ended', phase: 'draft', summary: 'old', agent: null, occurredAt: '2026-08-22T10:02:00Z', processId: null, sequence: 3 },
-    ] as never,
+      { missionId: fixtureMissionId('task-2389'), operationId: 'op-old', state: 'running', phase: 'draft', summary: 'old', agent: null, occurredAt: '2026-08-22T10:00:00Z', processId: null, blockedReason: null, sequence: 1 },
+      { missionId: fixtureMissionId('task-2389'), operationId: 'op-new', state: 'running', phase: 'execute', summary: 'new', agent: null, occurredAt: '2026-08-22T10:01:00Z', processId: null, blockedReason: null, sequence: 2 },
+      { missionId: fixtureMissionId('task-2389'), operationId: 'op-old', state: 'ended', phase: 'draft', summary: 'old', agent: null, occurredAt: '2026-08-22T10:02:00Z', processId: null, blockedReason: null, sequence: 3 },
+    ],
     { nowMs: Date.parse('2026-08-22T10:02:30Z'), ttlMs: 5 * 60 * 1000 },
   );
 
   const activity = projectMissionActivity({
-    currentWork: facts.get('task-2389' as never)?.currentWork ?? null,
-    blockingReason: facts.get('task-2389' as never)?.blockingReason ?? null,
+    currentWork: facts.get(fixtureMissionId('task-2389'))?.currentWork ?? null,
+    blockingReason: facts.get(fixtureMissionId('task-2389'))?.blockingReason ?? null,
   });
 
   assert.equal(activity.work.kind, 'working');
@@ -181,7 +184,7 @@ test('summarizeMissionActivity tallies work states and sums no coordinator evide
     projectMissionActivity(working('unverified')),
     projectMissionActivity(working('stale')),
     projectMissionActivity({ currentWork: null, blockingReason: 'gate failed' }),
-    projectMissionActivity({ currentWork: null, blockingReason: null, liveSession: { missionId: 'task-1' as never, family: null } }),
+    projectMissionActivity({ currentWork: null, blockingReason: null, liveSession: { missionId: fixtureMissionId('task-1'), family: null } }),
   ]);
 
   assert.deepEqual(totals, { live: 1, unknown: 1, stale: 1, blocked: 1, idle: 1 });
@@ -221,12 +224,12 @@ test('AgentStrip renders recovery-only live coordinator evidence without claimin
   const recoveryOnly = projectMissionActivity({
     currentWork: null,
     blockingReason: null,
-    liveSession: { missionId: 'task-2389' as never, family: agentFamily('claude') },
+    liveSession: { missionId: fixtureMissionId('task-2389'), family: agentFamily('claude') },
   });
   const rows = projectAgentAvailability(
     [{ family: agentFamily('claude'), launcherAvailable: true, block: { kind: 'none' } }],
     Date.parse('2026-08-22T10:00:00Z'),
-    [{ missionId: 'task-2389' as never, family: agentFamily('claude') }],
+    [{ missionId: fixtureMissionId('task-2389'), family: agentFamily('claude') }],
   );
 
   const frame = await renderStrip(rows, [recoveryOnly]);
@@ -272,7 +275,7 @@ test('AgentStrip omits the work summary when no mission activity is supplied', a
 /** Render `px status` output for one mission activity, returning its lines. */
 function renderStatusLines(activity: MissionActivity | null): string[] {
   const lines: string[] = [];
-  const result = {
+  const result = ({
     branch: 'mission/task-2389',
     worktree: '/tmp/task-2389',
     rebaseInfo: null,
@@ -288,14 +291,14 @@ function renderStatusLines(activity: MissionActivity | null): string[] {
     agents: [],
     lastThreeCommits: [],
     uncommittedCount: 0,
-  } as unknown as StatusResult;
+  });
   renderStatus(result, (line) => lines.push(plain(line)));
   return lines;
 }
 
 test('px status renders live authoritative work and live coordinator evidence as separate facts', () => {
   const lines = renderStatusLines(projectMissionActivity(working('live', {
-    liveSession: { missionId: 'task-2389' as never, family: agentFamily('claude') },
+    liveSession: { missionId: fixtureMissionId('task-2389'), family: agentFamily('claude') },
   })));
 
   assert.ok(lines.includes('Mission work: (live): execute'), lines.join('\n'));
@@ -306,7 +309,7 @@ test('px status reports a recovery-only live coordinator without claiming missio
   const lines = renderStatusLines(projectMissionActivity({
     currentWork: null,
     blockingReason: null,
-    liveSession: { missionId: 'task-2389' as never, family: null },
+    liveSession: { missionId: fixtureMissionId('task-2389'), family: null },
   }));
 
   assert.ok(lines.includes('Mission work: none recorded'), lines.join('\n'));
@@ -351,11 +354,11 @@ test('px status omits the activity lines when the projection supplied none', () 
 /** Build a mission card with the given operational-fact overrides. */
 function cardWithOverrides(facts: Partial<MissionOperationalFacts>): MissionCard {
   return projectMissionCard(
-    {
-      id: 'task-2399' as never,
-      repositoryId: 'parallix' as never,
+    completeMissionFixture(String(fixtureMissionId('task-2399')), {
+      id: fixtureMissionId('task-2399'),
+      repositoryId: fixtureRepositoryId('parallix'),
       title: 'Change the working UI',
-      labels: [] as never,
+      labels: [],
       status: 'active',
       rawStatus: 'active',
       closedAt: null,
@@ -363,7 +366,7 @@ function cardWithOverrides(facts: Partial<MissionOperationalFacts>): MissionCard
       checkpoints: [],
       review: null,
       netEngineeringLines: null,
-    } as never,
+    }),
     {
       latestGate: 'passed',
       reviewApproval: null,
@@ -372,7 +375,7 @@ function cardWithOverrides(facts: Partial<MissionOperationalFacts>): MissionCard
       currentWork: null,
       liveSession: undefined,
       ...facts,
-    } as never,
+    },
   );
 }
 

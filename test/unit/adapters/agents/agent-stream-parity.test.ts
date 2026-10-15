@@ -135,7 +135,7 @@ test('dumb terminals do not receive spinner control sequences', () => {
 
 test('shared watchdog reports later stalls, tolerates callback faults, and stops when cleared', () => {
   mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
-  const events: any[] = [];
+  const events: { command: string; args: string[]; pid: number | undefined; elapsedMs: number; sawOutput: boolean; msSinceLastOutput: number | null; }[] = [];
   const watchdog = createOutputWatchdog({ initialDelayMs: 10, intervalMs: 10, onNoOutput: event => {
     events.push(event); if (events.length === 1) { throw new Error('report failed'); }
   } }, { command: 'agent', args: [], pid: 42 });

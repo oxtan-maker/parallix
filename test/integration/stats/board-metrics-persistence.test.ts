@@ -184,7 +184,7 @@ describe("production certification: full path from persisted facts to BoardMetri
     await insertUsageRow(db, { repo: REPO_B, mission: task200, date: '2026-06-05', classification: 'ai_sdlc', prFixRounds: 3, durationMinutes: 50 });
 
     // 5. Build metrics through ConcreteMetricsReadAdapter (production path)
-    const cohortMetadata = async () => new Map<MissionId, { labels: readonly MissionLabel[]; assignee: AgentFamily | null }>([
+    const cohortMetadata: NonNullable<NonNullable<ConstructorParameters<typeof ConcreteMetricsReadAdapter>[0]>["cohortMetadata"]> = async () => new Map<MissionId, { labels: readonly MissionLabel[]; assignee: AgentFamily | null }>([
       [task100, { labels: ['ai_sdlc' as MissionLabel], assignee: agentFamily('claude') }],
       [task101, { labels: ['ai_sdlc' as MissionLabel], assignee: agentFamily('claude') }],
       [task102, { labels: ['user_value' as MissionLabel], assignee: agentFamily('claude') }],

@@ -6,7 +6,8 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "target": "ES2024",
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "strict": true
   },
   "include": [
     "scripts/**/*.ts"

@@ -32,7 +32,7 @@ async function startReviewLoop(root: string, request: ReviewLoopRequest) {
 }
 
 
-async function withTempRepo(fn) {
+async function withTempRepo(fn: (_arg0: string) => void | Promise<void>) {
   const previous = process.cwd();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-review-autoderive-'));
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
@@ -69,7 +69,7 @@ async function withTempRepo(fn) {
 
 test('review loop auto-derives implementer from backlog task', { concurrency: false }, async () => {
 
-  await withTempRepo(async root => {
+  await withTempRepo(async (root) => {
     const slug = 'task-999';
     const taskPath = path.join(root, 'backlog', 'tasks', `${slug} - test.md`);
     fs.writeFileSync(taskPath, '---\nid: TASK-999\nassignee: [claude]\n---\n');
@@ -87,7 +87,7 @@ test('review loop auto-derives implementer from backlog task', { concurrency: fa
 
 test('review loop prioritizes explicit implementer over backlog task', { concurrency: false }, async () => {
 
-  await withTempRepo(async root => {
+  await withTempRepo(async (root) => {
     const slug = 'task-999';
     const taskPath = path.join(root, 'backlog', 'tasks', `${slug} - test.md`);
     fs.writeFileSync(taskPath, '---\nid: TASK-999\nassignee: [claude]\n---\n');

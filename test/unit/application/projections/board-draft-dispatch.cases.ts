@@ -1,3 +1,7 @@
+import { fixtureMission } from '../../../fixtures/mission-builders.js';
+import type { MissionStatus } from '../../../../src/domain/mission.js';
+import { draftMissionServicesFixture } from '../../../helpers/draft-mission-services.js';
+import { missionVersion as fixtureVersion } from '../../../../src/application/domain-ports.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -32,7 +36,7 @@ function makeCtx(overrides: Partial<DraftWorkflowContext> = {}): DraftWorkflowCo
     exitFn: (_code?: number) => { throw new Error('unreachable'); },
     logFn: () => {},
     errorFn: () => {},
-    missionServicesFn: async () => ({}),
+    missionServicesFn: async () => (draftMissionServicesFixture({})),
     options: {},
     ...overrides,
   };
@@ -94,7 +98,7 @@ function makeCurrentWorkRecorder(): { port: CurrentWorkPort; events: string[] } 
 function makeRequest(overrides: Partial<BoardCommandRequest> = {}): BoardCommandRequest {
   return {
     operationId: 'op-draft',
-    kind: 'draft:create',
+    kind: 'draft:create' as const,
     missionId: 'task-2427',
     missionStatusAtRequest: 'backlog',
     capabilities: new Set<Capability>(['mission:intake']),
@@ -103,7 +107,7 @@ function makeRequest(overrides: Partial<BoardCommandRequest> = {}): BoardCommand
 }
 
 interface ControllerDeps {
-  readonly status?: string;
+  readonly status?: MissionStatus;
   readonly workflow?: MockWorkflow;
   readonly currentWork?: { port: CurrentWorkPort; events: string[] };
 }
@@ -118,9 +122,9 @@ function makeController(deps: ControllerDeps = {}) {
   const store = {
     async load(id: string): Promise<MissionLoadResult> {
       loadCalls.push(id);
-      return { kind: 'found', mission: { status: deps.status ?? 'backlog' }, version: 1 } as never;
+      return { kind: 'found', mission: fixtureMission(id, { status: deps.status ?? 'backlog' }), version: fixtureVersion(1) };
     },
-  };
+  } satisfies NonNullable<ConstructorParameters<typeof BoardCommandController>[4]>;
   const controller = new BoardCommandController(ports, undefined, { draft }, currentWork.port, store);
   return { controller, workflow, currentWork, loadCalls };
 }
@@ -150,12 +154,13 @@ test('draft request carries only the slug: extra args/options/env/path/agent val
   const request = makeRequest({
     agent: 'opencode',
     payload: {
+      // @ts-expect-error Intentional hostile CLI-shaped payload must be ignored by the typed board boundary.
       kind: 'draft:create',
       args: ['task-2427', '--agent', 'codex'],
       options: { env: { WORKFLOW_AGENT: 'codex' } },
       worktreePath: '/tmp/smuggled-worktree',
       agent: 'codex',
-    } as unknown as BoardCommandPayload,
+    },
   });
   const result = await controller.dispatch(request);
 
@@ -192,7 +197,7 @@ test('unwired controller returns the typed unavailable capability without touchi
   const { ports } = makeExecutePorts();
   const loadCalls: string[] = [];
   const controller = new BoardCommandController(ports, undefined, {}, undefined, {
-    async load(id: string) { loadCalls.push(id); return { kind: 'found', mission: { status: 'backlog' }, version: 1 } as never; },
+    async load(id: string) { loadCalls.push(id); return { kind: 'found', mission: fixtureMission(id, { status: 'backlog' }), version: fixtureVersion(1) }; },
   });
   const result = await controller.dispatch(makeRequest());
 

@@ -1,0 +1,40 @@
+import type { RebaseWorkflowPort } from '../../src/application/ports/rebase-workflow.js';
+
+/** Cases explicitly supply every exercised operation; unexpected boundaries fail. */
+export function rebaseWorkflowFixture(overrides: Partial<RebaseWorkflowPort> = {}): RebaseWorkflowPort {
+  return {
+    git: () => { throw new Error('Unexpected rebase fixture operation: git'); },
+    detectRebaseState: () => { throw new Error('Unexpected rebase fixture operation: detectRebaseState'); },
+    getCurrentBranch: () => { throw new Error('Unexpected rebase fixture operation: getCurrentBranch'); },
+    cwd: () => { throw new Error('Unexpected rebase fixture operation: cwd'); },
+    inferSlug: () => { throw new Error('Unexpected rebase fixture operation: inferSlug'); },
+    findMissionDir: () => { throw new Error('Unexpected rebase fixture operation: findMissionDir'); },
+    findMissionArea: () => { throw new Error('Unexpected rebase fixture operation: findMissionArea'); },
+    resolveWorktree: () => { throw new Error('Unexpected rebase fixture operation: resolveWorktree'); },
+    conventionalWorktreePath: () => { throw new Error('Unexpected rebase fixture operation: conventionalWorktreePath'); },
+    missionBranchName: () => { throw new Error('Unexpected rebase fixture operation: missionBranchName'); },
+    resolveMissionBaseBranch: () => { throw new Error('Unexpected rebase fixture operation: resolveMissionBaseBranch'); },
+    missionConflictPathPrefix: () => { throw new Error('Unexpected rebase fixture operation: missionConflictPathPrefix'); },
+    resolvePromptBaseBranch: () => { throw new Error('Unexpected rebase fixture operation: resolvePromptBaseBranch'); },
+    startAgent: () => { throw new Error('Unexpected rebase fixture operation: startAgent'); },
+    selectAgent: () => { throw new Error('Unexpected rebase fixture operation: selectAgent'); },
+    workflowLauncherStatus: () => { throw new Error('Unexpected rebase fixture operation: workflowLauncherStatus'); },
+    applyAgentFallback: () => { throw new Error('Unexpected rebase fixture operation: applyAgentFallback'); },
+    createPr: () => { throw new Error('Unexpected rebase fixture operation: createPr'); },
+    readToken: () => { throw new Error('Unexpected rebase fixture operation: readToken'); },
+    resolveForgejoUser: () => { throw new Error('Unexpected rebase fixture operation: resolveForgejoUser'); },
+    fetchReviewBranch: () => { throw new Error('Unexpected rebase fixture operation: fetchReviewBranch'); },
+    resolveTaskFile: () => { throw new Error('Unexpected rebase fixture operation: resolveTaskFile'); },
+    getTaskImplementer: () => { throw new Error('Unexpected rebase fixture operation: getTaskImplementer'); },
+    transitionTask: () => { throw new Error('Unexpected rebase fixture operation: transitionTask'); },
+    resolveReviewIdentity: () => { throw new Error('Unexpected rebase fixture operation: resolveReviewIdentity'); },
+    readReviewState: () => { throw new Error('Unexpected rebase fixture operation: readReviewState'); },
+    writeReviewState: () => { throw new Error('Unexpected rebase fixture operation: writeReviewState'); },
+    persistReviewState: () => { throw new Error('Unexpected rebase fixture operation: persistReviewState'); },
+    isForgejoReviewEnabled: () => { throw new Error('Unexpected rebase fixture operation: isForgejoReviewEnabled'); },
+    formatVerificationCommand: () => { throw new Error('Unexpected rebase fixture operation: formatVerificationCommand'); },
+    resolveConflictsForMission: () => { throw new Error('Unexpected rebase fixture operation: resolveConflictsForMission'); },
+    exit: () => { throw new Error('Unexpected rebase fixture operation: exit'); },
+    ...overrides,
+  };
+}

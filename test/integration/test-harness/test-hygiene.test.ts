@@ -1,15 +1,14 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 
 const HYGIENE_SCRIPT = path.join(import.meta.dirname, '..', '..', '..', 'scripts', 'test-hygiene.sh');
 
-function withFixture(source, assertion) {
+function withFixture(source: string, assertion: (_result: SpawnSyncReturns<string>) => void) {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'test-hygiene-'));
   try {
     fs.mkdirSync(path.join(repoRoot, 'test'));
@@ -50,7 +49,7 @@ test('test hygiene accepts an annotated TypeScript skip', () => {
 // Inode-usage guard: exercises the real scripts/test-hygiene.sh with a
 // mocked df binary so the threshold logic is verified without depending
 // on the host's actual /tmp inode state.
-function withMockedDf(dfOutput, assertion) {
+function withMockedDf(dfOutput: string, assertion: (_result: SpawnSyncReturns<string>) => void) {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'test-hygiene-inode-'));
   try {
     fs.mkdirSync(path.join(repoRoot, 'test'));
@@ -97,7 +96,7 @@ test('inode guard passes the real script below 80% threshold', () => {
 // BSD/macOS df -i format:
 // Filesystem 512-blocks Used Available Capacity iused ifree %iused Mounted on
 // Inode percentage is in field 8 (%iused), not field 5.
-function withMockedDfBsd(dfOutput, assertion) {
+function withMockedDfBsd(dfOutput: string, assertion: (_result: SpawnSyncReturns<string>) => void) {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'test-hygiene-inode-bsd-'));
   try {
     fs.mkdirSync(path.join(repoRoot, 'test'));

@@ -142,10 +142,10 @@ function applyTaskStateChange(taskFile: string, newStatus: string, implementer: 
 /**
  * @param {string} slug
  * @param {string} newStatus
- * @param {{implementer?: string|null, clearAssignee?: boolean, rootDir?: string, log?: Function}} [opts]
+ * @param {{implementer?: string|null, clearAssignee?: boolean, rootDir?: string, log?: (_message: string) => void}} [opts]
  * @returns {Promise<boolean>}
  */
-async function transitionTaskLocal(slug: string, newStatus: string, { implementer = null, clearAssignee = false, rootDir = process.cwd(), log = fmt.log.plain }: { implementer?: string | null | undefined, clearAssignee?: boolean, rootDir?: string, log?: Function } = {} as any) {
+async function transitionTaskLocal(slug: string, newStatus: string, { implementer = null, clearAssignee = false, rootDir = process.cwd(), log = fmt.log.plain }: { implementer?: string | null | undefined, clearAssignee?: boolean, rootDir?: string, log?: (_message: string) => void } = {}) {
   const resolution = resolveTaskFile(slug, rootDir);
   if (!resolution.ok) {
     log(fmt.status('WARN', `Could not transition task ${fmt.slug(slug)}: ${resolution.reason}`));
@@ -258,7 +258,7 @@ function reconcileMissionRebase({ slug, missionWorktree, authoritativeTaskFile, 
   missionWorktree: string;
   authoritativeTaskFile: string;
   taskRelativePath: string;
-  log: Function;
+  log: (_message: string) => void;
 }): boolean {
   for (let round = 0; round < 20; round += 1) {
     const conflicts = unresolvedRebaseFiles(missionWorktree);
@@ -301,7 +301,7 @@ function reconcileMissionRebase({ slug, missionWorktree, authoritativeTaskFile, 
  */
 export async function recordLifecycleOperation(
   slug: string,
-  options: { trigger: string; toStatus: string; agent?: string | null; occurredAt?: string } ,
+  options: { trigger: import('../../domain/mission-workflow.js').MissionCommand['type']; toStatus: string; agent?: string | null; occurredAt?: string } ,
 ): Promise<boolean> {
   try {
     const { SqliteDatabaseAdapter } = await import('../sqlite/database-adapter.js');
@@ -329,7 +329,7 @@ export async function recordLifecycleOperation(
       await recorder.append({
         missionId: missionId(slug),
         repositoryId: read.mission.repositoryId,
-        trigger: options.trigger as never,
+        trigger: options.trigger,
         toStatus: options.toStatus,
         agent: options.agent ?? 'unknown',
         occurredAt: options.occurredAt ?? new Date().toISOString(),
@@ -381,7 +381,7 @@ async function recordIntegrationTransition(slug: string, oldStatus: string | nul
   } catch { /* recording failure never blocks the authoritative transition */ }
 }
 
-function synchronizeMissionWorktree(slug: string, stateRoot: string, rootDir: string, deferMissionRebase: boolean, log: Function): boolean {
+function synchronizeMissionWorktree(slug: string, stateRoot: string, rootDir: string, deferMissionRebase: boolean, log: (_message: string) => void): boolean {
   const missionWorktree = resolveWorktree(slug, { cwd: rootDir });
   if (!missionWorktree || missionWorktree === stateRoot) { return true; }
   const authoritativeResolution = resolveTaskFile(slug, stateRoot);
@@ -421,7 +421,7 @@ function synchronizeMissionWorktree(slug: string, stateRoot: string, rootDir: st
 async function transitionTaskOnIntegrationBranch(
   slug: string,
   newStatus: string,
-  { implementer = null, clearAssignee = false, rootDir = process.cwd(), log = fmt.log.plain, deferMissionRebase = false }: { implementer?: string | null | undefined, clearAssignee?: boolean, rootDir?: string, log?: Function, deferMissionRebase?: boolean } = {} as any
+  { implementer = null, clearAssignee = false, rootDir = process.cwd(), log = fmt.log.plain, deferMissionRebase = false }: { implementer?: string | null | undefined, clearAssignee?: boolean, rootDir?: string, log?: (_message: string) => void, deferMissionRebase?: boolean } = {}
 ): Promise<boolean> {
   let stateRoot: string;
   try {

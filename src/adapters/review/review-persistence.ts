@@ -25,7 +25,7 @@ import { parseReviewFindings } from './review-round.js';
  * Every production approval path persists through the bound write function,
  * so one injection here covers all of them.
  */
-export function bindReviewPersistence(store: MissionStore, lifecycleService?: MissionLifecycleService | null, sessionMarkerPort?: SessionMarkerPort | null) {
+export function bindReviewPersistence(store: MissionStore | null, lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null, sessionMarkerPort?: SessionMarkerPort | null) {
   const boundReadReviewState = (slug: string, rootDir?: string) => readReviewState(slug, rootDir, store);
   const boundCreateEvent = (
     slug: string,
@@ -37,10 +37,10 @@ export function bindReviewPersistence(store: MissionStore, lifecycleService?: Mi
     // The 4th argument is either a backward-compat positional MissionStore or
     // an options bag. Merge it (instead of dropping it) so a lifecycle
     // service supplied through the options is not silently discarded.
-    const callerOptions: { missionStore?: MissionStore | null; lifecycleService?: MissionLifecycleService | null } =
+    const callerOptions: { missionStore?: MissionStore | null; lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null } =
       _options && typeof _options === 'object' && 'save' in _options
-        ? { missionStore: _options as MissionStore }
-        : ({ ...(_options ?? {}) } as { missionStore?: MissionStore | null; lifecycleService?: MissionLifecycleService | null });
+        ? { missionStore: _options }
+        : { ...(_options ?? {}) };
     return writeReviewState(slug, state, rootDir, {
       ...callerOptions,
       missionStore: store,
@@ -116,15 +116,15 @@ export function reviewLoopBindings(store: MissionStore, lifecycleService?: Missi
     const state = await persistence.readReviewState(slug, options.worktree);
     if (!state) { return { consumed: false }; }
     const events = await persistence.readAllEvents(slug, { rootDir: options.worktree });
-    const outcome = [...events].reverse().find((event: any) =>
+    const outcome = [...events].reverse().find((event) =>
       event.event_type === 'reviewer_outcome' && event.round === state.round && event.actor === reviewer
       && Date.parse(event.timestamp) >= Date.parse(state.startedAt),
-    ) as { verdict?: string; content?: string } | undefined;
+    );
     if (!outcome?.verdict) { return { consumed: false }; }
-    const findings = [...events].reverse().find((event: any) =>
+    const findings = [...events].reverse().find((event) =>
       event.event_type === 'reviewer_findings' && event.round === state.round && event.actor === reviewer
       && Date.parse(event.timestamp) >= Date.parse(state.startedAt),
-    ) as { content?: string } | undefined;
+    );
     return {
       consumed: true,
       ok: true,
@@ -140,10 +140,10 @@ export function reviewLoopBindings(store: MissionStore, lifecycleService?: Missi
     const state = await persistence.readReviewState(slug, options.worktree);
     if (!state) { return { consumed: false }; }
     const events = await persistence.readAllEvents(slug, { rootDir: options.worktree });
-    const disposition = [...events].reverse().find((event: any) =>
+    const disposition = [...events].reverse().find((event) =>
       event.event_type === 'implementer_disposition' && event.round === state.round && event.actor === implementer
       && Date.parse(event.timestamp) >= Date.parse(state.startedAt),
-    ) as { disposition?: string } | undefined;
+    );
     return disposition?.disposition
       ? { consumed: true, ok: true, disposition: disposition.disposition }
       : { consumed: false };

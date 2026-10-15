@@ -42,13 +42,13 @@ describe("packageRoot asset resolution is independent of the working directory",
   // The real checkout root, resolved from this test's own directory.
   const ROOT = packageRoot(import.meta.dirname);
 
-  function readPkgName(root) {
+  function readPkgName(root: string) {
     return JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).name;
   }
 
   // Run `fn` with process.cwd() set to a fresh temp dir outside the checkout,
   // restoring the original CWD (and cleaning up) afterwards.
-  function withTempCwd(fn) {
+  function withTempCwd(fn: (_arg0: string) => void) {
     const original = process.cwd();
     const tmp = registeredMkdtemp('px-t2225-');
     try {
@@ -60,7 +60,7 @@ describe("packageRoot asset resolution is independent of the working directory",
     }
   }
 
-  async function withTempCwdAsync(fn) {
+  async function withTempCwdAsync(fn: (_arg0: string) => void | Promise<void>) {
     const original = process.cwd();
     const tmp = registeredMkdtemp('px-t2225-');
     try {
@@ -97,7 +97,7 @@ describe("packageRoot asset resolution is independent of the working directory",
     assert.equal(fromOutsideCheckout, ROOT);
     // Also confirm passing the temp CWD itself (no matching ancestor) throws
     // rather than silently succeeding via a CWD fallback.
-    withTempCwd((tmp) => {
+    withTempCwd((tmp: string) => {
       assert.throws(() => packageRoot(tmp), /could not find a package\.json named @magnusekdahl\/parallix/);
     });
   });
@@ -158,14 +158,13 @@ describe("packageRoot asset resolution is independent of the working directory",
 
       // TASK-2322.08: stats.ts no longer resolves any shipped package asset —
       // `data/stats.seed.csv` and the whole stats-path resolver chain are gone.
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-      assert.equal(stats.resolveStatsPath, undefined);
+      assert.equal('resolveStatsPath' in stats, false);
 
       // The bootstrap path is used only when the provider is unavailable. Drive
       // that branch of the review provider mechanism and assert the command.
       mock.method(reviewAdapter, 'isProviderEnabled', () => true);
       mock.method(reviewAdapter, 'providerAvailable', async () => false);
-      mock.method(gitModule, 'run', (command, args) => {
+      mock.method(gitModule, 'run', (command: Parameters<(typeof gitModule)["run"]>[0], args: Parameters<(typeof gitModule)["run"]>[1]) => {
         assert.equal(command, 'bash');
         assert.deepEqual(args, [path.join(ROOT, 'scripts', 'bootstrap.sh')]);
         return { status: 1, signal: null, stdout: '', stderr: '' };
@@ -192,7 +191,7 @@ describe("shipped prompts and configuration route through the runtime AssetStore
       'templates/mission-scaffold.md',
     ]) {
       assert.match(assetStoreSource, new RegExp(`'${asset.replace('.', '\\.')}'`));
-      assert.ok(manifest.assets.some((entry) => entry.key === asset && entry.sha256), `${asset} must be in the canonical asset manifest`);
+      assert.ok(manifest.assets.some((entry: { key: string; sha256?: string }) => entry.key === asset && entry.sha256), `${asset} must be in the canonical asset manifest`);
     }
 
     for (const file of [

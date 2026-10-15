@@ -27,10 +27,9 @@ import { isForgejoReviewEnabled } from '../config/product-config.js';
 import { formatVerificationCommand } from '../verification/verification.js';
 import { buildRebasePrompt as buildRebasePromptPolicy } from '../../application/rebase-workflow.js';
 import type { GitRunner, RebaseWorkflowPort } from '../../application/ports/rebase-workflow.js';
-import { transitionReviewRepair } from '../../application/review-repair-lifecycle.js';
+import { transitionRebaseRepair, resumeRebaseReview } from '../../application/rebase-repair-lifecycle.js';
 import { describeBranchMove, recordBranchMove } from '../../application/approval-coverage.js';
 import { createGitChangeIdentity } from '../git/change-identity.js';
-import { missionId } from '../../domain/mission.js';
 import { agentFamily } from '../../domain/agents.js';
 import { ConfiguredReviewerEligibility } from '../../domain/review.js';
 import { CONFIG_PATH } from '../agents/agent-config.js';
@@ -38,33 +37,33 @@ import { CONFIG_PATH } from '../agents/agent-config.js';
 /** Legacy `*Fn` seam accepted by `px rebase` and by its tests. */
 export interface RebaseCommandOptions {
   configuration?: ParallixConfiguration;
-  inferSlugFn?: Function;
-  findMissionDirFn?: Function;
-  findMissionAreaFn?: Function;
-  getCurrentBranchFn?: Function;
-  resolveConflictsFn?: Function;
-  startAgentFn?: Function;
-  createPrFn?: Function;
-  readTokenFn?: Function;
-  resolveForgejoUserFn?: Function;
-  resolveTaskFileFn?: Function;
-  getTaskImplementerFn?: Function;
-  resolveReviewIdentityFn?: Function;
-  detectRebaseStateFn?: Function;
-  resolveMissionBaseBranchFn?: Function;
-  resolveWorktreeFn?: Function;
-  gitFn?: Function;
+  inferSlugFn?: typeof inferSlug;
+  findMissionDirFn?: typeof findMissionDir;
+  findMissionAreaFn?: typeof findMissionArea;
+  getCurrentBranchFn?: typeof getCurrentBranch;
+  resolveConflictsFn?: (...args: Parameters<typeof integrate.resolveConflictsForMission>) => ReturnType<RebaseWorkflowPort['resolveConflictsForMission']>;
+  startAgentFn?: (step: string, options: NonNullable<Parameters<typeof startAgent>[1]>) => ReturnType<RebaseWorkflowPort['startAgent']>;
+  createPrFn?: typeof createPr;
+  readTokenFn?: typeof readToken;
+  resolveForgejoUserFn?: typeof resolveForgejoUser;
+  resolveTaskFileFn?: typeof resolveTaskFile;
+  getTaskImplementerFn?: typeof getTaskImplementer;
+  resolveReviewIdentityFn?: typeof resolveReviewIdentity;
+  detectRebaseStateFn?: (...args: Parameters<typeof detectRebaseState>) => ReturnType<RebaseWorkflowPort['detectRebaseState']>;
+  resolveMissionBaseBranchFn?: typeof resolveMissionBaseBranch;
+  resolveWorktreeFn?: typeof resolveWorktree;
+  gitFn?: GitRunner;
   exitFn?: (_code: number) => void;
-  isForgejoReviewEnabledFn?: Function;
-  fetchReviewBranchFn?: Function;
-  missionServicesFn?: Function;
+  isForgejoReviewEnabledFn?: typeof isForgejoReviewEnabled;
+  fetchReviewBranchFn?: typeof fetchReviewBranch;
+  missionServicesFn?: (_root: string) => Promise<import('../../application/ports/rebase-workflow.js').RebaseMissionServices>;
 }
 
 const defaultExit = (code: number) => process.exit(code);
 
 /** Build the shared-file conflict-resolution prompt with the real mission resolvers. */
-export function buildRebasePrompt({ slug, area, worktreePath, missionSpecificFiles, sharedFiles, gitFn = undefined as Function | undefined }: {
-  slug: string; area: string; worktreePath: string; missionSpecificFiles: string[]; sharedFiles: string[]; gitFn?: Function;
+export function buildRebasePrompt({ slug, area, worktreePath, missionSpecificFiles, sharedFiles, gitFn = undefined as GitRunner | undefined }: {
+  slug: string; area: string; worktreePath: string; missionSpecificFiles: string[]; sharedFiles: string[]; gitFn?: GitRunner;
 }): string {
   return buildRebasePromptPolicy({
     slug,
@@ -72,7 +71,7 @@ export function buildRebasePrompt({ slug, area, worktreePath, missionSpecificFil
     worktreePath,
     missionSpecificFiles,
     sharedFiles,
-    resolveBaseBranch: (promptSlug, promptRoot) => resolvePromptBaseBranch(promptSlug, promptRoot, gitFn as GitRunner | undefined),
+    resolveBaseBranch: (promptSlug, promptRoot) => resolvePromptBaseBranch(promptSlug, promptRoot, gitFn),
     formatVerificationCommand,
   });
 }
@@ -86,7 +85,7 @@ function resolvePromptBaseBranch(slug: string, worktreePath: string, gitFn?: Git
     return resolveMissionBaseBranch(slug, worktreePath, { gitFn });
   } catch (_) {
     try {
-      return getPrimaryBranch(worktreePath, gitFn as Function);
+      return getPrimaryBranch(worktreePath, gitFn);
     } catch (_e) {
       return 'main';
     }
@@ -106,124 +105,119 @@ function missionConflictPathPrefix(slug: string, worktreePath: string): string {
 }
 
 /** Bind the rebase workflow to the concrete adapters, honoring the legacy seams. */
-export function createRebaseWorkflowPort(options: RebaseCommandOptions = {}): RebaseWorkflowPort {
+function rebaseWorkspaceBindings(options: RebaseCommandOptions) {
   const {
     inferSlugFn = inferSlug,
     findMissionDirFn = findMissionDir,
     findMissionAreaFn = findMissionArea,
     getCurrentBranchFn = getCurrentBranch,
-    resolveConflictsFn = (integrate as any).resolveConflictsForMission,
+    resolveConflictsFn = integrate.resolveConflictsForMission,
     startAgentFn = (step: string, launch: NonNullable<Parameters<typeof startAgent>[1]>) => startAgent(step, { ...launch, configuration: options.configuration }),
     createPrFn = (branch: string, user: string, token: string, opts: Record<string, unknown> = {}) => createPr(branch, user, token, { ...opts, configuration: options.configuration }),
     readTokenFn = (user: string) => readToken(user, undefined, options.configuration),
-    resolveForgejoUserFn = (user?: string) => resolveForgejoUser(user, options.configuration),
+    resolveForgejoUserFn = (user?: string | null) => resolveForgejoUser(user, options.configuration),
     resolveTaskFileFn = resolveTaskFile,
+  } = options;
+  return { inferSlugFn, findMissionDirFn, findMissionAreaFn, getCurrentBranchFn, resolveConflictsFn, startAgentFn, createPrFn, readTokenFn, resolveForgejoUserFn, resolveTaskFileFn };
+}
+
+function rebaseRepairBindings(options: RebaseCommandOptions) {
+  const {
     getTaskImplementerFn = getTaskImplementer,
     resolveReviewIdentityFn = resolveReviewIdentity,
     detectRebaseStateFn = detectRebaseState,
     resolveMissionBaseBranchFn = resolveMissionBaseBranch,
     resolveWorktreeFn = resolveWorktree,
     gitFn = git,
-    exitFn = defaultExit as (_code: number) => void,
+    exitFn = defaultExit,
     isForgejoReviewEnabledFn = isForgejoReviewEnabled,
     fetchReviewBranchFn = fetchReviewBranch,
     missionServicesFn,
   } = options;
+  return { getTaskImplementerFn, resolveReviewIdentityFn, detectRebaseStateFn, resolveMissionBaseBranchFn, resolveWorktreeFn, gitFn, exitFn, isForgejoReviewEnabledFn, fetchReviewBranchFn, missionServicesFn };
+}
+
+export function createRebaseWorkflowPort(options: RebaseCommandOptions = {}): RebaseWorkflowPort {
+  const { inferSlugFn, findMissionDirFn, findMissionAreaFn, getCurrentBranchFn, resolveConflictsFn, startAgentFn, createPrFn, readTokenFn, resolveForgejoUserFn, resolveTaskFileFn, getTaskImplementerFn, resolveReviewIdentityFn, detectRebaseStateFn, resolveMissionBaseBranchFn, resolveWorktreeFn, gitFn, exitFn, isForgejoReviewEnabledFn, fetchReviewBranchFn, missionServicesFn } = { ...rebaseWorkspaceBindings(options), ...rebaseRepairBindings(options) };
+
+  const repairBindings = {
+    missionServices: missionServicesFn,
+    cwd: () => process.cwd(),
+    transitionTask,
+    reviewerEligibility: (root: string) => ConfiguredReviewerEligibility.fromReviewStep({
+      eligible: eligibleAgentsForStep('review', { configPath: path.join(root, CONFIG_PATH) }).map(agentFamily),
+      strategy: 'random',
+    }),
+  };
 
   return {
-    git: gitFn as GitRunner,
-    detectRebaseState: detectRebaseStateFn as RebaseWorkflowPort['detectRebaseState'],
-    getCurrentBranch: getCurrentBranchFn as RebaseWorkflowPort['getCurrentBranch'],
+    git: gitFn,
+    detectRebaseState: detectRebaseStateFn,
+    getCurrentBranch: getCurrentBranchFn,
 
     cwd: () => process.cwd(),
-    inferSlug: inferSlugFn as RebaseWorkflowPort['inferSlug'],
-    findMissionDir: findMissionDirFn as RebaseWorkflowPort['findMissionDir'],
-    findMissionArea: findMissionAreaFn as RebaseWorkflowPort['findMissionArea'],
-    resolveWorktree: resolveWorktreeFn as RebaseWorkflowPort['resolveWorktree'],
+    inferSlug: inferSlugFn,
+    findMissionDir: findMissionDirFn,
+    findMissionArea: findMissionAreaFn,
+    resolveWorktree: resolveWorktreeFn,
     conventionalWorktreePath,
     missionBranchName,
-    resolveMissionBaseBranch: resolveMissionBaseBranchFn as RebaseWorkflowPort['resolveMissionBaseBranch'],
+    resolveMissionBaseBranch: resolveMissionBaseBranchFn,
     missionConflictPathPrefix,
     resolvePromptBaseBranch,
 
-    startAgent: startAgentFn as RebaseWorkflowPort['startAgent'],
-    selectAgent: ((step: string, opts: Parameters<typeof selectAgent>[1]) => selectAgent(step, { ...opts, configuration: options.configuration })) as unknown as RebaseWorkflowPort['selectAgent'],
-    workflowLauncherStatus: ((agent: string, worktree?: string) => workflowLauncherStatus(agent, worktree, options.configuration)) as unknown as RebaseWorkflowPort['workflowLauncherStatus'],
-    applyAgentFallback: applyAgentFallback as unknown as RebaseWorkflowPort['applyAgentFallback'],
+    startAgent: startAgentFn,
+    selectAgent: (step, opts) => selectAgent(step, { ...opts, configuration: options.configuration }),
+    workflowLauncherStatus: (agent, worktree) => workflowLauncherStatus(agent, worktree, options.configuration),
+    applyAgentFallback: applyAgentFallback,
 
-    createPr: createPrFn as unknown as RebaseWorkflowPort['createPr'],
-    readToken: readTokenFn as unknown as RebaseWorkflowPort['readToken'],
-    resolveForgejoUser: resolveForgejoUserFn as unknown as RebaseWorkflowPort['resolveForgejoUser'],
-    fetchReviewBranch: fetchReviewBranchFn as unknown as RebaseWorkflowPort['fetchReviewBranch'],
+    createPr: createPrFn,
+    readToken: readTokenFn,
+    resolveForgejoUser: resolveForgejoUserFn,
+    fetchReviewBranch: fetchReviewBranchFn,
 
-    resolveTaskFile: resolveTaskFileFn as unknown as RebaseWorkflowPort['resolveTaskFile'],
-    getTaskImplementer: getTaskImplementerFn as unknown as RebaseWorkflowPort['getTaskImplementer'],
-    transitionTask: async (slug, status, transitionOptions) => {
-      if (missionServicesFn && status === 'active') {
-        const root = (transitionOptions?.rootDir as string) || process.cwd();
-        const services = await missionServicesFn(root);
-        const loaded = await services.store.load(missionId(slug));
-        if (loaded.kind !== 'found') { throw new Error(`Mission ${slug} is unavailable for rebase repair`); }
-        // Integration rebase repair is part of integration completion.
-        if (loaded.mission.status === 'integration') {
-          return transitionTask(slug, 'ready-for-integration', transitionOptions as any);
-        }
-        const implementer = loaded.mission.assignee ?? loaded.mission.review?.rounds.at(-1)?.implementer;
-        if (!implementer) { throw new Error(`Mission ${slug} has no implementer for rebase repair`); }
-        await transitionReviewRepair(slug, 'active', implementer, services.store, services.lifecycle, undefined, { kind: 'rebase-repair' });
-      }
-      return transitionTask(slug, status, transitionOptions as any);
-    },
-    resumeReviewAfterRepair: async (slug, root, implementer) => {
-      if (!missionServicesFn) { return; }
-      const services = await missionServicesFn(root);
-      const loaded = await services.store.load(missionId(slug));
-      if (loaded.kind !== 'found') { throw new Error(`Mission ${slug} is unavailable after rebase repair`); }
-      if (loaded.mission.status === 'active' && loaded.mission.review && !loaded.mission.review.rounds.at(-1)?.decision) {
-        // AC12: reviewer eligibility always comes from the configured review step
-        // of THIS mission's worktree, never from the prior round's reviewer.
-        const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({
-          eligible: eligibleAgentsForStep('review', { configPath: path.join(root, CONFIG_PATH) }).map(agentFamily),
-          strategy: 'random',
-        });
-        await transitionReviewRepair(slug, 'review', implementer, services.store, services.lifecycle, reviewerEligibility);
-        await transitionTask(slug, 'review', { rootDir: root });
-      }
-    },
+    resolveTaskFile: resolveTaskFileFn,
+    getTaskImplementer: getTaskImplementerFn,
+    transitionTask: (slug, status, transitionOptions) => transitionRebaseRepair(slug, status, transitionOptions, repairBindings),
+    resumeReviewAfterRepair: (slug, root, implementer) => resumeRebaseReview(slug, root, implementer, repairBindings),
 
-    recordBranchMove: missionServicesFn ? async (slug, root, movedFrom) => {
-      const head = (gitFn as GitRunner)(['-C', root, 'rev-parse', 'HEAD']);
-      const landedRevision = head.status === 0 ? head.stdout.trim() : '';
-      if (!landedRevision || landedRevision === movedFrom) { return null; }
-      try {
-        const services = await missionServicesFn(root);
-        return describeBranchMove(slug, await recordBranchMove({
-          store: services.store, slug, identity: createGitChangeIdentity(root, gitFn as GitRunner),
-          landedRevision, movedFrom, recordedBy: 'px rebase', occurredAt: new Date().toISOString(),
-        }));
-      } catch (error) {
-        // The rebase itself succeeded; px status still computes the staleness.
-        return `The rebase moved ${slug}, but whether its approval still covers the branch was not recorded: ${error instanceof Error ? error.message : String(error)}`;
-      }
-    } : undefined,
+    recordBranchMove: missionServicesFn ? (slug, root, movedFrom) => recordRebaseBranchMove(slug, root, movedFrom, gitFn, missionServicesFn) : undefined,
 
-    resolveReviewIdentity: resolveReviewIdentityFn as unknown as RebaseWorkflowPort['resolveReviewIdentity'],
+    resolveReviewIdentity: resolveReviewIdentityFn,
     readReviewState,
     writeReviewState,
     persistReviewState: (slug, state, worktree, missionStore) =>
-      persistReviewStateOrThrow(writeReviewState as any, slug, state as any, worktree, missionStore as any),
+      persistReviewStateOrThrow(writeReviewState, slug, state, worktree, missionStore),
 
-    isForgejoReviewEnabled: isForgejoReviewEnabledFn as RebaseWorkflowPort['isForgejoReviewEnabled'],
+    isForgejoReviewEnabled: isForgejoReviewEnabledFn,
 
     formatVerificationCommand,
 
-    resolveConflictsForMission: resolveConflictsFn as unknown as RebaseWorkflowPort['resolveConflictsForMission'],
+    resolveConflictsForMission: resolveConflictsFn,
 
     missionServices: typeof missionServicesFn === 'function'
-      ? missionServicesFn as (_root: string) => Promise<{ store: unknown }>
+      ? missionServicesFn
       : null,
     // No hook-bounce seam: `runRebaseWorkflow` bounces hook failures through the
     // rebound kernel (TASK-2377.05), using the `startAgent` port above.
     exit: exitFn,
   };
+}
+
+async function recordRebaseBranchMove(slug: string, root: string, movedFrom: string | null, gitFn: GitRunner, missionServicesFn: NonNullable<RebaseCommandOptions['missionServicesFn']>) {
+
+  const head = (gitFn)(['-C', root, 'rev-parse', 'HEAD']);
+  const landedRevision = head.status === 0 ? head.stdout.trim() : '';
+  if (!landedRevision || landedRevision === movedFrom) { return null; }
+  try {
+    const services = await missionServicesFn(root);
+    return describeBranchMove(slug, await recordBranchMove({
+      store: services.store, slug, identity: createGitChangeIdentity(root, gitFn),
+      landedRevision, movedFrom, recordedBy: 'px rebase', occurredAt: new Date().toISOString(),
+    }));
+  } catch (error) {
+    // The rebase itself succeeded; px status still computes the staleness.
+    return `The rebase moved ${slug}, but whether its approval still covers the branch was not recorded: ${error instanceof Error ? error.message : String(error)}`;
+  }
+
 }

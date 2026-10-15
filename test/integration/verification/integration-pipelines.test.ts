@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 
 import test from 'node:test';
@@ -16,8 +15,8 @@ const { mock } = test;
 // Mock getPrimaryWorktree and getPrimaryBranch before requiring integrate.js
 mock.method(missionUtils, 'getPrimaryWorktree', () => '/tmp/mission');
 mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
-mock.method(missionUtils, 'resolveWorktree', (slug) => `/tmp/mission-${slug}`);
-mock.method(missionUtils, 'conventionalWorktreePath', (slug, rootDir) => path.join(rootDir, `mission-${slug}`));
+mock.method(missionUtils, 'resolveWorktree', (slug: Parameters<(typeof missionUtils)["resolveWorktree"]>[0]) => `/tmp/mission-${slug}`);
+mock.method(missionUtils, 'conventionalWorktreePath', (slug: Parameters<(typeof missionUtils)["conventionalWorktreePath"]>[0], rootDir: Parameters<(typeof missionUtils)["conventionalWorktreePath"]>[1]) => path.join(rootDir ?? process.cwd(), `mission-${slug}`));
 mock.method(missionUtils, 'getMissionYear', () => '2026');
 
 const {
@@ -39,13 +38,13 @@ const {
 // host-coupled tests; in the monorepo (where it exists) they still run unchanged.
 const VERIFY_LOCAL_SH = path.join(import.meta.dirname, '..', '..', 'scripts', 'verify-local.sh');
 const VERIFY_LOCAL_PRESENT = fs.existsSync(VERIFY_LOCAL_SH);
-const verifyLocalTest = (name, fn) => test(name, {
+const verifyLocalTest = (name: string|undefined, fn: test.TestFn|undefined) => test(name, {
   skip: VERIFY_LOCAL_PRESENT ? false : 'requires monorepo scripts/verify-local.sh (absent in standalone parallix — task-1302)'
 }, fn);
 
 // Helper to mock git runner
 function createMockGitRunner(changedFiles = '') {
-  return (args) => {
+  return (args: string[]) => {
     const cmd = args.join(' ');
     // Mock diff --name-only between branches
     if (cmd.includes('diff --name-only') && cmd.includes('main') && cmd.includes('mission/')) {
@@ -180,15 +179,18 @@ test('printIntegrationGatePlan outputs gate plan lines', () => {
   ];
 
   // Mock console.log to capture output
-  const logs = [];
+  const logs: unknown[] = [];
   const originalLog = console.log;
-  mock.method(console, 'log', (msg) => { logs.push(msg); }, { restoreAfterAll: true });
+  mock.method(console, 'log', (msg: unknown) => { logs.push(msg); });
 
   printIntegrationGatePlan(gates);
 
   // Verify output contains the gates in order
+  assert.ok(logs.every((message): message is string => typeof message === 'string'));
   assert.ok(logs.some(l => l.includes('Integration gate plan:')));
+  assert.ok(logs.every((message): message is string => typeof message === 'string'));
   assert.ok(logs.some(l => l.includes('server:') && l.includes('./server/updateStaging.sh')));
+  assert.ok(logs.every((message): message is string => typeof message === 'string'));
   assert.ok(logs.some(l => l.includes('web-e2e:') && l.includes('run-playwright-stage.sh')));
 
   mock.restoreAll();
@@ -276,7 +278,7 @@ test('executeIntegrationGates uses injected commandRunner and aborts on failure'
   ];
 
   // Mock command runner that fails on first gate
-  const mockRunner = (cmd, args, options) => {
+  const mockRunner: NonNullable<NonNullable<Parameters<typeof executeIntegrationGates>[1]>["commandRunner"]> = (cmd, args, options) => {
     return { status: 1, stdout: '', stderr: 'mock failure' };
   };
 
@@ -293,6 +295,7 @@ test('executeIntegrationGates uses injected commandRunner and aborts on failure'
 test('executeIntegrationGates rejects an omitted execution root before launching a child', async () => {
   let launched = false;
   await assert.rejects(
+    // @ts-expect-error An omitted execution root is the intentional invalid-input contract.
     () => executeIntegrationGates([], { commandRunner: () => { launched = true; return { status: 0 }; } }),
     /explicit execution root/
   );
@@ -304,7 +307,7 @@ test('integration-suite failure aborts before a simulated squash merge command (
     { key: 'integration-suite', command: 'npm run test:integration', order: 3, run_last: false },
     { key: 'simulated-squash-merge', command: 'git merge --squash mission/task-2292', order: 4, run_last: false }
   ];
-  const commands = [];
+  const commands: string[] = [];
   const result = await executeIntegrationGates(gates, {
     commandRunner(command) {
       commands.push(command);
@@ -329,7 +332,7 @@ test('executeIntegrationGates with injected commandRunner succeeds on all pass',
   ];
 
   // Mock command runner that succeeds
-  const mockRunner = (cmd, args, options) => {
+  const mockRunner: NonNullable<NonNullable<Parameters<typeof executeIntegrationGates>[1]>["commandRunner"]> = (cmd, args, options) => {
     return { status: 0, stdout: '', stderr: '' };
   };
 
@@ -467,7 +470,7 @@ test('script integrate area: changed area filtering works', () => {
   ];
 
   // Simulate the filtering logic from the script
-  const shouldRun = (gateKey) => {
+  const shouldRun = (gateKey: string) => {
     if (changedAreas.includes(gateKey)) return true;
     if (gateKey === 'web-e2e') {
       return changedAreas.includes('web-client');
@@ -491,7 +494,7 @@ test('script integrate area: web-e2e special case works', () => {
     { key: 'web-e2e', command: './web-client/scripts/run-playwright-stage.sh' }
   ];
 
-  const shouldRun = (gateKey) => {
+  const shouldRun = (gateKey: string) => {
     if (changedAreas.includes(gateKey)) return true;
     if (gateKey === 'web-e2e') {
       return changedAreas.includes('web-client');
@@ -635,7 +638,7 @@ test('repo integration config keeps workflow gate on the targeted mission-lifecy
   assert.ok(config.gates['coverage-merge'].order < config.gates['quality-gate'].order);
   assert.equal(config.gates.codeql, undefined, 'CodeQL remains manual');
   for (const key of ['build', 'dependency-audit', 'unit', 'integration-ci', 'integration-local', 'coverage-merge', 'quality-gate', 'workflow']) {
-    assert.equal(config.gates[key].command, preIntegration.find(gate => gate.key === key)?.command, `${key} must match the px integrate gate`);
+    assert.equal(config.gates[key].command, preIntegration.find((gate: { key: string; }) => gate.key === key)?.command, `${key} must match the px integrate gate`);
   }
 });
 
@@ -674,7 +677,7 @@ test('executeIntegrationGates aborts when lib gate command fails (task-1362)', a
     { key: 'lib', command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false }
   ];
 
-  const mockRunner = () => ({ status: 1, stdout: '', stderr: 'static analysis failed' });
+  const mockRunner: NonNullable<NonNullable<Parameters<typeof executeIntegrationGates>[1]>["commandRunner"]> = () => ({ status: 1, stdout: '', stderr: 'static analysis failed' });
 
   const result = await executeIntegrationGates(gates, {
     commandRunner: mockRunner,
@@ -690,7 +693,7 @@ test('executeIntegrationGates succeeds when lib gate command passes (task-1362)'
     { key: 'lib', command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false }
   ];
 
-  const mockRunner = () => ({ status: 0, stdout: '', stderr: '' });
+  const mockRunner: NonNullable<NonNullable<Parameters<typeof executeIntegrationGates>[1]>["commandRunner"]> = () => ({ status: 0, stdout: '', stderr: '' });
 
   const result = await executeIntegrationGates(gates, {
     commandRunner: mockRunner,
@@ -725,7 +728,7 @@ verifyLocalTest('script integrate: is callable and handles missing config gracef
   });
 
   // Cleanup temp dir
-  fs.rmdirSync(tmpDir, { recursive: true, force: true });
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 
   // The script should succeed (exit 0) with no config
   assert.equal(result.status, 0);
@@ -793,7 +796,7 @@ verifyLocalTest('script integrate: failure output prints command', () => {
 
   // Cleanup temp dir
   fs.unlinkSync(tmpConfigPath);
-  fs.rmdirSync(tmpDir, { recursive: true, force: true });
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 
   // The script should fail (non-zero exit)
   assert.notEqual(result.status, 0);
@@ -860,7 +863,7 @@ verifyLocalTest('integrate command ignores INTEGRATION_CONFIG_PATH and INTEGRATE
   });
 
   // Cleanup temp dir
-  fs.rmdirSync(tmpDir, { recursive: true, force: true });
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 
   // The result without overrides should use the repo's real config
   // It should either succeed (if no changed areas match) or run the real gates
@@ -1090,7 +1093,7 @@ test('orderIntegrationGates carries areas metadata through to gate objects (task
   const buildGate = ordered.find(g => g.key === 'build');
   assert.ok(buildGate, 'build gate should be present');
   assert.deepEqual(buildGate.areas, ['lib', 'workflow'], 'areas metadata should be carried through');
-  assert.equal(ordered.find(g => g.key === 'lib').areas, undefined, 'legacy gate should not have areas');
+  assert.equal(ordered.find(g => g.key === 'lib')?.areas, undefined, 'legacy gate should not have areas');
 });
 
 test('gateMatchesChangedAreas uses areas metadata when provided (task-1419)', () => {
@@ -1348,7 +1351,7 @@ test('repo config preserves remaining gate orders (task-1419)', () => {
 
 test('every representative changed-area plan includes the unconditional tier gates (task-2292)', () => {
   const configPath = path.join(import.meta.dirname, '..', '..', '..', 'config', 'integration-pipelines.json');
-  const cases = [
+  const cases: [string, string, boolean][] = [
     ['lib', 'lib/commands/integrate.ts', true],
     ['workflow', 'scripts/verify-local.sh', true],
     ['docs', 'docs/README.md', false],
@@ -1361,7 +1364,6 @@ test('every representative changed-area plan includes the unconditional tier gat
   for (const [label, changedFiles, expectsE2E] of cases) {
     const plan = getIntegrationGatePlan('task-2292', {
       runIntegrationGates: true,
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
       gitRunner: createMockGitRunner(changedFiles),
       dryRun: false,
       configPath
@@ -1378,7 +1380,9 @@ test('every representative changed-area plan includes the unconditional tier gat
     assert.equal(Boolean(workflowGate), expectsE2E, `${label} workflow gate selection must remain area-scoped`);
     assert.equal(Boolean(smokeGate), expectsE2E, `${label} custom-agent-smoke selection must remain area-scoped`);
     if (expectsE2E) {
+      assert.ok(workflowGate != null);
       assert.equal(workflowGate.command, 'node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/lifecycle/mission-lifecycle.test.ts');
+      assert.ok(smokeGate != null);
       assert.equal(smokeGate.command, 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/agents/real-agent-smoke.test.ts');
       assert.ok(plan.gates.indexOf(tierGates[2]!) < plan.gates.indexOf(workflowGate), `${label} integration-local runs before workflow E2E`);
       assert.ok(plan.gates.indexOf(workflowGate) < plan.gates.indexOf(smokeGate), `${label} workflow E2E remains before smoke E2E`);

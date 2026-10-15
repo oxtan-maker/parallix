@@ -5,14 +5,14 @@ import { buildDraftPrompt, buildRestartPrompt, fallbackDraftCommitMessage, valid
 import { classifyDraftEntries, isUnmergedStatus, isDeletedStatus, isMissionTaskPath, isExpectedDraftPath, enforceDraftCommitSafety } from './draft-conflicts.js';
 import { recordDraftStats, recordDraftImplementer, restartDraftAgent, createDraftWorkflowAdapter } from './draft-stats.js';
 
-type DraftDependencies = Parameters<typeof createDraftWorkflowAdapter>[0];
+type DraftDependencies = NonNullable<Parameters<typeof createDraftWorkflowAdapter>[0]>;
 
-async function runDraftCommand(args: string[], deps: DraftDependencies = {} as DraftDependencies): Promise<void> {
+async function runDraftCommand(args: string[], deps: DraftDependencies = {}): Promise<void> {
   const adapter: DraftWorkflowPort = createDraftWorkflowAdapter(deps);
   return new DraftCommandUseCase(adapter).execute(args, deps);
 }
 
-async function draft(args: string[], deps: DraftDependencies = {} as DraftDependencies): Promise<void> {
+async function draft(args: string[], deps: DraftDependencies = {}): Promise<void> {
   return runDraftCommand(args, deps);
 }
 

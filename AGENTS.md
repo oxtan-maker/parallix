@@ -6,13 +6,15 @@ If `graphify-out/graph.json` exists, start codebase questions with `graphify que
 
 ## Documentation
 
-Read `docs/doc-standards.md` before editing root or `docs/` Markdown. Update live documentation for changed user-facing behavior, constraints, or rationale; internal refactors usually need no doc change. Keep implementation inventories and test evidence out of live docs. After editing live docs, run `./scripts/verify-local.sh docs`.
+Read `docs/doc-standards.md` before editing root or `docs/` Markdown. Update live documentation for changed user-facing behavior, constraints, or rationale; internal refactors usually need no doc change. Keep implementation inventories and test evidence out of live docs.
 
 ## Git
 
 Push mission branches only to `review` (Forgejo), never to `origin` (GitHub). Only `main` may be pushed to `origin`.
 
 ## Verification
+
+- Agents must never add verification gates or restore removed gates. Gate configuration is owned by the operator; tests must respect operator changes.
 
 - Before adding tests, trace changed public behavior to its owning suite and
   nearby assertions; extend that suite. Test discovery and the category registry
@@ -34,14 +36,12 @@ Push mission branches only to `review` (Forgejo), never to `origin` (GitHub). On
   timeout, signal, and child-process exit; later cases must not depend on them.
 - Bug-labeled Missions require a focused reproduction: red on parent behavior,
   green with the fix, retained in the owning suite. Run focused contract checks
-  before broader required checks; guidance-only changes require focused docs
-  checks and `./scripts/verify-local.sh docs`.
+  before broader required checks; guidance-only changes require focused review of the changed documentation.
 - Preserve ports-and-adapters principles, dependency direction, typed application
   ports, composition authority, and adapter boundaries. Changes to the arcitectural principles require
   stopping dependent implementation, presenting measured evidence, alternatives,
   behavioral risks, and a proposed decision to the user, then obtaining an explicit
   subsequent decision before implementation. This wave grants no exception.
-- Code changes require `./scripts/verify-local.sh static-analysis`.
 - Other than that, do not run full test gates when a focused test run is enough, parallix will run the complete test gates automatically at appropriate times.
 - `px integrate` uses `adapters.gates.preIntegration` in `workflow.config.json` as its mandatory gate plan. `config/integration-pipelines.json` is for the standalone `./scripts/verify-local.sh integrate` script.
 - `px integrate` skips re-running high-level integration hooks a mission already ran green: when a mission was bounced from the integration lane back to active and its fix was validated green by those tests, the next integrate run skips the already-validated hooks when the finalized commit is the validated one or differs from it only in Backlog task records (`backlog/tasks/`, `backlog/completed/`), so lane-transition commits and bookkeeping-only rebases keep the skip. Any other changed path, missing validation, or git error runs the full suite. The skip is a sha-keyed whitelist decided purely from the recorded validation and that diff, with no repo, branch, or mission special-casing.
@@ -55,6 +55,7 @@ Push mission branches only to `review` (Forgejo), never to `origin` (GitHub). On
 - Early `integration-ci` (`npm run test:integration:ci:prebuilt`, the pre-integration gate) runs only suites whose largest declared CPU limit in `test/lib/test-cpu-budgets.json` is at most `EARLY_CI_CPU_CUTOFF_MS` (`test/lib/test-tier-selection.ts`, currently 3500 ms). Heavier suites are shifted to the later GitHub push gate: `npm run test:ci` runs the full lane (`--integration-ci-all`) on `github-publish/**` before `origin/main` accepts the commit. Shifted suites do not contribute to early coverage, so the SonarQube coverage bar must be met by the cheaper suites; do not rely on a shifted suite to cover new code. CPU limits are not changed by the cutoff.
 - Production source files under `src/` and `web/` must stay at or under 500 lines. `test/unit/repository/file-size-cap.test.ts` (default unit suite) fails for any non-exempt file over the cap; fix with a cohesive, senior-reviewable refactor, not a file split. Pre-existing over-cap files are named in the test's exception list — work entries down and remove them as the debt shrinks.
 - Test source files must stay at or under 1,000 lines unless listed as pre-existing debt in `test/unit/repository/file-size-cap.test.ts`. Keep test files cohesive; group execution without merging files for speed.
+- you cannot create or modify any integration test so it takes more than 3.5s to run.
 
 
 each mission where you are an implementor, you need to manually test e2e that it works unless there are major risk in testing (Corrupting real db, creating wrong statistics etc), otherwise the error % of mission delivery is to large. If you are not the implementor you are not doing that.

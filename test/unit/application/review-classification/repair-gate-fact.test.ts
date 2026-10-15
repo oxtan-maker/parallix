@@ -52,25 +52,26 @@ test('uses the newest covering validation and skips one whose code differs (TASK
 
 test('relates identical, backlog-only, rebase-only and code-changed revisions (TASK-2736.2)', async () => {
   assert.equal(await relateToCandidate('c', 'c', bare, 'b', 'main'), 'same');
-  const backlog = { ...bare, changedPaths: async () => ['backlog/tasks/task-1 - x.md', 'backlog/completed/task-2 - y.md'] };
+  const backlog = { ...bare, changedPaths: async () => ['backlog/tasks/task-1 - x.md', 'backlog/completed/task-2 - y.md'] } satisfies NonNullable<Parameters<typeof relateToCandidate>[2]>;
   assert.equal(await relateToCandidate('v', 'c', backlog, 'b', 'main'), 'backlog-only');
-  const code = { ...bare, changedPaths: async () => ['src/a.ts'] };
+  const code = { ...bare, changedPaths: async () => ['src/a.ts'] } satisfies NonNullable<Parameters<typeof relateToCandidate>[2]>;
   assert.equal(await relateToCandidate('v', 'c', code, 'b', 'main'), 'rebase-only');
-  const edited = { ...code, missionInterdiff: async () => ({ diff: '+src/a.ts\t+x', paths: ['src/a.ts'] }) };
+  const edited = { ...code, missionInterdiff: async () => ({ diff: '+src/a.ts\t+x', paths: ['src/a.ts'] }) } satisfies NonNullable<Parameters<typeof relateToCandidate>[2]>;
   assert.equal(await relateToCandidate('v', 'c', edited, 'b', 'main'), 'code-changed');
-  assert.equal(await relateToCandidate('v', 'c', code, null, 'main'), 'code-changed');
+  assert.equal(await relateToCandidate('v', 'c', code, null, 'main'), null);
 });
 
-test('measures the validated revision against its own merge base with the target (TASK-2736.2)', async () => {
+test('uses recorded per-revision baselines even when main was rewritten (TASK-2754)', async () => {
   const seen: unknown[] = [];
-  const port = { ...bare, changedPaths: async () => ['src/a.ts'], mergeBase: async (revision: string, ref: string) => `${revision}@${ref}`,
-    missionInterdiff: async (before: unknown, after: unknown) => { seen.push(before, after); return { diff: '', paths: [] }; } };
-  await relateToCandidate('v', 'c', port, 'new-base', 'main');
-  assert.deepEqual(seen, [{ baseline: 'v@main', revision: 'v' }, { baseline: 'new-base', revision: 'c' }]);
+  const port = { ...bare, changedPaths: async () => ['src/a.ts'], mergeBase: async () => { assert.fail('current main cannot recover historical provenance'); },
+    missionInterdiff: async (before: unknown, after: unknown) => { seen.push(before, after); return { diff: '', paths: [] }; } } satisfies NonNullable<Parameters<typeof relateToCandidate>[2]>;
+  await relateToCandidate('v', 'c', port, 'new-base', 'recorded-old-main');
+  assert.deepEqual(seen, [{ baseline: 'recorded-old-main', revision: 'v' }, { baseline: 'new-base', revision: 'c' }]);
+  assert.equal(await relateToCandidate('v', 'c', port, 'new-base', null), null);
 });
 
 test('a failed git read yields no relation instead of an admission (TASK-2736.2)', async () => {
-  const failing = { ...bare, changedPaths: async () => { throw new Error('git failed'); } };
+  const failing = { ...bare, changedPaths: async () => { throw new Error('git failed'); } } satisfies NonNullable<Parameters<typeof relateToCandidate>[2]>;
   assert.equal(await relateToCandidate('v', 'c', failing, 'b', 'main'), null);
 });
 

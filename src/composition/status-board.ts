@@ -8,9 +8,13 @@
 import type { StatusBoardPort } from '../application/ports/cli-workflows.js';
 import { createStatusBoardAdapter } from '../adapters/cli/commands/status-adapter.js';
 import { missionId } from '../domain/mission.js';
-import type { ProductionApplicationServices } from './application-services.js';
+import type { MissionStore } from '../application/domain-ports.js';
+import type { BoardProjectionBuilder } from '../application/projections/board-readers.js';
 
-type StatusBoardServices = Pick<ProductionApplicationServices, 'presentationCapabilities' | 'mission'>;
+interface StatusBoardServices {
+  presentationCapabilities?: { boardProjection: Pick<BoardProjectionBuilder, 'buildMissionCard'> } | null;
+  mission?: { store: Pick<MissionStore, 'load'> } | null;
+}
 
 /** Build the StatusBoardPort `px status` reads a Mission through. */
 export function createStatusBoardFor(services: StatusBoardServices): StatusBoardPort {

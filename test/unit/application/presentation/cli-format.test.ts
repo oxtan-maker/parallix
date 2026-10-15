@@ -10,7 +10,7 @@ function capture() {
   const logger = {
     log: (...args: unknown[]) => { lines.push(args.map(String).join(' ')); },
     error: (...args: unknown[]) => { lines.push(args.map(String).join(' ')); },
-  };
+  } satisfies NonNullable<Parameters<typeof fmt.setLogger>[0]>;
   const prev = fmt.setLogger(logger);
   return {
     lines,
@@ -34,8 +34,8 @@ test('stripAnsi returns the input unchanged when no escapes are present', () => 
 });
 
 test('stripAnsi coerces nullish input to a string', () => {
-  assert.equal(fmt.stripAnsi(null as unknown as string), '');
-  assert.equal(fmt.stripAnsi(undefined as unknown as string), '');
+  assert.equal(fmt.stripAnsi(null), '');
+  assert.equal(fmt.stripAnsi(undefined), '');
 });
 
 test('visibleWidth measures the post-strip length', () => {
@@ -50,7 +50,7 @@ test('padVisibleEnd pads to the target width using visible length', () => {
 });
 
 test('padVisibleEnd coerces nullish input', () => {
-  assert.equal(fmt.padVisibleEnd(null as unknown as string, 4), '    ');
+  assert.equal(fmt.padVisibleEnd(null, 4), '    ');
 });
 
 test('status maps known levels through colorize', () => {
@@ -136,8 +136,10 @@ test('log.info prefixes untagged lines and leaves tagged lines intact', () => {
   const cap = capture();
   try {
     const plain = fmt.log.info('plain line');
+    assert.ok(plain != null);
     assert.ok(plain.includes('[INFO] plain line'));
     const already = fmt.log.info('[PASS] already tagged');
+    assert.ok(already != null);
     assert.ok(already.includes('[PASS] already tagged'));
     assert.ok(!already.includes('[INFO] [PASS]'), 'no nested [INFO] prefix');
   } finally { cap.restore(); }
@@ -147,8 +149,10 @@ test('log.pass and log.warn route through the logger log channel', () => {
   const cap = capture();
   try {
     const pass = fmt.log.pass('done');
+    assert.ok(pass != null);
     assert.ok(pass.includes('[PASS]'));
     const warn = fmt.log.warn('careful');
+    assert.ok(warn != null);
     assert.ok(warn.includes('[WARN]'));
     assert.equal(cap.lines.length, 2);
   } finally { cap.restore(); }
@@ -158,8 +162,10 @@ test('log.fail and log.error route through the logger error channel', () => {
   const cap = capture();
   try {
     const fail = fmt.log.fail('nope');
+    assert.ok(fail != null);
     assert.ok(fail.includes('[FAIL]'));
     const error = fmt.log.error('kaboom');
+    assert.ok(error != null);
     assert.ok(error.includes('[FAIL]'));
     assert.equal(cap.lines.length, 2);
   } finally { cap.restore(); }
@@ -173,6 +179,7 @@ test('log.debug is a no-op when DEBUG is unset and renders when set', () => {
     assert.equal(fmt.log.debug('silent'), null);
     environment.DEBUG = '1';
     const shown = fmt.log.debug('loud', resolveConfiguration(environment).runtime.debug);
+    assert.ok(shown != null);
     assert.ok(shown.includes('[DEBUG] loud'));
     if (saved === undefined) { delete environment.DEBUG; } else { environment.DEBUG = saved; }
   } finally { cap.restore(); }
@@ -211,7 +218,7 @@ test('setLogger swaps the active logger and returns the previous one', () => {
 
 test('setLogger tolerates a bare function logger', () => {
   const lines: string[] = [];
-  const prev = fmt.setLogger((line: string) => { lines.push(line); });
+  const prev = fmt.setLogger((line: unknown) => { lines.push(String(line)); });
   try {
     assert.equal(fmt.log.plain('via function logger'), 'via function logger');
     assert.deepEqual(lines, [], 'a bare function is tolerated but not treated as a Logger object');
@@ -220,7 +227,7 @@ test('setLogger tolerates a bare function logger', () => {
 
 test('setLogger falls back when only log is provided', () => {
   const lines: string[] = [];
-  const prev = fmt.setLogger({ log: (line: string) => { lines.push(line); } });
+  const prev = fmt.setLogger({ log: (line: unknown) => { lines.push(String(line)); } });
   try {
     fmt.log.plainError('error fallback path');
     assert.deepEqual(lines, ['error fallback path']);

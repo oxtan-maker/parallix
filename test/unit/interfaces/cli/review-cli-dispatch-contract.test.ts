@@ -20,9 +20,9 @@ describe('revoke-review CLI version contract', () => {
     const command = createRevokeReviewCommand({
       async execute(request: RevokeReviewDecisionRequest) {
         requests.push(request);
-        return { status: 'completed', value: { providerUpdated: true, providerDiagnostic: null } };
+        return { durableEvidence: [],  status: 'completed' as const, value: { providerUpdated: true, providerDiagnostic: null } };
       },
-    } as never, () => 'task-2710');
+    }, () => 'task-2710');
     const args = ['--decision', '2', '--reason', 'approval is stale', '--operator', 'human'];
     await command(args, { logFn: text => messages.push(text) });
     await command([...args, '--slug', 'task-explicit', '--expected-version', '42'], { logFn: text => messages.push(text) });
@@ -39,7 +39,7 @@ describe('revoke-review CLI version contract', () => {
 
   test('rejects malformed version pins before submitting a revocation (TASK-2710)', async () => {
     let calls = 0;
-    const command = createRevokeReviewCommand({ async execute() { calls++; } } as never, () => 'task-2710');
+    const command = createRevokeReviewCommand({ async execute(): Promise<never> { calls++; throw new Error('Unexpected revocation submission'); } }, () => 'task-2710');
     for (const suffix of [[], ['--reason', 'text'], ['nope'], ['0'], ['-1'], ['1.5'], ['9007199254740992']]) {
       await assert.rejects(() => command(['--decision', '1', '--expected-version', ...suffix]), /--expected-version must be a positive integer/);
     }
@@ -49,8 +49,8 @@ describe('revoke-review CLI version contract', () => {
   test('reports a refused automatic revocation without reporting success (TASK-2710)', async () => {
     const errors: string[] = [];
     const command = createRevokeReviewCommand({
-      async execute() { return { status: 'failed', error: { message: 'expected version 1, found 2' } }; },
-    } as never, () => 'task-2710');
+      async execute() { return { durableEvidence: [],  status: 'failed' as const, error: { kind: 'conflict' as const, message: 'expected version 1, found 2' } }; },
+    }, () => 'task-2710');
     await assert.rejects(() => command(['--decision', '1', '--reason', 'stale', '--operator', 'human'], {
       logFn: () => assert.fail('refused revocation must not report success'),
       errorFn: text => errors.push(text),
@@ -86,14 +86,14 @@ describe("review verbs", { concurrency: false }, () => {
       ports: {
         resolveSlug: (explicit) => explicit ?? 'task-2521.03',
         resolveWorktree: () => '/tmp/worktree',
-        readReviewState: async () => ({ round: 2, phase: 'reviewing' }),
+        readReviewState: async () => ({ round: 2, phase: 'reviewing' as const }),
         consumeReviewerOutput: async (slug, reviewer, output, _worktree, expectedVersion) => {
           recorded.reviewerOutputs.push({ slug, reviewer, output, expectedVersion });
-          return { consumed: true, ok: true };
+          return { consumed: true, ok: true as const };
         },
         consumeImplementerOutput: async (slug, implementer, output, _worktree, expectedVersion) => {
           recorded.implementerOutputs.push({ slug, implementer, output, expectedVersion });
-          return { consumed: true, ok: true };
+          return { consumed: true, ok: true as const };
         },
         ...overrides,
       },
@@ -356,7 +356,7 @@ describe("review use case", { concurrency: false }, () => {
   test('ReviewCommandUseCase delegates Forgejo-unavailable submit handling to mocked port', async () => {
     const calls: Array<{ operation: string; args: string[] }> = [];
     const port = mockedPort(calls);
-    port.submit = async context => { calls.push({ operation: 'forgejo-unavailable', args: context.args }); };
+    port.submit = async context => { calls.push({ operation: 'forgejo-unavailable' as const, args: context.args }); };
     await new ReviewCommandUseCase(port).execute(['task-2332.14', '--submit']);
     assert.equal(calls[0].operation, 'forgejo-unavailable');
   });

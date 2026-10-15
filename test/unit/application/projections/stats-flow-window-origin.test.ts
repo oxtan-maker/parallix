@@ -1,3 +1,4 @@
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 /**
  * Reproduction test for task-2459.
  *
@@ -16,7 +17,7 @@ import type { MissionTransition } from '../../../../src/domain/mission-workflow.
 import type { MissionId, MissionStatus } from '../../../../src/domain/mission.js';
 
 const asOf = '2026-08-31T12:00:00Z';
-const oldMission = 'task-0001' as MissionId;
+const oldMission = fixtureMissionId('task-0001') as MissionId;
 
 const transitions: readonly MissionTransition[] = [
   { missionId: oldMission, from: null, to: 'backlog', trigger: 'refine', actor: 'codex', occurredAt: '2026-07-01T09:00:00Z' },

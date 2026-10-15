@@ -5,10 +5,68 @@ import { getTaskImplementer, findTaskFile } from '../backlog/backlog.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { DEFAULT_FORGEJO_USER, DISPOSITION_PATTERN, readToken, resolveAuthorizedApproverUser, resolveForgejoAuth, resolveForgejoHome, resolveForgejoSettings, resolveForgejoUser } from './forgejo-auth.js';
 import { forgejoApi, forgejoApiAsync, codexSandboxHint } from './forgejo-api.js';
+import type { ForgejoApiCall, ForgejoAsyncApiCall, ForgejoApiError, ForgejoApiResult, ForgejoIssueComment, ForgejoLogFn, ForgejoPrLookupFailure, ForgejoPullRequest, ForgejoReview, ForgejoReviewComment } from './forgejo-types.js';
 import { git } from '../git/git.js';
+import type { ReviewRefFetch } from './forgejo-git.js';
 import { syncPrimaryBaseline, ensureRemoteBaseBranch, fetchReviewBranch, buildCreatePrPushArgs, cLocaleEnv, deleteReviewRef, isStaleInfoPushRejection } from './forgejo-git.js';
 
-type ForgejoOptions = { configuration?: ParallixConfiguration; rootDir?: string; [key: string]: any };
+type GitFetchFn = ReviewRefFetch;
+
+/** Result of resolving a branch to a PR number, or the failure envelope. */
+type PrNumberResult = number | null | ForgejoPrLookupFailure;
+type PrNumberResolver = (branch: string, token: string, options: ForgejoOptions) => PrNumberResult;
+
+/** Checked options shared by the PR adapter, including forwarded push controls. */
+type ForgejoOptions = {
+  configuration?: ParallixConfiguration;
+  rootDir?: string;
+  forgejoUser?: string | null;
+  reviewIdentity?: string | null;
+  token?: string;
+  apiCall?: ForgejoApiCall;
+  apiToken?: string;
+  apiUser?: string;
+  resolvePrNumber?: PrNumberResolver;
+  pageSize?: number;
+  maxPages?: number;
+  slug?: string | null;
+  onlyOpen?: boolean;
+  reportNotFound?: boolean;
+  base?: string;
+  log?: ForgejoLogFn;
+  force?: boolean;
+  forceWithLease?: boolean;
+  gitFetch?: GitFetchFn;
+  refreshTrackingRef?: boolean;
+  verificationArea?: string;
+  expectedRevision?: string;
+  sinceIso?: string;
+  reviewerUser?: string;
+  authorizedApproverUser?: string;
+  user?: string;
+};
+
+/** Envelope for the comment/review mutations: the API result plus a raw diagnostic. */
+type PrMutationResult = ForgejoApiResult<unknown> & { raw?: string };
+
+/** A PR lookup that succeeded, failed through the API, or found nothing. */
+type PrAccess = { prNumber: number, token?: string } | ForgejoPrLookupFailure;
+type PrLookupOutcome = { prNumber: number | null, lastApiError: ForgejoApiError | null, sawSuccessfulLookup: boolean };
+
+/** Normalised comment record returned by `getCommentsSync`. */
+type ForgejoCommentRecord = {
+  kind: string;
+  id: string;
+  reviewId?: string;
+  user: string;
+  isBot: boolean;
+  created: string;
+  updated: string;
+  body: string;
+  state?: string;
+  dismissed?: boolean;
+  location?: string;
+};
 
 const noopLog = () => {};
 
@@ -17,7 +75,7 @@ const noopLog = () => {};
  * @param {{status?: number, statusCode?: number}} [apiErr]
  * @returns {string}
  */
-function formatPrLookupFailure(branch: string, apiErr: { status?: number, statusCode?: number }): string {
+function formatPrLookupFailure(branch: string, apiErr: ForgejoApiError): string {
   const sandboxNote = apiErr.status === 7 ? ` (${codexSandboxHint()})` : '';
   if (apiErr.statusCode === 401 || apiErr.statusCode === 403) {
     return `failed to resolve PR for ${branch}: Forgejo authentication failed (${apiErr.statusCode})${sandboxNote}`;
@@ -35,7 +93,6 @@ function formatPrLookupFailure(branch: string, apiErr: { status?: number, status
  * @returns {{exists: boolean, error?: string, raw: string, number?: number, title?: string, state?: string, merged?: boolean, url?: string}}
  */
 function getPrStatus(branch: string, rootDir?: string, options: ForgejoOptions = {}) {
-  /** @type {{forgejoUser?: string, token?: string, apiCall?: Function}} */
   const {
     forgejoUser,
     token: providedToken,
@@ -49,23 +106,24 @@ function getPrStatus(branch: string, rootDir?: string, options: ForgejoOptions =
   // Don't short-circuit on missing primary token — resolvePrAccess has fallback logic
   // to try implementer and other known tokens when the primary is unavailable.
   const prAccess = resolvePrAccess(branch, token || null, { ...({ apiCall, slug, forgejoUser, rootDir }), configuration: options.configuration });
-  if (prAccess && typeof prAccess === 'object' && prAccess._apiError) {
-    const apiErr = prAccess._apiError;
+  if (prAccess && isPrAccessFailure(prAccess)) {
+    const apiErr = prAccess._apiError ?? {};
     return {
       exists: false,
       error: 'api-failed',
       raw: formatPrLookupFailure(branch, apiErr)
     };
   }
-  if (!prAccess) {
+  const hit = prAccess && !isPrAccessFailure(prAccess) ? prAccess : null;
+  if (!hit) {
     return {
       exists: false,
       raw: `no PR found for '${branch}'`
     };
   }
-  const existingPrNumber = prAccess.prNumber;
+  const existingPrNumber = hit.prNumber;
 
-  const prDetails = apiCall('GET', `/pulls/${existingPrNumber}`, prAccess.token, undefined, { ...({ rootDir }), configuration: options.configuration });
+  const prDetails = apiCall<ForgejoPullRequest>('GET', `/pulls/${existingPrNumber}`, hit.token, undefined, { ...({ rootDir }), configuration: options.configuration });
   if (!prDetails.ok) {
     return {
       exists: false,
@@ -74,7 +132,7 @@ function getPrStatus(branch: string, rootDir?: string, options: ForgejoOptions =
     };
   }
 
-  const pr = prDetails.data;
+  const pr = prDetails.data ?? {};
   const merged = pr.merged === true;
   const raw = `PR #${pr.number}: ${pr.title}\n  State:  ${pr.state}\n  Merged: ${merged ? 'True' : 'False'}\n  URL:    ${pr.html_url}`;
 
@@ -128,7 +186,7 @@ function runPrPush(branch: string, remoteUrl: string, rootDir: string, options: 
  * result, or null once the branch is published.
  */
 function pushBranchForPr(branch: string, remoteUrl: string, rootDir: string, context: ForgejoOptions): CreatePrResult | null {
-  const { force, forceWithLease, gitFetch, log } = context;
+  const { force, forceWithLease, gitFetch, log = fmt.log.info } = context;
   const pushOptions = { force, forceWithLease, gitFetch };
   let attempt = runPrPush(branch, remoteUrl, rootDir, pushOptions);
   if (attempt.failure) { return attempt.failure; }
@@ -150,17 +208,18 @@ function pushBranchForPr(branch: string, remoteUrl: string, rootDir: string, con
  * is none and one must be created.
  */
 function existingPrForBranch(branch: string, context: ForgejoOptions): CreatePrResult | null {
-  const { apiCall, apiToken, apiUser, slug, rootDir, log } = context;
+  const { apiCall = forgejoApi, apiToken, apiUser, slug, rootDir, log = noopLog } = context;
   const lookup = resolvePrAccess(branch, apiToken, { ...({ apiCall, slug, onlyOpen: true, forgejoUser: apiUser, rootDir }), configuration: context.configuration });
-  if (lookup && isApiErrorResult(lookup)) {
-    const apiErr = (lookup as any)._apiError || {};
+  if (lookup && isPrAccessFailure(lookup)) {
+    const apiErr = lookup._apiError || {};
     return { ok: false, error: `failed to check existing PR: ${(apiErr.error || 'API error')}${apiErr.status === 7 ? ` (${codexSandboxHint()})` : ''}` };
   }
   if (!lookup?.prNumber) { return null; }
-  const details = apiCall('GET', `/pulls/${lookup.prNumber}`, lookup.token || apiToken, undefined, { ...({ rootDir }), configuration: context.configuration });
+  const details = apiCall<ForgejoPullRequest>('GET', `/pulls/${lookup.prNumber}`, lookup.token || apiToken, undefined, { ...({ rootDir }), configuration: context.configuration });
   if (!details.ok) { return null; }
-  log(`PR already exists: ${details.data.html_url}`);
-  return { ok: true, url: details.data.html_url, prNumber: lookup.prNumber };
+  const url = details.data?.html_url;
+  log(`PR already exists: ${url}`);
+  return { ok: true, url, prNumber: lookup.prNumber };
 }
 
 function resolvePrimaryBranchOrMain(rootDir: string): string {
@@ -182,7 +241,59 @@ function resolvePrBase(slug: string | null, primaryBranch: string, rootDir: stri
   }
 }
 
-function createPr(branch: string, user: string, token: string, options: ForgejoOptions = {}): { ok: boolean, url?: string | null, error?: string | null, prNumber?: number, gateFailure?: { area: string; command: string; cwd: string; exitCode: number | null; stdout: string; stderr: string; transient?: boolean } } {
+/** Credentials used for the git side of PR creation, and the API-side identity. */
+type PrCredentials = { gitUser: string; gitToken: string; apiUser: string; apiToken: string };
+
+function resolvePrCredentials(user: string, token: string, rootDir: string, configuration?: ParallixConfiguration): PrCredentials {
+  const repoOwner = resolveForgejoSettings(rootDir, configuration).repo.split('/')[0] || null;
+  const ownerToken = repoOwner ? readToken(repoOwner, rootDir, configuration) : null;
+  return {
+    gitUser: ownerToken && repoOwner ? repoOwner : user,
+    gitToken: ownerToken || token,
+    apiUser: user,
+    apiToken: token
+  };
+}
+
+/** Mirror the local branches the PR needs onto the review remote. */
+function syncPrBaseline(prBase: string, primaryBranch: string, gitUser: string, gitToken: string, rootDir: string, log: ForgejoLogFn): CreatePrResult | null {
+  // Mirroring a local baseline does not introduce another verification gate.
+  const syncResult = syncPrimaryBaseline(gitUser, gitToken, rootDir, { gitRunner: git });
+  if (!syncResult.ok) {
+    return { ok: false, error: `failed to sync primary baseline: ${syncResult.error || syncResult.stderr}` };
+  }
+  // 1b. Feature-branch missions target a non-primary PR base that must exist on
+  // the review remote before the PR is opened. syncPrimaryBaseline only mirrors
+  // the primary branch, so push the feature base branch too.
+  if (prBase === primaryBranch) { return null; }
+  log(`Mirroring PR base branch ${prBase} to review remote...`);
+  const baseSync = ensureRemoteBaseBranch(prBase, gitUser, gitToken, rootDir);
+  if (!baseSync.ok) {
+    return { ok: false, error: `failed to sync PR base branch ${prBase}: ${baseSync.error || baseSync.stderr}` };
+  }
+  return null;
+}
+
+function createRemotePr(branch: string, prBase: string, apiToken: string, rootDir: string, apiCall: ForgejoApiCall, log: ForgejoLogFn, configuration?: ParallixConfiguration): CreatePrResult {
+  // 5. Create the PR
+  const title = branch.replace(/^mission\//, '').replace(/-/g, ' ');
+  const prPayload = {
+    title,
+    head: branch,
+    base: prBase
+  };
+
+  const createResult = apiCall<ForgejoPullRequest>('POST', '/pulls', apiToken, prPayload, { ...({ rootDir }), configuration: configuration });
+  const createdUrl = createResult.data?.html_url;
+  if (!createResult.ok || !createdUrl) {
+    return { ok: false, error: `failed to create PR: ${JSON.stringify(createResult.data)}` };
+  }
+
+  log(`PR created: ${createdUrl}`);
+  return { ok: true, url: createdUrl, prNumber: createResult.data?.number };
+}
+
+function createPr(branch: string, user: string, token: string, options: ForgejoOptions = {}): CreatePrResult {
   const {
     rootDir = process.cwd(),
     apiCall = forgejoApi,
@@ -197,34 +308,15 @@ function createPr(branch: string, user: string, token: string, options: ForgejoO
   const slug = branch.match(/^mission\/(task-\d+)/)?.[1] ?? null;
   const prBase = resolvePrBase(slug, primaryBranch, rootDir);
 
-  const repoOwner = resolveForgejoSettings(rootDir, options.configuration).repo.split('/')[0] || null;
-  const ownerToken = repoOwner ? readToken(repoOwner, rootDir, options.configuration) : null;
-  const gitUser = ownerToken && repoOwner ? repoOwner : user;
-  const gitToken = ownerToken || token;
-  const apiUser = user;
-  const apiToken = token;
-  const authenticatedGitFetch = /** @param {string} branchName @param {string} dir @param {{user?: string, token?: string}} [options] */ (branchName: string, dir: string, options: ForgejoOptions = {}) => fetchReviewBranch(branchName, dir, {
-    ...options,
+  const { gitUser, gitToken, apiUser, apiToken } = resolvePrCredentials(user, token, rootDir, options.configuration);
+  const authenticatedGitFetch: GitFetchFn = (branchName, dir, fetchOptions = {}) => fetchReviewBranch(branchName, dir, {
+    ...fetchOptions,
     user: gitUser,
     token: gitToken,
   });
 
-  // Mirroring a local baseline does not introduce another verification gate.
-  const syncResult = syncPrimaryBaseline(gitUser, gitToken, rootDir, { gitRunner: git });
-  if (!syncResult.ok) {
-    return { ok: false, error: `failed to sync primary baseline: ${syncResult.error || syncResult.stderr}` };
-  }
-
-  // 1b. Feature-branch missions target a non-primary PR base that must exist on
-  // the review remote before the PR is opened. syncPrimaryBaseline only mirrors
-  // the primary branch, so push the feature base branch too.
-  if (prBase !== primaryBranch) {
-    log(`Mirroring PR base branch ${prBase} to review remote...`);
-    const baseSync = ensureRemoteBaseBranch(prBase, gitUser, gitToken, rootDir);
-    if (!baseSync.ok) {
-      return { ok: false, error: `failed to sync PR base branch ${prBase}: ${baseSync.error || baseSync.stderr}` };
-    }
-  }
+  const baselineFailure = syncPrBaseline(prBase, primaryBranch, gitUser, gitToken, rootDir, log);
+  if (baselineFailure) { return baselineFailure; }
 
   // 2. Push the branch using authenticated URL
   const remoteUrl = authenticatedReviewUrl(gitUser, gitToken, rootDir, options.configuration);
@@ -236,21 +328,7 @@ function createPr(branch: string, user: string, token: string, options: ForgejoO
   const existing = existingPrForBranch(branch, { ...({ apiCall, apiToken, apiUser, slug, rootDir, log }), configuration: options.configuration });
   if (existing) { return existing; }
 
-  // 5. Create the PR
-  const title = branch.replace(/^mission\//, '').replace(/-/g, ' ');
-  const prPayload = {
-    title,
-    head: branch,
-    base: prBase
-  };
-
-  const createResult = apiCall('POST', '/pulls', apiToken, prPayload, { ...({ rootDir }), configuration: options.configuration });
-  if (!createResult.ok || !createResult.data || !createResult.data.html_url) {
-    return { ok: false, error: `failed to create PR: ${JSON.stringify(createResult.data)}` };
-  }
-
-  log(`PR created: ${createResult.data.html_url}`);
-  return { ok: true, url: createResult.data.html_url, prNumber: createResult.data.number };
+  return createRemotePr(branch, prBase, apiToken, rootDir, apiCall, log, options.configuration);
 }
 
 /**
@@ -259,9 +337,9 @@ function createPr(branch: string, user: string, token: string, options: ForgejoO
  * @param {{apiCall?: Function, slug?: string|null, onlyOpen?: boolean, forgejoUser?: string, rootDir?: string}} [options]
  * @returns {number|null|{_apiError?: object, _notFound?: boolean}}
  */
-function getPrNumber(branch: string, token: string | null, options: ForgejoOptions = {}): number | null | { _apiError?: object, _notFound?: boolean } {
+function getPrNumber(branch: string, token: string | null, options: ForgejoOptions = {}): PrNumberResult {
   const resolved = resolvePrAccess(branch, token, { ...(options), configuration: options.configuration });
-  if (!resolved || isApiErrorResult(resolved)) {
+  if (!resolved || isPrAccessFailure(resolved)) {
     return resolved;
   }
   return resolved.prNumber ?? null;
@@ -290,19 +368,17 @@ function getPrNumber(branch: string, token: string | null, options: ForgejoOptio
  * @returns {string|null}
  */
 function getPrAuthor(branch: string, token: string, options: ForgejoOptions = {}): string | null {
-  /** @type {{apiCall?: Function, resolvePrNumber?: Function, forgejoUser?: string, rootDir?: string}} */
   const {
     apiCall = forgejoApi,
     resolvePrNumber = getPrNumber,
     forgejoUser,
     rootDir = process.cwd()
   } = options;
-  const slugMatch = branch.match(/^mission\/(task-\d+)/);
-  const slug = slugMatch ? slugMatch[1] : null;
+  const slug = branch.match(/^mission\/(task-\d+)/)?.[1] ?? null;
   const prNumber = resolvePrNumber(branch, token, { apiCall, slug, forgejoUser, rootDir, configuration: options.configuration });
   if (isApiErrorResult(prNumber) || !prNumber) {return null;}
 
-  const prRes = apiCall('GET', `/pulls/${prNumber}`, token, undefined, { ...({ rootDir }), configuration: options.configuration });
+  const prRes = apiCall<ForgejoPullRequest>('GET', `/pulls/${prNumber}`, token, undefined, { ...({ rootDir }), configuration: options.configuration });
   if (!prRes.ok || !prRes.data || !prRes.data.user) {return null;}
   return prRes.data.user.login || null;
 }
@@ -313,13 +389,13 @@ function getPrAuthor(branch: string, token: string, options: ForgejoOptions = {}
  * @param {{apiCall?: Function, pageSize?: number, maxPages?: number, slug?: string|null, onlyOpen?: boolean, forgejoUser?: string, rootDir?: string, reportNotFound?: boolean}} [options]
  * @returns {{prNumber?: number, token?: string, _apiError?: object, _notFound?: boolean}|null}
  */
-function findPrInState(branch: string, token: string, state: string, options: ForgejoOptions) {
-  const { apiCall, pageSize, maxPages, rootDir } = options;
-  let lastApiError: { status?: number, statusCode?: number, error?: string, stderr?: string|null } | null = null;
+function findPrInState(branch: string, token: string, state: string, options: ForgejoOptions): PrLookupOutcome {
+  const { apiCall = forgejoApi, pageSize = 50, maxPages = 50, rootDir } = options;
+  let lastApiError: ForgejoApiError | null = null;
   let sawSuccessfulLookup = false;
   let consecutiveErrors = 0;
   for (let page = 1; page <= maxPages; page += 1) {
-    const result = apiCall('GET', `/pulls?state=${state}&page=${page}&limit=${pageSize}&sort=recentupdate&direction=desc`, token, undefined, { ...({ rootDir }), configuration: options.configuration });
+    const result = apiCall<ForgejoPullRequest[]>('GET', `/pulls?state=${state}&page=${page}&limit=${pageSize}&sort=recentupdate&direction=desc`, token, undefined, { ...({ rootDir }), configuration: options.configuration });
     if (!result.ok) {
       consecutiveErrors++;
       lastApiError = { error: result.error, status: result.status, statusCode: result.statusCode, stderr: result.stderr };
@@ -328,9 +404,11 @@ function findPrInState(branch: string, token: string, state: string, options: Fo
     }
     consecutiveErrors = 0;
     sawSuccessfulLookup = true;
-    if (!Array.isArray(result.data) || result.data.length === 0) { break; }
-    const prNumber = findPrForBranch(result.data, branch);
-    if (prNumber || result.data.length < pageSize) { return { prNumber, lastApiError, sawSuccessfulLookup }; }
+    const pulls = Array.isArray(result.data) ? result.data : [];
+    if (pulls.length === 0) { break; }
+    const prNumber = findPrForBranch(pulls, branch);
+    if (prNumber || pulls.length < pageSize) { return { prNumber, lastApiError, sawSuccessfulLookup };
+    }
   }
   return { prNumber: null, lastApiError, sawSuccessfulLookup };
 }
@@ -343,10 +421,11 @@ function findPrInState(branch: string, token: string, state: string, options: Fo
  * other answer, which leaves the full page scan to decide.
  */
 function findPrByBaseHead(branch: string, token: string, options: ForgejoOptions): { kind: 'found'; prNumber: number; open: boolean } | { kind: 'absent' | 'unknown' } {
-  const { apiCall, rootDir, base } = options;
+  const { apiCall = forgejoApi, rootDir, base } = options;
   if (!base) { return { kind: 'unknown' }; }
-  const result = apiCall('GET', `/pulls/${encodeURIComponent(base)}/${branch.split('/').map(encodeURIComponent).join('/')}`, token, undefined, { ...({ rootDir }), configuration: options.configuration });
-  if (result.ok && result.data?.number) { return { kind: 'found', prNumber: result.data.number, open: result.data.state === 'open' }; }
+  const result = apiCall<ForgejoPullRequest>('GET', `/pulls/${encodeURIComponent(base)}/${branch.split('/').map(encodeURIComponent).join('/')}`, token, undefined, { ...({ rootDir }), configuration: options.configuration });
+  const pr = result.data;
+  if (result.ok && pr?.number) { return { kind: 'found', prNumber: pr.number, open: pr.state === 'open' }; }
   return !result.ok && result.statusCode === 404 ? { kind: 'absent' } : { kind: 'unknown' };
 }
 
@@ -372,7 +451,7 @@ function findPrWithToken(branch: string, token: string, onlyOpen: boolean, optio
   };
 }
 
-function findPrWithFallbackTokens(branch: string, slug: string | null, currentUser: string, rootDir: string, doLookup: Function, triedUsers: string[], configuration?: ParallixConfiguration) {
+function findPrWithFallbackTokens(branch: string, slug: string | null, currentUser: string, rootDir: string, doLookup: (token: string) => number | null, triedUsers: string[], configuration?: ParallixConfiguration): { prNumber: number; token: string } | null {
   if (!slug) { return null; }
   const taskFile = findTaskFile(slug, rootDir);
   const implementer = taskFile ? getTaskImplementer(taskFile) : null;
@@ -387,20 +466,20 @@ function findPrWithFallbackTokens(branch: string, slug: string | null, currentUs
   return null;
 }
 
-function reportMissingPr(branch: string, rootDir: string, triedUsers: readonly string[], lastApiError: any, configuration?: ParallixConfiguration) {
+function reportMissingPr(branch: string, rootDir: string, triedUsers: readonly string[], lastApiError: ForgejoApiError | null, configuration?: ParallixConfiguration) {
   const curlCheck = spawnSync('curl', ['--version'], { encoding: 'utf8' });
   fmt.log.fail(`PR not found for branch '${branch}' after checking tokens for: ${triedUsers.join(', ')}`);
   const settings = resolveForgejoSettings(rootDir, configuration);
   fmt.log.info(`Current environment: FORGEJO_URL=${settings.url}, FORGEJO_REPO=${settings.repo}, FORGEJO_HOME=${resolveForgejoHome(rootDir, configuration)}`);
   if (lastApiError) {
-    const err = lastApiError as { status?: number, error?: string, stderr?: string };
+    const err = lastApiError as { status?: number | null, error?: string | null, stderr?: string | null };
     fmt.log.warn(`API error encountered during lookup: status=${err.status || 0}, error=${err.error || 'unknown'}`);
     if (err.stderr) { fmt.log.info(`API stderr: ${err.stderr}`); }
   }
-  fmt.log.info(`curl --version: ${curlCheck.status === 0 ? curlCheck.stdout.split('\n')[0] : 'failed to run curl'}`);
+  fmt.log.info(`curl --version: ${curlCheck.status === 0 ? (curlCheck.stdout || '').split('\n')[0] : 'failed to run curl'}`);
 }
 
-function resolvePrAccess(branch: string, token: string | null, options: ForgejoOptions = {}): { prNumber?: number, token?: string, _apiError?: object, _notFound?: boolean } | null {
+function resolvePrAccess(branch: string, token: string | null | undefined, options: ForgejoOptions = {}): PrAccess | null {
   const {
     apiCall = forgejoApi,
     pageSize = 50,
@@ -411,7 +490,7 @@ function resolvePrAccess(branch: string, token: string | null, options: ForgejoO
     rootDir = process.cwd()
   } = options;
 
-  let lastApiError: { status?: number, statusCode?: number, error?: string, stderr?: string|null } | null = null;
+  let lastApiError: ForgejoApiError | null = null;
   let sawSuccessfulLookup = false;
 
   const base = resolvePrBase(slug, resolvePrimaryBranchOrMain(rootDir), rootDir);
@@ -445,7 +524,7 @@ function resolvePrAccess(branch: string, token: string | null, options: ForgejoO
   return null;
 }
 
-function findPrForBranch(prs: any[], branch: string): number | null {
+function findPrForBranch(prs: ForgejoPullRequest[], branch: string): number | null {
   const pr = prs.find(candidate => {
     const head = candidate.head || {};
     return head.ref === branch || head.label === branch || head.label?.endsWith(`:${branch}`);
@@ -460,47 +539,60 @@ function findPrForBranch(prs: any[], branch: string): number | null {
  * @returns {Array<{number: number, title: string, html_url: string, head: string}>}
  */
 function listOpenPrsForSlug(baseSlug: string, token: string, options: ForgejoOptions = {}): Array< { number: number, title: string, html_url: string, head: string } > {
-  /** @type {{apiCall?: Function, pageSize?: number, maxPages?: number}} */
   const {
     apiCall = forgejoApi,
     pageSize = 50,
     maxPages = 2
   } = options;
 
-  const prs = [];
+  const prs: Array< { number: number, title: string, html_url: string, head: string } > = [];
   let consecutiveErrors = 0;
 
   for (let page = 1; page <= maxPages; page += 1) {
-    const result = apiCall('GET', `/pulls?state=open&page=${page}&limit=${pageSize}&sort=recentupdate&direction=desc`, token, undefined, { ...({}), configuration: options.configuration });
+    const result = apiCall<ForgejoPullRequest[]>('GET', `/pulls?state=open&page=${page}&limit=${pageSize}&sort=recentupdate&direction=desc`, token, undefined, { ...({}), configuration: options.configuration });
     if (!result.ok) {
       consecutiveErrors++;
       if (consecutiveErrors >= 3) {break;}
       continue;
     }
     consecutiveErrors = 0;
-    if (!Array.isArray(result.data) || result.data.length === 0) {break;}
+    const pulls = Array.isArray(result.data) ? result.data : [];
+    if (pulls.length === 0) {break;}
 
-    prs.push(...matchingMissionPrs(result.data, baseSlug));
+    prs.push(...matchingMissionPrs(pulls, baseSlug));
 
-    if (result.data.length < pageSize) {break;}
+    if (pulls.length < pageSize) {break;}
   }
 
   return prs;
 }
 
-function matchingMissionPrs(prs: any[], baseSlug: string) {
+function matchingMissionPrs(prs: ForgejoPullRequest[], baseSlug: string) {
   const prefix = `mission/${baseSlug}`;
   return prs.flatMap((pr) => {
     const head = pr.head || {};
     const ref = head.ref || head.label?.split(':').pop() || '';
-    return ref === prefix || ref.startsWith(`${prefix}-`) ? [{ number: pr.number, title: pr.title, html_url: pr.html_url, head: ref }] : [];
+    return ref === prefix || ref.startsWith(`${prefix}-`)
+      ? [{ number: pr.number as number, title: pr.title as string, html_url: pr.html_url as string, head: ref }]
+      : [];
   });
 }
 
 
-/** @param {{_apiError?: object, _notFound?: boolean}} result @returns {boolean} */
-function isApiErrorResult(result: { _apiError?: object, _notFound?: boolean }): boolean {
-  return Boolean(result && typeof result === 'object' && result._apiError && result._notFound === true);
+/** Narrow the PR-lookup failure envelope, which every lookup path can return. */
+function isApiErrorResult(result: unknown): result is ForgejoPrLookupFailure {
+  if (!result || typeof result !== 'object') { return false; }
+  const candidate = result as { _apiError?: unknown, _notFound?: unknown };
+  return Boolean(candidate._apiError) && candidate._notFound === true;
+}
+
+/**
+ * Narrow a resolved PR access. The parameter is the union itself, not `unknown`,
+ * so the false branch keeps the success shape under the test project's
+ * non-strict typecheck as well as the strict production project.
+ */
+function isPrAccessFailure(access: PrAccess): access is ForgejoPrLookupFailure {
+  return isApiErrorResult(access);
 }
 
 /**
@@ -555,48 +647,56 @@ function getLatestReview(branch: string, reviewerUser: string, sinceIso: string,
   const slugMatch = branch.match(/^mission\/(task-\d+)/);
   const slug = slugMatch ? slugMatch[1] : null;
   const prAccess = resolvePrAccess(branch, token, { ...({ apiCall, slug, forgejoUser, rootDir }), configuration: options.configuration });
-  if (!prAccess || isApiErrorResult(prAccess)) {return null;}
+  if (!prAccess || isPrAccessFailure(prAccess)) {return null;}
 
-  const result = apiCall('GET', `/pulls/${prAccess.prNumber}/reviews`, prAccess.token, undefined, { ...({}), configuration: options.configuration });
+  const result = apiCall<ForgejoReview[]>('GET', `/pulls/${prAccess.prNumber}/reviews`, prAccess.token, undefined, { ...({}), configuration: options.configuration });
   if (!result.ok || !Array.isArray(result.data)) {return null;}
 
   const since = new Date(sinceIso).getTime();
   const eligible = result.data
-    .filter(/** @param {{user?: {login?: string}, submitted_at?: string, created_at?: string, state?: string}} r */ (r: any) => {
+    .filter(/** @param {{user?: {login?: string}, submitted_at?: string, created_at?: string, state?: string}} r */ (r) => {
       const submittedAt = r.submitted_at || r.created_at || '';
       return (r.state === 'REQUEST_CHANGES' || r.user?.login === reviewerUser) && !!submittedAt
         && new Date(submittedAt).getTime() >= since && !r.dismissed;
     })
-    .map(/** @param {{state?: string, submitted_at?: string, created_at?: string}} r */ (r: any) => ({ state: r.state, submittedAt: r.submitted_at || r.created_at || '' }))
-    .sort(/** @param {{submittedAt: string}} a @param {{submittedAt: string}} b */ (a: any, b: any) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
+    .map(/** @param {{state?: string, submitted_at?: string, created_at?: string}} r */ (r) => ({ state: r.state!, submittedAt: r.submitted_at || r.created_at || '' }))
+    .sort(/** @param {{submittedAt: string}} a @param {{submittedAt: string}} b */ (a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
 
   return eligible.length > 0 ? eligible[eligible.length - 1] : null;
 }
 
-function reviewDecisionFromReviews(data: any[], prNumber: number, reviewerUser?: string, sinceIso?: string, authorizedApproverUser?: string) {
-  const reviews = data
-    .map((review: any) => ({ user: (review.user || {}).login || '?', state: review.state || '', submittedAt: review.submitted_at || review.created_at || '', dismissed: !!review.dismissed }))
-    .filter((review: any) => review.state && review.submittedAt && !review.dismissed)
-    .sort((a: any, b: any) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
-  if (reviews.length === 0) { return { ok: true, prNumber, reviewState: null, defaultUserApproved: false }; }
-  const allFormalReviews = reviews.filter((review: any) => review.state === 'APPROVED' || review.state === 'REQUEST_CHANGES');
-  const formalReviews = allFormalReviews.filter((review: any) => !sinceIso || Date.parse(review.submittedAt) >= Date.parse(sinceIso));
-  const finalState = formalReviews.at(-1)?.state ?? (sinceIso ? null : reviews.at(-1)!.state);
-  const latestDefaultUserFormal = formalReviews.filter((review: any) => review.user === DEFAULT_FORGEJO_USER).at(-1);
-  const defaultUserApproved = finalState === 'APPROVED' && latestDefaultUserFormal?.state === 'APPROVED';
+type ReviewDecision = { ok: boolean; prNumber: number; reviewState: string | null; defaultUserApproved: boolean; defaultUserApprovedAt?: string; approvalHolders?: string[]; operatorApproved?: boolean; operatorApprovedAt?: string; reviewerApproved?: boolean; reviewerApprovedAt?: string };
+
+type FormalReview = { user: string; state: string; submittedAt: string };
+
+function addOperatorApproval(decision: ReviewDecision, formalReviews: FormalReview[], authorizedApproverUser?: string) {
   const operatorUser = authorizedApproverUser && authorizedApproverUser !== DEFAULT_FORGEJO_USER ? authorizedApproverUser : undefined;
-  const latestOperatorFormal = operatorUser ? formalReviews.filter((review: any) => review.user === operatorUser).at(-1) : undefined;
-  const operatorApproved = !!operatorUser && finalState === 'APPROVED' && latestOperatorFormal?.state === 'APPROVED';
-  const latestByUser = new Map(allFormalReviews.map((review: any) => [review.user, review]));
-  const approvalHolders = [...latestByUser.values()].filter((review: any) => review.state === 'APPROVED').map((review: any) => review.user);
-  const decision: any = { ok: true, prNumber, reviewState: finalState, defaultUserApproved, approvalHolders };
-  if (defaultUserApproved) { decision.defaultUserApprovedAt = latestDefaultUserFormal.submittedAt; }
+  const latestOperatorFormal = operatorUser ? formalReviews.filter(review => review.user === operatorUser).at(-1) : undefined;
+  const operatorApproved = !!operatorUser && decision.reviewState === 'APPROVED' && latestOperatorFormal?.state === 'APPROVED';
   if (operatorUser) {
     decision.operatorApproved = operatorApproved;
     if (operatorApproved) { decision.operatorApprovedAt = latestOperatorFormal!.submittedAt; }
   }
+}
+
+function reviewDecisionFromReviews(data: ForgejoReview[], prNumber: number, reviewerUser?: string, sinceIso?: string, authorizedApproverUser?: string) {
+  const reviews = data
+    .map((review) => ({ user: (review.user || {}).login || '?', state: review.state || '', submittedAt: review.submitted_at || review.created_at || '', dismissed: !!review.dismissed }))
+    .filter((review) => review.state && review.submittedAt && !review.dismissed)
+    .sort((a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
+  if (reviews.length === 0) { return { ok: true, prNumber, reviewState: null, defaultUserApproved: false }; }
+  const allFormalReviews = reviews.filter((review) => review.state === 'APPROVED' || review.state === 'REQUEST_CHANGES');
+  const formalReviews = allFormalReviews.filter((review) => !sinceIso || Date.parse(review.submittedAt) >= Date.parse(sinceIso));
+  const finalState = formalReviews.at(-1)?.state ?? (sinceIso ? null : reviews.at(-1)!.state);
+  const latestDefaultUserFormal = formalReviews.filter((review) => review.user === DEFAULT_FORGEJO_USER).at(-1);
+  const defaultUserApproved = finalState === 'APPROVED' && latestDefaultUserFormal?.state === 'APPROVED';
+  const latestByUser = new Map(allFormalReviews.map((review) => [review.user, review]));
+  const approvalHolders = [...latestByUser.values()].filter((review) => review.state === 'APPROVED').map((review) => review.user);
+  const decision: ReviewDecision = { ok: true, prNumber, reviewState: finalState, defaultUserApproved, approvalHolders };
+  if (defaultUserApproved) { decision.defaultUserApprovedAt = latestDefaultUserFormal.submittedAt; }
+  addOperatorApproval(decision, formalReviews, authorizedApproverUser);
   if (reviewerUser) {
-    const latestReviewerFormal = formalReviews.filter((review: any) => review.user === reviewerUser).at(-1);
+    const latestReviewerFormal = formalReviews.filter((review) => review.user === reviewerUser).at(-1);
     decision.reviewerApproved = finalState === 'APPROVED' && latestReviewerFormal?.state === 'APPROVED';
     if (decision.reviewerApproved && latestReviewerFormal) { decision.reviewerApprovedAt = latestReviewerFormal.submittedAt; }
   }
@@ -629,8 +729,8 @@ function getLatestReviewDecision(branch: string, options: ForgejoOptions = {}): 
   }
 
   const prAccess = resolvePrAccess(branch, token, { ...({ apiCall, slug, forgejoUser, rootDir }), configuration: options.configuration });
-  if (prAccess && isApiErrorResult(prAccess)) {
-    const apiErr = (prAccess as any)._apiError || {};
+  if (prAccess && isPrAccessFailure(prAccess)) {
+    const apiErr = prAccess._apiError;
     return {
       ok: false,
       error: 'api-failed',
@@ -643,7 +743,7 @@ function getLatestReviewDecision(branch: string, options: ForgejoOptions = {}): 
   }
   const prNumber = prAccess.prNumber as number;
 
-  const result = apiCall('GET', `/pulls/${prNumber}/reviews`, prAccess.token, undefined, { ...({}), configuration: options.configuration });
+  const result = apiCall<ForgejoReview[]>('GET', `/pulls/${prNumber}/reviews`, prAccess.token, undefined, { ...({}), configuration: options.configuration });
   if (!result.ok || !Array.isArray(result.data)) {
     return { ok: false, error: 'reviews-unavailable', reviewState: null, prNumber };
   }
@@ -673,82 +773,84 @@ function getLatestDisposition(branch: string, implementerUser: string, sinceIso:
   const slugMatch = branch.match(/^mission\/(task-\d+)/);
   const slug = slugMatch ? slugMatch[1] : null;
   const prAccess = resolvePrAccess(branch, token, { ...({ apiCall, slug, forgejoUser, rootDir }), configuration: options.configuration });
-  if (prAccess && isApiErrorResult(prAccess)) {return null;}
+  if (prAccess && isPrAccessFailure(prAccess)) {return null;}
   if (!prAccess) {return null;}
   const prNumber = prAccess.prNumber;
 
-  const result = apiCall('GET', `/issues/${prNumber}/comments`, prAccess.token, undefined, { ...({}), configuration: options.configuration });
+  const result = apiCall<ForgejoIssueComment[]>('GET', `/issues/${prNumber}/comments`, prAccess.token, undefined, { ...({}), configuration: options.configuration });
   if (!result.ok || !Array.isArray(result.data)) {return null;}
 
   const since = new Date(sinceIso).getTime();
   const eligible = result.data
-    .filter(/** @param {{user?: {login?: string}, created_at?: string, body?: string}} c */ (c: any) => {
+    .filter(/** @param {{user?: {login?: string}, created_at?: string, body?: string}} c */ (c) => {
       const user = (c.user || {}).login;
       const createdStr = c.created_at || '';
       const created = createdStr ? new Date(createdStr).getTime() : 0;
       const body = c.body || '';
       return user === implementerUser && created >= since && DISPOSITION_PATTERN.test(body);
     })
-    .map(/** @param {{user?: {login?: string}, created_at?: string, body?: string}} c */ (c: any) => {
+    .map(/** @param {{user?: {login?: string}, created_at?: string, body?: string}} c */ (c) => {
       const match = DISPOSITION_PATTERN.exec(c.body || '');
       return { disposition: match ? match[1] : null, createdAt: c.created_at || '' };
     })
-    .filter(/** @param {{disposition: string|null}} e */ (e: any) => e.disposition)
-    .sort(/** @param {{createdAt: string}} a @param {{createdAt: string}} b */ (a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    .filter(/** @param {{disposition: string|null}} e */ (e) => e.disposition)
+    .sort(/** @param {{createdAt: string}} a @param {{createdAt: string}} b */ (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
   return eligible.length > 0 ? eligible[eligible.length - 1].disposition : null;
 }
 
 
-async function getLatestReviewForPr(prNumber: number, reviewerUser: string, sinceIso: string, token: string, options: ForgejoOptions = {}) {
+type AsyncReviewOptions = Omit<ForgejoOptions, 'apiCall'> & { apiCall?: ForgejoApiCall | ForgejoAsyncApiCall };
+
+async function getLatestReviewForPr(prNumber: number, reviewerUser: string, sinceIso: string, token: string, options: AsyncReviewOptions = {}) {
   /** @type {{apiCall?: Function}} */
   const {
     apiCall = forgejoApiAsync
   } = options;
 
-  const result = await apiCall('GET', `/pulls/${prNumber}/reviews`, token, undefined, { ...({}), configuration: options.configuration });
+  const result = await apiCall<ForgejoReview[]>('GET', `/pulls/${prNumber}/reviews`, token, undefined, { ...({}), configuration: options.configuration });
   if (!result.ok || !Array.isArray(result.data)) {return null;}
 
   const since = new Date(sinceIso).getTime();
 
   const eligible = result.data
-    .filter(/** @param {{user?: {login?: string}, submitted_at?: string, created_at?: string, state?: string}} r */ (r: any) => {
+    .filter(/** @param {{user?: {login?: string}, submitted_at?: string, created_at?: string, state?: string}} r */ (r) => {
       const submittedAt = r.submitted_at || r.created_at || '';
       return (r.state === 'REQUEST_CHANGES' || r.user?.login === reviewerUser) && !!submittedAt
         && new Date(submittedAt).getTime() >= since && !r.dismissed;
     })
-    .map(/** @param {{state?: string, submitted_at?: string, created_at?: string}} r */ (r: any) => ({ state: r.state, submittedAt: r.submitted_at || r.created_at || '' }))
-    .sort(/** @param {{submittedAt: string}} a @param {{submittedAt: string}} b */ (a: any, b: any) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
+    .map(/** @param {{state?: string, submitted_at?: string, created_at?: string}} r */ (r) => ({ state: r.state!, submittedAt: r.submitted_at || r.created_at || '' }))
+    .sort(/** @param {{submittedAt: string}} a @param {{submittedAt: string}} b */ (a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
 
   return eligible.length > 0 ? eligible[eligible.length - 1] : null;
 }
 
 
-async function getLatestDispositionForPr(prNumber: number, implementerUser: string, sinceIso: string, token: string, options: ForgejoOptions = {}) {
+async function getLatestDispositionForPr(prNumber: number, implementerUser: string, sinceIso: string, token: string, options: AsyncReviewOptions = {}) {
   /** @type {{apiCall?: Function}} */
   const {
     apiCall = forgejoApiAsync
   } = options;
 
-  const result = await apiCall('GET', `/issues/${prNumber}/comments`, token, undefined, { ...({}), configuration: options.configuration });
+  const result = await apiCall<ForgejoIssueComment[]>('GET', `/issues/${prNumber}/comments`, token, undefined, { ...({}), configuration: options.configuration });
   if (!result.ok || !Array.isArray(result.data)) {return null;}
 
   const since = new Date(sinceIso).getTime();
 
   const eligible = result.data
-    .filter(/** @param {{user?: {login?: string}, created_at?: string, body?: string}} c */ (c: any) => {
+    .filter(/** @param {{user?: {login?: string}, created_at?: string, body?: string}} c */ (c) => {
       const user = (c.user || {}).login;
       const createdAt = c.created_at || '';
       const created = createdAt ? new Date(createdAt).getTime() : 0;
       const body = c.body || '';
       return user === implementerUser && created >= since && DISPOSITION_PATTERN.test(body);
     })
-    .map(/** @param {{user?: {login?: string}, created_at?: string, body?: string}} c */ (c: any) => {
+    .map(/** @param {{user?: {login?: string}, created_at?: string, body?: string}} c */ (c) => {
       const match = DISPOSITION_PATTERN.exec(c.body || '');
       return { disposition: match ? match[1] : null, createdAt: c.created_at || '' };
     })
-    .filter(/** @param {{disposition: string|null}} e */ (e: any) => e.disposition)
-    .sort(/** @param {{createdAt: string}} a @param {{createdAt: string}} b */ (a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    .filter(/** @param {{disposition: string|null}} e */ (e) => e.disposition)
+    .sort(/** @param {{createdAt: string}} a @param {{createdAt: string}} b */ (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
   return eligible.length > 0 ? eligible[eligible.length - 1].disposition : null;
 }
@@ -759,9 +861,9 @@ async function getLatestDispositionForPr(prNumber: number, implementerUser: stri
  * @param {string} branch  - Mission branch (e.g. 'mission/architecture migration')
  * @param {string} token   - Forgejo PAT
  * @param {string} body    - Comment body (markdown)
- * @returns {{ ok: boolean, data: any, status: number|null, error?: string, raw?: string }}
+ * @returns {{ ok: boolean, data: unknown, status: number|null, error?: string, raw?: string }}
  */
-function postComment(branch: string, token: string, body: string, options: ForgejoOptions = {}): { ok: boolean, data: any, status: number | null, error?: string, raw?: string } {
+function postComment(branch: string, token: string, body: string, options: ForgejoOptions = {}): PrMutationResult {
   /** @type {{apiCall?: Function, resolvePrNumber?: Function, forgejoUser?: string}} */
   const {
     apiCall = forgejoApi,
@@ -772,10 +874,10 @@ function postComment(branch: string, token: string, body: string, options: Forge
   const slug = slugMatch ? slugMatch[1] : null;
   const prNumber = resolvePrNumber(branch, token, { apiCall, slug, forgejoUser, rootDir: options.rootDir, configuration: options.configuration });
   if (isApiErrorResult(prNumber)) {
-    const apiErr = prNumber._apiError || {};
-    return { ok: false, data: null, status: null, error: 'api-failed', raw: `failed to resolve PR for ${branch}${(apiErr.status || 0) === 7 ? ` (${codexSandboxHint()})` : ''}` };
+    const apiErr = prNumber._apiError;
+    return { ok: false, data: null, status: null, statusCode: null, stderr: null, error: 'api-failed', raw: `failed to resolve PR for ${branch}${(apiErr.status || 0) === 7 ? ` (${codexSandboxHint()})` : ''}` };
   }
-  if (!prNumber) {return { ok: false, data: null, status: null, error: 'pr-not-found' };}
+  if (!prNumber) {return { ok: false, data: null, status: null, statusCode: null, stderr: null, error: 'pr-not-found' };}
   return apiCall('POST', `/issues/${prNumber}/comments`, token, { body }, { ...({}), configuration: options.configuration });
 }
 
@@ -792,9 +894,18 @@ const REVIEW_OUTCOME_MAP = {
  * @param {string} token    - Forgejo PAT
  * @param {string} outcome  - 'approve' | 'request-changes' | 'comment'
  * @param {string} summary  - Review summary text
- * @returns {{ ok: boolean, data: any, status: number|null, error?: string, raw?: string }}
+ * @returns {{ ok: boolean, data: unknown, status: number|null, error?: string, raw?: string }}
  */
-function postReview(branch: string, token: string, outcome: string, summary: string, options: ForgejoOptions = {}): { ok: boolean, data: any, status: number | null, error?: string, raw?: string } {
+function reviewHead(apiCall: ForgejoApiCall, prNumber: number, token: string) {
+  const prRes = apiCall<ForgejoPullRequest>('GET', `/pulls/${prNumber}`, token);
+  return prRes.ok ? prRes.data?.head?.sha ?? null : null;
+}
+
+function reviewPayload(body: string, event: string, commit_id: string | null) { return commit_id ? { body, event, commit_id } : { body, event }; }
+
+function mutationFailure(error: string): PrMutationResult { return { ok: false, data: null, status: null, statusCode: null, stderr: null, error }; }
+
+function postReview(branch: string, token: string, outcome: string, summary: string, options: ForgejoOptions = {}): PrMutationResult {
   /** @type {{apiCall?: Function, resolvePrNumber?: Function, forgejoUser?: string}} */
   const {
     apiCall = forgejoApi,
@@ -802,31 +913,24 @@ function postReview(branch: string, token: string, outcome: string, summary: str
     forgejoUser,
     rootDir = process.cwd()
   } = options;
-  const scopedApi = (method: string, endpoint: string, auth: string, data?: unknown) => apiCall(method, endpoint, auth, data, { ...({ rootDir }), configuration: options.configuration });
+  const scopedApi = <T = unknown>(method: string, endpoint: string, auth: string | undefined, data?: unknown) => apiCall<T>(method, endpoint, auth, data, { ...({ rootDir }), configuration: options.configuration });
   const slugMatch = branch.match(/^mission\/(task-\d+)/);
   const slug = slugMatch ? slugMatch[1] : null;
   const prNumber = resolvePrNumber(branch, token, { apiCall: scopedApi, slug, forgejoUser, rootDir, configuration: options.configuration });
   if (isApiErrorResult(prNumber)) {
-    const apiErr = prNumber._apiError || {};
-    return { ok: false, data: null, status: null, error: 'api-failed', raw: `failed to resolve PR for ${branch}${(apiErr.status || 0) === 7 ? ` (${codexSandboxHint()})` : ''}` };
+    const apiErr = prNumber._apiError;
+    return { ok: false, data: null, status: null, statusCode: null, stderr: null, error: 'api-failed', raw: `failed to resolve PR for ${branch}${(apiErr.status || 0) === 7 ? ` (${codexSandboxHint()})` : ''}` };
   }
-  if (!prNumber) {return { ok: false, data: null, status: null, error: 'pr-not-found' };}
+  if (!prNumber) {return { ok: false, data: null, status: null, statusCode: null, stderr: null, error: 'pr-not-found' };}
 
-  // Resolve current head SHA for the PR to avoid submission failures if PR updated
-  const prRes = scopedApi('GET', `/pulls/${prNumber}`, token);
-  const commit_id = (prRes.ok && prRes.data && prRes.data.head) ? prRes.data.head.sha : null;
-  if (options.expectedRevision && commit_id !== options.expectedRevision) {
-    return { ok: false, data: null, status: null, error: 'revision-drift' };
-  }
+  const commit_id = reviewHead(scopedApi, prNumber, token);
+  if (options.expectedRevision && commit_id !== options.expectedRevision) { return mutationFailure('revision-drift'); }
 
   const event = /** @type {'APPROVED'|'REQUEST_CHANGES'|'COMMENT'|undefined} */ (REVIEW_OUTCOME_MAP[outcome as keyof typeof REVIEW_OUTCOME_MAP]);
-  if (!event) {return { ok: false, data: null, status: null, error: `unsupported-outcome: ${outcome}` };}
+  if (!event) {return { ok: false, data: null, status: null, statusCode: null, stderr: null, error: `unsupported-outcome: ${outcome}` };}
 
   /** @type {{body: string, event: string, commit_id?: string|null}} */
-  const payload: any = { body: summary, event };
-  if (commit_id) {
-    payload.commit_id = commit_id;
-  }
+  const payload = reviewPayload(summary, event, commit_id);
 
   const result = scopedApi('POST', `/pulls/${prNumber}/reviews`, token, payload);
   if (!result.ok && result.stderr) {
@@ -840,12 +944,12 @@ function dismissApproval(branch: string, token: string, decidedAt: string, reaso
   const { apiCall = forgejoApi, forgejoUser, rootDir = process.cwd() } = options;
   const slugMatch = branch.match(/^mission\/(task-\d+)/);
   const access = resolvePrAccess(branch, token, { ...({ apiCall, slug: slugMatch?.[1] ?? null, forgejoUser, rootDir }), configuration: options.configuration });
-  if (!access || isApiErrorResult(access)) { return { ok: false, error: 'pr-not-found' }; }
-  const reviews = apiCall('GET', `/pulls/${access.prNumber}/reviews`, access.token, undefined, { ...({}), configuration: options.configuration });
+  if (!access || isPrAccessFailure(access)) { return { ok: false, error: 'pr-not-found' }; }
+  const reviews = apiCall<ForgejoReview[]>('GET', `/pulls/${access.prNumber}/reviews`, access.token, undefined, { ...({}), configuration: options.configuration });
   if (!reviews.ok || !Array.isArray(reviews.data)) { return { ok: false, error: 'reviews-unavailable' }; }
   const approval = reviews.data
-    .filter((review: any) => review.state === 'APPROVED' && !review.dismissed && review.id)
-    .sort((left: any, right: any) => Math.abs(new Date(left.submitted_at || left.created_at || 0).getTime() - new Date(decidedAt).getTime()) - Math.abs(new Date(right.submitted_at || right.created_at || 0).getTime() - new Date(decidedAt).getTime()))[0];
+    .filter((review) => review.state === 'APPROVED' && !review.dismissed && review.id)
+    .sort((left, right) => Math.abs(new Date(left.submitted_at || left.created_at || 0).getTime() - new Date(decidedAt).getTime()) - Math.abs(new Date(right.submitted_at || right.created_at || 0).getTime() - new Date(decidedAt).getTime()))[0];
   if (!approval) { return { ok: false, error: 'matching-approval-not-found' }; }
   return apiCall('POST', `/pulls/${access.prNumber}/reviews/${approval.id}/dismissals`, access.token, { message: reason }, { ...({}), configuration: options.configuration });
 }
@@ -855,20 +959,24 @@ function dismissApproval(branch: string, token: string, decidedAt: string, reaso
  * dismissal API (TASK-2620). The caller acts as the dedicated `parallix` login:
  * no review is posted as another login and no finding is written.
  */
+function apiStatusLabel(result: ForgejoApiError) { return result.statusCode ?? result.status ?? 'n/a'; }
+
+function isStandingApproval(review: ForgejoReview) { return review.state === 'APPROVED' && !review.dismissed && review.id; }
+
 function dismissStandingApprovals(branch: string, token: string, reason: string, options: ForgejoOptions = {}) {
   const { apiCall = forgejoApi, forgejoUser, rootDir = process.cwd() } = options;
   const slugMatch = branch.match(/^mission\/(task-\d+)/);
   const access = resolvePrAccess(branch, token, { ...({ apiCall, slug: slugMatch?.[1] ?? null, forgejoUser, rootDir }), configuration: options.configuration });
-  if (!access || isApiErrorResult(access)) { return { ok: false, dismissed: [], errors: ['pr-not-found'] }; }
-  const reviews = apiCall('GET', `/pulls/${access.prNumber}/reviews`, access.token, undefined, { ...({}), configuration: options.configuration });
+  if (!access || isPrAccessFailure(access)) { return { ok: false, dismissed: [], errors: ['pr-not-found'] }; }
+  const reviews = apiCall<ForgejoReview[]>('GET', `/pulls/${access.prNumber}/reviews`, access.token, undefined, { ...({}), configuration: options.configuration });
   if (!reviews.ok || !Array.isArray(reviews.data)) { return { ok: false, dismissed: [], errors: ['reviews-unavailable'] }; }
   const dismissed: string[] = [];
   const errors: string[] = [];
-  for (const review of reviews.data.filter((entry: any) => entry.state === 'APPROVED' && !entry.dismissed && entry.id)) {
+  for (const review of reviews.data.filter(isStandingApproval)) {
     const login = review.user?.login ?? `review ${review.id}`;
     const result = apiCall('POST', `/pulls/${access.prNumber}/reviews/${review.id}/dismissals`, access.token, { message: reason }, { ...({}), configuration: options.configuration });
     if (result.ok) { dismissed.push(login); }
-    else { errors.push(`dismissing ${login}'s approval failed (HTTP ${result.statusCode ?? result.status ?? 'n/a'})`); }
+    else { errors.push(`dismissing ${login}'s approval failed (HTTP ${apiStatusLabel(result)})`); }
   }
   return { ok: errors.length === 0, dismissed, errors };
 }
@@ -881,9 +989,38 @@ function dismissStandingApprovals(branch: string, token: string, reason: string,
  * @param {object} [options]
  * @param {Function} [options.apiCall] - Forgejo API function, injectable for tests
  * @param {Function} [options.log]     - Logger, injectable for tests
- * @returns {any[]|null} - Array of comment objects sorted by creation time, or null if comments could not be fetched
+ * @returns {ForgejoCommentRecord[]|null} - Array of comment objects sorted by creation time, or null if comments could not be fetched
  */
-function getCommentsSync(branch: string, token: string, options: ForgejoOptions = {}): any[] | null {
+function commentRecord(comment: ForgejoIssueComment) {
+  return { id: String(comment.id ?? ''), user: comment.user?.login || '?', isBot: comment.user?.type === 'bot', created: comment.created_at || '', updated: comment.updated_at || comment.created_at || '', body: (comment.body || '').trim() };
+}
+
+function reviewRecord(review: ForgejoReview): ForgejoCommentRecord {
+  return { kind: 'review', ...commentRecord(review), created: review.submitted_at || review.created_at || '', updated: review.updated_at || review.submitted_at || review.created_at || '', state: review.state || '', dismissed: Boolean(review.dismissed) };
+}
+
+function inlineCommentRecord(comment: ForgejoReviewComment, review: ForgejoReview): ForgejoCommentRecord {
+  const path = comment.path || '';
+  const line = comment.line || comment.original_line || '';
+  return { kind: 'inline-comment', ...commentRecord(comment), reviewId: String(review.id ?? ''), state: review.state || '', dismissed: Boolean(review.dismissed), location: line ? `${path}:${line}` : path };
+}
+
+function collectPrComments(prNumber: number, accessToken: string | undefined, issueComments: ForgejoIssueComment[], reviews: ForgejoReview[], apiCall: ForgejoApiCall, configuration?: ParallixConfiguration): ForgejoCommentRecord[] {
+  const allComments: ForgejoCommentRecord[] = [];
+
+  for (const comment of issueComments) { allComments.push({ kind: 'issue-comment', ...commentRecord(comment) }); }
+  for (const review of reviews) {
+    allComments.push(reviewRecord(review));
+    const inlineRes = apiCall<ForgejoReviewComment[]>('GET', `/pulls/${prNumber}/reviews/${review.id}/comments`, accessToken, undefined, { configuration: configuration });
+    if (inlineRes.ok && Array.isArray(inlineRes.data)) {
+      for (const comment of inlineRes.data) { allComments.push(inlineCommentRecord(comment, review)); }
+    }
+  }
+
+  return allComments.sort(/** @param {{created: string}} a @param {{created: string}} b */ (a, b) => a.created.localeCompare(b.created));
+}
+
+function getCommentsSync(branch: string, token: string, options: ForgejoOptions = {}): ForgejoCommentRecord[] | null {
   /** @type {{apiCall?: Function, forgejoUser?: string, rootDir?: string, log?: Function}} */
   const {
     apiCall = forgejoApi,
@@ -894,79 +1031,23 @@ function getCommentsSync(branch: string, token: string, options: ForgejoOptions 
   const slugMatch = branch.match(/^mission\/(task-\d+)/);
   const slug = slugMatch ? slugMatch[1] : null;
   const prAccess = resolvePrAccess(branch, token, { ...({ apiCall, slug, forgejoUser, rootDir }), configuration: options.configuration });
-  if (prAccess && isApiErrorResult(prAccess)) {
-    logger(`getComments API error resolving PR for ${branch}: status=${((prAccess as any)._apiError || {}).status || 0}`);
+  if (prAccess && isPrAccessFailure(prAccess)) {
+    logger(`getComments API error resolving PR for ${branch}: status=${(prAccess._apiError || {}).status || 0}`);
     return null;
   }
   if (!prAccess) {return null;}
   const prNumber = prAccess.prNumber;
   const accessToken = prAccess.token;
 
-  const issueCommentsRes = apiCall('GET', `/issues/${prNumber}/comments`, accessToken, undefined, { ...({}), configuration: options.configuration });
-  const reviewsRes = apiCall('GET', `/pulls/${prNumber}/reviews`, accessToken, undefined, { ...({}), configuration: options.configuration });
+  const issueCommentsRes = apiCall<ForgejoIssueComment[]>('GET', `/issues/${prNumber}/comments`, accessToken, undefined, { ...({}), configuration: options.configuration });
+  const reviewsRes = apiCall<ForgejoReview[]>('GET', `/pulls/${prNumber}/reviews`, accessToken, undefined, { ...({}), configuration: options.configuration });
 
   if (!issueCommentsRes.ok || !reviewsRes.ok) {
     logger(`getComments API failure: issueCommentsRes.ok=${issueCommentsRes.ok}, reviewsRes.ok=${reviewsRes.ok}`);
     return null;
   }
 
-  const issueComments = issueCommentsRes.data || [];
-  const reviews = reviewsRes.data || [];
-  const allComments = /** @type {Array<{kind: string, id: string, reviewId?: string, user: string, isBot: boolean, created: string, updated: string, body: string, state?: string, dismissed?: boolean, location?: string}>} */ ([]);
-
-  // 1. Process issue comments
-  issueComments.forEach(/** @param {{id?: number, user?: {login?: string, type?: string}, created_at?: string, updated_at?: string, body?: string}} c */ (c: any) => {
-    allComments.push({
-      kind: 'issue-comment',
-      id: String(c.id ?? ''),
-      user: (c.user || {}).login || '?',
-      isBot: (c.user || {}).type === 'bot',
-      created: c.created_at || '',
-      updated: c.updated_at || c.created_at || '',
-      body: (c.body || '').trim()
-    });
-  });
-
-  // 2. Process reviews and their inline comments
-  for (const r of reviews) {
-    allComments.push({
-      kind: 'review',
-      id: String(r.id ?? ''),
-      user: (r.user || {}).login || '?',
-      isBot: (r.user || {}).type === 'bot',
-      created: r.submitted_at || r.created_at || '',
-      updated: r.updated_at || r.submitted_at || r.created_at || '',
-      body: (r.body || '').trim(),
-      state: r.state || '',
-      dismissed: Boolean(r.dismissed),
-    });
-
-    // Fetch inline comments for this review
-    const inlineRes = apiCall('GET', `/pulls/${prNumber}/reviews/${r.id}/comments`, accessToken, undefined, { ...({}), configuration: options.configuration });
-    if (inlineRes.ok && Array.isArray(inlineRes.data)) {
-      inlineRes.data.forEach(/** @param {{user?: {login?: string}, created_at?: string, body?: string, path?: string, line?: number, original_line?: number}} c */ (c: any) => {
-        const path = c.path || '';
-        const line = c.line || c.original_line || '';
-        const location = line ? `${path}:${line}` : path;
-
-        allComments.push({
-          kind: 'inline-comment',
-          id: String(c.id ?? ''),
-          reviewId: String(r.id ?? ''),
-          user: (c.user || {}).login || '?',
-          isBot: (c.user || {}).type === 'bot',
-          created: c.created_at || '',
-          updated: c.updated_at || c.created_at || '',
-          body: (c.body || '').trim(),
-          state: r.state || '',
-          dismissed: Boolean(r.dismissed),
-          location
-        });
-      });
-    }
-  }
-
-  return allComments.sort(/** @param {{created: string}} a @param {{created: string}} b */ (a: any, b: any) => a.created.localeCompare(b.created));
+  return collectPrComments(prNumber, accessToken, issueCommentsRes.data || [], reviewsRes.data || [], apiCall, options.configuration);
 }
 
 
@@ -980,13 +1061,13 @@ async function getComments(branch: string, token: string, options: ForgejoOption
  *
  * @param {string} branch  - Mission branch
  * @param {string} token   - Forgejo PAT
- * @returns {Promise<Object>} - { ok: boolean, error: string }
+ * @returns {Promise<{ ok: boolean; error?: string }>} - { ok: boolean, error: string }
  */
 function closeResolvedPr(branch: string, token: string, prNumber: number, rootDir: string): { ok: boolean; error?: string } {
-  const details = forgejoApi('GET', `/pulls/${prNumber}`, token, undefined, { rootDir });
+  const details = forgejoApi<ForgejoPullRequest>('GET', `/pulls/${prNumber}`, token, undefined, { rootDir });
   if (!details.ok) { return { ok: true }; }
-  if (details.data.state === 'closed' || details.data.merged) {
-    fmt.log.info(`PR #${prNumber} is already ${details.data.state}${details.data.merged ? ' and merged' : ''}.`);
+  if (details.data?.state === 'closed' || details.data?.merged) {
+    fmt.log.info(`PR #${prNumber} is already ${details.data?.state}${details.data?.merged ? ' and merged' : ''}.`);
     return { ok: true };
   }
   const result = forgejoApi('PATCH', `/pulls/${prNumber}`, token, { state: 'closed' }, { rootDir });
@@ -1001,14 +1082,14 @@ function deleteClosedPrBranch(branch: string, rootDir: string) {
   fmt.log[deleted ? 'pass' : 'info'](`Remote branch ${fmt.branch(branch)} ${deleted ? 'deleted.' : 'already gone or could not be deleted.'}`);
 }
 
-async function closePrImpl(branch: string, token: string): Promise<Object> {
+async function closePrImpl(branch: string, token: string): Promise<{ ok: boolean; error?: string }> {
   const slugMatch = branch.match(/^mission\/(task-\d+)/);
   const slug = slugMatch ? slugMatch[1] : null;
   const rootDir = process.cwd();
   const prNumber = getPrNumber(branch, token, { slug, rootDir });
 
   if (prNumber && typeof prNumber === 'object' && isApiErrorResult(prNumber)) {
-    const apiErr = (prNumber as any)._apiError || {};
+    const apiErr = prNumber._apiError;
     fmt.log.warn(`API error resolving PR for ${fmt.branch(branch)}: status=${(apiErr as {status?: number}).status || 0}${((apiErr as {status?: number}).status || 0) === 7 ? ` (${codexSandboxHint()})` : ''}`);
     return { ok: true };
   }
@@ -1023,7 +1104,7 @@ async function closePrImpl(branch: string, token: string): Promise<Object> {
   return { ok: true };
 }
 
-async function closePr(branch: string, token: string): Promise<Object> {
+async function closePr(branch: string, token: string): Promise<{ ok: boolean; error?: string }> {
   return await closePrImpl(branch, token);
 }
 

@@ -1,3 +1,7 @@
+import { integrationServices } from '../../../../helpers/stub-integration-services.js';
+import { fixtureMission } from '../../../../fixtures/mission-builders.js';
+import { missionVersion } from '../../../../../src/application/domain-ports.js';
+import { stubIntegrateWorkflowPorts } from '../../../../helpers/stub-integrate-workflow-ports.js';
 import { resolveConfiguration } from '../../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 // Historical regression provenance: TASK-2242, TASK-2411.
@@ -101,13 +105,13 @@ describe("backlog drift retry", () => {
 
   // Helper: deterministic git runner with per-operation counters.
   // Mirrors the control flow in integrate.ts Step 2.
-  function createGitRunner(scenario) {
-    const calls = [];
+  function createGitRunner(scenario: { onMergeNoCommit(count: number): Pick<ReturnType<typeof git.git>, 'status' | 'stdout' | 'stderr'>; onMergeAbort(count: number): Pick<ReturnType<typeof git.git>, 'status' | 'stdout' | 'stderr'> } & Partial<Record<'onResetHard' | 'onFetch' | 'onPull', (count: number) => Pick<ReturnType<typeof git.git>, 'status' | 'stdout' | 'stderr'>>>) {
+    const calls: string[] = [];
     const counters = { mergeNoCommit: 0, mergeAbort: 0, resetHard: 0, fetch: 0, pull: 0 };
 
     return {
       calls,
-      run(args) {
+      run(args: string[]) {
         calls.push(args.join(' '));
         const fullCmd = args.join(' ');
 
@@ -131,14 +135,14 @@ describe("backlog drift retry", () => {
           counters.pull++;
           return scenario.onPull?.(counters.pull) ?? { status: 0, stdout: '', stderr: '' };
         }
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
     };
   }
 
   // Simulate the Step 2 probe-merge flow from integrate.ts.
   // Reproduces the exact control flow: merge, abort, classify, reset/fetch/pull/retry.
-  function simulateStep2Probe(gitRunner, conflictOutput) {
+  function simulateStep2Probe(gitRunner: ReturnType<typeof createGitRunner>, conflictOutput: string) {
     const { calls, run } = gitRunner;
 
     // Initial probe merge (integrate.ts:747-748)
@@ -159,18 +163,18 @@ describe("backlog drift retry", () => {
       if (abortFailed) {
         const resetResult = run(['-C', '/tmp/base', 'reset', '--hard', 'HEAD']);
         if (resetResult.status !== 0) {
-          return { ok: false, error: 'reset-failed', proceedToSquash: false, calls };
+          return { ok: false as const, error: 'reset-failed', proceedToSquash: false, calls };
         }
       }
 
       // Fetch and advance local base (integrate.ts:777-786)
       const fetchResult = run(['-C', '/tmp/base', 'fetch', '--all', '--prune']);
       if (fetchResult.status !== 0) {
-        return { ok: false, error: 'fetch-failed', proceedToSquash: false, calls };
+        return { ok: false as const, error: 'fetch-failed', proceedToSquash: false, calls };
       }
       const pullResult = run(['-C', '/tmp/base', 'pull', '--ff-only']);
       if (pullResult.status !== 0) {
-        return { ok: false, error: 'pull-failed', proceedToSquash: false, calls };
+        return { ok: false as const, error: 'pull-failed', proceedToSquash: false, calls };
       }
 
       // Retry probe merge (integrate.ts:789-796)
@@ -182,13 +186,13 @@ describe("backlog drift retry", () => {
       }
     }
 
-    return { ok: true, proceedToSquash, calls };
+    return { ok: true as const, proceedToSquash, calls };
   }
 
   // SC2(a): Backlog-only conflict files trigger retry with fetch + pull --ff-only
   test('backlog-only conflict files trigger retry with fetch, pull --ff-only, and proceed to squash', () => {
     const gitRunner = createGitRunner({
-      onMergeNoCommit: (count) => {
+      onMergeNoCommit: (count: number) => {
         if (count === 1) {
           return {
             status: 1,
@@ -208,10 +212,10 @@ describe("backlog drift retry", () => {
 
     assert.equal(result.ok, true, 'simulation completed');
     assert.equal(result.proceedToSquash, true, 'retry succeeded, proceed to squash');
-    assert.equal(result.calls.filter(c => c.includes('merge') && c.includes('--no-commit')).length, 2, 'two merge --no-commit calls');
-    assert.ok(result.calls.some(c => c.includes('fetch --all --prune')), 'fetch was called');
-    assert.ok(result.calls.some(c => c.includes('pull --ff-only')), 'pull --ff-only was called');
-    assert.ok(!result.calls.some(c => c.includes('reset --hard')), 'reset NOT called (abort succeeded)');
+    assert.equal(result.calls.filter((c: string|string[]) => c.includes('merge') && c.includes('--no-commit')).length, 2, 'two merge --no-commit calls');
+    assert.ok(result.calls.some((c: string|string[]) => c.includes('fetch --all --prune')), 'fetch was called');
+    assert.ok(result.calls.some((c: string|string[]) => c.includes('pull --ff-only')), 'pull --ff-only was called');
+    assert.ok(!result.calls.some((c: string|string[]) => c.includes('reset --hard')), 'reset NOT called (abort succeeded)');
   });
 
   // SC2(b): Non-backlog conflict fails without retry
@@ -232,9 +236,9 @@ describe("backlog drift retry", () => {
 
     assert.equal(result.ok, true, 'simulation completed');
     assert.equal(result.proceedToSquash, false, 'did not proceed to squash (non-backlog)');
-    assert.equal(result.calls.filter(c => c.includes('merge') && c.includes('--no-commit')).length, 1, 'one merge --no-commit call (no retry)');
-    assert.ok(!result.calls.some(c => c.includes('fetch')), 'fetch NOT called');
-    assert.ok(!result.calls.some(c => c.includes('pull')), 'pull NOT called');
+    assert.equal(result.calls.filter((c: string|string[]) => c.includes('merge') && c.includes('--no-commit')).length, 1, 'one merge --no-commit call (no retry)');
+    assert.ok(!result.calls.some((c: string|string[]) => c.includes('fetch')), 'fetch NOT called');
+    assert.ok(!result.calls.some((c: string|string[]) => c.includes('pull')), 'pull NOT called');
   });
 
   // SC2(c): Mission backlog task file triggers retry path
@@ -256,7 +260,7 @@ describe("backlog drift retry", () => {
     assert.equal(result.ok, true, 'simulation completed');
     // Both initial and retry conflict (real overlap), so proceedToSquash is false
     assert.equal(result.proceedToSquash, false, 'retry also conflicted (real overlap), fall through to fail-closed');
-    assert.equal(result.calls.filter(c => c.includes('merge') && c.includes('--no-commit')).length, 2, 'two merge --no-commit calls (retry attempted)');
+    assert.equal(result.calls.filter((c: string|string[]) => c.includes('merge') && c.includes('--no-commit')).length, 2, 'two merge --no-commit calls (retry attempted)');
   });
 
   // Fetch failure aborts integration (P1 finding)
@@ -278,7 +282,7 @@ describe("backlog drift retry", () => {
 
     assert.equal(result.ok, false, 'simulation aborted');
     assert.equal(result.error, 'fetch-failed', 'aborted due to fetch failure');
-    assert.equal(result.calls.filter(c => c.includes('merge') && c.includes('--no-commit')).length, 1, 'only initial merge (no retry after fetch failure)');
+    assert.equal(result.calls.filter((c: string|string[]) => c.includes('merge') && c.includes('--no-commit')).length, 1, 'only initial merge (no retry after fetch failure)');
   });
 
   // Pull --ff-only failure aborts integration (P1 finding)
@@ -301,13 +305,13 @@ describe("backlog drift retry", () => {
 
     assert.equal(result.ok, false, 'simulation aborted');
     assert.equal(result.error, 'pull-failed', 'aborted due to pull --ff-only failure');
-    assert.equal(result.calls.filter(c => c.includes('merge') && c.includes('--no-commit')).length, 1, 'only initial merge (no retry after pull failure)');
+    assert.equal(result.calls.filter((c: string|string[]) => c.includes('merge') && c.includes('--no-commit')).length, 1, 'only initial merge (no retry after pull failure)');
   });
 
   // Unabortable merge rescued by reset --hard (P1 finding)
   test('unabortable initial merge is rescued by reset --hard for backlog-only conflicts', () => {
     const gitRunner = createGitRunner({
-      onMergeNoCommit: (count) => {
+      onMergeNoCommit: (count: number) => {
         if (count === 1) {
           return {
             status: 1,
@@ -317,7 +321,7 @@ describe("backlog drift retry", () => {
         }
         return { status: 0, stdout: '', stderr: '' };
       },
-      onMergeAbort: (count) => {
+      onMergeAbort: (count: number) => {
         if (count === 1) return { status: 1, stdout: 'error', stderr: '' };
         return { status: 0, stdout: '', stderr: '' };
       },
@@ -331,8 +335,8 @@ describe("backlog drift retry", () => {
 
     assert.equal(result.ok, true, 'simulation completed');
     assert.equal(result.proceedToSquash, true, 'retry succeeded after reset --hard');
-    assert.ok(result.calls.some(c => c.includes('reset --hard')), 'reset --hard was called');
-    assert.equal(result.calls.filter(c => c.includes('merge') && c.includes('--no-commit')).length, 2, 'two merge calls');
+    assert.ok(result.calls.some((c: string|string[]) => c.includes('reset --hard')), 'reset --hard was called');
+    assert.equal(result.calls.filter((c: string|string[]) => c.includes('merge') && c.includes('--no-commit')).length, 2, 'two merge calls');
   });
 
   // Happy path: no conflicts
@@ -365,15 +369,14 @@ describe("backlog drift retry", () => {
   // are named exports. Expose both through the ESM mock facade.
   function loadIntegrate() {
     return Object.assign(
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-      (...args) => areAllBacklogOnlyConflictsModule.default(...args),
+      (...args: Parameters<typeof areAllBacklogOnlyConflictsModule.default>) => areAllBacklogOnlyConflictsModule.default(...args),
       areAllBacklogOnlyConflictsModule,
     );
   }
 
   // Base git responses shared by all production integration tests.
   // Test-specific overrides layer on top of this.
-  function baseGitFn(args) {
+  function baseGitFn(args: string|string[]) {
     if (args.includes('branch') && args.includes('--show-current')) return { status: 0, stdout: 'main', stderr: '' };
     if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
     if (args.includes('status')) return { status: 0, stdout: '', stderr: '' };
@@ -383,10 +386,10 @@ describe("backlog drift retry", () => {
     return { status: 0, stdout: '', stderr: '' };
   }
 
-  function setupBaseMocks(gitMockFn) {
+  function setupBaseMocks(gitMockFn: { (args: string|string[]): { status: number; stdout: string; stderr: string; }; (args: string|string[]): { status: number; stdout: string; stderr: string; }; (args: string|string[]): { status: number; stdout: string; stderr: string; }; (args: string|string[]): { status: number; stdout: string; stderr: string; }; }) {
     mock.method(backlogCjs, 'getTaskClassification', () => 'ai_sdlc');
     mock.method(missionUtilsCjs, 'getPrimaryBranch', () => 'main');
-    mock.method(missionUtilsCjs, 'inferSlug', (s) => s || TEST_SLUG);
+    mock.method(missionUtilsCjs, 'inferSlug', (s: Parameters<(typeof missionUtilsCjs)["inferSlug"]>[0]) => s || TEST_SLUG);
     mock.method(missionUtilsCjs, 'findMissionDir', () => path.join(FAKE_ROOT, 'missions', TEST_SLUG));
     mock.method(missionUtilsCjs, 'findMissionArea', () => 'lib');
     mock.method(missionUtilsCjs, 'getPrimaryWorktree', () => FAKE_ROOT);
@@ -399,22 +402,22 @@ describe("backlog drift retry", () => {
     mock.method(missionUtilsCjs, 'resolveWorktree', () => path.join(FAKE_ROOT, '..', TEST_SLUG));
     mock.method(missionUtilsCjs, 'findMissionDocInBranches', () => []);
     mock.method(gitCjs, 'detectRebaseState', () => ({ inProgress: false, rebaseHead: '', detached: false, unmergedFiles: [], rebaseDir: null }));
-    mock.method(integrateConflict, 'getUnresolvedIndexConflicts', () => ({ ok: true, files: [] }));
+    mock.method(integrateConflict, 'getUnresolvedIndexConflicts', () => ({ ok: true as const, files: [] }));
     mock.method(missionUtilsCjs, 'missionTitle', () => 'Test Mission');
     mock.method(missionUtilsCjs, 'updateGraphifyKnowledgeGraph', () => false);
     mock.method(gitCjs, 'getCurrentBranch', () => 'mission/' + TEST_SLUG);
     mock.method(gitCjs, 'git', gitMockFn);
-    mock.method(backlogCjs, 'resolveTaskFile', () => ({ ok: true, taskFile: path.join(FAKE_ROOT, 'backlog/tasks/task.md') }));
+    mock.method(backlogCjs, 'resolveTaskFile', () => ({ ok: true as const, taskFile: path.join(FAKE_ROOT, 'backlog/tasks/task.md') }));
     mock.method(backlogCjs, 'getTaskStatus', () => 'ready-for-integration');
     mock.method(backlogCjs, 'getTaskAssignee', () => 'agent');
     mock.method(backlogCjs, 'setTaskStatus', () => true);
     mock.method(backlogCjs, 'completeTask', () => true);
-    mock.method(forgejoCjs, 'getPrStatus', () => ({ exists: true, state: 'open', merged: false, number: 41 }));
+    mock.method(forgejoCjs, 'getPrStatus', () => ({ exists: true as const, state: 'open', merged: false, number: 41 }));
     mock.method(forgejoCjs, 'listOpenPrsForSlug', () => []);
-    mock.method(forgejoCjs, 'getLatestReviewDecision', () => ({ ok: true, reviewState: 'APPROVED' }));
+    mock.method(forgejoCjs, 'getLatestReviewDecision', () => ({ ok: true as const, reviewState: 'APPROVED' }));
     mock.method(forgejoCjs, 'readToken', () => 'token');
     mock.method(forgejoCjs, 'resolveTokenFile', () => 'token-file');
-    mock.method(forgejoCjs, 'syncMerged', () => ({ ok: true }));
+    mock.method(forgejoCjs, 'syncMerged', () => ({ ok: true as const }));
     mock.method(statsCjs, 'recordIntegrationStats', () => ({ changed: false, row: { mission: TEST_SLUG } }));
     mock.method(productConfigCjs, 'isForgejoReviewEnabled', () => false);
     mock.method(runtimeMatrixCjs, 'buildAutonomousReviewMatrix', () => ({}));
@@ -424,10 +427,10 @@ describe("backlog drift retry", () => {
     mock.method(compositionCjs, 'createMissionApplicationServices', async () => ({
       store: {
         _repoId: 'default',
-        load: async () => ({ kind: 'found', mission: { status: 'review', review: { rounds: [{ decision: { kind: 'approved', decidedAt: '2026-01-01T10:30:00Z' } }] } }, version: 1 }),
+        load: async () => ({ kind: 'found' as const, mission: { status: 'review', review: { rounds: [{ decision: { kind: 'approved', decidedAt: '2026-01-01T10:30:00Z' } }] } }, version: 1 }),
       },
       lifecycle: {
-        transition: async () => ({ status: 'completed', value: { to: 'review', version: 2 } }),
+        transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: { to: 'review', version: 2 } }),
       },
       handoff: {
         recordNel: async () => ({}),
@@ -436,12 +439,12 @@ describe("backlog drift retry", () => {
   }
 
   test('integrate SC2b: non-backlog conflict exits with conflict files and helper path', async () => {
-    const logs = [];
+    const logs: unknown[] = [];
     const originalLog = console.log;
-    console.log = (msg) => logs.push(msg);
+    console.log = (msg: unknown) => logs.push(msg);
 
     const mergeNoCommitCalls = [];
-    const gitMockFn = (args) => {
+    const gitMockFn = (args: string|string[]) => {
       if (args.includes('merge') && args.includes('--no-commit')) {
         mergeNoCommitCalls.push(args);
         return { status: 1, stdout: 'CONFLICT (content): Merge conflict in src/adapters/cli/commands/handoff.ts\n', stderr: '' };
@@ -465,12 +468,12 @@ describe("backlog drift retry", () => {
   });
 
   test('integrate SC2c: mission backlog task overlap retries and falls through with conflict details', async () => {
-    const logs = [];
+    const logs: unknown[] = [];
     const originalLog = console.log;
-    console.log = (msg) => logs.push(msg);
+    console.log = (msg: unknown) => logs.push(msg);
 
     let mergeNoCommitCount = 0;
-    const gitMockFn = (args) => {
+    const gitMockFn = (args: string|string[]) => {
       if (args.includes('merge') && args.includes('--no-commit')) {
         mergeNoCommitCount++;
         return { status: 1, stdout: 'CONFLICT (content): Merge conflict in backlog/tasks/task-2242 - backlog.md-changes-fast.md\n', stderr: '' };
@@ -498,13 +501,13 @@ describe("backlog drift retry", () => {
   });
 
   test('integrate P1: recovered abort failure uses normal conflict output after reset', async () => {
-    const logs = [];
+    const logs: unknown[] = [];
     const originalLog = console.log;
-    console.log = (msg) => logs.push(msg);
+    console.log = (msg: unknown) => logs.push(msg);
 
     let mergeNoCommitCount = 0;
     let mergeAbortCount = 0;
-    const gitMockFn = (args) => {
+    const gitMockFn = (args: string|string[]) => {
       if (args.includes('merge') && args.includes('--no-commit')) {
         mergeNoCommitCount++;
         return { status: 1, stdout: 'CONFLICT (content): Merge conflict in backlog/tasks/task-100.md\n', stderr: '' };
@@ -539,15 +542,15 @@ describe("backlog drift retry", () => {
   });
 
   test('integrate P1: retry abort failure routes to inspect-checkout path (not rebase guidance)', async () => {
-    const logs = [];
+    const logs: unknown[] = [];
     const originalLog = console.log;
     const originalError = console.error;
-    console.log = (msg) => logs.push(msg);
-    console.error = (msg) => logs.push(msg);
+    console.log = (msg: unknown) => logs.push(msg);
+    console.error = (msg: unknown) => logs.push(msg);
 
     let mergeNoCommitCount = 0;
     let mergeAbortCount = 0;
-    const gitMockFn = (args) => {
+    const gitMockFn = (args: string|string[]) => {
       if (args.includes('merge') && args.includes('--no-commit')) {
         mergeNoCommitCount++;
         // Both initial and retry conflict
@@ -605,15 +608,15 @@ describe("integrate guard", () => {
     const originalError = console.error;
     const originalLog = console.log;
 
-    let exitCode = null;
+    let exitCode: Parameters<typeof process.exit>[0] = null;
     let errorOutput = '';
 
-    const stubExit = (code) => {
+    const stubExit = (code: Parameters<typeof process.exit>[0]) => {
       exitCode = code;
       throw new Error('process.exit called');
     };
 
-    const stubError = (...args) => {
+    const stubError = (...args: unknown[]) => {
       errorOutput += args.join(' ') + '\n';
     };
 
@@ -641,6 +644,7 @@ describe("integrate guard", () => {
       try {
         await integrate.default(['task-1086'], { configuration: resolveConfiguration(environment) });
       } catch (err) {
+        assert.ok(err instanceof Error);
         if (err.message !== 'process.exit called') throw err;
       } finally {
         environment.FORGEJO_USER = oldUser;
@@ -670,6 +674,7 @@ describe("integrate guard", () => {
       try {
         await integrate.default(['task-1086'], { configuration: resolveConfiguration(environment) });
       } catch (err) {
+        assert.ok(err instanceof Error);
         if (err.message !== 'process.exit called') throw err;
       } finally {
         environment.FORGEJO_USER = oldUser;
@@ -727,7 +732,7 @@ describe("exclusive integrate claim", () => {
     const finishFirst = new Promise<never>((_resolve, reject) => { releaseFirst = () => reject(new Error('fixture stopped')); });
     let serviceCalls = 0;
     const exits: number[] = [];
-    const workflow = createIntegrateWorkflow({
+    const workflow = createIntegrateWorkflow(stubIntegrateWorkflowPorts({
       process: {
         terminate: (code: number) => { exits.push(code); },
         cwd: () => '/tmp/base',
@@ -739,12 +744,12 @@ describe("exclusive integrate claim", () => {
         },
       },
       missionPaths: { inferSlug: () => 'task-exclusive' },
-      git: { git: () => ({ status: 0, stdout: '', stderr: '' }) },
+      git: { git: () => ({ signal: null,  status: 0, stdout: '', stderr: '' }) },
       landing: { isAbort: () => false },
-      agents: { startAgent: () => {}, selectAgent: () => null, workflowLauncherStatus: () => null, applyAgentFallback: () => {} },
+      agents: { startAgent: async () => assert.fail('Unexpected agent launch'), selectAgent: () => null, workflowLauncherStatus: () => null, applyAgentFallback: () => assert.fail('Unexpected agent fallback') },
       backlog: { transitionTask: () => {} },
-      gates: { routeIntegrationGateFailure: () => {} },
-    } as never);
+      gates: { routeIntegrationGateFailure: async () => assert.fail('Unexpected gate repair') },
+    }));
     const options = {
       missionServicesFn: async () => {
         serviceCalls++;
@@ -752,7 +757,7 @@ describe("exclusive integrate claim", () => {
         return finishFirst;
       },
       exitFn: (code: number) => { exits.push(code); },
-    };
+    } satisfies NonNullable<Parameters<typeof workflow.integrate>[1]>;
 
     const first = workflow.integrate(['task-exclusive'], options);
     await firstEntered;
@@ -772,7 +777,7 @@ describe("exclusive integrate claim", () => {
     let branchRemains = false;
     const abort = new Error('incomplete closeout');
     const exits: number[] = [];
-    const workflow = createIntegrateWorkflow({
+    const workflow = createIntegrateWorkflow(stubIntegrateWorkflowPorts({
       process: {
         terminate: () => {},
         cwd: () => '/tmp/base',
@@ -781,15 +786,15 @@ describe("exclusive integrate claim", () => {
       },
       missionPaths: { inferSlug: () => 'task-closed', getPrimaryWorktree: () => '/tmp/base', missionBranchName: () => 'mission/task-closed', conventionalWorktreePath: () => '/tmp/base-task-closed' },
       fileSystem: { existsSync: () => false },
-      git: { git: () => ({ status: branchRemains ? 0 : 1, stdout: '', stderr: '' }) },
+      git: { git: () => ({ signal: null,  status: branchRemains ? 0 : 1, stdout: '', stderr: '' }) },
       checkout: { findLandedSquashOnBaseBranch: () => 'abc123456789' },
       landing: { isAbort: (error: unknown) => error === abort, createAbort: () => abort },
-      agents: { startAgent: () => {}, selectAgent: () => null, workflowLauncherStatus: () => null, applyAgentFallback: () => {} },
+      agents: { startAgent: async () => assert.fail('Unexpected agent launch'), selectAgent: () => null, workflowLauncherStatus: () => null, applyAgentFallback: () => assert.fail('Unexpected agent fallback') },
       backlog: { transitionTask: () => {} },
-      gates: { routeIntegrationGateFailure: () => { gateCalls++; } },
-    } as never);
+      gates: { routeIntegrationGateFailure: async () => { gateCalls++; return assert.fail('Unexpected gate repair'); } },
+    }));
     const result = await workflow.integrate(['task-closed'], {
-      missionServicesFn: async () => ({ store: { load: async () => ({ kind: 'found', mission: { status: 'done', closedAt: '2026-09-27T20:50:34Z' } }) } }),
+      missionServicesFn: async () => integrationServices({ store: { load: async () => ({ kind: 'found', mission: fixtureMission('task-closed', { status: 'done', closedAt: '2026-09-27T20:50:34Z' }), version: missionVersion(1) }) } }),
       exitFn: code => { exits.push(code); },
     });
     assert.deepEqual(result, { exitCode: 0 });
@@ -798,7 +803,7 @@ describe("exclusive integrate claim", () => {
     assert.equal(released, 1);
     branchRemains = true;
     const incomplete = await workflow.integrate(['task-closed'], {
-      missionServicesFn: async () => ({ store: { load: async () => ({ kind: 'found', mission: { status: 'done', closedAt: '2026-09-27T20:50:34Z' } }) } }),
+      missionServicesFn: async () => integrationServices({ store: { load: async () => ({ kind: 'found', mission: fixtureMission('task-closed', { status: 'done', closedAt: '2026-09-27T20:50:34Z' }), version: missionVersion(1) }) } }),
       exitFn: code => { exits.push(code); },
     });
     assert.deepEqual(incomplete, { exitCode: 1 });

@@ -1,3 +1,6 @@
+import { TerminalStream } from '../../../helpers/terminal-stream.js';
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
+import { agentFamily as fixtureAgentFamily } from '../../../../src/domain/agents.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
@@ -16,57 +19,14 @@ import '../../../../src/interfaces/tui/shell.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-async function renderShell(props: Record<string, unknown>): Promise<string> {
+async function renderShell(props: import('react').ComponentProps<typeof import('../../../../src/interfaces/tui/shell.js').BoardShell>): Promise<string> {
   const ink = await import('ink');
   const React = await import('react');
   const { BoardShell } = await import('../../../../src/interfaces/tui/shell.js');
-  return ink.renderToString(React.createElement(BoardShell, props as never), { columns: 120 });
+  return ink.renderToString(React.createElement(BoardShell, props), { columns: 120 });
 }
 
-interface MockStream extends EventEmitter {
-  columns: number;
-  rows: number;
-  isTTY: boolean;
-  writes: string[];
-  _input: string[];
-  write(value: string): boolean;
-  setRawMode(mode: boolean): void;
-  setEncoding(encoding: BufferEncoding): void;
-  resume(): void;
-  ref(): void;
-  unref(): void;
-  read(): string | null;
-  send(value: string): void;
-}
-
-function makeStream(): MockStream {
-  const stream = new EventEmitter() as MockStream;
-  stream.columns = 120;
-  stream.rows = 30;
-  stream.isTTY = true;
-  stream.writes = [];
-  stream._input = [];
-  stream.write = function (this: MockStream, value: string): boolean {
-    this.writes.push(value);
-    return true;
-  };
-  stream.setRawMode = () => {};
-  stream.setEncoding = () => {};
-  stream.resume = () => {};
-  stream.ref = () => {};
-  stream.unref = () => {};
-  stream.read = function (this: MockStream): string | null {
-    return this._input.shift() ?? null;
-  };
-  stream.send = function (this: MockStream, value: string): void {
-    this._input.push(value);
-    /* Emit as Buffer for escape sequences (real terminals send bytes).
-     * Also emit as string for simple characters like \r. */
-    this.emit('data', Buffer.from(value));
-    this.emit('readable');
-  };
-  return stream;
-}
+function makeStream(): TerminalStream { return new TerminalStream(); }
 
 // ---------------------------------------------------------------------------
 // CP-1: Attention item selection and bidirectional sync
@@ -74,12 +34,12 @@ function makeStream(): MockStream {
 
 test('attention-items: AttentionItems renders with selectedMissionId and ▶ prefix for focused mission', async () => {
   const integrateCard = makeCard({
-    id: 'task-1001' as never,
+    id: fixtureMissionId('task-1001'),
     lane: 'integration',
     title: 'Integrate mission',
   });
   const reviewCard = makeCard({
-    id: 'task-1002' as never,
+    id: fixtureMissionId('task-1002'),
     lane: 'review',
     title: 'Review mission',
   });
@@ -116,7 +76,7 @@ test('attention-items: selecting an attention item by Enter updates selectedMiss
   const { BoardShell } = await import('../../../../src/interfaces/tui/shell.js');
 
   const integrateCard = makeCard({
-    id: 'task-2001' as never,
+    id: fixtureMissionId('task-2001'),
     lane: 'integration',
     title: 'Integrate mission',
   });
@@ -139,10 +99,10 @@ test('attention-items: selecting an attention item by Enter updates selectedMiss
       projection: projWithQueue,
       columns: 120,
       rows: 30,
-    } as never),
+    }),
     {
-      stdin: stdin as unknown as NodeJS.ReadStream,
-      stdout: stdout as unknown as NodeJS.WriteStream,
+      stdin: stdin,
+      stdout: stdout,
       patchConsole: false,
       exitOnCtrlC: false,
     },
@@ -175,12 +135,12 @@ test('attention-items: Enter while board focus is active does not activate atten
   const { BoardShell } = await import('../../../../src/interfaces/tui/shell.js');
 
   const reviewCard = makeCard({
-    id: 'task-board1' as never,
+    id: fixtureMissionId('task-board1'),
     lane: 'review',
     title: 'Review mission',
   });
   const integrateCard = makeCard({
-    id: 'task-board2' as never,
+    id: fixtureMissionId('task-board2'),
     lane: 'integration',
     title: 'Integrate mission',
   });
@@ -204,10 +164,10 @@ test('attention-items: Enter while board focus is active does not activate atten
       projection: projWithQueue,
       columns: 120,
       rows: 30,
-    } as never),
+    }),
     {
-      stdin: stdin as unknown as NodeJS.ReadStream,
-      stdout: stdout as unknown as NodeJS.WriteStream,
+      stdin: stdin,
+      stdout: stdout,
       patchConsole: false,
       exitOnCtrlC: false,
     },
@@ -237,17 +197,17 @@ test('attention-items: up/down (WASD) independently navigate attention rail with
   const { BoardShell } = await import('../../../../src/interfaces/tui/shell.js');
 
   const integrateCard = makeCard({
-    id: 'task-nav1' as never,
+    id: fixtureMissionId('task-nav1'),
     lane: 'integration',
     title: 'Integrate mission',
   });
   const reviewCard = makeCard({
-    id: 'task-nav2' as never,
+    id: fixtureMissionId('task-nav2'),
     lane: 'review',
     title: 'Review mission',
   });
   const blockingCard = makeCard({
-    id: 'task-nav3' as never,
+    id: fixtureMissionId('task-nav3'),
     lane: 'active',
     title: 'Blocking mission',
     blockingReason: 'upstream',
@@ -273,10 +233,10 @@ test('attention-items: up/down (WASD) independently navigate attention rail with
       projection: projWithQueue,
       columns: 120,
       rows: 30,
-    } as never),
+    }),
     {
-      stdin: stdin as unknown as NodeJS.ReadStream,
-      stdout: stdout as unknown as NodeJS.WriteStream,
+      stdin: stdin,
+      stdout: stdout,
       patchConsole: false,
       exitOnCtrlC: false,
     },
@@ -324,7 +284,7 @@ test('attention-items: selecting a lane card updates selectedMissionId and match
   const { BoardShell } = await import('../../../../src/interfaces/tui/shell.js');
 
   const reviewCard = makeCard({
-    id: 'task-3001' as never,
+    id: fixtureMissionId('task-3001'),
     lane: 'review',
     title: 'Review mission',
   });
@@ -347,10 +307,10 @@ test('attention-items: selecting a lane card updates selectedMissionId and match
       projection: projWithQueue,
       columns: 120,
       rows: 30,
-    } as never),
+    }),
     {
-      stdin: stdin as unknown as NodeJS.ReadStream,
-      stdout: stdout as unknown as NodeJS.WriteStream,
+      stdin: stdin,
+      stdout: stdout,
       patchConsole: false,
       exitOnCtrlC: false,
     },
@@ -381,10 +341,10 @@ test('attention-items: selecting a lane card updates selectedMissionId and match
 test('attention-items: each item renders exact command string from attentionCommand()', async () => {
   const { attentionCommand } = await import('../../../../src/interfaces/tui/shell.js');
 
-  const integrateCard = makeCard({ id: 'task-4001' as never, lane: 'integration' });
-  const reviewCard = makeCard({ id: 'task-4002' as never, lane: 'review' });
-  const blockingCard = makeCard({ id: 'task-4003' as never, lane: 'active', blockingReason: 'upstream' });
-  const gateFailedCard = makeCard({ id: 'task-4004' as never, lane: 'active', gate: 'failed' });
+  const integrateCard = makeCard({ id: fixtureMissionId('task-4001'), lane: 'integration' });
+  const reviewCard = makeCard({ id: fixtureMissionId('task-4002'), lane: 'review' });
+  const blockingCard = makeCard({ id: fixtureMissionId('task-4003'), lane: 'active', blockingReason: 'upstream' });
+  const gateFailedCard = makeCard({ id: fixtureMissionId('task-4004'), lane: 'active', gate: 'failed' });
 
   assert.equal(
     attentionCommand(integrateCard, { kind: 'integrate-lane' }),
@@ -406,7 +366,7 @@ test('attention-items: each item renders exact command string from attentionComm
 
 test('attention-items: rendered output contains exact command text "$ px <cmd> <slug>"', async () => {
   const integrateCard = makeCard({
-    id: 'task-5001' as never,
+    id: fixtureMissionId('task-5001'),
     lane: 'integration',
     title: 'Integrate mission',
   });
@@ -440,7 +400,7 @@ test('attention-items: activating run affordance shows wave 5 message and dispat
   const { BoardShell } = await import('../../../../src/interfaces/tui/shell.js');
 
   const reviewCard = makeCard({
-    id: 'task-6001' as never,
+    id: fixtureMissionId('task-6001'),
     lane: 'review',
     title: 'Review mission',
   });
@@ -463,10 +423,10 @@ test('attention-items: activating run affordance shows wave 5 message and dispat
       projection: projWithQueue,
       columns: 120,
       rows: 30,
-    } as never),
+    }),
     {
-      stdin: stdin as unknown as NodeJS.ReadStream,
-      stdout: stdout as unknown as NodeJS.WriteStream,
+      stdin: stdin,
+      stdout: stdout,
       patchConsole: false,
       exitOnCtrlC: false,
     },
@@ -500,7 +460,7 @@ test('attention-items: activating run affordance shows wave 5 message and dispat
 
 test('attention-items: empty attention queue renders "nothing needs attention" in wide layout', async () => {
   const projection = makeProjection(
-    { active: [makeCard({ id: 'task-7001' as never, lane: 'active' })] },
+    { active: [makeCard({ id: fixtureMissionId('task-7001'), lane: 'active' })] },
     'test-repo',
   );
   // attentionQueue is already empty from makeProjection
@@ -521,7 +481,7 @@ test('attention-items: empty attention queue renders "nothing needs attention" i
 
 test('attention-items: empty attention queue renders "nothing needs attention" in narrow layout', async () => {
   const projection = makeProjection(
-    { active: [makeCard({ id: 'task-7002' as never, lane: 'active' })] },
+    { active: [makeCard({ id: fixtureMissionId('task-7002'), lane: 'active' })] },
     'test-repo',
   );
 
@@ -540,7 +500,7 @@ test('attention-items: empty attention queue renders "nothing needs attention" i
 
 test('attention-items: unavailable sourceFacts render ⚠ indicator per item in attention rail', async () => {
   const reviewCard = makeCard({
-    id: 'task-8001' as never,
+    id: fixtureMissionId('task-8001'),
     lane: 'review',
     title: 'Review mission',
   });
@@ -589,7 +549,7 @@ test('attention-items: unavailable sourceFacts render ⚠ indicator per item in 
 
 test('attention-items: stale sourceFacts render ⚠ indicator per item in attention rail', async () => {
   const reviewCard = makeCard({
-    id: 'task-8002' as never,
+    id: fixtureMissionId('task-8002'),
     lane: 'review',
     title: 'Review mission',
   });
@@ -638,7 +598,7 @@ test('attention-items: stale sourceFacts render ⚠ indicator per item in attent
 
 test('attention-items: narrow layout (columns=60) renders attention rail above board with top item visible', async () => {
   const integrateCard = makeCard({
-    id: 'task-9001' as never,
+    id: fixtureMissionId('task-9001'),
     lane: 'integration',
     title: 'Integrate mission',
   });
@@ -680,10 +640,10 @@ test('attention-items: narrow layout (columns=60) renders attention rail above b
 test('attention-items: rank order is correct (blocking=0 < gate-failed=1 < review=2 < integrate=3)', async () => {
   const { attentionRank } = await import('../../../../src/application/projections/board.js');
 
-  const blockingCard = makeCard({ id: 'task-r1' as never, lane: 'active', blockingReason: 'blocked' });
-  const gateFailedCard = makeCard({ id: 'task-r2' as never, lane: 'active', gate: 'failed' });
-  const reviewCard = makeCard({ id: 'task-r3' as never, lane: 'review' });
-  const integrateCard = makeCard({ id: 'task-r4' as never, lane: 'integration' });
+  const blockingCard = makeCard({ id: fixtureMissionId('task-r1'), lane: 'active', blockingReason: 'blocked' });
+  const gateFailedCard = makeCard({ id: fixtureMissionId('task-r2'), lane: 'active', gate: 'failed' });
+  const reviewCard = makeCard({ id: fixtureMissionId('task-r3'), lane: 'review' });
+  const integrateCard = makeCard({ id: fixtureMissionId('task-r4'), lane: 'integration' });
 
   assert.equal(attentionRank(blockingCard), 0, 'blocking rank must be 0');
   assert.equal(attentionRank(gateFailedCard), 1, 'gate-failed rank must be 1');
@@ -710,15 +670,15 @@ test('attention-items: reason kinds render with correct colors (blocking=red, ga
 test('attention-items: exact command text matches px <command> <mission-id> pattern for all reason kinds', async () => {
   const { attentionCommand } = await import('../../../../src/interfaces/tui/shell.js');
 
-  const cases: { id: string; lane: string; reasonKind: string; expected: string }[] = [
+  const cases = [
     { id: 'task-c1', lane: 'integration', reasonKind: 'integrate-lane', expected: 'px integrate task-c1' },
     { id: 'task-c2', lane: 'review', reasonKind: 'review-lane', expected: 'px review task-c2' },
     { id: 'task-c3', lane: 'active', reasonKind: 'blocking', expected: 'px active task-c3' },
     { id: 'task-c4', lane: 'active', reasonKind: 'gate-failed', expected: 'px active task-c4' },
-  ];
+  ] as const;
 
   for (const { id, lane, reasonKind, expected } of cases) {
-    const card = makeCard({ id: id as never, lane: lane as never });
+    const card = makeCard({ id: fixtureMissionId(id), lane: lane });
     const actual = attentionCommand(card, { kind: reasonKind });
     assert.equal(actual, expected, `command for ${reasonKind} must be "${expected}"`);
   }
@@ -727,7 +687,7 @@ test('attention-items: exact command text matches px <command> <mission-id> patt
 test('attention action display and its typed confirmation command stay aligned', async () => {
   const { attentionCommand } = await import('../../../../src/interfaces/tui/shell.js');
   const { applicationCommandText } = await import('../../../../src/interfaces/tui/confirmation-dialog.js');
-  const reviewCard = makeCard({ id: 'task-2370' as never, lane: 'review', status: 'review' });
+  const reviewCard = makeCard({ id: fixtureMissionId('task-2370'), lane: 'review', status: 'review' });
   const item = makeAttentionItem(reviewCard, { kind: 'review-lane', detail: 'Awaiting review decision' }, 2);
 
   assert.equal(attentionCommand(item.card, item.reason, item.action), item.action.display);
@@ -736,15 +696,15 @@ test('attention action display and its typed confirmation command stay aligned',
 
 test('working work is separate from NEEDS YOU', async () => {
   const working = makeCard({
-    id: 'task-working' as never,
-    currentWork: { operationId: 'op', phase: 'review', summary: 'reviewing', agent: 'qwen' as never, updatedAt: new Date().toISOString(), freshness: 'live' },
+    id: fixtureMissionId('task-working'),
+    currentWork: { operationId: 'op', phase: 'review', summary: 'reviewing', agent: fixtureAgentFamily('qwen'), updatedAt: new Date().toISOString(), freshness: 'live' },
   });
   const base = makeProjection({ review: [working] });
   const projection = {
     ...base,
     metrics: {
       ...base.metrics,
-      agentAvailability: [{ family: 'qwen' as never, available: true, blockedForMs: 0, runningSessions: 1 }],
+      agentAvailability: [{ family: fixtureAgentFamily('qwen'), available: true, blockedForMs: 0, runningSessions: 1 }],
     },
   };
   const output = await renderShell({ projection, columns: 120, rows: 30 });

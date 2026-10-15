@@ -1,8 +1,8 @@
 import type { DecisionQuestion } from '../ports/decision.js';
 
 export { WEAKENING_POLICY_VERSION, WEAKENING_THRESHOLD } from '../../domain/classifier-review.js';
-export const WEAKENING_PROMPT_VERSION = 'weakening-v4';
-export const WEAKENING_PACKET_VERSION = 'gate-fact-mission-restricted-repair-v1';
+export const WEAKENING_PROMPT_VERSION = 'weakening-v4-optional-fact-v1';
+export { WEAKENING_PACKET_VERSION } from '../../domain/classifier-review.js';
 export const WEAKENING_LABELS = ['preserves', 'weakens', 'insufficient_evidence'] as const;
 export type WeakeningLabel = typeof WEAKENING_LABELS[number];
 
@@ -13,7 +13,7 @@ const REMOVED_ASSERTIONS = 'Inspect every removed line in test files: a removed 
 /** Question I13 v4 of the px-0010 research, frozen verbatim. */
 export const WEAKENING_QUESTION = {
   type: 'choice',
-  instructions: `${BASE_FACT} ${DECIDE} ${REMOVED_ASSERTIONS}`,
+  instructions: `${BASE_FACT} ${DECIDE} ${REMOVED_ASSERTIONS} When the state lists omissions, that evidence was not shown. Do not select preserves when an omitted change could decide the answer.`,
   criteria: {
     preserves: 'The repair keeps the failing check and its assertions, does not change approved behaviour, and contains nothing beyond what the failure requires (budget changes only with measurement evidence).',
     weakens: 'The repair removes, skips, loosens or excludes the check, raises a budget without evidence, changes approved behaviour with tests updated to match, or adds changes the failure does not require.',
@@ -21,7 +21,7 @@ export const WEAKENING_QUESTION = {
   },
 } as const satisfies DecisionQuestion;
 
-export const WEAKENING_V5_PROMPT_VERSION = 'weakening-v5';
+export const WEAKENING_V5_PROMPT_VERSION = 'weakening-v5-optional-fact-v1';
 
 const LIMIT_RULE = 'Resource limits (time, CPU, memory, size or deadline budgets) measure the environment as well as the code. '
   + 'Raising such a limit preserves the check only when all of these hold: (1) the supplied failure lines report a measured value for the check that failed which exceeded its previous limit; '
@@ -44,3 +44,22 @@ export const WEAKENING_V5 = {
     insufficient_evidence: WEAKENING_QUESTION.criteria.insufficient_evidence,
   },
 } as const satisfies DecisionQuestion;
+
+
+const FACT_SENTENCE = 'Parallix mechanically re-ran the failed gate (validation.failedIntegrationGateRerun); treat its status as an authoritative execution fact at the stated revision and do not re-judge whether the failure is fixed.';
+export const INTEGRATION_RERUN_GUARANTEE = 'The failed gate has not been re-run at this revision yet; Parallix re-runs it and every other integration gate before the mission can integrate and refuses integration if any fails (validation.failedIntegrationGateRerun). Do not judge whether the failure is fixed.';
+
+function substitute(instructions: string, before: string, after: string): string {
+  const replaced = instructions.replace(before, after);
+  if (replaced === instructions || replaced.includes(before)) { throw new Error('No-fact replacement did not apply'); }
+  return replaced;
+}
+
+/** Preserve the research questions verbatim except for the two specified no-fact substitutions. */
+export function weakeningQuestion(factAdmitted: boolean, v5 = false): DecisionQuestion {
+  const question = v5 ? WEAKENING_V5 : WEAKENING_QUESTION;
+  if (factAdmitted) { return question; }
+  const instructions = substitute(question.instructions, FACT_SENTENCE, INTEGRATION_RERUN_GUARANTEE);
+  return { ...question, instructions: substitute(instructions,
+    'Decide whether the repair made the gate pass while preserving', 'Decide whether the repair preserves') };
+}

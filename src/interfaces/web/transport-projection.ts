@@ -123,6 +123,8 @@ function toWebMissionCard(card: MissionCard): WebMissionCard {
     reviewDisposition: card.reviewDisposition,
     reviewHistory: card.reviewHistory.map((round) => ({
       number: round.number,
+      ...(round.startRevision === undefined ? {} : { startRevision: round.startRevision }),
+      ...(round.decidedRevision === undefined ? {} : { decidedRevision: round.decidedRevision }),
       reviewer: round.reviewer,
       implementer: round.implementer,
       phase: round.phase,
@@ -327,7 +329,11 @@ function assertJsonValueSafe(value: unknown, path: string): void {
   if (value instanceof Set || value instanceof Map) {
     throw new WebTransportError('unsafe-value', `${path} is a ${value.constructor.name}`);
   }
-  for (const [key, element] of Object.entries(value as Record<string, unknown>)) {
+  assertJsonObjectSafe(value as Record<string, unknown>, path);
+}
+
+function assertJsonObjectSafe(value: Record<string, unknown>, path: string): void {
+  for (const [key, element] of Object.entries(value)) {
     if (element === undefined) {
       throw new WebTransportError('unsafe-value', `${path}.${key} is undefined and would silently vanish on the wire`);
     }

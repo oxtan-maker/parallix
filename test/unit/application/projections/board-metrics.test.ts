@@ -1,3 +1,5 @@
+import { emptyBoardRepositories } from '../../../helpers/empty-board-repositories.js';
+import { repositoryId as fixtureRepositoryId } from '../../../../src/domain/repository.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
@@ -20,7 +22,7 @@ import {
   type MetricsInput,
 } from '../../../../src/application/projections/metrics.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
-import { missionId, type MissionId, type MissionStatus } from '../../../../src/domain/mission.js';
+import { missionId, missionLabels, type MissionId, type MissionStatus } from '../../../../src/domain/mission.js';
 import { missionOutcome } from '../../../fixtures/mission-outcome.js';
 import { weeklyDecisionWindows } from '../../../../src/application/services/decision-window.js';
 import { ConcreteMetricsReadAdapter } from '../../../../src/application/projections/metrics-read-adapter.js';
@@ -492,6 +494,7 @@ test('age: mission 3 days (4320 min) before asOf reports age >= 4300 min (SC1, t
 
   // With correct asOf (injected clock), age should be ~4320 min
   assert.ok(activeAge !== null, 'active lane should have a non-null age');
+  assert.ok(activeAge != null);
   assert.ok(activeAge >= 4300, `active lane age should be >= 4300 min, got ${activeAge}`);
 });
 
@@ -506,12 +509,14 @@ test('age: asOf parameter controls computed age, not last transition time (SC1, 
   const asOf1 = '2026-07-21T08:00:00Z';
   const series1 = medianAgeByLaneSeries(transitions, asOf1);
   const age1 = series1.series.find((e) => e.lane === 'refined')?.value;
+  assert.ok(age1 != null);
   assert.ok(age1 !== null && age1 >= 1400, `1 day age should be ~1440, got ${age1}`);
 
   // asOf 3 days after transition → ~4320 min
   const asOf2 = '2026-07-23T08:00:00Z';
   const series2 = medianAgeByLaneSeries(transitions, asOf2);
   const age2 = series2.series.find((e) => e.lane === 'refined')?.value;
+  assert.ok(age2 != null);
   assert.ok(age2 !== null && age2 >= 4300, `3 day age should be ~4320, got ${age2}`);
 });
 
@@ -619,13 +624,14 @@ test('ConcreteMetricsReadAdapter: asOf from injected clock not instants.at(-1) (
   const { ConcreteMetricsReadAdapter } = await import('../../../../src/application/projections/metrics-read-adapter.js');
 
   // Fixed clock — always returns this timestamp
-  const fixedClock = () => '2026-07-22T10:00:00Z';
+  const fixedClock: NonNullable<NonNullable<ConstructorParameters<typeof ConcreteMetricsReadAdapter>[0]>["clock"]> = () => '2026-07-22T10:00:00Z';
 
   // Transition happened much earlier
   const earlyTransition = '2026-07-20T08:00:00Z';
 
   // Mock repos
-  const laneEventRepo = {
+  const laneEventRepo: BoardLaneEventRepository = {
+    ...emptyBoardRepositories().laneEventRepo,
     findByRepositoryId: async () => [
       {
         id: 1,
@@ -643,15 +649,12 @@ test('ConcreteMetricsReadAdapter: asOf from injected clock not instants.at(-1) (
     findAll: async () => [],
     append: async () => true,
     clear: async () => {},
-  };
+  } satisfies BoardLaneEventRepository;
 
   const usageRepo = {
     findAll: async () => [],
     findWhere: async () => [],
-    save: async () => {},
-    saveAll: async () => {},
-    clear: async () => {},
-  };
+  } satisfies UsageRepository;
 
   const adapter = new ConcreteMetricsReadAdapter({
     laneEventRepo,
@@ -666,6 +669,7 @@ test('ConcreteMetricsReadAdapter: asOf from injected clock not instants.at(-1) (
   const activeAge = metrics.medianAgeByLane.series.find((e) => e.lane === 'active')?.value;
   assert.ok(activeAge !== null, 'active lane should have age');
   // Clock is 3000 min after transition (2 days + 2 hours)
+  assert.ok(activeAge != null);
   assert.ok(activeAge >= 2990, `age should be ~3000 min (from clock), got ${activeAge}`);
 });
 
@@ -696,11 +700,13 @@ test('medianAgeByLaneSeries: mission with no transition uses lifecycle entry tim
 
   // b1 in active: 60 min (from transition)
   const activeAge = series.series.find((e) => e.lane === 'active')?.value;
+  assert.ok(activeAge != null);
   assert.ok(activeAge !== null && activeAge >= 59, `active age should be ~60, got ${activeAge}`);
 
   // b2 in refined: 1440 min (from lifecycle entry)
   const refinedAge = series.series.find((e) => e.lane === 'refined')?.value;
   assert.ok(refinedAge !== null, 'refined lane should have non-null age from lifecycle entry');
+  assert.ok(refinedAge != null);
   assert.ok(refinedAge >= 1400, `refined age should be ~1440, got ${refinedAge}`);
 });
 
@@ -720,19 +726,18 @@ class ThroughputInMemoryUsageRepository implements UsageRepository {
 
 test('throughput excludes active and review telemetry (task-2347.04)', async () => {
   const adapter = new ConcreteMetricsReadAdapter({
-    // Partial double: this test only reads lane events, so the writing half of
-    // the port is deliberately absent and the cast goes through `unknown`.
     laneEventRepo: {
+      ...emptyBoardRepositories().laneEventRepo,
       findByRepositoryId: async () => [
         { repositoryId: 'parallix', missionId: 'task-closed', fromStatus: 'integration', toStatus: 'done', trigger: 'integrate', agent: 'codex', occurredAt: '2026-06-01T00:00:00Z', idempotencyKey: 'task-closed-done' },
       ],
-    } as unknown as BoardLaneEventRepository,
+    },
     usageRepo: new ThroughputInMemoryUsageRepository([
       { repo: 'parallix', mission: 'task-closed', date: '2026-06-01', duration_minutes: 10 },
       { repo: 'parallix', mission: 'task-active', date: '2026-07-27', stage: 'active', duration_minutes: 20 },
       { repo: 'parallix', mission: 'task-review', date: '2026-07-28', stage: 'review', duration_minutes: 30 },
     ]),
-    repositoryId: 'parallix' as never,
+    repositoryId: fixtureRepositoryId('parallix'),
   });
 
   const metrics = await adapter.buildMetrics(new Map());
@@ -742,23 +747,24 @@ test('throughput excludes active and review telemetry (task-2347.04)', async () 
 
 test('historical metrics exclude outcomes closed after each instant (task-2347.04)', () => {
   const outcomes = [
-    { missionId: 'task-early' as never, repositoryId: 'parallix' as never, createdAt: '2026-07-01T00:00:00Z', closedAt: '2026-07-10T00:00:00Z', cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
-    { missionId: 'task-late' as never, repositoryId: 'parallix' as never, createdAt: '2026-07-11T00:00:00Z', closedAt: '2026-07-20T00:00:00Z', cycleTimeMinutes: 30, reviewFixRounds: 3, runs: [] },
-  ] as unknown as readonly MissionOutcome[];
+    missionOutcome({ missionId: missionId('task-early'), repositoryId: repositoryId('parallix'), createdAt: '2026-07-01T00:00:00Z', closedAt: '2026-07-10T00:00:00Z', cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] }),
+    missionOutcome({ missionId: missionId('task-late'), repositoryId: repositoryId('parallix'), createdAt: '2026-07-11T00:00:00Z', closedAt: '2026-07-20T00:00:00Z', cycleTimeMinutes: 30, reviewFixRounds: 3, runs: [] }),
+  ];
   const instants = ['2026-07-15T00:00:00Z', '2026-07-21T00:00:00Z'];
 
   assert.deepEqual(throughputSeries(outcomes, instants).series.map((point) => point.value), [1, 2]);
   assert.deepEqual(medianStateTimes(outcomes, instants).series.map((point) => point.value), [10, 20]);
   const transitions = [
-    { missionId: 'task-early' as never, from: 'active' as const, to: 'review' as const, trigger: 'submit-for-review' as const, actor: 'codex', occurredAt: '2026-07-10T00:00:00Z' },
-    { missionId: 'task-early' as never, from: 'review' as const, to: 'active' as const, trigger: 'request-changes' as const, actor: 'codex', occurredAt: '2026-07-11T00:00:00Z' },
-    { missionId: 'task-late' as never, from: 'active' as const, to: 'review' as const, trigger: 'submit-for-review' as const, actor: 'codex', occurredAt: '2026-07-20T00:00:00Z' },
+    { missionId: missionId('task-early'), from: 'active' as const, to: 'review' as const, trigger: 'submit-for-review' as const, actor: 'codex', occurredAt: '2026-07-10T00:00:00Z' },
+    { missionId: missionId('task-early'), from: 'review' as const, to: 'active' as const, trigger: 'request-changes' as const, actor: 'codex', occurredAt: '2026-07-11T00:00:00Z' },
+    { missionId: missionId('task-late'), from: 'active' as const, to: 'review' as const, trigger: 'submit-for-review' as const, actor: 'codex', occurredAt: '2026-07-20T00:00:00Z' },
   ];
   assert.deepEqual(reviewBounceRateSeries(transitions, instants).series.map((point) => point.value), [1, 0.5]);
 });
 
 test('lifecycle completion survives absent telemetry and ignores later close (task-2347.04)', async () => {
-  const laneEventRepo = {
+  const laneEventRepo: BoardLaneEventRepository = {
+    ...emptyBoardRepositories().laneEventRepo,
     async findByRepositoryId() {
       return [
         { repositoryId: 'parallix', missionId: 'task-lifecycle-only', fromStatus: null, toStatus: 'backlog', trigger: 'intake', agent: 'codex', occurredAt: '2026-07-01T08:00:00Z', idempotencyKey: 'intake' },
@@ -766,11 +772,11 @@ test('lifecycle completion survives absent telemetry and ignores later close (ta
         { repositoryId: 'parallix', missionId: 'task-lifecycle-only', fromStatus: 'done', toStatus: 'done', trigger: 'close', agent: 'codex', occurredAt: '2026-07-20T00:00:00Z', idempotencyKey: 'close' },
       ];
     },
-  } as unknown as BoardLaneEventRepository;
+  };
   const adapter = new ConcreteMetricsReadAdapter({
     laneEventRepo,
     usageRepo: new ThroughputInMemoryUsageRepository([]),
-    repositoryId: 'parallix' as never,
+    repositoryId: fixtureRepositoryId('parallix'),
     clock: () => '2026-07-27T12:00:00Z',
   });
 
@@ -778,24 +784,25 @@ test('lifecycle completion survives absent telemetry and ignores later close (ta
   assert.deepEqual(outcomes.map((outcome) => ({ closedAt: outcome.closedAt, cycleTimeMinutes: outcome.cycleTimeMinutes })), [
     { closedAt: '2026-07-07T01:30:00.000Z', cycleTimeMinutes: 8250 },
   ]);
-  const metrics = await adapter.buildMetrics(new Map([['task-lifecycle-only' as never, 'done' as never]]));
+  const metrics = await adapter.buildMetrics(new Map([[missionId('task-lifecycle-only'), 'done']]));
   assert.equal(metrics.decisionWindow?.current.completedMissions, 0);
 });
 
 test('cohort labels and implementer come from canonical Mission metadata, not telemetry (task-2347.04)', async () => {
-  const laneEventRepo = {
+  const laneEventRepo: BoardLaneEventRepository = {
+    ...emptyBoardRepositories().laneEventRepo,
     async findByRepositoryId() {
       return [
         { repositoryId: 'parallix', missionId: 'task-canonical', fromStatus: null, toStatus: 'backlog', trigger: 'intake', agent: 'codex', occurredAt: '2026-07-01T08:00:00Z', idempotencyKey: 'intake' },
         { repositoryId: 'parallix', missionId: 'task-canonical', fromStatus: 'integration', toStatus: 'done', trigger: 'integrate', agent: 'codex', occurredAt: '2026-07-02T08:00:00Z', idempotencyKey: 'done' },
       ];
     },
-  } as unknown as BoardLaneEventRepository;
+  };
   const adapter = new ConcreteMetricsReadAdapter({
     laneEventRepo,
     usageRepo: new ThroughputInMemoryUsageRepository([{ repo: 'parallix', mission: 'task-canonical', date: '2026-07-02', classification: 'wrong-label', implementer: 'claude' }]),
-    repositoryId: 'parallix' as never,
-    cohortMetadata: async () => new Map([['task-canonical' as never, { labels: ['ai_sdlc' as never], assignee: 'codex' as never }]]),
+    repositoryId: fixtureRepositoryId('parallix'),
+    cohortMetadata: async () => new Map([[missionId('task-canonical'), { labels: missionLabels(['ai_sdlc']), assignee: agentFamily('codex') }]]),
   });
   const [outcome] = await adapter.readOutcomes();
   assert.deepEqual(outcome?.labels, ['ai_sdlc']);
@@ -803,16 +810,17 @@ test('cohort labels and implementer come from canonical Mission metadata, not te
 });
 
 test('mixed timestamp formats select the earliest delivery instant despite textual order (TASK-2685)', async () => {
-  const laneEventRepo = {
+  const laneEventRepo: BoardLaneEventRepository = {
+    ...emptyBoardRepositories().laneEventRepo,
     findByRepositoryId: async () => [
       { repositoryId: 'parallix', missionId: 'task-offset', fromStatus: null, toStatus: 'active', trigger: 'activate', agent: 'codex', occurredAt: '2026-10-01T00:00:00Z', idempotencyKey: 'intake' },
       // Text ordering puts this later delivery before the offset-formatted one.
       { repositoryId: 'parallix', missionId: 'task-offset', fromStatus: 'integration', toStatus: 'done', trigger: 'integrate', agent: 'codex', occurredAt: '2026-10-01T23:00:00Z', idempotencyKey: 'later' },
       { repositoryId: 'parallix', missionId: 'task-offset', fromStatus: 'integration', toStatus: 'done', trigger: 'integrate', agent: 'codex', occurredAt: '2026-10-02T00:30:00+02:00', idempotencyKey: 'first' },
     ],
-  } as unknown as BoardLaneEventRepository;
+  };
   const adapter = new ConcreteMetricsReadAdapter({
-    laneEventRepo, usageRepo: new ThroughputInMemoryUsageRepository([]), repositoryId: 'parallix' as never,
+    laneEventRepo, usageRepo: new ThroughputInMemoryUsageRepository([]), repositoryId: fixtureRepositoryId('parallix'),
   });
   const outcomes = await adapter.readOutcomes();
   assert.equal(outcomes.length, 1);

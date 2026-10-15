@@ -1,3 +1,5 @@
+import { handoffTransitionValue } from '../../helpers/handoff-ports.js';
+import { missionVersion } from '../../../src/application/domain-ports.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -47,8 +49,8 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' | 'forc
     let gateRuns = 0;
     const ports = makePorts(recorder, {
       missionServices: async () => ({ store, checkpoints,
-        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 10 } }) },
-        handoff: { recordNel: async () => ({ status: 'completed' }) },
+        lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: handoffTransitionValue(missionVersion(10)) }) },
+        handoff: { recordNel: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
       }),
       process: { spawnSync: (cmd: string, args: string[], options: object) => {
         gateRuns++;
@@ -82,8 +84,8 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' | 'forc
     assert.equal(launches, 0);
     await record('CP-2');
     const result = await handoff();
-    assert.equal(launches, 1, result.error);
-    assert.equal(result.ok, mode === 'repair', result.error);
+    assert.equal(launches, 1, result.error ?? '');
+    assert.equal(result.ok, mode === 'repair', result.error ?? '');
     const after = await store.load(id); assert.equal(after.kind, 'found');
     if (after.kind !== 'found') { throw new Error('missing fixture'); }
     assert.deepEqual(after.mission.checkpoints[0], retainedPrior);
@@ -95,7 +97,7 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' | 'forc
       const blockedAgain = await handoff();
       assert.equal(blockedAgain.ok, false);
       assert.match(blockedAgain.error ?? '', /human review/);
-      assert.equal(launches, 1, result.error);
+      assert.equal(launches, 1, result.error ?? '');
     }
     let finalHandoff = result.ok;
     if (mode === 'force') {
@@ -103,7 +105,7 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' | 'forc
       await record('CP-3', true);
       assert.equal(await reloaded.readBlocker(SLUG, 'CP-3'), undefined);
       const resolved = await handoff();
-      assert.equal(resolved.ok, true, resolved.error);
+      assert.equal(resolved.ok, true, resolved.error ?? '');
       finalHandoff = resolved.ok;
       assert.equal(gateRuns, 2, 'forced evidence still runs the required gate');
       assert.equal(launches, 1, 'operator recovery needs no agent relaunch');

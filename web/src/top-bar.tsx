@@ -15,11 +15,6 @@ export function TopBar({ snapshot, flowOpen, onFlowToggle, onCreate }: {
 }) {
   const wip = snapshot.inFlightWip;
   const throughput = snapshot.metrics.weeklyCompletedMissions;
-  const unattributed = 'unattributedRunningSessions' in snapshot
-    ? snapshot.unattributedRunningSessions === null
-      ? 'unattributed sessions unknown'
-      : `unattributed ${snapshot.unattributedRunningSessions} running`
-    : null;
   return (
     <header
       style={{

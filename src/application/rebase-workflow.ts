@@ -254,7 +254,7 @@ async function resolveRecordedImplementer(slug: string, executionRoot: string, p
     || null;
 }
 
-function reportRebaseAlreadyInProgress(existingRebase: any, branch: string, port: RebaseWorkflowPort): void {
+function reportRebaseAlreadyInProgress(existingRebase: ReturnType<RebaseWorkflowPort['detectRebaseState']>, branch: string, port: RebaseWorkflowPort): void {
   fmt.log.fail(`Rebase already in progress for ${fmt.branch(branch)}.`);
   if (existingRebase.rebaseHead) { fmt.log.info(`Current rebase head: ${existingRebase.rebaseHead}`); }
   if (existingRebase.unmergedFiles.length > 0) {
@@ -277,7 +277,7 @@ async function performPush(ctx: RebaseContext): Promise<boolean> {
   }
   fmt.log.info(`--push detected. Updating Forgejo PR for ${fmt.branch(branch)}...`);
   const reviewIdentity = port.resolveReviewIdentity(slug, executionRoot);
-  const forgejoUser = port.resolveForgejoUser(reviewIdentity.forgejoUser || recordedImplementer || null);
+  const forgejoUser = port.resolveForgejoUser(('forgejoUser' in reviewIdentity ? reviewIdentity.forgejoUser : undefined) || recordedImplementer || null);
   const token = port.readToken(forgejoUser || 'default');
   if (!token) {
     fmt.log.fail(`No Forgejo token found for user "${fmt.agent(forgejoUser || 'default')}". Push failed.`);
@@ -400,7 +400,7 @@ async function reboundHookFailure(
         await port.applyAgentFallback({
           role: 'implementer', original, launchResult, state: {}, slug, worktree: executionRoot,
           log: fmt.log.plain, writeReviewStateFn: port.writeReviewState,
-        }) as string || original,
+        }) || original,
       verify: () => {
         gitFn(['-C', executionRoot, 'add', '-A']);
         lastResult = retryContinue();
@@ -710,7 +710,7 @@ function selectReplacementFamily(ctx: RebaseContext, implementer: string): strin
  * family may substitute an eligible replacement; it is never reported as an
  * infrastructure or Forgejo failure.
  */
-async function launchConflictResolver(ctx: RebaseContext, implementer: string, prompt: string): Promise<{ agent: string; result: { status: number } } | null> {
+async function launchConflictResolver(ctx: RebaseContext, implementer: string, prompt: string): Promise<import('./ports/rebase-workflow.js').AgentLaunchResult | null> {
   const { port, executionRoot, slug } = ctx;
   const launchOptions = { prompt, worktree: executionRoot, slug, role: 'implementer' };
   try {
@@ -719,8 +719,8 @@ async function launchConflictResolver(ctx: RebaseContext, implementer: string, p
       ctx.repairImplementer = implementer;
     }
     return await port.startAgent('conflict-resolution', { ...launchOptions, agent: implementer, pinnedAgent: true });
-  } catch (err: any) {
-    const message = err?.message || String(err);
+  } catch (err) {
+    const message = (err as { message?: string } | null)?.message || String(err);
     if (!/usage\s+limit|blocked\s+until|usage\s+limit\s+hit/i.test(message)) {
       fmt.log.fail(`Implementer ${fmt.agent(implementer)} cannot run conflict resolution: ${message}`);
       fmt.log.info(`You may need to abort the rebase: ${fmt.command('git rebase --abort')}`);
@@ -813,7 +813,7 @@ export async function runRebaseWorkflow(
   // A rebase already in progress is a blocker only on the initial entry: a
   // re-entrant `resumeInPlace` call is resuming the rebase this command started,
   // so it re-classifies the new conflicts instead of bailing (TASK-2668.02).
-  if (!opts?.resumeInPlace && existingRebase.inProgress) {
+  if (blocksRebaseStart(opts, existingRebase)) {
     reportRebaseAlreadyInProgress(existingRebase, branch, port);
     return;
   }
@@ -827,22 +827,7 @@ export async function runRebaseWorkflow(
     return;
   }
 
-  const ctx: RebaseContext = {
-    args,
-    port,
-    gitFn,
-    slug,
-    branch,
-    area: missionDir ? port.findMissionArea(missionDir) : 'docs',
-    executionRoot,
-    // Honor the mission's recorded base branch (a feature-branch mission rebases
-    // onto its base, e.g. skunkworks — not the primary branch). Falls back to
-    // the primary branch for every mission without a recorded Base-Branch.
-    baseBranch: port.resolveMissionBaseBranch(slug, executionRoot, { gitFn }),
-    isPush: flags.includes('--push'),
-    recordedImplementer: await resolveRecordedImplementer(slug, executionRoot, port),
-    movedFrom: port.recordBranchMove ? (gitFn(['-C', executionRoot, 'rev-parse', 'HEAD']).stdout || '').trim() || null : null,
-  };
+  const ctx = await prepareRebaseContext(args, port, slug, branch, executionRoot, missionDir, flags, gitFn);
 
   let rebaseResult: GitCommandResult;
   if (opts?.resumeInPlace) {
@@ -896,3 +881,25 @@ export async function runRebaseWorkflow(
 
   await resolveSharedConflicts(ctx, conflictResult);
 }
+
+async function prepareRebaseContext(args: string[], port: RebaseWorkflowPort, slug: string, branch: string, executionRoot: string, missionDir: ReturnType<RebaseWorkflowPort['findMissionDir']>, flags: string[], gitFn: GitRunner): Promise<RebaseContext> {
+  return {
+    args,
+    port,
+    gitFn,
+    slug,
+    branch,
+    area: missionDir ? port.findMissionArea(missionDir) : 'docs',
+    executionRoot,
+    // Honor the mission's recorded base branch (a feature-branch mission rebases
+    // onto its base, e.g. skunkworks — not the primary branch). Falls back to
+    // the primary branch for every mission without a recorded Base-Branch.
+    baseBranch: port.resolveMissionBaseBranch(slug, executionRoot, { gitFn }),
+    isPush: flags.includes('--push'),
+    recordedImplementer: await resolveRecordedImplementer(slug, executionRoot, port),
+    movedFrom: port.recordBranchMove ? (gitFn(['-C', executionRoot, 'rev-parse', 'HEAD']).stdout || '').trim() || null : null,
+  };
+
+}
+
+function blocksRebaseStart(opts: { resumeInPlace?: boolean } | undefined, state: ReturnType<RebaseWorkflowPort['detectRebaseState']>): boolean { return !opts?.resumeInPlace && state.inProgress; }

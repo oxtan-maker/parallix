@@ -243,7 +243,7 @@ export interface HandoffProductConfigPort {
 export interface HandoffAgentLaunchPort {
   startAgent(
     _step: string,
-    _options: Record<string, unknown>,
+    _options: import('../rebound-kernel.js').ReboundLaunchOptions,
   ): Promise<{ agent?: string | null; result?: { status?: number | null } | null } | null | undefined>;
 }
 
@@ -267,8 +267,8 @@ export interface HandoffMissionServicesOptions {
  * transition to review, checkpoint recording, and NEL handoff recording.
  */
 export interface HandoffMissionServices {
-  readonly store: MissionStore;
-  readonly lifecycle: MissionLifecycleService;
+  readonly store: Pick<MissionStore, 'load'>;
+  readonly lifecycle: Pick<MissionLifecycleService, 'transition'>;
   readonly checkpoints: Pick<MissionCheckpointService, 'record'>;
   readonly handoff: Pick<MissionHandoffService, 'recordNel'>;
 }

@@ -129,9 +129,9 @@ test('queryGraph from worktree without graph returns actionable missing-graph re
     );
 
     // Capturing command runner: record the arguments passed to graphify
-    let capturedArgs: string[] | null = null;
-    const capturingRunner = (_cmd: string, args: string[]) => {
-      capturedArgs = args;
+    let capturedArgs: { value: string[] | null } = { value: null };
+    const capturingRunner: NonNullable<NonNullable<Parameters<typeof queryGraph>[0]>["commandRunner"]> = (_cmd, args) => {
+      capturedArgs.value = args;
       return { status: 0, stdout: 'query output' };
     };
 
@@ -143,12 +143,12 @@ test('queryGraph from worktree without graph returns actionable missing-graph re
     });
 
     assert.strictEqual(queryWithGraph.success, true);
-    assert.ok(capturedArgs, 'commandRunner must have been called');
+    assert.ok(capturedArgs.value, 'commandRunner must have been called');
 
     // The --graph argument must use the active worktree's path, not the sibling's
-    const graphFlagIndex = capturedArgs!.indexOf('--graph');
+    const graphFlagIndex = capturedArgs.value!.indexOf('--graph');
     assert.ok(graphFlagIndex >= 0, '--graph flag must be present in query args');
-    const graphPathArg = capturedArgs![graphFlagIndex + 1];
+    const graphPathArg = capturedArgs.value![graphFlagIndex + 1];
     assert.strictEqual(graphPathArg, path.join(activeWorktree, 'graphify-out', 'graph.json'),
       '--graph must use active worktree path, not sibling');
     assert.ok(
@@ -199,13 +199,15 @@ test('Codex launcher sets cwd to active worktree so $(pwd)/graphify-out resolves
     const { __setSpawnAndTeeForTest, __setSessionsForTest, startCodexDraftAgent } = codex;
 
     // Capture the spawnAndTee call to inspect cwd and env
-    let capturedCwd: string | null = null;
-    let capturedEnv: Record<string, string> | null = null;
-    let capturedArgs: string[] | null = null;
-    __setSpawnAndTeeForTest((cmd: string, args: string[], options: { cwd: string; env: Record<string, string> }) => {
-      capturedCwd = options.cwd;
-      capturedEnv = options.env;
-      capturedArgs = args;
+    let capturedCwd: { value: string | null } = { value: null };
+    let capturedEnv: { value: NodeJS.ProcessEnv | null } = { value: null };
+    let capturedArgs: { value: string[] | null } = { value: null };
+    __setSpawnAndTeeForTest((cmd, args, options) => {
+      assert.ok(options?.cwd);
+      assert.ok(options.env);
+      capturedCwd.value = options.cwd;
+      capturedEnv.value = options.env;
+      capturedArgs.value = args;
       return Promise.resolve({
         status: 0,
         signal: null,
@@ -225,14 +227,14 @@ test('Codex launcher sets cwd to active worktree so $(pwd)/graphify-out resolves
 
     // The cwd must be the active worktree, not the sibling
     assert.strictEqual(
-      capturedCwd,
+      capturedCwd.value,
       activeWorktree,
       'Codex launcher must set cwd to active worktree'
     );
 
     // The cwd must NOT be the sibling worktree
     assert.ok(
-      !capturedCwd!.includes(path.basename(siblingWorktree)),
+      !capturedCwd.value!.includes(path.basename(siblingWorktree)),
       'Codex launcher cwd must NOT reference sibling worktree'
     );
 

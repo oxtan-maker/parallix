@@ -1,3 +1,4 @@
+import { emptyBoardRepositories } from '../../helpers/empty-board-repositories.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
@@ -64,10 +65,7 @@ test('external task update leaves persisted board lifecycle authoritative', asyn
         rootDir: root,
         missionStore: opened.store,
         repositoryId: repository,
-        blocklistRepo: { async findAll() { return []; } } as never,
-        historyRepo: { async findAll() { return []; }, async findByType() { return []; } } as never,
-        laneEventRepo: { async findAll() { return []; } } as never,
-        usageRepo: { async findAll() { return []; } } as never,
+        ...emptyBoardRepositories(),
         knownAgentFamilies: [],
       });
       const lanes = new Map((await board.builder.build()).stages.flatMap((stage) =>

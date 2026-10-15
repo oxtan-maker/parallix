@@ -1,3 +1,4 @@
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 /** Semantic navigation tests: no TTY, command, workflow, filesystem, Git, agent, or Forgejo dependency. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,8 +14,8 @@ test('navigation: horizontal movement wraps, skips empty lanes, and preserves th
   const projection = makeProjection({
     backlog: makeCards(3, 'backlog'),
     review: [
-      makeCard({ id: 'task-review-1' as never, lane: 'review' }),
-      makeCard({ id: 'task-review-2' as never, lane: 'review' }),
+      makeCard({ id: fixtureMissionId('task-review-1'), lane: 'review' }),
+      makeCard({ id: fixtureMissionId('task-review-2'), lane: 'review' }),
     ],
   });
   let state = createNavigationState(projection);
@@ -29,7 +30,7 @@ test('navigation: horizontal movement wraps, skips empty lanes, and preserves th
 });
 
 test('navigation: vertical boundaries stop and an all-empty board has no selection', () => {
-  const projection = makeProjection({ active: [makeCard({ id: 'task-one' as never, lane: 'active' })] });
+  const projection = makeProjection({ active: [makeCard({ id: fixtureMissionId('task-one'), lane: 'active' })] });
   let state = createNavigationState(projection);
   state = moveSelection(state, projection, 'up', 3);
   assert.equal(state.selectedMissionId, 'task-one');

@@ -2,7 +2,7 @@ import { agentFamily, type AgentAvailability, type AgentFamily, type AgentSelect
 import type { AgentSelectionSnapshotPort } from '../../application/domain-ports.js';
 import { AgentBlockService, parseAgentBlockUntil } from '../../application/services/agent-block-service.js';
 import type { AgentBlocklistRepository } from '../../application/ports/agent-blocklist.js';
-import { readAgentConfig, type AgentConfig } from './agent-config.js';
+import { readAgentConfig, type AgentConfig, type AgentStepConfig } from './agent-config.js';
 import { workflowLauncherStatus } from './launcher-selection.js';
 
 type LauncherStatus = { supported: boolean; detail?: string; health?: string; reason?: string };
@@ -15,7 +15,7 @@ export interface AgentSelectionSnapshotAdapterOptions {
   readonly now?: () => number;
 }
 
-function policy(value: any, fallback: readonly AgentFamily[]): StepSelectionPolicy {
+function policy(value: AgentStepConfig | null, fallback: readonly AgentFamily[]): StepSelectionPolicy {
   const eligible = Array.isArray(value?.eligible)
     ? value.eligible.map((name: string) => agentFamily(name))
     : [...fallback];

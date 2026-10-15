@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 
 
@@ -31,7 +30,7 @@ function createDummyLauncher() {
     fs.chmodSync(launcher, 0o755);
   }
   process.env.PATH = `${dir}${path.delimiter}${process.env.PATH}`;
-  setCommandPathProbe(name => fs.existsSync(path.join(dir, name)));
+  setCommandPathProbe(name => fs.existsSync(path.join(dir, name)) ? path.join(dir, name) : null);
 
   const launcherPath = path.join(dir, 'dummy-launcher');
   fs.writeFileSync(launcherPath, `#!${process.execPath}\nprocess.exit(0);\n`);
@@ -39,7 +38,7 @@ function createDummyLauncher() {
   return launcherPath;
 }
 
-function withPathLaunchers(entries, run) {
+function withPathLaunchers(entries: { vibe: string; claude?: string; gemini?: string; opencode?: string; pi?: string; }, run: () => void) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'runtime-matrix-path-'));
   const binDir = path.join(tmpRoot, 'bin');
   fs.mkdirSync(binDir, { recursive: true });
@@ -55,7 +54,7 @@ function withPathLaunchers(entries, run) {
 
   const previousPath = process.env.PATH;
   process.env.PATH = `${binDir}${path.delimiter}${previousPath}`;
-  setCommandPathProbe(name => fs.existsSync(path.join(binDir, name)));
+  setCommandPathProbe(name => fs.existsSync(path.join(binDir, name)) ? path.join(binDir, name) : null);
   try {
     return run();
   } finally {
@@ -68,7 +67,7 @@ function withPathLaunchers(entries, run) {
 // ---------- launcherStatus delegates to agents.js discovery ----------
 
 test('launcherStatus delegates to the injected workflowLauncherStatus (RESOLVERS-based discovery)', () => {
-  const calls = [];
+  const calls: string[] = [];
   const status = launcherStatus('codex', {
     workflowLauncherStatusFn: (agent) => {
       calls.push(agent);
@@ -116,7 +115,7 @@ test('buildAutonomousReviewMatrix derives agents from injected step eligibility 
   assert.equal(matrix.launchers.claude.supported, true);
   assert.equal(matrix.launchers.gemini.supported, false);
   // No hardcoded implementer→reviewer routing survives.
-  assert.equal(matrix.routes, undefined);
+  assert.equal('routes' in matrix, false);
 });
 
 test('buildAutonomousReviewMatrix marks config missing when the config file does not exist', () => {
@@ -175,9 +174,9 @@ test('formatMatrixSummary renders config and per-agent launcher support without 
     configPresent: true,
     configPath: '/tmp/agents.json',
     launchers: {
-      codex: { supported: true, detail: '/bin/codex --help', health: 'ok' },
-      claude: { supported: false, detail: 'claude', health: 'missing' },
-      gemini: { supported: true, detail: 'gemini --help', health: 'ok' }
+      codex: { agent: 'codex', supported: true, detail: '/bin/codex --help', health: 'ok' },
+      claude: { agent: 'claude', supported: false, detail: 'claude', health: 'missing' },
+      gemini: { agent: 'gemini', supported: true, detail: 'gemini --help', health: 'ok' }
     }
   });
 
@@ -196,7 +195,7 @@ test('formatMatrixSummary renders config and per-agent launcher support without 
 test('runnableDifferentFamilyExists returns true when a non-implementer agent has a supported launcher', () => {
   const result = runnableDifferentFamilyExists('codex', {
     eligibleAgentsForStepFn: () => ['codex', 'claude'],
-    workflowLauncherStatusFn: agent => ({ agent, supported: agent === 'claude' })
+    workflowLauncherStatusFn: agent => ({ agent, supported: agent === 'claude', detail: agent })
   });
   assert.equal(result, true);
 });
@@ -204,7 +203,7 @@ test('runnableDifferentFamilyExists returns true when a non-implementer agent ha
 test('runnableDifferentFamilyExists returns false when only the implementer family has a supported launcher', () => {
   const result = runnableDifferentFamilyExists('codex', {
     eligibleAgentsForStepFn: () => ['codex', 'claude'],
-    workflowLauncherStatusFn: agent => ({ agent, supported: agent === 'codex' })
+    workflowLauncherStatusFn: agent => ({ agent, supported: agent === 'codex', detail: agent })
   });
   assert.equal(result, false);
 });
@@ -230,7 +229,7 @@ test('reviewer selection for a codex implementer is unbiased: drawn from remaini
       steps: {
         review: { eligible: ['codex', 'claude', 'gemini', 'custom', 'mistral'], selection: 'random' }
       }
-    };
+    } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
     const seen = new Set();
     for (let i = 0; i < 40; i++) {
       const reviewer = selectAgent('review', { config, exclude: new Set(['codex']) });

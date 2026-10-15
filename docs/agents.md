@@ -101,7 +101,7 @@ Opencode (custom agent family) may encounter issues with concurrent tool calls o
 
 | Agent   | Invocation shape                                                     |
 |---------|----------------------------------------------------------------------|
-| codex   | `codex exec --sandbox danger-full-access --cd <worktree> <prompt>`; resume uses `codex exec resume <session-id-or---last> <prompt>`. `CODEX_HOME` stays worktree-local so sessions and rollouts cannot cross missions. When present, the originating `config.toml` and file-based `auth.json` are linked into that state root, preserving MCP configuration without copying secret values. `HOME` and `PATH` remain available for nested tools such as `opencode` and `pi`. |
+| codex   | `codex exec --sandbox danger-full-access --cd <worktree> -`; resume uses `codex exec resume <session-id-or---last> -`. The prompt is written to stdin followed by EOF (also inside a hosted mission terminal), so its size is not bound by the operating system's per-argument limit. `CODEX_HOME` stays worktree-local so sessions and rollouts cannot cross missions. When present, the originating `config.toml` and file-based `auth.json` are linked into that state root, preserving MCP configuration without copying secret values. `HOME` and `PATH` remain available for nested tools such as `opencode` and `pi`. |
 | claude  | `claude --dangerously-skip-permissions --output-format stream-json --verbose --include-partial-messages -p <prompt>` (cwd=worktree) — uses `--output-format stream-json --verbose --include-partial-messages` to stream real-time JSONL events (tool calls, assistant text chunks) to the operator's terminal via the spawn-tee mechanism. `--include-partial-messages` is required: without it, the assistant event contains the full response at once and no intermediate progress is emitted. Session-id extraction parses the `result` event from stream-json output, falling back to the `claude --resume <id>` regex on plain text. |
 | mistral | `vibe --prompt <prompt> --trust --yolo --output text` (cwd=worktree) — `--yolo` approves tool calls non-interactively (mirrors `--dangerously-skip-permissions` for claude/opencode and codex's `trust_level = "trusted"`); `--trust` only bypasses the working-directory trust prompt and does not itself skip tool-call approval. **Note: NOT resume-capable in current Vibe version**; session management uses internal state in `~/.vibe/logs/session/` but does not emit a parseable resume hint to stdout/stderr. |
 | qwen    | `qwen -p <prompt> --output-format text` (cwd=worktree). `QWEN_HOME` set to worktree-local `.workflow/qwen-home` so sessions, chat recordings, and usage artifacts cannot cross missions. Tool-approval bypass via `tools.approvalMode: yolo` in worktree-local `settings.json` (mirrors vibe's `--yolo`; qwen CLI has no `--yolo` flag). `HOME` and `PATH` remain untouched. Resume via `-r <session-id>` (session id extracted from `<QWEN_HOME>/projects/<hash>/chats/<id>.jsonl`) or `-c` for most recent; session-not-found falls back to fresh session. Telemetry extracted from disk artifacts: `usage/token-usage-YYYY-MM.jsonl` (per-call tokens) and `usage_record.jsonl` (session summary with tool calls/duration). |
@@ -251,11 +251,13 @@ The `<stage>` field is `"starting up"` before the step-specific initial delay el
 
 This means the launcher process is alive but silent. It is not a launch failure by itself. A launch failure is still reported separately when the process cannot start, exits non-zero, is killed by a signal, or produces a detected usage-limit transcript that triggers fallback.
 
+A launcher that cannot start reports no exit status, so the harness reports the spawn error itself: `Launcher for "<agent>" did not start or report an exit status: code <code>, message "<message>"`. `E2BIG` means the command line exceeded the operating system's argument-size limit (Linux caps one argument at 128 KiB); the claude, mistral, qwen and opencode launchers still pass the prompt as an argument and can hit it with very large recovery prompts. A repair launch that fails this way, or with another error the operating system would repeat (`ENOENT`, `EACCES`, `ENOEXEC`, `ENAMETOOLONG`), is not retried unchanged. A missing exit status with no error or signal is still a failed launch, never a repair.
+
 An unexpected `SIGTERM` of an agent, at startup or mid-run, is a per-invocation failure: the session falls back to the next eligible agent and excludes the terminated one for the rest of that session. It writes no block, so the next run can select that agent again. A `SIGTERM` that accompanies a genuine usage-limit message still blocks as before. Operator cancellation and application shutdown end the session without launching a fallback.
 
 ### Launch echo
 
-Each launch echoes the command it is about to run. The prompt is one of the launcher arguments and runs to hundreds of lines, so it is summarized as `<prompt: <n> chars>` by default; `DEBUG=1` echoes the verbatim command, prompt included, for reproducing a launch by hand.
+Each launch echoes the command it is about to run. A prompt passed as a launcher argument runs to hundreds of lines, so it is summarized as `<prompt: <n> chars>` by default; `DEBUG=1` echoes the verbatim command, prompt included, for reproducing a launch by hand. A prompt delivered on stdin (Codex) is summarized as `<prompt on stdin: <n> chars>`.
 
 ## Per-step eligibility policy
 
@@ -576,6 +578,24 @@ The Backlog task is moved to `active` with the correct implementer **only after*
 
 When `startAgent` falls back to a different agent family after a limit hit, the Backlog records the fallback family (the agent that actually ran), not the originally preselected one.
 
+### Resuming stopped execution
+
+After resolving a recorded contract contradiction, run `px active <slug>` to
+resume unfinished work. This explicit operator invocation acknowledges retained
+execution stops before preparing the implementer. For an unfinished repair, it
+clears the retained contract blocker and refreshes repair authorization to the
+current recorded success criteria and declared gates. `px status <slug>` keeps
+the prior blocker, proposed correction, and operator acknowledgment readable.
+
+Resume preserves prior checkpoint evidence. It adds no checkpoint, records no
+Goal Check evidence, marks no criterion complete, and claims no repair success.
+The implementer continues from the first unfinished checkpoint; declared gates
+and independent review still apply at handoff. Automatic retries and recovery
+do not carry this acknowledgment authority. A new blocker stops the resumed run
+again: the command reports the concrete reason, exits non-zero, and prints no
+implementation-complete message for that blocked execution. `px checkpoint
+record --force` retains its existing evidence requirements.
+
 ### Backlog branch ownership
 
 Backlog lifecycle state changes are committed in the active mission worktree. This applies equally to actions started from the `px` UI: the UI uses the same workflow command path and does not route task-state commits through the primary branch.
@@ -654,30 +674,17 @@ keep a null ID. Round-time criteria from before capture remain unknown.
 
 
 Before a dedicated repair launch, Parallix persists an incident-associated repair
-checkpoint and names it in the prompt. The agent records fresh evidence there
-with `px checkpoint record`; a relaunch requires another fresh write.
+checkpoint and names it in the prompt. A new incident's checkpoint starts with
+a copy of every row from the latest checkpoint that has evidence and is either
+not a repair or a verified repair; each copied row names that source checkpoint
+(`carriedFrom` in `px status --json`, `(carried from CP-N)` in text) and keeps
+its evidence and round unchanged. Carried rows keep accepted coverage visible
+but are not repair proof: the agent records fresh evidence there with
+`px checkpoint record`, which replaces the carried row for the same criterion
+and keeps the others, and the harness refuses a repair checkpoint with only
+carried rows. Reopening the same incident keeps its rows; a relaunch requires
+another fresh write.
 Every planned checkpoint must have evidence before handoff.
-With `px checkpoint record --name CP-1 --criterion '<exact criterion text>'
---evidence '<verifiable evidence>' --next '<specific next action>' --complete-criteria`,
-recording and completion are one atomic write. Repeat the criterion/evidence pair
-for each criterion verified. Only the supplied rows complete criteria; retained
-repair rows keep their previous completion state. Invalid evidence, unknown
-criterion text or a competing write changes nothing. Omitting the flag retains
-evidence-only recording.
-
-Draft, execute and review agents receive authoritative Mission snapshots current
-as of launch and a short `px` command that resolves to the launching CLI. The
-snapshot replaces the initial status read; successful mutation output is readback.
-The launch prompt supplies a shell bootstrap to prefix each invocation using
-`px`, inside the final shell body after login or interactive profiles load. It
-restores the pinned PATH and overrides profile aliases or functions, including
-when an agent starts a nested shell.
-Use `px status` to recover missing context or a version conflict. Graphify guidance
-is supplied only when the graph exists at launch. Handoff runs declared gates;
-agents use focused checks to develop changes or investigate concrete failures.
-Reviewers cite the recorded gate result and validated SHA, and review substantive
-Backlog edits while recognizing Parallix-owned status and assignee transitions.
-
 A repair checkpoint records only the criteria it fixes; earlier valid rows for the
 other criteria are retained, not rewritten. Handoff then measures coverage across
 every recorded checkpoint by criterion identity, so a repair that covers its
@@ -690,6 +697,16 @@ criterion N` in the summary; the classifier uses `success-criterion-N` ids) each
 need a fresh row, as do the criteria whose recorded proof cites a failed integration gate
 or command, or that were recorded to repair that same gate before, and otherwise at least one fresh row, so a handoff that leaves
 only rows kept from earlier rounds is refused.
+
+Each review round keeps its start revision separately from the exact revision
+judged by its decision. Pre-review preparation can advance the head between
+those moments; approval or requested changes records the judged head without
+rewriting the start revision. Review history displays both. Classifier research,
+repair comparisons and decision measurements use the decided revision.
+Older decisions whose judged head was never recorded retain a null decided
+revision; Parallix does not substitute the start revision or reconstruct history.
+Missing decided-code evidence requires normal review rather than a classifier
+or mechanical restoration shortcut.
 
 ### Pre-review bounce policy — verified fixes and a per-failure budget
 
@@ -768,8 +785,10 @@ the human without spending the repair budget. A repair enters a fresh round thro
 Before model dispatch, an unchanged baseline-relative mission patch with
 recorded green validation of the failed gate can restore prior approval
 mechanically. See [integration repair eligibility](operator-setup.md).
-A substantive change or unavailable comparison/evidence takes normal review, and
-the reviewer's prompt carries the failed gate, its output, and the repair range
+A substantive repair can restore approval through the weakening questions even
+without a recorded gate re-run; mandatory integration gates still run before
+landing. Unavailable required evidence or a non-clearing answer takes general
+review, and the reviewer's prompt carries the failed gate, its output, and the repair range
 A..B; the reviewer decides how much to review. On approval the mission stops in
 the integration lane. Parallix never merges an approval a human has not seen:
 `px integrate`, `px review --continue` and `px lead` all stop there, and

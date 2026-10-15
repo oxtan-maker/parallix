@@ -1,3 +1,4 @@
+import type { SqlParameter } from './database-adapter.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import fs from 'node:fs';
 
@@ -171,7 +172,7 @@ export class SqliteMeasurementStore implements MeasurementStorePort {
     return { changed };
   }
 
-  private selectRows(sql: string, params: readonly unknown[]): readonly MeasurementRecord[] {
+  private selectRows(sql: string, params: readonly SqlParameter[]): readonly MeasurementRecord[] {
     try {
       const rows = this.db.querySync<Record<string, unknown>>(sql, params);
       return rows.map((row) => rowToRecord(row));
@@ -239,17 +240,7 @@ function bindValues(record: MeasurementRecord): (string | number | null)[] {
     record.reviewer_agent ?? null,
     record.stage,
     record.actorKey,
-    record.input_tokens ?? null,
-    record.output_tokens ?? null,
-    record.cached_tokens ?? null,
-    record.thoughts_tokens ?? null,
-    record.context_tokens ?? null,
-    record.tool_calls ?? null,
-    record.openai_usage_before ?? null,
-    record.openai_usage_after ?? null,
-    record.openai_usage_delta ?? null,
-    record.duration_minutes ?? null,
-    record.cost_usd ?? null,
+    ...usageBindings(record),
   ];
 }
 
@@ -362,4 +353,20 @@ export function closeMeasurementStores(): void {
     store.close();
   }
   openStores.clear();
+}
+
+function usageBindings(record: MeasurementRecord): (number | null)[] {
+  return [
+    record.input_tokens ?? null,
+    record.output_tokens ?? null,
+    record.cached_tokens ?? null,
+    record.thoughts_tokens ?? null,
+    record.context_tokens ?? null,
+    record.tool_calls ?? null,
+    record.openai_usage_before ?? null,
+    record.openai_usage_after ?? null,
+    record.openai_usage_delta ?? null,
+    record.duration_minutes ?? null,
+    record.cost_usd ?? null,
+  ];
 }

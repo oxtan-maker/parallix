@@ -5,22 +5,25 @@ import * as statsReport from '../../../../../src/adapters/cli/commands/stats-rep
 // `createWindow` and friends hang off the default export object, not the
 // module's named exports, so this must be the default import.
 import stats from '../../../../../src/adapters/cli/commands/stats.js';
+import { StatsRow } from '../../../../../src/application/services/statistics-row.js';
 
-function missionFlow(rows) {
-  return rows.filter(row => row.completedForTest === 'yes')
+interface TestRow extends StatsRow { repo: string; mission: string; date: string; completedForTest?: string; }
+
+function missionFlow(rows: readonly TestRow[]) {
+  return rows.filter((row) => row.completedForTest === 'yes')
     .map(row => ({ repo: row.repo, mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [], implementer: row.implementer }));
 }
 
-function completedMissionKeys(rows) {
-  return new Set(rows.filter(row => row.completedForTest === 'yes')
+function completedMissionKeys(rows: readonly TestRow[]) {
+  return new Set(rows.filter((row) => row.completedForTest === 'yes')
     .map(row => `${row.repo}::${String(row.mission).trim().toLowerCase()}`));
 }
 
-function renderWeeklyStatsReport(rows, options = {}) {
+function renderWeeklyStatsReport(rows: readonly TestRow[], options = {}) {
   return statsReport.renderWeeklyStatsReport(rows, { ...options, missionFlow: missionFlow(rows) });
 }
 
-function renderRangeStatsReport(rows, options = {}) {
+function renderRangeStatsReport(rows: readonly TestRow[], options = {}) {
   return statsReport.renderRangeStatsReport(rows, { ...options, missionFlow: missionFlow(rows) });
 }
 

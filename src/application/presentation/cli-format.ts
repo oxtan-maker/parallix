@@ -35,7 +35,7 @@ const agentMap: Record<string, string> = {
   custom: 'yellow',
 };
 
-export function colorize(format: string, text: string, runtime?: RuntimeConfiguration): string {
+export function colorize(format: string, text: unknown, runtime?: RuntimeConfiguration): string {
   const value = String(text ?? '');
   if (!runtime) { return styleText(format as import('node:util').InspectColor, value); }
   if (runtime.noColor || runtime.forceColor === '0' || runtime.term === 'dumb') { return value; }
@@ -46,15 +46,15 @@ export function colorize(format: string, text: string, runtime?: RuntimeConfigur
 // control character in a regex literal; the matched text is unchanged.
 const ANSI_SGR_PATTERN = new RegExp(`${String.fromCharCode(0x1b)}\\[[0-9;]*m`, 'g');
 
-export function stripAnsi(text: string): string {
+export function stripAnsi(text: unknown): string {
   return String(text ?? '').replace(ANSI_SGR_PATTERN, '');
 }
 
-export function visibleWidth(text: string): number {
+export function visibleWidth(text: unknown): number {
   return stripAnsi(text).length;
 }
 
-export function padVisibleEnd(text: string, width: number): string {
+export function padVisibleEnd(text: unknown, width: number): string {
   const stringValue = String(text ?? '');
   const padLength = Math.max(0, width - visibleWidth(stringValue));
   return stringValue + ' '.repeat(padLength);
@@ -90,7 +90,7 @@ export function kv(key: string, value: string, width: number = 30): string {
   return `${bold(key.padEnd(width))} ${value}`;
 }
 
-export function table(rows: string[][], { indent = 2, colPadding = 2 }: { indent?: number; colPadding?: number } = {}): string {
+export function table(rows: readonly (readonly unknown[])[], { indent = 2, colPadding = 2 }: { indent?: number; colPadding?: number } = {}): string {
   if (rows.length === 0) {return '';}
   const colWidths = rows[0].map((_, i) => Math.max(...rows.map(row => visibleWidth(row[i] ?? ''))));
   const padding = ' '.repeat(indent);
@@ -209,7 +209,7 @@ export { colors };
 /** Bind terminal presentation explicitly for an injected host configuration. */
 export function createFormatter(runtime: RuntimeConfiguration) {
   return {
-    colorize: (format: string, text: string) => colorize(format, text, runtime),
+    colorize: (format: string, text: unknown) => colorize(format, text, runtime),
     status: (type: string, text: string) => status(type, text, runtime),
     agent: (family: string, text = family, runner?: string) => agent(family, text, runner, runtime),
     bold: (text: string) => bold(text, runtime), dim: (text: string) => dim(text, runtime),

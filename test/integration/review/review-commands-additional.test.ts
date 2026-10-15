@@ -14,9 +14,7 @@ test('pushRound exits when no forgejoUser', async () => {
   await pushRound('test-slug', {
     resolveWorktreeFn: () => mockRootDir,
     readReviewStateFn: () => null,
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    resolveTaskFileFn: () => ({ ok: false }),
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
+    resolveTaskFileFn: () => ({ matches: [], reason: 'missing' as const,  ok: false as const }),
     exit: (code) => { exited = true; },
     log: () => {},
     error: () => {}
@@ -28,7 +26,6 @@ test('commentRound exits when no forgejoUser', async () => {
   let exited = false;
   await commentRound('test-slug', 'msg', {
     readReviewStateFn: () => null,
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     exit: (code) => { exited = true; },
     log: () => {},
     error: () => {},
@@ -41,7 +38,6 @@ test('submitReviewRound exits when no forgejoUser', async () => {
   let exited = false;
   await submitReviewRound('test-slug', 'approve', 'msg', {
     readReviewStateFn: () => null,
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     exit: (code) => { exited = true; },
     log: () => {},
     error: () => {},

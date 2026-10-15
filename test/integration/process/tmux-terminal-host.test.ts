@@ -32,7 +32,7 @@ import { startClaudeAgent } from '../../../src/adapters/agents/claude.js';
 import { CLAUDE_STREAM_FIXTURE } from '../../fixtures/claude-stream-json.js';
 import { createMissionTerminalResources } from '../../../src/adapters/cli/commands/mission-terminal-resources.js';
 
-const sink = { write: () => true };
+const sink = { write: () => true } satisfies import("../../../src/adapters/process/spawn-tee.js").TeeSink;
 const REPO_ROOT = path.join(import.meta.dirname, '..', '..', '..');
 
 interface Fixture {
@@ -181,6 +181,25 @@ test('cancellation by signal kills the owned agent and preserves the mission ter
     assert.equal(result.status, 143);
     waitFor(() => { try { process.kill(agentPid, 0); return false; } catch { return true; } });
     assert.deepEqual(listTmuxSessions(missionSocketPath(run.identity, resolveConfiguration(fx.env))).map(s => s.name), [run.identity.missionId]);
+  } finally { fx.cleanup(); }
+});
+
+test('a hosted launch reads an oversized prompt byte-for-byte from stdin and leaves no prompt file behind (TASK-2760)', { timeout: 20000 }, async () => {
+  const fx = fixture();
+  try {
+    const worktree = fx.worktree('task-in');
+    const run = session(fx, worktree, 'task-in');
+    const receipt = path.join(fx.root, 'receipt');
+    const prompt = 'hosted recovery — 修复 🚀\n'.repeat(8000);
+    assert.ok(Buffer.byteLength(prompt) > 188_583);
+    const result = await spawnAndTee('sh', ['-c', `cat > ${receipt}; echo hosted-stdin-done`], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions, input: prompt });
+    run.finish(result);
+    assert.equal(result.status, 0);
+    assert.ok(fs.readFileSync(receipt).equals(Buffer.from(prompt)), 'the pane command reads the exact prompt and EOF');
+    assert.match(result.stdout, /hosted-stdin-done/);
+    const state = fx.env.PARALLIX_TERMINAL_STATE_DIR!;
+    const leftovers = fs.readdirSync(state, { recursive: true }).map(String).filter(name => path.basename(name) === 'stdin');
+    assert.deepEqual(leftovers, [], 'the private prompt file is removed');
   } finally { fx.cleanup(); }
 });
 
@@ -571,7 +590,7 @@ test('a headless operator CLI invocation preserves pipes without an inherited wr
   try {
     const worktree = fx.worktree('cli-entry');
     assert.equal(childProcess.spawnSync('git', ['init', '-q', worktree]).status, 0);
-    const env = { ...fx.env, PARALLIX_HOME: path.join(fx.root, 'home') };
+    const env: NodeJS.ProcessEnv = { ...fx.env, PARALLIX_HOME: path.join(fx.root, 'home') };
     for (const key of ['PARALLIX_CLI_COMMAND', 'PARALLIX_CLI_ENTRYPOINT', 'PARALLIX_MISSION_TERMINAL', 'PARALLIX_MISSION_SOCKET', 'TMUX', 'TMUX_PANE']) {
       delete env[key];
     }
@@ -809,7 +828,7 @@ test('hosted Claude launch shows readable presentation in the live pane and tran
       pane = paneText();
     }
     fs.writeFileSync(release, '');
-    const result: any = await resultPromise;
+    const result = await resultPromise;
     run.finish(result);
     assert.match(pane, /Checking the launcher wiring/, 'live pane shows assistant text');
     assert.match(pane, /ls src\/adapters/, 'live pane shows tool activity');
@@ -818,6 +837,7 @@ test('hosted Claude launch shows readable presentation in the live pane and tran
     assert.match(transcript, /Checking the launcher wiring/);
     assert.doesNotMatch(transcript, /stream_event/);
     assert.equal(result.sessionId, 'sess-2461', 'session id is extracted from the raw stream');
+    assert.ok(result.stdout);
     assert.ok(result.stdout.includes('"type":"stream_event"'), 'telemetry tail keeps the raw JSONL');
     for (const line of CLAUDE_STREAM_FIXTURE.split('\n').filter(l => l.startsWith('{'))) { assert.ok(result.stdout.includes(line), 'raw record intact'); }
   } finally { fx.cleanup(); }
@@ -833,10 +853,10 @@ test('presented Claude launch keeps the agent exit status and stops the agent on
     const failing = session(fx, worktree, 'task-claude-x', 'claude');
     fs.writeFileSync(path.join(bin, 'claude'), '#!/bin/sh\necho plain-diagnostic\nexit 7\n', { mode: 0o700 });
     const env = { PATH: `${bin}${path.delimiter}${process.env.PATH}` };
-    const exited: any = await startClaudeAgent({ prompt: 'p', worktree, configuration: resolveConfiguration(fx.env), env, teeOptions: { ...failing.teeOptions, stdoutSink: sink, stderrSink: sink } }).resultPromise;
+    const exited = await startClaudeAgent({ prompt: 'p', worktree, configuration: resolveConfiguration(fx.env), env, teeOptions: { ...failing.teeOptions, stdoutSink: sink, stderrSink: sink } }).resultPromise;
     failing.finish(exited);
     assert.equal(exited.status, 7);
-    assert.match(exited.stdout, /plain-diagnostic/, 'non-JSON output still reaches the raw stream');
+    assert.match(exited.stdout ?? '', /plain-diagnostic/, 'non-JSON output still reaches the raw stream');
     const cancelled = session(fx, worktree, 'task-claude-x', 'claude');
     fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/sh\necho $$ > ${shellQuote(pidFile)}\nexec sleep 30\n`, { mode: 0o700 });
     let hostPid = 0;
@@ -845,7 +865,7 @@ test('presented Claude launch keeps the agent exit status and stops the agent on
     waitFor(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() !== '', 8000);
     const agentPid = Number(fs.readFileSync(pidFile, 'utf8'));
     process.kill(hostPid, 'SIGTERM');
-    const result: any = await resultPromise;
+    const result = await resultPromise;
     cancelled.finish(result);
     assert.equal(result.status, 143);
     waitFor(() => { try { process.kill(agentPid, 0); return false; } catch { return true; } });

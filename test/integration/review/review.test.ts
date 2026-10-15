@@ -1,4 +1,11 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import type { ReviewStateInstanceReader } from '../../../src/adapters/review/review-state.js';
+import { reviewStateWriterFixture } from '../../helpers/review-state-writer.js';
+import { rebaseWorkflowFixture } from '../../helpers/rebase-workflow-fixture.js';
+import type { RebaseWorkflowPort } from '../../../src/application/ports/rebase-workflow.js';
+import { forgejoApiFixture, forgejoAsyncApiFixture } from '../../fixtures/forgejo-api.js';
+import type { ReviewStateData } from "../../../src/application/ports/review-persistence.js";
+import type { ParallixConfiguration } from "../../../src/application/ports/configuration.js";
+type ForgejoOptions = NonNullable<Parameters<typeof import("../../../src/adapters/forgejo/forgejo-pr.js").createPr>[3]>;
 
 
 // We test the pure validation logic that runs before any agent is launched.
@@ -50,7 +57,7 @@ const createEventHandlerModule = mockModule<typeof import('../../../src/adapters
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const { verifyReview, readComments, pushRound } = verifyReviewModule;
-const review = (args, options = {}) =>
+const review = (args: string[], options: NonNullable<Parameters<typeof verifyReviewModule.createReviewWorkflowAdapter>[0]> = {}) =>
   createReviewCommand(new ReviewCommandUseCase(verifyReviewModule.createReviewWorkflowAdapter(options)))(args, options);
 const { rebaseBeforeReviewRound } = rebaseBeforeReviewRoundModule;
 const { pollForReview } = pollForReviewModule;
@@ -74,11 +81,11 @@ const { createEventHandler } = createEventHandlerModule;
 // Base mission slug — append process.pid for isolation between parallel runs.
 const TEST_SLUG = `task-test-review-${process.pid}`;
 const hermeticLoopCollaborators = {
-  gitFn: () => ({ status: 0, stdout: 'main\n', stderr: '' }),
+  gitFn: () => ({ signal: null,  status: 0, stdout: 'main\n', stderr: '' }),
   recordStageStatsSafeFn: async () => {},
   transitionTaskFn: async () => true,
 };
-const persistenceCommitted = () => ({ outcome: 'committed' });
+const persistenceCommitted = async () => ({ outcome: 'committed' as const });
 // Dry-run tests assert local loop setup, not provider behavior. Make that
 // boundary explicit so they cannot probe the workstation's Forgejo service.
 const isolatedDryRun = { isForgejoReviewEnabledFn: () => false };
@@ -86,8 +93,8 @@ const isolatedDryRun = { isForgejoReviewEnabledFn: () => false };
 // Isolate stats writes to a temp PARALLIX_HOME so test runs never pollute
 // the real operator stats.csv (recordStageStatsSafe writes there via
 // recordStageStats/recordReviewStats/recordActiveStats).
-let _prevParallixHome;
-let _tmpHome;
+let _prevParallixHome: string | undefined;
+let _tmpHome: string;
 test.beforeEach(() => {
   _tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'review-test-home-'));
   _prevParallixHome = process.env.PARALLIX_HOME;
@@ -114,7 +121,7 @@ function cleanupArtifacts() {
 }
 test.beforeEach(() => { cleanupArtifacts(); });
 
-function runGitOrThrow(args, options = {}) {
+function runGitOrThrow(args: string[], options: Omit<childProcess.SpawnSyncOptionsWithStringEncoding, 'encoding'> = {}) {
   const result = childProcess.spawnSync('git', args, {
     encoding: 'utf8',
     ...options
@@ -123,9 +130,7 @@ function runGitOrThrow(args, options = {}) {
     throw result.error;
   }
   if (typeof result.status === 'number' && result.status !== 0) {
-    const error = new Error((result.stderr || result.stdout || `git ${args.join(' ')} failed`).trim());
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `result` absent from its inferred mock shape.
-    error.result = result;
+    const error = Object.assign(new Error((result.stderr || result.stdout || `git ${args.join(' ')} failed`).trim()), { result });
     throw error;
   }
   return result.stdout || '';
@@ -156,7 +161,7 @@ function cleanInterruptedReviewFixtureSource(parentPid: number, root: string): s
   `;
 }
 
-function watchInterruptedReviewFixture(root) {
+function watchInterruptedReviewFixture(root: string) {
   const watcher = childProcess.spawn(process.execPath, [
     '-e', cleanInterruptedReviewFixtureSource(process.pid, root)
   ], { detached: true, stdio: 'ignore' });
@@ -164,19 +169,19 @@ function watchInterruptedReviewFixture(root) {
 }
 
 async function passingPreReviewGate() {
-  return { ok: true, area: 'all', command: 'test gate', exitCode: 0, stdout: '', stderr: '' };
+  return { ok: true as const, area: 'all' as const, command: 'test gate', exitCode: 0, stdout: '', stderr: '' };
 }
 
-async function captureExit(fn) {
+async function captureExit(fn: () => unknown | Promise<unknown>) {
   const originalExit = process.exit;
   const originalError = console.error;
   const originalLog = console.log;
-  const errors = [];
-  const logs = [];
-  let exitCode = null;
+  const errors: (string | unknown)[] = [];
+  const logs: (string | unknown)[] = [];
+  let exitCode: { value: Parameters<typeof process.exit>[0] } = { value: null };
 
   process.exit = (code) => {
-    exitCode = code;
+    exitCode.value = code;
     throw new Error(`process.exit(${code})`);
   };
   console.error = (...args) => errors.push(args.join(' '));
@@ -190,7 +195,7 @@ async function captureExit(fn) {
   try {
     await fn();
   } catch (err) {
-    if (!err.message.startsWith('process.exit(')) throw err;
+    if (!(err instanceof Error) || !err.message.startsWith('process.exit(')) throw err;
   } finally {
     process.exit = originalExit;
     console.error = originalError;
@@ -198,7 +203,7 @@ async function captureExit(fn) {
     fmt.setLogger(oldLogger);
   }
 
-  return { exitCode, errors, logs };
+  return { exitCode: exitCode.value, errors, logs };
 }
 
 
@@ -209,31 +214,31 @@ async function captureExit(fn) {
 
 
 test('verifyReview handles task status edge cases', async () => {
-  const logs = [];
-  const errors = [];
-  const exitCodes = [];
+  const logs: string[] = [];
+  const errors: string[] = [];
+  const exitCodes: number[] = [];
 
   const baseOptions = {
-    log: (m) => logs.push(m),
-    error: (m) => errors.push(m),
-    exit: (c) => exitCodes.push(c),
+    log: (m: string) => logs.push(m),
+    error: (m: string) => errors.push(m),
+    exit: (c: number) => exitCodes.push(c),
     resolveWorktreeFn: () => null,
     findMissionDirFn: () => '/tmp/mission',
     getCurrentBranchFn: () => `mission/${TEST_SLUG}`,
-    getPrStatusFn: () => ({ exists: true, state: 'open', number: 41 }),
+    getPrStatusFn: () => ({ raw: '', title: undefined, merged: false, url: undefined, createdAt: null,  exists: true as const, state: 'open', number: 41 }),
     findMissionAreaFn: () => 'docs',
-    runFn: () => ({ status: 0 }),
+    runFn: () => ({ signal: null, stdout: '', stderr: '',  status: 0 }),
     getAcceptanceCriteriaFn: () => [],
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({}),
+    buildAutonomousReviewMatrixFn: () => ({ step: 'review', agents: [], configPath: '', configPresent: false, launchers: {} }),
     readReviewStateFn: () => null,
     cwdFn: () => '/tmp/visualBoard'
-  };
+  } satisfies Partial<NonNullable<Parameters<typeof verifyReview>[2]>>;
 
   // 1. Task not found
   verifyReview(TEST_SLUG, false, {
     ...baseOptions,
-    resolveTaskFileFn: () => ({ ok: false, reason: 'missing' })
+    resolveTaskFileFn: () => ({ matches: [],  ok: false as const, reason: 'missing' as const })
   });
   assert.ok(logs.some(l => l.includes('not found in backlog/tasks/')), 'Should log task not found');
 
@@ -241,17 +246,15 @@ test('verifyReview handles task status edge cases', async () => {
   logs.length = 0;
   verifyReview(TEST_SLUG, false, {
     ...baseOptions,
-    resolveTaskFileFn: () => ({ ok: false, reason: 'ambiguous', matches: ['a.md', 'b.md'] })
+    resolveTaskFileFn: () => ({ ok: false as const, reason: 'ambiguous' as const, matches: ['a.md', 'b.md'] })
   });
   assert.ok(logs.some(l => l.includes('Backlog task resolution is ambiguous')), 'Should log ambiguous task');
 
   // 3. Task status DONE
   logs.length = 0;
   verifyReview(TEST_SLUG, false, {
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     ...baseOptions,
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `md` absent from its inferred mock shape.
-    resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }),
+    resolveTaskFileFn: () => ({ matches: ['task.md'],  ok: true as const, taskFile: 'task.md' }),
     getTaskStatusFn: () => 'done'
   });
   assert.ok(logs.some(l => l.includes('Backlog task: task is already done/integrated')), 'Should log done task error');
@@ -259,10 +262,8 @@ test('verifyReview handles task status edge cases', async () => {
   // 4. Task status ACTIVE (warning)
   logs.length = 0;
   verifyReview(TEST_SLUG, false, {
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     ...baseOptions,
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `md` absent from its inferred mock shape.
-    resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }),
+    resolveTaskFileFn: () => ({ matches: ['task.md'],  ok: true as const, taskFile: 'task.md' }),
     getTaskStatusFn: () => 'active'
   });
   assert.ok(logs.some(l => l.includes('Backlog task: task.md is still active')), 'Should log active task warning');
@@ -270,60 +271,56 @@ test('verifyReview handles task status edge cases', async () => {
   // 5. Unexpected task status
   logs.length = 0;
   verifyReview(TEST_SLUG, false, {
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     ...baseOptions,
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `md` absent from its inferred mock shape.
-    resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }),
+    resolveTaskFileFn: () => ({ matches: ['task.md'],  ok: true as const, taskFile: 'task.md' }),
     getTaskStatusFn: () => 'backlog'
   });
   assert.ok(logs.some(l => l.includes('Backlog task: unexpected status backlog')), 'Should log unexpected status error');
 });
 
 test('verifyReview handles PR state edge cases', async () => {
-  const logs = [];
-  const errors = [];
-  const exitCodes = [];
+  const logs: string[] = [];
+  const errors: string[] = [];
+  const exitCodes: number[] = [];
 
   const baseOptions = {
-    log: (m) => logs.push(m),
-    error: (m) => errors.push(m),
-    exit: (c) => exitCodes.push(c),
+    log: (m: string) => logs.push(m),
+    error: (m: string) => errors.push(m),
+    exit: (c: number) => exitCodes.push(c),
     resolveWorktreeFn: () => null,
     findMissionDirFn: () => '/tmp/mission',
     getCurrentBranchFn: () => `mission/${TEST_SLUG}`,
-    resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }),
+    resolveTaskFileFn: () => ({ matches: ['task.md'],  ok: true as const, taskFile: 'task.md' }),
     getTaskStatusFn: () => 'review',
     findMissionAreaFn: () => 'docs',
-    runFn: () => ({ status: 0 }),
+    runFn: () => ({ signal: null, stdout: '', stderr: '',  status: 0 }),
     getAcceptanceCriteriaFn: () => [],
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({}),
+    buildAutonomousReviewMatrixFn: () => ({ step: 'review', agents: [], configPath: '', configPresent: false, launchers: {} }),
     readReviewStateFn: () => null,
     isForgejoReviewEnabledFn: () => true,
     cwdFn: () => '/tmp/visualBoard'
-  };
+  } satisfies Partial<NonNullable<Parameters<typeof verifyReview>[2]>>;
 
   // 1. PR closed/merged
   verifyReview(TEST_SLUG, false, {
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     ...baseOptions,
-    getPrStatusFn: () => ({ exists: true, state: 'closed', merged: true, number: 41 })
+    getPrStatusFn: () => ({ raw: '', title: undefined, url: undefined, createdAt: null,  exists: true as const, state: 'closed', merged: true, number: 41 })
   });
   assert.ok(logs.some(l => l.includes('Review PR: expected an open PR, got state=closed merged=true')), 'Should log PR state error');
 
   // 2. PR missing
   logs.length = 0;
   verifyReview(TEST_SLUG, false, {
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     ...baseOptions,
-    getPrStatusFn: () => ({ exists: false, raw: 'Not found' })
+    getPrStatusFn: () => ({ exists: false as const, raw: 'Not found' })
   });
   assert.ok(logs.some(l => l.includes('Review PR: Not found')), 'Should log PR missing error');
 });
 
 test('verifyReview handles gate failures', async () => {
-  const logs = [];
-  const exitCodes = [];
+  const logs: string[] = [];
+  const exitCodes: number[] = [];
 
   // The reviewer gate resolves its command from the review root (cwdFn when no
   // worktree resolves); the default is no validation, so configure a gate in a
@@ -338,22 +335,20 @@ test('verifyReview handles gate failures', async () => {
   process.chdir(tmp);
   try {
     verifyReview(TEST_SLUG, false, {
-      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
-      log: (m) => logs.push(m),
+      log: (m: string) => logs.push(m),
       error: () => {},
-      exit: (c) => exitCodes.push(c),
+      exit: (c: number) => exitCodes.push(c),
       resolveWorktreeFn: () => null,
       findMissionDirFn: () => '/tmp/mission',
       getCurrentBranchFn: () => `mission/${TEST_SLUG}`,
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `md` absent from its inferred mock shape.
-      resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }),
+      resolveTaskFileFn: () => ({ matches: ['task.md'],  ok: true as const, taskFile: 'task.md' }),
       getTaskStatusFn: () => 'review',
-      getPrStatusFn: () => ({ exists: true, state: 'open', number: 41 }),
+      getPrStatusFn: () => ({ raw: '', title: undefined, merged: false, url: undefined, createdAt: null,  exists: true as const, state: 'open', number: 41 }),
       findMissionAreaFn: () => 'docs',
-      runFn: () => ({ status: 1 }), // Fails
+      runFn: () => ({ signal: null, stdout: '', stderr: '',  status: 1 }), // Fails
       getAcceptanceCriteriaFn: () => [],
       formatMatrixSummaryFn: () => [],
-      buildAutonomousReviewMatrixFn: () => ({}),
+      buildAutonomousReviewMatrixFn: () => ({ step: 'review', agents: [], configPath: '', configPresent: false, launchers: {} }),
       readReviewStateFn: () => null,
       // Hermetic: point at the temp dir holding the workflow.config.json written
       // above. A hardcoded developer-machine path here made the gate read no
@@ -377,19 +372,19 @@ test('verifyReview handles gate failures', async () => {
 
 test('review helper functions and error paths', async () => {
   const { pollForReview, pollForDisposition } = pollForReviewModule;
-  const logs = [];
-  const errors = [];
-  const exitCodes = [];
+  const logs: string[] = [];
+  const errors: string[] = [];
+  const exitCodes: number[] = [];
 
   const baseOptions = {
-    log: (m) => logs.push(m),
-    error: (m) => errors.push(m),
-    exit: (c) => exitCodes.push(c),
+    log: (m: string) => logs.push(m),
+    error: (m: string) => errors.push(m),
+    exit: (c: number) => exitCodes.push(c),
     inferSlugFn: (s) => s || 'test-slug',
-    getPrStatusFn: () => ({ exists: false }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
     readReviewStateFn: () => null,
-    readFileSync: (p) => { if (p === 'fail.md') throw new Error('read fail'); return 'content'; }
-  };
+    readFileSync: (p: string) => { if (p === 'fail.md') throw new Error('read fail'); return 'content'; }
+  } satisfies Partial<NonNullable<Parameters<typeof review>[1]>>;
 
   // 1. review usage error (missing slug)
   await review([], { ...baseOptions, inferSlugFn: () => null });
@@ -405,14 +400,14 @@ test('review helper functions and error paths', async () => {
   // 3. readTextFlag error path
   errors.length = 0;
   exitCodes.length = 0;
-  await review(['test-slug', '--comment-file', 'fail.md'], { ...baseOptions, isComment: true });
+  await review(['test-slug', '--comment-file', 'fail.md'], { ...baseOptions });
   assert.deepEqual(exitCodes, [1, 1]);
   assert.ok(errors[0].includes('Could not read comment from fail.md'), 'Should log read error');
 
   // 4. Polling helpers - No token warning
   const originalLog = console.log;
   try {
-    console.log = (m) => logs.push(m);
+    console.log = (m: unknown) => { assert.ok(typeof m === 'string'); return logs.push(m); };
     logs.length = 0;
     const reviewResult = await pollForReview(41, 'user', 'since', null, { configuration: resolveConfiguration(process.env) });
     assert.equal(reviewResult, null);
@@ -428,18 +423,16 @@ test('review helper functions and error paths', async () => {
 });
 
 test('review function missing argument and env var error paths', async () => {
-  const errors = [];
-  const exitCodes = [];
+  const errors: string[] = [];
+  const exitCodes: number[] = [];
 
   const baseOptions = {
-    error: (m) => errors.push(m),
-    exit: (c) => exitCodes.push(c),
+    error: (m: string) => errors.push(m),
+    exit: (c: number) => exitCodes.push(c),
     inferSlugFn: (s) => s || 'test-slug',
-    isForgejoReviewEnabledFn: () => true,
-    readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'codex' }),
-    readTokenFn: () => 'token',
-    getCommentsFn: async () => []
-  };
+    readReviewStateFn: (slug: string) => (new ReviewState(slug, { reviewer: 'codex', implementer: 'codex' })),
+    readCommentsFn: (slug, options) => readComments(slug, { ...options, readTokenFn: () => 'token', getCommentsFn: async () => [], isForgejoReviewEnabledFn: () => true })
+  } satisfies Partial<NonNullable<Parameters<typeof review>[1]>>;
 
   // 1. --comments should use review-state identity without needing FORGEJO_USER
   await review(['test-slug', '--comments'], { ...baseOptions });
@@ -468,9 +461,9 @@ test('review function missing argument and env var error paths', async () => {
  * In-process rebase-workflow seam (TASK-2377.02). `rebaseBeforeReviewRound` no
  * longer spawns `px rebase`, so these tests drive the `RebaseWorkflowPort`.
  */
-function inProcessWorkflow(runs, { exitCode = 0, port = {}, onRun = null } = {}) {
+function inProcessWorkflow(runs: string[][], { exitCode = 0, port = {}, onRun = null }: { exitCode?: number; port?: Partial<RebaseWorkflowPort>; onRun?: ((port: RebaseWorkflowPort) => void | Promise<void>) | null } = {}): Pick<NonNullable<Parameters<typeof rebaseBeforeReviewRound>[1]>, 'createRebaseWorkflowPortFn' | 'runRebaseWorkflowFn'> {
   return {
-    createRebaseWorkflowPortFn: () => ({ exit: () => {}, ...port }),
+    createRebaseWorkflowPortFn: () => rebaseWorkflowFixture({ exit: () => {}, ...port }),
     runRebaseWorkflowFn: async (args, workflowPort) => {
       runs.push(args);
       if (onRun) { await onRun(workflowPort); }
@@ -480,10 +473,10 @@ function inProcessWorkflow(runs, { exitCode = 0, port = {}, onRun = null } = {})
 }
 
 test('rebaseBeforeReviewRound succeeds after a clean rebase', async () => {
-  const logs = [];
-  const errors = [];
+  const logs: string[] = [];
+  const errors: string[] = [];
 
-  const workflowRuns = [];
+  const workflowRuns: string[][] = [];
   const result = await rebaseBeforeReviewRound('task-1087', {
     worktree: '/tmp/worktree',
     isForgejoReviewEnabledFn: () => true,
@@ -500,8 +493,8 @@ test('rebaseBeforeReviewRound succeeds after a clean rebase', async () => {
 });
 
 test('rebaseBeforeReviewRound reports shared-file conflicts with recovery instructions', async () => {
-  const logs = [];
-  const errors = [];
+  const logs: string[] = [];
+  const errors: string[] = [];
 
   const result = await rebaseBeforeReviewRound('task-1087', {
     worktree: '/tmp/worktree',
@@ -510,7 +503,7 @@ test('rebaseBeforeReviewRound reports shared-file conflicts with recovery instru
       exitCode: 1,
       port: {
         resolveConflictsForMission: () => ({
-          ok: true, conflictFiles: ['src/shared.js'], missionSpecificFiles: [], sharedFiles: ['src/shared.js'],
+          ok: true as const, conflictFiles: ['src/shared.js'], missionSpecificFiles: [], sharedFiles: ['src/shared.js'],
         }),
       },
       onRun: (workflowPort) => { workflowPort.resolveConflictsForMission('task-1087', 'lib', {}); },
@@ -537,8 +530,8 @@ test('rebaseBeforeReviewRound reports shared-file conflicts with recovery instru
 });
 
 test('rebaseBeforeReviewRound derives sharedFileConflicts from sharedFiles when the conflict-resolution agent launches', async () => {
-  const launches = [];
-  const startAgent = async (step) => { launches.push(step); return { agent: 'claude', result: { ok: false } }; };
+  const launches: string[] = [];
+  const startAgent: RebaseWorkflowPort['startAgent'] = async (step) => { launches.push(step); return { agent: 'claude', result: { status: 1 } }; };
 
   const result = await rebaseBeforeReviewRound('task-1087', {
     worktree: '/tmp/worktree',
@@ -548,14 +541,14 @@ test('rebaseBeforeReviewRound derives sharedFileConflicts from sharedFiles when 
       port: {
         startAgent,
         resolveConflictsForMission: () => ({
-          ok: true, conflictFiles: ['src/shared.js'], missionSpecificFiles: [], sharedFiles: ['src/shared.js'],
+          ok: true as const, conflictFiles: ['src/shared.js'], missionSpecificFiles: [], sharedFiles: ['src/shared.js'],
         }),
       },
       onRun: async (workflowPort) => {
         // The workflow launches the resolver through the unwrapped port method.
         assert.equal(workflowPort.startAgent, startAgent, 'startAgent must reach the workflow unwrapped');
         workflowPort.resolveConflictsForMission('task-1087', 'lib', {});
-        await workflowPort.startAgent('conflict-resolution', { configuration: resolveConfiguration(process.env),});
+        await workflowPort.startAgent('conflict-resolution', { prompt: 'Resolve fixture conflicts', worktree: '/tmp/worktree', slug: 'task-1087' });
       },
     }),
     log: () => {},
@@ -568,8 +561,8 @@ test('rebaseBeforeReviewRound derives sharedFileConflicts from sharedFiles when 
 });
 
 test('rebaseBeforeReviewRound reports non-conflict rebase failures', async () => {
-  const logs = [];
-  const errors = [];
+  const logs: string[] = [];
+  const errors: string[] = [];
 
   const result = await rebaseBeforeReviewRound('task-1087', {
     worktree: '/tmp/worktree',
@@ -582,6 +575,7 @@ test('rebaseBeforeReviewRound reports non-conflict rebase failures', async () =>
   assert.equal(result.ok, false);
   assert.equal(result.sharedFileConflicts, false);
   assert.equal(result.hookFailure, false);
+  assert.ok(result.failure != null);
   assert.equal(result.failure.kind, 'other');
   assert.ok(errors.some(message => message.includes('Rebase failed before launching reviewer')));
   assert.ok(
@@ -593,7 +587,7 @@ test('rebaseBeforeReviewRound reports non-conflict rebase failures', async () =>
 
 
 test('pollForReview waits asynchronously between retries', async () => {
-  const sleeps = [];
+  const sleeps: number[] = [];
   let attempts = 0;
 
   const state = await pollForReview(41, 'claude', '2026-04-18T10:00:00Z', 'fake-token', { configuration: resolveConfiguration(process.env),
@@ -612,7 +606,7 @@ test('pollForReview waits asynchronously between retries', async () => {
 });
 
 test('pollForDisposition waits asynchronously between retries', async () => {
-  const sleeps = [];
+  const sleeps: number[] = [];
   let attempts = 0;
 
   const disposition = await pollForDisposition(41, 'codex', '2026-04-18T10:00:00Z', 'fake-token', { configuration: resolveConfiguration(process.env),
@@ -631,7 +625,7 @@ test('pollForDisposition waits asynchronously between retries', async () => {
 });
 
 test('pollForReview honours caller intervalMs and timeoutMs and returns timeout sentinel on timeout', async () => {
-  const sleeps = [];
+  const sleeps: number[] = [];
 
   // Simulated clock so the "timeout" fires after a few iterations without real time passing.
   const originalNow = Date.now;
@@ -659,7 +653,7 @@ test('pollForReview honours caller intervalMs and timeoutMs and returns timeout 
 });
 
 test('pollForReview emits a progress line on every tick when verbose=true', async () => {
-  const logs = [];
+  const logs: string[] = [];
   const originalLog = console.log;
   console.log = (msg) => logs.push(String(msg));
 
@@ -729,7 +723,7 @@ test('pollForDisposition misses comment if created_at is slightly before sinceIs
   ];
 
   let callCount = 0;
-  const getLatestDispositionForPrFn = async (prNum, user, since) => {
+  const getLatestDispositionForPrFn: NonNullable<NonNullable<Parameters<typeof pollForDisposition>[4]>["getLatestDispositionForPrFn"]> = async (prNum, user, since) => {
     callCount++;
     const eligible = mockComments.filter(c =>
       c.user.login === user && c.created_at >= since
@@ -766,7 +760,7 @@ test('pollForDisposition finds comment with stable round start time despite cloc
     }
   ];
 
-  const getLatestDispositionForPrFn = async (prNum, user, since) => {
+  const getLatestDispositionForPrFn: NonNullable<NonNullable<Parameters<typeof pollForDisposition>[4]>["getLatestDispositionForPrFn"]> = async (prNum, user, since) => {
     const eligible = mockComments.filter(c =>
       c.user.login === user && c.created_at >= since
     );
@@ -804,7 +798,7 @@ test('pollForDisposition finds already-posted comment when resuming a round', as
   // We restart at 10:00:20
   const resumeTime = '2026-04-26T10:00:20.000Z';
 
-  const getLatestDispositionForPrFn = async (prNum, user, since) => {
+  const getLatestDispositionForPrFn: NonNullable<NonNullable<Parameters<typeof pollForDisposition>[4]>["getLatestDispositionForPrFn"]> = async (prNum, user, since) => {
     const eligible = mockComments.filter(c =>
       c.user.login === user && c.created_at >= since
     );
@@ -844,7 +838,7 @@ test('getLatestReviewForPr correctly handles mixed-precision ISO timestamps', as
     }
   ];
 
-  const apiCall = async () => ({ ok: true, data: mockReviews });
+  const apiCall = forgejoAsyncApiFixture(async () => ({ ok: true as const, data: mockReviews }));
 
   const review = await getLatestReviewForPr(41, 'codex', sinceIso, 'fake-token', { apiCall });
   assert.ok(review, 'Should have found the review');
@@ -853,10 +847,10 @@ test('getLatestReviewForPr correctly handles mixed-precision ISO timestamps', as
 
 test('getLatestReviewForPr accepts a human request after round start but excludes stale approval', async () => {
   const review = await getLatestReviewForPr(41, 'codex', '2026-04-26T10:00:00Z', 'fake-token', {
-    apiCall: async () => ({ ok: true, data: [
+    apiCall: forgejoAsyncApiFixture(async () => ({ ok: true as const, data: [
       { user: { login: 'codex' }, submitted_at: '2026-04-26T09:59:59Z', state: 'APPROVED' },
       { user: { login: 'human' }, submitted_at: '2026-04-26T10:00:01Z', state: 'REQUEST_CHANGES' },
-    ] }),
+    ] })),
   });
   assert.deepEqual(review, { state: 'REQUEST_CHANGES', submittedAt: '2026-04-26T10:00:01Z' });
 });
@@ -878,7 +872,7 @@ test('getLatestReviewForPr correctly sorts mixed-precision ISO timestamps', asyn
     }
   ];
 
-  const apiCall = async () => ({ ok: true, data: mockReviews });
+  const apiCall = forgejoAsyncApiFixture(async () => ({ ok: true as const, data: mockReviews }));
 
   const review = await getLatestReviewForPr(41, 'codex', sinceIso, 'fake-token', { apiCall });
   assert.ok(review, 'Should have found the review');
@@ -898,7 +892,7 @@ test('getLatestDispositionForPr correctly handles mixed-precision ISO timestamps
     }
   ];
 
-  const apiCall = async () => ({ ok: true, data: mockComments });
+  const apiCall = forgejoAsyncApiFixture(async () => ({ ok: true as const, data: mockComments }));
 
   const disposition = await getLatestDispositionForPr(41, 'gemini', sinceIso, 'fake-token', { apiCall });
   assert.strictEqual(disposition, 'CHANGES_MADE');
@@ -921,7 +915,7 @@ test('getLatestDispositionForPr correctly sorts mixed-precision ISO timestamps',
     }
   ];
 
-  const apiCall = async () => ({ ok: true, data: mockComments });
+  const apiCall = forgejoAsyncApiFixture(async () => ({ ok: true as const, data: mockComments }));
 
   const disposition = await getLatestDispositionForPr(41, 'gemini', sinceIso, 'fake-token', { apiCall });
   // 10:00:01Z is later than 10:00:00.500Z
@@ -940,12 +934,12 @@ test('getLatestDisposition correctly handles mixed-precision ISO timestamps', ()
     }
   ];
 
-  const apiCall = (method, path) => {
+  const apiCall = forgejoApiFixture((method, path) => {
     if (path.startsWith('/pulls')) {
-      return { ok: true, data: [{ number: 41, head: { ref: 'mission/task-1016' } }] };
+      return { ok: true as const, data: [{ number: 41, head: { ref: 'mission/task-1016' } }] };
     }
-    return { ok: true, data: mockComments };
-  };
+    return { ok: true as const, data: mockComments };
+  });
 
   const disposition = getLatestDisposition('mission/task-1016', 'gemini', sinceIso, 'fake-token', { apiCall });
   assert.strictEqual(disposition, 'CHANGES_MADE');
@@ -968,12 +962,12 @@ test('getLatestDisposition correctly sorts mixed-precision ISO timestamps', () =
     }
   ];
 
-  const apiCall = (method, path) => {
+  const apiCall = forgejoApiFixture((method, path) => {
     if (path.startsWith('/pulls')) {
-      return { ok: true, data: [{ number: 41, head: { ref: 'mission/task-1016' } }] };
+      return { ok: true as const, data: [{ number: 41, head: { ref: 'mission/task-1016' } }] };
     }
-    return { ok: true, data: mockComments };
-  };
+    return { ok: true as const, data: mockComments };
+  });
 
   const disposition = getLatestDisposition('mission/task-1016', 'gemini', sinceIso, 'fake-token', { apiCall });
   // 10:00:01Z is later than 10:00:00.500Z
@@ -992,15 +986,15 @@ test('getLatestReview correctly handles mixed-precision ISO timestamps', () => {
     }
   ];
 
-  const apiCall = (method, path) => {
+  const apiCall = forgejoApiFixture((method, path) => {
     if (path.includes('/reviews')) {
-      return { ok: true, data: mockReviews };
+      return { ok: true as const, data: mockReviews };
     }
     if (path.startsWith('/pulls')) {
-      return { ok: true, data: [{ number: 41, head: { ref: 'mission/task-1016' } }] };
+      return { ok: true as const, data: [{ number: 41, head: { ref: 'mission/task-1016' } }] };
     }
-    return { ok: false };
-  };
+    return { ok: false as const };
+  });
 
   const review = getLatestReview('mission/task-1016', 'codex', sinceIso, 'fake-token', { apiCall });
   assert.ok(review);
@@ -1024,15 +1018,15 @@ test('getLatestReview correctly sorts mixed-precision ISO timestamps', () => {
     }
   ];
 
-  const apiCall = (method, path) => {
+  const apiCall = forgejoApiFixture((method, path) => {
     if (path.includes('/reviews')) {
-      return { ok: true, data: mockReviews };
+      return { ok: true as const, data: mockReviews };
     }
     if (path.startsWith('/pulls')) {
-      return { ok: true, data: [{ number: 41, head: { ref: 'mission/task-1016' } }] };
+      return { ok: true as const, data: [{ number: 41, head: { ref: 'mission/task-1016' } }] };
     }
-    return { ok: false };
-  };
+    return { ok: false as const };
+  });
 
   const review = getLatestReview('mission/task-1016', 'codex', sinceIso, 'fake-token', { apiCall });
   assert.ok(review);
@@ -1044,8 +1038,8 @@ test('getLatestReview correctly sorts mixed-precision ISO timestamps', () => {
 
 test('applyAgentFallback returns the original agent when startAgent did not fall back', async () => {
   const { applyAgentFallback } = applyAgentFallbackModule;
-  const writeReviewStateFn = () => { throw new Error('writeReviewState should not run when no fallback'); };
-  const enforceTaskAssigneeFn = () => { throw new Error('enforceTaskAssignee should not run when no fallback'); };
+  const writeReviewStateFn: NonNullable<NonNullable<Parameters<typeof applyAgentFallback>[0]>["writeReviewStateFn"]> = () => { throw new Error('writeReviewState should not run when no fallback'); };
+  const enforceTaskAssigneeFn: NonNullable<NonNullable<Parameters<typeof applyAgentFallback>[0]>["enforceTaskAssigneeFn"]> = () => { throw new Error('enforceTaskAssignee should not run when no fallback'); };
 
   const state = new ReviewState('task-test-fallback', { reviewer: 'codex', implementer: 'custom', round: 1 });
 
@@ -1056,7 +1050,7 @@ test('applyAgentFallback returns the original agent when startAgent did not fall
     state,
     slug: 'task-test-fallback',
     worktree: '/tmp/visualBoard-task-test-fallback',
-    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    taskResolution: { ok: true, taskFile: '/tmp/task.md', matches: ['/tmp/task.md'] },
     log: () => {},
     writeReviewStateFn,
     enforceTaskAssigneeFn
@@ -1068,7 +1062,7 @@ test('applyAgentFallback returns the original agent when startAgent did not fall
 test('applyAgentFallback rewrites reviewer identity and persists state but does NOT update backlog assignee', async () => {
   const { applyAgentFallback } = applyAgentFallbackModule;
   const { ReviewState } = ReviewStateModule;
-  const writes = [];
+  const writes: { slug: string; state: Record<string, unknown> | ReviewStateData; worktree: string | undefined; }[] = [];
   const state = new ReviewState('task-test-fallback', { reviewer: 'claude', implementer: 'custom', round: 2 });
 
   const next = await applyAgentFallback({
@@ -1078,9 +1072,9 @@ test('applyAgentFallback rewrites reviewer identity and persists state but does 
     state,
     slug: 'task-test-fallback',
     worktree: '/tmp/visualBoard-task-test-fallback',
-    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    taskResolution: { ok: true, taskFile: '/tmp/task.md', matches: ['/tmp/task.md'] },
     log: () => {},
-    writeReviewStateFn: (slug, st, worktree) => writes.push({ slug, state: st, worktree }),
+    writeReviewStateFn: reviewStateWriterFixture((slug, st, worktree) => writes.push({ slug, state: st, worktree })),
     enforceTaskAssigneeFn: () => { throw new Error('enforceTaskAssignee must not be called for reviewer fallback'); }
   });
 
@@ -1096,7 +1090,7 @@ test('applyAgentFallback rewrites reviewer identity and persists state but does 
 test('applyAgentFallback rewrites implementer identity on fallback without touching reviewer', async () => {
   const { applyAgentFallback } = applyAgentFallbackModule;
   const { ReviewState } = ReviewStateModule;
-  const writes = [];
+  const writes: { slug: string; state: Record<string, unknown> | ReviewStateData; worktree: string | undefined; }[] = [];
   const state = new ReviewState('task-test-fallback', { reviewer: 'codex', implementer: 'custom', round: 3 });
 
   const next = await applyAgentFallback({
@@ -1106,9 +1100,9 @@ test('applyAgentFallback rewrites implementer identity on fallback without touch
     state,
     slug: 'task-test-fallback',
     worktree: '/tmp/visualBoard-task-test-fallback',
-    taskResolution: { ok: false },
+    taskResolution: { ok: false, reason: 'missing', matches: [] },
     log: () => {},
-    writeReviewStateFn: (slug, st, worktree) => writes.push({ slug, state: st, worktree }),
+    writeReviewStateFn: reviewStateWriterFixture((slug, st, worktree) => writes.push({ slug, state: st, worktree })),
     enforceTaskAssigneeFn: () => { throw new Error('enforceTaskAssignee must not run when taskResolution.ok is false'); }
   });
 
@@ -1120,8 +1114,8 @@ test('applyAgentFallback rewrites implementer identity on fallback without touch
 test('applyAgentFallback enforces implementer in backlog when implementer falls back', async () => {
   const { applyAgentFallback } = applyAgentFallbackModule;
   const { ReviewState } = ReviewStateModule;
-  const writes = [];
-  const enforced = [];
+  const writes: { slug: string; state: Record<string, unknown> | ReviewStateData; worktree: string | undefined; }[] = [];
+  const enforced: { file: string; agent: string; }[] = [];
   const state = new ReviewState('task-test-fallback', { reviewer: 'custom', implementer: 'claude', round: 2 });
 
   const next = await applyAgentFallback({
@@ -1131,9 +1125,9 @@ test('applyAgentFallback enforces implementer in backlog when implementer falls 
     state,
     slug: 'task-test-fallback',
     worktree: '/tmp/visualBoard-task-test-fallback',
-    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    taskResolution: { ok: true, taskFile: '/tmp/task.md', matches: ['/tmp/task.md'] },
     log: () => {},
-    writeReviewStateFn: (slug, st, worktree) => writes.push({ slug, state: st, worktree }),
+    writeReviewStateFn: reviewStateWriterFixture((slug, st, worktree) => writes.push({ slug, state: st, worktree })),
     enforceTaskAssigneeFn: (file, agent) => { enforced.push({ file, agent }); return true; }
   });
 
@@ -1152,7 +1146,7 @@ test('applyAgentFallback handles a missing launchResult gracefully (catastrophic
     state,
     slug: 'task-test-fallback',
     worktree: '/tmp/x',
-    taskResolution: { ok: false },
+    taskResolution: { ok: false, reason: 'missing', matches: [] },
     log: () => {},
     writeReviewStateFn: () => { throw new Error('should not write'); },
     enforceTaskAssigneeFn: () => { throw new Error('should not assign'); }
@@ -1161,7 +1155,7 @@ test('applyAgentFallback handles a missing launchResult gracefully (catastrophic
 });
 
 test('applyAgentFallback handles a missing state during an implementer fallback', async () => {
-  const writes = [];
+  const writes: (Record<string, unknown> | ReviewStateData)[] = [];
   const next = await applyAgentFallback({
     role: 'implementer',
     original: 'claude',
@@ -1169,7 +1163,7 @@ test('applyAgentFallback handles a missing state during an implementer fallback'
     slug: 'task-test-fallback',
     worktree: '/tmp/x',
     log: () => {},
-    writeReviewStateFn: (_slug, state) => writes.push(state),
+    writeReviewStateFn: reviewStateWriterFixture((_slug, state) => writes.push(state)),
   });
 
   assert.equal(next, 'codex');
@@ -1180,7 +1174,7 @@ test('applyAgentFallback preserves the original roundStartedAt when rewriting st
   // Regression: a crash after the fallback rewrite but before pollFor* completes
   // must leave review-state.json pinned to the original round start so the resumed
   // run still picks up comments the fallback agent already posted in this round.
-  const writes = [];
+  const writes: { slug: string; state: Record<string, unknown> | ReviewStateData; worktree: string | undefined; }[] = [];
   const roundStartedAt = '2026-04-27T17:00:00.000Z';
   const state = new ReviewState('task-test-fallback', { reviewer: 'claude', implementer: 'custom', round: 4, startedAt: roundStartedAt });
 
@@ -1191,9 +1185,9 @@ test('applyAgentFallback preserves the original roundStartedAt when rewriting st
     state,
     slug: 'task-test-fallback',
     worktree: '/tmp/visualBoard-task-test-fallback',
-    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    taskResolution: { ok: true, taskFile: '/tmp/task.md', matches: ['/tmp/task.md'] },
     log: () => {},
-    writeReviewStateFn: (slug, st, worktree) => writes.push({ slug, state: st, worktree }),
+    writeReviewStateFn: reviewStateWriterFixture((slug, st, worktree) => writes.push({ slug, state: st, worktree })),
     enforceTaskAssigneeFn: () => true
   });
 
@@ -1209,10 +1203,10 @@ test('applyAgentFallback preserves the original roundStartedAt when rewriting st
 
 
 test('review dispatches to verifyReview with inferred slug and no-gate flag', async () => {
-  const calls = [];
+  const calls: { slug: string; skipGate: string | boolean; }[] = [];
 
   await review(['task-1031', '--verify', '--no-gate'], {
-    inferSlugFn: explicit => explicit,
+    inferSlugFn: explicit => explicit ?? null,
     verifyReviewFn: (slug, skipGate) => calls.push({ slug, skipGate })
   });
 
@@ -1220,10 +1214,10 @@ test('review dispatches to verifyReview with inferred slug and no-gate flag', as
 });
 
 test('review dispatches to commentRound with file-backed message', async () => {
-  const calls = [];
+  const calls: { slug: string; message: string; }[] = [];
 
   await review(['task-1031', '--comment-file', '/tmp/review-comment.txt'], {
-    inferSlugFn: explicit => explicit,
+    inferSlugFn: explicit => explicit ?? null,
     readFileSync: () => 'Review body\n',
     commentRoundFn: (slug, message) => calls.push({ slug, message })
   });
@@ -1232,12 +1226,12 @@ test('review dispatches to commentRound with file-backed message', async () => {
 });
 
 test('review prints status when no action flag is provided', async () => {
-  const lines = [];
+  const lines: string[] = [];
 
   await review(['task-1031'], {
-    inferSlugFn: explicit => explicit,
-    getPrStatusFn: () => ({ exists: true, raw: 'PR #83 open' }),
-    readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'claude', round: 2 }),
+    inferSlugFn: explicit => explicit ?? null,
+    getPrStatusFn: () => ({ number: undefined, title: undefined, state: undefined, merged: false, url: undefined, createdAt: null,  exists: true as const, raw: 'PR #83 open' }),
+    readReviewStateFn: (slug: string) => (new ReviewState(slug, { reviewer: 'codex', implementer: 'claude', round: 2 })),
     log: line => lines.push(line)
   });
 
@@ -1247,19 +1241,19 @@ test('review prints status when no action flag is provided', async () => {
 });
 
 test('review re-launches the implementer on static findings instead of starting the autonomous loop', async () => {
-  const calls = [];
+  const calls: ({ type: 'submit'; slug: string } | { type: 'comment'; slug: string; message: string } | { type: 'agent'; step: string; opts: { prompt: string; agent: string; worktree: string; slug: string } })[] = [];
 
   await review(['task-1031'], {
-    inferSlugFn: explicit => explicit,
+    inferSlugFn: explicit => explicit ?? null,
     resolveWorktreeFn: () => '/tmp/mission-task-1031',
-    getPrStatusFn: () => ({ exists: false }),
-    performStaticReviewFn: () => ({ ok: false, findings: ['Missing Goal Check evidence'] }),
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1031.md' }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
+    performStaticReviewFn: () => ({ ok: false as const, findings: ['Missing Goal Check evidence'] }),
+    resolveTaskFileFn: () => ({ matches: ['/tmp/task-1031.md'],  ok: true as const, taskFile: '/tmp/task-1031.md' }),
     getTaskImplementerFn: () => 'claude',
-    submitForReviewFn: async slug => calls.push({ type: 'submit', slug }),
-    postStaticReviewCommentFn: (slug, message) => calls.push({ type: 'comment', slug, message }),
-    startReviewLoopFn: async slug => calls.push({ type: 'start', slug }),
-    startAgentFn: async (step, opts) => calls.push({ type: 'agent', step, opts }),
+    submitForReviewFn: async slug => calls.push({ type: 'submit' as const, slug }),
+    postStaticReviewCommentFn: (slug, message) => calls.push({ type: 'comment' as const, slug, message }),
+    reviewLoopMechanisms: () => assert.fail('static findings must not start an autonomous loop'),
+    startAgentFn: async (step, opts) => calls.push({ type: 'agent' as const, step, opts }),
     readReviewStateFn: () => null,
     log: () => {},
     error: () => {}
@@ -1270,6 +1264,7 @@ test('review re-launches the implementer on static findings instead of starting 
     calls.map(call => call.type),
     ['agent']
   );
+  assert.ok(calls[0].type === 'agent');
   assert.equal(calls[0].step, 'active');
   assert.equal(calls[0].opts.agent, 'claude');
   assert.equal(calls[0].opts.worktree, '/tmp/mission-task-1031');
@@ -1277,15 +1272,15 @@ test('review re-launches the implementer on static findings instead of starting 
 });
 
 test('review posts zero-finding artifact but does NOT transition task when static review passes', async () => {
-  const calls = [];
+  const calls: ({ type: "submit"; slug: string; } | { type: "comment"; slug: string; message: string; })[] = [];
 
   await review(['task-1031'], {
-    inferSlugFn: explicit => explicit,
+    inferSlugFn: explicit => explicit ?? null,
     resolveWorktreeFn: () => '/tmp/mission-task-1031',
-    getPrStatusFn: () => ({ exists: false }),
-    performStaticReviewFn: () => ({ ok: true, findings: [] }),
-    submitForReviewFn: async slug => calls.push({ type: 'submit', slug }),
-    postStaticReviewCommentFn: (slug, message) => calls.push({ type: 'comment', slug, message }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
+    performStaticReviewFn: () => ({ ok: true as const, findings: [] }),
+    submitForReviewFn: async slug => calls.push({ type: 'submit' as const, slug }),
+    postStaticReviewCommentFn: (slug, message) => calls.push({ type: 'comment' as const, slug, message }),
     readReviewStateFn: () => null,
     log: () => {},
     error: () => {}
@@ -1297,32 +1292,33 @@ test('review posts zero-finding artifact but does NOT transition task when stati
     calls.map(call => call.type),
     ['submit', 'comment']
   );
+  assert.ok(calls[1].type === 'comment');
   assert.ok(calls[1].message.includes('found zero issues'));
 });
 
 test('verifyReview reports success path with gate pass and persisted state', async () => {
-  const lines = [];
-  let exitCode = null;
+  const lines: string[] = [];
+  let exitCode: { value: Parameters<typeof process.exit>[0] } = { value: null };
 
   await verifyReview('task-1031', false, {
     resolveWorktreeFn: () => '/tmp/mission-task-1031',
     findMissionDirFn: () => '/tmp/mission-task-1031/docs/missions/2026/task-1031',
     getCurrentBranchFn: () => 'mission/task-1031',
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1031.md' }),
-    getPrStatusFn: () => ({ exists: true, state: 'open', merged: false, number: 83 }),
+    resolveTaskFileFn: () => ({ matches: ['/tmp/task-1031.md'],  ok: true as const, taskFile: '/tmp/task-1031.md' }),
+    getPrStatusFn: () => ({ raw: '', title: undefined, url: undefined, createdAt: null,  exists: true as const, state: 'open', merged: false, number: 83 }),
     getTaskStatusFn: () => 'review',
     findMissionAreaFn: () => 'workflow',
-    runFn: () => ({ status: 0 }),
+    runFn: () => ({ signal: null, stdout: '', stderr: '',  status: 0 }),
     getAcceptanceCriteriaFn: () => ['- [x] prove it'],
     formatMatrixSummaryFn: () => ['matrix line'],
-    buildAutonomousReviewMatrixFn: () => ({}),
-    readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'claude', round: 2, startedAt: '2026-04-30T10:00:00Z' }),
+    buildAutonomousReviewMatrixFn: () => ({ step: 'review', agents: [], configPath: '', configPresent: false, launchers: {} }),
+    readReviewStateFn: (slug: string) => (new ReviewState(slug, { reviewer: 'codex', implementer: 'claude', round: 2, startedAt: '2026-04-30T10:00:00Z' })),
     log: line => lines.push(line),
     error: line => lines.push(`ERR:${line}`),
-    exit: code => { exitCode = code; }
+    exit: code => { exitCode.value = code; }
   });
 
-  assert.equal(exitCode, null);
+  assert.equal(exitCode.value, null);
   assert.ok(lines.includes('[PASS] Branch: mission/task-1031'));
   assert.ok(lines.includes('[PASS] Reviewer gate passed.'));
   assert.ok(lines.includes('[INFO] Autonomous review runtime matrix:'));
@@ -1331,8 +1327,8 @@ test('verifyReview reports success path with gate pass and persisted state', asy
 });
 
 test('verifyReview reports failure path and exits when blockers exist', async () => {
-  const lines = [];
-  let exitCode = null;
+  const lines: string[] = [];
+  let exitCode: { value: Parameters<typeof process.exit>[0] } = { value: null };
 
   await verifyReview('task-1031', true, {
     resolveWorktreeFn: () => null,
@@ -1340,17 +1336,17 @@ test('verifyReview reports failure path and exits when blockers exist', async ()
     isForgejoReviewEnabledFn: () => true,
     findMissionDirFn: () => null,
     getCurrentBranchFn: () => 'main',
-    resolveTaskFileFn: () => ({ ok: false, reason: 'ambiguous', matches: ['a.md', 'b.md'] }),
-    getPrStatusFn: () => ({ exists: false, raw: 'missing' }),
+    resolveTaskFileFn: () => ({ ok: false as const, reason: 'ambiguous' as const, matches: ['a.md', 'b.md'] }),
+    getPrStatusFn: () => ({ exists: false as const, raw: 'missing' }),
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({}),
+    buildAutonomousReviewMatrixFn: () => ({ step: 'review', agents: [], configPath: '', configPresent: false, launchers: {} }),
     readReviewStateFn: () => null,
     log: line => lines.push(line),
     error: line => lines.push(`ERR:${line}`),
-    exit: code => { exitCode = code; }
+    exit: code => { exitCode.value = code; }
   });
 
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.ok(lines.includes('[FAIL] Mission directory not found for slug: task-1031'));
   assert.ok(lines.includes('[FAIL] Branch: current branch is main, expected mission/task-1031'));
   assert.ok(lines.includes('[FAIL] Backlog task resolution is ambiguous for slug: task-1031'));
@@ -1359,21 +1355,21 @@ test('verifyReview reports failure path and exits when blockers exist', async ()
 });
 
 test('readComments renders comment list when token and comments exist', async () => {
-  const lines = [];
-  let exitCode = null;
+  const lines: string[] = [];
+  let exitCode: { value: Parameters<typeof process.exit>[0] } = { value: null };
   await readComments('task-1031', {
     readTokenFn: () => 'token',
     getCommentsFn: async () => [
-      { kind: 'inline', location: 'workflow/lib/review/review.js:10', user: 'claude', created: 'today', body: 'Looks good' }
+      { kind: 'inline', id: 'fixture-comment', isBot: false, updated: 'today', location: 'workflow/lib/review/review.js:10', user: 'claude', created: 'today', body: 'Looks good' }
     ],
-    readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'codex' }),
+    readReviewStateFn: (slug: string) => (new ReviewState(slug, { reviewer: 'codex', implementer: 'codex' })),
     isForgejoReviewEnabledFn: () => true,
     log: line => lines.push(line),
     error: line => lines.push(`ERR:${line}`),
-    exit: code => { exitCode = code; }
+    exit: code => { exitCode.value = code; }
   });
 
-  assert.equal(exitCode, null);
+  assert.equal(exitCode.value, null);
   assert.ok(lines.includes('[INFO] Reading PR comments on mission/task-1031 as codex...'));
   assert.ok(lines.includes('--- inline workflow/lib/review/review.js:10 | claude (today) ---'));
   assert.ok(lines.includes('Looks good'));
@@ -1382,36 +1378,36 @@ test('readComments renders comment list when token and comments exist', async ()
 test('pushRound resolves forgejo user from backlog assignee and reports success', async () => {
   const previous = process.env.FORGEJO_USER;
   delete process.env.FORGEJO_USER;
-  const lines = [];
-  let exitCode = null;
+  const lines: string[] = [];
+  let exitCode: { value: Parameters<typeof process.exit>[0] } = { value: null };
   try {
     await pushRound('task-1031', {
       isForgejoReviewEnabledFn: () => false,
       resolveWorktreeFn: () => '/tmp/mission-task-1031',
-      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1031.md' }),
+      resolveTaskFileFn: () => ({ matches: ['/tmp/task-1031.md'],  ok: true as const, taskFile: '/tmp/task-1031.md' }),
       getTaskImplementerFn: () => 'codex',
       readTokenFn: () => 'token',
-      createPrFn: () => ({ ok: true }),
+      createPrFn: () => ({ ok: true as const }),
       log: line => lines.push(line),
       error: line => lines.push(`ERR:${line}`),
-      exit: code => { exitCode = code; }
+      exit: code => { exitCode.value = code; }
     });
   } finally {
     if (previous !== undefined) process.env.FORGEJO_USER = previous;
   }
 
-  assert.equal(exitCode, null);
+  assert.equal(exitCode.value, null);
   assert.ok(lines.includes('[INFO] Pushing mission/task-1031 to the review provider as codex...'));
   assert.ok(lines.includes('[PASS] Branch pushed and PR updated for mission/task-1031.'));
 });
 
 test('commentRound and submitReviewRound fail loudly on API errors', async () => {
-  const errors = [];
-  const exits = [];
-  const readReviewStateFn = () => ({ reviewer: 'codex', implementer: 'codex' });
+  const errors: string[] = [];
+  const exits: number[] = [];
+  const readReviewStateFn: ReviewStateInstanceReader = (slug: string) => (new ReviewState(slug, { reviewer: 'codex', implementer: 'codex' }));
   await commentRound('task-1031', 'body', {
     readTokenFn: () => 'token',
-    postCommentFn: () => ({ ok: false, error: 'boom' }),
+    postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null,  ok: false as const, error: 'boom' }),
     readReviewStateFn,
     error: line => errors.push(line),
     exit: code => exits.push(code)
@@ -1419,7 +1415,7 @@ test('commentRound and submitReviewRound fail loudly on API errors', async () =>
   await submitReviewRound('task-1031', 'approve', 'ship it', { configuration: resolveConfiguration(process.env),
     readTokenFn: () => 'token',
     getPrAuthorFn: () => 'claude',
-    postReviewFn: () => ({ ok: false, error: 'nope' }),
+    postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null,  ok: false as const, error: 'nope' }),
     readReviewStateFn,
     isForgejoReviewEnabledFn: () => true,
     error: line => errors.push(line),
@@ -1434,62 +1430,64 @@ test('commentRound and submitReviewRound fail loudly on API errors', async () =>
 test('submitForReview exits when no forgejo user and no task implementer (task-1105)', async () => {
   const previous = process.env.FORGEJO_USER;
   delete process.env.FORGEJO_USER;
-  const calls = [];
-  let exitCode = null;
+  const calls: { slug: string; opts: Parameters<typeof import('../../../src/adapters/cli/commands/handoff.js').performHandoff>[1] | undefined; }[] = [];
+  let exitCode: { value: Parameters<typeof process.exit>[0] } = { value: null };
   try {
     await submitForReview('task-1105', true, {
-      resolveTaskFileFn: () => ({ ok: false }),
+      resolveTaskFileFn: () => ({ matches: [], reason: 'missing' as const,  ok: false as const }),
       getTaskImplementerFn: () => null,
       resolveWorktreeFn: () => '/tmp/mission-task-1105',
       isForgejoReviewEnabledFn: () => true,
       performHandoffFn: async (slug, opts) => {
         calls.push({ slug, opts });
-        return { ok: true };
+        return { ok: true as const };
       },
-      exit: code => { exitCode = code; }
+      exit: code => { exitCode.value = code; }
     });
   } finally {
     if (previous === undefined) delete process.env.FORGEJO_USER;
     else process.env.FORGEJO_USER = previous;
   }
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.equal(calls.length, 0);
 });
 
 test('submitForReview and closeMissionPr use injected handoff and close functions', async () => {
   const previous = process.env.FORGEJO_USER;
   delete process.env.FORGEJO_USER;
-  const calls = [];
-  let exitCode = null;
+  const calls: ({ slug: string; opts: Parameters<typeof import('../../../src/adapters/cli/commands/handoff.js').performHandoff>[1] | undefined; } | { branch: string; token: string; user: string; })[] = [];
+  let exitCode: { value: Parameters<typeof process.exit>[0] } = { value: null };
   try {
     await submitForReview('task-1031', true, {
-      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1031.md' }),
+      resolveTaskFileFn: () => ({ matches: ['/tmp/task-1031.md'],  ok: true as const, taskFile: '/tmp/task-1031.md' }),
       getTaskImplementerFn: () => 'gemini',
       resolveWorktreeFn: () => '/tmp/mission-task-1031',
       isForgejoReviewEnabledFn: () => false,
       performHandoffFn: async (slug, opts) => {
         calls.push({ slug, opts });
-        return { ok: true };
+        return { ok: true as const };
       },
-      exit: code => { exitCode = code; }
+      exit: code => { exitCode.value = code; }
       });
 
     await closeMissionPr('task-1031', {
       readTokenFn: () => 'token',
-      readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'gemini' }),
+      readReviewStateFn: (slug: string) => (new ReviewState(slug, { reviewer: 'codex', implementer: 'gemini' })),
       closePrFn: async (branch, token, user) => {
         calls.push({ branch, token, user });
-        return { ok: true };
+        return { ok: true as const };
       },
-      exit: code => { exitCode = code; }
+      exit: code => { exitCode.value = code; }
     });
   } finally {
     if (previous === undefined) delete process.env.FORGEJO_USER;
     else process.env.FORGEJO_USER = previous;
   }
 
-  assert.equal(exitCode, null);
+  assert.equal(exitCode.value, null);
+  assert.ok('slug' in calls[0]);
   assert.equal(calls[0].slug, 'task-1031');
+  assert.ok(calls[0].opts);
   assert.equal(calls[0].opts.forgejoUser, 'gemini');
   assert.deepEqual(calls[1], { branch: 'mission/task-1031', token: 'token', user: 'codex' });
 });
@@ -1535,12 +1533,12 @@ test('buildMetadataFooter returns empty string when no state exists', async () =
 
 test('commentRound appends metadata footer to message', async () => {
   const { commentRound } = createEventHandlerModule;
-  let posted = null;
+  let posted: { value: string | null } = { value: null };
   await commentRound('task-meta-2', 'Test comment body', {
     readTokenFn: () => 'token',
-    postCommentFn: (branch, token, message) => { posted = message; return { ok: true }; },
-    readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'codex' }),
-    buildMetadataFooterFn: () => '\n\n---\n`[workflow-round:2, workflow-phase:reviewing]`',
+    postCommentFn: (branch, token, message) => { posted.value = message; return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
+    readReviewStateFn: (slug: string) => (new ReviewState(slug, { reviewer: 'codex', implementer: 'codex' })),
+    buildMetadataFooterFn: async () => '\n\n---\n`[workflow-round:2, workflow-phase:reviewing]`',
     writeReviewStateFn: persistenceCommitted,
     rootDir: '/tmp/visualBoard-task-meta-2',
     log: () => {},
@@ -1548,18 +1546,19 @@ test('commentRound appends metadata footer to message', async () => {
     exit: () => {}
   });
 
-  assert.ok(posted.startsWith('Test comment body'));
-  assert.ok(posted.includes('[workflow-round:2, workflow-phase:reviewing]'));
+  assert.ok(posted.value != null);
+  assert.ok(posted.value.startsWith('Test comment body'));
+  assert.ok(posted.value.includes('[workflow-round:2, workflow-phase:reviewing]'));
 });
 
 test('submitReviewRound appends metadata footer to review message', async () => {
   const { submitReviewRound } = createEventHandlerModule;
-  let posted = null;
+  let posted: { value: string | null } = { value: null };
   await submitReviewRound('task-meta-3', 'approve', 'Looks good', { configuration: resolveConfiguration(process.env),
     readTokenFn: () => 'token',
-    postReviewFn: (branch, token, outcome, message) => { posted = message; return { ok: true }; },
-    readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'codex' }),
-    buildMetadataFooterFn: () => '\n\n---\n`[workflow-round:1, workflow-phase:reviewing]`',
+    postReviewFn: (branch, token, outcome, message) => { posted.value = message; return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
+    readReviewStateFn: (slug: string) => (new ReviewState(slug, { reviewer: 'codex', implementer: 'codex' })),
+    buildMetadataFooterFn: async () => '\n\n---\n`[workflow-round:1, workflow-phase:reviewing]`',
     writeReviewStateFn: persistenceCommitted,
     worktree: '/tmp/visualBoard-task-meta-3',
     isForgejoReviewEnabledFn: () => true,
@@ -1568,14 +1567,15 @@ test('submitReviewRound appends metadata footer to review message', async () => 
     exit: () => {}
   });
 
-  assert.ok(posted.startsWith('Looks good'));
-  assert.ok(posted.includes('[workflow-round:1, workflow-phase:reviewing]'));
+  assert.ok(posted.value != null);
+  assert.ok(posted.value.startsWith('Looks good'));
+  assert.ok(posted.value.includes('[workflow-round:1, workflow-phase:reviewing]'));
 });
 
 test('showReviewStatus prints state details when state exists', async () => {
   const { showReviewStatus } = createEventHandlerModule;
   const { ReviewState } = ReviewStateModule;
-  const lines = [];
+  const lines: string[] = [];
 
   await showReviewStatus('task-status-1', {
     readReviewStateFn: () => new ReviewState('task-status-1', {
@@ -1596,7 +1596,7 @@ test('showReviewStatus prints state details when state exists', async () => {
 
 test('showReviewStatus prints no-state message when state is absent', async () => {
   const { showReviewStatus } = createEventHandlerModule;
-  const lines = [];
+  const lines: string[] = [];
 
   await showReviewStatus('task-status-2', {
     readReviewStateFn: () => null,
@@ -1612,19 +1612,19 @@ test('showReviewStatus prints no-state message when state is absent', async () =
 test('commentRound persists review state after successful post', async () => {
   const { commentRound } = createEventHandlerModule;
   const { ReviewState } = ReviewStateModule;
-  let stateWritten = null;
+  let stateWritten: { value: { slug: string; state: Record<string, unknown> | ReviewStateData; worktree: string | undefined; } | null } = { value: null };
   const prev = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'codex';
 
   try {
     await commentRound('task-persist-1', 'Test body', {
       readTokenFn: () => 'token',
-      postCommentFn: () => ({ ok: true }),
-      buildMetadataFooterFn: () => '',
+      postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
+      buildMetadataFooterFn: async () => '',
       readReviewStateFn: () => new ReviewState('task-persist-1', {
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
       }),
-      writeReviewStateFn: (slug, state, worktree) => { stateWritten = { slug, state, worktree }; },
+      writeReviewStateFn: reviewStateWriterFixture((slug, state, worktree) => { stateWritten.value = { slug, state, worktree }; }),
       rootDir: '/tmp/visualBoard-task-persist-1',
       log: () => {},
       error: () => {},
@@ -1635,8 +1635,8 @@ test('commentRound persists review state after successful post', async () => {
     else process.env.FORGEJO_USER = prev;
   }
 
-  assert.ok(stateWritten, 'writeReviewStateFn must be called after successful comment post');
-  assert.equal(stateWritten.slug, 'task-persist-1');
+  assert.ok(stateWritten.value, 'writeReviewStateFn must be called after successful comment post');
+  assert.equal(stateWritten.value.slug, 'task-persist-1');
 });
 
 test('commentRound does not persist state when no state exists', async () => {
@@ -1648,10 +1648,10 @@ test('commentRound does not persist state when no state exists', async () => {
   try {
     await commentRound('task-persist-2', 'Test body', {
       readTokenFn: () => 'token',
-      postCommentFn: () => ({ ok: true }),
-      buildMetadataFooterFn: () => '',
+      postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
+      buildMetadataFooterFn: async () => '',
       readReviewStateFn: () => null,
-      writeReviewStateFn: () => { writeCount++; },
+      writeReviewStateFn: reviewStateWriterFixture(() => { writeCount++; }),
       rootDir: '/tmp/visualBoard-task-persist-2',
       log: () => {},
       error: () => {},
@@ -1668,22 +1668,22 @@ test('commentRound does not persist state when no state exists', async () => {
 test('submitReviewRound persists state with REQUEST_CHANGES disposition after request-changes', async () => {
   const { submitReviewRound } = createEventHandlerModule;
   const { ReviewState } = ReviewStateModule;
-  let stateWritten = null;
-  let backlogTransitioned = null;
+  let stateWritten: { value: { slug: string; disposition: unknown; phase: unknown; } | null } = { value: null };
+  let backlogTransitioned: { value: { slug: string; status: string; } | null } = { value: null };
   const prev = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'codex';
 
   try {
     await submitReviewRound('task-persist-3', 'request-changes', 'Needs work', { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'token',
-      postReviewFn: () => ({ ok: true }),
-      buildMetadataFooterFn: () => '',
+      postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
+      buildMetadataFooterFn: async () => '',
       readReviewStateFn: () => new ReviewState('task-persist-3', {
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
       }),
-      writeReviewStateFn: (slug, state) => { stateWritten = { slug, disposition: state.disposition, phase: state.phase }; },
+      writeReviewStateFn: reviewStateWriterFixture((slug, state) => { stateWritten.value = { slug, disposition: state.disposition, phase: state.phase }; }),
       transitionTaskFn: async (slug, status) => {
-        backlogTransitioned = { slug, status };
+        backlogTransitioned.value = { slug, status };
         return true;
       },
       worktree: '/tmp/visualBoard-task-persist-3',
@@ -1696,31 +1696,31 @@ test('submitReviewRound persists state with REQUEST_CHANGES disposition after re
     else process.env.FORGEJO_USER = prev;
   }
 
-  assert.ok(stateWritten, 'writeReviewStateFn must be called after successful review post');
-  assert.equal(stateWritten.disposition, 'REQUEST_CHANGES');
-  assert.equal(stateWritten.phase, 'fixing');
-  assert.deepEqual(backlogTransitioned, { slug: 'task-persist-3', status: 'review' });
+  assert.ok(stateWritten.value, 'writeReviewStateFn must be called after successful review post');
+  assert.equal(stateWritten.value.disposition, 'REQUEST_CHANGES');
+  assert.equal(stateWritten.value.phase, 'fixing');
+  assert.deepEqual(backlogTransitioned.value, { slug: 'task-persist-3', status: 'review' });
 });
 
 test('submitReviewRound persists state with APPROVED disposition after approve', async () => {
   const { submitReviewRound } = createEventHandlerModule;
   const { ReviewState } = ReviewStateModule;
-  let stateWritten = null;
-  let backlogTransitioned = null;
+  let stateWritten: { value: { slug: string; disposition: unknown; phase: unknown; } | null } = { value: null };
+  let backlogTransitioned: { value: { slug: string; status: string; } | null } = { value: null };
   const prev = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'codex';
 
   try {
     await submitReviewRound('task-persist-4', 'approve', 'LGTM', { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'token',
-      postReviewFn: () => ({ ok: true }),
-      buildMetadataFooterFn: () => '',
+      postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
+      buildMetadataFooterFn: async () => '',
       readReviewStateFn: () => new ReviewState('task-persist-4', {
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
       }),
-      writeReviewStateFn: (slug, state) => { stateWritten = { slug, disposition: state.disposition, phase: state.phase }; },
+      writeReviewStateFn: reviewStateWriterFixture((slug, state) => { stateWritten.value = { slug, disposition: state.disposition, phase: state.phase }; }),
       transitionTaskFn: async (slug, status) => {
-        backlogTransitioned = { slug, status };
+        backlogTransitioned.value = { slug, status };
         return true;
       },
       worktree: '/tmp/visualBoard-task-persist-4',
@@ -1733,16 +1733,16 @@ test('submitReviewRound persists state with APPROVED disposition after approve',
     else process.env.FORGEJO_USER = prev;
   }
 
-  assert.ok(stateWritten, 'writeReviewStateFn must be called after successful review post');
-  assert.equal(stateWritten.disposition, 'APPROVED');
-  assert.equal(stateWritten.phase, 'approved');
-  assert.deepEqual(backlogTransitioned, { slug: 'task-persist-4', status: 'approved' });
+  assert.ok(stateWritten.value, 'writeReviewStateFn must be called after successful review post');
+  assert.equal(stateWritten.value.disposition, 'APPROVED');
+  assert.equal(stateWritten.value.phase, 'approved');
+  assert.deepEqual(backlogTransitioned.value, { slug: 'task-persist-4', status: 'approved' });
 });
 
 test('submitReviewRound promotes an active backlog task to review after provider-backed approval', async () => {
   const { submitReviewRound } = createEventHandlerModule;
   const { ReviewState } = ReviewStateModule;
-  let transitioned = null;
+  let transitioned: { value: { slug: string; status: string; } | null } = { value: null };
   const prev = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'codex';
 
@@ -1750,16 +1750,16 @@ test('submitReviewRound promotes an active backlog task to review after provider
     await submitReviewRound('task-2197', 'approve', 'LGTM', { configuration: resolveConfiguration(process.env),
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => 'token',
-      postReviewFn: () => ({ ok: true }),
-      buildMetadataFooterFn: () => '',
+      postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
+      buildMetadataFooterFn: async () => '',
       writeReviewStateFn: persistenceCommitted,
       readReviewStateFn: () => new ReviewState('task-2197', {
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
       }),
-      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-2197.md' }),
+      resolveTaskFileFn: () => ({ matches: ['/tmp/task-2197.md'],  ok: true as const, taskFile: '/tmp/task-2197.md' }),
       getTaskStatusFn: () => 'active',
       transitionTaskFn: async (slug, status) => {
-        transitioned = { slug, status };
+        transitioned.value = { slug, status };
         return true;
       },
       worktree: '/tmp/visualBoard-task-2197',
@@ -1772,7 +1772,7 @@ test('submitReviewRound promotes an active backlog task to review after provider
     else process.env.FORGEJO_USER = prev;
   }
 
-  assert.deepEqual(transitioned, {
+  assert.deepEqual(transitioned.value, {
     slug: 'task-2197',
     status: 'review'
   });
@@ -1811,8 +1811,8 @@ test('submitReviewRound keeps YAML and rendered task status aligned when provide
     await submitReviewRound('task-2198', 'approve', 'LGTM', { configuration: resolveConfiguration(process.env),
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => 'token',
-      postReviewFn: () => ({ ok: true }),
-      buildMetadataFooterFn: () => '',
+      postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
+      buildMetadataFooterFn: async () => '',
       writeReviewStateFn: persistenceCommitted,
       readReviewStateFn: () => new ReviewState('task-2198', {
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
@@ -1853,8 +1853,8 @@ test('submitReviewRound skips Forgejo and updates review-state only when provide
     'utf8'
   );
 
-  let stateWritten = null;
-  let backlogTransitioned = null;
+  let stateWritten: { value: { slug: string; disposition: unknown; phase: unknown; implementer: unknown; } | null } = { value: null };
+  let backlogTransitioned: { value: { slug: string; status: string; } | null } = { value: null };
 
   const prevForgejo = process.env.FORGEJO_USER;
   const prevAgent = process.env.WORKFLOW_AGENT;
@@ -1865,11 +1865,11 @@ test('submitReviewRound skips Forgejo and updates review-state only when provide
     await submitReviewRound('task-test', 'approve', 'Test approval', { configuration: resolveConfiguration(process.env),
       isForgejoReviewEnabledFn: () => false, // Simulate provider=none
       readReviewStateFn: () => null, // No existing state
-      writeReviewStateFn: (slug, state) => {
-        stateWritten = { slug, disposition: state.disposition, phase: state.phase, implementer: state.implementer };
-      },
+      writeReviewStateFn: reviewStateWriterFixture((slug, state) => {
+        stateWritten.value = { slug, disposition: state.disposition, phase: state.phase, implementer: state.implementer };
+      }),
       transitionTaskFn: async (slug, status) => {
-        backlogTransitioned = { slug, status };
+        backlogTransitioned.value = { slug, status };
         return true;
       },
       worktree,
@@ -1887,23 +1887,23 @@ test('submitReviewRound skips Forgejo and updates review-state only when provide
   }
 
   // Verify review-state was written with correct values
-  assert.ok(stateWritten, 'writeReviewStateFn must be called');
-  assert.equal(stateWritten.disposition, 'APPROVED');
-  assert.equal(stateWritten.phase, 'approved');
-  assert.equal(stateWritten.implementer, 'custom');
+  assert.ok(stateWritten.value, 'writeReviewStateFn must be called');
+  assert.equal(stateWritten.value.disposition, 'APPROVED');
+  assert.equal(stateWritten.value.phase, 'approved');
+  assert.equal(stateWritten.value.implementer, 'custom');
 
   // Verify backlog task was transitioned
-  assert.ok(backlogTransitioned, 'transitionTaskFn must be called');
-  assert.equal(backlogTransitioned.slug, 'task-test');
-  assert.equal(backlogTransitioned.status, 'approved');
+  assert.ok(backlogTransitioned.value, 'transitionTaskFn must be called');
+  assert.equal(backlogTransitioned.value.slug, 'task-test');
+  assert.equal(backlogTransitioned.value.status, 'approved');
 });
 
 test('submitReviewRound updates existing state when provider=none', async () => {
   const { submitReviewRound } = createEventHandlerModule;
   const { ReviewState } = ReviewStateModule;
 
-  let stateWritten = null;
-  let backlogTransitioned = null;
+  let stateWritten: { value: { slug: string; disposition: unknown; phase: unknown; } | null } = { value: null };
+  let backlogTransitioned: { value: { slug: string; status: string; } | null } = { value: null };
 
   const existingState = new ReviewState('task-exist', {
     reviewer: 'codex',
@@ -1920,11 +1920,11 @@ test('submitReviewRound updates existing state when provider=none', async () => 
     await submitReviewRound('task-exist', 'request-changes', 'Needs work', { configuration: resolveConfiguration(process.env),
       isForgejoReviewEnabledFn: () => false, // Simulate provider=none
       readReviewStateFn: () => existingState,
-      writeReviewStateFn: (slug, state) => {
-        stateWritten = { slug, disposition: state.disposition, phase: state.phase };
-      },
+      writeReviewStateFn: reviewStateWriterFixture((slug, state) => {
+        stateWritten.value = { slug, disposition: state.disposition, phase: state.phase };
+      }),
       transitionTaskFn: async (slug, status) => {
-        backlogTransitioned = { slug, status };
+        backlogTransitioned.value = { slug, status };
         return true;
       },
       worktree: '/tmp/test-worktree',
@@ -1940,14 +1940,14 @@ test('submitReviewRound updates existing state when provider=none', async () => 
   }
 
   // Verify review-state was updated
-  assert.ok(stateWritten, 'writeReviewStateFn must be called');
-  assert.equal(stateWritten.disposition, 'REQUEST_CHANGES');
-  assert.equal(stateWritten.phase, 'fixing');
+  assert.ok(stateWritten.value, 'writeReviewStateFn must be called');
+  assert.equal(stateWritten.value.disposition, 'REQUEST_CHANGES');
+  assert.equal(stateWritten.value.phase, 'fixing');
 
   // Verify backlog task was transitioned to review
-  assert.ok(backlogTransitioned, 'transitionTaskFn must be called');
-  assert.equal(backlogTransitioned.slug, 'task-exist');
-  assert.equal(backlogTransitioned.status, 'review');
+  assert.ok(backlogTransitioned.value, 'transitionTaskFn must be called');
+  assert.equal(backlogTransitioned.value.slug, 'task-exist');
+  assert.equal(backlogTransitioned.value.status, 'review');
 });
 
 // ---------- Terminal disposition state persistence (Finding 3) ----------
@@ -1958,8 +1958,8 @@ test('submitReviewRound updates existing state when provider=none', async () => 
 
 
 test('consumeImplementerArtifacts posts resolution and normalized disposition from files', async () => {
-  const posted = [];
-  const deleted = [];
+  const posted: { branch: string; token: string; message: string; meta: ForgejoOptions | undefined; }[] = [];
+  const deleted: string[] = [];
   const artifactMap = new Map([
     ['/tmp/task-089-round-resolution.md', '# resolution'],
     ['/tmp/task-089-review-disposition.txt', 'changes_made\n'],
@@ -1968,23 +1968,23 @@ test('consumeImplementerArtifacts posts resolution and normalized disposition fr
   const result = consumeImplementerArtifacts('task-089', 'codex', {
     forgejoEnabled: true,
     tmpDir: '/tmp',
-    readArtifactFn: (filePath) => artifactMap.has(filePath) ? artifactMap.get(filePath) : null,
+    readArtifactFn: (filePath) => artifactMap.get(filePath) ?? null,
     readTokenFn: () => 'token',
     postCommentFn: (branch, token, message, meta) => {
       posted.push({ branch, token, message, meta });
-      return { ok: true };
+      return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const };
     },
     deleteArtifactFn: (filePath) => deleted.push(filePath),
-    buildMetadataFooterFn: () => '',
+    buildMetadataFooterFn: async () => '',
     worktree: '/tmp/worktree',
     log: () => {},
     error: () => {},
     // Mock createEvent to avoid requiring real mission directory
-    createEventFn: () => ({ ok: true, path: '/tmp/fake-event.md' }),
+    createEventFn: () => ({ ok: true as const, path: '/tmp/fake-event.md' }),
     // /tmp/worktree is not a checkout; supply the branch tip and stub the
     // round-closing record (covered in test/unit/adapters/review/review-round-loop.test.ts).
     headRevisionFn: () => 'rev-4',
-    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' }),
+    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' as const }),
   });
 
   const actualResult = await result;
@@ -1999,7 +1999,7 @@ test('consumeImplementerArtifacts posts resolution and normalized disposition fr
 });
 
 test('consumeReviewerArtifacts deletes artifacts only after successful comment and review posts', async () => {
-  const deleted = [];
+  const deleted: string[] = [];
   const artifactMap = new Map([
     ['/tmp/task-089-review-findings.md', '# findings'],
     ['/tmp/task-089-review-outcome.md', '# outcome'],
@@ -2009,17 +2009,17 @@ test('consumeReviewerArtifacts deletes artifacts only after successful comment a
   const result = await consumeReviewerArtifacts('task-089', 'custom', {
     forgejoEnabled: true,
     tmpDir: '/tmp',
-    readArtifactFn: (filePath) => artifactMap.has(filePath) ? artifactMap.get(filePath) : null,
+    readArtifactFn: (filePath) => artifactMap.get(filePath) ?? null,
     readTokenFn: () => 'token',
-    postCommentFn: () => ({ ok: true }),
-    postReviewFn: () => ({ ok: true }),
+    postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
+    postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
     deleteArtifactFn: (filePath) => deleted.push(filePath),
-    buildMetadataFooterFn: () => '',
+    buildMetadataFooterFn: async () => '',
     worktree: '/tmp/worktree',
     log: () => {},
     error: () => {},
     // Mock createEvent to avoid requiring real mission directory
-    createEventFn: () => ({ ok: true, path: '/tmp/fake-event.md' }),
+    createEventFn: () => ({ ok: true as const, path: '/tmp/fake-event.md' }),
   });
 
   assert.deepEqual(result, { consumed: true, ok: true, reviewState: 'APPROVED', reviewFindings: [] });
@@ -2031,7 +2031,7 @@ test('consumeReviewerArtifacts deletes artifacts only after successful comment a
 });
 
 test('consumeImplementerArtifacts leaves artifacts in place when posting fails', async () => {
-  const deleted = [];
+  const deleted: string[] = [];
   const artifactMap = new Map([
     ['/tmp/task-089-round-resolution.md', '# resolution'],
     ['/tmp/task-089-review-disposition.txt', 'changes_made\n'],
@@ -2040,16 +2040,16 @@ test('consumeImplementerArtifacts leaves artifacts in place when posting fails',
   const result = consumeImplementerArtifacts('task-089', 'codex', {
     forgejoEnabled: true,
     tmpDir: '/tmp',
-    readArtifactFn: (filePath) => artifactMap.has(filePath) ? artifactMap.get(filePath) : null,
+    readArtifactFn: (filePath) => artifactMap.get(filePath) ?? null,
     readTokenFn: () => 'token',
-    postCommentFn: () => ({ ok: false, error: 'boom' }),
+    postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null,  ok: false as const, error: 'boom' }),
     deleteArtifactFn: (filePath) => deleted.push(filePath),
-    buildMetadataFooterFn: () => '',
+    buildMetadataFooterFn: async () => '',
     worktree: '/tmp/worktree',
     log: () => {},
     error: () => {},
     // Mock createEvent to avoid requiring real mission directory
-    createEventFn: () => ({ ok: true, path: '/tmp/fake-event.md' }),
+    createEventFn: () => ({ ok: true as const, path: '/tmp/fake-event.md' }),
   });
 
   const actualResult = await result;
@@ -2061,7 +2061,7 @@ test('consumeImplementerArtifacts leaves artifacts in place when posting fails',
 
 // SC 1: Regression test proving persist-before-mirror ordering for reviewer artifacts
 test('consumeReviewerArtifacts proves persist-before-mirror ordering', async () => {
-  const calls = [];
+  const calls: string[] = [];
   const artifactMap = new Map([
     ['/tmp/task-089-review-findings.md', '# findings'],
     ['/tmp/task-089-review-outcome.md', '# outcome'],
@@ -2071,17 +2071,17 @@ test('consumeReviewerArtifacts proves persist-before-mirror ordering', async () 
   const result = await consumeReviewerArtifacts('task-089', 'custom', {
     forgejoEnabled: true,
     tmpDir: '/tmp',
-    readArtifactFn: (filePath) => artifactMap.has(filePath) ? artifactMap.get(filePath) : null,
+    readArtifactFn: (filePath) => artifactMap.get(filePath) ?? null,
     readTokenFn: () => 'token',
-    postCommentFn: (branch, token, body, options) => { calls.push('postComment'); return { ok: true }; },
-    postReviewFn: (branch, token, body, options) => { calls.push('postReview'); return { ok: true }; },
+    postCommentFn: (branch, token, body, options) => { calls.push('postComment'); return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
+    postReviewFn: (branch, token, body, options) => { calls.push('postReview'); return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
     deleteArtifactFn: (filePath) => {},
-    buildMetadataFooterFn: () => '',
+    buildMetadataFooterFn: async () => '',
     worktree: '/tmp/worktree',
     log: () => {},
     error: () => {},
     // Track createEvent calls
-    createEventFn: (slug, eventType, params, options) => { calls.push('createEvent'); return { ok: true, path: `/tmp/fake-${eventType}.md` }; },
+    createEventFn: (slug, eventType, params, options) => { calls.push('createEvent'); return { ok: true as const, path: `/tmp/fake-${eventType}.md` }; },
   });
 
   assert.deepEqual(result, { consumed: true, ok: true, reviewState: 'APPROVED', reviewFindings: [] });
@@ -2100,7 +2100,7 @@ test('consumeReviewerArtifacts proves persist-before-mirror ordering', async () 
 
 // SC 1: Regression test proving persist-before-mirror ordering for implementer artifacts
 test('consumeImplementerArtifacts proves persist-before-mirror ordering', async () => {
-  const calls = [];
+  const calls: string[] = [];
   const artifactMap = new Map([
     ['/tmp/task-089-round-resolution.md', '# resolution'],
     ['/tmp/task-089-review-disposition.txt', 'changes_made\n'],
@@ -2109,20 +2109,20 @@ test('consumeImplementerArtifacts proves persist-before-mirror ordering', async 
   const result = consumeImplementerArtifacts('task-089', 'codex', {
     forgejoEnabled: true,
     tmpDir: '/tmp',
-    readArtifactFn: (filePath) => artifactMap.has(filePath) ? artifactMap.get(filePath) : null,
+    readArtifactFn: (filePath) => artifactMap.get(filePath) ?? null,
     readTokenFn: () => 'token',
-    postCommentFn: (branch, token, body, options) => { calls.push('postComment'); return { ok: true }; },
+    postCommentFn: (branch, token, body, options) => { calls.push('postComment'); return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
     deleteArtifactFn: (filePath) => {},
-    buildMetadataFooterFn: () => '',
+    buildMetadataFooterFn: async () => '',
     worktree: '/tmp/worktree',
     log: () => {},
     error: () => {},
     // Track createEvent calls
-    createEventFn: (slug, eventType, params, options) => { calls.push('createEvent'); return { ok: true, path: `/tmp/fake-${eventType}.md` }; },
+    createEventFn: (slug, eventType, params, options) => { calls.push('createEvent'); return { ok: true as const, path: `/tmp/fake-${eventType}.md` }; },
     // /tmp/worktree is not a checkout; supply the branch tip and stub the
     // round-closing record (covered in test/unit/adapters/review/review-round-loop.test.ts).
     headRevisionFn: () => 'rev-4',
-    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' }),
+    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' as const }),
   });
 
   const actualResult = await result;
@@ -2156,21 +2156,22 @@ test('createEventHandler requires review-state or --actor for mirrored event typ
 
     // Mock options
     const logMessages = [];
-    const errorMessages = [];
-    let exitCode = null;
+    const errorMessages: string[] = [];
+    let exitCode: { value: Parameters<typeof process.exit>[0] } = { value: null };
 
     const options = {
       log: (msg) => logMessages.push(msg),
       error: (msg) => errorMessages.push(msg),
-      exit: (code) => { exitCode = code; throw new Error(`exit(${code})`); },
+      exit: (code) => { exitCode.value = code; throw new Error(`exit(${code})`); },
       resolveWorktreeFn: () => tmpDir
-    };
+    } satisfies NonNullable<Parameters<typeof createEventHandler>[2]>;
 
     try {
       // This should fail because mirrored events need persisted identity or --actor.
       await createEventHandler('task-test', ['--type', 'reviewer_outcome', '--verdict', 'approve'], options);
-      assert.fail('Expected createEventHandler to exit with code 1');
+      return assert.fail('Expected createEventHandler to exit with code 1');
     } catch (err) {
+      assert.ok(err instanceof Error);
       assert.match(err.message, /exit\(1\)/);
     }
 
@@ -2179,7 +2180,7 @@ test('createEventHandler requires review-state or --actor for mirrored event typ
     // SC2: the retired standalone `px handoff` command is gone; the review-start
     // transition is the supported entry point.
     assert.ok(errorMessages.some(msg => msg.includes('px review') && msg.includes('--start') && msg.includes('--actor')));
-    assert.equal(exitCode, 1);
+    assert.equal(exitCode.value, 1);
 
     // Verify that no event file was created
     // The event would be created in docs/missions/2026/task-test/review-events/
@@ -2238,24 +2239,22 @@ test('createEventHandler allows non-mirrored event types without FORGEJO_USER', 
 
     // Mock options
     const logMessages = [];
-    const errorMessages = [];
-    let exitCode = null;
+    const errorMessages: string[] = [];
+    let exitCode: { value: Parameters<typeof process.exit>[0] } = { value: null };
     let exitCalled = false;
 
     const options = {
       log: (msg) => logMessages.push(msg),
       error: (msg) => errorMessages.push(msg),
-      exit: (code) => { exitCode = code; exitCalled = true; throw new Error(`exit(${code})`); },
+      exit: (code) => { exitCode.value = code; exitCalled = true; throw new Error(`exit(${code})`); },
       resolveWorktreeFn: () => tmpDir,
-      // Mock the Forgejo posting functions to avoid actual API calls
-      postCommentFn: () => ({ ok: false, error: 'no token' }),
-      postReviewFn: () => ({ ok: false, error: 'no token' })
-    };
+
+    } satisfies NonNullable<Parameters<typeof createEventHandler>[2]>;
 
     try {
       // neutral_discussion is NOT mirrored, so this should succeed even without FORGEJO_USER
       await createEventHandler('task-test', ['--type', 'neutral_discussion', '--content', 'test discussion'], options);
-      assert.fail('Expected createEventHandler to exit with code 1');
+      return assert.fail('Expected createEventHandler to exit with code 1');
     } catch (err) {
       // This will fail because it tries to create the event in a non-existent directory structure
       // but the important thing is it doesn't fail due to FORGEJO_USER check

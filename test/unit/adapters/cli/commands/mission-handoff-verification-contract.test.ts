@@ -1,3 +1,6 @@
+import { fixtureMission } from '../../../../fixtures/mission-builders.js';
+import { missionId } from '../../../../../src/domain/mission.js';
+import { missionVersion as fixtureVersion } from '../../../../../src/application/domain-ports.js';
 import { resolveConfiguration } from '../../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 // Mission handoff verification contract: verifyHandoff and performHandoff failure paths.
@@ -33,16 +36,15 @@ function setupMocks() {
   mock.method(missionUtils, 'findCheckpoints', () => [path.join(WORKTREE, 'docs/missions/2026', TEST_SLUG, 'CP-1.md')]);
   mock.method(git, 'getCurrentBranch', () => 'mission/' + TEST_SLUG);
   mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', args => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '' }));
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/task.md' }));
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => ({ signal: null, stderr: '',  status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/task.md' }));
   mock.method(backlog, 'getTaskImplementer', () => 'claude');
   // Keep agent selection and branch probing in-memory: the real paths spawn
   // the shimmed git CLI (several subprocesses per handoff run).
   mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
   mock.method(agents, 'eligibleAgentsForStep', () => ['codex', 'claude', 'gemini', 'custom']);
-  mock.method(agents, 'selectAgent', (_step, options = {}) => {
-    // @ts-ignore -- module mock callback options are inferred as an empty object
+  mock.method(agents, 'selectAgent', (_step: Parameters<(typeof agents)["selectAgent"]>[0], options: Parameters<(typeof agents)["selectAgent"]>[1] = {}) => {
     const excluded = options.exclude instanceof Set ? options.exclude : new Set();
     return ['codex', 'claude', 'gemini'].find((candidate) => !excluded.has(candidate)) ?? 'codex';
   });
@@ -51,9 +53,9 @@ function setupMocks() {
   mock.method(verification, 'createVerificationProofIdentity', () => 'test-proof-identity');
   mock.method(backlog, 'transitionTask', () => true);
   mock.method(forgejo, 'readToken', () => 'token');
-  mock.method(forgejo, 'createPr', () => ({ ok: true }));
-  mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true, sha: 'fake-sha' }));
-  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true }));
+  mock.method(forgejo, 'createPr', () => ({ ok: true as const }));
+  mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true as const, sha: 'fake-sha' }));
+  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true as const }));
 
   const missionDir = path.join(WORKTREE, 'docs/missions/2026', TEST_SLUG);
   fs.mkdirSync(missionDir, { recursive: true });
@@ -66,7 +68,7 @@ function setupMocks() {
   fs.writeFileSync(path.join(missionDir, 'CP-1.md'), '## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| handoff coverage | docs/missions/2026/task-handoff-test/MISSION.md:1 | PASS |');
 }
 
-const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+const mockRebase = async () => ({ ok: true as const, sharedFileConflicts: false });
 
 function recordedMissionServices({
   criteria = ['handoff coverage'],
@@ -82,13 +84,13 @@ function recordedMissionServices({
       async load() {
         return {
           kind: 'found' as const,
-          mission: {
-            status: 'review', review: { rounds: [] },
-            checkpoints: [{ name: 'CP-1', goalCheck, nextActionText: 'review' }],
+          mission: fixtureMission(TEST_SLUG, {
+            status: 'review', review: null,
+            checkpoints: [{ missionId: missionId(TEST_SLUG), name: 'CP-1', goalCheck, nextActionText: 'review' }],
             brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
             successCriteria: criteria, completedSuccessCriteria: completed, declaredGates: ['true'],
-          },
-          version: 1,
+          }),
+          version: fixtureVersion(1),
         };
       },
     },
@@ -105,6 +107,7 @@ test('verifyHandoff fails when not on mission branch', (t) => {
   mock.method(git, 'getCurrentBranch', () => 'main');
   const result = verifyHandoff(TEST_SLUG, { worktree: WORKTREE });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error !== undefined);
   assert.match(result.error, /Not on mission branch/);
   cleanup();
 });
@@ -115,9 +118,9 @@ test('performHandoff handles gatekeeper pushback', async (t) => {
   const mockGK = () => {
     gkCallCount++;
     if (gkCallCount === 1) {
-      return { ok: false, posted: true, missing: ['A'] };
+      return { ok: false as const, posted: true, missing: ['A'] };
     }
-    return { ok: true, missing: [] };
+    return { ok: true as const, missing: [] };
   };
   // Mock the launch port so the kernel's verify re-runs the handoff
   const mockStartAgent = async () => ({ agent: 'custom', result: { status: 0 } });
@@ -140,9 +143,10 @@ test('performHandoff handles gatekeeper pushback', async (t) => {
 
 test('performHandoff handles gatekeeper block', async (t) => {
   setupMocks();
-  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: false, posted: false, skipped: false, missing: ['A'] }));
+  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: false as const, posted: false, skipped: false, missing: ['A'] }));
   const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error !== undefined);
   assert.match(result.error, /Gatekeeper detected missing artifacts/);
   cleanup();
 });
@@ -166,18 +170,20 @@ test('performHandoff fails when final verification gate fails', async (t) => {
     path.join(WORKTREE, 'workflow.config.json'),
     JSON.stringify({ adapters: { verification: { command: 'npm test' } } })
   );
-  mock.method(git, 'run', () => ({ status: 1 }));
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 1 }));
   const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices(), recoverGateFailure: false });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error !== undefined);
   assert.match(result.error, /Final verification gate failed/);
   cleanup();
 });
 
 test('performHandoff fails when PR creation fails', async (t) => {
   setupMocks();
-  mock.method(forgejo, 'createPr', () => ({ ok: false, error: 'API Error' }));
+  mock.method(forgejo, 'createPr', () => ({ ok: false as const, error: 'API Error' }));
   const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error !== undefined);
   assert.match(result.error, /Forgejo PR creation\/update failed/);
   cleanup();
 });
@@ -187,6 +193,7 @@ test('performHandoff fails when Backlog transition fails (assignee)', async (t) 
   mock.method(backlog, 'transitionTask', () => false);
   const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error !== undefined);
   assert.match(result.error, /Could not transition task task-handoff-test to review/);
   cleanup();
 });
@@ -196,6 +203,7 @@ test('performHandoff fails when Backlog transition fails (status)', async (t) =>
   mock.method(backlog, 'transitionTask', () => false);
   const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error !== undefined);
   assert.match(result.error, /Could not transition task task-handoff-test to review/);
   cleanup();
 });
@@ -206,17 +214,20 @@ test('performHandoff fails when git add fails', async (t) => {
   mock.method(backlog, 'transitionTask', () => false);
   const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error !== undefined);
   assert.match(result.error, /Could not transition task task-handoff-test to review/);
   cleanup();
 });
 
 test('performHandoff fails when git push fails', async (t) => {
   setupMocks();
-  mock.method(git, 'git', (args) => args.includes('push') ? { status: 1, stderr: 'fatal: Unable to create .git/index.lock: No space left on device' } : { status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '' });
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => args.includes('push') ? { status: 1, stderr: 'fatal: Unable to create .git/index.lock: No space left on device' } : { status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '' });
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'url');
   const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error !== undefined);
   assert.match(result.error, /Failed to push Backlog transition/);
+  assert.ok(result.error !== undefined);
   assert.match(result.error, /Unable to create .git\/index\.lock: No space left on device/);
   cleanup();
 });
@@ -250,6 +261,7 @@ test('performHandoff rejects incomplete success criteria before handoff (TASK-26
     missionServicesFn: recordedMissionServices({ criteria: ['first', 'second'], completed: [0] }),
   });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error !== undefined);
   assert.match(result.error, /Success criteria 2 are incomplete/);
   cleanup();
 });
@@ -267,6 +279,7 @@ test('performHandoff rejects completed criteria lacking one evidence row each (T
     }),
   });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error !== undefined);
   assert.match(result.error, /2 completed criteria require 2 Goal Check row/);
   cleanup();
 });

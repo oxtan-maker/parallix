@@ -173,26 +173,26 @@ test('task-2598: an unrefreshable Claude credential reports the refresh diagnost
     const before = fs.readFileSync(claudeCredentialsPath(), 'utf8');
     const logs: string[] = [];
     const blocks: unknown[] = [];
-    let claudeResult: { status: number | null; stderr: string } | null = null;
+    let claudeResult: { value: { status: number | null; stderr: string } | null } = { value: null };
     let calls = 0;
     const result = await startAgent('execute', {
       prompt: 'Execute.', worktree: fixture.worktree,
       selectAgentFn: () => calls++ === 0 ? 'claude' : 'vibe',
       detectLimitHitFn: () => null,
-      updateAgentBlockFn: (...args: unknown[]) => { blocks.push(args); },
+      updateAgentBlockFn: (...args: unknown[]) => { blocks.push(args); return {}; },
       launchAgentFn: () => ({
         invocation: { command: fixture.claude, args: [], options: {} },
         resultPromise: calls === 1
-          ? runSandboxedAsync(sandboxArgs(fixture, 'execute'), fixture.claude, claudeEnv(fixture)).then(run => { claudeResult = run; return run; })
+          ? runSandboxedAsync(sandboxArgs(fixture, 'execute'), fixture.claude, claudeEnv(fixture)).then(run => { claudeResult.value = run; return run; })
           : Promise.resolve({ status: 0, stdout: '' }),
       }),
       log: (line: string) => logs.push(line),
-    } as never);
+    });
     assert.equal(result.agent, 'vibe');
-    assert.ok(claudeResult, 'claude launched');
-    assert.match(claudeResult!.stderr, /OAuth access token has expired/);
+    assert.ok(claudeResult.value, 'claude launched');
+    assert.match(claudeResult.value!.stderr, /OAuth access token has expired/);
     assert.ok(logs.some(line => line.includes('claude') && line.includes('credentials need refreshing')));
-    assert.equal(shouldPersistLaunchFailureBlock('claude', claudeResult!), false);
+    assert.equal(shouldPersistLaunchFailureBlock('claude', claudeResult.value!), false);
     assert.equal(blocks.length, 0, 'no family block is persisted');
     assert.equal(fs.readFileSync(claudeCredentialsPath(), 'utf8'), before, 'nothing half-written to the host credential');
   });

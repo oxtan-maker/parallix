@@ -1,4 +1,13 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import type { Mission } from '../../../src/domain/mission.js';
+import { missionLabels } from '../../../src/domain/mission.js';
+import { integrationContext } from '../../fixtures/integration-context.js';
+import { fixtureMission, integrateCommandMission, approvedReview, pendingReview, requestedChangesReview } from '../../fixtures/mission-builders.js';
+import { agentFamily } from '../../../src/domain/agents.js';
+import { missionVersion as fixtureVersion } from '../../../src/application/domain-ports.js';
+import type { DecideIntegrationRequest } from "../../../src/application/mission-integration-service.js";
+import type { CloseMissionRequest } from "../../../src/application/mission-integration-service.js";
+import type { GitReader } from "../../../src/adapters/git/worktree.js";
+import type { StatsRecordingOptions } from "../../../src/adapters/cli/commands/stats.js";
 
 
 import { resolveConfiguration } from '../../../src/composition/config.js';
@@ -32,10 +41,10 @@ const { resolveDatabasePath } = __mm1;
 mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
 
 function installVerificationMocks() {
-  mock.method(verification, 'captureVerifiedTreeProof', (area, rootDir) => ({
-    ok: true,
+  mock.method(verification, 'captureVerifiedTreeProof', (area: Parameters<(typeof verification)["captureVerifiedTreeProof"]>[0], rootDir: Parameters<(typeof verification)["captureVerifiedTreeProof"]>[1]) => ({
+    ok: true as const,
     proof: {
-      rootDir: path.resolve(rootDir),
+      rootDir: path.resolve(rootDir ?? process.cwd()),
       area,
       command: 'mock-verification',
       commit: 'abc123',
@@ -43,12 +52,12 @@ function installVerificationMocks() {
       verifiedAt: '2026-01-01T00:00:00.000Z'
     }
   }));
-  mock.method(verification, 'assertVerifiedTreeProof', (proof, rootDir) => {
-    const resolvedRoot = path.resolve(rootDir);
+  mock.method(verification, 'assertVerifiedTreeProof', (proof: Parameters<(typeof verification)["assertVerifiedTreeProof"]>[0], rootDir: Parameters<(typeof verification)["assertVerifiedTreeProof"]>[1]) => {
+    const resolvedRoot = path.resolve(rootDir ?? process.cwd());
     if (!proof || proof.rootDir !== resolvedRoot) {
-      return { ok: false, error: 'verification proof does not match the tree being published' };
+      return { ok: false as const, error: 'verification proof does not match the tree being published' };
     }
-    return { ok: true, proof };
+    return { ok: true as const, proof };
   });
 }
 
@@ -69,7 +78,7 @@ const FAKE_ROOT = `/tmp/mission-${process.pid}`;
  * checks themselves are unchanged — failures still print and still block — so
  * the tests that assert on that detail keep their coverage by asking for it.
  */
-function withDebug(fn) {
+function withDebug<T>(fn: () => T): T {
   const previous = process.env.DEBUG;
   process.env.DEBUG = '1';
   try {
@@ -91,7 +100,7 @@ process.env.PRIMARY_WORKTREE = FAKE_ROOT;
 if (previousPrimaryWorktree === undefined) delete process.env.PRIMARY_WORKTREE;
 else process.env.PRIMARY_WORKTREE = previousPrimaryWorktree;
 
-function runGitOrThrow(args, options = {}) {
+function runGitOrThrow(args: string[], options: Omit<childProcess.SpawnSyncOptionsWithStringEncoding, 'encoding'> = {}) {
   const result = childProcess.spawnSync('git', args, {
     encoding: 'utf8',
     ...options
@@ -100,9 +109,7 @@ function runGitOrThrow(args, options = {}) {
     throw result.error;
   }
   if (typeof result.status === 'number' && result.status !== 0) {
-    const error = new Error((result.stderr || result.stdout || `git ${args.join(' ')} failed`).trim());
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `result` absent from its inferred mock shape.
-    error.result = result;
+    const error = Object.assign(new Error((result.stderr || result.stdout || `git ${args.join(' ')} failed`).trim()), { result });
     throw error;
   }
   return result.stdout || '';
@@ -145,21 +152,21 @@ const { conventionalWorktreePath, getPrimaryBranch } = missionUtils;
 
 const PRIMARY = getPrimaryBranch();
 
-import { stubMissionServices } from '../../helpers/stub-mission-services.js';
+import { integrationServices, stubIntegrationMissionServices as stubMissionServices } from '../../helpers/stub-integration-services.js';
 
 test('landed delivery and administrative closure are separate writes', async () => {
-  const calls = [];
-  const integration = { status: 'integration', closedAt: null, assignee: 'codex' };
-  const done = { status: 'done', closedAt: null, assignee: 'codex' };
-  const closed = { status: 'done', closedAt: '2026-08-12T12:00:00.000Z', assignee: 'codex' };
+  const calls: (["decide", DecideIntegrationRequest] | ["close", CloseMissionRequest])[] = [];
+  const integration = fixtureMission('task-close', { status: 'integration', assignee: agentFamily('codex') });
+  const done = fixtureMission('task-close', { status: 'done', assignee: agentFamily('codex') });
+  const closed = fixtureMission('task-close', { status: 'done', closedAt: '2026-08-12T12:00:00.000Z', assignee: agentFamily('codex') });
   let state = integration;
   const services = {
-    store: { load: async () => ({ kind: 'found', mission: state, version: 1 }) },
+    store: { load: async () => ({ kind: 'found' as const, mission: state, version: fixtureVersion(1) }) },
     integration: {
-      decideIntegration: async request => { calls.push(['decide', request]); state = done; return { status: 'completed' }; },
-      close: async request => { calls.push(['close', request]); state = closed; return { status: 'completed' }; },
+      decideIntegration: async request => { calls.push(['decide', request] as const); state = done; return { durableEvidence: [],  status: 'completed' as const }; },
+      close: async request => { calls.push(['close', request] as const); state = closed; return { durableEvidence: [],  status: 'completed' as const }; },
     },
-  };
+  } satisfies NonNullable<Parameters<typeof persistLandedIntegrationOrAbort>[2]>;
 
   await persistLandedIntegrationOrAbort('task-close', 'abc123', services, { landedAt: '2026-08-12T10:00:00.000Z' });
 
@@ -167,16 +174,21 @@ test('landed delivery and administrative closure are separate writes', async () 
   assert.equal(state.closedAt, null);
   await closeLandedIntegrationOrAbort('task-close', 'abc123', services);
   assert.deepEqual(calls.map(([kind]) => kind), ['decide', 'close']);
-  assert.equal(calls[0][1].occurredAt, '2026-08-12T10:00:00.000Z');
-  assert.equal(calls[1][1].expectedVersion, 1);
-  assert.equal(calls[1][1].integration.value.completed, true);
+  const decision = calls[0];
+  assert.equal(decision[0], 'decide' as const);
+  assert.equal(decision[1].occurredAt, '2026-08-12T10:00:00.000Z');
+  const closure = calls[1];
+  assert.equal(closure[0], 'close' as const);
+  assert.equal(closure[1].expectedVersion, 1);
+  assert.ok(closure[1].integration.value);
+  assert.equal(closure[1].integration.value.completed, true);
 });
 
 test('prepareNoisePatchForSquash cleans only its owned patch directory when reset fails', () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-noise-cleanup-'));
   const operatorFile = path.join(tmpRoot, 'operator-note.txt');
   fs.writeFileSync(operatorFile, 'keep');
-  const gitRunner = args => {
+  const gitRunner: NonNullable<NonNullable<Parameters<typeof prepareNoisePatchForSquash>[1]>["gitRunner"]> = (args) => {
     if (args.includes('diff')) { return { status: 0, stdout: 'diff --git a/backlog/tasks/a.md b/backlog/tasks/a.md', stderr: '' }; }
     if (args.includes('reset')) { return { status: 1, stdout: '', stderr: 'reset failed' }; }
     throw new Error(`unexpected git invocation: ${args.join(' ')}`);
@@ -184,6 +196,7 @@ test('prepareNoisePatchForSquash cleans only its owned patch directory when rese
   try {
     const result = prepareNoisePatchForSquash('/fake-worktree', { gitRunner, tmpDir: tmpRoot });
     assert.equal(result.ok, false);
+    assert.ok(typeof result.error === 'string');
     assert.match(result.error, /reset failed/);
     assert.deepEqual(fs.readdirSync(tmpRoot), ['operator-note.txt']);
     assert.equal(fs.readFileSync(operatorFile, 'utf8'), 'keep');
@@ -195,7 +208,7 @@ test('prepareNoisePatchForSquash cleans only its owned patch directory when rese
 test('integration verification resolves the candidate mission worktree, not the primary checkout', () => {
   const primaryWorktree = '/tmp/primary-checkout';
   const candidateWorktree = '/tmp/task-1253-candidate';
-  const observed = [];
+  const observed: { slug: string; options: { cwd?: string; gitFn?: GitReader | null; } | undefined; }[] = [];
 
   const resolved = resolveIntegrationVerificationWorktree('task-1253', {
     baseWorktree: primaryWorktree,
@@ -218,7 +231,7 @@ test('integration verification resolves the candidate mission worktree, not the 
 test('integration verification command and cwd are both derived from the candidate worktree', () => {
   const primaryWorktree = '/tmp/primary-checkout';
   const candidateWorktree = '/tmp/task-1253-candidate';
-  const commandRoots = [];
+  const commandRoots: { area: string | undefined; rootDir: string | undefined; }[] = [];
 
   const invocation = buildIntegrationVerificationInvocation('task-1253', {
     baseWorktree: primaryWorktree,
@@ -283,8 +296,7 @@ test('px integrate parses the paired Codex real-agent override without placing v
 });
 
 test('px integrate rejects malformed real-agent options before preflight or gate execution', () => {
-  /** @type {Array<[string[], RegExp]>} */
-  const malformedCases = [
+  const malformedCases: Array<[string[], RegExp]> = [
     [['task-2269', '--real-agent', 'codex'], /must be supplied together/],
     [['task-2269', '--real-agent'], /requires a value/],
     [['task-2269', '--real-agent', 'codex', '--real-agent', 'codex', '--real-agent-model', 'gpt-5.6-luna'], /only once/],
@@ -309,25 +321,25 @@ test('buildIntegrationContext reads task file and status from the mission worktr
   const mockedResolveMissionBaseBranch = mock.method(missionUtils, 'resolveMissionBaseBranch', () => 'main');
   const mockedResolveBaseWorktree = mock.method(missionUtils, 'resolveBaseWorktree', () => baseWorktree);
   const mockedGetCurrentBranch = mock.method(__mm2, 'getCurrentBranch', () => 'mission/task-2200');
-  const mockedGit = mock.method(__mm2, 'git', (args) => {
+  const mockedGit = mock.method(__mm2, 'git', (args: Parameters<(typeof __mm2)["git"]>[0]) => {
     if (args.includes('branch') && args.includes('--show-current')) {
-      return { status: 0, stdout: 'main', stderr: '' };
+      return { signal: null,  status: 0, stdout: 'main', stderr: '' };
     }
     if (args.includes('status') && args.includes('--short')) {
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     }
-    return { status: 0, stdout: '', stderr: '' };
+    return { signal: null,  status: 0, stdout: '', stderr: '' };
   });
-  const mockedResolveTaskFile = mock.method(backlog, 'resolveTaskFile', (_slug, rootDir) => {
+  const mockedResolveTaskFile = mock.method(backlog, 'resolveTaskFile', (_slug: Parameters<(typeof backlog)["resolveTaskFile"]>[0], rootDir: Parameters<(typeof backlog)["resolveTaskFile"]>[1]) => {
     if (rootDir === worktree) {
-      return { ok: true, taskFile: worktreeTask };
+      return { ok: true as const, taskFile: worktreeTask };
     }
     if (rootDir === baseWorktree) {
-      return { ok: true, taskFile: baseTask };
+      return { ok: true as const, taskFile: baseTask };
     }
-    return { ok: false, reason: 'missing', matches: [] };
+    return { ok: false as const, reason: 'missing' as const, matches: [] };
   });
-  const mockedGetTaskStatus = mock.method(backlog, 'getTaskStatus', (taskFile) => taskFile === worktreeTask ? 'active' : 'ready-for-integration');
+  const mockedGetTaskStatus = mock.method(backlog, 'getTaskStatus', (taskFile: Parameters<(typeof backlog)["getTaskStatus"]>[0]) => taskFile === worktreeTask ? 'active' : 'ready-for-integration');
   const mockedGetTaskAssignee = mock.method(backlog, 'getTaskAssignee', () => 'claude');
   t.after(() => {
     mockedResolveWorktree.mock.restore();
@@ -364,22 +376,22 @@ test('buildIntegrationContext uses Mission lifecycle status, not task-file statu
   const mockedResolveMissionBaseBranch = mock.method(missionUtils, 'resolveMissionBaseBranch', () => 'main');
   const mockedResolveBaseWorktree = mock.method(missionUtils, 'resolveBaseWorktree', () => baseWorktree);
   const mockedGetCurrentBranch = mock.method(__mm2, 'getCurrentBranch', () => 'mission/task-2244');
-  const mockedGit = mock.method(__mm2, 'git', (args) => {
+  const mockedGit = mock.method(__mm2, 'git', (args: Parameters<(typeof __mm2)["git"]>[0]) => {
     if (args.includes('branch') && args.includes('--show-current')) {
-      return { status: 0, stdout: 'main', stderr: '' };
+      return { signal: null,  status: 0, stdout: 'main', stderr: '' };
     }
-    return { status: 0, stdout: '', stderr: '' };
+    return { signal: null,  status: 0, stdout: '', stderr: '' };
   });
-  const mockedResolveTaskFile = mock.method(backlog, 'resolveTaskFile', (_slug, rootDir) => {
+  const mockedResolveTaskFile = mock.method(backlog, 'resolveTaskFile', (_slug: Parameters<(typeof backlog)["resolveTaskFile"]>[0], rootDir: Parameters<(typeof backlog)["resolveTaskFile"]>[1]) => {
     if (rootDir === worktree) {
-      return { ok: true, taskFile: worktreeTask };
+      return { ok: true as const, taskFile: worktreeTask };
     }
     if (rootDir === baseWorktree) {
-      return { ok: true, taskFile: baseTask };
+      return { ok: true as const, taskFile: baseTask };
     }
-    return { ok: false, reason: 'missing', matches: [] };
+    return { ok: false as const, reason: 'missing' as const, matches: [] };
   });
-  const mockedGetTaskStatus = mock.method(backlog, 'getTaskStatus', (taskFile) => taskFile === worktreeTask ? 'active' : 'ready-for-integration');
+  const mockedGetTaskStatus = mock.method(backlog, 'getTaskStatus', (taskFile: Parameters<(typeof backlog)["getTaskStatus"]>[0]) => taskFile === worktreeTask ? 'active' : 'ready-for-integration');
   const mockedGetTaskAssignee = mock.method(backlog, 'getTaskAssignee', () => 'claude');
   t.after(() => {
     mockedResolveWorktree.mock.restore();
@@ -405,13 +417,13 @@ test('buildIntegrationContext uses Mission lifecycle status, not task-file statu
 });
 
 test('printIntegrationPreflight reads classification from the selected task file, not by re-resolving in the base checkout', (t) => {
-  const logs = [];
+  const logs: string[] = [];
   const worktreeTask = '/tmp/project-task-2200/backlog/tasks/task-2200 - fix.md';
 
-  const mockedGetTaskClassification = mock.method(backlog, 'getTaskClassification', (taskFile) => taskFile === worktreeTask ? 'ai_sdlc' : null);
+  const mockedGetTaskClassification = mock.method(backlog, 'getTaskClassification', (taskFile: Parameters<(typeof backlog)["getTaskClassification"]>[0]) => taskFile === worktreeTask ? 'ai_sdlc' : null);
   t.after(() => mockedGetTaskClassification.mock.restore());
 
-  const result = withDebug(() => printIntegrationPreflight({
+  const result = withDebug(() => printIntegrationPreflight(integrationContext({
     slug: 'task-2200',
     branch: 'mission/task-2200',
     currentBranch: 'mission/task-2200',
@@ -422,6 +434,8 @@ test('printIntegrationPreflight reads classification from the selected task file
     taskAssignee: 'claude',
     forgejoUser: 'claude',
     taskAssigneeWarning: null,
+    reviewState: null, missionWorktree: '/tmp/project-task-2200', promoteBacklogOnCloseout: false,
+    forgejoToken: null, configuredReviewer: null,
     pr: { exists: false, raw: 'no PR found' },
     siblingPrs: [],
     approval: { ok: true, reviewState: 'APPROVED' },
@@ -430,14 +444,13 @@ test('printIntegrationPreflight reads classification from the selected task file
     mainBranch: 'main',
     mainDirty: false,
     mainDirtyEntries: []
-  }, { configuration: resolveConfiguration(process.env),
+  }), { configuration: resolveConfiguration(process.env),
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => '/tmp/token',
-    detectRebaseStateFn: () => ({ inProgress: false, rebaseHead: null, unmergedFiles: [] }),
-    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+    detectRebaseStateFn: () => ({ inProgress: false, rebaseHead: '', detached: false, rebaseDir: null, unmergedFiles: [] }),
+    getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] }),
     findMissionDocInBranchesFn: () => [],
     isForgejoReviewEnabledFn: () => false,
-    resolveMissionClassificationFn: () => ({ classification: null, error: 'stale base resolver should not be used' }),
     log: line => logs.push(line)
   }));
 
@@ -446,8 +459,8 @@ test('printIntegrationPreflight reads classification from the selected task file
 });
 
 test('cleanupMissionWorktree removes the mission worktree and deletes the branch without shelling to the script helper', () => {
-  const gitCalls = [];
-  const removed = [];
+  const gitCalls: string[][] = [];
+  const removed: string[] = [];
   let worktreeExists = true;
   const wt = conventionalWorktreePath('task-082', FAKE_ROOT);
   const result = cleanupMissionWorktree('task-082', { configuration: resolveConfiguration(process.env),
@@ -462,15 +475,15 @@ test('cleanupMissionWorktree removes the mission worktree and deletes the branch
     gitRunner(args) {
       gitCalls.push(args);
       if (args.slice(-2).join(' ') === 'branch --show-current') {
-        return { status: 0, stdout: 'main\n', stderr: '' };
+        return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
       }
       if (args.includes('show-ref')) {
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
       if (args.slice(-2).join(' ') === 'list --porcelain') {
-        return { status: 0, stdout: `worktree ${wt}\nbranch refs/heads/mission/task-082\n`, stderr: '' };
+        return { signal: null,  status: 0, stdout: `worktree ${wt}\nbranch refs/heads/mission/task-082\n`, stderr: '' };
       }
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     }
   });
 
@@ -494,7 +507,7 @@ test('cleanupMissionWorktree prunes stale prunable worktrees before deleting the
   // holds mission/task-118 even though its path is not what
   // integrate wants to delete. Without a prune step `git branch -D`
   // fails because git still thinks the branch is checked out.
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
   let branchDeleteAttempts = 0;
   const result = cleanupMissionWorktree('task-118', { configuration: resolveConfiguration(process.env),
     rootDir: FAKE_ROOT,
@@ -503,28 +516,28 @@ test('cleanupMissionWorktree prunes stale prunable worktrees before deleting the
     gitRunner(args) {
       gitCalls.push(args);
       if (args.slice(-2).join(' ') === 'branch --show-current') {
-        return { status: 0, stdout: 'main\n', stderr: '' };
+        return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
       }
       if (args.includes('show-ref')) {
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
       if (args.slice(-2).join(' ') === 'list --porcelain') {
         // A worktree (no task- prefix) is registered but prunable; the
         // path the helper queries for is not listed.
-        return {
+        return { signal: null,
           status: 0,
           stdout: `worktree /tmp/project-118\nHEAD deadbeef\nbranch refs/heads/mission/task-118\nprunable gitdir file points to non-existent location\n\n`,
           stderr: ''
         };
       }
       if (args.slice(-2).join(' ') === 'worktree prune') {
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
       if (args[args.length - 2] === '-D') {
         branchDeleteAttempts += 1;
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     }
   });
 
@@ -554,32 +567,32 @@ test('cleanupMissionWorktree blocks deletion when the mission worktree resolves 
         },
         gitRunner(args) {
           if (args.slice(-2).join(' ') === 'branch --show-current') {
-            return { status: 0, stdout: 'main\n', stderr: '' };
+            return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
           }
           if (args.includes('show-ref')) {
-            return { status: 0, stdout: '', stderr: '' };
+            return { signal: null,  status: 0, stdout: '', stderr: '' };
           }
           if (args.slice(-2).join(' ') === 'list --porcelain') {
-            return {
+            return { signal: null,
               status: 0,
               stdout: `worktree ${worktreePath}\nbranch refs/heads/mission/task-082\n`,
               stderr: ''
             };
           }
           if (args.includes('worktree') && args.includes('remove')) {
-            return { status: 0, stdout: '', stderr: '' };
+            return { signal: null,  status: 0, stdout: '', stderr: '' };
           }
           if (args.slice(-2).join(' ') === 'worktree prune') {
-            return { status: 0, stdout: '', stderr: '' };
+            return { signal: null,  status: 0, stdout: '', stderr: '' };
           }
-          return { status: 0, stdout: '', stderr: '' };
+          return { signal: null,  status: 0, stdout: '', stderr: '' };
         }
       });
     } catch (error) {
       thrown = error;
     }
 
-    assert.ok(thrown, 'expected forgejo-home deletion attempt to throw');
+    assert.ok(thrown instanceof Error, 'expected forgejo-home deletion attempt to throw');
     assert.match(thrown.message, /CRITICAL SAFETY VIOLATION/);
   } finally {
     if (previousHome === undefined) delete process.env.FORGEJO_HOME;
@@ -645,9 +658,9 @@ test('sync-merged diagnostics include stale-info branch push recovery', () => {
 });
 
 test('printDiagnosticTable prominently includes the stale-info diagnostic row', () => {
-  const lines = [];
+  const lines: unknown[] = [];
   const originalLog = console.log;
-  console.log = message => lines.push(message);
+  console.log = (message: unknown) => lines.push(message);
   try {
     printDiagnosticTable();
   } finally {
@@ -661,15 +674,14 @@ test('printDiagnosticTable prominently includes the stale-info diagnostic row', 
 });
 
 test('reportSyncMergedFailure prints failure, raw output, and diagnostics table', () => {
-  const errors = [];
-  const logs = [];
+  const errors: unknown[] = [];
+  const logs: unknown[] = [];
   const originalError = console.error;
   const originalLog = console.log;
-  console.error = message => errors.push(message);
-  console.log = message => logs.push(message);
+  console.error = (message: unknown) => errors.push(message);
+  console.log = (message: unknown) => logs.push(message);
   try {
     reportSyncMergedFailure({
-      ok: false,
       error: 'push-branch-failed',
       raw: '! [rejected] abc123 -> mission/task-1062 (stale info)'
     });
@@ -714,9 +726,9 @@ test('formatRecordedStatsRow renders absent fields without changing the stored r
 });
 
 test('recordPostIntegrationStats logs the persisted stats row including pr_fix_rounds', async () => {
-  const logs = [];
+  const logs: unknown[] = [];
   const originalLog = console.log;
-  console.log = message => logs.push(message);
+  console.log = (message: unknown) => logs.push(message);
   try {
     const outcome = await recordPostIntegrationStats('task-2000', { configuration: resolveConfiguration(process.env),
       rootDir: FAKE_ROOT,
@@ -750,17 +762,18 @@ test('recordPostIntegrationStats logs the persisted stats row including pr_fix_r
 });
 
 test('recordPostIntegrationStats records an unknown classification row for a missing-task mission', async () => {
-  const logs = [];
+  const logs: unknown[] = [];
   const originalLog = console.log;
-  console.log = message => logs.push(message);
+  console.log = (message: unknown) => logs.push(message);
   try {
     const outcome = await recordPostIntegrationStats('task-unknown', { configuration: resolveConfiguration(process.env),
       rootDir: FAKE_ROOT,
-      recordIntegrationStatsFn({ slug, rootDir, filePath, date }) {
+      recordIntegrationStatsFn(options) {
+        const { slug, rootDir, date } = options;
         assert.equal(slug, 'task-unknown');
         assert.equal(rootDir, FAKE_ROOT);
         // TASK-2322.08: no stats file path is passed at all.
-        assert.equal(filePath, undefined);
+        assert.equal('filePath' in options, false);
         // task-1415: no explicit date is passed anymore — recordIntegrationStats
         // defaults it to "today" itself, rather than trusting a stale
         // `git log -1 --format=%cs` committer date.
@@ -797,7 +810,7 @@ test('recordPostIntegrationStats passes no file path and stays anchored to PARAL
   const previousHome = process.env.PARALLIX_HOME;
   process.env.PARALLIX_HOME = parallixHome;
   try {
-    const capturedOptions = [];
+    const capturedOptions: StatsRecordingOptions[] = [];
     const runOnce = () => recordPostIntegrationStats('task-2046', { configuration: resolveConfiguration(process.env),
       rootDir: runtimeRoot,
       recordIntegrationStatsFn(options) {
@@ -828,8 +841,10 @@ test('recordPostIntegrationStats passes no file path and stays anchored to PARAL
 
     assert.equal(capturedOptions.length, 2);
     // No `filePath` is supplied and no stats CSV is created anywhere.
-    assert.equal(capturedOptions[0].filePath, undefined);
-    assert.equal(capturedOptions[1].filePath, undefined);
+    assert.ok(capturedOptions[0] != null);
+    assert.equal('filePath' in capturedOptions[0], false);
+    assert.ok(capturedOptions[1] != null);
+    assert.equal('filePath' in capturedOptions[1], false);
     assert.deepEqual(capturedOptions.map(o => o.rootDir), [runtimeRoot, runtimeRoot]);
     assert.deepEqual(fs.readdirSync(parallixHome).filter(name => name.endsWith('.csv')), []);
     assert.equal(fs.existsSync(path.join(runtimeRoot, 'stats.csv')), false);
@@ -844,9 +859,9 @@ test('recordPostIntegrationStats passes no file path and stays anchored to PARAL
 });
 
 test('recordPostIntegrationStats prints the weekly report but not mission telemetry on the success path (TASK-2633)', async () => {
-  const logs = [];
+  const logs: unknown[] = [];
   const originalLog = console.log;
-  console.log = message => logs.push(message);
+  console.log = (message: unknown) => logs.push(message);
   try {
     const missionPhaseRows = [
       { mission: 'task-3000', stage: 'draft', provider: 'openai', model: 'gpt-4', implementer: 'claude', input_tokens: '1000', output_tokens: '500', cached_tokens: '100', tool_calls: '50', duration_minutes: '10', cost_usd: '1.50' },
@@ -884,9 +899,9 @@ test('recordPostIntegrationStats prints the weekly report but not mission teleme
 });
 
 test('recordPostIntegrationStats prints only the recorded row and weekly report for empty mission-phase rows', async () => {
-  const logs = [];
+  const logs: unknown[] = [];
   const originalLog = console.log;
-  console.log = message => logs.push(message);
+  console.log = (message: unknown) => logs.push(message);
   try {
     await recordPostIntegrationStats('task-4000', { configuration: resolveConfiguration(process.env),
       rootDir: FAKE_ROOT,
@@ -919,13 +934,13 @@ test('recordPostIntegrationStats prints only the recorded row and weekly report 
 });
 
 test('recordPostIntegrationStats contains a weekly report read or render failure (TASK-2633)', async () => {
-  const logs = [];
+  const logs: unknown[] = [];
   const originalLog = console.log;
   const originalWarn = console.warn;
   const originalError = console.error;
-  console.log = message => logs.push(message);
-  console.warn = message => logs.push(message);
-  console.error = message => logs.push(message);
+  console.log = (message: unknown) => logs.push(message);
+  console.warn = (message: unknown) => logs.push(message);
+  console.error = (message: unknown) => logs.push(message);
   try {
     for (const failure of [{ report: null, reportError: 'database locked' }, { report: undefined }]) {
       const outcome = await recordPostIntegrationStats('task-5000', { configuration: resolveConfiguration(process.env),
@@ -952,18 +967,18 @@ test('recordPostIntegrationStats contains a weekly report read or render failure
 });
 
 test('runPostIntegrateHookOrAbort no-ops silently when no hook is configured (SC1: unchanged behavior)', () => {
-  const logs = [];
-  const errors = [];
+  const logs: unknown[] = [];
+  const errors: unknown[] = [];
   const originalLog = console.log;
   const originalError = console.error;
-  console.log = message => logs.push(message);
-  console.error = message => errors.push(message);
+  console.log = (message: unknown) => logs.push(message);
+  console.error = (message: unknown) => errors.push(message);
   try {
     const result = runPostIntegrateHookOrAbort('task-1402', {
       baseWorktree: FAKE_ROOT,
       baseBranch: 'main',
       variant: 'variant-b',
-      runPostIntegrateHookFn: () => ({ ran: false, ok: true })
+      runPostIntegrateHookFn: () => ({ ran: false, ok: true as const })
     });
 
     assert.deepEqual(result, { ran: false, ok: true });
@@ -976,18 +991,18 @@ test('runPostIntegrateHookOrAbort no-ops silently when no hook is configured (SC
 });
 
 test('runPostIntegrateHookOrAbort passes slug, base worktree/branch, and variant to the hook (SC2/SC3)', () => {
-  let received;
+  let received: { value: import("../../../src/adapters/process/post-integrate-hook.js").PostIntegrateHookParams | undefined } = { value: undefined };
   runPostIntegrateHookOrAbort('task-1402', {
     baseWorktree: FAKE_ROOT,
     baseBranch: 'main',
     variant: 'variant-b',
     runPostIntegrateHookFn: (params) => {
-      received = params;
-      return { ran: true, ok: true, command: './scripts/refresh-px.sh', output: 'ok', exitCode: 0 };
+      received.value = params;
+      return { ran: true, ok: true as const, command: './scripts/refresh-px.sh', output: 'ok', exitCode: 0 };
     }
   });
 
-  assert.deepEqual(received, {
+  assert.deepEqual(received.value, {
     slug: 'task-1402',
     baseWorktree: FAKE_ROOT,
     baseBranch: 'main',
@@ -996,15 +1011,15 @@ test('runPostIntegrateHookOrAbort passes slug, base worktree/branch, and variant
 });
 
 test('runPostIntegrateHookOrAbort logs a pass and the hook output on success', () => {
-  const logs = [];
+  const logs: unknown[] = [];
   const originalLog = console.log;
-  console.log = message => logs.push(message);
+  console.log = (message: unknown) => logs.push(message);
   try {
     runPostIntegrateHookOrAbort('task-1402', {
       baseWorktree: FAKE_ROOT,
       baseBranch: 'main',
       variant: 'variant-b',
-      runPostIntegrateHookFn: () => ({ ran: true, ok: true, command: './scripts/refresh-px.sh', output: 'bumped to 1.3.5', exitCode: 0 })
+      runPostIntegrateHookFn: () => ({ ran: true, ok: true as const, command: './scripts/refresh-px.sh', output: 'bumped to 1.3.5', exitCode: 0 })
     });
 
     const combined = logs.join('\n');
@@ -1016,15 +1031,15 @@ test('runPostIntegrateHookOrAbort logs a pass and the hook output on success', (
 });
 
 test('runPreCommitHookOrAbort commits only the tracked files the hook modified onto the mission branch (task-2510)', () => {
-  const gitCalls = [];
-  let hookParams;
+  const gitCalls: string[][] = [];
+  let hookParams: { value: import("../../../src/adapters/process/post-integrate-hook.js").PostIntegrateHookParams | undefined } = { value: undefined };
   let diffCalls = 0;
-  const gitRunner = (args) => {
+  const gitRunner: NonNullable<NonNullable<Parameters<typeof runPreCommitHookOrAbort>[1]>["gitRunner"]> = (args) => {
     gitCalls.push(args);
     if (args.includes('diff')) {
-      return { status: 0, stdout: diffCalls++ === 0 ? 'unrelated-dirty.txt\n' : 'unrelated-dirty.txt\npackage.json\npackage-lock.json\n' };
+      return { stderr: '', signal: null,  status: 0, stdout: diffCalls++ === 0 ? 'unrelated-dirty.txt\n' : 'unrelated-dirty.txt\npackage.json\npackage-lock.json\n' };
     }
-    return { status: 0, stdout: '' };
+    return { stderr: '', signal: null,  status: 0, stdout: '' };
   };
   const originalLog = console.log;
   console.log = () => {};
@@ -1036,21 +1051,22 @@ test('runPreCommitHookOrAbort commits only the tracked files the hook modified o
       variant: 'variant-b',
       gitRunner,
       runPreCommitHookFn: (params) => {
-        hookParams = params;
-        return { ran: true, ok: true, command: './scripts/bump-version.sh', output: '', exitCode: 0 };
+        hookParams.value = params;
+        return { ran: true, ok: true as const, command: './scripts/bump-version.sh', output: '', exitCode: 0 };
       }
     });
   } finally {
     console.log = originalLog;
   }
-  assert.equal(hookParams.cwd, '/mission');
-  assert.equal(hookParams.baseBranch, 'main');
+  assert.ok(hookParams.value != null);
+  assert.equal(hookParams.value.cwd, '/mission');
+  assert.equal(hookParams.value.baseBranch, 'main');
   const commits = gitCalls.filter(args => args.includes('commit'));
   assert.deepEqual(commits, [['-C', '/mission', 'commit', '--only', '-m', 'chore(task-2510): integrate pre-commit hook\n\nParallix-Bookkeeping: pre-commit-hook', '--', 'package.json', 'package-lock.json']]);
 });
 
 test('runPreCommitHookOrAbort creates no commit when the hook changes nothing (task-2510)', () => {
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
   const originalLog = console.log;
   console.log = () => {};
   try {
@@ -1059,8 +1075,8 @@ test('runPreCommitHookOrAbort creates no commit when the hook changes nothing (t
       baseWorktree: FAKE_ROOT,
       baseBranch: 'main',
       variant: 'variant-b',
-      gitRunner: (args) => { gitCalls.push(args); return { status: 0, stdout: '' }; },
-      runPreCommitHookFn: () => ({ ran: true, ok: true, command: './scripts/bump-version.sh', output: '', exitCode: 0 })
+      gitRunner: (args) => { gitCalls.push(args); return { stderr: '', signal: null,  status: 0, stdout: '' }; },
+      runPreCommitHookFn: () => ({ ran: true, ok: true as const, command: './scripts/bump-version.sh', output: '', exitCode: 0 })
     });
   } finally {
     console.log = originalLog;
@@ -1069,9 +1085,9 @@ test('runPreCommitHookOrAbort creates no commit when the hook changes nothing (t
 });
 
 test('runPreCommitHookOrAbort aborts before the integration gates when the hook fails (task-2510)', () => {
-  const errors = [];
+  const errors: unknown[] = [];
   const originalError = console.error;
-  console.error = message => errors.push(message);
+  console.error = (message: unknown) => errors.push(message);
   try {
     assert.throws(
       () => runPreCommitHookOrAbort('task-2510', {
@@ -1079,10 +1095,10 @@ test('runPreCommitHookOrAbort aborts before the integration gates when the hook 
         baseWorktree: FAKE_ROOT,
         baseBranch: 'main',
         variant: 'variant-b',
-        gitRunner: () => ({ status: 0, stdout: '' }),
-        runPreCommitHookFn: () => ({ ran: true, ok: false, command: './scripts/bump-version.sh', output: 'not MAJOR.MINOR.PATCH', exitCode: 1 })
+        gitRunner: () => ({ stderr: '', signal: null,  status: 0, stdout: '' }),
+        runPreCommitHookFn: () => ({ ran: true, ok: false as const, command: './scripts/bump-version.sh', output: 'not MAJOR.MINOR.PATCH', exitCode: 1 })
       }),
-      error => error.constructor.name === 'IntegrationAbort'
+      error => error instanceof Error && error.constructor.name === 'IntegrationAbort'
     );
     assert.match(errors.join('\n'), /Pre-commit hook failed \(exit code 1\)/);
   } finally {
@@ -1091,16 +1107,16 @@ test('runPreCommitHookOrAbort aborts before the integration gates when the hook 
 });
 
 test('runPostIntegrateHookOrAbort throws IntegrationAbort and surfaces a distinct failure with hook output (SC5)', () => {
-  const errors = [];
+  const errors: unknown[] = [];
   const originalError = console.error;
-  console.error = message => errors.push(message);
+  console.error = (message: unknown) => errors.push(message);
   try {
     assert.throws(() => {
       runPostIntegrateHookOrAbort('task-1402', {
         baseWorktree: FAKE_ROOT,
         baseBranch: 'main',
         variant: 'variant-b-resumed',
-        runPostIntegrateHookFn: () => ({ ran: true, ok: false, command: './scripts/refresh-px.sh', output: 'permission denied', exitCode: 3 })
+        runPostIntegrateHookFn: () => ({ ran: true, ok: false as const, command: './scripts/refresh-px.sh', output: 'permission denied', exitCode: 3 })
       });
     });
 
@@ -1124,7 +1140,7 @@ test('px integrate --dry-run never invokes the post-integrate hook (SC4)', async
     try {
       await integrateCommand(['task-integrate-hook-dry-run-does-not-exist', '--dry-run'], { configuration: resolveConfiguration(process.env), missionServicesFn: stubMissionServices() });
     } catch (err) {
-      if (err.message !== 'process.exit called') throw err;
+      if (!(err instanceof Error) || err.message !== 'process.exit called') throw err;
     }
   } finally {
     process.exit = originalExit;
@@ -1148,7 +1164,7 @@ test('px integrate never invokes the post-integrate hook when preflight fails (S
     try {
       await integrateCommand(['task-integrate-hook-preflight-fails-does-not-exist'], { configuration: resolveConfiguration(process.env), missionServicesFn: stubMissionServices() });
     } catch (err) {
-      if (err.message !== 'process.exit called') throw err;
+      if (!(err instanceof Error) || err.message !== 'process.exit called') throw err;
     }
   } finally {
     process.exit = originalExit;
@@ -1162,11 +1178,11 @@ test('px integrate never invokes the post-integrate hook when preflight fails (S
 
 test('evaluateTaskStatusForIntegration accepts approved (ready-for-integration) without extra conditions', () => {
   assert.deepEqual(
-    evaluateTaskStatusForIntegration({
+    evaluateTaskStatusForIntegration(integrationContext({
       taskStatus: 'ready-for-integration',
-      pr: { merged: false },
+      pr: { exists: true, merged: false },
       approval: { ok: false, reviewState: null }
-    }),
+    })),
     {
       ok: true,
       level: 'pass',
@@ -1176,11 +1192,11 @@ test('evaluateTaskStatusForIntegration accepts approved (ready-for-integration) 
 });
 
 test('evaluateTaskStatusForIntegration accepts review when the latest formal review is approved', () => {
-  const result = evaluateTaskStatusForIntegration({
+  const result = evaluateTaskStatusForIntegration(integrationContext({
     taskStatus: 'review',
-    pr: { merged: false },
+    pr: { exists: true, merged: false },
     approval: { ok: true, reviewState: 'APPROVED' }
-  });
+  }));
 
   assert.equal(result.ok, true);
   assert.equal(result.level, 'warn');
@@ -1219,9 +1235,9 @@ test('provider-backed approval repair leaves integration preflight with review i
     await submitReviewRound('task-2199', 'approve', 'LGTM', { configuration: resolveConfiguration(process.env),
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => 'token',
-      postReviewFn: () => ({ ok: true }),
-      buildMetadataFooterFn: () => '',
-      writeReviewStateFn: () => ({ outcome: 'committed' }),
+      postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
+      buildMetadataFooterFn: async () => '',
+      writeReviewStateFn: async () => ({ outcome: 'committed' as const }),
       readReviewStateFn: () => new ReviewState('task-2199', {
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
       }),
@@ -1231,11 +1247,11 @@ test('provider-backed approval repair leaves integration preflight with review i
       exit: () => {}
     });
 
-    const result = evaluateTaskStatusForIntegration({
-      taskStatus: backlog.getTaskStatus(taskFile),
-      pr: { merged: false },
+    const result = evaluateTaskStatusForIntegration(integrationContext({
+      taskStatus: backlog.getTaskStatus(taskFile) ?? undefined,
+      pr: { exists: true, merged: false },
       approval: { ok: true, reviewState: 'APPROVED' }
-    });
+    }));
 
     assert.equal(result.ok, true);
     assert.equal(result.level, 'warn');
@@ -1248,11 +1264,11 @@ test('provider-backed approval repair leaves integration preflight with review i
 });
 
 test('evaluateTaskStatusForIntegration rejects review when the Forgejo PR is already merged', () => {
-  const result = evaluateTaskStatusForIntegration({
+  const result = evaluateTaskStatusForIntegration(integrationContext({
     taskStatus: 'review',
-    pr: { state: 'merged', merged: true },
+    pr: { exists: true, state: 'merged', merged: true },
     approval: { ok: false, reviewState: null }
-  });
+  }));
 
   assert.equal(result.ok, false);
   assert.equal(result.level, 'fail');
@@ -1260,11 +1276,11 @@ test('evaluateTaskStatusForIntegration rejects review when the Forgejo PR is alr
 });
 
 test('evaluateTaskStatusForIntegration rejects review without an approved Forgejo PR', () => {
-  const result = evaluateTaskStatusForIntegration({
+  const result = evaluateTaskStatusForIntegration(integrationContext({
     taskStatus: 'review',
-    pr: { merged: false },
+    pr: { exists: true, merged: false },
     approval: { ok: true, reviewState: 'COMMENT' }
-  });
+  }));
 
   assert.equal(result.ok, false);
   assert.equal(result.level, 'fail');
@@ -1276,11 +1292,11 @@ test('evaluateTaskStatusForIntegration rejects review without an approved Forgej
 // (which moves the Mission lifecycle), and the lifecycle — not the boolean —
 // is what the preflight accepts.
 test('evaluateTaskStatusForIntegration rejects a raw defaultUserApproved boolean without the Mission lifecycle', () => {
-  const result = evaluateTaskStatusForIntegration({
+  const result = evaluateTaskStatusForIntegration(integrationContext({
     taskStatus: 'review',
-    pr: { merged: false },
+    pr: { exists: true, merged: false },
     approval: { ok: true, reviewState: 'REQUEST_CHANGES', defaultUserApproved: true }
-  });
+  }));
 
   assert.equal(result.ok, false);
   assert.equal(result.level, 'fail');
@@ -1288,12 +1304,12 @@ test('evaluateTaskStatusForIntegration rejects a raw defaultUserApproved boolean
 });
 
 test('evaluateTaskStatusForIntegration accepts review once the Mission lifecycle left it', () => {
-  const result = evaluateTaskStatusForIntegration({
+  const result = evaluateTaskStatusForIntegration(integrationContext({
     taskStatus: 'review',
     missionStatus: 'integration',
-    pr: { merged: false },
+    pr: { exists: true, merged: false },
     approval: { ok: true, reviewState: 'REQUEST_CHANGES', defaultUserApproved: true }
-  });
+  }));
 
   assert.equal(result.ok, true);
   assert.equal(result.level, 'pass');
@@ -1301,11 +1317,11 @@ test('evaluateTaskStatusForIntegration accepts review once the Mission lifecycle
 });
 
 test('evaluateTaskStatusForIntegration rejects review when default user did not approve and latest is not APPROVED', () => {
-  const result = evaluateTaskStatusForIntegration({
+  const result = evaluateTaskStatusForIntegration(integrationContext({
     taskStatus: 'review',
-    pr: { merged: false },
+    pr: { exists: true, merged: false },
     approval: { ok: true, reviewState: 'REQUEST_CHANGES', defaultUserApproved: false }
-  });
+  }));
 
   assert.equal(result.ok, false);
   assert.equal(result.level, 'fail');
@@ -1336,12 +1352,12 @@ test('resolveForgejoUserForIntegration uses task assignee directly even for unkn
 });
 
 test('printIntegrationPreflight reports token resolution and detached-head recovery command', () => {
-  const lines = [];
+  const lines: unknown[] = [];
   const originalLog = console.log;
-  console.log = line => lines.push(line);
+  console.log = (line: unknown) => lines.push(line);
 
   try {
-    const result = withDebug(() => printIntegrationPreflight({
+    const result = withDebug(() => printIntegrationPreflight(integrationContext({
       slug: 'task-113',
       branch: 'mission/task-113',
       currentBranch: 'mission/task-113',
@@ -1357,11 +1373,11 @@ test('printIntegrationPreflight reports token resolution and detached-head recov
       mainBranch: '',
       mainDirty: false,
       mainDirtyEntries: []
-    }, { configuration: resolveConfiguration(process.env),
+    }), { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'secret-token',
       resolveTokenFileFn: () => '/tmp/tokens/codex',
       isForgejoReviewEnabledFn: () => true,
-      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+      getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] })
     }));
 
     assert.ok(result.failures.includes('main-branch'));
@@ -1375,12 +1391,12 @@ test('printIntegrationPreflight reports token resolution and detached-head recov
 });
 
 test('printIntegrationPreflight fails when no Forgejo token is available', () => {
-  const lines = [];
+  const lines: unknown[] = [];
   const originalLog = console.log;
-  console.log = line => lines.push(line);
+  console.log = (line: unknown) => lines.push(line);
 
   try {
-    const result = printIntegrationPreflight({
+    const result = printIntegrationPreflight(integrationContext({
       slug: 'task-113',
       branch: 'mission/task-113',
       currentBranch: 'mission/task-113',
@@ -1394,14 +1410,13 @@ test('printIntegrationPreflight fails when no Forgejo token is available', () =>
       pr: { exists: true, state: 'open', merged: false, number: 113 },
       approval: { ok: true, reviewState: 'APPROVED' },
       mainBranch: 'main',
-      mainAheadCount: 0,
       mainDirty: false,
       mainDirtyEntries: []
-    }, { configuration: resolveConfiguration(process.env),
+    }), { configuration: resolveConfiguration(process.env),
       readTokenFn: () => null,
       resolveTokenFileFn: () => null,
       isForgejoReviewEnabledFn: () => true,
-      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+      getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] })
     });
 
     assert.ok(result.failures.includes('forgejo-token'));
@@ -1413,21 +1428,21 @@ test('printIntegrationPreflight fails when no Forgejo token is available', () =>
 });
 
 test('printIntegrationPreflight reads an adhoc mission from the Mission store instead of warning about a missing task file', () => {
-  const lines = [];
+  const lines: unknown[] = [];
   const originalLog = console.log;
-  console.log = line => lines.push(line);
+  console.log = (line: unknown) => lines.push(line);
 
   try {
-    const result = withDebug(() => printIntegrationPreflight({
+    const result = withDebug(() => printIntegrationPreflight(integrationContext({
       slug: 'px-0001',
       branch: 'mission/px-0001',
       currentBranch: 'mission/px-0001',
       missionDir: '/tmp/project-px-0001/missions/px-0001',
       task: { ok: false, reason: 'missing' },
-      taskStatus: null,
+      taskStatus: undefined,
       taskAssignee: null,
       missionStatus: 'integration',
-      missionLabels: ['user_value', 'bug'],
+      missionLabels: missionLabels(['user_value', 'bug']),
       forgejoUser: null,
       taskAssigneeWarning: null,
       pr: { exists: false, raw: 'no PR found' },
@@ -1436,11 +1451,11 @@ test('printIntegrationPreflight reads an adhoc mission from the Mission store in
       mainBranch: 'main',
       mainDirty: false,
       mainDirtyEntries: []
-    }, { configuration: resolveConfiguration(process.env),
+    }), { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'token',
       resolveTokenFileFn: () => '/tmp/token',
       isForgejoReviewEnabledFn: () => false,
-      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+      getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] })
     }));
 
     const output = lines.join('\n');
@@ -1456,18 +1471,18 @@ test('printIntegrationPreflight reads an adhoc mission from the Mission store in
 });
 
 test('printIntegrationPreflight tolerates a missing task file and reports unknown classification', () => {
-  const lines = [];
+  const lines: unknown[] = [];
   const originalLog = console.log;
-  console.log = line => lines.push(line);
+  console.log = (line: unknown) => lines.push(line);
 
   try {
-    const result = withDebug(() => printIntegrationPreflight({
+    const result = withDebug(() => printIntegrationPreflight(integrationContext({
       slug: 'task-unknown',
       branch: 'mission/task-unknown',
       currentBranch: 'mission/task-unknown',
       missionDir: '/tmp/docs/missions/2026/task-unknown',
       task: { ok: false, reason: 'missing' },
-      taskStatus: null,
+      taskStatus: undefined,
       taskAssignee: null,
       forgejoUser: 'codex',
       taskAssigneeWarning: null,
@@ -1476,11 +1491,11 @@ test('printIntegrationPreflight tolerates a missing task file and reports unknow
       mainBranch: 'main',
       mainDirty: false,
       mainDirtyEntries: []
-    }, { configuration: resolveConfiguration(process.env),
+    }), { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'secret-token',
       resolveTokenFileFn: () => '/tmp/tokens/codex',
       isForgejoReviewEnabledFn: () => false,
-      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+      getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] })
     }));
 
     const output = lines.join('\n');
@@ -1515,12 +1530,12 @@ test('getUnresolvedIndexConflicts deduplicates conflicted paths from git ls-file
 });
 
 test('printIntegrationPreflight reports unresolved index conflicts with recovery commands', () => {
-  const lines = [];
+  const lines: unknown[] = [];
   const originalLog = console.log;
-  console.log = line => lines.push(line);
+  console.log = (line: unknown) => lines.push(line);
 
   try {
-    const result = printIntegrationPreflight({
+    const result = printIntegrationPreflight(integrationContext({
       slug: 'task-113',
       branch: 'mission/task-113',
       currentBranch: 'mission/task-113',
@@ -1534,15 +1549,14 @@ test('printIntegrationPreflight reports unresolved index conflicts with recovery
       pr: { exists: true, state: 'open', merged: false, number: 113 },
       approval: { ok: true, reviewState: 'APPROVED' },
       mainBranch: 'main',
-      mainAheadCount: 0,
       mainDirty: false,
       mainDirtyEntries: []
-    }, { configuration: resolveConfiguration(process.env),
+    }), { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'secret-token',
       resolveTokenFileFn: () => '/tmp/tokens/codex',
       isForgejoReviewEnabledFn: () => true,
       getUnresolvedIndexConflictsFn: () => ({
-        ok: true,
+        ok: true as const,
         files: ['workflow/lib/commands/integrate.js', 'backlog/tasks/task-113.md']
       })
     });
@@ -1560,12 +1574,12 @@ test('printIntegrationPreflight reports unresolved index conflicts with recovery
 });
 
 test('printIntegrationPreflight fails fast on an in-progress rebase in the integration checkout', () => {
-  const lines = [];
+  const lines: unknown[] = [];
   const originalLog = console.log;
-  console.log = line => lines.push(line);
+  console.log = (line: unknown) => lines.push(line);
 
   try {
-    const result = printIntegrationPreflight({
+    const result = printIntegrationPreflight(integrationContext({
       slug: 'task-1322',
       branch: 'mission/task-1322',
       currentBranch: 'mission/task-1322',
@@ -1579,10 +1593,9 @@ test('printIntegrationPreflight fails fast on an in-progress rebase in the integ
       pr: { exists: true, state: 'open', merged: false, number: 1322 },
       approval: { ok: true, reviewState: 'APPROVED' },
       mainBranch: 'main',
-      mainAheadCount: 0,
       mainDirty: false,
       mainDirtyEntries: []
-    }, { configuration: resolveConfiguration(process.env),
+    }), { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'secret-token',
       resolveTokenFileFn: () => '/tmp/tokens/codex',
       isForgejoReviewEnabledFn: () => true,
@@ -1591,7 +1604,7 @@ test('printIntegrationPreflight fails fast on an in-progress rebase in the integ
         return {
           inProgress: true,
           detached: true,
-          rebaseHead: 'abc123def456',
+          rebaseHead: 'abc123def456', rebaseDir: '/fixture/rebase',
           unmergedFiles: [
             'backlog/tasks/task-1322 - prevent-backlog-task-id-recycling-collision.md',
             'missions/task-1322/review-state.json',
@@ -1599,7 +1612,7 @@ test('printIntegrationPreflight fails fast on an in-progress rebase in the integ
           ]
         };
       },
-      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+      getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] })
     });
 
     assert.ok(result.failures.includes('rebase-in-progress'));
@@ -1627,12 +1640,12 @@ test('parseStashPopCollisionFiles extracts already-exists paths from stash pop o
 });
 
 test('reportStashPopFailure confirms landed integration and prints merge-conflict recovery steps', () => {
-  const lines = [];
+  const lines: unknown[] = [];
   const originalError = console.error;
-  console.error = line => lines.push(line);
+  console.error = (line: unknown) => lines.push(line);
 
   try {
-    reportStashPopFailure('task-113', { status: 1, stdout: '', stderr: 'conflict output' }, {
+    reportStashPopFailure('task-113', { stdout: '', stderr: 'conflict output' }, {
       rootDir: '/tmp/main-checkout',
       gitRunner(args) {
         if (args.includes('--oneline')) {
@@ -1645,7 +1658,7 @@ test('reportStashPopFailure confirms landed integration and prints merge-conflic
         return { status: 0, stdout: '\0abc123\0mission/task-113: harden integrate preflight\n', stderr: '' };
       },
       getUnresolvedIndexConflictsFn: () => ({
-        ok: true,
+        ok: true as const,
         files: ['workflow/lib/commands/integrate.js']
       })
     });
@@ -1661,13 +1674,12 @@ test('reportStashPopFailure confirms landed integration and prints merge-conflic
 });
 
 test('reportStashPopFailure prints file-collision recovery steps when no merge entries remain', () => {
-  const lines = [];
+  const lines: unknown[] = [];
   const originalError = console.error;
-  console.error = line => lines.push(line);
+  console.error = (line: unknown) => lines.push(line);
 
   try {
     reportStashPopFailure('task-113', {
-      status: 1,
       stdout: 'docs/index.md already exists, no checkout',
       stderr: 'error: could not restore untracked files from stash'
     }, {
@@ -1681,7 +1693,7 @@ test('reportStashPopFailure prints file-collision recovery steps when no merge e
         return { status: 0, stdout: '\0def456\0unrelated latest commit\n', stderr: '' };
       },
       getUnresolvedIndexConflictsFn: () => ({
-        ok: true,
+        ok: true as const,
         files: []
       })
     });
@@ -1698,15 +1710,15 @@ test('reportStashPopFailure prints file-collision recovery steps when no merge e
 });
 
 test('promoteTaskForIntegrationIfNeeded logs the dry-run auto-promotion without mutating status', async () => {
-  const context = {
+  const context = integrationContext({
     task: { ok: true, taskFile: '/tmp/task-097.md' },
     taskStatus: 'review',
-    pr: { merged: false },
+    pr: { exists: true, merged: false },
     approval: { ok: true, reviewState: 'APPROVED' }
-  };
-  const lines = [];
+  });
+  const lines: unknown[] = [];
   const originalLog = console.log;
-  console.log = line => lines.push(line);
+  console.log = (line: unknown) => lines.push(line);
 
   try {
     const result = await promoteTaskForIntegrationIfNeeded(context, { dryRun: true });
@@ -1720,24 +1732,20 @@ test('promoteTaskForIntegrationIfNeeded logs the dry-run auto-promotion without 
 
 test('recovery promotes an approved Review with its original decidedAt before integration', async () => {
   const decidedAt = '2026-01-01T10:30:00Z';
-  const calls = [];
-  let state = {
-    status: 'review', assignee: 'codex', review: {
-      rounds: [{ decision: { kind: 'approved', decidedAt } }],
-    },
-  };
-  const missionServices = {
-    store: { async load() { return { kind: 'found', mission: state, version: 7 }; } },
+  const calls: import("../../../src/application/mission-lifecycle-service.js").MissionTransitionRequest[] = [];
+  let state = integrateCommandMission("task-2376", 'review', approvedReview("task-2376", { startedAt: '2026-01-01T10:00:00Z', decidedAt: decidedAt }));
+  const missionServices = integrationServices({
+    store: { async load() { return { kind: 'found' as const, mission: state, version: fixtureVersion(7) }; } },
     lifecycle: {
       async transition(request) {
         calls.push(request);
-        state = { ...state, status: 'integration' };
-        return { status: 'completed' };
+        state = { ...state, status: 'integration', closedAt: null };
+        return { durableEvidence: [],  status: 'completed' as const };
       },
     },
-  };
+  });
 
-  const result = await recoverMissionForIntegration({ slug: 'task-2376' }, { missionServices });
+  const result = await recoverMissionForIntegration(integrationContext({ slug: 'task-2376' }), { missionServices });
   assert.deepEqual(result, { recovered: true, status: 'integration', occurredAt: decidedAt });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].command.type, 'approve');
@@ -1745,13 +1753,13 @@ test('recovery promotes an approved Review with its original decidedAt before in
 });
 
 test('recovery refuses an active Mission without authoritative Review facts', async () => {
-  const missionServices = {
-    store: { async load() { return { kind: 'found', mission: { status: 'active' }, version: 7 }; } },
+  const missionServices = integrationServices({
+    store: { async load() { return { kind: 'found' as const, mission: fixtureMission('task-2376', { status: 'active' }), version: fixtureVersion(7) }; } },
     lifecycle: { async transition() { throw new Error('must not transition'); } },
-  };
+  });
   await assert.rejects(
-    () => recoverMissionForIntegration({ slug: 'task-2376' }, { missionServices }),
-    error => error.constructor.name === 'IntegrationAbort',
+    () => recoverMissionForIntegration(integrationContext({ slug: 'task-2376' }), { missionServices }),
+    error => error instanceof Error && error.constructor.name === 'IntegrationAbort',
   );
 });
 
@@ -1766,36 +1774,33 @@ test('R4: stale active approved recovery skips submit-for-review replay, then ap
   const reviewEntryAt = '2026-01-01T10:00:00Z';
   const calls: string[][] = [];
   let submitForReviewCalled = false;
-  const state = {
-    status: 'active', assignee: 'codex',
-    review: { rounds: [{ startedAt: reviewEntryAt, decision: { kind: 'approved', decidedAt } }] },
-  };
-  const submitForReviewFn = async () => {
+  let state = integrateCommandMission("task-2376", 'active', approvedReview("task-2376", { startedAt: reviewEntryAt, decidedAt: decidedAt }));
+  const submitForReviewFn: NonNullable<NonNullable<Parameters<typeof recoverMissionForIntegration>[1]>["submitForReviewFn"]> = async () => {
     submitForReviewCalled = true;
   };
-  const missionServices = {
-    store: { async load() { return { kind: 'found', mission: state, version: 7 }; } },
+  const missionServices = integrationServices({
+    store: { async load() { return { kind: 'found' as const, mission: state, version: fixtureVersion(7) }; } },
     lifecycle: {
-      async transition(request) {
+      async transition(request: { command: { type: string; }; occurredAt: string; }) {
         calls.push([request.command.type, request.occurredAt]);
         // mirror the workflow guard: a decided round moves active → review, then
         // approve moves review → integration
-        if (request.command.type === 'submit-for-review') { state.status = 'review'; }
-        else if (request.command.type === 'approve') { state.status = 'integration'; }
-        return { status: 'completed' };
+        if (request.command.type === 'submit-for-review') { state = fixtureMission(state.id, { ...state, status: 'review', closedAt: null }); }
+        else if (request.command.type === 'approve') { state = fixtureMission(state.id, { ...state, status: 'integration', closedAt: null }); }
+        return { durableEvidence: [],  status: 'completed' as const };
       },
     },
-  };
+  });
 
   const result = await recoverMissionForIntegration(
-    {
+    integrationContext({
       slug: 'task-2376',
       approval: {
         ok: true,
         defaultUserApproved: true,
         defaultUserApprovedAt: decidedAt,
       },
-    },
+    }),
     { missionServices, submitForReviewFn },
   );
 
@@ -1811,24 +1816,16 @@ test('R4: stale active approved recovery skips submit-for-review replay, then ap
 });
 
 test('R4b: stale active approved recovery requires the provider approval', async () => {
-  const state = {
-    status: 'active', assignee: 'codex',
-    review: {
-      rounds: [{
-        startedAt: '2026-01-01T10:00:00Z',
-        decision: { kind: 'approved', decidedAt: '2026-01-01T10:30:00Z' },
-      }],
-    },
-  };
-  const transitionCalls = [];
-  const missionServices = {
-    store: { async load() { return { kind: 'found', mission: state, version: 7 }; } },
-    lifecycle: { async transition(request) { transitionCalls.push(request); return { status: 'completed' }; } },
-  };
+  let state = integrateCommandMission("task-2397", 'active', approvedReview("task-2397", { startedAt: '2026-01-01T10:00:00Z', decidedAt: '2026-01-01T10:30:00Z' }));
+  const transitionCalls: import("../../../src/application/mission-lifecycle-service.js").MissionTransitionRequest[] = [];
+  const missionServices = integrationServices({
+    store: { async load() { return { kind: 'found' as const, mission: state, version: fixtureVersion(7) }; } },
+    lifecycle: { async transition(request) { transitionCalls.push(request); return { durableEvidence: [],  status: 'completed' as const }; } },
+  });
 
   await assert.rejects(
-    () => recoverMissionForIntegration({ slug: 'task-2397' }, { missionServices }),
-    error => error.constructor.name === 'IntegrationAbort',
+    () => recoverMissionForIntegration(integrationContext({ slug: 'task-2397' }), { missionServices }),
+    error => error instanceof Error && error.constructor.name === 'IntegrationAbort',
   );
   assert.equal(transitionCalls.length, 0, 'a stored approval alone cannot move the Mission');
   assert.equal(state.status, 'active');
@@ -1842,27 +1839,24 @@ test('R4b2: stale active approved recovery proceeds when no review provider is c
   const decidedAt = '2026-01-01T10:30:00Z';
   const reviewEntryAt = '2026-01-01T10:00:00Z';
   const calls: string[][] = [];
-  const state = {
-    status: 'active', assignee: 'codex',
-    review: { rounds: [{ startedAt: reviewEntryAt, decision: { kind: 'approved', decidedAt } }] },
-  };
-  const missionServices = {
-    store: { async load() { return { kind: 'found', mission: state, version: 7 }; } },
+  let state = integrateCommandMission("task-2460", 'active', approvedReview("task-2460", { startedAt: reviewEntryAt, decidedAt: decidedAt }));
+  const missionServices = integrationServices({
+    store: { async load() { return { kind: 'found' as const, mission: state, version: fixtureVersion(7) }; } },
     lifecycle: {
-      async transition(request) {
+      async transition(request: { command: { type: string; }; occurredAt: string; }) {
         calls.push([request.command.type, request.occurredAt]);
-        if (request.command.type === 'submit-for-review') { state.status = 'review'; }
-        else if (request.command.type === 'approve') { state.status = 'integration'; }
-        return { status: 'completed' };
+        if (request.command.type === 'submit-for-review') { state = fixtureMission(state.id, { ...state, status: 'review', closedAt: null }); }
+        else if (request.command.type === 'approve') { state = fixtureMission(state.id, { ...state, status: 'integration', closedAt: null }); }
+        return { durableEvidence: [],  status: 'completed' as const };
       },
     },
-  };
+  });
 
   const result = await recoverMissionForIntegration(
-    {
+    integrationContext({
       slug: 'task-2460',
       approval: { ok: true, reviewState: 'APPROVED', source: 'mission-store', providerDisabled: true },
-    },
+    }),
     { missionServices },
   );
 
@@ -1871,25 +1865,22 @@ test('R4b2: stale active approved recovery proceeds when no review provider is c
 });
 
 test('R4c: fresh awaiting-review recovery still uses the handoff operation', async () => {
-  const state = {
-    status: 'active', assignee: 'codex',
-    review: { rounds: [{ startedAt: '2026-01-01T10:00:00Z', decision: null }] },
-  };
-  const missionServices = {
-    store: { async load() { return { kind: 'found', mission: state, version: 7 }; } },
+  let state = integrateCommandMission("task-2397", 'active', pendingReview("task-2397", '2026-01-01T10:00:00Z'));
+  const missionServices = integrationServices({
+    store: { async load() { return { kind: 'found' as const, mission: state, version: fixtureVersion(7) }; } },
     lifecycle: { async transition() { throw new Error('no direct transition expected'); } },
-  };
+  });
   let submitForReviewCalled = false;
 
   await assert.rejects(
-    () => recoverMissionForIntegration({ slug: 'task-2397' }, {
+    () => recoverMissionForIntegration(integrationContext({ slug: 'task-2397' }), {
       missionServices,
       submitForReviewFn: async () => {
         submitForReviewCalled = true;
-        state.status = 'review';
+        state = fixtureMission(state.id, { ...state, status: 'review', closedAt: null });
       },
     }),
-    error => error.constructor.name === 'IntegrationAbort',
+    error => error instanceof Error && error.constructor.name === 'IntegrationAbort',
   );
   assert.equal(submitForReviewCalled, true, 'fresh rounds still route through submitForReview');
   assert.equal(state.status, 'review', 'the fresh handoff still advances active to review');
@@ -1919,7 +1910,7 @@ test('R5: stale active recovery with human override persists a real ReviewerDeci
   const implementer = agentFamily('configured-implementer');
   const reviewer = agentFamily('configured-reviewer');
   const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' });
-  const pullRequest = { kind: 'pull-request', provider: 'forgejo', id: '2379-r5', url: null, sourceBranch: 'mission/task-2379-r5', targetBranch: 'main' };
+  const pullRequest = { kind: 'pull-request', provider: 'forgejo', id: '2379-r5', url: null, sourceBranch: 'mission/task-2379-r5', targetBranch: 'main' } satisfies import("../../../src/domain/review.js").ReviewedChange;
 
   const root = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'task-2379-r5-'));
   fsMod.mkdirSync(pathMod.join(root, 'missions'), { recursive: true });
@@ -1942,7 +1933,7 @@ test('R5: stale active recovery with human override persists a real ReviewerDeci
   const lifecycle = new MissionLifecycleService(store);
 
   const slug = 'task-2379-r5';
-  const mission = {
+  const mission = fixtureMission(missionId(slug), {
     id: missionId(slug),
     repositoryId: repositoryId('parallix'),
     title: 'R5 active override',
@@ -1961,22 +1952,21 @@ test('R5: stale active recovery with human override persists a real ReviewerDeci
     netEngineeringLines: null,
     closedAt: null,
     externalTaskRef: null,
-    intakeTrace: null,
     review: null,
-  };
+  });
   await store.save(mission, null);
 
   try {
-    const calls = [];
+    const calls: ["submit-for-review", string, boolean, {} | null][] = [];
     // The existing handoff operation owns active → review: it creates the
     // awaiting Review aggregate and persists it through the domain.
     // Mirrors the production contract (review round 1, F1): the handoff
     // stamps the authoritative timestamp recovery passes, its own wall clock
     // when nothing is passed — so this test stays red if recovery forgets to
     // forward the entry time.
-    const stamp = (options: any) => options?.occurredAt || new Date().toISOString();
-    const submitForReviewFn = async (submittedSlug, isContinue, options: any = {}) => {
-      calls.push(['submit-for-review', submittedSlug, isContinue, options?.occurredAt ?? null]);
+    const stamp = (options: { occurredAt?: string } | undefined) => options?.occurredAt || new Date().toISOString();
+    const submitForReviewFn: NonNullable<NonNullable<Parameters<typeof recoverMissionForIntegration>[1]>["submitForReviewFn"]> = async (submittedSlug, isContinue, options = {}) => {
+      calls.push(['submit-for-review', submittedSlug, isContinue, options?.occurredAt ?? null] as const);
       const loaded = await store.load(missionId(submittedSlug));
       const review = startReview(
         { change: pullRequest, revision: changeRevision('abc123') },
@@ -1988,7 +1978,7 @@ test('R5: stale active recovery with human override persists a real ReviewerDeci
       const result = await lifecycle.transition({
         operationId: `r5-submit:${submittedSlug}`,
         missionId: missionId(submittedSlug),
-        expectedVersion: loaded.kind === 'found' ? loaded.version : null,
+        expectedVersion: loaded.kind === 'found' ? loaded.version : undefined,
         capabilities: new Set(['mission:transition']),
         command: { type: 'submit-for-review', gatesPassed: true, review, reviewerEligibility },
         actor: implementer,
@@ -1999,7 +1989,7 @@ test('R5: stale active recovery with human override persists a real ReviewerDeci
       }
     };
 
-    const context = {
+    const context = integrationContext({
       slug,
       // The provider approval was recorded on this PR; its creation time is
       // the authoritative review-entry point for the recovered transition.
@@ -2015,10 +2005,10 @@ test('R5: stale active recovery with human override persists a real ReviewerDeci
         defaultUserApproved: true,
         defaultUserApprovedAt: decidedAt,
       },
-    };
+    });
 
     const result = await recoverMissionForIntegration(context, {
-      missionServices: { store, lifecycle },
+      missionServices: integrationServices({ store, lifecycle }),
       submitForReviewFn,
     });
 
@@ -2032,11 +2022,13 @@ test('R5: stale active recovery with human override persists a real ReviewerDeci
     const loaded = await store.load(missionId(slug));
     assert.equal(loaded.kind, 'found');
     assert.equal(loaded.mission.status, 'integration');
+    assert.ok(loaded.mission.review);
     const round = loaded.mission.review.rounds[loaded.mission.review.rounds.length - 1];
+    assert.ok(round.decision != null);
     assert.equal(round.decision.kind, 'approved', 'an authoritative ReviewerDecision exists');
     assert.equal(round.decision.decidedAt, decidedAt, 'decidedAt is the human approval time, not the integration start');
 
-    const events = await database.query(
+    const events = await database.query<{ from_status: string; to_status: string; trigger: string; occurred_at: string }>(
       'SELECT from_status, to_status, trigger, occurred_at FROM board_lane_events WHERE mission_id = ?',
       [missionId(slug)],
     );
@@ -2061,17 +2053,17 @@ test('R5: stale active recovery with human override persists a real ReviewerDeci
 // is the divergence this mission removes) and it may not persist an
 // out-of-order lane event from inverted data.
 test('R5b: override recovery stops without an authoritative review-entry timestamp', async () => {
-  const makeState = () => ({ status: 'active', assignee: 'codex', review: null });
+  const makeState = () => fixtureMission('task-2376', { status: 'active', assignee: agentFamily('codex'), review: null });
   const baseContext = {
     slug: 'task-2376',
     approval: { ok: true, reviewState: 'REQUEST_CHANGES', defaultUserApproved: true, defaultUserApprovedAt: '2026-01-01T10:30:00Z' },
-  };
-  const makeServices = (state) => {
-    const transitionCalls = [];
-    const services = {
-      store: { async load() { return { kind: 'found', mission: state, version: 7 }; } },
-      lifecycle: { async transition(request) { transitionCalls.push(request); return { status: 'completed' }; } },
-    };
+  } satisfies Partial<NonNullable<Parameters<typeof recoverMissionForIntegration>[0]>>;
+  const makeServices = (state: Mission) => {
+    const transitionCalls: import("../../../src/application/mission-lifecycle-service.js").MissionTransitionRequest[] = [];
+    const services = integrationServices({
+      store: { async load() { return { kind: 'found' as const, mission: state, version: fixtureVersion(7) }; } },
+      lifecycle: { async transition(request) { transitionCalls.push(request); return { durableEvidence: [],  status: 'completed' as const }; } },
+    });
     return { services, transitionCalls };
   };
 
@@ -2081,11 +2073,11 @@ test('R5b: override recovery stops without an authoritative review-entry timesta
     const { services, transitionCalls } = makeServices(state);
     const submitCalls = [];
     await assert.rejects(
-      () => recoverMissionForIntegration({ ...baseContext, pr: { exists: true, state: 'open' } }, {
+      () => recoverMissionForIntegration(integrationContext({ ...baseContext, pr: { exists: true, state: 'open' } }), {
         missionServices: services,
         submitForReviewFn: async () => { submitCalls.push(1); },
       }),
-      error => error.constructor.name === 'IntegrationAbort',
+      error => error instanceof Error && error.constructor.name === 'IntegrationAbort',
     );
     assert.equal(submitCalls.length, 0, 'no handoff operation runs on missing entry data');
     assert.equal(transitionCalls.length, 0, 'no transition is invented');
@@ -2099,11 +2091,11 @@ test('R5b: override recovery stops without an authoritative review-entry timesta
     const { services, transitionCalls } = makeServices(state);
     const submitCalls = [];
     await assert.rejects(
-      () => recoverMissionForIntegration({ ...baseContext, pr: { exists: true, state: 'open', createdAt: '2026-01-01T12:00:00Z' } }, {
+      () => recoverMissionForIntegration(integrationContext({ ...baseContext, pr: { exists: true, state: 'open', createdAt: '2026-01-01T12:00:00Z' } }), {
         missionServices: services,
         submitForReviewFn: async () => { submitCalls.push(1); },
       }),
-      error => error.constructor.name === 'IntegrationAbort',
+      error => error instanceof Error && error.constructor.name === 'IntegrationAbort',
     );
     assert.equal(submitCalls.length, 0, 'inverted timestamps never reach the handoff operation');
     assert.equal(transitionCalls.length, 0, 'no transition is invented');
@@ -2116,13 +2108,13 @@ test('R5b: override recovery stops without an authoritative review-entry timesta
 // accepts must not fail the dry-run preflight; the no-override control must
 // still fail.
 test('F3: dry-run preflight accepts the override case the real run accepts', () => {
-  const logs = [];
-  const makeContext = (approval) => ({
+  const logs: string[] = [];
+  const makeContext = (approval: { ok: boolean; reviewState: string; defaultUserApproved: boolean; defaultUserApprovedAt?: string; }) => integrationContext({
     slug: 'task-2379-f3',
     branch: 'mission/task-2379-f3',
     currentBranch: 'mission/task-2379-f3',
     missionDir: '/tmp/task-2379-f3/missions/task-2379-f3',
-    area: 'all',
+    area: 'all' as const,
     task: { ok: true, taskFile: '/tmp/task-2379-f3/backlog/tasks/task-2379-f3.md' },
     taskStatus: 'review',
     taskAssignee: 'custom',
@@ -2132,7 +2124,7 @@ test('F3: dry-run preflight accepts the override case the real run accepts', () 
     siblingPrs: [],
     approval,
     missionStatus: 'review',
-    missionReview: { rounds: [{ decision: null }] },
+    missionReview: pendingReview('task-2379-f3'),
     baseBranch: 'main',
     baseWorktree: '/tmp/task-2379-f3',
     mainBranch: 'main',
@@ -2142,11 +2134,11 @@ test('F3: dry-run preflight accepts the override case the real run accepts', () 
   const options = {
     readTokenFn: () => 'test-token',
     resolveTokenFileFn: () => '/tmp/token-file',
-    detectRebaseStateFn: () => ({ inProgress: false, rebaseHead: null, unmergedFiles: [] }),
-    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
-    findMissionDocInBranchesFn: () => null,
+    detectRebaseStateFn: () => ({ inProgress: false, rebaseHead: '', detached: false, rebaseDir: null, unmergedFiles: [] }),
+    getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] }),
+    findMissionDocInBranchesFn: () => [],
     isForgejoReviewEnabledFn: () => true,
-    log: (message) => { logs.push(message); },
+    log: (message: string) => { logs.push(message); },
   };
 
   const { failures } = withDebug(() => printIntegrationPreflight(
@@ -2170,20 +2162,20 @@ test('F3: dry-run preflight accepts the override case the real run accepts', () 
 // stops with an actionable error and the Mission is not `done`. No Git/PR/
 // task-text inference is allowed to fill the gap.
 test('R6: stale active without Review facts and without override stops — Mission not done', async () => {
-  const state = { status: 'active', assignee: 'codex' };
-  const transitionCalls = [];
-  const missionServices = {
-    store: { async load() { return { kind: 'found', mission: state, version: 7 }; } },
-    lifecycle: { async transition(request) { transitionCalls.push(request); return { status: 'completed' }; } },
-  };
-  const context = {
+  let state = integrateCommandMission("task-2376", 'active');
+  const transitionCalls: import("../../../src/application/mission-lifecycle-service.js").MissionTransitionRequest[] = [];
+  const missionServices = integrationServices({
+    store: { async load() { return { kind: 'found' as const, mission: state, version: fixtureVersion(7) }; } },
+    lifecycle: { async transition(request) { transitionCalls.push(request); return { durableEvidence: [],  status: 'completed' as const }; } },
+  });
+  const context = integrationContext({
     slug: 'task-2376',
     approval: { ok: true, reviewState: 'REQUEST_CHANGES', defaultUserApproved: false },
-  };
+  });
 
   await assert.rejects(
     () => recoverMissionForIntegration(context, { missionServices }),
-    error => error.constructor.name === 'IntegrationAbort',
+    error => error instanceof Error && error.constructor.name === 'IntegrationAbort',
   );
   assert.equal(transitionCalls.length, 0, 'no transition is invented without authoritative facts');
   assert.equal(state.status, 'active', 'Mission is not done');
@@ -2192,19 +2184,16 @@ test('R6: stale active without Review facts and without override stops — Missi
 // R7 — `review` without an authoritative approval and no override: recovery
 // must stop and the Mission must remain in `review` (no invented transition).
 test('R7: review without approval stops — Mission remains review', async () => {
-  const transitionCalls = [];
-  const state = {
-    status: 'review', assignee: 'codex',
-    review: { rounds: [{ decision: { kind: 'changes-requested', decidedAt: '2026-01-01T11:00:00Z' } }] },
-  };
-  const missionServices = {
-    store: { async load() { return { kind: 'found', mission: state, version: 7 }; } },
-    lifecycle: { async transition(request) { transitionCalls.push(request); return { status: 'completed' }; } },
-  };
+  const transitionCalls: import("../../../src/application/mission-lifecycle-service.js").MissionTransitionRequest[] = [];
+  let state = integrateCommandMission("task-2376", 'review', requestedChangesReview("task-2376", { startedAt: '2026-01-01T10:00:00Z', decidedAt: '2026-01-01T11:00:00Z' }));
+  const missionServices = integrationServices({
+    store: { async load() { return { kind: 'found' as const, mission: state, version: fixtureVersion(7) }; } },
+    lifecycle: { async transition(request) { transitionCalls.push(request); return { durableEvidence: [],  status: 'completed' as const }; } },
+  });
 
   await assert.rejects(
-    () => recoverMissionForIntegration({ slug: 'task-2376' }, { missionServices }),
-    error => error.constructor.name === 'IntegrationAbort',
+    () => recoverMissionForIntegration(integrationContext({ slug: 'task-2376' }), { missionServices }),
+    error => error instanceof Error && error.constructor.name === 'IntegrationAbort',
   );
   assert.equal(transitionCalls.length, 0, 'no approval transition is invented');
   assert.equal(state.status, 'review', 'Mission remains in review');
@@ -2213,14 +2202,14 @@ test('R7: review without approval stops — Mission remains review', async () =>
 // R9 — normal `integration` state: recovery proceeds without rerunning
 // review/approval logic and creates no duplicate approval event.
 test('R9: normal integration state proceeds without rerunning approval', async () => {
-  const transitionCalls = [];
-  const state = { status: 'integration', assignee: 'codex' };
-  const missionServices = {
-    store: { async load() { return { kind: 'found', mission: state, version: 7 }; } },
-    lifecycle: { async transition(request) { transitionCalls.push(request); return { status: 'completed' }; } },
-  };
+  const transitionCalls: import("../../../src/application/mission-lifecycle-service.js").MissionTransitionRequest[] = [];
+  let state = integrateCommandMission("task-2376", 'integration');
+  const missionServices = integrationServices({
+    store: { async load() { return { kind: 'found' as const, mission: state, version: fixtureVersion(7) }; } },
+    lifecycle: { async transition(request) { transitionCalls.push(request); return { durableEvidence: [],  status: 'completed' as const }; } },
+  });
 
-  const result = await recoverMissionForIntegration({ slug: 'task-2376' }, { missionServices });
+  const result = await recoverMissionForIntegration(integrationContext({ slug: 'task-2376' }), { missionServices });
 
   assert.deepEqual(result, { recovered: false, status: 'integration' });
   assert.equal(transitionCalls.length, 0, 'no duplicate approval event is created');
@@ -2233,18 +2222,18 @@ test('promoteTaskForIntegrationIfNeeded updates the task file on a real integrat
   fs.writeFileSync(taskFile, 'Status: ○ review\n');
 
   try {
-    const context = {
+    const context = integrationContext({
       slug: 'task-2229',
       baseWorktree,
       task: { ok: true, taskFile },
       taskStatus: 'review',
       missionStatus: 'review',
-      pr: { merged: false },
+      pr: { exists: true, merged: false },
       approval: { ok: true, reviewState: 'APPROVED' }
-    };
+    });
     const result = await promoteTaskForIntegrationIfNeeded(context, {
       missionServicesFn: stubMissionServices({
-        store: { async load() { return { kind: 'found', mission: { status: 'integration' }, version: 1 }; } },
+        store: { async load() { return { kind: 'found' as const, mission: fixtureMission('task-2376', { status: 'integration' }), version: fixtureVersion(1) }; } },
       }),
     });
 
@@ -2269,15 +2258,15 @@ for (const [label, read] of [
     fs.writeFileSync(taskFile, 'Status: ○ review\n');
 
     try {
-      const context = {
+      const context = integrationContext({
         slug: 'task-2322-07-absent',
         task: { ok: true, taskFile },
         taskStatus: 'review',
-        pr: { merged: false },
+        pr: { exists: true, merged: false },
         approval: { ok: true, reviewState: 'APPROVED' }
-      };
+      });
       const missionServicesFn = stubMissionServices({
-        store: { _repoId: 'test-repo', async load() { return read; } },
+        store: { async load() { return read; } },
       });
 
       await assert.rejects(
@@ -2302,16 +2291,16 @@ test('promoteTaskForIntegrationIfNeeded writes the integration checkout instead 
   fs.writeFileSync(baseTask, 'id: TASK-2230\nstatus: review\n');
   fs.writeFileSync(missionTask, 'id: TASK-2230\nstatus: review\n');
   try {
-    const context = {
+    const context = integrationContext({
       slug: 'task-2230', baseWorktree: root, missionWorktree: missionRoot,
       task: { ok: true, taskFile: missionTask }, taskStatus: 'review',
       missionStatus: 'review',
-      pr: { merged: false }, approval: { ok: true, reviewState: 'APPROVED' }
-    };
+      pr: { exists: true, merged: false }, approval: { ok: true, reviewState: 'APPROVED' }
+    });
     assert.deepEqual(
       await promoteTaskForIntegrationIfNeeded(context, {
         missionServicesFn: stubMissionServices({
-          store: { async load() { return { kind: 'found', mission: { status: 'integration' }, version: 1 }; } },
+          store: { async load() { return { kind: 'found' as const, mission: fixtureMission('task-2376', { status: 'integration' }), version: fixtureVersion(1) }; } },
         }),
       }),
       { changed: true, dryRun: false },
@@ -2336,7 +2325,7 @@ test('stashMainCheckoutIfNeeded no-ops when the main checkout is already clean',
 });
 
 test('stashMainCheckoutIfNeeded creates an explicit include-untracked stash', () => {
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
   const result = stashMainCheckoutIfNeeded({
     slug: 'task-097',
     dirtyEntries: ['?? backlog/tasks/task-099 - fix-act-on-review.md'],
@@ -2364,7 +2353,7 @@ test('stashMainCheckoutIfNeeded creates an explicit include-untracked stash', ()
 });
 
 test('restoreMainCheckoutStash pops the temporary stash back onto the main checkout', () => {
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
   const result = restoreMainCheckoutStash({
     message: 'integrate:task-097: temporary integration checkout stash',
     rootDir: '/tmp/main-checkout',
@@ -2424,28 +2413,28 @@ test('findExistingSquashCommit returns null when no squash commit exists for the
 
 test('isNoMergeToAbortResult only ignores the known no-merge case', () => {
   assert.equal(
-    isNoMergeToAbortResult({ status: 1, stdout: '', stderr: 'fatal: There is no merge to abort (MERGE_HEAD missing).' }),
+    isNoMergeToAbortResult({ stdout: '', stderr: 'fatal: There is no merge to abort (MERGE_HEAD missing).' }),
     true
   );
   assert.equal(
-    isNoMergeToAbortResult({ status: 1, stdout: '', stderr: 'fatal: some other git error' }),
+    isNoMergeToAbortResult({ stdout: '', stderr: 'fatal: some other git error' }),
     false
   );
 });
 
 for (const recordedContract of [false, true]) {
 test(`printIntegrationPreflight ${recordedContract ? 'accepts a recorded contract without metadata' : 'prints the missing legacy contract path'}`, () => {
-  const lines = [];
+  const lines: unknown[] = [];
   const originalLog = console.log;
-  console.log = line => lines.push(line);
+  console.log = (line: unknown) => lines.push(line);
 
   try {
-    const result = printIntegrationPreflight({
+    const result = printIntegrationPreflight(integrationContext({
       slug: 'task-1054-modern',
       branch: 'mission/task-1054-modern',
       currentBranch: 'mission/task-1054-modern',
       missionDir: null,
-      missionBrief: recordedContract ? { goal: 'Recorded mission contract' } : null,
+      missionBrief: recordedContract ? { goal: 'Recorded mission contract', why: 'Fixture contract', scope: null, outOfScope: [] } : null,
       recordedContract,
       task: { ok: true, taskFile: '/tmp/task-1054-modern.md' },
       taskStatus: 'ready-for-integration',
@@ -2455,14 +2444,13 @@ test(`printIntegrationPreflight ${recordedContract ? 'accepts a recorded contrac
       pr: { exists: true, state: 'open', merged: false, number: 1054 },
       approval: { ok: true, reviewState: 'APPROVED' },
       mainBranch: 'main',
-      mainAheadCount: 0,
       mainDirty: false,
       mainDirtyEntries: []
-    }, { configuration: resolveConfiguration(process.env),
+    }), { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'secret-token',
       resolveTokenFileFn: () => '/tmp/tokens/codex',
       isForgejoReviewEnabledFn: () => true,
-      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+      getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] })
     });
 
     assert.equal(result.failures.includes('mission-doc'), !recordedContract);
@@ -2480,12 +2468,12 @@ test(`printIntegrationPreflight ${recordedContract ? 'accepts a recorded contrac
 }
 
 test('printIntegrationPreflight warns when multiple PRs exist for the same task', () => {
-  const lines = [];
+  const lines: unknown[] = [];
   const originalLog = console.log;
-  console.log = line => lines.push(line);
+  console.log = (line: unknown) => lines.push(line);
 
   try {
-    const result = printIntegrationPreflight({
+    const result = printIntegrationPreflight(integrationContext({
       slug: 'task-1054-modern',
       branch: 'mission/task-1054-modern',
       currentBranch: 'mission/task-1054-modern',
@@ -2501,14 +2489,13 @@ test('printIntegrationPreflight warns when multiple PRs exist for the same task'
       ],
       approval: { ok: true, reviewState: 'APPROVED' },
       mainBranch: 'main',
-      mainAheadCount: 0,
       mainDirty: false,
       mainDirtyEntries: []
-    }, { configuration: resolveConfiguration(process.env),
+    }), { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'secret-token',
       resolveTokenFileFn: () => '/tmp/tokens/codex',
       isForgejoReviewEnabledFn: () => true,
-      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+      getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] })
     });
 
     assert.ok(result.warnings.includes('sibling-prs'));
@@ -2521,12 +2508,12 @@ test('printIntegrationPreflight warns when multiple PRs exist for the same task'
 });
 
 test('printIntegrationPreflight provides recovery commands when mission doc is missing but found on another branch', () => {
-  const lines = [];
+  const lines: unknown[] = [];
   const originalLog = console.log;
-  console.log = line => lines.push(line);
+  console.log = (line: unknown) => lines.push(line);
 
   try {
-    const result = printIntegrationPreflight({
+    const result = printIntegrationPreflight(integrationContext({
       slug: 'task-1054-modern',
       branch: 'mission/task-1054-modern',
       currentBranch: 'mission/task-1054-modern',
@@ -2540,14 +2527,13 @@ test('printIntegrationPreflight provides recovery commands when mission doc is m
       siblingPrs: [],
       approval: { ok: true, reviewState: 'APPROVED' },
       mainBranch: 'main',
-      mainAheadCount: 0,
       mainDirty: false,
       mainDirtyEntries: []
-    }, { configuration: resolveConfiguration(process.env),
+    }), { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'secret-token',
       resolveTokenFileFn: () => '/tmp/tokens/codex',
       isForgejoReviewEnabledFn: () => true,
-      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+      getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] }),
       findMissionDocInBranchesFn: () => [
         { branch: 'mission/task-1054', path: 'docs/missions/2026/task-1054/MISSION.md' }
       ]
@@ -2571,7 +2557,7 @@ test('maybeDropStashAfterCollision drops the stash on a benign file-collision', 
     // The landed squash commit already restored the file, so it exists on disk.
     fs.writeFileSync(path.join(root, 'config', 'agents.json'), '{"filtered":true}');
     const gitCalls: string[][] = [];
-    const gitRunner = (args: string[]) => {
+    const gitRunner: NonNullable<NonNullable<Parameters<typeof maybeDropStashAfterCollision>[2]>["gitRunner"]> = (args) => {
       gitCalls.push(args);
       const cmd = args.join(' ');
       if (cmd.includes('ls-files')) {return { status: 0, stdout: '', stderr: '' };}
@@ -2597,7 +2583,7 @@ test('maybeDropStashAfterCollision does not drop on a real merge conflict', asyn
   try {
     fs.mkdirSync(path.join(root, 'config'), { recursive: true });
     fs.writeFileSync(path.join(root, 'config', 'agents.json'), '{}');
-    const gitRunner = (_args: string[]) => ({ status: 0, stdout: '100644,111111122222333344445555666677778888999,2\tconfig/agents.json\n', stderr: '' });
+    const gitRunner: NonNullable<NonNullable<Parameters<typeof maybeDropStashAfterCollision>[2]>["gitRunner"]> = (_args) => ({ status: 0, stdout: '100644,111111122222333344445555666677778888999,2\tconfig/agents.json\n', stderr: '' });
     const result = maybeDropStashAfterCollision(
       { status: 1, stdout: '', stderr: 'config/agents.json already exists, no checkout\n' },
       root,
@@ -2614,7 +2600,7 @@ test('maybeDropStashAfterCollision does not drop when a colliding file is missin
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'stash-collision-missing-'));
   try {
     // config/agents.json deliberately absent from disk.
-    const gitRunner = (_args: string[]) => ({ status: 0, stdout: '', stderr: '' });
+    const gitRunner: NonNullable<NonNullable<Parameters<typeof maybeDropStashAfterCollision>[2]>["gitRunner"]> = (_args) => ({ status: 0, stdout: '', stderr: '' });
     const result = maybeDropStashAfterCollision(
       { status: 1, stdout: '', stderr: 'config/agents.json already exists, no checkout\n' },
       root,

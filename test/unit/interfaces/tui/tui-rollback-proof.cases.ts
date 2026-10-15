@@ -14,10 +14,11 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 const root = process.cwd();
-const indexPath = path.join(root, 'src', 'composition', 'create-cli.ts');
+const indexPath = path.join(root, 'src', 'composition', 'cli-read-commands.ts');
 const indexSource = fs.readFileSync(indexPath, 'utf8');
 
 test('rollback-proof: ui command uses dynamic import (not static require)', () => {
+  assert.match(fs.readFileSync(path.join(root, 'src/composition/create-cli.ts'), 'utf8'), /\.\.\.createReadCommands\(context\)/);
   // The 'ui' command must use import() or a lazy wrapper so that removing
   // src/interfaces/tui/ does not break the headless entry module graph.
   const hasDynamicImport = /await\s+import\s*\(\s*['"]\.\.\/interfaces\/tui\/ui-command\.js['"]\s*\)/.test(indexSource);

@@ -16,16 +16,17 @@ const { MACHINE_WRITTEN_PATH_INVENTORY } = MACHINE_WRITTEN_PATH_INVENTORYModule;
 const ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
 const RUNTIME_LIB = path.join(ROOT, 'src');
 const DIRECT_JSON_EXCEPTIONS = new Map([
+  ['src/adapters/git/rebase-completion-recorder.ts:metadataPath', 'rebase-hook-overlay'],
   ['src/adapters/verification/temp-root-registry.ts:manifestPath', 'coverage-manifest'],
   ['src/adapters/review/setup-review-config.ts:configPath', 'workflow-config'],
   ['src/adapters/agents/qwen.ts:targetSettings', 'qwen-settings'],
   ['src/adapters/backlog/legacy-mission-import.ts:archiveFile', 'legacy-task-body-archive'],
 ]);
 
-function directJsonWrites(file, source) {
+function directJsonWrites(file: string, source: string) {
   const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
-  const writes = [];
-  function visit(node) {
+  const writes: string[] = [];
+  function visit(node: ts.Node) {
     if (ts.isCallExpression(node) && /\.writeFileSync$/.test(node.expression.getText(sourceFile))) {
       const body = node.arguments.slice(1).map(arg => arg.getText(sourceFile)).join(' ');
       if (/\bJSON\.stringify\s*\(/.test(body)) {
@@ -38,7 +39,7 @@ function directJsonWrites(file, source) {
   return writes;
 }
 
-function typeScriptFiles(dir) {
+function typeScriptFiles(dir: string): string[] {
   const files = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const fullPath = path.join(dir, entry.name);
@@ -51,9 +52,9 @@ function typeScriptFiles(dir) {
   return files;
 }
 
-function directJsonWritesInLib(libDir) {
+function directJsonWritesInLib(libDir: string) {
   const repoRoot = path.dirname(libDir);
-  return typeScriptFiles(libDir).flatMap(file =>
+  return typeScriptFiles(libDir).flatMap((file: string) =>
     directJsonWrites(path.relative(repoRoot, file), fs.readFileSync(file, 'utf8'))
   );
 }
@@ -77,6 +78,7 @@ test('direct durable JSON write guard passes only inventory-documented exception
   assert.deepEqual([...new Set(writes)].sort(), [...DIRECT_JSON_EXCEPTIONS.keys()].sort());
   for (const inventoryId of DIRECT_JSON_EXCEPTIONS.values()) {
     const row = MACHINE_WRITTEN_PATH_INVENTORY.find(entry => entry.id === inventoryId);
+    assert.ok(row != null);
     assert.match(row.persistencePolicy, /direct-write exception/);
   }
 });
@@ -88,7 +90,7 @@ test('direct durable JSON write guard rejects a new non-inventoried lib writer',
     fs.mkdirSync(path.dirname(fixture), { recursive: true });
     fs.writeFileSync(fixture, "fs.writeFileSync(sessionFile(root, slug), JSON.stringify({ agent: 'codex' }));\n");
     const introduced = directJsonWritesInLib(path.join(fixtureRoot, 'lib'));
-    const violations = introduced.filter(write => !DIRECT_JSON_EXCEPTIONS.has(write));
+    const violations = introduced.filter((write: string) => !DIRECT_JSON_EXCEPTIONS.has(write));
     assert.deepEqual(violations, ['lib/tools/new-state.ts:sessionFile(root, slug)']);
   } finally {
     fs.rmSync(fixtureRoot, { recursive: true, force: true });

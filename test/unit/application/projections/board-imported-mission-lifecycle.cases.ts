@@ -1,3 +1,4 @@
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -141,9 +142,9 @@ describe('imported Missions use the existing board and lifecycle path', () => {
     // service the normal path uses refines it, with no importer involvement.
     const refined = await new MissionLifecycleService(store).transition({
       operationId: 'normal-refine',
-      missionId: 'task-9105' as MissionId,
+      missionId: fixtureMissionId('task-9105') as MissionId,
       command: { type: 'refine' },
-      actor: 'claude' as never,
+      actor: 'claude',
       occurredAt: '2026-09-18T00:00:00.000Z',
       capabilities: new Set(['mission:transition'] as const),
     });
@@ -167,12 +168,14 @@ describe('imported Missions use the existing board and lifecycle path', () => {
 
     assert.deepEqual(callers, [
       path.join('adapters', 'backlog', 'legacy-mission-import.ts'),
-      path.join('composition', 'create-cli.ts'),
+      path.join('composition', 'cli-legacy-commands.ts'),
     ], 'only the importer itself and the CLI registration reference the importer');
 
     // And inside the registration it is bound to `import-legacy` alone: no
     // draft, active, board, review, or integrate path can reach it.
-    const registry = fs.readFileSync(path.join(repoRoot, 'src', 'composition', 'create-cli.ts'), 'utf8');
+    const registry = fs.readFileSync(path.join(repoRoot, 'src', 'composition', 'cli-legacy-commands.ts'), 'utf8');
+    const cli = fs.readFileSync(path.join(repoRoot, 'src', 'composition', 'create-cli.ts'), 'utf8');
+    assert.match(cli, /\.\.\.createLegacyCommands\(context\)/, 'CLI registers the explicit legacy command group');
     const binding = /'import-legacy': \(args\) => withGraph\(services => \{[\s\S]*?\n {4}\}\),/.exec(registry);
     assert.ok(binding, 'the import-legacy registry entry exists');
     assert.equal(

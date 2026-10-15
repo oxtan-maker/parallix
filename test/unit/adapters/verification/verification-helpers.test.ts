@@ -9,9 +9,9 @@ import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 function tempDir(prefix = 'verification-') {
   return registeredMkdtemp(prefix);
 }
-function cleanup(dir) { fs.rmSync(dir, { recursive: true, force: true }); }
+function cleanup(dir: fs.PathLike) { fs.rmSync(dir, { recursive: true, force: true }); }
 
-function writeConfig(dir, config) {
+function writeConfig(dir: string, config: unknown) {
   fs.writeFileSync(path.join(dir, 'workflow.config.json'), JSON.stringify(config));
 }
 
@@ -94,11 +94,13 @@ test('recordGateResult writes a passed record for exit code 0 and a failed recor
   const dir = tempDir();
   try {
     const passed = v.recordGateResult(dir, { area: 'docs', command: 'npm check', exitCode: 0 }, { now: () => new Date('2026-09-17T00:00:00.000Z') });
+    assert.ok(passed != null);
     assert.equal(passed.status, 'passed');
     assert.equal(passed.exitCode, 0);
     assert.equal(fs.existsSync(path.join(dir, '.workflow', 'gate-result.json')), true);
 
     const failed = v.recordGateResult(dir, { area: 'docs', command: 'npm check', exitCode: 2 });
+    assert.ok(failed != null);
     assert.equal(failed.status, 'failed');
     assert.equal(failed.exitCode, 2);
   } finally { cleanup(dir); }
@@ -108,6 +110,7 @@ test('recordGateResult coerces a non-number exit code to a failed status', () =>
   const dir = tempDir();
   try {
     const rec = v.recordGateResult(dir, { area: 'docs', command: 'npm check', exitCode: null });
+    assert.ok(rec != null);
     assert.equal(rec.status, 'failed');
     assert.equal(rec.exitCode, 1);
   } finally { cleanup(dir); }

@@ -1,3 +1,4 @@
+import type { ExecuteHandoffPorts, ExecuteHandoffRequest } from '../../../../../src/application/execute-handoff-service.js';
 // Historical regression provenance: TASK-2215, TASK-2581.
 // Mission checkpoint gate bounce contract: missing or invalid checkpoint evidence is repairable and
 // relaunches the agent within a bounded budget.
@@ -28,20 +29,33 @@ import { isRelaunchableError } from '../../../../../src/adapters/cli/commands/re
 const repairHandoff = mockModule<typeof import('../../../../../src/adapters/cli/commands/repair-handoff.js')>('../../../../../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
-const runHandoffAndReview = async (slug: string, worktree: string, agent: string, options: Record<string, any> = {}) => {
-  const validate = options.validateCheckpointsBeforeHandoffFn ?? (() => ({ ok: true }));
-  const handoff = options.performHandoff ?? (async () => ({ ok: true }));
-  const repair = options.repairHandoffFn ?? (async () => ({ repaired: false }));
+interface BounceOptions {
+  validateCheckpointsBeforeHandoffFn?: (slug: string, worktree: string, output: Partial<Pick<ExecuteHandoffPorts['output'], 'log' | 'error'>>) => Awaited<ReturnType<ExecuteHandoffPorts['checkpoints']['validateBeforeHandoff']>>;
+  performHandoff?: (slug: string, options: { forgejoUser: string; worktree: string; force?: boolean }) => ReturnType<ExecuteHandoffPorts['handoff']['run']>;
+  repairHandoffFn?: (slug: string, worktree: string, error: string, options: { taskFile: string | null; log: (message: string) => void; error: (message: string) => void }) => Promise<{ repaired: boolean; blocker?: string | null }>;
+  startAgentFn?: (step: string, options: Parameters<ExecuteHandoffPorts['repairLaunch']['launch']>[0] & { role: 'implementer' }) => ReturnType<ExecuteHandoffPorts['repairLaunch']['launch']>;
+  startReviewLoop?: (slug: string, options: Parameters<ExecuteHandoffPorts['review']['start']>[0] & { skipHandoff: true }) => void | Promise<void>;
+  workflowLauncherStatusFn?: ExecuteHandoffPorts['repairLaunch']['available'];
+  log?: ExecuteHandoffPorts['output']['log'];
+  error?: ExecuteHandoffPorts['output']['error'];
+  taskFile?: string | null;
+  onAgentLaunched?: ExecuteHandoffRequest['onAgentLaunched'];
+  onAutonomousStop?: ExecuteHandoffRequest['onAutonomousStop'];
+}
+const runHandoffAndReview = async (slug: string, worktree: string, agent: string, options: BounceOptions = {}) => {
+  const validate = options.validateCheckpointsBeforeHandoffFn ?? (() => ({ ok: true as const }));
+  const handoff = options.performHandoff ?? (async () => ({ ok: true as const }));
+  const repair: NonNullable<BounceOptions['repairHandoffFn']> = options.repairHandoffFn ?? (async () => ({ repaired: false }));
   const launch = options.startAgentFn ?? (async () => ({}));
   return new ExecuteHandoffService({
     checkpoints: { async validateBeforeHandoff(request) { return validate(slug, worktree, { log: request.log, error: request.error }); } },
     handoff: {
       async run(request) { return handoff(slug, { forgejoUser: agent, worktree, force: request.force }); },
-      async repairHygiene(request) { return repair(slug, worktree, request.error, { taskFile: request.taskFile, log: request.log, error: request.outputError }); },
+      async repairHygiene(request) { const result = await repair(slug, worktree, request.error, { taskFile: request.taskFile, log: request.log, error: request.outputError }); return { ...result, blocker: result.blocker ?? undefined }; },
       classifyFailure: classifyError,
       isRelaunchableFailure: isRelaunchableError,
     },
-    review: { async start(request) { await options.startReviewLoop?.(slug, { implementer: agent, worktree, skipHandoff: true, onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop }); } },
+    review: { async start(request) { await options.startReviewLoop?.(slug, { slug, implementer: agent, worktree, skipHandoff: true, onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop }); } },
     repairLaunch: {
       available: options.workflowLauncherStatusFn ?? (() => ({ supported: true })),
       readHead() { return null; },
@@ -56,26 +70,25 @@ const runHandoffAndReview = async (slug: string, worktree: string, agent: string
 test('missing checkpoint: runHandoffAndReview classifies as repairable and relaunches agent instead of stranding', async () => {
   const slug = 'task-2261';
   const worktree = '/tmp/worktree-task-2261';
-  const logs = [];
-  const errors = [];
+  const logs: string[] = [];
+  const errors: string[] = [];
   let relaunchCalled = false;
   let relaunchPrompt = null;
   let performHandoffCallCount = 0;
 
   const result = await runHandoffAndReview(slug, worktree, 'codex', {
     validateCheckpointsBeforeHandoffFn: () => ({
-      ok: false,
+      ok: false as const,
       error: `No checkpoint documents found in /tmp/worktree-task-2261/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff. Create at least CP-1 documenting your implementation, including a Goal Check table with real evidence such as a backticked command, test name, ADR reference, or test file path.`
     }),
     performHandoff: async () => {
       performHandoffCallCount++;
-      return { ok: false, error: 'still missing' };
+      return { ok: false as const, error: 'still missing' };
     },
     startAgentFn: async (_step, opts) => {
       relaunchCalled = true;
       // TASK-2377.05: the kernel builds the fix prompt and hands it to the port.
-      const slot = opts.prompt;
-      relaunchPrompt = typeof slot === 'function' ? slot('codex') : String(slot ?? '');
+      relaunchPrompt = opts.prompt;
       // Simulate the launch succeeding but the checkpoint still not created
       return { agent: 'codex', result: { status: 0 } };
     },
@@ -129,13 +142,13 @@ test('valid repaired checkpoint: runHandoffAndReview unblocks handoff after rela
   let reviewLoopCalled = false;
 
   const result = await runHandoffAndReview(slug, worktree, 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
     performHandoff: async () => {
       handoffAttempts++;
       if (handoffAttempts === 1) {
-        return { ok: false, error: 'The final checkpoint at missions/task-2261/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
+        return { ok: false as const, error: 'The final checkpoint at missions/task-2261/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
       }
-      return { ok: true };
+      return { ok: true as const };
     },
     startAgentFn: async () => {
       relaunchCount++;
@@ -161,10 +174,10 @@ test('exhaustion: runHandoffAndReview stops after bounded relaunch attempts with
   let reviewLoopCalled = false;
 
   const result = await runHandoffAndReview(slug, worktree, 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
     performHandoff: async () => {
       handoffAttempts++;
-      return { ok: false, error: 'The final checkpoint at missions/task-2261/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
+      return { ok: false as const, error: 'The final checkpoint at missions/task-2261/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
     },
     startAgentFn: async () => {
       relaunchCount++;
@@ -201,24 +214,25 @@ test('missing checkpoint: valid CP after relaunch unblocks handoff and starts re
       // Real filesystem check: look for CP-*.md files with Goal Check content
       const cpFiles = fs.readdirSync(missionDir).filter(f => /^CP-\d+\.md$/.test(f));
       if (cpFiles.length === 0) {
-        return { ok: false, error: 'No checkpoint documents found in ' + missionDir + '. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff.' };
+        return { ok: false as const, error: 'No checkpoint documents found in ' + missionDir + '. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff.' };
       }
       // Validate Goal Check table is present in the latest checkpoint
       const latestCp = cpFiles.sort().pop();
+      assert.ok(latestCp);
       const cpContent = fs.readFileSync(path.join(missionDir, latestCp), 'utf8');
       if (!/## Goal Check/.test(cpContent) || !/\| Criterion \| Evidence \| Status \|/.test(cpContent)) {
-        return { ok: false, error: 'Checkpoint ' + latestCp + ' is missing a valid ## Goal Check table.' };
+        return { ok: false as const, error: 'Checkpoint ' + latestCp + ' is missing a valid ## Goal Check table.' };
       }
       // Check for at least one evidence row
       const evidenceRows = cpContent.split('\n').filter(l => /^\|/.test(l) && !/Criterion/.test(l) && !/^\|-+\|/.test(l));
       if (evidenceRows.length === 0) {
-        return { ok: false, error: 'Checkpoint ' + latestCp + ' has a ## Goal Check section but no evidence rows.' };
+        return { ok: false as const, error: 'Checkpoint ' + latestCp + ' has a ## Goal Check section but no evidence rows.' };
       }
-      return { ok: true };
+      return { ok: true as const };
     },
     performHandoff: async () => {
       handoffAttempts++;
-      return { ok: true };
+      return { ok: true as const };
     },
     startAgentFn: async () => {
       relaunchCount++;
@@ -272,16 +286,16 @@ test('missing checkpoint: still absent after relaunch returns false with manual 
   let handoffAttempts = 0;
   let relaunchCount = 0;
   let reviewLoopCalled = false;
-  const errors = [];
+  const errors: string[] = [];
 
   const result = await runHandoffAndReview(slug, worktree, 'codex', {
     validateCheckpointsBeforeHandoffFn: () => ({
-      ok: false,
+      ok: false as const,
       error: 'No checkpoint documents found in /tmp/worktree-task-2261/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff.'
     }),
     performHandoff: async () => {
       handoffAttempts++;
-      return { ok: false, error: 'still missing' };
+      return { ok: false as const, error: 'still missing' };
     },
     startAgentFn: async () => {
       relaunchCount++;
@@ -307,16 +321,16 @@ test('missing checkpoint: relaunch failure returns false with manual instruction
   let handoffAttempts = 0;
   let relaunchCount = 0;
   let reviewLoopCalled = false;
-  const errors = [];
+  const errors: string[] = [];
 
   const result = await runHandoffAndReview(slug, worktree, 'codex', {
     validateCheckpointsBeforeHandoffFn: () => ({
-      ok: false,
+      ok: false as const,
       error: 'No checkpoint documents found in /tmp/worktree-task-2261/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff.'
     }),
     performHandoff: async () => {
       handoffAttempts++;
-      return { ok: false, error: 'still missing' };
+      return { ok: false as const, error: 'still missing' };
     },
     startAgentFn: async () => {
       relaunchCount++;
@@ -345,16 +359,16 @@ test('dirty checkpoint: GitBlockers classification does NOT enter the Incomplete
   let handoffAttempts = 0;
   let relaunchCount = 0;
   let reviewLoopCalled = false;
-  const errors = [];
+  const errors: string[] = [];
 
   const result = await runHandoffAndReview(slug, worktree, 'codex', {
     validateCheckpointsBeforeHandoffFn: () => ({
-      ok: false,
+      ok: false as const,
       error: 'Checkpoint documents must be committed before handoff. Uncommitted checkpoint files: CP-1.md. Commit the checkpoint update and re-run the handoff.'
     }),
     performHandoff: async () => {
       handoffAttempts++;
-      return { ok: false, error: 'still dirty' };
+      return { ok: false as const, error: 'still dirty' };
     },
     startAgentFn: async () => {
       relaunchCount++;
@@ -440,7 +454,7 @@ describe("Typed checkpoint recovery advice —", () => {
 
     const result = await runHandoffAndReview(slug, worktree, 'codex', {
       validateCheckpointsBeforeHandoffFn: () => ({
-        ok: false,
+        ok: false as const,
         error: typedCheckpointFailure,
         nextCheckpoint: 'CP-2',
       }),
@@ -470,7 +484,7 @@ import { missionId } from '../../../../../src/domain/mission.js';
 test('missing planned checkpoint repair creates durable incident evidence and completes the original plan before handoff (TASK-2695)', async (t) => {
   const slug = 'typed-checkpoint-gap';
   const id = missionId(slug);
-  const store = inMemoryTransitionStore(fixtureMission(slug, { brief: {} as never, successCriteria: ['implemented'], completedSuccessCriteria: [0],
+  const store = inMemoryTransitionStore(fixtureMission(slug, { brief: { goal: 'Repair missing checkpoint evidence', why: 'Preserve the planned checkpoint contract', scope: 'Fixture evidence', outOfScope: ['External state'] }, successCriteria: ['implemented'], completedSuccessCriteria: [0],
     checkpoints: ['CP-1', 'CP-2'].map(name => ({ missionId: id, name, firstLine: 'original plan', goalCheck: [], nextActionText: '' })),
   }));
   configureRepairCheckpoints(new RepairCheckpointService(store));
@@ -498,7 +512,7 @@ test('missing planned checkpoint repair creates durable incident evidence and co
       }
       return { result: { status: 0 } };
     },
-    performHandoff: async () => { handoffs++; assert.equal(repairCheckpointFailure(store.mission().checkpoints), null); return { ok: true }; },
+    performHandoff: async () => { handoffs++; assert.equal(repairCheckpointFailure(store.mission().checkpoints), null); return { ok: true as const }; },
     startReviewLoop: async () => { reviews++; },
   });
   assert.equal(result, true);

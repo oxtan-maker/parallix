@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 
 
@@ -30,7 +29,9 @@ test('stats-backfill module loads without a parse-time SyntaxError', async () =>
   await assert.doesNotReject(() => import('../../../src/adapters/cli/commands/stats-backfill.js'));
 });
 
-function withFixture(fn) {
+function withFixture<T>(fn: (root: string) => Promise<T>): Promise<T>;
+function withFixture(fn: (root: string) => void): void;
+function withFixture<T>(fn: (root: string) => T | Promise<T>): void | Promise<T> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-backfill-'));
   const previousHome = process.env.PARALLIX_HOME;
   process.env.PARALLIX_HOME = path.join(root, 'parallix-home');
@@ -59,7 +60,7 @@ function withFixture(fn) {
 
   try {
     const result = fn(root);
-    if (result && typeof result.then === 'function') {
+    if (result instanceof Promise) {
       return result.finally(finish);
     }
     finish();
@@ -69,7 +70,7 @@ function withFixture(fn) {
   }
 }
 
-async function seedMissionClassifications(root, entries) {
+async function seedMissionClassifications(root: string, entries: [string, string][]) {
   const db = new SqliteDatabaseAdapter();
   await db.open({ path: path.join(root, 'parallix-home', 'parallix.db') });
   try {
@@ -85,18 +86,18 @@ async function seedMissionClassifications(root, entries) {
   }
 }
 
-function initGitRepo(root) {
+function initGitRepo(root: string) {
   childProcess.spawnSync('git', ['init'], { cwd: root, encoding: 'utf8' });
   childProcess.spawnSync('git', ['config', 'user.name', 'Magnus Ekdahl'], { cwd: root, encoding: 'utf8' });
   childProcess.spawnSync('git', ['config', 'user.email', 'magnus.ekdahl@gmail.com'], { cwd: root, encoding: 'utf8' });
 }
 
-function commitAll(root, message) {
+function commitAll(root: string, message: string) {
   childProcess.spawnSync('git', ['add', '.'], { cwd: root, encoding: 'utf8' });
   childProcess.spawnSync('git', ['commit', '-m', message], { cwd: root, encoding: 'utf8' });
 }
 
-function writeMission(root, slug, missionText, checkpoint = 'CP-1.md') {
+function writeMission(root: string, slug: string, missionText: string|NodeJS.ArrayBufferView<ArrayBufferLike>, checkpoint = 'CP-1.md') {
   const missionDir = path.join(root, 'docs', 'missions', '2026', slug);
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), missionText, 'utf8');
@@ -104,7 +105,7 @@ function writeMission(root, slug, missionText, checkpoint = 'CP-1.md') {
 }
 
 test('collectHistoricalStatsBackfill resolves done missions, skips non-done missions, and reports unresolved items', async () => {
-  await withFixture(async root => {
+  await withFixture(async (root: string) => {
     initGitRepo(root);
 
     fs.writeFileSync(path.join(root, 'backlog', 'completed', 'task-2000 - Workflow fix.md'), [
@@ -195,7 +196,7 @@ test('collectHistoricalStatsBackfill resolves done missions, skips non-done miss
 });
 
 test('collectHistoricalStatsBackfill falls back to git history for date and human implementer', async () => {
-  await withFixture(async root => {
+  await withFixture(async (root: string) => {
     initGitRepo(root);
 
     fs.writeFileSync(path.join(root, 'backlog', 'completed', 'task-2003 - Human workflow cleanup.md'), [
@@ -219,7 +220,7 @@ test('collectHistoricalStatsBackfill falls back to git history for date and huma
     const row = report.rows.find(item => item.mission === 'task-2003');
 
     assert.ok(row);
-    assert.equal(row.date, /\d{4}-\d{2}-\d{2}/.exec(row.date)[0]);
+    assert.match(row.date, /^\d{4}-\d{2}-\d{2}$/);
     assert.equal(row.classification, 'ai_sdlc');
     assert.equal(row.implementer, 'magnus');
     assert.equal(row.repo, stats.resolveStatsRepoName(root));
@@ -228,7 +229,7 @@ test('collectHistoricalStatsBackfill falls back to git history for date and huma
 });
 
 test('collectHistoricalStatsBackfill requires stored classification for historical rows', async () => {
-  await withFixture(async root => {
+  await withFixture(async (root: string) => {
     initGitRepo(root);
 
     writeMission(root, 'task-2006', [
@@ -273,7 +274,7 @@ test('collectHistoricalStatsBackfill requires stored classification for historic
 });
 
 test('statsBackfill supports help, json output, summary output, and apply mode', async () => {
-  await withFixture(async root => {
+  await withFixture(async (root: string) => {
     initGitRepo(root);
 
     fs.writeFileSync(path.join(root, 'backlog', 'completed', 'task-2008 - Workflow cleanup.md'), [
@@ -316,7 +317,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
     process.env.PARALLIX_HOME = parallixHome;
     try {
       const service = new StatsBackfillService(new LegacyStatsBackfillAdapter(root, { configuration: resolveConfiguration(process.env) }));
-      const logs = [];
+      const logs: string[] = [];
       await statsBackfillCommand(['--help'], {
         rootDir: root,
         log: line => logs.push(line),
@@ -327,7 +328,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
       // SC4: the help names the database, not a CSV, as the authority.
       assert.match(logs.join('\n'), /measurement database \(<PARALLIX_HOME>\/parallix\.db\)/);
 
-      const jsonLogs = [];
+      const jsonLogs: string[] = [];
       await statsBackfillCommand(['--json'], {
         rootDir: root,
         service,
@@ -339,7 +340,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
       assert.equal(payload.resolved, 1);
       assert.equal(payload.skipped, 1);
 
-      const summaryLogs = [];
+      const summaryLogs: string[] = [];
       await statsBackfillCommand([], {
         rootDir: root,
         service,
@@ -350,7 +351,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
       assert.match(summaryLogs.join('\n'), /Resolved rows: 1/);
       assert.match(summaryLogs.join('\n'), /Skipped:\n- task-2009 status=active/);
 
-      const applyLogs = [];
+      const applyLogs: string[] = [];
       await statsBackfillCommand(['--apply'], {
         rootDir: root,
         service,
@@ -390,27 +391,27 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
 });
 
 test('statsBackfill maps a delegated write failure to stderr and exit 1 without success output', async () => {
-  const errors = [];
-  const logs = [];
-  let exitCode = null;
+  const errors: string[] = [];
+  const logs: string[] = [];
+  let exitCode: { value: number | undefined | null } = { value: null };
 
   await statsBackfillCommand(['--apply'], {
     rootDir: process.cwd(),
     service: {
       async execute() {
         return {
-          status: 'failed',
-          error: { kind: 'unavailable', message: 'stats write failed' },
+          status: 'failed' as const,
+          error: { kind: 'unavailable' as const, message: 'stats write failed' },
           durableEvidence: [],
         };
       },
     },
     log: line => logs.push(line),
     error: line => errors.push(line),
-    exit: code => { exitCode = code; },
+    exit: code => { exitCode.value = code; },
   });
 
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.deepEqual(logs, []);
   assert.match(errors.join('\n'), /stats write failed/);
 });

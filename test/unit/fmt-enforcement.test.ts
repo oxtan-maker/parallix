@@ -17,9 +17,9 @@ const CONSOLE_RE = /console\.(log|error)/;
 // These bypass the coloring layer; use fmt.status('LEVEL', text) instead.
 const RAW_STATUS_RE = /[`'"](?:\\n)?\[(?:INFO|FAIL|PASS|WARN|DRY-RUN)\]/;
 
-function findViolations(filePath) {
+function findViolations(filePath: string) {
   const lines = fs.readFileSync(filePath, 'utf8').split('\n');
-  return lines.reduce((acc, line, idx) => {
+  return lines.reduce<string[]>((acc, line, idx) => {
     const trimmed = line.trimStart();
     if (trimmed.startsWith('//') || trimmed.startsWith('*')) return acc;
     const tag = `${path.basename(filePath)}:${idx + 1}: ${line.trim()}`;
@@ -29,7 +29,7 @@ function findViolations(filePath) {
   }, []);
 }
 
-function walkSourceFiles(rootDir) {
+function walkSourceFiles(rootDir: string): string[] {
   return fs.readdirSync(rootDir, { withFileTypes: true }).flatMap(entry => {
     const fullPath = path.join(rootDir, entry.name);
     if (entry.isDirectory()) return walkSourceFiles(fullPath);
@@ -40,8 +40,8 @@ function walkSourceFiles(rootDir) {
 
 test('no direct console.log/error calls in CLI adapter modules', () => {
   const files = walkSourceFiles(RUNTIME_LIB)
-    .filter(f => path.basename(f) !== 'index.ts')
-    .filter(f => !EXCLUDED.has(path.basename(f)));
+    .filter((f: string) => path.basename(f) !== 'index.ts')
+    .filter((f: string) => !EXCLUDED.has(path.basename(f)));
 
   const violations = files.flatMap(findViolations);
   assert.deepEqual(violations, [],

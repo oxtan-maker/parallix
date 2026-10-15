@@ -44,7 +44,7 @@ function contextFor(overrides: Partial<ReboundContext> = {}): ReboundContext {
     slug: 'task-2620-agent-smoke',
     worktree: '/tmp/task-2620-agent-smoke',
     implementer: 'codex',
-    verify: () => ({ ok: true }),
+    verify: () => ({ ok: true as const }),
     startAgent: async () => ({ agent: 'codex', result: { status: 0 } }),
     log: () => {},
     error: () => {},
@@ -73,7 +73,7 @@ test('task-2620: agent-smoke retries once, then returns to the human without lau
     maxAttempts: 2,
     verify: () => {
       verifyCalls += 1;
-      return { ok: false, diagnostic: 'shared local vLLM timed out under concurrency' };
+      return { ok: false as const, diagnostic: 'shared local vLLM timed out under concurrency' };
     },
     startAgent: async () => {
       launchCalls += 1;
@@ -95,7 +95,7 @@ test('task-2620: a transient gate that is not an environment failure still launc
   const context = contextFor({
     maxTransientRetries: 1,
     maxAttempts: 1,
-    verify: () => ({ ok: false, diagnostic: 'still failing after the rerun' }),
+    verify: () => ({ ok: false as const, diagnostic: 'still failing after the rerun' }),
     startAgent: async () => {
       launchCalls += 1;
       return { agent: 'codex', result: { status: 0 } };

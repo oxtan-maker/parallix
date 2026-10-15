@@ -1,3 +1,4 @@
+import type { ReviewRole } from "../../../../src/application/ports/review-round.js";
 import { resolveConfiguration } from '../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 // review handoff order contract.
@@ -30,8 +31,8 @@ const { mock } = test;
 
 // Isolate stats writes to a temp PARALLIX_HOME so this test never pollutes
 // the real operator stats.csv at the real PARALLIX_HOME.
-let _prevParallixHome;
-let _tmpHome;
+let _prevParallixHome: string | undefined;
+let _tmpHome: string;
 test.beforeEach(() => {
   _tmpHome = registeredMkdtemp('task-1104-home-');
   _prevParallixHome = environment.PARALLIX_HOME;
@@ -46,7 +47,7 @@ test.afterEach(() => {
 const TEST_SLUG = 'task-1104-test';
 
 test('review loop follows the transition contract: review before reviewer, active before implementer', async () => {
-  const events = [];
+  const events: ({ type: "transition"; status: "review" | "active"; implementer: string | undefined; } | { type: "transition"; status: string; } | { type: "launch"; step: string; agent: string; })[] = [];
   const fake = fakeReviewLoopPorts({
     slug: TEST_SLUG,
     routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
@@ -57,10 +58,10 @@ test('review loop follows the transition contract: review before reviewer, activ
       pollDisposition: async () => 'PUSHBACK_ALL',
     },
     task: {
-      mirror: async (lane, implementer) => { events.push({ type: 'transition', status: lane, implementer }); },
-      mirrorApproved: async () => { events.push({ type: 'transition', status: 'approved' }); },
+      mirror: async (lane, implementer) => { events.push({ type: 'transition' as const, status: lane, implementer }); },
+      mirrorApproved: async () => { events.push({ type: 'transition' as const, status: 'approved' }); },
     },
-    agents: { launch: async launch => { events.push({ type: 'launch', step: launch.role === 'reviewer' ? 'review' : 'act-on-review', agent: launch.agent }); return { agent: launch.agent }; } },
+    agents: { launch: async launch => { events.push({ type: 'launch' as const, step: launch.role === 'reviewer' ? 'review' : 'act-on-review', agent: launch.agent }); return { agent: launch.agent }; } },
     output: { exit: (code) => { if (code !== 0) { throw new Error(`Exit ${code}`); } } },
   });
 
@@ -89,7 +90,7 @@ test('review loop follows the transition contract: review before reviewer, activ
   assert.ok(reviewTransitionIdx < reviewerLaunchIdx, "Transition to 'review' must occur BEFORE reviewer launch");
 
   // Check 'active' transition before implementer launch
-  const activeTransitionIdx = relevantEvents.findIndex(e => e.type === 'transition' && e.status === 'active' && e.implementer === 'claude');
+  const activeTransitionIdx = relevantEvents.findIndex(e => e.type === 'transition' && e.status === 'active' && 'implementer' in e && e.implementer === 'claude');
   assert.ok(activeTransitionIdx !== -1, "Transition to 'active' should occur");
   assert.ok(activeTransitionIdx > reviewerLaunchIdx, "Transition to 'active' must occur AFTER reviewer launch");
   assert.ok(activeTransitionIdx < implementerLaunchIdx, "Transition to 'active' must occur BEFORE implementer launch");
@@ -100,26 +101,24 @@ test('review loop follows the transition contract: review before reviewer, activ
 });
 
 test('pushRound follows the transition contract: review before createPr', async () => {
-  const events = [];
+  const events: ({ type: "transition"; status: string; } | { type: "createPr"; })[] = [];
   const logs = [];
 
   const opts = {
     resolveWorktreeFn: () => '/tmp/worktree',
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    resolveTaskFileFn: () => ({ matches: ['/tmp/task.md'],  ok: true as const, taskFile: '/tmp/task.md' }),
     getTaskImplementerFn: () => 'gemini',
     readTokenFn: () => 'token',
     log: msg => logs.push(msg),
-    transitionTaskFn: (slug, status, options) => {
-      events.push({ type: 'transition', status });
+    transitionTaskFn: async (slug, status, options) => {
+      events.push({ type: 'transition' as const, status });
       return true;
     },
     createPrFn: (branch, user, token, options) => {
-      events.push({ type: 'createPr' });
-      return { ok: true };
+      events.push({ type: 'createPr' as const });
+      return { ok: true as const };
     }
-  };
-
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
+  } satisfies NonNullable<Parameters<typeof pushRound>[1]>;
   await pushRound(TEST_SLUG, opts);
 
   const relevantEvents = events.filter(e => e.type === 'transition' || e.type === 'createPr');
@@ -133,40 +132,40 @@ test('pushRound follows the transition contract: review before createPr', async 
 });
 
 test('performHandoff follows the sequence: createPr -> gatekeeper -> transitionTask -> push', async () => {
-  const events = [];
+  const events: ({ type: "push"; } | { type: "transition"; status: string; } | { type: "createPr"; } | { type: "gatekeeper"; })[] = [];
   const slug = 'task-1104-handoff-test';
 
   // Mocking all external dependencies for performHandoff
   const mocks = [
     mock.method(git, 'getCurrentBranch', () => `mission/${slug}`),
     mock.method(git, 'getWorktreeStatus', () => []),
-    mock.method(git, 'git', (args) => {
-      if (args.includes('rev-parse')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' };
+    mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+      if (args.includes('rev-parse')) return { signal: null, stderr: '',  status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' };
       if (args && args.includes('push')) {
-        events.push({ type: 'push' });
+        events.push({ type: 'push' as const });
       }
-      return { status: 0 };
+      return { signal: null, stdout: '', stderr: '',  status: 0 };
     }),
-    mock.method(git, 'run', () => ({ status: 0 })),
+    mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 })),
     mock.method(missionUtils, 'findMissionDir', () => '/tmp/mission'),
     mock.method(missionUtils, 'findMissionArea', () => 'workflow'),
     mock.method(missionUtils, 'findCheckpoints', () => ['/tmp/mission/CP-1.md']),
-    mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/task.md' })),
+    mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/task.md' })),
     mock.method(backlog, 'getTaskImplementer', () => 'gemini'),
     mock.method(backlog, 'transitionTask', () => {
-      events.push({ type: 'transition', status: 'review' });
+      events.push({ type: 'transition' as const, status: 'review' });
       return true;
     }),
     mock.method(forgejo, 'readToken', () => 'token'),
     mock.method(forgejo, 'createPr', () => {
-      events.push({ type: 'createPr' });
-      return { ok: true };
+      events.push({ type: 'createPr' as const });
+      return { ok: true as const };
     }),
     mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://forgejo/push'),
-    mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true, sha: 'expected-pr-tip' })),
+    mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true as const, sha: 'expected-pr-tip' })),
     mock.method(gatekeeper, 'runGatekeeper', () => {
-      events.push({ type: 'gatekeeper' });
-      return { ok: true };
+      events.push({ type: 'gatekeeper' as const });
+      return { ok: true as const };
     }),
     mock.method(nodeFs, 'readFileSync', () => '## Goal Check\n| Goal | Evidence | Status |\n| :--- | :--- | :--- |\n| test | test/task-1104-call-order.test.js:1 | PASS |\n'),
     mock.method(nodeFs, 'existsSync', () => true),
@@ -174,7 +173,7 @@ test('performHandoff follows the sequence: createPr -> gatekeeper -> transitionT
   ];
 
   try {
-    const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+    const mockRebase = async () => ({ ok: true as const, sharedFileConflicts: false });
     await performHandoff(slug, {
       skipGate: true,
       worktree: _tmpHome,
@@ -184,7 +183,7 @@ test('performHandoff follows the sequence: createPr -> gatekeeper -> transitionT
       // The call-order contract neither computes NEL nor needs its durable
       // record.  Bypass that adapter boundary so this test cannot inspect the
       // checkout or operator state while asserting its four handoff effects.
-      captureNelFn: async () => ({ ok: true }),
+      captureNelFn: async () => ({ ok: true as const, nel: 1, bucket: 'tiny' }),
       // The blanket readFileSync mock above supplies checkpoint content. Keep
       // agent selection independent of filesystem-backed configuration.
       eligibleAgentsForStepFn: () => ['codex', 'claude'],
@@ -212,16 +211,16 @@ test('performHandoff follows the sequence: createPr -> gatekeeper -> transitionT
 });
 
 test('review loop does not transition to review if rebase fails', async () => {
-  const events = [];
+  const events: ({ type: "transition"; status: "review" | "active"; } | { type: "launch"; step: ReviewRole; } | { type: "exit"; code: number; })[] = [];
   const fake = fakeReviewLoopPorts({
     slug: TEST_SLUG,
     routing: { eligibleFamilies: () => ['codex'] },
     provider: {},
     // FAILING REBASE
-    preReview: { rebase: async () => ({ ok: false, diagnostic: '' }) },
-    task: { mirror: async lane => { events.push({ type: 'transition', status: lane }); } },
-    agents: { launch: async launch => { events.push({ type: 'launch', step: launch.role }); return { agent: launch.agent }; } },
-    output: { exit: (code) => { if (code !== 0) { events.push({ type: 'exit', code }); } } },
+    preReview: { rebase: async () => ({ ok: false as const, diagnostic: '' }) },
+    task: { mirror: async lane => { events.push({ type: 'transition' as const, status: lane }); } },
+    agents: { launch: async launch => { events.push({ type: 'launch' as const, step: launch.role }); return { agent: launch.agent }; } },
+    output: { exit: (code) => { if (code !== 0) { events.push({ type: 'exit' as const, code }); } } },
   });
 
   await runReviewLoop({ slug: TEST_SLUG, implementer: 'claude', reviewer: 'codex', skipHandoff: true }, fake.ports);

@@ -78,7 +78,7 @@ export async function recoverMissionLifecycle(input: {
   if (loaded.kind !== 'found') { return failure('unavailable', `Mission ${input.missionId} is unavailable for lifecycle recovery`); }
   const taskStatus = input.taskStatus ?? 'unavailable';
   const aggregateStatus = loaded.mission.status;
-  if (taskStatus === 'active' && aggregateStatus === 'active' && input.alreadyMerged && await input.alreadyMerged()) {
+  if (hasActiveLandingProbe(taskStatus, aggregateStatus, input.alreadyMerged) && await input.alreadyMerged()) {
     return completed({ taskStatus, aggregateStatus, action: 'refused-integrated', recovered: null });
   }
   if (taskStatus === 'active' && aggregateStatus === 'refined') {
@@ -116,4 +116,8 @@ export async function recoverMissionLifecycle(input: {
     return writeFailure(error);
   }
   return completed({ taskStatus, aggregateStatus, action: 'recover-to-active', recovered });
+}
+
+function hasActiveLandingProbe(taskStatus: string, aggregateStatus: Mission['status'], probe: (() => Promise<boolean>) | undefined): probe is () => Promise<boolean> {
+  return taskStatus === 'active' && aggregateStatus === 'active' && Boolean(probe);
 }

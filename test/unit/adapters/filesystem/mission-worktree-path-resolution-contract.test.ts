@@ -32,7 +32,7 @@ describe("task-file and slug-suffix resolution", () => {
   test.afterEach(() => mock.restoreAll());
   const { resolveTaskFile, checkBacklogIntegrity } = resolveTaskFileModule;
   const { findMissionDir, getMissionYear } = findMissionDirModule;
-  function withTempRepo(fn) {
+  function withTempRepo(fn: (_arg0: string) => void) {
     const previous = process.cwd();
     const root = registeredMkdtemp('workflow-task-1004-');
     fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
@@ -47,7 +47,7 @@ describe("task-file and slug-suffix resolution", () => {
   }
 
   test('resolveTaskFile prefers exact frontmatter id: match over filename-prefix matches', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       const taskDir = path.join(root, 'backlog', 'tasks');
 
       // Create two files with the same filename prefix but different frontmatter IDs
@@ -70,7 +70,7 @@ describe("task-file and slug-suffix resolution", () => {
   });
 
   test('resolveTaskFile handles slugs with suffixes by falling back to base task ID', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       const taskDir = path.join(root, 'backlog', 'tasks');
 
       const file1 = path.join(taskDir, 'task-1004 - harden-workflow.md');
@@ -84,7 +84,7 @@ describe("task-file and slug-suffix resolution", () => {
   });
 
   test('findMissionDir and getMissionYear handle slugs with suffixes', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       const missionDir = path.join(root, 'docs', 'missions', '2026', 'task-1004');
       fs.mkdirSync(missionDir, { recursive: true });
       fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n');
@@ -116,7 +116,7 @@ describe("merge-noise classification of backlog paths", () => {
   });
 
   test('getConflictFiles returns conflict paths, empty arrays for clean merges, and throws on non-conflict failures', () => {
-    const calls = [];
+    const calls: string[][] = [];
     const conflicts = getConflictFiles('/tmp/worktree', 'main', {
       gitRunner: args => {
         calls.push(args);
@@ -148,7 +148,7 @@ describe("merge-noise classification of backlog paths", () => {
   });
 
   test('findLastNonNoiseCommit skips trailing backlog noise and stops on shared commits', () => {
-    const responses = {
+    const responses: Record<string, string> = {
       'rev-parse --symbolic-full-name HEAD': 'refs/heads/mission/task-132',
       'rev-parse HEAD': 'sha-head',
       'rev-parse HEAD^': 'sha-prev',
@@ -159,10 +159,10 @@ describe("merge-noise classification of backlog paths", () => {
       'diff-tree --no-commit-id --name-only -r HEAD': 'backlog/tasks/task-132 - sample.md',
       'diff-tree --no-commit-id --name-only -r HEAD^': 'workflow/lib/core/runtime-matrix.js'
     };
-    const runner = args => ({ status: 0, stdout: responses[args.slice(2).join(' ')] || '', stderr: '' });
+    const runner = (args: string[]) => ({ status: 0, stdout: responses[args.slice(2).join(' ')] || '', stderr: '' });
     assert.equal(findLastNonNoiseCommit('/tmp/worktree', runner), 'HEAD^');
 
-    const sharedRunner = args => {
+    const sharedRunner = (args: string[]) => {
       if (args.includes('--contains') && args.includes('sha-head')) {
         return { status: 0, stdout: 'refs/heads/mission/task-132\nrefs/remotes/review/mission/task-132\n', stderr: '' };
       }
@@ -172,14 +172,14 @@ describe("merge-noise classification of backlog paths", () => {
   });
 
   test('noise squash caps dirty paths and suppresses warnings for untracked-only trees (TASK-2708)', () => {
-    const logs = [];
+    const logs: unknown[] = [];
     const originalLog = console.log;
-    console.log = msg => logs.push(msg);
+    console.log = (msg: unknown) => logs.push(msg);
     try {
       for (const prefix of [' M', 'M ', '??']) {
         logs.length = 0;
-        const calls = [];
-        const runner = args => {
+        const calls: string[][] = [];
+        const runner = (args: string[]) => {
           calls.push(args);
           return { status: 0, stdout: Array.from({ length: 7 }, (_, i) => `${prefix} file-${i}.txt`).join('\n'), stderr: '' };
         };
@@ -196,21 +196,23 @@ describe("merge-noise classification of backlog paths", () => {
   });
 
   test('squashTrailingBacklogNoiseIntoPreviousMission and softResetTrailingBacklogNoise refuse dirty trees and run resets on clean ones', () => {
-    const dirtyLogs = [];
+    const dirtyLogs: unknown[] = [];
     const originalLog = console.log;
-    console.log = msg => dirtyLogs.push(msg);
+    console.log = (msg: unknown) => dirtyLogs.push(msg);
     try {
-      const dirtyRunner = args => ({ status: 0, stdout: args.includes('status') ? ' M backlog/tasks/task.md' : '', stderr: '' });
+      const dirtyRunner = (args: string[]) => ({ status: 0, stdout: args.includes('status') ? ' M backlog/tasks/task.md' : '', stderr: '' });
       assert.equal(squashTrailingBacklogNoiseIntoPreviousMission('/tmp/worktree', dirtyRunner), false);
       assert.equal(softResetTrailingBacklogNoise('/tmp/worktree', dirtyRunner), false);
     } finally {
       console.log = originalLog;
     }
+    assert.ok(dirtyLogs.every((message): message is string => typeof message === 'string'));
     assert.ok(dirtyLogs.some(msg => msg.includes('[WARN] Skipping noise squash') && msg.includes('backlog/tasks/task.md') && msg.includes('Trailing backlog commits remain separate')));
+    assert.ok(dirtyLogs.every((message): message is string => typeof message === 'string'));
     assert.ok(dirtyLogs.some(msg => msg.includes('Skipping noise reset') && msg.includes('worktree is not clean')));
 
-    const calls = [];
-    const cleanResponses = {
+    const calls: string[][] = [];
+    const cleanResponses: Record<string, string> = {
       'status --porcelain': '',
       'rev-parse --symbolic-full-name HEAD': 'refs/heads/mission/task-132',
       'rev-parse HEAD': 'sha-head',
@@ -223,7 +225,7 @@ describe("merge-noise classification of backlog paths", () => {
       'diff-tree --no-commit-id --name-only -r HEAD^': 'workflow/lib/tools/backlog.js',
       'log -1 --format=%aD sha-base': 'Thu, 07 May 2026 18:00:00 +0200'
     };
-    const cleanRunner = args => {
+    const cleanRunner = (args: string[]) => {
       calls.push(args);
       const key = args.slice(2).join(' ');
       return { status: 0, stdout: cleanResponses[key] || '', stderr: '' };
@@ -233,8 +235,8 @@ describe("merge-noise classification of backlog paths", () => {
     assert.ok(calls.some(args => args.includes('--soft')));
     assert.ok(calls.some(args => args.includes('--amend')));
 
-    const resetCalls = [];
-    const resetRunner = args => {
+    const resetCalls: string[][] = [];
+    const resetRunner = (args: string[]) => {
       resetCalls.push(args);
       const key = args.slice(2).join(' ');
       return { status: 0, stdout: cleanResponses[key] || '', stderr: '' };
@@ -244,7 +246,7 @@ describe("merge-noise classification of backlog paths", () => {
   });
 
   test('findMissionDocInBranches finds mission docs on slug and base-slug branches and ignores branch lookup failures', () => {
-    const runner = args => {
+    const runner = (args: string[]) => {
       const key = args.slice(2).join(' ');
       if (key === 'branch -a --format=%(refname:short)') {
         return {
@@ -305,7 +307,7 @@ describe("merge-noise classification of backlog paths", () => {
   });
 
   test('findMissionDocInBranches uses exact slug matching, not substring', () => {
-    const runner = args => {
+    const runner = (args: string[]) => {
       const key = args.slice(2).join(' ');
       if (key === 'branch -a --format=%(refname:short)') {
         return {
@@ -406,7 +408,7 @@ describe("snapshotWorktreeTopology composition export", async () => {
       cwd: process.cwd(),
       gitFn: () => {
         gitCalls += 1;
-        return { status: 0, stdout: '' };
+        return { signal: null, stderr: '',  status: 0, stdout: '' };
       },
       currentBranch: () => '',
     });
@@ -448,11 +450,11 @@ describe("board readers worktree amplification", () => {
     }) as typeof fs.readFileSync;
     syncBuiltinESMExports();
 
-    const resolveTaskFile = (id: string) => {
+    const resolveTaskFile: NonNullable<NonNullable<ConstructorParameters<typeof ConcreteMissionReadAdapter>[0]>["resolveTaskFile"]> = (id) => {
       const taskFile = taskFiles.get(id.toLowerCase());
       return taskFile ? { ok: true, taskFile, matches: [taskFile] } : { ok: false, matches: [], reason: 'missing' };
     };
-    const resolveWorktree = () => null;
+    const resolveWorktree: NonNullable<NonNullable<ConstructorParameters<typeof ConcreteMissionReadAdapter>[0]>["resolveWorktree"]> = () => null;
     try {
       const missions = new ConcreteMissionReadAdapter({
         rootDir,
@@ -472,7 +474,7 @@ describe("board readers worktree amplification", () => {
           prepareReads: () => {
             const topology = snapshotWorktreeTopology({
               cwd: rootDir,
-              gitFn: () => ({ status: 0, stdout: (gitCalls += 1, '') }),
+              gitFn: () => ({ signal: null, stderr: '',  status: 0, stdout: (gitCalls += 1, '') }),
               currentBranch: () => '',
             });
             missions.useWorktreeTopology(topology);
@@ -536,7 +538,7 @@ describe("backlog reorder with completed duplicates", () => {
   // backlog/tasks/ copy while keeping the completed copy canonical.
 
 
-  function withTempRepo(fn) {
+  function withTempRepo(fn: (_arg0: string) => void) {
     const root = registeredMkdtemp('workflow-reorder-dup-');
     fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
     fs.mkdirSync(path.join(root, 'backlog', 'completed'), { recursive: true });
@@ -550,7 +552,7 @@ describe("backlog reorder with completed duplicates", () => {
 
   // Mirror the evidence from TASK-1343: a recreated backlog copy carrying
   // `status: backlog` and an `ordinal:` field alongside a done completed copy.
-  function reproduceReorderRecreate(root) {
+  function reproduceReorderRecreate(root: string) {
     const completedFile = path.join(root, 'backlog', 'completed', 'task-1323 - example.md');
     fs.writeFileSync(completedFile, '---\nid: TASK-1323\nstatus: done\n---\n# done copy\n');
 
@@ -561,7 +563,7 @@ describe("backlog reorder with completed duplicates", () => {
   }
 
   test('checkBacklogIntegrity flags a reorder-recreated backlog copy of a completed task', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       const { staleFile, completedFile } = reproduceReorderRecreate(root);
 
       const issues = checkBacklogIntegrity(root);
@@ -569,12 +571,13 @@ describe("backlog reorder with completed duplicates", () => {
 
       assert.ok(dup, 'expected a duplicate-completed issue for TASK-1323');
       assert.equal(dup.file, path.relative(root, staleFile));
+      assert.equal(dup.type, 'duplicate-completed');
       assert.equal(dup.canonicalFile, path.relative(root, completedFile));
     });
   });
 
   test('checkBacklogIntegrity also flags a tasks/ copy that duplicates an archived task', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       fs.writeFileSync(
         path.join(root, 'backlog', 'archive', 'tasks', 'task-1400 - archived.md'),
         '---\nid: TASK-1400\nstatus: done\n---\n'
@@ -593,7 +596,7 @@ describe("backlog reorder with completed duplicates", () => {
   });
 
   test('pruneStaleBacklogDuplicates removes the stale copy and clears the gate', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       const { staleFile, completedFile } = reproduceReorderRecreate(root);
 
       const removed = pruneStaleBacklogDuplicates(root);
@@ -615,7 +618,7 @@ describe("backlog reorder with completed duplicates", () => {
   });
 
   test('integrity gate stays clean when no duplicate exists', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       fs.writeFileSync(
         path.join(root, 'backlog', 'completed', 'task-1500 - shipped.md'),
         '---\nid: TASK-1500\nstatus: done\n---\n'

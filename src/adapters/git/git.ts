@@ -5,7 +5,7 @@ import * as pathMod from 'node:path';
 import { withCommandProgress } from './command-progress.js';
 import { commandProgressLabel } from './command-identity.js';
 
-interface GitOptions {
+export interface GitOptions {
   progressLabel?: string;
   encoding?: BufferEncoding;
   stdio?: import('node:child_process').StdioOptions;
@@ -139,8 +139,8 @@ interface GitRunner {
 
 interface DetectRebaseOptions {
   gitRunner?: GitRunner;
-  fsModule?: typeof fsMod;
-  pathModule?: typeof pathMod;
+  fsModule?: { existsSync(_path: string): boolean };
+  pathModule?: Pick<typeof pathMod, 'isAbsolute' | 'join'>;
 }
 
 export function detectRebaseState(cwd: string = process.cwd(), options: DetectRebaseOptions = {}): RebaseStateResult {

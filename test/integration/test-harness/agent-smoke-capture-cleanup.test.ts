@@ -57,9 +57,7 @@ test('real-agent smoke capture removes its first stdout file when stderr capture
       if (openCalls === 1) {
         return originalOpenSync(filePath, ...args);
       }
-      const error = new Error('ENOSPC: no space left while opening stderr capture');
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `code` absent from its inferred mock shape.
-      error.code = 'ENOSPC';
+      const error = Object.assign(new Error('ENOSPC: no space left while opening stderr capture'), { code: 'ENOSPC' });
       throw error;
     };
     const { runWorkflowAllowFail } = loadSmokeHelpers();
@@ -145,7 +143,6 @@ test('real-agent smoke preflight reports temporary-storage exhaustion before fix
   const result = temporaryCapacityPreflight({
     tmpDir: '/owned-test-temp',
     requiredBytes: 1024,
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     statfs: () => ({ bavail: 1, bsize: 512 })
   });
   assert.deepEqual(result, {
@@ -179,7 +176,7 @@ test('real-agent smoke classifies a trapped SIGTERM as a runner or model failure
 
 test('real-agent smoke distinguishes active timeout from active workflow rejection', async () => {
   const { classifyFailure } = loadSmokeHelpers();
-  const output = { stdout: 'Implementation in progress', stderr: '', status: null, signal: 'SIGTERM' };
+  const output = { stdout: 'Implementation in progress', stderr: '', status: null, signal: 'SIGTERM' } satisfies Partial<NonNullable<Parameters<typeof classifyFailure>[0]>>;
   assert.equal(classifyFailure(output, 'active').bucket, 'local-model-environment');
   const rejected = classifyFailure({ ...output, status: 1, signal: null }, 'active');
   assert.equal(rejected.bucket, 'parallix-workflow-failure');
@@ -217,7 +214,7 @@ test('smoke progress reaches integration output before child exit and clears too
   const lines: string[] = [];
   let sawToolBeforeExit = false;
   try {
-    const progressWrite = (chunk: string) => {
+    const progressWrite: (line: string) => void = (chunk) => {
       lines.push(String(chunk));
       if (String(chunk).includes('state=tool')) {
         sawToolBeforeExit = !fs.existsSync(released);

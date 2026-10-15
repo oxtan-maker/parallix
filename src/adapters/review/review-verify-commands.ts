@@ -1,3 +1,4 @@
+import type { ReviewStateReader } from './review-state.js';
 /**
  * Review verification and submission commands: verify a mission is ready
  * for review and submit it.
@@ -23,8 +24,8 @@ import { performHandoff } from '../cli/commands/handoff.js';
 type ReviewVerdict = { failures: string[]; warnings: string[] };
 
 /** Check the Backlog task exists and sits in a status a review can start from. */
-function verifyBacklogTask(taskResolution: any, slug: string, verdict: ReviewVerdict, deps: {
-  getTaskStatusFn: typeof getTaskStatus; toVirtualFn: typeof toVirtual; log: (_msg: string) => void;
+function verifyBacklogTask(taskResolution: ReturnType<typeof resolveTaskFile>, slug: string, verdict: ReviewVerdict, deps: {
+  getTaskStatusFn: typeof getTaskStatus; toVirtualFn: (_actualState: string) => string; log: (_msg: string) => void;
 }): { taskStatus: string | null; virtualStatus: string | null } {
   const { getTaskStatusFn, toVirtualFn, log } = deps;
   if (!taskResolution.ok) {
@@ -56,7 +57,7 @@ function verifyBacklogTask(taskResolution: any, slug: string, verdict: ReviewVer
  * a hard failure (fail closed).
  */
 function verifyReviewPullRequest(pr: unknown, context: {
-  providerEnabled: boolean; taskResolution: any; taskStatus: string | null;
+  providerEnabled: boolean; taskResolution: ReturnType<typeof resolveTaskFile>; taskStatus: string | null;
   virtualStatus: string | null; branch: string; slug: string;
 }, verdict: ReviewVerdict, log: (_msg: string) => void): void {
   const { providerEnabled, taskResolution, taskStatus, virtualStatus, branch, slug } = context;
@@ -99,7 +100,7 @@ function verifyMissionLocation(missionDir: string | null, slug: string, current:
   log(fmt.status('FAIL', `Branch: current branch is ${fmt.branch(current)}, expected ${fmt.branch(branch)}`));
 }
 
-function runReviewerGate(area: string, rootDir: string, skipped: boolean, verdict: ReviewVerdict, deps: { runVerificationGateFn: Function; runFn: unknown; log: (_msg: string) => void }): void {
+function runReviewerGate(area: string, rootDir: string, skipped: boolean, verdict: ReviewVerdict, deps: { runVerificationGateFn: typeof runVerificationGate; runFn: NonNullable<Parameters<typeof runVerificationGate>[1]>['runFn']; log: (_msg: string) => void }): void {
   const { runVerificationGateFn, runFn, log } = deps;
   if (skipped) {
     log(fmt.status('WARN', `Verification gate skipped (--no-gate) for area ${area}`));
@@ -125,25 +126,25 @@ function logAcceptanceChecklist(acceptanceCriteria: string[], log: (_msg: string
 
 export async function verifyReview(
   slug: string,
-  skipGate: boolean | string,
+  skipGate: boolean,
   options: {
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
-    exit?: (_code: number) => never;
+    exit?: (_code: number) => void;
     resolveWorktreeFn?: typeof resolveWorktree;
     findMissionDirFn?: typeof findMissionDir;
     getCurrentBranchFn?: typeof getCurrentBranch;
     resolveTaskFileFn?: typeof resolveTaskFile;
     getPrStatusFn?: typeof getPrStatus;
     getTaskStatusFn?: typeof getTaskStatus;
-    toVirtualFn?: typeof toVirtual;
+    toVirtualFn?: (_actualState: string) => string;
     findMissionAreaFn?: typeof findMissionArea;
     runVerificationGate?: typeof runVerificationGate;
     runFn?: typeof run;
     getAcceptanceCriteriaFn?: typeof getAcceptanceCriteria;
     formatMatrixSummaryFn?: typeof formatMatrixSummary;
     buildAutonomousReviewMatrixFn?: typeof buildAutonomousReviewMatrix;
-    readReviewStateFn?: typeof readReviewState;
+    readReviewStateFn?: ReviewStateReader;
     isReviewProviderEnabledFn?: typeof isProviderEnabled;
     isForgejoReviewEnabledFn?: typeof isProviderEnabled;
     cwdFn?: () => string;
@@ -151,26 +152,7 @@ export async function verifyReview(
     skipGate?: boolean;
   } = {}
 ): Promise<void> {
-  const log = options.log || fmt.log.plain;
-  const error = options.error || fmt.log.plainError;
-  const exit = options.exit || process.exit;
-  const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
-  const findMissionDirFn = options.findMissionDirFn || findMissionDir;
-  const getCurrentBranchFn = options.getCurrentBranchFn || getCurrentBranch;
-  const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
-  const getPrStatusFn = options.getPrStatusFn || getPrStatus;
-  const getTaskStatusFn = options.getTaskStatusFn || getTaskStatus;
-  const toVirtualFn = options.toVirtualFn || toVirtual;
-  const findMissionAreaFn = options.findMissionAreaFn || findMissionArea;
-  const runVerificationGateFn = options.runVerificationGate || runVerificationGate;
-  const runFn = options.runFn || run;
-  const getAcceptanceCriteriaFn = options.getAcceptanceCriteriaFn || getAcceptanceCriteria;
-  const formatMatrixSummaryFn = options.formatMatrixSummaryFn || formatMatrixSummary;
-  const buildAutonomousReviewMatrixFn = options.buildAutonomousReviewMatrixFn || buildAutonomousReviewMatrix;
-  const readReviewStateFn = options.readReviewStateFn || readReviewState;
-  const isReviewProviderEnabledFn = options.isReviewProviderEnabledFn || options.isForgejoReviewEnabledFn || isProviderEnabled;
-  const cwdFn = options.cwdFn || (() => process.cwd());
-
+  const { log, error, exit, resolveWorktreeFn, findMissionDirFn, getCurrentBranchFn, resolveTaskFileFn, getPrStatusFn, getTaskStatusFn, toVirtualFn, findMissionAreaFn, runVerificationGateFn, runFn, getAcceptanceCriteriaFn, formatMatrixSummaryFn, buildAutonomousReviewMatrixFn, readReviewStateFn, isReviewProviderEnabledFn, cwdFn } = verifyReviewBindings(options);
   const worktree = resolveWorktreeFn(slug);
   const rootDir = worktree || cwdFn();
 
@@ -223,18 +205,18 @@ export async function verifyReview(
 
 export async function submitForReview(
   slug: string,
-  skipGate: boolean | string,
+  skipGate: boolean,
   options: {
-    exit?: (_code: number) => never;
+    exit?: (_code: number) => void;
     resolveTaskFileFn?: typeof resolveTaskFile;
     getTaskImplementerFn?: typeof getTaskImplementer;
     resolveWorktreeFn?: typeof resolveWorktree;
-    performHandoffFn?: (_slug: string, _opts?: Record<string, unknown>) => Promise<Record<string, unknown>>;
-    readReviewStateFn?: typeof readReviewState;
+    performHandoffFn?: typeof performHandoff;
+    readReviewStateFn?: ReviewStateReader;
     transitionTaskFn?: typeof transitionTask;
     isReviewProviderEnabledFn?: typeof isProviderEnabled;
     isForgejoReviewEnabledFn?: typeof isProviderEnabled;
-    missionServicesFn?: Function;
+    missionServicesFn?: import('../../application/ports/handoff-workflow.js').HandoffMissionServicesPort;
     // TASK-2379 review round 1 (F1): authoritative review-entry timestamp
     // for lifecycle recovery; a genuine submit-for-review passes nothing and
     // the handoff keeps the wall clock.
@@ -244,16 +226,7 @@ export async function submitForReview(
     log?: (_msg: string) => void;
   } = {}
 ): Promise<void> {
-  const exit = options.exit || process.exit;
-  const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
-  const getTaskImplementerFn = options.getTaskImplementerFn || getTaskImplementer;
-  const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
-  const performHandoffFn = options.performHandoffFn || performHandoff;
-  const readReviewStateFn = options.readReviewStateFn || readReviewState;
-  const transitionTaskFn = options.transitionTaskFn || transitionTask;
-  const isReviewProviderEnabledFn = options.isReviewProviderEnabledFn || options.isForgejoReviewEnabledFn || isProviderEnabled;
-  const log = options.log || fmt.log.plain;
-
+  const { exit, resolveTaskFileFn, getTaskImplementerFn, resolveWorktreeFn, performHandoffFn, readReviewStateFn, transitionTaskFn, isReviewProviderEnabledFn, log } = submitForReviewBindings(options);
   const worktree = resolveWorktreeFn(slug) || process.cwd();
   const providerEnabled = isReviewProviderEnabledFn(worktree);
 
@@ -291,7 +264,7 @@ export async function submitForReview(
       transition: status => transitionTaskFn(slug, status, { rootDir: worktree, log }),
       reportBounce: () => log(fmt.status('INFO', `Auto-bounced ${slug} to active: declared-gate validation failure. Fix the gate in MISSION.md and retry.`)),
     };
-    await reboundRejectedHandoff(result as { ok: unknown; reason?: unknown; recoveryAttempted?: unknown }, failurePort);
+    await reboundRejectedHandoff(result, failurePort);
     exit(1);
   }
 }
@@ -300,3 +273,46 @@ export async function submitForReview(
 // Command: readComments
 // ============================================================================
 
+
+function verifyReviewBindings(options: NonNullable<Parameters<typeof verifyReview>[2]>) {
+  const log = options.log || fmt.log.plain;
+  const error = options.error || fmt.log.plainError;
+  const exit = options.exit || process.exit;
+  const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
+  const findMissionDirFn = options.findMissionDirFn || findMissionDir;
+  const getCurrentBranchFn = options.getCurrentBranchFn || getCurrentBranch;
+  const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
+  const getPrStatusFn = options.getPrStatusFn || getPrStatus;
+  const getTaskStatusFn = options.getTaskStatusFn || getTaskStatus;
+  const toVirtualFn = options.toVirtualFn || toVirtual;
+  const findMissionAreaFn = options.findMissionAreaFn || findMissionArea;
+  const { runVerificationGateFn, runFn, getAcceptanceCriteriaFn, formatMatrixSummaryFn, buildAutonomousReviewMatrixFn, readReviewStateFn, isReviewProviderEnabledFn } = reviewVerificationBindings(options);
+  const cwdFn = options.cwdFn || (() => process.cwd());
+
+  return { log, error, exit, resolveWorktreeFn, findMissionDirFn, getCurrentBranchFn, resolveTaskFileFn, getPrStatusFn, getTaskStatusFn, toVirtualFn, findMissionAreaFn, runVerificationGateFn, runFn, getAcceptanceCriteriaFn, formatMatrixSummaryFn, buildAutonomousReviewMatrixFn, readReviewStateFn, isReviewProviderEnabledFn, cwdFn };
+}
+
+function submitForReviewBindings(options: NonNullable<Parameters<typeof submitForReview>[2]>) {
+  const exit = options.exit || process.exit;
+  const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
+  const getTaskImplementerFn = options.getTaskImplementerFn || getTaskImplementer;
+  const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
+  const performHandoffFn = options.performHandoffFn || performHandoff;
+  const readReviewStateFn = options.readReviewStateFn || readReviewState;
+  const transitionTaskFn = options.transitionTaskFn || transitionTask;
+  const isReviewProviderEnabledFn = options.isReviewProviderEnabledFn || options.isForgejoReviewEnabledFn || isProviderEnabled;
+  const log = options.log || fmt.log.plain;
+
+  return { exit, resolveTaskFileFn, getTaskImplementerFn, resolveWorktreeFn, performHandoffFn, readReviewStateFn, transitionTaskFn, isReviewProviderEnabledFn, log };
+}
+
+function reviewVerificationBindings(options: NonNullable<Parameters<typeof verifyReview>[2]>) {
+  const runVerificationGateFn = options.runVerificationGate || runVerificationGate;
+  const runFn = options.runFn || run;
+  const getAcceptanceCriteriaFn = options.getAcceptanceCriteriaFn || getAcceptanceCriteria;
+  const formatMatrixSummaryFn = options.formatMatrixSummaryFn || formatMatrixSummary;
+  const buildAutonomousReviewMatrixFn = options.buildAutonomousReviewMatrixFn || buildAutonomousReviewMatrix;
+  const readReviewStateFn = options.readReviewStateFn || readReviewState;
+  const isReviewProviderEnabledFn = options.isReviewProviderEnabledFn || options.isForgejoReviewEnabledFn || isProviderEnabled;
+  return { runVerificationGateFn, runFn, getAcceptanceCriteriaFn, formatMatrixSummaryFn, buildAutonomousReviewMatrixFn, readReviewStateFn, isReviewProviderEnabledFn };
+}

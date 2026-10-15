@@ -147,6 +147,7 @@ test('stats and DONE rail share persisted delivery days despite later closure (T
       // Keep the original visibility invariant across both rendered groups.
       assert.deepEqual([...done.cards, ...done.historyCards ?? []].map(c => c.id).sort(),
         ['task-delivery', 'task-first', 'task-last', 'task-unclosed', 'task-unknown']);
+      assert.ok(selection.current.flow != null);
       assert.equal(done.count, selection.current.flow.total);
       assert.equal(done.count, board.metrics.decisionWindow?.current.completedMissions);
       assert.equal(done.count, board.metrics.weeklyCumulativeFlow?.series.at(-1)?.counts.done);

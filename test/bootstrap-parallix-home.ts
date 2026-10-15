@@ -17,10 +17,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // so it protects the database this process would otherwise have resolved.
 startDefaultDbGuard('unit-test');
 
-const tempRoots = [];
+const tempRoots: string[] = [];
 const testHomeTempRoot = process.env.PARALLIX_TEST_HOME_TMPDIR || os.tmpdir();
 
-function makeTempDir(prefix) {
+function makeTempDir(prefix: string) {
   const dir = fs.mkdtempSync(path.join(testHomeTempRoot, prefix));
   tempRoots.push(dir);
   return dir;
@@ -44,19 +44,22 @@ process.env.PARALLIX_TEST_NO_FORGEJO = '1';
 // marker keeps those hermetic fixtures from bypassing the production gate rule.
 process.env.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS = '1';
 
-function forgejoNetworkError(target) {
+function forgejoNetworkError(target: unknown) {
   return new Error(`Unit test attempted an unmocked Forgejo request to ${String(target)}`);
 }
 
-function guardRequest(module) {
+type RequestCallback = (response: http.IncomingMessage) => void;
+type RequestArguments = [http.RequestOptions | string | URL, RequestCallback?] | [string | URL, http.RequestOptions, RequestCallback?];
+
+function guardRequest(module: Pick<typeof http, 'request'>) {
   const request = module.request;
-  module.request = function guardedRequest(...args) {
+  module.request = function guardedRequest(this: unknown, ...args: RequestArguments): http.ClientRequest {
     const target = args[0];
     let url;
     try {
       url = target instanceof URL ? target : new URL(String(target));
     } catch (_) {
-      const options = target && typeof target === 'object' ? target : args[1];
+      const options = (target && typeof target === 'object' ? target : args[1]) as { protocol?: unknown; hostname?: unknown; host?: unknown; path?: unknown } | undefined;
       const protocol = options?.protocol || 'http:';
       const host = options?.hostname || options?.host || 'localhost';
       url = new URL(`${protocol}//${host}${options?.path || '/'}`);
@@ -65,7 +68,7 @@ function guardRequest(module) {
       || (url.hostname === '127.0.0.1' && url.port === '9')) {
       throw forgejoNetworkError(url);
     }
-    return request.apply(this, args);
+    return Reflect.apply(request, this, args) as http.ClientRequest;
   };
 }
 
@@ -80,7 +83,7 @@ guardRequest(https);
 // exercise probe behavior inject their own doubles via setCommandPathProbe /
 // setLauncherHealthProbe (null restores a real probe).
 setCommandPathProbe((name) => name);
-setLauncherHealthProbe(() => ({ ok: true }));
+setLauncherHealthProbe(() => ({ ok: true as const }));
 
 fs.mkdirSync(process.env.PARALLIX_HOME, { recursive: true });
 fs.mkdirSync(process.env.HOME, { recursive: true });
@@ -90,7 +93,7 @@ if (!fs.existsSync(agentsLocalPath)) {
   fs.writeFileSync(agentsLocalPath, '{"blocklist":{}}\n');
 }
 
-function commandPath(command) {
+function commandPath(command: string) {
   for (const dir of (process.env.PATH || '').split(path.delimiter)) {
     const candidate = path.join(dir, command);
     try {
@@ -211,7 +214,7 @@ flushManifest();
 // reclaim it on SIGKILL. Test files that create their own temporary
 // directories (e.g., via mkdtempSync) should call this to ensure those
 // directories are cleaned up even when the worker is killed.
-function registerTempRoot(dir) {
+function registerTempRoot(dir: string) {
   if (dir && !tempRoots.includes(dir)) {
     tempRoots.push(dir);
     flushManifest();

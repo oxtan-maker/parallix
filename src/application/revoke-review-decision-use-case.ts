@@ -32,10 +32,10 @@ export interface RevokeReviewDecisionResult {
 export class RevokeReviewDecisionUseCase {
   constructor(
     private readonly _store: MissionStore,
-    private readonly _lifecycle: MissionLifecycleService,
+    private readonly _lifecycle: Pick<MissionLifecycleService, 'transition'>,
     private readonly _provider: ReviewProviderRevocationPort | null = null,
     private readonly _changeIdentity: ChangeIdentityPort | null = null,
-  ) {}
+  ) { }
 
   /** A staleness observed but never recorded (the branch moved outside px rebase) is recorded now. */
   private withObservedSupersession(review: Review, occurredAt: string): Review {
@@ -48,9 +48,8 @@ export class RevokeReviewDecisionUseCase {
   }
 
   async execute(request: RevokeReviewDecisionRequest): Promise<ApplicationOutcome<RevokeReviewDecisionResult>> {
-    if (!request.reason.trim()) { return failure('validation', 'Revocation requires --reason <text> from the operator'); }
-    if (!request.operator.trim()) { return failure('validation', 'Revocation requires --operator <name>; it is an operator-only command'); }
-    if (!Number.isSafeInteger(request.round) || request.round < 1) { return failure('validation', 'Revocation requires --decision <round-number>'); }
+    const invalid = invalidRevocationRequest(request);
+    if (invalid) { return invalid; }
     const loaded = await this._store.load(missionId(request.slug));
     if (loaded.kind !== 'found') { return failure('validation', `Mission ${request.slug} has no recorded review decision`); }
     if (loaded.mission.status === 'done') { return failure('validation', `Mission ${request.slug} is closed and cannot be reopened by revocation`); }
@@ -89,6 +88,10 @@ export class RevokeReviewDecisionUseCase {
     if (transition.status !== 'completed') {
       return failure('validation', transition.error?.message ?? 'Revocation was not recorded');
     }
+    return this.revokeProviderApproval(transition, request);
+  }
+
+  private async revokeProviderApproval(transition: Awaited<ReturnType<MissionLifecycleService['transition']>>, request: RevokeReviewDecisionRequest): Promise<ApplicationOutcome<RevokeReviewDecisionResult>> {
     if (!this._provider) {
       return completed({ providerUpdated: false, providerDiagnostic: 'review provider is disabled; local revocation was recorded' });
     }
@@ -99,4 +102,11 @@ export class RevokeReviewDecisionUseCase {
       return completed({ providerUpdated: false, providerDiagnostic: `provider was not updated: ${error instanceof Error ? error.message : 'unreachable'}` });
     }
   }
+}
+
+function invalidRevocationRequest(request: RevokeReviewDecisionRequest): ApplicationOutcome<RevokeReviewDecisionResult> | null {
+  if (!request.reason.trim()) { return failure('validation', 'Revocation requires --reason <text> from the operator'); }
+  if (!request.operator.trim()) { return failure('validation', 'Revocation requires --operator <name>; it is an operator-only command'); }
+  if (!Number.isSafeInteger(request.round) || request.round < 1) { return failure('validation', 'Revocation requires --decision <round-number>'); }
+  return null;
 }

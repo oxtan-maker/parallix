@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, SpawnSyncReturns } from 'node:child_process';
 import { mkdtemp } from '../../helpers/temp-dir.js';
 import test from 'node:test';
 import { seedMissionDatabase } from '../../fixtures/review-state-db.js';
@@ -28,7 +28,7 @@ const PX = resolvePxEntryLoader();
 const pkgVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version;
 const versionRe = new RegExp(`parallix ${pkgVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
 
-function runGit(args, cwd) {
+function runGit(args: string[], cwd: string) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
   assert.equal(result.status, 0, `${args.join(' ')}\n${result.stderr}${result.stdout}`);
   return result;
@@ -93,7 +93,7 @@ function runPx(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv;
  * an operator database holding the mission's Review. Seed one under its own
  * PARALLIX_HOME and hand that home to the spawned process.
  */
-async function seedTargetReview(target) {
+async function seedTargetReview(target: ReturnType<typeof makeTargetRepo>) {
   const home = mkdtemp('px-target-home-');
   const restore = await seedMissionDatabase(home, target.slug, target.root);
   // The seed points this process at the temp home; the spawned px reads it from
@@ -102,15 +102,15 @@ async function seedTargetReview(target) {
   return home;
 }
 
-function skipIfSandboxBlocked(result) {
+function skipIfSandboxBlocked(result: SpawnSyncReturns<string>) {
   const output = `${result.stdout || ''}${result.stderr || ''}`;
-  return Boolean(result.error && result.error.code === 'EPERM' && !output);
+  return Boolean(result.error && 'code' in result.error && result.error.code === 'EPERM' && !output);
 }
 
-function stripNodeWarnings(output) {
+function stripNodeWarnings(output: string) {
   return output
     .split('\n')
-    .filter(line => !/^\(node:/.test(line) && !/^Reparsing as ES module/.test(line) && !/^To eliminate this warning/.test(line) && !/^\(Use `node --trace-warnings/.test(line))
+    .filter((line) => !/^\(node:/.test(line) && !/^Reparsing as ES module/.test(line) && !/^To eliminate this warning/.test(line) && !/^\(Use `node --trace-warnings/.test(line))
     .join('\n');
 }
 

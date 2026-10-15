@@ -23,13 +23,8 @@ test.afterEach(() => mock.restoreAll());
 
 // Build a namespace-like object that mirrors what `import * as` produces
 // after esModuleInterop compilation of a CJS module with `module.exports = fn`.
-function makeNamespaceObj(fn) {
-  const ns = { default: fn };
-  // Copy own properties from the function (e.g. completePreflightOrExit)
-  for (const key of Object.keys(fn)) {
-    ns[key] = fn[key];
-  }
-  return ns;
+function makeNamespaceObj(fn: typeof stubMissionStart) {
+  return Object.assign({ default: fn }, fn);
 }
 
 // Stub mission-start function that returns a passing preflight result.
@@ -48,7 +43,7 @@ test('active delegates without invoking a legacy missionStartFn namespace object
 
   // Verify the namespace object is NOT callable (this is the bug).
   assert.throws(
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
+    // @ts-expect-error A module namespace is deliberately invoked to prove it is not callable.
     () => namespaceObj(['task-1396'], { returnResult: true }),
     TypeError,
     'namespace object must not be callable — this is the task-1396 bug',
@@ -57,13 +52,13 @@ test('active delegates without invoking a legacy missionStartFn namespace object
   // Now invoke active with the namespace as missionStartFn.
   // active.default() should propagate the TypeError when it tries to call missionStartFn.
   let threw = false;
-  let error;
+  let error: unknown;
   try {
     // active.default() calls missionStartFn([slug], { returnResult: true }) at the
     // preflight step. With a namespace object, this throws TypeError.
     await active.default(['task-1396'], {
-      missionStartFn: namespaceObj,
-      service: { execute: async () => ({ status: 'completed', value: { agent: 'codex' }, durableEvidence: [] }) },
+      
+      service: { execute: async () => ({ status: 'completed' as const, value: { agent: 'codex' }, durableEvidence: [] }) },
       inferSlugFn: () => 'task-1396',
       exitFn: () => { /* suppress process.exit */ },
     });
@@ -72,7 +67,7 @@ test('active delegates without invoking a legacy missionStartFn namespace object
     error = err;
   }
 
-  assert.equal(threw, false, error && error.message);
+  assert.equal(threw, false, error instanceof Error ? error.message : '');
 });
 
 test('active succeeds when missionStartFn is the default export function (task-1396 fix verified)', async () => {
@@ -85,23 +80,20 @@ test('active succeeds when missionStartFn is the default export function (task-1
   // then continue to resolveWorktreeFn which we also stub.
   let launched = false;
   await active.default(['task-1396'], {
-    missionStartFn: fn,
+    
     service: { execute: async () => {
       launched = true;
-      return { status: 'completed', value: { agent: 'claude' }, durableEvidence: [] };
+      return { status: 'completed' as const, value: { agent: 'claude' }, durableEvidence: [] };
     } },
     inferSlugFn: () => 'task-1396',
-    resolveWorktreeFn: () => '/tmp/fake-worktree-task-1396',
-    readAgentConfigOrExitFn: () => ({ default: 'claude' }),
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
-    buildCheckpointContextFn: () => 'No checkpoints yet.',
-    buildExecutePromptFn: () => 'execute prompt',
-    selectLaunchAndRecordFn: async () => {
-      launched = true;
-      return { agent: 'claude', result: { status: 0, startedAt: '2026-01-01T00:00:00Z', endedAt: '2026-01-01T00:01:00Z' } };
-    },
-    enforceExecuteCommitSafetyFn: () => {},
-    runHandoffAndReviewFn: async () => true,
+    
+    
+    
+    
+    
+    
+    
+    
     exitFn: () => { /* suppress process.exit */ },
   });
 
@@ -110,7 +102,7 @@ test('active succeeds when missionStartFn is the default export function (task-1
 
 test('active forwards --implementer and --reviewer to the execute service and refuses a missing reviewer value (TASK-2723)', async () => {
   const requests: Array<{ agent?: string | null; reviewer?: string }> = [];
-  const service = { execute: async (request: { agent?: string | null; reviewer?: string }) => { requests.push(request); return { status: 'completed' as const, value: { agent: 'claude' }, durableEvidence: [] }; } };
+  const service = { execute: async (request: { agent?: string | null; reviewer?: string }) => { requests.push(request); return { status: 'completed' as const, value: { agent: 'claude' }, durableEvidence: [] }; } } satisfies Pick<import("../../../../../src/application/execute-mission-service.js").ExecuteMissionService, "execute">;
   const run = async (args: string[]) => {
     const failures: string[] = [];
     const exits: number[] = [];

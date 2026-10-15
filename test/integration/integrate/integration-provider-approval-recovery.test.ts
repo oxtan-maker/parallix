@@ -1,4 +1,7 @@
-// @ts-nocheck -- TASK-2420: reproduction for the assigned-reviewer recovery gap
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { forgejoApiFixture } from '../../fixtures/forgejo-api.js';
+import { integrationContext } from '../../fixtures/integration-context.js';
+import { integrationServices } from '../../helpers/stub-integration-services.js';
 
 // TASK-2420: integration recovery only recognized a provider APPROVED when the
 // approving Forgejo login equaled the hard-coded default user ('human'). An
@@ -46,16 +49,16 @@ const { IntegrationAbort } = await import('../../../src/adapters/cli/commands/in
  * Build an apiCall that returns a fixed review list for a branch PR.
  * @param {Array<{state: string, submitted_at: string, user: {login: string}}>} reviews
  */
-function reviewsApi(reviews) {
-  return function apiCall(method, apiPath) {
+function reviewsApi(reviews: { state: string; submitted_at: string; user: { login: string; }; }[]) {
+  return forgejoApiFixture((_method, apiPath) => {
     if (apiPath.includes('/pulls?state=')) {
-      return { ok: true, data: [{ number: 2420, head: { ref: 'mission/task-2420', label: 'magnus:mission/task-2420' } }], status: 0 };
+      return { ok: true as const, data: [{ number: 2420, head: { ref: 'mission/task-2420', label: 'magnus:mission/task-2420' } }], status: 0 };
     }
     if (apiPath === '/pulls/2420/reviews') {
-      return { ok: true, data: reviews, status: 0 };
+      return { ok: true as const, data: reviews, status: 0 };
     }
-    return { ok: false, data: null, status: 1 };
-  };
+    return { ok: false as const, data: null, status: 1 };
+  });
 }
 
 test('task-2420: getLatestReviewDecision recognizes an APPROVED by the assigned reviewer', () => {
@@ -128,7 +131,7 @@ async function seedActiveApprovedByReviewer(slug: string, reviewerLogin: string,
   const reviewer = agentFamily('configured-reviewer');
   const implementer = agentFamily('configured-implementer');
   const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' });
-  const pullRequest = { kind: 'pull-request', provider: 'forgejo', id: slug, url: null, sourceBranch: `mission/${slug}`, targetBranch: 'main' };
+  const pullRequest = { kind: 'pull-request', provider: 'forgejo', id: slug, url: null, sourceBranch: `mission/${slug}`, targetBranch: 'main' } satisfies import("../../../src/domain/review.js").ReviewedChange;
 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `${slug}-`));
   fs.mkdirSync(path.join(root, 'missions'), { recursive: true });
@@ -164,7 +167,7 @@ async function seedActiveApprovedByReviewer(slug: string, reviewerLogin: string,
     source: { kind: 'provider', provider: 'forgejo' },
   });
 
-  const mission = {
+  const mission = fixtureMission(slug, {
     id: missionId(slug),
     repositoryId: repositoryId('parallix'),
     title: `${slug} approved by ${reviewerLogin}`,
@@ -176,9 +179,8 @@ async function seedActiveApprovedByReviewer(slug: string, reviewerLogin: string,
     netEngineeringLines: null,
     closedAt: null,
     externalTaskRef: null,
-    intakeTrace: null,
     review: approvedReview,
-  };
+  });
   await store.save(mission, null);
 
   return {
@@ -204,13 +206,13 @@ test('task-2420: active approved review by assigned reviewer recovers to integra
   const ctx = await seedActiveApprovedByReviewer('task-2420', 'qwen', decidedAt, submittedAt);
   try {
     let submitForReviewCalled = false;
-    const submitForReviewFn = async () => {
+    const submitForReviewFn: NonNullable<NonNullable<Parameters<typeof recoverMissionForIntegration>[1]>["submitForReviewFn"]> = async () => {
       submitForReviewCalled = true;
       throw new Error('A submitted review must be awaiting a reviewer decision');
     };
 
     const result = await recoverMissionForIntegration(
-      {
+      integrationContext({
         slug: ctx.slug,
         approval: {
           ok: true,
@@ -219,8 +221,8 @@ test('task-2420: active approved review by assigned reviewer recovers to integra
           reviewerApproved: true,
           reviewerApprovedAt: decidedAt,
         },
-      },
-      { missionServices: { store: ctx.store, lifecycle: ctx.lifecycle }, submitForReviewFn },
+      }),
+      { missionServices: integrationServices({ store: ctx.store, lifecycle: ctx.lifecycle }), submitForReviewFn },
     );
 
     assert.equal(submitForReviewCalled, false, 'recovery skips the submit-for-review handoff replay for an already-approved round');
@@ -233,7 +235,9 @@ test('task-2420: active approved review by assigned reviewer recovers to integra
     const reloaded = await ctx.store.load(missionId(ctx.slug));
     assert.equal(reloaded.kind, 'found');
     assert.equal(reloaded.mission.status, 'integration', 'mission reaches integration');
+    assert.ok(reloaded.mission.review);
     const round = reloaded.mission.review.rounds[reloaded.mission.review.rounds.length - 1];
+    assert.ok(round.decision != null);
     assert.equal(round.decision.kind, 'approved', 'the recorded reviewer decision is preserved');
     assert.equal(round.decision.decidedAt, decidedAt, 'the recorded decidedAt is preserved');
   } finally {
@@ -249,7 +253,7 @@ test('task-2420: active approved review aborts when no current provider approval
     let threw = false;
     try {
       await recoverMissionForIntegration(
-        {
+        integrationContext({
           slug: ctx.slug,
           approval: {
             ok: true,
@@ -257,8 +261,8 @@ test('task-2420: active approved review aborts when no current provider approval
             defaultUserApproved: false,
             reviewerApproved: false,
           },
-        },
-        { missionServices: { store: ctx.store, lifecycle: ctx.lifecycle }, submitForReviewFn: async () => { throw new Error('should not call'); } },
+        }),
+        { missionServices: integrationServices({ store: ctx.store, lifecycle: ctx.lifecycle }), submitForReviewFn: async () => { throw new Error('should not call'); } },
       );
     } catch (error) {
       threw = true;
@@ -266,6 +270,7 @@ test('task-2420: active approved review aborts when no current provider approval
     }
     assert.ok(threw, 'recovery aborts a stored approval without a current provider approval');
     const reloaded = await ctx.store.load(missionId(ctx.slug));
+    assert.equal(reloaded.kind, 'found');
     assert.equal(reloaded.mission.status, 'active', 'mission stays active after the abort');
   } finally {
     await ctx.cleanup();
@@ -280,7 +285,7 @@ test('task-2420: active approved review aborts when the current approval is by a
     let threw = false;
     try {
       await recoverMissionForIntegration(
-        {
+        integrationContext({
           slug: ctx.slug,
           approval: {
             ok: true,
@@ -289,8 +294,8 @@ test('task-2420: active approved review aborts when the current approval is by a
             // Provider shows gemini's approval, not the assigned reviewer qwen's.
             reviewerApproved: false,
           },
-        },
-        { missionServices: { store: ctx.store, lifecycle: ctx.lifecycle }, submitForReviewFn: async () => { throw new Error('should not call'); } },
+        }),
+        { missionServices: integrationServices({ store: ctx.store, lifecycle: ctx.lifecycle }), submitForReviewFn: async () => { throw new Error('should not call'); } },
       );
     } catch (error) {
       threw = true;
@@ -331,17 +336,18 @@ test('task-2420: buildIntegrationContext derives reviewerUser from the recorded 
     spawnSync('git', ['add', '.'], { cwd: root });
     spawnSync('git', ['commit', '-m', 'fixture', '--allow-empty'], { cwd: root });
 
-    let capturedReviewerUser: string | undefined;
+    let capturedReviewerUser: string | null | undefined;
     const context = await buildIntegrationContext('task-2420', {
       baseBranch: 'main',
       baseWorktree: root,
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => null,
-      getPrStatusFn: () => ({ exists: true, merged: false }),
-      readReviewStateFn: async () => ({ reviewer: 'qwen', implementer: 'codex', round: 1, phase: 'approved' } as any),
-      getLatestReviewDecisionFn: (_branch: string, options: any) => {
-        capturedReviewerUser = options?.reviewerUser;
-        return { ok: true, reviewState: 'APPROVED', defaultUserApproved: false, reviewerApproved: true, reviewerApprovedAt: '2026-05-01T10:30:00Z' };
+      getPrStatusFn: () => ({ raw: '', number: undefined, title: undefined, state: undefined, url: undefined, createdAt: null,  exists: true as const, merged: false }),
+      readReviewStateFn: async () => ({ reviewer: 'qwen', implementer: 'codex', round: 1, phase: 'approved' }),
+      getLatestReviewDecisionFn: (_branch: string, options) => {
+        assert.ok(options.reviewerUser === null || typeof options.reviewerUser === 'string');
+        capturedReviewerUser = options.reviewerUser;
+        return { ok: true as const, reviewState: 'APPROVED', defaultUserApproved: false, reviewerApproved: true, reviewerApprovedAt: '2026-05-01T10:30:00Z' };
       },
     });
 
@@ -366,7 +372,7 @@ test('task-2420: buildIntegrationContext passes the authoritative store to the d
   const reviewer = agentFamily('qwen');
   const implementer = agentFamily('codex');
   const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' });
-  const pullRequest = { kind: 'pull-request', provider: 'forgejo', id: 'task-2420', url: null, sourceBranch: 'mission/task-2420', targetBranch: 'main' };
+  const pullRequest = { kind: 'pull-request', provider: 'forgejo', id: 'task-2420', url: null, sourceBranch: 'mission/task-2420', targetBranch: 'main' } satisfies import("../../../src/domain/review.js").ReviewedChange;
 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2420-buildctx-store-'));
   fs.mkdirSync(path.join(root, 'missions'), { recursive: true });
@@ -416,7 +422,7 @@ test('task-2420: buildIntegrationContext passes the authoritative store to the d
     comment: null,
     source: { kind: 'provider', provider: 'forgejo' },
   });
-  const mission = {
+  const mission = fixtureMission('task-2420', {
     id: missionId('task-2420'),
     repositoryId: repositoryId('parallix'),
     title: 'task-2420 build ctx store',
@@ -428,25 +434,25 @@ test('task-2420: buildIntegrationContext passes the authoritative store to the d
     netEngineeringLines: null,
     closedAt: null,
     externalTaskRef: null,
-    intakeTrace: null,
     review: approvedReview,
-  };
+  });
   await store.save(mission, null);
 
   try {
-    let capturedReviewerUser: string | undefined;
+    let capturedReviewerUser: string | null | undefined;
     const context = await buildIntegrationContext('task-2420', {
       baseBranch: 'main',
       baseWorktree: root,
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => null,
-      getPrStatusFn: () => ({ exists: true, merged: false }),
+      getPrStatusFn: () => ({ raw: '', number: undefined, title: undefined, state: undefined, url: undefined, createdAt: null,  exists: true as const, merged: false }),
       // DEFAULT reader: no stub. The store argument is what makes it resolve.
       readReviewStateFn: readReviewState,
       missionStore: store,
-      getLatestReviewDecisionFn: (_branch: string, options: any) => {
-        capturedReviewerUser = options?.reviewerUser;
-        return { ok: true, reviewState: 'APPROVED', defaultUserApproved: false, reviewerApproved: true, reviewerApprovedAt: '2026-05-01T10:30:00Z' };
+      getLatestReviewDecisionFn: (_branch: string, options) => {
+        assert.ok(options.reviewerUser === null || typeof options.reviewerUser === 'string');
+        capturedReviewerUser = options.reviewerUser;
+        return { ok: true as const, reviewState: 'APPROVED', defaultUserApproved: false, reviewerApproved: true, reviewerApprovedAt: '2026-05-01T10:30:00Z' };
       },
     });
 
@@ -471,16 +477,17 @@ test('task-2420: buildIntegrationContext without the authoritative store does no
   const { readReviewState } = await import('../../../src/adapters/review/review-state.js');
   const ctx = await seedActiveApprovedByReviewer('task-2420-neg', 'qwen', '2026-05-01T10:30:00Z', '2026-05-01T10:00:00Z');
   try {
-    let capturedReviewerUser: string | undefined;
+    let capturedReviewerUser: string | null | undefined;
     await buildIntegrationContext('task-2420-neg', {
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => null,
-      getPrStatusFn: () => ({ exists: true, merged: false }),
+      getPrStatusFn: () => ({ raw: '', number: undefined, title: undefined, state: undefined, url: undefined, createdAt: null,  exists: true as const, merged: false }),
       // DEFAULT reader, but NO missionStore: the production default returns null.
       readReviewStateFn: readReviewState,
-      getLatestReviewDecisionFn: (_branch: string, options: any) => {
-        capturedReviewerUser = options?.reviewerUser;
-        return { ok: true, reviewState: 'APPROVED', defaultUserApproved: false, reviewerApproved: true, reviewerApprovedAt: '2026-05-01T10:30:00Z' };
+      getLatestReviewDecisionFn: (_branch: string, options) => {
+        assert.ok(options.reviewerUser === null || typeof options.reviewerUser === 'string');
+        capturedReviewerUser = options.reviewerUser;
+        return { ok: true as const, reviewState: 'APPROVED', defaultUserApproved: false, reviewerApproved: true, reviewerApprovedAt: '2026-05-01T10:30:00Z' };
       },
     });
     assert.equal(capturedReviewerUser, null, 'without the store the default reader yields no reviewer');

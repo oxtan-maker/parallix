@@ -37,7 +37,7 @@ export async function isolatedForgejo(root: string) {
         ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(10_000),
       });
       if (!response.ok) { throw new Error(`Isolated Forgejo ${method} ${route}: ${response.status} ${await response.text()}`); }
-      return response.status === 204 ? null : await response.json() as any;
+      return response.status === 204 ? null : await response.json();
     }
     const tokens = path.join(root, 'tokens');
     fs.mkdirSync(tokens, { recursive: true });

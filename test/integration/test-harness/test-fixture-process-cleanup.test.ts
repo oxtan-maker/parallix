@@ -42,7 +42,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -72,11 +72,11 @@ function runChild(args: string[], env: NodeJS.ProcessEnv = {}): Promise<{ code: 
   // node --test refuses to run files inside an inherited test context
   // ("run() is being called recursively ... skipping running files"), so the
   // child gets a clean context: a real focused run, not a skipped one.
-  const childEnv = { ...process.env, ...env };
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, ...env };
   for (const key of Object.keys(childEnv)) {
     if (key.startsWith('NODE_TEST_')) { delete childEnv[key]; }
   }
-  const child: ChildProcess = spawn(process.execPath, args, {
+  const child = spawn(process.execPath, args, {
     cwd: REPO_ROOT,
     env: childEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -134,7 +134,7 @@ async function waitFor(condition: () => boolean, what: string, timeoutMs = 30_00
     if (condition()) { return; }
     await new Promise(resolve => setTimeout(resolve, 25));
   }
-  assert.fail(`timed out waiting for ${what}`);
+  return assert.fail(`timed out waiting for ${what}`);
 }
 
 test('measurement store fixture leaves no px-measure-* root after teardown', async () => {
@@ -198,7 +198,7 @@ test('a focused run of the task-2521.04 family leaves no task-2521.04-* dirs', a
 test('an interrupted child running the task-2339 drain scenario leaves no orphaned fixture dirs', async () => {
   const manifestDir = mkdtemp('task-2577-manifest-');
   const privateTmp = mkdtemp('task-2577-private-');
-  const childEnv = { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDir, TMPDIR: privateTmp };
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDir, TMPDIR: privateTmp };
   for (const key of Object.keys(childEnv)) {
     if (key.startsWith('NODE_TEST_')) { delete childEnv[key]; }
   }
@@ -222,6 +222,7 @@ test('an interrupted child running the task-2339 drain scenario leaves no orphan
       () => manifestRoots(manifestDir).some(root => path.basename(root).startsWith('task-2339-drain-')),
       'task-2339-drain- fixture root in the worker manifest',
     );
+    assert.ok(child.pid);
     process.kill(-child.pid, 'SIGKILL');
     await new Promise<void>(resolve => {
       const timer = setTimeout(() => resolve(), 10_000);

@@ -1,4 +1,4 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import type { ApiRequestOptions } from "../../../src/adapters/review/setup-review-types.js";
 
 
 
@@ -12,7 +12,7 @@ import childProcess from 'child_process';
 import { mock } from 'node:test';
 import { importFresh } from '../../lib/module-mock.js';
 import { promptLine, bootstrapReviewSurface, buildWorkflowConfig, collectSetupAnswers, collectWizardAnswers, createToken, defaultProductName, defaultRepoSlug, ensureForgejoUser, ensureRepo, ensureReviewRemote, evaluateReviewSetup, parseRepoSlug, parseYesNo, readConfiguredReviewRemote, runVerifyEnv, setupReview, setupWizard, writeWorkflowConfig, } from '../../../src/adapters/review/setup-review.js';
-async function withTempDir(fn) {
+async function withTempDir(fn: (_arg0: string) => void | Promise<void>) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-setup-review-'));
   try {
     await fn(dir);
@@ -24,7 +24,8 @@ async function withTempDir(fn) {
 // ESM-native replacement for the former `delete require.cache[...]` reload:
 // mock `child_process.spawnSync` on the shared builtin object, then re-evaluate
 // the module past the ESM cache so its load-time destructure picks up the mock.
-async function loadSetupReviewWithSpawn(spawnImpl) {
+type SetupSpawnFixture = (command: string, args: readonly string[], options?: childProcess.SpawnSyncOptions) => { status: number | null; stdout: string; stderr?: string; error?: Error };
+async function loadSetupReviewWithSpawn(spawnImpl: SetupSpawnFixture) {
   const mocked = mock.method(childProcess, 'spawnSync', spawnImpl);
   try {
     return await importFresh<typeof import('../../../src/adapters/review/setup-review.js')>(
@@ -34,7 +35,7 @@ async function loadSetupReviewWithSpawn(spawnImpl) {
   }
 }
 
-async function loadSetupReviewAuthWithSpawn(spawnImpl) {
+async function loadSetupReviewAuthWithSpawn(spawnImpl: SetupSpawnFixture) {
   const mocked = mock.method(childProcess, 'spawnSync', spawnImpl);
   try {
     return await importFresh<typeof import('../../../src/adapters/review/setup-review-auth.js')>(
@@ -44,7 +45,7 @@ async function loadSetupReviewAuthWithSpawn(spawnImpl) {
   }
 }
 
-function writeConfig(root, review = {}) {
+function writeConfig(root: string, review = {}) {
   fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
     product: { name: 'Standalone' },
     adapters: {
@@ -77,7 +78,7 @@ test('parseYesNo and default helpers provide setup wizard defaults', () => {
 });
 
 test('evaluateReviewSetup reports missing tokens and review remote', () => {
-  return withTempDir(root => {
+  return withTempDir((root) => {
     writeConfig(root);
     const result = evaluateReviewSetup(root, {
       users: ['codex', 'claude'],
@@ -95,7 +96,7 @@ test('evaluateReviewSetup reports missing tokens and review remote', () => {
 });
 
 test('evaluateReviewSetup reports not-required without configured review settings and passes when setup is complete', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     let result = evaluateReviewSetup(root, {
       users: ['codex'],
       tokenPathFn: user => path.join(root, '.forgejo-local', 'tokens', user),
@@ -113,14 +114,14 @@ test('evaluateReviewSetup reports not-required without configured review setting
       tokenPathFn: user => path.join(root, '.forgejo-local', 'tokens', user),
       getRemoteUrlFn: () => 'http://localhost:3300/test-org/test-repo.git',
       remoteUrlFn: () => 'http://localhost:3300/test-org/test-repo.git',
-      requestFn: () => ({ ok: true, statusCode: 200, data: { id: 1 } }),
+      requestFn: () => ({ error: null,  ok: true as const, statusCode: 200, data: { id: 1 } }),
     });
     assert.deepEqual(result, { required: true, ok: true, issues: [], steps: [] });
   });
 });
 
 test('evaluateReviewSetup reports invalid Forgejo tokens', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     writeConfig(root);
     fs.mkdirSync(path.join(root, '.forgejo-local', 'tokens'), { recursive: true });
     fs.writeFileSync(path.join(root, '.forgejo-local', 'tokens', 'codex'), 'token\n');
@@ -130,7 +131,7 @@ test('evaluateReviewSetup reports invalid Forgejo tokens', async () => {
       tokenPathFn: user => path.join(root, '.forgejo-local', 'tokens', user),
       getRemoteUrlFn: () => 'http://localhost:3300/test-org/test-repo.git',
       remoteUrlFn: () => 'http://localhost:3300/test-org/test-repo.git',
-      requestFn: () => ({ ok: false, statusCode: 401, data: { message: 'denied' } }),
+      requestFn: () => ({ error: null,  ok: false as const, statusCode: 401, data: { message: 'denied' } }),
     });
 
     assert.equal(result.required, true);
@@ -141,31 +142,31 @@ test('evaluateReviewSetup reports invalid Forgejo tokens', async () => {
 });
 
 test('bootstrapReviewSurface writes token files and configures the review remote', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     writeConfig(root);
     const forgejoHome = path.join(root, '.forgejo-local');
     spawnSync('git', ['init', '-b', 'main'], { cwd: root, encoding: 'utf8' });
 
-    const requests = [];
-    const requestFn = (method, url, requestOptions = {}) => {
-      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
+    const requests: { method: string; url: string; requestOptions: ApiRequestOptions; }[] = [];
+    const requestFn: NonNullable<NonNullable<Parameters<typeof bootstrapReviewSurface>[2]>["requestFn"]> = (method, url, requestOptions = {}) => {
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { error: null,  ok: true as const, statusCode: 200, data: {} };
       requests.push({ method, url, requestOptions });
       if (method === 'POST' && url.endsWith('/api/v1/users/magnus/tokens')) {
-        return { ok: true, statusCode: 201, data: { sha1: 'owner-token' } };
+        return { error: null,  ok: true as const, statusCode: 201, data: { sha1: 'owner-token' } };
       }
       if (method === 'GET' && url.endsWith('/api/v1/repos/test-org/test-repo')) {
-        return { ok: false, statusCode: 404, data: {} };
+        return { error: null,  ok: false as const, statusCode: 404, data: {} };
       }
       if (method === 'POST' && url.endsWith('/api/v1/orgs/test-org/repos')) {
-        return { ok: true, statusCode: 201, data: { full_name: 'test-org/test-repo' } };
+        return { error: null,  ok: true as const, statusCode: 201, data: { full_name: 'test-org/test-repo' } };
       }
       if (method === 'PUT' && url.endsWith('/api/v1/repos/test-org/test-repo/collaborators/codex')) {
-        return { ok: true, statusCode: 204, data: {} };
+        return { error: null,  ok: true as const, statusCode: 204, data: {} };
       }
       if (method === 'POST' && url.endsWith('/api/v1/users/codex/tokens')) {
-        return { ok: true, statusCode: 201, data: { sha1: 'codex-token' } };
+        return { error: null,  ok: true as const, statusCode: 201, data: { sha1: 'codex-token' } };
       }
-      return { ok: false, statusCode: 500, data: { error: 'unexpected request' } };
+      return { error: null,  ok: false as const, statusCode: 500, data: { error: 'unexpected request' } };
     };
 
     const result = await bootstrapReviewSurface(root, {
@@ -187,6 +188,8 @@ test('bootstrapReviewSurface writes token files and configures the review remote
     assert.equal(fs.statSync(path.join(forgejoHome, 'tokens', 'magnus')).mode & 0o777, 0o600);
     assert.equal(fs.statSync(path.join(forgejoHome, 'tokens', 'codex')).mode & 0o777, 0o600);
     const ownerTokenRequest = requests.find(entry => entry.method === 'POST' && entry.url.endsWith('/api/v1/users/magnus/tokens'));
+    assert.ok(ownerTokenRequest != null);
+    assert.ok(ownerTokenRequest.requestOptions.body && typeof ownerTokenRequest.requestOptions.body === 'object' && 'scopes' in ownerTokenRequest.requestOptions.body);
     assert.deepEqual(ownerTokenRequest.requestOptions.body.scopes, ['write:user', 'write:repository', 'write:issue', 'write:organization', 'write:admin']);
     assert.ok(requests.some(entry => entry.method === 'PUT' && entry.url.endsWith('/api/v1/repos/test-org/test-repo/collaborators/codex')));
 
@@ -198,16 +201,16 @@ test('bootstrapReviewSurface writes token files and configures the review remote
 });
 
 test('bootstrapReviewSurface grants the parallix login admin so it can dismiss stale approvals (TASK-2620)', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     writeConfig(root);
     spawnSync('git', ['init', '-b', 'main'], { cwd: root, encoding: 'utf8' });
-    const grants = [];
-    const requestFn = (method, url, requestOptions = {}) => {
-      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
-      if (method === 'POST' && url.endsWith('/api/v1/users/magnus/tokens')) { return { ok: true, statusCode: 201, data: { sha1: 'owner-token' } }; }
-      if (method === 'GET' && url.endsWith('/api/v1/repos/test-org/test-repo')) { return { ok: true, statusCode: 200, data: {} }; }
-      if (method === 'PUT' && url.includes('/collaborators/')) { grants.push({ user: url.split('/').pop(), permission: requestOptions.body.permission }); return { ok: true, statusCode: 204, data: {} }; }
-      return { ok: false, statusCode: 500, data: { error: 'unexpected request' } };
+    const grants: { user: string | undefined; permission: unknown }[] = [];
+    const requestFn: NonNullable<NonNullable<Parameters<typeof bootstrapReviewSurface>[2]>["requestFn"]> = (method, url, requestOptions = {}) => {
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { error: null,  ok: true as const, statusCode: 200, data: {} };
+      if (method === 'POST' && url.endsWith('/api/v1/users/magnus/tokens')) { return { error: null,  ok: true as const, statusCode: 201, data: { sha1: 'owner-token' } }; }
+      if (method === 'GET' && url.endsWith('/api/v1/repos/test-org/test-repo')) { return { error: null,  ok: true as const, statusCode: 200, data: {} }; }
+      if (method === 'PUT' && url.includes('/collaborators/')) { assert.ok(requestOptions.body && typeof requestOptions.body === 'object' && 'permission' in requestOptions.body); grants.push({ user: url.split('/').pop(), permission: requestOptions.body.permission }); return { error: null,  ok: true as const, statusCode: 204, data: {} }; }
+      return { error: null,  ok: false as const, statusCode: 500, data: { error: 'unexpected request' } };
     };
     const result = await bootstrapReviewSurface(root, {
       baseUrl: 'http://localhost:3300/', repo: 'test-org/test-repo', ownerLogin: 'magnus', ownerPassword: 'secret',
@@ -219,36 +222,36 @@ test('bootstrapReviewSurface grants the parallix login admin so it can dismiss s
 });
 
 test('bootstrapReviewSurface creates a missing Forgejo agent user before minting its token', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     writeConfig(root);
     const forgejoHome = path.join(root, '.forgejo-local');
     spawnSync('git', ['init', '-b', 'main'], { cwd: root, encoding: 'utf8' });
 
-    const requests = [];
-    const requestFn = (method, url, requestOptions = {}) => {
+    const requests: { method: string; url: string; requestOptions: ApiRequestOptions; }[] = [];
+    const requestFn: NonNullable<NonNullable<Parameters<typeof bootstrapReviewSurface>[2]>["requestFn"]> = (method, url, requestOptions = {}) => {
       requests.push({ method, url, requestOptions });
       if (method === 'POST' && url.endsWith('/api/v1/users/magnus/tokens')) {
-        return { ok: true, statusCode: 201, data: { sha1: 'owner-token' } };
+        return { error: null,  ok: true as const, statusCode: 201, data: { sha1: 'owner-token' } };
       }
       if (method === 'GET' && url.endsWith('/api/v1/repos/test-org/test-repo')) {
-        return { ok: true, statusCode: 200, data: {} };
+        return { error: null,  ok: true as const, statusCode: 200, data: {} };
       }
       if (method === 'PUT' && url.endsWith('/api/v1/repos/test-org/test-repo/collaborators/vibe')) {
-        return { ok: true, statusCode: 204, data: {} };
+        return { error: null,  ok: true as const, statusCode: 204, data: {} };
       }
       if (method === 'GET' && url.endsWith('/api/v1/users/vibe')) {
-        return { ok: false, statusCode: 404, data: {} };
+        return { error: null,  ok: false as const, statusCode: 404, data: {} };
       }
       if (method === 'POST' && url.endsWith('/api/v1/admin/users')) {
-        return { ok: true, statusCode: 201, data: {} };
+        return { error: null,  ok: true as const, statusCode: 201, data: {} };
       }
       if (method === 'POST' && url.endsWith('/api/v1/users/vibe/tokens')) {
-        return { ok: true, statusCode: 201, data: { sha1: 'vibe-token' } };
+        return { error: null,  ok: true as const, statusCode: 201, data: { sha1: 'vibe-token' } };
       }
-      return { ok: false, statusCode: 500, data: { error: 'unexpected request' } };
+      return { error: null,  ok: false as const, statusCode: 500, data: { error: 'unexpected request' } };
     };
 
-    const logs = [];
+    const logs: string[] = [];
     const result = await bootstrapReviewSurface(root, {
       baseUrl: 'http://localhost:3300/',
       repo: 'test-org/test-repo',
@@ -264,6 +267,7 @@ test('bootstrapReviewSurface creates a missing Forgejo agent user before minting
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(fs.readFileSync(path.join(forgejoHome, 'tokens', 'vibe'), 'utf8').trim(), 'vibe-token');
     const createUserRequest = requests.find(entry => entry.method === 'POST' && entry.url.endsWith('/api/v1/admin/users'));
+    assert.ok(createUserRequest != null);
     assert.deepEqual(createUserRequest.requestOptions.basicAuth, { user: 'magnus', password: 'secret' });
     assert.deepEqual(createUserRequest.requestOptions.body, {
       username: 'vibe',
@@ -276,87 +280,92 @@ test('bootstrapReviewSurface creates a missing Forgejo agent user before minting
 });
 
 test('createToken reports API failures and missing token payloads', () => {
-  let seenBody = null;
+  let seenBody: { value: unknown } = { value: null };
   let result = createToken('http://localhost:3300/', 'codex', 'pw', 'workflow-codex', (_method, _url, requestOptions = {}) => {
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `body` absent from its inferred mock shape.
-    seenBody = requestOptions.body;
-    return {
-      ok: false,
+    seenBody.value = requestOptions.body;
+    return { error: null,
+      ok: false as const,
       statusCode: 401,
       data: { message: 'denied' },
     };
   });
-  assert.deepEqual(seenBody.scopes, ['write:user', 'write:repository', 'write:issue', 'write:organization']);
+  assert.ok(seenBody.value && typeof seenBody.value === 'object' && 'scopes' in seenBody.value);
+  assert.deepEqual(seenBody.value.scopes, ['write:user', 'write:repository', 'write:issue', 'write:organization']);
   assert.equal(result.ok, false);
+  assert.ok('error' in result && typeof result.error === 'string');
   assert.match(result.error, /HTTP 401/);
 
-  result = createToken('http://localhost:3300/', 'magnus', 'pw', 'workflow-magnus', () => ({
-    ok: true,
+  result = createToken('http://localhost:3300/', 'magnus', 'pw', 'workflow-magnus', () => ({ error: null,
+    ok: true as const,
     statusCode: 201,
     data: { sha1: 'owner-token' },
   }), ['write:user', 'write:repository']);
   assert.equal(result.ok, true);
 
-  result = createToken('http://localhost:3300/', 'codex', 'pw', 'workflow-codex', () => ({
-    ok: true,
+  result = createToken('http://localhost:3300/', 'codex', 'pw', 'workflow-codex', () => ({ error: null,
+    ok: true as const,
     statusCode: 201,
     data: {},
   }));
   assert.equal(result.ok, false);
+  assert.ok('error' in result && typeof result.error === 'string');
   assert.match(result.error, /did not return a token/);
 });
 
 test('ensureRepo handles invalid slugs, existing repos, user repos, and creation failures', () => {
-  let result = ensureRepo('http://localhost:3300', 'broken', 'magnus', 'token', () => ({ ok: true }));
+  let result = ensureRepo('http://localhost:3300', 'broken', 'magnus', 'token', () => ({ error: null, data: null, statusCode: null,  ok: true as const }));
   assert.equal(result.ok, false);
+  assert.ok('error' in result && typeof result.error === 'string');
   assert.match(result.error, /invalid review repo slug/);
 
   result = ensureRepo('http://localhost:3300', 'magnus/demo', 'magnus', 'token', (method, url) => {
     if (method === 'GET' && url.endsWith('/api/v1/repos/magnus/demo')) {
-      return { ok: true, statusCode: 200, data: {} };
+      return { error: null,  ok: true as const, statusCode: 200, data: {} };
     }
-    return { ok: false, statusCode: 500, data: {} };
+    return { error: null,  ok: false as const, statusCode: 500, data: {} };
   });
   assert.deepEqual(result, { ok: true, created: false });
 
-  const seen = [];
+  const seen: { method: string; url: string; requestOptions: ApiRequestOptions; }[] = [];
   result = ensureRepo('http://localhost:3300', 'magnus/demo', 'magnus', 'token', (method, url, requestOptions = {}) => {
     seen.push({ method, url, requestOptions });
     if (method === 'GET') {
-      return { ok: false, statusCode: 404, data: {} };
+      return { error: null,  ok: false as const, statusCode: 404, data: {} };
     }
-    return { ok: true, statusCode: 201, data: {} };
+    return { error: null,  ok: true as const, statusCode: 201, data: {} };
   });
   assert.equal(result.ok, true);
   assert.ok(seen.some(entry => entry.url.endsWith('/api/v1/user/repos')));
 
   result = ensureRepo('http://localhost:3300', 'test-org/demo', 'magnus', 'token', (method, url) => {
     if (method === 'GET') {
-      return { ok: false, statusCode: 500, data: { message: 'boom' } };
+      return { error: null,  ok: false as const, statusCode: 500, data: { message: 'boom' } };
     }
-    return { ok: false, statusCode: 500, data: {} };
+    return { error: null,  ok: false as const, statusCode: 500, data: {} };
   });
   assert.equal(result.ok, false);
+  assert.ok('error' in result && typeof result.error === 'string');
   assert.match(result.error, /failed to check review repo/);
 
   result = ensureRepo('http://localhost:3300', 'test-org/demo', 'magnus', 'token', (method, url) => {
     if (method === 'GET') {
-      return { ok: false, statusCode: 404, data: {} };
+      return { error: null,  ok: false as const, statusCode: 404, data: {} };
     }
-    return { ok: false, statusCode: 403, data: { message: 'nope' } };
+    return { error: null,  ok: false as const, statusCode: 403, data: { message: 'nope' } };
   });
   assert.equal(result.ok, false);
+  assert.ok('error' in result && typeof result.error === 'string');
   assert.match(result.error, /failed to create review repo/);
 });
 
 test('ensureForgejoUser skips existing users, creates missing ones via basic auth, and reports scope failures', () => {
-  let seen = [];
+  let seen: { method: string; url: string; requestOptions: ApiRequestOptions; }[] = [];
   let result = ensureForgejoUser('http://localhost:3300', 'vibe', 'magnus', 'owner-pw', 'vibe-pw', (method, url, requestOptions = {}) => {
     seen.push({ method, url, requestOptions });
     if (method === 'GET' && url.endsWith('/api/v1/users/vibe')) {
-      return { ok: true, statusCode: 200, data: {} };
+      return { error: null,  ok: true as const, statusCode: 200, data: {} };
     }
-    return { ok: false, statusCode: 500, data: {} };
+    return { error: null,  ok: false as const, statusCode: 500, data: {} };
   });
   assert.deepEqual(result, { ok: true, created: false });
   assert.equal(seen.length, 1);
@@ -366,15 +375,16 @@ test('ensureForgejoUser skips existing users, creates missing ones via basic aut
   result = ensureForgejoUser('http://localhost:3300', 'vibe', 'magnus', 'owner-pw', 'vibe-pw', (method, url, requestOptions = {}) => {
     seen.push({ method, url, requestOptions });
     if (method === 'GET' && url.endsWith('/api/v1/users/vibe')) {
-      return { ok: false, statusCode: 404, data: {} };
+      return { error: null,  ok: false as const, statusCode: 404, data: {} };
     }
     if (method === 'POST' && url.endsWith('/api/v1/admin/users')) {
-      return { ok: true, statusCode: 201, data: {} };
+      return { error: null,  ok: true as const, statusCode: 201, data: {} };
     }
-    return { ok: false, statusCode: 500, data: {} };
+    return { error: null,  ok: false as const, statusCode: 500, data: {} };
   });
   assert.deepEqual(result, { ok: true, created: true });
   const createRequest = seen.find(entry => entry.method === 'POST');
+  assert.ok(createRequest != null);
   assert.deepEqual(createRequest.requestOptions.basicAuth, { user: 'magnus', password: 'owner-pw' });
   assert.deepEqual(createRequest.requestOptions.body, {
     username: 'vibe',
@@ -385,33 +395,38 @@ test('ensureForgejoUser skips existing users, creates missing ones via basic aut
 
   result = ensureForgejoUser('http://localhost:3300', 'vibe', 'human', 'owner-pw', 'vibe-pw', (method) => {
     if (method === 'GET') {
-      return { ok: false, statusCode: 404, data: {} };
+      return { error: null,  ok: false as const, statusCode: 404, data: {} };
     }
-    return { ok: false, statusCode: 403, data: { message: 'nope' } };
+    return { error: null,  ok: false as const, statusCode: 403, data: { message: 'nope' } };
   });
   assert.equal(result.ok, false);
+  assert.ok('error' in result && typeof result.error === 'string');
   assert.match(result.error, /failed to create Forgejo user vibe/);
+  assert.ok('error' in result && typeof result.error === 'string');
   assert.match(result.error, /may not be a Forgejo site admin/);
 
-  result = ensureForgejoUser('http://localhost:3300', 'vibe', 'magnus', 'owner-pw', 'vibe-pw', () => ({
-    ok: false, statusCode: 500, data: {},
+  result = ensureForgejoUser('http://localhost:3300', 'vibe', 'magnus', 'owner-pw', 'vibe-pw', () => ({ error: null,
+    ok: false as const, statusCode: 500, data: {},
   }));
   assert.equal(result.ok, false);
+  assert.ok('error' in result && typeof result.error === 'string');
   assert.match(result.error, /failed to check Forgejo user vibe \(HTTP 500\)/);
 });
 
 test('collectSetupAnswers uses defaults and skips blank agent passwords', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     writeConfig(root);
-    const prompts = [];
+    const prompts: { prompt: string; promptOptions: { hidden?: boolean; }; }[] = [];
     const answers = ['', 'owner-password', '', 'agent-password', ''];
     const result = await collectSetupAnswers(root, {
       users: ['codex', 'claude'],
-      resolveForgejoSettingsFn: () => ({ url: 'http://localhost:3300', repo: 'test-org/test-repo' }),
+      resolveForgejoSettingsFn: () => ({ url: 'http://localhost:3300', repo: 'test-org/test-repo', remote: 'review' }),
       log: () => {},
       promptFn: async (prompt, promptOptions = {}) => {
         prompts.push({ prompt, promptOptions });
-        return answers.shift();
+        const answer = answers.shift();
+        assert.ok(answer !== undefined, 'unexpected wizard prompt');
+        return answer;
       },
     });
 
@@ -426,9 +441,9 @@ test('collectSetupAnswers uses defaults and skips blank agent passwords', async 
 });
 
 test('collectWizardAnswers uses default layout answers and bootstrap defaults', async () => {
-  await withTempDir(async root => {
-    const prompts = [];
-    const logs = [];
+  await withTempDir(async (root) => {
+    const prompts: { prompt: string; promptOptions: { hidden?: boolean; }; }[] = [];
+    const logs: string[] = [];
     const answers = ['', '', '', '', '', '', '', 'owner-password', '', 'agent-password', ''];
     const result = await collectWizardAnswers(root, {
       users: ['codex', 'claude'],
@@ -456,7 +471,7 @@ test('collectWizardAnswers uses default layout answers and bootstrap defaults', 
 });
 
 test('collectWizardAnswers repairs a stale configured master default when the repo primary branch is main', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     writeConfig(root);
     const answers = ['Demo', 'n', '', '', '', '', '', '', '', '', '', '', '', '', 'n'];
     const result = await collectWizardAnswers(root, {
@@ -470,7 +485,7 @@ test('collectWizardAnswers repairs a stale configured master default when the re
 });
 
 test('collectWizardAnswers supports custom layout and skipping bootstrap', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     writeConfig(root, { repo: 'acme/demo', remote: 'review-remote' });
     const answers = [
       'Acme Workflow',
@@ -512,7 +527,7 @@ test('collectWizardAnswers supports custom layout and skipping bootstrap', async
 });
 
 test('buildWorkflowConfig and writeWorkflowConfig create a usable workflow.config.json', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     const config = buildWorkflowConfig({
       productName: 'Demo',
       tasksProvider: 'backlog-md',
@@ -557,7 +572,7 @@ test('buildWorkflowConfig preserves explicit nonstandard primary branches', () =
 });
 
 test('ensureReviewRemote adds and updates git remotes and readConfiguredReviewRemote reads them', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     spawnSync('git', ['init', '-b', 'main'], { cwd: root, encoding: 'utf8' });
 
     let result = ensureReviewRemote(root, 'review', 'http://localhost:3300/test-org/test-repo.git');
@@ -575,7 +590,6 @@ test('ensureReviewRemote adds and updates git remotes and readConfiguredReviewRe
 test('apiRequest handles success, plain-text payloads, and curl failures', async () => {
   const setupReviewModule = await loadSetupReviewAuthWithSpawn((_command, args, options = {}) => {
     if (args.includes('http://localhost:3300/success')) {
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `equal` absent from its inferred mock shape.
       assert.equal(options.input, JSON.stringify({ hello: 'world' }));
       return { status: 0, stdout: '{"ok":true}\n201' };
     }
@@ -599,27 +613,30 @@ test('apiRequest handles success, plain-text payloads, and curl failures', async
 
   result = setupReviewModule.apiRequest('GET', 'http://localhost:3300/fail');
   assert.equal(result.ok, false);
+  assert.ok('error' in result && typeof result.error === 'string');
   assert.match(result.error, /connection refused/);
 });
 
 test('promptLine supports visible and hidden prompts', async () => {
-  const writes = [];
+  const writes: string[] = [];
   const output = {
     write(chunk, _encoding, cb) {
-      writes.push(chunk);
+      writes.push(String(chunk));
       if (typeof cb === 'function') cb();
       return true;
     },
-  };
+  } satisfies { write(chunk: string | Buffer, encoding?: BufferEncoding | (() => void), callback?: () => void): boolean; };
 
   const answers = [' visible ', ' secret '];
-  const createInterface = ({ output: rlOutput }) => ({
+  const createInterface: NonNullable<NonNullable<Parameters<typeof promptLine>[1]>["createInterface"]> = ({ output: rlOutput }) => ({
     stdoutMuted: false,
     question(_prompt, callback) {
       if (rlOutput) {
         rlOutput.write('typed');
       }
-      callback(answers.shift());
+      const answer = answers.shift();
+      assert.ok(answer !== undefined, 'unexpected prompt');
+      callback(answer);
     },
     close() {},
   });
@@ -634,13 +651,13 @@ test('promptLine supports visible and hidden prompts', async () => {
 });
 
 test('bootstrapReviewSurface reprompts on Forgejo auth failure and succeeds on retry', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     writeConfig(root);
     const forgejoHome = path.join(root, '.forgejo-local');
     spawnSync('git', ['init', '-b', 'main'], { cwd: root, encoding: 'utf8' });
 
-    const prompts = [];
-    const logs = [];
+    const prompts: { prompt: string; promptOptions: { hidden?: boolean; }; }[] = [];
+    const logs: string[] = [];
     let ownerAttempts = 0;
     let agentAttempts = 0;
     const result = await bootstrapReviewSurface(root, {
@@ -659,28 +676,28 @@ test('bootstrapReviewSurface reprompts on Forgejo auth failure and succeeds on r
         return '';
       },
       requestFn(method, url, requestOptions = {}) {
-      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { error: null,  ok: true as const, statusCode: 200, data: {} };
         if (method === 'POST' && url.endsWith('/api/v1/users/magnus/tokens')) {
           ownerAttempts += 1;
           if (ownerAttempts === 1) {
-            return { ok: false, statusCode: 401, data: { message: 'denied' } };
+            return { error: null,  ok: false as const, statusCode: 401, data: { message: 'denied' } };
           }
-          return { ok: true, statusCode: 201, data: { sha1: 'owner-token' } };
+          return { error: null,  ok: true as const, statusCode: 201, data: { sha1: 'owner-token' } };
         }
         if (method === 'GET' && url.endsWith('/api/v1/repos/test-org/test-repo')) {
-          return { ok: true, statusCode: 200, data: {} };
+          return { error: null,  ok: true as const, statusCode: 200, data: {} };
         }
         if (method === 'PUT' && url.endsWith('/api/v1/repos/test-org/test-repo/collaborators/codex')) {
-          return { ok: true, statusCode: 204, data: {} };
+          return { error: null,  ok: true as const, statusCode: 204, data: {} };
         }
         if (method === 'POST' && url.endsWith('/api/v1/users/codex/tokens')) {
           agentAttempts += 1;
           if (agentAttempts === 1) {
-            return { ok: false, statusCode: 403, data: { message: 'denied' } };
+            return { error: null,  ok: false as const, statusCode: 403, data: { message: 'denied' } };
           }
-          return { ok: true, statusCode: 201, data: { sha1: 'codex-token' } };
+          return { error: null,  ok: true as const, statusCode: 201, data: { sha1: 'codex-token' } };
         }
-        return { ok: false, statusCode: 500, data: { message: 'unexpected request' } };
+        return { error: null,  ok: false as const, statusCode: 500, data: { message: 'unexpected request' } };
       },
     });
 
@@ -696,29 +713,29 @@ test('bootstrapReviewSurface reprompts on Forgejo auth failure and succeeds on r
 });
 
 test('bootstrapReviewSurface uses unique token names across reruns', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     writeConfig(root);
     const forgejoHome = path.join(root, '.forgejo-local');
     spawnSync('git', ['init', '-b', 'main'], { cwd: root, encoding: 'utf8' });
 
     const seenTokenNames = new Set();
-    const requestFn = (method, url, requestOptions = {}) => {
-      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
+    const requestFn: NonNullable<NonNullable<Parameters<typeof bootstrapReviewSurface>[2]>["requestFn"]> = (method, url, requestOptions = {}) => {
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { error: null,  ok: true as const, statusCode: 200, data: {} };
       if (method === 'POST' && url.includes('/tokens')) {
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `body` absent from its inferred mock shape.
-        const tokenName = requestOptions.body && requestOptions.body.name;
+        assert.ok(requestOptions.body && typeof requestOptions.body === 'object' && 'name' in requestOptions.body);
+        const tokenName = requestOptions.body.name;
         assert.ok(tokenName);
         assert.equal(seenTokenNames.has(tokenName), false);
         seenTokenNames.add(tokenName);
-        return { ok: true, statusCode: 201, data: { sha1: `${tokenName}-sha1` } };
+        return { error: null,  ok: true as const, statusCode: 201, data: { sha1: `${tokenName}-sha1` } };
       }
       if (method === 'GET' && url.endsWith('/api/v1/repos/test-org/test-repo')) {
-        return { ok: true, statusCode: 200, data: {} };
+        return { error: null,  ok: true as const, statusCode: 200, data: {} };
       }
       if (method === 'PUT' && url.includes('/api/v1/repos/test-org/test-repo/collaborators/')) {
-        return { ok: true, statusCode: 204, data: {} };
+        return { error: null,  ok: true as const, statusCode: 204, data: {} };
       }
-      return { ok: false, statusCode: 500, data: { message: 'unexpected request' } };
+      return { error: null,  ok: false as const, statusCode: 500, data: { message: 'unexpected request' } };
     };
 
     let result = await bootstrapReviewSurface(root, {
@@ -751,7 +768,7 @@ test('bootstrapReviewSurface uses unique token names across reruns', async () =>
 });
 
 test('bootstrapReviewSurface reports local validation and downstream setup failures', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     writeConfig(root);
     const forgejoHome = path.join(root, '.forgejo-local');
     spawnSync('git', ['init', '-b', 'main'], { cwd: root, encoding: 'utf8' });
@@ -764,7 +781,8 @@ test('bootstrapReviewSurface reports local validation and downstream setup failu
       agentPasswords: [],
     }, { log: () => {}, forgejoHome });
     assert.equal(result.ok, false);
-    assert.match(result.error, /must define adapters.review.baseUrl/);
+    assert.ok('error' in result && typeof result.error === 'string');
+  assert.match(result.error, /must define adapters.review.baseUrl/);
 
     result = await bootstrapReviewSurface(root, {
       baseUrl: 'http://localhost:3300',
@@ -774,7 +792,8 @@ test('bootstrapReviewSurface reports local validation and downstream setup failu
       agentPasswords: [],
     }, { log: () => {}, forgejoHome });
     assert.equal(result.ok, false);
-    assert.match(result.error, /Password is required/);
+    assert.ok('error' in result && typeof result.error === 'string');
+  assert.match(result.error, /Password is required/);
 
     result = await bootstrapReviewSurface(root, {
       baseUrl: 'http://localhost:3300',
@@ -785,10 +804,11 @@ test('bootstrapReviewSurface reports local validation and downstream setup failu
     }, {
       log: () => {},
       forgejoHome,
-      requestFn: () => ({ ok: false, statusCode: 401, data: { message: 'denied' } }),
+      requestFn: () => ({ error: null,  ok: false as const, statusCode: 401, data: { message: 'denied' } }),
     });
     assert.equal(result.ok, false);
-    assert.match(result.error, /token creation failed/);
+    assert.ok('error' in result && typeof result.error === 'string');
+  assert.match(result.error, /token creation failed/);
 
     result = await bootstrapReviewSurface(root, {
       baseUrl: 'http://localhost:3300',
@@ -800,25 +820,26 @@ test('bootstrapReviewSurface reports local validation and downstream setup failu
       log: () => {},
       forgejoHome,
       requestFn(method, url) {
-      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { error: null,  ok: true as const, statusCode: 200, data: {} };
         if (method === 'POST' && url.endsWith('/api/v1/users/magnus/tokens')) {
-          return { ok: true, statusCode: 201, data: { sha1: 'owner-token' } };
+          return { error: null,  ok: true as const, statusCode: 201, data: { sha1: 'owner-token' } };
         }
         if (method === 'GET' && url.endsWith('/api/v1/repos/test-org/test-repo')) {
-          return { ok: true, statusCode: 200, data: {} };
+          return { error: null,  ok: true as const, statusCode: 200, data: {} };
         }
         if (method === 'PUT' && url.includes('/api/v1/repos/test-org/test-repo/collaborators/')) {
-          return { ok: true, statusCode: 204, data: {} };
+          return { error: null,  ok: true as const, statusCode: 204, data: {} };
         }
         if (method === 'POST' && url.endsWith('/api/v1/users/codex/tokens')) {
-          return { ok: false, statusCode: 403, data: { message: 'denied' } };
+          return { error: null,  ok: false as const, statusCode: 403, data: { message: 'denied' } };
         }
-        return { ok: false, statusCode: 500, data: {} };
+        return { error: null,  ok: false as const, statusCode: 500, data: {} };
       },
     });
     assert.equal(result.ok, true);
     assert.equal(fs.readFileSync(path.join(forgejoHome, 'tokens', 'magnus'), 'utf8').trim(), 'owner-token');
     assert.equal(fs.existsSync(path.join(forgejoHome, 'tokens', 'codex')), false);
+    assert.ok('warnings' in result);
     assert.equal(result.warnings.length, 1);
     assert.equal(result.warnings[0].user, 'codex');
     assert.match(result.warnings[0].error, /token creation failed for codex/);
@@ -826,7 +847,7 @@ test('bootstrapReviewSurface reports local validation and downstream setup failu
 });
 
 test('runVerifyEnv delegates to injectable verifier', async () => {
-  const calls = [];
+  const calls: string[] = [];
   const result = await runVerifyEnv('/tmp/demo', {
     verifyFn: (rootDir) => {
       calls.push(rootDir);
@@ -840,8 +861,8 @@ test('runVerifyEnv delegates to injectable verifier', async () => {
 test('setupReview surfaces bootstrap failures with Forgejo response details', async () => {
   await withTempDir(async root => {
     writeConfig(root);
-    const errors = [];
-    const exits = [];
+    const errors: string[] = [];
+    const exits: number[] = [];
     await setupReview([], {
       rootDir: root,
       log: () => {},
@@ -854,7 +875,7 @@ test('setupReview surfaces bootstrap failures with Forgejo response details', as
         if (prompt.includes('Password for codex')) return 'codex-password';
         return '';
       },
-      requestFn: () => ({ ok: false, statusCode: 401, data: { message: 'denied' } }),
+      requestFn: () => ({ error: null,  ok: false as const, statusCode: 401, data: { message: 'denied' } }),
     });
 
     assert.deepEqual(exits, [1]);
@@ -864,9 +885,9 @@ test('setupReview surfaces bootstrap failures with Forgejo response details', as
 });
 
 test('setupWizard writes config, bootstraps review, and verifies the install', async () => {
-  await withTempDir(async root => {
-    const logs = [];
-    const exits = [];
+  await withTempDir(async (root) => {
+    const logs: string[] = [];
+    const exits: number[] = [];
     spawnSync('git', ['init', '-b', 'main'], { cwd: root, encoding: 'utf8' });
     await setupWizard([], {
       rootDir: root,
@@ -887,13 +908,13 @@ test('setupWizard writes config, bootstraps review, and verifies the install', a
         return '';
       },
       requestFn(method, url) {
-      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
-        if (method === 'POST' && url.endsWith('/api/v1/users/magnus/tokens')) return { ok: true, statusCode: 201, data: { sha1: 'owner-token' } };
-        if (method === 'GET' && url.endsWith('/api/v1/repos/magnus/demo')) return { ok: false, statusCode: 404, data: {} };
-        if (method === 'POST' && url.endsWith('/api/v1/user/repos')) return { ok: true, statusCode: 201, data: {} };
-        if (method === 'PUT' && url.includes('/api/v1/repos/magnus/demo/collaborators/')) return { ok: true, statusCode: 204, data: {} };
-        if (method === 'POST' && url.endsWith('/api/v1/users/codex/tokens')) return { ok: true, statusCode: 201, data: { sha1: 'codex-token' } };
-        return { ok: false, statusCode: 500, data: {} };
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { error: null,  ok: true as const, statusCode: 200, data: {} };
+        if (method === 'POST' && url.endsWith('/api/v1/users/magnus/tokens')) return { error: null,  ok: true as const, statusCode: 201, data: { sha1: 'owner-token' } };
+        if (method === 'GET' && url.endsWith('/api/v1/repos/magnus/demo')) return { error: null,  ok: false as const, statusCode: 404, data: {} };
+        if (method === 'POST' && url.endsWith('/api/v1/user/repos')) return { error: null,  ok: true as const, statusCode: 201, data: {} };
+        if (method === 'PUT' && url.includes('/api/v1/repos/magnus/demo/collaborators/')) return { error: null,  ok: true as const, statusCode: 204, data: {} };
+        if (method === 'POST' && url.endsWith('/api/v1/users/codex/tokens')) return { error: null,  ok: true as const, statusCode: 201, data: { sha1: 'codex-token' } };
+        return { error: null,  ok: false as const, statusCode: 500, data: {} };
       },
       verifyFn: () => ({ status: 0 }),
     });
@@ -906,9 +927,9 @@ test('setupWizard writes config, bootstraps review, and verifies the install', a
 });
 
 test('setupWizard continues when optional agent token creation fails', async () => {
-  await withTempDir(async root => {
-    const logs = [];
-    const exits = [];
+  await withTempDir(async (root) => {
+    const logs: string[] = [];
+    const exits: number[] = [];
     spawnSync('git', ['init', '-b', 'main'], { cwd: root, encoding: 'utf8' });
     await setupWizard([], {
       rootDir: root,
@@ -929,23 +950,23 @@ test('setupWizard continues when optional agent token creation fails', async () 
         return '';
       },
       requestFn(method, url) {
-      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { error: null,  ok: true as const, statusCode: 200, data: {} };
         if (method === 'POST' && url.endsWith('/api/v1/users/magnus/tokens')) {
-          return { ok: true, statusCode: 201, data: { sha1: 'owner-token' } };
+          return { error: null,  ok: true as const, statusCode: 201, data: { sha1: 'owner-token' } };
         }
         if (method === 'GET' && url.endsWith('/api/v1/repos/magnus/demo')) {
-          return { ok: false, statusCode: 404, data: {} };
+          return { error: null,  ok: false as const, statusCode: 404, data: {} };
         }
         if (method === 'POST' && url.endsWith('/api/v1/user/repos')) {
-          return { ok: true, statusCode: 201, data: { full_name: 'magnus/demo' } };
+          return { error: null,  ok: true as const, statusCode: 201, data: { full_name: 'magnus/demo' } };
         }
         if (method === 'PUT' && url.includes('/api/v1/repos/magnus/demo/collaborators/')) {
-          return { ok: true, statusCode: 204, data: {} };
+          return { error: null,  ok: true as const, statusCode: 204, data: {} };
         }
         if (method === 'POST' && url.endsWith('/api/v1/users/codex/tokens')) {
-          return { ok: false, statusCode: 401, data: { message: 'invalid password' } };
+          return { error: null,  ok: false as const, statusCode: 401, data: { message: 'invalid password' } };
         }
-        return { ok: false, statusCode: 500, data: {} };
+        return { error: null,  ok: false as const, statusCode: 500, data: {} };
       },
       verifyFn: () => ({ status: 0 }),
     });
@@ -959,7 +980,7 @@ test('setupWizard continues when optional agent token creation fails', async () 
 });
 
 test('setupWizard writes Forgejo tokens under rootDir when cwd differs', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     const otherDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-setup-review-cwd-'));
     const previousCwd = process.cwd();
     try {
@@ -984,13 +1005,13 @@ test('setupWizard writes Forgejo tokens under rootDir when cwd differs', async (
           return '';
         },
         requestFn(method, url) {
-      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
-          if (method === 'POST' && url.endsWith('/api/v1/users/magnus/tokens')) return { ok: true, statusCode: 201, data: { sha1: 'owner-token' } };
-          if (method === 'GET' && url.endsWith('/api/v1/repos/magnus/demo')) return { ok: false, statusCode: 404, data: {} };
-          if (method === 'POST' && url.endsWith('/api/v1/user/repos')) return { ok: true, statusCode: 201, data: {} };
-          if (method === 'PUT' && url.includes('/api/v1/repos/magnus/demo/collaborators/')) return { ok: true, statusCode: 204, data: {} };
-          if (method === 'POST' && url.endsWith('/api/v1/users/codex/tokens')) return { ok: true, statusCode: 201, data: { sha1: 'codex-token' } };
-          return { ok: false, statusCode: 500, data: {} };
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { error: null,  ok: true as const, statusCode: 200, data: {} };
+          if (method === 'POST' && url.endsWith('/api/v1/users/magnus/tokens')) return { error: null,  ok: true as const, statusCode: 201, data: { sha1: 'owner-token' } };
+          if (method === 'GET' && url.endsWith('/api/v1/repos/magnus/demo')) return { error: null,  ok: false as const, statusCode: 404, data: {} };
+          if (method === 'POST' && url.endsWith('/api/v1/user/repos')) return { error: null,  ok: true as const, statusCode: 201, data: {} };
+          if (method === 'PUT' && url.includes('/api/v1/repos/magnus/demo/collaborators/')) return { error: null,  ok: true as const, statusCode: 204, data: {} };
+          if (method === 'POST' && url.endsWith('/api/v1/users/codex/tokens')) return { error: null,  ok: true as const, statusCode: 201, data: { sha1: 'codex-token' } };
+          return { error: null,  ok: false as const, statusCode: 500, data: {} };
         },
         verifyFn: () => ({ status: 0 }),
       });
@@ -1008,7 +1029,7 @@ test('setupWizard writes Forgejo tokens under rootDir when cwd differs', async (
 
 test('setupWizard exits when bootstrap or verify fails', async () => {
   await withTempDir(async root => {
-    const exits = [];
+    const exits: number[] = [];
     await setupWizard([], {
       rootDir: root,
       log: () => {},
@@ -1027,14 +1048,14 @@ test('setupWizard exits when bootstrap or verify fails', async () => {
         if (prompt.includes('Password for codex')) return '';
         return '';
       },
-      requestFn: () => ({ ok: false, statusCode: 500, data: {} }),
+      requestFn: () => ({ error: null,  ok: false as const, statusCode: 500, data: {} }),
       verifyFn: () => ({ status: 7 }),
     });
     assert.deepEqual(exits, [1]);
   });
 
   await withTempDir(async root => {
-    const exits = [];
+    const exits: number[] = [];
     await setupWizard([], {
       rootDir: root,
       log: () => {},
@@ -1057,13 +1078,13 @@ test('setupWizard exits when bootstrap or verify fails', async () => {
 });
 
 test('bootstrapReviewSurface non-interactive mode creates agent token via owner token', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     spawnSync('git', ['init', '-b', 'main'], { cwd: root, encoding: 'utf8' });
     writeConfig(root);
     const forgejoHome = path.join(root, '.forgejo-local');
     fs.mkdirSync(path.join(forgejoHome, 'tokens'), { recursive: true });
     fs.writeFileSync(path.join(forgejoHome, 'tokens', 'magnus'), 'owner-pat\n');
-    const logs = [];
+    const logs: string[] = [];
     let repoCreated = false;
 
     const previousForgejoHome = process.env.FORGEJO_HOME;
@@ -1078,25 +1099,23 @@ test('bootstrapReviewSurface non-interactive mode creates agent token via owner 
       }, {
         interactive: false,
         requestFn(method, url, requestOptions = {}) {
-      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
-          if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { error: null,  ok: true as const, statusCode: 200, data: {} };
+          if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { error: null,  ok: true as const, statusCode: 200, data: {} };
           if (method === 'GET' && url.endsWith('/api/v1/repos/test-org/test-repo')) {
-            return { ok: false, statusCode: 404, data: {} };
+            return { error: null,  ok: false as const, statusCode: 404, data: {} };
           }
           if (method === 'POST' && url.endsWith('/api/v1/orgs/test-org/repos')) {
             repoCreated = true;
-            return { ok: true, statusCode: 201, data: { full_name: 'test-org/test-repo' } };
+            return { error: null,  ok: true as const, statusCode: 201, data: { full_name: 'test-org/test-repo' } };
           }
           if (method === 'PUT' && url.endsWith('/api/v1/repos/test-org/test-repo/collaborators/custom')) {
-            return { ok: true, statusCode: 204, data: {} };
+            return { error: null,  ok: true as const, statusCode: 204, data: {} };
           }
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `endsWith` absent from its inferred mock shape.
           if (method === 'POST' && url.endsWith('/api/v1/users/custom/tokens') && requestOptions.token) {
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `equal` absent from its inferred mock shape.
             assert.equal(requestOptions.token, 'owner-pat');
-            return { ok: true, statusCode: 201, data: { sha1: 'custom-bootstrap-token' } };
+            return { error: null,  ok: true as const, statusCode: 201, data: { sha1: 'custom-bootstrap-token' } };
           }
-          return { ok: false, statusCode: 500, data: {} };
+          return { error: null,  ok: false as const, statusCode: 500, data: {} };
         },
         forgejoHome,
         log: message => logs.push(message),
@@ -1118,7 +1137,7 @@ test('bootstrapReviewSurface non-interactive mode creates agent token via owner 
 });
 
 test('bootstrapReviewSurface non-interactive returns error when no owner token exists', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     writeConfig(root);
     const forgejoHome = path.join(root, '.forgejo-local');
     fs.mkdirSync(path.join(forgejoHome, 'tokens'), { recursive: true });
@@ -1136,6 +1155,7 @@ test('bootstrapReviewSurface non-interactive returns error when no owner token e
       });
 
       assert.equal(result.ok, false);
+      assert.ok('error' in result && typeof result.error === 'string');
       assert.ok(result.error.includes('No owner token found'));
     } finally {
       if (previousForgejoHome) {
@@ -1148,7 +1168,7 @@ test('bootstrapReviewSurface non-interactive returns error when no owner token e
 });
 
 test('bootstrapReviewSurface non-interactive reports agent token failure via warnings', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     spawnSync('git', ['init', '-b', 'main'], { cwd: root, encoding: 'utf8' });
     writeConfig(root);
     const forgejoHome = path.join(root, '.forgejo-local');
@@ -1166,28 +1186,30 @@ test('bootstrapReviewSurface non-interactive reports agent token failure via war
       }, {
         interactive: false,
         requestFn(method, url) {
-      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { error: null,  ok: true as const, statusCode: 200, data: {} };
           if (method === 'GET' && url.endsWith('/api/v1/repos/test-org/test-repo')) {
-            return { ok: false, statusCode: 404, data: {} };
+            return { error: null,  ok: false as const, statusCode: 404, data: {} };
           }
           if (method === 'POST' && url.endsWith('/api/v1/orgs/test-org/repos')) {
-            return { ok: true, statusCode: 201, data: { full_name: 'test-org/test-repo' } };
+            return { error: null,  ok: true as const, statusCode: 201, data: { full_name: 'test-org/test-repo' } };
           }
           if (method === 'PUT' && url.endsWith('/api/v1/repos/test-org/test-repo/collaborators/custom')) {
-            return { ok: true, statusCode: 204, data: {} };
+            return { error: null,  ok: true as const, statusCode: 204, data: {} };
           }
           if (method === 'POST' && url.endsWith('/api/v1/users/custom/tokens')) {
-            return { ok: false, statusCode: 403, data: { message: 'forbidden' } };
+            return { error: null,  ok: false as const, statusCode: 403, data: { message: 'forbidden' } };
           }
-          return { ok: false, statusCode: 500, data: {} };
+          return { error: null,  ok: false as const, statusCode: 500, data: {} };
         },
         forgejoHome,
       });
 
       assert.equal(result.ok, false);
-      assert.equal(result.warnings.length, 1);
+      assert.ok('warnings' in result);
+    assert.equal(result.warnings.length, 1);
       assert.equal(result.warnings[0].user, 'custom');
-      assert.match(result.error, /custom: token creation via owner token failed/);
+      assert.ok('error' in result && typeof result.error === 'string');
+  assert.match(result.error, /custom: token creation via owner token failed/);
     } finally {
       if (previousForgejoHome) {
         process.env.FORGEJO_HOME = previousForgejoHome;

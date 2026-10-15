@@ -45,8 +45,8 @@ export type NormalizedEvent =
   | { kind: 'passthrough'; text: string }
   | { kind: 'unknown'; type: string };
 
-export function asRecord(value: unknown): Record<string, any> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : null;
+export function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
 export function finiteOrNull(value: unknown): number | null {

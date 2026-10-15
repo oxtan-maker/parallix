@@ -1,3 +1,4 @@
+import { MissionCheckpointService } from './mission-checkpoint-service.js';
 import type { ApplicationOutcome, Cancellation, Capability, DurableEvidence } from './contracts.js';
 import { failure, rejected } from './contracts.js';
 import { MissionLifecycleService, type MissionTransitionResult } from './mission-lifecycle-service.js';
@@ -21,6 +22,8 @@ import {
 } from './recording/current-work-recorder.js';
 
 export interface ExecuteMissionRequest {
+  /** Only the explicit operator CLI invocation may acknowledge retained stops. */
+  readonly operatorInvocation?: boolean;
   readonly operationId: string;
   readonly slug: string;
   readonly agent?: string | null;
@@ -77,15 +80,15 @@ export class ExecuteMissionService {
     private readonly _ports: ExecuteMissionPorts,
     private readonly _progress?: ProgressPort,
     private readonly _currentWork: CurrentWorkPort = NO_CURRENT_WORK_PORT,
-  ) {}
+  ) { }
 
   async execute(request: ExecuteMissionRequest): Promise<ApplicationOutcome<ExecuteMissionResult>> {
-    if (!request.operationId || !request.slug) {return rejected('validation', 'operationId and slug are required');}
-    if (!request.capabilities.has('active:execute')) {return rejected('capability', 'active:execute capability is required');}
-    if (request.cancellation?.requested) {return failure('cancelled', 'cancelled before launch');}
+    if (!request.operationId || !request.slug) { return rejected('validation', 'operationId and slug are required'); }
+    if (!request.capabilities.has('active:execute')) { return rejected('capability', 'active:execute capability is required'); }
+    if (request.cancellation?.requested) { return failure('cancelled', 'cancelled before launch'); }
 
     const prepared = await this.resolveWorkspace(request.slug);
-    if (typeof prepared === 'string') {return rejected('validation', prepared);}
+    if (typeof prepared === 'string') { return rejected('validation', prepared); }
 
     this.emit(request, 1, 'launch', 'launching execute agent');
     await this.publishWork(request, 'execute', 'launching execute agent', null);
@@ -93,6 +96,7 @@ export class ExecuteMissionService {
     let activationAgent: string | null = null;
     let agentStarted = false;
     try {
+      await this.prepareOperatorResume(request);
       const plan = await this._ports.agentExecution.prepare({
         slug: request.slug,
         worktree: prepared.worktree,
@@ -140,28 +144,51 @@ export class ExecuteMissionService {
         repairLaunch: this._ports.repairLaunch,
         output: this._ports.output,
       }).run(handoffRequest);
-      if (!handedOff) {throw new Error('handoff and review failed');}
+      if (!handedOff) { throw new Error('handoff and review failed'); }
 
       await this.endWork(request);
       return { status: 'completed', value: { agent: launch.agent }, durableEvidence: evidence };
     } catch (error) {
-      let message = error instanceof Error ? error.message : 'active execution failed';
-      if (activation?.from === 'refined' && activationAgent && !agentStarted) {
-        try {
-          await this.abortActivation(request.slug, activation, activationAgent);
-        } catch (compensationError) {
-          const compensationMessage = compensationError instanceof Error
-            ? compensationError.message
-            : 'Could not undo failed activation';
-          message = `${message}; ${compensationMessage}`;
-        }
-      }
-      // The in-call retry/failover loop already tried every eligible family. If
-      // it still could not finish, the run is not "running slowly" — the board
-      // must stop showing it as working and say why an operator is needed.
-      await this.blockWork(request, message);
-      return failure('execution', message);
+      return this.failedExecution(request, error, activation, activationAgent, agentStarted);
     }
+  }
+
+  private async prepareOperatorResume(request: ExecuteMissionRequest): Promise<void> {
+    if (request.operatorInvocation) {
+      await new MissionCheckpointService(this._ports.missionTransitions).acknowledgeOperatorResume({
+        operationId: request.operationId, missionId: missionId(request.slug),
+        capabilities: new Set(['checkpoint:record']), actor: 'px active operator', occurredAt: new Date().toISOString(),
+      });
+    }
+    await this.assertNoRecordedStop(request.slug);
+  }
+
+  private async assertNoRecordedStop(slug: string): Promise<void> {
+    const loaded = await this._ports.missionTransitions.load(missionId(slug));
+    if (loaded.kind !== 'found') { return; }
+    const checkpoint = loaded.mission.checkpoints.find(cp => cp.repair?.blocker);
+    if (checkpoint?.repair?.blocker) {
+      throw new Error(`Blocked at ${checkpoint.name}: ${checkpoint.repair.blocker.diagnostic}`);
+    }
+  }
+
+  private async failedExecution(request: ExecuteMissionRequest, error: unknown, activation: MissionTransitionResult | null, activationAgent: string | null, agentStarted: boolean): Promise<ApplicationOutcome<ExecuteMissionResult>> {
+    let message = error instanceof Error ? error.message : 'active execution failed';
+    if (activation?.from === 'refined' && activationAgent && !agentStarted) {
+      try {
+        await this.abortActivation(request.slug, activation, activationAgent);
+      } catch (compensationError) {
+        const compensationMessage = compensationError instanceof Error
+          ? compensationError.message
+          : 'Could not undo failed activation';
+        message = `${message}; ${compensationMessage}`;
+      }
+    }
+    // The in-call retry/failover loop already tried every eligible family. If
+    // it still could not finish, the run is not "running slowly" — the board
+    // must stop showing it as working and say why an operator is needed.
+    await this.blockWork(request, message);
+    return failure('execution', message);
   }
 
   /**
@@ -172,10 +199,10 @@ export class ExecuteMissionService {
    * their own remediation text.
    */
   private async resolveWorkspace(slug: string): Promise<ExecuteWorkspace | string> {
-    if (!isMissionSlugCandidate(slug)) {return 'slug is not a recognized mission identity';}
-    if (!await this._ports.workspace.preflight(slug)) {return 'execute preflight failed';}
+    if (!isMissionSlugCandidate(slug)) { return 'slug is not a recognized mission identity'; }
+    if (!await this._ports.workspace.preflight(slug)) { return 'execute preflight failed'; }
     const worktree = await this._ports.workspace.resolveWorktree(slug);
-    if (!worktree) {return 'dedicated execute worktree is required';}
+    if (!worktree) { return 'dedicated execute worktree is required'; }
     return { worktree, taskResolution: await this._ports.workspace.resolveTaskFile(slug, worktree) };
   }
 
@@ -211,6 +238,7 @@ export class ExecuteMissionService {
         await this.publishWork(request, 'execute', `running execute agent (${agent})`, agent);
       },
     });
+    await this.assertNoRecordedStop(request.slug);
     if (launch.errored) {
       throw new Error(`Could not start execute agent (${launch.agent}): ${launch.errorMessage}`);
     }
@@ -324,5 +352,5 @@ export class ExecuteMissionService {
 async function bestEffort(publish: () => Promise<void>): Promise<void> {
   try {
     await publish();
-  } catch {}
+  } catch { }
 }

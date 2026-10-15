@@ -1,3 +1,4 @@
+import type { AgentLauncherInput, AgentLauncherResult } from '../../src/adapters/agents/agent-process-types.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -119,12 +120,11 @@ function fakeLauncher({
   sessionId?: string | null;
   spawnError?: { message?: string; code?: string } | null;
 } = {}) {
-  return ({ prompt, worktree, env = {} }: { prompt?: string; worktree?: string; env?: Record<string, string> } = {}) => ({
+  return ({ worktree, env = {} }: AgentLauncherInput = { prompt: '', worktree: '/tmp' }): AgentLauncherResult => ({
     invocation: {
       command,
       args,
-      options: { cwd: worktree, env: { ...env } },
-      prompt
+      options: { cwd: worktree, env: { ...env } }
     },
     resultPromise: spawnError
       ? Promise.resolve({ error: Object.assign(new Error(spawnError.message || String(spawnError)), { code: spawnError.code }) })

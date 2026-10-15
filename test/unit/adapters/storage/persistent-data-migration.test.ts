@@ -4,11 +4,10 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-import { migrateStats, migrateAgentBlocklists, } from '../../../../src/adapters/storage/persistent-data-migration.js';
+import { migrateAgentBlocklists, } from '../../../../src/adapters/storage/persistent-data-migration.js';
 import * as persistentDataMigration from '../../../../src/adapters/storage/persistent-data-migration.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
-function withTempRoot(run) {
+function withTempRoot(run: (_arg0: string) => void) {
   const root = registeredMkdtemp('parallix-migration-');
   try {
     run(root);
@@ -21,15 +20,13 @@ function withTempRoot(run) {
 // `<PARALLIX_HOME>/stats.csv` is no longer a runtime authority or migration
 // destination, so this module must expose no stats CSV migration at all.
 test('no stats CSV migration survives the measurement cut-over', () => {
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-  assert.equal(persistentDataMigration.migrateStats, undefined);
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-  assert.equal(persistentDataMigration._internals, undefined);
+  assert.equal('migrateStats' in persistentDataMigration, false);
+  assert.equal('_internals' in persistentDataMigration, false);
   assert.equal(typeof persistentDataMigration.migrateAgentBlocklists, 'function');
 });
 
 test('migrateAgentBlocklists covers all three legacy sources and preserves schema variants', () => {
-  withTempRoot(root => {
+  withTempRoot((root) => {
     const workflowPath = path.join(root, 'workflow', 'config', 'agents.local.json');
     const repoPath = path.join(root, 'repo', 'agents.local.json');
     const mainPath = path.join(root, 'main', 'agents.local.json');
@@ -56,7 +53,7 @@ test('migrateAgentBlocklists covers all three legacy sources and preserves schem
 });
 
 test('migrateAgentBlocklists reports conflicts and existing destination wins idempotently', () => {
-  withTempRoot(root => {
+  withTempRoot((root) => {
     const lowPath = path.join(root, 'low.json');
     const highPath = path.join(root, 'high.json');
     const destinationPath = path.join(root, 'parallix', 'agents.local.json');
@@ -64,12 +61,12 @@ test('migrateAgentBlocklists reports conflicts and existing destination wins ide
     fs.writeFileSync(highPath, JSON.stringify({ blocklist: { codex: false } }));
     fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
     fs.writeFileSync(destinationPath, JSON.stringify({ blocklist: { codex: { blocked: true } } }, null, 2) + '\n');
-    const warnings = [];
+    const warnings: string[] = [];
 
     const firstResult = migrateAgentBlocklists({
       sourcePaths: [lowPath, highPath],
       destinationPath,
-      warn: message => warnings.push(message)
+      warn: message => warnings.push(String(message))
     });
     const first = fs.readFileSync(destinationPath, 'utf8');
     const secondResult = migrateAgentBlocklists({
@@ -88,16 +85,16 @@ test('migrateAgentBlocklists reports conflicts and existing destination wins ide
 });
 
 test('migrateAgentBlocklists skips malformed legacy source but rejects malformed destination', () => {
-  withTempRoot(root => {
+  withTempRoot((root) => {
     const malformedSource = path.join(root, 'legacy.json');
     const destinationPath = path.join(root, 'parallix', 'agents.local.json');
     fs.writeFileSync(malformedSource, '{ invalid');
-    const warnings = [];
+    const warnings: string[] = [];
 
     migrateAgentBlocklists({
       sourcePaths: [malformedSource],
       destinationPath,
-      warn: message => warnings.push(message)
+      warn: message => warnings.push(String(message))
     });
     assert.match(warnings[0], /Skipping malformed legacy agent blocklist/);
     assert.deepEqual(JSON.parse(fs.readFileSync(destinationPath, 'utf8')), { blocklist: {} });

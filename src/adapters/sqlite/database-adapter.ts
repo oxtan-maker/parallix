@@ -1,13 +1,13 @@
+import { pruneOlderBackups } from './database-backups.js';
+export { MAX_RETAINED_BACKUPS } from './database-backups.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import fs from 'node:fs';
 import { compareCodeUnits } from '../../domain/comparators.js';
 import path from 'node:path';
 
-/**
- * Configuration for a SQLite database connection.
- */
+/** Configuration for a SQLite database connection. */
 export interface DatabaseConfig {
   /** Absolute path to the SQLite database file. */
   readonly path: string;
@@ -44,14 +44,7 @@ export interface Migration {
  * Row type for query results.
  */
 export type QueryRow = object;
-
-/**
- * Maximum number of `<path>.bak.*` snapshot sidecars retained per database path.
- * After a new snapshot is written, older snapshots beyond this cap are pruned.
- * Named constant so the retention count can be tuned without touching the
- * pruning algorithm (task-2530).
- */
-export const MAX_RETAINED_BACKUPS = 3;
+export type SqlParameter = SQLInputValue;
 
 /**
  * SQLite database adapter using `node:sqlite` (DatabaseSync).
@@ -67,7 +60,7 @@ export const MAX_RETAINED_BACKUPS = 3;
  * - Explicit transactions for multi-statement writes
  */
 export class SqliteDatabaseAdapter {
-  constructor(private readonly _configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) {}
+  constructor(private readonly _configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) { }
   /** Serialize immediate writers from this Node process; SQLite handles other processes. */
   private static readonly immediateWriterTurns = new Map<string, Promise<void>>();
   private db: DatabaseSync | null = null;
@@ -186,10 +179,10 @@ export class SqliteDatabaseAdapter {
   }
 
   /** Synchronous counterpart of `execute`. */
-  executeSync(sql: string, params?: readonly unknown[]): number {
+  executeSync(sql: string, params?: readonly SQLInputValue[]): number {
     this.assertOpen();
     if (params && params.length > 0) {
-      const result = this.db!.prepare(sql).run(...params as any);
+      const result = this.db!.prepare(sql).run(...params);
       return (result as { changes?: number }).changes ?? 0;
     }
     this.db!.exec(sql);
@@ -197,11 +190,11 @@ export class SqliteDatabaseAdapter {
   }
 
   /** Synchronous counterpart of `query`. */
-  querySync<T extends QueryRow>(sql: string, params?: readonly unknown[]): readonly T[] {
+  querySync<T extends QueryRow>(sql: string, params?: readonly SQLInputValue[]): readonly T[] {
     this.assertOpen();
     const stmt = this.db!.prepare(sql);
     const rows = (params && params.length > 0
-      ? stmt.all(...params as any) as T[]
+      ? stmt.all(...params) as T[]
       : stmt.all() as T[]);
     return Object.freeze(rows);
   }
@@ -262,7 +255,7 @@ export class SqliteDatabaseAdapter {
    * Execute a parameterized SQL statement.
    * Returns the number of rows changed/affected by the statement.
    */
-  async execute(sql: string, params?: readonly unknown[]): Promise<number> {
+  async execute(sql: string, params?: readonly SQLInputValue[]): Promise<number> {
     this.assertOpen();
     const debug = this._configuration.storage.debugSql;
     if (debug) {
@@ -270,23 +263,27 @@ export class SqliteDatabaseAdapter {
     }
     try {
       if (params && params.length > 0) {
-        const result = this.db!.prepare(sql).run(...params as any);
+        const result = this.db!.prepare(sql).run(...params);
         return (result as { changes?: number }).changes ?? 0;
       } else {
         this.db!.exec(sql);
         return 0;
       }
     } catch (err) {
-      if (debug && this.db) {
-        try {
-          const bt = this.db.prepare('PRAGMA busy_timeout;').all();
-          const jm = this.db.prepare('PRAGMA journal_mode;').all();
-          const btVal = bt?.[0] ?? bt;
-          const jmVal = jm?.[0] ?? jm;
-          process.stderr.write(`[sql-diag] error on ${this.config?.path}: busy_timeout=${JSON.stringify(btVal)}, journal_mode=${JSON.stringify(jmVal)}, pid=${process.pid}\n`);
-        } catch (_) { /* diag failed, ignore */ }
-      }
+      this.writeFailureDiagnostic(debug);
       throw err;
+    }
+  }
+
+  private writeFailureDiagnostic(debug: ParallixConfiguration['storage']['debugSql']): void {
+    if (debug && this.db) {
+      try {
+        const bt = this.db.prepare('PRAGMA busy_timeout;').all();
+        const jm = this.db.prepare('PRAGMA journal_mode;').all();
+        const btVal = bt?.[0] ?? bt;
+        const jmVal = jm?.[0] ?? jm;
+        process.stderr.write(`[sql-diag] error on ${this.config?.path}: busy_timeout=${JSON.stringify(btVal)}, journal_mode=${JSON.stringify(jmVal)}, pid=${process.pid}\n`);
+      } catch (_) { /* diag failed, ignore */ }
     }
   }
 
@@ -295,12 +292,12 @@ export class SqliteDatabaseAdapter {
    */
   async query<T extends QueryRow>(
     sql: string,
-    params?: readonly unknown[],
+    params?: readonly SQLInputValue[],
   ): Promise<readonly T[]> {
     this.assertOpen();
     const stmt = this.db!.prepare(sql);
     const rows = (params && params.length > 0
-      ? stmt.all(...params as any) as T[]
+      ? stmt.all(...params) as T[]
       : stmt.all() as T[]);
     return Object.freeze(rows);
   }
@@ -498,33 +495,6 @@ export class SqliteDatabaseAdapter {
   private assertOpen(): void {
     if (!this.db) {
       throw new Error('Database is not open. Call open() before using the adapter.');
-    }
-  }
-}
-
-/**
- * Delete timestamped `<path>.bak.<millisecond>` snapshots beyond the newest
- * `MAX_RETAINED_BACKUPS`; non-timestamped legacy sidecars are unmanaged.
- *
- * Fixed-width millisecond suffixes sort lexically == chronologically. Files
- * are sorted newest-first and everything past the cap is removed.
- */
-function pruneOlderBackups(dbPath: string): void {
-  const base = path.basename(dbPath);
-  const dir = path.dirname(dbPath);
-  if (!fs.existsSync(dir)) {
-    return;
-  }
-  const prefix = `${base}.bak.`;
-  const backups = fs
-    .readdirSync(dir)
-    .filter((f) => f.startsWith(prefix) && /^\d{13}$/.test(f.slice(prefix.length)))
-    .sort((a, b) => compareCodeUnits(b, a)); // newest first
-  for (const stale of backups.slice(MAX_RETAINED_BACKUPS)) {
-    try {
-      fs.rmSync(path.join(dir, stale), { force: true });
-    } catch {
-      // Best-effort cleanup; the newest backup is always retained above.
     }
   }
 }

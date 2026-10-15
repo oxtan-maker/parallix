@@ -1,3 +1,4 @@
+import type { GitOptions } from "../../../../../src/adapters/git/git.js";
 // Mission handoff repair contract: repairHandoff auto-commit, failure classification, and dispatch.
 //
 // Behavior-owned suite (TASK-2622.07). Legacy case names are unchanged; each section keeps its
@@ -23,13 +24,13 @@ describe('Repair handoff', () => {
   const { classifyError, getDispatchAction, FailureClass, DispatchAction } = repairHandoff;
 
   test('repairHandoff auto-commits safe mission files', async () => {
-    const adds = [];
-    const commits = [];
-    const logs = [];
+    const adds: string[] = [];
+    const commits: string[] = [];
+    const logs: string[] = [];
 
-    const gitFn = (args) => {
+    const gitFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return {
+        return { signal: null, stderr: '', 
           status: 0,
           stdout: [
             ' M missions/task-1037/MISSION.md',
@@ -40,18 +41,16 @@ describe('Repair handoff', () => {
       }
       if (args.includes('add')) {
         adds.push(...args.slice(args.indexOf('--') + 1));
-        return { status: 0 };
+        return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
       if (args.includes('commit')) {
         commits.push(args[args.indexOf('-m') + 1]);
-        return { status: 0 };
+        return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
-      return { status: 0 };
+      return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
     const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-      taskFile: '/tmp/worktree/backlog/tasks/task-1037 - some task.md',
       gitFn,
       log: (msg) => logs.push(msg)
     });
@@ -68,12 +67,12 @@ describe('Repair handoff', () => {
   });
 
   test('repairHandoff stages renamed mission files by destination path', async () => {
-    const adds = [];
-    const commits = [];
+    const adds: string[] = [];
+    const commits: true[] = [];
 
-    const gitFn = (args) => {
+    const gitFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return {
+        return { signal: null, stderr: '', 
           status: 0,
           stdout: [
             'R  missions/task-1037/CP-1.md -> missions/task-1037/CP-1-renamed.md'
@@ -82,13 +81,13 @@ describe('Repair handoff', () => {
       }
       if (args.includes('add')) {
         adds.push(...args.slice(args.indexOf('--') + 1));
-        return { status: 0 };
+        return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
       if (args.includes('commit')) {
         commits.push(true);
-        return { status: 0 };
+        return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
-      return { status: 0 };
+      return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
     const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
@@ -103,12 +102,12 @@ describe('Repair handoff', () => {
   });
 
   test('repairHandoff commits operator-local and generated paths when they are dirty', async () => {
-    const adds = [];
-    const logs = [];
+    const adds: string[] = [];
+    const logs: string[] = [];
 
-    const gitFn = (args) => {
+    const gitFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return {
+        return { signal: null, stderr: '', 
           status: 0,
           stdout: [
             ' M missions/task-1037/MISSION.md',
@@ -121,9 +120,9 @@ describe('Repair handoff', () => {
       }
       if (args.includes('add')) {
         adds.push(...args.slice(args.indexOf('--') + 1));
-        return { status: 0 };
+        return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
-      return { status: 0 };
+      return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
     const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
@@ -144,12 +143,12 @@ describe('Repair handoff', () => {
   });
 
   test('repairHandoff commits arbitrary non-mission repo files when they are dirty', async () => {
-    const adds = [];
-    const logs = [];
+    const adds: string[] = [];
+    const logs: string[] = [];
 
-    const gitFn = (args) => {
+    const gitFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return {
+        return { signal: null, stderr: '', 
           status: 0,
           stdout: [
             ' M missions/task-1037/MISSION.md',
@@ -161,9 +160,9 @@ describe('Repair handoff', () => {
       }
       if (args.includes('add')) {
         adds.push(...args.slice(args.indexOf('--') + 1));
-        return { status: 0 };
+        return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
-      return { status: 0 };
+      return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
     const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
@@ -183,13 +182,13 @@ describe('Repair handoff', () => {
   });
 
   test('repairHandoff reports staging failures and stops before commit', async () => {
-    const adds = [];
-    const commits = [];
-    const errors = [];
+    const adds: string[] = [];
+    const commits: true[] = [];
+    const errors: string[] = [];
 
-    const gitFn = (args) => {
+    const gitFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return {
+        return { signal: null, stderr: '', 
           status: 0,
           stdout: [
             ' M missions/task-1037/MISSION.md'
@@ -198,13 +197,13 @@ describe('Repair handoff', () => {
       }
       if (args.includes('add')) {
         adds.push(args[args.length - 1]);
-        return { status: 1, stderr: 'permission denied' };
+        return { signal: null, stdout: '',  status: 1, stderr: 'permission denied' };
       }
       if (args.includes('commit')) {
         commits.push(true);
-        return { status: 0 };
+        return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
-      return { status: 0 };
+      return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
     const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
@@ -214,26 +213,26 @@ describe('Repair handoff', () => {
     });
 
     assert.equal(repaired, false);
-    assert.match(blocker, /failed to stage dirty files/);
-    assert.match(blocker, /permission denied/);
+    assert.ok(blocker);    assert.match(blocker, /failed to stage dirty files/);
+    assert.ok(blocker);    assert.match(blocker, /permission denied/);
     assert.equal(commits.length, 0);
     assert.ok(errors.some(line => line.includes('failed to stage dirty files')));
   });
 
   test('repairHandoff refuses to commit when mission files are conflicted', async () => {
     const adds = [];
-    const logs = [];
+    const logs: string[] = [];
 
-    const gitFn = (args) => {
+    const gitFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return {
+        return { signal: null, stderr: '', 
           status: 0,
           stdout: [
             'UU missions/task-1037/MISSION.md'
           ].join('\n')
         };
       }
-      return { status: 0 };
+      return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
     const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
@@ -242,24 +241,25 @@ describe('Repair handoff', () => {
     });
 
     assert.equal(repaired, false);
-    assert.match(blocker, /Conflicted files detected/);
-    assert.match(blocker, /missions\/task-1037\/MISSION\.md/);
+    assert.ok(blocker);    assert.match(blocker, /Conflicted files detected/);
+    assert.ok(blocker);    assert.match(blocker, /missions\/task-1037\/MISSION\.md/);
     assert.equal(adds.length, 0);
     assert.ok(logs.some(l => l.includes('Cannot auto-commit: Conflicted files detected')));
   });
 
   test('repairHandoff calls rebase when branch is behind', async () => {
-    const logs = [];
+    const logs: string[] = [];
     let rebaseCalled = false;
 
-    const gitFn = (args) => {
-      if (args.includes('status')) return { status: 0, stdout: '' };
-      return { status: 0 };
+    const gitFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["gitFn"]> = (args) => {
+      if (args.includes('status')) return { signal: null, stderr: '',  status: 0, stdout: '' };
+      return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
-    const rebaseFn = async (args, opts) => {
+    const rebaseFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["rebaseFn"]> = async (args, opts) => {
       rebaseCalled = true;
       assert.equal(args[0], 'task-1037');
+      assert.ok(opts?.exitFn);
       opts.exitFn(0);
     };
 
@@ -276,15 +276,16 @@ describe('Repair handoff', () => {
   });
 
   test('repairHandoff returns false when rebase fails', async () => {
-    const logs = [];
-    const errors = [];
+    const logs: string[] = [];
+    const errors: string[] = [];
 
-    const gitFn = (args) => {
-      if (args.includes('status')) return { status: 0, stdout: '' };
-      return { status: 0 };
+    const gitFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["gitFn"]> = (args) => {
+      if (args.includes('status')) return { signal: null, stderr: '',  status: 0, stdout: '' };
+      return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
-    const rebaseFn = async (args, opts) => {
+    const rebaseFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["rebaseFn"]> = async (args, opts) => {
+      assert.ok(opts?.exitFn);
       opts.exitFn(1);
     };
 
@@ -296,15 +297,15 @@ describe('Repair handoff', () => {
     });
 
     assert.equal(repaired, false, 'repairHandoff should return repaired:false when rebase failed');
-    assert.match(blocker, /Auto-rebase failed: rebase exited with code 1/);
+    assert.ok(blocker);    assert.match(blocker, /Auto-rebase failed: rebase exited with code 1/);
     assert.ok(errors.some(l => l.includes('Auto-rebase failed')));
   });
 
   test('repairHandoff auto-commits safe mission files including completed tasks', async () => {
-    const adds = [];
-    const gitFn = (args) => {
+    const adds: string[] = [];
+    const gitFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return {
+        return { signal: null, stderr: '', 
           status: 0,
           stdout: [
             ' M backlog/completed/task-1037 - some task.md'
@@ -313,14 +314,12 @@ describe('Repair handoff', () => {
       }
       if (args.includes('add')) {
         adds.push(args[args.length - 1]);
-        return { status: 0 };
+        return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
-      return { status: 0 };
+      return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
     const { repaired } = await repairHandoff.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-      taskFile: '/tmp/worktree/backlog/completed/task-1037 - some task.md',
       gitFn,
       log: () => {}
     });
@@ -330,16 +329,17 @@ describe('Repair handoff', () => {
   });
 
   test('repairHandoff returns repaired:false when rebase fails after successful auto-commit', async () => {
-    const gitFn = (args) => {
+    const gitFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return { status: 0, stdout: ' M missions/task-1037/MISSION.md' };
+        return { signal: null, stderr: '',  status: 0, stdout: ' M missions/task-1037/MISSION.md' };
       }
-      if (args.includes('add')) return { status: 0 };
-      if (args.includes('commit')) return { status: 0 };
-      return { status: 0 };
+      if (args.includes('add')) return { signal: null, stdout: '', stderr: '',  status: 0 };
+      if (args.includes('commit')) return { signal: null, stdout: '', stderr: '',  status: 0 };
+      return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
-    const rebaseFn = async (args, opts) => {
+    const rebaseFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["rebaseFn"]> = async (args, opts) => {
+      assert.ok(opts?.exitFn);
       opts.exitFn(1); // Rebase fails
     };
 
@@ -351,7 +351,7 @@ describe('Repair handoff', () => {
     });
 
     assert.equal(repaired, false, 'Should be false because rebase failed');
-    assert.match(blocker, /Auto-rebase failed/);
+    assert.ok(blocker);    assert.match(blocker, /Auto-rebase failed/);
   });
 
   test('repairHandoff returns repaired:false for generic git push failed (auth/transport)', async () => {
@@ -373,9 +373,11 @@ describe('Repair handoff', () => {
   test('isRelaunchableError returns false for non-relaunchable errors', () => {
     const { isRelaunchableError } = repairHandoff;
 
+    // @ts-expect-error Intentional non-string error-classification input.
     assert.equal(isRelaunchableError(null), false);
+    // @ts-expect-error Intentional non-string error-classification input.
     assert.equal(isRelaunchableError(undefined), false);
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
+    // @ts-expect-error Intentional non-string error-classification input.
     assert.equal(isRelaunchableError(123), false);
     assert.equal(isRelaunchableError(''), false);
     assert.equal(isRelaunchableError('Some other error'), false);
@@ -434,6 +436,7 @@ describe('Repair handoff', () => {
   });
 
   test('classifyError returns HumanOnly for null input', () => {
+    // @ts-expect-error Intentional non-string error-classification input.
     const result = classifyError(null);
     assert.equal(result.failureClass, FailureClass.InfraBlocker);
     assert.equal(result.dispatchAction, DispatchAction.HumanOnly);
@@ -583,11 +586,13 @@ describe('Repair handoff', () => {
 
   test('isRelaunchableError backward compat: null → false', () => {
     const { isRelaunchableError } = repairHandoff;
+    // @ts-expect-error Intentional non-string error-classification input.
     assert.equal(isRelaunchableError(null), false);
   });
 
   test('isRelaunchableError backward compat: undefined → false', () => {
     const { isRelaunchableError } = repairHandoff;
+    // @ts-expect-error Intentional non-string error-classification input.
     assert.equal(isRelaunchableError(undefined), false);
   });
 
@@ -622,13 +627,13 @@ describe('Repair handoff', () => {
   });
 
   test('repairHandoff uses classifyError internally for dirty errors', async () => {
-    const adds = [];
-    const commits = [];
-    const logs = [];
+    const adds: string[] = [];
+    const commits: string[] = [];
+    const logs: string[] = [];
 
-    const gitFn = (args) => {
+    const gitFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return {
+        return { signal: null, stderr: '', 
           status: 0,
           stdout: [
             ' M missions/task-1037/MISSION.md',
@@ -637,18 +642,16 @@ describe('Repair handoff', () => {
       }
       if (args.includes('add')) {
         adds.push(args[args.length - 1]);
-        return { status: 0 };
+        return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
       if (args.includes('commit')) {
         commits.push(args[args.indexOf('-m') + 1]);
-        return { status: 0 };
+        return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
-      return { status: 0 };
+      return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
     const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-      taskFile: '/tmp/worktree/backlog/tasks/task-1037 - some task.md',
       gitFn,
       log: (msg) => logs.push(msg)
     });
@@ -659,16 +662,17 @@ describe('Repair handoff', () => {
   });
 
   test('repairHandoff uses classifyError internally for behind errors', async () => {
-    const logs = [];
+    const logs: string[] = [];
     let rebaseCalled = false;
 
-    const gitFn = (args) => {
-      if (args.includes('status')) return { status: 0, stdout: '' };
-      return { status: 0 };
+    const gitFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["gitFn"]> = (args) => {
+      if (args.includes('status')) return { signal: null, stderr: '',  status: 0, stdout: '' };
+      return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
-    const rebaseFn = async (args, opts) => {
+    const rebaseFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["rebaseFn"]> = async (args, opts) => {
       rebaseCalled = true;
+      assert.ok(opts?.exitFn);
       opts.exitFn(0);
     };
 
@@ -694,7 +698,7 @@ describe('Repair handoff', () => {
   // ── CP-4/CP-6: C6 InfraBlocker blocker message in repairHandoff ──────────────
 
   test('repairHandoff returns InfraBlocker-specific blocker message for infrastructure errors', async () => {
-    const logs = [];
+    const logs: string[] = [];
     const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'connection timed out', {
       log: (msg) => logs.push(msg)
     });
@@ -708,7 +712,7 @@ describe('Repair handoff', () => {
   });
 
   test('repairHandoff returns InfraBlocker-specific blocker for token expired errors', async () => {
-    const logs = [];
+    const logs: string[] = [];
     const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'Authentication failed for Forgejo: token expired', {
       log: (msg) => logs.push(msg)
     });
@@ -732,20 +736,20 @@ describe('Repair handoff', () => {
   });
 
   test('repairHandoff derives isBehind from classifyError reason (dirty only, no rebase)', async () => {
-    const adds = [];
-    const commits = [];
+    const adds: string[] = [];
+    const commits: true[] = [];
     let rebaseCalled = false;
 
-    const gitFn = (args) => {
+    const gitFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return { status: 0, stdout: ' M missions/task-1037/MISSION.md' };
+        return { signal: null, stderr: '',  status: 0, stdout: ' M missions/task-1037/MISSION.md' };
       }
-      if (args.includes('add')) { adds.push(args[args.length - 1]); return { status: 0 }; }
-      if (args.includes('commit')) { commits.push(true); return { status: 0 }; }
-      return { status: 0 };
+      if (args.includes('add')) { adds.push(args[args.length - 1]); return { signal: null, stdout: '', stderr: '',  status: 0 }; }
+      if (args.includes('commit')) { commits.push(true); return { signal: null, stdout: '', stderr: '',  status: 0 }; }
+      return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
-    const rebaseFn = async () => { rebaseCalled = true; };
+    const rebaseFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["rebaseFn"]> = async () => { rebaseCalled = true; };
 
     const { repaired } = await repairHandoff.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
       gitFn,
@@ -761,13 +765,13 @@ describe('Repair handoff', () => {
 // TASK-2202 (was test/task-2202-repair-handoff-autocommit.test.ts)
 describe('Repair handoff auto-commit', () => {
   test('repairHandoff auto-commits bounded implementation files for active-step handoff repair', async () => {
-    const adds = [];
-    const commits = [];
-    const logs = [];
+    const adds: string[] = [];
+    const commits: string[] = [];
+    const logs: string[] = [];
 
-    const gitFn = (args) => {
+    const gitFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return {
+        return { signal: null, stderr: '', 
           status: 0,
           stdout: [
             ' M missions/task-2202/MISSION.md',
@@ -780,13 +784,13 @@ describe('Repair handoff auto-commit', () => {
       }
       if (args.includes('add')) {
         adds.push(...args.slice(args.indexOf('--') + 1));
-        return { status: 0 };
+        return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
       if (args.includes('commit')) {
         commits.push(args[args.indexOf('-m') + 1]);
-        return { status: 0 };
+        return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
-      return { status: 0 };
+      return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
     const { repaired, blocker } = await repairHandoff.default(
@@ -815,12 +819,12 @@ describe('Repair handoff auto-commit', () => {
   });
 
   test('repairHandoff auto-commits all non-conflicted dirty files for git-blocker handoff repair', async () => {
-    const adds = [];
-    const commits = [];
+    const adds: string[][] = [];
+    const commits: string[] = [];
 
-    const gitFn = (args) => {
+    const gitFn: NonNullable<NonNullable<Parameters<typeof repairHandoff.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return {
+        return { signal: null, stderr: '', 
           status: 0,
           stdout: [
             ' M src/adapters/cli/commands/repair-handoff.ts',
@@ -832,13 +836,13 @@ describe('Repair handoff auto-commit', () => {
       }
       if (args.includes('add')) {
         adds.push(args.slice(args.indexOf('--') + 1));
-        return { status: 0 };
+        return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
       if (args.includes('commit')) {
         commits.push(args[args.indexOf('-m') + 1]);
-        return { status: 0 };
+        return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
-      return { status: 0 };
+      return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
     const { repaired, blocker } = await repairHandoff.default(
@@ -881,16 +885,18 @@ describe('Rebase failure classification', () => {
 
 test('nested handoff preserves configuration and caller rebase seams (TASK-2744)', async () => {
   const configuration = resolveConfiguration({ PATH: '/injected/bin', PARALLIX_HOME: '/injected/home' });
-  const gitFn = () => ({ status: 0, stdout: '', stderr: '' });
-  const createPrFn = () => ({ ok: true });
+  const gitFn = () => ({ signal: null,  status: 0, stdout: '', stderr: '' });
+  const createPrFn = () => ({ ok: true as const });
   const runRebaseWorkflowFn = async () => {};
-  mock.method(reviewRebase, 'rebaseBeforeReviewRound', async (slug, options) => {
+  mock.method(reviewRebase, 'rebaseBeforeReviewRound', async (slug: Parameters<(typeof reviewRebase)["rebaseBeforeReviewRound"]>[0], options: Parameters<(typeof reviewRebase)["rebaseBeforeReviewRound"]>[1]) => {
     assert.equal(slug, 'task-2744');
+    assert.ok(options != null);
     assert.strictEqual(options.gitFn, gitFn);
     assert.strictEqual(options.runRebaseWorkflowFn, runRebaseWorkflowFn);
+    assert.ok(options.rebaseWorkflowOptions != null);
     assert.strictEqual(options.rebaseWorkflowOptions.createPrFn, createPrFn);
     assert.strictEqual(options.rebaseWorkflowOptions.configuration, configuration);
-    return { ok: true, sharedFileConflicts: false, hookFailure: false };
+    return { ok: true as const, sharedFileConflicts: false, hookFailure: false };
   });
   const options = {
     gitFn, worktree: '/fixture', runRebaseWorkflowFn, rebaseWorkflowOptions: { createPrFn },
@@ -904,27 +910,31 @@ test('default execute runtime preserves configuration through handoff and automa
   const configuration = resolveConfiguration({ PATH: '/injected/bin', PARALLIX_HOME: '/injected/home' });
   const runtime = execute.createDefaultExecuteMissionRuntime(configuration);
   let handoffs = 0;
-  mock.method(handoff, 'performHandoff', async (slug, options) => {
+  mock.method(handoff, 'performHandoff', async (slug: Parameters<(typeof handoff)["performHandoff"]>[0], options: Parameters<(typeof handoff)["performHandoff"]>[1]) => {
     assert.equal(slug, 'task-2744');
+    assert.ok(options != null);
     assert.strictEqual(options.configuration, configuration);
     assert.equal(options.worktree, '/fixture');
     handoffs += 1;
-    return { ok: true };
+    return { ok: true as const };
   });
   assert.equal((await runtime.performHandoff('task-2744', { worktree: '/fixture' })).ok, true);
   assert.equal(handoffs, 1);
-  const gitCalls = [];
-  const gitFn = (args, options) => { gitCalls.push({ args, options }); return { status: 0, stdout: '' }; };
+  const gitCalls: { args: string[]; options: GitOptions | undefined; }[] = [];
+  const gitFn: NonNullable<NonNullable<Parameters<typeof runtime.repairHandoff>[3]>["gitFn"]> = (args, options) => { gitCalls.push({ args, options }); return { signal: null, stderr: '',  status: 0, stdout: '' }; };
   let rebases = 0;
   const result = await runtime.repairHandoff('task-2744', '/fixture', 'git push failed: Updates were rejected', {
     gitFn, log: () => {}, error: () => {},
     rebaseFn: async (args, options) => {
       assert.deepEqual(args, ['task-2744']);
+      assert.ok(options != null);
       assert.strictEqual(options.configuration, configuration);
+      assert.ok(options.gitFn);
       options.gitFn(['status'], { cwd: '/wrong', marker: 'preserved' });
       assert.deepEqual(gitCalls.at(-1), { args: ['status'], options: { cwd: '/fixture', marker: 'preserved' } });
       assert.equal(typeof options.getCurrentBranchFn, 'function');
       rebases += 1;
+      assert.ok(options.exitFn);
       options.exitFn(0);
     },
   });

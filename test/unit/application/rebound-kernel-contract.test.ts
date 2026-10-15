@@ -1,5 +1,7 @@
 import { repairCheckpointCases } from './rebound-repair-checkpoint.cases.js';
 repairCheckpointCases();
+import { launchFailureCases } from './rebound-launch-failure.cases.js';
+launchFailureCases();
 import { transientRetryAllowed, reboundRequiresHuman, repairStrategy, launchRecoveryAction, repairBudgetAllows, reboundExhaustion } from '../../../src/domain/rebound-policy.js';
 // Historical regression provenance: TASK-2413, TASK-2369.13, TASK-2492.
 // Rebound kernel contract: the single repair loop (classification, per-occurrence budget, fix prompts,
@@ -13,7 +15,7 @@ import { transientRetryAllowed, reboundRequiresHuman, repairStrategy, launchReco
 //   Integration gate rebound: TASK-2492
 
 import assert from 'node:assert/strict';
-import test, { describe, it } from 'node:test';
+import test, { describe, it, type TestContext } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { mkdtemp } from '../../helpers/temp-dir.js';
@@ -69,7 +71,7 @@ test('escalates an agent-reported invalid locked contract before repair (TASK-26
   };
   const outcome = await rebound(reason, contextFor({
     startAgent: async () => { launches++; return { result: { status: 0 } }; },
-    verify: () => { verifications++; return { ok: true }; },
+    verify: () => { verifications++; return { ok: true as const }; },
   }));
   assert.equal(outcome.outcome, 'human-only');
   assert.equal(outcome.attempts, 0);
@@ -85,7 +87,7 @@ function contextFor(overrides: Partial<ReboundContext> = {}): ReboundContext {
     // that assert recovery-evidence persistence supply an isolated temp dir.
     worktree: '',
     implementer: 'codex',
-    verify: () => ({ ok: true }),
+    verify: () => ({ ok: true as const }),
     startAgent: async () => ({ agent: 'codex', result: { status: 0 } }),
     log: () => {},
     error: () => {},
@@ -250,8 +252,9 @@ test('task-2377.03: an agent timeout uses the shared rebound launch and verify l
 test('task-2377.03: fresh repair reloads authority and delegates exact verification', async () => {
   const prompts: string[] = [];
   await rebound(gateReason, contextFor({
-    startAgent: async (_step, options: any) => {
-      prompts.push(options.prompt('codex'));
+    startAgent: async (_step, options) => {
+      assert.ok(typeof options.prompt === 'function');
+      prompts.push((typeof options.prompt === 'function' ? options.prompt('codex') : options.prompt));
       return { agent: 'codex', result: { status: 0 } };
     },
   }));
@@ -288,8 +291,9 @@ test('task-2620 AC3: the gate fix prompt names the approved revision and states 
   await rebound(
     { ...gateReason, area: 'integration gate agent-smoke', approvedRevision: 'abc1234' },
     contextFor({
-      startAgent: async (_step, options: any) => {
-        prompts.push(options.prompt('codex'));
+      startAgent: async (_step, options) => {
+        assert.ok(typeof options.prompt === 'function');
+        prompts.push((typeof options.prompt === 'function' ? options.prompt('codex') : options.prompt));
         return { agent: 'codex', result: { status: 0 } };
       },
     }),
@@ -323,7 +327,7 @@ test('task-2413: rebound preserves role-family exclusions for fallback selection
   let exclude: unknown;
   await rebound(gateReason, contextFor({
     exclude: ['claude'],
-    startAgent: async (_step, options: any) => {
+    startAgent: async (_step, options) => {
       exclude = options.exclude;
       return { agent: 'codex', result: { status: 0 } };
     },
@@ -337,8 +341,9 @@ test('task-2377.03: a failing verify consumes one attempt and relaunches with th
   const prompts: string[] = [];
   const verifyDiagnostics = ['second-run diagnostic: 2 tests still failing'];
   const outcome = await rebound(gateReason, contextFor({
-    startAgent: async (_step, options: any) => {
-      prompts.push(options.prompt('codex'));
+    startAgent: async (_step, options) => {
+      assert.ok(typeof options.prompt === 'function');
+      prompts.push((typeof options.prompt === 'function' ? options.prompt('codex') : options.prompt));
       return { agent: 'codex', result: { status: 0 } };
     },
     verify: () => verifyDiagnostics.length
@@ -359,7 +364,7 @@ test('task-2377.03: two failed verifies exhaust the default budget with the last
   let verifyRuns = 0;
   const outcome = await rebound(gateReason, contextFor({
     startAgent: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
-    verify: () => { verifyRuns++; return { ok: false, diagnostic: `still failing after attempt ${verifyRuns}` }; },
+    verify: () => { verifyRuns++; return { ok: false as const, diagnostic: `still failing after attempt ${verifyRuns}` }; },
   }));
 
   assert.equal(outcome.outcome, 'exhausted');
@@ -372,7 +377,7 @@ test('task-2377.03: two failed verifies exhaust the default budget with the last
 test('task-2377.03: an outcome of fixed is returned only after verify passes', async () => {
   let verifyRuns = 0;
   const outcome = await rebound(gateReason, contextFor({
-    verify: () => { verifyRuns++; return { ok: true }; },
+    verify: () => { verifyRuns++; return { ok: true as const }; },
   }));
   assert.equal(outcome.outcome, 'fixed');
   assert.equal(outcome.attempts, 1);
@@ -384,7 +389,7 @@ test('task-2377.03: an ambiguous null agent exit is a launch failure, never fixe
   let verifyRuns = 0;
   const outcome = await rebound(gateReason, contextFor({
     startAgent: async () => { launches++; return { agent: 'codex', result: { status: null } }; },
-    verify: () => { verifyRuns++; return { ok: true }; },
+    verify: () => { verifyRuns++; return { ok: true as const }; },
   }));
 
   assert.equal(outcome.outcome, 'exhausted', 'a null-exit fix is no evidence of a fix');
@@ -397,7 +402,7 @@ test('task-2377.03: a null-exit first attempt still allows a verified fix inside
   const statuses: Array<number | null> = [null, 0];
   const outcome = await rebound(gateReason, contextFor({
     startAgent: async () => ({ agent: 'codex', result: { status: statuses.shift()! } }),
-    verify: () => ({ ok: true }),
+    verify: () => ({ ok: true as const }),
   }));
   assert.equal(outcome.outcome, 'fixed');
   assert.equal(outcome.attempts, 1, 'only the completed repair attempt is charged; the launcher retry has its own budget');
@@ -414,7 +419,7 @@ test('task-2377.03: a throwing launch is a failed attempt, not a fix', async () 
 test('task-2377.03: the budget is per occurrence — a second invocation after an exhausted one starts fresh', async () => {
   // This budget-only contract does not exercise durable evidence capture; keep
   // its retries in-memory so filesystem work belongs to that owning contract.
-  const failing = contextFor({ worktree: '', verify: () => ({ ok: false, diagnostic: 'still failing' }) });
+  const failing = contextFor({ worktree: '', verify: () => ({ ok: false as const, diagnostic: 'still failing' }) });
   const first = await rebound(gateReason, failing);
   assert.equal(first.outcome, 'exhausted');
 
@@ -434,7 +439,7 @@ test('task-2377.03: the budget is configurable per occurrence and never read fro
     worktree: '',
     maxAttempts: 1,
     startAgent: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
-    verify: () => ({ ok: false, diagnostic: 'still failing' }),
+    verify: () => ({ ok: false as const, diagnostic: 'still failing' }),
   }));
   assert.equal(outcome.outcome, 'exhausted');
   assert.equal(launches, 1);
@@ -451,8 +456,8 @@ test('task-2377.03: the kernel writes nothing to a state store while spending a 
   // the context object. The kernel's context has no state-store slot, so a run
   // that spends the whole budget must leave every write method untouched.
   const outcome = await rebound(gateReason, {
-    ...contextFor({ verify: () => ({ ok: false, diagnostic: 'still failing' }) }),
-    ...(failOnWriteStore as unknown as Record<string, never>),
+    ...contextFor({ verify: () => ({ ok: false as const, diagnostic: 'still failing' }) }),
+    ...failOnWriteStore,
   });
   assert.equal(outcome.outcome, 'exhausted');
   assert.deepEqual(writes, [], 'no review-state or SQLite write may originate in the kernel');
@@ -489,10 +494,11 @@ test('task-2525.05: a transient gate rerun preserves the original diagnostic in 
     maxAttempts: 1,
     verify: () => {
       verifyCalls += 1;
-      return { ok: false, diagnostic: 'REFRESHED_GATE_OUTPUT' };
+      return { ok: false as const, diagnostic: 'REFRESHED_GATE_OUTPUT' };
     },
-    startAgent: async (_step, options: any) => {
-      capturedPrompt = options.prompt('codex');
+    startAgent: async (_step, options) => {
+      assert.ok(typeof options.prompt === 'function');
+      capturedPrompt = (typeof options.prompt === 'function' ? options.prompt('codex') : options.prompt);
       return { agent: 'codex', result: { status: 0 } };
     },
   }));
@@ -505,15 +511,15 @@ test('task-2525.05: a transient gate rerun preserves the original diagnostic in 
 });
 
 test('task-2588: fresh diagnostic failure then independent fresh success keeps both verifier passes and strategies', async () => {
-  const launches: any[] = []; const logs: string[] = []; let verifies = 0;
+  const launches: Parameters<NonNullable<Parameters<typeof rebound>[1]['startAgent']>>[1][] = []; const logs: string[] = []; let verifies = 0;
   const outcome = await rebound(gateReason, contextFor({
     verify: () => ({ ok: ++verifies === 2, diagnostic: verifies === 1 ? 'LATEST_FAILURE' : '' }),
-    startAgent: async (_step, options: any) => { launches.push(options); return { agent: 'codex', result: { status: 0 } }; },
+    startAgent: async (_step, options) => { launches.push(options); return { agent: 'codex', result: { status: 0 } }; },
     log: message => logs.push(message),
   }));
   assert.equal(outcome.outcome, 'fixed'); assert.equal(launches.length, 2); assert.equal(verifies, 2);
   assert.equal(launches[0].sessionPolicy, 'fresh-ephemeral'); assert.equal(launches[1].sessionPolicy, 'fresh-ephemeral');
-  const freshPrompt = launches[1].prompt('codex'); assert.match(freshPrompt, /LATEST_FAILURE/); assert.match(freshPrompt, /failing test: preserves diagnostic/);
+  const freshPrompt = (typeof launches[1].prompt === 'function' ? launches[1].prompt('codex') : launches[1].prompt); assert.match(freshPrompt, /LATEST_FAILURE/); assert.match(freshPrompt, /failing test: preserves diagnostic/);
   assert.deepEqual(outcome.attemptsDetail?.map(a => a.strategy), ['fresh-diagnostic', 'fresh-diagnostic']);
   assert.ok(logs.some(line => line.includes('RECOVERY_TELEMETRY strategy=fresh-diagnostic outcome=advance')));
   assert.ok(logs.some(line => line.includes('RECOVERY_TELEMETRY strategy=fresh-diagnostic outcome=rescue')));
@@ -521,16 +527,16 @@ test('task-2588: fresh diagnostic failure then independent fresh success keeps b
 
 test('task-2588: fresh failure escalates after two independent attempts with no false pass', async () => {
   let launches = 0; const logs: string[] = [];
-  const outcome = await rebound(gateReason, contextFor({ verify: () => ({ ok: false, diagnostic: 'STILL_RED' }), startAgent: async () => ({ result: { status: 0, }, agent: (++launches, 'codex') }), log: message => logs.push(message) }));
+  const outcome = await rebound(gateReason, contextFor({ verify: () => ({ ok: false as const, diagnostic: 'STILL_RED' }), startAgent: async () => ({ result: { status: 0, }, agent: (++launches, 'codex') }), log: message => logs.push(message) }));
   assert.equal(outcome.outcome, 'exhausted'); assert.equal(launches, 2); assert.match(outcome.dossier || '', /fresh-diagnostic/); assert.ok(!/PASS|APPROVED/.test(outcome.dossier || ''));
   assert.ok(logs.some(line => line.includes('RECOVERY_TELEMETRY strategy=fresh-diagnostic outcome=advance')));
   assert.ok(logs.some(line => line.includes('RECOVERY_TELEMETRY strategy=fresh-diagnostic outcome=escalate')));
 });
 
 test('task-2588: first fresh success launches once and emits strategy telemetry', async () => {
-  const launches: any[] = []; const logs: string[] = [];
+  const launches: Parameters<NonNullable<Parameters<typeof rebound>[1]['startAgent']>>[1][] = []; const logs: string[] = [];
   const outcome = await rebound(gateReason, contextFor({
-    startAgent: async (_step, options: any) => (launches.push(options), { agent: 'codex', result: { status: 0 } }),
+    startAgent: async (_step, options) => (launches.push(options), { agent: 'codex', result: { status: 0 } }),
     log: message => logs.push(message),
   }));
   assert.equal(outcome.outcome, 'fixed');
@@ -540,7 +546,7 @@ test('task-2588: first fresh success launches once and emits strategy telemetry'
 
 test('task-2588: no HEAD change and same failure escalate with per-attempt evidence', async () => {
   const outcome = await rebound(gateReason, contextFor({
-    readHead: () => 'head-unchanged', verify: () => ({ ok: false, diagnostic: gateReason.stdout, reason: gateReason }),
+    readHead: () => 'head-unchanged', verify: () => ({ ok: false as const, diagnostic: gateReason.stdout, reason: gateReason }),
   }));
   assert.equal(outcome.outcome, 'exhausted'); assert.equal(outcome.attempts, 2);
   assert.deepEqual(outcome.attemptsDetail?.map(detail => [detail.headBefore, detail.headAfter, detail.fingerprintBefore === detail.fingerprintAfter]), [
@@ -553,7 +559,7 @@ test('task-2588: changed code with the same failure still exhausts the bounded b
   const outcome = await rebound(gateReason, contextFor({
     readHead: () => head,
     startAgent: async () => { head = `after-${++launches}`; return { agent: 'codex', result: { status: 0 } }; },
-    verify: () => ({ ok: false, diagnostic: gateReason.stdout }),
+    verify: () => ({ ok: false as const, diagnostic: gateReason.stdout }),
   }));
   assert.equal(outcome.outcome, 'exhausted'); assert.equal(launches, 2);
   assert.deepEqual(outcome.attemptsDetail?.map(detail => [detail.headBefore, detail.headAfter]), [['before', 'after-1'], ['after-1', 'after-2']]);
@@ -563,7 +569,7 @@ test('task-2588: a changed failure after attempt one remains bounded at two laun
   let launches = 0; let verifies = 0;
   const outcome = await rebound(gateReason, contextFor({
     startAgent: async () => ({ agent: 'codex', result: { status: 0 }, ...(launches++, {}) }),
-    verify: () => ({ ok: false, diagnostic: ++verifies === 1 ? 'SECOND_FAILURE' : 'THIRD_FAILURE' }),
+    verify: () => ({ ok: false as const, diagnostic: ++verifies === 1 ? 'SECOND_FAILURE' : 'THIRD_FAILURE' }),
   }));
   assert.equal(outcome.outcome, 'exhausted'); assert.equal(launches, 2);
   assert.equal(outcome.attemptsDetail?.[0].fingerprintAfter, outcome.attemptsDetail?.[1].fingerprintBefore);
@@ -591,7 +597,7 @@ test('task-2642: a failed relaunch persists as a distinct attempt in the origina
     slug: 'task-2642',
     worktree,
     readHead: () => 'head-unchanged',
-    verify: () => ({ ok: false, diagnostic: gateReason.stdout, reason: gateReason }),
+    verify: () => ({ ok: false as const, diagnostic: gateReason.stdout, reason: gateReason }),
   }));
   assert.equal(outcome.outcome, 'exhausted');
   assert.equal(outcome.attempts, DEFAULT_REBOUND_ATTEMPTS);
@@ -628,21 +634,24 @@ describe("Recovery dossier —", () => {
     error: 'verification gate failed with exit code 1',
   };
 
-  function exhaustingContext(overrides: Partial<ReboundContext> = {}): ReboundContext {
+  function exhaustingContext(t: TestContext, overrides: Partial<ReboundContext> = {}): ReboundContext {
+    const worktree = mkdtemp('kernel-dossier-');
+    t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
     return {
       slug: 'task-2413-exhaust',
-      worktree: '/tmp/task-2413-exhaust',
+      worktree,
       implementer: 'codex',
       startAgent: async () => ({ agent: 'codex', result: { status: 0 } }),
-      verify: () => ({ ok: false, diagnostic: 'still failing after attempt N' }),
+      verify: () => ({ ok: false as const, diagnostic: 'still failing after attempt N' }),
       log: () => {},
       error: () => {},
       ...overrides,
     };
   }
 
-  test('task-2413: an exhausted recovery retains the structured root-failure dossier', async () => {
-    const outcome = await rebound(gateReason, exhaustingContext());
+  test('task-2413: an exhausted recovery retains the structured root-failure dossier', async (t) => {
+    const context = exhaustingContext(t);
+    const outcome = await rebound(gateReason, context);
 
     // Stop reason: the per-occurrence budget was spent.
     assert.equal(outcome.outcome, 'exhausted');
@@ -662,16 +671,16 @@ describe("Recovery dossier —", () => {
     assert.equal(outcome.implementer, 'codex');
     assert.match(outcome.dossier || '', /Successful checks: none recorded before exhaustion/);
     assert.match(outcome.dossier || '', /Stopped because: implementer repair budget \(2\): attempt budget spent \(2\)/);
-    assert.match(outcome.dossier || '', /Manual next action: Repair the reported failure, then rerun \.\/scripts\/verify-local\.sh docs from \/tmp\/task-2413-exhaust\./);
+    assert.ok(outcome.dossier?.includes(`Manual next action: Repair the reported failure, then rerun ./scripts/verify-local.sh docs from ${context.worktree}.`));
   });
 
-  test('task-2413: the exhaustion dossier carries the final diagnostic, not the first', async () => {
+  test('task-2413: the exhaustion dossier carries the final diagnostic, not the first', async (t) => {
     const diagnostics = [
       { ok: false, diagnostic: 'first-run deterministic failure' },
       { ok: false, diagnostic: 'final-run still failing' },
     ];
     let launches = 0;
-    const outcome = await rebound(gateReason, exhaustingContext({
+    const outcome = await rebound(gateReason, exhaustingContext(t, {
       startAgent: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
       verify: () => (diagnostics.length ? diagnostics.shift()! : { ok: false, diagnostic: 'unknown' }),
     }));
@@ -732,7 +741,7 @@ describe("Bounce output elision —", () => {
             capturedPrompt = typeof slot === 'function' ? slot('claude') : String(slot);
             return { agent: 'claude', result: { status: 0 } };
           },
-          verify: () => ({ ok: true }),
+          verify: () => ({ ok: true as const }),
           log: () => {},
           error: () => {},
         },
@@ -761,8 +770,8 @@ describe("Bounce output elision —", () => {
         stderr: '',
       }), {
         slug: 'task-2369.13', worktree: '/worktree', implementer: 'claude',
-        verify: () => ({ ok: true }),
-        startAgent: async (_mode, opts: any) => {
+        verify: () => ({ ok: true as const }),
+        startAgent: async (_mode, opts) => {
           capturedPrompt = typeof opts.prompt === 'function' ? opts.prompt('claude') : String(opts.prompt);
           return { agent: 'claude', result: { status: 0 } };
         },
@@ -871,12 +880,12 @@ describe("Integration gate rebound —", () => {
       gates: [{ key: 'integration-suite', command: GATE_COMMAND, order: 3 }],
       implementer: 'codex',
       repositoryId: 'parallix',
-      startAgentFn: (async () => { harness.launches += 1; return { agent: 'codex', result: { status: 0 } }; }) as never,
+      startAgentFn: (async () => { harness.launches += 1; return { agent: 'codex', result: { status: 0 } }; }),
       transitionTaskFn: async (slug: string) => { harness.transitions.push(slug); return true; },
-      captureFinalTreeFn: (() => ({ ok: true, rootDir: '/tmp/mission', commit: 'c', tree: 't' })) as never,
-      runPhaseGatesFn: (async (_p: string, o: any) => (rerunOk
+      captureFinalTreeFn: (() => ({ ok: true as const, rootDir: '/tmp/mission', commit: 'c', tree: 't' })),
+      runPhaseGatesFn: (async (_p: string, o) => (rerunOk
         ? { ok: true, phase: 'integration', gates: o.gates, executed: 1, skipped: false, dryRun: false, failedGate: null, error: null }
-        : { ok: false, phase: 'integration', gates: o.gates, executed: 1, skipped: false, dryRun: false, failedGate: failedGate(), error: 'still red' })) as never,
+        : { ok: false, phase: 'integration', gates: o.gates, executed: 1, skipped: false, dryRun: false, failedGate: failedGate(), error: 'still red' })),
       log: (m: string) => harness.messages.push(m),
       error: (m: string) => harness.messages.push(m),
       gateRunLog: (m: string) => harness.messages.push(m),
@@ -927,7 +936,7 @@ describe("Integration gate rebound —", () => {
   test('TASK-2492: a repair left uncommitted fails the re-run instead of being reported as fixed', async () => {
     const h = harness();
     const route = await routeIntegrationGateFailure(routeArgs({
-      captureFinalTreeFn: (() => ({ ok: false, error: 'selected execution root is not finalized (dirty tree): /tmp/mission' })) as never,
+      captureFinalTreeFn: (() => ({ ok: false as const, error: 'selected execution root is not finalized (dirty tree): /tmp/mission' })),
     }, h));
     assert.equal(route.route, 'exhausted');
     assert.match(h.messages.join('\n'), /not committed|dirty tree/);
@@ -942,7 +951,7 @@ describe("Integration gate rebound —", () => {
 });
 
 test('rebound domain preserves transient and launch budgets without doubles (TASK-2668.07)', () => {
-  const reason = { ...gateReason, transient: true, environment: true };
+  const reason = { ...gateReason, transient: true, environment: true } satisfies Partial<NonNullable<Parameters<typeof reboundRequiresHuman>[0]>>;
   const classification = classifyReboundReason(reason);
   assert.equal(reboundRequiresHuman(reason, classification), false);
   assert.equal(transientRetryAllowed(reason, 1, 1), true);
@@ -964,16 +973,16 @@ test('rebound domain preserves transient and launch budgets without doubles (TAS
 });
 
 test('first agent-fixable repair uses independent diagnostic context (TASK-2700)', async () => {
-  const launches: any[] = [];
+  const launches: Parameters<NonNullable<Parameters<typeof rebound>[1]['startAgent']>>[1][] = [];
   const outcome = await rebound(gateReason, contextFor({
-    startAgent: async (_step, options: any) => {
+    startAgent: async (_step, options) => {
       launches.push(options);
       return { agent: 'codex', result: { status: 0 } };
     },
   }));
   assert.equal(outcome.outcome, 'fixed');
   assert.equal(launches[0].sessionPolicy, 'fresh-ephemeral');
-  const prompt = launches[0].prompt('codex');
+  const prompt = (typeof launches[0].prompt === 'function' ? launches[0].prompt('codex') : launches[0].prompt);
   assert.match(prompt, /FRESH-CONTEXT DIAGNOSTIC REPAIR REQUIRED/);
   assert.match(prompt, /Original failure evidence/);
   assert.match(prompt, /Latest failure evidence/);

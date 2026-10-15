@@ -96,7 +96,7 @@ function findTaskFile(fileName: string, stores: readonly string[]): string {
       return relative;
     }
   }
-  assert.fail(`expected to find ${fileName} in one of: ${stores.join(', ')}`);
+  return assert.fail(`expected to find ${fileName} in one of: ${stores.join(', ')}`);
 }
 
 function entry(record: TaskRecord, key: string): unknown {

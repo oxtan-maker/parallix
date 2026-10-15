@@ -43,7 +43,7 @@ const TRUSTED_TEMP_ROOTS: string[] = [path.resolve(os.tmpdir())];
 
 function addTrustedTempRoot(root: string): void {
   const resolved = path.resolve(root);
-  if (!TRUSTED_TEMP_ROOTS.includes(resolved)) {TRUSTED_TEMP_ROOTS.push(resolved);}
+  if (!TRUSTED_TEMP_ROOTS.includes(resolved)) { TRUSTED_TEMP_ROOTS.push(resolved); }
 }
 
 function isTemporaryRoot(root: string) {
@@ -54,7 +54,7 @@ function isTemporaryRoot(root: string) {
 function removeRecordedRoots(roots: string[]) {
   for (const root of roots) {
     if (typeof root === 'string' && isTemporaryRoot(root)) {
-      try { fs.rmSync(root, { recursive: true, force: true }); } catch (_) {}
+      try { fs.rmSync(root, { recursive: true, force: true }); } catch (_) { }
     }
   }
 }
@@ -63,12 +63,7 @@ function recoverManifestEntry(manifestDir: string, entry: string, alive: (_pid: 
   const nestedMatch = /^test-run-(\d+)$/.exec(entry);
   const entryPath = path.join(manifestDir, entry);
   if (nestedMatch) {
-    if (alive(Number(nestedMatch[1])) || !ownedDirectory(entryPath)) { return; }
-    for (const workerEntry of fs.readdirSync(entryPath)) {
-      if (!workerEntry.endsWith('.json')) { continue; }
-      try { removeRecordedRoots(manifestRoots(JSON.parse(fs.readFileSync(path.join(entryPath, workerEntry), 'utf8')))); } catch (_) {}
-    }
-    fs.rmSync(entryPath, { recursive: true, force: true });
+    recoverNestedManifest(manifestDir, entryPath, Number(nestedMatch[1]), alive);
     return;
   }
   const pid = Number(path.basename(entry, '.json'));
@@ -77,6 +72,15 @@ function recoverManifestEntry(manifestDir: string, entry: string, alive: (_pid: 
     || !stat.isFile() || stat.isSymbolicLink() || (process.getuid?.() !== undefined && stat.uid !== process.getuid?.())) { return; }
   removeRecordedRoots(manifestRoots(JSON.parse(fs.readFileSync(entryPath, 'utf8'))));
   fs.rmSync(entryPath, { force: true });
+}
+
+function recoverNestedManifest(manifestDir: string, entryPath: string, pid: number, alive: (_pid: number) => boolean): void {
+  if (alive(pid) || !ownedDirectory(entryPath)) { return; }
+  for (const workerEntry of fs.readdirSync(entryPath)) {
+    if (!workerEntry.endsWith('.json')) { continue; }
+    try { removeRecordedRoots(manifestRoots(JSON.parse(fs.readFileSync(path.join(entryPath, workerEntry), 'utf8')))); } catch (_) { }
+  }
+  fs.rmSync(entryPath, { recursive: true, force: true });
 }
 
 function recoverRecordedTempRoots({
@@ -118,7 +122,7 @@ function createTempRootRegistry({ manifestDir = defaultManifestDir(), pid = proc
   };
   const cleanup = () => {
     removeRecordedRoots(roots.splice(0).reverse());
-    try { fs.rmSync(manifestPath, { force: true }); } catch (_) {}
+    try { fs.rmSync(manifestPath, { force: true }); } catch (_) { }
   };
   flush();
   return { cleanup, manifestDir, manifestPath, register, release };

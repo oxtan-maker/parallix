@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 import { resolveConfiguration } from '../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 
@@ -25,39 +24,45 @@ function noopSink() {
   return new Writable({ write(chunk, enc, cb) { cb(); } });
 }
 
-function sleep(ms) {
+function sleep(ms: number|undefined) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function createMockChild(config = {}) {
-  const child = new EventEmitter();
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `pid` absent from its inferred mock shape.
-  child.pid = config.pid || 1234;
-  child.stdout = new EventEmitter();
-  child.stderr = new EventEmitter();
+interface MockChildConfig {
+  pid?: number;
+  chunkGapMs?: number;
+  stdoutChunks?: readonly (string | Buffer)[];
+  stderrChunks?: readonly (string | Buffer)[];
+  stdoutDelayMs?: number;
+  stderrDelayMs?: number;
+  closeDelayMs?: number;
+  status?: number | null;
+  signal?: NodeJS.Signals | null;
+  error?: Error;
+}
 
-  const emitChunks = (stream, chunks = [], delayMs = 0) => {
+function createMockChild(config: MockChildConfig = {}) {
+  const child = Object.assign(new EventEmitter(), {
+    pid: config.pid || 1234,
+    stdout: new EventEmitter(),
+    stderr: new EventEmitter(),
+    kill: (_signal?: NodeJS.Signals | number) => true,
+    disconnect: () => {},
+  });
+
+  const emitChunks = (stream: { emit: (arg0: string,arg1: Buffer) => void; }, chunks: readonly (string | Buffer)[] = [], delayMs = 0) => {
     chunks.forEach((chunk, index) => {
       const payload = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `emit` absent from its inferred mock shape.
       setTimeout(() => stream.emit('data', payload), delayMs + index * (config.chunkGapMs || 0));
     });
   };
-
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `error` absent from its inferred mock shape.
   if (config.error) {
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `emit` absent from its inferred mock shape.
     setImmediate(() => child.emit('error', config.error));
   } else {
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `stdout` absent from its inferred mock shape.
     emitChunks(child.stdout, config.stdoutChunks, config.stdoutDelayMs || 0);
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `stderr` absent from its inferred mock shape.
     emitChunks(child.stderr, config.stderrChunks, config.stderrDelayMs || 0);
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `closeDelayMs` absent from its inferred mock shape.
     const closeDelayMs = config.closeDelayMs ?? Math.max(config.stdoutDelayMs || 0, config.stderrDelayMs || 0) + 1;
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `status` absent from its inferred mock shape.
     const status = config.status === undefined ? 0 : config.status;
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `signal` absent from its inferred mock shape.
     const signal = config.signal === undefined ? null : config.signal;
     setTimeout(() => child.emit('close', status, signal), closeDelayMs);
   }
@@ -65,9 +70,10 @@ function createMockChild(config = {}) {
   return child;
 }
 
-async function withMockSpawn(config, fn) {
-  const observed = [];
-  const mocked = mock.method(childProcess, 'spawn', (command, args, options) => {
+type ObservedSpawn = { command: string; args: readonly string[]; options: childProcess.SpawnOptions };
+async function withMockSpawn<T>(config: MockChildConfig, fn: (observed: ObservedSpawn[]) => Promise<T>): Promise<T> {
+  const observed: ObservedSpawn[] = [];
+  const mocked = mock.method(childProcess, 'spawn', (command: Parameters<(typeof childProcess)["spawn"]>[0], args: Parameters<(typeof childProcess)["spawn"]>[1], options: Parameters<(typeof childProcess)["spawn"]>[2]) => {
     observed.push({ command, args, options });
     return createMockChild(config);
   });
@@ -160,7 +166,7 @@ test('spawnAndTee exposes a sane DEFAULT_MAX_TAIL_BYTES', () => {
 
 test('spawnAndTee reports no-output intervals until the child writes output', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
-  const diagnostics = [];
+  const diagnostics: { command: string; args: string[]; pid: number | undefined; elapsedMs: number; sawOutput: boolean; msSinceLastOutput: number | null; }[] = [];
   const pending = withMockSpawn({
     stdoutChunks: ['ready'],
     stdoutDelayMs: 75,
@@ -188,7 +194,7 @@ test('spawnAndTee reports no-output intervals until the child writes output', as
 
 test('spawnAndTee continues liveness reports after visible output until the child settles', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
-  const diagnostics = [];
+  const diagnostics: { command: string; args: string[]; pid: number | undefined; elapsedMs: number; sawOutput: boolean; msSinceLastOutput: number | null; }[] = [];
   const pending = withMockSpawn({
     stdoutChunks: ['ready'],
     stdoutDelayMs: 5,
@@ -219,12 +225,12 @@ test('spawnAndTee liveness watchdog never kills, signals, or cancels the child',
   // liveness reports it must not touch the child's lifecycle — the result may
   // only come from the child's own close event.
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
-  const diagnostics = [];
-  const lifecycleCalls = [];
+  const diagnostics: { command: string; args: string[]; pid: number | undefined; elapsedMs: number; sawOutput: boolean; msSinceLastOutput: number | null; }[] = [];
+  const lifecycleCalls: string[][] = [];
   const mocked = mock.method(childProcess, 'spawn', () => {
     const child = createMockChild({ status: 0, closeDelayMs: 90 });
-    child.kill = (...args) => { lifecycleCalls.push(['kill', ...args]); return true; };
-    child.disconnect = () => { lifecycleCalls.push(['disconnect']); };
+    child.kill = signal => { lifecycleCalls.push(['kill', ...(signal === undefined ? [] : [String(signal)])]); return true; };
+    child.disconnect = () => { lifecycleCalls.push(['disconnect'] as const); };
     return child;
   });
   let result;
@@ -254,7 +260,7 @@ test('spawnAndTee liveness reports carry sawOutput and the age of the last outpu
   // task-2386 AC #4 payload contract: callers must be able to word the report
   // truthfully once the agent has already produced visible output.
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
-  const diagnostics = [];
+  const diagnostics: { command: string; args: string[]; pid: number | undefined; elapsedMs: number; sawOutput: boolean; msSinceLastOutput: number | null; }[] = [];
   const pending = withMockSpawn({
     stdoutChunks: ['ready'],
     stdoutDelayMs: 5,
@@ -276,12 +282,13 @@ test('spawnAndTee liveness reports carry sawOutput and the age of the last outpu
   assert.equal(result.status, 0);
   const afterOutput = diagnostics.filter(event => event.sawOutput);
   assert.ok(afterOutput.length >= 1, 'expected at least one report flagged as post-output');
+  assert.ok(afterOutput[0].msSinceLastOutput != null);
   assert.ok(afterOutput[0].msSinceLastOutput >= 0);
   assert.ok(afterOutput[0].msSinceLastOutput <= afterOutput[0].elapsedMs);
 });
 
 test('spawnAndTee treats stdout before the first interval as visible output', async () => {
-  const diagnostics = [];
+  const diagnostics: { command: string; args: string[]; pid: number | undefined; elapsedMs: number; sawOutput: boolean; msSinceLastOutput: number | null; }[] = [];
   const result = await withMockSpawn({
     stdoutChunks: ['hello'],
     status: 0
@@ -301,7 +308,7 @@ test('spawnAndTee treats stdout before the first interval as visible output', as
 });
 
 test('spawnAndTee treats stderr before the first interval as visible output', async () => {
-  const diagnostics = [];
+  const diagnostics: { command: string; args: string[]; pid: number | undefined; elapsedMs: number; sawOutput: boolean; msSinceLastOutput: number | null; }[] = [];
   const result = await withMockSpawn({
     stderrChunks: ['warn'],
     status: 0
@@ -321,7 +328,7 @@ test('spawnAndTee treats stderr before the first interval as visible output', as
 });
 
 test('spawnAndTee clears no-output watchdog on clean exit before first interval', async () => {
-  const diagnostics = [];
+  const diagnostics: { command: string; args: string[]; pid: number | undefined; elapsedMs: number; sawOutput: boolean; msSinceLastOutput: number | null; }[] = [];
   const result = await withMockSpawn({
     status: 0,
     closeDelayMs: 1
@@ -341,7 +348,7 @@ test('spawnAndTee clears no-output watchdog on clean exit before first interval'
 });
 
 test('spawnAndTee clears no-output watchdog on spawn error', async () => {
-  const diagnostics = [];
+  const diagnostics: { command: string; args: string[]; pid: number | undefined; elapsedMs: number; sawOutput: boolean; msSinceLastOutput: number | null; }[] = [];
   const result = await withMockSpawn({
     error: new Error('ENOENT')
   }, async () => spawnAndTee('missing-node', [], {
@@ -361,7 +368,7 @@ test('spawnAndTee clears no-output watchdog on spawn error', async () => {
 });
 
 test('spawnAndTee clears no-output watchdog on signal exit', async () => {
-  const diagnostics = [];
+  const diagnostics: { command: string; args: string[]; pid: number | undefined; elapsedMs: number; sawOutput: boolean; msSinceLastOutput: number | null; }[] = [];
   const result = await withMockSpawn({
     signal: 'SIGTERM',
     status: null,
@@ -399,6 +406,7 @@ test('spawnAndTee rewrites PWD to the spawned cwd so child CLIs see the mission 
       stderrSink: noopSink()
     }).then(res => {
       assert.equal(observed[0].options.cwd, tmpRoot);
+      assert.ok(observed[0].options.env);
       assert.equal(observed[0].options.env.PWD, tmpRoot);
       return res;
     }));
@@ -434,8 +442,8 @@ test('spawnAndTee leaves no-output watchdog intact when no stall cutoff is confi
 
 test('spawnAndTee marks a real no-output deadline as a bounded timeout', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
-  const signals = [];
-  const kill = mock.method(process, 'kill', (_pid, signal) => { signals.push(signal); return true; });
+  const signals: (string | number | undefined)[] = [];
+  const kill = mock.method(process, 'kill', (_pid: Parameters<(typeof process)["kill"]>[0], signal: Parameters<(typeof process)["kill"]>[1]) => { signals.push(signal); return true; });
   const pending = withMockSpawn({ stdoutChunks: ['Interrupted'], stdoutDelayMs: 10, closeDelayMs: 600, status: 1 }, async () => spawnAndTee('mock-node', [], {
     stdoutSink: noopSink(), stderrSink: noopSink(), noOutputWatchdog: { maxNoOutputMs: 5 },
   }));
@@ -469,7 +477,7 @@ test('spawnAndTee installs parent signal forwarding only for detached deadline l
 });
 
 test('spawnAndTee hands every chunk to the durable capture before the tail bound (TASK-2643)', async () => {
-  const captured = { stdout: [], stderr: [] };
+  const captured: Record<'stdout' | 'stderr', Buffer[]> = { stdout: [], stderr: [] };
   const result = await withMockSpawn({
     stdoutChunks: ['first ', 'x'.repeat(2048), ' last'],
     stderrChunks: ['warn'],
@@ -486,14 +494,14 @@ test('spawnAndTee hands every chunk to the durable capture before the tail bound
 });
 
 test('spawnAndTee spawns the terminal host command and cleans it up once (TASK-2643)', async () => {
-  const hosted = [];
+  const hosted: { launch: { command: string; args: string[]; }; cwd: string; }[] = [];
   let cleanups = 0;
   const terminalHost = {
     host: (launch, context) => {
       hosted.push({ launch, cwd: context.cwd });
       return { command: 'sh', args: ['/state/host.sh'], cleanup: () => { cleanups += 1; } };
     }
-  };
+  } satisfies import("../../../../src/adapters/process/spawn-tee.js").TerminalHost;
   await withMockSpawn({ stdoutChunks: ['ok'], status: 3 }, async (observed) => {
     const result = await spawnAndTee('agent-cli', ['--flag'], { stdoutSink: noopSink(), stderrSink: noopSink(), terminalHost });
     assert.equal(result.status, 3, 'the hosted command exit status is the launch status');
@@ -507,8 +515,8 @@ test('spawnAndTee spawns the terminal host command and cleans it up once (TASK-2
 
 test('a launched agent is hosted without decision-provider credentials (TASK-2704)', async () => {
   const names = ['TYPESAFE_API_KEY', 'OPENROUTER_API_KEY', 'AI_GATEWAY_API_KEY'];
-  const hostedEnv = [];
-  const terminalHost = { host: (_launch, context) => { hostedEnv.push(context.env); return { command: 'sh', args: ['/state/host.sh'], cleanup: () => {} }; } };
+  const hostedEnv: NodeJS.ProcessEnv[] = [];
+  const terminalHost = { host: (_launch, context) => { hostedEnv.push(context.env); return { command: 'sh', args: ['/state/host.sh'], cleanup: () => {} }; } } satisfies import("../../../../src/adapters/process/spawn-tee.js").TerminalHost;
   const env = { KEEP_ME: '1', ...Object.fromEntries(names.map(name => [name, 'sentinel'])) };
   await withMockSpawn({ stdoutChunks: [], status: 0 }, async () => spawnAndTee('agent-cli', [], { env, stdoutSink: noopSink(), stderrSink: noopSink(), terminalHost }));
   assert.equal(hostedEnv.length, 1);
@@ -517,10 +525,11 @@ test('a launched agent is hosted without decision-provider credentials (TASK-270
 });
 
 test('spawnAndTee reports a terminal host that cannot prepare as a launch error (TASK-2643)', async () => {
-  const terminalHost = { host: () => { throw Object.assign(new Error('mkfifo failed'), { code: 'EACCES' }); } };
+  const terminalHost = { host: () => { throw Object.assign(new Error('mkfifo failed'), { code: 'EACCES' }); } } satisfies import("../../../../src/adapters/process/spawn-tee.js").TerminalHost;
   await withMockSpawn({ stdoutChunks: ['never'], status: 0 }, async (observed) => {
     const result = await spawnAndTee('agent-cli', [], { stdoutSink: noopSink(), stderrSink: noopSink(), terminalHost });
     assert.equal(result.status, null);
+    assert.ok(result.error instanceof Error);
     assert.equal(result.error.message, 'mkfifo failed');
     assert.equal(observed.length, 0, 'nothing is spawned when the host cannot prepare');
   });
@@ -535,6 +544,7 @@ test('spawnAndTee never passes decision-provider credentials to a launched child
     await withMockSpawn({ stdoutChunks: [], status: 0 }, async (observed) => spawnAndTee('mock-node', [], {
       cwd: tmpRoot, env: { OPENROUTER_API_KEY: 'sentinel', KEEP_ME: '1' }, stdoutSink: noopSink(), stderrSink: noopSink()
     }).then(res => {
+      assert.ok(observed[0].options.env);
       for (const name of names) { assert.equal(name in observed[0].options.env, false, `${name} leaked to the child`); }
       assert.equal(observed[0].options.env.KEEP_ME, '1');
       return res;
@@ -546,12 +556,50 @@ test('spawnAndTee never passes decision-provider credentials to a launched child
 });
 
 test('spawnAndTee passes the requested host presentation to the terminal host and keeps raw output in the tail (TASK-2735)', async () => {
-  const contexts = [];
-  const terminalHost = { host: (_launch, context) => { contexts.push(context.presentation); return { command: 'sh', args: ['/state/host.sh'], cleanup: () => {} }; } };
+  const contexts: (string | undefined)[] = [];
+  const terminalHost = { host: (_launch, context) => { contexts.push(context.presentation); return { command: 'sh', args: ['/state/host.sh'], cleanup: () => {} }; } } satisfies import("../../../../src/adapters/process/spawn-tee.js").TerminalHost;
   await withMockSpawn({ stdoutChunks: ['{"type":"result"}\n'], status: 0 }, async (observed) => {
     const result = await spawnAndTee('agent-cli', [], { stdoutSink: noopSink(), stderrSink: noopSink(), terminalHost, hostPresentation: 'claude-stream' });
     assert.equal(result.stdout, '{"type":"result"}\n');
-    assert.equal(observed[0].options.hostPresentation, undefined, 'the option is not forwarded to child_process.spawn');
+    assert.equal('hostPresentation' in observed[0].options, false, 'the option is not forwarded to child_process.spawn');
   });
   assert.deepEqual(contexts, ['claude-stream']);
+});
+
+test('spawnAndTee writes supplied input to a piped stdin and ends it; a closed stdin pipe stays the exit status (TASK-2760)', async () => {
+  const input = Buffer.from('prompt — 修复 🚀\n'.repeat(3));
+  for (const failWrite of [false, true]) {
+    const received: Buffer[] = [];
+    let ended = false;
+    let stdio: childProcess.StdioOptions | undefined;
+    const mocked = mock.method(childProcess, 'spawn', (_command: string, _args: readonly string[], options: childProcess.SpawnOptions) => {
+      stdio = options.stdio;
+      const stdin = new Writable({
+        write(chunk, _enc, cb) { received.push(chunk); cb(failWrite ? Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }) : null); },
+        final(cb) { ended = true; cb(); },
+      });
+      return Object.assign(createMockChild({ status: failWrite ? 1 : 0, closeDelayMs: 5 }), { stdin });
+    });
+    try {
+      const result = await spawnAndTee('agent-cli', ['-'], { stdoutSink: noopSink(), stderrSink: noopSink(), input: input.toString('utf8') });
+      assert.equal(stdio?.[0], 'pipe');
+      assert.ok(Buffer.concat(received).equals(input), 'exact prompt bytes reach stdin');
+      assert.equal(result.status, failWrite ? 1 : 0, 'an unread prompt is reported through the exit status, not a launcher crash');
+      if (!failWrite) { assert.equal(ended, true, 'stdin ends with EOF after the prompt'); }
+    } finally {
+      mocked.mock.restore();
+    }
+  }
+});
+
+test('spawnAndTee keeps stdin inherited without input and hands input to the terminal host instead of a pipe (TASK-2760)', async () => {
+  const launches: Parameters<import('../../../../src/adapters/process/spawn-tee.js').TerminalHost['host']>[0][] = [];
+  const terminalHost = { host: (launch) => { launches.push(launch); return { command: 'sh', args: ['/state/host.sh'], cleanup: () => {} }; } } satisfies import('../../../../src/adapters/process/spawn-tee.js').TerminalHost;
+  await withMockSpawn({ status: 0 }, async (observed) => {
+    await spawnAndTee('agent-cli', ['-'], { stdoutSink: noopSink(), stderrSink: noopSink() });
+    await spawnAndTee('agent-cli', ['-'], { stdoutSink: noopSink(), stderrSink: noopSink(), terminalHost, input: 'hosted prompt' });
+    assert.deepEqual(observed.map(call => call.options.stdio?.[0]), ['inherit', 'inherit']);
+  });
+  assert.equal(launches.length, 1);
+  assert.ok(Buffer.isBuffer(launches[0].input) && launches[0].input.toString('utf8') === 'hosted prompt');
 });

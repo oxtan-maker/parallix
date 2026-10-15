@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 
 // ---------------------------------------------------------------------------
@@ -117,36 +116,36 @@ test('buildRebasePrompt omits mission-specific section when empty', () => {
 // ---------------------------------------------------------------------------
 
 test('rebase exits 1 when no slug can be inferred', async () => {
-  let exitCode = null;
+  let exitCode: { value: number | null } = { value: null };
   await rebase([], {
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => null,
-    exitFn: code => { exitCode = code; },
+    exitFn: code => { exitCode.value = code; },
   });
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
 });
 
 test('rebase exits 1 when not on the correct branch', async () => {
-  let exitCode = null;
+  let exitCode: { value: number | null } = { value: null };
   await rebase(['task-1018'], {
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1018',
     detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
     getCurrentBranchFn: () => 'feature/foo',
-    exitFn: code => { exitCode = code; },
+    exitFn: code => { exitCode.value = code; },
   });
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
 });
 
 test('rebase exits 1 with recovery guidance when a rebase is already in progress', async () => {
-  const capturedStdout = [];
-  const capturedStderr = [];
+  const capturedStdout: string[] = [];
+  const capturedStderr: string[] = [];
   const originalLog = console.log;
   const originalError = console.error;
   console.log = (...args) => { capturedStdout.push(args.join(' ')); };
   console.error = (...args) => { capturedStderr.push(args.join(' ')); };
 
-  let exitCode = null;
+  let exitCode: { value: number | null } = { value: null };
   let attemptedFreshRebase = false;
 
   try {
@@ -173,9 +172,9 @@ test('rebase exits 1 with recovery guidance when a rebase is already in progress
         if (args.includes('rebase') && args.includes('main')) {
           attemptedFreshRebase = true;
         }
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
-      exitFn: code => { exitCode = code; },
+      exitFn: code => { exitCode.value = code; },
     });
   } finally {
     console.log = originalLog;
@@ -183,7 +182,7 @@ test('rebase exits 1 with recovery guidance when a rebase is already in progress
   }
 
   const output = [...capturedStderr, ...capturedStdout].join('\n');
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.equal(attemptedFreshRebase, false);
   assert.match(output, /Rebase already in progress for mission\/task-1322/);
   assert.match(output, /Current rebase head: abc123def456/);
@@ -194,7 +193,7 @@ test('rebase exits 1 with recovery guidance when a rebase is already in progress
 });
 
 test('rebase exits 0 on clean rebase', async () => {
-  let exitCode = null;
+  let exitCode: { value: number | null } = { value: null };
   await rebase(['task-1018'], {
     inferSlugFn: () => 'task-1018',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1018',
@@ -203,23 +202,23 @@ test('rebase exits 0 on clean rebase', async () => {
     getCurrentBranchFn: () => 'mission/task-1018',
     isForgejoReviewEnabledFn: () => true,
     gitFn: args => {
-      if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
+      if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
       if (gitSubcommandArgs(args)[0] === 'rebase' && gitSubcommandArgs(args)[1] === '--show-current') {
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     },
-    exitFn: code => { exitCode = code; },
+    exitFn: code => { exitCode.value = code; },
   });
-  assert.equal(exitCode, 0);
+  assert.equal(exitCode.value, 0);
 });
 
 test('rebase targets the mission recorded base branch, not the primary branch', async () => {
-  let exitCode = null;
-  let rebaseTarget = null;
+  let exitCode: { value: number | null } = { value: null };
+  let rebaseTarget: { value: string | null } = { value: null };
   await rebase(['task-1350'], {
     inferSlugFn: () => 'task-1350',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1350',
@@ -231,22 +230,22 @@ test('rebase targets the mission recorded base branch, not the primary branch', 
     gitFn: args => {
       const rebaseIdx = args.indexOf('rebase');
       if (rebaseIdx !== -1 && args[rebaseIdx + 1] && !args[rebaseIdx + 1].startsWith('--')) {
-        rebaseTarget = args[rebaseIdx + 1];
-        return { status: 0, stdout: '', stderr: '' };
+        rebaseTarget.value = args[rebaseIdx + 1];
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
       if (gitSubcommandArgs(args)[0] === 'rebase' && gitSubcommandArgs(args)[1] === '--show-current') {
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     },
-    exitFn: code => { exitCode = code; },
+    exitFn: code => { exitCode.value = code; },
   });
-  assert.equal(exitCode, 0);
-  assert.equal(rebaseTarget, 'skunkworks');
+  assert.equal(exitCode.value, 0);
+  assert.equal(rebaseTarget.value, 'skunkworks');
 });
 
 test('rebase uses local main and does not fetch Forgejo even when review is enabled', async () => {
-  let exitCode = null;
+  let exitCode: { value: number | null } = { value: null };
   let fetchCalled = false;
   await rebase(['task-1018'], {
     inferSlugFn: () => 'task-1018',
@@ -257,26 +256,26 @@ test('rebase uses local main and does not fetch Forgejo even when review is enab
     isForgejoReviewEnabledFn: () => true,
     fetchReviewBranchFn: () => {
       fetchCalled = true;
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     },
     gitFn: args => {
-      if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
+      if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
       if (gitSubcommandArgs(args)[0] === 'rebase' && gitSubcommandArgs(args)[1] === '--show-current') {
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     },
-    exitFn: code => { exitCode = code; },
+    exitFn: code => { exitCode.value = code; },
   });
-  assert.equal(exitCode, 0);
+  assert.equal(exitCode.value, 0);
   assert.equal(fetchCalled, false);
 });
 
 test('rebase detects non-conflict rebase failure', async () => {
-  let exitCode = null;
+  let exitCode: { value: number | null } = { value: null };
   await rebase(['task-1018'], {
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1018',
@@ -285,20 +284,20 @@ test('rebase detects non-conflict rebase failure', async () => {
     detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
     getCurrentBranchFn: () => 'mission/task-1018',
     gitFn: args => {
-      if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (gitSubcommandArgs(args)[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'fetch') return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
-        return { status: 128, stdout: 'fatal: not a git repository', stderr: '' };
+        return { signal: null,  status: 128, stdout: 'fatal: not a git repository', stderr: '' };
       }
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     },
-    exitFn: code => { exitCode = code; },
+    exitFn: code => { exitCode.value = code; },
   });
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
 });
 
 test('rebase detects localized KONFLIKT in rebase output', async () => {
-  let exitCode = null;
+  let exitCode: { value: number | null } = { value: null };
   await rebase(['task-1018'], {
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1018',
@@ -307,22 +306,22 @@ test('rebase detects localized KONFLIKT in rebase output', async () => {
     detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
     getCurrentBranchFn: () => 'mission/task-1018',
     resolveConflictsFn: () => ({
-      ok: true,
+      ok: true as const,
       conflictFiles: ['backlog/tasks/task-1018.md'],
       missionSpecificFiles: ['backlog/tasks/task-1018.md'],
       sharedFiles: [],
     }),
     gitFn: args => {
-      if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (gitSubcommandArgs(args)[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'fetch') return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
-        return { status: 1, stdout: '', stderr: 'KONFLIKT (innehåll): Sammanslagningskonflikt i backlog/tasks/task-1018.md\n' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'KONFLIKT (innehåll): Sammanslagningskonflikt i backlog/tasks/task-1018.md\n' };
       }
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     },
-    exitFn: code => { exitCode = code; },
+    exitFn: code => { exitCode.value = code; },
   });
-  assert.equal(exitCode, 0);
+  assert.equal(exitCode.value, 0);
 });
 
 // ---------------------------------------------------------------------------
@@ -463,8 +462,8 @@ test('rebase task-1057 flow: sharedFiles and prompt contain only workflow/docs/a
     "tips: 'git rm' för att ta bort filen (KONFLIKT löses då automatiskt)",
   ].join('\n');
 
-  let capturedPrompt = null;
-  let exitCode = null;
+  const capturedPrompt: { value: string | null } = { value: null };
+  let exitCode: { value: number | null } = { value: null };
 
   await rebase(['task-1057'], {
     // Git is injected below; completion probes must use the same isolated state.
@@ -475,37 +474,39 @@ test('rebase task-1057 flow: sharedFiles and prompt contain only workflow/docs/a
     findMissionDirFn: () => '/tmp/missions/docs/missions/2026/task-1057',
     findMissionAreaFn: () => 'workflow',
     getCurrentBranchFn: () => 'mission/task-1057',
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1057.md' }),
+    resolveTaskFileFn: () => ({ matches: ['/tmp/task-1057.md'],  ok: true as const, taskFile: '/tmp/task-1057.md' }),
     getTaskImplementerFn: () => 'claude',
     // merge-failed triggers the git status --porcelain fallback
-    resolveConflictsFn: () => ({ ok: false, error: 'merge-failed' }),
+    resolveConflictsFn: () => ({ ok: false as const, error: 'merge-failed', conflictFiles: [], missionSpecificFiles: [], sharedFiles: [] }),
     startAgentFn: async (_mode, { prompt }) => {
-      capturedPrompt = prompt;
+      assert.equal(typeof prompt, 'string');
+      assert.ok(typeof prompt === 'string');
+      capturedPrompt.value = prompt;
       return { agent: 'test-agent', result: { status: 0 } };
     },
     gitFn: (args) => {
-      if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (gitSubcommandArgs(args)[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'fetch') return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
-        return { status: 1, stdout: '', stderr: SWEDISH_REBASE_OUTPUT };
+        return { signal: null,  status: 1, stdout: '', stderr: SWEDISH_REBASE_OUTPUT };
       }
       // git status --porcelain (direct or via -C <worktreePath>)
       const statusIdx = args.indexOf('status');
       if (statusIdx !== -1 && args[statusIdx + 1] === '--porcelain') {
-        return { status: 0, stdout: 'UU\tworkflow/docs/agents.md\n', stderr: '' };
+        return { signal: null,  status: 0, stdout: 'UU\tworkflow/docs/agents.md\n', stderr: '' };
       }
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     },
-    exitFn: code => { exitCode = code; },
+    exitFn: code => { exitCode.value = code; },
   });
 
-  assert.ok(capturedPrompt !== null, 'agent should have been launched with a prompt');
-  assert.match(capturedPrompt, /workflow\/docs\/agents\.md/);
+  assert.ok(capturedPrompt.value !== null, 'agent should have been launched with a prompt');
+  assert.match(capturedPrompt.value, /workflow\/docs\/agents\.md/);
   assert.ok(
-    !capturedPrompt.includes('\n  - tips') && !capturedPrompt.includes('  - tips\n'),
-    `prompt must not list 'tips' as a shared file but got:\n${capturedPrompt}`
+    !capturedPrompt.value.includes('\n  - tips') && !capturedPrompt.value.includes('  - tips\n'),
+    `prompt must not list 'tips' as a shared file but got:\n${capturedPrompt.value}`
   );
-  assert.equal(exitCode, 0);
+  assert.equal(exitCode.value, 0);
 });
 
 // ---------------------------------------------------------------------------
@@ -542,10 +543,10 @@ test('parseConflictFilesFromRebaseOutput task-1057: does not treat hint advice a
 // ---------------------------------------------------------------------------
 
 test('rebase detects staged-no-conflict continuation after failed git rebase --continue', async () => {
-  let exitCode = null;
+  let exitCode: { value: number | null } = { value: null };
   let stdoutLines = [];
   let continueCalls = 0;
-  const capturedStdout = [];
+  const capturedStdout: string[] = [];
   const originalLog = console.log;
   console.log = (...args) => { capturedStdout.push(args.join(' ')); };
 
@@ -558,57 +559,57 @@ test('rebase detects staged-no-conflict continuation after failed git rebase --c
     findMissionAreaFn: () => 'docs',
     getCurrentBranchFn: () => 'mission/task-1035',
     resolveConflictsFn: () => ({
-      ok: true,
+      ok: true as const,
       conflictFiles: ['docs/missions/2026/task-1035/MISSION.md'],
       missionSpecificFiles: ['docs/missions/2026/task-1035/MISSION.md'],
       sharedFiles: [],
     }),
     gitFn: (args, opts) => {
-      if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (gitSubcommandArgs(args)[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'fetch') return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
-        return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n' };
       }
       if (gitSubcommandArgs(args)[0] === 'checkout' && gitSubcommandArgs(args)[2] === 'docs/missions/2026/task-1035/MISSION.md') {
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
-      if (gitSubcommandArgs(args)[0] === 'add') return { status: 0, stdout: '', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'add') return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('--continue')) {
         continueCalls += 1;
         // Fail the first call to trigger the retry path
         if (continueCalls > 1) {
-          return { status: 0, stdout: '', stderr: '' };
+          return { signal: null,  status: 0, stdout: '', stderr: '' };
         }
-        return { status: 1, stdout: '', stderr: 'hook declined' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'hook declined' };
       }
       if (gitSubcommandArgs(args)[0] === 'status' && gitSubcommandArgs(args)[1] === '--porcelain') {
         // No unresolved conflicts — staged but clean
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
       if (args.includes('rebase') && args.includes('--show-current')) {
         // Rebase still in progress
-        return { status: 0, stdout: 'mission/task-1035', stderr: '' };
+        return { signal: null,  status: 0, stdout: 'mission/task-1035', stderr: '' };
       }
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     },
-    exitFn: code => { exitCode = code; },
+    exitFn: code => { exitCode.value = code; },
   });
 
   console.log = originalLog;
   stdoutLines = capturedStdout;
 
   // Should have retried --continue (second call) and completed
-  assert.equal(exitCode, 0);
+  assert.equal(exitCode.value, 0);
   const combined = stdoutLines.join('\n');
   assert.match(combined, /Continuing rebase/i);
   assert.match(combined, /No unresolved conflicts|staged|all conflicts resolved/i);
 });
 
 test('rebase detects empty/no-op pick and guides operator', async () => {
-  let exitCode = null;
+  let exitCode: { value: number | null } = { value: null };
   let stdoutLines = [];
   let continueCalls = 0;
-  const capturedStdout = [];
+  const capturedStdout: string[] = [];
   const originalLog = console.log;
   console.log = (...args) => { capturedStdout.push(args.join(' ')); };
 
@@ -621,49 +622,49 @@ test('rebase detects empty/no-op pick and guides operator', async () => {
     findMissionAreaFn: () => 'docs',
     getCurrentBranchFn: () => 'mission/task-1035',
     resolveConflictsFn: () => ({
-      ok: true,
+      ok: true as const,
       conflictFiles: ['docs/missions/2026/task-1035/MISSION.md'],
       missionSpecificFiles: ['docs/missions/2026/task-1035/MISSION.md'],
       sharedFiles: [],
     }),
     gitFn: (args, opts) => {
-      if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (gitSubcommandArgs(args)[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'fetch') return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
-        return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n' };
       }
       if (args.includes('rebase') && args.includes('--continue')) {
         continueCalls += 1;
         // Empty pick — no changes, just drops the commit
         if (continueCalls > 1) {
-          return { status: 0, stdout: '', stderr: '' };
+          return { signal: null,  status: 0, stdout: '', stderr: '' };
         }
-        return { status: 1, stdout: '', stderr: 'Aborting commit; try again' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'Aborting commit; try again' };
       }
       if (gitSubcommandArgs(args)[0] === 'status' && gitSubcommandArgs(args)[1] === '--porcelain') {
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
       if (gitSubcommandArgs(args)[0] === 'rebase' && gitSubcommandArgs(args)[1] === '--show-current') {
-        return { status: 0, stdout: 'mission/task-1035', stderr: '' };
+        return { signal: null,  status: 0, stdout: 'mission/task-1035', stderr: '' };
       }
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     },
-    exitFn: code => { exitCode = code; },
+    exitFn: code => { exitCode.value = code; },
   });
 
   console.log = originalLog;
   stdoutLines = capturedStdout;
 
   // Should detect empty pick and continue
-  assert.equal(exitCode, 0);
+  assert.equal(exitCode.value, 0);
   const combined = stdoutLines.join('\n');
   assert.match(combined, /Continuing rebase/i);
 });
 
 test('rebase caps failed continue retries when rebase remains active', async () => {
-  let exitCode = null;
-  const capturedStdout = [];
-  const capturedStderr = [];
+  let exitCode: { value: number | null } = { value: null };
+  const capturedStdout: string[] = [];
+  const capturedStderr: string[] = [];
   const originalLog = console.log;
   const originalError = console.error;
   let continueCalls = 0;
@@ -679,53 +680,53 @@ test('rebase caps failed continue retries when rebase remains active', async () 
     findMissionAreaFn: () => 'docs',
     getCurrentBranchFn: () => 'mission/task-1035',
     resolveConflictsFn: () => ({
-      ok: true,
+      ok: true as const,
       conflictFiles: ['docs/missions/2026/task-1035/MISSION.md'],
       missionSpecificFiles: ['docs/missions/2026/task-1035/MISSION.md'],
       sharedFiles: [],
     }),
     gitFn: (args, opts) => {
-      if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (gitSubcommandArgs(args)[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'fetch') return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
-        return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n' };
       }
       if (gitSubcommandArgs(args)[0] === 'checkout' && gitSubcommandArgs(args)[2] === 'docs/missions/2026/task-1035/MISSION.md') {
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
-      if (gitSubcommandArgs(args)[0] === 'add') return { status: 0, stdout: '', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'add') return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('--continue')) {
         continueCalls += 1;
         if (args.includes('core.editor=true')) {
-          return { status: 1, stdout: '', stderr: 'hook declined again' };
+          return { signal: null,  status: 1, stdout: '', stderr: 'hook declined again' };
         }
-        return { status: 1, stdout: '', stderr: 'hook declined' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'hook declined' };
       }
       if (gitSubcommandArgs(args)[0] === 'status' && gitSubcommandArgs(args)[1] === '--porcelain') {
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
       if (gitSubcommandArgs(args)[0] === 'rebase' && gitSubcommandArgs(args)[1] === '--show-current') {
-        return { status: 0, stdout: 'mission/task-1035', stderr: '' };
+        return { signal: null,  status: 0, stdout: 'mission/task-1035', stderr: '' };
       }
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     },
-    exitFn: code => { exitCode = code; },
+    exitFn: code => { exitCode.value = code; },
   });
 
   console.log = originalLog;
   console.error = originalError;
 
   assert.equal(continueCalls, 3);
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.match(capturedStderr.join('\n'), /after 3 failed --continue attempt/);
   assert.match(capturedStderr.join('\n'), /git rebase --skip/);
 });
 
 test('rebase distinguishes hook failure from genuine conflict after --continue', async () => {
-  let exitCode = null;
+  let exitCode: { value: number | null } = { value: null };
   let stdoutLines = [];
   let continueCalls = 0;
-  const capturedStdout = [];
+  const capturedStdout: string[] = [];
   const originalLog = console.log;
   console.log = (...args) => { capturedStdout.push(args.join(' ')); };
 
@@ -738,45 +739,45 @@ test('rebase distinguishes hook failure from genuine conflict after --continue',
     findMissionAreaFn: () => 'docs',
     getCurrentBranchFn: () => 'mission/task-1035',
     resolveConflictsFn: () => ({
-      ok: true,
+      ok: true as const,
       conflictFiles: ['docs/missions/2026/task-1035/MISSION.md'],
       missionSpecificFiles: ['docs/missions/2026/task-1035/MISSION.md'],
       sharedFiles: [],
     }),
     gitFn: (args, opts) => {
-      if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (gitSubcommandArgs(args)[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'fetch') return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
-        return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n' };
       }
       if (gitSubcommandArgs(args)[0] === 'checkout' && gitSubcommandArgs(args)[2] === 'docs/missions/2026/task-1035/MISSION.md') {
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
-      if (gitSubcommandArgs(args)[0] === 'add') return { status: 0, stdout: '', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'add') return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('--continue')) {
         continueCalls += 1;
         // First --continue: hook fails
         if (continueCalls > 1) {
-          return { status: 0, stdout: '', stderr: '' };
+          return { signal: null,  status: 0, stdout: '', stderr: '' };
         }
-        return { status: 1, stdout: '', stderr: 'pre-commit hook declined' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'pre-commit hook declined' };
       }
       if (gitSubcommandArgs(args)[0] === 'status' && gitSubcommandArgs(args)[1] === '--porcelain') {
         // No unresolved conflicts
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
       if (gitSubcommandArgs(args)[0] === 'rebase' && gitSubcommandArgs(args)[1] === '--show-current') {
-        return { status: 0, stdout: 'mission/task-1035', stderr: '' };
+        return { signal: null,  status: 0, stdout: 'mission/task-1035', stderr: '' };
       }
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     },
-    exitFn: code => { exitCode = code; },
+    exitFn: code => { exitCode.value = code; },
   });
 
   console.log = originalLog;
   stdoutLines = capturedStdout;
 
-  assert.equal(exitCode, 0);
+  assert.equal(exitCode.value, 0);
   const combined = stdoutLines.join('\n');
   // Should show "all conflicts resolved" message after retry succeeds
   assert.match(combined, /Mission-specific conflicts resolved/i);
@@ -800,7 +801,7 @@ test('rebase exits 1 when base is not an ancestor of HEAD', async () => {
   console.log = (...args) => { captured.push(args.join(' ')); };
   console.error = (...args) => { captured.push(args.join(' ')); };
 
-  let exitCode = null;
+  let exitCode: { value: number | null } = { value: null };
   let pushed = false;
   try {
     await rebase(['task-2323'], {
@@ -811,15 +812,15 @@ test('rebase exits 1 when base is not an ancestor of HEAD', async () => {
       getCurrentBranchFn: () => 'mission/task-2323',
       isForgejoReviewEnabledFn: () => true,
       resolveMissionBaseBranchFn: () => 'skunkworks',
-      createPrFn: () => { pushed = true; return { ok: true }; },
+      createPrFn: () => { pushed = true; return { ok: true as const }; },
       gitFn: args => {
-        if (isAncestryCheck(args)) return { status: 1, stdout: '', stderr: '' };
+        if (isAncestryCheck(args)) return { signal: null,  status: 1, stdout: '', stderr: '' };
         if (gitSubcommandArgs(args)[0] === 'rev-parse') {
-          return { status: 0, stdout: 'deadbee1234567\n', stderr: '' };
+          return { signal: null,  status: 0, stdout: 'deadbee1234567\n', stderr: '' };
         }
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
-      exitFn: code => { exitCode = code; },
+      exitFn: code => { exitCode.value = code; },
     });
   } finally {
     console.log = originalLog;
@@ -827,7 +828,7 @@ test('rebase exits 1 when base is not an ancestor of HEAD', async () => {
   }
 
   const output = captured.join('\n');
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.equal(pushed, false, 'must not push a branch that failed the ancestry postcondition');
   assert.doesNotMatch(output, /Rebase completed cleanly/);
   assert.match(output, /skunkworks/);
@@ -838,8 +839,8 @@ test('rebase exits 1 when base is not an ancestor of HEAD', async () => {
 });
 
 test('rebase clean rebase verifies ancestry before reporting success', async () => {
-  let exitCode = null;
-  let ancestryArgs = null;
+  let exitCode: { value: number | null } = { value: null };
+  let ancestryArgs: { value: string[] | null } = { value: null };
   await rebase(['task-2323'], {
     inferSlugFn: () => 'task-2323',
     findMissionDirFn: () => '/tmp/missions/task-2323',
@@ -850,20 +851,20 @@ test('rebase clean rebase verifies ancestry before reporting success', async () 
     resolveMissionBaseBranchFn: () => 'main',
     gitFn: args => {
       if (isAncestryCheck(args)) {
-        ancestryArgs = gitSubcommandArgs(args);
-        return { status: 0, stdout: '', stderr: '' };
+        ancestryArgs.value = gitSubcommandArgs(args);
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     },
-    exitFn: code => { exitCode = code; },
+    exitFn: code => { exitCode.value = code; },
   });
 
-  assert.equal(exitCode, 0);
-  assert.deepEqual(ancestryArgs, ['merge-base', '--is-ancestor', 'main', 'HEAD']);
+  assert.equal(exitCode.value, 0);
+  assert.deepEqual(ancestryArgs.value, ['merge-base', '--is-ancestor', 'main', 'HEAD']);
 });
 
 test('rebase mission-specific resolution verifies ancestry before reporting success', async () => {
-  let exitCode = null;
+  let exitCode: { value: number | null } = { value: null };
   let ancestryChecked = false;
   await rebase(['task-2323'], {
     inferSlugFn: () => 'task-2323',
@@ -874,7 +875,7 @@ test('rebase mission-specific resolution verifies ancestry before reporting succ
     isForgejoReviewEnabledFn: () => false,
     resolveMissionBaseBranchFn: () => 'main',
     resolveConflictsFn: () => ({
-      ok: true,
+      ok: true as const,
       conflictFiles: ['missions/task-2323/MISSION.md'],
       missionSpecificFiles: ['missions/task-2323/MISSION.md'],
       sharedFiles: [],
@@ -882,30 +883,30 @@ test('rebase mission-specific resolution verifies ancestry before reporting succ
     gitFn: args => {
       if (isAncestryCheck(args)) {
         ancestryChecked = true;
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
       const tail = gitSubcommandArgs(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in missions/task-2323/MISSION.md\n' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in missions/task-2323/MISSION.md\n' };
       }
       if (tail[0] === 'rebase' && tail[1] === '--show-current') {
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     },
-    exitFn: code => { exitCode = code; },
+    exitFn: code => { exitCode.value = code; },
   });
 
-  assert.equal(exitCode, 0);
+  assert.equal(exitCode.value, 0);
   assert.equal(ancestryChecked, true, 'auto-resolve success path must verify base ancestry');
 });
 
 test('rebase agent-assisted rebase rechecks ancestry after conflict resolution', async () => {
-  let exitCode = null;
+  let exitCode: { value: number | null } = { value: null };
   let ancestryChecked = false;
   let agentLaunched = false;
   await rebase(['task-2323'], {
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-2323.md' }),
+    resolveTaskFileFn: () => ({ matches: ['/tmp/task-2323.md'],  ok: true as const, taskFile: '/tmp/task-2323.md' }),
     getTaskImplementerFn: () => 'codex',
     inferSlugFn: () => 'task-2323',
     findMissionDirFn: () => '/tmp/missions/task-2323',
@@ -915,7 +916,7 @@ test('rebase agent-assisted rebase rechecks ancestry after conflict resolution',
     isForgejoReviewEnabledFn: () => false,
     resolveMissionBaseBranchFn: () => 'main',
     resolveConflictsFn: () => ({
-      ok: true,
+      ok: true as const,
       conflictFiles: ['src/adapters/git/git.ts'],
       missionSpecificFiles: [],
       sharedFiles: ['src/adapters/git/git.ts'],
@@ -927,22 +928,22 @@ test('rebase agent-assisted rebase rechecks ancestry after conflict resolution',
     gitFn: args => {
       if (isAncestryCheck(args)) {
         ancestryChecked = true;
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
       const tail = gitSubcommandArgs(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in src/adapters/git/git.ts\n' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in src/adapters/git/git.ts\n' };
       }
       if (tail[0] === 'rebase' && tail[1] === '--show-current') {
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
-      return { status: 0, stdout: '', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     },
-    exitFn: code => { exitCode = code; },
+    exitFn: code => { exitCode.value = code; },
   });
 
   assert.equal(agentLaunched, true);
-  assert.equal(exitCode, 0);
+  assert.equal(exitCode.value, 0);
   assert.equal(ancestryChecked, true, 'agent-assisted success path must recheck base ancestry');
 });
 
@@ -953,10 +954,10 @@ test('rebase agent-assisted rebase exits 1 when ancestry fails after conflict re
   console.log = (...args) => { captured.push(args.join(' ')); };
   console.error = (...args) => { captured.push(args.join(' ')); };
 
-  let exitCode = null;
+  let exitCode: { value: number | null } = { value: null };
   try {
     await rebase(['task-2323'], {
-      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-2323.md' }),
+      resolveTaskFileFn: () => ({ matches: ['/tmp/task-2323.md'],  ok: true as const, taskFile: '/tmp/task-2323.md' }),
       getTaskImplementerFn: () => 'codex',
       inferSlugFn: () => 'task-2323',
       findMissionDirFn: () => '/tmp/missions/task-2323',
@@ -966,25 +967,25 @@ test('rebase agent-assisted rebase exits 1 when ancestry fails after conflict re
       isForgejoReviewEnabledFn: () => false,
       resolveMissionBaseBranchFn: () => 'main',
       resolveConflictsFn: () => ({
-        ok: true,
+        ok: true as const,
         conflictFiles: ['src/adapters/git/git.ts'],
         missionSpecificFiles: [],
         sharedFiles: ['src/adapters/git/git.ts'],
       }),
       startAgentFn: async () => ({ agent: 'test-agent', result: { status: 0 } }),
       gitFn: args => {
-        if (isAncestryCheck(args)) return { status: 1, stdout: '', stderr: '' };
+        if (isAncestryCheck(args)) return { signal: null,  status: 1, stdout: '', stderr: '' };
         const tail = gitSubcommandArgs(args);
-        if (tail[0] === 'rev-parse') return { status: 0, stdout: 'cafe4242\n', stderr: '' };
+        if (tail[0] === 'rev-parse') return { signal: null,  status: 0, stdout: 'cafe4242\n', stderr: '' };
         if (tail[0] === 'rebase' && tail[1] === 'main') {
-          return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in src/adapters/git/git.ts\n' };
+          return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in src/adapters/git/git.ts\n' };
         }
         if (tail[0] === 'rebase' && tail[1] === '--show-current') {
-          return { status: 0, stdout: '', stderr: '' };
+          return { signal: null,  status: 0, stdout: '', stderr: '' };
         }
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
-      exitFn: code => { exitCode = code; },
+      exitFn: code => { exitCode.value = code; },
     });
   } finally {
     console.log = originalLog;
@@ -992,7 +993,7 @@ test('rebase agent-assisted rebase exits 1 when ancestry fails after conflict re
   }
 
   const output = captured.join('\n');
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.doesNotMatch(output, /completed conflict resolution/);
   assert.match(output, /cafe4242/);
   assert.match(output, /git rebase --abort/);

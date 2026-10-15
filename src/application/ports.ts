@@ -36,14 +36,27 @@ export type {
 export interface StatsRow {
   readonly mission: string;
   readonly implementer: string;
-  readonly [field: string]: unknown;
+  readonly date: string;
+  readonly repo: string;
+  readonly classification: string;
+  readonly pr_fix_rounds: string;
+  readonly sources: { readonly date: string; readonly classification: string; readonly implementer: string };
 }
+
+export interface StatsBackfillUnresolved {
+  readonly slug: string; readonly reason: string; readonly detail?: string | null;
+  readonly missing?: readonly string[];
+  readonly date?: string | null; readonly classification?: string | null;
+  readonly implementer?: string | null; readonly prFixRounds?: number | null;
+  readonly sources?: { readonly classification: string; readonly implementer: string | null };
+}
+export interface StatsBackfillSkipped { readonly slug: string; readonly reason: string; }
 
 export interface StatsProjection {
   readonly rows: readonly StatsRow[];
   readonly sources: readonly SourceFact<string>[];
-  readonly unresolved?: readonly Record<string, unknown>[];
-  readonly skipped?: readonly Record<string, unknown>[];
+  readonly unresolved?: readonly StatsBackfillUnresolved[];
+  readonly skipped?: readonly StatsBackfillSkipped[];
 }
 
 export interface StatsBackfillPort {

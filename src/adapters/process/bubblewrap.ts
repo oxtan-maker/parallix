@@ -86,7 +86,7 @@ export function setBubblewrapProbeForTest(probe: AvailabilityProbe | null): void
 }
 
 function probeBubblewrap(): boolean {
-  if (availabilityProbe) {return availabilityProbe();}
+  if (availabilityProbe) { return availabilityProbe(); }
   try {
     const result = childProcess.spawnSync(BUBBLEWRAP_COMMAND, ['--version'], { stdio: 'ignore' });
     return !result.error && result.status === 0;
@@ -104,6 +104,25 @@ export function isBubblewrapAvailable(): boolean {
     cachedAvailability = probeBubblewrap();
   }
   return cachedAvailability;
+}
+
+function perWorktreeGitDirectory(gitDirResult: childProcess.SpawnSyncReturns<string>, worktree: string): string {
+  if (gitDirResult.error || gitDirResult.status === null) {
+    throw new BubblewrapGuardError(
+      `cannot resolve per-worktree git dir for ${worktree}: ${gitDirResult.error?.message || 'git timed out'}`
+    );
+  }
+  if (gitDirResult.status !== 0) {
+    throw new BubblewrapGuardError(
+      `cannot resolve per-worktree git dir for ${worktree}: ${gitDirResult.stderr?.trim() || 'git rev-parse failed'}`
+    );
+  }
+  const gitDir = gitDirResult.stdout.trim();
+  if (!gitDir) {
+    throw new BubblewrapGuardError(`git could not resolve the per-worktree git dir for ${worktree}`);
+  }
+
+  return gitDir;
 }
 
 /** True when the operator opted out via `PARALLIX_NO_BUBBLEWRAP`. */
@@ -165,20 +184,7 @@ function resolveGitMetadataMounts(worktree: string): string[] {
   }
 
   const gitDirResult = run(['rev-parse', '--absolute-git-dir']);
-  if (gitDirResult.error || gitDirResult.status === null) {
-    throw new BubblewrapGuardError(
-      `cannot resolve per-worktree git dir for ${worktree}: ${gitDirResult.error?.message || 'git timed out'}`
-    );
-  }
-  if (gitDirResult.status !== 0) {
-    throw new BubblewrapGuardError(
-      `cannot resolve per-worktree git dir for ${worktree}: ${gitDirResult.stderr?.trim() || 'git rev-parse failed'}`
-    );
-  }
-  const gitDir = gitDirResult.stdout.trim();
-  if (!gitDir) {
-    throw new BubblewrapGuardError(`git could not resolve the per-worktree git dir for ${worktree}`);
-  }
+  const gitDir = perWorktreeGitDirectory(gitDirResult, worktree);
 
   // The per-worktree dir is nested beneath the shared common dir, but both are
   // Git-resolved inputs and both keep explicit binds in the argv. This avoids a

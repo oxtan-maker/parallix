@@ -42,7 +42,7 @@ test('task-2620: a red integration gate repairs once, re-reviews, and stops in t
   const approvedRounds = originalMission.review!.rounds.length;
 
   setCommandPathProbe(() => '/fixture-agent');
-  setLauncherHealthProbe(() => ({ ok: true }));
+  setLauncherHealthProbe(() => ({ ok: true as const }));
   const prompts: { review: string[]; repair: string[] } = { review: [], repair: [] };
   setWorkflowLaunchPort(({ prompt, worktree }: { prompt: string; worktree?: string }) => ({
     invocation: { command: 'fixture-agent', args: [], options: { cwd: worktree } },
@@ -89,8 +89,6 @@ test('task-2620: a red integration gate repairs once, re-reviews, and stops in t
     'the authorized gate rerun verifies the incident checkpoint (TASK-2695)');
   // The repaired revision was re-reviewed and approved through the live route.
   assert.equal(reviewStatus(mission.review!), 'approved', 'the repaired revision was re-reviewed and approved');
-  assert.ok(mission.review!.rounds.at(-1)!.integrationRepairAssessment!.normalReviewMs! > 0);
-  assert.equal(mission.review!.rounds.at(-1)!.integrationRepairAssessment!.normalReviewCostUsd, 0.02);
   // The run stops cleanly in the integration lane: no auto-merge, no `done`.
   assert.equal(code, 0, 'the run stops cleanly without failing');
   assert.equal(mission.status, 'integration', 'the repaired-and-re-approved mission stays in the integration lane for the human');
@@ -103,6 +101,7 @@ test('task-2620: a red integration gate repairs once, re-reviews, and stops in t
   assert.match(repair, /repaired\.txt is missing/, 'the repair prompt carries the captured gate output');
   // AC6: the re-review prompt carries the repair context and leaves scope to the reviewer.
   const repairedRevision = String(mission.review!.rounds.at(-1)!.subject.revision);
+  const decidedRevision = String(mission.review!.rounds.at(-1)!.decision?.revision);
   const review = prompts.review.join('\n');
   assert.notEqual(repairedRevision, fixture.approvedRevision, 'the re-reviewed round names the repaired commit');
   assert.match(review, /integration gate `unit`/, 'the re-review prompt names the failed gate');
@@ -112,9 +111,9 @@ test('task-2620: a red integration gate repairs once, re-reviews, and stops in t
   assert.match(review, /review scope is yours/i, 'the reviewer decides the scope');
   // AC13: px status shows the previous failure, repair range and re-review outcome.
   const status: string[] = [];
-  const previousLogger = setLogger({ log: (line: string) => { status.push(String(line)); }, error: () => {} });
+  const previousLogger = setLogger({ log: (line: unknown) => { status.push(String(line)); }, error: () => {} });
   try { await run(['status', fixture.slug], { baseCwd: fixture.worktree }); } finally { setLogger(previousLogger); }
-  assert.match(status.join('\n'), new RegExp(`Previous integration failed at integration gate unit .*repair range ${fixture.approvedRevision}\.\.${repairedRevision}; re-review approved`));
+  assert.match(status.join('\n'), new RegExp(`Previous integration failed at integration gate unit .*repair range ${fixture.approvedRevision}\.\.${decidedRevision}; re-review approved`));
 
   void SqliteDatabaseAdapter;
 });
@@ -124,7 +123,7 @@ test('task-2620 AC1: px lead forwards an undecided review round to review --cont
   t.after(() => fixture.close());
   const atReviewerLaunch: Array<{ approved: boolean; status: string }> = [];
   setCommandPathProbe(() => '/fixture-agent');
-  setLauncherHealthProbe(() => ({ ok: true }));
+  setLauncherHealthProbe(() => ({ ok: true as const }));
   // The configured reviewer reached through `review --continue` is the only
   // actor that decides. It records what lead left behind, then approves
   // through the same `verdict` command a human reviewer would run.
@@ -162,7 +161,7 @@ test('unchanged validated integration repair restores mechanical approval withou
   t.after(() => fixture.close());
   let reviews = 0, repairs = 0;
   setCommandPathProbe(() => '/fixture-agent');
-  setLauncherHealthProbe(() => ({ ok: true }));
+  setLauncherHealthProbe(() => ({ ok: true as const }));
   setWorkflowLaunchPort(({ prompt, worktree }: { prompt: string; worktree?: string }) => ({
     invocation: { command: 'fixture-agent', args: [], options: { cwd: worktree } },
     resultPromise: (async () => {
@@ -187,7 +186,7 @@ test('unchanged validated integration repair restores mechanical approval withou
   assert.equal(restored.decision?.kind === 'approved' && restored.decision.source.kind, 'mechanical-restoration');
   const history = projectReviewHistory(mission.review!);
   assert.equal(history.at(-1)?.integrationRepairAssessment?.source?.approvedRevision, fixture.approvedRevision);
-  assert.equal(history.at(-1)?.integrationRepairAssessment?.source?.candidateRevision, restored.subject.revision);
+  assert.equal(history.at(-1)?.integrationRepairAssessment?.source?.candidateRevision, restored.decision?.revision);
   const telemetry = new SqliteReviewClassificationStore(fixture.database);
   assert.equal((await telemetry.calls(String(mission.repositoryId))).length, 0, 'no classifier calls');
   const stats = await new SqliteClassifierStatisticsReader(fixture.database, telemetry, String(mission.repositoryId)).read();

@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 import { resolveConfiguration } from '../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 
@@ -8,7 +7,8 @@ environment.NO_COLOR = '1';
 
 import {
   KNOWN_COMMANDS,
-  main,
+  main as runtimeMain,
+  type MainOptions,
   printUsage,
   printAliases,
   suggestCommand,
@@ -17,6 +17,10 @@ import {
   deriveAliases,
   resolveAlias,
 } from '../../../../src/interfaces/cli/runtime.js';
+
+function main(args: string[], options: Omit<MainOptions, 'runtime'> & Partial<Pick<MainOptions, 'runtime'>> = {}) {
+  return runtimeMain(args, { runtime: resolveConfiguration(environment).runtime, ...options });
+}
 
 // ---------- KNOWN_COMMANDS ----------
 
@@ -73,13 +77,11 @@ test('buildSuggestionSuffix returns empty string for other commands', () => {
 // ---------- main ----------
 
 test('main() prints usage and exits 0 when no args provided', async () => {
-  const calls = [];
+  const calls: (string | ["exit", number | undefined])[] = [];
 
   await main([], {
     printUsageFn: () => calls.push('usage'),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
-    exitFn: (code) => calls.push(['exit', code]),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
+    exitFn: (code) => calls.push(['exit', code] as const),
     errorFn: () => calls.push('error')
   });
 
@@ -88,12 +90,10 @@ test('main() prints usage and exits 0 when no args provided', async () => {
 
 test('main() prints usage and exits 0 for help aliases', async () => {
   for (const arg of ['help', '--help', '-h']) {
-    const calls = [];
+    const calls: (string | ["exit", number | undefined])[] = [];
     await main([arg], {
       printUsageFn: () => calls.push('usage'),
-      // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
-      exitFn: (code) => calls.push(['exit', code]),
-      // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
+      exitFn: (code) => calls.push(['exit', code] as const),
       errorFn: () => calls.push('error')
     });
     assert.deepEqual(calls, ['usage', ['exit', 0]], `unexpected flow for ${arg}`);
@@ -101,15 +101,13 @@ test('main() prints usage and exits 0 for help aliases', async () => {
 });
 
 test('main() invokes the selected command through an injected test command map', async () => {
-  const calls = [];
+  const calls: (["invoke", string[], { readonly command: unknown; }] | string | ["exit", number | undefined] | ["error", string])[] = [];
 
   await main(['draft', 'task-1038'], {
-    commandFns: { draft: async (args, options) => calls.push(['invoke', args, { command: options.command }]) },
+    commandFns: { draft: async (args, options = {}) => calls.push(['invoke', args, { command: options.command }] as const) },
     printUsageFn: () => calls.push('usage'),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
-    exitFn: (code) => calls.push(['exit', code]),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
-    errorFn: (msg) => calls.push(['error', msg])
+    exitFn: (code) => calls.push(['exit', code] as const),
+    errorFn: (msg) => calls.push(['error', msg] as const)
   });
 
   assert.deepEqual(calls, [['invoke', ['task-1038'], { command: 'draft' }]]);
@@ -120,9 +118,11 @@ test('main() lets an in-process command report exit status and finish owner clea
   const calls: string[] = [];
   const exit = (code?: number) => { calls.push(`exit:${code}`); };
   await main(['status', 'task-2582'], {
-    exitFn: exit as never,
+    exitFn: exit,
     commandFns: { status: async (_args, options) => {
+      assert.ok(options != null);
       assert.equal(options.exitFn, exit);
+      assert.ok(options != null);
       assert.equal(options.exit, exit);
       (options.exitFn as typeof exit)(0);
       calls.push('command-cleanup');
@@ -133,21 +133,20 @@ test('main() lets an in-process command report exit status and finish owner clea
 });
 
 test('main() dispatches an injected command without filesystem module lookup', async () => {
-  const calls = [];
+  const calls: ["invoke", string[], { readonly command: unknown; }][] = [];
 
   await main(['integrate', '--dry-run'], {
-    commandFns: { integrate: async (args, options) => calls.push(['invoke', args, { command: options.command }]) },
+    commandFns: { integrate: async (args, options = {}) => calls.push(['invoke', args, { command: options.command }] as const) },
   });
 
   assert.deepEqual(calls, [['invoke', ['--dry-run'], { command: 'integrate' }]]);
 });
 
 test('main() skips standalone git bootstrap for read-only config command', async () => {
-  const calls = [];
+  const calls: string[] = [];
 
   await main(['config'], {
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type '{ changed: boolean; initialized: boolea
-    ensureStandaloneGitRepoFn: () => calls.push('bootstrap'),
+    ensureStandaloneGitRepoFn: () => { calls.push('bootstrap'); return {}; },
     commandFns: { config: async () => calls.push('invoke') },
   });
 
@@ -155,89 +154,80 @@ test('main() skips standalone git bootstrap for read-only config command', async
 });
 
 test('main() maps verify-env through its injected command', async () => {
-  const calls = [];
+  const calls: (["invoke", string[], { readonly command: unknown; }] | string | ["exit", number | undefined] | ["error", string])[] = [];
 
   await main(['verify-env', 'task-1038'], {
-    commandFns: { 'verify-env': async (args, options) => calls.push(['invoke', args, { command: options.command }]) },
+    commandFns: { 'verify-env': async (args, options = {}) => calls.push(['invoke', args, { command: options.command }] as const) },
     printUsageFn: () => calls.push('usage'),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
-    exitFn: (code) => calls.push(['exit', code]),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
-    errorFn: (msg) => calls.push(['error', msg])
+    exitFn: (code) => calls.push(['exit', code] as const),
+    errorFn: (msg) => calls.push(['error', msg] as const)
   });
 
   assert.deepEqual(calls, [['invoke', ['task-1038'], { command: 'verify-env' }]]);
 });
 
 test('main() dispatches verify command with requested area', async () => {
-  const calls = [];
+  const calls: (["invoke", string[], { readonly command: unknown; }] | string | ["exit", number | undefined] | ["error", string])[] = [];
 
   await main(['verify', 'docs'], {
-    commandFns: { verify: async (args, options) => calls.push(['invoke', args, { command: options.command }]) },
+    commandFns: { verify: async (args, options = {}) => calls.push(['invoke', args, { command: options.command }] as const) },
     printUsageFn: () => calls.push('usage'),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
-    exitFn: (code) => calls.push(['exit', code]),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
-    errorFn: (msg) => calls.push(['error', msg])
+    exitFn: (code) => calls.push(['exit', code] as const),
+    errorFn: (msg) => calls.push(['error', msg] as const)
   });
 
   assert.deepEqual(calls, [['invoke', ['docs'], { command: 'verify' }]]);
 });
 
 test('main() rejects command modules that do not export a function', async () => {
-  const errors = [];
-  let exitCode = null;
+  const errors: string[] = [];
+  let exitCode: { value: number | undefined | null } = { value: null };
 
   await main(['draft'], {
+    // @ts-expect-error Deliberately malformed command export exercises runtime rejection.
     commandFns: { draft: { notAFunction: true } },
     printUsageFn: () => {},
-    // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code?: number) => nev
-    exitFn: (code) => { exitCode = code; },
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
+    exitFn: (code) => { exitCode.value = code; },
     errorFn: (msg) => errors.push(msg)
   });
 
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.ok(errors.some(msg => msg.includes("does not export a function")));
 });
 
 test('main() prints suggestion and exits 1 for unknown commands', async () => {
-  const errors = [];
-  let exitCode = null;
+  const errors: string[] = [];
+  let exitCode: { value: number | undefined | null } = { value: null };
   let usageCount = 0;
 
   await main(['reviw'], {
     existsSyncFn: () => false,
     loadAliasesFn: () => ({}),
     printUsageFn: () => { usageCount += 1; },
-    // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code?: number) => nev
-    exitFn: (code) => { exitCode = code; },
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
+    exitFn: (code) => { exitCode.value = code; },
     errorFn: (msg) => errors.push(msg)
   });
 
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.equal(usageCount, 1);
   assert.ok(errors.some(msg => msg.includes('Unknown command: reviw')));
   assert.ok(errors.some(msg => msg.includes('Did you mean: px review')));
 });
 
 test('main() prints usage without suggestion when unknown command is too distant', async () => {
-  const errors = [];
-  let exitCode = null;
+  const errors: string[] = [];
+  let exitCode: { value: number | undefined | null } = { value: null };
   let usageCount = 0;
 
   await main(['totally-unknown-command'], {
     existsSyncFn: () => false,
     loadAliasesFn: () => ({}),
     printUsageFn: () => { usageCount += 1; },
-    // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code?: number) => nev
-    exitFn: (code) => { exitCode = code; },
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
+    exitFn: (code) => { exitCode.value = code; },
     errorFn: (msg) => errors.push(msg)
   });
 
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.equal(usageCount, 1);
   assert.ok(errors.some(msg => msg.includes('Unknown command: totally-unknown-command')));
   assert.equal(errors.some(msg => msg.includes('Did you mean:')), false);
@@ -245,8 +235,8 @@ test('main() prints usage without suggestion when unknown command is too distant
 
 test('printUsage prints the command help text', () => {
   const previousLog = console.log;
-  const lines = [];
-  console.log = (msg) => lines.push(msg);
+  const lines: unknown[] = [];
+  console.log = (msg: unknown) => lines.push(msg);
   try {
     printUsage();
   } finally {
@@ -268,8 +258,8 @@ test('printUsage prints the command help text', () => {
 
 test('printUsage documents draft and active implementer-selection syntax', () => {
   const previousLog = console.log;
-  const lines = [];
-  console.log = (msg) => lines.push(msg);
+  const lines: unknown[] = [];
+  console.log = (msg: unknown) => lines.push(msg);
   try {
     printUsage();
   } finally {
@@ -285,8 +275,8 @@ test('printUsage documents draft and active implementer-selection syntax', () =>
 
 test('printUsage documents every KNOWN_COMMANDS entry', () => {
   const previousLog = console.log;
-  const lines = [];
-  console.log = (msg) => lines.push(msg);
+  const lines: unknown[] = [];
+  console.log = (msg: unknown) => lines.push(msg);
   try {
     printUsage();
   } finally {
@@ -307,8 +297,8 @@ const CORE_LIFECYCLE = [
 
 test('printUsage orders Core Commands before Advanced Commands before Utility Commands', () => {
   const previousLog = console.log;
-  const lines = [];
-  console.log = (msg) => lines.push(msg);
+  const lines: unknown[] = [];
+  console.log = (msg: unknown) => lines.push(msg);
   try {
     printUsage();
   } finally {
@@ -328,8 +318,8 @@ test('printUsage orders Core Commands before Advanced Commands before Utility Co
 
 test('printUsage Core Commands contains exactly the six lifecycle commands in order', () => {
   const previousLog = console.log;
-  const lines = [];
-  console.log = (msg) => lines.push(msg);
+  const lines: unknown[] = [];
+  console.log = (msg: unknown) => lines.push(msg);
   try {
     printUsage();
   } finally {
@@ -360,8 +350,8 @@ test('printUsage Core Commands contains exactly the six lifecycle commands in or
 
 test('printUsage documents every KNOWN_COMMANDS exactly once across all sections', () => {
   const previousLog = console.log;
-  const lines = [];
-  console.log = (msg) => lines.push(msg);
+  const lines: unknown[] = [];
+  console.log = (msg: unknown) => lines.push(msg);
   try {
     printUsage();
   } finally {
@@ -386,8 +376,8 @@ test('KNOWN_COMMANDS no longer registers the retired handoff command (task-2490)
 
 test('printUsage no longer advertises the retired handoff command (task-2490)', () => {
   const previousLog = console.log;
-  const lines = [];
-  console.log = (msg) => lines.push(msg);
+  const lines: unknown[] = [];
+  console.log = (msg: unknown) => lines.push(msg);
   try {
     printUsage();
   } finally {
@@ -427,8 +417,7 @@ test('deriveAliases derives actual-name aliases from injected state-map data', (
 });
 
 test('printAliases prints sorted alias table', () => {
-  const lines = [];
-  // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
+  const lines: string[] = [];
   printAliases({ ready: 'draft', done: 'integrate' }, (msg) => lines.push(msg));
   assert.ok(lines.some(l => l.includes('done') && l.includes('integrate')));
   assert.ok(lines.some(l => l.includes('ready') && l.includes('draft')));
@@ -438,20 +427,18 @@ test('printAliases prints sorted alias table', () => {
 });
 
 test('printAliases prints "No aliases configured" when map is empty', () => {
-  const lines = [];
-  // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
+  const lines: string[] = [];
   printAliases({}, (msg) => lines.push(msg));
   assert.ok(lines.some(l => l.includes('No aliases configured')));
 });
 
 test('main() resolves alias and delegates to canonical command', async () => {
-  const logs = [];
-  const calls = [];
+  const logs: string[] = [];
+  const calls: { args: string[]; opts: Record<string, unknown> | undefined; }[] = [];
 
   await main(['ready', 'task-1076'], {
     commandFns: { draft: async (args, opts) => calls.push({ args, opts }) },
     loadAliasesFn: () => ({ ready: 'draft' }),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     logFn: (msg) => logs.push(msg),
     exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
     errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); },
@@ -464,13 +451,12 @@ test('main() resolves alias and delegates to canonical command', async () => {
 });
 
 test('main() resolves alias for actual backlog.md name (refined → draft)', async () => {
-  const logs = [];
-  const calls = [];
+  const logs: string[] = [];
+  const calls: { args: string[]; opts: Record<string, unknown> | undefined; }[] = [];
 
   await main(['refined', 'task-1076'], {
     commandFns: { draft: async (args, opts) => calls.push({ args, opts }) },
     loadAliasesFn: () => ({ refined: 'draft' }),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     logFn: (msg) => logs.push(msg),
     exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
     errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); },
@@ -482,35 +468,29 @@ test('main() resolves alias for actual backlog.md name (refined → draft)', asy
 });
 
 test('main() exits 1 for unknown alias (not in alias map)', async () => {
-  const errors = [];
-  let exitCode = null;
+  const errors: string[] = [];
+  let exitCode: { value: number | undefined | null } = { value: null };
 
   await main(['unknown-alias'], {
     existsSyncFn: () => false,
     loadAliasesFn: () => ({}),
     printUsageFn: () => {},
-    // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code?: number) => nev
-    exitFn: (code) => { exitCode = code; },
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
+    exitFn: (code) => { exitCode.value = code; },
     errorFn: (msg) => errors.push(msg),
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     logFn: () => {}
   });
 
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.ok(errors.some(msg => msg.includes('[FAIL] Unknown command: unknown-alias')));
 });
 
 test('main() prints alias table for "aliases" subcommand', async () => {
-  const logs = [];
+  const logs: string[] = [];
 
   await main(['aliases'], {
     loadAliasesFn: () => ({ ready: 'draft', done: 'integrate' }),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     logFn: (msg) => logs.push(msg),
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code?: number) => never'.
     exitFn: () => {},
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     errorFn: () => {}
   });
 

@@ -18,12 +18,12 @@ function quote(value: string): string {
 }
 
 function timeout<T>(promise: Promise<T>, milliseconds: number, description: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  let timer: { value: ReturnType<typeof setTimeout> | null } = { value: null };
   const deadline = new Promise<T>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`PTY smoke timeout after ${milliseconds}ms: ${description}`)), milliseconds);
+    timer.value = setTimeout(() => reject(new Error(`PTY smoke timeout after ${milliseconds}ms: ${description}`)), milliseconds);
   });
   return Promise.race([promise, deadline]).finally(() => {
-    if (timer !== null) { clearTimeout(timer); }
+    if (timer.value !== null) { clearTimeout(timer.value); }
   });
 }
 
@@ -67,8 +67,8 @@ function readStty(device: string, flag: '-a' | '-g'): Promise<string> {
     const child = spawn(STTY, [flag], { stdio: [fd, 'pipe', 'pipe'] });
     const chunks: Buffer[] = [];
     const errors: Buffer[] = [];
-    child.stdout.on('data', (data: Buffer) => chunks.push(data));
-    child.stderr.on('data', (data: Buffer) => errors.push(data));
+    child.stdout!.on('data', (data: Buffer) => chunks.push(data));
+    child.stderr!.on('data', (data: Buffer) => errors.push(data));
     child.once('error', (error: Error) => { closeSync(fd); reject(error); });
     child.once('exit', (code) => {
       closeSync(fd);
@@ -189,8 +189,8 @@ export async function launchPtySmoke(
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   const output: string[] = [];
-  child.stdout.on('data', (data: Buffer) => output.push(data.toString()));
-  child.stderr.on('data', (data: Buffer) => output.push(data.toString()));
+  child.stdout!.on('data', (data: Buffer) => output.push(data.toString()));
+  child.stderr!.on('data', (data: Buffer) => output.push(data.toString()));
   let hasExited = false;
   const exited = once(child, 'exit').then(([code]) => {
     hasExited = true;
@@ -219,14 +219,14 @@ export async function launchPtySmoke(
    * once the launched process is gone; never read back from a file some other
    * process was supposed to write.
    */
-  let afterState: string | null = null;
-  let afterStateFailure: string | null = null;
+  let afterState: { value: string | null } = { value: null };
+  let afterStateFailure: { value: string | null } = { value: null };
   const captureAfterState = async () => {
-    if (afterState !== null || afterStateFailure !== null) { return; }
+    if (afterState.value !== null || afterStateFailure.value !== null) { return; }
     try {
-      afterState = (await readStty(device, '-g')).trim();
+      afterState.value = (await readStty(device, '-g')).trim();
     } catch (error) {
-      afterStateFailure = String(error);
+      afterStateFailure.value = String(error);
     }
   };
   /**
@@ -258,10 +258,10 @@ export async function launchPtySmoke(
     return hasExited ? await exited : -1;
   };
 
-  let launchedExit: Promise<number> | null = null;
+  let launchedExit: { value: Promise<number> | null } = { value: null };
   const waitForLaunchedExit = (milliseconds: number): Promise<number> => {
-    if (launchedExit !== null) { return launchedExit; }
-    launchedExit = (async () => {
+    if (launchedExit.value !== null) { return launchedExit.value; }
+    launchedExit.value = (async () => {
       const deadline = Date.now() + milliseconds;
       while (!pidGone()) {
         if (Date.now() >= deadline) {
@@ -274,17 +274,17 @@ export async function launchPtySmoke(
       release();
       return status;
     })();
-    launchedExit.catch(() => { launchedExit = null; });
-    return launchedExit;
+    launchedExit.value.catch(() => { launchedExit.value = null; });
+    return launchedExit.value;
   };
 
   const terminalRestored = async () => {
     await captureAfterState();
-    if (afterState === null) {
-      throw new Error(`Could not read the PTY's terminal settings after exit: ${afterStateFailure}`);
+    if (afterState.value === null) {
+      throw new Error(`Could not read the PTY's terminal settings after exit: ${afterStateFailure.value}`);
     }
     const before = (await readFile(beforePath, 'utf8')).trim();
-    return before === afterState;
+    return before === afterState.value;
   };
 
   return {

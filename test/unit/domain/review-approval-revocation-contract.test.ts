@@ -1,3 +1,7 @@
+import { missionVersion } from '../../../src/application/domain-ports.js';
+import { phaseGateResult } from '../../helpers/phase-gate-result.js';
+import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
+import { forgejoApiFixture, forgejoAsyncApiFixture } from '../../fixtures/forgejo-api.js';
 // review approval revocation contract.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
 import test, { describe } from 'node:test';
@@ -48,7 +52,7 @@ describe("revoke review", { concurrency: false }, () => {
     { change: { kind: 'local-branch', sourceBranch: 'mission/task-2543', targetBranch: 'main' }, revision: changeRevision('abc') },
     agentFamily('custom'), agentFamily('codex'), '2026-01-01T00:00:00Z',
     ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily('custom')], strategy: 'random' }),
-  ), { type: 'approve', decidedAt: '2026-01-01T00:01:00Z', comment: null, source: { kind: 'local' } });
+  ), { type: 'approve', revision: changeRevision('abc'), decidedAt: '2026-01-01T00:01:00Z', comment: null, source: { kind: 'local' } });
   const mission: Mission = { id, repositoryId: repositoryId('repo'), title: 'revoke', labels: missionLabels([]), assignee: null, checkpoints: [], review, netEngineeringLines: null, status: 'integration', closedAt: null };
 
   test('refused revocation does not read or mutate its store', async () => {
@@ -56,7 +60,7 @@ describe("revoke review", { concurrency: false }, () => {
     const useCase = new RevokeReviewDecisionUseCase({
       async load() { reads++; throw new Error('must not load'); },
       async save() { throw new Error('must not save'); },
-    } as never, {} as never);
+    }, { transition: async () => { throw new Error('Unexpected lifecycle transition'); } });
     const result = await useCase.execute({
       slug: 'task-2543', round: 1, reason: '', operator: 'operator',
       occurredAt: '2026-09-25T00:00:00Z', expectedVersion: 1,
@@ -69,9 +73,9 @@ describe("revoke review", { concurrency: false }, () => {
     let transitions = 0;
     let providerCalls = 0;
     const activeMission = { ...mission, status: 'active' as const, review: null };
-    const store = { async load() { return { kind: 'found' as const, mission: activeMission, version: 1 as never }; } };
+    const store = { async load() { return { kind: 'found' as const, mission: activeMission, version: missionVersion(1) }; }, async save() { throw new Error('Unexpected save'); } };
     const lifecycle = { async transition() { transitions++; throw new Error('must not transition'); } };
-    const useCase = new RevokeReviewDecisionUseCase(store as never, lifecycle as never, {
+    const useCase = new RevokeReviewDecisionUseCase(store, lifecycle, {
       async dismissApproval() { providerCalls++; },
     });
     const result = await useCase.execute({ slug: 'task-2543', round: 1, reason: 'unfounded', operator: 'operator', occurredAt: '2026-01-01T00:02:00Z', expectedVersion: 1 });
@@ -83,23 +87,23 @@ describe("revoke review", { concurrency: false }, () => {
   });
 
   test('provider failure leaves local revocation durable', async () => {
-    let saved: Mission | null = null;
-    const store = { async load() { return { kind: 'found' as const, mission, version: 1 as never }; }, async save() { throw new Error('unused'); } };
-    const lifecycle = { async transition(request: any) { saved = { ...mission, status: 'review', review: request.command.review }; return { status: 'completed', value: { mission: saved } }; } };
-    const useCase = new RevokeReviewDecisionUseCase(store as never, lifecycle as never, { async dismissApproval() { throw new Error('offline'); } });
+    let saved: { value: Mission | null } = { value: null };
+    const store = { async load() { return { kind: 'found' as const, mission, version: missionVersion(1) }; }, async save() { throw new Error('unused'); } };
+    const lifecycle: Pick<MissionLifecycleService, 'transition'> = { async transition(request: Parameters<MissionLifecycleService['transition']>[0]) { assert.equal(request.command.type, 'revoke-approval'); if (request.command.type !== 'revoke-approval') { throw new Error('Unexpected command'); } saved.value = { ...mission, status: 'review', closedAt: null, review: request.command.review }; return { durableEvidence: [],  status: 'completed' as const, value: { mission: saved.value, version: missionVersion(2), from: 'integration', to: 'review', previousAssignee: null, laneChanged: true } }; } };
+    const useCase = new RevokeReviewDecisionUseCase(store, lifecycle, { async dismissApproval() { throw new Error('offline'); } });
     const result = await useCase.execute({ slug: 'task-2543', round: 1, reason: 'unfounded', operator: 'operator', occurredAt: '2026-01-01T00:02:00Z', expectedVersion: 1 });
     assert.equal(result.status, 'completed');
     assert.match(result.value!.providerDiagnostic!, /provider was not updated/);
-    assert.equal(saved?.status, 'review');
-    assert.equal(saved?.review?.rounds.length, 2);
+    assert.equal(saved.value?.status, 'review');
+    assert.equal(saved.value?.review?.rounds.length, 2);
   });
 
   test('provider REQUEST_CHANGES after an agent approval keeps the mission reviewable', async () => {
     const providerReview = await getLatestReviewForPr(41, 'codex', '2026-01-01T00:00:00Z', 'fake-token', {
-      apiCall: async () => ({ ok: true, data: [
+      apiCall: forgejoAsyncApiFixture(async () => ({ ok: true as const, data: [
         { user: { login: 'codex' }, submitted_at: '2026-01-01T00:01:00Z', state: 'APPROVED' },
         { user: { login: 'human' }, submitted_at: '2026-01-01T00:02:00Z', state: 'REQUEST_CHANGES' },
-      ] }),
+      ] })),
     });
     assert.deepEqual(providerReview, { state: 'REQUEST_CHANGES', submittedAt: '2026-01-01T00:02:00Z' });
     const requested = applyReviewerCommand(startReview(
@@ -121,21 +125,21 @@ describe("revoke review", { concurrency: false }, () => {
   test('a concurrent review write between the use case load and the lifecycle save is refused', async () => {
     let loadCount = 0;
     let saves = 0;
-    const store = {
+    const store: MissionTransitionStore = {
       async load() {
         loadCount++;
         // First read is the use case's (version 1); a concurrent approval lands
         // before the lifecycle's internal read, moving the mission to version 2.
-        return { kind: 'found' as const, mission, version: (loadCount === 1 ? 1 : 2) as never };
+        return { kind: 'found' as const, mission, version: missionVersion(loadCount === 1 ? 1 : 2) };
       },
-      async save(next: Mission) { saves++; return 2 as never; },
-      async saveWithTransition(next: Mission) { saves++; return 2 as never; },
-    } as unknown as MissionTransitionStore;
+      async save(next: Mission) { saves++; return missionVersion(2); },
+      async saveWithTransition(next: Mission) { saves++; return missionVersion(2); },
+    };
     const result = await new RevokeReviewDecisionUseCase(store, new MissionLifecycleService(store), null).execute({
       slug: 'task-2543', round: 1, reason: 'unfounded', operator: 'operator', occurredAt: '2026-01-01T00:02:00Z',
     });
     assert.equal(result.status, 'failed');
-    assert.match(result.error?.message, /expected version 1, found 2/);
+    assert.match(result.error?.message ?? '', /expected version 1, found 2/);
     assert.equal(saves, 0);
   });
 });
@@ -154,22 +158,22 @@ describe("stand down", { concurrency: false }, () => {
     { change: { kind: 'local-branch', sourceBranch: 'mission/task-2555', targetBranch: 'main' }, revision: changeRevision('a1a1a1a') },
     agentFamily('custom'), agentFamily('codex'), '2026-09-22T00:00:00Z',
     ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily('custom')], strategy: 'random' }),
-  ), { type: 'approve', decidedAt: '2026-09-22T00:01:00Z', comment: null, source: { kind: 'local' } });
-  const mission = {
+  ), { type: 'approve', revision: changeRevision('a1a1a1a'), decidedAt: '2026-09-22T00:01:00Z', comment: null, source: { kind: 'local' } });
+  const mission = completeMissionFixture(String(missionId(slug)), {
     id: missionId(slug), repositoryId: repositoryId('repo'), title: 'Stale approval', labels: missionLabels([]),
     status: 'integration', closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: approved, netEngineeringLines: null,
-  } as Mission;
+  }) as Mission;
 
   /** In-memory store with the save/transition contract the lifecycle service relies on. */
   function memoryStore(initial: Mission) {
     let current = initial;
-    let version = 1;
+    let version = missionVersion(1);
     let saves = 0;
-    const store = {
-      async load() { return { kind: 'found' as const, mission: current, version: version as never }; },
-      async save(next: Mission) { saves++; current = next; version++; return version as never; },
-      async saveWithTransition(next: Mission) { saves++; current = next; version++; return version as never; },
-    } as unknown as MissionTransitionStore;
+    const store: MissionTransitionStore = {
+      async load() { return { kind: 'found' as const, mission: current, version: version }; },
+      async save(next: Mission) { saves++; current = next; version = missionVersion(version + 1); return version; },
+      async saveWithTransition(next: Mission) { saves++; current = next; version = missionVersion(version + 1); return version; },
+    };
     return { store, get current() { return current; }, get saves() { return saves; } };
   }
 
@@ -183,7 +187,7 @@ describe("stand down", { concurrency: false }, () => {
     const result = await new RevokeReviewDecisionUseCase(memory.store, new MissionLifecycleService(memory.store), null, moved).execute({
       slug, round: 1, reason: 'The branch was re-scoped after approval', operator: 'operator', occurredAt: '2026-09-22T03:00:00Z', expectedVersion: 1,
     });
-    assert.equal(result.status, 'completed', result.error?.message);
+    assert.equal(result.status, 'completed', result.error?.message ?? '');
     const review = memory.current.review!;
     assert.equal(memory.current.status, 'review');
     assert.equal(reviewStatus(review), 'awaiting-review');
@@ -291,7 +295,7 @@ describe("stand down", { concurrency: false }, () => {
     assert.equal(coverage?.kind, 'stale');
     assert.equal(coverage?.kind === 'stale' && coverage.landedRevision, 'b2b2b2b');
     assert.equal(coverage?.kind === 'stale' && coverage.recorded, null);
-    assert.doesNotMatch(staleApprovalSentence(coverage as never), /request(ed)? changes?(?! were)/i);
+    assert.doesNotMatch(staleApprovalSentence(coverage), /request(ed)? changes?(?! were)/i);
   });
 
   test('an approval still covering its branch is reported as covering', () => {
@@ -341,18 +345,17 @@ describe("stand down", { concurrency: false }, () => {
       implementer: 'codex',
       repositoryId: 'parallix',
       approval: { ok: true, reviewState: 'APPROVED', reviewerApproved: true },
-      reviewerUser: 'qwen',
       reportedStaleness,
-      startAgentFn: (async () => { head = { commit: 'repaired-commit', tree: 'repaired-tree' }; return { agent: 'codex', result: { status: 0 } }; }) as never,
+      startAgentFn: (async () => { head = { commit: 'repaired-commit', tree: 'repaired-tree' }; return { agent: 'codex', result: { status: 0 } }; }),
       transitionTaskFn: async () => true,
-      captureFinalTreeFn: (() => ({ ok: true, rootDir: '/tmp/mission', commit: head.commit, tree: head.tree })) as never,
-      runPhaseGatesFn: (async () => ({ ok: true, failedGate: null, error: null })) as never,
-      invalidateApprovalFn: (async () => ({ ok: true, dismissed: ['qwen'], errors: [] })) as never,
+      captureFinalTreeFn: (() => ({ ok: true as const, rootDir: '/tmp/mission', commit: head.commit, tree: head.tree })),
+      runPhaseGatesFn: (async () => phaseGateResult()),
+      invalidateApprovalFn: (async () => ({ ok: true as const, dismissed: ['qwen'], errors: [] })),
       log: (m: string) => messages.push(m),
       error: (m: string) => messages.push(m),
       gateRunLog: () => {},
       gateRunError: () => {},
-    } as unknown as IntegrationGateRouteOptions;
+    };
   }
 
   test('the revision-changed refusal names a staleness px rebase already reported', async () => {
@@ -384,7 +387,7 @@ describe("stand down", { concurrency: false }, () => {
     { change: { kind: 'local-branch', sourceBranch: 'mission/task-2555', targetBranch: 'main' }, revision: changeRevision('a1a1a1a') },
     agentFamily('custom'), agentFamily('codex'), '2026-09-22T00:00:00Z',
     ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily('custom')], strategy: 'random' }),
-  ), { type: 'approve', decidedAt: '2026-09-22T00:01:00Z', comment: 'looks right', source: { kind: 'local' } });
+  ), { type: 'approve', revision: changeRevision('a1a1a1a'), decidedAt: '2026-09-22T00:01:00Z', comment: 'looks right', source: { kind: 'local' } });
 
   function statusMission(review: Review): Mission {
     return {
@@ -416,10 +419,10 @@ describe("stand down", { concurrency: false }, () => {
   async function statusOf(review: Review, identity?: ChangeIdentityPort) {
     const board = createStatusBoardAdapter({ buildProjectionFn: async () => statusBuilder(review, identity) });
     const missionData = await board.getMissionData(statusId, '/repo');
-    const result = {
+    const result: StatusResult = {
       branch: 'mission/task-2555', worktree: '/repo', rebaseInfo: null, slug: statusId, missionData, prInfo: null,
       staleWorktrees: [], staleWorktreeRebase: {}, agents: [], agentOverride: undefined, lastThreeCommits: [], uncommittedCount: 0,
-    } as unknown as StatusResult;
+    };
     const lines: string[] = [];
     renderStatus(result, (line) => lines.push(line));
     return { missionData, json: JSON.parse(statusJson(result)), text: lines.join('\n') };
@@ -470,10 +473,10 @@ test('a human can revoke mechanical restoration without erasing its source or in
     revision: changeRevision('candidate') }, reviewer, implementer, '2026-10-01T10:00:00Z',
   ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' }));
   const source = { kind: 'mechanical-restoration' as const, approvedRevision: 'approved', candidateRevision: 'candidate', failedGate: 'unit',
-    validationRevision: 'candidate', validationReference: 'operational_history:42', validatedAt: '2026-10-01T11:00:00Z' };
+    validationRevision: 'candidate', validationReference: 'operational_history:42', validatedAt: '2026-10-01T11:00:00Z' } satisfies import("../../../src/domain/integration-approval-restoration.js").MechanicalApprovalSource;
   review = { ...review, rounds: [{ ...review.rounds[0], integrationRepairAssessment: { assessedAt: '2026-10-01T12:00:00Z',
     approvedRevision: 'approved', candidateRevision: 'candidate', failedGate: 'unit', outcome: 'restored', source } }] };
-  review = applyReviewerCommand(review, { type: 'approve', decidedAt: '2026-10-01T12:00:00Z', comment: 'restored', source });
+  review = applyReviewerCommand(review, { type: 'approve', revision: changeRevision('candidate'), decidedAt: '2026-10-01T12:00:00Z', comment: 'restored', source });
   const revoked = revokeApprovedDecision(review, 1, { revokedAt: '2026-10-01T13:00:00Z', revokedBy: 'human', reason: 'correction', cause: { kind: 'operator' } });
   assert.equal(reviewStatus(revoked), 'awaiting-review');
   assert.deepEqual(revoked.rounds[0].decision?.kind === 'approved' && revoked.rounds[0].decision.source, source);

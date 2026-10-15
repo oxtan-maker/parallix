@@ -1,3 +1,5 @@
+import { statusResult } from '../../fixtures/status-result.js';
+import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
 // review status backfill.integration.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
 import { describe, it, afterEach } from 'node:test';
@@ -119,7 +121,7 @@ function missionWithEventlessRound(root: string): Mission {
     reviewerRetryCount: 0,
     implementerRetryCount: 0,
   };
-  return {
+  return completeMissionFixture(String(missionId(SLUG)), {
     id: missionId(SLUG),
     repositoryId: repositoryId(root),
     title: `Mission ${SLUG}`,
@@ -131,7 +133,7 @@ function missionWithEventlessRound(root: string): Mission {
     netEngineeringLines: null,
     closedAt: null,
     externalTaskRef: null,
-    intakeTrace: null,
+    
     review: {
       rounds: [round],
       intervention: null,
@@ -140,7 +142,7 @@ function missionWithEventlessRound(root: string): Mission {
       hookFailureRetryCount: 0,
       reviewEvents: [],
     } as Review,
-  } as Mission;
+  }) as Mission;
 }
 
 async function openMigrated(root: string): Promise<SqliteDatabaseAdapter> {
@@ -153,7 +155,7 @@ async function openMigrated(root: string): Promise<SqliteDatabaseAdapter> {
 /** Render `px status <slug>`'s mission block from the projected review history. */
 function renderedStatusLines(history: ReturnType<typeof projectReviewHistory>): string[] {
   const lines: string[] = [];
-  const result: StatusResult = {
+  const result = statusResult({
     branch: `mission/${SLUG}`,
     worktree: '/tmp/worktree',
     rebaseInfo: null,
@@ -178,7 +180,7 @@ function renderedStatusLines(history: ReturnType<typeof projectReviewHistory>): 
     staleWorktrees: [],
     agents: [],
     lastThreeCommits: [],
-  } as unknown as StatusResult;
+  });
   renderStatus(result, (message) => lines.push(message));
   return lines;
 }

@@ -1,4 +1,7 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import type { StartReviewRound } from '../../../../src/application/ports/review-round.js';
+import type { ReviewLoopObservers } from '../../../../src/adapters/review/review-workflow-adapter.js';
+import { ReviewState } from '../../../../src/adapters/review/review-state.js';
+type ObservedLoop = StartReviewRound & ReviewLoopObservers;
 
 import { reviewOperation, reviewOperationPhase, reviewPushIdentity } from '../../../../src/domain/review-command-policy.js';
 
@@ -32,7 +35,7 @@ const {
 } = reviewModule;
 const { flagValue, readTextFlag, unknownReviewFlags } = reviewCliFlags;
 const { ReviewWorkflowAdapter, createReviewWorkflowAdapter } = reviewWorkflowAdapter;
-const review = (args, options = {}) =>
+const review = (args: string[], options: NonNullable<Parameters<typeof createReviewWorkflowAdapter>[0]> = {}) =>
   createReviewCommand(new ReviewCommandUseCase(createReviewWorkflowAdapter(options)))(args, options);
 
 test('createReviewWorkflowAdapter returns a ReviewWorkflowAdapter', () => {
@@ -182,7 +185,7 @@ test('performStaticReview rejects placeholder-only Goal Check evidence rows', (t
       findMissionDir: () => missionDir,
       findCheckpoints: () => [checkpointPath],
       readFileSync: fs.readFileSync,
-      run: () => ({ status: 0, stdout: '' }),
+      run: () => ({ signal: null, stderr: '',  status: 0, stdout: '' }),
       getPrimaryBranch: () => 'main',
       log: () => {}
     });
@@ -208,7 +211,7 @@ test('performStaticReview accepts a shell command that references an existing re
       findMissionDir: () => missionDir,
       findCheckpoints: () => [checkpointPath],
       readFileSync: fs.readFileSync,
-      run: () => ({ status: 0, stdout: '' }),
+      run: () => ({ signal: null, stderr: '',  status: 0, stdout: '' }),
       getPrimaryBranch: () => 'main',
       log: () => {}
     });
@@ -233,7 +236,7 @@ test('performStaticReview rejects separator-only Goal Check tables', (t) => {
       findMissionDir: () => missionDir,
       findCheckpoints: () => [checkpointPath],
       readFileSync: fs.readFileSync,
-      run: () => ({ status: 0, stdout: '' }),
+      run: () => ({ signal: null, stderr: '',  status: 0, stdout: '' }),
       getPrimaryBranch: () => 'main',
       log: () => {}
     });
@@ -262,7 +265,7 @@ test('performStaticReview accepts Goal Check evidence that cites a real test nam
       findMissionDir: () => missionDir,
       findCheckpoints: () => [checkpointPath],
       readFileSync: fs.readFileSync,
-      run: () => ({ status: 0, stdout: '' }),
+      run: () => ({ signal: null, stderr: '',  status: 0, stdout: '' }),
       getPrimaryBranch: () => 'main',
       log: () => {}
     });
@@ -281,21 +284,21 @@ test('performStaticReview accepts Goal Check evidence that cites a real test nam
 test('no-PR + clean static review does NOT auto-transition task to approved/ready-for-integration', async () => {
   let submitForReviewCalled = false;
   let postStaticReviewCalled = false;
-  const logs = [];
-  const errors = [];
+  const logs: string[] = [];
+  const errors: string[] = [];
 
   await review(['task-1259-regression'], {
     inferSlugFn: (s) => s || 'task-1259-regression',
     log: (m) => logs.push(m),
     error: (m) => errors.push(m),
     exit: (c) => { /* swallow exit */ },
-    getPrStatusFn: () => ({ exists: false }),
-    performStaticReviewFn: () => ({ ok: true, findings: [] }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
+    performStaticReviewFn: () => ({ ok: true as const, findings: [] }),
     submitForReviewFn: async () => { submitForReviewCalled = true; },
     postStaticReviewCommentFn: () => { postStaticReviewCalled = true; },
     resolveWorktreeFn: () => null,
     readReviewStateFn: () => null,
-    run: () => ({ status: 0 })
+    run: () => ({ signal: null, stdout: '', stderr: '',  status: 0 })
   });
 
   // The key assertion: the clean-static-review path must not promote the task.
@@ -326,21 +329,21 @@ test('no-PR + clean static review does NOT auto-transition task to approved/read
 
 test('no-PR + static review findings re-launches the implementer (not the review loop)', async () => {
   let startReviewLoopCalled = 0;
-  let startAgentCalls = [];
+  let startAgentCalls: { step: "active"; opts: { prompt: string; worktree: string; agent: string; slug: string; }; }[] = [];
   let submitForReviewCalled = false;
   let postStaticReviewCalled = false;
   const findings = ['Missing Goal Check section', 'No evidence rows'];
-  const logs = [];
-  const errors = [];
+  const logs: string[] = [];
+  const errors: string[] = [];
 
   await review(['task-1259-regression-findings'], {
     inferSlugFn: (s) => s || 'task-1259-regression-findings',
     log: (m) => logs.push(m),
     error: (m) => errors.push(m),
     exit: (c) => { /* swallow exit */ },
-    getPrStatusFn: () => ({ exists: false }),
-    performStaticReviewFn: () => ({ ok: false, findings }),
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1259.md' }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
+    performStaticReviewFn: () => ({ ok: false as const, findings }),
+    resolveTaskFileFn: () => ({ matches: ['/tmp/task-1259.md'],  ok: true as const, taskFile: '/tmp/task-1259.md' }),
     getTaskImplementerFn: () => 'claude',
     reviewLoopMechanisms: () => { startReviewLoopCalled += 1; return declinedLoop(); },
     startAgentFn: async (step, opts) => { startAgentCalls.push({ step, opts }); },
@@ -348,7 +351,7 @@ test('no-PR + static review findings re-launches the implementer (not the review
     postStaticReviewCommentFn: () => { postStaticReviewCalled = true; },
     resolveWorktreeFn: () => '/tmp/wt-1259',
     readReviewStateFn: () => null,
-    run: () => ({ status: 0 })
+    run: () => ({ signal: null, stdout: '', stderr: '',  status: 0 })
   });
 
   // SC1: the review loop must NOT start on the findings path.
@@ -389,22 +392,22 @@ test('no-PR + static review findings re-launches the implementer (not the review
 test('no-PR + static review findings with unresolvable implementer logs WARN and does nothing', async () => {
   let startReviewLoopCalled = 0;
   let startAgentCalled = 0;
-  const logs = [];
+  const logs: string[] = [];
 
   await review(['task-1311-no-implementer'], {
     inferSlugFn: (s) => s || 'task-1311-no-implementer',
     log: (m) => logs.push(m),
     error: () => {},
     exit: () => {},
-    getPrStatusFn: () => ({ exists: false }),
-    performStaticReviewFn: () => ({ ok: false, findings: ['Missing Goal Check section'] }),
-    resolveTaskFileFn: () => ({ ok: false, taskFile: null }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
+    performStaticReviewFn: () => ({ ok: false as const, findings: ['Missing Goal Check section'] }),
+    resolveTaskFileFn: () => ({ matches: [], reason: 'missing' as const, ok: false as const }),
     getTaskImplementerFn: () => null,
     reviewLoopMechanisms: () => { startReviewLoopCalled += 1; return declinedLoop(); },
     startAgentFn: async () => { startAgentCalled += 1; },
     resolveWorktreeFn: () => null,
     readReviewStateFn: () => null,
-    run: () => ({ status: 0 })
+    run: () => ({ signal: null, stdout: '', stderr: '',  status: 0 })
   });
 
   // SC3: implementer unresolved ⇒ no agent launch, no review loop, WARN emitted.
@@ -438,20 +441,20 @@ test('unknownReviewFlags flags typos but not values of value-taking flags', () =
 });
 
 test('review rejects an unknown flag with a suggestion instead of ignoring it', async () => {
-  const errors = [];
-  let exitCode = null;
+  const errors: string[] = [];
+  let exitCode: { value: number | null } = { value: null };
   let startReviewLoopCalled = 0;
 
   await review(['task-2322', '--continue', '--max-attempt', '7'], {
     inferSlugFn: (s) => s || 'task-2322',
     log: () => {},
     error: (m) => errors.push(m),
-    exit: (c) => { exitCode = c; },
+    exit: (c) => { exitCode.value = c; },
     reviewLoopMechanisms: () => { startReviewLoopCalled += 1; return declinedLoop(); }
   });
 
   assert.equal(startReviewLoopCalled, 0, 'the loop must not start when a flag is misspelled');
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.ok(
     errors.some(e => e.includes('--max-attempt') && e.includes('--max-attempts')),
     `expected a suggestion for --max-attempts; got: ${errors.join(' | ')}`
@@ -459,60 +462,61 @@ test('review rejects an unknown flag with a suggestion instead of ignoring it', 
 });
 
 test('review passes an explicit --max-attempts through to the review loop', async () => {
-  let received = null;
-  const exits = [];
-  const exit = (code) => { exits.push(code); };
+  let received: { value: ObservedLoop | null } = { value: null };
+  const exits: number[] = [];
+  const exit = (code: number) => { exits.push(code); };
 
   await review(['task-2322', '--continue', '--max-attempts', '7'], {
     continueReviewClearsInterventionFn: async () => false,
-    readReviewStateFn: async () => ({ round: 1 }),
+    readReviewStateFn: async slug => new ReviewState(slug, { round: 1, startedAt: '2026-01-01T00:00:00Z' }),
     inferSlugFn: (s) => s || 'task-2322',
     log: () => {},
     error: () => {},
     exit,
-    reviewLoopMechanisms: (request, observers) => { received = { ...request, ...observers }; return declinedLoop(); }
+    reviewLoopMechanisms: (request, observers) => { received.value = { ...request, ...observers }; return declinedLoop(); }
   });
 
-  assert.equal(received && received.maxAttempts, 7);
-  assert.notEqual(received && received.exit, process.exit, 'nested review loops must not retain process.exit from the parent command');
+  assert.equal(received.value && received.value.maxAttempts, 7);
+  assert.notEqual(received.value && received.value.exit, process.exit, 'nested review loops must not retain process.exit from the parent command');
   // The use case observes the injected exit (TASK-2620) and still forwards to it.
-  received.exit(3);
+  assert.ok(received.value?.exit);
+  received.value.exit(3);
   assert.equal(exits.at(-1), 3);
 });
 
 test('a manual review continuation renews the five-round budget at the current round', async () => {
-  let received = null;
+  let received: { value: ObservedLoop | null } = { value: null };
 
   await review(['task-2436', '--continue'], {
     continueReviewClearsInterventionFn: async () => false,
     inferSlugFn: (s) => s || 'task-2436',
     log: () => {}, error: () => {}, exit: () => {},
-    readReviewStateFn: async () => ({ round: 5 }),
-    reviewLoopMechanisms: (request, observers) => { received = { ...request, ...observers }; return declinedLoop(); },
+    readReviewStateFn: async slug => new ReviewState(slug, { round: 5, startedAt: '2026-01-01T00:00:00Z' }),
+    reviewLoopMechanisms: (request, observers) => { received.value = { ...request, ...observers }; return declinedLoop(); },
   });
 
-  assert.equal(received && received.maxAttempts, 9);
+  assert.equal(received.value && received.value.maxAttempts, 9);
 });
 
 test('review automation retains its five-round limit', async () => {
-  let received = null;
+  let received: { value: ObservedLoop | null } = { value: null };
 
   await review(['task-2436', '--start'], {
     inferSlugFn: (s) => s || 'task-2436',
     log: () => {}, error: () => {}, exit: () => {},
-    readReviewStateFn: async () => ({ round: 5 }),
-    reviewLoopMechanisms: (request, observers) => { received = { ...request, ...observers }; return declinedLoop(); },
+    readReviewStateFn: async slug => new ReviewState(slug, { round: 5, startedAt: '2026-01-01T00:00:00Z' }),
+    reviewLoopMechanisms: (request, observers) => { received.value = { ...request, ...observers }; return declinedLoop(); },
   });
 
-  assert.equal(received && received.maxAttempts, 5);
+  assert.equal(received.value && received.value.maxAttempts, 5);
 });
 
 // An unknown identity may not begin a review; known missions reach handoff
 // readiness even when their first Review has not been created yet.
 test('a --start rejects an unknown mission without the DB-native Review aggregate', async () => {
   let startReviewLoopCalled = 0;
-  const errors = [];
-  const exits = [];
+  const errors: string[] = [];
+  const exits: number[] = [];
 
   await review(['task-2490', '--start'], {
     inferSlugFn: (s) => s || 'task-2490',
@@ -533,7 +537,7 @@ test('a --start rejects an unknown mission without the DB-native Review aggregat
 // The aggregate guard is retained for every non-start operation: a `--continue`
 // on a mission with no persisted Review stops with --start guidance.
 test('a --continue with no persisted Review aggregate exits with start guidance', async () => {
-  const errors = [];
+  const errors: string[] = [];
   let startReviewLoopCalled = 0;
 
   await review(['task-2490', '--continue'], {
@@ -554,38 +558,38 @@ test('a --continue with no persisted Review aggregate exits with start guidance'
 });
 
 test('review forwards current-work agent publication into the review loop', async () => {
-  let received = null;
+  let received: { value: ObservedLoop | null } = { value: null };
 
   await review(['task-2322', '--continue'], {
     continueReviewClearsInterventionFn: async () => false,
-    readReviewStateFn: async () => ({ round: 1 }),
+    readReviewStateFn: async slug => new ReviewState(slug, { round: 1, startedAt: '2026-01-01T00:00:00Z' }),
     inferSlugFn: (s) => s || 'task-2322',
     log: () => {},
     error: () => {},
     exit: () => {},
-    reviewLoopMechanisms: (request, observers) => { received = { ...request, ...observers }; return declinedLoop(); },
+    reviewLoopMechanisms: (request, observers) => { received.value = { ...request, ...observers }; return declinedLoop(); },
   });
 
-  assert.equal(typeof received?.onAgentLaunched, 'function');
+  assert.equal(typeof received.value?.onAgentLaunched, 'function');
 });
 
 test('review rejects a non-numeric --max-attempts', async () => {
-  const errors = [];
-  let exitCode = null;
+  const errors: string[] = [];
+  let exitCode: { value: number | null } = { value: null };
   let startReviewLoopCalled = 0;
 
   await review(['task-2322', '--continue', '--max-attempts', 'lots'], {
     continueReviewClearsInterventionFn: async () => false,
-    readReviewStateFn: async () => ({ round: 1 }),
+    readReviewStateFn: async slug => new ReviewState(slug, { round: 1, startedAt: '2026-01-01T00:00:00Z' }),
     inferSlugFn: (s) => s || 'task-2322',
     log: () => {},
     error: (m) => errors.push(m),
-    exit: (c) => { exitCode = c; },
+    exit: (c) => { exitCode.value = c; },
     reviewLoopMechanisms: () => { startReviewLoopCalled += 1; return declinedLoop(); }
   });
 
   assert.equal(startReviewLoopCalled, 0);
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.ok(
     errors.some(e => /--max-attempts requires a positive integer/.test(e)),
     `expected a positive-integer error; got: ${errors.join(' | ')}`
@@ -609,9 +613,9 @@ test('composed review continuation rejects a known mission without Review once a
   const slug = 'task-2696-repro';
   const store = inMemoryTransitionStore(fixtureMission(slug));
   const persistence = bindReviewPersistence(store, null);
-  const errors = [];
-  const exits = [];
-  const effects = [];
+  const errors: string[] = [];
+  const exits: number[] = [];
+  const effects: string[] = [];
   mock.method(store, 'save', async () => { effects.push('persist'); });
   const fake = fakeReviewLoopPorts({
     provider: { ensureReachable: async () => { effects.push('provider'); return true; } },
@@ -637,15 +641,15 @@ test('composed review continuation rejects a known mission without Review once a
 
 for (const prerequisite of ['intervention', 'blocker']) {
   test(`continuation stops after a ${prerequisite} prerequisite failure when exit returns (TASK-2696)`, async () => {
-    const errors = [];
-    const exits = [];
-    const effects = [];
+    const errors: string[] = [];
+    const exits: number[] = [];
+    const effects: "dispatch"[] = [];
     const store = inMemoryTransitionStore(fixtureMission('task-2696-failure'));
     mock.method(store, 'load', async () => { throw new Error('isolated store read failure'); });
     await review(['task-2696-failure', '--continue'], {
       inferSlugFn: () => 'task-2696-failure', resolveWorktreeFn: () => null,
       log: () => {}, error: message => errors.push(message), exit: code => { exits.push(code); },
-      missionStore: store, readReviewStateFn: async () => ({ round: 2 }),
+      missionStore: store, readReviewStateFn: async slug => new ReviewState(slug, { round: 2, startedAt: '2026-01-01T00:00:00Z' }),
       ...(prerequisite === 'blocker' ? { continueReviewClearsInterventionFn: async () => false } : {}),
       reviewLoopMechanisms: () => { effects.push('dispatch'); return declinedLoop(); },
     });
@@ -657,15 +661,15 @@ for (const prerequisite of ['intervention', 'blocker']) {
 }
 
 test('resume without a persisted Review returns after one rejection without writes (TASK-2696)', async () => {
-  const errors = [];
-  const exits = [];
+  const errors: string[] = [];
+  const exits: number[] = [];
   const store = inMemoryTransitionStore(fixtureMission('task-2696-resume'));
-  mock.method(store, 'save', async () => { assert.fail('resume must not persist a missing review'); });
+  mock.method(store, 'save', async () => { return assert.fail('resume must not persist a missing review'); });
   await review(['task-2696-resume', '--resume', '--actor', 'operator'], {
     inferSlugFn: () => 'task-2696-resume', resolveWorktreeFn: () => null,
     missionStore: store, log: () => {}, error: message => errors.push(message),
     exit: code => { exits.push(code); },
-    reviewLoopMechanisms: () => { assert.fail('resume must not dispatch the loop'); },
+    reviewLoopMechanisms: () => { return assert.fail('resume must not dispatch the loop'); },
   });
   assert.deepEqual(exits, [1]);
   assert.equal(errors.length, 1);
@@ -674,11 +678,27 @@ test('resume without a persisted Review returns after one rejection without writ
 
 test('continuation preserves unexpected helper errors (TASK-2696)', async () => {
   const failure = new Error('unexpected prerequisite failure');
-  await assert.rejects(() => review(['task-2696-failure', '--continue'], {
+  await assert.rejects(async () => review(['task-2696-failure', '--continue'], {
     inferSlugFn: () => 'task-2696-failure', resolveWorktreeFn: () => null,
-    readReviewStateFn: async () => ({ round: 2 }),
+    readReviewStateFn: async slug => new ReviewState(slug, { round: 2, startedAt: '2026-01-01T00:00:00Z' }),
     continueReviewClearsInterventionFn: async () => { throw failure; },
     log: () => {}, error: () => {}, exit: () => {},
-    reviewLoopMechanisms: () => { assert.fail('unexpected errors must stop dispatch'); },
-  }), error => error === failure);
+    reviewLoopMechanisms: () => { return assert.fail('unexpected errors must stop dispatch'); },
+  }), (error) => error === failure);
+});
+
+
+test('composition grants review acknowledgment only to a direct operator invocation (TASK-2759)', async () => {
+  const { bindReviewOperatorResume, withinCliInvocation } = await import('../../../../src/composition/review-operator-resume.js');
+  const store = inMemoryTransitionStore(fixtureMission('task-2759'));
+  assert.equal(bindReviewOperatorResume(store, false, {}), undefined, 'automatic and borrowed registries have no authority');
+  assert.equal(bindReviewOperatorResume(store, true, { nestedWork: {} }), undefined);
+  assert.equal(bindReviewOperatorResume(store, true, { integrationOwnsReview: true }), undefined);
+  await withinCliInvocation(true, async direct => {
+    assert.ok(bindReviewOperatorResume(store, direct, {}));
+    await withinCliInvocation(true, async nested => {
+      assert.equal(bindReviewOperatorResume(store, nested, {}), undefined, 'reentrant public CLI has no authority');
+    });
+  });
+  withinCliInvocation(false, direct => assert.equal(direct, false, 'forwarded supervisor invocation'));
 });

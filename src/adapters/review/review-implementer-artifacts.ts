@@ -1,3 +1,4 @@
+import type { postComment } from './review-adapter.js';
 /**
  * Implementer artifact consumption: resolve the implementer artifact set,
  * record the resolution, and close the implementer round.
@@ -10,7 +11,7 @@ import type { MissionStore } from '../../application/domain-ports.js';
 import { parseResolutionDispositions, type ReviewItemDisposition } from '../../domain/review.js';
 import { createEvent, consumeHumanNotes, VALID_EVENT_TYPES, CreateEventParams, CreateEventOptions, CreateEventResult } from './review-events.js';
 import { recordImplementerResolution } from './review-round.js';
-import { reviewArtifactPath, staleReviewWrite, renderResolution, resolveArtifactRead, resolveArtifactDir, readArtifactFile, deleteArtifactFile, normalizeDisposition, headRevision } from './review-artifact-files.js';
+import { type ReviewStateReader, reviewArtifactPath, staleReviewWrite, renderResolution, resolveArtifactRead, resolveArtifactDir, readArtifactFile, deleteArtifactFile, normalizeDisposition, headRevision } from './review-artifact-files.js';
 import { postWorkflowComment } from './review-workflow-posting.js';
 import { resolveProviderEnabled, type RepoEventFn } from './review-reviewer-artifacts.js';
 
@@ -25,10 +26,10 @@ type ImplementerArtifactOptions = {
   forgejoEnabled?: boolean | null;
   readTokenFn?: (_user: string, _opts?: Record<string, unknown>) => string | null;
   getCommentsFn?: (_branch: string, _token: string) => Promise<unknown[]>;
-  postCommentFn?: (_branch: string, _token: string, _body: string, _opts?: Record<string, unknown>) => unknown;
+  postCommentFn?: typeof postComment;
   buildMetadataFooterFn?: (_s: string, _r?: string) => string | Promise<string>;
   createEventFn?: (_s: string, _t: string, _p: CreateEventParams, _o: CreateEventOptions) => CreateEventResult | Promise<CreateEventResult>;
-  readReviewStateFn?: (_s: string, _r?: string) => any;
+  readReviewStateFn?: ReviewStateReader;
   writeReviewStateFn?: typeof writeReviewState;
   currentState?: { metadata?: Record<string, unknown> } | null;
   missionStore?: MissionStore | null;
@@ -134,7 +135,7 @@ function parseImplementerResolution(resolution: string, disposition: string): { 
  */
 async function closeImplementerRound(slug: string, context: {
   disposition: string; itemDispositions: ReviewItemDisposition[]; worktree: string;
-  options: any; log: (_msg: string) => void; error: (_msg: string) => void;
+  options: ImplementerArtifactOptions; log: (_msg: string) => void; error: (_msg: string) => void;
 }): Promise<ImplementerArtifactFailure | null> {
   const { disposition, itemDispositions, worktree, options, log, error } = context;
   const recordImplementerResolutionFn = options.recordImplementerResolutionFn || recordImplementerResolution;
@@ -167,7 +168,7 @@ async function closeImplementerRound(slug: string, context: {
 /** Mirror the round resolution and its disposition onto the pull request. */
 async function mirrorImplementerArtifacts(slug: string, context: {
   resolution: string; disposition: string; implementer: string; worktree: string;
-  options: any; log: (_msg: string) => void; error: (_msg: string) => void;
+  options: ImplementerArtifactOptions; log: (_msg: string) => void; error: (_msg: string) => void;
 }): Promise<ImplementerArtifactFailure | null> {
   const { resolution, disposition, implementer, worktree, options, log, error } = context;
   const postOptions = {
@@ -225,11 +226,7 @@ async function persistImplementerEvents(params: {
   return { ok: true };
 }
 
-export async function consumeImplementerArtifacts(
-  slug: string,
-  implementer: string,
-  options: ImplementerArtifactOptions = {}
-): Promise<{ consumed: boolean; ok?: boolean; disposition?: string | null; diagnostic?: string | null }> {
+function prepareImplementerArtifacts(slug: string, options: ImplementerArtifactOptions) {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const readArtifactFn = options.readArtifactFn || readArtifactFile;
@@ -245,6 +242,16 @@ export async function consumeImplementerArtifacts(
   const disposition = normalizeDisposition(artifacts.dispositionRaw || '');
   const hasAny = artifacts.resolution !== null || artifacts.dispositionRaw !== null;
 
+  return { log, error, deleteArtifactFn, worktree, providerEnabled, reviewStatePath, artifacts, disposition, hasAny };
+}
+
+export async function consumeImplementerArtifacts(
+  slug: string,
+  implementer: string,
+  options: ImplementerArtifactOptions = {}
+): Promise<{ consumed: boolean; ok?: boolean; disposition?: string | null; diagnostic?: string | null }> {
+  const { log, error, deleteArtifactFn, worktree, providerEnabled, reviewStatePath, artifacts, disposition, hasAny } = prepareImplementerArtifacts(slug, options);
+
   if (!hasAny) {
     return { consumed: false };
   }
@@ -258,9 +265,7 @@ export async function consumeImplementerArtifacts(
     return { consumed: true, ok: false, diagnostic: staleResolution };
   }
 
-  const currentState = await Promise.resolve((options.readReviewStateFn || readReviewState)(slug, worktree));
-  const round = currentState ? currentState.round : 1;
-  const phase = currentState ? currentState.phase : 'fixing';
+  const { round, phase } = await implementerArtifactRound(slug, worktree, options);
 
   const { itemDispositions, blockedReason } = options.output
     ? { itemDispositions: [...options.output.items], blockedReason: options.output.blockedReason ?? null }
@@ -283,21 +288,9 @@ export async function consumeImplementerArtifacts(
     slug, implementer, round, phase, resolution: artifacts.resolution, disposition, itemDispositions, blockedReason,
     createEventFn: options.createEventFn || createEvent, worktree, log, error,
   });
-  if (!persisted.ok) { return { consumed: true, ok: false, diagnostic: 'diagnostic' in persisted ? persisted.diagnostic : 'implementer event persistence failed' }; }
+  if (!persisted.ok) { return { consumed: true, ok: false, diagnostic: persisted.diagnostic }; }
 
-  if (providerEnabled && options.readTokenFn && options.getCommentsFn) {
-    await consumeHumanNotes(slug, implementer, {
-      getCommentsFn: options.getCommentsFn,
-      createEventFn: (options.createEventFn || createEvent) as any,
-      readTokenFn: options.readTokenFn,
-      reviewIdentity: implementer,
-      worktree,
-      writeReviewStateFn: options.writeReviewStateFn,
-      currentState: options.currentState,
-      log: log,
-      error
-    });
-  }
+  await consumeImplementerHumanNotes(slug, implementer, providerEnabled, worktree, options, log, error);
 
   if (providerEnabled) {
     const mirrored = await mirrorImplementerArtifacts(slug, { resolution: artifacts.resolution, disposition, implementer, worktree, options, log, error });
@@ -314,3 +307,26 @@ export async function consumeImplementerArtifacts(
   return { consumed: true, ok: true, disposition };
 }
 
+async function consumeImplementerHumanNotes(slug: string, implementer: string, providerEnabled: boolean, worktree: string, options: ImplementerArtifactOptions, log: (message: string) => void, error: (message: string) => void): Promise<void> {
+  if (providerEnabled && options.readTokenFn && options.getCommentsFn) {
+    await consumeHumanNotes(slug, implementer, {
+      getCommentsFn: options.getCommentsFn,
+      createEventFn: options.createEventFn || createEvent,
+      readTokenFn: options.readTokenFn,
+      reviewIdentity: implementer,
+      worktree,
+      writeReviewStateFn: options.writeReviewStateFn,
+      currentState: options.currentState,
+      log: log,
+      error
+    });
+  }
+
+}
+
+async function implementerArtifactRound(slug: string, worktree: string, options: ImplementerArtifactOptions) {
+  const currentState = await Promise.resolve((options.readReviewStateFn || readReviewState)(slug, worktree));
+  const round = currentState ? currentState.round : 1;
+  const phase = currentState ? currentState.phase : 'fixing';
+  return { round, phase };
+}

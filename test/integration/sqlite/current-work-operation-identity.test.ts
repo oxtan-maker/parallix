@@ -73,7 +73,7 @@ function publication(operationId: string): CurrentWorkPublication {
   return {
     missionId: MISSION,
     operationId,
-    phase: 'execute',
+    phase: 'execute' as const,
     summary: `px active ${MISSION} (${operationId})`,
     agent: agentFamily('codex'),
   };

@@ -11,7 +11,7 @@ export interface StatsRow {
   mission?: string;
   classification?: string | null;
   implementer?: string | null;
-  pr_fix_rounds?: string;
+  pr_fix_rounds?: string | number | null;
   provider?: string;
   model?: string;
   implementer_agent?: string;
@@ -61,17 +61,48 @@ const VALID_CLASSIFICATIONS = new Set(['ai_sdlc', 'user_value', 'unknown']);
 
 function normalizeStatsRow(row: StatsRow = {}, options: NormalizeStatsRowOptions = {}) {
   const repo = String(row.repo || options.repo || '').trim();
+  return { ...statsIdentityFields(row, repo), ...statsActorFields(row), ...statsTokenFields(row), ...statsUsageFields(row) };
+}
+
+function statsIdentityFields(row: StatsRow, repo: string) {
   return {
-    date: row.date || '', repo, mission: row.mission || '', classification: row.classification || '',
+    date: row.date || '',
+    repo,
+    mission: row.mission || '',
+    classification: row.classification || '',
     implementer: row.implementer || '',
-    pr_fix_rounds: row.pr_fix_rounds === null || row.pr_fix_rounds === undefined ? undefined : String(row.pr_fix_rounds),
-    provider: row.provider || '', model: row.model || '', implementer_agent: row.implementer_agent || '',
-    reviewer_agent: row.reviewer_agent || '', stage: row.stage || 'default', input_tokens: row.input_tokens || '0',
-    output_tokens: row.output_tokens || '0', cached_tokens: row.cached_tokens || '0',
-    thoughts_tokens: row.thoughts_tokens || '0', context_tokens: row.context_tokens || '0',
-    tool_calls: row.tool_calls || '0', openai_usage_before: row.openai_usage_before || '0',
-    openai_usage_after: row.openai_usage_after || '0', openai_usage_delta: row.openai_usage_delta || '0',
-    duration_minutes: row.duration_minutes || '0', cost_usd: row.cost_usd || '0',
+    pr_fix_rounds: row.pr_fix_rounds === null || row.pr_fix_rounds === undefined ? undefined : String(row.pr_fix_rounds)
+  };
+}
+
+function statsActorFields(row: StatsRow) {
+  return {
+    provider: row.provider || '',
+    model: row.model || '',
+    implementer_agent: row.implementer_agent || '',
+    reviewer_agent: row.reviewer_agent || '',
+    stage: row.stage || 'default'
+  };
+}
+
+function statsTokenFields(row: StatsRow) {
+  return {
+    input_tokens: row.input_tokens || '0',
+    output_tokens: row.output_tokens || '0',
+    cached_tokens: row.cached_tokens || '0',
+    thoughts_tokens: row.thoughts_tokens || '0',
+    context_tokens: row.context_tokens || '0',
+    tool_calls: row.tool_calls || '0'
+  };
+}
+
+function statsUsageFields(row: StatsRow) {
+  return {
+    openai_usage_before: row.openai_usage_before || '0',
+    openai_usage_after: row.openai_usage_after || '0',
+    openai_usage_delta: row.openai_usage_delta || '0',
+    duration_minutes: row.duration_minutes || '0',
+    cost_usd: row.cost_usd || '0'
   };
 }
 
@@ -109,7 +140,7 @@ function createWindow(endDate: Date | string, days: number) {
 }
 
 function createRangeWindow(range = {}) {
-  const { from, to, timeZone } = range as {from?: string, to?: string, timeZone?: string};
+  const { from, to, timeZone } = range as { from?: string, to?: string, timeZone?: string };
   if (!from) { throw new Error('Invalid date range argument --from: value is required when using range mode.'); }
   if (!to) { throw new Error('Invalid date range argument --to: value is required when using range mode.'); }
   const start = parseDateOnlyStrict(from, '--from');
@@ -173,7 +204,7 @@ function normalizeClassification(value: unknown) {
   return isValidClassification(normalized) ? normalized : null;
 }
 
-function rowInWindow(row: StatsRow, window: {start: Date, end: Date}) {
+function rowInWindow(row: StatsRow, window: { start: Date, end: Date }) {
   return statisticsRowInWindow(row, window);
 }
 
@@ -198,7 +229,7 @@ function sameStatsIdentity(a: StatsRow, b: StatsRow) {
   return a.repo === b.repo && a.mission === b.mission && (a.stage || 'default') === (b.stage || 'default') && actor(a) === actor(b);
 }
 
-function accumulateIntegerStrings(existing: string, incoming: string, options: {mode?: string} = {}) {
+function accumulateIntegerStrings(existing: string, incoming: string, options: { mode?: string } = {}) {
   const current = Number.parseInt(existing, 10) || 0;
   const next = Number.parseInt(incoming, 10) || 0;
   if (options.mode === 'max') { return String(Math.max(current, next)); }

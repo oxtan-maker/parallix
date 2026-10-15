@@ -25,10 +25,33 @@ import {
   renderNotices,
   renderSbom,
 } from '../../../scripts/release-metadata.js';
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-import { violationsFor } from '../../../scripts/package-content-audit.ts';
+import { violationsFor } from '../../../scripts/package-content-audit.js';
 import { isNewerNormalVersion, parseNormalVersion, publishTrustedRelease, validateMetadata, validateTrustedRelease } from '../../../scripts/release-publish.js';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
+
+function jsonObject(value: unknown): Record<string, unknown> {
+  assert.ok(value !== null && typeof value === 'object' && !Array.isArray(value));
+  return value as Record<string, unknown>;
+}
+
+function builtSbom(root: string) {
+  const value = jsonObject(JSON.parse(fs.readFileSync(path.join(root, 'build', 'sbom.json'), 'utf8')));
+  const component = jsonObject(jsonObject(value.metadata).component);
+  assert.ok(Array.isArray(value.components));
+  return { bomFormat: value.bomFormat, specVersion: value.specVersion, metadata: { component },
+    components: value.components.map((entry: unknown) => {
+      const item = jsonObject(entry);
+      assert.ok(typeof item.name === 'string' && typeof item.version === 'string' && Array.isArray(item.licenses));
+      const licenses = item.licenses.map((entry: unknown) => {
+        const license = jsonObject(jsonObject(entry).license);
+        assert.equal(typeof license.name, 'string');
+        assert.ok(typeof license.name === 'string');
+        return { license: { name: license.name } };
+      });
+      return { name: item.name, version: item.version, licenses };
+    }),
+  };
+}
 
 // ---- task-2285 release metadata for the canonical ESM bundle ----
 describe("release metadata for the canonical ESM bundle", () => {
@@ -112,7 +135,7 @@ describe("release metadata for the canonical ESM bundle", () => {
         .map(line => { const [digest, ...rest] = line.split(/\s+/); return [rest.join(' '), digest]; }),
     );
     const walk = (dir: string, prefix = ''): string[] => fs.readdirSync(dir, { withFileTypes: true })
-      .flatMap((entry: any) => (entry.isDirectory()
+      .flatMap((entry) => (entry.isDirectory()
         ? (entry.name === 'sea' ? [] : walk(path.join(dir, entry.name), `${prefix}${entry.name}/`))
           // build/sea is owned by the SEA build script and is not part of the
           // canonical bundle's checksum manifest (task-2286).
@@ -129,7 +152,7 @@ describe("release metadata for the canonical ESM bundle", () => {
   });
 
   test('task-2285 SBOM and NOTICES describe the same bundled package set', () => {
-    const sbom = JSON.parse(fs.readFileSync(path.join(ROOT, 'build', 'sbom.json'), 'utf8'));
+    const sbom = builtSbom(ROOT);
     const notices = fs.readFileSync(path.join(ROOT, 'NOTICES'), 'utf8');
     assert.equal(sbom.bomFormat, 'CycloneDX');
     assert.equal(sbom.specVersion, '1.5');
@@ -143,7 +166,7 @@ describe("release metadata for the canonical ESM bundle", () => {
       assert.match(notices, new RegExp(`${component.name.replace(/[/@.]/g, '\\$&')}@${component.version.replace(/\./g, '\\.')}`));
     }
     // ink and react are the reason the bundle is not first-party-only (TASK-2282).
-    const names = sbom.components.map((component: any) => component.name);
+    const names = sbom.components.map((component) => component.name);
     assert.ok(names.includes('ink'));
     assert.ok(names.includes('react'));
     // The pi coding-agent SDK is loaded through an opaque dynamic import, so it is
@@ -152,8 +175,8 @@ describe("release metadata for the canonical ESM bundle", () => {
   });
 
   test('task-2285 every bundled package carries an approved license', () => {
-    const sbom = JSON.parse(fs.readFileSync(path.join(ROOT, 'build', 'sbom.json'), 'utf8'));
-    const packages = sbom.components.map((component: any) => ({
+    const sbom = builtSbom(ROOT);
+    const packages = sbom.components.map((component) => ({
       name: component.name,
       version: component.version,
       license: component.licenses[0].license.name,
@@ -164,7 +187,6 @@ describe("release metadata for the canonical ESM bundle", () => {
   test('task-2285 license audit rejects an unapproved dependency license', () => {
     assert.equal(ALLOWED_LICENSES.has('GPL-3.0-only'), false);
     assert.deepEqual(
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       licenseViolations([{ name: 'copyleft-lib', version: '1.0.0', license: 'GPL-3.0-only' }]),
       ['copyleft-lib@1.0.0: unapproved license GPL-3.0-only'],
     );
@@ -201,8 +223,9 @@ describe("release metadata for the canonical ESM bundle", () => {
   });
 
   test('task-2285 release metadata requires the bundle metafile', () => {
+    // @ts-expect-error An absent metafile must be rejected.
     assert.throws(() => bundledPackages(ROOT, undefined), /requires the esbuild metafile/);
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
+    // @ts-expect-error A metafile without inputs must be rejected.
     assert.throws(() => bundledPackages(ROOT, {}), /requires the esbuild metafile/);
   });
 
@@ -221,9 +244,8 @@ describe("release metadata for the canonical ESM bundle", () => {
       const packageDir = path.join(fixture, 'node_modules', name);
       fs.mkdirSync(packageDir, { recursive: true });
       fs.writeFileSync(path.join(packageDir, 'LICENSE'), 'MIT License\n\nShared body.\n');
-      return { name, version: '1.0.0', license: 'MIT', homepage: null, packageDir };
+      return { name, version: '1.0.0', license: 'MIT', homepage: null, packageDir, location: packageDir, resolved: null, integrity: null };
     });
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     const notices = renderNotices(packages, packageJson);
     assert.equal(notices.split('Shared body.').length - 1, 1, 'identical texts appear once');
     assert.match(notices, /alpha@1\.0\.0 \(MIT\)\nbeta@1\.0\.0 \(MIT\)/);
@@ -232,14 +254,14 @@ describe("release metadata for the canonical ESM bundle", () => {
 
   test('task-2285 SBOM records subresource hashes from the lockfile integrity', () => {
     const sbom = renderSbom(
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       [{
         name: 'ink', version: '6.8.0', license: 'MIT', homepage: null,
-        integrity: 'sha512-AAAAAA==',
+        integrity: 'sha512-AAAAAA==', resolved: null, location: 'node_modules/ink', packageDir: path.join(ROOT, 'node_modules/ink'),
       }],
       packageJson,
     );
     assert.equal(sbom.components[0].purl, 'pkg:npm/ink@6.8.0');
+    assert.ok(sbom.components[0].hashes);
     assert.equal(sbom.components[0].hashes[0].alg, 'SHA-512');
     assert.equal(sbom.components[0].hashes[0].content, Buffer.from('AAAAAA==', 'base64').toString('hex'));
   });
@@ -341,7 +363,7 @@ describe("runtime entry points avoid import-equals syntax", () => {
   // Regex matches `export =` in a comment or string (negative filter)
   // We need to distinguish `export = fn` from `export { fn }`
 
-  function readFileSafe(filePath) {
+  function readFileSafe(filePath: fs.PathOrFileDescriptor) {
     try {
       return fs.readFileSync(filePath, 'utf8');
     } catch (err) {
@@ -349,7 +371,7 @@ describe("runtime entry points avoid import-equals syntax", () => {
     }
   }
 
-  function findImportEqualsMatches(content, filePath) {
+  function findImportEqualsMatches(content: string, filePath: string) {
     const matches = [];
     const lines = content.split('\n');
     for (let i = 0; i < lines.length; i++) {
@@ -361,7 +383,7 @@ describe("runtime entry points avoid import-equals syntax", () => {
     return matches;
   }
 
-  function findExportEqualsMatches(content, filePath) {
+  function findExportEqualsMatches(content: string, filePath: string) {
     const matches = [];
     const lines = content.split('\n');
     for (let i = 0; i < lines.length; i++) {
@@ -499,14 +521,14 @@ describe("release publication trust", () => {
       const run = (executable: string, args: string[]) => {
         calls.push([executable, ...args]);
         if (executable === 'npm' && args[0] === 'view' && args[1].includes('@1.5.120')) {
-          return { status: 1, stdout: '', stderr: 'E404 Not Found' };
+          return { signal: null,  status: 1, stdout: '', stderr: 'E404 Not Found' };
         }
-        if (executable === 'npm' && args[0] === 'view') { return { status: 0, stdout: '"1.5.119"', stderr: '' }; }
-        if (executable === 'git' && args[0] === 'rev-parse') { return { status: 1, stdout: '', stderr: '' }; }
+        if (executable === 'npm' && args[0] === 'view') { return { signal: null,  status: 0, stdout: '"1.5.119"', stderr: '' }; }
+        if (executable === 'git' && args[0] === 'rev-parse') { return { signal: null,  status: 1, stdout: '', stderr: '' }; }
         if (executable === 'gh' && args[0] === 'release' && args[1] === 'view') {
-          return { status: 1, stdout: '', stderr: 'release not found' };
+          return { signal: null,  status: 1, stdout: '', stderr: 'release not found' };
         }
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       };
       publishTrustedRelease(root, 'trusted-sha', run);
       assert.deepEqual(calls.filter(call => call[0] === 'git' && call[1] === 'tag'), [['git', 'tag', 'v1.5.120', 'trusted-sha']]);
@@ -520,12 +542,12 @@ describe("release publication trust", () => {
       const calls: string[][] = [];
       const run = (executable: string, args: string[]) => {
         calls.push([executable, ...args]);
-        if (executable === 'git') { return { status: 0, stdout: 'trusted-sha\n', stderr: '' }; }
-        if (executable === 'npm' && args[2] === 'gitHead') { return { status: 0, stdout: '"trusted-sha"', stderr: '' }; }
-        if (executable === 'npm' && args[0] === 'view') { return { status: 0, stdout: '"1.5.120"', stderr: '' }; }
+        if (executable === 'git') { return { signal: null,  status: 0, stdout: 'trusted-sha\n', stderr: '' }; }
+        if (executable === 'npm' && args[2] === 'gitHead') { return { signal: null,  status: 0, stdout: '"trusted-sha"', stderr: '' }; }
+        if (executable === 'npm' && args[0] === 'view') { return { signal: null,  status: 0, stdout: '"1.5.120"', stderr: '' }; }
         // A release whose stored targetCommitish is a branch name is still bound to its tag.
-        if (executable === 'gh') { return { status: 0, stdout: 'tag: v1.5.120\ntarget: main\n', stderr: '' }; }
-        return { status: 0, stdout: '', stderr: '' };
+        if (executable === 'gh') { return { signal: null,  status: 0, stdout: 'tag: v1.5.120\ntarget: main\n', stderr: '' }; }
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       };
       publishTrustedRelease(root, 'trusted-sha', run);
       assert.ok(!calls.some(call => call[0] === 'npm' && call[1] === 'publish'));

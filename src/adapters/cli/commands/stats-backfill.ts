@@ -1,3 +1,4 @@
+import type { StatsRow, StatsBackfillUnresolved, StatsBackfillSkipped } from '../../../application/ports.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -14,36 +15,28 @@ import {
 import { findMissionDir } from '../../filesystem/mission-utils.js';
 import type { StatsBackfillService } from '../../../application/stats-backfill-service.js';
 
-interface StatsAugmented {
-  resolveMissionClassification: (_slug: string, _rootDir?: string, _readLabels?: undefined, _configuration?: ParallixConfiguration) => { classification?: string | null; source?: string };
-  resolveStatsRepoName: (_rootDir: string) => string;
-  loadMeasurementRows: (_options?: { configuration?: ParallixConfiguration; rootDir?: string; dbPath?: string; store?: unknown }) => { rows: Record<string, string>[] };
-  deriveImplementerAndFixRounds: (_slug: string, _rootDir?: string, _missionStore?: unknown) => { implementer: string; prFixRounds: number | null; source: string };
-  upsertMeasurementRow: (_row: Record<string, string>, _options?: { rootDir?: string; dbPath?: string; store?: unknown }) => { changed: boolean };
-}
-
-function getStats(): StatsAugmented {
-  return stats as unknown as StatsAugmented;
-}
+type BackfillStoreOptions = Pick<NonNullable<Parameters<typeof stats.loadMeasurementRows>[0]>, 'configuration' | 'dbPath' | 'store'>;
+type BackfillMissionStore = Parameters<typeof stats.deriveImplementerAndFixRounds>[2];
+function getStats(): typeof stats { return stats; }
 
 function hasCheckpointFiles(missionDir: string) {
-  if (!missionDir || !fs.existsSync(missionDir)) {return false;}
+  if (!missionDir || !fs.existsSync(missionDir)) { return false; }
   return fs.readdirSync(missionDir).some(file => /^CP-\d+\.md$/i.test(file) || /^CHECKPOINT_FINAL\.md$/i.test(file));
 }
 
 function listHistoricalMissionSlugs(rootDir = process.cwd()) {
   const missionsRoot = path.join(rootDir, 'docs', 'missions');
-  if (!fs.existsSync(missionsRoot)) {return [];}
+  if (!fs.existsSync(missionsRoot)) { return []; }
 
   const slugs = [];
   for (const year of fs.readdirSync(missionsRoot).sort(compareCodeUnits)) {
     const yearDir = path.join(missionsRoot, year);
-    if (!/^\d{4}$/.test(year) || !fs.statSync(yearDir).isDirectory()) {continue;}
+    if (!/^\d{4}$/.test(year) || !fs.statSync(yearDir).isDirectory()) { continue; }
     for (const slug of fs.readdirSync(yearDir).sort(compareCodeUnits)) {
-      if (!/^task-\d+/i.test(slug)) {continue;}
+      if (!/^task-\d+/i.test(slug)) { continue; }
       const missionDir = path.join(yearDir, slug);
-      if (!fs.statSync(missionDir).isDirectory()) {continue;}
-      if (!hasCheckpointFiles(missionDir)) {continue;}
+      if (!fs.statSync(missionDir).isDirectory()) { continue; }
+      if (!hasCheckpointFiles(missionDir)) { continue; }
       slugs.push(slug);
     }
   }
@@ -57,24 +50,24 @@ function extractDateOnly(value: unknown) {
 
 function normalizeHistoricalImplementer(value: unknown) {
   const normalized = String(value || '').trim().toLowerCase();
-  if (!normalized) {return null;}
-  if (/(^|[^a-z])codex([^a-z]|$)/.test(normalized)) {return 'codex';}
-  if (/(^|[^a-z])claude([^a-z]|$)/.test(normalized)) {return 'claude';}
-  if (/(^|[^a-z])gemini([^a-z]|$)/.test(normalized)) {return 'gemini';}
-  if (/(^|[^a-z])custom([^a-z]|$)/.test(normalized)) {return 'custom';}
-  if (/(^|[^a-z])vibe([^a-z]|$)/.test(normalized)) {return 'vibe';}
-  if (/(^|[^a-z])magnus([^a-z]|$)/.test(normalized)) {return 'magnus';}
-  if (/(^|[^a-z])human([^a-z]|$)/.test(normalized)) {return 'human';}
+  if (!normalized) { return null; }
+  if (/(^|[^a-z])codex([^a-z]|$)/.test(normalized)) { return 'codex'; }
+  if (/(^|[^a-z])claude([^a-z]|$)/.test(normalized)) { return 'claude'; }
+  if (/(^|[^a-z])gemini([^a-z]|$)/.test(normalized)) { return 'gemini'; }
+  if (/(^|[^a-z])custom([^a-z]|$)/.test(normalized)) { return 'custom'; }
+  if (/(^|[^a-z])vibe([^a-z]|$)/.test(normalized)) { return 'vibe'; }
+  if (/(^|[^a-z])magnus([^a-z]|$)/.test(normalized)) { return 'magnus'; }
+  if (/(^|[^a-z])human([^a-z]|$)/.test(normalized)) { return 'human'; }
   return null;
 }
 
 function deriveImplementerFromGitHistory(slug: string, taskFile: string, rootDir = process.cwd()) {
   const missionDir = findMissionDir(slug, rootDir);
   const targets: string[] = [missionDir, taskFile].filter((x): x is string => Boolean(x));
-  if (targets.length === 0) {return null;}
+  if (targets.length === 0) { return null; }
 
   const result = git(['-C', rootDir, 'log', '--all', '--format=%an|%ae', '--', ...targets]);
-  if (result.status !== 0) {return null;}
+  if (result.status !== 0) { return null; }
 
   const authors: string[] = result.stdout
     .split('\n')
@@ -86,7 +79,7 @@ function deriveImplementerFromGitHistory(slug: string, taskFile: string, rootDir
     })
     .filter(Boolean) as string[];
 
-  if (authors.length === 0) {return null;}
+  if (authors.length === 0) { return null; }
   // new Set(authors)[0] == authors[0]: first author, dedupe irrelevant to element 0.
   return authors[0];
 }
@@ -94,10 +87,10 @@ function deriveImplementerFromGitHistory(slug: string, taskFile: string, rootDir
 function deriveDateFromGitHistory(slug: string, taskFile: string, rootDir = process.cwd()) {
   const missionDir = findMissionDir(slug, rootDir);
   const targets: string[] = [missionDir, taskFile].filter((x): x is string => Boolean(x));
-  if (targets.length === 0) {return null;}
+  if (targets.length === 0) { return null; }
 
   const result = git(['-C', rootDir, 'log', '--all', '-1', '--date=short', '--format=%cd', '--', ...targets]);
-  if (result.status !== 0) {return null;}
+  if (result.status !== 0) { return null; }
   return extractDateOnly(result.stdout.trim());
 }
 
@@ -108,11 +101,11 @@ function resolveHistoricalClassification(slug: string, rootDir = process.cwd(), 
 }
 
 type HistoricalMissionOutcome =
-  | { kind: 'row'; row: any }
-  | { kind: 'unresolved'; unresolved: any }
-  | { kind: 'skipped'; skipped: any };
+  | { kind: 'row'; row: StatsRow }
+  | { kind: 'unresolved'; unresolved: StatsBackfillUnresolved }
+  | { kind: 'skipped'; skipped: StatsBackfillSkipped };
 
-async function collectHistoricalMission(slug: string, rootDir: string, repoName: string, missionStore: unknown, stats: ReturnType<typeof getStats>, configuration?: ParallixConfiguration): Promise<HistoricalMissionOutcome> {
+async function collectHistoricalMission(slug: string, rootDir: string, repoName: string, missionStore: BackfillMissionStore, stats: ReturnType<typeof getStats>, configuration?: ParallixConfiguration): Promise<HistoricalMissionOutcome> {
   const taskResolution = resolveTaskFile(slug, rootDir);
   if (!taskResolution.ok) {
     return { kind: 'unresolved', unresolved: { slug, reason: 'task-resolution', detail: taskResolution.reason } };
@@ -124,33 +117,9 @@ async function collectHistoricalMission(slug: string, rootDir: string, repoName:
   }
   const date = extractDateOnly(getTaskFrontmatterValue(taskFile, 'updated_date') ?? '') || deriveDateFromGitHistory(slug, taskFile, rootDir);
   const classification = resolveHistoricalClassification(slug, rootDir, configuration);
-  let implementerInfo: { implementer: string; prFixRounds: number | null; source: string } | null = null;
-  let implementerError: string | null = null;
-  try {
-    implementerInfo = await Promise.resolve(stats.deriveImplementerAndFixRounds(slug, rootDir, missionStore));
-  } catch (error) {
-    implementerError = error instanceof Error ? error.message : String(error);
-  }
-  if (!implementerInfo?.implementer || implementerInfo.implementer === 'unknown') {
-    const gitHistoryImplementer = deriveImplementerFromGitHistory(slug, taskFile, rootDir);
-    if (gitHistoryImplementer) {
-      implementerInfo = { implementer: gitHistoryImplementer, prFixRounds: 0, source: 'git-history-author' };
-    }
-  }
+  const { implementerInfo, implementerError } = await resolveHistoricalImplementer(slug, taskFile, rootDir, missionStore, stats);
   if (!date || !classification.value || !implementerInfo?.implementer) {
-    return {
-      kind: 'unresolved', unresolved: {
-        slug,
-        reason: 'missing-fields',
-        date: date || null,
-        classification: classification.value || null,
-        implementer: implementerInfo?.implementer || null,
-        prFixRounds: implementerInfo?.prFixRounds ?? null,
-        sources: { classification: classification.source, implementer: implementerInfo?.source || null },
-        missing: [...(!date ? ['date'] : []), ...(!classification.value ? ['classification'] : []), ...(!implementerInfo?.implementer ? ['implementer'] : [])],
-        detail: implementerError,
-      },
-    };
+    return { kind: 'unresolved', unresolved: unresolvedHistoricalFields(slug, date, classification, implementerInfo, implementerError) };
   }
   return {
     kind: 'row', row: {
@@ -165,6 +134,37 @@ async function collectHistoricalMission(slug: string, rootDir: string, repoName:
   };
 }
 
+interface HistoricalImplementer { implementer: string; prFixRounds: number | null; source: string; }
+async function resolveHistoricalImplementer(slug: string, taskFile: string, rootDir: string, missionStore: BackfillMissionStore, stats: ReturnType<typeof getStats>) {
+  let implementerInfo: { implementer: string; prFixRounds: number | null; source: string } | null = null;
+  let implementerError: string | null = null;
+  try {
+    implementerInfo = await Promise.resolve(stats.deriveImplementerAndFixRounds(slug, rootDir, missionStore));
+  } catch (error) {
+    implementerError = error instanceof Error ? error.message : String(error);
+  }
+  if (!implementerInfo?.implementer || implementerInfo.implementer === 'unknown') {
+    const gitHistoryImplementer = deriveImplementerFromGitHistory(slug, taskFile, rootDir);
+    if (gitHistoryImplementer) {
+      implementerInfo = { implementer: gitHistoryImplementer, prFixRounds: 0, source: 'git-history-author' };
+    }
+  }
+  return { implementerInfo, implementerError };
+}
+function unresolvedHistoricalFields(slug: string, date: string | null, classification: { value: string | null; source: string }, implementerInfo: HistoricalImplementer | null, implementerError: string | null): StatsBackfillUnresolved {
+  return {
+    slug,
+    reason: 'missing-fields',
+    date: date || null,
+    classification: classification.value || null,
+    implementer: implementerInfo?.implementer || null,
+    prFixRounds: implementerInfo?.prFixRounds ?? null,
+    sources: { classification: classification.source, implementer: implementerInfo?.source || null },
+    missing: [...(!date ? ['date'] : []), ...(!classification.value ? ['classification'] : []), ...(!implementerInfo?.implementer ? ['implementer'] : [])],
+    detail: implementerError,
+  };
+}
+
 /**
  * @param rootDir Repository root the historical missions are read from.
  * @param options Measurement-store selection. `dbPath`/`store` let fast
@@ -176,8 +176,8 @@ async function collectHistoricalMission(slug: string, rootDir: string, repoName:
  */
 async function collectHistoricalStatsBackfill(
   rootDir = process.cwd(),
-  options: { configuration?: ParallixConfiguration; dbPath?: string; store?: unknown } = {},
-  missionStore?: unknown,
+  options: BackfillStoreOptions = {},
+  missionStore?: BackfillMissionStore,
 ) {
   const s = getStats();
   // architecture migration: the already-recorded missions come from the measurement
@@ -185,15 +185,15 @@ async function collectHistoricalStatsBackfill(
   const repoName = s.resolveStatsRepoName(rootDir);
   const existingMissions = new Set(
     s.loadMeasurementRows({ configuration: options.configuration, rootDir, dbPath: options.dbPath, store: options.store }).rows
-      .filter((row: Record<string, string>) => String(row.repo || '').trim() === repoName)
-      .map((row: Record<string, string>) => row.mission)
+      .filter(row => String(row.repo || '').trim() === repoName)
+      .map(row => row.mission)
   );
   const rows = [];
   const unresolved = [];
   const skipped = [];
 
   for (const slug of listHistoricalMissionSlugs(rootDir)) {
-    if (existingMissions.has(slug)) {continue;}
+    if (existingMissions.has(slug)) { continue; }
     const outcome = await collectHistoricalMission(slug, rootDir, repoName, missionStore, s, options.configuration);
     if (outcome.kind === 'row') { rows.push(outcome.row); }
     if (outcome.kind === 'unresolved') { unresolved.push(outcome.unresolved); }
@@ -207,7 +207,11 @@ async function collectHistoricalStatsBackfill(
   return { rows, unresolved, skipped };
 }
 
-function renderBackfillSummary(report: { rows: readonly any[]; unresolved: readonly any[]; skipped: readonly any[] }) {
+function backfillReport(value: import('../../../application/ports.js').StatsProjection) {
+  return { rows: value.rows, unresolved: value.unresolved || [], skipped: value.skipped || [] };
+}
+
+function renderBackfillSummary(report: { rows: readonly StatsRow[]; unresolved: readonly StatsBackfillUnresolved[]; skipped: readonly StatsBackfillSkipped[] }) {
   const lines = [];
   lines.push(`Resolved rows: ${report.rows.length}`);
   lines.push(`Unresolved missions: ${report.unresolved.length}`);
@@ -226,7 +230,7 @@ function renderBackfillSummary(report: { rows: readonly any[]; unresolved: reado
 }
 
 /** Append a labeled section to `lines`: a header, one `- ` prefixed row per item, and a trailing blank line. Skips empty sections. */
-function pushSummarySection(lines: string[], header: string, renderRow: (_item: any) => string, items: readonly any[]): void {
+function pushSummarySection<T>(lines: string[], header: string, renderRow: (_item: T) => string, items: readonly T[]): void {
   if (items.length === 0) { return; }
   lines.push(header);
   for (const item of items) {
@@ -235,7 +239,7 @@ function pushSummarySection(lines: string[], header: string, renderRow: (_item: 
   lines.push('');
 }
 
-function printUsage(log = fmt.log.plain) {
+function printUsage(log: (_message: string) => void = fmt.log.plain) {
   log(`Usage: px stats-backfill [--apply] [--json]
 
 Examples:
@@ -251,10 +255,27 @@ Notes:
   - Non-done missions are skipped and unresolved missions are reported without being written.`);
 }
 
+function parseBackfillFlags(args: readonly string[]) {
+  let apply = false;
+  let json = false;
+
+  for (let i = 0;i < args.length;i += 1) {
+    const arg = args[i];
+    if (arg === '--apply') {
+      apply = true;
+      continue;
+    }
+    if (arg === '--json') {
+      json = true;
+    }
+  }
+  return { apply, json };
+}
+
 interface BackfillOptions {
-  log?: (_msg: string) => string | null;
-  error?: (_msg: string) => string | null;
-  exit?: (_code?: number) => never;
+  log?: (_msg: string) => void;
+  error?: (_msg: string) => void;
+  exit?: (_code?: number) => void;
   rootDir?: string;
   service?: Pick<StatsBackfillService, 'execute'>;
 }
@@ -269,19 +290,7 @@ async function statsBackfill(args: string[], options: BackfillOptions = {}) {
     return;
   }
 
-  let apply = false;
-  let json = false;
-
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i];
-    if (arg === '--apply') {
-      apply = true;
-      continue;
-    }
-    if (arg === '--json') {
-      json = true;
-    }
-  }
+  const { apply, json } = parseBackfillFlags(args);
   const service = opts.service;
   if (!service) { throw new Error('stats-backfill command requires an injected service'); }
   const outcome = await service.execute({
@@ -296,11 +305,7 @@ async function statsBackfill(args: string[], options: BackfillOptions = {}) {
     return;
   }
 
-  const report = {
-    rows: outcome.value.rows,
-    unresolved: outcome.value.unresolved || [],
-    skipped: outcome.value.skipped || [],
-  };
+  const report = backfillReport(outcome.value);
   const changed = outcome.durableEvidence.length;
   const payload = {
     resolved: report.rows.length,
@@ -312,6 +317,10 @@ async function statsBackfill(args: string[], options: BackfillOptions = {}) {
     skippedItems: report.skipped,
   };
 
+  printBackfillResult(report, payload, changed, apply, json, log, error);
+}
+
+function printBackfillResult(report: ReturnType<typeof backfillReport>, payload: unknown, changed: number, apply: boolean, json: boolean, log: (_msg: string) => unknown, error: (_msg: string) => unknown): void {
   if (json) {
     log(JSON.stringify(payload, null, 2));
   } else {
@@ -327,7 +336,6 @@ async function statsBackfill(args: string[], options: BackfillOptions = {}) {
   }
 }
 
-(statsBackfill as any).collectHistoricalStatsBackfill = collectHistoricalStatsBackfill;
-(statsBackfill as any).extractDateOnly = extractDateOnly;
-export default statsBackfill;
+const statsBackfillWithHelpers = Object.assign(statsBackfill, { collectHistoricalStatsBackfill, extractDateOnly });
+export default statsBackfillWithHelpers;
 export { statsBackfill, collectHistoricalStatsBackfill, extractDateOnly };

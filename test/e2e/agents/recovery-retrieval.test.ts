@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2642: bounded real-agent evaluation of recovery-evidence retrieval.
 
 // Tier 2 blocking e2e: proves the capability criterion 6 demands — a configured
 // real agent actually RETRIEVES the hidden failure that a large passing prefix
@@ -59,13 +58,13 @@ const SMOKE_AGENT = OVERRIDE_AGENT === 'custom' ? 'custom' : 'codex'; // only co
 const LOCAL_E2E_API_KEY = 'parallix-pi-e2e-local-key';
 const KEEP_TMP = process.env.PARALLIX_E2E_KEEP_TMP === '1';
 
-function runCommand(command, args, options = {}) {
+function runCommand(command: string, args: readonly string[], options: Omit<childProcess.SpawnSyncOptionsWithStringEncoding, 'encoding'> & { encoding?: 'utf8' } = {}) {
   const result = childProcess.spawnSync(command, args, { encoding: 'utf8', ...options });
   if (result.error && result.status === null) { throw result.error; }
   return result;
 }
 
-function runGit(cwd, args) {
+function runGit(cwd: string, args: readonly string[]) {
   const result = runCommand('git', args, { cwd });
   if (result.status !== 0) {
     throw new Error(`git ${args.join(' ')} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
@@ -73,7 +72,7 @@ function runGit(cwd, args) {
   return (result.stdout || '').trim();
 }
 
-function maybeCommandPath(command) {
+function maybeCommandPath(command: string) {
   const dirs = (process.env.PATH || '').split(path.delimiter);
   for (const dir of dirs) {
     if (!dir) {continue;}
@@ -86,7 +85,7 @@ function maybeCommandPath(command) {
   return line && fs.existsSync(line) ? line : null;
 }
 
-function requireCommandPath(command) {
+function requireCommandPath(command: string) {
   const resolved = maybeCommandPath(command);
   if (!resolved) { throw new Error(`Could not resolve ${command} on PATH: ${command}`); }
   return resolved;
@@ -253,7 +252,7 @@ exit 1
   return { tmpRoot, repoRoot, stateHome };
 }
 
-function envFor(repo) {
+function envFor(repo: ReturnType<typeof setupRepository>) {
   const binDir = path.join(repo.tmpRoot, 'bin');
   fs.mkdirSync(binDir, { recursive: true });
   fs.symlinkSync(process.execPath, path.join(binDir, 'node'));
@@ -262,7 +261,7 @@ function envFor(repo) {
   // Codex launcher resolves its executable from CODEX_BIN first; pin it so the
   // run exercises this checkout's configured adapter, not an ambient one.
   const codexBin = requireCommandPath('codex');
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     FORCE_COLOR: '0',
     PRIMARY_WORKTREE: repo.repoRoot,
@@ -282,13 +281,13 @@ function envFor(repo) {
  * a hidden failure. Returns the active run result plus the captured repair
  * prompt, so the evaluation can check what the repair agent was handed.
  */
-function driveToRecovery(repo, env) {
+function driveToRecovery(repo: ReturnType<typeof setupRepository>, env: NodeJS.ProcessEnv) {
   const slug = 'task-6420';
   const draft = runCommand(process.execPath, [CLI_ENTRY, 'draft', slug, '--agent', 'codex'], {
     cwd: repo.repoRoot, env, timeout: RUN_TIMEOUT_MS,
   });
   if (draft.status !== 0) {
-    assert.fail(`[recovery-e2e] px draft failed (status=${draft.status}): ${draft.stderr || draft.stdout}`);
+    return assert.fail(`[recovery-e2e] px draft failed (status=${draft.status}): ${draft.stderr || draft.stdout}`);
   }
   // `px active` runs from the mission worktree (PWD + branch preflight), which
   // is the same layout a real implementer session uses.
@@ -322,7 +321,7 @@ function readStreamFiles(ref: { stdoutPath: string; stderrPath: string }): strin
  * A bounded configured-agent evaluation. Reports three outcomes separately, as
  * criterion 6 requires: retrieval success, repair outcome, and context cost.
  */
-function evaluate({ slug, active, worktree, repo, env }) {
+function evaluate({ slug, active, worktree, repo }: { slug: string; active: ReturnType<typeof runCommand>; worktree: string; repo: ReturnType<typeof setupRepository>; env: NodeJS.ProcessEnv }) {
   const stdout = `${active.stdout || ''}${active.stderr || ''}`.replace(/\x1B\[[0-9;]*m/g, '');
 
   // Repair outcome: did the bounded repair launch run at all, and how did it end?
@@ -434,7 +433,6 @@ function evaluate({ slug, active, worktree, repo, env }) {
   let contextCost = null;
   try {
     const db = path.join(repo.stateHome, 'parallix.db');
-    // eslint-disable-next-line no-console
     console.error('[recovery-e2e-debug] db path', db, 'exists', fs.existsSync(db));
     if (fs.existsSync(db)) {
       const authority = new DatabaseSync(db, { readOnly: true });
@@ -453,7 +451,7 @@ function evaluate({ slug, active, worktree, repo, env }) {
     }
   } catch { /* cost is reported, never fatal */ }
 
-  return { retrieval, repairOutcome, contextCost };
+  return { retrieval, repairOutcome, repairTargetCleared, contextCost };
 }
 
 test('task-2642: a bounded configured agent retrieves the hidden failure and names the repair target', {

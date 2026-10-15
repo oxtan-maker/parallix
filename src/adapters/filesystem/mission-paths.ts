@@ -113,7 +113,7 @@ export function missionPathForSlug(rootDir: string, slug: string): string {
 }
 
 /** @param {string} slug @param {string} [rootDir] @param {{missionPath?: string}} options */
-export function findMissionDir(slug: string, rootDir: string = process.cwd(), options: { missionPath?: string } = {}): string | null {
+export function findMissionDir(slug: string | null | undefined, rootDir: string = process.cwd(), options: { missionPath?: string } = {}): string | null {
   const override = existingMissionPath(options.missionPath);
   if (override) { return override; }
   if (!slug) {return null;}
@@ -151,7 +151,7 @@ function findLegacyMissionDir(slug: string, rootDir: string, baseSlug?: string):
  * @returns {string|null}
  */
 /** @param {string} [slugCandidate] */
-export function inferSlug(slugCandidate: string | undefined): string | null {
+export function inferSlug(slugCandidate?: string): string | null {
   if (slugCandidate && isMissionSlugCandidate(slugCandidate)) {
     return slugCandidate.toLowerCase();
   }
@@ -240,7 +240,7 @@ export function readMissionFile(missionDir: string): string {
 }
 
 /** @param {string} [slug] */
-export function missionTitle(slug: string | undefined): string | null {
+export function missionTitle(slug?: string | null): string | null {
   if (!slug) {return null;}
   const missionDir = findMissionDir(slug);
   if (!missionDir) {return null;}

@@ -1,3 +1,4 @@
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
@@ -9,7 +10,7 @@ import { makeCard, makeProjection } from '../../../fixtures/board-projection.js'
 
 function render(agent: string | null, phase = 'integrate'): string {
   const card = makeCard({
-    id: 'task-2576' as never,
+    id: fixtureMissionId('task-2576'),
     lane: 'integration',
     status: 'integration',
     agent: null,
@@ -17,7 +18,7 @@ function render(agent: string | null, phase = 'integrate'): string {
       operationId: `${phase}:task-2576`, phase, summary: `${phase} in progress`,
       agent: agent === null ? null : agentFamily(agent), updatedAt: new Date().toISOString(), freshness: 'live',
     },
-    liveSession: { missionId: 'task-2576' as never, family: agentFamily('codex') },
+    liveSession: { missionId: fixtureMissionId('task-2576'), family: agentFamily('codex') },
   });
   return renderToStaticMarkup(React.createElement(Board, {
     snapshot: toWebBoardSnapshot(makeProjection({ integration: [card] })),

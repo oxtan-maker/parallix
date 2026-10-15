@@ -129,7 +129,7 @@ describe("production certification: persisted weekly FLOW decision surface", () 
         const missionReader = { ...catalog,
           loadMission: async (id: string) => (await catalog.loadAllMissions()).find(mission => mission.id === id) ?? null,
           getSourceFacts: () => [],
-        };
+        } satisfies NonNullable<ConstructorParameters<typeof BoardProjectionBuilder>[0]>;
         const metricsAdapter = new ConcreteMetricsReadAdapter({
           laneEventRepo, usageRepo, historyRepo, repositoryId: REPO, clock: fixedClock(NOW),
         });

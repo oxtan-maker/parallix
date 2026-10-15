@@ -38,6 +38,8 @@ export interface StartReviewRound {
 
 /** Entry facts and effects `ReviewRoundUseCase` needs before the loop runs. */
 export interface ReviewRoundEntryPort {
+  /** Bound only by composition for a direct operator invocation. */
+  readonly operatorResume?: ReviewOperatorResumePort;
   loadRound(_slug: string): Promise<PersistedReviewRound | null>;
   isKnownMission(_slug: string): Promise<boolean>;
   clearHumanIntervention(_slug: string): Promise<void>;
@@ -60,6 +62,7 @@ export interface ReviewLoopState {
   round: number;
   startedAt: string;
   phase: string;
+  phaseOriginal?: string | null;
   disposition: string | null;
   metadata: Record<string, unknown>;
   pullRequest: PullRequestReference | null;
@@ -227,17 +230,16 @@ export interface ReviewAgentLaunch {
   /** The role prompt; absent for a bare repair launch that carries only `recovery`. */
   readonly prompt?: ReviewPromptFacts;
   /** Recovery instructions appended to the role prompt by a rebound. */
-  readonly recovery?: { prompt: (_actualAgent: string) => unknown; sessionPolicy?: unknown };
+  readonly recovery?: { prompt: (_actualAgent: string) => unknown; sessionPolicy?: import('../../domain/session.js').SessionLaunchPolicy };
 }
 
 export interface ReviewAgentLaunchResult {
   /** The family the launcher actually ran (differs after a capacity fallback). */
   readonly agent?: string | null;
-  readonly result?: { telemetry?: { provider?: string; cost_usd?: number }; status?: number | null; startedAt?: string; endedAt?: string; [key: string]: unknown } | null;
+  readonly result?: { telemetry?: { provider?: string | null; cost_usd?: number } | null; status?: number | null; startedAt?: string; endedAt?: string; [key: string]: unknown } | null;
 }
 
 export interface ReviewAgentPort {
-  measuredCost?(_launch: ReviewAgentLaunchResult | null | undefined): number | null;
   /** Launch a role; throws when the launcher cannot start it. */
   launch(_launch: ReviewAgentLaunch): Promise<ReviewAgentLaunchResult | null | undefined>;
   /** The full prompt a dry run prints for a role. */
@@ -253,7 +255,7 @@ export interface ReviewAgentPort {
 export interface ReviewerArtifactFacts {
   readonly consumed: boolean;
   readonly ok?: boolean;
-  readonly diagnostic?: string;
+  readonly diagnostic?: string | null;
   readonly reviewState?: string | null;
   readonly reviewFindings?: { id: string; summary: string }[];
 }
@@ -261,7 +263,7 @@ export interface ReviewerArtifactFacts {
 export interface ImplementerArtifactFacts {
   readonly consumed: boolean;
   readonly ok?: boolean;
-  readonly diagnostic?: string;
+  readonly diagnostic?: string | null;
   readonly disposition?: string | null;
   readonly changedRevision?: boolean;
 }
@@ -335,6 +337,7 @@ export interface ReviewControllerLock {
  * ------------------------------------------------------------------ */
 
 export interface ReviewLoopPorts {
+  readonly retainedRepair?: RetainedRepairPort;
   readonly restoration?: import('./integration-approval-restoration.js').IntegrationApprovalRestorationPort;
   readonly branch: string;
   /** The mission worktree, quoted in repair prompts. */
@@ -356,7 +359,7 @@ export interface ReviewLoopPorts {
   readonly lock: ReviewControllerLock;
   readonly classification?: import('./review-classification.js').ReviewClassificationPorts;
   readonly missionStore: MissionStore | null;
-  readonly lifecycle: MissionLifecycleService | null;
+  readonly lifecycle: Pick<MissionLifecycleService, 'transition'> | null;
 }
 
 /** One autonomous review run, with the loop's tuning knobs. */
@@ -373,4 +376,16 @@ export interface ReviewLoopRequest {
   /** The caller already ran the handoff transition (e.g. `px active` repair). */
   readonly skipHandoff?: boolean;
   readonly verbose?: boolean;
+}
+
+/** Retained diagnostics and exact execution for an unfinished gate repair. */
+export interface RetainedRepairPort {
+  read(_command: string): Promise<{ evidence: import('../recovery-evidence-types.js').RecoveryEvidenceRef; stdout: string; stderr: string }>;
+  verify(_command: string, _cwd: string): Promise<import('../rebound-kernel.js').VerifyResult>;
+  readonly checkpoints: import('./repair-checkpoint.js').RepairCheckpointPort;
+}
+
+/** Explicit operator acknowledgment; supplies no repair or review evidence. */
+export interface ReviewOperatorResumePort {
+  acknowledge(_slug: string): Promise<void>;
 }

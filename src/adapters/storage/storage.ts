@@ -73,12 +73,7 @@ export function resolveParallixHome(
   } else if (platform === 'darwin') {
     home = path.join(homedir(), 'Library', 'Application Support', 'parallix');
   } else if (platform === 'win32') {
-    const localAppData = configuration.storage.localAppData;
-    if (localAppData && typeof localAppData === 'string' && localAppData.trim().length > 0) {
-      home = path.join(localAppData.trim(), 'parallix');
-    } else {
-      home = path.join(homedir(), '.parallix');
-    }
+    home = windowsParallixHome(configuration.storage.localAppData, homedir);
   } else {
     // WSL, CI, other UNIX variants
     home = path.join(homedir(), '.parallix');
@@ -91,6 +86,14 @@ export function resolveParallixHome(
   }
 
   return home;
+}
+
+function windowsParallixHome(localAppData: unknown, homedir: () => string): string {
+  if (localAppData && typeof localAppData === 'string' && localAppData.trim().length > 0) {
+    return path.join(localAppData.trim(), 'parallix');
+  } else {
+    return path.join(homedir(), '.parallix');
+  }
 }
 
 // `resolveStatsPath` was removed by architecture migration. Statistics live in the
@@ -174,10 +177,10 @@ export function writeFileAtomic(
   );
   try {
     fsModule.writeFileSync(tempPath, content, { encoding: 'utf8', mode: destinationMode });
-    if (destinationMode !== undefined) {fsModule.chmodSync(tempPath, destinationMode);}
+    if (destinationMode !== undefined) { fsModule.chmodSync(tempPath, destinationMode); }
     fsModule.renameSync(tempPath, filePath);
   } finally {
-    if (fsModule.existsSync(tempPath)) {fsModule.unlinkSync(tempPath);}
+    if (fsModule.existsSync(tempPath)) { fsModule.unlinkSync(tempPath); }
   }
 }
 

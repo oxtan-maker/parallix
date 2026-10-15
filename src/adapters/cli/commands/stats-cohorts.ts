@@ -76,7 +76,7 @@ interface ParsedCohortArgs {
 export function parseCohortArgs(args: readonly string[]): ParsedCohortArgs {
   const parsed: { dimension: CohortDimension; lowSampleThreshold: number; repositoryId: string | null; help: boolean } = { dimension: 'label', lowSampleThreshold: LOW_SAMPLE_THRESHOLD, repositoryId: null, help: false };
 
-  for (let index = 0; index < args.length; index += 1) {
+  for (let index = 0;index < args.length;index += 1) {
     const arg = args[index];
     if (arg === '--help' || arg === '-h') { parsed.help = true; continue; }
     const option = parseCohortOption(arg, args[index + 1]);
@@ -198,9 +198,7 @@ export async function statsCohorts(
   }
 
   try {
-    const repositories = options.laneEventRepo && options.usageRepo
-      ? { laneEventRepo: options.laneEventRepo, usageRepo: options.usageRepo }
-      : await resolveOperatorRepositories(options.configuration);
+    const repositories = configuredCohortRepositories(options) ?? await resolveOperatorRepositories(options.configuration);
     // `--repo` is an explicit operator choice. With no override the identity
     // comes from the canonical owner, never from `rootDir`: run from a mission
     // worktree, the path itself matches no persisted row.
@@ -231,3 +229,7 @@ export async function statsCohorts(
 }
 
 export default statsCohorts;
+
+function configuredCohortRepositories(options: StatsCohortsOptions) {
+  return options.laneEventRepo && options.usageRepo ? { laneEventRepo: options.laneEventRepo, usageRepo: options.usageRepo } : null;
+}

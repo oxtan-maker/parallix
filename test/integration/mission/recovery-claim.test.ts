@@ -58,16 +58,16 @@ test('two runs that saw the same dead owner cannot both take the claim', async (
 
   // B reads the dead owner, and A completes its whole takeover inside that
   // window. B must then find A's live claim and give up rather than delete it.
-  let winner: (() => Promise<void>) | null = null;
+  let winner: { value: (() => Promise<void>) | null } = { value: null };
   const loser = claimRecoveryLock(mission, {
-    onDeadOwnerObserved: () => { winner = claimRecoveryLock(mission); },
+    onDeadOwnerObserved: () => { winner.value = claimRecoveryLock(mission); },
   });
 
-  assert.ok(winner, 'the run that got there first holds the claim');
+  assert.ok(winner.value, 'the run that got there first holds the claim');
   assert.equal(loser, null, 'the run holding a stale observation does not steal it back');
   assert.equal(fs.readFileSync(path.join(dir, 'owner'), 'utf8').split('\n')[0], String(process.pid),
     'and the live claim was not deleted underneath its owner');
-  await winner!();
+  await winner.value!();
   assert.equal(fs.existsSync(dir), false);
 });
 

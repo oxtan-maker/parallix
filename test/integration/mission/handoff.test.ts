@@ -1,4 +1,6 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import { fixtureMission, pendingReview } from '../../fixtures/mission-builders.js';
+import { missionVersion as fixtureVersion } from '../../../src/application/domain-ports.js';
+import type { RecordHandoffNelRequest } from "../../../src/application/mission-handoff-service.js";
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -6,9 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
-import { HandoffCommandUseCase } from '../../../src/application/handoff-command-use-case.js';
 import { findUnverifiableGoalCheckRow } from '../../../src/application/static-evidence.js';
-import { createHandoffCommand } from '../src/interfaces/cli/handoff.js';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
 import { stubMissionServices } from '../../helpers/stub-mission-services.js';
 const handoffModule = mockModule<typeof import('../../../src/adapters/cli/commands/handoff.js')>('../../../src/adapters/cli/commands/handoff.js', import.meta.url);
@@ -34,7 +34,7 @@ test('evidence shell commands require an existing file argument', () => {
     readText: () => { throw new Error('Evidence command validation must not read repository files'); },
     listEntries: () => [],
     listNames: () => [],
-  };
+  } satisfies NonNullable<Parameters<typeof findUnverifiableGoalCheckRow>[0]>;
   const bareCommandRow = '| Criterion | `cat` | PASS |';
   const fileCommandRow = '| Criterion | `cat package.json` | PASS |';
 
@@ -69,7 +69,7 @@ test('evidence accepts git commands inside escaped-backtick markdown cells', () 
  * task's implementer. These tests mock the Backlog module, so that is where the
  * identity is stated.
  */
-function writeReviewState(missionDir, reviewer, implementer) {
+function writeReviewState(missionDir: fs.PathLike, reviewer: string, implementer: string) {
   fs.mkdirSync(missionDir, { recursive: true });
   mock.method(backlog, 'getTaskImplementer', () => implementer);
   mock.method(backlog, 'getTaskAssignee', () => implementer);
@@ -78,6 +78,7 @@ function writeReviewState(missionDir, reviewer, implementer) {
 test('verifyHandoff fails when mission directory is not found', () => {
   const result = verifyHandoff('non-existent-slug-999');
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error);
   assert.match(result.error, /Mission directory not found/);
 });
 
@@ -86,30 +87,30 @@ test('performHandoff uses provided worktree and fails hard on Backlog missing', 
   const worktree = '/tmp/fake-worktree';
 
   // Mocking
-  mock.method(missionUtils, 'findMissionDir', (s, root) => {
+  mock.method(missionUtils, 'findMissionDir', (s: Parameters<(typeof missionUtils)["findMissionDir"]>[0], root: Parameters<(typeof missionUtils)["findMissionDir"]>[1]) => {
     if (s === slug && root === worktree) return '/tmp/fake-worktree/docs/missions/2026/task-098';
     return null;
   });
   mock.method(missionUtils, 'findMissionArea', () => 'docs');
-  mock.method(git, 'getCurrentBranch', (root) => {
+  mock.method(git, 'getCurrentBranch', (root: Parameters<(typeof git)["getCurrentBranch"]>[0]) => {
     if (root === worktree) return 'mission/task-098';
     return 'main';
   });
-  mock.method(git, 'run', (cmd, args, opts) => {
-    if (opts.cwd === worktree) return { status: 0 };
-    return { status: 1 };
+  mock.method(git, 'run', (cmd: Parameters<(typeof git)["run"]>[0], args: Parameters<(typeof git)["run"]>[1], opts: Parameters<(typeof git)["run"]>[2]) => {
+    if (opts?.cwd === worktree) return { signal: null, stdout: '', stderr: '',  status: 0 };
+    return { signal: null, stdout: '', stderr: '',  status: 1 };
   });
-  mock.method(git, 'git', (args, opts) => {
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0], opts: Parameters<(typeof git)["git"]>[1]) => {
     // Should NOT push to origin
     if (args.includes('origin')) {
-        assert.fail('Should not push to origin during handoff');
+        return assert.fail('Should not push to origin during handoff');
     }
-    return { status: 0 };
+    return { signal: null, stdout: '', stderr: '',  status: 0 };
   });
   mock.method(forgejo, 'readToken', () => 'fake-token');
-  mock.method(forgejo, 'createPr', (branch, user, token, opts) => {
-    if (opts.rootDir === worktree) return { ok: true, url: 'http://fake-pr' };
-    return { ok: false, error: 'wrong rootDir' };
+  mock.method(forgejo, 'createPr', (branch: Parameters<(typeof forgejo)["createPr"]>[0], user: Parameters<(typeof forgejo)["createPr"]>[1], token: Parameters<(typeof forgejo)["createPr"]>[2], opts: Parameters<(typeof forgejo)["createPr"]>[3]) => {
+    if (opts?.rootDir === worktree) return { ok: true as const, url: 'http://fake-pr' };
+    return { ok: false as const, error: 'wrong rootDir' };
   });
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
 
@@ -118,14 +119,15 @@ test('performHandoff uses provided worktree and fails hard on Backlog missing', 
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
 
-  mock.method(backlog, 'resolveTaskFile', (s, root) => {
-    if (s === slug && root === worktree) return { ok: false, reason: 'missing' };
-    return { ok: true, taskFile: 'found' };
+  mock.method(backlog, 'resolveTaskFile', (s: Parameters<(typeof backlog)["resolveTaskFile"]>[0], root: Parameters<(typeof backlog)["resolveTaskFile"]>[1]) => {
+    if (s === slug && root === worktree) return { ok: false as const, reason: 'missing' as const };
+    return { ok: true as const, taskFile: 'found' };
   });
   writeReviewState('/tmp/fake-worktree/docs/missions/2026/task-098', 'claude', 'claude');
 
   const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error);
   assert.match(result.error, /Backlog task file for task-098 not found or ambiguous/);
 
   fs.rmSync(missionMdPath, { force: true });
@@ -141,21 +143,21 @@ test('performHandoff skips commit in Step 4 when Backlog transition already comm
   mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
   mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
   mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', (args) => {
-    if (args.includes('rev-parse') && args.includes('HEAD')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
-    if (args.includes('origin')) assert.fail('Should not push to origin');
-    if (args.includes('commit')) assert.fail('Should not commit when diff --cached shows nothing staged');
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('rev-parse') && args.includes('HEAD')) return { signal: null,  status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
+    if (args.includes('origin')) return assert.fail('Should not push to origin');
+    if (args.includes('commit')) return assert.fail('Should not commit when diff --cached shows nothing staged');
     // diff --cached --quiet exits 0 = nothing staged
-    if (args.includes('--cached') && args.includes('--quiet')) return { status: 0 };
-    return { status: 0 };
+    if (args.includes('--cached') && args.includes('--quiet')) return { signal: null, stdout: '', stderr: '',  status: 0 };
+    return { signal: null, stdout: '', stderr: '',  status: 0 };
   });
   mock.method(forgejo, 'readToken', () => 'fake-token');
-  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'createPr', () => ({ ok: true as const, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
   mock.method(backlog, 'transitionTask', () => true);
-  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
+  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true as const, missing: [], skipped: false, posted: false }));
 
   // Provide a valid checkpoint file with Goal Check table for the new integrity gate
   const missionDir = '/tmp/fake-worktree/docs/missions/2026/task-098';
@@ -167,9 +169,10 @@ test('performHandoff skips commit in Step 4 when Backlog transition already comm
   const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, true);
 
-  mock.method(git, 'git', args => ({ status: args.includes('rev-parse') ? 1 : 0, stdout: '', stderr: '' }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => ({ signal: null,  status: args.includes('rev-parse') ? 1 : 0, stdout: '', stderr: '' }));
   const missingHead = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.equal(missingHead.ok, false);
+  assert.ok(missingHead.error);
   assert.match(missingHead.error, /Cannot capture the HEAD commit/);
 
 
@@ -181,27 +184,27 @@ test('performHandoff refreshes the review tracking ref and lease-updates the reb
   const slug = 'task-098';
   const worktree = '/tmp/fake-worktree';
   const cpPath = '/tmp/fake-worktree/docs/missions/2026/task-098/CP-1.md';
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
 
   mock.method(missionUtils, 'findMissionDir', () => '/tmp/fake-worktree/docs/missions/2026/task-098');
   mock.method(missionUtils, 'findMissionArea', () => 'docs');
   mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
   mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
   mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', (args) => {
-    if (args.includes('rev-parse') && args.includes('HEAD')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('rev-parse') && args.includes('HEAD')) return { signal: null,  status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
     gitCalls.push(args);
-    if (args.includes('fetch')) return { status: 0, stdout: '', stderr: '' };
-    if (args.includes('rev-parse')) return { status: 0, stdout: 'lease-sha\n', stderr: '' };
-    return { status: 0, stdout: '', stderr: '' };
+    if (args.includes('fetch')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+    if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'lease-sha\n', stderr: '' };
+    return { signal: null,  status: 0, stdout: '', stderr: '' };
   });
   mock.method(forgejo, 'readToken', () => 'fake-token');
-  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'createPr', () => ({ ok: true as const, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
   mock.method(backlog, 'transitionTask', () => true);
-  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
+  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true as const, missing: [], skipped: false, posted: false }));
 
   const missionDir = '/tmp/fake-worktree/docs/missions/2026/task-098';
   const missionMdPath = path.join(missionDir, 'MISSION.md');
@@ -212,7 +215,7 @@ test('performHandoff refreshes the review tracking ref and lease-updates the reb
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
 
-  const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+  const mockRebase = async () => ({ ok: true as const, sharedFileConflicts: false });
   const result = await performHandoff(slug, {
       missionServicesFn: stubMissionServices(),
     worktree,
@@ -235,7 +238,7 @@ test('performHandoff falls back to magnus and persists bootstrap failure summary
   const missionDir = path.join(worktree, 'docs/missions/2026', slug);
   const cpPath = path.join(missionDir, 'CP-1.md');
   const taskFile = path.join(worktree, 'backlog/tasks', `${slug} - token fallback.md`);
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
 
   fs.mkdirSync(missionDir, { recursive: true });
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
@@ -248,46 +251,48 @@ test('performHandoff falls back to magnus and persists bootstrap failure summary
   mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', (args) => {
-    if (args.includes('rev-parse') && args.includes('HEAD')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('rev-parse') && args.includes('HEAD')) return { signal: null,  status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
     gitCalls.push(args);
-    return { status: 0, stdout: '', stderr: '' };
+    return { signal: null,  status: 0, stdout: '', stderr: '' };
   });
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
-  mock.method(backlog, 'transitionTask', (taskSlug, status, options) => {
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
+  mock.method(backlog, 'transitionTask', (taskSlug: Parameters<(typeof backlog)["transitionTask"]>[0], status: Parameters<(typeof backlog)["transitionTask"]>[1], options: Parameters<(typeof backlog)["transitionTask"]>[2]) => {
     assert.equal(taskSlug, slug);
     assert.equal(status, 'review');
+    assert.ok(options != null);
     assert.equal(options.implementer, 'custom');
     return true;
   });
-  mock.method(forgejo, 'readToken', (user) => (user === 'human' ? 'human-token' : null));
+  mock.method(forgejo, 'readToken', (user: Parameters<(typeof forgejo)["readToken"]>[0]) => (user === 'human' ? 'human-token' : null));
   mock.method(forgejo, 'resolveForgejoSettings', () => ({
     url: 'http://localhost:3300',
     repo: 'human/visualboard',
   }));
   mock.method(setupReview, 'bootstrapReviewSurface', async () => ({
-    ok: false,
+    ok: false as const,
     error: 'No owner token found for human at /tmp/no-token',
   }));
-  mock.method(forgejo, 'createPr', (branch, user, token, opts) => {
+  mock.method(forgejo, 'createPr', (branch: Parameters<(typeof forgejo)["createPr"]>[0], user: Parameters<(typeof forgejo)["createPr"]>[1], token: Parameters<(typeof forgejo)["createPr"]>[2], opts: Parameters<(typeof forgejo)["createPr"]>[3]) => {
     assert.equal(branch, `mission/${slug}`);
     assert.equal(user, 'human');
     assert.equal(token, 'human-token');
+    assert.ok(opts != null);
     assert.equal(opts.forceWithLease, true);
-    return { ok: true, url: 'http://fake-pr' };
+    return { ok: true as const, url: 'http://fake-pr' };
   });
-  mock.method(forgejo, 'authenticatedReviewUrl', (user, token) => {
+  mock.method(forgejo, 'authenticatedReviewUrl', (user: Parameters<(typeof forgejo)["authenticatedReviewUrl"]>[0], token: Parameters<(typeof forgejo)["authenticatedReviewUrl"]>[1]) => {
     assert.equal(user, 'human');
     assert.equal(token, 'human-token');
     return 'http://fake-url';
   });
-  mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true, sha: 'lease-sha' }));
-  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
+  mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true as const, sha: 'lease-sha' }));
+  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true as const, missing: [], skipped: false, posted: false }));
   writeReviewState(missionDir, 'custom', 'custom');
 
   try {
-    const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+    const mockRebase = async () => ({ ok: true as const, sharedFileConflicts: false });
     const result = await performHandoff(slug, {
       missionServicesFn: stubMissionServices(),
       worktree,
@@ -318,21 +323,21 @@ test('performHandoff fails hard when git commit fails in Step 4', async (t) => {
     mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
     mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
     mock.method(git, 'getWorktreeStatus', () => []);
-    mock.method(git, 'run', () => ({ status: 0 }));
-    mock.method(git, 'git', (args) => {
-    if (args.includes('rev-parse') && args.includes('HEAD')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
-        if (args.includes('origin')) assert.fail('Should not push to origin');
-        if (args.includes('commit')) return { status: 1 }; // Step 4 Commit fail
+    mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 }));
+    mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('rev-parse') && args.includes('HEAD')) return { signal: null,  status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
+        if (args.includes('origin')) return assert.fail('Should not push to origin');
+        if (args.includes('commit')) return { signal: null, stdout: '', stderr: '',  status: 1 }; // Step 4 Commit fail
         // diff --cached --quiet exits 1 = staged changes exist, proceed to commit
-        if (args.includes('--cached') && args.includes('--quiet')) return { status: 1 };
-        return { status: 0 };
+        if (args.includes('--cached') && args.includes('--quiet')) return { signal: null, stdout: '', stderr: '',  status: 1 };
+        return { signal: null, stdout: '', stderr: '',  status: 0 };
     });
     mock.method(forgejo, 'readToken', () => 'fake-token');
-    mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+    mock.method(forgejo, 'createPr', () => ({ ok: true as const, url: 'http://fake-pr' }));
     mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
-    mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
+    mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
     mock.method(backlog, 'transitionTask', () => false);
-    mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
+    mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true as const, missing: [], skipped: false, posted: false }));
    // Provide a valid checkpoint file with Goal Check table for the new integrity gate
     const missionDir = '/tmp/fake-worktree/docs/missions/2026/task-098';
     const missionMdPath = path.join(missionDir, 'MISSION.md');
@@ -343,6 +348,7 @@ test('performHandoff fails hard when git commit fails in Step 4', async (t) => {
 
     const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
     assert.strictEqual(result.ok, false);
+    assert.ok(result.error);
     assert.match(result.error, /Could not transition task task-098 to review/);
 
     fs.rmSync(cpPath, { force: true });
@@ -362,23 +368,36 @@ test('verifyHandoff accepts a typed mission without MISSION.md', () => {
   assert.strictEqual(result.ok, true);
 });
 
-test('performHandoff fails when MISSION.md is missing from mission directory', async () => {
-  const slug = 'task-098';
-  const worktree = '/tmp/fake-worktree-missing-mm2';
-  const missionDir = '/tmp/fake-worktree-missing-mm2/docs/missions/2026/task-098';
+for (const missing of ['contract', 'checkpoint'] as const) {
+  test(`performHandoff rejects missing historical ${missing} evidence (TASK-2746)`, async (t) => {
+    const slug = 'task-098';
+    const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'handoff-missing-evidence-'));
+    t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+    const missionDir = path.join(worktree, 'docs/missions/2026/task-098');
 
-  mock.method(missionUtils, 'findMissionDir', () => missionDir);
-  mock.method(missionUtils, 'findMissionArea', () => 'docs');
-  mock.method(missionUtils, 'findCheckpoints', () => [`${missionDir}/CP-1.md`]);
-  mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
-  mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
-  writeReviewState(missionDir, 'claude', 'claude');
+    mock.method(missionUtils, 'findMissionDir', () => missionDir);
+    mock.method(missionUtils, 'findMissionArea', () => 'docs');
+    mock.method(missionUtils, 'findCheckpoints', () => [`${missionDir}/CP-1.md`]);
+    mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
+    mock.method(git, 'getWorktreeStatus', () => []);
+    mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
+    writeReviewState(missionDir, 'claude', 'claude');
 
-  const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
-  assert.strictEqual(result.ok, false);
-  assert.match(result.error, /MISSION\.md not found/);
-});
+    if (missing === 'contract') {
+      fs.writeFileSync(path.join(missionDir, 'CP-1.md'), '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test` | PASS |\n');
+    } else {
+      fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Historical contract\n');
+    }
+    const rebaseFn = t.mock.fn(async () => { throw new Error('Rebase must not run before evidence validation'); });
+    const exec = t.mock.method(childProcess, 'spawnSync', () => { throw new Error('No external effects before evidence validation'); });
+    const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices(), rebaseFn });
+    assert.strictEqual(result.ok, false);
+    assert.ok(result.error);
+    assert.match(result.error, missing === 'contract' ? /MISSION\.md not found.*Import the historical contract/ : /CP-1\.md.*was not found/);
+    assert.equal(rebaseFn.mock.callCount(), 0);
+    assert.equal(exec.mock.callCount(), 0);
+  });
+}
 
 test('performHandoff succeeds with ## Goal Check Table heading variant', async (t) => {
   const slug = 'task-098';
@@ -391,17 +410,17 @@ test('performHandoff succeeds with ## Goal Check Table heading variant', async (
   mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
   mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
   mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', (args) => {
-    if (args.includes('rev-parse') && args.includes('HEAD')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
-    if (args.includes('origin')) assert.fail('Should not push to origin');
-    if (args.includes('--cached') && args.includes('--quiet')) return { status: 0 };
-    return { status: 0 };
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('rev-parse') && args.includes('HEAD')) return { signal: null,  status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
+    if (args.includes('origin')) return assert.fail('Should not push to origin');
+    if (args.includes('--cached') && args.includes('--quiet')) return { signal: null, stdout: '', stderr: '',  status: 0 };
+    return { signal: null, stdout: '', stderr: '',  status: 0 };
   });
   mock.method(forgejo, 'readToken', () => 'fake-token');
-  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'createPr', () => ({ ok: true as const, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
   mock.method(backlog, 'transitionTask', () => true);
 
   const missionMdPath = path.join(missionDir, 'MISSION.md');
@@ -429,7 +448,7 @@ test('performHandoff fails when MISSION.md is uncommitted', async () => {
   mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
   mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
   mock.method(git, 'getWorktreeStatus', () => [' M docs/missions/2026/task-098/MISSION.md']);
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
 
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
@@ -438,6 +457,7 @@ test('performHandoff fails when MISSION.md is uncommitted', async () => {
 
   const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error);
   assert.match(result.error, /MISSION\.md is modified but uncommitted/);
 
   fs.rmSync(cpPath, { force: true });
@@ -455,7 +475,7 @@ test('performHandoff fails when no checkpoint documents exist', async () => {
   mock.method(missionUtils, 'findCheckpoints', () => []);
   mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
   mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
 
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
@@ -463,6 +483,7 @@ test('performHandoff fails when no checkpoint documents exist', async () => {
 
   const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error);
   assert.match(result.error, /No checkpoint documents found/);
 
   fs.rmSync(missionMdPath, { force: true });
@@ -473,7 +494,7 @@ test('legacy handoff fails closed without synthesizing or committing checkpoint 
   const worktree = fs.mkdtempSync(path.join('/tmp', 'handoff-autoremediate-'));
   const missionDir = path.join(worktree, 'docs/missions/2026', slug);
   const autoCpPath = path.join(missionDir, 'CP-1.md');
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
 
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
@@ -490,24 +511,25 @@ test('legacy handoff fails closed without synthesizing or committing checkpoint 
   });
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', (args) => {
-    if (args.includes('rev-parse') && args.includes('HEAD')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('rev-parse') && args.includes('HEAD')) return { signal: null,  status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
     gitCalls.push(args);
-    return { status: 0, stdout: '', stderr: '' };
+    return { signal: null,  status: 0, stdout: '', stderr: '' };
   });
   mock.method(forgejo, 'readToken', () => 'fake-token');
-  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'createPr', () => ({ ok: true as const, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
   mock.method(backlog, 'transitionTask', () => true);
-  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
+  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true as const, missing: [], skipped: false, posted: false }));
 
   try {
     writeReviewState(missionDir, 'claude', 'claude');
     const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
 
     assert.strictEqual(result.ok, false);
+    assert.ok(result.error);
     assert.match(result.error, /No checkpoint documents found/);
 
     assert.equal(fs.existsSync(autoCpPath), false, 'Handoff must not write checkpoint evidence');
@@ -531,7 +553,7 @@ test('performHandoff fails when the latest checkpoint document is uncommitted', 
   mock.method(missionUtils, 'findCheckpoints', () => [cp1Path, cp2Path]);
   mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
   mock.method(git, 'getWorktreeStatus', () => [' M docs/missions/2026/task-098/CP-2.md']);
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
 
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
@@ -541,6 +563,7 @@ test('performHandoff fails when the latest checkpoint document is uncommitted', 
 
   const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error);
   assert.match(result.error, /latest checkpoint document is modified but uncommitted/);
 
   fs.rmSync(cp1Path, { force: true });
@@ -567,10 +590,11 @@ test('performHandoff fails when final checkpoint is missing Goal Check section',
   fs.writeFileSync(cpPath, '# CP-1\n\nSome checkpoint content.\n');
   writeReviewState(missionDir, 'claude', 'claude');
 
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
 
   const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error);
   assert.match(result.error, /missing a "## Goal Check" section/);
 
   fs.rmSync(cpPath, { force: true });
@@ -596,10 +620,11 @@ test('performHandoff fails when final checkpoint has Goal Check section but no e
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\nNo evidence here.\n');
   writeReviewState(missionDir, 'claude', 'claude');
 
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
 
   const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error);
   assert.match(result.error, /no evidence rows/);
 
   fs.rmSync(cpPath, { force: true });
@@ -625,10 +650,11 @@ test('performHandoff fails when final checkpoint has header-only goal-check tabl
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n');
   writeReviewState(missionDir, 'claude', 'claude');
 
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
 
   const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error);
   assert.match(result.error, /no evidence rows/);
 
   fs.rmSync(cpPath, { force: true });
@@ -654,10 +680,11 @@ test('performHandoff fails when final checkpoint has separator-only goal-check t
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n|---|---|---|\n');
   writeReviewState(missionDir, 'claude', 'claude');
 
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
 
   const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error);
   assert.match(result.error, /no evidence rows/);
 
   fs.rmSync(cpPath, { force: true });
@@ -682,10 +709,11 @@ test('performHandoff fails when final checkpoint evidence row is placeholder pro
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| Works | Tested manually | Looks good |\n');
   writeReviewState(missionDir, 'claude', 'claude');
 
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
 
   const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error);
   assert.match(result.error, /no evidence rows that cite a verifiable reference/);
 
   fs.rmSync(cpPath, { force: true });
@@ -710,10 +738,11 @@ test('performHandoff fails when final checkpoint evidence row is shell output on
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| Executable bit checked | `stat -c \'%A\' bin/hello.sh` → `-rwxrwxr-x` | PASS |\n');
   writeReviewState(missionDir, 'claude', 'claude');
 
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
 
   const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
+  assert.ok(result.error);
   assert.match(result.error, /no evidence rows that cite a verifiable reference/);
 
   fs.rmSync(cpPath, { force: true });
@@ -740,14 +769,14 @@ test('performHandoff accepts final checkpoint evidence row with a real file:line
   mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
   mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
   mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => ({ signal: null,  status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
-  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'createPr', () => ({ ok: true as const, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
   mock.method(backlog, 'transitionTask', () => true);
-  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
+  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true as const, missing: [], skipped: false, posted: false }));
 
   try {
     const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
@@ -777,14 +806,14 @@ test('performHandoff accepts file:line evidence with supporting shell context in
   mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
   mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
   mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => ({ signal: null,  status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
-  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'createPr', () => ({ ok: true as const, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
   mock.method(backlog, 'transitionTask', () => true);
-  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
+  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true as const, missing: [], skipped: false, posted: false }));
 
   try {
     const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
@@ -802,7 +831,7 @@ test('performHandoff calls rebaseBeforeReviewRound before Forgejo PR creation', 
   const missionDir = path.join(worktree, 'docs/missions/2026', slug);
   const cpPath = path.join(missionDir, 'CP-1.md');
   const taskFile = path.join(worktree, 'backlog/tasks', `${slug} - rebase order.md`);
-  const prCallOrder = [];
+  const prCallOrder: ("git-origin" | "forgejo-createPr")[] = [];
 
   fs.mkdirSync(missionDir, { recursive: true });
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
@@ -812,10 +841,10 @@ test('performHandoff calls rebaseBeforeReviewRound before Forgejo PR creation', 
 
   let rebaseCalled = false;
   let rebaseCalledBeforePr = false;
-  const mockRebase = async (slugArg, opts) => {
+  const mockRebase: NonNullable<NonNullable<Parameters<typeof performHandoff>[1]>['rebaseFn']> = async () => {
     rebaseCalled = true;
     rebaseCalledBeforePr = prCallOrder.length === 0;
-    return { ok: true, sharedFileConflicts: false };
+    return { ok: true as const, sharedFileConflicts: false };
   };
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);
@@ -823,22 +852,22 @@ test('performHandoff calls rebaseBeforeReviewRound before Forgejo PR creation', 
   mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', (args) => {
-    if (args.includes('rev-parse') && args.includes('HEAD')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('rev-parse') && args.includes('HEAD')) return { signal: null,  status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
     if (args.includes('origin')) prCallOrder.push('git-origin');
-    return { status: 0, stdout: '', stderr: '' };
+    return { signal: null,  status: 0, stdout: '', stderr: '' };
   });
   mock.method(forgejo, 'readToken', () => 'fake-token');
-  mock.method(forgejo, 'createPr', (branch, user, token, opts) => {
+  mock.method(forgejo, 'createPr', (branch: Parameters<(typeof forgejo)["createPr"]>[0], user: Parameters<(typeof forgejo)["createPr"]>[1], token: Parameters<(typeof forgejo)["createPr"]>[2], opts: Parameters<(typeof forgejo)["createPr"]>[3]) => {
     prCallOrder.push('forgejo-createPr');
-    return { ok: true, url: 'http://fake-pr' };
+    return { ok: true as const, url: 'http://fake-pr' };
   });
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
-  mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true, sha: 'lease-sha' }));
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true as const, sha: 'lease-sha' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
   mock.method(backlog, 'transitionTask', () => true);
-  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
+  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true as const, missing: [], skipped: false, posted: false }));
   writeReviewState(missionDir, 'custom', 'custom');
 
   try {
@@ -873,23 +902,23 @@ test('performHandoff fails when rebase returns ok=false with no shared-file conf
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# rebase fail\n');
 
-  const mockRebase = async () => ({ ok: false, sharedFileConflicts: false });
+  const mockRebase = async () => ({ ok: false as const, sharedFileConflicts: false });
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);
   mock.method(missionUtils, 'findMissionArea', () => 'workflow');
   mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => ({ signal: null,  status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
   mock.method(forgejo, 'createPr', () => {
-    assert.fail('createPr should NOT be called when rebase fails');
-    return { ok: true, url: 'http://fake-pr' };
+    return assert.fail('createPr should NOT be called when rebase fails');
+    return { ok: true as const, url: 'http://fake-pr' };
   });
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
   mock.method(backlog, 'transitionTask', () => {
-    assert.fail('transitionTask should NOT be called when rebase fails');
+    return assert.fail('transitionTask should NOT be called when rebase fails');
     return true;
   });
   writeReviewState(missionDir, 'custom', 'custom');
@@ -904,6 +933,7 @@ test('performHandoff fails when rebase returns ok=false with no shared-file conf
     });
 
     assert.strictEqual(result.ok, false);
+    assert.ok(result.error);
     assert.match(result.error, /Rebase failed before handoff/);
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
@@ -924,23 +954,23 @@ test('performHandoff fails when rebase returns sharedFileConflicts=true', async 
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# shared conflict\n');
 
-  const mockRebase = async () => ({ ok: false, sharedFileConflicts: true });
+  const mockRebase = async () => ({ ok: false as const, sharedFileConflicts: true });
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);
   mock.method(missionUtils, 'findMissionArea', () => 'workflow');
   mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => ({ signal: null,  status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
   mock.method(forgejo, 'createPr', () => {
-    assert.fail('createPr should NOT be called when rebase has shared-file conflicts');
-    return { ok: true, url: 'http://fake-pr' };
+    return assert.fail('createPr should NOT be called when rebase has shared-file conflicts');
+    return { ok: true as const, url: 'http://fake-pr' };
   });
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
   mock.method(backlog, 'transitionTask', () => {
-    assert.fail('transitionTask should NOT be called when rebase has shared-file conflicts');
+    return assert.fail('transitionTask should NOT be called when rebase has shared-file conflicts');
     return true;
   });
   writeReviewState(missionDir, 'custom', 'custom');
@@ -955,9 +985,12 @@ test('performHandoff fails when rebase returns sharedFileConflicts=true', async 
     });
 
     assert.strictEqual(result.ok, false);
+    assert.ok(result.error);
     assert.match(result.error, /shared-file conflicts/);
     // task-2386 AC #1: the bounce must command execution, not description.
+    assert.ok(result.error);
     assert.match(result.error, /Execute the listed commands now/);
+    assert.ok(result.error);
     assert.match(result.error, /report the failure and stop/i);
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
@@ -978,27 +1011,27 @@ test('performHandoff proceeds normally when rebase is a no-op (branch already up
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# rebase uptodate\n');
 
-  const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+  const mockRebase = async () => ({ ok: true as const, sharedFileConflicts: false });
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);
   mock.method(missionUtils, 'findMissionArea', () => 'workflow');
   mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', (args) => {
-    if (args.includes('rev-parse') && args.includes('HEAD')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
-    if (args.includes('origin')) assert.fail('Should not push to origin');
-    if (args.includes('--cached') && args.includes('--quiet')) return { status: 0 };
-    return { status: 0, stdout: '', stderr: '' };
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+    if (args.includes('rev-parse') && args.includes('HEAD')) return { signal: null,  status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
+    if (args.includes('origin')) return assert.fail('Should not push to origin');
+    if (args.includes('--cached') && args.includes('--quiet')) return { signal: null, stdout: '', stderr: '',  status: 0 };
+    return { signal: null,  status: 0, stdout: '', stderr: '' };
   });
   mock.method(forgejo, 'readToken', () => 'fake-token');
-  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'createPr', () => ({ ok: true as const, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
-  mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true, sha: 'lease-sha' }));
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true as const, sha: 'lease-sha' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
   mock.method(backlog, 'transitionTask', () => true);
-  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
+  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true as const, missing: [], skipped: false, posted: false }));
   writeReviewState(missionDir, 'custom', 'custom');
 
   try {
@@ -1059,6 +1092,7 @@ test('runDeclaredGates falls back to the mission document when nothing is record
       recordedGates: [],
     });
     assert.strictEqual(result.ok, true);
+    assert.equal(result.skipped, false);
     assert.strictEqual(result.count, 1, 'the document gate still runs for a legacy mission');
   } finally {
     fs.rmSync(missionDir, { recursive: true, force: true });
@@ -1149,7 +1183,7 @@ test('runDeclaredGates handles checkbox prefixes [- [ ] and - [x])', () => {
  * production path always has (handoff already refuses a mission whose task
  * cannot be transitioned).
  */
-function writeCompatibilityTaskRecord(rootDir, slug, status = 'active') {
+function writeCompatibilityTaskRecord(rootDir: string, slug: string, status = 'active') {
   const tasksDir = path.join(rootDir, 'backlog', 'tasks');
   fs.mkdirSync(tasksDir, { recursive: true });
   const taskFile = path.join(tasksDir, `${slug} - nel fixture.md`);
@@ -1185,6 +1219,7 @@ test('captureNelAtHandoff returns error when primary branch not detected', async
       error: () => {},
     });
     assert.strictEqual(result.ok, false);
+    assert.ok(result.error);
     assert.match(result.error, /primary branch/);
   } finally {
     mockFn.mock.restore();
@@ -1215,22 +1250,21 @@ test('captureNelAtHandoff records the NEL through the Mission store and writes n
     const mockFn = mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
 
     // TASK-2322.07: review rounds come from the Mission store, not review-state.json.
-    const recorded = [];
+    const recorded: RecordHandoffNelRequest[] = [];
     const missionServicesFn = stubMissionServices({
       store: {
-        _repoId: 'test-repo',
         async load() {
           return {
-            kind: 'found',
-            mission: { review: { rounds: [{}, {}, {}] } },
-            version: 1,
+            kind: 'found' as const,
+            mission: fixtureMission('task-nel-test', { review: { ...pendingReview('task-nel-test'), rounds: [{ ...pendingReview('task-nel-test').rounds[0], number: 1 }, { ...pendingReview('task-nel-test').rounds[0], number: 2 }, { ...pendingReview('task-nel-test').rounds[0], number: 3 }] } }),
+            version: fixtureVersion(1),
           };
         },
       },
       handoff: {
         async recordNel(request) {
           recorded.push(request);
-          return { status: 'completed', value: {}, durableEvidence: [] };
+          return { status: 'completed' as const, durableEvidence: [] };
         },
       },
     });
@@ -1283,8 +1317,8 @@ test('captureNelAtHandoff reports a refused Mission write and leaves no legacy r
         handoff: {
           async recordNel() {
             return {
-              status: 'failed',
-              error: { kind: 'unavailable', message: 'injected NEL persistence failure' },
+              status: 'failed' as const,
+              error: { kind: 'unavailable' as const, message: 'injected NEL persistence failure' },
               durableEvidence: [],
             };
           },
@@ -1293,6 +1327,7 @@ test('captureNelAtHandoff reports a refused Mission write and leaves no legacy r
     });
     assert.equal(result.ok, false);
     assert.equal(result.persistenceFailed, true);
+    assert.ok(result.error);
     assert.match(result.error, /injected NEL persistence failure/);
     assert.equal(fs.existsSync(path.join(missionDir, 'nel-record.json')), false);
     assert.equal(errors.length, 1);
@@ -1320,7 +1355,7 @@ test('performHandoff stops before review transitions when NEL persistence fails'
   t.mock.method(missionUtils, 'findCheckpoints', () => [checkpoint]);
   t.mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   t.mock.method(git, 'getWorktreeStatus', () => []);
-  t.mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  t.mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
   t.mock.method(backlog, 'transitionTask', () => { transitions++; return true; });
   try {
     const result = await performHandoff(slug, {
@@ -1328,12 +1363,13 @@ test('performHandoff stops before review transitions when NEL persistence fails'
       worktree,
       skipGate: true,
       isForgejoReviewEnabledFn: () => false,
-      rebaseFn: async () => ({ ok: true }),
-      captureNelFn: () => ({ ok: false, persistenceFailed: true, error: 'injected failure' }),
+      rebaseFn: async () => ({ ok: true as const }),
+      captureNelFn: async () => ({ ok: false as const, persistenceFailed: true, error: 'injected failure' }),
       log: () => {},
       error: () => {},
     });
     assert.equal(result.ok, false);
+    assert.ok(result.error);
     assert.match(result.error, /stopped before review state advanced/);
     assert.equal(transitions, 0);
   } finally {
@@ -1353,20 +1389,20 @@ test('performHandoff no longer stages or commits a legacy NEL record before tran
   fs.writeFileSync(checkpoint, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| proof | `npm test -- test/handoff.test.js` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n');
   writeReviewState(missionDir, 'codex', 'codex');
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
   let transitions = 0;
   t.mock.method(missionUtils, 'findMissionDir', () => missionDir);
   t.mock.method(missionUtils, 'findMissionArea', () => 'workflow');
   t.mock.method(missionUtils, 'findCheckpoints', () => [checkpoint]);
   t.mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   t.mock.method(git, 'getWorktreeStatus', () => []);
-  t.mock.method(git, 'git', args => {
+  t.mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
     if (args.includes('rev-parse') && args.includes('HEAD')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
     gitCalls.push(args);
     if (args.includes('diff')) { return { status: 1, stdout: '', stderr: '' }; }
     return { status: 0, stdout: '', stderr: '' };
   });
-  t.mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  t.mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
   t.mock.method(backlog, 'transitionTask', () => { transitions++; return true; });
   try {
     const result = await performHandoff(slug, {
@@ -1374,10 +1410,10 @@ test('performHandoff no longer stages or commits a legacy NEL record before tran
       worktree,
       skipGate: true,
       isForgejoReviewEnabledFn: () => false,
-      rebaseFn: async () => ({ ok: true }),
-      captureNelFn: () => {
+      rebaseFn: async () => ({ ok: true as const }),
+      captureNelFn: async () => {
         fs.writeFileSync(path.join(missionDir, 'nel-record.json'), '{}');
-        return { ok: true, nel: 0, bucket: { label: 'Small' } };
+        return { ok: true as const, nel: 0, bucket: 'Small' };
       },
       log: () => {},
       error: () => {},
@@ -1420,7 +1456,7 @@ test('captureNelAtHandoff reads predicted bucket from MISSION.md Refinement Sign
 
     const { mock } = test;
     const mockFn = mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
-    const recorded = [];
+    const recorded: RecordHandoffNelRequest[] = [];
 
     try {
       await captureNelAtHandoff('task-nel-bucket', {
@@ -1432,7 +1468,7 @@ test('captureNelAtHandoff reads predicted bucket from MISSION.md Refinement Sign
           handoff: {
             async recordNel(request) {
               recorded.push(request);
-              return { status: 'completed', value: {}, durableEvidence: [] };
+              return { status: 'completed' as const, durableEvidence: [] };
             },
           },
         }),
@@ -1463,7 +1499,7 @@ test('performHandoff captures verification gate stdout/stderr on non-zero exit (
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# sc1\n');
 
-  const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+  const mockRebase = async () => ({ ok: true as const, sharedFileConflicts: false });
 
   // Provide a mock runVerificationGate that returns non-zero with known output
   const mockVerifyGate = () => ({
@@ -1477,14 +1513,14 @@ test('performHandoff captures verification gate stdout/stderr on non-zero exit (
   mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => ({ signal: null,  status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
-  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'createPr', () => ({ ok: true as const, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
   mock.method(backlog, 'transitionTask', () => true);
-  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
+  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true as const, missing: [], skipped: false, posted: false }));
   writeReviewState(missionDir, 'custom', 'custom');
 
   try {
@@ -1513,7 +1549,7 @@ test('runDeclaredGates captures stdout and stderr on gate failure (SC2)', async 
 
   // Mock spawnSync to capture the actual gate command
   const origSpawnSync = childProcess.spawnSync;
-  const mockSpawnSync = mock.method(childProcess, 'spawnSync', (...args) => {
+  const mockSpawnSync = mock.method(childProcess, 'spawnSync', (...args: Parameters<typeof origSpawnSync>) => {
     // Let real spawnSync run, we just want to verify the result is captured
     return origSpawnSync.apply(childProcess, args);
   });
@@ -1773,7 +1809,9 @@ test('validateDeclaredGates rejects outcome prose with command-only remediation'
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'validation-failed');
   assert.equal(result.gate, gate);
+  assert.ok(result.error);
   assert.match(result.error, /exact runnable command only/i);
+  assert.ok(result.error);
   assert.match(result.error, /Success Criteria or checkpoint documentation/i);
 });
 
@@ -1853,32 +1891,32 @@ test('performHandoff attempts agent relaunch when gatekeeper posts pushback', as
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# gk pushback\n');
 
-  const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+  const mockRebase = async () => ({ ok: true as const, sharedFileConflicts: false });
   let relaunchCallCount = 0;
-  let relaunchPrompt = null;
+  let relaunchPrompt: { value: string | null } = { value: null };
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);
   mock.method(missionUtils, 'findMissionArea', () => 'workflow');
   mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => ({ signal: null,  status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
-  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'createPr', () => ({ ok: true as const, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
   mock.method(backlog, 'transitionTask', () => true);
   mock.method(gatekeeper, 'runGatekeeper', () => ({
-    ok: false, missing: ['docs/missions/2026/task-1388-gk-pushback/MISSION.md'], skipped: false, posted: true
+    ok: false as const, missing: ['docs/missions/2026/task-1388-gk-pushback/MISSION.md'], skipped: false, posted: true
   }));
 
   // TASK-2377.05: the pushback bounce runs through the rebound kernel, which
   // builds the fix prompt and hands it to this launch port.
-  const mockStartAgent = async (_step, opts) => {
+  const mockStartAgent: NonNullable<NonNullable<Parameters<typeof performHandoff>[1]>['startAgentFn']> = async (_step, opts) => {
     relaunchCallCount++;
     const slot = opts && opts.prompt;
-    relaunchPrompt = typeof slot === 'function' ? slot('custom') : (slot ?? null);
+    relaunchPrompt.value = typeof slot === 'function' ? slot('custom') : (slot ?? null);
     throw new Error('agent not available');
   };
 
@@ -1898,11 +1936,11 @@ test('performHandoff attempts agent relaunch when gatekeeper posts pushback', as
     assert.strictEqual(result.gatekeeperPushedBack, true);
     assert.ok(result.error && result.error.includes('Manual intervention required'));
     assert.strictEqual(relaunchCallCount, 1, 'the kernel launched once against the remaining budget');
-    assert.ok(relaunchPrompt, 'the kernel fix prompt should have been built');
-    assert.ok(relaunchPrompt.includes('MISSION.md'), 'prompt should mention MISSION.md');
-    assert.ok(relaunchPrompt.includes('create'), 'prompt should contain creation instructions');
-    assert.ok(relaunchPrompt.includes(`px review ${slug} --start`), 'prompt should name the exact post-repair review-start command');
-    assert.ok(!relaunchPrompt.includes('${slug}'), 'prompt must not leak an unsubstituted mission placeholder');
+    assert.ok(relaunchPrompt.value, 'the kernel fix prompt should have been built');
+    assert.ok(relaunchPrompt.value.includes('MISSION.md'), 'prompt should mention MISSION.md');
+    assert.ok(relaunchPrompt.value.includes('create'), 'prompt should contain creation instructions');
+    assert.ok(relaunchPrompt.value.includes(`px review ${slug} --start`), 'prompt should name the exact post-repair review-start command');
+    assert.ok(!relaunchPrompt.value.includes('${slug}'), 'prompt must not leak an unsubstituted mission placeholder');
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
   }
@@ -1922,25 +1960,25 @@ test('performHandoff respects bounded retry limit of 2 for gatekeeper pushback',
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# retry limit\n');
 
-  const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+  const mockRebase = async () => ({ ok: true as const, sharedFileConflicts: false });
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);
   mock.method(missionUtils, 'findMissionArea', () => 'workflow');
   mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => ({ signal: null,  status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
-  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'createPr', () => ({ ok: true as const, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
-  mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true, sha: 'fake-sha' }));
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true as const, sha: 'fake-sha' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
   mock.method(backlog, 'transitionTask', () => true);
 
   // Gatekeeper always returns pushback (simulating artifacts never created)
   const mockGK = () => ({
-    ok: false, missing: ['docs/missions/2026/task-1388-retry-limit/MISSION.md'], skipped: false, posted: true
+    ok: false as const, missing: ['docs/missions/2026/task-1388-retry-limit/MISSION.md'], skipped: false, posted: true
   });
 
   // Mock relaunch always fails — loop should exit after 1 iteration
@@ -1987,7 +2025,7 @@ test('performHandoff consumes full retry budget when relaunch succeeds but pushb
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# retry persists\n');
 
-  const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+  const mockRebase = async () => ({ ok: true as const, sharedFileConflicts: false });
   let gkCallCount = 0;
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);
@@ -1995,17 +2033,17 @@ test('performHandoff consumes full retry budget when relaunch succeeds but pushb
   mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => ({ signal: null,  status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
-  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'createPr', () => ({ ok: true as const, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
   mock.method(backlog, 'transitionTask', () => true);
 
   // Gatekeeper always returns pushback (simulating artifacts never created)
   const mockGK = () => ({
-    ok: false, missing: ['docs/missions/2026/task-1388-retry-persists/MISSION.md'], skipped: false, posted: true
+    ok: false as const, missing: ['docs/missions/2026/task-1388-retry-persists/MISSION.md'], skipped: false, posted: true
   });
 
   // Launch always succeeds but the verified handoff still fails
@@ -2051,7 +2089,7 @@ test('performHandoff succeeds after successful agent relaunch', async (t) => {
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# relaunch success\n');
 
-  const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+  const mockRebase = async () => ({ ok: true as const, sharedFileConflicts: false });
   let gkCallCount = 0;
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);
@@ -2059,22 +2097,22 @@ test('performHandoff succeeds after successful agent relaunch', async (t) => {
   mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => ({ signal: null,  status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
-  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'createPr', () => ({ ok: true as const, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
-  mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true, sha: 'fake-sha' }));
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true as const, sha: 'fake-sha' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
   mock.method(backlog, 'transitionTask', () => true);
 
   // First call returns pushback, subsequent calls return ok
-  const mockGK = (slugArg, opts) => {
+  const mockGK: typeof gatekeeper.runGatekeeper = () => {
     gkCallCount++;
     if (gkCallCount === 1) {
-      return { ok: false, missing: ['docs/missions/2026/task-1388-relaunch-success/MISSION.md'], skipped: false, posted: true };
+      return { ok: false as const, missing: ['docs/missions/2026/task-1388-relaunch-success/MISSION.md'], skipped: false, posted: true };
     }
-    return { ok: true, missing: [], skipped: false, posted: false };
+    return { ok: true as const, missing: [], skipped: false, posted: false };
   };
   mock.method(gatekeeper, 'runGatekeeper', mockGK);
 
@@ -2113,23 +2151,23 @@ test('performHandoff relaunch prompt lists all missing artifact types', async (t
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# prompt content\n');
 
-  const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
-  let capturedPrompt = null;
+  const mockRebase = async () => ({ ok: true as const, sharedFileConflicts: false });
+  let capturedPrompt: { value: string | null } = { value: null };
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);
   mock.method(missionUtils, 'findMissionArea', () => 'workflow');
   mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
-  mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 0 }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => ({ signal: null,  status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
-  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'createPr', () => ({ ok: true as const, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
   mock.method(backlog, 'transitionTask', () => true);
   mock.method(gatekeeper, 'runGatekeeper', () => ({
-    ok: false,
+    ok: false as const,
     missing: [
       'docs/missions/2026/task-1388-prompt-content/MISSION.md',
       'docs/missions/2026/task-1388-prompt-content/CP-*.md (at least one checkpoint document)',
@@ -2139,9 +2177,9 @@ test('performHandoff relaunch prompt lists all missing artifact types', async (t
   }));
 
   // The kernel builds the fix prompt and passes it to the launch port.
-  const mockStartAgent = async (_step, opts) => {
+  const mockStartAgent: NonNullable<NonNullable<Parameters<typeof performHandoff>[1]>['startAgentFn']> = async (_step, opts) => {
     const slot = opts && opts.prompt;
-    capturedPrompt = typeof slot === 'function' ? slot('custom') : (slot ?? null);
+    capturedPrompt.value = typeof slot === 'function' ? slot('custom') : (slot ?? null);
     throw new Error('not available');
   };
 
@@ -2157,13 +2195,13 @@ test('performHandoff relaunch prompt lists all missing artifact types', async (t
       startAgentFn: mockStartAgent,
     });
 
-    assert.ok(capturedPrompt, 'prompt should have been captured');
-    assert.ok(capturedPrompt.includes('MISSION.md'), 'prompt should list MISSION.md');
-    assert.ok(capturedPrompt.includes('CP-'), 'prompt should list CP-*.md');
-    assert.ok(capturedPrompt.includes('backlog/tasks'), 'prompt should list backlog task file');
-    assert.ok(capturedPrompt.includes('create'), 'prompt should contain creation keyword');
-    assert.ok(capturedPrompt.includes('frontmatter'), 'prompt should mention frontmatter for task file');
-    assert.ok(capturedPrompt.includes('Goal Check'), 'prompt should mention Goal Check for checkpoints');
+    assert.ok(capturedPrompt.value, 'prompt should have been captured');
+    assert.ok(capturedPrompt.value.includes('MISSION.md'), 'prompt should list MISSION.md');
+    assert.ok(capturedPrompt.value.includes('CP-'), 'prompt should list CP-*.md');
+    assert.ok(capturedPrompt.value.includes('backlog/tasks'), 'prompt should list backlog task file');
+    assert.ok(capturedPrompt.value.includes('create'), 'prompt should contain creation keyword');
+    assert.ok(capturedPrompt.value.includes('frontmatter'), 'prompt should mention frontmatter for task file');
+    assert.ok(capturedPrompt.value.includes('Goal Check'), 'prompt should mention Goal Check for checkpoints');
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
   }

@@ -15,6 +15,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+type CodexUsage = { input_tokens?: number; output_tokens?: number; cached_input_tokens?: number; reasoning_output_tokens?: number; total_tokens?: number };
+type CodexPayload = { id?: string; model_provider?: string; model?: string; effort?: string; type?: string; info?: { total_token_usage?: CodexUsage; model_context_window?: number }; rate_limits?: { primary?: { used_percent?: unknown } } };
+type CodexState = { sessionId: string | null; provider: string | null; model: string | null; effort: string | null; toolCalls: number; lastUsage: CodexUsage | null; contextWindow: number; usagePercent: number | null };
+
 function codexSessionsDir(codexHome: string) {
   return path.join(codexHome, '.codex', 'sessions');
 }
@@ -23,10 +27,12 @@ function codexSessionsDir(codexHome: string) {
  * Parse a rollout JSONL string into a telemetry object. Returns null when the
  * content yields no usable signal (e.g. a failed turn with no token_count).
  */
+function codexContextWindow(state: CodexState) { return state.contextWindow || 0; }
+
 function parseCodexRollout(content: string) {
   if (!content) {return null;}
 
-  const state: any = { sessionId: null, provider: null, model: null, effort: null, toolCalls: 0, lastUsage: null, contextWindow: 0, usagePercent: null };
+  const state: CodexState = { sessionId: null, provider: null, model: null, effort: null, toolCalls: 0, lastUsage: null, contextWindow: 0, usagePercent: null };
 
   for (const line of String(content).split('\n')) {
     applyCodexRolloutEvent(line, state);
@@ -45,17 +51,23 @@ function parseCodexRollout(content: string) {
     cachedTokens: usage.cached_input_tokens || 0,
     reasoningTokens: usage.reasoning_output_tokens || 0,
     totalTokens: usage.total_tokens || 0,
-    contextWindow: state.contextWindow || 0,
+    contextWindow: codexContextWindow(state),
     toolCalls: state.toolCalls,
     usagePercent: state.usagePercent,
   };
 }
 
-function applyCodexRolloutEvent(line: string, state: any): void {
-  let event: any;
-  try { event = JSON.parse(line.trim()); } catch { return; }
-  const payload = event?.payload;
-  if (!payload) { return; }
+function applyCodexUsage(payload: CodexPayload, state: CodexState) {
+    state.lastUsage = payload.info?.total_token_usage || state.lastUsage;
+    state.contextWindow = payload.info?.model_context_window || state.contextWindow;
+    state.usagePercent = typeof payload.rate_limits?.primary?.used_percent === 'number' ? payload.rate_limits.primary.used_percent : state.usagePercent;
+}
+
+function applyCodexRolloutEvent(line: string, state: CodexState): void {
+  let event: { type?: string; payload?: CodexPayload } | null;
+  try { event = JSON.parse(line.trim()) as typeof event; } catch { return; }
+  if (!event?.payload) { return; }
+  const payload = event.payload;
   if (event.type === 'session_meta') {
     state.sessionId = payload.id || state.sessionId;
     state.provider = payload.model_provider || state.provider;
@@ -66,9 +78,7 @@ function applyCodexRolloutEvent(line: string, state: any): void {
   } else if (event.type === 'response_item') {
     state.toolCalls += Number(payload.type === 'function_call' || payload.type === 'custom_tool_call');
   } else if (event.type === 'event_msg' && payload.type === 'token_count') {
-    state.lastUsage = payload.info?.total_token_usage || state.lastUsage;
-    state.contextWindow = payload.info?.model_context_window || state.contextWindow;
-    state.usagePercent = typeof payload.rate_limits?.primary?.used_percent === 'number' ? payload.rate_limits.primary.used_percent : state.usagePercent;
+    applyCodexUsage(payload, state);
   }
 }
 
@@ -96,7 +106,7 @@ function collectRolloutFiles(sessionsDir: string, { sinceMs = 0 }: { sinceMs?: n
 
 function rolloutEntries(dir: string, sinceMs: number) {
   let entries: Array<{name: string, isDirectory: () => boolean, isFile: () => boolean}>;
-  try { entries = (fs as any).readdirSync(dir, { withFileTypes: true }); } catch { return { directories: [], files: [] as Array<{ full: string; mtime: number }> }; }
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return { directories: [], files: [] as Array<{ full: string; mtime: number }> }; }
   const directories: string[] = [];
   const files: Array<{ full: string; mtime: number }> = [];
   for (const entry of entries) {
@@ -155,8 +165,8 @@ function readCodexRollout(file: string) {
 function codexTelemetryAggregate() {
   const totals = { inputTokens: 0, outputTokens: 0, cachedTokens: 0, reasoningTokens: 0, totalTokens: 0, toolCalls: 0 };
   return {
-    totals, newest: null as any, newestPath: null as string | null,
-    add(telemetry: any, path: string) {
+    totals, newest: null as ReturnType<typeof parseCodexRollout>, newestPath: null as string | null,
+    add(telemetry: NonNullable<ReturnType<typeof parseCodexRollout>>, path: string) {
       for (const field of Object.keys(totals) as Array<keyof typeof totals>) { totals[field] += telemetry[field]; }
       this.newest = telemetry;
       this.newestPath = path;

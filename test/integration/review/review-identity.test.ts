@@ -1,4 +1,5 @@
-// @ts-nocheck -- Retained legacy partial request doubles (TASK-2328).
+import { ReviewState } from '../../../src/adapters/review/review-state.js';
+import { reviewStateWriterFixture } from '../../helpers/review-state-writer.js';
 // review identity.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
 import test, { describe } from 'node:test';
@@ -20,24 +21,24 @@ describe("review identity", { concurrency: false }, () => {
   const TEST_SLUG = 'task-test-identity-fail';
 
   function reviewStateStub(reviewer = 'claude', implementer = 'mistral') {
-    return {
+    return new ReviewState(TEST_SLUG, {
       reviewer,
       implementer,
       round: 1,
-      phase: 'reviewing',
+      phase: 'reviewing' as const,
       startedAt: '2026-05-25T19:35:13Z'
-    };
+    });
   }
 
-  async function captureExit(fn) {
+  async function captureExit(fn: () => unknown | Promise<unknown>) {
     const originalExit = process.exit;
     const originalError = console.error;
     const originalLog = console.log;
-    const errors = [];
-    let exitCode = null;
+    const errors: string[] = [];
+    let exitCode: { value: string | number | null | undefined | null } = { value: null };
 
     process.exit = (code) => {
-      exitCode = code;
+      exitCode.value = code;
       throw new Error(`process.exit(${code})`);
     };
     console.error = (...args) => errors.push(args.join(' '));
@@ -46,14 +47,14 @@ describe("review identity", { concurrency: false }, () => {
     try {
       await fn();
     } catch (err) {
-      if (!err.message.startsWith('process.exit(')) throw err;
+      if (!(err instanceof Error) || !err.message.startsWith('process.exit(')) throw err;
     } finally {
       process.exit = originalExit;
       console.error = originalError;
       console.log = originalLog;
     }
 
-    return { exitCode, errors };
+    return { exitCode: exitCode.value, errors };
   }
 
   test('readComments falls back to review-state identity when FORGEJO_USER is missing', async () => {
@@ -61,7 +62,7 @@ describe("review identity", { concurrency: false }, () => {
     delete process.env.FORGEJO_USER;
 
     try {
-      const logs = [];
+      const logs: string[] = [];
       const { exitCode, errors } = await captureExit(async () => {
         await readComments(TEST_SLUG, {
           readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
@@ -84,11 +85,11 @@ describe("review identity", { concurrency: false }, () => {
     delete process.env.FORGEJO_USER;
 
     try {
-      const writes = [];
+      const writes: { slug: string; reviewer: unknown; }[] = [];
       const { exitCode, errors } = await captureExit(() => commentRound(TEST_SLUG, 'test message', {
         readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
-        writeReviewStateFn: (slug, state) => writes.push({ slug, reviewer: state.reviewer }),
-        postCommentFn: () => ({ ok: true }),
+        writeReviewStateFn: reviewStateWriterFixture(async (slug, state) => writes.push({ slug, reviewer: state.reviewer })),
+        postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
         readTokenFn: () => 'token-123'
       }));
       assert.equal(exitCode, null);
@@ -123,12 +124,12 @@ describe("review identity", { concurrency: false }, () => {
     delete process.env.FORGEJO_USER;
 
     try {
-      const writes = [];
+      const writes: { slug: string; disposition: unknown; phase: unknown; }[] = [];
       const { exitCode, errors } = await captureExit(() => submitReviewRound(TEST_SLUG, 'approve', 'test summary', {
         readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
-        writeReviewStateFn: (slug, state) => writes.push({ slug, disposition: state.disposition, phase: state.phase }),
+        writeReviewStateFn: reviewStateWriterFixture(async (slug, state) => writes.push({ slug, disposition: state.disposition, phase: state.phase })),
         getPrAuthorFn: () => 'different-author',
-        postReviewFn: () => ({ ok: true }),
+        postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
         readTokenFn: () => 'token-123',
         isForgejoReviewEnabledFn: () => true
       }));
@@ -146,13 +147,13 @@ describe("review identity", { concurrency: false }, () => {
     process.env.FORGEJO_USER = 'override-reviewer';
 
     try {
-      let capturedUser = null;
+      let capturedUser: { value: string | null } = { value: null };
       const { exitCode, errors } = await captureExit(() => submitReviewRound(TEST_SLUG, 'approve', 'test summary', {
         readReviewStateFn: () => reviewStateStub('state-reviewer', 'state-implementer'),
-        writeReviewStateFn: () => {},
-        postReviewFn: () => ({ ok: true }),
+        writeReviewStateFn: reviewStateWriterFixture(async () => {}),
+        postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
         readTokenFn: (user) => {
-          capturedUser = user;
+          capturedUser.value = user;
           return 'token-123';
         },
         isForgejoReviewEnabledFn: () => true,
@@ -160,7 +161,7 @@ describe("review identity", { concurrency: false }, () => {
       }));
       assert.equal(exitCode, null);
       assert.equal(errors.length, 0);
-      assert.equal(capturedUser, 'state-reviewer');
+      assert.equal(capturedUser.value, 'state-reviewer');
     } finally {
       if (originalUser === undefined) delete process.env.FORGEJO_USER;
       else process.env.FORGEJO_USER = originalUser;
@@ -172,11 +173,11 @@ describe("review identity", { concurrency: false }, () => {
     delete process.env.FORGEJO_USER;
 
     try {
-      const logs = [];
+      const logs: string[] = [];
       const { exitCode, errors } = await captureExit(() => closeMissionPr(TEST_SLUG, {
         readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
         readTokenFn: () => 'token-123',
-        closePrFn: async () => ({ ok: true }),
+        closePrFn: async () => ({ ok: true as const }),
         log: (line) => logs.push(line)
       }));
       assert.equal(exitCode, null);

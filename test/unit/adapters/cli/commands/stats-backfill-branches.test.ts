@@ -1,28 +1,28 @@
-// @ts-nocheck -- TASK-2535: partial test doubles for the stats-backfill branches;
-// mirrors the established mockModule/@ts-nocheck pattern in test/integration/stats/stats-backfill.test.ts.
+import type { StatsBackfillService } from '../../../../../src/application/stats-backfill-service.js';
+// Statistics backfill command rendering uses typed application outcomes.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { statsBackfill } from '../../../../../src/adapters/cli/commands/stats-backfill.js';
 
-function completedOutcome(extra = {}) {
+function completedOutcome(): Pick<StatsBackfillService, 'execute'> {
   return {
     async execute() {
       return {
-        status: 'completed',
+        status: 'completed' as const,
         value: {
-          rows: [{ date: '2026-05-05', mission: 'task-1', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '0', sources: { date: 'backlog-updated_date', classification: 'backlog-label', implementer: 'git-history-author' } }],
+          sources: [],
+          rows: [{ repo: 'parallix', date: '2026-05-05', mission: 'task-1', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '0', sources: { date: 'backlog-updated_date', classification: 'backlog-label', implementer: 'git-history-author' } }],
           unresolved: [{ slug: 'task-2', reason: 'missing-fields', missing: ['date'], detail: 'no date' }],
           skipped: [{ slug: 'task-3', reason: 'status=active' }],
         },
-        durableEvidence: [/* one applied row */ {}],
-        ...extra,
+        durableEvidence: [{ id: 'row-1', source: 'stats', detail: 'one applied row' }],
       };
     },
   };
 }
 
 test('statsBackfill renders the unresolved and skipped sections in summary output', async () => {
-  const logs = [];
+  const logs: string[] = [];
   await statsBackfill([], {
     rootDir: process.cwd(),
     service: completedOutcome(),
@@ -38,7 +38,7 @@ test('statsBackfill renders the unresolved and skipped sections in summary outpu
 });
 
 test('statsBackfill reports unresolved missions as an error when applying', async () => {
-  const errors = [];
+  const errors: string[] = [];
   await statsBackfill(['--apply'], {
     rootDir: process.cwd(),
     service: completedOutcome(),
@@ -50,7 +50,7 @@ test('statsBackfill reports unresolved missions as an error when applying', asyn
 });
 
 test('statsBackfill json output includes unresolved and skipped items', async () => {
-  const logs = [];
+  const logs: string[] = [];
   await statsBackfill(['--json'], {
     rootDir: process.cwd(),
     service: completedOutcome(),
@@ -66,33 +66,33 @@ test('statsBackfill json output includes unresolved and skipped items', async ()
 });
 
 test('statsBackfill reports a non-completed outcome to stderr and exits 1', async () => {
-  const errors = [];
-  let exitCode = null;
+  const errors: string[] = [];
+  let exitCode: { value: number | undefined | null } = { value: null };
   await statsBackfill([], {
     rootDir: process.cwd(),
     service: {
-      async execute() { return { status: 'failed', error: { message: 'boom' }, durableEvidence: [] }; },
+      async execute() { return { status: 'failed' as const, error: { kind: 'unavailable', message: 'boom' }, durableEvidence: [] }; },
     },
     log: () => {},
     error: line => errors.push(typeof line === 'string' ? line : JSON.stringify(line)),
-    exit: code => { exitCode = code; },
+    exit: code => { exitCode.value = code; },
   });
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.match(errors.join('\n'), /boom/);
 });
 
 test('statsBackfill reports a missing outcome value to stderr and exits 1', async () => {
-  let exitCode = null;
+  let exitCode: { value: number | undefined | null } = { value: null };
   await statsBackfill([], {
     rootDir: process.cwd(),
     service: {
-      async execute() { return { status: 'completed', value: null, durableEvidence: [] }; },
+      async execute() { return { status: 'completed' as const, durableEvidence: [] }; },
     },
     log: () => {},
     error: () => {},
-    exit: code => { exitCode = code; },
+    exit: code => { exitCode.value = code; },
   });
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
 });
 
 test('statsBackfill throws when no service is injected', async () => {

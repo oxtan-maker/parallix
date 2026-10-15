@@ -1,3 +1,6 @@
+import { repositoryId as fixtureRepositoryId } from '../../src/domain/repository.js';
+import { missionId as fixtureMissionId } from '../../src/domain/mission.js';
+import { agentFamily as fixtureAgentFamily } from '../../src/domain/agents.js';
 /**
  * Mocked BoardProjection data for the Ink TUI component tests.
  *
@@ -23,7 +26,7 @@ const emptySeries: MetricSeries = { series: [], missingHistoryFallback: 'skip' }
 export const emptyMetrics: BoardMetrics = {
   health: { state: 'no-telemetry' },
   provenance: {
-    repositoryId: 'test-repo' as RepositoryId,
+    repositoryId: fixtureRepositoryId('test-repo'),
     evaluatedWindow: { startedAt: null, endedAt: null },
     sampleSize: 0,
     newestEventTimestamp: null,
@@ -31,13 +34,13 @@ export const emptyMetrics: BoardMetrics = {
     adapterSucceeded: true,
   },
   cumulativeFlow: emptySeries,
-  cumulativeFlowByState: emptySeries as unknown as BoardMetrics['cumulativeFlowByState'],
+  cumulativeFlowByState: { series: [], missingHistoryFallback: 'skip' },
   medianStateTimes: emptySeries,
   medianAgentRuntime: emptySeries,
-  medianCycleTimeByState: emptySeries as unknown as BoardMetrics['medianCycleTimeByState'],
+  medianCycleTimeByState: { series: [], missingHistoryFallback: 'skip' },
   throughput: emptySeries,
   reviewBounceRate: emptySeries,
-  medianAgeByLane: emptySeries as unknown as BoardMetrics['medianAgeByLane'],
+  medianAgeByLane: { series: [], missingHistoryFallback: 'skip' },
   agentAvailability: [],
   bottleneck: {
     sentence: 'Bottleneck unavailable: history is missing.',
@@ -52,8 +55,8 @@ export const ALL_LANES: readonly BoardLane[] = [
 /** A card with every optional projection fact absent. */
 export function makeCard(overrides: Partial<MissionCard> = {}): MissionCard {
   return {
-    id: 'task-9999' as MissionId,
-    repositoryId: 'test-repo' as RepositoryId,
+    id: fixtureMissionId('task-9999'),
+    repositoryId: fixtureRepositoryId('test-repo'),
     title: 'Test task-9999',
     labels: [],
     lane: 'active',
@@ -83,12 +86,12 @@ export function makeCard(overrides: Partial<MissionCard> = {}): MissionCard {
 /** A card with every projection fact present. */
 export function makeFullCard(overrides: Partial<MissionCard> = {}): MissionCard {
   return makeCard({
-    id: 'task-1234' as MissionId,
+    id: fixtureMissionId('task-1234') as MissionId,
     title: 'Full card title',
     lane: 'review',
     status: 'review',
     rawStatus: 'review',
-    agent: 'custom' as AgentFamily,
+    agent: fixtureAgentFamily('custom') as AgentFamily,
     checkpoint: 'CP-2.md',
     checkpointDescription: 'CP-2: components extracted',
     nextActionText: 'run the verification gate',
@@ -119,7 +122,7 @@ export function makeProjection(
   const stages = ALL_LANES.map((lane) => makeStage(lane, cardsByLane[lane] ?? []));
   return {
     version: 1,
-    repositoryId: repositoryId as RepositoryId,
+    repositoryId: fixtureRepositoryId(repositoryId),
     stages,
     attentionQueue: [],
     wipCounts: stages.map((stage) => ({ lane: stage.lane, count: stage.count })),

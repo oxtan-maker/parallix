@@ -11,7 +11,7 @@ import { PROFILE_ENV } from './lib/file-timing-reporter.js';
 import { cpuSupervisor, readCpuReport } from './lib/cpu-supervisor.js';
 import { childCpuUsageModule } from './lib/child-cpu-usage.js';
 import { readCpuBudgetPolicy, suiteCpuBudget } from './lib/test-cpu-policy.mjs';
-import { checkoutTestTmpdir, linkCheckoutTranspileCache } from './lib/test-tmpdir.js';
+import { checkoutTestTmpdir } from './lib/test-tmpdir.js';
 import { assertValidTestLayout } from './lib/test-layout-validation.js';
 import { MEMORY_BOUNDARY_ENV, MEMORY_LIMIT_ENV, classifyWorkload, formatBreachReport, MEMORY_SCOPE_ENV, resolveMemoryBoundaryPolicy } from '../src/adapters/process/test-memory-policy.js';
 import { assertCgroupEnforcement, defaultUserRuntimeDir, forgetScope, scopeCgroupDir, scopeResult, watchScope, wrapInScope } from '../src/adapters/process/test-memory-cgroup.js';
@@ -96,7 +96,6 @@ if (fastUnit && coverageEnabled) {
 let coverageScratchDir: string | null = null;
 if (coverageEnabled) {
   coverageScratchDir = fs.mkdtempSync(path.join(checkoutTestTmpdir(executionRoot), 'coverage-scratch-'));
-  linkCheckoutTranspileCache(executionRoot, checkoutTestTmpdir(executionRoot, coverageScratchDir));
 }
 
 // Unit tests import production modules directly from `src/` and replace

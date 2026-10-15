@@ -69,12 +69,15 @@ test('TASK-2367 certification: persisted lifecycle owns success, failure, retry,
     assert.equal(after.decisionWindow?.current.completedMissions, 1);
     const doneEvents = (await events.findByMissionId(landed)).filter(event => event.fromStatus === 'integration' && event.toStatus === 'done');
     assert.equal(doneEvents.length, 1);
-    assert.equal((await store.load(failed) as any).mission.status, 'integration');
+    const failedLoad = await store.load(failed);
+    assert.equal(failedLoad.kind, 'found');
+    assert.equal(failedLoad.mission.status, 'integration');
     assert.deepEqual((await adapter.readOutcomes()).map(outcome => outcome.missionId), [landed]);
     const retry = await store.load(landed);
-    assert.equal((retry as any).mission.status, 'done');
+    assert.equal(retry.kind, 'found');
+    assert.equal((retry).mission.status, 'done');
     const repeated = await service.decideIntegration({
-      operationId: 'certify-landed-retry', missionId: landed, expectedVersion: (retry as any).version,
+      operationId: 'certify-landed-retry', missionId: landed, expectedVersion: (retry).version,
       capabilities: new Set(['integration:decide']), occurredAt: '2026-08-11T11:00:00.000Z',
       facts: { git: { source: 'git', status: 'fresh', value: { merged: true } }, verification: { source: 'git', status: 'fresh', value: { passed: true } } },
     });

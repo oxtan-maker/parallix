@@ -11,6 +11,8 @@ import { MissionEditor } from './mission-editor.js';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import type { DragEvent } from 'react';
 import type { WebBoardSnapshot, WebCommandAction, WebMissionCard } from '../../src/interfaces/web/transport.js';
+import { dispatchBoardCommand } from './board-command-controller.js';
+export { restoreActionFocus } from './board-command-controller.js';
 import { CancelConfirmation } from './cancel-confirmation.js';
 import { AttentionRail } from './attention-rail.js';
 import { CreateMissionDialog } from './create-mission-dialog.js';
@@ -20,7 +22,6 @@ import { FlowPanel } from './flow-panel.js';
 import { IntakeColumn } from './intake-column.js';
 import { OperationLog } from './operation-log.js';
 import { TopBar } from './top-bar.js';
-import { sendCommand } from './board-data.js';
 import { MissionHistory } from './mission-history.js';
 import { unavailableReason, type PendingCommands } from './pending-command.js';
 
@@ -35,15 +36,6 @@ export function dragActionForTarget(actions: readonly WebCommandAction[], lane: 
   return matches.length === 1 ? matches[0] : null;
 }
 
-export function restoreActionFocus(control: HTMLButtonElement, root: HTMLDivElement | null) {
-  queueMicrotask(() => {
-    if (control.isConnected) { control.focus(); return; }
-    // `focus()` returns undefined, so the fallback must branch on the element,
-    // never on the call's result.
-    const card = root?.querySelector<HTMLElement>('[data-board-card][aria-selected="true"]') ?? null;
-    (card ?? root)?.focus();
-  });
-}
 
 function setDragPreview(event: DragEvent<HTMLElement>, card: WebMissionCard) {
   const preview = document.createElement('div');
@@ -59,12 +51,8 @@ function setDragPreview(event: DragEvent<HTMLElement>, card: WebMissionCard) {
   requestAnimationFrame(() => preview.remove());
 }
 
-function isRequestKind(kind: WebCommandAction['kind']): kind is 'active:execute' | 'draft:create' | 'handoff:record' | 'integrate:merge' | 'review:submit' | 'mission:cancel' {
-  return kind === 'active:execute' || kind === 'draft:create' || kind === 'handoff:record'
-    || kind === 'integrate:merge' || kind === 'review:submit' || kind === 'mission:cancel';
-}
 
-export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onRefresh: () => Promise<void> }) {
+function useBoardModel(snapshot: WebBoardSnapshot, onRefresh: () => Promise<void>) {
   const [editRequest, setEditRequest] = useState<{ id: string; control: HTMLButtonElement } | null>(null);
   const [flowOpen, setFlowOpen] = useState(false);
   const [pendingCommands, setPendingCommands] = useState<PendingCommands>(new Map());
@@ -121,42 +109,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
     setDragPreview(event, card);
     setDragged(card);
   };
-  const dispatch = async (card: WebMissionCard, action: WebCommandAction, control?: HTMLButtonElement) => {
-    if (action.kind === 'mission:edit' && action.state === 'enabled' && control) { setEditRequest({ id: card.id, control }); return; }
-    const unavailable = unavailableReason(action, pendingRef.current.get(card.id));
-    if (unavailable !== null) { publishOutcome(card.id, unavailable); return; }
-    if (!isRequestKind(action.kind)) {
-      publishOutcome(card.id, 'This projected action is not supported by the browser controller.');
-      return;
-    }
-    const id = ++requestSequence.current;
-    latestInteraction.current = id;
-    pendingRef.current.set(card.id, { id, kind: action.kind });
-    publishPending();
-    publishOutcome(card.id, `Starting ${action.display}…`);
-    try {
-      const result = await sendCommand({
-        missionId: card.id,
-        kind: action.kind,
-        missionStatusAtRequest: card.status,
-      });
-      if (result.error?.kind === 'conflict') {
-        await onRefresh();
-        publishOutcome(card.id, `${result.error.message} Select the refreshed action to try again.`);
-        return;
-      }
-      if (result.status !== 'completed') { publishOutcome(card.id, result.error?.message ?? result.status); return; }
-      await onRefresh();
-      publishOutcome(card.id, action.kind === 'mission:cancel'
-        ? `Cancelled ${card.id}: its lifecycle rows are gone and its card has left the board.`
-        : `${action.display} started.`);
-    } catch (error) {
-      publishOutcome(card.id, error instanceof Error ? error.message : String(error));
-    } finally {
-      if (pendingRef.current.get(card.id)?.id === id) { pendingRef.current.delete(card.id); publishPending(); }
-      if (control !== undefined && mounted.current && latestInteraction.current === id) { restoreActionFocus(control, root.current); }
-    }
-  };
+  const dispatch = (card: WebMissionCard, action: WebCommandAction, control?: HTMLButtonElement) => dispatchBoardCommand(card, action, control, { pendingRef, requestSequence, latestInteraction, mounted, root, setEditRequest, publishPending, publishOutcome, onRefresh });
   const open = (card: WebMissionCard, action: WebCommandAction, control: HTMLButtonElement) => {
     const unavailable = unavailableReason(action, pendingRef.current.get(card.id));
     if (unavailable !== null) { publishOutcome(card.id, unavailable); return; }
@@ -184,6 +137,53 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
     const card = (event.target as HTMLElement).closest<HTMLElement>('[data-board-card]');
     if (card !== null) { setSelectedId(card.dataset.boardCard ?? null); setTerminalMission(card.dataset.boardCard ?? null); }
   };
+  return { root, moveSelection, selectTerminal, pressedAction, publishOutcome, flowOpen, setFlowOpen, setCreateFrom, selectedId, pendingCommands, setSelectedId, open, startDrag, dropAction, canDrop, cancelPrompt, setCancelPrompt, outcomes, pendingRef, dispatch, editRequest, setEditRequest, createFrom, closeCreate, terminalMission, closeTerminal };
+}
+
+function BoardCancellation({ cancelPrompt, setCancelPrompt, snapshot, outcomes, pendingRef, publishOutcome, dispatch }: Pick<ReturnType<typeof useBoardModel>, 'cancelPrompt' | 'setCancelPrompt' | 'outcomes' | 'pendingRef' | 'publishOutcome' | 'dispatch'> & { snapshot: WebBoardSnapshot }) {
+  return (
+cancelPrompt !== null && (
+        <CancelConfirmation missionId={cancelPrompt.card.id} opener={cancelPrompt.control}
+          feedback={outcomes.get(cancelPrompt.card.id)}
+          onKeep={() => { setCancelPrompt(null); publishOutcome(cancelPrompt.card.id, `Kept ${cancelPrompt.card.id}. Nothing was deleted.`); }}>
+
+          <p style={{ margin: 0, fontSize: 12 }}>
+            {`Cancelling ${cancelPrompt.card.id} deletes its lifecycle rows — lanes, checkpoints, review rounds, findings and session markers — and cannot be undone. Usage statistics are kept, and its git branch and worktree stay for you to remove.`}
+          </p>
+          <div style={{ display: 'flex', gap: 7, marginTop: 8 }}>
+            <button
+              type="button"
+              onClick={() => {
+                const pending = cancelPrompt;
+                const card = snapshot.stages.flatMap((stage) => stage.cards).find((candidate) => candidate.id === pending.card.id);
+                const action = card?.actions.find((candidate) => candidate.kind === pending.action.kind);
+                const unavailable = card === undefined ? 'mission is no longer in the current projection' : action === undefined
+                  ? 'cancellation is no longer available in the current server projection'
+                  : unavailableReason(action, pendingRef.current.get(card.id));
+                if (card === undefined || action === undefined || unavailable !== null) { publishOutcome(pending.card.id, `Cancellation was not sent: ${unavailable}`); return; }
+                setCancelPrompt(null);
+                void dispatch(card, action);
+              }}
+              style={{ background: '#3a1618', border: '1px solid #a83c3c', borderRadius: 4, color: '#f0a0a0', cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5, letterSpacing: 0.5, padding: '4px 10px' }}
+            >
+              {`delete ${cancelPrompt.card.id} lifecycle rows`}
+            </button>
+            <button
+              type="button"
+              data-cancel-keep
+              onClick={() => { setCancelPrompt(null); publishOutcome(cancelPrompt.card.id, `Kept ${cancelPrompt.card.id}. Nothing was deleted.`); }}
+              style={{ background: 'none', border: '1px solid #3a4550', borderRadius: 4, color: '#aab4bf', cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5, letterSpacing: 0.5, padding: '4px 10px' }}
+            >
+              keep mission
+            </button>
+          </div>
+        </CancelConfirmation>
+      )
+  );
+}
+
+export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onRefresh: () => Promise<void> }) {
+  const { root, moveSelection, selectTerminal, pressedAction, publishOutcome, flowOpen, setFlowOpen, setCreateFrom, selectedId, pendingCommands, setSelectedId, open, startDrag, dropAction, canDrop, cancelPrompt, setCancelPrompt, outcomes, pendingRef, dispatch, editRequest, setEditRequest, createFrom, closeCreate, terminalMission, closeTerminal } = useBoardModel(snapshot, onRefresh);
   // The intake bucket stacks in the reference's order; every other lane keeps
   // the order the server sent.
   const intake = snapshot.stages
@@ -244,43 +244,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
           {shipped.map((stage) => <DoneRail key={stage.lane} stage={stage} />)}
         </div>
       </div>
-      {cancelPrompt !== null && (
-        <CancelConfirmation missionId={cancelPrompt.card.id} opener={cancelPrompt.control}
-          feedback={outcomes.get(cancelPrompt.card.id)}
-          onKeep={() => { setCancelPrompt(null); publishOutcome(cancelPrompt.card.id, `Kept ${cancelPrompt.card.id}. Nothing was deleted.`); }}>
-
-          <p style={{ margin: 0, fontSize: 12 }}>
-            {`Cancelling ${cancelPrompt.card.id} deletes its lifecycle rows — lanes, checkpoints, review rounds, findings and session markers — and cannot be undone. Usage statistics are kept, and its git branch and worktree stay for you to remove.`}
-          </p>
-          <div style={{ display: 'flex', gap: 7, marginTop: 8 }}>
-            <button
-              type="button"
-              onClick={() => {
-                const pending = cancelPrompt;
-                const card = snapshot.stages.flatMap((stage) => stage.cards).find((candidate) => candidate.id === pending.card.id);
-                const action = card?.actions.find((candidate) => candidate.kind === pending.action.kind);
-                const unavailable = card === undefined ? 'mission is no longer in the current projection' : action === undefined
-                  ? 'cancellation is no longer available in the current server projection'
-                  : unavailableReason(action, pendingRef.current.get(card.id));
-                if (card === undefined || action === undefined || unavailable !== null) { publishOutcome(pending.card.id, `Cancellation was not sent: ${unavailable}`); return; }
-                setCancelPrompt(null);
-                void dispatch(card, action);
-              }}
-              style={{ background: '#3a1618', border: '1px solid #a83c3c', borderRadius: 4, color: '#f0a0a0', cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5, letterSpacing: 0.5, padding: '4px 10px' }}
-            >
-              {`delete ${cancelPrompt.card.id} lifecycle rows`}
-            </button>
-            <button
-              type="button"
-              data-cancel-keep
-              onClick={() => { setCancelPrompt(null); publishOutcome(cancelPrompt.card.id, `Kept ${cancelPrompt.card.id}. Nothing was deleted.`); }}
-              style={{ background: 'none', border: '1px solid #3a4550', borderRadius: 4, color: '#aab4bf', cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5, letterSpacing: 0.5, padding: '4px 10px' }}
-            >
-              keep mission
-            </button>
-          </div>
-        </CancelConfirmation>
-      )}
+      <BoardCancellation cancelPrompt={cancelPrompt} setCancelPrompt={setCancelPrompt} snapshot={snapshot} outcomes={outcomes} pendingRef={pendingRef} publishOutcome={publishOutcome} dispatch={dispatch} />
       <MissionEditor snapshot={snapshot} onRefresh={onRefresh} request={editRequest} onClose={() => setEditRequest(null)} />
       {createFrom !== null && (
         <CreateMissionDialog

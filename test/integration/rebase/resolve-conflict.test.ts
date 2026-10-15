@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 
 import test from 'node:test';
@@ -77,7 +76,7 @@ test('parseConflictFilesFromMergeOutput deduplicates repeated conflict lines', (
 // ---------------------------------------------------------------------------
 
 test('getConflictFiles returns empty array when dry merge succeeds', () => {
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
   const files = getConflictFiles('/tmp/worktree', PRIMARY, {
     gitRunner(args) {
       gitCalls.push(args);
@@ -92,7 +91,7 @@ test('getConflictFiles returns empty array when dry merge succeeds', () => {
 });
 
 test('getConflictFiles returns conflict files and always aborts', () => {
-  const gitCalls = [];
+  const gitCalls: string[][] = [];
   const conflictOutput = [
     'Auto-merging workflow/lib/commands/integrate.js',
     'CONFLICT (content): Merge conflict in workflow/lib/commands/integrate.js',
@@ -132,11 +131,11 @@ test('getConflictFiles throws for non-conflict merge failure (no CONFLICT lines)
 // ---------------------------------------------------------------------------
 
 test('resolveConflictsForMission returns ok when no conflicts detected', () => {
-  mock.method(fs, 'existsSync', (p) => p === TEST_WORKTREE);
+  mock.method(fs, 'existsSync', (p: Parameters<(typeof fs)["existsSync"]>[0]) => p === TEST_WORKTREE);
 
-  const lines = [];
+  const lines: unknown[] = [];
   const origLog = console.log;
-  console.log = l => lines.push(l);
+  console.log = (l: unknown) => lines.push(l);
 
   try {
     const result = resolveConflictsForMission('task-108', 'docs', {
@@ -160,14 +159,14 @@ test('resolveConflictsForMission returns ok when no conflicts detected', () => {
 // ---------------------------------------------------------------------------
 
 test('resolveConflictsForMission emits skip-all-conflicts path for mission-specific files', () => {
-  mock.method(fs, 'existsSync', (p) => p === TEST_WORKTREE);
+  mock.method(fs, 'existsSync', (p: Parameters<(typeof fs)["existsSync"]>[0]) => p === TEST_WORKTREE);
 
-  const lines = [];
-  const errs = [];
+  const lines: unknown[] = [];
+  const errs: string[] = [];
   const origLog = console.log;
   const origErr = console.error;
-  console.log = l => lines.push(l);
-  console.error = l => errs.push(l);
+  console.log = (l: unknown) => lines.push(l);
+  console.error = (l: unknown) => errs.push(String(l));
 
   try {
     const result = resolveConflictsForMission('task-108', 'docs', {
@@ -204,14 +203,14 @@ test('resolveConflictsForMission emits skip-all-conflicts path for mission-speci
 // ---------------------------------------------------------------------------
 
 test('resolveConflictsForMission warns and returns error for shared file conflicts', () => {
-  mock.method(fs, 'existsSync', (p) => p === TEST_WORKTREE);
+  mock.method(fs, 'existsSync', (p: Parameters<(typeof fs)["existsSync"]>[0]) => p === TEST_WORKTREE);
 
-  const lines = [];
-  const errs = [];
+  const lines: unknown[] = [];
+  const errs: string[] = [];
   const origLog = console.log;
   const origErr = console.error;
-  console.log = l => lines.push(l);
-  console.error = l => errs.push(l);
+  console.log = (l: unknown) => lines.push(l);
+  console.error = (l: unknown) => errs.push(String(l));
 
   try {
     const result = resolveConflictsForMission('task-108', 'docs', {
@@ -245,15 +244,15 @@ test('resolveConflictsForMission warns and returns error for shared file conflic
 // ---------------------------------------------------------------------------
 
 test('resolveConflictsForMission returns error when worktree is missing', () => {
-  mock.method(fs, 'existsSync', (p) => p !== MISSING_WORKTREE);
+  mock.method(fs, 'existsSync', (p: Parameters<(typeof fs)["existsSync"]>[0]) => p !== MISSING_WORKTREE);
 
   const slug = 'task-nonexistent-zzz';
-  const lines = [];
-  const errs = [];
+  const lines: unknown[] = [];
+  const errs: string[] = [];
   const origLog = console.log;
   const origErr = console.error;
-  console.log = l => lines.push(l);
-  console.error = l => errs.push(l);
+  console.log = (l: unknown) => lines.push(l);
+  console.error = (l: unknown) => errs.push(String(l));
 
   try {
     const result = resolveConflictsForMission(slug, 'docs', { worktreePathOverride: MISSING_WORKTREE });
@@ -273,14 +272,14 @@ test('resolveConflictsForMission returns error when worktree is missing', () => 
 // ---------------------------------------------------------------------------
 
 test('resolveConflictsForMission returns merge-failed when getConflictFilesFn throws', () => {
-  mock.method(fs, 'existsSync', (p) => p === TEST_WORKTREE);
+  mock.method(fs, 'existsSync', (p: Parameters<(typeof fs)["existsSync"]>[0]) => p === TEST_WORKTREE);
 
-  const lines = [];
-  const errs = [];
+  const lines: unknown[] = [];
+  const errs: string[] = [];
   const origLog = console.log;
   const origErr = console.error;
-  console.log = l => lines.push(l);
-  console.error = l => errs.push(l);
+  console.log = (l: unknown) => lines.push(l);
+  console.error = (l: unknown) => errs.push(String(l));
 
   try {
     const result = resolveConflictsForMission('task-108', 'docs', {
@@ -323,7 +322,7 @@ test('buildConflictResolutionPrompt includes agent-assisted resolve-conflict ent
 // ---------------------------------------------------------------------------
 
 test('resolveConflictsForMission includes worktreePath in every return shape', () => {
-  mock.method(fs, 'existsSync', (p) => p === TEST_WORKTREE);
+  mock.method(fs, 'existsSync', (p: Parameters<(typeof fs)["existsSync"]>[0]) => p === TEST_WORKTREE);
 
   try {
     // No-conflicts path
@@ -411,51 +410,51 @@ test('buildAgentResolutionPrompt states the execute-verify-report completion con
 // ---------------------------------------------------------------------------
 
 test('resolveConflict exits 0 and skips agent when no conflicts', () => {
-  let exitCode = null;
+  let exitCode: { value: number | null } = { value: null };
   let agentCalled = false;
-  const lines = [];
+  const lines: unknown[] = [];
   const origLog = console.log;
-  console.log = l => lines.push(l);
+  console.log = (l: unknown) => lines.push(l);
 
   try {
     resolveConflict(['task-108'], {
-      resolveConflictsFn: () => ({ ok: true, conflictFiles: [], sharedFiles: [], missionSpecificFiles: [], worktreePath: '/tmp/wt' }),
-      startAgentFn: () => { agentCalled = true; return { agent: 'claude', result: { status: 0 } }; },
-      exitFn: code => { exitCode = code; },
+      resolveConflictsFn: () => ({ ok: true as const, conflictFiles: [], sharedFiles: [], missionSpecificFiles: [], worktreePath: '/tmp/wt' }),
+      startAgentFn: async () => { agentCalled = true; return { agent: 'claude', result: { status: 0 } }; },
+      exitFn: code => { exitCode.value = code; },
     });
   } finally {
     console.log = origLog;
   }
 
-  assert.equal(exitCode, 0);
+  assert.equal(exitCode.value, 0);
   assert.equal(agentCalled, false, 'agent must not be spawned when there are no conflicts');
 });
 
 test('resolveConflict exits 1 and skips agent for shared-file conflicts', () => {
-  let exitCode = null;
+  let exitCode: { value: number | null } = { value: null };
   let agentCalled = false;
-  const errs = [];
+  const errs: string[] = [];
   const origErr = console.error;
-  console.error = l => errs.push(l);
+  console.error = (l: unknown) => errs.push(String(l));
 
   try {
     resolveConflict(['task-108'], {
       resolveConflictsFn: () => ({
-        ok: false,
+        ok: false as const,
         error: 'shared-file-conflicts',
         conflictFiles: ['workflow/lib/commands/integrate.js'],
         sharedFiles: ['workflow/lib/commands/integrate.js'],
         missionSpecificFiles: [],
         worktreePath: '/tmp/wt',
       }),
-      startAgentFn: () => { agentCalled = true; return { agent: 'claude', result: { status: 0 } }; },
-      exitFn: code => { exitCode = code; },
+      startAgentFn: async () => { agentCalled = true; return { agent: 'claude', result: { status: 0 } }; },
+      exitFn: code => { exitCode.value = code; },
     });
   } finally {
     console.error = origErr;
   }
 
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.equal(agentCalled, false, 'agent must not be spawned for shared-file conflicts');
   assert.match(errs.join('\n'), /cannot guess/i);
 });
@@ -465,8 +464,8 @@ test('resolveConflict exits 1 and skips agent for shared-file conflicts', () => 
 // ---------------------------------------------------------------------------
 
 /** Mission-specific-only conflict classification for the agent-launch path. */
-const MISSION_SPECIFIC_CONFLICTS = () => ({
-  ok: true,
+const MISSION_SPECIFIC_CONFLICTS: NonNullable<NonNullable<Parameters<typeof resolveConflict>[1]>["resolveConflictsFn"]> = () => ({
+  ok: true as const,
   conflictFiles: ['docs/missions/2026/task-108/CP-1.md'],
   sharedFiles: [],
   missionSpecificFiles: ['docs/missions/2026/task-108/CP-1.md'],
@@ -474,46 +473,52 @@ const MISSION_SPECIFIC_CONFLICTS = () => ({
 });
 
 /** Backlog seams that record `implementer` as the mission's assignee. */
-const implementerSeams = (implementer) => ({
+const implementerSeams = (implementer: string) => ({
   rootDir: '/repo',
-  resolveTaskFileFn: () => ({ ok: true, taskFile: '/repo/backlog/tasks/task-108.md' }),
+  resolveTaskFileFn: () => ({ matches: ['/repo/backlog/tasks/task-108.md'],  ok: true as const, taskFile: '/repo/backlog/tasks/task-108.md' }),
   getTaskImplementerFn: () => implementer,
 });
 
 test('resolveConflict spawns agent for mission-specific-only conflicts and exits 0 on success', async () => {
-  let exitCode = null;
-  let agentStep = null;
-  let agentOptions = null;
-  const lines = [];
+  let exitCode: { value: number | null } = { value: null };
+  let agentStep: { value: string | null } = { value: null };
+  let agentOptions: { value: import("../../../src/adapters/agents/agent-launch-context.js").StartAgentOptions | undefined | null } = { value: null };
+  const lines: unknown[] = [];
   const origLog = console.log;
-  console.log = l => lines.push(l);
+  console.log = (l: unknown) => lines.push(l);
 
   try {
     await resolveConflict(['task-108'], {
       ...implementerSeams('codex'),
       resolveConflictsFn: MISSION_SPECIFIC_CONFLICTS,
       startAgentFn: async (step, options) => {
-        agentStep = step;
-        agentOptions = options;
+        agentStep.value = step;
+        assert.ok(options?.agent);
+        agentOptions.value = options;
         return { agent: options.agent, result: { status: 0 } };
       },
-      exitFn: code => { exitCode = code; },
+      exitFn: code => { exitCode.value = code; },
     });
   } finally {
     console.log = origLog;
   }
 
-  assert.equal(exitCode, 0);
-  assert.equal(agentStep, 'conflict-resolution');
-  assert.equal(agentOptions.worktree, '/tmp/wt');
-  assert.match(agentOptions.prompt, /CP-1\.md/);
-  assert.match(agentOptions.prompt, /--theirs/);
+  assert.equal(exitCode.value, 0);
+  assert.equal(agentStep.value, 'conflict-resolution');
+  assert.ok(agentOptions.value != null);
+  assert.equal(agentOptions.value.worktree, '/tmp/wt');
+  assert.equal(typeof agentOptions.value.prompt, 'string');
+  assert.ok(typeof agentOptions.value.prompt === 'string');
+  assert.match(agentOptions.value.prompt, /CP-1\.md/);
+  assert.equal(typeof agentOptions.value.prompt, 'string');
+  assert.ok(typeof agentOptions.value.prompt === 'string');
+  assert.match(agentOptions.value.prompt, /--theirs/);
   assert.match(lines.join('\n'), /PASS.*codex/i);
 });
 
 test('resolveConflict pins the recorded mission implementer as the conflict agent', async () => {
-  let agentOptions = null;
-  let exitCode = null;
+  let agentOptions: { value: import("../../../src/adapters/agents/agent-launch-context.js").StartAgentOptions | undefined | null } = { value: null };
+  let exitCode: { value: number | null } = { value: null };
   const origLog = console.log;
   console.log = () => {};
 
@@ -522,27 +527,29 @@ test('resolveConflict pins the recorded mission implementer as the conflict agen
       ...implementerSeams('vibe'),
       resolveConflictsFn: MISSION_SPECIFIC_CONFLICTS,
       startAgentFn: async (_step, options) => {
-        agentOptions = options;
+        assert.ok(options?.agent);
+        agentOptions.value = options;
         return { agent: options.agent, result: { status: 0 } };
       },
-      exitFn: code => { exitCode = code; },
+      exitFn: code => { exitCode.value = code; },
     });
   } finally {
     console.log = origLog;
   }
 
-  assert.equal(exitCode, 0);
+  assert.equal(exitCode.value, 0);
   // SC1: the launch carries the recorded implementer, not a pool selection.
-  assert.equal(agentOptions.agent, 'vibe');
+  assert.ok(agentOptions.value != null);
+  assert.equal(agentOptions.value.agent, 'vibe');
   // SC7: usage stays attributable to (conflict-resolution stage, implementer role).
-  assert.equal(agentOptions.slug, 'task-108');
-  assert.equal(agentOptions.role, 'implementer');
+  assert.equal(agentOptions.value.slug, 'task-108');
+  assert.equal(agentOptions.value.role, 'implementer');
   // AC #3: no substitute family may be selected after a failure.
-  assert.equal(agentOptions.pinnedAgent, true);
+  assert.equal(agentOptions.value.pinnedAgent, true);
 });
 
 test('resolveConflict accepts any configured implementer family without hardcoding names', async () => {
-  const seen = [];
+  const seen: (string | undefined)[] = [];
   const origLog = console.log;
   console.log = () => {};
 
@@ -552,6 +559,7 @@ test('resolveConflict accepts any configured implementer family without hardcodi
         ...implementerSeams(family),
         resolveConflictsFn: MISSION_SPECIFIC_CONFLICTS,
         startAgentFn: async (_step, options) => {
+          assert.ok(options?.agent);
           seen.push(options.agent);
           return { agent: options.agent, result: { status: 0 } };
         },
@@ -567,23 +575,23 @@ test('resolveConflict accepts any configured implementer family without hardcodi
 });
 
 test('resolveConflict exits non-zero when the mission has no recorded implementer', async () => {
-  let exitCode = null;
+  let exitCode: { value: number | null } = { value: null };
   let agentLaunched = false;
-  const errs = [];
-  const lines = [];
+  const errs: string[] = [];
+  const lines: unknown[] = [];
   const origErr = console.error;
   const origLog = console.log;
-  console.error = l => errs.push(l);
-  console.log = l => lines.push(l);
+  console.error = (l: unknown) => errs.push(String(l));
+  console.log = (l: unknown) => lines.push(l);
 
   try {
     await resolveConflict(['task-108'], {
       rootDir: '/repo',
-      resolveTaskFileFn: () => ({ ok: false }),
+      resolveTaskFileFn: () => ({ matches: [], reason: 'missing' as const,  ok: false as const }),
       getTaskImplementerFn: () => null,
       resolveConflictsFn: MISSION_SPECIFIC_CONFLICTS,
       startAgentFn: async () => { agentLaunched = true; return { agent: 'codex', result: { status: 0 } }; },
-      exitFn: code => { exitCode = code; },
+      exitFn: code => { exitCode.value = code; },
     });
   } finally {
     console.error = origErr;
@@ -591,20 +599,20 @@ test('resolveConflict exits non-zero when the mission has no recorded implemente
   }
 
   // SC6: missing implementer is a hard stop, never a pool selection.
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.equal(agentLaunched, false);
   assert.match(errs.join('\n'), /no recorded implementer/i);
   assert.match(lines.join('\n'), /px resolve-conflict task-108/);
 });
 
 test('resolveConflict exits non-zero and names the implementer when its launcher is unavailable', async () => {
-  let exitCode = null;
-  const errs = [];
-  const lines = [];
+  let exitCode: { value: number | null } = { value: null };
+  const errs: string[] = [];
+  const lines: unknown[] = [];
   const origErr = console.error;
   const origLog = console.log;
-  console.error = l => errs.push(l);
-  console.log = l => lines.push(l);
+  console.error = (l: unknown) => errs.push(String(l));
+  console.log = (l: unknown) => lines.push(l);
 
   try {
     await resolveConflict(['task-108'], {
@@ -616,7 +624,7 @@ test('resolveConflict exits non-zero and names the implementer when its launcher
           { code: 'PINNED_AGENT_UNAVAILABLE' },
         );
       },
-      exitFn: code => { exitCode = code; },
+      exitFn: code => { exitCode.value = code; },
     });
   } finally {
     console.error = origErr;
@@ -624,29 +632,29 @@ test('resolveConflict exits non-zero and names the implementer when its launcher
   }
 
   // SC4: names the implementer family and the launcher detail.
-  assert.equal(exitCode, 1);
+  assert.equal(exitCode.value, 1);
   assert.match(errs.join('\n'), /vibe/);
   assert.match(errs.join('\n'), /not found on PATH/);
   assert.match(lines.join('\n'), /does not substitute another agent family/i);
 });
 
 test('resolveConflict exits with agent status when agent fails', async () => {
-  let exitCode = null;
-  const errs = [];
+  let exitCode: { value: number | null } = { value: null };
+  const errs: string[] = [];
   const origErr = console.error;
-  console.error = l => errs.push(l);
+  console.error = (l: unknown) => errs.push(String(l));
 
   try {
     await resolveConflict(['task-108'], {
       ...implementerSeams('claude'),
       resolveConflictsFn: MISSION_SPECIFIC_CONFLICTS,
       startAgentFn: async () => ({ agent: 'claude', result: { status: 2 } }),
-      exitFn: code => { exitCode = code; },
+      exitFn: code => { exitCode.value = code; },
     });
   } finally {
     console.error = origErr;
   }
 
-  assert.equal(exitCode, 2);
+  assert.equal(exitCode.value, 2);
   assert.match(errs.join('\n'), /FAIL.*claude/i);
 });

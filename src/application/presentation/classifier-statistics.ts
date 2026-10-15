@@ -1,41 +1,34 @@
 import { table, reportingRange, type Window } from './stats-table.js';
 import { reviewRounds, type ClassifierStatisticsInput } from '../review-classification/statistics.js';
 
-/** Display re-review rounds only; retain first-review measurements for audit. */
+/** Decisions and telemetry have independent populations and coverage. */
 export function renderClassifierStatistics(input: ClassifierStatisticsInput | null, windows: readonly [Window, Window]): string {
-  const periods = [['This week', windows[0]], ['Last week', windows[1]]] as const;
-  const cells = periods.map(([label, window]) => ({ label, window, kind: 're-review',
-    stats: input ? reviewRounds(input, window, 're-review') : null }));
-  const stats = cells.map(cell => cell.stats);
-  const text = (value: number, of: number, coverage: string | undefined) => {
-    if (!coverage || coverage === 'unavailable') { return 'unavailable'; }
-    const label = coverage === 'partial' ? ', partial' : '';
-    return of === 0 ? `${value} (n/a${label})` : `${value} (${Math.round(100 * value / of)}%${label})`;
-  };
-  const rows = cells.map(({ label, window, kind, stats: s }) => {
-    const name = `${label} (${reportingRange(window)})`;
-    if (!s) { return [name, kind, ...Array<string>(9).fill('unavailable')]; }
-    const known = (value: number) => text(value, s.rounds, s.coverage);
-    const share = (value: number) => s.coverage === 'unavailable' || s.rounds === 0 ? 'n/a'
-      : `${Math.round(100 * value / s.rounds)}%${s.coverage === 'partial' ? ' (partial)' : ''}`;
-    const observed = s.appliedDecisions === 0 ? 'n/a (no classifier decisions)'
-      : s.observedDecisions === 0 ? `n/a (0/${s.appliedDecisions} observed)`
-        : `${s.wrong}/${s.observedDecisions} observed; ${s.appliedDecisions - s.observedDecisions}/${s.appliedDecisions} unobserved`;
-    return [name, kind, s.coverage === 'unavailable' ? 'unavailable' : `${s.rounds}${s.coverage === 'partial' ? ' (partial)' : ''}`,
-      known(s.notAttempted), known(s.fellBack), known(s.called), known(s.cleared), known(s.returned),
-      share(s.jevDecisions), share(s.called), observed];
-  });
-  const reasons = [...new Set(stats.flatMap(s => Object.keys(s?.reasons ?? {})))].sort((a, b) => a.localeCompare(b));
-  const count = (s: (typeof stats)[number], value: number) => !s || s.coverage === 'unavailable' ? 'unavailable'
+  const cells = windows.map(window => input ? reviewRounds(input, window, 're-review') : null);
+  const count = (s: (typeof cells)[number], value: number) => !s ? 'unavailable'
     : `${value}${s.coverage === 'partial' ? ' (partial)' : ''}`;
-  const reasonRows = reasons.map(reason => [reason, ...stats.map(s => count(s, s?.reasons[reason] ?? 0))]);
+  const rows = cells.map((s, i) => {
+    const name = `${i === 0 ? 'This week' : 'Last week'} (${reportingRange(windows[i])})`;
+    if (!s) { return [name, 're-review', ...Array<string>(10).fill('unavailable')]; }
+    return [name, 're-review', String(s.rounds), String(s.jevDecisions), String(s.mechanical), String(s.reviewer),
+      s.rounds ? `${Math.round(100 * s.jevDecisions / s.rounds)}%` : 'n/a',
+      count(s, s.notAttempted), count(s, s.fellBack), count(s, s.called), String(s.cleared), String(s.returned)];
+  });
+  const reasons = [...new Set(cells.flatMap(s => Object.keys(s?.reasons ?? {})))].sort((a, b) => a.localeCompare(b));
+  const reasonRows = (reasons.length ? reasons : ['none']).map(reason => [reason, ...cells.map(s => count(s, s?.reasons[reason] ?? 0))]);
+  const firstSample = cells[0]?.firstSampleAt ?? 'none recorded';
   return [
     'PR Classification analysis',
-    ...table(['Period', 'Round kind', 'Review rounds', 'Classifier not attempted', 'Attempted, fell back', 'Classifier called', 'Classifier cleared', 'Classifier returned',
-      'Classifier share of decisions', 'Classifier called share', 'Observed wrong'], rows, new Set([2, 3, 4, 5, 6, 7, 8, 9])),
+    ...table(['Period', 'Round kind', 'Decided rounds', 'Classifier', 'Mechanical restoration', 'General reviewer',
+      'Classifier share of decisions', 'Classifier not attempted', 'Attempted, fell back', 'Classifier called', 'Classifier cleared', 'Classifier returned'], rows,
+    new Set([2, 3, 4, 5, 6, 7, 8, 9, 10, 11])),
+    `Sample coverage starts: ${firstSample}. Partial applies to sample measurements only; samples use sample time.`,
     '',
-    'Fallback reasons (review rounds decided by the general reviewer)',
-    ...(reasonRows.length ? table(['Reason', 'This week', 'Last week'], reasonRows, new Set([1, 2]))
-      : table(['Reason', 'This week', 'Last week'], [['none', ...stats.map(s => count(s, 0))]], new Set([1, 2]))),
+    ...table(['Clears by omission evidence', 'This week', 'Last week'], [
+      ['With omissions', ...cells.map(s => count(s, s?.clearsWithOmissions ?? 0))],
+      ['Without omissions', ...cells.map(s => count(s, s?.clearsWithoutOmissions ?? 0))],
+      ['Historical unknown', ...cells.map(s => count(s, s?.clearsOmissionsUnknown ?? 0))],
+    ], new Set([1, 2])),
+    '', 'Fallback reasons (sampled review rounds routed to the general reviewer)',
+    ...table(['Reason', 'This week', 'Last week'], reasonRows, new Set([1, 2])),
   ].join('\n');
 }

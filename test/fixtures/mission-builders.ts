@@ -1,9 +1,9 @@
-import type { MissionVersion } from '../../src/application/domain-ports.js';
+import { missionVersion, type MissionVersion } from '../../src/application/domain-ports.js';
 import { agentFamily } from '../../src/domain/agents.js';
 import { DuplicateLaneEventError, type LaneTransitionEvent } from '../../src/domain/board-event.js';
 import { missionId, missionLabels, type Mission, type MissionId } from '../../src/domain/mission.js';
 import { repositoryId } from '../../src/domain/repository.js';
-import type { Review } from '../../src/domain/review.js';
+import { reviewFindingId, changeRevision, startReview, applyReviewerCommand, ConfiguredReviewerEligibility, type Review } from '../../src/domain/review.js';
 
 /**
  * Typed Mission, review-round and in-memory store builders (TASK-2622.04).
@@ -17,9 +17,9 @@ import type { Review } from '../../src/domain/review.js';
  * Callers override only the fields their scenario is about (status, review,
  * assignee, brief, ...).
  */
-export function fixtureMission(slug: string, overrides: Partial<Mission> = {}): Mission {
+export function fixtureMission(slug: string, overrides: Partial<Omit<Mission, 'status' | 'closedAt'>> & { status?: Mission['status']; closedAt?: string | null } = {}): Mission {
   const status = overrides.status ?? 'active';
-  return {
+  const mission = {
     id: missionId(slug),
     repositoryId: repositoryId('parallix'),
     title: `Mission ${slug}`,
@@ -47,7 +47,8 @@ export function fixtureMission(slug: string, overrides: Partial<Mission> = {}): 
     netEngineeringLines: null,
     closedAt: null,
     ...overrides,
-  } as unknown as Mission;
+  };
+  return mission.closedAt === null ? { ...mission, closedAt: null } : { ...mission, status: 'done', closedAt: mission.closedAt };
 }
 
 /**
@@ -64,20 +65,28 @@ export function integrateCommandMission(slug: string, status: Mission['status'],
  * A one-round Review that `claude` approved for `codex` on the mission
  * branch: the approval source integrate reads when no provider is reachable.
  */
-export function approvedReview(slug: string): Review {
-  return {
-    rounds: [{
-      number: 1,
-      subject: {
-        change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' },
-        revision: 'fixture-revision',
-      },
-      reviewer: 'claude', implementer: 'codex', startedAt: '2026-08-04T10:00:00Z',
-      decision: { kind: 'approved', decidedAt: '2026-08-04T10:30:00Z', comment: null, source: { kind: 'local' } },
-      response: null, phase: 'approved', disposition: 'APPROVED', reviewerRetryCount: 0, implementerRetryCount: 0,
-    }],
-    intervention: null, stageLaunches: [], reviewEvents: [],
-  } as unknown as Review;
+export function pendingReview(slug: string, startedAt = '2026-08-04T10:00:00Z'): Review {
+  const reviewer = agentFamily('claude');
+  return startReview({
+    change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' },
+    revision: changeRevision('fixture-revision'),
+  }, reviewer, agentFamily('codex'), startedAt,
+  ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' }));
+}
+
+export function approvedReview(slug: string, timing = {
+  startedAt: '2026-08-04T10:00:00Z', decidedAt: '2026-08-04T10:30:00Z',
+}): Review {
+  return applyReviewerCommand(pendingReview(slug, timing.startedAt), {
+    type: 'approve', decidedAt: timing.decidedAt, comment: null, source: { kind: 'local' },
+  });
+}
+
+export function requestedChangesReview(slug: string, timing: { startedAt: string; decidedAt: string }): Review {
+  return applyReviewerCommand(pendingReview(slug, timing.startedAt), {
+    type: 'request-changes', decidedAt: timing.decidedAt, comment: null,
+    findings: [{ id: reviewFindingId('fixture-finding'), summary: 'Unresolved fixture finding', location: null }],
+  });
 }
 
 export interface InMemoryTransitionStore {
@@ -104,17 +113,17 @@ export function inMemoryTransitionStore(
 ): InMemoryTransitionStore {
   const persist = options.persist ?? true;
   let current = initial;
-  let version = options.version ?? 1;
+  let version = missionVersion(options.version ?? 1);
   const events: LaneTransitionEvent[] = [];
   const keys = new Set<string>();
   const commit = (next: Mission) => {
-    if (persist) { current = next; version += 1; }
-    return version as MissionVersion;
+    if (persist) { current = next; version = missionVersion(version + 1); }
+    return version;
   };
   return {
     events,
     mission: () => current,
-    async load() { return { kind: 'found', mission: current, version: version as MissionVersion }; },
+    async load() { return { kind: 'found' as const, mission: current, version }; },
     async save(next) { return commit(next); },
     async saveWithTransition(next, _expectedVersion, event) {
       if (persist) {
@@ -127,4 +136,16 @@ export function inMemoryTransitionStore(
       return commit(next);
     },
   };
+}
+
+/** An optional-fact classifier approval whose mandatory gates still need to run. */
+export function noFactIntegrationRepairClassifier(revokedAt: string): import('../../src/domain/classifier-review.js').ClassifierReviewSource {
+  return { kind: 'classifier', identity: 'jev', decisionId: 'no-fact',
+    provider: 'typesafe', model: 'jev', packetHash: 'c'.repeat(64), priorRevision: 'a'.repeat(40),
+    candidateRevision: 'b'.repeat(40), responseRevision: 'b'.repeat(40), findingIds: ['integration-gate-repair'],
+    integrationRepair: { revokedAt, gate: 'integration' },
+    policyVersion: 'integration-repair-weakening-v4-preserves-0.60-optional-fact-v3', label: 'preserves', score: 0.6,
+    weakening: { decisionSource: 'integration-repair-weakening', approvedRevision: 'a'.repeat(40),
+      gate: 'integration', factAdmitted: false, question: { clearedBy: 'weakening-v4-optional-fact-v1',
+        preserves: 0.6, versions: ['weakening-v4-optional-fact-v1', 'weakening-v5-optional-fact-v1'] } } };
 }

@@ -1,3 +1,5 @@
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
+import { repositoryId as fixtureRepositoryId } from '../../../../src/domain/repository.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { agentFamily } from '../../../../src/domain/agents.js';
@@ -15,8 +17,8 @@ import type { SessionMarkerEntry, SessionMarkerRepository } from '../../../../sr
 
 const NOW_MS = Date.parse('2026-08-08T12:00:00Z');
 const WORKTREES = new Map<string, MissionId>([
-  ['/home/dev/parallix-task-2328', 'task-2328' as MissionId],
-  ['/home/dev/parallix-task-2340', 'task-2340' as MissionId],
+  ['/home/dev/parallix-task-2328', fixtureMissionId('task-2328') as MissionId],
+  ['/home/dev/parallix-task-2340', fixtureMissionId('task-2340') as MissionId],
 ]);
 
 // A real `ps -eo pid=,args=` line for a running review loop, plus its child.
@@ -47,7 +49,7 @@ class StubSessionMarkers implements SessionMarkerRepository {
 
 function marker(missionId: string, role: 'execute' | 'review' | 'draft', agent: string): SessionMarkerEntry {
   return {
-    repositoryId: 'parallix' as SessionMarkerEntry['repositoryId'],
+    repositoryId: fixtureRepositoryId('parallix') as SessionMarkerEntry['repositoryId'],
     missionId: missionId as MissionId,
     role,
     agent: agentFamily(agent),
@@ -222,13 +224,13 @@ test('loadRunningSessions leaves a live px review process unattributed', async (
     rootDir: '/home/dev/parallix',
     blocklistRepo: new EmptyBlocklistRepo(),
     knownAgentFamilies: [agentFamily('claude')],
-    resolveTaskFile: () => ({ ok: false, matches: [] }),
+    resolveTaskFile: () => ({ ok: false as const, matches: [] }),
     sessionMarkers: new StubSessionMarkers([
       marker('task-2328', 'review', 'claude'),
       marker('task-2328', 'execute', 'custom'),
     ]),
     detectRunningSessions: () => [
-      { missionId: 'task-2328' as MissionId, role: null, startedAtMs: NOW_MS, worktree: '/home/dev/parallix-task-2328', pinnedAgent: null },
+      { missionId: fixtureMissionId('task-2328') as MissionId, role: null, startedAtMs: NOW_MS, worktree: '/home/dev/parallix-task-2328', pinnedAgent: null },
     ],
   });
 
@@ -242,11 +244,11 @@ test('loadRunningSessions falls back to the family pinned on the command line', 
     rootDir: '/home/dev/parallix',
     blocklistRepo: new EmptyBlocklistRepo(),
     knownAgentFamilies: [agentFamily('custom')],
-    resolveTaskFile: () => ({ ok: false, matches: [] }),
+    resolveTaskFile: () => ({ ok: false as const, matches: [] }),
     // A fresh `px draft <slug> --agent custom` has not written a marker yet.
     sessionMarkers: new StubSessionMarkers([]),
     detectRunningSessions: () => [
-      { missionId: 'task-2217' as MissionId, role: 'draft', startedAtMs: NOW_MS, worktree: null, pinnedAgent: 'custom' },
+      { missionId: fixtureMissionId('task-2217') as MissionId, role: 'draft', startedAtMs: NOW_MS, worktree: null, pinnedAgent: 'custom' },
     ],
   });
 
@@ -260,14 +262,14 @@ test('loadRunningSessions ignores a session marker older than the running proces
     rootDir: '/home/dev/parallix',
     blocklistRepo: new EmptyBlocklistRepo(),
     knownAgentFamilies: [agentFamily('codex')],
-    resolveTaskFile: () => ({ ok: true, taskFile: '/home/dev/parallix/backlog/tasks/task-2217.md', matches: [] }),
+    resolveTaskFile: () => ({ ok: true as const, taskFile: '/home/dev/parallix/backlog/tasks/task-2217.md', matches: [] }),
     // The assignee is not evidence about who is running, and the marker below
     // was written by a previous run: the launcher writes it after a launch
     // exits, so it lags by one launch and can name a family that fell back.
     getTaskAssignee: () => 'codex',
     sessionMarkers: new StubSessionMarkers([marker('task-2217', 'execute', 'codex')]),
     detectRunningSessions: () => [
-      { missionId: 'task-2217' as MissionId, role: 'execute', startedAtMs: NOW_MS, worktree: '/home/dev/parallix-task-2217', pinnedAgent: null },
+      { missionId: fixtureMissionId('task-2217') as MissionId, role: 'execute', startedAtMs: NOW_MS, worktree: '/home/dev/parallix-task-2217', pinnedAgent: null },
     ],
   });
 
@@ -285,10 +287,10 @@ test('loadRunningSessions uses a session marker written after the process starte
     rootDir: '/home/dev/parallix',
     blocklistRepo: new EmptyBlocklistRepo(),
     knownAgentFamilies: [agentFamily('custom')],
-    resolveTaskFile: () => ({ ok: false, matches: [] }),
+    resolveTaskFile: () => ({ ok: false as const, matches: [] }),
     sessionMarkers: new StubSessionMarkers([fresh]),
     detectRunningSessions: () => [
-      { missionId: 'task-2217' as MissionId, role: 'execute', startedAtMs: NOW_MS, worktree: '/home/dev/parallix-task-2217', pinnedAgent: 'codex' },
+      { missionId: fixtureMissionId('task-2217') as MissionId, role: 'execute', startedAtMs: NOW_MS, worktree: '/home/dev/parallix-task-2217', pinnedAgent: 'codex' },
     ],
   });
 
@@ -323,10 +325,10 @@ test('loadRunningSessions leaves a session unattributed when no source names a f
     rootDir: '/home/dev/parallix',
     blocklistRepo: new EmptyBlocklistRepo(),
     knownAgentFamilies: [agentFamily('claude')],
-    resolveTaskFile: () => ({ ok: false, matches: [] }),
+    resolveTaskFile: () => ({ ok: false as const, matches: [] }),
     sessionMarkers: null,
     detectRunningSessions: () => [
-      { missionId: 'task-2328' as MissionId, role: null, startedAtMs: NOW_MS, worktree: '/home/dev/parallix-task-2328', pinnedAgent: null },
+      { missionId: fixtureMissionId('task-2328') as MissionId, role: null, startedAtMs: NOW_MS, worktree: '/home/dev/parallix-task-2328', pinnedAgent: null },
     ],
   });
 
@@ -340,7 +342,7 @@ test('loadRunningSessions reports an observed empty process table as zero sessio
     rootDir: '/home/dev/parallix',
     blocklistRepo: new EmptyBlocklistRepo(),
     knownAgentFamilies: [agentFamily('claude')],
-    resolveTaskFile: () => ({ ok: false, matches: [] }),
+    resolveTaskFile: () => ({ ok: false as const, matches: [] }),
     detectRunningSessions: () => [],
   });
 
@@ -352,7 +354,7 @@ test('loadRunningSessions reports unknown when liveness could not be observed', 
     rootDir: '/home/dev/parallix',
     blocklistRepo: new EmptyBlocklistRepo(),
     knownAgentFamilies: [agentFamily('claude')],
-    resolveTaskFile: () => ({ ok: false, matches: [] }),
+    resolveTaskFile: () => ({ ok: false as const, matches: [] }),
     detectRunningSessions: () => null,
   });
 

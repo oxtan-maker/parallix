@@ -1,3 +1,4 @@
+import { fixtureMission } from '../../fixtures/mission-builders.js';
 // Historical regression provenance: TASK-2332.05.
 // Application port contracts: typed outcomes, production capability
 // composition, and single-dispatcher convergence for CLI and TUI.
@@ -28,9 +29,13 @@ describe('Application outcomes and view data', () => {
     const unavailable = failure('unavailable', 'offline');
     const cancelled = failure('cancelled', 'stopped');
     assert.deepEqual([validation.status, capability.status, unavailable.status, cancelled.status], ['rejected', 'rejected', 'failed', 'cancelled']);
+    assert.ok(validation.error != null);
     assert.equal(validation.error.kind, 'validation');
+    assert.ok(capability.error != null);
     assert.equal(capability.error.kind, 'capability');
+    assert.ok(unavailable.error != null);
     assert.equal(unavailable.error.kind, 'unavailable');
+    assert.ok(cancelled.error != null);
     assert.equal(cancelled.error.kind, 'cancelled');
   });
 
@@ -46,8 +51,8 @@ describe('Production capability composition', () => {
     agentBlocklist: { async findAll() { return []; }, async findByAgent() { return undefined; }, async save() {}, async deleteByAgent() {}, async clear() {} },
     operationalHistory: { async findAll() { return []; }, async findByType() { return []; }, async append() {}, async clear() {} },
     boardLaneEvents: { async findAll() { return []; }, async findByMissionId() { return []; }, async findByRepositoryId() { return []; }, async append() { return true; }, async clear() {} },
-    usage: { async findAll() { return []; }, async findWhere() { return []; }, async save() {}, async saveAll() {}, async clear() {} },
-  };
+    usage: { async findAll() { return []; }, async findWhere() { return []; } },
+  } satisfies NonNullable<Parameters<typeof composeProductionCapabilities>[2]>;
 
   test('production composition gives CLI and TUI identical board and active capability instances', () => {
     const { ports } = makeExecutePorts();
@@ -154,7 +159,7 @@ describe("Command dispatch convergence", () => {
     });
 
     it('BoardCommandController wraps ExecuteMissionService (not raw ports)', () => {
-      const launchSpy = mock.fn(async () => ({}));
+      const launchSpy = mock.fn(async () => ({ agent: 'codex', rebaseDeferred: false, errored: false, errorMessage: null, exitStatus: 0, detail: null }));
       const ports = createPorts(launchSpy);
       const controller = new BoardCommandController(ports);
       // Controller internally creates ExecuteMissionService from ports
@@ -162,12 +167,12 @@ describe("Command dispatch convergence", () => {
     });
   });
 
-  function createPorts(launchSpy: any): ExecuteMissionPorts {
+  function createPorts(launchSpy: ExecuteMissionPorts['agentExecution']['launch']): ExecuteMissionPorts {
     return {
       workspace: {
         preflight: async () => true,
         resolveWorktree: async () => '/tmp/wt',
-        resolveTaskFile: async () => ({ ok: true, taskFile: '/tmp/task.md' }),
+        resolveTaskFile: async () => ({ ok: true as const, taskFile: '/tmp/task.md' }),
         readTaskStatus: async () => 'active',
         enforceCommitSafety: async () => {},
       },
@@ -180,17 +185,17 @@ describe("Command dispatch convergence", () => {
         launch: launchSpy,
       },
       missionTransitions: {
-        load: async () => ({ kind: 'found' as const, mission: { status: 'active' } as never, version: missionVersion(1) }),
+        load: async () => ({ kind: 'found' as const, mission: fixtureMission('task-fixture', { status: 'active' }), version: missionVersion(1) }),
         save: async () => missionVersion(1),
         saveWithTransition: async () => missionVersion(1),
       },
       telemetry: {
         recordLaunchTelemetry: async () => {},
       },
-      checkpointValidation: { validateBeforeHandoff: async () => ({ ok: true }) },
-      handoffExecution: { run: async () => ({ ok: true }), repairHygiene: async () => ({ repaired: false }), classifyFailure: () => null, isRelaunchableFailure: () => false },
+      checkpointValidation: { validateBeforeHandoff: async () => ({ ok: true as const }) },
+      handoffExecution: { run: async () => ({ ok: true as const }), repairHygiene: async () => ({ repaired: false }), classifyFailure: () => null, isRelaunchableFailure: () => false },
       autonomousReview: { start: async () => {} },
-      repairLaunch: { launch: async () => {}, available: () => ({ supported: false }), readHead: () => null },
+      repairLaunch: { launch: async () => undefined, available: () => ({ supported: false }), readHead: () => null },
       output: { log: () => {}, error: () => {}, command: (value: string) => value, formatSlug: (value: string) => value, formatAgent: (value: string) => value },
     };
   }

@@ -1,3 +1,6 @@
+import type { SQLInputValue } from 'node:sqlite';
+import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
+import { missionVersion as fixtureVersion } from '../../../src/application/domain-ports.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -30,33 +33,33 @@ const persisted = [
   mission('task-2438-done', 'done'),
   mission('task-2438-foreign', 'active', foreignRepository),
 ];
-let requestedRepository: typeof repository | null = null;
+let requestedRepository: { value: typeof repository | null } = { value: null };
 
 const store: MissionStore = {
   async load(id: MissionId) {
     const found = persisted.find((candidate) => candidate.id === id);
-    return found ? { kind: 'found' as const, mission: found, version: 1 as never } : { kind: 'missing' as const };
+    return found ? { kind: 'found' as const, mission: found, version: fixtureVersion(1) } : { kind: 'missing' as const };
   },
-  async save() { return 1 as never; },
+  async save() { return fixtureVersion(1); },
   async loadByRepository(id) {
-    requestedRepository = id;
+    requestedRepository.value = id;
     return persisted.filter((candidate) => candidate.repositoryId === id);
   },
 };
 
 // Hermetic doubles: the board must build without spawning the shimmed git
 // CLI, launcher probes, or the OS process scan (each ~50-100 ms per call).
-const gitDouble = () => ({ status: 0, stdout: '', stderr: '' });
+const gitDouble: NonNullable<NonNullable<Parameters<typeof composeBoardProjection>[0]>["gitFn"]> = () => ({ status: 0, stdout: '', stderr: '' });
 
 function board(rootDir: string) {
   return composeBoardProjection({
     rootDir,
     missionStore: store,
     repositoryId: repository,
-    blocklistRepo: { async findAll() { return []; } } as never,
-    historyRepo: { async findAll() { return []; }, async findByType() { return []; } } as never,
-    laneEventRepo: { async findAll() { return []; } } as never,
-    usageRepo: { async findAll() { return []; } } as never,
+    blocklistRepo: { async findAll() { return []; }, async findByAgent() { return undefined; }, async save() { throw new Error('Unexpected block save'); }, async deleteByAgent() { throw new Error('Unexpected block delete'); }, async clear() { throw new Error('Unexpected block clear'); } },
+    historyRepo: { async findAll() { return []; }, async findByType() { return []; }, async append() { throw new Error('Unexpected history append'); }, async clear() { throw new Error('Unexpected history clear'); } },
+    laneEventRepo: { async findAll() { return []; }, async findByMissionId() { return []; }, async findByRepositoryId() { return []; }, async append() { throw new Error('Unexpected lane append'); }, async clear() { throw new Error('Unexpected lane clear'); } },
+    usageRepo: { async findAll() { return []; }, async findWhere() { return []; } },
     knownAgentFamilies: [],
     launcherProbe: () => ({ available: true, detail: null }),
     readAgentConfig: () => null,
@@ -123,7 +126,7 @@ test('task-2438 board reads persisted repository missions from every worktree', 
     assert.equal((await firstBoard.missionQuery.detail(missionId('task-2438-backlog')))?.id, missionId('task-2438-backlog'));
     const active = await firstBoard.missionQuery.detail(missionId('task-2438-active'));
     assert.deepEqual(active?.checkpoints, []);
-    assert.equal(requestedRepository, repository);
+    assert.equal(requestedRepository.value, repository);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(secondRoot, { recursive: true, force: true });
@@ -131,13 +134,10 @@ test('task-2438 board reads persisted repository missions from every worktree', 
 });
 
 test('task-2438 mission store scopes board reads to the repository', async () => {
-  const calls: unknown[][] = [];
-  const store = new SqliteMissionStore({
-    async query(_sql: string, params: unknown[]) {
-      calls.push(params);
-      return [];
-    },
-  } as never);
+  const calls: (readonly SQLInputValue[] | undefined)[] = [];
+  const database = new SqliteDatabaseAdapter();
+  test.mock.method(database, 'query', async (_sql: string, params?: readonly SQLInputValue[]) => { calls.push(params); return []; });
+  const store = new SqliteMissionStore(database);
 
   assert.deepEqual(await store.loadByRepository(repository), []);
   assert.deepEqual(calls, [[repository]]);

@@ -24,7 +24,7 @@ function fixture(t: import('node:test').TestContext, installed: readonly string[
   setLauncherHealthProbe(null);
   t.after(() => {
     setCommandPathProbe(name => name);
-    setLauncherHealthProbe(() => ({ ok: true }));
+    setLauncherHealthProbe(() => ({ ok: true as const }));
   });
   const configPath = path.join(root, 'config/agents.json');
   const invoke = (args: string[]) => run(args, {

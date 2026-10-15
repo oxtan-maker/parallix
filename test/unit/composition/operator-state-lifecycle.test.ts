@@ -5,7 +5,7 @@ import { registerOperatorStateShutdown } from '../../../src/composition/operator
 
 test('composition-owned operator-state shutdown calls the synchronous close path on forced process exit', () => {
   const handlers = new Map<string, () => void>();
-  const processRef = { once(event: string, listener: () => void) { handlers.set(event, listener); } };
+  const processRef = { once(event: string, listener: () => void) { handlers.set(event, listener); } } satisfies NonNullable<Parameters<typeof registerOperatorStateShutdown>[2]>;
   let asyncCloses = 0;
   let syncCloses = 0;
   registerOperatorStateShutdown(async () => { asyncCloses += 1; }, () => { syncCloses += 1; }, processRef);
@@ -18,7 +18,7 @@ test('composition-owned operator-state shutdown calls the synchronous close path
 
 test('composition-owned operator-state shutdown registers only one hook pair per process', () => {
   const registrations: string[] = [];
-  const processRef = { once(event: string) { registrations.push(event); } };
+  const processRef = { once(event: string) { registrations.push(event); } } satisfies NonNullable<Parameters<typeof registerOperatorStateShutdown>[2]>;
   const first = registerOperatorStateShutdown(async () => {}, () => {}, processRef);
   const second = registerOperatorStateShutdown(async () => { throw new Error('must not replace registered closer'); }, () => { throw new Error('must not replace registered closer'); }, processRef);
 
@@ -28,7 +28,7 @@ test('composition-owned operator-state shutdown registers only one hook pair per
 
 test('composition-owned operator-state shutdown uses the asynchronous close path before normal exit', async () => {
   const handlers = new Map<string, () => void>();
-  const processRef = { once(event: string, listener: () => void) { handlers.set(event, listener); } };
+  const processRef = { once(event: string, listener: () => void) { handlers.set(event, listener); } } satisfies NonNullable<Parameters<typeof registerOperatorStateShutdown>[2]>;
   let asyncCloses = 0;
   let syncCloses = 0;
   const close = registerOperatorStateShutdown(async () => { asyncCloses += 1; }, () => { syncCloses += 1; }, processRef);

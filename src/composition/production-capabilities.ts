@@ -1,3 +1,5 @@
+import type { DraftAdapterDependencies } from '../adapters/cli/commands/draft-adapter-types.js';
+import type { GitReader } from '../adapters/git/worktree.js';
 import { MissionEditService } from '../application/mission-edit-service.js';
 import { createReviewClassification, createIntegrationApprovalRestoration } from './review-classification.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
@@ -73,11 +75,13 @@ export interface ProductionCapabilities {
  * test graph swaps in a mocked port and the real adapter never opens git or
  * launches an agent.
  */
+type BoardDraftAdapterDependencies = DraftAdapterDependencies & { gitFn?: NonNullable<Parameters<typeof ensureWorktree>[3]>['gitFn'] };
+
 export interface ProductionCompositionOverrides {
   readonly configuration: ParallixConfiguration;
   readonly draftWorkflow?: DraftWorkflowPort;
   /** Test-only adapter seams; production always supplies the safe exit boundary. */
-  readonly draftAdapterDeps?: Record<string, unknown>;
+  readonly draftAdapterDeps?: BoardDraftAdapterDependencies;
   /**
    * Test-only seam for the review loop the board's handoff resume launches.
    * Production always uses the real loop; a test supplies a recorder so the
@@ -99,11 +103,11 @@ function createBoardDraftService(deps: {
   readonly repositoryId: RepositoryId;
   // A full transition-capable store so the draft service can advance the
   // aggregate to `ready` (record refinement) the way the CLI draft does.
-  readonly store?: MissionStore & MissionTransitionStore & MissionNelRecorder;
+  readonly store: MissionStore & MissionTransitionStore & MissionNelRecorder;
   readonly currentWork: CurrentWorkPort;
   readonly progress?: BoardProgressSink;
   readonly workflow?: DraftWorkflowPort;
-  readonly workflowDeps?: Record<string, unknown>;
+  readonly workflowDeps?: BoardDraftAdapterDependencies;
   readonly configuration?: ParallixConfiguration;
 }): DraftCommandUseCase {
   let sequence = 0;
@@ -131,7 +135,7 @@ function createBoardDraftService(deps: {
     // These legacy helpers default to process.exit. Keep that CLI behavior,
     // but route the board adapter through its throwing boundary instead.
     ensureWorktreeFn: (mainRepo: string, targetWorktree: string, branchName: string, options: Record<string, unknown> = {}) =>
-      ensureWorktree(mainRepo, targetWorktree, branchName, { ...options, ...(gitFn ? { gitFn: gitFn as never } : {}), exitFn }),
+      ensureWorktree(mainRepo, targetWorktree, branchName, { ...options, ...(gitFn ? { gitFn } : {}), exitFn }),
     readAgentConfigOrExitFn: () => readAgentConfig(undefined, { configuration: deps.configuration }),
     // The board draft reaches the lifecycle the same way the CLI does: via the
     // mission services. Advancing the aggregate to `ready` (recording the
@@ -145,7 +149,7 @@ function createBoardDraftService(deps: {
       // DB-owned mission (a web-created px-XXXX with no Backlog file) and draft
       // under its existing identity instead of bailing "no Backlog task file".
       store: deps.store,
-      lifecycle: deps.store ? new MissionLifecycleService(deps.store) : undefined,
+      lifecycle: new MissionLifecycleService(deps.store),
     }),
   });
   return new DraftCommandUseCase(workflow, deps.currentWork);
@@ -157,12 +161,12 @@ function createBoardDraftService(deps: {
  * never runs git. An abandoned mission usually has no worktree left, so the
  * conventional path stands in when `git worktree list` no longer knows the slug.
  */
-export function missionCleanupCommand(slug: string, rootDir: string, gitFn?: Function): string {
+export function missionCleanupCommand(slug: string, rootDir: string, gitFn?: GitReader): string {
   const worktree = resolveWorktree(slug, { cwd: rootDir, gitFn: gitFn ?? null }) ?? conventionalWorktreePath(slug, rootDir);
   return `git worktree remove ${worktree} && git branch -D ${missionBranchName(slug, rootDir)}`;
 }
 
-async function resumeActiveBoardHandoff(existing: any, store: MissionStore & MissionTransitionStore & MissionNelRecorder, lifecycle: MissionLifecycleService, slug: string): Promise<void> {
+async function resumeActiveBoardHandoff(existing: Extract<Awaited<ReturnType<MissionStore['load']>>, { kind: 'found' }> & { mission: { review: NonNullable<import('../domain/mission.js').Mission['review']> } }, store: MissionStore & MissionTransitionStore & MissionNelRecorder, lifecycle: MissionLifecycleService, slug: string): Promise<void> {
   if (existing.mission.status !== 'active') { return; }
   const previous = existing.mission.review;
   const decision = currentReviewRound(previous).decision;
@@ -179,13 +183,13 @@ async function resumeActiveBoardHandoff(existing: any, store: MissionStore & Mis
   const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible, strategy: 'random' });
   const priorReviewer = currentReviewRound(resolved).reviewer;
   const review = reviewStatus(resolved) === 'ready-for-next-round'
-    ? beginNextReviewRound(resolved, eligible.includes(priorReviewer) ? priorReviewer : eligible[0] ?? priorReviewer, existing.mission.assignee ?? agentFamily('codex'), new Date().toISOString(), reviewerEligibility)
+    ? beginNextReviewRound(resolved, resumeReviewer(eligible, priorReviewer), existing.mission.assignee ?? agentFamily('codex'), new Date().toISOString(), reviewerEligibility)
     : resolved;
   if (review === previous) { throw new Error('Review is not ready to resume.'); }
   await store.save({ ...existing.mission, review }, existing.version);
   const transition = await lifecycle.transition({
     operationId: `handoff-resume-${slug}`,
-    missionId: slug as never,
+    missionId: missionId(slug),
     capabilities: new Set(['mission:transition']),
     command: { type: 'submit-for-review', gatesPassed: true, review, reviewerEligibility },
     actor: currentReviewRound(review).reviewer,
@@ -211,15 +215,15 @@ function createBoardHandoffWorkflow(
   const handoff = (slug: string, options: Record<string, unknown> = {}) =>
     performHandoff(slug, { recoverGateFailure: true, ...options, configuration, missionServicesFn: async () => missionServices });
   const reviewHandoff = async (slug: string, options: Record<string, unknown> = {}): Promise<Record<string, unknown>> =>
-    await handoff(slug, options) as unknown as Record<string, unknown>;
+    ({ ...await handoff(slug, options) });
   return {
     async executeForSlug(slug: string): Promise<void> {
-      const existing = await store.load(slug as never);
+      const existing = await store.load(missionId(slug));
       if (existing.kind === 'found' && existing.mission.review?.rounds?.length) {
         // Handoff already established the review identity. A later board handoff
         // is a resume signal, not a second submission (which would replay the
         // lane-event key and violate the lifecycle idempotency contract).
-        await resumeActiveBoardHandoff(existing, store, lifecycle, slug);
+        await resumeActiveBoardHandoff({ ...existing, mission: { ...existing.mission, review: existing.mission.review } }, store, lifecycle, slug);
         await reviewLoop(
           { slug, isContinue: true, maxAttempts: existing.mission.review.rounds.length + 1 },
           createReviewLoopPorts(slug, {}, { configuration, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd(), configuration.decision, configuration), restoration: createIntegrationApprovalRestoration(resolveWorktree(slug) ?? process.cwd(), configuration) }),
@@ -271,7 +275,7 @@ export function composeProductionCapabilities(
       draft: createBoardDraftService({
         configuration: overrides.configuration,
         intake,
-        store: missionStore ?? undefined,
+        store: missionStore,
         repositoryId: owningRepositoryId,
         currentWork,
         progress,
@@ -314,4 +318,8 @@ export function composeProductionCapabilities(
     executePorts,
     commandController: controller,
   };
+}
+
+function resumeReviewer(eligible: readonly ReturnType<typeof agentFamily>[], priorReviewer: ReturnType<typeof agentFamily>): ReturnType<typeof agentFamily> {
+  return eligible.includes(priorReviewer) ? priorReviewer : eligible[0] ?? priorReviewer;
 }

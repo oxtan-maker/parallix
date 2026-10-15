@@ -49,7 +49,7 @@ try {
       const store = new SqliteMissionStore(db), lifecycle = new MissionLifecycleService(store);
       const original = repeatReview();
       const review = { ...original, rounds: [
-        { ...original.rounds[0], subject: { ...original.rounds[0].subject, revision: changeRevision(prior) },
+        { ...original.rounds[0], decision: { ...original.rounds[0].decision!, revision: changeRevision(prior) }, subject: { ...original.rounds[0].subject, revision: changeRevision(prior) },
           response: { ...original.rounds[0].response!, resultingRevision: changeRevision(candidate) } },
         { ...original.rounds[1], subject: { ...original.rounds[1].subject, revision: changeRevision(candidate) } },
       ] as const };

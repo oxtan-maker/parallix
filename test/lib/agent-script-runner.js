@@ -8,5 +8,4 @@ if (typeof body !== 'string') {
   process.exit(0);
 }
 
-// eslint-disable-next-line no-eval
 eval(body);

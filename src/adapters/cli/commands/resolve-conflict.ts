@@ -49,24 +49,40 @@ function buildAgentResolutionPrompt({ slug, area, worktreePath, missionSpecificF
 
 /**
  * @param {string[]} args
- * @param {{resolveConflictsFn?: Function, startAgentFn?: Function, exitFn?: Function,
- *   resolveTaskFileFn?: Function, getTaskImplementerFn?: Function, rootDir?: string}} opts
+ * @param {{resolveConflictsFn?: typeof integrate.resolveConflictsForMission, startAgentFn?: (...args: Parameters<typeof startAgent>) => Promise<Pick<Awaited<ReturnType<typeof startAgent>>, 'agent' | 'result'>>, exitFn?: Function,
+ *   resolveTaskFileFn?: typeof resolveTaskFile, getTaskImplementerFn?: typeof getTaskImplementer, rootDir?: string}} opts
  */
-async function resolveConflict(args: string[], {
-  resolveConflictsFn = (integrate as any).resolveConflictsForMission,
+function recordedConflictImplementer(slug: string, rootDir: string, resolveTaskFileFn: typeof resolveTaskFile, getTaskImplementerFn: typeof getTaskImplementer): string | null {
+  const taskResolution = resolveTaskFileFn(slug, rootDir);
+  const implementer = taskResolution && taskResolution.ok && taskResolution.taskFile
+    ? getTaskImplementerFn(taskResolution.taskFile)
+    : null;
+  return implementer;
+}
+
+type ResolveConflictOptions = {
+  resolveConflictsFn?: typeof integrate.resolveConflictsForMission,
+  startAgentFn?: (...args: Parameters<typeof startAgent>) => Promise<Pick<Awaited<ReturnType<typeof startAgent>>, 'agent' | 'result'>>,
+  exitFn?: (_code: number) => void,
+  resolveTaskFileFn?: typeof resolveTaskFile,
+  getTaskImplementerFn?: typeof getTaskImplementer,
+  rootDir?: string,
+};
+
+function resolveConflictBindings(options: ResolveConflictOptions) {
+  const {
+  resolveConflictsFn = integrate.resolveConflictsForMission,
   startAgentFn = startAgent,
-  exitFn = ((_code: number) => process.exit(_code)) as (_code: number) => void,
+  exitFn = (_code: number) => process.exit(_code),
   resolveTaskFileFn = resolveTaskFile,
   getTaskImplementerFn = getTaskImplementer,
   rootDir = process.cwd(),
-}: {
-  resolveConflictsFn?: Function,
-  startAgentFn?: Function,
-  exitFn?: (_code: number) => void,
-  resolveTaskFileFn?: Function,
-  getTaskImplementerFn?: Function,
-  rootDir?: string,
-} = {}) {
+  } = options;
+  return { resolveConflictsFn, startAgentFn, exitFn, resolveTaskFileFn, getTaskImplementerFn, rootDir };
+}
+
+async function resolveConflict(args: string[], options: ResolveConflictOptions = {}) {
+  const { resolveConflictsFn, startAgentFn, exitFn, resolveTaskFileFn, getTaskImplementerFn, rootDir } = resolveConflictBindings(options);
   const explicitSlug = args[0];
   const slug = inferSlug(explicitSlug);
   if (!slug) {
@@ -105,10 +121,7 @@ async function resolveConflict(args: string[], {
   // Conflict resolution is implementation work owned by the mission's recorded
   // implementer (TASK-2294.01). Resolve that family before launching; there is
   // no separate conflict-resolution pool to fall back on.
-  const taskResolution = resolveTaskFileFn(slug, rootDir) as {ok: boolean, taskFile?: string};
-  const implementer = taskResolution && taskResolution.ok && taskResolution.taskFile
-    ? getTaskImplementerFn(taskResolution.taskFile) as string | null
-    : null;
+  const implementer = recordedConflictImplementer(slug, rootDir, resolveTaskFileFn, getTaskImplementerFn);
   if (!implementer) {
     fmt.log.fail(`No recorded implementer for ${fmt.slug(slug)}; cannot launch conflict resolution.`);
     fmt.log.info('Conflict resolution runs as the mission implementer. Set the task assignee to a supported agent family, then re-run.');
@@ -127,7 +140,7 @@ async function resolveConflict(args: string[], {
 
   fmt.log.info(`Launching implementer (${fmt.agent(implementer)}) to execute mission-specific conflict resolution...`);
   let agent: string;
-  let agentResult: {status: number};
+  let agentResult: Awaited<ReturnType<typeof startAgent>>['result'];
   try {
     ({ agent, result: agentResult } = await startAgentFn('conflict-resolution', {
       prompt,
@@ -137,8 +150,8 @@ async function resolveConflict(args: string[], {
       role: 'implementer',
       pinnedAgent: true,
     }));
-  } catch (err: any) {
-    fmt.log.fail(`Implementer (${fmt.agent(implementer)}) cannot run conflict resolution: ${err.message || String(err)}`);
+  } catch (err) {
+    fmt.log.fail(`Implementer (${fmt.agent(implementer)}) cannot run conflict resolution: ${(err as { message?: string }).message || String(err)}`);
     fmt.log.info('Parallix does not substitute another agent family for the mission implementer.');
     fmt.log.info(`Recovery: clear the blocker for ${fmt.agent(implementer)}, then re-run ${fmt.command(`px resolve-conflict ${slug}`)}`);
     exitFn(1);
@@ -155,6 +168,6 @@ async function resolveConflict(args: string[], {
   exitFn(0);
 }
 
-(resolveConflict as any).buildAgentResolutionPrompt = buildAgentResolutionPrompt;
-export default resolveConflict;
+const resolveConflictWithHelpers = Object.assign(resolveConflict, { buildAgentResolutionPrompt });
+export default resolveConflictWithHelpers;
 export { resolveConflict, buildAgentResolutionPrompt };

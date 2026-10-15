@@ -1,3 +1,6 @@
+import { rebaseWorkflowFixture } from '../../../helpers/rebase-workflow-fixture.js';
+import type { IntegrateWorkflowPorts } from '../../../../src/application/ports/integrate-workflow.js';
+import { stubIntegrateWorkflowPorts } from '../../../helpers/stub-integrate-workflow-ports.js';
 // Historical regression provenance: TASK-2520.
 // Behavior-owned suite (TASK-2622.09): a paused rebase is never reported as a clean completion — the
 // integration-time rebase inspects the mission worktree (task-2520 SC4/SC7) and `px rebase` reports
@@ -41,13 +44,13 @@ describe("integration rebase state", async () => {
    * post-rebase in-progress check, which must read the mission worktree.
    */
   function buildPorts({ missionRebaseInProgress }: { missionRebaseInProgress: boolean }) {
-    const rebase = {
+    const rebase: IntegrateWorkflowPorts['rebase'] = {
       createRebaseWorkflowPort: (opts: { exitFn: (code: number) => void }) => {
         opts.exitFn(0);
-        return { cwd() {}, getCurrentBranch() {}, resolveMissionBaseBranch() {} };
+        return rebaseWorkflowFixture();
       },
     };
-    const landing = { createAbort: () => ({ isAbort: true }) };
+    const landing = { createAbort: () => Object.assign(new Error('Integration aborted'), { isAbort: true }) };
     const missionPaths = {
       missionBranchName: (_slug: string) => `mission/${SLUG}`,
       conventionalWorktreePath: (_slug: string) => MISSION_WORKTREE,
@@ -58,21 +61,25 @@ describe("integration rebase state", async () => {
       if (joined.includes('rebase') && args.includes('--show-current')) {
         // The rebase lives in the mission worktree; the base worktree is clean.
         if (args.includes(MISSION_WORKTREE)) {
-          return { status: 0, stdout: missionRebaseInProgress ? SLUG : '', stderr: '' };
+          return { signal: null, status: 0, stdout: missionRebaseInProgress ? SLUG : '', stderr: '' };
         }
-        return { status: 0, stdout: '', stderr: '' };
+        return { signal: null, status: 0, stdout: '', stderr: '' };
       }
-      if (joined.includes('rev-parse')) { return { status: 0, stdout: 'missionsha', stderr: '' }; }
-      if (joined.includes('merge-base') && joined.includes('--is-ancestor')) { return { status: 0, stdout: '', stderr: '' }; }
-      return { status: 0, stdout: '', stderr: '' };
+      if (joined.includes('rev-parse')) { return { signal: null, status: 0, stdout: 'missionsha', stderr: '' }; }
+      if (joined.includes('merge-base') && joined.includes('--is-ancestor')) { return { signal: null, status: 0, stdout: '', stderr: '' }; }
+      return { signal: null, status: 0, stdout: '', stderr: '' };
     });
+    const defaults = stubIntegrateWorkflowPorts();
     const ports = {
-      missionPaths: missionPaths as any,
-      rebase: rebase as any,
-      landing: landing as any,
+      ...stubIntegrateWorkflowPorts({
+      missionPaths: missionPaths,
+      rebase: rebase,
+      landing: landing,
       git: { git },
+      }),
+      git: { ...defaults.git, git },
     };
-    return ports as any;
+    return ports;
   }
 
   test('integration rebase reports a paused rebase in the mission worktree (SC7)', async () => {
@@ -103,16 +110,16 @@ describe("integration rebase state", async () => {
     mock.method(console, 'error', (chunk: unknown) => { logs.push(String(chunk)); return true; });
     const ports = buildPorts({ missionRebaseInProgress: false });
     // Make the ancestry probe report the base is NOT an ancestor of the mission.
-    const git = (args: string[]) => {
+    const git: import("../../../../src/application/ports/integrate-workflow.js").IntegrateGitRunner = (args) => {
       const joined = args.join(' ');
-      if (joined.includes('merge-base') && joined.includes('--is-ancestor')) { return { status: 1, stdout: '', stderr: '' }; }
-      if (joined.includes('rebase') && args.includes('--show-current')) { return { status: 0, stdout: '', stderr: '' }; }
-      if (joined.includes('rev-parse')) { return { status: 0, stdout: 'missionsha', stderr: '' }; }
-      return { status: 0, stdout: '', stderr: '' };
+      if (joined.includes('merge-base') && joined.includes('--is-ancestor')) { return { signal: null,  status: 1, stdout: '', stderr: '' }; }
+      if (joined.includes('rebase') && args.includes('--show-current')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
+      if (joined.includes('rev-parse')) { return { signal: null,  status: 0, stdout: 'missionsha', stderr: '' }; }
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
     };
     let aborted = false;
     try {
-      await createIntegrationRebase({ ...ports, git }).runIntegrationRebase(SLUG, { baseWorktree: BASE_WORKTREE, baseBranch: 'main', git });
+      await createIntegrationRebase(stubIntegrateWorkflowPorts({ ...ports, git: { ...ports.git, git } })).runIntegrationRebase(SLUG, { baseWorktree: BASE_WORKTREE, baseBranch: 'main', git });
     } catch (error) {
       aborted = (error as { isAbort?: boolean })?.isAbort === true;
     }
@@ -155,13 +162,13 @@ describe("px rebase in-progress", async () => {
    * exact SC6 trap: a status-0 rebase that has not actually finished.
    */
   function buildPort({ inProgress }: { inProgress: boolean }, exitCodes: { value: number[] }) {
-    const port: any = {
+    const port = rebaseWorkflowFixture({
       git: (args: string[]) => {
         if (args.includes('--show-current')) {
-          return { status: 0, stdout: inProgress ? SLUG : '', stderr: '' };
+          return { signal: null,  status: 0, stdout: inProgress ? SLUG : '', stderr: '' };
         }
-        if (args.includes('rebase')) { return { status: 0, stdout: '', stderr: '' }; }
-        return { status: 0, stdout: '', stderr: '' };
+        if (args.includes('rebase')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
       detectRebaseState: () => ({ inProgress: false, rebaseHead: null, unmergedFiles: [] }),
       getCurrentBranch: () => BRANCH,
@@ -179,23 +186,23 @@ describe("px rebase in-progress", async () => {
       selectAgent: () => 'test-agent',
       workflowLauncherStatus: () => ({ supported: true, agent: 'test-agent' }),
       applyAgentFallback: async () => 'test-agent',
-      createPr: () => ({ ok: true }),
+      createPr: () => ({ ok: true as const }),
       readToken: () => 'token',
       resolveForgejoUser: (user: string | null) => user ?? 'tester',
       fetchReviewBranch: () => ({ status: 0, stdout: '', stderr: '' }),
-      resolveTaskFile: () => ({ ok: true, taskFile: `${WORKTREE}/backlog/tasks/${SLUG}.md`, task: {} }),
+      resolveTaskFile: () => ({ ok: true as const, taskFile: `${WORKTREE}/backlog/tasks/${SLUG}.md`, task: {} }),
       getTaskImplementer: () => 'tester',
       transitionTask: async () => undefined,
       resolveReviewIdentity: () => ({ forgejoUser: 'tester' }),
-      readReviewState: () => ({ metadata: {} }),
-      writeReviewState: () => undefined,
-      persistReviewState: async () => undefined,
+      readReviewState: async () => ({ metadata: {} }),
+      writeReviewState: async () => ({ outcome: 'committed' as const }),
+      persistReviewState: async () => ({ outcome: 'committed' as const }),
       isForgejoReviewEnabled: () => true,
       formatVerificationCommand: () => ': # no verification gate configured (set adapters.verification.command)',
-      resolveConflictsForMission: () => ({ ok: true, conflictFiles: [], missionSpecificFiles: [], sharedFiles: [] }),
+      resolveConflictsForMission: () => ({ ok: true as const, conflictFiles: [], missionSpecificFiles: [], sharedFiles: [] }),
       missionServices: null,
       exit: (code: number) => { exitCodes.value.push(code); },
-    };
+    });
     return port;
   }
 

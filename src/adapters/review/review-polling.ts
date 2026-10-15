@@ -50,7 +50,7 @@ async function pollForReview(
   prNumber: number,
   reviewerUser: string,
   sinceIso: string,
-  token: string,
+  token: string | null,
   options: {
     configuration?: ParallixConfiguration;
     getLatestReviewForPrFn?: (_prNumber: number, _reviewerUser: string, _sinceIso: string, _token: string) => Promise<unknown>;
@@ -63,16 +63,8 @@ async function pollForReview(
     log?: (_msg: string) => void;
   } = {}
 ): Promise<string | typeof POLL_TIMEOUT | null> {
-  const {
-    getLatestReviewForPrFn = getLatestReviewForPr,
-    sleepFn = delay,
-    intervalMs = resolvePollIntervalMs(options.configuration),
-    timeoutMs = resolvePollTimeoutMs(undefined, options.configuration),
-    verbose = false,
-    label = 'review',
-    retryCount = 0,
-    log: logger = log.plain
-  } = options;
+  const { getLatestReviewForPrFn = getLatestReviewForPr } = options;
+  const { sleepFn, intervalMs, timeoutMs, verbose, label, retryCount, logger } = pollingParameters(options, 'review');
   if (!token) {
     logger(status('WARN', 'No Forgejo token — skipping review-outcome poll (manual handoff required).'));
     return null;
@@ -118,7 +110,7 @@ async function pollForDisposition(
   prNumber: number,
   implementerUser: string,
   sinceIso: string,
-  token: string,
+  token: string | null,
   options: {
     configuration?: ParallixConfiguration;
     getLatestDispositionForPrFn?: (_prNumber: number, _implementerUser: string, _sinceIso: string, _token: string) => Promise<unknown>;
@@ -131,16 +123,8 @@ async function pollForDisposition(
     log?: (_msg: string) => void;
   } = {}
 ): Promise<string | typeof POLL_TIMEOUT | null> {
-  const {
-    getLatestDispositionForPrFn = getLatestDispositionForPr,
-    sleepFn = delay,
-    intervalMs = resolvePollIntervalMs(options.configuration),
-    timeoutMs = resolvePollTimeoutMs(undefined, options.configuration),
-    verbose = false,
-    label = 'disposition',
-    retryCount = 0,
-    log: logger = log.plain
-  } = options;
+  const { getLatestDispositionForPrFn = getLatestDispositionForPr } = options;
+  const { sleepFn, intervalMs, timeoutMs, verbose, label, retryCount, logger } = pollingParameters(options, 'disposition');
   if (!token) {
     logger(status('WARN', 'No Forgejo token — skipping disposition poll (manual handoff required).'));
     return null;
@@ -181,3 +165,17 @@ export {
   pollForReview,
   pollForDisposition
 };
+
+type PollSettings = Pick<NonNullable<Parameters<typeof pollForReview>[4]>, 'configuration' | 'sleepFn' | 'intervalMs' | 'timeoutMs' | 'verbose' | 'label' | 'retryCount' | 'log'>;
+function pollingParameters(options: PollSettings, defaultLabel: string) {
+  const {
+    sleepFn = delay,
+    intervalMs = resolvePollIntervalMs(options.configuration),
+    timeoutMs = resolvePollTimeoutMs(undefined, options.configuration),
+    verbose = false,
+    label = defaultLabel,
+    retryCount = 0,
+    log: logger = log.plain,
+  } = options;
+  return { sleepFn, intervalMs, timeoutMs, verbose, label, retryCount, logger };
+}

@@ -1,0 +1,154 @@
+{
+  "executedAt": "2026-10-15T09:42:14.321Z",
+  "implementation": "23bceb324ec0e76630595e0203886682526bc43b",
+  "setup": "Historical packet-backed evidence port and isolated in-memory Mission scaffold; real SystemOne adapter calls, production tryClassifyReview and SQLite telemetry store. No production database or review authority writes. Historical outcome is archived, not a fresh reviewer call. Temporary database removed after readback.",
+  "results": [
+    {
+      "historicalRound": "task-2587-r2",
+      "packetPath": "/mnt/data/code/parallix-research/px-0010/oc/packets-fixed-validation/task-2587-r2.json",
+      "generalReviewerOutcome": "approved",
+      "applicationOutcome": null,
+      "authorityUnchanged": true,
+      "sqliteReadback": {
+        "decisionId": "1c3715eb82476d2c3aa6bc415ac9e8fdc69d499f66cb9a6c921e4b7558db5c38",
+        "fingerprint": "task-2587-r2",
+        "repository": "parallix",
+        "mission": "task-2658",
+        "round": 2,
+        "observedAt": "2026-10-15T09:42:12.990Z",
+        "priorRevision": "2054a34694aa342bb7b098bfd6429088dd422e08",
+        "candidateRevision": "ddae8dff929d335bf19524b855ee26c5a9665856",
+        "findingIds": [
+          "F1"
+        ],
+        "packetHash": "1088b63a8339e224e5cf4c46afdf5131b587cd188d891cbcd703fe809aa2bb73",
+        "packetVersion": "general-obligation-fitted-v1",
+        "promptVersion": "px-0010-3b-reviewer-frozen-v1",
+        "policyVersion": "general-obligations-97-97-v1",
+        "provider": "openrouter",
+        "model": "typesafe/jev-1.14-20261014",
+        "implementer": "codex",
+        "reviewer": "claude",
+        "label": null,
+        "score": null,
+        "route": "reviewer",
+        "reason": "obligation-abstention",
+        "omittedDiffCount": 0,
+        "omittedTokens": 0,
+        "shadow": true,
+        "preparationMs": 295.285392,
+        "classificationMs": 478.5047850000001,
+        "obligations": [
+          {
+            "id": "F1",
+            "selected": "addresses",
+            "probabilities": {
+              "addresses": 0.62,
+              "does_not_address": 0.03,
+              "insufficient_evidence": 0.35
+            },
+            "failure": null
+          }
+        ]
+      }
+    },
+    {
+      "historicalRound": "task-2639-r2",
+      "packetPath": "/mnt/data/code/parallix-research/px-0010/oc/packets-fixed-validation/task-2639-r2.json",
+      "generalReviewerOutcome": "changes-requested",
+      "applicationOutcome": null,
+      "authorityUnchanged": true,
+      "sqliteReadback": {
+        "decisionId": "f616165a65e3b09646565405676e90ef51773d3211bad459db2b8f35718ab0e4",
+        "fingerprint": "task-2639-r2",
+        "repository": "parallix",
+        "mission": "task-2658",
+        "round": 2,
+        "observedAt": "2026-10-15T09:42:13.768Z",
+        "priorRevision": "6880fb6f8f571924571ec3cd0a2fbfe4a4224132",
+        "candidateRevision": "08cfa6aab3849f90eb3e605ae01a7ddc7223691e",
+        "findingIds": [
+          "F1"
+        ],
+        "packetHash": "a7cbdc4fa198c18152a66e2173f3246ad94ad14c72b13a981a26ffc5f10691aa",
+        "packetVersion": "general-obligation-fitted-v1",
+        "promptVersion": "px-0010-3b-reviewer-frozen-v1",
+        "policyVersion": "general-obligations-97-97-v1",
+        "provider": "openrouter",
+        "model": "typesafe/jev-1.14-20261014",
+        "implementer": "codex",
+        "reviewer": "claude",
+        "label": null,
+        "score": null,
+        "route": "reviewer",
+        "reason": "obligation-abstention",
+        "omittedDiffCount": 0,
+        "omittedTokens": 0,
+        "shadow": true,
+        "preparationMs": 10.946639999999888,
+        "classificationMs": 244.05113400000005,
+        "obligations": [
+          {
+            "id": "F1",
+            "selected": "addresses",
+            "probabilities": {
+              "addresses": 0.95,
+              "does_not_address": 0.03,
+              "insufficient_evidence": 0.02
+            },
+            "failure": null
+          }
+        ]
+      }
+    },
+    {
+      "historicalRound": "task-2662-r2",
+      "packetPath": "/mnt/data/code/parallix-research/px-0010/oc/packets-fixed-validation/task-2662-r2.json",
+      "generalReviewerOutcome": "changes-requested",
+      "applicationOutcome": null,
+      "authorityUnchanged": true,
+      "sqliteReadback": {
+        "decisionId": "263e9dffb7d083c2824fb1cc79d533c5aa9087d4bce9e38cc47afeef575ae75b",
+        "fingerprint": "task-2662-r2",
+        "repository": "parallix",
+        "mission": "task-2658",
+        "round": 2,
+        "observedAt": "2026-10-15T09:42:14.024Z",
+        "priorRevision": "9a358e7d0e2e35b23b679dd63b3ac00ae453488b",
+        "candidateRevision": "921bce5bb32b7358b9674c0acd3bbcbd12015195",
+        "findingIds": [
+          "F1"
+        ],
+        "packetHash": "b2ae04940ede892f1a2d798132579c03f675e7679af4c24173839769b31132d2",
+        "packetVersion": "general-obligation-fitted-v1",
+        "promptVersion": "px-0010-3b-reviewer-frozen-v1",
+        "policyVersion": "general-obligations-97-97-v1",
+        "provider": "openrouter",
+        "model": "typesafe/jev-1.14-20261014",
+        "implementer": "codex",
+        "reviewer": "claude",
+        "label": null,
+        "score": null,
+        "route": "reviewer",
+        "reason": "obligation-abstention",
+        "omittedDiffCount": 0,
+        "omittedTokens": 0,
+        "shadow": true,
+        "preparationMs": 18.444208000000117,
+        "classificationMs": 277.47092499999985,
+        "obligations": [
+          {
+            "id": "F1",
+            "selected": "addresses",
+            "probabilities": {
+              "addresses": 0.91,
+              "does_not_address": 0.04,
+              "insufficient_evidence": 0.05
+            },
+            "failure": null
+          }
+        ]
+      }
+    }
+  ]
+}

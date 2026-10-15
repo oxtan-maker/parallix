@@ -1,3 +1,4 @@
+import type { GitReader } from './worktree.js';
 import path from 'node:path';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { resolveTaskStorage } from '../config/product-config.js';
@@ -44,11 +45,11 @@ export function parseConflictFilesFromMergeOutput(output: string): string[] {
  *
  * @param {string} rootDir - Absolute path to the git worktree to test in.
  * @param {string} branch  - Branch (or ref) to attempt merging.
- * @param {{ gitRunner?: Function }} [options]
+ * @param {{ gitRunner?: GitReader }} [options]
  * @returns {string[]} Relative paths of conflicting files (empty if no conflicts).
  */
-/** @param {string} rootDir @param {string} branch @param {{gitRunner?: Function}} [options] */
-export function getConflictFiles(rootDir: string, branch: string, options: { gitRunner?: Function } = {}): string[] {
+/** @param {string} rootDir @param {string} branch @param {{gitRunner?: GitReader}} [options] */
+export function getConflictFiles(rootDir: string, branch: string, options: { gitRunner?: GitReader } = {}): string[] {
   const runner = options.gitRunner || gitModule.git;
 
   const merge = runner(['-C', rootDir, 'merge', '--no-commit', '--no-ff', branch]);
@@ -75,7 +76,7 @@ function isNoiseCommit(files: string[], message: string): boolean {
 }
 
 /** @param {string} rootDir @param {Function} [gitRunner] */
-export function findLastNonNoiseCommit(rootDir: string, gitRunner?: Function): string | null {
+export function findLastNonNoiseCommit(rootDir: string, gitRunner?: GitReader): string | null {
   const runner = gitRunner || gitModule.git;
 
   const currentFullRef = runner(['-C', rootDir, 'rev-parse', '--symbolic-full-name', 'HEAD'], { stdio: 'pipe' }).stdout.trim();
@@ -112,7 +113,7 @@ export function findLastNonNoiseCommit(rootDir: string, gitRunner?: Function): s
 }
 
 /** @param {string} rootDir @param {Function} [gitRunner] */
-export function squashTrailingBacklogNoiseIntoPreviousMission(rootDir: string, gitRunner?: Function): boolean {
+export function squashTrailingBacklogNoiseIntoPreviousMission(rootDir: string, gitRunner?: GitReader): boolean {
   const runner = gitRunner || gitModule.git;
 
   const statusOutput = runner(['-C', rootDir, 'status', '--porcelain']).stdout;
@@ -151,7 +152,7 @@ export function squashTrailingBacklogNoiseIntoPreviousMission(rootDir: string, g
 }
 
 /** @param {string} rootDir @param {Function} [gitRunner] */
-export function softResetTrailingBacklogNoise(rootDir: string, gitRunner?: Function): boolean {
+export function softResetTrailingBacklogNoise(rootDir: string, gitRunner?: GitReader): boolean {
   const runner = gitRunner || gitModule.git;
 
   const status = runner(['-C', rootDir, 'status', '--porcelain']).stdout.trim();
@@ -179,7 +180,7 @@ export function softResetTrailingBacklogNoise(rootDir: string, gitRunner?: Funct
 }
 
 /** @param {string} slug @param {string} [rootDir] @param {Function|null} [gitRunner] */
-export function findMissionDocInBranches(slug: string, rootDir: string = process.cwd(), gitRunner?: Function): Array<{ branch: string; path: string }> {
+export function findMissionDocInBranches(slug: string, rootDir: string = process.cwd(), gitRunner?: GitReader): Array<{ branch: string; path: string }> {
   const runner = gitRunner || gitModule.git;
   const candidates: Array<{ branch: string; path: string }> = [];
 

@@ -126,7 +126,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-agent-selection',
     family: 'launch',
     fileLocation: 'src/adapters/agents/launcher-selection.ts',
-    line: 142,
+    line: 172,
     anchor: 'function selectAgent',
     reads: ['AgentBlock'],
     requirement:
@@ -137,7 +137,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-blocklist-filter',
     family: 'launch',
     fileLocation: 'src/adapters/agents/launcher-selection.ts',
-    line: 129,
+    line: 130,
     anchor: 'isAgentBlocked',
     reads: ['AgentBlock'],
     requirement:
@@ -147,8 +147,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'launch-session-resume',
     family: 'launch',
-    fileLocation: 'src/adapters/agents/agents.ts',
-    line: 597,
+    fileLocation: 'src/adapters/agents/agent-launch-preparation.ts',
+    line: 113,
     anchor: 'await launchSessionMarkerPort.shouldResume(',
     reads: ['SessionMarker', 'Mission'],
     requirement:
@@ -158,8 +158,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'launch-session-marker-write',
     family: 'launch',
-    fileLocation: 'src/adapters/agents/agents.ts',
-    line: 987,
+    fileLocation: 'src/adapters/agents/agent-launch-authority.ts',
+    line: 123,
     anchor: 'launchSessionMarkerPort.save({',
     reads: ['SessionMarker'],
     requirement:
@@ -174,7 +174,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-in-process-tried-set',
     family: 'retry',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 1029,
+    line: 70,
     anchor: 'tried: new Set(excludeIterable),',
     reads: ['AgentBlock'],
     requirement:
@@ -184,8 +184,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'retry-launch-failure-reselect',
     family: 'retry',
-    fileLocation: 'src/adapters/agents/agents.ts',
-    line: 943,
+    fileLocation: 'src/adapters/agents/agent-launch-outcome.ts',
+    line: 337,
     anchor: 'retrying with next eligible agent',
     reads: ['AgentBlock'],
     requirement:
@@ -196,7 +196,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-stage-launch-dedupe',
     family: 'retry',
     fileLocation: 'src/adapters/review/review-agent-fallback.ts',
-    line: 37,
+    line: 42,
     anchor: 'function stageLaunchFingerprint',
     reads: ['AgentRunMeasurement', 'Review'],
     requirement:
@@ -210,8 +210,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'failover-limit-hit-block',
     family: 'failover',
-    fileLocation: 'src/adapters/agents/agents.ts',
-    line: 883,
+    fileLocation: 'src/adapters/agents/agent-launch-outcome.ts',
+    line: 296,
     anchor: 'deps.updateAgentBlockFn(chosen, limitHit.until',
     reads: ['AgentBlock'],
     requirement:
@@ -221,8 +221,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'failover-transient-failure-block',
     family: 'failover',
-    fileLocation: 'src/adapters/agents/agents.ts',
-    line: 406,
+    fileLocation: 'src/adapters/agents/agent-launch-outcome.ts',
+    line: 195,
     anchor: 'await updateAgentBlockFn(agent, blockUntil',
     reads: ['AgentBlock'],
     requirement:
@@ -259,7 +259,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'usage-mission-key',
     family: 'usage-statistics',
     fileLocation: 'src/application/services/statistics-row.ts',
-    line: 152,
+    line: 183,
     anchor: 'function statsMissionKey',
     reads: ['Mission', 'MissionOutcome'],
     requirement:
@@ -285,7 +285,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'review-round-state',
     family: 'review',
     fileLocation: 'src/adapters/review/review-state.ts',
-    line: 618,
+    line: 204,
     anchor: 'export class ReviewState',
     reads: ['Review', 'Mission'],
     requirement:
@@ -296,7 +296,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'review-loop-round-progression',
     family: 'review',
     fileLocation: 'src/application/review-loop/review-loop.ts',
-    line: 231,
+    line: 213,
     anchor: 'function runOwnedReviewLoop',
     reads: ['Review', 'Mission'],
     requirement:
@@ -322,7 +322,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'ui-board-card',
     family: 'ui-board',
     fileLocation: 'src/application/projections/mission-board.ts',
-    line: 397,
+    line: 276,
     anchor: 'function projectMissionCard',
     reads: ['Mission', 'CheckpointData', 'Review'],
     requirement:

@@ -1,10 +1,10 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { spawn, spawnSync } from 'child_process';
+import { URL } from 'node:url';
 'use strict';
 
 // Regression test for task-2231: unit tests sometimes hang around the draft
@@ -23,7 +23,7 @@ import { spawn, spawnSync } from 'child_process';
 
 const OPENCODE_MODULE_PATH = path.join(import.meta.dirname, '..', '..', '..', 'src', 'adapters', 'agents', 'opencode.ts');
 
-function writeLauncher(filePath, body) {
+function writeLauncher(filePath: string, body: string) {
   fs.writeFileSync(filePath, `#!${process.execPath}\n${body}\n`);
   fs.chmodSync(filePath, 0o755);
 }
@@ -32,7 +32,7 @@ test('bootstrap preserves nvm discovery while isolating HOME', () => {
   const operatorHome = fs.mkdtempSync(path.join(os.tmpdir(), 'px-nvm-home-'));
   try {
     for (const explicit of [undefined, path.join(operatorHome, 'custom-nvm')]) {
-      const env = { ...process.env, HOME: operatorHome };
+      const env: NodeJS.ProcessEnv = { ...process.env, HOME: operatorHome };
       delete env.NVM_DIR;
       if (explicit) { env.NVM_DIR = explicit; }
       const result = spawnSync(process.execPath, [
@@ -79,16 +79,15 @@ process.stdout.write(JSON.stringify({
     ], {
       cwd: path.join(import.meta.dirname),
       env: { ...process.env, OPENCODE_BIN: expensiveBinPath },
-      encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.stdout.on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr.on('data', (chunk: string) => { stderr += chunk; });
 
-    const { code, signal } = await new Promise((resolve) => {
+    const { code, signal } = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
       child.on('close', (c, s) => resolve({ code: c, signal: s }));
     });
 

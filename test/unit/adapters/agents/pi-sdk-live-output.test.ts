@@ -1,3 +1,7 @@
+type PiTeeOptions = NonNullable<Parameters<typeof pi.startPiAgent>[0]['teeOptions']>;
+type WatchdogEvent = Parameters<NonNullable<NonNullable<PiTeeOptions['noOutputWatchdog']>['onNoOutput']>>[0];
+import type { PiStreamEvent, PiSession } from '../../../../src/adapters/agents/pi-sdk-types.js';
+import { piSdkFixture } from '../../../helpers/pi-sdk-fixture.js';
 // Reproduction test for task-2311: after pi tech change console is empty
 //
 // The pi agent was switched from spawnAndTee (subprocess) to the
@@ -15,7 +19,7 @@ import { mockModule, installModuleMocks } from '../../../lib/module-mock.js';
 const pi = mockModule<typeof import('../../../../src/adapters/agents/pi.js')>('../../../../src/adapters/agents/pi.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
-test.beforeEach(() => pi.__setSdkForTest({ SessionManager: { create: () => ({}) } }));
+test.beforeEach(() => pi.__setSdkForTest(piSdkFixture({ SessionManager: { create: () => ({}) } })));
 
 test.afterEach(() => {
   pi.__setSdkForTest(null);
@@ -24,7 +28,7 @@ test.afterEach(() => {
 });
 
 test('startPiAgent writes text_delta to process.stdout during SDK execution (repro: console empty)', async () => {
-  let stdoutWrites = [];
+  let stdoutWrites: { chunk: string; encoding: string | undefined; }[] = [];
   const originalWrite = process.stdout.write.bind(process.stdout);
   process.stdout.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
     const encoding = typeof args[0] === 'string' ? args[0] : undefined;
@@ -32,34 +36,33 @@ test('startPiAgent writes text_delta to process.stdout during SDK execution (rep
     const callback = args.find((arg): arg is () => void => typeof arg === 'function');
     callback?.();
     return true;
-  }) as typeof process.stdout.write;
+  });
 
   try {
     pi.__setCreateAgentSessionForTest(async () => {
       // SDK event stream with text_delta events that should be teed to stdout.
-      const sdkEvents = [
+      const sdkEvents: PiStreamEvent[] = [
         { type: 'agent_start' },
         { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Hello' } },
         { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: ' world' } },
-        { type: 'tool_execution_end', toolName: 'bash', toolCallId: 't1', result: 'OK', isError: false },
+        { type: 'tool_execution_end', toolName: 'bash', toolCallId: 't1', result: { content: [{ type: 'text', text: 'OK' }] }, isError: false },
         { type: 'message_end', message: { role: 'assistant' } },
         { type: 'agent_end', messages: [{ role: 'assistant' }] },
       ];
-      let listener: any = null;
-      const session = {
+      let listener: { value: ((_event: PiStreamEvent) => void) | null } = { value: null };
+      const session: PiSession = {
         sessionId: 'repro-session-001',
-        subscribe: (l: any) => {
-          listener = l;
-          return () => { listener = null; };
+        subscribe: (l: (_event: PiStreamEvent) => void) => {
+          listener.value = l;
+          return () => { listener.value = null; };
         },
         prompt: async () => {
           // Emit events synchronously to the registered listener,
           // simulating the real SDK event stream.
           for (const event of sdkEvents) {
-            if (listener) listener(event);
+            if (listener.value) listener.value(event);
           }
         },
-        waitForIdle: async () => {},
         dispose: () => {},
         getLastAssistantText: () => '',
         getSessionStats: () => ({
@@ -107,7 +110,7 @@ test('startPiAgent writes text_delta to process.stdout during SDK execution (rep
 
 test('startPiAgent invokes teeOptions.noOutputWatchdog.onNoOutput when no text arrives (repro: watchdog ignored)', async () => {
   let watchdogCalled = false;
-  let watchdogEvent = null;
+  const watchdogEvent: { value: WatchdogEvent | null } = { value: null };
 
   const teeOptions = {
     noOutputWatchdog: {
@@ -115,35 +118,34 @@ test('startPiAgent invokes teeOptions.noOutputWatchdog.onNoOutput when no text a
       intervalMs: 50,
       onNoOutput: (event) => {
         watchdogCalled = true;
-        watchdogEvent = event;
+        watchdogEvent.value = event;
       },
     },
-  };
+  } satisfies PiTeeOptions;
 
   pi.__setCreateAgentSessionForTest(async () => {
     // Session that emits NO text_delta events — only internal chatter.
     // The watchdog should fire because no visible output arrives.
-    const sdkEvents = [
+    const sdkEvents: PiStreamEvent[] = [
       { type: 'agent_start' },
       { type: 'tool_execution_start', toolName: 'bash', toolCallId: 't1' },
-      { type: 'tool_execution_end', toolName: 'bash', toolCallId: 't1', result: 'OK', isError: false },
+      { type: 'tool_execution_end', toolName: 'bash', toolCallId: 't1', result: { content: [{ type: 'text', text: 'OK' }] }, isError: false },
       { type: 'agent_end', messages: [{ role: 'assistant' }] },
     ];
-    let listener: any = null;
-    const session = {
+    let listener: { value: ((_event: PiStreamEvent) => void) | null } = { value: null };
+    const session: PiSession = {
       sessionId: 'watchdog-session-001',
-      subscribe: (l: any) => {
-        listener = l;
-        return () => { listener = null; };
+      subscribe: (l: (_event: PiStreamEvent) => void) => {
+        listener.value = l;
+        return () => { listener.value = null; };
       },
       prompt: async () => {
         for (const event of sdkEvents) {
-          if (listener) listener(event);
+          if (listener.value) listener.value(event);
         }
         // Simulate some processing delay so the watchdog timer has time to fire.
         await new Promise((resolve) => setTimeout(resolve, 100));
       },
-      waitForIdle: async () => {},
       dispose: () => {},
       getLastAssistantText: () => '',
       getSessionStats: () => ({
@@ -173,8 +175,8 @@ test('startPiAgent invokes teeOptions.noOutputWatchdog.onNoOutput when no text a
     watchdogCalled,
     'teeOptions.noOutputWatchdog.onNoOutput should be invoked when no text output arrives. Current code ignores teeOptions.'
   );
-  assert.ok(watchdogEvent, 'Watchdog event object should be passed to callback');
-  assert.ok(watchdogEvent.elapsedMs >= 10, `Watchdog elapsedMs (${watchdogEvent.elapsedMs}) should be >= initialDelayMs (10)`);
+  assert.ok(watchdogEvent.value, 'Watchdog event object should be passed to callback');
+  assert.ok(watchdogEvent.value.elapsedMs >= 10, `Watchdog elapsedMs (${watchdogEvent.value.elapsedMs}) should be >= initialDelayMs (10)`);
 
   // Result should still be correct.
   assert.equal(result.status, 0);

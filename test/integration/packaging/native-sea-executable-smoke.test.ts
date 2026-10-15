@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 // task-2286 — native smoke for one ESM Node SEA executable (ADR 0044).
 //
 // This suite builds the real single executable from the canonical ESM bundle
@@ -24,7 +23,7 @@ import * as path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { launchSeaPty } from '../../helpers/sea-pty-session.js';
-import { SEA_THRESHOLDS, assertSurface, evaluateSeaRuntime } from '../../../scripts/sea-surfaces.ts';
+import { SEA_THRESHOLDS, assertSurface, evaluateSeaRuntime } from '../../../scripts/sea-surfaces.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
 const BUNDLE = path.join(ROOT, 'build', 'px.mjs');
@@ -522,7 +521,7 @@ test('native SEA smoke: the npm fallback passes the same headless smoke set (SC8
   const npmDb = new DatabaseSync(path.join(npmHome, 'parallix.db'), { readOnly: true });
   try {
     const tables = npmDb.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()
-      .map((row: any) => String(row.name));
+      .map((row) => String(row.name));
     assert.ok(tables.includes('session_markers'), 'the npm layout must materialize the SessionMarker authority');
     assert.ok(tables.includes('schema_migrations'), 'the npm layout must record applied migration checksums');
   } finally {

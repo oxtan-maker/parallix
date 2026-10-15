@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 // Tier 2 blocking e2e: launches the REAL `custom` agent family (opencode + a
 // pinned local model) through the production launcher path in
@@ -77,7 +76,7 @@ const MIN_TMP_FREE_BYTES = Number(process.env.PARALLIX_REAL_AGENT_MIN_TMP_BYTES 
 // separate copy into each mission worktree. Verification requires it in both.
 const PROVISIONED_MARKER = '.pre-draft-provisioned';
 
-function runCommand(command, args, options = {}) {
+function runCommand(command: string, args: readonly string[], options: Omit<childProcess.SpawnSyncOptionsWithStringEncoding, 'encoding'> & { encoding?: BufferEncoding } = {}) {
   const result = childProcess.spawnSync(command, args, { encoding: 'utf8', ...options });
   if (result.error && result.status === null) {
     throw result.error;
@@ -92,7 +91,7 @@ function runCommand(command, args, options = {}) {
 // git/bash/id can live there in some setups); user-local installs like
 // opencode are frequently PATH-only in the current process, not in a fresh
 // login shell, so checking the login shell first would produce false negatives.
-function maybeCommandPath(command) {
+function maybeCommandPath(command: string) {
   const dirs = (process.env.PATH || '').split(path.delimiter);
   for (const dir of dirs) {
     if (!dir) {continue;}
@@ -107,9 +106,9 @@ function maybeCommandPath(command) {
 }
 
 function opencodeCommandCandidates() {
-  const candidates = [];
-  const seen = new Set();
-  const pushCandidate = (candidate) => {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  const pushCandidate = (candidate: string | null | undefined) => {
     if (!candidate || seen.has(candidate)) {return;}
     seen.add(candidate);
     candidates.push(candidate);
@@ -140,9 +139,9 @@ function maybeOpencodePath() {
 }
 
 function piCommandCandidates() {
-  const candidates = [];
-  const seen = new Set();
-  const pushCandidate = (candidate) => {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  const pushCandidate = (candidate: string | null | undefined) => {
     if (!candidate || seen.has(candidate)) {return;}
     seen.add(candidate);
     candidates.push(candidate);
@@ -198,13 +197,13 @@ function maybeCodexPath() {
   return maybeCommandPath(process.env.CODEX_BIN || 'codex');
 }
 
-function requireCommandPath(command, resolver = maybeCommandPath) {
+function requireCommandPath(command: string, resolver = maybeCommandPath) {
   const resolved = resolver(command);
   assert.ok(resolved, `Expected command path for ${command}`);
   return resolved;
 }
 
-function runGit(cwd, args) {
+function runGit(cwd: string, args: string[]) {
   const result = runCommand('git', args, { cwd });
   if (result.status !== 0) {
     throw new Error(`git ${args.join(' ')} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
@@ -258,23 +257,23 @@ function temporaryCapacityPreflight({
   tmpDir = os.tmpdir(),
   requiredBytes = MIN_TMP_FREE_BYTES,
   statfs = fs.statfsSync
-} = {}) {
+}: { tmpDir?: string; requiredBytes?: number; statfs?: (path: string) => Pick<ReturnType<typeof fs.statfsSync>, 'bavail' | 'bsize'> } = {}) {
   try {
     const stats = statfs(tmpDir);
     const availableBytes = Number(stats.bavail) * Number(stats.bsize);
     if (!Number.isFinite(availableBytes)) {
-      return { ok: false, bucket: 'environment-resource', detail: `temporary-storage capacity is unavailable for ${tmpDir}` };
+      return { ok: false as const, bucket: 'environment-resource', detail: `temporary-storage capacity is unavailable for ${tmpDir}` };
     }
     if (availableBytes < requiredBytes) {
-      return { ok: false, bucket: 'environment-resource', detail: `temporary-storage exhaustion at ${tmpDir}: ${availableBytes} bytes available, ${requiredBytes} required` };
+      return { ok: false as const, bucket: 'environment-resource', detail: `temporary-storage exhaustion at ${tmpDir}: ${availableBytes} bytes available, ${requiredBytes} required` };
     }
-    return { ok: true, availableBytes };
+    return { ok: true as const, availableBytes };
   } catch (error) {
-    return { ok: false, bucket: 'environment-resource', detail: `temporary-storage capacity check failed at ${tmpDir}: ${error.message}` };
+    return { ok: false as const, bucket: 'environment-resource', detail: `temporary-storage capacity check failed at ${tmpDir}: ${error instanceof Error ? error.message : String(error)}` };
   }
 }
 
-function classifyFailure({ stdout, stderr, status, signal }, phase = 'draft') {
+function classifyFailure({ stdout, stderr, status, signal }: Partial<Pick<childProcess.SpawnSyncReturns<string>, 'stdout' | 'stderr' | 'status' | 'signal'>>, phase = 'draft') {
   const text = `${stdout || ''}\n${stderr || ''}`;
   if (TEMPORARY_RESOURCE_FAILURE_PATTERNS.some((re) => re.test(text))) {
     return { bucket: 'environment-resource', detail: 'temporary-storage or Git index/lock creation failed; reclaim capacity and retry' };
@@ -299,7 +298,7 @@ function classifyFailure({ stdout, stderr, status, signal }, phase = 'draft') {
 // `px draft --agent custom` launch below; do not fail early on auxiliary
 // opencode subcommands like `opencode models`, which can be tighter or flakier
 // than the launcher path this smoke test is meant to verify.
-function preflightCheck(agent, runner) {
+function preflightCheck(agent: string, runner: string) {
   // adapters.agents.models.custom is an optional override (see MISSION.md
   // "Amended during CP-3 execution"): when unset, the launcher omits -m and
   // the runner (opencode/pi) falls back to its own configured default model,
@@ -324,7 +323,7 @@ function preflightCheck(agent, runner) {
   return null;
 }
 
-function runOpencodeHealthcheck(repoRoot, env, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
+function runOpencodeHealthcheck(repoRoot: string, env: NodeJS.ProcessEnv, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
   const command = maybeOpencodePath() || 'opencode';
   const args = ['run', '--pure', '--dangerously-skip-permissions', '--format', 'json'];
   if (SMOKE_MODEL) {args.push('-m', SMOKE_MODEL);}
@@ -338,7 +337,7 @@ function runOpencodeHealthcheck(repoRoot, env, timeoutMs = HEALTHCHECK_TIMEOUT_M
   );
 }
 
-function runPiHealthcheck(repoRoot, env, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
+function runPiHealthcheck(repoRoot: string, env: NodeJS.ProcessEnv, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
   // Once setupRepository has linked the selected real executable into binDir,
   // keep the probe on that exact path too. This prevents an inherited PI_BIN
   // or a different Node installation from selecting another Pi binary.
@@ -355,14 +354,14 @@ function runPiHealthcheck(repoRoot, env, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
   );
 }
 
-function runCodexHealthcheck(repoRoot, env, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
+function runCodexHealthcheck(repoRoot: string, env: NodeJS.ProcessEnv, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
   const args = ['exec', '--sandbox', 'danger-full-access'];
   if (SMOKE_MODEL) {args.push('-m', SMOKE_MODEL);}
   args.push('--cd', repoRoot, 'Reply with exactly OK');
   return runWorkflowAllowFail(repoRoot, env, [env.CODEX_BIN || 'codex', ...args], timeoutMs, { directCommand: true });
 }
 
-function runHealthcheck(agent, runner, repoRoot, env, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
+function runHealthcheck(agent: string, runner: string, repoRoot: string, env: NodeJS.ProcessEnv, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
   if (agent === 'codex') {return runCodexHealthcheck(repoRoot, env, timeoutMs);}
   return runner === 'pi'
     ? runPiHealthcheck(repoRoot, env, timeoutMs)
@@ -370,7 +369,7 @@ function runHealthcheck(agent, runner, repoRoot, env, timeoutMs = HEALTHCHECK_TI
 }
 
 // Materialize links as private files; never retain aliases to operator settings.
-function copyRunnerConfiguration(source, target, ancestors = new Set()) {
+function copyRunnerConfiguration(source: string, target: string, ancestors = new Set<string>()) {
   const realSource = fs.realpathSync(source);
   if (fs.statSync(realSource).isDirectory()) {
     assert.ok(!ancestors.has(realSource), `Cyclic runner configuration link: ${source}`);
@@ -384,7 +383,7 @@ function copyRunnerConfiguration(source, target, ancestors = new Set()) {
   }
 }
 
-function setupRepository({ slug, title, agent = 'custom', runner = 'opencode', runnerCommandPath = '' }) {
+function setupRepository({ slug, title, agent = 'custom', runner = 'opencode', runnerCommandPath = '' }: { slug: string; title: string; agent?: string; runner?: string; runnerCommandPath?: string }) {
   const toolWaitSeconds = Number(process.env.PARALLIX_REAL_AGENT_TOOL_WAIT_SECONDS || 0);
   assert.ok(Number.isInteger(toolWaitSeconds) && toolWaitSeconds >= 0 && toolWaitSeconds <= 60,
     'Manual smoke tool wait must be an integer from 0 to 60 seconds');
@@ -413,9 +412,7 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode', r
       const raw = fs.readFileSync(piModelsPath, 'utf8');
       const piModels = JSON.parse(raw.replace(/,\s*([\]}])/g, '$1'));
       for (const provider of Object.values(piModels.providers || {})) {
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `apiKey` absent from its inferred mock shape.
-        if (typeof provider?.apiKey === 'string' && /^(?:dummy|placeholder)/i.test(provider.apiKey)) {
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `apiKey` absent from its inferred mock shape.
+        if (provider && typeof provider === 'object' && 'apiKey' in provider && typeof provider.apiKey === 'string' && /^(?:dummy|placeholder)/i.test(provider.apiKey)) {
           provider.apiKey = LOCAL_PI_E2E_API_KEY;
         }
       }
@@ -477,7 +474,7 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode', r
   //      asserts explicitly.
   //   2. Cost containment: no fallback or reviewer selection can ever launch
   //      an expensive cloud agent (claude/codex) from this blocking gate.
-  const blocklist = { claude: { blocked: true }, codex: { blocked: true }, qwen: { blocked: true }, vibe: { blocked: true }, custom: { blocked: true } };
+  const blocklist: Record<string, { blocked: boolean }> = { claude: { blocked: true }, codex: { blocked: true }, qwen: { blocked: true }, vibe: { blocked: true }, custom: { blocked: true } };
   delete blocklist[agent];
   fs.writeFileSync(path.join(stateHome, 'agents.local.json'), JSON.stringify({ blocklist }, null, 2), 'utf8');
 
@@ -643,11 +640,9 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode', r
   return { tmpRoot, repoRoot, binDir, stateHome, piAgentHome, opencodeConfigHome, opencodeDataHome };
 }
 
-async function runWorkflowAllowFail(repoRoot, env, args, timeout, options = {}) {
+async function runWorkflowAllowFail(repoRoot: string, env: NodeJS.ProcessEnv, args: string[], timeout: number, options: { directCommand?: boolean; progressWrite?: Parameters<typeof smokeProgress>[0]; liveProgress?: boolean; keepCaptureArtifacts?: boolean } = {}) {
   const {
-// @ts-expect-error -- Legacy CommonJS assertion exercises a runtime shape not represented by the inferred declaration.
     directCommand = false,
-// @ts-expect-error -- Legacy CommonJS assertion exercises a runtime shape not represented by the inferred declaration.
     progressWrite = undefined,
     liveProgress = !directCommand && ['draft', 'active'].includes(args[0]),
     keepCaptureArtifacts = shouldKeepTmp()
@@ -658,29 +653,31 @@ async function runWorkflowAllowFail(repoRoot, env, args, timeout, options = {}) 
   const captureDir = tempRootRegistry.register(fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-real-agent-capture-')));
   const stdoutPath = path.join(captureDir, 'stdout.log');
   const stderrPath = path.join(captureDir, 'stderr.log');
-  let stdoutFd;
-  let stderrFd;
+  let stdoutFd: number | undefined;
+  let stderrFd: number | undefined;
   let result;
   try {
-    stdoutFd = fs.openSync(stdoutPath, 'w');
-    stderrFd = fs.openSync(stderrPath, 'w');
+    const activeStdoutFd = fs.openSync(stdoutPath, 'w');
+    stdoutFd = activeStdoutFd;
+    const activeStderrFd = fs.openSync(stderrPath, 'w');
+    stderrFd = activeStderrFd;
     const command = directCommand ? args[0] : process.execPath;
     const commandArgs = directCommand ? args.slice(1) : [CLI_ENTRY, ...args];
     const progress = liveProgress ? smokeProgress(progressWrite) : null;
-    result = await new Promise((resolve) => {
+    result = await new Promise<{ status: number | null; signal: NodeJS.Signals | null; error?: NodeJS.ErrnoException }>((resolve) => {
       const child = childProcess.spawn(command, commandArgs, { cwd: repoRoot, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
-      const killOwnedChild = (signal) => {
+      const killOwnedChild = (signal: NodeJS.Signals) => {
         try {
           if (process.platform !== 'win32' && child.pid) { process.kill(-child.pid, signal); }
           else { child.kill(signal); }
-        } catch (error) { if (error?.code !== 'ESRCH') { throw error; } }
+        } catch (error) { if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ESRCH')) { throw error; } }
       };
       const onExit = () => killOwnedChild('SIGKILL');
       process.once('exit', onExit);
       const decoder = new StringDecoder('utf8');
-      child.stdout.on('data', chunk => { fs.writeSync(stdoutFd, chunk); progress?.push(decoder.write(chunk)); });
-      child.stderr.on('data', chunk => { fs.writeSync(stderrFd, chunk); });
-      let error;
+      child.stdout.on('data', chunk => { fs.writeSync(activeStdoutFd, chunk); progress?.push(decoder.write(chunk)); });
+      child.stderr.on('data', chunk => { fs.writeSync(activeStderrFd, chunk); });
+      let error: NodeJS.ErrnoException | undefined;
       // The existing wall deadline still bounds execution; terminate the owned
       // process group so a tool cannot keep capture pipes open after timeout.
       const timer = setTimeout(() => {
@@ -697,9 +694,11 @@ async function runWorkflowAllowFail(repoRoot, env, args, timeout, options = {}) 
         resolve({ status, signal, error });
       });
     });
-    result.stdout = fs.existsSync(stdoutPath) ? fs.readFileSync(stdoutPath, 'utf8') : '';
-    result.stderr = fs.existsSync(stderrPath) ? fs.readFileSync(stderrPath, 'utf8') : '';
-    return result;
+    return {
+      ...result,
+      stdout: fs.existsSync(stdoutPath) ? fs.readFileSync(stdoutPath, 'utf8') : '',
+      stderr: fs.existsSync(stderrPath) ? fs.readFileSync(stderrPath, 'utf8') : '',
+    };
   } finally {
     if (stdoutFd !== undefined) { fs.closeSync(stdoutFd); }
     if (stderrFd !== undefined) { fs.closeSync(stderrFd); }
@@ -710,10 +709,35 @@ async function runWorkflowAllowFail(repoRoot, env, args, timeout, options = {}) 
   }
 }
 
-async function readMissionStatus(worktree, env, slug) {
+interface SmokeMissionStatus {
+  brief?: { goal: string; why: string; scope: string | null } | null;
+  successCriteria?: string[];
+  declaredGates?: string[];
+  predictedNelBucket?: string | null;
+  checkpoints?: { name: string; recorded: boolean; goalCheck: { criterion: string; evidence: string }[] }[];
+  review?: { history?: unknown[] } | null;
+}
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function isSmokeMissionStatus(value: unknown): value is SmokeMissionStatus {
+  if (!isRecord(value)) { return false; }
+  const strings = (items: unknown) => items === undefined || Array.isArray(items) && items.every(item => typeof item === 'string');
+  const brief = value.brief;
+  if (brief !== undefined && brief !== null && !(isRecord(brief) && typeof brief.goal === 'string' && typeof brief.why === 'string' && (brief.scope === null || typeof brief.scope === 'string'))) { return false; }
+  if (!strings(value.successCriteria) || !strings(value.declaredGates)) { return false; }
+  if (value.predictedNelBucket !== undefined && value.predictedNelBucket !== null && typeof value.predictedNelBucket !== 'string') { return false; }
+  if (value.checkpoints !== undefined && !(Array.isArray(value.checkpoints) && value.checkpoints.every(checkpoint => isRecord(checkpoint) && typeof checkpoint.name === 'string' && typeof checkpoint.recorded === 'boolean' && Array.isArray(checkpoint.goalCheck) && checkpoint.goalCheck.every(row => isRecord(row) && typeof row.criterion === 'string' && typeof row.evidence === 'string')))) { return false; }
+  const review = value.review;
+  return review === undefined || review === null || isRecord(review) && (review.history === undefined || Array.isArray(review.history));
+}
+
+async function readMissionStatus(worktree: string, env: NodeJS.ProcessEnv, slug: string) {
   const result = await runWorkflowAllowFail(worktree, env, ['status', slug, '--json'], RUN_TIMEOUT_MS);
   assert.equal(result.status, 0, `[parallix-workflow-failure] px status ${slug} --json failed: ${result.stderr || result.stdout}`);
-  return JSON.parse(result.stdout);
+  const observed: unknown = JSON.parse(result.stdout);
+  assert.ok(isSmokeMissionStatus(observed), 'status JSON must carry the typed contract and checkpoint evidence');
+  return observed;
 }
 
 function shouldKeepTmp() {
@@ -725,7 +749,7 @@ function shouldKeepTmp() {
 // The smoke run stays black-box about that: it asks the CLI through
 // `px review <slug> --status`, which reads the same authority the loop writes,
 // so a loop that never persisted its state still fails here.
-async function readReviewStateViaCli(worktree, env, slug) {
+async function readReviewStateViaCli(worktree: string, env: NodeJS.ProcessEnv, slug: string) {
   const result = await runWorkflowAllowFail(worktree, env, ['review', slug, '--status'], RUN_TIMEOUT_MS);
   const output = `${result.stdout || ''}${result.stderr || ''}`.replace(/\x1B\[[0-9;]*m/g, '');
   assert.equal(
@@ -737,7 +761,7 @@ async function readReviewStateViaCli(worktree, env, slug) {
     !/No persisted review state found/.test(output),
     `[parallix-workflow-failure] expected persisted review state after active phase (review loop should have completed) for ${slug}:\n${output}`
   );
-  const field = label => {
+  const field = (label: string) => {
     const match = output.match(new RegExp(`^\\s*${label}:\\s*(.+)$`, 'm'));
     return match ? match[1].trim() : null;
   };
@@ -775,10 +799,10 @@ function snapshotDefaultParallixState() {
   return snapshots;
 }
 
-async function runRealAgentSmoke(agent, runner) {
+async function runRealAgentSmoke(agent: string, runner: string) {
   const preflightError = preflightCheck(agent, runner);
   if (preflightError) {
-    assert.fail(
+    return assert.fail(
       `[local-model-environment] Cannot run the real-agent smoke test (agent=${agent}, runner=${runner}): ${preflightError}\n` +
       'This blocking gate requires the selected agent and model to be available. See docs/real-agent-smoke.md.'
     );
@@ -804,8 +828,7 @@ async function runRealAgentSmoke(agent, runner) {
   // like a real workstation — with a bare binDir-only PATH, opencode's glob
   // tool cannot even extract its bundled ripgrep (spawns `tar`), feeding the
   // agent artificial tool errors that destabilize the draft.
-  /** @type {NodeJS.ProcessEnv} */
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     FORCE_COLOR: '0',
     PRIMARY_WORKTREE: repo.repoRoot,
@@ -824,7 +847,6 @@ async function runRealAgentSmoke(agent, runner) {
     // setupRepository's symlink is a test-controlled route to the production
     // Codex adapter; keeping it first on PATH proves model dispatch without
     // trusting another Codex executable selected by the parent environment.
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `CODEX_BIN` absent from its inferred mock shape.
     env.CODEX_BIN = path.join(repo.binDir, 'codex');
   }
   if (agent === 'custom' && runner === 'opencode') {
@@ -836,9 +858,7 @@ async function runRealAgentSmoke(agent, runner) {
   if (agent === 'custom' && runner === 'pi') {
     // Pin both Pi's executable and mutable agent state to the disposable
     // fixture. The launcher resolves PI_BIN before NVM/PATH fallbacks.
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `PI_BIN` absent from its inferred mock shape.
     env.PI_BIN = path.join(repo.binDir, 'pi');
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `PI_CODING_AGENT_DIR` absent from its inferred mock shape.
     env.PI_CODING_AGENT_DIR = repo.piAgentHome;
   }
   // Drop the inherited PWD: opencode trusts PWD over the real cwd for project
@@ -846,7 +866,6 @@ async function runRealAgentSmoke(agent, runner) {
   // the launcher child attach to that project instead of the throwaway repo —
   // colliding with any concurrently running opencode sessions (observed as
   // SQLite WAL contention and as the child hanging at exit until SIGTERM).
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `PWD` absent from its inferred mock shape.
   delete env.PWD;
 
   console.log(`[smoke-fixture] time=${new Date().toISOString()} repo=${repo.repoRoot} operator=${repo.stateHome} runner_state=${runner === 'pi' ? repo.piAgentHome : repo.opencodeDataHome} admission=${env.PARALLIX_CUSTOM_ADMISSION_HOME}`);
@@ -883,7 +902,7 @@ async function runRealAgentSmoke(agent, runner) {
       }
       if (healthcheckResult.status !== 0) {
         const { bucket, detail } = classifyFailure(healthcheckResult);
-        assert.fail(
+        return assert.fail(
           `[${bucket}] ${agent} healthcheck after draft failure failed (status=${healthcheckResult.status}, signal=${healthcheckResult.signal}): ${detail}\n` +
           `stdout:\n${healthcheckResult.stdout}\nstderr:\n${healthcheckResult.stderr}\n` +
           `draft stdout:\n${draftResult.stdout}\ndraft stderr:\n${draftResult.stderr}`
@@ -892,7 +911,7 @@ async function runRealAgentSmoke(agent, runner) {
       const { bucket, detail } = /mission contract is incomplete/.test(`${draftResult.stdout || ''}${draftResult.stderr || ''}`)
         ? { bucket: 'parallix-workflow-failure', detail: 'the draft ended with an incomplete mission contract after its bounce-back budget' }
         : classifyFailure(draftResult);
-      assert.fail(
+      return assert.fail(
         `[${bucket}] px draft --agent ${agent} failed (status=${draftResult.status}, signal=${draftResult.signal}): ${detail}\n` +
         `stdout:\n${draftResult.stdout}\nstderr:\n${draftResult.stderr}`
       );
@@ -920,7 +939,7 @@ async function runRealAgentSmoke(agent, runner) {
     assert.ok(fs.existsSync(path.join(worktree, 'AGENTS.md')));
     assert.equal(runGit(worktree, ['ls-files', '--error-unmatch', 'AGENTS.md']), 'AGENTS.md');
     const recorded = await readMissionStatus(worktree, env, slug);
-    const missing = ['goal', 'why', 'scope'].filter((field) => !recorded.brief?.[field]);
+    const missing: string[] = (['goal', 'why', 'scope'] as const).filter((field) => !recorded.brief?.[field]);
     if ((recorded.successCriteria ?? []).length === 0) { missing.push('success criteria'); }
     if ((recorded.checkpoints ?? []).length === 0) { missing.push('checkpoint plan'); }
     if ((recorded.declaredGates ?? []).length === 0) { missing.push('gates'); }
@@ -1189,7 +1208,7 @@ const CONFIGURED_RUNNER = process.env.PARALLIX_REAL_AGENT_RUNNER
   || workflowConfig?.adapters?.agents?.runners?.custom
   || 'opencode';
 
-function assertSmokeSelection(agent) {
+function assertSmokeSelection(agent: string) {
   assert.ok(['custom', 'codex'].includes(agent), `Unknown real agent "${agent}"; expected custom or codex`);
   if (agent === 'codex') {
     assert.equal(SMOKE_MODEL, 'gpt-5.6-luna', 'Codex smoke override requires model gpt-5.6-luna');

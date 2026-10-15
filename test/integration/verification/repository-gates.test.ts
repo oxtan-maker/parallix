@@ -1,4 +1,3 @@
-// @ts-nocheck -- repository-configured lifecycle gates (TASK-2457).
 //
 // Proves the two invariants the mission is built on:
 //   1. An unconfigured fixture repository invokes no lifecycle gate.
@@ -65,7 +64,7 @@ test('clean-tree gates reuse only an exact successful proof and never cache fail
   try {
     let runs = 0;
     const gate = [{ key: 'verify', command: 'true', order: 0, reuse: 'clean-tree' as const }];
-    const runner = () => ({ status: ++runs === 2 ? 1 : 0, stdout: '', stderr: '' });
+    const runner: NonNullable<NonNullable<Parameters<typeof runPhaseGates>[1]>["commandRunner"]> = () => ({ status: ++runs === 2 ? 1 : 0, stdout: '', stderr: '' });
     assert.equal((await runPhaseGates('integration', { slug: 'task-1', checkoutPath: checkout, gates: gate, commandRunner: runner, log: () => {}, error: () => {} })).ok, true);
     assert.equal((await runPhaseGates('integration', { slug: 'task-1', checkoutPath: checkout, gates: gate, commandRunner: runner, log: () => {}, error: () => {} })).executed, 1, 'an exact proof skips the runner but remains a completed gate');
     assert.equal(runs, 1, 'the second exact invocation reuses the pass');
@@ -89,7 +88,7 @@ test('unconfigured repository runs no gate for the handoff phase', async () => {
   const checkout = makeCheckout();
   try {
     let launched = 0;
-    const runner = () => {
+    const runner: NonNullable<NonNullable<Parameters<typeof runPhaseGates>[1]>["commandRunner"]> = () => {
       launched++;
       return { status: 0, stdout: '', stderr: '' };
     };
@@ -114,11 +113,11 @@ test('unconfigured repository runs no gate for the handoff phase', async () => {
 test('configured failing pre-handoff gate blocks handoff and receives the phase contract', async () => {
   const checkout = makeCheckout();
   try {
-    let capturedEnv: NodeJS.ProcessEnv | null = null;
-    let capturedCwd: string | null = null;
-    const runner = (_command, _args, options) => {
-      capturedEnv = options.env;
-      capturedCwd = options.cwd;
+    let capturedEnv: { value: NodeJS.ProcessEnv | null } = { value: null };
+    let capturedCwd: { value: string | null } = { value: null };
+    const runner: NonNullable<NonNullable<Parameters<typeof runPhaseGates>[1]>["commandRunner"]> = (_command, _args, options) => {
+      capturedEnv.value = options.env;
+      capturedCwd.value = options.cwd;
       return { status: 1, stdout: 'nope', stderr: 'gate did not pass' };
     };
 
@@ -136,12 +135,12 @@ test('configured failing pre-handoff gate blocks handoff and receives the phase 
     assert.equal(result.failedGate?.exitCode, 1);
 
     // Environment contract: mission slug, checkout path, and exact phase.
-    assert.ok(capturedEnv, 'gate must run with an environment');
-    assert.equal(capturedEnv?.PARALLIX_MISSION_SLUG, 'task-2457');
-    assert.equal(capturedEnv?.PARALLIX_PHASE, 'handoff');
-    assert.equal(capturedEnv?.PARALLIX_CHECKOUT_PATH, path.resolve(checkout));
+    assert.ok(capturedEnv.value, 'gate must run with an environment');
+    assert.equal(capturedEnv.value?.PARALLIX_MISSION_SLUG, 'task-2457');
+    assert.equal(capturedEnv.value?.PARALLIX_PHASE, 'handoff');
+    assert.equal(capturedEnv.value?.PARALLIX_CHECKOUT_PATH, path.resolve(checkout));
     // The gate runs from the supplied checkout.
-    assert.equal(capturedCwd, path.resolve(checkout));
+    assert.equal(capturedCwd.value, path.resolve(checkout));
   } finally {
     fs.rmSync(checkout, { recursive: true, force: true });
   }
@@ -155,10 +154,10 @@ for (const phase of ['handoff', 'review', 'integration'] as const) {
     const checkout = makeCheckout();
     try {
       let launched = 0;
-      let capturedEnv: NodeJS.ProcessEnv | null = null;
-      const runner = (_command, _args, options) => {
+      let capturedEnv: { value: NodeJS.ProcessEnv | null } = { value: null };
+      const runner: NonNullable<NonNullable<Parameters<typeof runPhaseGates>[1]>["commandRunner"]> = (_command, _args, options) => {
         launched++;
-        capturedEnv = options.env;
+        capturedEnv.value = options.env;
         return { status: 0, stdout: 'ok', stderr: '' };
       };
 
@@ -175,9 +174,9 @@ for (const phase of ['handoff', 'review', 'integration'] as const) {
       assert.equal(result.skipped, false);
       assert.equal(result.failedGate, null);
       assert.equal(launched, 1);
-      assert.equal(capturedEnv?.PARALLIX_PHASE, phase);
-      assert.equal(capturedEnv?.PARALLIX_MISSION_SLUG, 'task-2457');
-      assert.equal(capturedEnv?.PARALLIX_CHECKOUT_PATH, path.resolve(checkout));
+      assert.equal(capturedEnv.value?.PARALLIX_PHASE, phase);
+      assert.equal(capturedEnv.value?.PARALLIX_MISSION_SLUG, 'task-2457');
+      assert.equal(capturedEnv.value?.PARALLIX_CHECKOUT_PATH, path.resolve(checkout));
     } finally {
       fs.rmSync(checkout, { recursive: true, force: true });
     }
@@ -190,7 +189,7 @@ for (const phase of ['review', 'integration'] as const) {
   test(`configured failing ${phase} gate blocks the phase`, async () => {
     const checkout = makeCheckout();
     try {
-      const runner = () => ({ status: 1, stdout: '', stderr: 'boom' });
+      const runner: NonNullable<NonNullable<Parameters<typeof runPhaseGates>[1]>["commandRunner"]> = () => ({ status: 1, stdout: '', stderr: 'boom' });
       const gates = [{ key: `${phase}-smoke`, command: 'false', order: 0 }];
       const result = await runPhaseGates(phase, {
         slug: 'task-2457',
@@ -217,10 +216,10 @@ for (const phase of ['handoff', 'review', 'integration'] as const) {
     const checkout = makeCheckout();
     try {
       let launched = 0;
-      let capturedEnv: NodeJS.ProcessEnv | null = null;
-      const runner = (_command, _args, options) => {
+      let capturedEnv: { value: NodeJS.ProcessEnv | null } = { value: null };
+      const runner: NonNullable<NonNullable<Parameters<typeof runPhaseGates>[1]>["commandRunner"]> = (_command, _args, options) => {
         launched++;
-        capturedEnv = options.env;
+        capturedEnv.value = options.env;
         return { status: 1, stdout: '', stderr: 'boom' };
       };
 
@@ -236,9 +235,9 @@ for (const phase of ['handoff', 'review', 'integration'] as const) {
       assert.equal(result.executed, 1);
       assert.equal(result.failedGate?.key, `${phase}-smoke`);
       assert.equal(launched, 1);
-      assert.equal(capturedEnv?.PARALLIX_PHASE, phase);
-      assert.equal(capturedEnv?.PARALLIX_MISSION_SLUG, 'task-2457');
-      assert.equal(capturedEnv?.PARALLIX_CHECKOUT_PATH, path.resolve(checkout));
+      assert.equal(capturedEnv.value?.PARALLIX_PHASE, phase);
+      assert.equal(capturedEnv.value?.PARALLIX_MISSION_SLUG, 'task-2457');
+      assert.equal(capturedEnv.value?.PARALLIX_CHECKOUT_PATH, path.resolve(checkout));
     } finally {
       fs.rmSync(checkout, { recursive: true, force: true });
     }
@@ -248,7 +247,7 @@ for (const phase of ['handoff', 'review', 'integration'] as const) {
     const checkout = makeCheckout();
     try {
       let launched = 0;
-      const runner = () => { launched++; return { status: 0, stdout: 'ok', stderr: '' };
+      const runner: NonNullable<NonNullable<Parameters<typeof runPhaseGates>[1]>["commandRunner"]> = () => { launched++; return { status: 0, stdout: 'ok', stderr: '' };
       };
 
       const gates = [{ key: `${phase}-ok`, command: 'true', order: 0 }];
@@ -330,8 +329,11 @@ test('workflow config surfaces configured gates through the effective config', (
       JSON.stringify({ adapters: { gates: { preHandoff: [{ key: 'v', command: 'true' }], preIntegration: [{ key: 'b', command: 'npm run build', order: 5 }] } } }),
     );
     const eff = loadEffectiveConfig(tmp);
-    assert.deepEqual(eff.adapters.gates.preHandoff, [{ key: 'v', command: 'true' }]);
-    assert.deepEqual(eff.adapters.gates.preIntegration, [{ key: 'b', command: 'npm run build', order: 5 }]);
+    assert.ok('gates' in eff.adapters);
+    const gates = eff.adapters.gates;
+    assert.ok(gates && typeof gates === 'object' && 'preHandoff' in gates && 'preIntegration' in gates);
+    assert.deepEqual(gates.preHandoff, [{ key: 'v', command: 'true' }]);
+    assert.deepEqual(gates.preIntegration, [{ key: 'b', command: 'npm run build', order: 5 }]);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -376,62 +378,6 @@ test('gate loading rejects an invalid dependency instead of selecting no gates',
   } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
 });
 
-// F6 / TASK-2457: prove THIS repository explicitly selects its own gates.
-// A later edit that deletes adapters.gates from workflow.config.json must be
-// caught here (compounding F1), so the test reads the repo's own config from
-// disk rather than a synthetic fixture. The repo integrates itself with px,
-// so these gates must stay active while it develops.
-// TASK-2519: CodeQL stays a manual scan (`npm run test:codeql`), not an
-// automatic integration gate, so the plan is pinned to exactly these keys.
-// Coverage produces the report consumed by the mandatory SonarQube gate.
-test('this repository exposes the full independent gate width and orders Sonar after fresh coverage', () => {
-  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-  const gates = loadPhaseGates(repoRoot, 'preIntegration');
-  const keys = gates.map((g) => g.key);
-  assert.deepEqual(keys, ['documentation', 'landing-tree', 'build', 'dependency-audit', 'verification', 'unit', 'integration-ci', 'integration-local', 'coverage-merge', 'workflow', 'agent-smoke', 'quality-gate']);
-  assert.equal(loadPhaseGateParallelism(repoRoot, 'preIntegration'), 6);
-  assert.deepEqual(gates.map(({ key, command, order }) => ({ key, command, order })), [
-    { key: 'documentation', command: './scripts/verify-local.sh docs', order: 0 },
-    { key: 'landing-tree', command: './scripts/verify-landing-tree.sh', order: 1 },
-    { key: 'build', command: 'npm run build', order: 1 },
-    { key: 'dependency-audit', command: 'pnpm audit --audit-level=high', order: 2 },
-    { key: 'verification', command: './scripts/verify-local.sh static-analysis', order: 3 },
-    { key: 'unit', command: 'PARALLIX_FAST_UNIT=1 PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom', order: 4 },
-    { key: 'integration-ci', command: 'PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt', order: 5 },
-    { key: 'integration-local', command: 'npm run test:integration:local:prebuilt', order: 6 },
-    { key: 'coverage-merge', command: 'rm -f coverage/lcov.info && npm run coverage:merge && test -s coverage/lcov.info', order: 7 },
-    { key: 'workflow', command: 'node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/lifecycle/mission-lifecycle.test.ts', order: 8 },
-    { key: 'agent-smoke', command: 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/agents/real-agent-smoke.test.ts', order: 9 },
-    { key: 'quality-gate', command: 'npm run sonar', order: 10 },
-  ]);
-  assert.deepEqual(gates.find(g => g.key === 'coverage-merge')?.after, ['unit', 'integration-ci']);
-  assert.deepEqual(gates.find(g => g.key === 'quality-gate')?.after, ['coverage-merge']);
-  assert.equal(gates.find(g => g.key === 'verification')?.reuse, 'clean-tree');
-  assert.ok(gates.filter(g => g.key !== 'verification').every(g => g.reuse === 'never'));
-  assert.deepEqual(gates.filter(g => ['unit', 'integration-ci', 'integration-local', 'workflow', 'agent-smoke'].includes(g.key)).map(g => g.after),
-    [['build'], ['build'], ['build'], ['build'], ['build']]);
-  const runner = fs.readFileSync(path.join(repoRoot, 'test', 'run-default-tests.ts'), 'utf8');
-  assert.match(runner, /mkdtempSync\(path\.join\(executionRoot, 'tmp', 'fast-unit-scratch-'\)\)/,
-    'the covered fast unit tier owns a process-specific scratch root, so concurrent gates never share one');
-  assert.match(runner, /mkdtempSync\(path\.join\(checkoutTestTmpdir\(executionRoot\), 'coverage-scratch-'\)\)/,
-    'covered workers own a scratch root outside the checkout so fixtures cannot inherit repository state (TASK-2637.04)');
-  assert.match(runner, /fs\.rmSync\(coverageScratchDir, \{ recursive: true, force: true \}\)/,
-    'the raw coverage payload scratch root is reclaimed on every runner exit path');
-  // TASK-2622.04: Node's test runner records coverage in its own temporary
-  // directory; a preset NODE_V8_COVERAGE only receives an unread ~1.5 GB copy.
-  assert.doesNotMatch(runner, /NODE_V8_COVERAGE:/,
-    'coverage producers must not ask Node to copy the raw V8 payload');
-  assert.ok(!gates.some((g) => g.command === 'npm run test:codeql'), 'preIntegration must not run CodeQL automatically');
-  // The runner executes them from this checkout with the phase contract.
-  const env = buildGateEnv('integration', 'task-2457', repoRoot);
-  assert.equal(env.PARALLIX_PHASE, 'integration');
-  assert.equal(env.PARALLIX_MISSION_SLUG, 'task-2457');
-  assert.equal(env.PARALLIX_CHECKOUT_PATH, path.resolve(repoRoot));
-  // BASH_ENV is scrubbed so an inherited startup hook cannot alter a gate.
-  const withBash = buildGateEnv('integration', 'task-2457', repoRoot, { BASH_ENV: '/etc/profile.d/hook.sh' } as NodeJS.ProcessEnv);
-  assert.equal('BASH_ENV' in withBash ? withBash.BASH_ENV : undefined, undefined);
-});
-
 test('this repository starts every independent check while Sonar waits for coverage', async () => {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
   const gates = loadPhaseGates(repoRoot, 'preIntegration');
@@ -468,7 +414,7 @@ test('dry run resolves the integration plan without executing any gate', async (
   const checkout = makeCheckout();
   try {
     let launched = 0;
-    const runner = () => { launched++; return { status: 0, stdout: '', stderr: '' };
+    const runner: NonNullable<NonNullable<Parameters<typeof runPhaseGates>[1]>["commandRunner"]> = () => { launched++; return { status: 0, stdout: '', stderr: '' };
     };
     const gates = [{ key: 'build', command: 'npm run build', order: 1 }];
     const result = await runPhaseGates('integration', {
@@ -493,7 +439,7 @@ test('parallel gates overlap within the configured bound', async () => {
     const events: string[] = [];
     let active = 0;
     let peak = 0;
-    const runner = async (command: string) => {
+    const runner: NonNullable<NonNullable<Parameters<typeof runPhaseGates>[1]>["commandRunner"]> = async (command) => {
       events.push(`start:${command}`);
       peak = Math.max(peak, ++active);
       await Promise.resolve();
@@ -548,7 +494,7 @@ test('a parallel gate waits for its declared artifact producer', async () => {
   const checkout = makeCheckout();
   try {
     const events: string[] = [];
-    const runner = (command: string) => new Promise(resolve => {
+    const runner: NonNullable<NonNullable<Parameters<typeof runPhaseGates>[1]>["commandRunner"]> = (command) => new Promise(resolve => {
       events.push(`start:${command}`);
       setTimeout(() => { events.push(`end:${command}`); resolve({ status: 0, stdout: '', stderr: '' }); }, command === 'build' ? 15 : 1);
     });
@@ -576,7 +522,7 @@ test('parallel success output stays isolated while results retain each complete 
   const checkout = makeCheckout();
   try {
     const output: string[] = [];
-    const runner = (command: string) => Promise.resolve({ status: 0, stdout: `${command} stdout`, stderr: `${command} stderr` });
+    const runner: NonNullable<NonNullable<Parameters<typeof runPhaseGates>[1]>["commandRunner"]> = (command) => Promise.resolve({ status: 0, stdout: `${command} stdout`, stderr: `${command} stderr` });
     const result = await runPhaseGates('integration', {
       slug: 'task-2558', checkoutPath: checkout, maxParallel: 2, commandRunner: runner, log: (line: string) => output.push(line),
       gates: [{ key: 'alpha', command: 'alpha', order: 1 }, { key: 'beta', command: 'beta', order: 2 }],

@@ -32,7 +32,7 @@ const pullRequest = {
 const reviewedSubject = {
   change: pullRequest,
   revision: changeRevision('abc123'),
-};
+} satisfies import("../../../../src/domain/review.js").ReviewedRevision;
 const implementer = agentFamily('configured-implementer');
 const reviewer = agentFamily('configured-reviewer');
 const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({
@@ -156,7 +156,7 @@ test('a mission with reviewer findings can be resumed with px active', () => {
       comment: null,
       findings: [{ id: reviewFindingId('F1'), summary: 'unbounded buffer', location: null }],
     }), netEngineeringLines: null,
-  };
+  } satisfies Partial<NonNullable<Parameters<typeof availableBoardCommands>[0]>>;
   const fixing = availableBoardCommands(base, { reviewApproval: null }).find(({ command }) => command === 'active');
   assert.equal(fixing?.enabled, true, 'findings to act on make px active the runnable next step');
   assert.equal(fixing?.label, 'findings ↩');
@@ -188,8 +188,8 @@ test('approved review exposes integrate without inventing another lifecycle stat
     checkpoints: [],
     review: reviewConversation(),
     netEngineeringLines: null,
-  };
-  const approval = { subject: reviewedSubject, approvedAt: 'now' };
+  } satisfies Partial<NonNullable<Parameters<typeof availableBoardCommands>[0]>>;
+  const approval = { subject: reviewedSubject, approvedAt: 'now' } satisfies { readonly subject: import("../../../../src/domain/review.js").ReviewedRevision; readonly approvedAt: string | null; };
   assert.equal(availableBoardCommands(review, { reviewApproval: approval }).find(({ command }) => command === 'integrate')?.enabled, true);
   assert.equal(availableBoardCommands({ ...review, status: 'active' }, { reviewApproval: approval })
     .find(({ command }) => command === 'integrate')?.enabled, true,
@@ -213,7 +213,7 @@ test('flow and median cycle projections operate on domain facts', () => {
   const flow = cumulativeFlow(new Map([[id, 'backlog']]), [transition], ['2026-07-22T08:00:00Z', '2026-07-22T10:00:00Z']);
   assert.equal(flow[0]?.counts.backlog, 1);
   assert.equal(flow[1]?.counts.active, 1);
-  const baseMission = { id, repositoryId: repo, title: 'x', labels: missionLabels(['unknown']), status: 'done' as const, rawStatus: 'done', closedAt: '2026-07-21T10:00:00Z', assignee: implementer, checkpoints: [], review: null, netEngineeringLines: 1 };
+  const baseMission = { id, repositoryId: repo, title: 'x', labels: missionLabels(['unknown']), status: 'done' as const, rawStatus: 'done', closedAt: '2026-07-21T10:00:00Z', assignee: implementer, checkpoints: [], review: null, netEngineeringLines: 1 } satisfies Partial<NonNullable<Parameters<typeof requireClosedMission>[0]>>;
   const baseOutcome = missionOutcome({ missionId: id, repositoryId: repo, cycleTimeMinutes: 10, reviewFixRounds: 1 });
   const series = medianCycleTimeSeries([
     { mission: requireClosedMission(baseMission), outcome: baseOutcome },
@@ -294,7 +294,7 @@ test('mission detail keeps review, checkpoint guidance, NEL, and statistics on o
     completedStatistics: null,
   });
   assert.throws(
-    () => projectMissionDetail(mission, { missionId: id } as never),
+    () => projectMissionDetail(mission, { missionId: id, repositoryId: mission.repositoryId, labels: [], closedAt: '2026-07-01T00:00:00Z', implementer: null, modelsInvolved: [], totalDurationMinutes: null, totalCostUsd: null, totalInputAndOutputTokens: null, totalCachedTokens: null, totalContextTokens: null, totalToolCalls: null, reviewFixRounds: null, netEngineeringLines: 12 }),
     /Open missions cannot have completed statistics/,
   );
 });
@@ -309,7 +309,7 @@ test('mission card preserves planned-only, partial and empty checkpoint plans (T
     id, repositoryId: repo, title: 'Plan', labels: missionLabels(['ai_sdlc']),
     status: 'active' as const, closedAt: null, assignee: null,
     checkpoints, review: null, netEngineeringLines: null,
-  };
+  } satisfies Partial<NonNullable<Parameters<typeof projectMissionCard>[0]>>;
   const facts = { latestGate: 'unknown' as const, reviewApproval: null, currentWork: null, blockingReason: null, flags: [] };
   const planned = projectMissionCard(mission, facts);
   assert.equal(planned.checkpoint, null);

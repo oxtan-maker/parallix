@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 import { resolveConfiguration } from '../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 // Behavior-owned suite (TASK-2622.09): the Git and mission-path adapter contract — porcelain/plumbing
@@ -39,7 +38,6 @@ describe("git adapter wrappers", () => {
   function mockSpawnSync(fake: (...args: unknown[]) => Record<string, unknown>): void {
     mock.restoreAll();
     mock.module('node:child_process', {
-      fallback: true,
       ...moduleMockOptions({ ...childProcess, spawnSync: fake }),
     });
   }
@@ -98,7 +96,7 @@ describe("git adapter wrappers", () => {
       { status: 0, stdout: '', stderr: '' },
       { status: 0, stdout: ' M file-a.js\n', stderr: '' }
     ];
-    mockSpawnSync(() => responses.shift());
+    mockSpawnSync(() => { const response = responses.shift(); assert.ok(response, 'unexpected spawn call'); return response; });
 
     const { isDirty } = await import('../../../../src/adapters/git/git.js?mock=' + Date.now());
     assert.equal(isDirty('/tmp/repo'), false);
@@ -110,7 +108,7 @@ describe("git adapter wrappers", () => {
       { status: 0, stdout: ' M file-a.js\n?? file-b.js\n', stderr: '' },
       { status: 0, stdout: '\n', stderr: '' }
     ];
-    mockSpawnSync(() => responses.shift());
+    mockSpawnSync(() => { const response = responses.shift(); assert.ok(response, 'unexpected spawn call'); return response; });
 
     const { getUncommittedCount } = await import('../../../../src/adapters/git/git.js?mock=' + Date.now());
     assert.equal(getUncommittedCount('/tmp/repo'), 2);
@@ -119,11 +117,11 @@ describe("git adapter wrappers", () => {
 
   test('detectRebaseState reports active rebase with detached head and unmerged files', () => {
     const fsModule = {
-      existsSync(target) {
+      existsSync(target: string) {
         return target === '/tmp/repo/.git/rebase-merge';
       }
     };
-    const calls = [];
+    const calls: string[][] = [];
 
     const result = git.detectRebaseState('/tmp/repo', {
       fsModule,
@@ -131,16 +129,16 @@ describe("git adapter wrappers", () => {
       gitRunner(args) {
         calls.push(args);
         if (args.includes('rev-parse')) {
-          return { status: 0, stdout: '.git\n', stderr: '' };
+          return { signal: null,  status: 0, stdout: '.git\n', stderr: '' };
         }
         if (args.includes('symbolic-ref')) {
-          return { status: 1, stdout: '', stderr: 'fatal: ref HEAD is not a symbolic ref' };
+          return { signal: null,  status: 1, stdout: '', stderr: 'fatal: ref HEAD is not a symbolic ref' };
         }
         if (args.includes('rebase') && args.includes('--show-current')) {
-          return { status: 0, stdout: 'abc123def456\n', stderr: '' };
+          return { signal: null,  status: 0, stdout: 'abc123def456\n', stderr: '' };
         }
         if (args.includes('ls-files') && args.includes('-u')) {
-          return {
+          return { signal: null, 
             status: 0,
             stdout: [
               '100644 aaaaa 1\tbacklog/tasks/task-1322 - prevent-backlog-task-id-recycling-collision.md',
@@ -174,16 +172,16 @@ describe("git adapter wrappers", () => {
       pathModule: _require('path'),
       gitRunner(args) {
         if (args.includes('rev-parse')) {
-          return { status: 0, stdout: '.git\n', stderr: '' };
+          return { signal: null,  status: 0, stdout: '.git\n', stderr: '' };
         }
         if (args.includes('symbolic-ref')) {
-          return { status: 0, stdout: 'mission/task-1328\n', stderr: '' };
+          return { signal: null,  status: 0, stdout: 'mission/task-1328\n', stderr: '' };
         }
         if (args.includes('rebase') && args.includes('--show-current')) {
-          return { status: 0, stdout: '\n', stderr: '' };
+          return { signal: null,  status: 0, stdout: '\n', stderr: '' };
         }
         if (args.includes('ls-files') && args.includes('-u')) {
-          return { status: 0, stdout: '', stderr: '' };
+          return { signal: null,  status: 0, stdout: '', stderr: '' };
         }
         throw new Error(`Unexpected git args: ${args.join(' ')}`);
       }
@@ -204,16 +202,16 @@ describe("git adapter wrappers", () => {
       pathModule: _require('path'),
       gitRunner(args) {
         if (args.includes('rev-parse')) {
-          return { status: 0, stdout: '.git\n', stderr: '' };
+          return { signal: null,  status: 0, stdout: '.git\n', stderr: '' };
         }
         if (args.includes('symbolic-ref')) {
-          return { status: 0, stdout: 'mission/task-1328\n', stderr: '' };
+          return { signal: null,  status: 0, stdout: 'mission/task-1328\n', stderr: '' };
         }
         if (args.includes('rebase') && args.includes('--show-current')) {
-          return { status: 0, stdout: '', stderr: '' };
+          return { signal: null,  status: 0, stdout: '', stderr: '' };
         }
         if (args.includes('ls-files') && args.includes('-u')) {
-          return { status: 0, stdout: '', stderr: '' };
+          return { signal: null,  status: 0, stdout: '', stderr: '' };
         }
         throw new Error(`Unexpected git args: ${args.join(' ')}`);
       }
@@ -254,12 +252,11 @@ describe("git adapter wrappers", () => {
 
 // ---- git pure helpers (consolidated from test/git-pure.test.ts, TASK-2622.09) ----
 describe("git pure helpers", () => {
-  // mockModule/@ts-nocheck pattern in test/integration/stats/stats-backfill.test.ts.
 
   function tempDir(prefix = 'git-pure-') {
     return registeredMkdtemp(prefix);
   }
-  function cleanup(dir) { fs.rmSync(dir, { recursive: true, force: true }); }
+  function cleanup(dir: fs.PathLike) { fs.rmSync(dir, { recursive: true, force: true }); }
 
   // ---------- parseUnmergedFiles (pure: returns the second porcelain column) ----------
 
@@ -282,7 +279,7 @@ describe("git pure helpers", () => {
 
   test('detectRebaseState reports in-progress when a rebase-merge directory exists', () => {
     const state = git.detectRebaseState('/nonexistent', {
-      gitRunner: () => ({ status: 0, stdout: '.git' }),
+      gitRunner: () => ({ stderr: '', signal: null,  status: 0, stdout: '.git' }),
       fsModule: { existsSync: () => true },
       pathModule: { isAbsolute: (p) => p.startsWith('/'), join: (...p) => p.join('/') },
     });
@@ -293,9 +290,9 @@ describe("git pure helpers", () => {
   test('detectRebaseState reports a clean, attached HEAD when no rebase is running', () => {
     const state = git.detectRebaseState('/nonexistent', {
       gitRunner: (args) => {
-        if (args.includes('--git-dir')) return { status: 0, stdout: '.git' };
-        if (args.includes('symbolic-ref')) return { status: 0, stdout: 'main' };
-        return { status: 1, stdout: '' }; // show-current + ls-files: nothing in progress
+        if (args.includes('--git-dir')) return { stderr: '', signal: null,  status: 0, stdout: '.git' };
+        if (args.includes('symbolic-ref')) return { stderr: '', signal: null,  status: 0, stdout: 'main' };
+        return { stderr: '', signal: null,  status: 1, stdout: '' }; // show-current + ls-files: nothing in progress
       },
       fsModule: { existsSync: () => false },
       pathModule: { isAbsolute: (p) => p.startsWith('/'), join: (...p) => p.join('/') },
@@ -308,9 +305,9 @@ describe("git pure helpers", () => {
   test('detectRebaseState reports detached HEAD when symbolic-ref fails', () => {
     const state = git.detectRebaseState('/nonexistent', {
       gitRunner: (args) => {
-        if (args.includes('--git-dir')) return { status: 0, stdout: '.git' };
-        if (args.includes('symbolic-ref')) return { status: 1, stdout: '' };
-        return { status: 1, stdout: '' };
+        if (args.includes('--git-dir')) return { stderr: '', signal: null,  status: 0, stdout: '.git' };
+        if (args.includes('symbolic-ref')) return { stderr: '', signal: null,  status: 1, stdout: '' };
+        return { stderr: '', signal: null,  status: 1, stdout: '' };
       },
       fsModule: { existsSync: () => false },
       pathModule: { isAbsolute: (p) => p.startsWith('/'), join: (...p) => p.join('/') },
@@ -325,7 +322,7 @@ describe("git pure helpers", () => {
     try {
       fs.writeFileSync(path.join(dir, 'ignored.ts'), '// x\n');
       fs.writeFileSync(path.join(dir, 'tracked.ts'), '// y\n');
-      const gitFn = (args) => ({
+      const gitFn = (args: string|string[]) => ({ signal: null, stderr: '', 
         status: args.includes('ignored.ts') ? 0 : 1,
         stdout: '',
       });
@@ -335,7 +332,7 @@ describe("git pure helpers", () => {
   });
 
   test('findIgnoredSourceFiles returns an empty list when the directory cannot be read', () => {
-    const gitFn = () => ({ status: 0, stdout: '' });
+    const gitFn = () => ({ signal: null, stderr: '',  status: 0, stdout: '' });
     assert.deepEqual(git.findIgnoredSourceFiles('/definitely-missing-dir-12345', gitFn), []);
   });
 });
@@ -345,9 +342,14 @@ describe("diff adapter", () => {
   // Mock child_process and other dependencies
 
   const diff = mockModule<typeof import('../../../../src/adapters/cli/commands/diff.js')>('../../../../src/adapters/cli/commands/diff.js', import.meta.url);
+  type DiffSpawn = NonNullable<NonNullable<Parameters<typeof diff.default>[1]>['spawnSyncFn']>;
+  type DiffSpawnCall = { cmd: Parameters<DiffSpawn>[0]; args: Parameters<DiffSpawn>[1]; opts: Parameters<DiffSpawn>[2] };
+  type DiffEffect = DiffSpawnCall | readonly ['exit', number];
+  const isGitSpawn = (effect: DiffEffect): effect is DiffSpawnCall => 'cmd' in effect && effect.cmd === 'git';
+
 
   test.afterEach(() => mock.restoreAll());
-  const mockGit = (responses) => (args, options = {}) => {
+  const mockGit = (responses: [RegExp | string, { status: number; stdout: string }][]) => (args: string[]) => {
     const cmd = args.join(' ');
     for (const [pattern, response] of responses) {
       if (pattern instanceof RegExp ? pattern.test(cmd) : cmd.includes(pattern)) {
@@ -358,7 +360,7 @@ describe("diff adapter", () => {
   };
 
   test('node parallix diff resolves correct target branches', async (t) => {
-    const calls = [];
+    const calls: DiffEffect[] = [];
     const worktree = '/tmp/mission-task-1147';
 
     const gitFn = mockGit([
@@ -366,9 +368,9 @@ describe("diff adapter", () => {
       [/branch --list --format/, { status: 0, stdout: 'main\n' }]
     ]);
 
-    const spawnSync = (cmd, args, opts) => {
+    const spawnSync: NonNullable<NonNullable<Parameters<typeof diff.default>[1]>["spawnSyncFn"]> = (cmd, args, opts) => {
       calls.push({ cmd, args, opts });
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     };
 
     await diff.default(['task-1147'], {
@@ -378,17 +380,17 @@ describe("diff adapter", () => {
       resolveWorktreeFn: () => worktree,
       getPrimaryBranchFn: () => 'main',
       missionBranchNameFn: (slug) => `mission/${slug}`,
-      exitFn: (code) => calls.push(['exit', code])
+      exitFn: (code) => calls.push(['exit', code] as const)
     });
 
-    const diffCall = calls.find(c => c.cmd === 'git');
+    const diffCall = calls.find(isGitSpawn);
     assert.ok(diffCall, 'should have called git');
     assert.deepEqual(diffCall.args, ['difftool', '-d', '--no-prompt', 'main..HEAD']);
     assert.equal(diffCall.opts.cwd, worktree);
   });
 
   test('node parallix diff detects pager.diff', async (t) => {
-    const calls = [];
+    const calls: DiffEffect[] = [];
     const worktree = '/tmp/mission-task-1147';
 
     const gitFn = mockGit([
@@ -397,9 +399,9 @@ describe("diff adapter", () => {
       [/branch --list --format/, { status: 0, stdout: 'main\n' }]
     ]);
 
-    const spawnSync = (cmd, args, opts) => {
+    const spawnSync: NonNullable<NonNullable<Parameters<typeof diff.default>[1]>["spawnSyncFn"]> = (cmd, args, opts) => {
       calls.push({ cmd, args, opts });
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     };
 
     await diff.default(['task-1147'], {
@@ -409,17 +411,17 @@ describe("diff adapter", () => {
       resolveWorktreeFn: () => worktree,
       getPrimaryBranchFn: () => 'main',
       missionBranchNameFn: (slug) => `mission/${slug}`,
-      exitFn: (code) => calls.push(['exit', code])
+      exitFn: (code) => calls.push(['exit', code] as const)
     });
 
-    const diffCall = calls.find(c => c.cmd === 'git');
+    const diffCall = calls.find(isGitSpawn);
     assert.ok(diffCall, 'should have called git');
     assert.deepEqual(diffCall.args, ['diff', 'main..HEAD']);
     assert.equal(diffCall.opts.cwd, worktree);
   });
 
   test('node parallix diff detects core.pager', async (t) => {
-    const calls = [];
+    const calls: DiffEffect[] = [];
     const worktree = '/tmp/mission-task-1147';
 
     const gitFn = mockGit([
@@ -429,9 +431,9 @@ describe("diff adapter", () => {
       [/branch --list --format/, { status: 0, stdout: 'main\n' }]
     ]);
 
-    const spawnSync = (cmd, args, opts) => {
+    const spawnSync: NonNullable<NonNullable<Parameters<typeof diff.default>[1]>["spawnSyncFn"]> = (cmd, args, opts) => {
       calls.push({ cmd, args, opts });
-      return { status: 0 };
+      return { stdout: '', stderr: '', signal: null,  status: 0 };
     };
 
     await diff.default(['task-1147'], {
@@ -441,17 +443,17 @@ describe("diff adapter", () => {
       resolveWorktreeFn: () => worktree,
       getPrimaryBranchFn: () => 'main',
       missionBranchNameFn: (slug) => `mission/${slug}`,
-      exitFn: (code) => calls.push(['exit', code])
+      exitFn: (code) => calls.push(['exit', code] as const)
     });
 
-    const diffCall = calls.find(c => c.cmd === 'git');
+    const diffCall = calls.find(isGitSpawn);
     assert.ok(diffCall, 'should have called git');
     assert.deepEqual(diffCall.args, ['diff', 'main..HEAD']);
     assert.equal(diffCall.opts.cwd, worktree);
   });
 
   test('node parallix diff rejects less variants', async (t) => {
-    const calls = [];
+    const calls: (["exit", string | number | null | undefined] | ["fail", string])[] = [];
 
     const gitFn = mockGit([
       [/config --get diff.tool/, { status: 1, stdout: '' }],
@@ -462,13 +464,13 @@ describe("diff adapter", () => {
 
     await diff.default(['task-1147'], {
       gitFn,
-      spawnSyncFn: () => ({ status: 0 }),
+      spawnSyncFn: () => ({ stdout: '', stderr: '', signal: null,  status: 0 }),
       inferSlugFn: () => 'task-1147',
       resolveWorktreeFn: () => '/tmp/mission-task-1147',
       getPrimaryBranchFn: () => 'main',
       missionBranchNameFn: (slug) => `mission/${slug}`,
-      exitFn: (code) => calls.push(['exit', code]),
-      failFn: (msg) => calls.push(['fail', msg])
+      exitFn: (code) => calls.push(['exit', code] as const),
+      failFn: (msg) => calls.push(['fail', msg] as const)
     });
 
     assert.deepEqual(calls.find(c => c[0] === 'exit'), ['exit', 1]);
@@ -476,7 +478,7 @@ describe("diff adapter", () => {
   });
 
   test('node parallix diff fails on spawn error', async (t) => {
-    const calls = [];
+    const calls: (["exit", string | number | null | undefined] | ["fail", string])[] = [];
 
     const gitFn = mockGit([
       [/config --get diff.tool/, { status: 0, stdout: 'difftastic\n' }],
@@ -485,13 +487,13 @@ describe("diff adapter", () => {
 
     await diff.default(['task-1147'], {
       gitFn,
-      spawnSyncFn: () => ({ error: new Error('spawn failed'), status: null }),
+      spawnSyncFn: () => ({ stdout: '', stderr: '', signal: null,  error: new Error('spawn failed'), status: null }),
       inferSlugFn: () => 'task-1147',
       resolveWorktreeFn: () => '/tmp/mission-task-1147',
       getPrimaryBranchFn: () => 'main',
       missionBranchNameFn: (slug) => `mission/${slug}`,
-      exitFn: (code) => calls.push(['exit', code]),
-      failFn: (msg) => calls.push(['fail', msg])
+      exitFn: (code) => calls.push(['exit', code] as const),
+      failFn: (msg) => calls.push(['fail', msg] as const)
     });
 
     assert.deepEqual(calls.find(c => c[0] === 'exit'), ['exit', 1]);
@@ -499,7 +501,7 @@ describe("diff adapter", () => {
   });
 
   test('node parallix diff fails on spawn signal', async (t) => {
-    const calls = [];
+    const calls: (["exit", string | number | null | undefined] | ["fail", string])[] = [];
 
     const gitFn = mockGit([
       [/config --get diff.tool/, { status: 0, stdout: 'difftastic\n' }],
@@ -508,13 +510,13 @@ describe("diff adapter", () => {
 
     await diff.default(['task-1147'], {
       gitFn,
-      spawnSyncFn: () => ({ signal: 'SIGKILL', status: null }),
+      spawnSyncFn: () => ({ stdout: '', stderr: '',  signal: 'SIGKILL', status: null }),
       inferSlugFn: () => 'task-1147',
       resolveWorktreeFn: () => '/tmp/mission-task-1147',
       getPrimaryBranchFn: () => 'main',
       missionBranchNameFn: (slug) => `mission/${slug}`,
-      exitFn: (code) => calls.push(['exit', code]),
-      failFn: (msg) => calls.push(['fail', msg])
+      exitFn: (code) => calls.push(['exit', code] as const),
+      failFn: (msg) => calls.push(['fail', msg] as const)
     });
 
     assert.deepEqual(calls.find(c => c[0] === 'exit'), ['exit', 1]);
@@ -522,14 +524,14 @@ describe("diff adapter", () => {
   });
 
   test('node parallix diff fails when slug cannot be inferred', async (t) => {
-    const calls = [];
+    const calls: (["exit", string | number | null | undefined] | ["fail", string])[] = [];
 
     await diff.default([], {
-      gitFn: () => ({ status: 0 }),
-      spawnSyncFn: () => ({ status: 0 }),
+      gitFn: () => ({ signal: null, stdout: '', stderr: '',  status: 0 }),
+      spawnSyncFn: () => ({ stdout: '', stderr: '', signal: null,  status: 0 }),
       inferSlugFn: () => null,
-      exitFn: (code) => calls.push(['exit', code]),
-      failFn: (msg) => calls.push(['fail', msg])
+      exitFn: (code) => calls.push(['exit', code] as const),
+      failFn: (msg) => calls.push(['fail', msg] as const)
     });
 
     assert.deepEqual(calls.find(c => c[0] === 'exit'), ['exit', 1]);
@@ -537,16 +539,16 @@ describe("diff adapter", () => {
   });
 
   test('node parallix diff fails when primary branch detection fails', async (t) => {
-    const calls = [];
+    const calls: (["exit", string | number | null | undefined] | ["fail", string])[] = [];
 
     await diff.default(['task-1147'], {
-      gitFn: () => ({ status: 0 }),
-      spawnSyncFn: () => ({ status: 0 }),
+      gitFn: () => ({ signal: null, stdout: '', stderr: '',  status: 0 }),
+      spawnSyncFn: () => ({ stdout: '', stderr: '', signal: null,  status: 0 }),
       inferSlugFn: () => 'task-1147',
       resolveWorktreeFn: () => '/tmp/mission-task-1147',
       getPrimaryBranchFn: () => { throw new Error('detection failed'); },
-      exitFn: (code) => calls.push(['exit', code]),
-      failFn: (msg) => calls.push(['fail', msg])
+      exitFn: (code) => calls.push(['exit', code] as const),
+      failFn: (msg) => calls.push(['fail', msg] as const)
     });
 
     assert.deepEqual(calls.find(c => c[0] === 'exit'), ['exit', 1]);
@@ -554,7 +556,7 @@ describe("diff adapter", () => {
   });
 
   test('node parallix diff fails when no tool is configured', async (t) => {
-    const calls = [];
+    const calls: (["exit", string | number | null | undefined] | ["fail", string])[] = [];
 
     const gitFn = mockGit([
       [/config --get diff.tool/, { status: 1, stdout: '' }],
@@ -564,13 +566,13 @@ describe("diff adapter", () => {
 
     await diff.default(['task-1147'], {
       gitFn,
-      spawnSyncFn: () => ({ status: 0 }),
+      spawnSyncFn: () => ({ stdout: '', stderr: '', signal: null,  status: 0 }),
       inferSlugFn: () => 'task-1147',
       resolveWorktreeFn: () => '/tmp/mission-task-1147',
       getPrimaryBranchFn: () => 'main',
       missionBranchNameFn: (slug) => `mission/${slug}`,
-      exitFn: (code) => calls.push(['exit', code]),
-      failFn: (msg) => calls.push(['fail', msg])
+      exitFn: (code) => calls.push(['exit', code] as const),
+      failFn: (msg) => calls.push(['fail', msg] as const)
     });
 
     assert.deepEqual(calls.find(c => c[0] === 'exit'), ['exit', 1]);
@@ -578,19 +580,21 @@ describe("diff adapter", () => {
   });
 
   test('node parallix diff fails when mission worktree cannot be resolved', async (t) => {
-    const calls = [];
+    const calls: (["exit", string | number | null | undefined] | ["fail", string])[] = [];
 
     await diff.default(['task-1147'], {
-      gitFn: () => ({ status: 0 }),
-      spawnSyncFn: () => ({ status: 0 }),
+      gitFn: () => ({ signal: null, stdout: '', stderr: '',  status: 0 }),
+      spawnSyncFn: () => ({ stdout: '', stderr: '', signal: null,  status: 0 }),
       inferSlugFn: () => 'task-1147',
       resolveWorktreeFn: () => null,
       getPrimaryBranchFn: () => 'main',
-      exitFn: (code) => calls.push(['exit', code]),
-      failFn: (msg) => calls.push(['fail', msg])
+      exitFn: (code) => calls.push(['exit', code] as const),
+      failFn: (msg) => calls.push(['fail', msg] as const)
     });
 
     assert.deepEqual(calls.find(c => c[0] === 'exit'), ['exit', 1]);
+    assert.ok(calls.find(c => c[0] === 'fail')?.[1] != null);
+    assert.ok(calls.find(c => c[0] === 'fail')?.[1] != null);
     assert.ok(calls.find(c => c[0] === 'fail')?.[1].includes('Mission worktree not found'));
   });
 });
@@ -617,7 +621,7 @@ describe("mission path resolution", () => {
 
   const FAKE_ROOT = '/tmp/mission';
 
-  function withTempRepo(fn) {
+  function withTempRepo(fn: (_arg0: string) => void) {
     const previous = process.cwd();
     const root = fs.realpathSync(registeredMkdtemp('workflow-mission-utils-'));
     process.chdir(root);
@@ -634,7 +638,7 @@ describe("mission path resolution", () => {
   }
 
   test('findCheckpoints supports CP-* and CHECKPOINT_* naming', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       const missionDir = path.join(root, 'docs', 'missions', '2026', 'task-081');
       fs.mkdirSync(missionDir, { recursive: true });
       fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: Example\n');
@@ -679,7 +683,7 @@ describe("mission path resolution", () => {
       // 4. Inference from worktree registry
       mock.method(git, 'getCurrentBranch', () => 'detached');
       process.cwd = () => '/tmp/random-dir';
-      mock.method(git, 'git', (args) => {
+      mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
         if (args.includes('worktree') && args.includes('list')) {
           return {
             stdout: `worktree ${FAKE_ROOT}\nbranch refs/heads/master\n\nworktree /tmp/random-dir\nbranch refs/heads/mission/task-120\n\n`
@@ -732,7 +736,7 @@ describe("mission path resolution", () => {
   });
 
   test('findMissionDir and getMissionYear handle year rollover and prior-year missions', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       // Current year is 2026 (based on the session context)
       const currentYear = new Date().getFullYear().toString();
       const priorYear = (parseInt(currentYear) - 1).toString();
@@ -772,7 +776,7 @@ describe("mission path resolution", () => {
   });
 
   test('findMissionArea returns docs when MISSION.md is missing and parses verify gate when present', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       const missionDir = path.join(root, 'docs', 'missions', '2026', 'task-132');
       fs.mkdirSync(missionDir, { recursive: true });
       assert.equal(findMissionArea(missionDir), 'docs');
@@ -783,7 +787,7 @@ describe("mission path resolution", () => {
   });
 
   test('findMissionDir and missionTitle handle null/undefined slug without throwing', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       // findMissionDir(null) should return null, not throw
       const result1 = findMissionDir(null, root);
       assert.equal(result1, null, 'findMissionDir(null) should return null');
@@ -801,7 +805,7 @@ describe("mission path resolution", () => {
   });
 
   test('getMissionYear resolves year from a configured non-default baseDir (task-1209 SC1)', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       // Configure a non-default mission baseDir ('missions') with nested year dirs.
       fs.writeFileSync(
         path.join(root, 'workflow.config.json'),
@@ -816,7 +820,7 @@ describe("mission path resolution", () => {
   });
 
   test('getMissionYear ignores year dirs under the default path when baseDir is customized (task-1209 SC1)', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       fs.writeFileSync(
         path.join(root, 'workflow.config.json'),
         JSON.stringify({ product: {}, adapters: { missions: { baseDir: 'missions' } } })
@@ -830,7 +834,7 @@ describe("mission path resolution", () => {
   });
 
   test('getMissionYear handles non-directory baseDir without throwing', () => {
-    withTempRepo(root => {
+    withTempRepo((root) => {
       // Create baseDir as a file instead of a directory
       const baseDir = path.join(root, 'docs', 'missions');
       fs.mkdirSync(path.dirname(baseDir), { recursive: true });

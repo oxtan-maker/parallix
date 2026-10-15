@@ -19,10 +19,9 @@ interface StatsOptions {
   repo?: string;
   from?: string;
   to?: string;
-  deriveFixRoundsFn?: Function;
-  log?: Function;
-  error?: Function;
-  exit?: Function;
+  log?: (_message: string) => void;
+  error?: (_message: string) => void;
+  exit?: (_code: number) => void;
 }
 
 import type { MissionStore } from '../../../application/domain-ports.js';
@@ -35,7 +34,7 @@ import * as statsReport from './stats-report.js';
 import { resolveMeasurementStore } from '../../sqlite/measurement-store.js';
 import { resolveMissionClassification } from './mission-classification.js';
 import type { StatsWorkflowPort, StatsMissionFlow } from '../../../application/ports/cli-workflows.js';
-import type { MeasurementRecord, MeasurementStorePort } from '../../../application/measurement-ports.js';
+import type { MeasurementStorePort } from '../../../application/measurement-ports.js';
 import type { NormalizeStatsRowOptions, StatsRow } from '../../../application/services/statistics-row.js';
 import type { StatisticsRecordingPort } from '../../../application/ports/statistics-recording.js';
 import { StatsRecordingUseCase, telemetryToStatsFields, type StageStatsRequest } from '../../../application/stats-recording-use-case.js';
@@ -101,7 +100,7 @@ function getMeasurementStore(options: StatsOptions = {}): StatisticsMeasurementS
  * defaults ('' for text, '0' for numeric) so filtering, totals, grouping,
  * formatting, and missing-data behavior are unchanged by the cut-over.
  */
-function measurementToStatsRow(record: MeasurementRecord): StatsRow {
+function measurementToStatsRow(record: import('../../../application/ports/mission-measurements.js').UsageRecord): StatsRow {
   const numeric = (value: unknown) => (value === null || value === undefined ? '0' : String(value));
   // `pr_fix_rounds` is the one measurement that is genuinely nullable: an
   // unknown number of review-fix rounds is not a measured zero, and collapsing
@@ -219,7 +218,7 @@ const { formatStatsTable, renderWeeklyStatsReport, renderRangeStatsReport } = st
  * (ADR 0053 / architecture migration) rather than through the review modules' readers,
  * so no statistics path can reintroduce a file-backed round history.
  */
-async function loadMissionReview(slug: string, _rootDir = process.cwd(), missionStore: ReviewReadStore) {
+async function loadMissionReview(slug: string, _rootDir = process.cwd(), missionStore: ReviewReadStore | null | undefined) {
   if (!missionStore) {
     throw new Error(
       `loadMissionReview requires a MissionStore: the stats caller must supply the operator store so ${slug} is read from the authoritative Review aggregate. Store omission is an invariant error; there is no heuristic fallback.`,
@@ -233,7 +232,7 @@ async function loadMissionReview(slug: string, _rootDir = process.cwd(), mission
 }
 
 /** Derive the recorded implementer and fix-round count for one mission. */
-async function deriveImplementerAndFixRounds(slug: string, rootDir = process.cwd(), missionStore: ReviewReadStore) {
+async function deriveImplementerAndFixRounds(slug: string, rootDir = process.cwd(), missionStore: ReviewReadStore | null | undefined) {
   if (!missionStore) {
     throw new Error(
       `deriveImplementerAndFixRounds requires a MissionStore: the stats caller must supply the operator store so ${slug} is read from the authoritative Review aggregate. Store omission is an invariant error; there is no PR, Git, or backlog fallback.`,
@@ -246,7 +245,7 @@ async function deriveImplementerAndFixRounds(slug: string, rootDir = process.cwd
  * Resolve classification from the Mission aggregate used by integration.
  * Missing, unreadable, or unclassified state is an error.
  */
-async function resolveStoredMissionClassification(slug: string, missionStore: ReviewReadStore) {
+async function resolveStoredMissionClassification(slug: string, missionStore: ReviewReadStore | null | undefined) {
   if (!missionStore) {throw new Error('Mission store is required for statistics classification.');}
   let result;
   try {
@@ -303,7 +302,7 @@ export interface StatsRecordingOptions extends StatsOptions {
   telemetry?: StageStatsRequest['telemetry'];
   durationMinutes?: number;
   model?: string | null;
-  missionStore?: ReviewReadStore;
+  missionStore?: ReviewReadStore | null;
   readMissionFlow?: StatsReadBinding['readMissionFlow'];
 }
 
@@ -312,8 +311,8 @@ export function createStatsRecordingUseCase(options: StatsRecordingOptions): Sta
   const port: StatisticsRecordingPort = {
     get repositoryName() { return resolveStatsRepoName(rootDir); },
     readClassification: slug => resolveMissionClassification(slug, rootDir, undefined, options.configuration),
-    readStoredClassification: slug => resolveStoredMissionClassification(slug, options.missionStore!),
-    readReview: slug => loadMissionReview(slug, rootDir, options.missionStore!),
+    readStoredClassification: slug => resolveStoredMissionClassification(slug, options.missionStore),
+    readReview: slug => loadMissionReview(slug, rootDir, options.missionStore),
     readMeasurements: () => loadMeasurementRows(options).rows,
     readFixRoundHistory: slug => {
       const store = getMeasurementStore(options);

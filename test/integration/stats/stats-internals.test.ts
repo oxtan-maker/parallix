@@ -1,3 +1,8 @@
+import type { ReviewRound, ReviewEventRecord } from '../../../src/domain/review.js';
+import type { StatsRow } from '../../../src/application/services/statistics-row.js';
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { integrationContext } from '../../fixtures/integration-context.js';
+import { integrationServices } from '../../helpers/stub-integration-services.js';
 /**
  * Stats-command internals for the metrics slice (TASK-2622.13 consolidation).
  *
@@ -65,7 +70,7 @@ function createRepoFixture() {
 
 // Helper: seed a mission with reviewEvents (live source) but rounds[].decision = null.
 // This matches the actual live loop: events written, decision never set to 'changes-requested'.
-async function seedMissionWithEvents(home, slug, rootDir, reviewEvents, roundOverrides = {}) {
+async function seedMissionWithEvents(home: string, slug: string, rootDir: string, reviewEvents: readonly ReviewEventRecord[], roundOverrides: Partial<ReviewRound> = {}) {
   fs.mkdirSync(home, { recursive: true });
   const previousHome = process.env.PARALLIX_HOME;
   process.env.PARALLIX_HOME = home;
@@ -77,7 +82,7 @@ async function seedMissionWithEvents(home, slug, rootDir, reviewEvents, roundOve
 
   const store = new SqliteMissionStore(database);
 
-  const mission = {
+  const mission = fixtureMission(slug, {
     id: missionId(slug),
     repositoryId: repositoryId(rootDir),
     title: `Mission ${slug}`,
@@ -89,7 +94,6 @@ async function seedMissionWithEvents(home, slug, rootDir, reviewEvents, roundOve
     netEngineeringLines: null,
     closedAt: null,
     externalTaskRef: null,
-    intakeTrace: null,
     review: {
       rounds: [{
         number: 1,
@@ -112,9 +116,7 @@ async function seedMissionWithEvents(home, slug, rootDir, reviewEvents, roundOve
       stageLaunches: [],
       reviewEvents, // LIVE SOURCE: events written by persistEventInStore
     },
-  };
-
-  // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
+  });
   await store.save(mission, null);
 
   // Seed import history to avoid re-import conflicts
@@ -141,7 +143,7 @@ test('deriveImplementerAndFixRounds counts fix rounds from reviewEvents (task-23
 
   // One reviewer_outcome with verdict 'request-changes' = 1 fix round.
   // This is what the live loop writes via persistEventInStore.
-  const reviewEvents = [
+  const reviewEvents: ReviewEventRecord[] = [
     {
       position: 0,
       eventType: 'reviewer_findings',
@@ -204,7 +206,7 @@ test('deriveImplementerAndFixRounds counts two fix rounds from reviewEvents (tas
   const root = createRepoFixture();
 
   // Two reviewer_outcome events with verdict 'request-changes' = 2 fix rounds.
-  const reviewEvents = [
+  const reviewEvents: ReviewEventRecord[] = [
     {
       position: 0,
       eventType: 'reviewer_outcome',
@@ -275,7 +277,7 @@ test('deriveImplementerAndFixRounds returns 0 for approved-first-time mission (t
   const root = createRepoFixture();
 
   // One reviewer_outcome with verdict 'approve' = 0 fix rounds.
-  const reviewEvents = [
+  const reviewEvents: ReviewEventRecord[] = [
     {
       position: 0,
       eventType: 'reviewer_outcome',
@@ -318,7 +320,7 @@ test('deriveImplementerAndFixRounds returns unknown when no reviewEvents and no 
   const root = createRepoFixture();
 
   // No reviewEvents, no decision on rounds — count cannot be determined.
-  const reviewEvents = [];
+  const reviewEvents: never[] = [];
 
   const restoreHome = await seedMissionWithEvents(
     path.join(root, 'parallix-home'),
@@ -422,12 +424,12 @@ async function createFixture(prefix: string): Promise<Fixture> {
   };
 }
 
-function reviewerOutcome(position: number, roundNumber: number, verdict: string, createdAt: string) {
+function reviewerOutcome(position: number, roundNumber: number, verdict: string, createdAt: string): ReviewEventRecord {
   return {
     position,
     eventType: 'reviewer_outcome',
     roundNumber,
-    phase: 'reviewing',
+    phase: 'reviewing' as const,
     actor: reviewer,
     content: `round ${roundNumber} ${verdict}`,
     disposition: null,
@@ -457,7 +459,7 @@ test('live stats workflow adapter derives authoritative implementer and reviewFi
     '---\nid: TASK-2378-STATS\nlabels: [ai_sdlc]\nassignee: [codex]\nstatus: done\n---\nReview round 7\n',
   );
 
-  const mission = {
+  const mission = fixtureMission(slug, {
     id: missionId(slug),
     repositoryId: repo,
     title: 'Stats adapter authority',
@@ -469,7 +471,6 @@ test('live stats workflow adapter derives authoritative implementer and reviewFi
     netEngineeringLines: null,
     closedAt: null,
     externalTaskRef: null,
-    intakeTrace: null,
     review: {
       rounds: [{
         number: 1,
@@ -492,8 +493,7 @@ test('live stats workflow adapter derives authoritative implementer and reviewFi
         reviewerOutcome(2, 3, 'approve', '2026-01-01T12:00:00Z'),
       ],
     },
-  };
-  // @ts-expect-error -- partial mission for test seed
+  });
   await fixture.store.save(mission, null);
 
   try {
@@ -531,7 +531,7 @@ test('failed approval boundary transition surfaces and blocks Backlog promotion 
     '2026-01-01T10:00:00Z',
     reviewerEligibility,
   );
-  const mission = {
+  const mission = fixtureMission(slug, {
     id: missionId(slug),
     repositoryId: repo,
     title: 'Approval boundary failure',
@@ -543,9 +543,8 @@ test('failed approval boundary transition surfaces and blocks Backlog promotion 
     netEngineeringLines: null,
     closedAt: null,
     externalTaskRef: null,
-    intakeTrace: null,
     review,
-  };
+  });
   await fixture.store.save(mission, null);
 
   const failingLifecycle = {
@@ -560,21 +559,21 @@ test('failed approval boundary transition surfaces and blocks Backlog promotion 
   const errors: string[] = [];
   const exitCodes: number[] = [];
 
-  const persistence = bindReviewPersistence(fixture.store, failingLifecycle as never);
+  const persistence = bindReviewPersistence(fixture.store, failingLifecycle);
 
   try {
     await submitReviewRound(slug, 'approve', 'Looks good', {
       worktree: fixture.root,
       log: () => {},
       error: (message: string) => { errors.push(message); },
-      exit: ((code: number) => { exitCodes.push(code); }) as never,
-      isReviewProviderEnabledFn: () => false,
-      readReviewStateFn: persistence.readReviewState as never,
-      writeReviewStateFn: persistence.writeReviewState as never,
+      exit: ((code: number) => { exitCodes.push(code); }),
+      isForgejoReviewEnabledFn: () => false,
+      readReviewStateFn: persistence.readReviewState,
+      writeReviewStateFn: persistence.writeReviewState,
       transitionTaskFn: (async (_slug: string, status: string) => {
         backlogTransitions.push(status);
-        return { ok: true };
-      }) as never,
+        return true;
+      }),
       missionStore: fixture.store,
     });
   } catch (error) {
@@ -635,7 +634,7 @@ test('R5: human px review approval persists ReviewerDecision and lands integrati
     startedAt,
     reviewerEligibility,
   );
-  const mission = {
+  const mission = fixtureMission(slug, {
     id: missionId(slug),
     repositoryId: repo,
     title: 'R5 human override',
@@ -647,9 +646,8 @@ test('R5: human px review approval persists ReviewerDecision and lands integrati
     netEngineeringLines: null,
     closedAt: null,
     externalTaskRef: null,
-    intakeTrace: null,
     review,
-  };
+  });
   await fixture.store.save(mission, null);
 
   const lifecycle = new MissionLifecycleService(fixture.store);
@@ -666,14 +664,14 @@ test('R5: human px review approval persists ReviewerDecision and lands integrati
       worktree: fixture.root,
       log: () => {},
       error: (message: string) => { errors.push(message); },
-      exit: ((code: number) => { exitCodes.push(code); }) as never,
-      isReviewProviderEnabledFn: () => false,
-      readReviewStateFn: persistence.readReviewState as never,
-      writeReviewStateFn: persistence.writeReviewState as never,
+      exit: ((code: number) => { exitCodes.push(code); }),
+      isForgejoReviewEnabledFn: () => false,
+      readReviewStateFn: persistence.readReviewState,
+      writeReviewStateFn: persistence.writeReviewState,
       transitionTaskFn: (async (_s: string, status: string) => {
         backlogTransitions.push(status);
-        return { ok: true };
-      }) as never,
+        return true;
+      }),
       missionStore: fixture.store,
     });
 
@@ -710,7 +708,7 @@ test('R5: human px review approval persists ReviewerDecision and lands integrati
 
     // SC07: px integrate then proceeds through the existing recovery path
     // without re-running the approval — no second approval event.
-    const recovery = await recoverMissionForIntegration({ slug }, { missionServices: { store: fixture.store, lifecycle } });
+    const recovery = await recoverMissionForIntegration(integrationContext({ slug }), { missionServices: integrationServices({ store: fixture.store, lifecycle }) });
     assert.deepEqual(recovery, { recovered: false, status: 'integration' });
     const approveEvents = await fixture.database.query<{ trigger: string }>(
       "SELECT trigger FROM board_lane_events WHERE mission_id = ? AND trigger = 'approve'",
@@ -724,10 +722,10 @@ test('R5: human px review approval persists ReviewerDecision and lands integrati
 // The helpers this file exercises hang off the default export object rather
 // than the module's named exports, so this must be the default import.
 
-function summarizeAgentWindow(rows, window, options = {}) {
+function summarizeAgentWindow(rows: readonly (StatsRow & { completedForTest?: string })[], window: Parameters<typeof stats._internals.summarizeAgentWindow>[1], options: NonNullable<Parameters<typeof stats._internals.summarizeAgentWindow>[2]> = {}) {
   const completedMissionKeys = new Set(rows.filter(row => row.completedForTest === 'yes')
     .map(row => `${String(row.repo || '')}::${String(row.mission).trim().toLowerCase()}`));
-  return (stats as any)._internals.summarizeAgentWindow(rows, window, { ...options, completedMissionKeys });
+  return (stats)._internals.summarizeAgentWindow(rows, window, { ...options, completedMissionKeys });
 }
 
 // ---------------------------------------------------------------------------
@@ -797,8 +795,8 @@ test('task-2348: mission with two implementers credits reported implementer not 
   const result = summarizeAgentWindow(rows, window);
   // Mission should be grouped under 'custom' (the reported implementer),
   // not 'claude-opus-5' (the earlier implementer's model).
-  const customGroup = result.find(g => g.implementer === 'custom');
-  const claudeGroup = result.find(g => g.implementer === 'claude-opus-5');
+  const customGroup = result.find((g) => g.implementer === 'custom');
+  const claudeGroup = result.find((g) => g.implementer === 'claude-opus-5');
 
   assert.ok(customGroup, 'mission should be grouped under "custom" (reported implementer)');
   assert.equal(customGroup.missions, 1, 'custom should have exactly 1 mission');
@@ -821,7 +819,7 @@ test('task-2348: review-aggregate pr_fix_rounds counts only reported implementer
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(root, 'docs', 'missions', '2026', 'task-2348-b'), { recursive: true });
 
-  const sentBackTo = (implementer, at) => ({
+  const sentBackTo = (implementer: string, at: string): Partial<ReviewRound> => ({
     decision: {
       kind: 'changes-requested',
       decidedAt: at,
@@ -829,7 +827,7 @@ test('task-2348: review-aggregate pr_fix_rounds counts only reported implementer
       findings: [{ id: reviewFindingId('F1'), summary: 'sent back', location: null }],
     },
     disposition: 'REQUEST_CHANGES',
-    phase: 'fixing',
+    phase: 'fixing' as const,
     implementer: agentFamily(implementer),
   });
 

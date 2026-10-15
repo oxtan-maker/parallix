@@ -5,10 +5,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-import { violationsFor, parsePackReport } from '../../../scripts/package-content-audit.ts';
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-import { artifactDifferences, compareFileLists } from '../../../scripts/verify-reproducible-build.ts';
+import { violationsFor, parsePackReport } from '../../../scripts/package-content-audit.js';
+import { artifactDifferences, compareFileLists } from '../../../scripts/verify-reproducible-build.js';
 const VALID_PACKAGE_FILES = [
   'build/asset-manifest.json',
   'build/config/agents.json',

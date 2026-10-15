@@ -19,6 +19,12 @@ export interface GoalCheckRow {
   readonly repairedGate?: string;
   /** All integration gates previously repaired by this criterion; retained across later updates. */
   readonly repairedGates?: readonly string[];
+  /**
+   * Checkpoint this row was copied from when a repair incident opened. Carried
+   * rows keep accepted coverage visible but are never fresh repair proof; a
+   * recorded row for the same criterion replaces it.
+   */
+  readonly carriedFrom?: string;
 }
 
 export interface CheckpointData {
@@ -48,6 +54,15 @@ export interface CheckpointData {
     readonly evidenceRecorded: boolean;
     readonly verified: boolean;
     readonly blocker?: InvalidContractBlocker;
+    /**
+     * A human-only contract stop an operator acknowledged and cleared by an
+     * explicit `px active` (TASK-2756). Retained with its proposal so the prior
+     * stop and who cleared it stay readable after the resume.
+     */
+    readonly acknowledgedBlocker?: InvalidContractBlocker;
+    /** The command that carried the operator authority for the acknowledgment. */
+    readonly acknowledgedBy?: string;
+    readonly acknowledgedAt?: string;
   };
   readonly goalCheck: readonly GoalCheckRow[];
   /** Operator guidance rendered in checkpoint and board views; never executed. */
@@ -170,11 +185,31 @@ export function retainPriorGoalCheckRows(
   }
   const priorByCriterion = new Map(priorRows.map((row) => [row.criterionId ?? row.criterion, row] as const));
   // New rows overwrite a shared criterion in place and append criteria the
-  // earlier evidence did not cover, preserving order.
+  // earlier evidence did not cover, preserving order. A prior row without a
+  // criterion identity (legacy or carried) still matches by exact text.
   for (const row of newRows) {
-    priorByCriterion.set(row.criterionId ?? row.criterion, row);
+    const key = row.criterionId ?? row.criterion;
+    const textMatch = priorRows.find((prior) => prior.criterion === row.criterion);
+    priorByCriterion.set(priorByCriterion.has(key) || !textMatch ? key : textMatch.criterionId ?? textMatch.criterion, row);
   }
   return [...priorByCriterion.values()];
+}
+
+/**
+ * Rows a newly opened repair incident starts from: every row of the
+ * highest-numbered evidence-bearing checkpoint that is not a repair or is a
+ * verified one, each naming that checkpoint as its source. Empty plans and
+ * unverified repairs are skipped; empty when no checkpoint qualifies.
+ */
+export function carriedGoalCheckRows(checkpoints: readonly CheckpointData[]): GoalCheckRow[] {
+  const source = byNumber(checkpoints.filter((checkpoint) => checkpoint.goalCheck.length > 0
+    && (!checkpoint.repair || checkpoint.repair.verified))).at(-1);
+  return source ? source.goalCheck.map((row) => ({ ...row, carriedFrom: source.name })) : [];
+}
+
+/** Rows recorded for the checkpoint itself rather than carried from an earlier one. */
+export function freshGoalCheckRows(rows: readonly GoalCheckRow[]): readonly GoalCheckRow[] {
+  return rows.filter((row) => row.carriedFrom === undefined);
 }
 
 /**

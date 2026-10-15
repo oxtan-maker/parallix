@@ -16,11 +16,11 @@ const INSTALLER = path.join(SCRIPT_DIR, 'install-workflow.sh');
 // global `px` runner). When it is absent we skip these host-coupled tests instead of
 // failing; in the monorepo (where the script exists) they still run unchanged.
 const INSTALLER_PRESENT = fs.existsSync(INSTALLER);
-const hostTest = (name, fn) => test(name, {
+const hostTest = (name: string|undefined, fn: test.TestFn|undefined) => test(name, {
   skip: INSTALLER_PRESENT ? false : 'requires monorepo scripts/install-workflow.sh (absent in standalone parallix — task-1302)'
 }, fn);
 
-function runInstaller(args, options = {}) {
+function runInstaller(args: string[], options = {}) {
   return spawnSync('bash', [INSTALLER, ...args], {
     timeout: 30000,
     env: { ...process.env },
@@ -28,7 +28,7 @@ function runInstaller(args, options = {}) {
   });
 }
 
-function cleanup(dir) {
+function cleanup(dir: fs.PathLike) {
   if (fs.existsSync(dir)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }

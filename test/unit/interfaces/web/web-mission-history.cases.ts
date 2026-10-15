@@ -35,9 +35,10 @@ function page(from: number, to: number, text: string, extra: Record<string, unkn
 
 async function render(route: Route, context: { mock: { method: (..._args: never[]) => unknown } }, element?: (_close: () => void) => React.ReactElement) {
   const window = new Window();
-  const previous = { window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch, IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT };
+  const reactGlobal = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const previous = { window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch, IS_REACT_ACT_ENVIRONMENT: reactGlobal.IS_REACT_ACT_ENVIRONMENT };
   Object.assign(globalThis, { window, document: window.document });
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  reactGlobal.IS_REACT_ACT_ENVIRONMENT = true;
   const reads: Array<{ path: string; init: RequestInit | undefined }> = [];
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input), 'http://board.test');
@@ -52,7 +53,7 @@ async function render(route: Route, context: { mock: { method: (..._args: never[
   let closed = 0;
   const mount = window.document.createElement('div');
   window.document.body.append(mount);
-  const root = createRoot(mount);
+  const root = createRoot(mount as unknown as Element);
   await act(async () => { root.render(element ? element(() => { closed += 1; }) : React.createElement(MissionHistory, { missionId: MISSION, onClose: () => { closed += 1; } })); });
   const settle = async () => { for (let i = 0; i < 4; i += 1) { await act(async () => { await new Promise<void>(resolve => setTimeout(resolve, 0)); }); } };
   await settle();

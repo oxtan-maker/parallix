@@ -36,6 +36,14 @@ validates its declared version, runs the package lifecycle, publishes through
 npm Trusted Publishing with provenance, and creates the matching tag and GitHub
 Release. No dist-tag management beyond `latest` is in scope.
 
+Dependabot-authored PRs merged into `main` run the same verification but do not
+trigger npm publication, a version tag, or a GitHub Release. The merged PR author
+determines this policy even when a human performs the merge. Their dependency
+updates are included in the next eligible verified release. Failure to resolve
+PR provenance blocks release without suppressing verification. The existing
+publication-proof job supplies both verification proof and release eligibility
+to the release job; the author lookup grants no publishing permissions.
+
 ### Authentication requirement
 
 Publishing uses npm Trusted Publishing through the GitHub Actions OIDC identity.

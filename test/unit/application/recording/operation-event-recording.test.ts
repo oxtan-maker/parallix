@@ -69,7 +69,8 @@ test('recorded lifecycle events reach operational_history and the operation-log 
 test('a lifecycle operation that changes no lane still records its own entry', async () => {
   const history = new MemoryHistoryRepo();
   await new OperationEventRecorder(history).append({
-    missionId: MISSION, repositoryId: repositoryId('parallix'), trigger: 'checkpoint' as never, toStatus: 'CP-3',
+    // @ts-expect-error Legacy checkpoint triggers remain serializable even though they are not lane commands.
+    missionId: MISSION, repositoryId: repositoryId('parallix'), trigger: 'checkpoint', toStatus: 'CP-3',
     agent: 'codex', occurredAt: '2026-08-02T09:00:00.000Z',
   });
 

@@ -22,7 +22,7 @@ describe('px shell-init function', () => {
 
 
   // Builds a fake `px` executable that prints the given transition signal.
-  function makeFakePx({ signalPath, exitCode = 0, signal = 'next', messages = [] }) {
+  function makeFakePx({ signalPath, exitCode = 0, signal = 'next', messages = [] }: { signalPath: string; exitCode?: number; signal?: string; messages?: string[] }) {
     const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'px-shell-init-bin-'));
     const pxPath = path.join(fakeBin, 'px');
     const message = signal === 'working-directory'
@@ -40,7 +40,7 @@ describe('px shell-init function', () => {
   // tests never depend on a generated tree that a concurrent integration test
   // could rebuild mid-run.  Distribution execution of the shipped entry point is
   // covered by the built-px shebang cases in this file (task-1390).
-  function writeShellInit(fakeBin) {
+  function writeShellInit(fakeBin: string) {
     const initPath = path.join(fakeBin, 'shell-init.sh');
     fs.writeFileSync(initPath, shellInit('bash'));
     return initPath;
@@ -49,7 +49,7 @@ describe('px shell-init function', () => {
   // PATH must be set inside the script: a login shell (`-l`) reloads the profile
   // and would otherwise clobber a PATH passed through the environment, hiding the
   // fake `px`.
-  function runBash(scriptLines, fakeBin) {
+  function runBash(scriptLines: string[], fakeBin: string) {
     const script = [
       `export PATH=${JSON.stringify(`${fakeBin}:${process.env.PATH}`)}`,
       ...scriptLines,
@@ -120,7 +120,7 @@ describe('px shell-init function', () => {
   test('px function ignores a routine agent-launch working-directory log', async () => {
     const target = fs.mkdtempSync(path.join(os.tmpdir(), 'px-shell-init-agent-cwd-'));
     const startDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'px-shell-init-start-'));
-    const launchLogs = [];
+    const launchLogs: string[] = [];
     await startAgent('review', {
       agent: 'claude',
       prompt: 'Test launch logging.',

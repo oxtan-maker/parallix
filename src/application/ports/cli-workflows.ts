@@ -42,6 +42,8 @@ export interface StatusAgentEntry {
 
 /** Review round from mission card history. */
 export interface StatusReviewRound {
+  readonly startRevision?: string;
+  readonly decidedRevision?: string | null;
   readonly integrationRepairAssessment?: import('../../domain/integration-approval-restoration.js').IntegrationRepairAssessment;
   /** Round number. */
   readonly number: number;
@@ -52,7 +54,7 @@ export interface StatusReviewRound {
   /** Disposition verdict. */
   readonly disposition: string;
   /** Review comment. */
-  readonly comment?: string;
+  readonly comment?: string | null;
   /** Finding summaries. */
   readonly findingSummaries: readonly string[];
   /** Fixes applied. */
@@ -76,15 +78,15 @@ export interface StatusMissionData {
   /** The Mission aggregate's closure timestamp, including historical imports. */
   readonly closedAt?: string | null;
   /** Last checkpoint name (e.g. CP-2.md). */
-  readonly checkpoint?: string;
+  readonly checkpoint?: string | null;
   /** Last checkpoint description. */
-  readonly checkpointDescription?: string;
+  readonly checkpointDescription?: string | null;
   /** Current review phase. */
-  readonly reviewPhase?: string;
+  readonly reviewPhase?: string | null;
   /** Current review round. */
-  readonly reviewRound?: number;
+  readonly reviewRound?: number | null;
   /** Current review disposition. */
-  readonly reviewDisposition?: string;
+  readonly reviewDisposition?: string | null;
   /** A local self-review awaits an external formal approval. */
   readonly approvalOwed?: boolean;
   /** Whether the effective approval still covers what the branch would land (TASK-2555). */
@@ -165,8 +167,9 @@ export interface StatusGoalCheckRow {
   readonly criterion: string;
   readonly criterionId?: string | null;
   readonly evidence: string;
+  /** Source checkpoint of a row carried into a repair checkpoint; absent for freshly recorded rows. */
+  readonly carriedFrom?: string;
 }
-
 
 /** The recorded mission brief: what this mission is for. */
 export interface StatusBrief {
@@ -292,6 +295,9 @@ export interface StatsMissionFlow {
   readonly implementer?: string | null;
 }
 
+/** Source material for an adhoc draft intake. */
+export interface DraftSyntheticTask { title: string; intent: string; id: string; source: string }
+
 /** Context passed between draft workflow steps.
  * Carries state from preflight through commit safety. */
 export interface DraftWorkflowContext {
@@ -318,7 +324,7 @@ export interface DraftWorkflowContext {
   /** Recorded base branch (null if primary/detached HEAD). */
   readonly recordedBase: string | null;
   /** Synthetic task info (for adhoc missions). */
-  readonly syntheticTask: unknown;
+  readonly syntheticTask: DraftSyntheticTask | null;
   /** Selected agent family. */
   readonly agent: string;
   /** Actual agent family (may differ from selected). */
@@ -326,15 +332,22 @@ export interface DraftWorkflowContext {
   /** Agent launch result. */
   readonly agentResult: unknown;
   /** Exit function. */
-  readonly exitFn: (_code?: number) => never;
+  readonly exitFn: (_code?: number) => void;
   /** Log function. */
   readonly logFn: (_msg: string) => void;
   /** Error function. */
   readonly errorFn: (_msg: string) => void;
   /** Mission services factory. */
-  readonly missionServicesFn: Function;
+  readonly missionServicesFn: (_rootDir: string) => Promise<DraftMissionServices>;
   /** Additional options passed through. */
   readonly options: Record<string, unknown>;
+}
+
+export interface DraftMissionServices {
+  readonly repositoryId: import('../../domain/repository.js').RepositoryId;
+  readonly store: Pick<import('../domain-ports.js').MissionStore, 'load'>;
+  readonly intake: Pick<import('../mission-intake-service.js').MissionIntakeService, 'execute'>;
+  readonly lifecycle: Pick<import('../mission-lifecycle-service.js').MissionLifecycleService, 'transition'>;
 }
 
 export interface DraftWorkflowPort {

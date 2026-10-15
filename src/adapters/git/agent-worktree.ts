@@ -83,14 +83,14 @@ function cacheMainWorktree(commonDir: string, value: string | null) {
   return value;
 }
 
-function listWorktreeLines(cwd: string, warn: Function): string[] | null {
+function listWorktreeLines(cwd: string, warn: (_message: string) => void): string[] | null {
   const result = spawnSync('git', ['-C', cwd, 'worktree', 'list', '--porcelain'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
   if (result.status === 0) { return result.stdout.split('\n'); }
   warn(worktreeLookupWarning(`git exited with status ${result.status}`));
   return null;
 }
 
-function getMainWorktreePath(options: {cwd?: string, warn?: Function} = {}) {
+function getMainWorktreePath(options: {cwd?: string, warn?: (_message: string) => void} = {}) {
   const { cwd = process.cwd(), warn = fmt.log.warn } = options;
   try {
     const commonDir = getGitPath(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
@@ -108,7 +108,7 @@ function getMainWorktreePath(options: {cwd?: string, warn?: Function} = {}) {
     if (mainWorktreePath) { return cacheMainWorktree(commonDir, mainWorktreePath); }
     return cacheMainWorktree(commonDir, fallbackMainWorktree(lines, cwd));
   } catch (err) {
-    const e: Error & {code?: string} = (err as any);
+    const e: { code?: string; message?: string } = (err as { code?: string; message?: string });
     const detail = e && (e.code || e.message) ? (e.code || e.message) : 'unknown error';
     warn(worktreeLookupWarning(detail));
     return null;

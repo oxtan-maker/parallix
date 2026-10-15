@@ -231,13 +231,15 @@ test('an integration-repair round reopened by a revoked approval is not approvab
 function submitOptions(fixture: Fixture, exits: number[], errors: string[]) {
   return {
     worktree: tempDir(),
+    // These command fixtures exercise aggregate authority without a Git checkout.
+    revision: 'rev-2',
     isReviewProviderEnabledFn: () => false,
     missionStore: fixture.store,
     lifecycleService: fixture.lifecycle,
     readReviewStateFn: () => null,
-    writeReviewStateFn: (async () => {}) as never,
-    transitionTaskFn: (async () => ({ ok: true })) as never,
-    exit: ((code: number) => { exits.push(code); }) as never,
+    writeReviewStateFn: (async () => ({ outcome: 'committed' as const })),
+    transitionTaskFn: async () => true,
+    exit: ((code: number) => { exits.push(code); }),
     log: () => {},
     error: (message: string) => { errors.push(message); },
   };

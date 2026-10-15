@@ -1,3 +1,9 @@
+import { missionVersion as fixtureVersion } from '../../../src/application/domain-ports.js';
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { integrationBounceSeams } from '../../helpers/integration-bounce-seams.js';
+import { integrationServices } from '../../helpers/stub-integration-services.js';
+import { integrationContext } from '../../fixtures/integration-context.js';
+import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflow-ports.js';
 // TASK-2627: `git commit --only` must name both sides of squash-staged renames.
 // This drives production squashAndLand over a throwaway Git repository.
 import test from 'node:test';
@@ -51,7 +57,7 @@ async function land(
 ): Promise<void> {
   let stagedTreeRead = false;
   let hookRuns = 0;
-  const { squashAndLand } = createSquashLanding({
+  const { squashAndLand } = createSquashLanding(stubIntegrateWorkflowPorts({
     git: {
       git: (args: string[]) => {
         if (!stagedTreeRead && args.includes('ls-files') && args.includes('-s')) {
@@ -59,7 +65,7 @@ async function land(
           beforeStagedTreeRead?.();
         }
         if (failCleanup && args.includes('reset') && args.includes('--merge')) {
-          return { status: 1, stdout: '', stderr: 'simulated cleanup failure' };
+          return { signal: null,  status: 1, stdout: '', stderr: 'simulated cleanup failure' };
         }
         return gitRun(args);
       },
@@ -72,7 +78,7 @@ async function land(
     gates: { isIntendedPayloadAtHead: () => false, runStagedTierGuards: () => { duringGuard?.(); return tierGuards; } },
     landing: {
       createAbort: () => new Error('abort'),
-      classifyHookFailure: () => ({ isHookFailure: false }),
+      classifyHookFailure: () => ({ isHookFailure: false, hookType: null }),
       persistLandedIntegrationOrAbort: async () => {},
       closeLandedIntegrationOrAbort: async () => {},
       recordPostIntegrationStatsOrAbort: async () => {},
@@ -80,13 +86,13 @@ async function land(
       updateGraphifyRepository: () => {},
       runPostIntegrateHookOrAbort: () => { hookRuns++; },
     },
-    verification: { formatVerificationCommand: () => 'verify', captureVerifiedTreeProof: () => { throw new Error('Implicit post-squash verification is forbidden'); }, assertVerifiedTreeProof: () => { throw new Error('Obsolete publication proof must not gate local landing'); } },
-  } as never, { promoteTaskForIntegrationIfNeeded: async () => {} });
+    verification: { formatVerificationCommand: () => 'verify' },
+  }), { promoteTaskForIntegrationIfNeeded: async () => {} });
   await squashAndLand({
-    slug: 'task-2627', context: { area: 'all' },
-    missionServices: { store: { load: async () => ({ kind: 'found', mission: { status: 'integration' } }) } },
-    baseWorktree: root, baseBranch: 'main', seams: {}, state: { temporaryStash: null, nextActionMessage: null },
-  } as never, { branch: 'mission/task-2627', summary: 'land', landedFromSha: 'base', mainTaskFile: path.join(root, 'absent-task.md') });
+    slug: 'task-2627', context: integrationContext({ area: 'all' }),
+    missionServices: integrationServices({ store: { load: async () => ({ kind: 'found' as const, mission: fixtureMission('task-2627', { status: 'integration' }), version: fixtureVersion(1) }) } }),
+    baseWorktree: root, baseBranch: 'main', seams: integrationBounceSeams(), state: { temporaryStash: null, nextActionMessage: null },
+  }, { branch: 'mission/task-2627', summary: 'land', landedFromSha: 'base', mainTaskFile: path.join(root, 'absent-task.md') });
   assert.equal(hookRuns, 1, 'the configured post-squash hook still runs exactly once (TASK-2715)');
 }
 

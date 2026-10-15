@@ -1,3 +1,4 @@
+import { fixtureMission as typedMissionFixture } from '../../fixtures/mission-builders.js';
 // Historical regression provenance: TASK-2521.04.
 /**
  * The imported trace's commit pin, against a real Git checkout (TASK-2521.04).
@@ -138,9 +139,7 @@ describe("legacy import trace pins its commit", () => {
       '---\nid: TASK-9007\ntitle: Future task\nstatus: backlog\n---\n\nNot started.\n');
     fs.writeFileSync(path.join(root, 'backlog/tasks/task-9008.md'),
       '---\nid: TASK-9008\ntitle: Pending intake\nstatus: backlog\n---\n');
-    store.missions.set('task-9008', { mission: {
-      id: 'task-9008', status: 'refined', externalTaskRef: null,
-    } as unknown as Mission, version: missionVersion(1) });
+    store.missions.set('task-9008', { mission: typedMissionFixture(String('task-9008'), { status: 'refined', externalTaskRef: null}), version: missionVersion(1) });
     run('add', '.'); run('commit', '--quiet', '-m', 'updated');
     const revision = run('rev-parse', 'HEAD').trim();
     await importLegacyMissions(services(store), { rootDir: root, dryRun: true, existingOnly: true });

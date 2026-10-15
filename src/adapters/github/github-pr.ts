@@ -9,6 +9,11 @@ export interface ExpectedGithubPr {
 
 export type GithubPr = { number: number; state: string; merged?: boolean; mergedAt?: string | null; merge_commit_sha?: string | null; mergeCommit?: { oid?: string | null } | null; head: { ref: string; sha: string }; base: { ref: string } };
 
+/** The fields requested from gh pr view/create, before adapter normalization. */
+type GithubCliPr = Pick<GithubPr, 'number' | 'state' | 'mergedAt' | 'mergeCommit'> & {
+  headRefName: string; headRefOid: string; baseRefName: string;
+};
+
 export type GithubPrObservation =
   | { kind: 'pending'; number: number; base: string }
   | { kind: 'merged'; number: number; base: string; resultingSha: string }
@@ -32,8 +37,8 @@ export function observeGithubPr(expected: ExpectedGithubPr, read: () => GithubPr
       return { kind: 'unexpected-tree', number: pr.number, base: pr.base.ref };
     }
     return { kind: 'merged', number: pr.number, base: pr.base.ref, resultingSha };
-  } catch (error: any) {
-    return { kind: 'unavailable', error: error?.message || String(error) };
+  } catch (error) {
+    return { kind: 'unavailable', error: (error as { message?: string } | null)?.message || String(error) };
   }
 }
 
@@ -55,22 +60,22 @@ export function submitOrObserveGithubPr(expected: ExpectedGithubPr, rootDir: str
   try {
     const repository = repo(rootDir);
     run('git', ['push', 'origin', `HEAD:refs/heads/${expected.head}`], rootDir);
-    let pr: GithubPr;
+    let pr: GithubCliPr;
     try {
-      pr = JSON.parse(run('gh', ['pr', 'view', expected.head, '--repo', repository, '--json', 'number,state,mergedAt,mergeCommit,headRefName,headRefOid,baseRefName'], rootDir));
+      pr = JSON.parse(run('gh', ['pr', 'view', expected.head, '--repo', repository, '--json', 'number,state,mergedAt,mergeCommit,headRefName,headRefOid,baseRefName'], rootDir)) as GithubCliPr;
     } catch {
-      pr = JSON.parse(run('gh', ['pr', 'create', '--repo', repository, '--head', expected.head, '--base', expected.base, '--fill', '--json', 'number,state,mergedAt,mergeCommit,headRefName,headRefOid,baseRefName'], rootDir));
+      pr = JSON.parse(run('gh', ['pr', 'create', '--repo', repository, '--head', expected.head, '--base', expected.base, '--fill', '--json', 'number,state,mergedAt,mergeCommit,headRefName,headRefOid,baseRefName'], rootDir)) as GithubCliPr;
     }
-    const normalized = {
+    const normalized: GithubPr = {
       number: pr.number, state: pr.state, mergedAt: pr.mergedAt, mergeCommit: pr.mergeCommit,
-      head: { ref: (pr as any).headRefName, sha: (pr as any).headRefOid }, base: { ref: (pr as any).baseRefName },
-    } as GithubPr;
+      head: { ref: pr.headRefName, sha: pr.headRefOid }, base: { ref: pr.baseRefName },
+    };
     return observeGithubPr(expected, () => normalized, (candidate, resulting) => {
       const candidateTree = run('gh', ['api', `repos/${repository}/git/commits/${candidate}`, '--jq', '.tree.sha'], rootDir);
       const resultingTree = run('gh', ['api', `repos/${repository}/git/commits/${resulting}`, '--jq', '.tree.sha'], rootDir);
       return candidateTree === resultingTree;
     });
-  } catch (error: any) {
-    return { kind: 'unavailable', error: error?.message || String(error) };
+  } catch (error) {
+    return { kind: 'unavailable', error: (error as { message?: string } | null)?.message || String(error) };
   }
 }

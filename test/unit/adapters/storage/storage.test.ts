@@ -132,8 +132,7 @@ test('resolveParallixHome uses ~/.parallix for unsupported platforms', () => {
 // TASK-2322.08 removed `storage.resolveStatsPath`: statistics live in the
 // measurement database, and no runtime path resolves <PARALLIX_HOME>/stats.csv.
 test('storage exposes no stats.csv resolver after the measurement cut-over', () => {
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-  assert.equal(storage.resolveStatsPath, undefined);
+  assert.equal('resolveStatsPath' in storage, false);
 });
 
 test('resolveAgentsLocalPath returns <PARALLIX_HOME>/agents.local.json', () => {
@@ -161,9 +160,9 @@ test('readJson returns { ok: true } for valid JSON', () => {
     environment.PARALLIX_HOME = tmpDir;
     const file = path.join(tmpDir, 'test.json');
     fs.writeFileSync(file, JSON.stringify({ blocklist: { gemini: true } }), 'utf8');
-    const result = storage.readJson(file);
+    const result = storage.readJson<{ blocklist: { gemini: boolean } }>(file);
     assert.equal(result.ok, true);
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
+    assert.ok(result.data);
     assert.equal(result.data.blocklist.gemini, true);
   } finally {
     environment.PARALLIX_HOME = savedHome;
@@ -183,7 +182,7 @@ test('readJson returns { ok: false, error } for malformed JSON', () => {
   try {
     const file = path.join(tmpDir, 'bad.json');
     fs.writeFileSync(file, '{ invalid json }', 'utf8');
-    const result = storage.readJson(file);
+    const result = storage.readJson<{ blocklist: { gemini: boolean } }>(file);
     assert.equal(result.ok, false);
     assert.ok(result.error);
   } finally {
@@ -198,9 +197,9 @@ test('readJson accepts a resolver function instead of a path', () => {
     environment.PARALLIX_HOME = tmpDir;
     const file = path.join(tmpDir, 'test.json');
     fs.writeFileSync(file, JSON.stringify({ key: 'val' }), 'utf8');
-    const result = storage.readJson(() => file);
+    const result = storage.readJson<{ key: string }>(() => file);
     assert.equal(result.ok, true);
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
+    assert.ok(result.data);
     assert.equal(result.data.key, 'val');
   } finally {
     environment.PARALLIX_HOME = savedHome;
@@ -245,7 +244,7 @@ test('writeFileAtomic propagates write failure and removes its stale temporary f
   const target = path.join(tmpDir, 'state.json');
   const staleTemp = path.join(tmpDir, '.state.json.stale.tmp');
   fs.writeFileSync(staleTemp, 'stale');
-  const fsModule = { ...fs, writeFileSync() { throw new Error('injected write failure'); } };
+  const fsModule = { ...fs, writeFileSync() { throw new Error('injected write failure'); } } satisfies { existsSync: (path: fs.PathLike) => boolean; renameSync: (oldPath: fs.PathLike, newPath: fs.PathLike) => void; chmodSync: (path: fs.PathLike, mode: fs.Mode) => void; statSync: { (path: fs.PathLike): fs.Stats; (path: fs.PathLike, options?: fs.StatOptions & { bigint?: false | undefined; throwIfNoEntry?: true | undefined; }): fs.Stats; (path: fs.PathLike, options: fs.StatOptions & { bigint: true; throwIfNoEntry?: true | undefined; }): fs.BigIntStats; (path: fs.PathLike, options: fs.StatOptions & { bigint?: false | undefined; throwIfNoEntry: false; }): fs.Stats | undefined; (path: fs.PathLike, options: fs.StatOptions & { bigint: true; throwIfNoEntry: false; }): fs.BigIntStats | undefined; (path: fs.PathLike, options: fs.StatOptions & { throwIfNoEntry?: true | undefined; }): fs.Stats | fs.BigIntStats; (path: fs.PathLike, options?: fs.StatOptions): fs.Stats | fs.BigIntStats | undefined; }; unlinkSync: (path: fs.PathLike) => void; mkdirSync: { (path: fs.PathLike, options: fs.MakeDirectoryOptions & { recursive: true; }): string | undefined; (path: fs.PathLike, options?: fs.Mode | (fs.MakeDirectoryOptions & { recursive?: false | undefined; }) | null): void; (path: fs.PathLike, options?: fs.Mode | fs.MakeDirectoryOptions | null): string | undefined; }; writeFileSync: (file: fs.PathOrFileDescriptor, data: string | NodeJS.ArrayBufferView, options?: fs.WriteFileOptions) => void; };
   try {
     assert.throws(
       () => storage.writeFileAtomic(target, 'new', { fsModule, tempPathFactory: () => staleTemp }),
@@ -263,7 +262,7 @@ test('writeFileAtomic propagates rename failure and preserves the previous valid
   const target = path.join(tmpDir, 'state.json');
   const temp = path.join(tmpDir, '.state.json.rename.tmp');
   fs.writeFileSync(target, 'previous\n');
-  const fsModule = { ...fs, renameSync() { throw new Error('injected rename failure'); } };
+  const fsModule = { ...fs, renameSync() { throw new Error('injected rename failure'); } } satisfies { existsSync: (path: fs.PathLike) => boolean; renameSync: (oldPath: fs.PathLike, newPath: fs.PathLike) => void; chmodSync: (path: fs.PathLike, mode: fs.Mode) => void; statSync: { (path: fs.PathLike): fs.Stats; (path: fs.PathLike, options?: fs.StatOptions & { bigint?: false | undefined; throwIfNoEntry?: true | undefined; }): fs.Stats; (path: fs.PathLike, options: fs.StatOptions & { bigint: true; throwIfNoEntry?: true | undefined; }): fs.BigIntStats; (path: fs.PathLike, options: fs.StatOptions & { bigint?: false | undefined; throwIfNoEntry: false; }): fs.Stats | undefined; (path: fs.PathLike, options: fs.StatOptions & { bigint: true; throwIfNoEntry: false; }): fs.BigIntStats | undefined; (path: fs.PathLike, options: fs.StatOptions & { throwIfNoEntry?: true | undefined; }): fs.Stats | fs.BigIntStats; (path: fs.PathLike, options?: fs.StatOptions): fs.Stats | fs.BigIntStats | undefined; }; unlinkSync: (path: fs.PathLike) => void; mkdirSync: { (path: fs.PathLike, options: fs.MakeDirectoryOptions & { recursive: true; }): string | undefined; (path: fs.PathLike, options?: fs.Mode | (fs.MakeDirectoryOptions & { recursive?: false | undefined; }) | null): void; (path: fs.PathLike, options?: fs.Mode | fs.MakeDirectoryOptions | null): string | undefined; }; writeFileSync: (file: fs.PathOrFileDescriptor, data: string | NodeJS.ArrayBufferView, options?: fs.WriteFileOptions) => void; };
   try {
     assert.throws(
       () => storage.writeFileAtomic(target, 'replacement\n', { fsModule, tempPathFactory: () => temp }),

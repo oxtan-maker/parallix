@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2274 / TASK-2377.04: artifact recovery through the rebound kernel
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,7 +9,7 @@ import {
   consumeImplementerArtifacts,
 } from '../../../../src/adapters/review/review-artifacts.js';
 import { isArtifactInfraDiagnostic } from '../../../../src/application/ports/review-round.js';
-import { DEFAULT_REBOUND_ATTEMPTS, rebound } from '../../../../src/application/rebound-kernel.js';
+import { DEFAULT_REBOUND_ATTEMPTS, rebound, ReboundContext } from '../../../../src/application/rebound-kernel.js';
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 
@@ -40,7 +39,7 @@ test('consumeReviewerArtifacts returns diagnostic when findings are missing', as
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
     log: () => {},
     error: () => {}
@@ -72,7 +71,7 @@ test('consumeReviewerArtifacts returns diagnostic when outcome is missing', asyn
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
     log: () => {},
     error: () => {}
@@ -103,7 +102,7 @@ test('consumeReviewerArtifacts returns diagnostic when verdict is missing', asyn
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
     log: () => {},
     error: () => {}
@@ -130,7 +129,7 @@ test('consumeReviewerArtifacts returns diagnostic when persist fails', async () 
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: false, error: 'DB connection failed' }),
+    createEventFn: () => ({ path: null, ok: false as const, error: 'DB connection failed' }),
     forgejoEnabled: false,
     log: () => {},
     error: () => {}
@@ -163,7 +162,7 @@ test('consumeImplementerArtifacts returns diagnostic when round-resolution is mi
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
     log: () => {},
     error: () => {}
@@ -192,7 +191,7 @@ test('consumeImplementerArtifacts returns diagnostic when disposition is missing
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
     log: () => {},
     error: () => {}
@@ -218,7 +217,7 @@ test('consumeImplementerArtifacts returns diagnostic when persist fails', async 
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: false, error: 'DB write failed' }),
+    createEventFn: () => ({ path: null, ok: false as const, error: 'DB write failed' }),
     forgejoEnabled: false,
     log: () => {},
     error: () => {}
@@ -242,12 +241,13 @@ test('consumeImplementerArtifacts returns diagnostic when persist fails', async 
 // ============================================================================
 
 /** Minimal kernel collaborators: a launch port that always succeeds. */
-function dispatcherOptions(overrides = {}) {
+function dispatcherOptions(overrides: Partial<ReboundContext> = {}): ReboundContext {
   return {
     slug: 'test-slug',
     worktree: '/mock/worktree',
     implementer: 'codex',
     maxAttempts: ARTIFACT_REBOUND_ATTEMPTS,
+    verify: () => { throw new Error('Unexpected artifact verification'); },
     startAgent: async () => ({ agent: 'codex', result: { status: 0 } }),
     log: () => {},
     error: () => {},
@@ -256,14 +256,14 @@ function dispatcherOptions(overrides = {}) {
 }
 
 /** One artifact-failure occurrence for a role. */
-const dispatchArtifactFailure = (role, diagnostic, options) => rebound({ kind: 'artifact-incomplete', role, diagnostic }, options);
+const dispatchArtifactFailure = (role: string, diagnostic: string, options: ReboundContext) => rebound({ kind: 'artifact-incomplete', role, diagnostic }, options);
 
 test('artifact recovery reports fixed only when the re-consumed reviewer artifacts are complete', async () => {
   let launches = 0;
   let verifies = 0;
   const result = await dispatchArtifactFailure('reviewer', 'Reviewer artifacts incomplete: missing findings', dispatcherOptions({
     startAgent: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
-    verify: () => { verifies++; return { ok: true }; },
+    verify: () => { verifies++; return { ok: true as const }; },
   }));
 
   assert.equal(result.outcome, 'fixed');
@@ -273,13 +273,14 @@ test('artifact recovery reports fixed only when the re-consumed reviewer artifac
 });
 
 test('artifact recovery relaunches with the fresh diagnostic when the re-consume still fails', async () => {
-  const prompts = [];
+  const prompts: string[] = [];
   const result = await dispatchArtifactFailure('reviewer', 'Reviewer artifacts incomplete: missing findings', dispatcherOptions({
     startAgent: async (_step, options) => {
+      assert.ok(typeof options.prompt === 'function');
       prompts.push(options.prompt('codex'));
       return { agent: 'codex', result: { status: 0 } };
     },
-    verify: (attempt) => attempt === 1
+    verify: (attempt: number) => attempt === 1
       ? { ok: false, diagnostic: 'Reviewer artifacts incomplete: missing verdict' }
       : { ok: true },
   }));
@@ -296,7 +297,7 @@ test('artifact recovery strands with the last diagnostic when the occurrence bud
   let launches = 0;
   const result = await dispatchArtifactFailure('reviewer', 'Reviewer artifacts incomplete: missing findings', dispatcherOptions({
     startAgent: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
-    verify: () => ({ ok: false, diagnostic: 'Reviewer artifacts incomplete: still missing verdict' }),
+    verify: () => ({ ok: false as const, diagnostic: 'Reviewer artifacts incomplete: still missing verdict' }),
   }));
 
   assert.equal(result.outcome, 'exhausted');
@@ -310,7 +311,7 @@ test('artifact recovery gives every occurrence a fresh budget (no persisted carr
     let launches = 0;
     const outcome = await dispatchArtifactFailure('implementer', 'Implementer artifacts incomplete: missing disposition', dispatcherOptions({
       startAgent: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
-      verify: () => ({ ok: false, diagnostic: 'Implementer artifacts incomplete: missing disposition' }),
+      verify: () => ({ ok: false as const, diagnostic: 'Implementer artifacts incomplete: missing disposition' }),
     }));
     return { outcome, launches };
   };
@@ -325,13 +326,14 @@ test('artifact recovery gives every occurrence a fresh budget (no persisted carr
 });
 
 test('artifact recovery routes the implementer role through the kernel with its own diagnostic', async () => {
-  const prompts = [];
+  const prompts: string[] = [];
   const result = await dispatchArtifactFailure('implementer', 'Implementer artifacts incomplete: missing round-resolution', dispatcherOptions({
     startAgent: async (_step, options) => {
+      assert.ok(typeof options.prompt === 'function');
       prompts.push(options.prompt('codex'));
       return { agent: 'codex', result: { status: 0 } };
     },
-    verify: () => ({ ok: true }),
+    verify: () => ({ ok: true as const }),
   }));
 
   assert.equal(result.outcome, 'fixed');
@@ -343,7 +345,7 @@ test('artifact recovery treats an ambiguous null exit status as a failed attempt
   let verifies = 0;
   const result = await dispatchArtifactFailure('implementer', 'Implementer artifacts incomplete: missing disposition', dispatcherOptions({
     startAgent: async () => ({ agent: 'codex', result: { status: null } }),
-    verify: () => { verifies++; return { ok: true }; },
+    verify: () => { verifies++; return { ok: true as const }; },
   }));
 
   assert.equal(result.outcome, 'exhausted');
@@ -353,7 +355,7 @@ test('artifact recovery treats an ambiguous null exit status as a failed attempt
 test('artifact recovery resolves the relaunched agent through the fallback port', async () => {
   const result = await dispatchArtifactFailure('reviewer', 'Reviewer artifacts incomplete: missing findings', dispatcherOptions({
     applyAgentFallback: () => 'claude',
-    verify: () => ({ ok: true }),
+    verify: () => ({ ok: true as const }),
   }));
 
   assert.equal(result.implementer, 'claude');
@@ -361,7 +363,7 @@ test('artifact recovery resolves the relaunched agent through the fallback port'
 
 test('artifact recovery persists no retry state anywhere', async () => {
   const fake = fakeReviewLoopPorts({
-    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: false, diagnostic: 'Reviewer artifacts incomplete: still incomplete' }) },
+    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: false as const, diagnostic: 'Reviewer artifacts incomplete: still incomplete' }) },
   });
   await runReviewLoop({ slug: 'test-slug', implementer: 'claude', reviewer: 'codex', maxAttempts: 1, skipHandoff: true }, fake.ports);
 

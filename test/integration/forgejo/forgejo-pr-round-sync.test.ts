@@ -54,11 +54,11 @@ function roundLoop(options: { reviews: string[]; dispositions?: string[]; provid
     },
     ...(options.providerEnabled === false ? {
       artifacts: {
-        consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: options.reviews.shift()! }),
-        consumeImplementer: async () => ({ consumed: true, ok: true, disposition: options.dispositions?.shift() ?? null }),
+        consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: options.reviews.shift()! }),
+        consumeImplementer: async () => ({ consumed: true, ok: true as const, disposition: options.dispositions?.shift() ?? null }),
       },
     } : {}),
-    handoff: { handoff: async () => ({ ok: true }) },
+    handoff: { handoff: async () => ({ ok: true as const }) },
     agents: { launch: async () => ({ agent: null }) },
     preReview: { head: () => (options.newRevision === false ? 'head-unchanged' : `head-${++head}`) },
   });
@@ -219,14 +219,14 @@ function realGitLoop(slug: string, worktree: string, branch: string, reviews: st
     slug,
     worktree,
     routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
-    handoff: { handoff: async () => ({ ok: true }) },
+    handoff: { handoff: async () => ({ ok: true as const }) },
     agents: { launch: async request => { launch(request); return { agent: null }; } },
     preReview: { head: () => headPort.head() },
     output: { log: line => { if (process.env.DEBUG_SYNC) { console.error(line); } }, error: line => { if (process.env.DEBUG_SYNC) { console.error(line); } } },
   });
   // An open PR keeps the start handoff off: this reproduction exercises the
   // round-boundary push, not the handoff/PR-create path.
-  const provider = { ...bound, pollReview: async () => reviews.shift()!, pollDisposition: async () => dispositions.shift() ?? null, openPullRequest: (): PullRequestReference => ({ kind: 'pull-request', provider: 'forgejo', id: '7', url: null, sourceBranch: branch, targetBranch: 'main' }), ensureReachable: async () => true };
+  const provider = { ...bound, pollReview: async () => reviews.shift()!, pollDisposition: async () => dispositions.shift() ?? null, openPullRequest: (): PullRequestReference => ({ kind: 'pull-request' as const, provider: 'forgejo', id: '7', url: null, sourceBranch: branch, targetBranch: 'main' }), ensureReachable: async () => true };
   return { ...fake.ports, provider };
 }
 

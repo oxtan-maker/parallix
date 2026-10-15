@@ -1,3 +1,4 @@
+import { fixtureMission as typedMissionFixture } from '../../fixtures/mission-builders.js';
 // Historical regression provenance: TASK-2614.
 // TASK-2614 — red-to-green reproduction for review --start and --reconcile-review
 // on a completed native (database-backed) Mission that carries no legacy
@@ -29,7 +30,7 @@ import { agentFamily } from '../../../src/domain/agents.js';
 import { changeRevision, startReview, ConfiguredReviewerEligibility } from '../../../src/domain/review.js';
 import { ReviewCommandUseCase } from '../../../src/application/review-command-use-case.js';
 import { createReviewWorkflowAdapter, reconcileInterruptedHandoffHandler } from '../../../src/adapters/review/review-commands.js';
-import { readReviewState } from '../../../src/adapters/review/review-state.js';
+import { ReviewState, readReviewState } from '../../../src/adapters/review/review-state.js';
 import { createReviewLoopPorts } from '../../../src/adapters/review/review-loop.js';
 import { runReviewLoop } from '../../../src/application/review-loop/review-loop.js';
 import { fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
@@ -52,8 +53,7 @@ after(() => {
  * anywhere under the worktree. This is the TASK-2614 shape.
  */
 function completedNativeMission(slug: string, rootDir: string): Mission {
-  return {
-    id: missionId(slug),
+  return typedMissionFixture(String(missionId(slug)), {
     repositoryId: repositoryId(rootDir),
     title: `Mission ${slug}`,
     labels: missionLabels(['ai_sdlc']),
@@ -78,8 +78,7 @@ function completedNativeMission(slug: string, rootDir: string): Mission {
     dependencies: [],
     closedAt: null,
     externalTaskRef: null,
-    review: null,
-  } as unknown as Mission;
+    review: null});
 }
 
 function createFileFreeHome(slug: string): string {
@@ -107,16 +106,16 @@ interface InvokeStartResult {
 /** Drive `px review <slug> --start` through the review CLI against a store. */
 async function invokeStart(store: SqliteMissionStore, root: string, status: 'active' | 'review'): Promise<InvokeStartResult> {
   let launched = false;
-  let error: string | null = null;
+  let error: { value: string | null } = { value: null };
   const adapter = createReviewWorkflowAdapter({
     missionStore: store,
     resolveWorktreeFn: () => root,
     log: () => undefined,
-    error: (msg: string) => { error = msg; },
+    error: (msg: string) => { error.value = msg; },
     exit: (code: number) => { throw new Error(`exit:${code}`); },
     inferSlugFn: () => SLUG,
     requireReviewAggregate: true,
-    readReviewStateFn: (target: string, worktree: string, missionStore: import('../../../src/application/domain-ports.js').MissionStore | null | undefined) => readReviewState(target, worktree, missionStore),
+    readReviewStateFn: readReviewState,
     reviewLoopMechanisms: () => { launched = true; return fakeReviewLoopPorts({ lock: { tryAcquire: () => false, release: () => {} } }).ports; },
   });
   const useCase = new ReviewCommandUseCase(adapter);
@@ -126,20 +125,20 @@ async function invokeStart(store: SqliteMissionStore, root: string, status: 'act
     // exit() throws; a launch either happened before the throw or the guard
     // rejected the start.
   }
-  return { launched, error };
+  return { launched, error: error.value };
 }
 
 async function invokeReconcile(store: SqliteMissionStore, root: string): Promise<{ outcome: string; error: string | null }> {
-  let error: string | null = null;
+  let error: { value: string | null } = { value: null };
   const adapter = createReviewWorkflowAdapter({
     missionStore: store,
     resolveWorktreeFn: () => root,
     log: () => undefined,
-    error: (msg: string) => { error = msg; },
+    error: (msg: string) => { error.value = msg; },
     exit: (code: number) => { throw new Error(`exit:${code}`); },
     inferSlugFn: () => SLUG,
-    reconcileInterruptedHandoffFn: (target: string, inputs: unknown, worktree: string, opts: unknown) =>
-      import('../../../src/adapters/review/review-state.js').then((m) => m.reconcileInterruptedHandoff(target, inputs as never, worktree, opts as never)),
+    reconcileInterruptedHandoffFn: (target, inputs, worktree, opts) =>
+      import('../../../src/adapters/review/review-state.js').then((m) => m.reconcileInterruptedHandoff(target, inputs, worktree, opts)),
   });
   const useCase = new ReviewCommandUseCase(adapter);
   try {
@@ -152,7 +151,7 @@ async function invokeReconcile(store: SqliteMissionStore, root: string): Promise
   }
   const loaded = await store.load(missionId(SLUG));
   const review = loaded.kind === 'found' ? loaded.mission.review : null;
-  return { outcome: review ? 'reconciled' : 'not-reconciled', error };
+  return { outcome: review ? 'reconciled' : 'not-reconciled', error: error.value };
 }
 
 interface StartTransitionResult {
@@ -179,7 +178,7 @@ async function driveStartTransition(
   opts: { openPr: boolean; launchReviewer?: boolean },
 ): Promise<StartTransitionResult> {
   let handoffRan = false;
-  let error: string | null = null;
+  let error: { value: string | null } = { value: null };
   let handoffWroteReview = false;
   // The review state reads null until the handoff has run (so the fresh start
   // sees no Review and the Mission-authority reset lets the handoff proceed),
@@ -188,14 +187,14 @@ async function driveStartTransition(
   const bound = createReviewLoopPorts(SLUG, { worktree: root }, {
     missionStore: store,
     log: () => undefined,
-    error: (msg: string) => { error = msg; },
-    readReviewState: () => (reviewed ? { reviewer: 'codex', round: 1, phase: 'reviewing', disposition: null } : null) as never,
-    writeReviewState: (async () => ({ outcome: 'committed' as const })) as never,
+    error: (msg: string) => { error.value = msg; },
+    readReviewState: () => (reviewed ? new ReviewState(SLUG, { reviewer: 'codex', round: 1, phase: 'reviewing', disposition: null }) : null),
+    writeReviewState: (async () => ({ outcome: 'committed' as const })),
   });
   const fake = fakeReviewLoopPorts({
     slug: SLUG,
     worktree: root,
-    missionStore: store as never,
+    missionStore: store,
     stateport: bound.state,
     routing: {
       eligibleFamilies: () => [agentFamily('codex'), agentFamily('qwen'), agentFamily('vibe')],
@@ -218,26 +217,26 @@ async function driveStartTransition(
             '2026-09-29T10:00:00.000Z',
             ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily('codex'), agentFamily('qwen'), agentFamily('vibe')], strategy: 'random' }),
           );
-          await store.save({ ...loaded.mission, status: 'review', rawStatus: 'review', review } as unknown as Mission, loaded.version);
+          await store.save({ ...loaded.mission, status: 'review', closedAt: null, rawStatus: 'review', review }, loaded.version);
           handoffWroteReview = true;
         }
         reviewed = true;
-        return { ok: true };
+        return { ok: true as const };
       },
     },
     // Approve immediately after launch so the round stops cleanly.
-    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED', reviewFindings: [] }) },
-    output: { error: (msg: string) => { error = msg; }, exit: () => {} },
+    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED', reviewFindings: [] }) },
+    output: { error: (msg: string) => { error.value = msg; }, exit: () => {} },
   });
   try {
     await runReviewLoop({ slug: SLUG, implementer: 'claude', reviewer: 'codex', maxAttempts: 1 }, fake.ports);
   } catch (err) {
-    error = err instanceof Error ? err.message : String(err);
+    error.value = err instanceof Error ? err.message : String(err);
   }
   const loaded = await store.load(missionId(SLUG));
   const reviewPersisted = loaded.kind === 'found' && Boolean(loaded.mission.review);
   const reviewerLaunched = fake.launches.some(launch => launch.role === 'reviewer');
-  return { handoffRan, reviewerLaunched, reviewPersisted: reviewPersisted || handoffWroteReview, error };
+  return { handoffRan, reviewerLaunched, reviewPersisted: reviewPersisted || handoffWroteReview, error: error.value };
 }
 
 describe("native Mission review start and recovery", () => {
@@ -285,9 +284,9 @@ describe("native Mission review start and recovery", () => {
       const fake = fakeReviewLoopPorts({
         slug: SLUG,
         worktree: root,
-        missionStore: store as never,
+        missionStore: store,
         provider: { openPullRequest: () => null },
-        handoff: { handoff: async () => ({ ok: true }) },
+        handoff: { handoff: async () => ({ ok: true as const }) },
         routing: { eligibleFamilies: () => [], nominate: () => { throw new Error('No agents available'); } }, // no reviewer can be routed
         // A real exit throws, so a loop that fails closed is observed.
         output: { exit: () => { surfaced = true; throw new Error('loop-exit'); } },
@@ -393,12 +392,12 @@ describe("native Mission review start and recovery", () => {
     try {
       // A native Mission that reached the review lane but never persisted its
       // round-one Review: an interrupted handoff with no Backlog task file.
-      const mission = {
+      const mission: Mission = {
         ...completedNativeMission(SLUG, root),
-        status: 'review',
+        status: 'review', closedAt: null,
         rawStatus: 'review',
         review: null,
-      } as unknown as Mission;
+      };
       const store = await openStore(root);
       await store.save(mission, null);
 
@@ -420,7 +419,7 @@ describe("native Mission review start and recovery", () => {
       '--reconcile-review', '--branch', `mission/${SLUG}`, '--target', 'main',
       '--reviewer', 'codex', '--implementer', 'claude', '--revision', 'abc123', '--eligible-reviewer', 'codex',
     ];
-    const unreadableStore = { load: async () => { throw new Error('database unavailable'); } } as unknown as SqliteMissionStore;
+    const unreadableStore: import('../../../src/application/domain-ports.js').MissionStore = { load: async () => { throw new Error('database unavailable'); }, save: async () => { throw new Error('Unexpected unreadable authority save'); } };
     for (const missionStore of [null, unreadableStore]) {
       const errors: string[] = [];
       await assert.rejects(

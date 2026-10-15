@@ -90,6 +90,8 @@ export interface BoardCommandRequest {
   readonly cancellation?: BoardCancellation;
   /** Keep CLI launches attached; board actions default to fire-and-forget. */
   readonly detached?: boolean;
+  /** Explicit operator CLI resume; automatic and board actions omit this. */
+  readonly operatorInvocation?: boolean;
   /** Required by the Mission commands; absent for `active:execute`. */
   readonly payload?: BoardCommandPayload;
 }

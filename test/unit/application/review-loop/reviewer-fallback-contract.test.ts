@@ -106,7 +106,7 @@ describe("review fallback", { concurrency: false }, () => {
           return { agent: launch.agent, result: { status: 0 } };
         },
       },
-      artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) },
+      artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
     });
     await runReviewLoop({ slug: 'task-test-cp1-fallback', implementer: 'claude', maxAttempts: 1, skipHandoff: true }, fake.ports);
     assert.deepEqual(fake.exits, [], `the loop must not exit on usage-limit; errors: ${fake.errors.join(' | ')}`);
@@ -200,7 +200,7 @@ describe("review loop selection", { concurrency: false }, () => {
           ],
         };
       },
-    } as never);
+    });
     const reviewer = prepared.select('review', { excluded: new Set() });
     if (reviewer === 'codex') { launchCalls += 1; }
     assert.equal(reviewer, 'claude');

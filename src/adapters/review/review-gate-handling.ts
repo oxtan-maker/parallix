@@ -46,13 +46,7 @@ export async function runPreReviewGate(
     error?: (_msg: string) => void;
   } = {}
 ): Promise<PreReviewGateResult> {
-  const {
-    resolveEffectiveAreaFn = resolveEffectiveArea,
-    findMissionAreaFn,
-    runFn: runFnOverride = run,
-    log = fmt.log.plain,
-    error = fmt.log.plainError,
-  } = opts;
+  const { resolveEffectiveAreaFn, findMissionAreaFn, runFnOverride, log, error } = preReviewGateBindings(opts);
 
   const missionDir = findMissionDir(slug, worktree);
   // findMissionAreaFn remains injectable for existing callers/tests. Normal
@@ -142,4 +136,15 @@ export function hookFailureReason(hookOutput: string, operation: string): HookFa
     operation,
     output: hookOutput,
   };
+}
+
+function preReviewGateBindings(opts: NonNullable<Parameters<typeof runPreReviewGate>[2]>) {
+  const {
+    resolveEffectiveAreaFn = resolveEffectiveArea,
+    findMissionAreaFn,
+    runFn: runFnOverride = run,
+    log = fmt.log.plain,
+    error = fmt.log.plainError,
+  } = opts;
+  return { resolveEffectiveAreaFn, findMissionAreaFn, runFnOverride, log, error };
 }

@@ -252,7 +252,7 @@ describe('StatusCommandUseCase and status rendering', () => {
       getUncommittedCount() { return 0; },
     };
     const mockPr: StatusPrPort = {
-      getPrInfo() { return { exists: true, number: 10, state: 'open' }; },
+      getPrInfo() { return { exists: true as const, number: 10, state: 'open' }; },
     };
     const mockAgent: StatusAgentPort = {
       async getAgents() { return [{ agent: 'codex', block: { kind: 'none' as const } }]; },
@@ -318,7 +318,7 @@ describe('StatusCommandUseCase and status rendering', () => {
       getLastThreeCommits() { return []; },
       getUncommittedCount() { return 0; },
     };
-    const mockPr: StatusPrPort = { getPrInfo() { return { exists: true, number: 1, state: 'open' }; } };
+    const mockPr: StatusPrPort = { getPrInfo() { return { exists: true as const, number: 1, state: 'open' }; } };
     const mockAgent: StatusAgentPort = { async getAgents() { return []; }, getAgentOverride() { return undefined; } };
     const mockStale: StatusStaleWorktreesPort = { findStaleWorktrees() { return []; }, getStaleWorktreeRebase() { return {}; } };
 
@@ -357,7 +357,7 @@ describe('StatusCommandUseCase and status rendering', () => {
       getLastThreeCommits() { return []; },
       getUncommittedCount() { return 0; },
     };
-    const mockPr: StatusPrPort = { getPrInfo() { return { exists: false }; } };
+    const mockPr: StatusPrPort = { getPrInfo() { return { exists: false as const }; } };
     const mockAgent: StatusAgentPort = { async getAgents() { return []; }, getAgentOverride() { return undefined; } };
     const mockStale: StatusStaleWorktreesPort = { findStaleWorktrees() { return []; }, getStaleWorktreeRebase() { return {}; } };
 
@@ -366,7 +366,7 @@ describe('StatusCommandUseCase and status rendering', () => {
 
     await cmd(['task-1001'], {
       logFn: (msg) => lines.push(msg),
-      exitFn: ((code) => { exitCode = code; }) as never,
+      exitFn: ((code: number|undefined) => { exitCode = code; }),
     });
 
     assert.equal(exitCode, 0, 'should exit 0');
@@ -403,7 +403,7 @@ describe('StatusCommandUseCase and status rendering', () => {
       getLastThreeCommits() { return []; },
       getUncommittedCount() { return 0; },
     };
-    const mockPr: StatusPrPort = { getPrInfo() { return { exists: true, number: 247, state: 'open' }; } };
+    const mockPr: StatusPrPort = { getPrInfo() { return { exists: true as const, number: 247, state: 'open' }; } };
     const mockAgent: StatusAgentPort = { async getAgents() { return []; }, getAgentOverride() { return undefined; } };
     const mockStale: StatusStaleWorktreesPort = { findStaleWorktrees() { return []; }, getStaleWorktreeRebase() { return {}; } };
 
@@ -412,7 +412,7 @@ describe('StatusCommandUseCase and status rendering', () => {
 
     await cmd([], {
       logFn: (msg) => lines.push(msg),
-      exitFn: ((code) => { exitCode = code; }) as never,
+      exitFn: ((code: number|undefined) => { exitCode = code; }),
     });
 
     assert.equal(exitCode, 0, 'should exit 0');
@@ -449,7 +449,7 @@ describe('StatusCommandUseCase and status rendering', () => {
 
     await cmd(['--verbose'], {
       errorFn: (msg) => errors.push(msg),
-      exitFn: ((code) => { exitCode = code; }) as never,
+      exitFn: ((code: number|undefined) => { exitCode = code; }),
     });
 
     assert.equal(exitCode, 1, 'should exit 1 on parse error');
@@ -475,7 +475,7 @@ describe("status projection of Mission brief and checkpoint", () => {
     why: 'Agents otherwise fall back to filesystem archaeology.',
     scope: 'Typed read and write commands over existing authorities.',
     outOfScope: ['A generic patch endpoint', 'Direct SQL for agents'],
-  };
+  } satisfies import("../../../src/application/ports/cli-workflows.js").StatusBrief;
 
   function missionData(overrides: Partial<StatusMissionData> = {}): StatusMissionData {
     return {
@@ -655,7 +655,7 @@ describe("PR lookup follows the requested Mission branch", () => {
     const mockPr: StatusPrPort = {
       getPrInfo(branch: string) {
         capturedBranch = branch;
-        return { exists: true, number: 339, state: 'open' };
+        return { exists: true as const, number: 339, state: 'open' };
       },
     };
 

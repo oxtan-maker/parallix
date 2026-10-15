@@ -1,23 +1,17 @@
 import { TextEncoder } from 'node:util';
-import type { ClassifierObservation, ClassifierCallMeasurement, ReviewClassificationTelemetryPort } from '../../application/ports/review-classification-telemetry.js';
+import type { ClassifierCallMeasurement, ReviewClassificationTelemetryPort } from '../../application/ports/review-classification-telemetry.js';
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
 
 /** Measurement samples belong to a decision; fingerprints deduplicate writes, not entities. */
 export class SqliteReviewClassificationStore implements ReviewClassificationTelemetryPort {
-  constructor(private readonly _db: SqliteDatabaseAdapter) {}
+  constructor(private readonly _db: SqliteDatabaseAdapter) { }
   private payload(value: unknown, maximum = 16384): string {
     const text = JSON.stringify(value);
     if (new TextEncoder().encode(text).length > maximum) { throw new Error('Classifier telemetry exceeds bounded allowance'); }
     return text;
   }
   async recordCall(sample: ClassifierCallMeasurement): Promise<void> {
-    if (!sample.decisionId || !sample.fingerprint || !sample.repository || !sample.mission
-      || !Number.isFinite(Date.parse(sample.observedAt)) || (sample.score !== null && sample.score > 1)) {
-      throw new Error('Invalid classifier measurement identity');
-    }
-    for (const value of [sample.preparationMs, sample.classificationMs, sample.score]) {
-      if (value !== null && (!Number.isFinite(value) || value < 0)) { throw new Error('Invalid classifier measurement'); }
-    }
+    assertClassifierSample(sample);
     this.payload(sample);
     await this._db.beginImmediateTransaction();
     try {
@@ -46,20 +40,25 @@ export class SqliteReviewClassificationStore implements ReviewClassificationTele
       await this._db.commitTransaction();
     } catch (error) { await this._db.rollbackTransaction(); throw error; }
   }
-  async recordObservation(observation: ClassifierObservation): Promise<void> {
-    for (const value of [observation.cycleMs, observation.ordinaryReviewMs, observation.newFindings]) {
-      if (value !== null && (!Number.isFinite(value) || value < 0)) { throw new Error('Invalid classifier observation'); }
-    }
-    await this._db.execute(`INSERT INTO review_classifier_observations (decision_id, payload) VALUES (?, ?)
-      ON CONFLICT(decision_id) DO UPDATE SET payload = excluded.payload`, [observation.decisionId, this.payload(observation)]);
-  }
   async calls(repository: string): Promise<readonly ClassifierCallMeasurement[]> {
     return (await this._db.query<{ samples: string }>('SELECT samples FROM review_classifier_measurements WHERE repository_id = ? ORDER BY decision_id', [repository]))
       .flatMap(row => JSON.parse(row.samples) as ClassifierCallMeasurement[]);
   }
-  async observations(repository: string): Promise<readonly ClassifierObservation[]> {
-    return (await this._db.query<{ payload: string }>(`SELECT o.payload FROM review_classifier_observations o
-      JOIN review_classifier_measurements m ON m.decision_id = o.decision_id WHERE m.repository_id = ?`, [repository]))
-      .map(row => JSON.parse(row.payload) as ClassifierObservation);
+}
+
+function assertClassifierIdentity(sample: ClassifierCallMeasurement): void {
+  if (!sample.decisionId || !sample.fingerprint || !sample.repository || !sample.mission
+    || !Number.isFinite(Date.parse(sample.observedAt)) || (sample.score !== null && sample.score > 1)) {
+    throw new Error('Invalid classifier measurement identity');
+  }
+}
+
+function assertClassifierSample(sample: ClassifierCallMeasurement): void {
+  assertClassifierIdentity(sample);
+  for (const value of [sample.preparationMs, sample.classificationMs, sample.score]) {
+    if (value !== null && (!Number.isFinite(value) || value < 0)) { throw new Error('Invalid classifier measurement'); }
+  }
+  for (const value of [sample.omittedDiffCount, sample.omittedTokens]) {
+    if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) { throw new Error('Invalid classifier omission measurement'); }
   }
 }

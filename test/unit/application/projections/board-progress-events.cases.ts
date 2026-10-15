@@ -1,3 +1,5 @@
+import { fixtureMission } from '../../../fixtures/mission-builders.js';
+import { missionVersion as fixtureVersion } from '../../../../src/application/domain-ports.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -8,7 +10,7 @@ import type { BoardCommandRequest, OperationEvent } from '../../../../src/applic
 function makeRequest(overrides: Partial<BoardCommandRequest> = {}): BoardCommandRequest {
   return {
     operationId: 'op-1',
-    kind: 'active:execute',
+    kind: 'active:execute' as const,
     missionId: 'task-0001',
     missionStatusAtRequest: 'refined',
     agent: 'codex',
@@ -106,13 +108,14 @@ test('cancellation before any port call returns cancelled with no evidence', asy
     cancellation: { requested: true },
   }));
   assert.equal(result.status, 'cancelled');
+  assert.ok(result.error != null);
   assert.equal(result.error.kind, 'cancelled');
   assert.equal(result.durableEvidence.length, 0);
   assert.deepEqual(calls, []);
 });
 
 test('cancellation after durable record returns partial evidence without rollback', async () => {
-  const cancellation = { requested: false };
+  const cancellation: { requested: boolean } = { requested: false };
   const { ports } = makeExecutePorts({
     telemetry: {
       async recordLaunchTelemetry() { cancellation.requested = true; },
@@ -123,6 +126,7 @@ test('cancellation after durable record returns partial evidence without rollbac
     cancellation,
   }));
   assert.equal(result.status, 'cancelled');
+  assert.ok(result.error != null);
   assert.equal(result.error.kind, 'cancelled');
   // Partial evidence: launch evidence + record evidence
   assert.ok(result.durableEvidence.length >= 2);
@@ -135,10 +139,11 @@ test('cancellation after durable record returns partial evidence without rollbac
 test('authoritative stale command returns failed status with conflict error kind', async () => {
   const { ports } = makeExecutePorts();
   const controller = new BoardCommandController(ports, undefined, {}, undefined, {
-    async load() { return { kind: 'found', mission: { status: 'active' }, version: 1 } as never; },
+    async load() { return { kind: 'found', mission: fixtureMission('task-fixture', { status: 'active' }), version: fixtureVersion(1) }; },
   });
   const result = await controller.dispatch(makeRequest({ missionStatusAtRequest: 'refined' }));
   assert.equal(result.status, 'failed');
+  assert.ok(result.error != null);
   assert.equal(result.error.kind, 'conflict');
   assert.ok(result.error.message.includes('refined'));
   assert.ok(result.error.message.includes('active'));
@@ -156,7 +161,7 @@ test('authoritative non-stale command proceeds to dispatch', async () => {
 test('stale check happens before capability dispatch', async () => {
   const { ports, calls } = makeExecutePorts();
   const controller = new BoardCommandController(ports, undefined, {}, undefined, {
-    async load() { return { kind: 'found', mission: { status: 'active' }, version: 1 } as never; },
+    async load() { return { kind: 'found', mission: fixtureMission('task-fixture', { status: 'active' }), version: fixtureVersion(1) }; },
   });
   const result = await controller.dispatch(makeRequest({ missionStatusAtRequest: 'refined' }));
   assert.equal(result.status, 'failed');

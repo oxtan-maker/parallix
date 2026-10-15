@@ -1,3 +1,15 @@
+import type { HandoffWorkflowPorts } from '../../../src/application/ports/handoff-workflow.js';
+import { draftMissionServicesFixture } from '../../helpers/draft-mission-services.js';
+import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflow-ports.js';
+import { integrationContext } from '../../fixtures/integration-context.js';
+import { integrationServices } from '../../helpers/stub-integration-services.js';
+import { integrationBounceSeams } from '../../helpers/integration-bounce-seams.js';
+import { phaseGateResult } from '../../helpers/phase-gate-result.js';
+import { missionVersion } from '../../../src/application/domain-ports.js';
+import type { GateStepRequest } from '../../../src/application/integrate/gates.js';
+import type { IntegrationGateRoute } from '../../../src/application/ports/integrate-workflow.js';
+import type { DraftMissionServices } from '../../../src/application/ports/cli-workflows.js';
+import { forgejoApiFixture } from '../../fixtures/forgejo-api.js';
 // Mission draft refine contract (TASK-2622.07 behavior-owned suite; was test/task-2561-lifecycle-unblock.test.ts).
 // Legacy case names are unchanged; regression provenance TASK-2561.
 //
@@ -42,28 +54,28 @@ function quietly<T>(run: () => Promise<T>): Promise<T> {
 
 // --- draft bounce-back budget -------------------------------------------------------
 
-function draftContext(transition: () => Promise<unknown>, repair: () => Promise<boolean>) {
+function draftContext(transition: DraftMissionServices['lifecycle']['transition'], repair: () => Promise<boolean>): DraftWorkflowContext {
   return {
     exited: false, slug: 'task-x', mainRepo: '/repo', targetWorktree: '/repo-task-x',
     missionFile: '/repo-task-x/missions/task-x/MISSION.md', recordedBase: null, syntheticTask: null,
     agent: 'codex', actualAgent: 'codex', agentResult: null,
     exitFn: () => { throw new Error('unused'); }, logFn: () => {}, errorFn: () => {},
-    missionServicesFn: async () => ({ lifecycle: { transition }, store: { async load() { return { kind: 'missing' }; } } }),
+    missionServicesFn: async () => draftMissionServicesFixture({ lifecycle: { transition }, store: { async load() { return { kind: 'missing' as const }; } } }),
     options: {
       repairDraftContractFn: repair,
       enforceDraftCommitSafetyFn: () => true,
       transitionTaskFn: async () => { throw new Error('must not transition to ready'); },
       transitionVirtualFn: async () => { throw new Error('must not transition to ready'); },
     },
-  } as unknown as DraftWorkflowContext;
+  };
 }
 
 function draftAdapter(record: { logs: string[]; errors: string[]; exits: number[] }) {
   return createDraftWorkflowAdapter({
-    exitFn: ((code?: number) => { record.exits.push(code ?? 0); }) as never,
+    exitFn: ((code?: number) => { record.exits.push(code ?? 0); }),
     logFn: (line: string) => record.logs.push(line),
     errorFn: (line: string) => record.errors.push(line),
-  } as never);
+  });
 }
 
 test('a contract the agent never completes fails after the bounded budget, naming what is missing', async () => {
@@ -71,7 +83,7 @@ test('a contract the agent never completes fails after the bounded budget, namin
   let repairs = 0;
   const refusal = 'Cannot refine task-x: its mission contract is incomplete. Missing at least one verification gate (`px gate add`).';
   await quietly(async () => draftAdapter(record).finalTransition(draftContext(
-    async () => ({ status: 'failed', error: { kind: 'validation', message: refusal } }),
+    async () => ({ status: 'failed', durableEvidence: [], error: { kind: 'validation', message: refusal } }),
     async () => { repairs += 1; return true; },
   )));
 
@@ -87,7 +99,7 @@ test('an infrastructure failure at refine is not sent to the agent and keeps the
   const record = { logs: [] as string[], errors: [] as string[], exits: [] as number[] };
   let repairs = 0;
   await quietly(async () => draftAdapter(record).finalTransition(draftContext(
-    async () => ({ status: 'failed', error: { kind: 'execution', message: 'database is locked' } }),
+    async () => ({ status: 'failed', durableEvidence: [], error: { kind: 'execution', message: 'database is locked' } }),
     async () => { repairs += 1; return true; },
   )));
 
@@ -99,12 +111,12 @@ test('an infrastructure failure at refine is not sent to the agent and keeps the
 // --- the draft prompt states exactly what refine enforces ------------------------------
 
 test('the draft prompt marks as required exactly the parts refine refuses without', () => {
-  const bare = {
+  const bare = fixtureMission('task-x', {
     id: missionId('task-x'), repositoryId: repositoryId('parallix'), title: 't',
     labels: missionLabels(['ai_sdlc', 'bug']), status: 'backlog', rawStatus: 'backlog', closedAt: null, assignee: null,
     checkpoints: [], brief: null, declaredGates: [], successCriteria: [], predictedNelBucket: null,
     reproductionTest: null, review: null, netEngineeringLines: null,
-  } as unknown as Mission;
+  });
   let refusal = '';
   try { decideMission(bare, { type: 'refine' }); } catch (error) { refusal = (error as Error).message; }
   const enforced = new Set([...refusal.matchAll(/`(px [a-z]+ [a-z]+)`/g)].map((match) => match[1]));
@@ -147,12 +159,12 @@ test('adapters.draft.preDraftCommand is validated as a string', () => {
 
 test('the pre-draft hook runs its command in the worktree with the mission slug, and is a no-op when unset', () => {
   withWorktree({ adapters: { draft: { preDraftCommand: 'npm ci' } } }, (dir) => {
-    const runs: { cmd: string; args: string[]; options: Record<string, any> }[] = [];
+    const runs: { cmd: string; args: string[]; options: Parameters<NonNullable<Parameters<typeof runPreDraftHook>[0]['runFn']>>[2] }[] = [];
     const ticks = [1000, 3450];
     const logs: string[] = [];
     const result = runPreDraftHook({
       slug: 'task-x', worktree: dir,
-      runFn: (cmd, args, options) => { runs.push({ cmd, args, options }); return { status: 0, stdout: 'Progress: resolved 3, reused 3, downloaded 0, added 3, done', stderr: '' }; },
+      runFn: (cmd, args, options) => { runs.push({ cmd, args, options }); return { signal: null,  status: 0, stdout: 'Progress: resolved 3, reused 3, downloaded 0, added 3, done', stderr: '' }; },
       nowFn: () => ticks.shift() as number, logFn: (line) => logs.push(line),
     });
     assert.deepEqual(result, { ran: true, ok: true, command: 'npm ci', output: 'Progress: resolved 3, reused 3, downloaded 0, added 3, done', exitCode: 0, durationMs: 2450, storeState: 'warm' });
@@ -162,7 +174,9 @@ test('the pre-draft hook runs its command in the worktree with the mission slug,
     ]);
     assert.deepEqual([runs[0].cmd, ...runs[0].args], ['bash', '-lc', 'npm ci']);
     assert.equal(runs[0].options.cwd, dir);
-    assert.equal(runs[0].options.env.PRE_DRAFT_HOOK_SLUG, 'task-x');
+    const env = runs[0].options.env;
+    assert.ok(env && typeof env === 'object' && 'PRE_DRAFT_HOOK_SLUG' in env);
+    assert.equal(env.PRE_DRAFT_HOOK_SLUG, 'task-x');
   });
   withWorktree({ adapters: { draft: { preDraftCommand: '  ' } } }, (dir) => {
     assert.deepEqual(runPreDraftHook({ slug: 'task-x', worktree: dir }), { ran: false, ok: true });
@@ -171,7 +185,7 @@ test('the pre-draft hook runs its command in the worktree with the mission slug,
 
 test('the hook times itself with a monotonic clock and probes the store by default (TASK-2707)', () => {
   withWorktree({ adapters: { draft: { preDraftCommand: 'true' } } }, (dir) => {
-    const result = runPreDraftHook({ slug: 'task-x', worktree: dir, runFn: () => ({ status: 0, stdout: '', stderr: '' }) });
+    const result = runPreDraftHook({ slug: 'task-x', worktree: dir, runFn: () => ({ signal: null,  status: 0, stdout: '', stderr: '' }) });
     assert.equal(result.ok, true);
     assert.ok(typeof result.durationMs === 'number' && result.durationMs >= 0);
     assert.equal(result.storeState, 'unknown');
@@ -184,7 +198,7 @@ test('a failing pre-draft hook reports its exit code and a bounded output tail (
     const big = `${'x'.repeat(10_000)}\nERR_PNPM_LOCKFILE_MISSING`;
     const result = runPreDraftHook({
       slug: 'task-x', worktree: dir, logFn: (line) => logs.push(line),
-      runFn: () => ({ status: 1, stdout: 'Progress: resolved 3, reused 0, downloaded 3, added 1', stderr: big }),
+      runFn: () => ({ signal: null,  status: 1, stdout: 'Progress: resolved 3, reused 0, downloaded 3, added 1', stderr: big }),
       nowFn: (() => { let t = 0; return () => (t += 5); })(),
     });
     assert.equal(result.ok, false);
@@ -206,21 +220,21 @@ test('the hook reads cold or warm store state from the installer summary (TASK-2
 test('a successful pre-draft hook reports checkout and install timing in the default draft output (TASK-2707)', () => {
   const record = { logs: [] as string[], errors: [] as string[], exits: [] as number[] };
   const adapter = createDraftWorkflowAdapter({
-    exitFn: ((code?: number) => { record.exits.push(code ?? 0); }) as never,
+    exitFn: ((code?: number) => { record.exits.push(code ?? 0); }),
     logFn: (line: string) => record.logs.push(line),
     errorFn: (line: string) => record.errors.push(line),
-  } as never);
-  const ctx = {
-    ...draftContext(async () => ({}), async () => true),
+  });
+  const ctx: DraftWorkflowContext = {
+    ...draftContext(async () => { throw new Error('Unexpected transition'); }, async () => true),
     options: {
       ensureMissionBranchFn: () => undefined,
       ensureWorktreeFn: () => undefined,
       conventionalWorktreePathFn: () => '/repo-task-x',
-      runPreDraftHookFn: () => ({ ran: true, ok: true, command: 'pnpm install', exitCode: 0, durationMs: 812, storeState: 'warm' }),
+      runPreDraftHookFn: () => ({ ran: true, ok: true as const, command: 'pnpm install', exitCode: 0, durationMs: 812, storeState: 'warm' }),
       ensureGraphifyWorkspaceFn: () => undefined,
       ensureGraphifyIgnoreFn: () => undefined,
     },
-  } as unknown as DraftWorkflowContext;
+  };
   adapter.setup(ctx);
   assert.deepEqual(record.exits, []);
   assert.ok(record.logs.some((line) => /^Worktree checkout \d+ms; install hook 812ms \(store warm\)\.$/.test(line)), 'timing is visible with debug off');
@@ -230,17 +244,17 @@ test('a failing pre-draft hook stops the draft at setup as an environment failur
   const record = { logs: [] as string[], errors: [] as string[], exits: [] as number[] };
   const steps: string[] = [];
   const adapter = draftAdapter(record);
-  const ctx = {
-    ...draftContext(async () => ({}), async () => true),
+  const ctx: DraftWorkflowContext = {
+    ...draftContext(async () => { throw new Error('Unexpected transition'); }, async () => true),
     options: {
       ensureMissionBranchFn: () => steps.push('branch'),
       ensureWorktreeFn: () => steps.push('worktree'),
       conventionalWorktreePathFn: () => '/repo-task-x',
-      runPreDraftHookFn: () => { steps.push('hook'); return { ran: true, ok: false, command: 'npm ci', output: 'npm ERR! missing lockfile', exitCode: 1 }; },
+      runPreDraftHookFn: () => { steps.push('hook'); return { ran: true, ok: false as const, command: 'npm ci', output: 'npm ERR! missing lockfile', exitCode: 1 }; },
       ensureGraphifyWorkspaceFn: () => steps.push('graphify'),
       ensureGraphifyIgnoreFn: () => steps.push('graphify-ignore'),
     },
-  } as unknown as DraftWorkflowContext;
+  };
 
   const next = adapter.setup(ctx);
 
@@ -274,7 +288,7 @@ test('the handoff Forgejo PR step gates the push on the mission area', async () 
   const ports = makePorts(recorder, {
     productConfig: { isForgejoReviewEnabled: () => true },
     verification: { ...base.verification, resolveEffectiveArea: () => 'docs' },
-    forgejo: { ...base.forgejo, createPr: (_b: string, _u: string, _t: string, options: Record<string, unknown>) => { areas.push(options.verificationArea); return { ok: true }; } },
+    forgejo: { ...base.forgejo, createPr: (_b: string, _u: string, _t: string, options: Parameters<HandoffWorkflowPorts['forgejo']['createPr']>[3]) => { areas.push(options.verificationArea); return { ok: true as const }; } },
   });
   const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
   assert.equal(result.ok, true, recorder.errors.join('\n'));
@@ -284,7 +298,7 @@ test('the handoff Forgejo PR step gates the push on the mission area', async () 
 test('a non-gate rebase failure before handoff keeps the rebase message', async () => {
   const recorder = makeRecorder();
   const ports = makePorts(recorder, {
-    rebase: { rebaseBeforeReviewRound: async () => ({ ok: false, sharedFileConflicts: false, hookFailure: false, failure: { kind: 'other', operation: 'rebase', output: 'exit 1' } }) },
+    rebase: { rebaseBeforeReviewRound: async () => ({ ok: false as const, sharedFileConflicts: false, hookFailure: false, failure: { kind: 'other', operation: 'rebase', output: 'exit 1' } }) },
   });
   const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
   assert.match(result.error ?? '', /Rebase failed before handoff/);
@@ -293,48 +307,49 @@ test('a non-gate rebase failure before handoff keeps the rebase message', async 
 
 // --- integration re-review routes --------------------------------------------------------
 
-function gateStep(route: Record<string, unknown>, gateResult: { ok: boolean; error: string; failedGate: { key: string }; cancelled?: boolean } = { ok: false, error: 'failed', failedGate: { key: 'quality-gate' } }) {
-  return createIntegrationGateStep({
+function gateStep(route: IntegrationGateRoute, gateResult: NonNullable<Parameters<typeof phaseGateResult>[0]> = { ok: false, error: 'failed', failedGate: { key: 'quality-gate' } }) {
+  return createIntegrationGateStep(stubIntegrateWorkflowPorts({
     gates: {
       resolveIntegrationVerificationWorktree: () => '/wt',
-      captureFinalIntegrationTree: () => ({ ok: true, rootDir: '/wt', commit: 'c', tree: 't' }),
+      captureFinalIntegrationTree: () => ({ ok: true as const, rootDir: '/wt', commit: 'c', tree: 't' }),
       loadPhaseGates: () => [{ key: 'quality-gate', command: 'npm run quality', order: 1 }],
       loadRequirePreIntegration: () => true,
-      runPhaseGates: async () => gateResult,
+      runPhaseGates: async () => phaseGateResult(gateResult),
       routeIntegrationGateFailure: async () => route,
     },
     landing: { createAbort: () => Object.assign(new Error('aborted'), { name: 'IntegrationAbort' }), isAbort: () => true },
     verification: { formatVerificationCommand: () => './scripts/verify-local.sh all' },
-  } as unknown as IntegrateWorkflowPorts);
+  }));
 }
 
 test('operator cancellation aborts integration without sending a gate failure to repair', async () => {
-  const request = gateRequest({}) as unknown as { seams: { routeIntegrationGateFailureFn: () => Promise<never> } };
+  const request = gateRequest({ route: 'unused' });
   request.seams.routeIntegrationGateFailureFn = async () => { throw new Error('must not route cancellation'); };
-  await assert.rejects(quietly(() => gateStep({}, { ok: false, cancelled: true, error: 'cancelled', failedGate: { key: 'quality-gate' } }).runRequiredLocalGates(request as never)),
+  await assert.rejects(quietly(() => gateStep({ route: 'unused' }, { ok: false, cancelled: true, error: 'cancelled', failedGate: { key: 'quality-gate' } }).runRequiredLocalGates(request)),
     { name: 'IntegrationAbort' });
 });
 
-function gateRequest(route: Record<string, unknown>, reReviewFn?: () => Promise<boolean>) {
+function gateRequest(route: IntegrationGateRoute, reReviewFn?: () => Promise<boolean>): GateStepRequest {
   return {
-    slug: 'task-x', context: { baseWorktree: '/repo', area: 'all', branch: 'mission/task-x' },
-    missionLoad: { kind: 'found', mission: { repositoryId: 'parallix' } },
+    slug: 'task-x', context: integrationContext({ baseWorktree: '/repo', area: 'all', branch: 'mission/task-x' }),
+    missionServices: integrationServices(),
+    missionLoad: { kind: 'found', mission: fixtureMission('task-x', { repositoryId: repositoryId('parallix') }), version: missionVersion(1) },
     dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
     seams: {
-      startAgentFn: async () => ({}), transitionTaskFn: () => true, applyAgentFallbackFn: async () => 'codex',
+      startAgentFn: async () => { throw new Error('Unexpected transition'); }, transitionTaskFn: () => true, applyAgentFallbackFn: async () => 'codex',
       routeIntegrationGateFailureFn: async () => route,
       ...(reReviewFn ? { reReviewFn } : {}),
     },
-  } as never;
+  };
 }
 
 test('a re-review that does not approve the repaired revision aborts before merge', async () => {
-  const route = { route: 'revision-changed', repairedRevision: 't2', invalidation: { ok: true } };
+  const route = { route: 'revision-changed', repairedRevision: 't2', invalidation: { ok: true, dismissed: [], errors: [] } };
   await assert.rejects(quietly(() => gateStep(route).runRequiredLocalGates(gateRequest(route, async () => false))), { name: 'IntegrationAbort' });
 });
 
 test('an approval that could not be retracted is never re-reviewed automatically', async () => {
-  const route = { route: 'revision-changed', repairedRevision: 't2', invalidation: { ok: false } };
+  const route = { route: 'revision-changed', repairedRevision: 't2', invalidation: { ok: false, dismissed: [], errors: [] } };
   let reviewed = false;
   await assert.rejects(quietly(() => gateStep(route).runRequiredLocalGates(gateRequest(route, async () => { reviewed = true; return true; }))), { name: 'IntegrationAbort' });
   assert.equal(reviewed, false);
@@ -346,12 +361,12 @@ test('a PR lookup with a direct base/head hit reads no page of pull requests', (
   const calls: string[] = [];
   const pr = getPrStatus('mission/task-2547', '/tmp', {
     token: 't',
-    apiCall: (_method: string, apiPath: string) => {
+    apiCall: forgejoApiFixture((_method: string, apiPath: string) => {
       calls.push(apiPath);
-      if (apiPath.endsWith('/mission/task-2547')) { return { ok: true, data: { number: 479, state: 'open' } }; }
-      if (apiPath === '/pulls/479') { return { ok: true, data: { number: 479, title: 'x', state: 'open', html_url: 'u' } }; }
-      return { ok: false, statusCode: 500 };
-    },
+      if (apiPath.endsWith('/mission/task-2547')) { return { ok: true as const, data: { number: 479, state: 'open' } }; }
+      if (apiPath === '/pulls/479') { return { ok: true as const, data: { number: 479, title: 'x', state: 'open', html_url: 'u' } }; }
+      return { ok: false as const, statusCode: 500 };
+    }),
   });
   assert.equal(pr.number, 479);
   assert.ok(!calls.some((call) => call.startsWith('/pulls?')), calls.join(', '));
@@ -361,22 +376,22 @@ test('a branch with no PR scans only the open pull requests, never every closed 
   const calls: string[] = [];
   const pr = getPrStatus('mission/task-2561', '/tmp', {
     token: 't',
-    apiCall: (_method: string, apiPath: string) => {
+    apiCall: forgejoApiFixture((_method: string, apiPath: string) => {
       calls.push(apiPath);
-      if (apiPath.startsWith('/pulls?state=open')) { return { ok: true, data: [] }; }
-      return { ok: false, statusCode: 404 };
-    },
+      if (apiPath.startsWith('/pulls?state=open')) { return { ok: true as const, data: [] }; }
+      return { ok: false as const, statusCode: 404 };
+    }),
   });
   assert.equal(pr.exists, false);
   assert.ok(!calls.some((call) => call.includes('state=all')), calls.join(', '));
 });
 
 test('the status agent view reports configured families with their database blocks, and unknown without a database', async () => {
-  const blocklist = {
-    async findAll() { return [{ agent: 'qwen', blocked: true, reason: 'quota', until: null }]; },
+  const blocklist: AgentBlocklistRepository = {
+    async findAll() { return [{ agent: 'qwen', blocked: true, reason: 'quota', until: undefined }]; },
     async findByAgent() { return undefined; },
     async save() {}, async deleteByAgent() {}, async clear() {},
-  } as unknown as AgentBlocklistRepository;
+  };
   const families = [agentFamily('codex'), agentFamily('qwen')];
   const agents = await createStatusAgentAdapter({ rootDir: REPO_ROOT, blocklistRepo: blocklist, knownAgentFamilies: families }).getAgents();
   assert.deepEqual(agents?.map((entry) => [entry.agent, entry.block.kind]), [['codex', 'none'], ['qwen', 'indefinite']]);
@@ -387,13 +402,13 @@ test('the status agent view reports configured families with their database bloc
 
 test('px gate add refuses a gate the validator rejects and writes nothing', async () => {
   const writes: unknown[] = [];
-  const services = {
+  const services: Parameters<typeof createGateCommand>[0] = {
     resolveSlug: () => 'task-x',
     brief: {
-      readGates: async () => ({ status: 'completed', value: { declaredGates: [] } }),
-      setGates: async (request: unknown) => { writes.push(request); return { status: 'completed', value: { version: 2 } }; },
+      readGates: async () => ({ status: 'completed', durableEvidence: [], value: { declaredGates: [], version: missionVersion(1) } }),
+      setGates: async (request: unknown) => { writes.push(request); return { status: 'completed', durableEvidence: [], value: { declaredGates: ['npm test'], version: missionVersion(2) } }; },
     },
-  } as never;
+  };
   const command = createGateCommand(services, (gate) => (gate.includes('#') ? 'Gate declaration must contain an exact runnable command only.' : null));
 
   await assert.rejects(command(['add', '--slug', 'task-x', '--command', 'npm test # all of it', '--expected-version', '1']), /exact runnable command only/);
@@ -428,12 +443,12 @@ test('post-draft stored unknown triggers agent repair and is checked again (TASK
   for (const repaired of [false, true]) {
     let classification = 'unknown'; let restarts = 0;
     const record = { logs: [] as string[], errors: [] as string[], exits: [] as number[] };
-    const base = draftContext(async () => ({}), async () => true);
-    const ctx = {
+    const base = draftContext(async () => { throw new Error('Unexpected transition'); }, async () => true);
+    const ctx: DraftWorkflowContext = {
       ...base,
-      missionServicesFn: async () => ({ store: { load: async () => ({ kind: 'found', mission: { labels: [classification] } }) } }),
+      missionServicesFn: async () => draftMissionServicesFixture({ store: { load: async () => ({ kind: 'found', mission: fixtureMission('task-x', { labels: missionLabels([classification]) }), version: missionVersion(1) }) } }),
       options: { ...base.options, restartDraftAgentFn: async () => { restarts++; if (repaired) classification = 'user_value'; return true; } },
-    } as unknown as DraftWorkflowContext;
+    };
     const result = await quietly(async () => draftAdapter(record).postProcess(ctx));
     assert.equal(restarts, 1);
     assert.equal(Boolean(result.exited), !repaired);

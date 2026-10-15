@@ -1,3 +1,5 @@
+import { SqliteMissionValueWriter } from './mission-value-writer.js';
+import { readMissionAggregates } from './mission-load-reader.js';
 import { SqliteCheckpointHistory } from './checkpoint-history.js';
 import type {
   MissionLoadResult,
@@ -17,29 +19,10 @@ import { completedCriteria, successCriteria, replaceSuccessCriteria, criterionCo
 import { missionDependencies } from '../../domain/mission-dependencies.js';
 import type { KnownRepository, RepositoryId } from '../../domain/repository.js';
 import { toCanonicalUtcInstant } from '../../domain/instant.js';
-import type { ReviewerDecision } from '../../domain/review.js';
+
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
 import { migrateLegacyAdhocIds as migrateLegacyAdhocIdsInStore } from './legacy-adhoc-migration.js';
 import { SqliteBoardLaneEventRepository } from './board-lane-event-repository.js';
-import {
-  hydrateMission,
-  type MissionExternalTaskRefRecord,
-  type MissionCheckpointRecord,
-  type MissionGoalCheckRecord,
-  type MissionLabelRecord,
-  type MissionBriefRecord,
-  type MissionBriefOutOfScopeRecord,
-  type MissionDeclaredGateRecord,
-  type MissionSuccessCriterionRecord,
-  type MissionDependencyRecord,
-  type MissionRecord,
-  type MissionReviewEventRecord,
-  type MissionReviewFindingRecord,
-  type MissionReviewRecord,
-  type MissionReviewResolutionRecord,
-  type MissionReviewStageLaunchRecord,
-  type MissionReviewRoundRecord,
-} from './mission-serialization.js';
 
 export class MissionStaleWriteError extends Error {
   readonly disposition = 'stale-write' as const;
@@ -86,6 +69,7 @@ const LOAD_CHUNK = 400;
  */
 export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
   private readonly eventRepo: SqliteBoardLaneEventRepository;
+  private readonly valueWriter: SqliteMissionValueWriter;
   /** Tail of the serialized aggregate-operation chain. */
   private aggregateQueue: Promise<unknown> = Promise.resolve();
   /** Hydrated aggregates by repository and the `version` they were read at. */
@@ -93,6 +77,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
 
   constructor(private readonly db: SqliteDatabaseAdapter) {
     this.eventRepo = new SqliteBoardLaneEventRepository(db);
+    this.valueWriter = new SqliteMissionValueWriter(db);
   }
 
   /**
@@ -129,10 +114,10 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       const stale = current.filter(({ id, version }) => cache.get(id)?.version !== version);
       const ids = new Set<string>(current.map(({ id }) => id));
       for (const id of [...cache.keys()]) { if (!ids.has(id)) { cache.delete(id); } }
-      for (let start = 0; start < stale.length; start += LOAD_CHUNK) {
+      for (let start = 0;start < stale.length;start += LOAD_CHUNK) {
         const chunk = stale.slice(start, start + LOAD_CHUNK).map(({ id }) => id);
         const marks = chunk.map(() => '?').join(', ');
-        const loaded = await this.loadAggregates({ missions: `id IN (${marks})`, children: `mission_id IN (${marks})`, params: chunk });
+        const loaded = await readMissionAggregates(this.db, { missions: `id IN (${marks})`, children: `mission_id IN (${marks})`, params: chunk });
         for (const result of loaded) {
           if (result.kind === 'found') { cache.set(result.mission.id, { version: result.version, mission: result.mission }); }
         }
@@ -190,159 +175,8 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
   }
 
   private async loadAggregate(id: MissionId): Promise<MissionLoadResult> {
-    const [loaded] = await this.loadAggregates({ missions: 'id = ?', children: 'mission_id = ?', params: [id] });
+    const [loaded] = await readMissionAggregates(this.db, { missions: 'id = ?', children: 'mission_id = ?', params: [id] });
     return loaded ?? { kind: 'missing' };
-  }
-
-  /**
-   * Load every aggregate a scope selects with one query per table instead of
-   * one per table per mission. `missions` filters the `missions` table and
-   * `children` the child tables; both bind the same `params`.
-   */
-  private async loadAggregates(scope: { readonly missions: string; readonly children: string; readonly params: readonly string[] }): Promise<MissionLoadResult[]> {
-    const params = [...scope.params];
-    const missionRows = await this.db.query<MissionRecord>(
-      `SELECT id, repository_id, title, status, raw_status, assignee,
-              net_engineering_lines, reproduction_test, predicted_nel_bucket, description, closed_at, version, next_success_criterion_id
-       FROM missions WHERE ${scope.missions} ORDER BY id`,
-      params,
-    );
-    if (missionRows.length === 0) { return []; }
-
-    const [
-      labels,
-      briefs,
-      briefOutOfScope,
-      gateRows,
-      criterionRows,
-      dependencyRows,
-      checkpoints,
-      goalChecks,
-      reviews,
-      reviewRounds,
-      findings,
-      resolutions,
-      externalRefs,
-      stageLaunches,
-      reviewEvents,
-    ] =
-      await Promise.all([
-        this.db.query<MissionLabelRecord>(
-          `SELECT mission_id, position, label FROM mission_labels WHERE ${scope.children} ORDER BY mission_id, position`,
-          params,
-        ),
-        this.db.query<MissionBriefRecord>(`SELECT mission_id, goal, why_text, scope_text FROM mission_briefs WHERE ${scope.children}`, params),
-        this.db.query<MissionBriefOutOfScopeRecord>(`SELECT mission_id, position, entry FROM mission_brief_out_of_scope WHERE ${scope.children} ORDER BY mission_id, position`, params),
-        this.db.query<MissionDeclaredGateRecord>(`SELECT mission_id, position, command FROM mission_declared_gates WHERE ${scope.children} ORDER BY mission_id, position`, params),
-        this.db.query<MissionSuccessCriterionRecord>(`SELECT mission_id, position, criterion, criterion_id, completed FROM mission_success_criteria WHERE ${scope.children} ORDER BY mission_id, position`, params),
-        this.db.query<MissionDependencyRecord>(`SELECT mission_id, position, depends_on_mission_id FROM mission_dependencies WHERE ${scope.children} ORDER BY mission_id, position`, params),
-        this.db.query<MissionCheckpointRecord>(
-          `SELECT mission_id, position, checkpoint_mission_id, name, raw_filename,
-                  first_line, next_action_text, repair_json, recording_json
-           FROM mission_checkpoints WHERE ${scope.children} ORDER BY mission_id, position`,
-          params,
-        ),
-        this.db.query<MissionGoalCheckRecord>(
-          `SELECT mission_id, checkpoint_position, position, criterion, criterion_id, evidence, recorded_round, repaired_gate, repaired_gates
-           FROM mission_checkpoint_goal_checks
-           WHERE ${scope.children} ORDER BY mission_id, checkpoint_position, position`,
-          params,
-        ),
-        this.db.query<MissionReviewRecord>(
-          `SELECT mission_id, intervention_requested_at, intervention_requested_by,
-                  intervention_reason
-           FROM mission_reviews WHERE ${scope.children}`,
-          params,
-        ),
-        this.db.query<MissionReviewRoundRecord>(
-          `SELECT mission_id, position, round_number, change_kind, provider,
-                  provider_change_id, provider_url, source_branch, target_branch,
-                  revision, review_baseline, reviewer, implementer, started_at, decision_kind,
-                  decided_at, decision_comment, classifier_source, integration_repair_assessment, mechanical_source, approval_source_kind,
-                  approval_source_provider, revoked_at, revoked_by, revoked_reason, revoked_cause, revoked_gate, revoked_gate_command, revoked_gate_log,
-                  superseded_at, superseding_revision, superseded_by, responded_at, resulting_revision,
-                  phase, disposition, reviewer_retry_count, implementer_retry_count,
-                  implementer_response_content, item_dispositions, blocked_reason
-           FROM mission_review_rounds WHERE ${scope.children} ORDER BY mission_id, position`,
-          params,
-        ),
-        this.db.query<MissionReviewFindingRecord>(
-          `SELECT mission_id, round_position, position, finding_id, summary, location
-           FROM mission_review_findings
-           WHERE ${scope.children} ORDER BY mission_id, round_position, position`,
-          params,
-        ),
-        this.db.query<MissionReviewResolutionRecord>(
-          `SELECT mission_id, round_position, position, finding_id, kind, explanation
-           FROM mission_review_resolutions
-           WHERE ${scope.children} ORDER BY mission_id, round_position, position`,
-          params,
-        ),
-        this.db.query<MissionExternalTaskRefRecord>(
-          `SELECT mission_id, source, external_id, url
-           FROM mission_external_task_refs WHERE ${scope.children}`,
-          params,
-        ),
-        this.db.query<MissionReviewStageLaunchRecord>(
-          `SELECT mission_id, stage_key, position, fingerprint
-           FROM mission_review_stage_launches
-           WHERE ${scope.children} ORDER BY mission_id, stage_key, position`,
-          params,
-        ),
-        this.db.query<MissionReviewEventRecord>(
-          `SELECT mission_id, position, event_type, round_number, phase, actor,
-                  content, disposition, verdict, item_dispositions, blocked_reason, followup_reference, created_at
-           FROM mission_review_events
-           WHERE ${scope.children} ORDER BY mission_id, position`,
-          params,
-        ),
-      ]);
-
-    const byMission = <T extends { readonly mission_id: string }>(rows: readonly T[]) => {
-      const grouped = new Map<string, T[]>();
-      for (const row of rows) {
-        const group = grouped.get(row.mission_id);
-        if (group === undefined) { grouped.set(row.mission_id, [row]); } else { group.push(row); }
-      }
-      return (id: string): T[] => grouped.get(id) ?? [];
-    };
-    const labelsOf = byMission(labels);
-    const briefsOf = byMission(briefs);
-    const briefOutOfScopeOf = byMission(briefOutOfScope);
-    const gatesOf = byMission(gateRows);
-    const criteriaOf = byMission(criterionRows);
-    const dependenciesOf = byMission(dependencyRows);
-    const checkpointsOf = byMission(checkpoints);
-    const goalChecksOf = byMission(goalChecks);
-    const reviewsOf = byMission(reviews);
-    const roundsOf = byMission(reviewRounds);
-    const findingsOf = byMission(findings);
-    const resolutionsOf = byMission(resolutions);
-    const externalRefsOf = byMission(externalRefs);
-    const stageLaunchesOf = byMission(stageLaunches);
-    const reviewEventsOf = byMission(reviewEvents);
-
-    return missionRows.map((mission): MissionLoadResult => ({
-      kind: 'found',
-      ...hydrateMission({
-        mission,
-        externalTaskRef: externalRefsOf(mission.id)[0] ?? null,
-        labels: labelsOf(mission.id),
-        brief: briefsOf(mission.id)[0] ?? null,
-        briefOutOfScope: briefOutOfScopeOf(mission.id),
-        declaredGates: gatesOf(mission.id),
-        successCriteria: criteriaOf(mission.id),
-        dependencies: dependenciesOf(mission.id),
-        checkpoints: checkpointsOf(mission.id),
-        goalChecks: goalChecksOf(mission.id),
-        review: reviewsOf(mission.id)[0] ?? null,
-        reviewRounds: roundsOf(mission.id),
-        findings: findingsOf(mission.id),
-        resolutions: resolutionsOf(mission.id),
-        stageLaunches: stageLaunchesOf(mission.id),
-        reviewEvents: reviewEventsOf(mission.id),
-      }),
-    }));
   }
 
   /**
@@ -499,22 +333,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     // MissionStore is a public persistence port: callers other than the brief
     // service may save an aggregate, so reject an invalid brief or gate list
     // before any relational row can make a Mission unloadable on restart.
-    mission = { ...mission, title: missionTitle(mission.title, mission.id) };
-    if (mission.brief) {
-      mission = { ...mission, brief: missionBrief(mission.brief) };
-    }
-    if (mission.declaredGates && mission.declaredGates.length > 0) {
-      mission = { ...mission, declaredGates: declaredGates(mission.declaredGates) };
-    }
-    if (mission.successCriteria && mission.successCriteria.length > 0) {
-      mission = { ...mission, successCriteria: successCriteria(mission.successCriteria) };
-    }
-    if (mission.completedSuccessCriteria && mission.completedSuccessCriteria.length > 0) {
-      mission = { ...mission, completedSuccessCriteria: completedCriteria(mission.completedSuccessCriteria, mission.successCriteria?.length ?? 0) };
-    }
-    if (mission.dependencies && mission.dependencies.length > 0) {
-      mission = { ...mission, dependencies: missionDependencies(mission.dependencies, mission.id) };
-    }
+    mission = normalizeStoredMission(mission);
     // New/changed closure instants must be canonical. Historical values that
     // migration deliberately preserved may survive an unrelated aggregate edit.
     let closedAt: string | null = mission.closedAt ?? null;
@@ -579,14 +398,12 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       await this.clearAggregateValues(mission);
     }
 
-    mission = replaceSuccessCriteria(mission, mission.successCriteria ?? [], mission.successCriterionIds);
-    mission = { ...mission, checkpoints: mission.checkpoints.map(checkpoint => ({ ...checkpoint,
-      goalCheck: identifyGoalCheckRows(checkpoint.goalCheck, criterionContract(mission)) })) };
+    mission = alignStoredCriteria(mission);
     await this.db.execute('UPDATE missions SET next_success_criterion_id = ? WHERE id = ?', [mission.nextSuccessCriterionId!, mission.id]);
     const checkpointHistory = new SqliteCheckpointHistory(this.db);
     await checkpointHistory.append(mission);
     await checkpointHistory.captureRounds(mission);
-    await this.insertAggregateValues(mission);
+    await this.valueWriter.insert(mission);
     return nextVersion;
   }
 
@@ -627,241 +444,35 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     await this.db.execute('DELETE FROM mission_review_findings WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_review_rounds WHERE mission_id = ?', [id]);
   }
-
-  private async insertAggregateValues(mission: Mission): Promise<void> {
-    if (mission.brief) {
-      const brief = mission.brief;
-      await this.db.execute(
-        'INSERT INTO mission_briefs (mission_id, goal, why_text, scope_text) VALUES (?, ?, ?, ?)',
-        [mission.id, brief.goal, brief.why, brief.scope],
-      );
-      for (const [position, entry] of brief.outOfScope.entries()) {
-        await this.db.execute(
-          'INSERT INTO mission_brief_out_of_scope (mission_id, position, entry) VALUES (?, ?, ?)',
-          [mission.id, position, entry],
-        );
-      }
-    }
-    for (const [position, command] of (mission.declaredGates ?? []).entries()) {
-      await this.db.execute(
-        'INSERT INTO mission_declared_gates (mission_id, position, command) VALUES (?, ?, ?)',
-        [mission.id, position, command],
-      );
-    }
-    for (const [position, dependency] of (mission.dependencies ?? []).entries()) {
-      await this.db.execute(
-        'INSERT INTO mission_dependencies (mission_id, position, depends_on_mission_id) VALUES (?, ?, ?)',
-        [mission.id, position, dependency],
-      );
-    }
-    for (const [position, criterion] of (mission.successCriteria ?? []).entries()) {
-      await this.db.execute(
-        'INSERT INTO mission_success_criteria (mission_id, position, criterion, completed, criterion_id) VALUES (?, ?, ?, ?, ?)',
-        [mission.id, position, criterion, (mission.completedSuccessCriteria ?? []).includes(position) ? 1 : 0, mission.successCriterionIds?.[position] ?? null],
-      );
-    }
-    if (mission.externalTaskRef) {
-      await this.db.execute(
-        `INSERT INTO mission_external_task_refs (mission_id, source, external_id, url)
-         VALUES (?, ?, ?, ?)`,
-        [
-          mission.id,
-          mission.externalTaskRef.source,
-          mission.externalTaskRef.id,
-          mission.externalTaskRef.url,
-        ],
-      );
-    }
-    for (const [position, label] of mission.labels.entries()) {
-      await this.db.execute(
-        'INSERT INTO mission_labels (mission_id, position, label) VALUES (?, ?, ?)',
-        [mission.id, position, label],
-      );
-    }
-    for (const [checkpointPosition, checkpoint] of mission.checkpoints.entries()) {
-      await this.db.execute(
-        `INSERT INTO mission_checkpoints
-           (mission_id, position, checkpoint_mission_id, name, raw_filename,
-            first_line, next_action_text, repair_json, recording_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          mission.id,
-          checkpointPosition,
-          checkpoint.missionId,
-          checkpoint.name,
-          checkpoint.rawFilename ?? null,
-          checkpoint.firstLine ?? null,
-          checkpoint.nextActionText,
-          checkpoint.repair ? JSON.stringify(checkpoint.repair) : null,
-          checkpoint.recording ? JSON.stringify(checkpoint.recording) : null,
-        ],
-      );
-      for (const [position, row] of checkpoint.goalCheck.entries()) {
-        await this.db.execute(
-          `INSERT INTO mission_checkpoint_goal_checks
-             (mission_id, checkpoint_position, position, criterion, evidence, recorded_round, repaired_gate, repaired_gates, criterion_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [mission.id, checkpointPosition, position, row.criterion, row.evidence, row.recordedRound ?? null, row.repairedGate ?? null, row.repairedGates ? JSON.stringify(row.repairedGates) : null, row.criterionId ?? null],
-        );
-      }
-    }
-    if (mission.review) {
-      await this.insertReview(mission);
-    }
-  }
-
-  private async insertReview(mission: Mission): Promise<void> {
-    const review = mission.review;
-    if (!review) {
-      return;
-    }
-    // Upsert, never delete-and-reinsert: the review children cascade from this
-    // row, and a concurrent reader must never observe the mission without it.
-    await this.db.execute(
-      `INSERT INTO mission_reviews
-         (mission_id, intervention_requested_at, intervention_requested_by,
-          intervention_reason)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(mission_id) DO UPDATE SET
-         intervention_requested_at = excluded.intervention_requested_at,
-         intervention_requested_by = excluded.intervention_requested_by,
-         intervention_reason = excluded.intervention_reason`,
-      [
-        mission.id,
-        review.intervention?.requestedAt ?? null,
-        review.intervention?.requestedBy ?? null,
-        review.intervention?.reason ?? null,
-      ],
-    );
-
-    for (const [roundPosition, round] of review.rounds.entries()) {
-      await this.insertReviewRound(mission.id, roundPosition, round);
-    }
-
-    for (const window of review.stageLaunches) {
-      for (const [position, fingerprint] of window.fingerprints.entries()) {
-        await this.db.execute(
-          `INSERT INTO mission_review_stage_launches
-             (mission_id, stage_key, position, fingerprint)
-           VALUES (?, ?, ?, ?)`,
-          [mission.id, window.stageKey, position, fingerprint],
-        );
-      }
-    }
-
-    // Insert review events (audit trail, replaces .md files)
-    for (const [position, event] of review.reviewEvents.entries()) {
-      await this.db.execute(
-        `INSERT INTO mission_review_events
-           (mission_id, position, event_type, round_number, phase, actor,
-            content, disposition, verdict, item_dispositions, blocked_reason, followup_reference, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [mission.id, position, event.eventType, event.roundNumber, event.phase, event.actor,
-          event.content, event.disposition, event.verdict,
-          event.itemDispositions ? JSON.stringify(event.itemDispositions) : null,
-          event.blockedReason, event.followUpReference, event.createdAt],
-      );
-    }
-  }
-
-  private async insertReviewRound(missionId: string, roundPosition: number, round: any): Promise<void> {
-      const change = round.subject.change;
-      const decision = round.decision;
-      const approval = decision?.kind === 'approved' ? decision.source : null;
-      await this.db.execute(
-        `INSERT INTO mission_review_rounds
-           (mission_id, position, round_number, change_kind, provider,
-            provider_change_id, provider_url, source_branch, target_branch,
-            revision, review_baseline, reviewer, implementer, started_at, decision_kind,
-            decided_at, decision_comment, classifier_source, integration_repair_assessment, mechanical_source, approval_source_kind,
-            approval_source_provider, revoked_at, revoked_by, revoked_reason, revoked_cause, revoked_gate, revoked_gate_command, revoked_gate_log,
-                  superseded_at, superseding_revision, superseded_by, responded_at, resulting_revision,
-            phase, disposition, reviewer_retry_count, implementer_retry_count,
-            implementer_response_content, item_dispositions, blocked_reason)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          missionId,
-          roundPosition,
-          round.number,
-          change.kind,
-          change.kind === 'pull-request' ? change.provider : null,
-          change.kind === 'pull-request' ? change.id : null,
-          change.kind === 'pull-request' ? change.url : null,
-          change.sourceBranch,
-          change.targetBranch,
-          round.subject.revision,
-          round.subject.baseline ?? null,
-          round.reviewer,
-          round.implementer,
-          round.startedAt,
-          decision?.kind ?? null,
-          decision?.decidedAt ?? null,
-          decision?.comment ?? null,
-          decision?.classifier ? JSON.stringify(decision.classifier) : null,
-          round.integrationRepairAssessment ? JSON.stringify(round.integrationRepairAssessment) : null,
-          approval?.kind === 'mechanical-restoration' ? JSON.stringify(approval) : null,
-          approval?.kind === 'mechanical-restoration' ? 'local' : approval?.kind ?? null,
-          approval?.kind === 'provider' ? approval.provider : null,
-          decision?.kind === 'approved' ? decision.revocation?.revokedAt ?? null : null,
-          decision?.kind === 'approved' ? decision.revocation?.revokedBy ?? null : null,
-          decision?.kind === 'approved' ? decision.revocation?.reason ?? null : null,
-          decision?.kind === 'approved' ? decision.revocation?.cause?.kind ?? null : null,
-          ...gateFailureColumns(decision),
-          decision?.kind === 'approved' ? decision.supersession?.supersededAt ?? null : null,
-          decision?.kind === 'approved' ? decision.supersession?.supersedingRevision ?? null : null,
-          decision?.kind === 'approved' ? decision.supersession?.recordedBy ?? null : null,
-          round.response?.respondedAt ?? null,
-          round.response?.resultingRevision ?? null,
-          round.phase,
-          round.disposition,
-          round.reviewerRetryCount,
-          round.implementerRetryCount,
-          round.implementerResponseContent ?? null,
-          round.itemDispositions ? JSON.stringify(round.itemDispositions) : null,
-          round.blockedReason ?? null,
-        ],
-      );
-
-      if (decision?.kind === 'changes-requested') {
-        for (const [position, finding] of decision.findings.entries()) {
-          await this.db.execute(
-            `INSERT INTO mission_review_findings
-               (mission_id, round_position, position, finding_id, summary, location)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [
-              missionId,
-              roundPosition,
-              position,
-              finding.id,
-              finding.summary,
-              finding.location,
-            ],
-          );
-        }
-      }
-      if (round.response) {
-        for (const [position, resolution] of round.response.resolutions.entries()) {
-          await this.db.execute(
-            `INSERT INTO mission_review_resolutions
-               (mission_id, round_position, position, finding_id, kind, explanation)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [
-              missionId,
-              roundPosition,
-              position,
-              resolution.findingId,
-              resolution.kind,
-              resolution.kind === 'fixed' ? resolution.evidence : resolution.rationale,
-            ],
-          );
-        }
-      }
-  }
 }
 
-/** The red integration gate recorded on a withdrawn approval, as its three columns. */
-function gateFailureColumns(decision: ReviewerDecision | null): [string | null, string | null, string | null] {
-  const cause = decision?.kind === 'approved' ? decision.revocation?.cause : undefined;
-  if (cause?.kind !== 'integration-gate-failure') { return [null, null, null]; }
-  return [cause.gate, cause.command ?? null, cause.log ?? null];
+function normalizeStoredMission(mission: Mission): Mission {
+  mission = { ...mission, title: missionTitle(mission.title, mission.id) };
+  if (mission.brief) {
+    mission = { ...mission, brief: missionBrief(mission.brief) };
+  }
+  if (mission.declaredGates && mission.declaredGates.length > 0) {
+    mission = { ...mission, declaredGates: declaredGates(mission.declaredGates) };
+  }
+  if (mission.successCriteria && mission.successCriteria.length > 0) {
+    mission = { ...mission, successCriteria: successCriteria(mission.successCriteria) };
+  }
+  if (mission.completedSuccessCriteria && mission.completedSuccessCriteria.length > 0) {
+    mission = { ...mission, completedSuccessCriteria: completedCriteria(mission.completedSuccessCriteria, mission.successCriteria?.length ?? 0) };
+  }
+  if (mission.dependencies && mission.dependencies.length > 0) {
+    mission = { ...mission, dependencies: missionDependencies(mission.dependencies, mission.id) };
+  }
+  return mission;
+}
+
+function alignStoredCriteria(mission: Mission): Mission {
+  mission = replaceSuccessCriteria(mission, mission.successCriteria ?? [], mission.successCriterionIds);
+  mission = {
+    ...mission, checkpoints: mission.checkpoints.map(checkpoint => ({
+      ...checkpoint,
+      goalCheck: identifyGoalCheckRows(checkpoint.goalCheck, criterionContract(mission))
+    }))
+  };
+  return mission;
 }

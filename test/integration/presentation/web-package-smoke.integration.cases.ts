@@ -65,17 +65,17 @@ function startPackagedWeb(): Promise<RunningHost> {
     },
   });
   let output = '';
-  let rejectError: ((error: Error) => void) | null = null;
+  let rejectError: { value: ((error: Error) => void) | null } = { value: null };
   child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString(); });
   child.stderr.on('data', (chunk: Buffer) => { output += chunk.toString(); });
-  child.on('error', err => rejectError?.(err));
+  child.on('error', err => rejectError.value?.(err));
   child.on('exit', code => {
-    if (code !== null && code !== 0 && rejectError) {
-      rejectError(new Error(`packaged px web exited ${code}: ${output}`));
+    if (code !== null && code !== 0 && rejectError.value) {
+      rejectError.value(new Error(`packaged px web exited ${code}: ${output}`));
     }
   });
   return new Promise((resolve, reject) => {
-    rejectError = reject;
+    rejectError.value = reject;
     const poll = setInterval(() => {
       const match = output.match(/listening on (http:\/\/127\.0\.0\.1:\d+)\/ /);
       if (match) {

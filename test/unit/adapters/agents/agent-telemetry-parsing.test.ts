@@ -21,7 +21,7 @@ describe("Codex rollout telemetry", () => {
   // Minimal but schema-faithful rollout JSONL, modelled on the real Codex
   // `~/.codex/sessions/.../rollout-*.jsonl` format (task-1251). Tests are fully
   // offline — no agent is launched, so no tokens are consumed.
-  function rolloutLines({ sessionId, model = 'gpt-5.4-mini', effort = 'medium', toolCalls = 0, usagePercent = 12, tokenCounts = [] }) {
+  function rolloutLines({ sessionId, model = 'gpt-5.4-mini', effort = 'medium', toolCalls = 0, usagePercent = 12, tokenCounts = [] }: { sessionId: string; model?: string; effort?: string; toolCalls?: number; usagePercent?: number; tokenCounts?: readonly { input: number; output: number; total: number; cached?: number; reasoning?: number }[] }) {
     const lines = [];
     lines.push(JSON.stringify({ type: 'session_meta', payload: { id: sessionId, model_provider: 'openai' } }));
     lines.push(JSON.stringify({ type: 'turn_context', payload: { model, effort } }));
@@ -59,6 +59,7 @@ describe("Codex rollout telemetry", () => {
       ],
     });
     const t = parseCodexRollout(content);
+    assert.ok(t != null);
     assert.equal(t.sessionId, 'aaaa');
     assert.equal(t.provider, 'openai');
     assert.equal(t.model, 'gpt-5.4-mini');
@@ -81,7 +82,9 @@ describe("Codex rollout telemetry", () => {
       JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, output_tokens: 10, total_tokens: 110 } } } }),
     ].join('\n');
 
-    assert.equal(parseCodexRollout(content).toolCalls, 2);
+    const parsed = parseCodexRollout(content);
+    assert.ok(parsed);
+    assert.equal(parsed.toolCalls, 2);
   });
 
   test('parseCodexRollout returns honest nulls/zeros for a failed turn (info null)', () => {
@@ -91,6 +94,7 @@ describe("Codex rollout telemetry", () => {
       JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: null, rate_limits: { primary: null } } }),
     ].join('\n');
     const t = parseCodexRollout(content);
+    assert.ok(t != null);
     assert.equal(t.inputTokens, 0);
     assert.equal(t.totalTokens, 0);
     assert.equal(t.toolCalls, 0);
@@ -119,6 +123,7 @@ describe("Codex rollout telemetry", () => {
     fs.utimesSync(f2, new Date(base), new Date(base));
 
     const t = extractCodexTelemetry(home, { sinceMs: 0 });
+    assert.ok(t != null);
     assert.equal(t.rolloutCount, 2);
     // tokens summed across both rounds
     assert.equal(t.inputTokens, 4000);
@@ -146,6 +151,7 @@ describe("Codex rollout telemetry", () => {
 
     // Window starting after the draft rollout must only see the active rollout.
     const t = extractCodexTelemetry(home, { sinceMs: base - 60000 });
+    assert.ok(t != null);
     assert.equal(t.rolloutCount, 1);
     assert.equal(t.totalTokens, 505);
   });
@@ -232,7 +238,7 @@ describe("Vibe telemetry", () => {
   test('parseVibeMeta returns null for empty/garbage input', () => {
     assert.equal(parseVibeMeta(null), null);
     assert.equal(parseVibeMeta(undefined), null);
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
+    // @ts-expect-error Intentional non-object telemetry input.
     assert.equal(parseVibeMeta('not json'), null);
   });
 

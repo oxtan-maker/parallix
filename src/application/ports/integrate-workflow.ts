@@ -26,6 +26,8 @@
  * | `checkout`         | `integrate-conflict` — stash, noise patch, conflict and squash helpers      |
  * | `landing`          | `integrate-post` — abort signal, hooks, stats, closeout, worktree cleanup   |
  */
+import type { IntegrationPullRequest, IntegrationApproval, IntegrationReviewSnapshot, GithubIntegrationObservation, IntegrationMissionServices, IntegrationMissionServicesFactory, IntegrationGateDefinition, IntegrationFailedGate, IntegrationStash } from './integration-records.js';
+import type { IntegrationMode } from '../../domain/integration.js';
 import type { MissionStore } from '../domain-ports.js';
 import type { ReboundContext } from '../rebound-kernel.js';
 import type { RebaseWorkflowPort } from './rebase-workflow.js';
@@ -38,12 +40,12 @@ export interface IntegrateCommandResult {
 
 export type IntegrateGitRunner = (_args: string[]) => IntegrateCommandResult;
 
-export interface IntegrateTaskResolution {
+export type IntegrateTaskResolution = {
   readonly ok: boolean;
   readonly taskFile?: string;
   readonly reason?: string;
   readonly matches?: string[];
-}
+};
 
 export interface IntegrateProcessPort {
   /** Terminal exit; the application never calls the runtime directly. */
@@ -78,21 +80,21 @@ export interface IntegrateBacklogPort {
 }
 
 export interface IntegrateStateMapPort {
-  toVirtual(_actualState: string, _map?: Record<string, unknown>): string;
+  toVirtual(_actualState: string | undefined, _map?: Record<string, unknown>): string | undefined;
   toActual(_virtualState: string, _map?: Record<string, unknown>): string | null;
 }
 
 export interface IntegrateForgejoPort {
-  getPrStatus(_branch: string, _rootDir: string, _options: Record<string, unknown>): any;
-  getLatestReviewDecision(_branch: string, _options: Record<string, unknown>): any;
-  syncMerged(_branch: string, _commit: string, _options: Record<string, unknown>): { ok: boolean };
+  getPrStatus(_branch: string, _rootDir: string, _options: Record<string, unknown>): IntegrationPullRequest;
+  getLatestReviewDecision(_branch: string, _options: Record<string, unknown>): IntegrationApproval;
+  syncMerged(_branch: string, _commit: string, _options: Record<string, unknown>): { ok: boolean; statusCode?: number | null; error?: string; raw?: string };
   readToken(_user: string): string | null;
   resolveTokenFile(_user: string): string | null;
   listOpenPrsForSlug(_baseSlug: string, _token: string): Array<{ head: string; number?: number; html_url?: string }>;
 }
 
 export interface IntegrateGithubPort {
-  submitOrObserveGithubPr(_expected: { head: string; base: string; candidateSha: string }, _rootDir: string): any;
+  submitOrObserveGithubPr(_expected: { head: string; base: string; candidateSha: string }, _rootDir: string): GithubIntegrationObservation;
 }
 
 export interface IntegrateMissionPathsPort {
@@ -132,29 +134,29 @@ export interface IntegrateAgentsPort {
 }
 
 export interface IntegrationAgentFallbackOptions {
-  launchResult: unknown;
+  launchResult: Awaited<ReturnType<ReboundContext['startAgent']>>;
   original: string;
   role: 'implementer';
   slug: string;
   worktree: string;
-  state: Record<string, unknown>;
+  state: IntegrationReviewSnapshot;
   taskResolution?: Record<string, unknown>;
   missionStore: MissionStore;
 }
 
 export interface IntegrateProductConfigPort {
   isForgejoReviewEnabled(_rootDir: string): boolean;
-  resolveIntegrationMode(_rootDir: string): any;
+  resolveIntegrationMode(_rootDir: string): IntegrationMode;
 }
 
 export interface IntegrateReviewPort {
-  readReviewState(_slug: string, _rootDir: string, _missionStore?: MissionStore | null): Promise<any> | any;
+  readReviewState(_slug: string, _rootDir: string, _missionStore?: MissionStore | null): Promise<IntegrationReviewSnapshot | null> | IntegrationReviewSnapshot | null;
   submitForReview(_slug: string, _skipGate: boolean, _options: Record<string, unknown>): Promise<unknown>;
   resolveForgejoUser(_reviewer: string): string | null;
 }
 
 export interface IntegrateRebasePort {
-  createRebaseWorkflowPort(_options: { gitFn: IntegrateGitRunner; missionServicesFn?: Function; exitFn: (_code: number) => void }): RebaseWorkflowPort;
+  createRebaseWorkflowPort(_options: { gitFn: IntegrateGitRunner; missionServicesFn?: IntegrationMissionServicesFactory; exitFn: (_code: number) => void }): RebaseWorkflowPort;
 }
 
 export interface IntegrationGateRunResult {
@@ -162,7 +164,7 @@ export interface IntegrationGateRunResult {
   readonly skipped?: boolean;
   readonly cancelled?: boolean;
   readonly error?: string | null;
-  readonly failedGate?: any;
+  readonly failedGate?: IntegrationFailedGate | null;
 }
 
 export interface IntegrationGateRoute {
@@ -176,24 +178,39 @@ export interface IntegrationGateRoute {
   readonly invalidation?: { readonly ok: boolean; readonly dismissed: readonly string[]; readonly errors: readonly string[] };
 }
 
+export interface IntegrationGateFailureRequest {
+  slug: string; missionWorktree: string; verificationCommand?: string | null;
+  failedGate: IntegrationFailedGate | null | undefined; gateError?: string | null;
+  gates: IntegrationGateDefinition[]; implementer: string; repositoryId: string;
+  approvedRevision?: string | null; branch?: string | null; approval?: IntegrationApproval;
+  reportedStaleness?: string | null; realAgent?: string | null; realAgentModel?: string | null;
+  startAgentFn: ReboundContext['startAgent'];
+  transitionTaskFn: (slug: string) => unknown | Promise<unknown>;
+  reactivateMissionFn?: (slug: string) => unknown | Promise<unknown>;
+  applyAgentFallbackFn?: ReboundContext['applyAgentFallback'];
+  recordIntegrationValidationFailureFn?: (input: { missionId: string; sha: string; hooks: readonly string[] }) => Promise<void> | void;
+  recordIntegrationValidationFn?: (input: { missionId: string; sha: string; hooks: readonly string[] }) => Promise<void> | void;
+  reReviewFollows?: boolean;
+}
+
 export interface IntegrateGatesPort {
-  loadPhaseGates(_rootDir: string, _phase: 'preIntegration'): any[];
+  loadPhaseGates(_rootDir: string, _phase: 'preIntegration'): IntegrationGateDefinition[];
   loadRequirePreIntegration(_rootDir: string): boolean;
-  runPhaseGates(_phase: 'integration', _options: Record<string, unknown>): Promise<IntegrationGateRunResult>;
+  runPhaseGates(_phase: 'integration', _options: { slug: string; checkoutPath: string; gates?: IntegrationGateDefinition[]; log?: (message: string) => void; error?: (message: string) => void; dryRun?: boolean; realAgent?: string | null; realAgentModel?: string | null }): Promise<IntegrationGateRunResult>;
   captureFinalIntegrationTree(_rootDir: string): { ok: boolean; error?: string; rootDir?: string; commit?: string; tree?: string };
   /** Repository-relative paths whose content differs between two commits; any git failure is `ok: false`. */
   listChangedPathsBetween(_rootDir: string, _fromCommit: string, _toCommit: string): { ok: true; paths: string[] } | { ok: false; error: string };
   resolveIntegrationVerificationWorktree(_slug: string, _options: { baseWorktree: string }): string;
   isIntendedPayloadAtHead(_rootDir: string, _paths: Iterable<string>, _options: { gitRunner: IntegrateGitRunner }): boolean;
   runStagedTierGuards?(_rootDir: string, _paths: ReadonlySet<string>): { ok: boolean; error?: string; tree?: string };
-  routeIntegrationGateFailure(_options: any): Promise<IntegrationGateRoute>;
+  routeIntegrationGateFailure(_options: IntegrationGateFailureRequest): Promise<IntegrationGateRoute>;
 }
 
 export interface IntegrateCheckoutPort {
   stashMainCheckoutIfNeeded(_options: { slug: string; dirtyEntries: string[]; rootDir: string }): { created?: boolean; message?: string; rootDir?: string } | null;
-  restoreMainCheckoutStash(_stash: any): IntegrateCommandResult;
-  maybeDropStashAfterCollision(_restoreResult: any, _rootDir: string): unknown;
-  reportStashPopFailure(_slug: string, _restoreResult: any, _options: { rootDir: string }): void;
+  restoreMainCheckoutStash(_stash: IntegrationStash): IntegrateCommandResult;
+  maybeDropStashAfterCollision(_restoreResult: IntegrateCommandResult, _rootDir: string): unknown;
+  reportStashPopFailure(_slug: string, _restoreResult: IntegrateCommandResult, _options: { rootDir: string }): void;
   prepareNoisePatchForSquash(_rootDir: string, _options: { gitRunner: IntegrateGitRunner }): { ok: boolean; error?: string; patchPath?: string | null; cleanup?: () => void };
   restoreNoisePatchAfterSquash(_rootDir: string, _patchPath: string, _options: { gitRunner: IntegrateGitRunner }): { ok: boolean; error?: string };
   getUnresolvedIndexConflicts(_rootDir: string): { ok: boolean; error?: string; files: string[] };
@@ -208,12 +225,12 @@ export interface IntegrateLandingPort {
   /** The error that ends a run with exit code 1 after its diagnostics were printed. */
   createAbort(): Error;
   isAbort(_error: unknown): boolean;
-  classifyHookFailure(_output: string): { isHookFailure: boolean; hookType?: any };
-  reportSyncMergedFailure(_syncResult: unknown): void;
+  classifyHookFailure(_output: string): { isHookFailure: boolean; hookType: string | null };
+  reportSyncMergedFailure(_syncResult: { statusCode?: number | null; error?: string; raw?: string }): void;
   resolveForgejoUserForIntegration(_taskAssignee: string | null): { forgejoUser: string | null; warning: string | null };
   isNoMergeToAbortResult(_result: IntegrateCommandResult): boolean;
-  persistLandedIntegrationOrAbort(_slug: string, _commit: string, _missionServices: any, _options: { rootDir: string }): Promise<unknown>;
-  closeLandedIntegrationOrAbort(_slug: string, _commit: string, _missionServices: any): Promise<unknown>;
+  persistLandedIntegrationOrAbort(_slug: string, _commit: string, _missionServices: IntegrationMissionServices, _options: { rootDir: string }): Promise<unknown>;
+  closeLandedIntegrationOrAbort(_slug: string, _commit: string, _missionServices: IntegrationMissionServices): Promise<unknown>;
   recordPostIntegrationStatsOrAbort(_slug: string, _options: { rootDir: string; missionStore: MissionStore; readMissionFlow?: () => Promise<readonly import('./cli-workflows.js').StatsMissionFlow[] | null> }): Promise<unknown>;
   hasIntegrationMeasurement?(_slug: string, _rootDir: string): boolean;
   runPreCommitHookOrAbort(_slug: string, _options: { missionWorktree: string; baseWorktree: string; baseBranch: string; variant: string }): unknown;

@@ -1,3 +1,5 @@
+import { repositoryId as fixtureRepositoryId } from '../../../src/domain/repository.js';
+import { missionId as fixtureMissionId } from '../../../src/domain/mission.js';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -57,8 +59,8 @@ async function withRepo(
 
 function event(overrides: Partial<LaneTransitionEvent> = {}): LaneTransitionEvent {
   return {
-    missionId: 'task-1' as MissionId,
-    repositoryId: '/repo' as never,
+    missionId: fixtureMissionId('task-1') as MissionId,
+    repositoryId: fixtureRepositoryId('/repo'),
     from: 'backlog' as MissionStatus,
     to: 'active' as MissionStatus,
     trigger: 'activate',
@@ -211,7 +213,7 @@ describe('recordLaneTransitionSafely — telemetry never blocks (SC4)', () => {
       append: async (): Promise<boolean> => {
         throw new Error('storage unavailable');
       },
-    };
+    } satisfies NonNullable<Parameters<typeof recordLaneTransitionSafely>[0]>;
 
     let result: boolean | undefined;
     await assert.doesNotReject(async () => {
@@ -223,7 +225,7 @@ describe('recordLaneTransitionSafely — telemetry never blocks (SC4)', () => {
   it('counts a failed write while preserving the non-blocking result', async () => {
     const recorder = new BoardEventRecorder({
       async append() { throw new Error('storage unavailable'); },
-    } as unknown as BoardLaneEventRepository);
+    });
 
     const wrote = await recordLaneTransitionSafely(recorder, event());
 
@@ -273,11 +275,11 @@ describe('SqliteBoardLaneEventRepository — typed queries', () => {
       const recorder = new BoardEventRecorder(repo);
       await recorder.append(event({
         idempotencyKey: 'op-a',
-        missionId: 'task-a' as MissionId,
+        missionId: fixtureMissionId('task-a') as MissionId,
       }));
       await recorder.append(event({
         idempotencyKey: 'op-b',
-        missionId: 'task-b' as MissionId,
+        missionId: fixtureMissionId('task-b') as MissionId,
       }));
 
       const rows = await repo.findAll();

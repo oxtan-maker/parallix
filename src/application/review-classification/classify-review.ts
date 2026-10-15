@@ -1,5 +1,10 @@
+import { obligationPackets, runObligations, OBLIGATION_PROMPT_VERSION, OBLIGATION_PACKET_VERSION } from './obligation-review.js';
+import { OBLIGATION_POLICY_VERSION, OBLIGATION_THRESHOLD } from '../../domain/classifier-review.js';
+import { reviewObligations } from '../../domain/review-obligations.js';
+import { decidedRevisionOf } from '../../domain/review.js';
+import { omissionMeasurements } from './fit-packet.js';
 import { missionId } from '../../domain/mission.js';
-import { applyClassifierReview, classifierPolicyForReview, integrationRepairFinding, reviewAtCandidateRevision, successCriteriaFindings, type ClassifierReviewSource } from '../../domain/classifier-review.js';
+import { applyClassifierReview, classifierPolicyForReview, integrationRepairFinding, successCriteriaFindings, type ClassifierReviewSource } from '../../domain/classifier-review.js';
 import { resolveReviewBaseline } from '../review-baseline.js';
 import { buildArchivedEvidencePacket, ARCHIVED_PACKING_VERSION } from './archived-packing.js';
 import { panelRequestBudget, runPanel } from './panel.js';
@@ -39,6 +44,7 @@ export interface ReviewScope {
   readonly evidenceComment: string;
   readonly evidenceResponse: string;
   readonly humanFeedback: string;
+  readonly obligationRoute?: boolean;
 }
 /** `reason` is the telemetry row reason; `message` is what the operator sees. */
 type Eligibility = ReviewScope | { readonly skip: { readonly reason: string; readonly message: string } };
@@ -83,7 +89,7 @@ export async function tryClassifyReview(context: LoopContext, round: ReviewRound
     emit(eligible.skip.message); return null;
   }
   const rows = new RoundTelemetry(telemetry, ports, context, scopeIdentity(context, ports, eligible));
-  return await decideAndCommit(context, round, eligible, rows, telemetry, cycleStarted);
+  return await decideAndCommit(context, round, eligible, rows, cycleStarted);
 }
 
 /** Stored review facts available to a round which ended before its findings were established. */
@@ -97,7 +103,7 @@ function skippedIdentity(context: LoopContext, round: ReviewRound, ports: Review
   const { repository, rounds } = storedRounds(loaded);
   const number = rounds?.at(-1)?.number ?? context.state.round;
   return { repository, decisionId: decisionIdFor(ports, [repository, context.slug, number, reason]), round: number,
-    priorRevision: String(rounds?.at(-2)?.subject.revision ?? ''),
+    priorRevision: String(rounds?.at(-2)?.decision?.revision ?? ''),
     candidateRevision: String(round.verifiedRevision ?? rounds?.at(-1)?.subject.revision ?? ''), findingIds: [] as string[] };
 }
 
@@ -158,6 +164,9 @@ function unavailableReason(context: LoopContext): { reason: string; message: str
 /** Why the stored round lacks the data its obligations need, or null when it can be judged. */
 function dataSkip(context: LoopContext, review: Review, shape: ReturnType<typeof reviewShape>, mission: Mission): { reason: string; message: string } | null {
   const current = review.rounds.at(-1)!;
+  if (unknownPriorRevision(review.rounds.at(-2))) {
+    return { reason: 'review-evidence-unavailable', message: 'prior decided revision was not recorded' };
+  }
   if (current.decision || current.number !== context.state.round) {
     return { reason: 'review-evidence-unavailable', message: 'ineligible because review evidence is unavailable' };
   }
@@ -181,7 +190,7 @@ function obligations(shape: ReturnType<typeof reviewShape>, mission: Mission): r
 function missionRangeOf(prior: DomainReviewRound, candidateBaseline: string | undefined, candidateRevision: string): ReviewScope['missionRange'] {
   const baseline = prior.subject.baseline;
   return baseline && candidateBaseline
-    ? { approved: { baseline: String(baseline), revision: String(prior.subject.revision) }, candidate: { baseline: candidateBaseline, revision: candidateRevision } } : null;
+    ? { approved: { baseline: String(baseline), revision: String(decidedRevisionOf(prior)) }, candidate: { baseline: candidateBaseline, revision: candidateRevision } } : null;
 }
 
 /** Pure scope derivation: the prior findings, withdrawn gate or success criteria this round is judged against. */
@@ -193,6 +202,22 @@ function isFirstReview(roundNumber: number, prior: unknown): boolean {
 function scopePolicy(review: Review, repairCause: ReviewScope['repairCause']): string {
   return repairCause ? WEAKENING_POLICY_VERSION : classifierPolicyForReview(review);
 }
+
+function obligationEligibility(mission: Mission, version: MissionVersion, review: Review, current: DomainReviewRound,
+  obligation: NonNullable<ReturnType<typeof reviewObligations>>, context: LoopContext, round: ReviewRound): Eligibility {
+  if (!obligation.general.decision?.revision || !round.verifiedRevision || current.decision || current.number !== context.state.round) {
+    return { skip: { reason: 'review-evidence-unavailable', message: 'obligation route requires recorded decided and verified revisions' } };
+  }
+  const general = obligation.general;
+  return { mission, version, review, current, prior: general, original: general.decision,
+    baseRevision: String(general.decision!.revision), candidateRevision: round.verifiedRevision, missionRange: null,
+    policyVersion: OBLIGATION_POLICY_VERSION, repairCause: null, verifiedRepair: false,
+    findings: obligation.findings, evidenceComment: general.decision!.comment ?? '',
+    evidenceResponse: review.rounds.filter(r => r.number >= general.number).map(r => r.implementerResponseContent ?? '').filter(Boolean).join('\n\n'),
+    humanFeedback: '', obligationRoute: true };
+}
+
+const candidateHead = (round: ReviewRound, current: DomainReviewRound) => round.verifiedRevision ?? String(current.subject.revision);
 
 function assessEligibility(context: LoopContext, round: ReviewRound, loaded: Loaded | null): Eligibility {
   const unavailable = unavailableReason(context);
@@ -207,7 +232,9 @@ function assessEligibility(context: LoopContext, round: ReviewRound, loaded: Loa
   if (isFirstReview(current.number, prior)) {
     return { skip: { reason: 'first-review', message: 'first review requires the general reviewer' } };
   }
-  const candidateRevision = round.verifiedRevision ?? String(current.subject.revision);
+  const candidateRevision = candidateHead(round, current);
+  const obligation = reviewObligations(review);
+  if (obligation) { return obligationEligibility(mission, version, review, current, obligation, context, round); }
   const shape = reviewShape(round, prior, candidateRevision);
   const { repairCause, changesRequested, verifiedRepair } = shape;
   const skip = dataSkip(context, review, shape, mission);
@@ -217,7 +244,7 @@ function assessEligibility(context: LoopContext, round: ReviewRound, loaded: Loa
   const text = evidenceText(review, prior, mission, { verifiedRepair, repairCause });
   return {
     mission, version, review, current, policyVersion: scopePolicy(review, repairCause), prior: answered ? prior! : null, candidateRevision, original: prior?.decision ?? null,
-    baseRevision: answered ? String(prior!.subject.revision) : resolveReviewBaseline(round.reviewBaseline, current.subject.change.targetBranch),
+    baseRevision: answered ? String(decidedRevisionOf(prior)) : resolveReviewBaseline(round.reviewBaseline, current.subject.change.targetBranch),
     missionRange: answered ? missionRangeOf(prior!, round.reviewBaseline, candidateRevision) : null,
     repairCause, verifiedRepair, findings, evidenceComment: text.comment, evidenceResponse: text.response, humanFeedback: humanFeedbackText(context, round),
   };
@@ -230,6 +257,7 @@ export interface Decision {
   readonly packetHash: string;
   /** Present when the decision restores a withdrawn integration approval after the weakening question. */
   readonly weakening?: ClassifierReviewSource['weakening'];
+  readonly obligations?: ClassifierReviewSource['obligations'];
 }
 
 /** An absent key is its own cause and is announced once per process; any other setup problem keeps its reason. */
@@ -256,16 +284,19 @@ function consecutiveClassifierReturns(review: Review): number {
 
 /** Calls the classifier for the scope; a null decision means the general reviewer decides. */
 async function decideAndCommit(context: LoopContext, round: ReviewRound, scope: ReviewScope, rows: RoundTelemetry,
-  telemetry: ReviewClassificationTelemetryPort, cycleStarted?: number): Promise<Outcome> {
+  cycleStarted?: number): Promise<Outcome> {
   const ports = context.ports.classification!;
   const emit = (value: string) => context.emit({ kind: 'reviewer-classification', reason: value });
   const fallback = async (why: string, message = why) => { await rows.finish(why); emit(message); return null; };
   const started = cycleStarted ?? ports.clock();
   rows.note({ policyVersion: scope.policyVersion, promptVersion: PANEL_PROMPT_VERSION, packetVersion: ARCHIVED_PACKING_VERSION });
+  if (scope.obligationRoute) {
+    return await classifyObligations(context, round, scope, rows, started);
+  }
   if (consecutiveClassifierReturns(scope.review) >= 2) { return await fallback('consecutive-classifier-returns'); }
   if (scope.repairCause) {
     const weakening = await decideWeakening(context, round, scope, rows, started);
-    return weakening ? await commitDecision(context, round, scope, weakening, rows, telemetry, started) : null;
+    return weakening ? await commitDecision(context, round, scope, weakening, rows) : null;
   }
   let decision: Decision;
   try {
@@ -275,7 +306,7 @@ async function decideAndCommit(context: LoopContext, round: ReviewRound, scope: 
     const packet = await buildArchivedEvidencePacket(evidenceInput(scope), ports.evidence, request => panelRequestBudget(request, ports.decision),
       undefined, context.ports.worktree);
     const packetHash = ports.hash(JSON.stringify(packet.request.state));
-    rows.note({ preparationMs: ports.clock() - started, packetHash });
+    rows.note({ preparationMs: ports.clock() - started, packetHash, ...omissionMeasurements(packet.request.state) });
     const classifyStart = ports.clock();
     const result = await runPanel(packet.request.state, ports.decision, availability, ports.hash);
     const selected = result.selected;
@@ -289,7 +320,39 @@ async function decideAndCommit(context: LoopContext, round: ReviewRound, scope: 
     const reason = failureReason(error);
     return await fallback(reason, failureMessage(reason));
   }
-  return await commitDecision(context, round, scope, decision, rows, telemetry, started);
+  return await commitDecision(context, round, scope, decision, rows);
+}
+
+/** Qualifying rounds have independent activation and retain general authority by default. */
+async function classifyObligations(context: LoopContext, round: ReviewRound, scope: ReviewScope, rows: RoundTelemetry,
+  started: number): Promise<Outcome> {
+  const ports = context.ports.classification!;
+  const shadow = ports.mode === 'shadow' || ports.obligationMode !== 'enabled';
+  rows.note({ policyVersion: OBLIGATION_POLICY_VERSION, promptVersion: OBLIGATION_PROMPT_VERSION,
+    packetVersion: OBLIGATION_PACKET_VERSION, panel: undefined, shadow, obligations: [] });
+  try {
+    const availability = await ports.decision.available();
+    if (availability.status !== 'available') { return await unavailableProvider(context, ports, availability, rows); }
+    const packets = await obligationPackets(scope, ports.evidence, ports.decision);
+    const packetHash = ports.hash(JSON.stringify(packets));
+    rows.note({ provider: availability.provider, model: availability.model, packetHash, preparationMs: ports.clock() - started });
+    const classifyStart = ports.clock();
+    const result = await runObligations(packets, ports.decision);
+    const { selected } = result;
+    rows.note({ obligations: result.answers, label: selected.label, score: selected.score,
+      provider: result.provider || availability.provider, model: result.model || availability.model, classificationMs: ports.clock() - classifyStart });
+    if (selected.route === 'reviewer' || shadow) {
+      await rows.finish(selected.reason, { route: selected.route });
+      context.emit({ kind: 'reviewer-classification', reason: shadow ? 'obligation shadow fallback' : selected.reason });
+      return null;
+    }
+    const failingIds = result.answers.filter(a => a.selected === 'does_not_address' && a.probabilities!.does_not_address >= OBLIGATION_THRESHOLD).map(a => a.id);
+    return await commitDecision(context, round, scope, { selected: { ...selected, route: selected.route },
+      provider: result.provider, model: result.model, packetHash, obligations: { generalRound: scope.prior!.number, failingIds } }, rows);
+  } catch (error) {
+    const reason = failureReason(error);
+    await rows.finish(reason); context.emit({ kind: 'reviewer-classification', reason }); return null;
+  }
 }
 
 /** Typed provenance binding the decision to the exact scope it judged. */
@@ -297,8 +360,8 @@ function classifierSource(scope: ReviewScope, decision: Decision, decisionId: st
   const { prior, current, candidateRevision, original } = scope;
   return {
     kind: 'classifier', identity: 'jev', decisionId, provider: decision.provider, model: decision.model,
-    packetHash: decision.packetHash, priorRevision: prior ? String(prior.subject.revision) : candidateRevision, candidateRevision,
-    ...(prior ? { responseRevision: String(scope.verifiedRepair ? current.subject.revision : prior.response!.resultingRevision) }
+    packetHash: decision.packetHash, priorRevision: prior ? String(decidedRevisionOf(prior)) : candidateRevision, candidateRevision,
+    ...(scope.obligationRoute ? { obligations: decision.obligations } : prior ? { responseRevision: String(scope.verifiedRepair ? current.subject.revision : prior.response!.resultingRevision) }
       : { successCriteria: { baseRef: scope.baseRevision } }),
     ...(decision.weakening ? { weakening: decision.weakening } : {}),
     ...(scope.verifiedRepair && original?.kind === 'approved'
@@ -308,8 +371,7 @@ function classifierSource(scope: ReviewScope, decision: Decision, decisionId: st
 }
 
 /** Publish first, then persist; persistence failure after publication escalates to a human. */
-async function commitDecision(context: LoopContext, round: ReviewRound, scope: ReviewScope, decision: Decision, rows: RoundTelemetry,
-  telemetry: ReviewClassificationTelemetryPort, started: number): Promise<Outcome> {
+async function commitDecision(context: LoopContext, round: ReviewRound, scope: ReviewScope, decision: Decision, rows: RoundTelemetry): Promise<Outcome> {
   const ports = context.ports.classification!;
   const { missionStore: store, lifecycle } = context.ports;
   const { prior, candidateRevision, findings } = scope;
@@ -326,7 +388,7 @@ async function commitDecision(context: LoopContext, round: ReviewRound, scope: R
     const latest = await store!.load(scope.mission.id);
     if (latest.kind !== 'found' || !latest.mission.review) { return await fallback('review-evidence-unavailable'); }
     if (latest.version !== scope.version || context.ports.preReview.head() !== candidateRevision) { return await fallback('classifier-stale-result'); }
-    const updated = applyClassifierReview(reviewAtCandidateRevision(latest.mission.review, candidateRevision), source, selected.route, at, firstReview ? findings : []);
+    const updated = applyClassifierReview(latest.mission.review, source, selected.route, at, firstReview ? findings : [], candidateRevision);
     const summary = `${updated.rounds.at(-1)!.decision!.comment}\n\nScope: ${source.findingIds.join(', ')}; revision: ${source.candidateRevision}; policy: ${source.policyVersion}; selected score: ${source.score}.\n[classifier-decision:${decisionId}]`;
     if (!(await ports.publish(source, selected.route, summary))) { return await fallback('classifier-publication-failed'); }
     published = true;
@@ -341,9 +403,6 @@ async function commitDecision(context: LoopContext, round: ReviewRound, scope: R
     }
     committed = selected.route === 'clear' ? 'APPROVED' : 'REQUEST_CHANGES';
     round.blockingFindings = selected.route === 'implementer' ? findings.map(f => ({ id: String(f.id), summary: f.summary })) : [];
-    await telemetry.recordObservation({ decisionId, revision: source.candidateRevision, findingIds: source.findingIds,
-      observedAt: ports.now(), originalFindings: 'unobserved', newFindings: null,
-      cycleMs: ports.clock() - started, ordinaryReviewMs: null });
     context.ports.output.log(`Classifier: ${selected.route === 'clear' ? 'cleared the findings' : 'likely unresolved findings'} (${source.findingIds.join(', ')}).`);
     return committed;
   } catch {
@@ -353,4 +412,8 @@ async function commitDecision(context: LoopContext, round: ReviewRound, scope: R
     }
     return await fallback('classifier-exception');
   }
+}
+
+function unknownPriorRevision(prior: DomainReviewRound | undefined): boolean {
+  return Boolean(prior?.decision && !decidedRevisionOf(prior));
 }

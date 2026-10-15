@@ -1,7 +1,11 @@
 import * as http from 'node:http';
 import * as https from 'node:https';
 import { spawnSync } from 'node:child_process';
+import type { IncomingMessage } from 'node:http';
 import { resolveForgejoSettings } from './forgejo-auth.js';
+import type { ForgejoApiOptions, ForgejoApiResult } from './forgejo-types.js';
+
+export type { ForgejoApiCall, ForgejoApiOptions, ForgejoApiResult, ForgejoAsyncApiCall } from './forgejo-types.js';
 
 const HTTP_REQUEST_TIMEOUT = 5000;
 
@@ -12,20 +16,17 @@ function codexSandboxHint(): string {
 /**
  * Synchronous Forgejo API call via Curl.
  *
- * @param {string} method
- * @param {string} apiPath
- * @param {string} token
- * @param {object} [body]
- * @param {{rootDir?: string}} [options]
- * @returns {{ok: boolean, data: any, status: number|null, statusCode: number|null, stderr: string|null, error: string|null}}
+ * `T` names the endpoint's response payload; the parsed JSON body is validated
+ * against it only by the caller's own narrowing, so callers must keep the
+ * endpoint type honest.
  */
-function forgejoApi(
+function forgejoApi<T = unknown>(
   method: string,
   apiPath: string,
-  token: string,
-  body: any,
-  options: any = {}
-): { ok: boolean, data: any, status: number | null, statusCode: number | null, stderr: string | null, error: string | null } {
+  token: string | undefined,
+  body?: unknown,
+  options: ForgejoApiOptions = {}
+): ForgejoApiResult<T> {
   const { rootDir = process.cwd() } = options;
   const { url: forgejoUrl, repo: forgejoRepo } = resolveForgejoSettings(rootDir, options.configuration);
   const url = `${forgejoUrl}/api/v1/repos/${forgejoRepo}${apiPath}`;
@@ -63,10 +64,10 @@ function forgejoApi(
 
   const statusCode = parseInt(statusCodeStr, 10);
 
-  let data = null;
+  let data: T | null = null;
   if (responseBody) {
     try {
-      data = JSON.parse(responseBody);
+      data = JSON.parse(responseBody) as T;
     } catch (_) {
       // Not JSON
     }
@@ -84,21 +85,14 @@ function forgejoApi(
 
 /**
  * Asynchronous Forgejo API call via Node http/https.
- *
- * @param {string} method
- * @param {string} apiPath
- * @param {string} token
- * @param {object} [body]
- * @param {{rootDir?: string, timeout?: number}} [options]
- * @returns {Promise<{ok: boolean, data: any, status: number|null, statusCode: number|null, stderr: string|null, error: string|null}>}
  */
-async function forgejoApiAsync(
+async function forgejoApiAsync<T = unknown>(
   method: string,
   apiPath: string,
-  token: string,
-  body: any,
-  options: any = {}
-): Promise<{ ok: boolean, data: any, status: number | null, statusCode: number | null, stderr: string | null, error: string | null }> {
+  token: string | undefined,
+  body?: unknown,
+  options: ForgejoApiOptions = {}
+): Promise<ForgejoApiResult<T>> {
   const {
     rootDir = process.cwd(),
     timeout = HTTP_REQUEST_TIMEOUT
@@ -111,7 +105,7 @@ async function forgejoApiAsync(
 
   return new Promise((resolve) => {
     let settled = false;
-    const finish = (result: any) => {
+    const finish = (result: ForgejoApiResult<T>) => {
       if (settled) { return; }
       settled = true;
       resolve(result);
@@ -125,17 +119,17 @@ async function forgejoApiAsync(
         'Content-Type': 'application/json',
         ...(payload ? { 'Content-Length': Buffer.byteLength(payload) } : {})
       }
-    }, (res: any) => {
+    }, (res: IncomingMessage) => {
       let responseBody = '';
       res.setEncoding('utf8');
-      res.on('data', (chunk: any) => {
+      res.on('data', (chunk: string | Buffer) => {
         responseBody += chunk;
       });
       res.on('end', () => {
-        let data = null;
+        let data: T | null = null;
         if (responseBody) {
           try {
-            data = JSON.parse(responseBody);
+            data = JSON.parse(responseBody) as T;
           } catch (_) {
             data = null;
           }
@@ -151,14 +145,14 @@ async function forgejoApiAsync(
       });
     });
 
-    req.on('error', (error: any) => {
+    req.on('error', (error: Error & { code?: string }) => {
       finish({
         ok: false,
         data: null,
         status: null,
         statusCode: null,
         stderr: error.message || null,
-        error: ['ECONNREFUSED', 'ENOTFOUND', 'EHOSTUNREACH'].includes((error as { code?: string }).code || '') ? codexSandboxHint() : null
+        error: ['ECONNREFUSED', 'ENOTFOUND', 'EHOSTUNREACH'].includes(error.code || '') ? codexSandboxHint() : null
       });
     });
 

@@ -6,7 +6,8 @@
     "moduleResolution": "NodeNext",
     "target": "ES2024",
     "resolveJsonModule": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "strict": true
   },
   "include": [
     "test/**/*.ts"

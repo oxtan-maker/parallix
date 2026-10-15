@@ -67,7 +67,7 @@ export async function commitSafeMissionArtifacts(slug: string, worktree: string,
   const parsePorcelainZ = (stdout: string | Buffer) => {
     const entries = String(stdout).split('\0').filter(Boolean);
     const dirty: { xy: string; file: string; paths: string[]; source?: string }[] = [];
-    for (let i = 0; i < entries.length; i += 1) {
+    for (let i = 0;i < entries.length;i += 1) {
       const entry = entries[i];
       const xy = entry.slice(0, 2);
       const file = entry.slice(3);
@@ -144,24 +144,7 @@ export async function commitSafeMissionArtifacts(slug: string, worktree: string,
  * @param {string} slug
  * @returns {Promise<PreReviewRebaseResult>}
  */
-export async function rebaseBeforeReviewRound(slug: string, {
-  gitFn = git,
-  taskFile = null,
-  worktree = resolveWorktree(slug) || process.cwd(),
-  log = fmt.log.plain,
-  error = fmt.log.plainError,
-  // TASK-2477/F3: defaults to `true` so the pre-review rebase skip line stays
-  // visible for callers that do not thread a `verbose` flag (the handoff use
-  // case and standalone rebase). The review loop always passes `verbose` at its
-  // own call sites, so the provider=none happy path is still demoted there.
-  verbose = true,
-  isReviewProviderEnabledFn = undefined,
-  legacyIsForgejoReviewEnabledFn = null,
-  isForgejoReviewEnabledFn = null,
-  rebaseWorkflowOptions = {},
-  runRebaseWorkflowFn = null,
-  createRebaseWorkflowPortFn = null,
-}: {
+type PreReviewRebaseOptions = {
   /** @deprecated Accepted and ignored: the pre-review rebase no longer spawns a CLI. */
   runFn?: unknown;
   gitFn?: typeof git;
@@ -176,22 +159,13 @@ export async function rebaseBeforeReviewRound(slug: string, {
   rebaseWorkflowOptions?: RebaseCommandOptions;
   runRebaseWorkflowFn?: RunRebaseWorkflowFn | null;
   createRebaseWorkflowPortFn?: CreateRebaseWorkflowPortFn | null;
-} = {}): Promise<PreReviewRebaseResult> {
+};
+
+export async function rebaseBeforeReviewRound(slug: string, options: PreReviewRebaseOptions = {}): Promise<PreReviewRebaseResult> {
+  const { gitFn, taskFile, worktree, log, error, verbose, isReviewProviderEnabledFn, legacyIsForgejoReviewEnabledFn, isForgejoReviewEnabledFn, rebaseWorkflowOptions, runRebaseWorkflowFn, createRebaseWorkflowPortFn } = preReviewRebaseBindings(slug, options);
   const cleanup = await commitSafeMissionArtifacts(slug, worktree, { taskFile, gitFn, log, error });
-  if (!cleanup.ok) {
-    error(fmt.status('WARN', 'Worktree is dirty with unsafe or conflicted files. Rebase may fail.'));
-    if (cleanup.hookFailure) {
-      const hook: PreReviewRebaseHookEvidence = { hook: cleanup.hook || 'pre-commit', output: cleanup.output || '' };
-      return {
-        ok: false, sharedFileConflicts: false, hookFailure: true, hookOutput: hook.output,
-        failure: { kind: 'hook', operation: 'commit', hook, bounceRequests: 0 },
-      };
-    }
-    return {
-      ok: false, sharedFileConflicts: false, hookFailure: false,
-      failure: { kind: 'unsafe-worktree', operation: 'commit', unsafeFiles: cleanup.unsafeFiles || [] },
-    };
-  }
+  const cleanupFailure = preReviewCleanupFailure(cleanup, error);
+  if (cleanupFailure) { return cleanupFailure; }
 
   const forgejoEnabledFn = isReviewProviderEnabledFn
     || legacyIsForgejoReviewEnabledFn
@@ -217,72 +191,24 @@ export async function rebaseBeforeReviewRound(slug: string, {
     || (await import('../rebase/rebase-workflow-adapter.js')).createRebaseWorkflowPort;
 
   // Every observation below is a structural seam on the port, not a text match.
-  let exitCode: number | null = null;
-  let hookEvidence: PreReviewRebaseHookEvidence | null = null;
-  let hookBounceRequests = 0;
-  let pushFailureOutput: string | null = null;
-  let publicationAttempted = false;
-  let pushGate: PreReviewRebaseGateEvidence | null = null;
-  let credentialFailure: string | null = null;
-  let conflictClassification: MissionConflictClassification | null = null;
+  const observed: PreReviewRebaseObservations = {
+    exitCode: null, hookEvidence: null, hookBounceRequests: 0, pushFailureOutput: null,
+    publicationAttempted: false, pushGate: null, credentialFailure: null, conflictClassification: null,
+  };
 
   const port = createPort({ ...rebaseWorkflowOptions, gitFn });
 
-  // The seams below are installed on the port itself rather than passed to the
-  // factory, so they hold for any port implementation the caller supplies.
-  port.cwd = () => worktree;
-  port.isForgejoReviewEnabled = (root: string) => forgejoEnabledFn(root);
-  // Exit-capturing seam: `runRebaseWorkflow` signals every outcome through
-  // `port.exit()` and returns immediately after, so capturing the code here
-  // keeps the review-loop process alive without rewriting its control flow.
-  port.exit = (code: number) => { if (exitCode === null) { exitCode = code; } };
-  // Single hook-retry budget consumer: record the hook identity the workflow
-  // classified from the failing git operation and refuse the in-child bounce.
-  // The caller (review loop) owns the budget and the fix prompt.
-  port.onHookFailure = (classification: { hookType: string | null }, hookOutput: string) => {
-    hookBounceRequests += 1;
-    hookEvidence = { hook: classification?.hookType || 'hook', output: hookOutput || '' };
-    return false;
-  };
-  // Present so the workflow routes hook failures into the seam above rather
-  // than the legacy hint-and-exit path; the recording seam ignores the store.
-  port.missionServices = async () => ({ store: null });
-  const innerReadToken = port.readToken;
-  port.readToken = (user) => {
-    publicationAttempted = true;
-    const token = innerReadToken(user);
-    if (!token) { credentialFailure = `No Forgejo token found for user "${user}". Push failed.`; }
-    return token;
-  };
-  const innerCreatePr = port.createPr;
-  port.createPr = (branch, user, token, options) => {
-    publicationAttempted = true;
-    const pushResult = innerCreatePr(branch, user, token, options);
-    if (!pushResult.ok) {
-      pushFailureOutput = pushResult.error || 'push rejected';
-      const gate = pushResult.gateFailure;
-      pushGate = gate ? { ...gate, exitCode: gate.exitCode ?? 1 } : null;
-    }
-    return pushResult;
-  };
-  const innerResolveConflicts = port.resolveConflictsForMission;
-  port.resolveConflictsForMission = (conflictSlug, area, options) => {
-    // The workflow mutates this object in place while reclassifying, so the
-    // retained reference reports the final shared-file set.
-    conflictClassification = innerResolveConflicts(conflictSlug, area, options);
-    return conflictClassification;
-  };
+  observePreReviewRebase(port, observed, worktree, forgejoEnabledFn);
 
   log(`Rebasing ${fmt.branch(`mission/${slug}`)} onto the latest primary branch before reviewer launch...`);
 
   await runWorkflow([slug, '--push'], port);
 
-  // Re-annotated reads: these are written from port callbacks, which the
-  // compiler's flow analysis does not track.
-  const finalExitCode = exitCode as number | null;
-  const finalHook = hookEvidence as PreReviewRebaseHookEvidence | null;
-  const finalPushOutput = pushFailureOutput as string | null;
-  const finalConflicts = conflictClassification as MissionConflictClassification | null;
+  return preReviewRebaseOutcome(slug, observed, log, error);
+}
+
+function preReviewRebaseOutcome(slug: string, observed: PreReviewRebaseObservations, log: (_msg: string) => void, error: (_msg: string) => void): PreReviewRebaseResult {
+  const { exitCode: finalExitCode, hookEvidence: finalHook, pushFailureOutput: finalPushOutput, conflictClassification: finalConflicts, publicationAttempted, hookBounceRequests, pushGate, credentialFailure } = observed;
 
   if (finalExitCode === null || finalExitCode === 0) {
     log(fmt.status('PASS', `Pre-review rebase completed for ${fmt.branch(`mission/${slug}`)}.`));
@@ -306,7 +232,7 @@ export async function rebaseBeforeReviewRound(slug: string, {
     // The push-time check is the verification gate the pre-push hook runs. The
     // failure class follows that inner check, never the enclosing hook name —
     // gate output mentioning `pre-push` stays a gate failure (ADR 0048).
-    const gate = pushGate as PreReviewRebaseGateEvidence;
+    const gate = pushGate;
     error(gate.stderr);
     error(fmt.status('FAIL', `Pre-review push gate failed for area "${gate.area}" (exit ${gate.exitCode}).`));
     return {
@@ -318,8 +244,10 @@ export async function rebaseBeforeReviewRound(slug: string, {
   if (publicationAttempted) {
     const output = finalPushOutput ?? credentialFailure ?? `publication exited with status ${finalExitCode}`;
     error(fmt.status('FAIL', `Pre-review publication failed: ${output}`));
-    return { ok: false, sharedFileConflicts: false, hookFailure: false,
-      failure: { kind: 'other', operation: 'push', output } };
+    return {
+      ok: false, sharedFileConflicts: false, hookFailure: false,
+      failure: { kind: 'other', operation: 'push', output }
+    };
   }
 
   if (sharedFileConflicts) {
@@ -339,4 +267,97 @@ export async function rebaseBeforeReviewRound(slug: string, {
     ok: false, sharedFileConflicts: false, hookFailure: false,
     failure: { kind: 'other', operation: 'rebase', output: `rebase workflow exited with status ${finalExitCode}` },
   };
+}
+
+interface PreReviewRebaseObservations {
+  exitCode: number | null; hookEvidence: PreReviewRebaseHookEvidence | null; hookBounceRequests: number;
+  pushFailureOutput: string | null; publicationAttempted: boolean; pushGate: PreReviewRebaseGateEvidence | null;
+  credentialFailure: string | null; conflictClassification: MissionConflictClassification | null;
+}
+function observePreReviewRebase(port: RebaseWorkflowPort, observed: PreReviewRebaseObservations, worktree: string, forgejoEnabledFn: (_wt: string) => boolean): void {
+  // The seams below are installed on the port itself rather than passed to the
+  // factory, so they hold for any port implementation the caller supplies.
+  port.cwd = () => worktree;
+  port.isForgejoReviewEnabled = (root: string) => forgejoEnabledFn(root);
+  // Exit-capturing seam: `runRebaseWorkflow` signals every outcome through
+  // `port.exit()` and returns immediately after, so capturing the code here
+  // keeps the review-loop process alive without rewriting its control flow.
+  port.exit = (code: number) => { if (observed.exitCode === null) { observed.exitCode = code; } };
+  // Single hook-retry budget consumer: record the hook identity the workflow
+  // classified from the failing git operation and refuse the in-child bounce.
+  // The caller (review loop) owns the budget and the fix prompt.
+  port.onHookFailure = (classification: { hookType: string | null }, hookOutput: string) => {
+    observed.hookBounceRequests += 1;
+    observed.hookEvidence = { hook: classification?.hookType || 'hook', output: hookOutput || '' };
+    return false;
+  };
+  // Present so the workflow routes hook failures into the seam above rather
+  // than the legacy hint-and-exit path; the recording seam ignores the store.
+  port.missionServices = async () => ({ store: null });
+  const innerReadToken = port.readToken;
+  port.readToken = (user) => {
+    observed.publicationAttempted = true;
+    const token = innerReadToken(user);
+    if (!token) { observed.credentialFailure = `No Forgejo token found for user "${user}". Push failed.`; }
+    return token;
+  };
+  const innerCreatePr = port.createPr;
+  port.createPr = (branch, user, token, options) => {
+    observed.publicationAttempted = true;
+    const pushResult = innerCreatePr(branch, user, token, options);
+    if (!pushResult.ok) {
+      observed.pushFailureOutput = pushResult.error || 'push rejected';
+      const gate = pushResult.gateFailure;
+      observed.pushGate = gate ? { ...gate, exitCode: gate.exitCode ?? 1 } : null;
+    }
+    return pushResult;
+  };
+  const innerResolveConflicts = port.resolveConflictsForMission;
+  port.resolveConflictsForMission = (conflictSlug, area, options) => {
+    // The workflow mutates this object in place while reclassifying, so the
+    // retained reference reports the final shared-file set.
+    observed.conflictClassification = innerResolveConflicts(conflictSlug, area, options);
+    return observed.conflictClassification;
+  };
+
+}
+
+function preReviewRebaseBindings(slug: string, options: PreReviewRebaseOptions) {
+  const {
+    gitFn = git,
+    taskFile = null,
+    worktree = resolveWorktree(slug) || process.cwd(),
+    log = fmt.log.plain,
+    error = fmt.log.plainError,
+    // TASK-2477/F3: defaults to `true` so the pre-review rebase skip line stays
+    // visible for callers that do not thread a `verbose` flag (the handoff use
+    // case and standalone rebase). The review loop always passes `verbose` at its
+    // own call sites, so the provider=none happy path is still demoted there.
+    verbose = true,
+    isReviewProviderEnabledFn = undefined,
+    legacyIsForgejoReviewEnabledFn = null,
+    isForgejoReviewEnabledFn = null,
+    rebaseWorkflowOptions = {},
+    runRebaseWorkflowFn = null,
+    createRebaseWorkflowPortFn = null,
+  } = options;
+  return { gitFn, taskFile, worktree, log, error, verbose, isReviewProviderEnabledFn, legacyIsForgejoReviewEnabledFn, isForgejoReviewEnabledFn, rebaseWorkflowOptions, runRebaseWorkflowFn, createRebaseWorkflowPortFn };
+}
+function preReviewCleanupFailure(cleanup: Awaited<ReturnType<typeof commitSafeMissionArtifacts>>, error: (_msg: string) => void): PreReviewRebaseResult | null {
+  if (!cleanup.ok) {
+    error(fmt.status('WARN', 'Worktree is dirty with unsafe or conflicted files. Rebase may fail.'));
+    if (cleanup.hookFailure) {
+      const hook: PreReviewRebaseHookEvidence = { hook: cleanup.hook || 'pre-commit', output: cleanup.output || '' };
+      return {
+        ok: false, sharedFileConflicts: false, hookFailure: true, hookOutput: hook.output,
+        failure: { kind: 'hook', operation: 'commit', hook, bounceRequests: 0 },
+      };
+    }
+    return {
+      ok: false, sharedFileConflicts: false, hookFailure: false,
+      failure: { kind: 'unsafe-worktree', operation: 'commit', unsafeFiles: cleanup.unsafeFiles || [] },
+    };
+  }
+
+  return null;
 }

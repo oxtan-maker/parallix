@@ -7,41 +7,40 @@ import { migrateAgentBlocklists } from '../storage/persistent-data-migration.js'
 import { getMainWorktreePath } from '../git/agent-worktree.js';
 import { runtimeAssetStore } from '../assets/runtime-assets.js';
 
-type AgentConfig = { blocklist?: {[key: string]: any}, steps?: {[key: string]: any} };
+export type AgentStepConfig = { eligible?: string[]; selection?: string; weights?: Record<string, number> };
+type AgentConfig = { blocklist?: Record<string, unknown>; steps?: Record<string, AgentStepConfig> };
+type ConfigWarning = (message: string) => unknown;
 
 type ReadAgentConfigOptions = {
   configuration?: ParallixConfiguration;
   mergeLocal?: boolean;
   mainWorktreePath?: string | null;
-  warn?: Function;
+  warn?: ConfigWarning;
   targetPath?: string;
 };
 
 const CONFIG_PATH = 'config/agents.json';
 
-function buildInvalidAgentConfigError(configPath: string, scope: string, originalError: {message?: string} | null) {
+function buildInvalidAgentConfigError(configPath: string, scope: string, originalError: unknown) {
   const location = path.resolve(configPath);
-  const detail = originalError && originalError.message ? originalError.message : 'invalid JSON';
-  const error: any = new Error(
+  const detail = originalError && typeof originalError === 'object' && 'message' in originalError && originalError.message ? originalError.message : 'invalid JSON';
+  const error = new Error(
     `Invalid ${scope} agent config at ${location}: ${detail}. ` +
     'Fix or remove the malformed file before running workflow commands so agent blocking is applied deterministically.'
   );
-  error.code = 'WORKFLOW_AGENT_CONFIG_INVALID';
-  error.configPath = location;
-  error.configScope = scope;
-  return error;
+  return Object.assign(error, { code: 'WORKFLOW_AGENT_CONFIG_INVALID', configPath: location, configScope: scope });
 }
 
-function isInvalidAgentConfigError(error: {code?: string}) {
-  return Boolean(error && error.code === 'WORKFLOW_AGENT_CONFIG_INVALID');
+function isInvalidAgentConfigError(error: unknown): error is ReturnType<typeof buildInvalidAgentConfigError> {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'WORKFLOW_AGENT_CONFIG_INVALID');
 }
 
 function readAgentConfigOrExit(configPath: string = CONFIG_PATH, options: ReadAgentConfigOptions = {}) {
   try {
     return readAgentConfig(configPath, options);
   } catch (error) {
-    if (isInvalidAgentConfigError((error as any))) {
-      fmt.log.fail((error as any).message);
+    if (isInvalidAgentConfigError(error)) {
+      fmt.log.fail(error.message);
       process.exit(1);
     }
     throw error;
@@ -65,7 +64,7 @@ function parseAgentConfigFile(configPath: string, scope: string) {
     } else {
       content = fs.readFileSync(configPath, 'utf8');
     }
-    return JSON.parse(content);
+    return JSON.parse(content) as AgentConfig;
   } catch (err) {
     throw buildInvalidAgentConfigError(configPath, scope, (err as {message?: string}));
   }
@@ -94,7 +93,7 @@ function mergeLocalAgentConfig(
   configPath: string,
   mainWorktreePath: string | null | undefined,
   targetPathOption: string | undefined,
-  warn: Function,
+  warn: ConfigWarning,
   configuration?: ParallixConfiguration,
 ): AgentConfig {
   const projectRoot = configPath === CONFIG_PATH ? process.cwd() : path.resolve(path.dirname(configPath), '..', '..');
@@ -112,16 +111,16 @@ function mergeLocalAgentConfig(
   return { ...config, blocklist: Object.assign(config.blocklist || {}, localConfig.blocklist) };
 }
 
-function migrateLocalBlocklist(sourcePaths: string[], targetPath: string, warn: Function): void {
+function migrateLocalBlocklist(sourcePaths: string[], targetPath: string, warn: ConfigWarning): void {
   if (fs.existsSync(targetPath)) { return; }
   try {
-    migrateAgentBlocklists({ sourcePaths, destinationPath: targetPath, warn: warn as any });
+    migrateAgentBlocklists({ sourcePaths, destinationPath: targetPath, warn: message => { warn(String(message)); } });
   } catch (error) {
-    throw buildInvalidAgentConfigError(targetPath, 'local', error as any);
+    throw buildInvalidAgentConfigError(targetPath, 'local', error);
   }
 }
 
-function parseBlockUntil(value: string | number) {
+function parseBlockUntil(value: unknown) {
   if (typeof value !== 'string') {
     return NaN;
   }
@@ -158,10 +157,11 @@ function isAgentBlocked(agent: string, config: AgentConfig | null) {
   if (entry === true) {return true;}
   if (entry === false) {return false;}
   if (entry && typeof entry === 'object') {
-    if ((entry as any).blocked === true) {return true;}
-    if ((entry as any).blocked === false) {return false;}
-    if ((entry as any).until) {
-      const until = parseBlockUntil((entry as any).until);
+    const block = entry as { blocked?: unknown; until?: unknown };
+    if (block.blocked === true) {return true;}
+    if (block.blocked === false) {return false;}
+    if (block.until) {
+      const until = parseBlockUntil(block.until);
       if (!isNaN(until) && until > Date.now()) {
         return true;
       }
@@ -185,10 +185,10 @@ function updateAgentBlock(agent: string, until: string, options: {targetPath?: s
 
   const targetPath = resolveBlocklistTargetPath(options);
 
-  let payload: {blocklist?: {[key: string]: any}} = {};
+  let payload: AgentConfig = {};
   if (fs.existsSync(targetPath)) {
     try {
-      payload = JSON.parse(fs.readFileSync(targetPath, 'utf8')) || {};
+      payload = (JSON.parse(fs.readFileSync(targetPath, 'utf8')) as AgentConfig | null) || {};
     } catch (err) {
       throw buildInvalidAgentConfigError(targetPath, 'local', (err as {message?: string}));
     }

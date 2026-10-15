@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2521.01: guard-2 boundary test scans the source tree with
 // node:fs, exactly like test/unit/persistence-inventory-guardrail.test.ts.
 
 import test from 'node:test';

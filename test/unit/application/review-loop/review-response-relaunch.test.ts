@@ -15,20 +15,20 @@ function reviewLoopHarness(options: {
   return fakeReviewLoopPorts({
     slug: 'task-2239',
     routing: { eligibleFamilies: () => ['codex', 'claude'] },
-    handoff: { handoff: async () => ({ ok: true }) },
+    handoff: { handoff: async () => ({ ok: true as const }) },
     agents: { launch: async launch => (options.launch ? options.launch(launch) : { agent: launch.agent }) },
     artifacts: { consumeReviewer: async () => options.reviewer(), consumeImplementer: async () => options.implementer() },
     preReview: { head: () => `head-${++head}` },
   });
 }
 const reviewerLaunches = (fake: ReturnType<typeof fakeReviewLoopPorts>) => fake.launches.filter(launch => launch.role === 'reviewer');
-const request = { slug: 'task-2239', implementer: 'claude', reviewer: 'codex', maxAttempts: 3 };
+const request = { slug: 'task-2239', implementer: 'claude', reviewer: 'codex', maxAttempts: 3 } satisfies Partial<NonNullable<Parameters<typeof runReviewLoop>[0]>>;
 
 test('post-response transition re-launches the active reviewer and records exactly one next round before approval', async () => {
   const reviewerOutcomes = ['REQUEST_CHANGES', 'APPROVED'];
   const fake = reviewLoopHarness({
-    reviewer: () => ({ consumed: true, ok: true, reviewState: reviewerOutcomes.shift() }),
-    implementer: () => ({ consumed: true, ok: true, disposition: 'PUSHBACK_ALL' }),
+    reviewer: () => ({ consumed: true, ok: true as const, reviewState: reviewerOutcomes.shift() }),
+    implementer: () => ({ consumed: true, ok: true as const, disposition: 'PUSHBACK_ALL' }),
   });
 
   await runReviewLoop(request, fake.ports);
@@ -42,8 +42,8 @@ test('post-response transition keeps the loop active when the reviewer requests 
   const reviewerOutcomes = ['REQUEST_CHANGES', 'REQUEST_CHANGES', 'APPROVED'];
   const implementerDispositions = ['PUSHBACK_ALL', 'CHANGES_MADE'];
   const fake = reviewLoopHarness({
-    reviewer: () => ({ consumed: true, ok: true, reviewState: reviewerOutcomes.shift() }),
-    implementer: () => ({ consumed: true, ok: true, disposition: implementerDispositions.shift() }),
+    reviewer: () => ({ consumed: true, ok: true as const, reviewState: reviewerOutcomes.shift() }),
+    implementer: () => ({ consumed: true, ok: true as const, disposition: implementerDispositions.shift() }),
   });
 
   await runReviewLoop(request, fake.ports);
@@ -56,8 +56,8 @@ test('post-response transition keeps the loop active when the reviewer requests 
 test('reviewer launch failure after a response records a reviewer-specific human escalation reason', async () => {
   let reviews = 0;
   const fake = reviewLoopHarness({
-    reviewer: () => ({ consumed: true, ok: true, reviewState: 'REQUEST_CHANGES' }),
-    implementer: () => ({ consumed: true, ok: true, disposition: 'PUSHBACK_ALL' }),
+    reviewer: () => ({ consumed: true, ok: true as const, reviewState: 'REQUEST_CHANGES' }),
+    implementer: () => ({ consumed: true, ok: true as const, disposition: 'PUSHBACK_ALL' }),
     launch: launch => {
       if (launch.role === 'reviewer' && ++reviews === 2) { throw new Error('reviewer unavailable'); }
       return { agent: launch.agent };
@@ -72,8 +72,8 @@ test('reviewer launch failure after a response records a reviewer-specific human
 
 test('post-response transition escalates at the maximum reviewer-attempt boundary without launching another reviewer', async () => {
   const fake = reviewLoopHarness({
-    reviewer: () => ({ consumed: true, ok: true, reviewState: 'REQUEST_CHANGES' }),
-    implementer: () => ({ consumed: true, ok: true, disposition: 'PUSHBACK_ALL' }),
+    reviewer: () => ({ consumed: true, ok: true as const, reviewState: 'REQUEST_CHANGES' }),
+    implementer: () => ({ consumed: true, ok: true as const, disposition: 'PUSHBACK_ALL' }),
   });
 
   await runReviewLoop({ ...request, maxAttempts: 1 }, fake.ports);

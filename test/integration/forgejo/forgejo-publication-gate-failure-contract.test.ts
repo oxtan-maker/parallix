@@ -1,3 +1,4 @@
+import { forgejoApiFixture } from '../../fixtures/forgejo-api.js';
 // Local publication delegates verification to explicit lifecycle gates and CI.
 // Real Git fixture; remote pushes and Forgejo calls remain isolated doubles.
 import test from 'node:test';
@@ -31,9 +32,9 @@ test('PR publication mirrors baseline without running implicit verification (TAS
     });
     const result = pr.createPr('mission/task-9999', 'fixture', 'fixture-token', {
       rootDir: root, log: () => {},
-      apiCall: (method: string) => method === 'GET'
+      apiCall: forgejoApiFixture((method: string) => method === 'GET'
         ? { ok: true, data: [] }
-        : { ok: true, data: { number: 1, html_url: 'http://localhost:3300/test-org/test-repo/pulls/1' } },
+        : { ok: true, data: { number: 1, html_url: 'http://localhost:3300/test-org/test-repo/pulls/1' } }),
     });
     assert.equal(result.ok, true, result.error ?? 'PR creation failed');
     assert.equal(fs.existsSync(marker), false, 'publication must not execute the configured verifier');

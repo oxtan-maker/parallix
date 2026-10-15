@@ -17,18 +17,10 @@ const DEFAULT_GATEKEEPER_USER = 'forgejo-gatekeeper';
 
 /**
  * @param {string} slug
- * @param {{rootDir?: string, findMissionDirFn?: Function, findCheckpointsFn?: Function, resolveTaskFileFn?: Function}} [options]
+ * @param {{rootDir?: string, findMissionDirFn?: typeof findMissionDir, findCheckpointsFn?: typeof findCheckpoints, resolveTaskFileFn?: typeof resolveTaskFile}} [options]
  * @returns {{ok: boolean, missing: string[]}}
  */
-function checkMandatoryFiles(slug: string, options: { rootDir?: string, checkpointsRecorded?: boolean, findMissionDirFn?: Function, findCheckpointsFn?: Function, resolveTaskFileFn?: Function } = {} as any) {
-  if (options.checkpointsRecorded) { return { ok: true, missing: [] }; }
-  const {
-    rootDir = process.cwd(),
-    findMissionDirFn = findMissionDir,
-    findCheckpointsFn = findCheckpoints,
-    resolveTaskFileFn = resolveTaskFile
-  } = options;
-
+function mandatoryMissionFiles(slug: string, rootDir: string, findMissionDirFn: typeof findMissionDir, findCheckpointsFn: typeof findCheckpoints) {
   const missing = [];
   const expectedMissionDir = missionDirForSlug(rootDir, slug);
   const expectedMissionRel = path.relative(rootDir, expectedMissionDir).split(path.sep).join('/');
@@ -43,6 +35,20 @@ function checkMandatoryFiles(slug: string, options: { rootDir?: string, checkpoi
   if (!checkpoints || checkpoints.length === 0) {
     missing.push(`${expectedMissionRel}/CP-*.md (at least one checkpoint document)`);
   }
+
+  return { missing, missionPath, checkpoints };
+}
+
+function checkMandatoryFiles(slug: string, options: { rootDir?: string, checkpointsRecorded?: boolean, findMissionDirFn?: typeof findMissionDir, findCheckpointsFn?: typeof findCheckpoints, resolveTaskFileFn?: typeof resolveTaskFile } = {}) {
+  if (options.checkpointsRecorded) { return { ok: true, missing: [] }; }
+  const {
+    rootDir = process.cwd(),
+    findMissionDirFn = findMissionDir,
+    findCheckpointsFn = findCheckpoints,
+    resolveTaskFileFn = resolveTaskFile
+  } = options;
+
+  const { missing, missionPath, checkpoints } = mandatoryMissionFiles(slug, rootDir, findMissionDirFn, findCheckpointsFn);
 
   const taskResolution = resolveTaskFileFn(slug, rootDir);
   const missionArtifactsPresent = Boolean(missionPath && fs.existsSync(missionPath) && checkpoints && checkpoints.length > 0);
@@ -96,10 +102,10 @@ function buildPushbackBody(slug: string, missing: string[]): string {
 
 /**
  * @param {string} slug
- * @param {{rootDir?: string, branch?: string, user?: string, log?: Function, readTokenFn?: Function, postReviewFn?: Function, checkFn?: Function}} [options]
+ * @param {{rootDir?: string, branch?: string, user?: string, log?: (message: string) => void, readTokenFn?: typeof readToken, postReviewFn?: (...args: Parameters<typeof postReview>) => Pick<ReturnType<typeof postReview>, 'ok' | 'error'>, checkFn?: typeof checkMandatoryFiles}} [options]
  * @returns {{ok: boolean, missing: string[], skipped: boolean, posted: boolean}}
  */
-function runGatekeeper(slug: string, options: { configuration?: ParallixConfiguration, rootDir?: string, checkpointsRecorded?: boolean, branch?: string, user?: string, log?: Function, readTokenFn?: Function, postReviewFn?: Function, checkFn?: Function } = {} as any) {
+function gatekeeperBindings(slug: string, options: { configuration?: ParallixConfiguration, rootDir?: string, checkpointsRecorded?: boolean, branch?: string, user?: string, log?: (message: string) => void, readTokenFn?: typeof readToken, postReviewFn?: (...args: Parameters<typeof postReview>) => Pick<ReturnType<typeof postReview>, 'ok' | 'error'>, checkFn?: typeof checkMandatoryFiles }) {
   const {
     rootDir = process.cwd(),
     checkpointsRecorded = false,
@@ -110,6 +116,11 @@ function runGatekeeper(slug: string, options: { configuration?: ParallixConfigur
     checkFn = checkMandatoryFiles
   } = options;
   const branch = options.branch || missionBranchName(slug, rootDir);
+  return { rootDir, checkpointsRecorded, user, log, readTokenFn, postReviewFn, checkFn, branch };
+}
+
+function runGatekeeper(slug: string, options: { configuration?: ParallixConfiguration, rootDir?: string, checkpointsRecorded?: boolean, branch?: string, user?: string, log?: (message: string) => void, readTokenFn?: typeof readToken, postReviewFn?: (...args: Parameters<typeof postReview>) => Pick<ReturnType<typeof postReview>, 'ok' | 'error'>, checkFn?: typeof checkMandatoryFiles } = {}) {
+  const { rootDir, checkpointsRecorded, user, log, readTokenFn, postReviewFn, checkFn, branch } = gatekeeperBindings(slug, options);
 
   const check = checkFn(slug, { rootDir, checkpointsRecorded });
   if (check.ok) {

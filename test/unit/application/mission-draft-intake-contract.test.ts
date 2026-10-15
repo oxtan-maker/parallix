@@ -1,4 +1,13 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { missionId, type Mission } from '../../../src/domain/mission.js';
+import { repositoryId } from '../../../src/domain/repository.js';
+import { missionVersion } from '../../../src/application/domain-ports.js';
+import type { MissionCreationRequest } from '../../../src/application/mission-creation-service.js';
+import type { MissionIntakeRequest, MissionIntakeResult, MissionIntakeService } from '../../../src/application/mission-intake-service.js';
+import type { ApplicationOutcome } from '../../../src/application/contracts.js';
+import { resolveConfiguration } from '../../../src/composition/config.js';
+import type { DraftWorkflowContext, DraftWorkflowPort } from '../../../src/application/ports/cli-workflows.js';
+import { draftMissionServicesFixture } from '../../helpers/draft-mission-services.js';
 // Mission draft intake contract: draft command use case, draft current-work publication, and start
 // removal.
 //
@@ -16,7 +25,6 @@ import { main, KNOWN_COMMANDS, suggestCommand } from '../../../src/interfaces/cl
 
 // no task ID in the legacy file (was test/draft-command-use-case.test.ts)
 describe('Draft command use case', () => {
-  // @ts-nocheck -- TASK-2332.10: mocked-port tests for DraftCommandUseCase
 
 
   // Shared exit tracker
@@ -38,7 +46,7 @@ describe('Draft command use case', () => {
   }
 
   // Helper: create a context that marks workflow as exited
-  function exitedCtx(exitTracker: ReturnType<typeof createExitTracker>, logTracker: ReturnType<typeof createLogTracker>, overrides: Record<string, any> = {}) {
+  function exitedCtx(exitTracker: ReturnType<typeof createExitTracker>, logTracker: ReturnType<typeof createLogTracker>, overrides: Partial<DraftWorkflowContext> = {}): DraftWorkflowContext {
     return {
       slug: '',
       mainRepo: '',
@@ -52,7 +60,7 @@ describe('Draft command use case', () => {
       exitFn: exitTracker.exitFn,
       logFn: logTracker.logFn,
       errorFn: logTracker.errorFn,
-      missionServicesFn: async () => ({}),
+      missionServicesFn: async () => draftMissionServicesFixture(),
       options: {},
       ...overrides,
       exited: true, // always last — cannot be overwritten
@@ -60,7 +68,7 @@ describe('Draft command use case', () => {
   }
 
   // Helper: create a context that continues workflow
-  function okCtx(exitTracker: ReturnType<typeof createExitTracker>, logTracker: ReturnType<typeof createLogTracker>, overrides: Record<string, any> = {}) {
+  function okCtx(exitTracker: ReturnType<typeof createExitTracker>, logTracker: ReturnType<typeof createLogTracker>, overrides: Partial<DraftWorkflowContext> = {}): DraftWorkflowContext {
     return {
       exited: false,
       slug: 'task-1234.56',
@@ -75,7 +83,7 @@ describe('Draft command use case', () => {
       exitFn: exitTracker.exitFn,
       logFn: logTracker.logFn,
       errorFn: logTracker.errorFn,
-      missionServicesFn: async () => ({}),
+      missionServicesFn: async () => draftMissionServicesFixture(),
       options: {},
       ...overrides,
     };
@@ -91,18 +99,18 @@ describe('Draft command use case', () => {
         calls.push('preflight');
         return okCtx(exit, logs, { options: options || {} });
       },
-      setup: (ctx: any) => { calls.push('setup'); return okCtx(exit, logs, ctx); },
-      scaffold: (ctx: any) => { calls.push('scaffold'); return okCtx(exit, logs, ctx); },
-      intake: async (ctx: any) => { calls.push('intake'); return okCtx(exit, logs, ctx); },
-      transition: async (ctx: any) => { calls.push('transition'); return okCtx(exit, logs, ctx); },
-      launchAgent: async (ctx: any) => { calls.push('launchAgent'); return okCtx(exit, logs, ctx); },
-      postProcess: async (ctx: any) => { calls.push('postProcess'); return okCtx(exit, logs, ctx); },
-      commitSafety: (ctx: any) => { calls.push('commitSafety'); return okCtx(exit, logs, ctx); },
-      finalTransition: async (_ctx: any) => { calls.push('finalTransition'); },
-    };
+      setup: (ctx) => { calls.push('setup'); return okCtx(exit, logs, ctx); },
+      scaffold: (ctx) => { calls.push('scaffold'); return okCtx(exit, logs, ctx); },
+      intake: async (ctx) => { calls.push('intake'); return okCtx(exit, logs, ctx); },
+      transition: async (ctx) => { calls.push('transition'); return okCtx(exit, logs, ctx); },
+      launchAgent: async (ctx) => { calls.push('launchAgent'); return okCtx(exit, logs, ctx); },
+      postProcess: async (ctx) => { calls.push('postProcess'); return okCtx(exit, logs, ctx); },
+      commitSafety: (ctx) => { calls.push('commitSafety'); return okCtx(exit, logs, ctx); },
+      finalTransition: async (_ctx) => { calls.push('finalTransition'); },
+    } satisfies NonNullable<ConstructorParameters<typeof DraftCommandUseCase>[0]>;
 
     const useCase = new DraftCommandUseCase(port);
-    await useCase.execute(['task-1234.56'], { missionServicesFn: async () => ({}) });
+    await useCase.execute(['task-1234.56'], { missionServicesFn: async () => draftMissionServicesFixture() });
 
     assert.deepStrictEqual(calls, [
       'preflight', 'setup', 'scaffold', 'intake', 'transition',
@@ -121,15 +129,15 @@ describe('Draft command use case', () => {
         exit.exitFn(1); // adapter calls exitFn(1) for missing slug
         return exitedCtx(exit, logs, { options: options || {} });
       },
-      setup: (_ctx: any) => calls.push('setup'),
-      scaffold: (_ctx: any) => calls.push('scaffold'),
-      intake: async (_ctx: any) => calls.push('intake'),
-      transition: async (_ctx: any) => calls.push('transition'),
-      launchAgent: async (_ctx: any) => calls.push('launchAgent'),
-      postProcess: async (_ctx: any) => calls.push('postProcess'),
-      commitSafety: (_ctx: any) => calls.push('commitSafety'),
-      finalTransition: async (_ctx: any) => calls.push('finalTransition'),
-    };
+      setup: (_ctx) => { calls.push('setup'); return _ctx; },
+      scaffold: (_ctx) => { calls.push('scaffold'); return _ctx; },
+      intake: async (_ctx) => { calls.push('intake'); return _ctx; },
+      transition: async (_ctx) => { calls.push('transition'); return _ctx; },
+      launchAgent: async (_ctx) => { calls.push('launchAgent'); return _ctx; },
+      postProcess: async (_ctx) => { calls.push('postProcess'); return _ctx; },
+      commitSafety: (_ctx) => { calls.push('commitSafety'); return _ctx; },
+      finalTransition: async (_ctx) => { calls.push('finalTransition'); },
+    } satisfies NonNullable<ConstructorParameters<typeof DraftCommandUseCase>[0]>;
 
     const useCase = new DraftCommandUseCase(port);
     await useCase.execute([], {});
@@ -148,19 +156,19 @@ describe('Draft command use case', () => {
         calls.push('preflight');
         return okCtx(exit, logs, { options: options || {} });
       },
-      setup: (ctx: any) => { calls.push('setup'); return okCtx(exit, logs, ctx); },
-      scaffold: (ctx: any) => { calls.push('scaffold'); return okCtx(exit, logs, ctx); },
-      intake: async (ctx: any) => {
+      setup: (ctx) => { calls.push('setup'); return okCtx(exit, logs, ctx); },
+      scaffold: (ctx) => { calls.push('scaffold'); return okCtx(exit, logs, ctx); },
+      intake: async (ctx) => {
         calls.push('intake');
         ctx.logFn('[INFO] Mission already recorded in SQLite: conflict');
         return okCtx(exit, logs, ctx); // conflict is non-fatal, continues
       },
-      transition: async (ctx: any) => { calls.push('transition'); return okCtx(exit, logs, ctx); },
-      launchAgent: async (ctx: any) => { calls.push('launchAgent'); return okCtx(exit, logs, ctx); },
-      postProcess: async (ctx: any) => { calls.push('postProcess'); return okCtx(exit, logs, ctx); },
-      commitSafety: (ctx: any) => { calls.push('commitSafety'); return okCtx(exit, logs, ctx); },
-      finalTransition: async (_ctx: any) => { calls.push('finalTransition'); },
-    };
+      transition: async (ctx) => { calls.push('transition'); return okCtx(exit, logs, ctx); },
+      launchAgent: async (ctx) => { calls.push('launchAgent'); return okCtx(exit, logs, ctx); },
+      postProcess: async (ctx) => { calls.push('postProcess'); return okCtx(exit, logs, ctx); },
+      commitSafety: (ctx) => { calls.push('commitSafety'); return okCtx(exit, logs, ctx); },
+      finalTransition: async (_ctx) => { calls.push('finalTransition'); },
+    } satisfies NonNullable<ConstructorParameters<typeof DraftCommandUseCase>[0]>;
 
     const useCase = new DraftCommandUseCase(port);
     await useCase.execute(['task-existing'], {});
@@ -180,19 +188,19 @@ describe('Draft command use case', () => {
         calls.push('preflight');
         return okCtx(exit, logs, { options: options || {} });
       },
-      setup: (ctx: any) => { calls.push('setup'); return okCtx(exit, logs, ctx); },
-      scaffold: (ctx: any) => { calls.push('scaffold'); return okCtx(exit, logs, ctx); },
-      intake: async (ctx: any) => { calls.push('intake'); return okCtx(exit, logs, ctx); },
-      transition: async (ctx: any) => { calls.push('transition'); return okCtx(exit, logs, ctx); },
-      launchAgent: async (ctx: any) => {
+      setup: (ctx) => { calls.push('setup'); return okCtx(exit, logs, ctx); },
+      scaffold: (ctx) => { calls.push('scaffold'); return okCtx(exit, logs, ctx); },
+      intake: async (ctx) => { calls.push('intake'); return okCtx(exit, logs, ctx); },
+      transition: async (ctx) => { calls.push('transition'); return okCtx(exit, logs, ctx); },
+      launchAgent: async (ctx) => {
         calls.push('launchAgent');
         exit.exitFn(1); // agent failed
         return exitedCtx(exit, logs, ctx);
       },
-      postProcess: async () => calls.push('postProcess'),
-      commitSafety: () => calls.push('commitSafety'),
-      finalTransition: async () => calls.push('finalTransition'),
-    };
+      postProcess: async (ctx) => { calls.push('postProcess'); return ctx; },
+      commitSafety: (ctx) => { calls.push('commitSafety'); return ctx; },
+      finalTransition: async () => { calls.push('finalTransition'); },
+    } satisfies NonNullable<ConstructorParameters<typeof DraftCommandUseCase>[0]>;
 
     const useCase = new DraftCommandUseCase(port);
     await useCase.execute(['task-verify-fail'], {});
@@ -212,21 +220,21 @@ describe('Draft command use case', () => {
         calls.push('preflight');
         return okCtx(exit, logs, { options: options || {} });
       },
-      setup: (ctx: any) => { calls.push('setup'); return okCtx(exit, logs, ctx); },
-      scaffold: (ctx: any) => { calls.push('scaffold'); return okCtx(exit, logs, ctx); },
-      intake: async (ctx: any) => { calls.push('intake'); return okCtx(exit, logs, ctx); },
-      transition: async (ctx: any) => { calls.push('transition'); return okCtx(exit, logs, ctx); },
-      launchAgent: async (ctx: any) => { calls.push('launchAgent'); return okCtx(exit, logs, ctx); },
-      postProcess: async (ctx: any) => {
+      setup: (ctx) => { calls.push('setup'); return okCtx(exit, logs, ctx); },
+      scaffold: (ctx) => { calls.push('scaffold'); return okCtx(exit, logs, ctx); },
+      intake: async (ctx) => { calls.push('intake'); return okCtx(exit, logs, ctx); },
+      transition: async (ctx) => { calls.push('transition'); return okCtx(exit, logs, ctx); },
+      launchAgent: async (ctx) => { calls.push('launchAgent'); return okCtx(exit, logs, ctx); },
+      postProcess: async (ctx) => {
         calls.push('postProcess');
         ctx.logFn('[WARN] Post-draft mission type labels are not valid. Relaunching...');
         ctx.logFn('[FAIL] Post-draft mission type labels are still invalid after restart.');
         exit.exitFn(1);
         return exitedCtx(exit, logs, ctx);
       },
-      commitSafety: () => calls.push('commitSafety'),
-      finalTransition: async () => calls.push('finalTransition'),
-    };
+      commitSafety: (ctx) => { calls.push('commitSafety'); return ctx; },
+      finalTransition: async () => { calls.push('finalTransition'); },
+    } satisfies NonNullable<ConstructorParameters<typeof DraftCommandUseCase>[0]>;
 
     const useCase = new DraftCommandUseCase(port);
     await useCase.execute(['task-classify'], {});
@@ -244,7 +252,7 @@ describe('Draft command use case', () => {
 
     const missionServices = async () => ({
       repositoryId: 'test-repo',
-      intake: { async execute() { return { status: 'completed', value: { version: 1 } }; } },
+      intake: { async execute() { return { durableEvidence: [],  status: 'completed' as const, value: { version: 1 } }; } },
     });
 
     const port = {
@@ -252,22 +260,22 @@ describe('Draft command use case', () => {
         capturedOptions = options;
         return okCtx(exit, logs, { options: options || {} });
       },
-      setup: (ctx: any) => okCtx(exit, logs, ctx),
-      scaffold: (ctx: any) => okCtx(exit, logs, ctx),
-      intake: async (ctx: any) => okCtx(exit, logs, ctx),
-      transition: async (ctx: any) => okCtx(exit, logs, ctx),
-      launchAgent: async (ctx: any) => okCtx(exit, logs, ctx),
-      postProcess: async (ctx: any) => okCtx(exit, logs, ctx),
-      commitSafety: (ctx: any) => okCtx(exit, logs, ctx),
+      setup: (ctx) => okCtx(exit, logs, ctx),
+      scaffold: (ctx) => okCtx(exit, logs, ctx),
+      intake: async (ctx) => okCtx(exit, logs, ctx),
+      transition: async (ctx) => okCtx(exit, logs, ctx),
+      launchAgent: async (ctx) => okCtx(exit, logs, ctx),
+      postProcess: async (ctx) => okCtx(exit, logs, ctx),
+      commitSafety: (ctx) => okCtx(exit, logs, ctx),
       finalTransition: async () => {},
-    };
+    } satisfies NonNullable<ConstructorParameters<typeof DraftCommandUseCase>[0]>;
 
     const useCase = new DraftCommandUseCase(port);
     await useCase.execute(['task-1234.56'], { missionServicesFn: missionServices });
 
     assert.ok(capturedOptions);
-    assert.ok(typeof (capturedOptions as any).missionServicesFn === 'function');
-    const services = await (capturedOptions as any).missionServicesFn('/tmp/worktree');
+    assert.ok(typeof (capturedOptions).missionServicesFn === 'function');
+    const services = await (capturedOptions).missionServicesFn('/tmp/worktree');
     assert.strictEqual(services.repositoryId, 'test-repo');
   });
 
@@ -281,19 +289,19 @@ describe('Draft command use case', () => {
         calls.push('preflight');
         return okCtx(exit, logs, { options: options || {} });
       },
-      setup: (ctx: any) => { calls.push('setup'); return okCtx(exit, logs, ctx); },
-      scaffold: (ctx: any) => { calls.push('scaffold'); return okCtx(exit, logs, ctx); },
-      intake: async (ctx: any) => { calls.push('intake'); return okCtx(exit, logs, ctx); },
-      transition: async (ctx: any) => { calls.push('transition'); return okCtx(exit, logs, ctx); },
-      launchAgent: async (ctx: any) => { calls.push('launchAgent'); return okCtx(exit, logs, ctx); },
-      postProcess: async (ctx: any) => { calls.push('postProcess'); return okCtx(exit, logs, ctx); },
-      commitSafety: (ctx: any) => {
+      setup: (ctx) => { calls.push('setup'); return okCtx(exit, logs, ctx); },
+      scaffold: (ctx) => { calls.push('scaffold'); return okCtx(exit, logs, ctx); },
+      intake: async (ctx) => { calls.push('intake'); return okCtx(exit, logs, ctx); },
+      transition: async (ctx) => { calls.push('transition'); return okCtx(exit, logs, ctx); },
+      launchAgent: async (ctx) => { calls.push('launchAgent'); return okCtx(exit, logs, ctx); },
+      postProcess: async (ctx) => { calls.push('postProcess'); return okCtx(exit, logs, ctx); },
+      commitSafety: (ctx) => {
         calls.push('commitSafety');
         exit.exitFn(1);
         return exitedCtx(exit, logs, ctx);
       },
-      finalTransition: async () => calls.push('finalTransition'),
-    };
+      finalTransition: async () => { calls.push('finalTransition'); },
+    } satisfies NonNullable<ConstructorParameters<typeof DraftCommandUseCase>[0]>;
 
     const useCase = new DraftCommandUseCase(port);
     await useCase.execute(['task-commit'], {});
@@ -306,11 +314,13 @@ describe('Draft command use case', () => {
 
 // TASK-2406 (was test/task-2406-draft-current-work.test.ts)
 describe('Draft current-work publication', () => {
-  // @ts-nocheck -- mocked-port regression coverage for DraftCommandUseCase
 
 
-  function context(overrides: Record<string, unknown> = {}) {
+  function context(overrides: Partial<DraftWorkflowContext> = {}): DraftWorkflowContext {
     return {
+      mainRepo: '/repo', targetWorktree: '/repo/task-2406', missionFile: '', recordedBase: null, syntheticTask: null,
+      actualAgent: null, agentResult: null, exitFn: () => {}, logFn: () => {}, errorFn: () => {},
+      missionServicesFn: async () => draftMissionServicesFixture(), options: {},
       exited: false,
       slug: 'task-2406',
       agent: 'codex',
@@ -318,16 +328,16 @@ describe('Draft current-work publication', () => {
     };
   }
 
-  function workflow(calls: string[], overrides: Record<string, unknown> = {}) {
+  function workflow(calls: string[], overrides: Partial<DraftWorkflowPort> = {}): DraftWorkflowPort {
     return {
       preflight: async () => { calls.push('preflight'); return context(); },
-      setup: (ctx: any) => { calls.push('setup'); return context(ctx); },
-      scaffold: (ctx: any) => { calls.push('scaffold'); return context(ctx); },
-      intake: async (ctx: any) => { calls.push('intake'); return context(ctx); },
-      transition: async (ctx: any) => { calls.push('transition'); return context(ctx); },
-      launchAgent: async (ctx: any) => { calls.push('launchAgent'); return context(ctx); },
-      postProcess: async (ctx: any) => { calls.push('postProcess'); return context(ctx); },
-      commitSafety: (ctx: any) => { calls.push('commitSafety'); return context(ctx); },
+      setup: (ctx) => { calls.push('setup'); return context(ctx); },
+      scaffold: (ctx) => { calls.push('scaffold'); return context(ctx); },
+      intake: async (ctx) => { calls.push('intake'); return context(ctx); },
+      transition: async (ctx) => { calls.push('transition'); return context(ctx); },
+      launchAgent: async (ctx) => { calls.push('launchAgent'); return context(ctx); },
+      postProcess: async (ctx) => { calls.push('postProcess'); return context(ctx); },
+      commitSafety: (ctx) => { calls.push('commitSafety'); return context(ctx); },
       finalTransition: async () => { calls.push('finalTransition'); },
       ...overrides,
     };
@@ -336,10 +346,10 @@ describe('Draft current-work publication', () => {
   test('draft publishes running with phase draft before workflow and ended after finalTransition', async () => {
     const calls: string[] = [];
     const currentWork = {
-      running: async (publication: any) => { calls.push(`running:${publication.phase}`); },
+      running: async (publication) => { calls.push(`running:${publication.phase}`); },
       blocked: async () => { calls.push('blocked'); },
       ended: async () => { calls.push('ended'); },
-    };
+    } satisfies NonNullable<ConstructorParameters<typeof DraftCommandUseCase>[1]>;
 
     await new DraftCommandUseCase(workflow(calls), currentWork).execute(['task-2406']);
 
@@ -353,9 +363,9 @@ describe('Draft current-work publication', () => {
     const calls: string[] = [];
     const currentWork = {
       running: async () => { calls.push('running'); },
-      blocked: async (_publication: any, reason: string) => { calls.push(`blocked:${reason}`); },
+      blocked: async (_publication, reason: string) => { calls.push(`blocked:${reason}`); },
       ended: async () => { calls.push('ended'); },
-    };
+    } satisfies NonNullable<ConstructorParameters<typeof DraftCommandUseCase>[1]>;
     const failure = new Error('draft agent failed');
 
     await assert.rejects(
@@ -371,7 +381,7 @@ describe('Draft current-work publication', () => {
       running: async () => { calls.push('running'); },
       blocked: async () => { calls.push('blocked'); },
       ended: async () => { calls.push('ended'); },
-    };
+    } satisfies NonNullable<ConstructorParameters<typeof DraftCommandUseCase>[1]>;
     const draftWorkflow = workflow(calls, { preflight: async () => context({ slug: 'not a slug' }) });
 
     await new DraftCommandUseCase(draftWorkflow, currentWork).execute(['not a slug']);
@@ -382,7 +392,6 @@ describe('Draft current-work publication', () => {
 
 // no task ID in the legacy file (was test/mission-start-removal.test.ts)
 describe('Mission start removal', () => {
-  // @ts-nocheck -- focused regression for task-2495: the hallucinated `px mission-start`
   // command is removed from the CLI surface and can never reach startup preflight.
 
   // The command is gone from the canonical command table, so help and the
@@ -400,17 +409,18 @@ describe('Mission start removal', () => {
   // it reports "Unknown command: mission-start", prints usage, and exits 1 without
   // ever invoking the startup-preflight implementation.
   test('px mission-start resolves to Unknown command and never reaches preflight', async () => {
-    const errors = [];
-    let exitedWith = 'unset';
+    const errors: string[] = [];
+    let exitedWith: number | 'unset' = 'unset';
     let usagePrinted = false;
 
     await main(['mission-start'], {
+      runtime: resolveConfiguration(process.env).runtime,
       commandFns: {},
       loadAliasesFn: () => ({}),
       cwdFn: () => '/tmp/nowhere',
       errorFn: (msg) => errors.push(String(msg)),
       printUsageFn: () => { usagePrinted = true; },
-      exitFn: (code) => { exitedWith = code; },
+      exitFn: (code) => { assert.ok(typeof code === 'number'); exitedWith = code; },
     });
 
     assert.equal(exitedWith, 1, 'unknown command must exit non-zero');
@@ -426,16 +436,17 @@ describe('Mission start removal', () => {
 
   // A near-miss spelling must not silently resolve to the removed command.
   test('px mission-startx does not resolve to a removed command', async () => {
-    const errors = [];
-    let exitedWith = 'unset';
+    const errors: string[] = [];
+    let exitedWith: number | 'unset' = 'unset';
 
     await main(['mission-startx'], {
+      runtime: resolveConfiguration(process.env).runtime,
       commandFns: {},
       loadAliasesFn: () => ({}),
       cwdFn: () => '/tmp/nowhere',
       errorFn: (msg) => errors.push(String(msg)),
       printUsageFn: () => {},
-      exitFn: (code) => { exitedWith = code; },
+      exitFn: (code) => { assert.ok(typeof code === 'number'); exitedWith = code; },
     });
 
     assert.equal(exitedWith, 1);
@@ -446,32 +457,32 @@ describe('Mission start removal', () => {
 // Create new mission (TASK-2693) from the web board — identity, validation, dependency
 // eligibility and retry safety, against doubles for the intake write and the catalog.
 describe('Mission creation use case', () => {
-  const REPO = 'parallix' as never;
+  const REPO = repositoryId('parallix');
   const CAPABILITIES = new Set(['mission:intake'] as const);
 
-  function fixture(missions: unknown[] = []) {
-    const writes: Record<string, unknown>[] = [];
+  function fixture(missions: Mission[] = []) {
+    const writes: MissionIntakeRequest[] = [];
     let counter = 0;
-    let failNext: unknown = null;
-    const intake = {
-      async execute(request: Record<string, unknown>) {
+    let failNext: { value: ApplicationOutcome<MissionIntakeResult> | null } = { value: null };
+    const intake: Pick<MissionIntakeService, 'execute'> = {
+      async execute(request) {
         writes.push(request);
-        if (failNext) { const outcome = failNext; failNext = null; return outcome; }
-        return { status: 'completed', value: { mission: { id: request.missionId }, version: 1 }, durableEvidence: [] };
+        if (failNext.value) { const outcome = failNext.value; failNext.value = null; return outcome; }
+        return { status: 'completed' as const, value: { mission: fixtureMission(request.missionId, { repositoryId: request.repositoryId, title: request.title, status: 'backlog' }), version: missionVersion(1) }, durableEvidence: [] };
       },
     };
     const service = new MissionCreationService(
-      intake as never,
-      { loadAllMissions: async () => missions as never },
-      { allocate: () => `px-${String(++counter).padStart(4, '0')}` as never },
+      intake,
+      { loadAllMissions: async () => missions },
+      { allocate: () => missionId(`px-${String(++counter).padStart(4, '0')}`) },
       REPO,
     );
-    const create = (overrides: Record<string, unknown> = {}) => service.execute({
+    const create = (overrides: Partial<MissionCreationRequest> = {}) => service.execute({
       operationId: 'op', requestKey: 'form-1', title: 'Capture it', capabilities: CAPABILITIES, ...overrides,
-    } as never);
-    return { writes, create, failWith: (outcome: unknown) => { failNext = outcome; }, allocated: () => counter };
+    });
+    return { writes, create, failWith: (outcome: ApplicationOutcome<MissionIntakeResult>) => { failNext.value = outcome; }, allocated: () => counter };
   }
-  const open = (id: string, overrides: Record<string, unknown> = {}) => ({ id, repositoryId: REPO, status: 'backlog', closedAt: null, ...overrides });
+  const open = (id: string, overrides: Partial<Mission> = {}) => fixtureMission(id, { repositoryId: REPO, ...overrides });
 
   test('creates one backlog intake carrying every submitted field under an allocated identity', async () => {
     const { create, writes } = fixture([open('task-1')]);
@@ -510,6 +521,7 @@ describe('Mission creation use case', () => {
     ]) {
       const outcome = await create(overrides);
       assert.equal(outcome.status, 'rejected', JSON.stringify(overrides));
+      assert.ok(outcome.error != null);
       assert.equal(outcome.error.kind, 'validation');
     }
     assert.equal(writes.length, 0);
@@ -517,13 +529,16 @@ describe('Mission creation use case', () => {
   });
 
   test('refuses finished, closed, foreign and nonexistent dependencies', async () => {
+    // @ts-expect-error Intentional invalid dependency: a closed timestamp on an open lane must be rejected.
+    const closed: Mission = { ...fixtureMission('task-closed'), status: 'backlog', closedAt: '2026-01-01T00:00:00Z' };
     const { create, writes } = fixture([
-      open('task-open'), open('task-done', { status: 'done' }), open('task-closed', { closedAt: '2026-01-01T00:00:00Z' }),
-      open('task-foreign', { repositoryId: 'other' }),
+      open('task-open'), open('task-done', { status: 'done' }), closed,
+      open('task-foreign', { repositoryId: repositoryId('other') }),
     ]);
     for (const dependency of ['task-done', 'task-closed', 'task-foreign', 'task-missing']) {
       const outcome = await create({ requestKey: dependency, dependencies: ['task-open', dependency] });
       assert.equal(outcome.status, 'rejected', dependency);
+      assert.ok(outcome.error != null);
       assert.match(outcome.error.message, new RegExp(dependency));
     }
     assert.equal(writes.length, 0);
@@ -533,6 +548,7 @@ describe('Mission creation use case', () => {
   test('requires the intake capability', async () => {
     const { create, writes } = fixture();
     const outcome = await create({ capabilities: new Set() });
+    assert.ok(outcome.error != null);
     assert.equal(outcome.error.kind, 'capability');
     assert.equal(writes.length, 0);
   });
@@ -542,9 +558,14 @@ describe('Mission creation use case', () => {
     const [first, concurrent] = await Promise.all([create(), create()]);
     const retried = await create();
     assert.equal(writes.length, 1);
+    assert.ok(concurrent.value != null);
+    assert.ok(first.value != null);
     assert.equal(first.value.mission.id, concurrent.value.mission.id);
+    assert.ok(retried.value != null);
     assert.equal(retried.value.mission.id, first.value.mission.id);
-    assert.equal((await create({ requestKey: 'form-2' })).value.mission.id, 'px-0002');
+    const second = await create({ requestKey: 'form-2' });
+    assert.ok(second.value);
+    assert.equal(second.value.mission.id, 'px-0002');
   });
 
   test('a failed write is not remembered, so the same request key can retry', async () => {

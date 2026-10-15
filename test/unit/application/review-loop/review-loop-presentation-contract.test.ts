@@ -19,9 +19,9 @@ function providerNone(consumeReviewer: () => Promise<ReviewerArtifactFacts>, run
       nominate: () => { throw new Error('No agents available'); },
     },
     // SC1: a provider-disabled --start performs the handoff transition.
-    handoff: { handoff: async () => ({ ok: true }) },
+    handoff: { handoff: async () => ({ ok: true as const }) },
     agents: { launch: async launch => { throw new Error(`unexpected ${launch.role} launch`); } },
-    artifacts: { consumeReviewer, consumeImplementer: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' }) },
+    artifacts: { consumeReviewer, consumeImplementer: async () => ({ consumed: true, ok: true as const, disposition: 'CHANGES_MADE' }) },
     ...(runGate ? { preReview: { runGate } } : {}),
     output: { exit: (code: number) => { throw new Error(`exit(${code})`); } },
   });
@@ -30,7 +30,7 @@ function providerNone(consumeReviewer: () => Promise<ReviewerArtifactFacts>, run
 // Regression provenance: TASK-1209.
 describe("review loop", { concurrency: false }, () => {
   test('review loop skips reviewer and implementer launches for autonomous fallback in provider=none mode', async () => {
-    const fake = providerNone(async () => ({ consumed: true, ok: true, reviewState: 'REQUEST_CHANGES' }));
+    const fake = providerNone(async () => ({ consumed: true, ok: true as const, reviewState: 'REQUEST_CHANGES' }));
     await runReviewLoop({ slug: 'task-999', maxAttempts: 1 }, fake.ports);
     const { logs, errors } = fake;
 
@@ -52,16 +52,16 @@ describe("review presentation", { concurrency: false }, () => {
    * loop through fake mechanism ports so the exact default/verbose emissions
    * are asserted without launching real agents.
    */
-  const happyPath = (outcome = 'APPROVED') => providerNone(async () => ({ consumed: true, ok: true, reviewState: outcome, reviewFindings: [] }));
+  const happyPath = (outcome = 'APPROVED') => providerNone(async () => ({ consumed: true, ok: true as const, reviewState: outcome, reviewFindings: [] }));
 
   test('single pre-review gate pass emission on the happy path', async () => {
     const lines: string[] = [];
     // TASK-2477/F4: the gate mechanism emits the real announcement, so the test
     // asserts how many times the gate-pass line is emitted. A duplicate
     // emission in the loop would push this count to 2 and fail.
-    const fake = providerNone(async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }), async () => {
+    const fake = providerNone(async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }), async () => {
       lines.push('[PASS] Pre-review gate passed for area "docs".');
-      return { ok: true };
+      return { ok: true as const };
     });
     await runReviewLoop({ slug: 'task-999', maxAttempts: 1 }, fake.ports);
     const logs = [...lines, ...fake.logs];
@@ -99,7 +99,7 @@ describe("review presentation", { concurrency: false }, () => {
   });
 
   test('incomplete reviewer-artifact infrastructure failure survives at default verbosity', async () => {
-    const fake = providerNone(async () => ({ consumed: true, ok: false, diagnostic: 'persist failed (outcome): sqlite busy' }));
+    const fake = providerNone(async () => ({ consumed: true, ok: false as const, diagnostic: 'persist failed (outcome): sqlite busy' }));
     await runReviewLoop({ slug: 'task-999', maxAttempts: 1 }, fake.ports);
     assert.ok(fake.errors.some((m) => m.includes('Reviewer artifact infrastructure failure')), 'infra failure message surfaces at default verbosity');
     assert.deepEqual(fake.stops, ['REVIEWER_ARTIFACT_INFRA_FAILURE'], 'an infrastructure failure escalates to a human instead of relaunching');
@@ -112,7 +112,7 @@ describe('review independence and verdict output', () => {
     const lines: string[] = [];
     const output = { log: (line: string) => { lines.push(line); }, error: (line: string) => { lines.push(line); } };
     for (const reason of ['abstention', 'classifier-publication-failed', 'opted-out']) {
-      renderReviewLoopEvent({ kind: 'reviewer-classification', reason }, output as never);
+      renderReviewLoopEvent({ kind: 'reviewer-classification', reason }, output);
     }
     assert.match(lines[0], /Reviewer classifier abstained, continuing with general reviewer/);
     assert.match(lines[1], /Reviewer classifier failed \(classifier-publication-failed\), continuing with general reviewer/);
@@ -160,7 +160,7 @@ test('renderReviewVerdict surfaces a non-binary verdict only when verbose', () =
 
 
 test('application review succeeds through structured observations without terminal output (TASK-2647)', async () => {
-  const fake = providerNone(async () => ({ consumed: true, ok: true, reviewState: 'APPROVED', reviewFindings: [] }));
+  const fake = providerNone(async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED', reviewFindings: [] }));
   const events: ReviewLoopEvent[] = [];
   fake.ports.output.emit = event => { events.push(event); };
   fake.ports.output.log = () => assert.fail('application must not render terminal output');

@@ -67,7 +67,7 @@ export async function resumeIntervenedReview(
   options: {
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
-    exit?: (_code: number) => never;
+    exit?: (_code: number) => void;
     resolveWorktreeFn?: typeof resolveWorktree;
     missionStore?: MissionStore | null;
     createEventFn?: typeof createEvent;
@@ -125,7 +125,7 @@ async function clearHumanInterventionIfPresent(
   options: {
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
-    exit?: (_code: number) => never;
+    exit?: (_code: number) => void;
     resolveWorktreeFn?: typeof resolveWorktree;
     missionStore?: MissionStore | null;
     createEventFn?: typeof createEvent;
@@ -188,14 +188,7 @@ async function clearHumanInterventionIfPresent(
     exit(1);
     return { cleared: false, operator: '', review, status: reviewStatus(review) };
   } else {
-    const worktree = options.resolveWorktreeFn ? (options.resolveWorktreeFn(slug) ?? process.cwd()) : process.cwd();
-    try {
-      const gitUser = (options.runFn ?? run)('git', ['-C', worktree, 'config', 'user.name']);
-      const resolved = (gitUser.stdout || '').trim();
-      operator = resolved || 'operator';
-    } catch {
-      operator = 'operator';
-    }
+    operator = operatorFromGit(slug, options.resolveWorktreeFn, options.runFn);
   }
 
   // The domain transition clears the intervention and derives the surviving
@@ -222,7 +215,7 @@ async function clearHumanInterventionIfPresent(
       phase: 'reviewing',
     },
     {
-      worktree: options.resolveWorktreeFn ? (options.resolveWorktreeFn(slug) ?? undefined) : undefined,
+      worktree: injectedReviewWorktree(slug, options.resolveWorktreeFn),
       skipGit: false,
       log: options.log,
       error,
@@ -251,7 +244,7 @@ export async function continueReviewClearsIntervention(
   options: {
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
-    exit?: (_code: number) => never;
+    exit?: (_code: number) => void;
     resolveWorktreeFn?: typeof resolveWorktree;
     missionStore?: MissionStore | null;
     createEventFn?: typeof createEvent;
@@ -291,7 +284,7 @@ export async function continueReviewInvalidatesBlocker(
   options: {
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
-    exit?: (_code: number) => never;
+    exit?: (_code: number) => void;
     resolveWorktreeFn?: typeof resolveWorktree;
     missionStore?: MissionStore | null;
     createEventFn?: typeof createEvent;
@@ -366,7 +359,7 @@ export async function continueReviewInvalidatesBlocker(
       phase: 'reviewing',
     },
     {
-      worktree: options.resolveWorktreeFn ? (options.resolveWorktreeFn(slug) ?? undefined) : undefined,
+      worktree: injectedReviewWorktree(slug, options.resolveWorktreeFn),
       skipGit: false,
       log: options.log,
       error,
@@ -384,3 +377,15 @@ export async function continueReviewInvalidatesBlocker(
 // ============================================================================
 
 /** Failures block the review; warnings only annotate it. */
+
+function injectedReviewWorktree(slug: string, resolveWorktreeFn: typeof resolveWorktree | undefined): string | undefined {
+  return resolveWorktreeFn ? (resolveWorktreeFn(slug) ?? undefined) : undefined;
+}
+
+function operatorFromGit(slug: string, resolveWorktreeFn: typeof resolveWorktree | undefined, runFn: typeof run | undefined): string {
+  const worktree = injectedReviewWorktree(slug, resolveWorktreeFn) ?? process.cwd();
+  try {
+    const gitUser = (runFn ?? run)('git', ['-C', worktree, 'config', 'user.name']);
+    return (gitUser.stdout || '').trim() || 'operator';
+  } catch { return 'operator'; }
+}

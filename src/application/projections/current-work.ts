@@ -238,6 +238,6 @@ function runningFreshness(
  * observation into "nobody is working" is exactly the silent conversion AC #8
  * forbids. `stale` does not count — that is the bound on a crashed process.
  */
-export function isWorkInProgress(work: LiveMissionWork | null | undefined): boolean {
+export function isWorkInProgress(work: LiveMissionWork | null | undefined): work is LiveMissionWork {
   return work !== null && work !== undefined && work.freshness !== 'stale';
 }

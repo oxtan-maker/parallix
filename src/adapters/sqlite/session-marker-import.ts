@@ -116,7 +116,7 @@ function readSessionFile(dirPath: string, filename: string): FileSessionMarker |
   }
 
   try {
-    const body = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const body = JSON.parse(fs.readFileSync(filePath, 'utf8')) as { agent?: unknown; lastLaunched?: unknown; sessionId?: unknown };
     if (!body || typeof body.agent !== 'string') {
       return null;
     }

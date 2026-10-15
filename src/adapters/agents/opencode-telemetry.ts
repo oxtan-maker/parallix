@@ -16,45 +16,59 @@
  * See architecture migration for the full telemetry credibility design.
  */
 
+type RawTokenUsage = { input_tokens?: unknown; output_tokens?: unknown; cached_input_tokens?: unknown; cached_tokens?: unknown; total_tokens?: unknown };
+type OpencodeMeta = RawTokenUsage & { total_token_usage?: RawTokenUsage; session_id?: unknown; sessionId?: unknown; model?: unknown; model_name?: unknown };
+type OpencodeMessage = { parts?: { type?: string }[] };
+type OpencodeEvent = { type?: string; tool_calls?: unknown[]; content_block_start?: { type?: string }[] };
+type OpencodeExport = RawTokenUsage & {
+  total_token_usage?: RawTokenUsage; token_usage?: RawTokenUsage; usage?: RawTokenUsage & { tool_calls?: unknown };
+  meta?: OpencodeMeta; metadata?: OpencodeMeta;
+  info?: { id?: unknown; model?: { id?: unknown; name?: unknown }; tokens?: { input?: number; output?: number; cache?: { read?: unknown } } };
+  session_id?: unknown; sessionId?: unknown; model?: unknown; model_name?: unknown; session?: { id?: unknown; session_id?: unknown; model?: unknown };
+  tool_calls?: unknown; toolCalls?: unknown; messages?: OpencodeMessage[]; events?: OpencodeEvent[]; tool_use_events?: unknown[];
+  [key: string]: unknown;
+};
+
 const PROVIDER = 'opencode';
 const MODEL = 'custom';
 
-function num(value: any) {
+function num(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
 /**
- * @param {{[key: string]: any}} obj
- * @returns {{input_tokens?: number, output_tokens?: number, cached_input_tokens?: number, total_tokens?: number}|null}
+ * @param {OpencodeExport} obj
+ * @returns {RawTokenUsage|null}
  */
-function findTokenUsage(obj: {[key: string]: any}): {input_tokens?: number, output_tokens?: number, cached_input_tokens?: number, total_tokens?: number} | null {
+function findTokenUsage(obj: OpencodeExport): RawTokenUsage | null {
   if (!obj || typeof obj !== 'object') {return null;}
   return directTokenUsage(obj) || directTokenUsage(obj.total_token_usage) || directTokenUsage(obj.token_usage)
     || directTokenUsage(obj.usage) || metadataTokenUsage(obj) || infoTokenUsage(obj) || arrayTokenUsage(obj);
 }
 
-function directTokenUsage(value: any) {
+function directTokenUsage(value: unknown) {
   if (!value || typeof value !== 'object' || (!('input_tokens' in value) && !('output_tokens' in value))) { return null; }
-  return { input_tokens: value.input_tokens || 0, output_tokens: value.output_tokens || 0, cached_input_tokens: value.cached_input_tokens || value.cached_tokens || 0, total_tokens: value.total_tokens || 0 };
+  const usage = value as RawTokenUsage;
+  return { input_tokens: usage.input_tokens || 0, output_tokens: usage.output_tokens || 0, cached_input_tokens: usage.cached_input_tokens || usage.cached_tokens || 0, total_tokens: usage.total_tokens || 0 };
 }
 
-function metadataTokenUsage(obj: {[key: string]: any}) {
+function metadataTokenUsage(obj: OpencodeExport) {
   const metadata = obj.meta || obj.metadata;
   return directTokenUsage(metadata) || directTokenUsage(metadata?.total_token_usage);
 }
 
-function infoTokenUsage(obj: {[key: string]: any}) {
+function infoTokenUsage(obj: OpencodeExport) {
   const tokens = obj.info?.tokens;
   if (!tokens || typeof tokens !== 'object' || (!('input' in tokens) && !('output' in tokens))) { return null; }
-  return { input_tokens: tokens.input || 0, output_tokens: tokens.output || 0, cached_input_tokens: tokens.cache?.read || 0, total_tokens: tokens.input + tokens.output || 0 };
+  return { input_tokens: tokens.input || 0, output_tokens: tokens.output || 0, cached_input_tokens: tokens.cache?.read || 0, total_tokens: tokens.input! + tokens.output! || 0 };
 }
 
-function arrayTokenUsage(obj: {[key: string]: any}) {
+function arrayTokenUsage(obj: OpencodeExport) {
   for (const value of Object.values(obj)) {
     if (!Array.isArray(value)) { continue; }
     for (const item of value) {
       if (item && typeof item === 'object') {
-        const found = findTokenUsage(item);
+        const found = findTokenUsage(item as OpencodeExport);
         if (found) { return found; }
       }
     }
@@ -63,48 +77,48 @@ function arrayTokenUsage(obj: {[key: string]: any}) {
 }
 
 /**
- * @param {{[key: string]: any}} parsed
+ * @param {OpencodeExport} parsed
  * @returns {string|null}
  */
-function extractSessionId(parsed: {[key: string]: any}) {
+function extractSessionId(parsed: OpencodeExport) {
   if (!parsed || typeof parsed !== 'object') {return null;}
   return firstString(parsed.session_id, parsed.sessionId, parsed.info?.id, parsed.metadata?.session_id, parsed.metadata?.sessionId, parsed.meta?.session_id, parsed.meta?.sessionId, parsed.session?.id, parsed.session?.session_id);
 }
 
 /**
- * @param {{[key: string]: any}} parsed
+ * @param {OpencodeExport} parsed
  * @returns {string|null}
  */
-function extractModelName(parsed: {[key: string]: any}) {
+function extractModelName(parsed: OpencodeExport) {
   if (!parsed || typeof parsed !== 'object') {return null;}
   return firstString(parsed.model, parsed.model_name, parsed.info?.model?.id, parsed.info?.model?.name, parsed.metadata?.model, parsed.metadata?.model_name, parsed.meta?.model, parsed.session?.model);
 }
 
-function firstString(...values: any[]): string | null {
+function firstString(...values: unknown[]): string | null {
   const value = values.find(Boolean);
   return value ? String(value) : null;
 }
 
 /**
- * @param {{[key: string]: any}} parsed
+ * @param {OpencodeExport} parsed
  * @returns {number}
  */
-function countToolCalls(parsed: {[key: string]: any}) {
+function countToolCalls(parsed: OpencodeExport) {
   if (!parsed || typeof parsed !== 'object') {return 0;}
   return numeric(parsed.tool_calls) + numeric(parsed.toolCalls) + numeric(parsed.usage?.tool_calls)
     + messageToolCalls(parsed.messages) + eventToolCalls(parsed.events) + (Array.isArray(parsed.tool_use_events) ? parsed.tool_use_events.length : 0);
 }
 
-function numeric(value: any): number { return typeof value === 'number' ? value : 0; }
+function numeric(value: unknown): number { return typeof value === 'number' ? value : 0; }
 
-function messageToolCalls(messages: any): number {
+function messageToolCalls(messages: OpencodeMessage[] | undefined): number {
   if (!Array.isArray(messages)) { return 0; }
-  return messages.reduce((count, message) => count + (Array.isArray(message?.parts) ? message.parts.filter((part: any) => part?.type === 'tool').length : 0), 0);
+  return messages.reduce((count, message) => count + (Array.isArray(message?.parts) ? message.parts.filter((part) => part?.type === 'tool').length : 0), 0);
 }
 
-function eventToolCalls(events: any): number {
+function eventToolCalls(events: OpencodeEvent[] | undefined): number {
   if (!Array.isArray(events)) { return 0; }
-  return events.reduce((count, event) => count + Number(['tool_use', 'tool_call', 'function_call'].includes(event?.type)) + (Array.isArray(event?.tool_calls) ? event.tool_calls.length : 0) + (Array.isArray(event?.content_block_start) ? event.content_block_start.filter((block: any) => block?.type === 'tool_use').length : 0), 0);
+  return events.reduce((count, event) => count + Number(['tool_use', 'tool_call', 'function_call'].includes(event?.type ?? '')) + (Array.isArray(event?.tool_calls) ? event.tool_calls.length : 0) + (Array.isArray(event?.content_block_start) ? event.content_block_start.filter((block) => block?.type === 'tool_use').length : 0), 0);
 }
 
 /**
@@ -125,14 +139,16 @@ function eventToolCalls(events: any): number {
  *   when the export JSON omits the model field
  * @returns {object|null} Normalized telemetry object or null
  */
+function opencodeModel(parsed: OpencodeExport, fallbackModel?: string) { return extractModelName(parsed) || fallbackModel || MODEL; }
+
 function extractOpencodeTelemetryFromExport(jsonString: string, fallbackModel?: string) {
   if (!jsonString || typeof jsonString !== 'string' || !jsonString.trim()) {
     return null;
   }
 
-  let parsed;
+  let parsed: OpencodeExport | null;
   try {
-    parsed = JSON.parse(jsonString);
+    parsed = JSON.parse(jsonString) as OpencodeExport | null;
   } catch (_) {
     return null;
   }
@@ -162,7 +178,7 @@ function extractOpencodeTelemetryFromExport(jsonString: string, fallbackModel?: 
       return {
         sessionId: extractSessionId(parsed),
         provider: PROVIDER,
-        model: extractModelName(parsed) || fallbackModel || MODEL,
+        model: opencodeModel(parsed, fallbackModel),
         inputTokens: 0,
         outputTokens: 0,
         cachedTokens: 0,
@@ -177,7 +193,7 @@ function extractOpencodeTelemetryFromExport(jsonString: string, fallbackModel?: 
   return {
     sessionId: extractSessionId(parsed),
     provider: PROVIDER,
-    model: extractModelName(parsed) || fallbackModel || MODEL,
+    model: opencodeModel(parsed, fallbackModel),
     inputTokens,
     outputTokens,
     cachedTokens,
@@ -191,7 +207,7 @@ function extractOpencodeTelemetryFromExport(jsonString: string, fallbackModel?: 
  * @param {{exportJson?: string, telemetry?: object}} result
  * @returns {object|null}
  */
-function extractOpencodeTelemetry(result: {exportJson?: string, telemetry?: any}) {
+function extractOpencodeTelemetry(result: {exportJson?: string, telemetry?: ReturnType<typeof extractOpencodeTelemetryFromExport>}) {
   if (result && result.exportJson && typeof result.exportJson === 'string') {
     return extractOpencodeTelemetryFromExport(result.exportJson);
   }

@@ -16,7 +16,7 @@ function value(args: readonly string[], name: string): string | null {
 }
 
 export function createRevokeReviewCommand(
-  useCase: RevokeReviewDecisionUseCase,
+  useCase: Pick<RevokeReviewDecisionUseCase, 'execute'>,
   inferSlug: (_explicit?: string) => string | null,
 ) {
   return async (args: string[], options: { logFn?: (_text: string) => void; errorFn?: (_text: string) => void; exitFn?: (_code?: number) => never } = {}) => {
@@ -30,15 +30,7 @@ export function createRevokeReviewCommand(
     // version, and the use case's compare-and-swap save still refuses a stale
     // revocation. Supplying it keeps the earlier explicit guard. A present flag
     // with no value is a malformed pin and is refused.
-    const versionPresent = args.includes('--expected-version');
-    const rawVersion = value(args, '--expected-version');
-    let expectedVersion: number | undefined;
-    if (versionPresent) {
-      if (rawVersion === null) { throw new Error('--expected-version must be a positive integer'); }
-      const parsed = Number(rawVersion);
-      if (!Number.isSafeInteger(parsed) || parsed < 1) { throw new Error('--expected-version must be a positive integer'); }
-      expectedVersion = parsed;
-    }
+    const expectedVersion = revocationExpectedVersion(args);
     if (!slug || !rawRound) {
       error(fmt.status('FAIL', REVOKE_REVIEW_HELP.trim())); exit(1); return;
     }
@@ -50,7 +42,24 @@ export function createRevokeReviewCommand(
       expectedVersion,
       occurredAt: new Date().toISOString(),
     });
-    if (result.status !== 'completed') { error(fmt.status('FAIL', result.error?.message ?? 'Revocation refused')); exit(1); return; }
-    log(fmt.status('PASS', `Review decision ${rawRound} revoked for ${slug}. ${result.value!.providerDiagnostic ?? 'Matching provider approval dismissed.'}`));
+    reportRevocation(result, rawRound, slug, log, error, exit);
   };
+}
+
+function revocationExpectedVersion(args: readonly string[]): number | undefined {
+  const versionPresent = args.includes('--expected-version');
+  const rawVersion = value(args, '--expected-version');
+  let expectedVersion: number | undefined;
+  if (versionPresent) {
+    if (rawVersion === null) { throw new Error('--expected-version must be a positive integer'); }
+    const parsed = Number(rawVersion);
+    if (!Number.isSafeInteger(parsed) || parsed < 1) { throw new Error('--expected-version must be a positive integer'); }
+    expectedVersion = parsed;
+  }
+  return expectedVersion;
+}
+
+function reportRevocation(result: Awaited<ReturnType<RevokeReviewDecisionUseCase['execute']>>, rawRound: string, slug: string, log: (_text: string) => void, error: (_text: string) => void, exit: (_code?: number) => never): void {
+  if (result.status !== 'completed') { error(fmt.status('FAIL', result.error?.message ?? 'Revocation refused')); exit(1); return; }
+  log(fmt.status('PASS', `Review decision ${rawRound} revoked for ${slug}. ${result.value!.providerDiagnostic ?? 'Matching provider approval dismissed.'}`));
 }

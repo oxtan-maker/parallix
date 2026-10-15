@@ -1,3 +1,6 @@
+import { fixtureMission, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
+import { reviewStateWriterFixture } from '../../helpers/review-state-writer.js';
+import { rebaseWorkflowFixture } from '../../helpers/rebase-workflow-fixture.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setLogger } from '../../../src/application/presentation/cli-format.js';
@@ -39,7 +42,7 @@ function harness(overrides: Partial<RebaseWorkflowPort> = {}): Harness {
   const exitCodes: number[] = [];
   const agentLaunches: Array<{ step: string; options: Record<string, unknown> }> = [];
   const state = { pushes: 0 };
-  const port: RebaseWorkflowPort = {
+  const port: RebaseWorkflowPort = rebaseWorkflowFixture({
     git: (args: string[]) => { gitCalls.push(args); return OK; },
     detectRebaseState: () => ({ inProgress: false, unmergedFiles: [] }),
     getCurrentBranch: () => 'mission/task-2332.12',
@@ -63,30 +66,30 @@ function harness(overrides: Partial<RebaseWorkflowPort> = {}): Harness {
     workflowLauncherStatus: (_agent: string) => ({ supported: true, agent: 'test-agent' }),
     applyAgentFallback: async () => 'test-agent',
 
-    createPr: () => { state.pushes += 1; return { ok: true }; },
+    createPr: () => { state.pushes += 1; return { ok: true as const }; },
     readToken: () => 'token',
     resolveForgejoUser: (user: string | null) => user ?? 'tester',
     fetchReviewBranch: () => OK,
 
-    resolveTaskFile: () => ({ ok: true, taskFile: '/worktree/backlog/tasks/task-2332.12.md', task: {} }),
+    resolveTaskFile: () => ({ ok: true as const, taskFile: '/worktree/backlog/tasks/task-2332.12.md', task: {} }),
     getTaskImplementer: () => 'tester',
     transitionTask: async () => undefined,
 
     resolveReviewIdentity: () => ({ forgejoUser: 'tester' }),
-    readReviewState: () => ({ metadata: {} }),
-    writeReviewState: () => undefined,
-    persistReviewState: async () => undefined,
+    readReviewState: async () => ({ metadata: {} }),
+    writeReviewState: reviewStateWriterFixture(() => {}),
+    persistReviewState: async () => ({ outcome: 'committed' }),
 
     isForgejoReviewEnabled: () => false,
 
     formatVerificationCommand: () => 'npm test',
 
-    resolveConflictsForMission: () => ({ ok: true, conflictFiles: [], missionSpecificFiles: [], sharedFiles: [] }),
+    resolveConflictsForMission: () => ({ ok: true as const, conflictFiles: [], missionSpecificFiles: [], sharedFiles: [] }),
 
     missionServices: null,
     exit: (code: number) => { exitCodes.push(code); },
     ...overrides,
-  };
+  });
   return {
     port, lines, gitCalls, exitCodes, agentLaunches,
     get pushes() { return state.pushes; },
@@ -120,12 +123,12 @@ test('rebase use case auto-resolves mission-specific conflicts with --theirs', a
       gitCalls.push(args);
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${conflicted}\n` };
+        return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${conflicted}\n` };
       }
       return OK;
     },
     resolveConflictsForMission: () => ({
-      ok: true,
+      ok: true as const,
       conflictFiles: [conflicted],
       missionSpecificFiles: [conflicted],
       sharedFiles: [],
@@ -144,12 +147,12 @@ test('rebase use case launches an agent for shared-file conflicts', async () => 
     git: (args: string[]) => {
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
+        return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
       }
       return OK;
     },
     resolveConflictsForMission: () => ({
-      ok: true,
+      ok: true as const,
       conflictFiles: [shared],
       missionSpecificFiles: [],
       sharedFiles: [shared],
@@ -169,12 +172,12 @@ function sharedConflictHarness(shared: string, overrides: Partial<RebaseWorkflow
     git: (args: string[]) => {
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
+        return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
       }
       return OK;
     },
     resolveConflictsForMission: () => ({
-      ok: true,
+      ok: true as const,
       conflictFiles: [shared],
       missionSpecificFiles: [],
       sharedFiles: [shared],
@@ -210,7 +213,7 @@ test('rebase use case keeps the implementer recorded before rebase rewrites task
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
         rebased = true;
-        return { status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
+        return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
       }
       return OK;
     },
@@ -249,7 +252,7 @@ test('rebase use case exits non-zero when the pinned implementer launcher is una
 test('rebase use case exits non-zero when the mission has no recorded implementer', async () => {
   const shared = 'src/adapters/git/git.ts';
   const h = sharedConflictHarness(shared, {
-    resolveTaskFile: () => ({ ok: false }),
+    resolveTaskFile: () => ({ ok: false as const }),
     getTaskImplementer: () => null,
   });
   await run(h);
@@ -277,7 +280,7 @@ test('rebase use case bounces a hook failure through the kernel and completes wh
     git: (args: string[]) => {
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { status: 1, stdout: '', stderr: 'error: pre-commit hook failed' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'error: pre-commit hook failed' };
       }
       if (tail[0] === 'rebase' && tail[1] === '--continue') {
         continues += 1;
@@ -285,7 +288,7 @@ test('rebase use case bounces a hook failure through the kernel and completes wh
       }
       return OK;
     },
-    missionServices: async () => ({ store: { id: 'store' } }),
+    missionServices: async () => ({ store: inMemoryTransitionStore(fixtureMission('task-2332.12')) }),
   });
   await run(h);
   assert.equal(h.agentLaunches.length, 1, 'exactly one bounce launch');
@@ -304,15 +307,15 @@ test('rebase use case strands a hook failure after two failed rebase --continue 
     git: (args: string[]) => {
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { status: 1, stdout: '', stderr: 'error: pre-commit hook failed: original diagnostic' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'error: pre-commit hook failed: original diagnostic' };
       }
       if (tail[0] === 'rebase' && tail[1] === '--continue') {
         continues += 1;
-        return { status: 1, stdout: '', stderr: laterDiagnostic };
+        return { signal: null,  status: 1, stdout: '', stderr: laterDiagnostic };
       }
       return OK;
     },
-    missionServices: async () => ({ store: { id: 'store' } }),
+    missionServices: async () => ({ store: inMemoryTransitionStore(fixtureMission('task-2332.12')) }),
   });
   await run(h);
   assert.equal(h.agentLaunches.length, 2, 'the per-occurrence budget is exactly two attempts');
@@ -332,14 +335,14 @@ test('rebase use case bounces a hook failure with no recorded implementer via a 
   // bounces; the probe must not throw with no agent argument.
   let continues = 0;
   const h = harness({
-    resolveTaskFile: () => ({ ok: false }),
+    resolveTaskFile: () => ({ ok: false as const }),
     getTaskImplementer: () => null,
     selectAgent: () => 'claude',
     workflowLauncherStatus: (agent: string) => ({ supported: agent === 'claude', agent }),
     git: (args: string[]) => {
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { status: 1, stdout: '', stderr: 'error: pre-commit hook failed' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'error: pre-commit hook failed' };
       }
       if (tail[0] === 'rebase' && tail[1] === '--continue') {
         continues += 1;
@@ -347,7 +350,7 @@ test('rebase use case bounces a hook failure with no recorded implementer via a 
       }
       return OK;
     },
-    missionServices: async () => ({ store: {} }),
+    missionServices: async () => ({ store: inMemoryTransitionStore(fixtureMission('task-2332.12')) }),
   });
   await run(h);
   assert.equal(h.agentLaunches.length, 1, 'one bounce for the no-recorded-implementer hook failure');
@@ -361,18 +364,18 @@ test('rebase use case strands a hook failure when no implementer is recorded and
   // F1: an unsupported selection strands without launching and without throwing
   // on the no-arg probe that the old code used.
   const h = harness({
-    resolveTaskFile: () => ({ ok: false }),
+    resolveTaskFile: () => ({ ok: false as const }),
     getTaskImplementer: () => null,
     selectAgent: () => 'claude',
     workflowLauncherStatus: () => ({ supported: false, agent: null }),
     git: (args: string[]) => {
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { status: 1, stdout: '', stderr: 'error: pre-commit hook failed' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'error: pre-commit hook failed' };
       }
       return OK;
     },
-    missionServices: async () => ({ store: {} }),
+    missionServices: async () => ({ store: inMemoryTransitionStore(fixtureMission('task-2332.12')) }),
   });
   await run(h);
   assert.equal(h.agentLaunches.length, 0, 'no launch when the selected launcher is unsupported');
@@ -389,7 +392,7 @@ test('rebase use case bounces a hook failure raised by rebase --continue and res
     git: (args: string[]) => {
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${conflicted}\n` };
+        return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${conflicted}\n` };
       }
       if (tail[0] === 'rebase' && tail[1] === '--continue') {
         continues += 1;
@@ -401,9 +404,9 @@ test('rebase use case bounces a hook failure raised by rebase --continue and res
       return OK;
     },
     resolveConflictsForMission: () => ({
-      ok: true, conflictFiles: [conflicted], missionSpecificFiles: [conflicted], sharedFiles: [],
+      ok: true as const, conflictFiles: [conflicted], missionSpecificFiles: [conflicted], sharedFiles: [],
     }),
-    missionServices: async () => ({ store: {} }),
+    missionServices: async () => ({ store: inMemoryTransitionStore(fixtureMission('task-2332.12')) }),
   });
   await run(h);
   assert.equal(h.agentLaunches.length, 1, 'one bounce for the --continue hook failure');
@@ -421,15 +424,15 @@ test('rebase use case starts a second hook occurrence with a full budget of two'
       git: (args: string[]) => {
         const tail = subcommand(args);
         if (tail[0] === 'rebase' && tail[1] === 'main') {
-          return { status: 1, stdout: '', stderr: 'error: pre-commit hook failed' };
+          return { signal: null,  status: 1, stdout: '', stderr: 'error: pre-commit hook failed' };
         }
         if (tail[0] === 'rebase' && tail[1] === '--continue') {
           continues += 1;
-          return { status: 1, stdout: '', stderr: 'pre-commit hook failed again' };
+          return { signal: null,  status: 1, stdout: '', stderr: 'pre-commit hook failed again' };
         }
         return OK;
       },
-      missionServices: async () => ({ store: {} }),
+      missionServices: async () => ({ store: inMemoryTransitionStore(fixtureMission('task-2332.12')) }),
     });
     await run(h);
     return { launches: h.agentLaunches.length, continues };
@@ -464,7 +467,7 @@ test('rebase CLI interface delegates the unchanged argv to its application use c
   const seen: string[][] = [];
   const h = harness();
   const command = createRebaseCommandForUseCase(
-    new RebaseCommandUseCase({ ...h.port, inferSlug: (slug?: string) => { seen.push([slug ?? '']); return slug ?? 'task-2332.12'; } }),
+    new RebaseCommandUseCase(rebaseWorkflowFixture({ ...h.port, inferSlug: (slug?: string) => { seen.push([slug ?? '']); return slug ?? 'task-2332.12'; } })),
   );
   const previous = setLogger({ log: () => {} });
   try {

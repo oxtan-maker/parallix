@@ -1,4 +1,9 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import { missionId } from '../../../../src/domain/mission.js';
+import { repositoryId } from '../../../../src/domain/repository.js';
+import { fixtureMission } from '../../../fixtures/mission-builders.js';
+import { missionVersion, type MissionTransitionStore } from '../../../../src/application/domain-ports.js';
+import type { ExecuteMissionRuntime } from '../../../../src/adapters/mission/execute-mission-adapters.js';
+import type { ExecuteMissionRequest } from '../../../../src/application/execute-mission-service.js';
 // Mission execute adapter contract: agent execution adapters and characterization of the execute
 // launch path through the real adapters.
 //
@@ -16,19 +21,18 @@ import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 
 // no task ID in the legacy file (was test/execute-mission-adapters.test.ts)
 describe('Execute Mission adapters', () => {
-  // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
   // Adapter-level contract for the execute mechanism set. The workflow ordering
   // itself is covered by the Execute Mission characterization section of this suite, which
   // drives these same adapters end to end.
-  function runtimeStub(overrides: Record<string, unknown> = {}) {
+  function runtimeStub(overrides: Partial<ExecuteMissionRuntime> = {}): ExecuteMissionRuntime {
     return {
       preflight() { return { pass: true }; },
       resolveWorktree() { return '/worktree'; },
-      resolveTaskFile() { return { ok: true, taskFile: '/worktree/task.md' }; },
+      resolveTaskFile() { return { ok: true as const, taskFile: '/worktree/task.md', matches: ['/worktree/task.md'] }; },
       buildCheckpointContext() { return 'CP-5'; },
       async resolveExecutionContext() { return null; },
-      readAgentConfig() { return { steps: ['active'] }; },
+      readAgentConfig() { return { steps: { active: { eligible: ['codex'], selection: 'first' } } }; },
       buildExecutePrompt() { return 'execute prompt'; },
       async selectLaunchAndRecord() { return { agent: 'codex', result: { status: 0 }, rebaseDeferred: false }; },
       enforceExecuteCommitSafety() {},
@@ -36,8 +40,8 @@ describe('Execute Mission adapters', () => {
       recordActiveStats() {},
       resolveAgentModel() { return 'gpt-5'; },
       resolveStageTelemetry() { return null; },
-      async validateCheckpointsBeforeHandoff() { return { ok: true }; },
-      async performHandoff() { return { ok: true }; },
+      async validateCheckpointsBeforeHandoff() { return { ok: true as const }; },
+      async performHandoff() { return { ok: true as const }; },
       async repairHandoff() { return { repaired: false }; },
       // The review loop itself is not exercised here: a held controller fence
       // makes the application loop decline immediately.
@@ -46,10 +50,10 @@ describe('Execute Mission adapters', () => {
     };
   }
 
-  const transitionStore = {
-    async load() { return { kind: 'missing' }; },
-    async save() { return 1; },
-    async saveWithTransition() { return 1; },
+  const transitionStore: MissionTransitionStore = {
+    async load() { return { kind: 'missing' as const }; },
+    async save() { return missionVersion(1); },
+    async saveWithTransition() { return missionVersion(1); },
   };
 
   test('execute mission ports use the injected mission transition store identity', () => {
@@ -59,7 +63,8 @@ describe('Execute Mission adapters', () => {
 
   test('execute mission ports refuse construction without a mission transition store', () => {
     assert.throws(
-      () => createExecuteMissionPorts('/repo', {} as never, runtimeStub()),
+      // @ts-expect-error Intentional invalid composition: execution requires a transition store.
+      () => createExecuteMissionPorts('/repo', {}, runtimeStub()),
       { message: 'composition must supply a mission transition store' },
     );
   });
@@ -75,54 +80,61 @@ describe('Execute Mission adapters', () => {
   });
 
   test('workspace adapter runs the execute preflight quiet (routine PASS diagnostics suppressed)', async () => {
-    let capturedOpts;
+    let capturedOpts: { value: Parameters<ExecuteMissionRuntime['preflight']>[1] | undefined } = { value: undefined };
     const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
       // missionStart([slug], { returnResult, quiet }) — options are the 2nd arg.
-      preflight() { capturedOpts = arguments[1]; return { pass: true }; },
+      preflight(_args, options) { capturedOpts.value = options; return { pass: true }; },
     }));
     assert.equal(await ports.workspace.preflight('task-1'), true);
-    assert.equal(capturedOpts.returnResult, true);
-    assert.equal(capturedOpts.quiet, true, 'active preflight must be quiet so the operator story leads with mission/implementer');
+    assert.ok(capturedOpts.value != null);
+    assert.equal(capturedOpts.value.returnResult, true);
+    assert.ok(capturedOpts.value != null);
+    assert.equal(capturedOpts.value.quiet, true, 'active preflight must be quiet so the operator story leads with mission/implementer');
   });
 
   test('workspace preflight delegates worktree resolution to the preflight mechanism', async () => {
-    let capturedOpts;
+    let capturedOpts: { value: Parameters<ExecuteMissionRuntime['preflight']>[1] | undefined } = { value: undefined };
     const ports = createExecuteMissionPorts('/lead-worktree', { missionTransitionStore: transitionStore }, runtimeStub({
-      preflight() { capturedOpts = arguments[1]; return { pass: true }; },
+      preflight(_args, options) { capturedOpts.value = options; return { pass: true }; },
     }));
     await ports.workspace.preflight('task-1');
-    assert.equal(capturedOpts.returnResult, true);
-    assert.equal(capturedOpts.quiet, true, 'active preflight must be quiet so the operator story leads with mission/implementer');
+    assert.ok(capturedOpts.value != null);
+    assert.equal(capturedOpts.value.returnResult, true);
+    assert.ok(capturedOpts.value != null);
+    assert.equal(capturedOpts.value.quiet, true, 'active preflight must be quiet so the operator story leads with mission/implementer');
     // The mission worktree the preflight validates against is resolved inside
     // the preflight mechanism (startupPreflight) from the slug, so the adapter
     // stays a single quiet port call with no worktree-scoped callbacks.
-    assert.equal(typeof capturedOpts.cwdFn, 'undefined', 'worktree resolution lives in the preflight mechanism');
-    assert.equal(typeof capturedOpts.getCurrentBranchFn, 'undefined');
-    assert.equal(typeof capturedOpts.findMissionDirFn, 'undefined');
+    assert.ok(capturedOpts.value != null);
+    assert.equal(typeof capturedOpts.value.cwdFn, 'undefined', 'worktree resolution lives in the preflight mechanism');
+    assert.ok(capturedOpts.value != null);
+    assert.equal(typeof capturedOpts.value.getCurrentBranchFn, 'undefined');
+    assert.ok(capturedOpts.value != null);
+    assert.equal(typeof capturedOpts.value.findMissionDirFn, 'undefined');
   });
 
   test('workspace adapter maps a failed preflight and an unresolved worktree to falsy verdicts', async () => {
     const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
       preflight() { return { pass: false }; },
-      resolveWorktree() { return undefined; },
+      resolveWorktree() { return null; },
     }));
     assert.equal(await ports.workspace.preflight('task-1'), false);
     assert.equal(await ports.workspace.resolveWorktree('task-1'), null);
   });
 
   test('agent execution adapter overlays the operator blocklist onto the file agent config', async () => {
-    const blocklist = { codex: { until: '2026-08-01T00:00:00Z' } };
+    const blocklist = { codex: { until: '2026-08-01T00:00:00Z' } } satisfies { codex: { until: string; }; };
     const ports = createExecuteMissionPorts(
       '/repo',
       { missionTransitionStore: transitionStore, operatorBlocklist: blocklist },
       runtimeStub({
-        async selectLaunchAndRecord(opts: { agentConfig: Record<string, unknown> }) {
+        async selectLaunchAndRecord(opts) {
           return { agent: 'codex', result: { status: 0, agentConfig: opts.agentConfig }, rebaseDeferred: false };
         },
       }),
     );
     const plan = await ports.agentExecution.prepare({ slug: 'task-1', worktree: '/worktree' });
-    assert.deepEqual(plan.agentConfig, { steps: ['active'], blocklist });
+    assert.deepEqual(plan.agentConfig, { steps: { active: { eligible: ['codex'], selection: 'first' } }, blocklist });
     assert.equal(plan.prompt, 'execute prompt');
   });
 
@@ -173,7 +185,7 @@ describe('Execute Mission adapters', () => {
   test('agent execution adapter leaves the file agent config untouched without a blocklist overlay', async () => {
     const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub());
     const plan = await ports.agentExecution.prepare({ slug: 'task-1', worktree: '/worktree' });
-    assert.deepEqual(plan.agentConfig, { steps: ['active'] });
+    assert.deepEqual(plan.agentConfig, { steps: { active: { eligible: ['codex'], selection: 'first' } } });
   });
 
   test('agent execution adapter selects before launch without probing a launcher', async () => {
@@ -192,7 +204,7 @@ describe('Execute Mission adapters', () => {
 
   test('agent execution adapter reports launcher errors and exit status as raw facts', async () => {
     const errored = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
-      async selectLaunchAndRecord() { return { agent: 'codex', result: { error: new Error('launcher exploded') }, rebaseDeferred: false }; },
+      async selectLaunchAndRecord() { return { agent: 'codex', result: { status: null, error: new Error('launcher exploded') }, rebaseDeferred: false }; },
     }));
     const failedLaunch = await errored.agentExecution.launch({
       slug: 'task-1', worktree: '/worktree', plan: { prompt: 'p', agentConfig: {} },
@@ -216,11 +228,11 @@ describe('Execute Mission adapters', () => {
   });
 
   test('telemetry adapter derives the stage window and duration from the launch detail', async () => {
-    const recorded: Array<Record<string, unknown>> = [];
-    const windows: Array<Record<string, unknown>> = [];
+    const recorded: Parameters<ExecuteMissionRuntime['recordActiveStats']>[0][] = [];
+    const windows: Parameters<ExecuteMissionRuntime['resolveStageTelemetry']>[0][] = [];
     const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
-      recordActiveStats(record: Record<string, unknown>) { recorded.push(record); },
-      resolveStageTelemetry(options: Record<string, unknown>) { windows.push(options); return null; },
+      recordActiveStats(record) { recorded.push(record); },
+      resolveStageTelemetry(options) { windows.push(options); return null; },
     }));
     await ports.telemetry.recordLaunchTelemetry({
       slug: 'task-1',
@@ -241,7 +253,7 @@ describe('Execute Mission adapters', () => {
   test('typed handoff adapter forwards the resolved task file and returns the pipeline verdict', async () => {
     const seen: Array<unknown[]> = [];
     const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
-      async performHandoff(...args: unknown[]) { seen.push(args); return { ok: false }; },
+      async performHandoff(...args: unknown[]) { seen.push(args); return { ok: false as const }; },
     }));
     const onAgentLaunched = async () => {};
     const onAutonomousStop = async () => {};
@@ -255,7 +267,6 @@ describe('Execute Mission adapters', () => {
 
 // no task ID in the legacy file (was test/execute-mission-characterization.test.ts)
 describe('Execute Mission characterization', () => {
-  // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
   // Characterization suite for the execute (`px active`) workflow.
   //
@@ -266,9 +277,9 @@ describe('Execute Mission characterization', () => {
   // and the contract of that move is that only this factory changes while every
   // expectation below stays byte-identical.
   function buildExecuteWorkflow(
-    runtime: Record<string, unknown>,
-    missionTransitionStore: unknown,
-    progress?: (_event: unknown) => void,
+    runtime: ExecuteMissionRuntime,
+    missionTransitionStore: MissionTransitionStore,
+    progress?: ConstructorParameters<typeof ExecuteMissionService>[1],
   ) {
     return new ExecuteMissionService(
       createExecuteMissionPorts('/repo', { missionTransitionStore }, runtime),
@@ -280,17 +291,17 @@ describe('Execute Mission characterization', () => {
   // Fixtures
   // ---------------------------------------------------------------------------
 
-  function executeFixture(overrides: Record<string, unknown> = {}) {
+  function executeFixture(overrides: Partial<ExecuteMissionRuntime> = {}) {
     const calls: string[] = [];
-    const transitionStore = {
+    const transitionStore: MissionTransitionStore = {
       async load() {
         calls.push('load');
         return {
-          kind: 'found',
-          version: 3,
-          mission: {
-            id: 'task-1', repositoryId: 'repo', title: 'Fixture', labels: [],
-            assignee: null, checkpoints: [{ missionId: 'task-1', name: 'CP-1', firstLine: 'Do the work', goalCheck: [], nextActionText: '' }], review: null, netEngineeringLines: null,
+          kind: 'found' as const,
+          version: missionVersion(3),
+          mission: fixtureMission('task-1', {
+            id: missionId('task-1'), repositoryId: repositoryId('repo'), title: 'Fixture', labels: [],
+            assignee: null, checkpoints: [{ missionId: missionId('task-1'), name: 'CP-1', firstLine: 'Do the work', goalCheck: [], nextActionText: '' }], review: null, netEngineeringLines: null,
             // Activation refuses an incomplete contract, so a refined fixture
             // carries the goal, scope and gate draft settles.
             brief: { goal: 'Fixture goal', why: 'Fixture why', scope: 'Fixture scope', outOfScope: [] },
@@ -298,16 +309,16 @@ describe('Execute Mission characterization', () => {
             successCriteria: ['The mission is done'],
             predictedNelBucket: 'Small',
             status: 'refined', closedAt: null,
-          },
+          }),
         };
       },
-      async save(_mission: unknown, expectedVersion: number) { calls.push('synchronize'); return expectedVersion + 1; },
-      async saveWithTransition(_mission: unknown, expectedVersion: number) { calls.push('synchronize'); return expectedVersion + 1; },
+      async save(_mission, expectedVersion) { calls.push('synchronize'); return missionVersion((expectedVersion ?? 0) + 1); },
+      async saveWithTransition(_mission, expectedVersion) { calls.push('synchronize'); return missionVersion((expectedVersion ?? 0) + 1); },
     };
-    const runtime = {
+    const runtime: ExecuteMissionRuntime = {
       preflight() { calls.push('preflight'); return { pass: true }; },
       resolveWorktree() { calls.push('worktree'); return '/worktree'; },
-      resolveTaskFile() { calls.push('task'); return { ok: true, taskFile: '/worktree/backlog/tasks/task-1.md' }; },
+      resolveTaskFile() { calls.push('task'); return { ok: true as const, taskFile: '/worktree/backlog/tasks/task-1.md', matches: ['/worktree/backlog/tasks/task-1.md'] }; },
       async resolveExecutionContext() { return null; },
       buildCheckpointContext() { calls.push('checkpoint'); return 'CP-5'; },
       readAgentConfig() { calls.push('config'); return {}; },
@@ -325,10 +336,10 @@ describe('Execute Mission characterization', () => {
       recordActiveStats(record: { implementer: string }) { calls.push(`stats:${record.implementer}`); },
       resolveAgentModel() { calls.push('model'); return 'gpt-5'; },
       resolveStageTelemetry() { calls.push('telemetry'); return null; },
-      async validateCheckpointsBeforeHandoff() { return { ok: true }; },
-      async performHandoff(slug: string, options: { worktree: string; forgejoUser: string }) {
+      async validateCheckpointsBeforeHandoff() { return { ok: true as const }; },
+      async performHandoff(slug: string, options: { worktree: string; forgejoUser?: string }) {
         calls.push(`handoff:${slug}:${options.worktree}:${options.forgejoUser}`);
-        return { ok: true };
+        return { ok: true as const };
       },
       async repairHandoff() { return { repaired: false }; },
       // The review loop itself is not exercised here: a held controller fence
@@ -339,7 +350,7 @@ describe('Execute Mission characterization', () => {
     return { runtime, calls, transitionStore };
   }
 
-  function executeRequest(overrides: Record<string, unknown> = {}) {
+  function executeRequest(overrides: Partial<ExecuteMissionRequest> = {}): ExecuteMissionRequest {
     return {
       operationId: 'active:task-1',
       slug: 'task-1',
@@ -357,13 +368,13 @@ describe('Execute Mission characterization', () => {
     const { runtime, calls, transitionStore } = executeFixture();
     const events: Array<{ sequence: number; phase: string; agent?: string }> = [];
     const outcome = await buildExecuteWorkflow(runtime, transitionStore, (event) =>
-      events.push(event as { sequence: number; phase: string })).execute(executeRequest());
+      events.push(event)).execute(executeRequest());
 
     assert.equal(outcome.status, 'completed');
     assert.deepEqual(outcome.value, { agent: 'codex' });
     assert.deepEqual(calls, [
-      'preflight', 'worktree', 'task', 'checkpoint', 'config', 'prompt', 'load', 'synchronize',
-      'launch-record:codex', 'safety',
+      'preflight', 'worktree', 'task', 'load', 'checkpoint', 'config', 'prompt', 'load', 'synchronize',
+      'launch-record:codex', 'load', 'safety',
       'model', 'telemetry', 'stats:codex',
       'handoff:task-1:/worktree:codex',
     ]);
@@ -375,7 +386,7 @@ describe('Execute Mission characterization', () => {
 
   // TASK-2723: the explicit reviewer reaches the real review-loop selection.
   async function reviewWithReviewer(reviewer: string | undefined, routing: Record<string, unknown> = {}) {
-    const fake = fakeReviewLoopPorts({ slug: 'task-1', routing: routing as never });
+    const fake = fakeReviewLoopPorts({ slug: 'task-1', routing: routing });
     const { runtime, transitionStore } = executeFixture({ reviewLoopMechanisms: () => fake.ports });
     const outcome = await buildExecuteWorkflow(runtime, transitionStore).execute(executeRequest({ agent: 'claude', reviewer }));
     return { fake, outcome };
@@ -446,12 +457,13 @@ describe('Execute Mission characterization', () => {
   test('execute workflow: lifecycle synchronization fails closed when the Mission authority refuses activation', async () => {
     const { runtime, calls } = executeFixture();
     const missingStore = {
-      async load() { calls.push('load'); return { kind: 'missing' }; },
-      async save() { calls.push('synchronize'); return 1; },
-      async saveWithTransition() { calls.push('synchronize'); return 1; },
+      async load() { calls.push('load'); return { kind: 'missing' as const }; },
+      async save() { calls.push('synchronize'); return missionVersion(1); },
+      async saveWithTransition() { calls.push('synchronize'); return missionVersion(1); },
     };
     const outcome = await buildExecuteWorkflow(runtime, missingStore).execute(executeRequest());
     assert.equal(outcome.status, 'failed');
+    assert.ok(outcome.error != null);
     assert.equal(outcome.error.kind, 'execution');
     assert.match(outcome.error.message ?? '', /^legacy task lifecycle synchronization failed: /);
     assert.equal(calls.includes('synchronize'), false);
@@ -479,12 +491,13 @@ describe('Execute Mission characterization', () => {
   test('execute workflow: a handoff relaunch retry that recovers still completes the launch', async () => {
     let handoffAttempts = 0;
     const { runtime, calls, transitionStore } = executeFixture({
-      async performHandoff(slug: string, options: { worktree: string; forgejoUser: string }) {
+      async performHandoff(slug: string, options: { worktree: string; forgejoUser?: string }) {
         handoffAttempts++;
         calls.push(`handoff:${slug}:${options.worktree}:${options.forgejoUser}`);
         // The relaunch/retry loop lives inside the handoff mechanism; the
         // workflow observes only its final boolean verdict.
-        return { ok: handoffAttempts >= 1 };
+        assert.ok(handoffAttempts >= 1);
+        return { ok: true as const };
       },
     });
     const outcome = await buildExecuteWorkflow(runtime, transitionStore).execute(executeRequest());
@@ -498,10 +511,11 @@ describe('Execute Mission characterization', () => {
 
   test('execute workflow: handoff-and-review failure surfaces as an execution failure after durable evidence', async () => {
     const { runtime, calls, transitionStore } = executeFixture({
-      async performHandoff() { calls.push('handoff'); return { ok: false, error: 'handoff rejected' }; },
+      async performHandoff() { calls.push('handoff'); return { ok: false as const, error: 'handoff rejected' }; },
     });
     const outcome = await buildExecuteWorkflow(runtime, transitionStore).execute(executeRequest());
     assert.equal(outcome.status, 'failed');
+    assert.ok(outcome.error != null);
     assert.equal(outcome.error.kind, 'execution');
     assert.equal(outcome.error.message, 'handoff and review failed');
     assert.ok(calls.includes('safety'));
@@ -521,10 +535,11 @@ describe('Execute Mission characterization', () => {
     });
     const outcome = await buildExecuteWorkflow(runtime, transitionStore).execute(executeRequest());
     assert.equal(outcome.status, 'failed');
+    assert.ok(outcome.error != null);
     assert.equal(outcome.error.kind, 'execution');
     assert.equal(outcome.error.message, 'Execute agent (codex) exited with status 23.');
     assert.deepEqual(calls, [
-      'preflight', 'worktree', 'task', 'checkpoint', 'config', 'prompt', 'load', 'synchronize', 'launch-record:codex', 'load', 'synchronize',
+      'preflight', 'worktree', 'task', 'load', 'checkpoint', 'config', 'prompt', 'load', 'synchronize', 'launch-record:codex', 'load', 'load', 'synchronize',
     ]);
   });
 
@@ -532,11 +547,12 @@ describe('Execute Mission characterization', () => {
     const { runtime, calls, transitionStore } = executeFixture({
       async selectLaunchAndRecord() {
         calls.push('launch-record:codex');
-        return { agent: 'codex', result: { error: new Error('launcher exploded') }, rebaseDeferred: false };
+        return { agent: 'codex', result: { status: null, error: new Error('launcher exploded') }, rebaseDeferred: false };
       },
     });
     const outcome = await buildExecuteWorkflow(runtime, transitionStore).execute(executeRequest());
     assert.equal(outcome.status, 'failed');
+    assert.ok(outcome.error != null);
     assert.equal(outcome.error.message, 'Could not start execute agent (codex): launcher exploded');
     assert.equal(calls.includes('safety'), false);
   });
@@ -550,6 +566,7 @@ describe('Execute Mission characterization', () => {
     const outcome = await buildExecuteWorkflow(runtime, transitionStore)
       .execute(executeRequest({ cancellation: { requested: true } }));
     assert.equal(outcome.status, 'cancelled');
+    assert.ok(outcome.error != null);
     assert.equal(outcome.error.message, 'cancelled before launch');
     assert.deepEqual(calls, []);
   });
@@ -569,6 +586,7 @@ describe('Execute Mission characterization', () => {
     const outcome = await buildExecuteWorkflow(runtime, transitionStore)
       .execute(executeRequest({ cancellation }));
     assert.equal(outcome.status, 'cancelled');
+    assert.ok(outcome.error != null);
     assert.equal(outcome.error.message, 'cancelled after durable launch; re-query task state');
     assert.equal(outcome.durableEvidence.length, 2);
     assert.equal(calls.some((call) => call.startsWith('handoff:')), false);
@@ -584,6 +602,7 @@ describe('Execute Mission characterization', () => {
     });
     const outcome = await buildExecuteWorkflow(runtime, transitionStore).execute(executeRequest());
     assert.equal(outcome.status, 'rejected');
+    assert.ok(outcome.error != null);
     assert.equal(outcome.error.kind, 'validation');
     assert.equal(outcome.error.message, 'execute preflight failed');
     assert.deepEqual(calls, ['preflight']);
@@ -599,6 +618,7 @@ describe('Execute Mission characterization', () => {
     });
     const outcome = await buildExecuteWorkflow(runtime, transitionStore).execute(executeRequest());
     assert.equal(outcome.status, 'rejected');
+    assert.ok(outcome.error != null);
     assert.equal(outcome.error.kind, 'validation');
     assert.equal(outcome.error.message, 'dedicated execute worktree is required');
     assert.deepEqual(calls, ['preflight', 'worktree']);
@@ -613,6 +633,7 @@ describe('Execute Mission characterization', () => {
     const outcome = await buildExecuteWorkflow(runtime, transitionStore)
       .execute(executeRequest({ slug: 'mission-1' }));
     assert.equal(outcome.status, 'rejected');
+    assert.ok(outcome.error != null);
     assert.equal(outcome.error.message, 'slug is not a recognized mission identity');
     assert.deepEqual(calls, []);
   });
@@ -630,6 +651,7 @@ describe('Execute Mission characterization', () => {
     const outcome = await buildExecuteWorkflow(runtime, transitionStore)
       .execute(executeRequest({ capabilities: new Set() }));
     assert.equal(outcome.status, 'rejected');
+    assert.ok(outcome.error != null);
     assert.equal(outcome.error.kind, 'capability');
     assert.deepEqual(calls, []);
   });
@@ -639,6 +661,7 @@ describe('Execute Mission characterization', () => {
     const outcome = await buildExecuteWorkflow(runtime, transitionStore)
       .execute(executeRequest({ operationId: '' }));
     assert.equal(outcome.status, 'rejected');
+    assert.ok(outcome.error != null);
     assert.equal(outcome.error.kind, 'validation');
     assert.deepEqual(calls, []);
   });

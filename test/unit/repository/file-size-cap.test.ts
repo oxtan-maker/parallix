@@ -39,24 +39,14 @@ const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx']);
  * fails while a stale entry remains.
  */
 const EXCEPTIONS: readonly string[] = [
-  'src/adapters/agents/agents.ts',
-  'src/adapters/cli/commands/draft-stats.ts',
   'src/adapters/config/product-config.ts',
   'src/adapters/forgejo/forgejo-git.ts',
   'src/adapters/forgejo/forgejo-pr.ts',
-  'src/adapters/review/review-events.ts',
-  'src/adapters/review/review-state.ts',
-  'src/adapters/sqlite/database-adapter.ts',
-  'src/adapters/sqlite/importer.ts',
   'src/adapters/sqlite/mission-serialization.ts',
-  'src/adapters/sqlite/mission-store.ts',
-  'src/application/projections/metrics-read-adapter.ts',
   'src/application/projections/metrics.ts',
   'src/application/rebase-workflow.ts',
   'src/application/recovery-supervisor.ts',
-  'src/composition/create-cli.ts',
   'src/domain/review.ts',
-  'src/interfaces/tui/shell.tsx',
 ];
 
 const REMEDIATION_GUIDANCE = `

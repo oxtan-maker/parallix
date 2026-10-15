@@ -184,7 +184,7 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
         ttlMs: CURRENT_WORK_TTL_MS,
         isProcessAlive: this.isProcessAlive,
       })
-      : new Map();
+      : new Map<Parameters<ReturnType<typeof reconcileCurrentWork>['get']>[0], NonNullable<ReturnType<ReturnType<typeof reconcileCurrentWork>['get']>>>();
     const markers = this.sessionMarkers ? await this.sessionMarkers.findAll() : [];
     const byMissionRole = new Map(markers.map((marker) => [`${marker.missionId}:${marker.role}`, marker]));
     return Promise.all(running.map(async (session) => {

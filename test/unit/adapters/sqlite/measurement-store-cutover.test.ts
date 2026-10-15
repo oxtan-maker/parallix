@@ -38,7 +38,7 @@ function disposeMeasureFixture(dir: string, ...stores: Array<SqliteMeasurementSt
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
-function measurement(overrides: Record<string, unknown> = {}) {
+function measurement(overrides: Partial<Parameters<SqliteMeasurementStore['upsertAll']>[0][number]> = {}) {
   return {
     repo: 'parallix',
     mission: 'task-9001',
@@ -175,11 +175,13 @@ test('upsertAll commits the whole batch or nothing, never a partial import', () 
   let store: SqliteMeasurementStore | undefined;
   try {
     store = new SqliteMeasurementStore(fixture.dbPath);
+    const activeStore = store;
     assert.throws(
-      () => store.upsertAll([
+      () => activeStore.upsertAll([
         measurement({ mission: 'task-good' }),
         // `repo` is NOT NULL in the schema — this record cannot be bound.
-        measurement({ mission: 'task-bad', repo: null as unknown as string }),
+        // @ts-expect-error Intentional null repository exercises the SQLite NOT NULL contract.
+        measurement({ mission: 'task-bad', repo: null }),
       ]),
       MeasurementStoreUnavailableError,
     );

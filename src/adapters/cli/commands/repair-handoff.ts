@@ -1,3 +1,4 @@
+import type { GitReader } from '../../git/worktree.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 import { git, getCurrentBranch } from '../../git/git.js';
 import rebase from './rebase.js';
@@ -44,7 +45,7 @@ function conflictedFiles(status: string) {
     .filter(({ xy }) => ['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'].includes(xy));
 }
 
-function commitDirtyFiles(rootDir: string, slug: string, gitFn: Function, log: Function, error: Function) {
+function commitDirtyFiles(rootDir: string, slug: string, gitFn: GitReader, log: (message: string) => void, error: (message: string) => void) {
   const status = gitFn(['-C', rootDir, 'status', '--porcelain']);
   if (status.status !== 0 || !status.stdout) { return { repaired: false, blocker: null }; }
   const conflicts = conflictedFiles(status.stdout);
@@ -80,8 +81,8 @@ function commitDirtyFiles(rootDir: string, slug: string, gitFn: Function, log: F
  * @param {object} [options]
  * @returns {Promise<{repaired: boolean, blocker: string|null}>} Result and optional blocker reason
   */
-async function repairHandoff(slug: string, worktree: string, errorMsg: string, options: { configuration?: ParallixConfiguration, gitFn?: Function, rebaseFn?: Function, log?: Function, error?: Function } = {}) {
-  /** @type {{gitFn?: Function, rebaseFn?: Function, log?: Function, error?: Function}} */
+async function repairHandoff(slug: string, worktree: string, errorMsg: string, options: { configuration?: ParallixConfiguration, gitFn?: GitReader, rebaseFn?: typeof import('./rebase.js').rebase, log?: (message: string) => void, error?: (message: string) => void } = {}) {
+  /** @type {{gitFn?: GitReader, rebaseFn?: typeof import('./rebase.js').rebase, log?: (message: string) => void, error?: (message: string) => void}} */
   const opts = options;
   const {
     gitFn = git,
@@ -118,14 +119,21 @@ async function repairHandoff(slug: string, worktree: string, errorMsg: string, o
   }
 
   // 2. Auto-rebase if branch is behind
-  if (isBehind) {
+  if (isBehind) { return rebaseHandoffBranch(slug, rootDir, gitFn, rebaseFn, opts, log, error); }
+
+  return { repaired, blocker };
+}
+
+async function rebaseHandoffBranch(slug: string, rootDir: string, gitFn: GitReader, rebaseFn: typeof import('./rebase.js').rebase, opts: NonNullable<Parameters<typeof repairHandoff>[3]>, log: (message: string) => void, error: (message: string) => void) {
+  let repaired = false;
+  let blocker: string | null = null;
     log('Branch appears behind primary branch. Calling rebase...');
     let rebaseSuccess = false;
     let rebaseError: string | null = null;
     try {
       await rebaseFn([slug], {
         configuration: opts.configuration,
-        gitFn: (args: string[], opts: { cwd?: string }) => gitFn(args, { ...opts, cwd: rootDir }),
+        gitFn: (args: string[], opts: import('../../git/git.js').GitOptions = {}) => gitFn(args, { ...opts, cwd: rootDir }),
         getCurrentBranchFn: () => getCurrentBranch(rootDir),
         exitFn: (code: number) => {
           if (code === 0) {
@@ -147,16 +155,11 @@ async function repairHandoff(slug: string, worktree: string, errorMsg: string, o
     } else {
       repaired = true;
     }
-  }
 
   return { repaired, blocker };
 }
 
-(repairHandoff as any).isRelaunchableError = isRelaunchableError;
-(repairHandoff as any).classifyError = classifyError;
-(repairHandoff as any).getDispatchAction = getDispatchAction;
-(repairHandoff as any).FailureClass = FailureClass;
-(repairHandoff as any).DispatchAction = DispatchAction;
+const repairHandoffWithHelpers = Object.assign(repairHandoff, { isRelaunchableError, classifyError, getDispatchAction, FailureClass, DispatchAction });
 
-export default repairHandoff;
+export default repairHandoffWithHelpers;
 export { repairHandoff, isRelaunchableError };

@@ -1,7 +1,7 @@
 import { processStartIdentity } from '../process/process-liveness.js';
+import { resolveCanonicalRepositoryId } from '../git/repository-identity.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import * as fmt from '../../application/presentation/cli-format.js';
@@ -10,7 +10,6 @@ import type { RunSource } from '../../application/run-history-types.js';
 import { agentRunId, agentRunIdentity } from '../../domain/agent-run.js';
 import type { AgentRunIdentity } from '../../domain/agent-run.js';
 import { loadAdapterConfig } from '../config/product-config.js';
-import { resolveCanonicalRepositoryId } from '../git/repository-identity.js';
 import { missionRepositoryKey } from '../filesystem/mission-repository-key.js';
 import { claudeProjectDir, codexHomeRoot, qwenHomeRoot } from '../config/state-homes.js';
 import { terminalHostConfig } from '../config/terminal-host-config.js';
@@ -19,7 +18,7 @@ import { openRunCapture } from '../filesystem/run-history-store.js';
 import type { RunCapture } from '../filesystem/run-history-store.js';
 import type { OutputCapture, TerminalHost } from '../process/spawn-tee.js';
 import { prepareTmuxLaunch, probeTmux, reconcileOrphanSessions, missionSocketPath, tmuxSessionName } from '../process/tmux-host.js';
-import type { TmuxProbe } from '../process/tmux-host.js';
+import type { TmuxProbe, SpawnSyncFn } from '../process/tmux-host.js';
 import { CLAUDE_STREAM_PRESENTER_FLAG } from './claude-stream-view.js';
 import { cliInvocation, type CliInvocation } from '../process/cli-invocation.js';
 
@@ -51,7 +50,7 @@ export interface RunSessionDeps {
   readonly repositoryKey?: (_worktree: string) => string;
   readonly configuration?: ParallixConfiguration;
   /** tmux command seam; unit tests pass a double so they never run tmux. */
-  readonly spawnSyncFn?: typeof spawnSync;
+  readonly spawnSyncFn?: SpawnSyncFn;
   /** This CLI's re-entry point, used to run the hosted stream presenter; defaults to the running entry. */
   readonly cli?: CliInvocation;
 }
@@ -135,30 +134,39 @@ export function openRunSession(input: RunSessionInput, deps: RunSessionDeps = {}
   try {
     identity = agentRunIdentity({
       repositoryId: resolveCanonicalRepositoryId(worktree),
-      missionId: input.slug,
-      role: input.role,
-      family: input.family,
-      attempt: input.attempt,
-      startedAtMs: now().getTime(),
+      missionId: input.slug, role: input.role, family: input.family,
+      attempt: input.attempt, startedAtMs: now().getTime(),
     });
   } catch (err) {
-    // A non-canonical Mission ID owns no terminal or history; launch unhosted rather than guess one.
     input.log(fmt.status('WARN', `Run history and terminal hosting are unavailable for this launch: ${(err as Error).message}`));
     return null;
   }
-  const runId = agentRunId(identity);
   const terminal = { ...identity, repositoryKey: (deps.repositoryKey ?? missionRepositoryKey)(worktree) };
+  const runId = agentRunId(identity);
   const config = (deps.config ?? ((root: string) => terminalHostConfig(loadAdapterConfig(root))))(worktree);
+  const choice = chooseTerminalHost(input, terminal, config, deps, configuration);
+  const { inheritedTerminal } = choice;
+  const capture = captureRunSession(input, worktree, terminal, runId, choice, now, configuration);
+  if (inheritedTerminal) { capture?.addTmuxSession(tmuxSessionName(identity)); }
+  const teeOptions = runTeeOptions(input, terminal, deps, configuration, choice, capture);
+  return {
+    runId,
+    identity,
+    observeExecution: pid => { try { if (!choice.useTmux || inheritedTerminal) { capture?.observeExecution(pid, processStartIdentity(pid)); } } catch { /* Observation cannot block launch. */ } },
+    teeOptions,
+    finish: result => finishRunCapture(input, worktree, runId, configuration, choice, capture, result),
+  };
+}
+
+interface TerminalChoice { useTmux: boolean; inheritedTerminal: boolean; fallbackReason: string | null; }
+
+function chooseTerminalHost(input: RunSessionInput, identity: AgentRunIdentity & { repositoryKey: string }, config: TerminalHostConfig, deps: RunSessionDeps, configuration: ParallixConfiguration): TerminalChoice {
   let fallbackReason: string | null = null;
   let useTmux = false;
   const inheritedTerminal = configuration.terminal.missionTerminal === input.slug && Boolean(configuration.terminal.missionSocket);
   if (inheritedTerminal) { useTmux = true; }
   else if (config.host !== 'pipe' && (deps.interactive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY))) {
-    const probe = Buffer.byteLength(missionSocketPath(terminal, configuration)) > 100
-      ? { available: false, version: null, reason: 'Mission terminal socket path exceeds the portable Unix socket limit' }
-      : IN_PROCESS_FAMILIES.has(input.family)
-      ? { available: false, version: null, reason: `${input.family} needs an outer mission command terminal` }
-      : (deps.probe ?? (() => probeTmux()))();
+    const probe = terminalProbe(input, identity, configuration, deps);
     if (probe.available) {
       useTmux = true;
     } else if (config.host === 'tmux' && config.whenUnavailable === 'fail') {
@@ -168,29 +176,35 @@ export function openRunSession(input: RunSessionInput, deps: RunSessionDeps = {}
       if (config.host !== 'auto') { input.log(fmt.status('WARN', `tmux terminal host unavailable (${probe.reason}); launching ${fmt.agent(input.family)} through the pipe host.`)); }
     }
   }
-  if (useTmux && !inheritedTerminal) {
-    const killed = reconcileOrphanSessions(terminal, { configuration, allRoles: true, ...(deps.spawnSyncFn ? { spawnSyncFn: deps.spawnSyncFn } : {}) });
-    if (killed.length > 0) { input.log(fmt.status('INFO', `Stopped unsupervised tmux session(s) from an earlier launch: ${killed.join(', ')}.`)); }
-  }
+  reconcilePreviousTerminalSessions(input, identity, deps, configuration, useTmux, inheritedTerminal);
+  return { useTmux, inheritedTerminal, fallbackReason };
+}
+
+function captureRunSession(input: RunSessionInput, worktree: string, identity: AgentRunIdentity & { repositoryKey: string }, runId: string, choice: TerminalChoice, now: () => Date, configuration: ParallixConfiguration): RunCapture | null {
+  const { useTmux, inheritedTerminal, fallbackReason } = choice;
   let capture: RunCapture | null = null;
   try {
     capture = openRunCapture({
       worktree, identity, runId,
       terminalHost: useTmux ? 'tmux' : 'pipe',
       hostFallbackReason: fallbackReason,
-      tmuxSocketPath: inheritedTerminal ? configuration.terminal.missionSocket! : useTmux ? missionSocketPath(terminal, configuration) : null,
+      tmuxSocketPath: inheritedTerminal ? configuration.terminal.missionSocket! : useTmux ? missionSocketPath(identity, configuration) : null,
       redactor: resolveConfiguredCredentialRedactor(configuration.runtime.credentialRedactor),
       now,
     });
   } catch (err) {
     input.log(fmt.status('WARN', `Run history capture is unavailable for this launch: ${(err as Error).message}`));
   }
-  if (inheritedTerminal) { capture?.addTmuxSession(tmuxSessionName(identity)); }
+  return capture;
+}
+
+function runTeeOptions(input: RunSessionInput, identity: AgentRunIdentity & { repositoryKey: string }, deps: RunSessionDeps, configuration: ParallixConfiguration, choice: TerminalChoice, capture: RunCapture | null): RunSession['teeOptions'] {
+  const { useTmux, inheritedTerminal } = choice;
   let spawnIndex = 0;
   const terminalHost: TerminalHost | undefined = useTmux && !inheritedTerminal ? {
     host: (launch, context) => {
       const presenter = context.presentation === 'claude-stream' ? presenterInvocation(deps.cli) : undefined;
-      const hosted = prepareTmuxLaunch({ identity: terminal, runId, spawnIndex: spawnIndex++, command: launch.command, args: launch.args, cwd: context.cwd, env: context.env, ...(presenter ? { presenter } : {}) }, { configuration, ...(deps.spawnSyncFn ? { spawnSyncFn: deps.spawnSyncFn } : {}) });
+      const hosted = prepareTmuxLaunch({ identity, runId: agentRunId(identity), spawnIndex: spawnIndex++, command: launch.command, args: launch.args, ...(launch.input ? { input: launch.input } : {}), cwd: context.cwd, env: context.env, ...(presenter ? { presenter } : {}) }, { configuration, ...(deps.spawnSyncFn ? { spawnSyncFn: deps.spawnSyncFn } : {}) });
       capture?.addTmuxSession(hosted.sessionName);
       input.log(fmt.status('INFO', `Agent terminal: attach with ${fmt.command(`px attach ${input.slug}`)} (detach with Ctrl-b d).`));
       return hosted;
@@ -202,23 +216,37 @@ export function openRunSession(input: RunSessionInput, deps: RunSessionDeps = {}
   const stdoutSink = sink && IN_PROCESS_FAMILIES.has(input.family)
     ? { isTTY: process.stdout.isTTY, write: (chunk: Buffer | string) => { sink.write('stdout', Buffer.from(chunk)); return process.stdout.write(chunk); } }
     : undefined;
-  return {
-    runId,
-    identity,
-    observeExecution: pid => { try { if (!useTmux || inheritedTerminal) { capture?.observeExecution(pid, processStartIdentity(pid)); } } catch { /* Observation cannot block launch. */ } },
-    teeOptions: { ...(terminalHost ? { terminalHost } : {}), ...(outputCapture ? { capture: outputCapture } : {}), ...(stdoutSink ? { stdoutSink } : {}) },
-    finish: (result) => {
-      if (!capture) { return; }
-      try {
-        const sessionId = result?.sessionId ?? null;
-        const provider = providerSources(capture, input.family, worktree, sessionId, useTmux && !inheritedTerminal, configuration);
-        if (IN_PROCESS_FAMILIES.has(input.family)) {
-          provider.sources[0] = { kind: 'terminal-bytes', path: 'stdout', covers: `text the in-process ${input.family} session rendered`, complete: true };
-        }
-        capture.finish({ exitCode: result?.status ?? null, signal: result?.signal ?? null, providerSessionId: sessionId, ...provider });
-      } catch (err) {
-        input.log(fmt.status('WARN', `Could not finalize run history ${runId}: ${(err as Error).message}`));
-      }
-    },
-  };
+  return { ...(terminalHost ? { terminalHost } : {}), ...(outputCapture ? { capture: outputCapture } : {}), ...(stdoutSink ? { stdoutSink } : {}) };
+}
+
+function finishRunCapture(input: RunSessionInput, worktree: string, runId: string, configuration: ParallixConfiguration, choice: TerminalChoice, capture: RunCapture | null, result: Parameters<RunSession['finish']>[0]): void {
+  const { useTmux, inheritedTerminal } = choice;
+
+  if (!capture) { return; }
+  try {
+    const sessionId = result?.sessionId ?? null;
+    const provider = providerSources(capture, input.family, worktree, sessionId, useTmux && !inheritedTerminal, configuration);
+    if (IN_PROCESS_FAMILIES.has(input.family)) {
+      provider.sources[0] = { kind: 'terminal-bytes', path: 'stdout', covers: `text the in-process ${input.family} session rendered`, complete: true };
+    }
+    capture.finish({ exitCode: result?.status ?? null, signal: result?.signal ?? null, providerSessionId: sessionId, ...provider });
+  } catch (err) {
+    input.log(fmt.status('WARN', `Could not finalize run history ${runId}: ${(err as Error).message}`));
+  }
+}
+
+function terminalProbe(input: RunSessionInput, identity: AgentRunIdentity & { repositoryKey: string }, configuration: ParallixConfiguration, deps: RunSessionDeps): TmuxProbe {
+  return Buffer.byteLength(missionSocketPath(identity, configuration)) > 100
+    ? { available: false, version: null, reason: 'Mission terminal socket path exceeds the portable Unix socket limit' }
+    : IN_PROCESS_FAMILIES.has(input.family)
+      ? { available: false, version: null, reason: `${input.family} needs an outer mission command terminal` }
+      : (deps.probe ?? (() => probeTmux()))();
+
+}
+
+function reconcilePreviousTerminalSessions(input: RunSessionInput, identity: AgentRunIdentity & { repositoryKey: string }, deps: RunSessionDeps, configuration: ParallixConfiguration, useTmux: boolean, inheritedTerminal: boolean): void {
+  if (useTmux && !inheritedTerminal) {
+    const killed = reconcileOrphanSessions(identity, { configuration, allRoles: true, ...(deps.spawnSyncFn ? { spawnSyncFn: deps.spawnSyncFn } : {}) });
+    if (killed.length > 0) { input.log(fmt.status('INFO', `Stopped unsupervised tmux session(s) from an earlier launch: ${killed.join(', ')}.`)); }
+  }
 }

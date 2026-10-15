@@ -73,8 +73,8 @@ function createFakeStore(status: MissionStatus): FakeStore {
 function servicesFor(store: FakeStore) {
   return {
     store,
-    lifecycle: new MissionLifecycleService(store as never),
-    integration: new MissionIntegrationService(store as never),
+    lifecycle: new MissionLifecycleService(store),
+    integration: new MissionIntegrationService(store),
     handoff: { recordNel: async () => ({}) },
   };
 }
@@ -139,7 +139,7 @@ async function runIntegrate(scenario: Scenario) {
   mock.method(missionUtils, 'conventionalWorktreePath', () => path.join(root, '..', SLUG));
   mock.method(missionUtils, 'resolveMainRepo', () => root);
   mock.method(missionUtils, 'missionTitle', () => 'fixture');
-  mock.method(missionUtils, 'updateGraphifyKnowledgeGraph', options => {
+  mock.method(missionUtils, 'updateGraphifyKnowledgeGraph', (options: Parameters<(typeof missionUtils)["updateGraphifyKnowledgeGraph"]>[0]) => {
     if (!scenario.graphify) { return false; }
     assert.equal(options!.rootDir, baseRoot);
     assert.ok(order.includes('landed') && order.includes('stats'));
@@ -153,6 +153,7 @@ async function runIntegrate(scenario: Scenario) {
         if (args[0] === '--help') { return { status: 0 }; }
         if (scenario.graphify === 'update-error') { throw new Error('spawn failed'); }
         if (scenario.graphify === 'update-exit') { return { status: 3 }; }
+        assert.ok(commandOptions?.cwd);
         fs.writeFileSync(path.join(commandOptions.cwd, 'graphify-out', 'graph.json'), 'updated base');
         return { status: 0 };
       },
@@ -167,7 +168,7 @@ async function runIntegrate(scenario: Scenario) {
     }
     // Landed-commit metadata read: the timestamp must come from this commit.
     if (args.includes('show')) {
-      if (scenario.gitShowFails) { return { status: 1, stdout: '', stderr: 'fatal: bad revision' }; }
+      if (scenario.gitShowFails) { return { signal: null,  status: 1, stdout: '', stderr: 'fatal: bad revision' }; }
       return args.includes(LANDED_SHA) ? ok(`${LANDED_AT}\n`) : { status: 1, stdout: '', stderr: 'unknown revision' };
     }
     if (args.includes('merge') && args.includes('--no-commit')) {
@@ -177,35 +178,35 @@ async function runIntegrate(scenario: Scenario) {
     }
     // The worktree matches the staged payload; HEAD comparison still models new work.
     if (args.includes('diff') && args.includes('--quiet') && !args.includes('HEAD')) { return ok(''); }
-    if (args.includes('diff') && args.includes('--quiet')) { return { status: 1, stdout: '', stderr: '' }; }
+    if (args.includes('diff') && args.includes('--quiet')) { return { signal: null,  status: 1, stdout: '', stderr: '' }; }
     if (args.includes('diff') && args.includes('--cached')) { return ok('fixture.ts\n'); }
     if (args.includes('commit')) {
-      if (scenario.commitFails) { return { status: 1, stdout: '', stderr: 'fatal: could not write the index' }; }
+      if (scenario.commitFails) { return { signal: null,  status: 1, stdout: '', stderr: 'fatal: could not write the index' }; }
       order.push('landed');
       return ok('');
     }
     if (args.includes('rev-parse')) { return ok(`${LANDED_SHA}\n`); }
     return ok('');
   });
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
   mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
   mock.method(backlog, 'getTaskStatus', () => scenario.taskStatus);
   mock.method(backlog, 'getTaskAssignee', () => 'codex');
   mock.method(backlog, 'completeTask', () => true);
   mock.method(backlog, 'setTaskStatus', () => { order.push('promoted'); return true; });
-  mock.method(forgejo, 'getPrStatus', () => ({ exists: true, state: 'open', merged: false, number: 1 }));
-  mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true, reviewState: 'APPROVED' }));
+  mock.method(forgejo, 'getPrStatus', () => ({ exists: true as const, state: 'open', merged: false, number: 1 }));
+  mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true as const, reviewState: 'APPROVED' }));
   mock.method(forgejo, 'listOpenPrsForSlug', () => []);
   mock.method(forgejo, 'readToken', () => 'token');
   mock.method(forgejo, 'resolveTokenFile', () => 'token-file');
-  mock.method(forgejo, 'syncMerged', () => ({ ok: true }));
+  mock.method(forgejo, 'syncMerged', () => ({ ok: true as const }));
   mock.method(statsModule, 'recordIntegrationStats', async () => {
     order.push('stats');
     return { changed: false, row: { mission: SLUG }, data: { rows: [] }, report: 'none' };
   });
   mock.method(statsModule, 'resolveMissionClassification', () => ({ classification: 'ai_sdlc' }));
-  mock.method(verification, 'captureVerifiedTreeProof', () => ({ ok: true, proof: { rootDir: root } }));
-  mock.method(verification, 'assertVerifiedTreeProof', () => ({ ok: true }));
+  mock.method(verification, 'captureVerifiedTreeProof', () => ({ ok: true as const, proof: { rootDir: root } }));
+  mock.method(verification, 'assertVerifiedTreeProof', () => ({ ok: true as const }));
   mock.method(process, 'cwd', () => root);
   let exitCode: number | undefined;
   mock.method(process, 'exit', (code?: number) => { exitCode = code; });
@@ -272,7 +273,7 @@ test('R2: an approved normal integration completes exactly once and a retry stay
   const services = servicesFor(first.store as FakeStore);
   const again = await services.integration.decideIntegration({
     operationId: 'retry', missionId: missionId(SLUG),
-    expectedVersion: undefined as never,
+    expectedVersion: undefined,
     capabilities: new Set(['integration:decide']),
     occurredAt: LANDED_AT,
     facts: {
@@ -391,12 +392,14 @@ test('R5: the live review-fix writers keep known zero and unknown apart', async 
     await seedStoredMissionClassification('task-2369-known');
     await seedStoredMissionClassification('task-2369-unknown');
 
-    stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-known', rootDir: root, dbPath, implementer: 'claude', prFixRounds: '0', date: '2026-08-04' } as never);
-    stats.recordReviewStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-unknown', rootDir: root, dbPath, reviewer: 'claude', implementer: 'claude', date: '2026-08-04' } as never);
+    stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-known', rootDir: root, dbPath, implementer: 'claude', prFixRounds: '0', date: '2026-08-04' });
+    stats.recordReviewStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-unknown', rootDir: root, dbPath, reviewer: 'claude', implementer: 'claude', date: '2026-08-04' });
 
     const rows = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), dbPath }).rows;
     const known = rows.find(row => row.mission === 'task-2369-known');
     const unknown = rows.find(row => row.mission === 'task-2369-unknown');
+    assert.ok(known);
+    assert.ok(unknown);
     assert.equal(known?.pr_fix_rounds, '0', 'a known zero stays a real observed zero');
     assert.equal(unknown?.pr_fix_rounds, undefined, 'an unmeasured count stays unknown, never zero');
 
@@ -407,12 +410,12 @@ test('R5: the live review-fix writers keep known zero and unknown apart', async 
     try {
       const stored = store.listMeasurements().find(record => record.mission === 'task-2369-unknown');
       assert.equal(stored?.pr_fix_rounds, undefined, 'an unknown count reads back as no value, not zero');
-      assert.equal(stats.statsRowToMeasurement(unknown as never).pr_fix_rounds, undefined,
+      assert.equal(stats.statsRowToMeasurement(unknown).pr_fix_rounds, undefined,
         'the port preserves unknown as undefined; its SQLite adapter binds that value as SQL NULL');
-      assert.equal(stats.statsRowToMeasurement(known as never).pr_fix_rounds, 0, 'a known zero writes back as a genuine 0');
+      assert.equal(stats.statsRowToMeasurement(known).pr_fix_rounds, 0, 'a known zero writes back as a genuine 0');
 
       // Rewriting the row read back from the store must not manufacture a zero.
-      stats.upsertMeasurementRow(unknown as never, { configuration: resolveConfiguration(process.env), rootDir: root, store });
+      stats.upsertMeasurementRow(unknown, { configuration: resolveConfiguration(process.env), rootDir: root, store });
       const rewritten = store.listMeasurements().find(record => record.mission === 'task-2369-unknown');
       assert.equal(rewritten?.pr_fix_rounds, undefined, 'the round trip is stable — unknown stays unknown');
     } finally {
@@ -439,14 +442,14 @@ test('R5: carrying a prior count forward skips NULL rows, and a read failure sta
     }
 
     // [NULL, NULL] -> unknown.
-    stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-nulls', rootDir: root, store, implementer: 'claude', date: '2026-08-04' } as never);
-    const nulls = stats.recordReviewStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-nulls', rootDir: root, store, reviewer: 'claude', implementer: 'claude', date: '2026-08-04' } as never);
+    stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-nulls', rootDir: root, store, implementer: 'claude', date: '2026-08-04' });
+    const nulls = stats.recordReviewStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-nulls', rootDir: root, store, reviewer: 'claude', implementer: 'claude', date: '2026-08-04' });
     assert.equal(nulls.row.pr_fix_rounds, undefined, '[NULL, NULL] stays unknown');
 
     // [NULL, 2] -> the known 2 is carried forward past the NULL row.
-    stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-carry', rootDir: root, store, implementer: 'claude', date: '2026-08-04' } as never);
-    stats.recordStageStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-carry', stage: 'handoff', rootDir: root, store, implementer: 'claude', prFixRounds: '2', date: '2026-08-04' } as never);
-    const carried = stats.recordReviewStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-carry', rootDir: root, store, reviewer: 'claude', implementer: 'claude', date: '2026-08-04' } as never);
+    stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-carry', rootDir: root, store, implementer: 'claude', date: '2026-08-04' });
+    stats.recordStageStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-carry', stage: 'handoff', rootDir: root, store, implementer: 'claude', prFixRounds: '2', date: '2026-08-04' });
+    const carried = stats.recordReviewStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-carry', rootDir: root, store, reviewer: 'claude', implementer: 'claude', date: '2026-08-04' });
     assert.equal(carried.row.pr_fix_rounds, '2', 'a real known prior count is carried forward');
 
     // A measurement-store read failure yields unknown, never a manufactured zero.
@@ -456,7 +459,7 @@ test('R5: carrying a prior count forward skips NULL rows, and a read failure sta
         return Reflect.get(target, property, receiver);
       },
     });
-    const broken = stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-broken', rootDir: root, store: unreadable, implementer: 'claude', date: '2026-08-04' } as never);
+    const broken = stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-broken', rootDir: root, store: unreadable, implementer: 'claude', date: '2026-08-04' });
     assert.equal(broken.row.pr_fix_rounds, undefined, 'a read failure never manufactures zero');
   } finally {
     store.close();
@@ -490,7 +493,7 @@ test('R6: [0, 2, unknown, unknown] reports exactly two review-fix observations',
         stats.recordActiveStats({ configuration: resolveConfiguration(process.env),
           slug: mission.slug, rootDir: checkout.primary, store,
           implementer: 'claude', prFixRounds: mission.rounds, date: '2026-08-04',
-        } as never);
+        });
         await events.append(laneEvent({ repositoryId: repo, missionId: mission.slug, from: null, to: 'backlog', at: '2026-08-01T09:00:00.000Z' }));
         await events.append(laneEvent({ repositoryId: repo, missionId: mission.slug, from: 'integration', to: 'done', at: '2026-08-04T21:30:00.000Z' }));
       }
@@ -536,7 +539,7 @@ test('the integration-time report, px stats, and BoardMetrics agree on the compl
       for (const [slug, completed] of [['task-2369-landed', true], ['task-2369-open', false]] as const) {
         writeTask(checkout.primary, slug);
         await seedStoredMissionClassification(slug);
-        stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug, rootDir: checkout.primary, store, implementer: 'claude', prFixRounds: '1', date: '2026-08-04' } as never);
+        stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug, rootDir: checkout.primary, store, implementer: 'claude', prFixRounds: '1', date: '2026-08-04' });
         await events.append(laneEvent({ repositoryId: repo, missionId: slug, from: null, to: 'backlog', at: '2026-08-01T09:00:00.000Z' }));
         if (completed) {
           await events.append(laneEvent({ repositoryId: repo, missionId: slug, from: 'integration', to: 'done', at: '2026-08-04T21:30:00.000Z' }));
@@ -558,7 +561,7 @@ test('the integration-time report, px stats, and BoardMetrics agree on the compl
     const report = stats.renderWeeklyStatsReport(stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), dbPath }).rows, {
       today: '2026-08-05',
       missionFlow: outcomes.map(outcome => ({ repo: String(repo), mission: outcome.missionId, closedAt: outcome.closedAt, labels: outcome.labels })),
-    } as never);
+    });
 
     assert.deepEqual(outcomes.map(outcome => String(outcome.missionId)), ['task-2369-landed'], 'lifecycle owns the population');
     assert.equal(metrics.decisionWindow?.current.completedMissions, 1, 'BoardMetrics sees exactly the landed mission');
@@ -583,7 +586,7 @@ test('R7: telemetry cannot decide Mission completion', async () => {
   const rows = [{
     date: '2026-08-04', repo: 'parallix', mission: 'task-2369-telemetry', classification: 'ai_sdlc',
     implementer: 'claude', pr_fix_rounds: '1', stage: 'default', closed: 'yes', completed: 'yes',
-  }] as never[];
+  }];
   const window = { start: new Date('2026-07-29T00:00:00Z'), end: new Date('2026-08-05T00:00:00Z') };
 
   // Lifecycle supplies the completed population; a final-looking row supplies none.
@@ -648,10 +651,10 @@ test('R7/R8: PR-fix averages exclude unknown rounds and retain known zero', asyn
   const [summary] = stats.summarizeAgentWindow(rows, window, { completedMissionKeys: keys });
   assert.equal(summary.implementer, 'terra');
   assert.equal(summary.missions, 4);
-  assert.equal((summary as unknown as { prFixObservationCount: number }).prFixObservationCount, 2);
+  assert.equal(((summary)).prFixObservationCount, 2);
   assert.equal(summary.averageFixRounds, '1.00');
   const unavailable = stats.summarizeAgentWindow(rows.slice(2), window, { completedMissionKeys: new Set(['parallix::task-2371-unknown-a', 'parallix::task-2371-unknown-b']) });
-  assert.deepEqual(unavailable.map(row => [(row as unknown as { prFixObservationCount: number }).prFixObservationCount, row.averageFixRounds]), [[0, null]]);
+  assert.deepEqual(unavailable.map(row => [((row)).prFixObservationCount, row.averageFixRounds]), [[0, null]]);
 });
 
 

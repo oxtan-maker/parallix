@@ -112,6 +112,33 @@ function workflowStepRunBody(workflow: string, stepName: string): string {
   return body.join('\n');
 }
 
+test('Dependabot verification keeps credential-free checks and fails closed on a missing Sonar token (TASK-2676)', () => {
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci-required.yml'), 'utf8');
+  const guard = "if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository";
+  for (const name of ['Ensure SONAR_TOKEN configured (trusted runs only)', 'Run mandatory SonarQube quality gate']) {
+    const step = workflow.split(`- name: ${name}`)[1]?.split('\n      - name:')[0];
+    assert.ok(step, `${name} exists`);
+    assert.ok(step.includes(guard), `${name} retains the same trust boundary`);
+    assert.match(step, /SONAR_TOKEN:\s*\$\{\{ secrets\.SONAR_TOKEN \}\}/);
+    assert.doesNotMatch(step, /continue-on-error|dependabot\[bot\]/, 'no bot-specific quality-gate bypass');
+  }
+  const checks = workflow.slice(workflow.indexOf('- name: Run static analysis gate'),
+    workflow.indexOf('- name: Ensure SONAR_TOKEN configured'));
+  assert.match(checks, /npm run test:ci/);
+  assert.doesNotMatch(checks, /^\s*(?:SONAR_TOKEN|if):/m, 'CI-safe checks run without credentials or actor guards');
+  assert.doesNotMatch(workflow, /pull_request_target:/, 'PR code never runs with a privileged event');
+
+  // Dependabot events can only resolve Dependabot secrets, not Actions secrets.
+  // Execute the actual prerequisite with an absent token; do not claim a scan
+  // passed just because the credential-free test population passes.
+  const run = workflowStepRunBody(workflow, 'Ensure SONAR_TOKEN configured (trusted runs only)');
+  const result = spawnSync('bash', ['-e', '-c', run], {
+    encoding: 'utf8', env: { ...process.env, SONAR_TOKEN: '' },
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /SONAR_TOKEN environment secret is not configured/);
+});
+
 test('task-2566: the Sonar step pipe preserves a non-zero exit and writes the summary log', () => {
   const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci-required.yml'), 'utf8');
   const run = workflowStepRunBody(workflow, 'Run mandatory SonarQube quality gate');
@@ -213,7 +240,7 @@ test('task-2525.03: scanner uses an environment SONAR_TOKEN for trusted CI runs'
     runSonar({
       spawn: ((command: string, args: string[], options: { env: NodeJS.ProcessEnv }) => {
         captured = { command: String(command), args, token: options.env.SONAR_TOKEN };
-        return { status: 0 } as ReturnType<typeof import('node:child_process').spawnSync>;
+        return { stdout: '', stderr: '', signal: null,  status: 0 } as ReturnType<typeof import('node:child_process').spawnSync>;
       }) as typeof import('node:child_process').spawnSync,
     });
   } finally {

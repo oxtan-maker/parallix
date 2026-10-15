@@ -1,6 +1,4 @@
-// @ts-nocheck -- TASK-2535: partial test doubles for the stats-backfill pure
 // export (extractDateOnly).
-// Mirrors the established mockModule/@ts-nocheck pattern in test/integration/stats/stats-backfill.test.ts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

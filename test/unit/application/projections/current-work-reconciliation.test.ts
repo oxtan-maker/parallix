@@ -1,3 +1,10 @@
+import { makeExecutePorts as completeExecuteFixture } from '../../../fixtures/execute-mission-ports.js';
+import { fixtureMission as completeMission } from '../../../fixtures/mission-builders.js';
+import { missionId as completeMissionId } from '../../../../src/domain/mission.js';
+import { repositoryId as completeRepositoryId } from '../../../../src/domain/repository.js';
+import { missionVersion as completeVersion } from '../../../../src/application/domain-ports.js';
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
+import { repositoryId as fixtureRepositoryId } from '../../../../src/domain/repository.js';
 // Historical regression provenance: TASK-2373, TASK-2393.
 
 
@@ -45,7 +52,7 @@ test('current work keeps automatic family handoff working and makes exhaustion a
 });
 
 test('current work distinguishes unverified, stale, and known-stopped publishers', () => {
-  const options = { ttlMs: 1_000, isProcessAlive: () => null as boolean | null };
+  const options = { ttlMs: 1_000, isProcessAlive: () => null as boolean | null } satisfies Partial<NonNullable<Parameters<typeof reconcileCurrentWork>[1]>>;
   assert.equal(reconcileCurrentWork([event()], { ...options, nowMs: now }).get(missionId('task-2370'))?.currentWork?.freshness, 'unverified');
   assert.equal(reconcileCurrentWork([event()], { ...options, nowMs: now + 2_000 }).get(missionId('task-2370'))?.currentWork?.freshness, 'stale');
   assert.equal(reconcileCurrentWork([event()], { ...options, isProcessAlive: () => false, nowMs: now }).get(missionId('task-2370'))?.currentWork, null);
@@ -151,12 +158,12 @@ describe("Live session attribution —", () => {
     async clear(): Promise<void> { /* unused */ }
   }
 
-  const missionId = 'task-2393' as MissionId;
+  const missionId = fixtureMissionId('task-2393') as MissionId;
   function work(overrides: Partial<CurrentWorkEvent> = {}): CurrentWorkEvent {
     return {
       missionId,
       operationId: 'review:task-2393:current',
-      phase: 'review',
+      phase: 'review' as const,
       state: 'running',
       summary: 'px review --continue',
       agent: agentFamily('claude'),
@@ -191,7 +198,7 @@ describe("Live session attribution —", () => {
       rootDir: '/home/dev/parallix',
       blocklistRepo: new EmptyBlocklistRepo(),
       knownAgentFamilies: [agentFamily('claude')],
-      resolveTaskFile: () => ({ ok: false, matches: [] }),
+      resolveTaskFile: () => ({ ok: false as const, matches: [] }),
       currentWork: liveCurrentWork,
       detectRunningSessions: () => [{
         missionId,
@@ -229,7 +236,7 @@ describe("Live session attribution —", () => {
       knownAgentFamilies: [agentFamily('claude'), agentFamily('custom')],
       currentWork: liveCurrentWork,
       sessionMarkers: new Markers([{
-        repositoryId: 'parallix' as SessionMarkerEntry['repositoryId'], missionId, role: 'execute', agent: agentFamily('custom'),
+        repositoryId: fixtureRepositoryId('parallix') as SessionMarkerEntry['repositoryId'], missionId, role: 'execute', agent: agentFamily('custom'),
         lastLaunched: new Date(Date.now() + 1_000).toISOString(), sessionId: null, updatedAt: new Date().toISOString(),
       }]),
       detectRunningSessions: () => [{ missionId, role: 'execute', startedAtMs: Date.now(), worktree: null, pinnedAgent: 'custom' }],
@@ -262,12 +269,12 @@ describe("Publish-then-reconcile defects —", () => {
   }
 
   function strictPorts(overrides: Record<string, unknown> = {}) {
-    const parts = {
+    const parts = completeExecuteFixture({
       ...makeExecutePorts().ports,
       workspace: {
         async preflight() { return true; },
         async resolveWorktree() { return '/worktree'; },
-        async resolveTaskFile() { return { ok: true, taskFile: '/worktree/task.md' }; },
+        async resolveTaskFile() { return { ok: true as const, taskFile: '/worktree/task.md' }; },
         async readTaskStatus() { return 'active'; },
         async enforceCommitSafety() {},
       },
@@ -278,14 +285,14 @@ describe("Publish-then-reconcile defects —", () => {
         },
       },
       missionTransitions: {
-        async load() { return { kind: 'found' as const, version: 1, mission: { id: 'task-2373', repositoryId: 'repo', title: 'Fixture', labels: [], assignee: null, checkpoints: [{ missionId: 'task-2373', name: 'CP-1', firstLine: 'work', goalCheck: [], nextActionText: '' }], review: null, netEngineeringLines: null, brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] }, declaredGates: ['npm test'], successCriteria: ['done'], predictedNelBucket: 'Small', status: 'refined' as const, closedAt: null } }; },
-        async save() { return 2; },
-        async saveWithTransition() { return 2; },
+        async load() { return { kind: 'found' as const, version: completeVersion(1), mission: completeMission(String('task-2373'), {repositoryId: completeRepositoryId('repo'),title: 'Fixture',labels: [],assignee: null,checkpoints: [{ missionId: completeMissionId('task-2373'), name: 'CP-1', firstLine: 'work', goalCheck: [], nextActionText: '' }],review: null,netEngineeringLines: null,brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },declaredGates: ['npm test'],successCriteria: ['done'],predictedNelBucket: 'Small',status: 'refined' as const,closedAt: null}) }; },
+        async save() { return completeVersion(2); },
+        async saveWithTransition() { return completeVersion(2); },
       },
       telemetry: { async recordLaunchTelemetry() {} },
-      autonomousReview: { async start() { return true; } },
-    };
-    return { ...parts, ...overrides } as unknown as ExecuteMissionPorts;
+      autonomousReview: { async start() {} },
+    }).ports;
+    return { ...parts, ...overrides };
   }
 
   function executeRequest(overrides: Record<string, unknown> = {}) {
@@ -295,7 +302,7 @@ describe("Publish-then-reconcile defects —", () => {
       agent: 'claude',
       capabilities: new Set(['active:execute'] as const),
       ...overrides,
-    } as never;
+    };
   }
 
   function makeReviewWorkflow(overrides: Record<string, unknown> = {}) {
@@ -334,11 +341,11 @@ describe("Publish-then-reconcile defects —", () => {
 
   test('TASK-2373 defect 1: px active publishes the agents launched inside the autonomous review loop', async () => {
     const { repo, appended } = inMemoryOperationalHistory();
-    let seen: Record<string, unknown> | null = null;
+    let seen: { value: Record<string, unknown> | null } = { value: null };
     const ports = strictPorts({
       autonomousReview: {
         async start(request: Record<string, unknown>) {
-          seen = request;
+          seen.value = request;
           const onAgentLaunched = request.onAgentLaunched;
           if (typeof onAgentLaunched === 'function') {
             await onAgentLaunched('qwen', 'review');
@@ -354,7 +361,7 @@ describe("Publish-then-reconcile defects —", () => {
     assert.equal(outcome.status, 'completed');
 
     assert.equal(
-      typeof (seen as unknown as Record<string, unknown> | null)?.onAgentLaunched,
+      typeof ((seen.value))?.onAgentLaunched,
       'function',
       'the handoff/review port must carry the current-work publication seam into the review loop',
     );
@@ -387,16 +394,16 @@ describe("Publish-then-reconcile defects —", () => {
       },
       async blocked() {},
       async ended() {},
-    };
+    } satisfies NonNullable<ConstructorParameters<typeof ExecuteMissionService>[2]>;
 
-    let awaitable: unknown = null;
+    let awaitable: { value: unknown } = { value: null };
     let agentsAfterLaunch: readonly (string | null)[] = [];
     const ports = strictPorts({
       agentExecution: {
         async prepare() { return { prompt: 'p', agentConfig: {} }; },
         async launch(request: { onAgentChanged?: (_agent: string) => unknown }) {
-          awaitable = request.onAgentChanged?.('qwen');
-          await awaitable;
+          awaitable.value = request.onAgentChanged?.('qwen');
+          await awaitable.value;
           agentsAfterLaunch = published(appended).map((fact) => fact.agent);
           return { agent: 'qwen', rebaseDeferred: false, errored: false, errorMessage: null, exitStatus: 0, detail: null };
         },
@@ -406,7 +413,7 @@ describe("Publish-then-reconcile defects —", () => {
     await new ExecuteMissionService(ports, undefined, slowRecorder).execute(executeRequest());
 
     assert.equal(
-      typeof (awaitable as { then?: unknown } | null)?.then,
+      typeof (awaitable.value as { then?: unknown } | null)?.then,
       'function',
       'the agent-change callback must return an awaitable so the authoritative write is ordered',
     );
@@ -491,7 +498,7 @@ describe("Publish-then-reconcile defects —", () => {
         });
       }
     }
-    const repo = {
+    const repo = ({
       async findAll() { rowsDelivered += rows.length; return rows; },
       async findByType(type: string) {
         const matching = rows.filter((row) => row.eventType === type);
@@ -511,7 +518,7 @@ describe("Publish-then-reconcile defects —", () => {
       },
       async append(entry: OperationalHistoryEntry) { rows.push(entry); },
       async clear() { rows.length = 0; },
-    } as unknown as OperationalHistoryRepository;
+    });
     return { repo, rowsDelivered: () => rowsDelivered };
   }
 

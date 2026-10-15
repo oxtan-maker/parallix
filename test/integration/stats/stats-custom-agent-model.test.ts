@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';

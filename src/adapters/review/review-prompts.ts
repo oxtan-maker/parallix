@@ -1,6 +1,3 @@
-import { buildHandoffControls } from './handoff-controls.js';
-import type { ParallixConfiguration } from '../../application/ports/configuration.js';
-import { renderGraphifyLaunchGuidance } from '../agents/launch-prompt-context.js';
 /**
  * Assemble review and act-on-review prompts for the autonomous review loop.
  * Owned by the Node workflow harness (ADR 0037 / architecture migration).
@@ -99,7 +96,7 @@ function shortCommand(command: string): string {
  */
 function readGateResultRecord(missionDir: string): { command: string; exitCode: number; recordedAt: string } | null {
   try {
-    const raw = JSON.parse(fs.readFileSync(path.join(missionDir, GATE_RESULT_RELATIVE_PATH), 'utf8'));
+    const raw = JSON.parse(fs.readFileSync(path.join(missionDir, GATE_RESULT_RELATIVE_PATH), 'utf8')) as Record<string, unknown>;
     if (!raw || typeof raw !== 'object') { return null; }
     if (typeof raw.command !== 'string' || typeof raw.exitCode !== 'number') { return null; }
     return { command: raw.command, exitCode: raw.exitCode, recordedAt: typeof raw.recordedAt === 'string' ? raw.recordedAt : 'unknown time' };
@@ -216,9 +213,8 @@ export function buildActOnReviewPrompt({ implementer, branch, attempt, reviewOut
  * @param {{reviewer: string, branch: string, implementer: string, focus?: string, attempt: number, actualReviewer?: string, repoRoot?: string, missionPath?: string}} opts
  * @returns {string}
  */
-export function buildCompactReviewPrompt({ reviewer, branch, implementer, focus = 'all', attempt, actualReviewer, repoRoot = '', missionPath: missionPathOverride, reviewBaseline, integrationRepair = '', declaredGates, configuration }: {
+export function buildCompactReviewPrompt({ reviewer, branch, implementer, focus = 'all', attempt, actualReviewer, repoRoot = '', missionPath: missionPathOverride, reviewBaseline, integrationRepair = '' }: {
   reviewer: string; branch: string; implementer: string; focus?: string; attempt: number; actualReviewer?: string; repoRoot?: string; missionPath?: string; reviewBaseline?: string;
-  declaredGates?: readonly string[]; configuration?: ParallixConfiguration;
   /** Integration repair context (TASK-2620); empty when the round follows no integration repair. */
   integrationRepair?: string;
 }): string {
@@ -229,7 +225,7 @@ export function buildCompactReviewPrompt({ reviewer, branch, implementer, focus 
   const primaryBranch = resolvePrimaryBranch(repoRoot);
   const artifactDir = resolveArtifactDir(repoRoot || process.cwd());
   const promptConfiguration = resolvePromptConfiguration(repoRoot || process.cwd());
-  const template = renderGraphifyLaunchGuidance(assembleStagePrompt('review', promptConfiguration), repoRoot || process.cwd());
+  const template = assembleStagePrompt('review', promptConfiguration);
   // Dry-run output preserves the runtime-selected agent as a placeholder.
   // Resolve its entrypoint from the configured reviewer instead, because the
   // placeholder is deliberately not a registered agent family.
@@ -245,7 +241,7 @@ export function buildCompactReviewPrompt({ reviewer, branch, implementer, focus 
     .replaceAll('{{artifactDir}}',      artifactDir)
     .replaceAll('{{primaryBranch}}',    primaryBranch)
     .replaceAll('{{reviewBaseline}}',   resolveReviewBaseline(reviewBaseline, primaryBranch))
-    .replaceAll('{{completedControls}}', declaredGates === undefined ? buildCompletedControlsBlock(missionPath, repoRoot) : buildHandoffControls(repoRoot, declaredGates, { configuration }))
+    .replaceAll('{{completedControls}}', buildCompletedControlsBlock(missionPath, repoRoot))
     .replaceAll('{{integrationRepair}}', integrationRepair)
     .replaceAll('YYYY',                year)
     .replaceAll('{{review_entrypoint}}', reviewEntrypoint(entrypointAgent));

@@ -1,4 +1,5 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import { makeProjection, makeCard } from '../../../../fixtures/board-projection.js';
+import { missionId as fixtureMissionId } from '../../../../../src/domain/mission.js';
 import { resolveConfiguration } from '../../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 
@@ -42,7 +43,7 @@ test('parseWorktreeList handles entry without branch line', () => {
 test('findStaleMissionWorktrees returns empty array when git fails', () => {
   const stale = findStaleMissionWorktrees({
     gitRun() {
-      return { status: 1, stdout: '', stderr: 'error' };
+      return { signal: null,  status: 1, stdout: '', stderr: 'error' };
     }
   });
   assert.deepEqual(stale, []);
@@ -52,7 +53,7 @@ test('findStaleMissionWorktrees skips entries without mission branch refs', () =
   const stale = findStaleMissionWorktrees({
     primaryWorktree: '/home/magnus/code/repo',
     gitRun() {
-      return {
+      return { signal: null, 
         status: 0,
         stdout: [
           'worktree /home/magnus/code/repo',
@@ -75,7 +76,7 @@ test('findStaleMissionWorktrees skips entries with non-done task status', () => 
   const stale = findStaleMissionWorktrees({
     primaryWorktree: '/home/magnus/code/repo',
     gitRun() {
-      return {
+      return { signal: null, 
         status: 0,
         stdout: [
           'worktree /home/magnus/code/repo',
@@ -100,7 +101,7 @@ test('findStaleMissionWorktrees returns cleanup command for done task', () => {
   const stale = findStaleMissionWorktrees({
     primaryWorktree: '/home/magnus/code/repo',
     gitRun() {
-      return {
+      return { signal: null, 
         status: 0,
         stdout: [
           'worktree /home/magnus/code/repo',
@@ -127,7 +128,7 @@ test('findStaleMissionWorktrees directs missing-task closeout through integrate 
   const stale = findStaleMissionWorktrees({
     primaryWorktree: '/home/magnus/code/repo',
     gitRun() {
-      return {
+      return { signal: null, 
         status: 0,
         stdout: [
           'worktree /home/magnus/code/repo',
@@ -151,8 +152,8 @@ test('findStaleMissionWorktrees directs missing-task closeout through integrate 
 });
 
 test('status prints mission details and agent matrix for inferred slug', async () => {
-  const lines = [];
-  let exitCode = null;
+  const lines: string[] = [];
+  let exitCode: { value: number | null } = { value: null };
 
   await status([], {
     inferSlugFn: () => 'task-1031',
@@ -166,21 +167,21 @@ test('status prints mission details and agent matrix for inferred slug', async (
     // never from the task file or CP-N.md.
     buildProjectionFn: async () => ({
       build: async () => ({
-        stages: [{ cards: [{ id: 'task-1031', status: 'active', rawStatus: 'active', checkpoint: 'CP-2.md', checkpointDescription: 'Checkpoint 2' }] }],
+        ...makeProjection({ active: [makeCard({ id: fixtureMissionId('task-1031'), status: 'active', rawStatus: 'active', checkpoint: 'CP-2.md', checkpointDescription: 'Checkpoint 2' })] }),
       }),
     }),
-    getPrStatusFn: () => ({ exists: true, number: 83, state: 'open' }),
-    readAgentConfigOrExitFn: () => ({ reviewers: true }),
+    getPrStatusFn: () => ({ raw: '', title: undefined, merged: false, url: undefined, createdAt: null,  exists: true as const, number: 83, state: 'open' }),
+    readAgentConfigOrExitFn: () => ({}),
     eligibleAgentsForStepFn: step => step === 'draft' ? ['codex', 'claude'] : ['codex', 'gemini'],
     workflowLauncherStatusFn: agent => ({ supported: agent !== 'gemini' }),
     getLastThreeCommitsFn: () => ['c1', 'c2', 'c3'],
     getUncommittedCountFn: () => 2,
     detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
     log: line => lines.push(line),
-    exit: code => { exitCode = code; }
+    exit: code => { exitCode.value = code; }
   });
 
-  assert.equal(exitCode, 0);
+  assert.equal(exitCode.value, 0);
   assert.ok(lines.includes('Mission status: active'));
   assert.ok(lines.includes('Last checkpoint: CP-2.md - Checkpoint 2'));
   assert.ok(lines.includes('Forgejo PR: #83 (open)'));
@@ -192,7 +193,7 @@ test('status prints mission details and agent matrix for inferred slug', async (
 });
 
 test('status agent matrix includes every workflow launcher even when not step-eligible', async () => {
-  const lines = [];
+  const lines: string[] = [];
 
   await status(['task-1031'], {
     inferSlugFn: () => 'task-1031',
@@ -200,11 +201,11 @@ test('status agent matrix includes every workflow launcher even when not step-el
     findTaskFileFn: () => '/tmp/task-1031.md',
     getTaskStatusFn: () => 'active',
     findMissionDirFn: () => null,
-    getPrStatusFn: () => ({ exists: false }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
     readAgentConfigOrExitFn: () => ({}),
     eligibleAgentsForStepFn: step => step === 'draft' ? ['codex'] : ['claude'],
     allWorkflowAgentNamesFn: () => ['codex', 'future-agent'],
-    buildProjectionFn: async () => ({ build: async () => ({ stages: [] }) }),
+    buildProjectionFn: async () => ({ build: async () => makeProjection() }),
     workflowLauncherStatusFn: agent => ({ supported: agent === 'future-agent' }),
     getLastThreeCommitsFn: () => [],
     getUncommittedCountFn: () => 0,
@@ -217,8 +218,8 @@ test('status agent matrix includes every workflow launcher even when not step-el
 });
 
 test('status prints stale worktrees only when no explicit slug is provided', async () => {
-  const lines = [];
-  let exitCode = null;
+  const lines: string[] = [];
+  let exitCode: { value: number | null } = { value: null };
 
   await status(['task-1031'], {
     inferSlugFn: () => 'task-1031',
@@ -226,9 +227,9 @@ test('status prints stale worktrees only when no explicit slug is provided', asy
     findTaskFileFn: () => null,
     getTaskStatusFn: () => null,
     findMissionDirFn: () => null,
-    getPrStatusFn: () => ({ exists: false }),
-    findStaleMissionWorktreesFn: () => [{ path: '/tmp/stale', taskStatus: 'done', cleanupCommand: 'cleanup it' }],
-    buildProjectionFn: async () => ({ build: async () => ({ stages: [] }) }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
+    findStaleMissionWorktreesFn: () => [{ slug: 'stale', branch: 'refs/heads/mission/stale', path: '/tmp/stale', taskStatus: 'done', cleanupCommand: 'cleanup it' }],
+    buildProjectionFn: async () => ({ build: async () => makeProjection() }),
     readAgentConfigOrExitFn: () => ({}),
     eligibleAgentsForStepFn: () => [],
     workflowLauncherStatusFn: () => ({ supported: false }),
@@ -236,10 +237,10 @@ test('status prints stale worktrees only when no explicit slug is provided', asy
     getUncommittedCountFn: () => 0,
     detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
     log: line => lines.push(line),
-    exit: code => { exitCode = code; }
+    exit: code => { exitCode.value = code; }
   });
 
-  assert.equal(exitCode, 0);
+  assert.equal(exitCode.value, 0);
   assert.equal(lines.some(line => line.includes('Stale worktree')), false);
   // TASK-2322.07: an unknown Mission reports the SQLite projection gap directly
   // instead of falling back to CP-N.md.
@@ -249,7 +250,7 @@ test('status prints stale worktrees only when no explicit slug is provided', asy
 });
 
 test('status reports detached-head rebase diagnostics for the current worktree', async () => {
-  const lines = [];
+  const lines: string[] = [];
 
   await status(['task-1322'], {
     inferSlugFn: () => 'task-1322',
@@ -257,7 +258,7 @@ test('status reports detached-head rebase diagnostics for the current worktree',
     findTaskFileFn: () => '/tmp/task-1322.md',
     getTaskStatusFn: () => 'active',
     findMissionDirFn: () => null,
-    getPrStatusFn: () => ({ exists: false }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
     readAgentConfigOrExitFn: () => ({}),
     eligibleAgentsForStepFn: () => [],
     workflowLauncherStatusFn: () => ({ supported: false }),
@@ -288,7 +289,7 @@ test('status reports detached-head rebase diagnostics for the current worktree',
 });
 
 test('status reports stale worktree rebase diagnostics instead of only cleanup hints', async () => {
-  const lines = [];
+  const lines: string[] = [];
 
   await status([], {
     inferSlugFn: () => null,
@@ -299,6 +300,7 @@ test('status reports stale worktree rebase diagnostics instead of only cleanup h
     getLastThreeCommitsFn: () => [],
     getUncommittedCountFn: () => 0,
     findStaleMissionWorktreesFn: () => [{
+      slug: 'task-1322',
       path: '/tmp/task-1322',
       branch: 'refs/heads/mission/task-1322',
       taskStatus: 'done',

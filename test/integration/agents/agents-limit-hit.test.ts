@@ -1,4 +1,5 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import type { AgentLauncher, AgentProcessResult } from '../../../src/adapters/agents/agent-process-types.js';
+type DetectLimitHitOptions = NonNullable<Parameters<typeof import("../../../src/application/services/agent-limit.js").detectLimitHit>[0]>;
 
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import { resolveBlockContext } from '../../../src/adapters/agents/agent-block-selection.js';
@@ -28,32 +29,20 @@ if (process.env.PARALLIX_HOME) {
 
 const { isAgentBlocked, readAgentConfig, setCommandPathProbe, startAgent, updateAgentBlock, shouldPersistLaunchFailureBlock } = selectAgentModule;
 
-function makeFakeLauncher(scriptedResults, recorder) {
+function fakeStartAgentOptions(scriptedResults: AgentProcessResult[] = [{ status: 0, stdout: '', stderr: '' }]) {
   let attempt = 0;
-  return ({ prompt, worktree, env }) => {
-    const i = attempt;
-    attempt += 1;
-    recorder.calls.push({ prompt, worktree, env });
-    const scripted = scriptedResults[i] || scriptedResults[scriptedResults.length - 1];
+  const launchAgentFn: AgentLauncher = ({ worktree, env }) => {
+    const scripted = scriptedResults[attempt++] || scriptedResults[scriptedResults.length - 1];
+    assert.ok(scripted, 'fixture requires at least one process result');
     return {
-      invocation: {
-        command: 'fake',
-        args: [],
-        options: { cwd: worktree, env: { ...env } }
-      },
-      resultPromise: Promise.resolve(scripted)
+      invocation: { command: 'fake', args: [], options: { cwd: worktree, env: { ...env } } },
+      resultPromise: Promise.resolve(scripted),
     };
   };
+  return { launchAgentFn, assertAgentSupportedFn: () => {} };
 }
 
-function fakeStartAgentOptions(scriptedResults = [{ status: 0, stdout: '', stderr: '' }]) {
-  return {
-    launchAgentFn: makeFakeLauncher(scriptedResults, { calls: [] }),
-    assertAgentSupportedFn: () => {}
-  };
-}
-
-function installPathLaunchers(tmpRoot) {
+function installPathLaunchers(tmpRoot: string) {
   const binDir = path.join(tmpRoot, 'bin');
   fs.mkdirSync(binDir, { recursive: true });
   // This fixture only needs an executable which accepts `--help`. Reuse the
@@ -65,7 +54,7 @@ function installPathLaunchers(tmpRoot) {
   }
   process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
   process.env.CODEX_HOME ||= path.join(tmpRoot, 'glm-codex-home');
-  setCommandPathProbe(name => fs.existsSync(path.join(binDir, name)));
+  setCommandPathProbe(name => fs.existsSync(path.join(binDir, name)) ? path.join(binDir, name) : null);
 }
 
 test.after(() => {
@@ -75,9 +64,9 @@ test.after(() => {
   setCommandPathProbe(null);
 });
 
-function runGit(cwd, args) {
+function runGit(cwd: string, args: string[]) {
   /** @type {import('node:child_process').SpawnSyncOptionsWithStringEncoding} */
-  const options = {
+  const options: import('node:child_process').SpawnSyncOptionsWithStringEncoding = {
     cwd,
     encoding: 'utf8',
     env: {
@@ -106,7 +95,7 @@ function runGit(cwd, args) {
   return result;
 }
 
-function withPrimaryAndMissionWorktrees(run) {
+function withPrimaryAndMissionWorktrees(run: (fixture: { tmpRoot: string; primaryWorktree: string; missionWorktree: string; missionConfigPath: string; primaryLocalPath: string; missionLocalPath: string; targetPath: string }) => void) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cross-worktree-'));
   const primaryWorktree = path.join(tmpRoot, 'primary');
   const missionWorktree = path.join(tmpRoot, 'mission-task-1208');
@@ -148,26 +137,28 @@ test('startAgent persists a block via updateAgentBlock when limit-hit detector f
   try {
     // Stub selectAgent to deterministic order
     const order = ['claude', 'codex'];
-    const selectAgentFn = (step, opts: { exclude?: Set<string> } = {}) => {
+    const selectAgentFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["selectAgentFn"]> = (step, opts = {}) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set();
-      return order.find(a => !exclude.has(a));
+      const selected = order.find(a => !exclude.has(a));
+      assert.ok(selected, 'fixture agent pool exhausted');
+      return selected;
     };
 
-    const detectLimitHitFn = ({ agent }) => {
-      if (agent === 'claude') return { until: '2026-05-01 18', source: 'parsed' };
+    const detectLimitHitFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["detectLimitHitFn"]> = ({ agent } = { agent: '' }) => {
+      if (agent === 'claude') return { until: '2026-05-01 18', source: 'parsed', reason: 'parsed rate limit' };
       return null;
     };
 
-    const blocks = [];
-    const updateAgentBlockFn = (agent, until) => {
+    const blocks: { agent: string; until: string; }[] = [];
+    const updateAgentBlockFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["updateAgentBlockFn"]> = (agent, until) => {
       blocks.push({ agent, until });
-      return { path: path.join(tmpRoot, 'agents.local.json') };
+      return { path: path.join(tmpRoot, 'agents.local.json'), reason: null };
     };
 
     // Keep both block reads on the same injected authority as the recorded
     // writes. Falling back must not initialize an unrelated SQLite database
     // (and charge its cold startup to this bounded retry contract).
-    const runtimeBlockContextFn = (_step, tried) => resolveBlockContext(
+    const runtimeBlockContextFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["runtimeBlockContextFn"]> = async (_step, tried) => resolveBlockContext(
       order, tried, new Set(blocks.map(block => block.agent))
     );
     installPathLaunchers(tmpRoot);
@@ -212,17 +203,17 @@ test('startAgent does not loop forever when WORKFLOW_AGENT is pinned and that ag
       // Real selectAgent: must honor exclude even when WORKFLOW_AGENT is set.
       const config = {
         steps: { review: { eligible: ['claude', 'codex'], selection: 'random' } }
-      };
-      const selectAgentFn = (step, opts: { exclude?: Set<string> } = {}) => selectAgent(step, { configuration: resolveConfiguration(process.env), ...opts, config });
+      } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
+      const selectAgentFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["selectAgentFn"]> = (step, opts = {}) => selectAgent(step, { configuration: resolveConfiguration(process.env), ...opts, config });
 
-      const detectLimitHitFn = ({ agent }) => {
-        if (agent === 'claude') return { until: '2026-05-01 18', source: 'parsed' };
+      const detectLimitHitFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["detectLimitHitFn"]> = ({ agent } = { agent: '' }) => {
+        if (agent === 'claude') return { until: '2026-05-01 18', source: 'parsed', reason: 'parsed rate limit' };
         return null;
       };
-      const blocks = [];
-      const updateAgentBlockFn = (agent, until) => {
+      const blocks: { agent: string; until: string; }[] = [];
+      const updateAgentBlockFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["updateAgentBlockFn"]> = (agent, until) => {
         blocks.push({ agent, until });
-        return { path: path.join(tmpRoot, 'agents.local.json') };
+        return { path: path.join(tmpRoot, 'agents.local.json'), reason: null };
       };
 
       const result = await startAgent('review', { configuration: resolveConfiguration(process.env),
@@ -232,7 +223,7 @@ test('startAgent does not loop forever when WORKFLOW_AGENT is pinned and that ag
         detectLimitHitFn,
         updateAgentBlockFn,
         selectAgentFn,
-        runtimeBlockContextFn: (_step, tried) => resolveBlockContext(
+        runtimeBlockContextFn: async (_step, tried) => resolveBlockContext(
           config.steps.review.eligible, tried, new Set(blocks.map(block => block.agent))
         ),
         log: () => {},
@@ -253,7 +244,7 @@ test('startAgent throws when every eligible agent hits the limit', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-limit-exhausted-'));
   try {
     const order = ['claude', 'codex'];
-    const selectAgentFn = (step, opts: { exclude?: Set<string> } = {}) => {
+    const selectAgentFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["selectAgentFn"]> = (step, opts = {}) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set();
       const next = order.find(a => !exclude.has(a));
       if (!next) {
@@ -262,11 +253,11 @@ test('startAgent throws when every eligible agent hits the limit', async () => {
       return next;
     };
 
-    const detectLimitHitFn = () => ({ until: '2026-05-01 23', source: 'fallback' });
+    const detectLimitHitFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["detectLimitHitFn"]> = () => ({ until: '2026-05-01 23', source: 'fallback', reason: 'fallback rate limit' });
     const blocks = new Set<string>();
-    const updateAgentBlockFn = (agent: string) => {
+    const updateAgentBlockFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["updateAgentBlockFn"]> = (agent) => {
       blocks.add(agent);
-      return { path: 'noop' };
+      return { path: 'noop', reason: null };
     };
 
     installPathLaunchers(tmpRoot);
@@ -283,7 +274,7 @@ test('startAgent throws when every eligible agent hits the limit', async () => {
           updateAgentBlockFn,
           selectAgentFn,
           isAgentBlockedFn: (agent: string) => blocks.has(agent),
-          runtimeBlockContextFn: (_step, tried) => resolveBlockContext(order, tried, blocks),
+          runtimeBlockContextFn: async (_step, tried) => resolveBlockContext(order, tried, blocks),
           log: () => {},
           ...fakeStartAgentOptions()
         }),
@@ -302,7 +293,9 @@ test('updateAgentBlock writes { until, reason } to agents.local.json', () => {
   try {
     const targetPath = path.join(tmpRoot, 'agents.local.json');
     const result = updateAgentBlock('codex', '2026-06-01 14', { targetPath, reason: 'transient crash' });
+    assert.ok(result.blocklist.codex && typeof result.blocklist.codex === 'object' && 'until' in result.blocklist.codex);
     assert.equal(result.blocklist.codex.until, '2026-06-01 14');
+    assert.ok(result.blocklist.codex && typeof result.blocklist.codex === 'object' && 'reason' in result.blocklist.codex);
     assert.equal(result.blocklist.codex.reason, 'transient crash');
 
     const written = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
@@ -318,6 +311,7 @@ test('updateAgentBlock persists reason with limit-hit source description', () =>
   try {
     const targetPath = path.join(tmpRoot, 'agents.local.json');
     const result = updateAgentBlock('claude', '2026-07-01 10', { targetPath, reason: 'parsed: weekly usage limit reached' });
+    assert.ok(result.blocklist.claude && typeof result.blocklist.claude === 'object' && 'reason' in result.blocklist.claude);
     assert.equal(result.blocklist.claude.reason, 'parsed: weekly usage limit reached');
 
     const written = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
@@ -338,7 +332,9 @@ test('updateAgentBlock writes a YYYY-MM-DD HH timestamp to agents.local.json and
 
     const result = updateAgentBlock('claude', '2026-05-02 09', { targetPath });
     assert.equal(result.path, targetPath);
+    assert.ok(result.blocklist.claude && typeof result.blocklist.claude === 'object' && 'until' in result.blocklist.claude);
     assert.equal(result.blocklist.claude.until, '2026-05-02 09');
+    assert.ok(result.blocklist.gemini && typeof result.blocklist.gemini === 'object' && 'until' in result.blocklist.gemini);
     assert.equal(result.blocklist.gemini.until, '2026-05-01 12');
 
     const written = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
@@ -388,7 +384,7 @@ test('updateAgentBlock fails loudly on malformed agents.local.json instead of ov
 
     assert.throws(
       () => updateAgentBlock('codex', '2026-05-01 15', { targetPath }),
-      (err) => err && err.code === 'WORKFLOW_AGENT_CONFIG_INVALID' && err.configPath === targetPath
+      (err) => err instanceof Error && 'code' in err && err.code === 'WORKFLOW_AGENT_CONFIG_INVALID' && 'configPath' in err && err.configPath === targetPath
     );
 
     // Original (corrupt) contents must still be on disk — not silently overwritten.
@@ -439,6 +435,7 @@ test('readAgentConfig in a sibling worktree migrates blocks from the primary wor
 
     const config = readAgentConfig(missionConfigPath, { configuration: resolveConfiguration(process.env), mergeLocal: true, targetPath });
 
+    assert.ok(config.blocklist != null);
     assert.deepEqual(config.blocklist.custom, { until: '2030-01-02 03' });
     assert.equal(isAgentBlocked('custom', config), true);
   });
@@ -473,7 +470,7 @@ test('updateAgentBlock preserves malformed PARALLIX_HOME agents.local.json', () 
     process.chdir(missionWorktree);
     assert.throws(
       () => updateAgentBlock('custom', '2030-01-02 03', { targetPath }),
-      (err) => err && err.code === 'WORKFLOW_AGENT_CONFIG_INVALID' && err.configPath === targetPath
+      (err) => err instanceof Error && 'code' in err && err.code === 'WORKFLOW_AGENT_CONFIG_INVALID' && 'configPath' in err && err.configPath === targetPath
     );
 
     assert.equal(fs.readFileSync(targetPath, 'utf8'), corrupt);
@@ -501,6 +498,7 @@ test('existing PARALLIX_HOME blocklist is authoritative and legacy sources remai
       mergeLocal: true, targetPath
     });
 
+    assert.ok(config.blocklist != null);
     assert.equal(config.blocklist.custom, true);
     assert.equal(isAgentBlocked('custom', config), true);
     assert.ok(fs.existsSync(primaryLocalPath));
@@ -520,19 +518,19 @@ test('startAgent forwards launcher exit metadata to the limit-hit detector', asy
     delete process.env.WORKFLOW_AGENT;
 
     try {
-      const seenDetectArgs = [];
+      const seenDetectArgs: (DetectLimitHitOptions | undefined)[] = [];
       // Stub detector returns null so the loop exits after one attempt; we
       // only care that agents.js handed the launcher result's exit metadata
       // through to the detector.
-      const detectLimitHitFn = (args) => {
+      const detectLimitHitFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["detectLimitHitFn"]> = (args) => {
         seenDetectArgs.push(args);
         return null;
       };
 
-      const blocks = [];
-      const updateAgentBlockFn = (agent, until) => {
+      const blocks: { agent: string; until: string; }[] = [];
+      const updateAgentBlockFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["updateAgentBlockFn"]> = (agent, until) => {
         blocks.push({ agent, until });
-        return { path: path.join(tmpRoot, 'agents.local.json') };
+        return { path: path.join(tmpRoot, 'agents.local.json'), reason: null };
       };
 
       await startAgent('review', { configuration: resolveConfiguration(process.env),
@@ -548,6 +546,7 @@ test('startAgent forwards launcher exit metadata to the limit-hit detector', asy
 
       assert.equal(seenDetectArgs.length, 1, 'detector must be called exactly once');
       const args = seenDetectArgs[0];
+      assert.ok(args != null);
       assert.equal(args.agent, 'claude');
       // status / signal / error keys must be present on the call so the real
       // detector can gate on launcher failure. Their values come from the
@@ -578,10 +577,10 @@ test('startAgent reroutes an explicit agent override that is already in the bloc
 
     try {
       // Stub the blocklist: claude is currently blocked, codex is free.
-      const isAgentBlockedFn = (agent) => agent === 'claude';
+      const isAgentBlockedFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["isAgentBlockedFn"]> = (agent) => agent === 'claude';
 
-      const seenSelectExcludes = [];
-      const selectAgentFn = (step, opts: { exclude?: Set<string> } = {}) => {
+      const seenSelectExcludes: unknown[][] = [];
+      const selectAgentFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["selectAgentFn"]> = (step, opts = {}) => {
         const exclude = opts.exclude instanceof Set ? opts.exclude : new Set();
         seenSelectExcludes.push([...exclude].sort());
         if (exclude.has('codex')) {
@@ -590,8 +589,8 @@ test('startAgent reroutes an explicit agent override that is already in the bloc
         return 'codex';
       };
 
-      const detectLimitHitFn = () => null;
-      const updateAgentBlockFn = () => ({ path: path.join(tmpRoot, 'agents.local.json') });
+      const detectLimitHitFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["detectLimitHitFn"]> = () => null;
+      const updateAgentBlockFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["updateAgentBlockFn"]> = () => ({ path: path.join(tmpRoot, 'agents.local.json'), reason: null });
 
       const result = await startAgent('review', { configuration: resolveConfiguration(process.env),
         prompt: 'test',
@@ -630,23 +629,25 @@ test('startAgent honours opts.exclude as a seed for the tried set (family-separa
     delete process.env.WORKFLOW_AGENT;
 
     try {
-      const seenExcludes = [];
+      const seenExcludes: unknown[][] = [];
       // Reviewer "codex" hits a limit. Without the exclude seed, selectAgent could
       // legitimately pick "claude" (the implementer). With exclude=[claude], the
       // tried-set already has claude on the very first selectAgent call, so the
       // fallback can only be "vibe".
       const order = ['codex', 'claude', 'vibe'];
-      const selectAgentFn = (step, opts: { exclude?: Set<string> } = {}) => {
+      const selectAgentFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["selectAgentFn"]> = (step, opts = {}) => {
         const exclude = opts.exclude instanceof Set ? opts.exclude : new Set();
         seenExcludes.push([...exclude].sort());
-        return order.find(a => !exclude.has(a));
+        const selected = order.find(a => !exclude.has(a));
+      assert.ok(selected, 'fixture agent pool exhausted');
+      return selected;
       };
 
-      const detectLimitHitFn = ({ agent }) => {
-        if (agent === 'codex') return { until: '2026-05-01 18', source: 'parsed' };
+      const detectLimitHitFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["detectLimitHitFn"]> = ({ agent } = { agent: '' }) => {
+        if (agent === 'codex') return { until: '2026-05-01 18', source: 'parsed', reason: 'parsed rate limit' };
         return null;
       };
-      const updateAgentBlockFn = () => ({ path: path.join(tmpRoot, 'agents.local.json') });
+      const updateAgentBlockFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["updateAgentBlockFn"]> = () => ({ path: path.join(tmpRoot, 'agents.local.json'), reason: null });
 
       const result = await startAgent('review', { configuration: resolveConfiguration(process.env),
         prompt: 'test',

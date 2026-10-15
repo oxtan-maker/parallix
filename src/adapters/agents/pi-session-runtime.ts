@@ -1,5 +1,4 @@
-import { renderRunnerContextRecovery } from './launch-prompt-context.js';
-import { resolvePromptConfiguration } from '../config/product-config.js';
+import type { PiSdk, PiSessionFactory, PiSessionOptions, PiModelRegistry, PiModelRegistryConstructor, PiStats, PiSession, PiStreamEvent, PiMessage } from './pi-sdk-types.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
@@ -10,12 +9,12 @@ import { finiteOrNull } from './agent-stream-events.js';
 
 // Lazily-loaded SDK, using native dynamic import to avoid startup cost.
 // Import cost and SDK-owned ambient configuration are isolated in the worker.
-let _sdk: any = null;
-let _sdkImport: Promise<any> | null = null;
-function sdkImport(): Promise<any> {
+let _sdk: PiSdk | null = null;
+let _sdkImport: Promise<PiSdk> | null = null;
+function sdkImport(): Promise<PiSdk> {
   if (_sdkImport) { return _sdkImport; }
-  const pending: Promise<any> = new Function('p', 'return import(p)')('@earendil-works/pi-coding-agent')
-    .then((mod: any) => { _sdk = mod; return mod; })
+  const pending: Promise<PiSdk> = (new Function('p', 'return import(p)') as (specifier: string) => Promise<PiSdk>)('@earendil-works/pi-coding-agent')
+    .then((mod: PiSdk) => { _sdk = mod; return mod; })
     .catch((err: unknown) => { _sdkImport = null; throw err; });
   _sdkImport = pending;
   return pending;
@@ -34,15 +33,15 @@ export function warmPiSdk(): Promise<void> {
 }
 
 // Injectable SDK for tests. Production uses the real createAgentSession.
-let _createAgentSession: any = null;
+let _createAgentSession: PiSessionFactory | null = null;
 let _sessionPort: SessionMarkerPort | null = null;
 
 // Test hooks: override the launcher's I/O without touching the public signature.
-function __setCreateAgentSessionForTest(fn: any) { _createAgentSession = fn || null; }
+function __setCreateAgentSessionForTest(fn: PiSessionFactory | null) { _createAgentSession = fn || null; }
 function __setSessionPortForTest(port: SessionMarkerPort | null) { _sessionPort = port; }
-function __setSdkForTest(sdk: any) { _sdk = sdk || null; }
+function __setSdkForTest(sdk: PiSdk | null) { _sdk = sdk || null; }
 // Legacy test hook retained for backward compatibility (pi.ts no longer uses file-based sessions).
-function __setSessionsForTest(_mod: any) { /* no-op: pi.ts uses SessionMarkerPort */ }
+function __setSessionsForTest(_mod: unknown) { /* no-op: pi.ts uses SessionMarkerPort */ }
 
 // Transient failures that Pi may surface - similar to opencode patterns
 const TRANSIENT_PI_PATTERNS = [
@@ -67,14 +66,14 @@ const TRANSIENT_PI_PATTERNS = [
   /\bretry[- ]after\b/i,
 ];
 
-function isTransientPiFailure(error: any) {
+function isTransientPiFailure(error: { stdout?: string; stderr?: string } | null) {
   if (!error) { return false; }
   const text = `${error.stdout || ''}\n${error.stderr || ''}`;
   return TRANSIENT_PI_PATTERNS.some((re) => re.test(text));
 }
 
 /** Extract telemetry from SDK session stats. */
-function extractTelemetryFromStats(stats: any, model?: string) {
+function extractTelemetryFromStats(stats: PiStats | null, model?: string) {
   if (!stats || !stats.tokens) { return null; }
   return {
     provider: 'pi',
@@ -91,7 +90,7 @@ function extractTelemetryFromStats(stats: any, model?: string) {
 
 /** Create a session manager based on resume state. */
 async function createSessionManager(
-  sdk: typeof import('@earendil-works/pi-coding-agent'),
+  sdk: PiSdk,
   worktree: string,
   resume: boolean,
   sessionId: string | null,
@@ -125,15 +124,15 @@ async function createSessionManager(
  * model/auth API.
  */
 async function createSdkSessionOptions(
-  sdk: any,
+  sdk: PiSdk,
   worktree: string,
-  sessionManager: any,
+  sessionManager: unknown,
   model: string | null,
 ) {
-  const sdkOptions: any = { cwd: worktree, sessionManager };
+  const sdkOptions: PiSessionOptions = { cwd: worktree, sessionManager };
   if (!model) { return sdkOptions; }
 
-  let modelRegistry: any = null;
+  let modelRegistry: PiModelRegistry | null = null;
   if (sdk.AuthStorage?.create && sdk.ModelRegistry?.create) {
     const authStorage = sdk.AuthStorage.create();
     modelRegistry = sdk.ModelRegistry.create(authStorage);
@@ -141,7 +140,7 @@ async function createSdkSessionOptions(
     sdkOptions.modelRegistry = modelRegistry;
   } else if (sdk.ModelRuntime?.create && sdk.ModelRegistry) {
     const modelRuntime = await sdk.ModelRuntime.create();
-    modelRegistry = new sdk.ModelRegistry(modelRuntime);
+    modelRegistry = new (sdk.ModelRegistry as PiModelRegistryConstructor)(modelRuntime);
     await modelRegistry.refresh?.();
     sdkOptions.modelRuntime = modelRuntime;
   }
@@ -151,7 +150,7 @@ async function createSdkSessionOptions(
   if (slashIndex > 0) {
     sdkOptions.model = modelRegistry.find(model.substring(0, slashIndex), model.substring(slashIndex + 1));
   } else {
-    sdkOptions.model = modelRegistry.getAll().find((candidate: any) => candidate.id === model);
+    sdkOptions.model = modelRegistry.getAll().find((candidate) => candidate.id === model);
   }
   if (!sdkOptions.model) { throw new Error(`Pi model not found: ${model}`); }
   return sdkOptions;
@@ -162,15 +161,15 @@ interface PiRunState {
   settleError: string | null;
 }
 
-function sessionValue(read: () => any, fallback: any) {
+function sessionValue<T>(read: () => T | null | undefined, fallback: T): T {
   try { return read() ?? fallback; } catch { return fallback; }
 }
 
 /** SDK stats are lifetime totals; a resumed launch must not bill old work again. */
-function invocationStats(current: any, baseline: any) {
-  const difference = (value: any, before: any) => typeof value === 'number' ? Math.max(0, value - (typeof before === 'number' ? before : 0)) : value;
+function invocationStats(current: PiStats, baseline: PiStats) {
+  const difference = (value: number | undefined, before: number | undefined) => typeof value === 'number' ? Math.max(0, value - (typeof before === 'number' ? before : 0)) : value;
   const stats = { ...current };
-  for (const key of ['assistantMessages', 'userMessages', 'toolCalls', 'toolResults', 'totalMessages', 'cost']) {
+  for (const key of ['assistantMessages', 'userMessages', 'toolCalls', 'toolResults', 'totalMessages', 'cost'] as const) {
     stats[key] = difference(current[key], baseline[key]);
   }
   if (current.tokens) {
@@ -179,44 +178,45 @@ function invocationStats(current: any, baseline: any) {
   return stats;
 }
 
-function piResult(session: any, state: PiRunState, error: any, attempts: number, startedAt: string, baseline: any = {}) {
+function piResult(session: PiSession | null, state: PiRunState, error: unknown, attempts: number, startedAt: string, baseline: PiStats = {}) {
   // Snapshot before disposal: SDK getters need not remain usable afterwards.
   const stats = invocationStats(sessionValue(() => session?.getSessionStats?.(), {}), baseline);
+  const modelId = session?.model?.id;
   return {
-    status: error ? error.exitCode || 1 : 0,
+    status: error ? (error as { exitCode?: number }).exitCode || 1 : 0,
     stdout: error ? state.assistantText : sessionValue(() => session?.getLastAssistantText?.(), '') || state.assistantText,
-    stderr: error ? error.message || String(error) : '', error: error || null, signal: null,
-    sessionId: session?.sessionId || null, telemetry: extractTelemetryFromStats(stats, session?.model?.id),
-    model: session?.model?.id || undefined, provider: 'pi', transientRetries: attempts,
+    stderr: error ? (error as { message?: string }).message || String(error) : '', error: error || null, signal: null,
+    sessionId: session?.sessionId || null, telemetry: extractTelemetryFromStats(stats, modelId),
+    model: modelId || undefined, provider: 'pi', transientRetries: attempts,
     startedAt, endedAt: new Date().toISOString(),
     stats,
   };
 }
 
 async function runPiSession(
-  createSession: Function, sdkOptions: any, prompt: string,
+  createSession: PiSessionFactory, sdkOptions: PiSessionOptions, prompt: string,
   watchdog: ReturnType<typeof createOutputWatchdog>, renderer: AgentStreamRenderer,
-  attempts: number, startedAt: string, usage: { baseline: any | null },
+  attempts: number, startedAt: string, usage: { baseline: PiStats | null },
 ) {
   const state: PiRunState = { assistantText: '', settleError: null };
-  let session: any = null;
+  let session: PiSession | null = null;
   let unsubscribe: (() => void) | undefined;
   try {
     const created = await createSession(sdkOptions);
     session = created.session;
-    usage.baseline ??= sessionValue(() => session.getSessionStats?.(), {});
+    usage.baseline ??= sessionValue(() => created.session.getSessionStats?.(), {});
     renderer.render([{ kind: 'system', model: session.model?.id || null, sessionId: session.sessionId || null,
-      tools: sessionValue(() => session.getActiveToolNames?.().length, null) }]);
+      tools: sessionValue(() => created.session.getActiveToolNames?.().length, null) }]);
     if (created.modelFallbackMessage) {
       renderer.render([{ kind: 'diagnostic', text: created.modelFallbackMessage, isError: false }]);
     }
     unsubscribe = subscribePiEvents(session, watchdog, renderer, state);
-    await session.prompt(renderRunnerContextRecovery(prompt, session.autoCompactionEnabled === true && resolvePromptConfiguration(sdkOptions.cwd).contextCompaction));
+    await session.prompt(prompt);
     if (state.settleError) { throw new Error(state.settleError); }
     const result = piResult(session, state, null, attempts, startedAt, usage.baseline);
     if (!state.assistantText && result.stdout) { renderer.render([{ kind: 'text', text: result.stdout, agent: null }]); }
     return result;
-  } catch (error: any) {
+  } catch (error: unknown) {
     return piResult(session, state, error, attempts, startedAt, usage.baseline || {});
   } finally {
     try { unsubscribe?.(); } finally { session?.dispose?.(); }
@@ -224,10 +224,10 @@ async function runPiSession(
 }
 
 async function runPiAttempts(
-  createSession: Function, sdkOptions: any, prompt: string, watchdog: ReturnType<typeof createOutputWatchdog>,
+  createSession: PiSessionFactory, sdkOptions: PiSessionOptions, prompt: string, watchdog: ReturnType<typeof createOutputWatchdog>,
   renderer: AgentStreamRenderer, maxTransientRetries: number, startedAt: string, resume: boolean,
 ) {
-  const usage = { baseline: resume ? null : {} };
+  const usage: { baseline: PiStats | null } = { baseline: resume ? null : {} };
   for (let attempts = 0; ; attempts += 1) {
     const result = await runPiSession(createSession, sdkOptions, prompt, watchdog, renderer, attempts, startedAt, usage);
     if (attempts >= maxTransientRetries || !isTransientPiFailure(result) || result.status === 0) { return result; }
@@ -243,9 +243,24 @@ function renderPiResult(renderer: AgentStreamRenderer, result: ReturnType<typeof
     numTurns: finiteOrNull(result.stats.assistantMessages) }]);
 }
 
-function subscribePiEvents(session: any, watchdog: { noteOutput: () => void }, renderer: AgentStreamRenderer, state: PiRunState) {
+function piMessageError(last: PiMessage | undefined): string | null {
+      return last?.stopReason === 'error' ? last.errorMessage || 'agent session ended in a provider error'
+        : last?.stopReason === 'aborted' ? 'agent session aborted' : null;
+}
+
+function updatePiSettlement(event: PiStreamEvent, state: PiRunState) {
+    if (event.type === 'message_start' && event.message?.role === 'assistant') { state.settleError = null; }
+    if (event.type === 'agent_end' && !event.willRetry) {
+      const last = event.messages?.findLast((message) => message.role === 'assistant') ?? event.messages?.at(-1);
+      state.settleError = piMessageError(last);
+    } else if (event.type === 'auto_retry_end') {
+      state.settleError = event.success === false ? event.finalError || 'agent retries exhausted without a model response' : null;
+    }
+}
+
+function subscribePiEvents(session: PiSession, watchdog: { noteOutput: () => void }, renderer: AgentStreamRenderer, state: PiRunState) {
   const normalizer = new PiStreamNormalizer();
-  return session.subscribe((event: any) => {
+  return session.subscribe((event) => {
     let events;
     try { events = normalizer.push(event); } catch { events = [{ kind: 'unknown' as const, type: String(event.type ?? 'unknown') }]; }
     for (const normalized of events) {
@@ -253,14 +268,7 @@ function subscribePiEvents(session: any, watchdog: { noteOutput: () => void }, r
     }
     renderer.render(events);
     if (events.length || event.type === 'tool_execution_update') { watchdog.noteOutput(); }
-    if (event.type === 'message_start' && event.message?.role === 'assistant') { state.settleError = null; }
-    if (event.type === 'agent_end' && !event.willRetry) {
-      const last = event.messages?.findLast((message: any) => message.role === 'assistant') ?? event.messages?.at(-1);
-      state.settleError = last?.stopReason === 'error' ? last.errorMessage || 'agent session ended in a provider error'
-        : last?.stopReason === 'aborted' ? 'agent session aborted' : null;
-    } else if (event.type === 'auto_retry_end') {
-      state.settleError = event.success === false ? event.finalError || 'agent retries exhausted without a model response' : null;
-    }
+    updatePiSettlement(event, state);
   });
 }
 

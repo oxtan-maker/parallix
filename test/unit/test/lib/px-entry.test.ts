@@ -5,7 +5,7 @@ import {
   PREBUILT_PX_ENTRY, SOURCE_PX, SOURCE_PX_ENTRY, TSX_LOADER, pxNodeArgs, resolvePxEntryLoader,
 } from '../../../lib/px-entry.js';
 
-const bundlePresent = (file: string) => file === PREBUILT_PX_ENTRY;
+const bundlePresent: NonNullable<NonNullable<Parameters<typeof resolvePxEntryLoader>[0]>["exists"]> = (file) => file === PREBUILT_PX_ENTRY;
 const bundleMissing = () => false;
 
 test('resolvePxEntryLoader runs the prebuilt bundle with no loader in a prebuilt lane whose bundle exists', () => {

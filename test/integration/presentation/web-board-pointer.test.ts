@@ -109,7 +109,7 @@ test('board coordinate control matrix across lanes and work states (TASK-2705)',
     }
     // Browser contract also accepts all four actions if the server supplies them enabled.
     const simultaneous = pointerSnapshot('active');
-    const supplied = { ...simultaneous, stages: simultaneous.stages.map((stage) => ({...stage, cards: stage.cards.map((card) => ({...card, actions: card.actions.map((action) => action.kind === 'review:submit' ? {...action, state: 'enabled' as const, reason: null} : action)}))})) };
+    const supplied = { ...simultaneous, stages: simultaneous.stages.map((stage) => ({...stage, cards: stage.cards.map((card) => ({...card, actions: card.actions.map((action) => action.kind === 'review:submit' ? {...action, state: 'enabled' as const, reason: null} : action)}))})) } satisfies NonNullable<Parameters<typeof fixture.render>[0]>;
     await fixture.render(supplied);
     const before = requests.length;
     for (const command of ['active', 'handoff', 'review', 'integrate']) {
@@ -144,7 +144,7 @@ test('SSE refresh during coordinate press cannot invoke another action or fall t
       await fixture.render(pointerSnapshot(lane));
       await clickAt(page.locator('[data-board-card] button[aria-label^="px cancel"]'));
       const refreshed = pointerSnapshot(lane);
-      const unavailable = {...refreshed, stages: refreshed.stages.map((stage) => ({...stage, cards: stage.cards.map((card) => ({...card, actions: card.actions.map((action) => action.kind === 'mission:cancel' ? {...action, state: 'ineligible' as const, reason: 'refreshed cancellation denied'} : action)}))}))};
+      const unavailable = {...refreshed, stages: refreshed.stages.map((stage) => ({...stage, cards: stage.cards.map((card) => ({...card, actions: card.actions.map((action) => action.kind === 'mission:cancel' ? {...action, state: 'ineligible' as const, reason: 'refreshed cancellation denied'} : action)}))}))} satisfies NonNullable<Parameters<typeof fixture.render>[0]>;
       await fixture.render(unavailable, true);
       await clickAt(page.getByRole('button', {name: 'delete task-pointer-disposable lifecycle rows'}));
       assert.equal(requests.length, 0);
@@ -165,7 +165,7 @@ test('tall board modal and pending coordinate presses remain safe (TASK-2705)', 
   page.setDefaultTimeout(3000);
   try {
     const base = pointerSnapshot('backlog');
-    const tall = {...base, stages: base.stages.map((stage) => ({...stage, cards: stage.cards.flatMap((card) => Array.from({length: 40}, (_, index) => ({...card, id: index === 39 ? card.id : `task-disposable-${index}`}))) }))};
+    const tall = {...base, stages: base.stages.map((stage) => ({...stage, cards: stage.cards.flatMap((card) => Array.from({length: 40}, (_, index) => ({...card, id: index === 39 ? card.id : `task-disposable-${index}`}))) }))} satisfies NonNullable<Parameters<typeof fixture.render>[0]>;
     await fixture.render(tall);
     const cancel = page.locator('[data-board-card="task-pointer-disposable"] button[aria-label^="px cancel"]');
     await clickAt(cancel);
@@ -176,9 +176,9 @@ test('tall board modal and pending coordinate presses remain safe (TASK-2705)', 
     await page.keyboard.press('Escape');
     await fixture.render(pointerSnapshot('active'));
     await page.evaluate(() => {
-      (window as unknown as { unsafeDrag: boolean }).unsafeDrag = false;
+      window.unsafeDrag = false;
       document.addEventListener('dragstart', (event) => {
-        if (!event.defaultPrevented) { (window as unknown as { unsafeDrag: boolean }).unsafeDrag = true; }
+        if (!event.defaultPrevented) { window.unsafeDrag = true; }
       });
     });
     const start = await page.locator('[data-board-card] button[aria-label^="px active"]').boundingBox(); assert.ok(start);
@@ -186,7 +186,7 @@ test('tall board modal and pending coordinate presses remain safe (TASK-2705)', 
     await page.mouse.down();
     await page.mouse.move(start.x + start.width + 80, start.y + start.height / 2, {steps: 10});
     await page.mouse.up();
-    assert.equal(await page.evaluate(() => (window as unknown as {unsafeDrag: boolean}).unsafeDrag), false);
+    assert.equal(await page.evaluate(() => window.unsafeDrag), false);
     assert.equal(requests.length, 0);
     fixture.hold();
     const active = page.locator('[data-board-card] button[aria-label^="px active"]');

@@ -29,7 +29,7 @@ export class HandoffNelCapture {
    * computed value is fatal to handoff.
    */
   async captureNelAtHandoff(slug: string, options: CaptureNelOptions): Promise<CaptureNelResult> {
-    const { fileSystem, missionUtils, nel, documentWriter } = this.ports;
+    const { missionUtils, nel, documentWriter } = this.ports;
     const { rootDir, missionDir, error } = options;
     const documentWriterFn = options.documentWriterFn || documentWriter.write;
 
@@ -77,13 +77,7 @@ export class HandoffNelCapture {
     // 3. The predicted bucket is recorded with `px nel set`. A Mission drafted
     //    before it was Mission state still carries it in its document's
     //    Refinement Signals, which is the only place it exists for that Mission.
-    let predictedBucket: NelBucketLabel | 'Unknown' = (missionLoad.kind === 'found' ? missionLoad.mission.predictedNelBucket : null) ?? 'Unknown';
-    const missionMdPath = path.join(missionDir, 'MISSION.md');
-    if (predictedBucket === 'Unknown' && !(missionLoad.kind === 'found' && missionLoad.mission.brief) && fileSystem.existsSync(missionMdPath)) {
-      const predictedMatch = fileSystem.readText(missionMdPath).match(/Predicted NEL bucket:\s*(Small|Medium|Large)/i);
-      const documented = predictedMatch?.[1]?.toLowerCase();
-      predictedBucket = NEL_BUCKET_LABELS.find((label) => label.toLowerCase() === documented) ?? predictedBucket;
-    }
+    const predictedBucket = this.predictedBucket(missionLoad, missionDir);
     const artifacts = [
       artifactReference('git-range', `${primaryBranch}..HEAD`),
     ];
@@ -105,6 +99,18 @@ export class HandoffNelCapture {
     }
 
     return { ok: true, nel: actualNel, bucket: actualBucket };
+  }
+
+  private predictedBucket(missionLoad: Awaited<ReturnType<import('./domain-ports.js').MissionStore['load']>>, missionDir: string): NelBucketLabel | 'Unknown' {
+    const { fileSystem } = this.ports;
+    let predictedBucket: NelBucketLabel | 'Unknown' = (missionLoad.kind === 'found' ? missionLoad.mission.predictedNelBucket : null) ?? 'Unknown';
+    const missionMdPath = path.join(missionDir, 'MISSION.md');
+    if (predictedBucket === 'Unknown' && !(missionLoad.kind === 'found' && missionLoad.mission.brief) && fileSystem.existsSync(missionMdPath)) {
+      const predictedMatch = fileSystem.readText(missionMdPath).match(/Predicted NEL bucket:\s*(Small|Medium|Large)/i);
+      const documented = predictedMatch?.[1]?.toLowerCase();
+      predictedBucket = NEL_BUCKET_LABELS.find((label) => label.toLowerCase() === documented) ?? predictedBucket;
+    }
+    return predictedBucket;
   }
 
 }

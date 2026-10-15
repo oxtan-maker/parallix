@@ -1,18 +1,23 @@
+import { makeCard as fixtureCard } from '../../../fixtures/board-projection.js';
+import { missionOutcome } from '../../../fixtures/mission-outcome.js';
+import { fixtureMission } from '../../../fixtures/mission-builders.js';
+import { repositoryId as fixtureRepositoryId } from '../../../../src/domain/repository.js';
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
+import { agentFamily as fixtureAgentFamily } from '../../../../src/domain/agents.js';
 // Historical regression provenance: TASK-2375.
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 import assert from 'node:assert/strict';
 import test, { describe } from 'node:test';
 import type { SourceFact } from '../../../../src/application/contracts.js';
 import { BoardProjectionBuilder, checkProjectionStaleness, filterCompletedMissions, type AgentReadAdapter, type GateReadAdapter, type GitReadAdapter, type MissionReadAdapter, type OperationLogReadAdapter, type ReviewReadAdapter } from '../../../../src/application/projections/board-readers.js';
-import type { MissionReadAdapter, ReviewReadAdapter, GateReadAdapter, AgentReadAdapter, GitReadAdapter, OperationLogReadAdapter, BoardProjectionOptions } from '../../../../src/application/projections/board-readers.js';
+import type { BoardProjectionOptions } from '../../../../src/application/projections/board-readers.js';
 import type { CurrentWorkReadAdapter, ProcessLivenessProbe } from '../../../../src/application/projections/current-work.js';
 import type { MetricsReadAdapter } from '../../../../src/application/projections/metrics-read-adapter.js';
 import { attentionQueue, attentionRank, type MissionCard } from '../../../../src/application/projections/mission-board.js';
 import { agentFamily, type AgentFamily } from '../../../../src/domain/agents.js';
-import type { AgentAvailability, AgentFamily } from '../../../../src/domain/agents.js';
+import type { AgentAvailability } from '../../../../src/domain/agents.js';
 import { missionId, missionLabels, type Mission } from '../../../../src/domain/mission.js';
-import type { Mission, MissionId, MissionStatus } from '../../../../src/domain/mission.js';
+import type { MissionId, MissionStatus } from '../../../../src/domain/mission.js';
 import { repositoryId } from '../../../../src/domain/repository.js';
 import { buildBoardMetrics } from '../../../../src/application/projections/board.js';
 import type { RepositoryId } from '../../../../src/domain/repository.js';
@@ -78,8 +83,8 @@ function makeOperationLogAdapter(): OperationLogReadAdapter {
 
 test('BoardProjectionBuilder builds projection with repository identity and stages', async () => {
   const missions = [
-    { id: id1, repositoryId: repo, title: 'Mission 1', labels: missionLabels(['user_value']), status: 'active' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null },
-    { id: id2, repositoryId: repo, title: 'Mission 2', labels: missionLabels(['bug']), status: 'backlog' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null },
+    fixtureMission(String(id1), { id: id1, repositoryId: repo, title: 'Mission 1', labels: missionLabels(['user_value']), status: 'active' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null }),
+    fixtureMission(String(id2), { id: id2, repositoryId: repo, title: 'Mission 2', labels: missionLabels(['bug']), status: 'backlog' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null }),
   ];
   const builder = new BoardProjectionBuilder(
     makeMissionAdapter(missions),
@@ -99,22 +104,22 @@ test('BoardProjectionBuilder builds projection with repository identity and stag
 
 test('completed-mission retention keeps inclusive UTC days and preserves missing delivery evidence (TASK-2645)', () => {
   const now = Date.parse('2026-10-04T12:00:00.000Z');
-  const done = (id: string, closedAt: string) => ({
+  const done = (id: string, closedAt: string) => (fixtureMission(String(missionId(id)), {
     id: missionId(id), repositoryId: repo, title: id, labels: missionLabels([]),
     status: 'done' as const, closedAt, assignee: null, checkpoints: [], review: null, netEngineeringLines: null,
-  });
+  }));
   const visible = filterCompletedMissions([
     done('task-recent', '2026-09-28T00:00:00.000Z'),
     done('task-old', '2026-09-27T23:59:59.999Z'),
     done('task-unknown-date', 'not-a-date'),
-    { id: missionId('task-active'), repositoryId: repo, title: 'active', labels: missionLabels([]), status: 'active' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null },
+    fixtureMission(String(missionId('task-active')), { id: missionId('task-active'), repositoryId: repo, title: 'active', labels: missionLabels([]), status: 'active' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null }),
   ], 7, now, new Map([[missionId('task-recent'), '2026-09-28T00:00:00Z'], [missionId('task-old'), '2026-09-27T23:59:59.999Z']]), 'UTC');
   assert.deepEqual(visible.map(mission => mission.id), [missionId('task-recent'), missionId('task-unknown-date'), missionId('task-active')]);
 });
 
 test('BoardProjectionBuilder applies its configured completed-mission retention before dependent reads (TASK-2645)', async () => {
-  const recent = { id: missionId('task-recent'), repositoryId: repo, title: 'recent', labels: missionLabels([]), status: 'done' as const, closedAt: '2026-09-28T12:00:00.000Z', assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
-  const old = { id: missionId('task-old'), repositoryId: repo, title: 'old', labels: missionLabels([]), status: 'done' as const, closedAt: '2026-09-20T12:00:00.000Z', assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
+  const recent = fixtureMission(String(missionId('task-recent')), { id: missionId('task-recent'), repositoryId: repo, title: 'recent', labels: missionLabels([]), status: 'done' as const, closedAt: '2026-09-28T12:00:00.000Z', assignee: null, checkpoints: [], review: null, netEngineeringLines: null });
+  const old = fixtureMission(String(missionId('task-old')), { id: missionId('task-old'), repositoryId: repo, title: 'old', labels: missionLabels([]), status: 'done' as const, closedAt: '2026-09-20T12:00:00.000Z', assignee: null, checkpoints: [], review: null, netEngineeringLines: null });
   let reviewed: readonly string[] = [];
   let metricStates: readonly string[] = [];
   const reviews: ReviewReadAdapter = { async loadReviews(ids) { reviewed = ids; return new Map(); } };
@@ -124,7 +129,7 @@ test('BoardProjectionBuilder applies its configured completed-mission retention 
       completedMissionRetentionDays: 7,
       now: () => Date.parse('2026-10-04T12:00:00.000Z'),
       metricsAdapter: {
-        async readOutcomes() { return [{ missionId: recent.id, closedAt: '2026-09-28T00:00:00Z' }, { missionId: old.id, closedAt: '2026-09-20T00:00:00Z' }]; },
+        async readOutcomes() { return [missionOutcome({ missionId: recent.id, closedAt: '2026-09-28T00:00:00Z' }), missionOutcome({ missionId: old.id, closedAt: '2026-09-20T00:00:00Z' })]; },
         async buildMetrics(states) {
           metricStates = [...states.keys()];
           return buildBoardMetrics({
@@ -142,7 +147,7 @@ test('BoardProjectionBuilder applies its configured completed-mission retention 
 
 test('BoardProjectionBuilder projects the review loaded by its review adapter', async () => {
   const missions = [
-    { id: id1, repositoryId: repo, title: 'Mission 1', labels: missionLabels(['bug']), status: 'review' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null },
+    fixtureMission(String(id1), { id: id1, repositoryId: repo, title: 'Mission 1', labels: missionLabels(['bug']), status: 'review' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null }),
   ];
   const builder = new BoardProjectionBuilder(
     makeMissionAdapter(missions),
@@ -192,7 +197,7 @@ test('BoardProjectionBuilder preserves populated multi-round review cards from a
     startedAt: '2026-08-23T08:00:00.000Z',
     decision: null,
     response: null,
-    phase: 'reviewing',
+    phase: 'reviewing' as const,
     disposition: null,
     reviewerRetryCount: 0,
     implementerRetryCount: 0,
@@ -269,9 +274,9 @@ test('BoardProjectionBuilder preserves populated multi-round review cards from a
 
 test('BoardProjectionBuilder attentionQueue excludes reasonless cards', async () => {
   const missions = [
-    { id: id3, repositoryId: repo, title: 'Active', labels: missionLabels(['a']), status: 'active' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null },
-    { id: id1, repositoryId: repo, title: 'Review', labels: missionLabels(['a']), status: 'review' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null },
-    { id: id2, repositoryId: repo, title: 'Backlog', labels: missionLabels(['a']), status: 'backlog' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null },
+    fixtureMission(String(id3), { id: id3, repositoryId: repo, title: 'Active', labels: missionLabels(['a']), status: 'active' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null }),
+    fixtureMission(String(id1), { id: id1, repositoryId: repo, title: 'Review', labels: missionLabels(['a']), status: 'review' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null }),
+    fixtureMission(String(id2), { id: id2, repositoryId: repo, title: 'Backlog', labels: missionLabels(['a']), status: 'backlog' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null }),
   ];
   const builder = new BoardProjectionBuilder(
     makeMissionAdapter(missions),
@@ -291,9 +296,9 @@ test('BoardProjectionBuilder attentionQueue excludes reasonless cards', async ()
 
 test('BoardProjectionBuilder wipCounts reflects all missions', async () => {
   const missions = [
-    { id: id1, repositoryId: repo, title: 'Active', labels: missionLabels(['a']), status: 'active' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null },
-    { id: id2, repositoryId: repo, title: 'Active 2', labels: missionLabels(['a']), status: 'active' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null },
-    { id: id3, repositoryId: repo, title: 'Review', labels: missionLabels(['a']), status: 'review' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null },
+    fixtureMission(String(id1), { id: id1, repositoryId: repo, title: 'Active', labels: missionLabels(['a']), status: 'active' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null }),
+    fixtureMission(String(id2), { id: id2, repositoryId: repo, title: 'Active 2', labels: missionLabels(['a']), status: 'active' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null }),
+    fixtureMission(String(id3), { id: id3, repositoryId: repo, title: 'Review', labels: missionLabels(['a']), status: 'review' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null }),
   ];
   const builder = new BoardProjectionBuilder(
     makeMissionAdapter(missions),
@@ -348,8 +353,8 @@ test('BoardProjectionBuilder includes default metrics with skip fallback', async
 
 test('BoardProjectionBuilder queues a gate-failed mission behind its runnable resume', async () => {
   const missions = [
-    { id: id1, repositoryId: repo, title: 'Active', labels: missionLabels(['a']), status: 'active' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null },
-    { id: id2, repositoryId: repo, title: 'Active 2', labels: missionLabels(['a']), status: 'active' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null },
+    fixtureMission(String(id1), { id: id1, repositoryId: repo, title: 'Active', labels: missionLabels(['a']), status: 'active' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null }),
+    fixtureMission(String(id2), { id: id2, repositoryId: repo, title: 'Active 2', labels: missionLabels(['a']), status: 'active' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null }),
   ];
   const gateAdapter: GateReadAdapter = {
     async loadGateStatus(missionId: typeof id1) {
@@ -484,7 +489,7 @@ function createCardHelpers() {
       currentWork?: MissionCard['currentWork'];
     } = {},
   ) {
-    return {
+    return fixtureCard({
       id,
       repositoryId: repo,
       title: `Mission ${id}`,
@@ -502,7 +507,7 @@ function createCardHelpers() {
       blockingReason: opts.blockingReason ?? null,
       flags: [],
       commands: [],
-    };
+    });
   }
   return { makeCard };
 }
@@ -522,8 +527,8 @@ describe("Slow metrics cache reuse — SC4", () => {
   // Fixtures
   // ---------------------------------------------------------------------------
 
-  const REPO: RepositoryId = 'test-repo' as RepositoryId;
-  const MISSION_ID = 'task-9901' as MissionId;
+  const REPO: RepositoryId = fixtureRepositoryId('test-repo') as RepositoryId;
+  const MISSION_ID = fixtureMissionId('task-9901') as MissionId;
 
   function emptyAdapters(): {
     missions: MissionReadAdapter;
@@ -599,7 +604,7 @@ describe("Slow metrics cache reuse — SC4", () => {
 
     const agents: AgentAvailability[] = [
       {
-        family: 'codex' as AgentFamily,
+        family: fixtureAgentFamily('codex') as AgentFamily,
         launcherAvailable: true,
         block: { kind: 'until', untilMs: Date.now() + 60_000, reason: 'usage limit' },
       },
@@ -608,17 +613,16 @@ describe("Slow metrics cache reuse — SC4", () => {
     const adapters = emptyAdapters();
     adapters.missions = {
       ...adapters.missions,
-      loadAllMissions: async () => [{
+      loadAllMissions: async () => [fixtureMission(MISSION_ID, {
         id: MISSION_ID,
-        slug: MISSION_ID,
         status: 'active' as MissionStatus,
         title: 'Test',
         labels: [],
-        assignee: [],
+        assignee: null,
         checkpoints: [],
         review: null,
         repositoryId: REPO,
-      }] as unknown as readonly Mission[],
+      })],
     };
     adapters.agents = {
       ...adapters.agents,
@@ -691,17 +695,16 @@ describe("Slow metrics cache reuse — SC4", () => {
     const adapters = emptyAdapters();
     adapters.missions = {
       ...adapters.missions,
-      loadAllMissions: async () => [{
+      loadAllMissions: async () => [fixtureMission(MISSION_ID, {
         id: MISSION_ID,
-        slug: MISSION_ID,
         status: 'active' as MissionStatus,
         title: 'Test',
         labels: [],
-        assignee: [],
+        assignee: null,
         checkpoints: [],
         review: null,
         repositoryId: REPO,
-      }] as unknown as readonly Mission[],
+      })],
     };
 
     // Agent availability changes between calls (different block untilMs)
@@ -710,7 +713,7 @@ describe("Slow metrics cache reuse — SC4", () => {
     adapters.agents = {
       ...adapters.agents,
       loadAgentAvailability: async () => [{
-        family: 'codex' as AgentFamily,
+        family: fixtureAgentFamily('codex') as AgentFamily,
         launcherAvailable: true,
         block: { kind: 'until', untilMs: currentUntilMs, reason: 'usage limit' },
       }],
@@ -748,7 +751,7 @@ describe("Slow metrics cache reuse — SC4", () => {
 });
 
 test('DONE retention uses delivery calendar days despite delayed administrative closure (TASK-2685)', () => {
-  const done = (id: string, closedAt: string | null) => ({ id: missionId(id), repositoryId: repo, title: id, labels: missionLabels([]), status: 'done', closedAt, assignee: null, checkpoints: [], review: null, netEngineeringLines: null });
+  const done = (id: string, closedAt: string | null) => (fixtureMission(String(missionId(id)), { id: missionId(id), repositoryId: repo, title: id, labels: missionLabels([]), status: 'done', closedAt, assignee: null, checkpoints: [], review: null, netEngineeringLines: null }));
   const missions = [done('task-first', '2026-10-09T12:00:00Z'), done('task-old', '2026-10-08T12:00:00Z'), done('task-unclosed', null), done('task-unknown', '2026-01-01'), done('task-invalid', '2026-01-01')];
   const deliveries = new Map([[missionId('task-first'), '2026-10-02T00:00:00Z'], [missionId('task-old'), '2026-10-01T23:59:59Z'], [missionId('task-unclosed'), '2026-01-01'], [missionId('task-invalid'), 'task-invalid']]);
   for (const instant of ['2026-10-08T00:00:00Z', '2026-10-08T23:59:59Z']) {
@@ -758,7 +761,7 @@ test('DONE retention uses delivery calendar days despite delayed administrative 
 });
 
 test('DONE cards remain visible when canonical delivery history is unavailable (TASK-2685)', async () => {
-  const mission = { id: missionId('task-unknown-delivery'), repositoryId: repo, title: 'unknown', labels: missionLabels([]), status: 'done', closedAt: '2025-01-01T00:00:00Z', assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
+  const mission = fixtureMission(String(missionId('task-unknown-delivery')), { id: missionId('task-unknown-delivery'), repositoryId: repo, title: 'unknown', labels: missionLabels([]), status: 'done', closedAt: '2025-01-01T00:00:00Z', assignee: null, checkpoints: [], review: null, netEngineeringLines: null });
   const builder = new BoardProjectionBuilder(
     makeMissionAdapter([mission]), makeReviewAdapter(), makeGateAdapter(), makeAgentAdapter(), makeGitAdapter(), makeOperationLogAdapter(),
     {

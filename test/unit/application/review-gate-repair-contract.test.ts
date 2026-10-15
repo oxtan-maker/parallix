@@ -1,7 +1,14 @@
-// @ts-nocheck -- Retained legacy partial request doubles (TASK-2328).
+import type { RepairCheckpointPort } from '../../../src/application/ports/repair-checkpoint.js';
+import type { RetainedRepairPort, ReviewLoopRequest } from '../../../src/application/ports/review-round.js';
+import type { ReviewLoopFakeOverrides } from '../../helpers/review-loop-ports.js';
+import type { ReviewLoopState } from '../../../src/application/ports/review-round.js';
+import type { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
+import { fixtureMission, pendingReview } from '../../fixtures/mission-builders.js';
+import { missionVersion } from '../../../src/application/domain-ports.js';
+import { makePorts, makeRecorder } from '../../helpers/handoff-ports.js';
 // review gate repair contract.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
-import test, { describe } from 'node:test';
+import test, { describe, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { runPreReviewGate, gateFailureReason } from '../../../src/adapters/review/review-gate-handling.js';
 import { preReviewRebaseFacts } from '../../../src/adapters/review/review-loop.js';
@@ -27,10 +34,10 @@ describe("pre review gate per round", { concurrency: false }, () => {
     const fake = fakeReviewLoopPorts({
       slug: TEST_SLUG,
       routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
-      handoff: { handoff: async () => ({ ok: true }) },
-      provider: { pollReview: async () => reviewOutcomes.shift(), pollDisposition: async () => dispositions.shift() },
+      handoff: { handoff: async () => ({ ok: true as const }) },
+      provider: { pollReview: async () => reviewOutcomes.shift() ?? null, pollDisposition: async () => dispositions.shift() ?? null },
       preReview: {
-        runGate: async () => { gateCalls.push(gateCalls.length + 1); return { ok: true }; },
+        runGate: async () => { gateCalls.push(gateCalls.length + 1); return { ok: true as const }; },
         // The implementer addressed the finding, so round 2 evaluates a revised
         // revision (TASK-2478/criterion 8 stops on an unchanged HEAD).
         head: () => `head-${++head}`,
@@ -49,12 +56,12 @@ describe("pre review gate per round", { concurrency: false }, () => {
     const fake = fakeReviewLoopPorts({
       slug: TEST_SLUG,
       routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
-      handoff: { handoff: async () => ({ ok: true }) },
+      handoff: { handoff: async () => ({ ok: true as const }) },
       provider: {},
       preReview: {
         runGate: async () => {
           gateCalls += 1;
-          return { ok: false, area: 'lib', exitCode: 1, diagnostic: 'still failing', reason: gateFailureReason({ ok: false, area: 'lib', command: 'false', exitCode: 1, stdout: '', stderr: '' }) };
+          return { ok: false as const, area: 'lib' as const, exitCode: 1, diagnostic: 'still failing', reason: gateFailureReason({ ok: false, area: 'lib', command: 'false', exitCode: 1, stdout: '', stderr: '' }) };
         },
       },
     });
@@ -69,24 +76,25 @@ describe("pre review gate per round", { concurrency: false }, () => {
 
   test('review loop rebounces a pre-review safety-commit hook failure before gate or reviewer launch', async () => {
     let gateCalls = 0;
-    const hook = preReviewRebaseFacts({ ok: false, sharedFileConflicts: false, hookFailure: true, hookOutput: 'pre-commit hook failed: lint error' } as never);
+    const hook = preReviewRebaseFacts({ ok: false, sharedFileConflicts: false, hookFailure: true, hookOutput: 'pre-commit hook failed: lint error' });
     assert.equal(hook.ok, false);
     const hookBounce = !hook.ok ? hook.hook : null;
     // TASK-2377.03: the hook path does not synthesize a `git-hook` gate result;
     // the rebase facts carry a structured hook-failure reason (SC5).
+    assert.ok(hookBounce != null);
     assert.equal(hookBounce.kind, 'hook-failure');
     assert.equal(hookBounce.hook, 'pre-commit');
-    assert.match(hookBounce.operation, /pre-review safety commit/);
+    assert.match(hookBounce.operation ?? '', /pre-review safety commit/);
     assert.match(hookBounce.output, /pre-commit hook failed/);
 
     const fake = fakeReviewLoopPorts({
       slug: TEST_SLUG,
       routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
-      handoff: { handoff: async () => ({ ok: true }) },
+      handoff: { handoff: async () => ({ ok: true as const }) },
       provider: {},
       preReview: {
         rebase: async () => hook,
-        runGate: async () => { gateCalls++; return { ok: true }; },
+        runGate: async () => { gateCalls++; return { ok: true as const }; },
       },
       agents: { launch: async launch => ({ agent: launch.agent, result: { status: 0 } }) },
     });
@@ -109,8 +117,8 @@ describe("pre review gate", { concurrency: false }, () => {
    * longer derived from the failure text at this call site, and the ADR 0048
    * table is covered by `test/task-2377.03-rebound-kernel.test.ts`.
    */
-  const passingVerify = () => ({ ok: true });
-  async function withTempDir(fn) {
+  const passingVerify = () => ({ ok: true as const });
+  async function withTempDir(fn: (_arg0: string) => void | Promise<void>) {
     const dir = registeredMkdtemp('task-1385-');
     try {
       return await fn(dir);
@@ -124,7 +132,7 @@ describe("pre review gate", { concurrency: false }, () => {
   // ============================================================================
 
   test('runPreReviewGate passes when gate command succeeds', async () => {
-    await withTempDir(async root => {
+    await withTempDir(async (root) => {
       fs.writeFileSync(
         path.join(root, 'workflow.config.json'),
         JSON.stringify({
@@ -139,7 +147,7 @@ describe("pre review gate", { concurrency: false }, () => {
       const logs = [];
       const errors = [];
       const result = await runPreReviewGate('task-1385', root, {
-        runFn: () => ({ status: 0, stdout: 'ok\n', stderr: '' }),
+        runFn: () => ({ signal: null,  status: 0, stdout: 'ok\n', stderr: '' }),
         findMissionAreaFn: () => 'docs',
         log: (msg) => logs.push(msg),
         error: (msg) => errors.push(msg),
@@ -153,7 +161,7 @@ describe("pre review gate", { concurrency: false }, () => {
   });
 
   test('runPreReviewGate fails when gate command fails', async () => {
-    await withTempDir(async root => {
+    await withTempDir(async (root) => {
       fs.writeFileSync(
         path.join(root, 'workflow.config.json'),
         JSON.stringify({
@@ -168,7 +176,7 @@ describe("pre review gate", { concurrency: false }, () => {
       const logs = [];
       const errors = [];
       const result = await runPreReviewGate('task-1385', root, {
-        runFn: () => ({ status: 1, stdout: '', stderr: '' }),
+        runFn: () => ({ signal: null,  status: 1, stdout: '', stderr: '' }),
         findMissionAreaFn: () => 'docs',
         log: (msg) => logs.push(msg),
         error: (msg) => errors.push(msg),
@@ -182,7 +190,7 @@ describe("pre review gate", { concurrency: false }, () => {
   });
 
   test('runPreReviewGate passes when no verification gate is configured', async () => {
-    await withTempDir(async root => {
+    await withTempDir(async (root) => {
       fs.writeFileSync(
         path.join(root, 'workflow.config.json'),
         JSON.stringify({
@@ -196,7 +204,7 @@ describe("pre review gate", { concurrency: false }, () => {
       const logs = [];
       const errors = [];
       const result = await runPreReviewGate('task-1385', root, {
-        runFn: () => ({ status: 99, stdout: '', stderr: '' }),
+        runFn: () => ({ signal: null,  status: 99, stdout: '', stderr: '' }),
         findMissionAreaFn: () => 'docs',
         log: (msg) => logs.push(msg),
         error: (msg) => errors.push(msg),
@@ -210,7 +218,7 @@ describe("pre review gate", { concurrency: false }, () => {
   });
 
   test('runPreReviewGate captures stdout and stderr on failure', async () => {
-    await withTempDir(async root => {
+    await withTempDir(async (root) => {
       fs.writeFileSync(
         path.join(root, 'workflow.config.json'),
         JSON.stringify({
@@ -225,7 +233,7 @@ describe("pre review gate", { concurrency: false }, () => {
       const logs = [];
       const errors = [];
       const result = await runPreReviewGate('task-1385', root, {
-        runFn: () => ({ status: 2, stdout: 'out\n', stderr: 'err\n' }),
+        runFn: () => ({ signal: null,  status: 2, stdout: 'out\n', stderr: 'err\n' }),
         findMissionAreaFn: () => 'docs',
         log: (msg) => logs.push(msg),
         error: (msg) => errors.push(msg),
@@ -239,7 +247,7 @@ describe("pre review gate", { concurrency: false }, () => {
   });
 
   test('runPreReviewGate resolves mission area from mission directory', async () => {
-    await withTempDir(async root => {
+    await withTempDir(async (root) => {
       const missionDir = path.join(root, 'missions', 'task-1385');
       fs.mkdirSync(missionDir, { recursive: true });
       // Include a verification command pattern that detectMissionAreaFromContent can parse
@@ -259,7 +267,7 @@ describe("pre review gate", { concurrency: false }, () => {
       const logs = [];
       const errors = [];
       const result = await runPreReviewGate('task-1385', root, {
-        runFn: () => ({ status: 0, stdout: 'area-test\n', stderr: '' }),
+        runFn: () => ({ signal: null,  status: 0, stdout: 'area-test\n', stderr: '' }),
         findMissionAreaFn: () => 'task-1385',
         log: (msg) => logs.push(msg),
         error: (msg) => errors.push(msg),
@@ -275,23 +283,23 @@ describe("pre review gate", { concurrency: false }, () => {
   // pre-review failure through one rebound-kernel occurrence.
   // ============================================================================
 
-  function repairFixture(verify: { rebase?: () => unknown; runGate?: () => unknown } = {}, launch?: (_launch: any) => unknown) {
+  function repairFixture(verify: ReviewLoopFakeOverrides['preReview'] = {}, launch?: NonNullable<ReviewLoopFakeOverrides['agents']>['launch']) {
     const fake = fakeReviewLoopPorts({
       slug: 'task-1385',
       preReview: {
         ...(verify.rebase ? { rebase: verify.rebase } : {}),
         ...(verify.runGate ? { runGate: verify.runGate } : {}),
-      } as never,
-      agents: launch ? { launch: launch as never } : {},
+      },
+      agents: launch ? { launch: launch } : {},
     });
     return { fake, context: fakeLoopContext(fake, { slug: 'task-1385' }) };
   }
 
-  const gateFailure = (overrides: Record<string, unknown>) => gateFailureReason({ ok: false, area: 'docs', command: 'exit 1', exitCode: 1, stdout: 'output', stderr: '', ...overrides } as never);
+  const gateFailure = (overrides: Record<string, unknown>) => gateFailureReason({ ok: false, area: 'docs', command: 'exit 1', exitCode: 1, stdout: 'output', stderr: '', ...overrides });
 
   test('pre-review repair bounces a gate failure whose verification re-run passes', async () => {
     let verifyRuns = 0;
-    const { fake, context } = repairFixture({ runGate: () => { verifyRuns++; return { ok: true }; } });
+    const { fake, context } = repairFixture({ runGate: async () => { verifyRuns++; return { ok: true as const }; } });
 
     const result = await repairPreReviewFailure(context, gateFailure({ stdout: 'stdout output', stderr: 'verification gate failed with exit code 1' }), 2);
 
@@ -322,8 +330,8 @@ describe("pre review gate", { concurrency: false }, () => {
   test('pre-review repair relaunches with the fresh diagnostic when the verification re-run still fails', async () => {
     const verifyDiagnostics = ['second run: 1 test still failing'];
     const { fake, context } = repairFixture({
-      runGate: () => verifyDiagnostics.length
-        ? { ok: false, area: 'docs', exitCode: 1, diagnostic: verifyDiagnostics.shift(), reason: undefined }
+      runGate: async () => verifyDiagnostics.length
+        ? { ok: false, area: 'docs', exitCode: 1, diagnostic: verifyDiagnostics.shift() ?? '', reason: gateFailure({ stdout: 'second run: 1 test still failing' }) }
         : { ok: true },
     });
 
@@ -337,7 +345,7 @@ describe("pre review gate", { concurrency: false }, () => {
   });
 
   test('pre-review repair strands the mission when the per-occurrence budget is spent', async () => {
-    const { fake, context } = repairFixture({ runGate: () => ({ ok: false, area: 'docs', exitCode: 1, diagnostic: 'gate still failing', reason: undefined }) });
+    const { fake, context } = repairFixture({ runGate: async () => ({ ok: false as const, area: 'docs' as const, exitCode: 1, diagnostic: 'gate still failing', reason: gateFailure({ stdout: 'gate still failing' }) }) });
 
     const result = await repairPreReviewFailure(context, gateFailure({}), 2);
 
@@ -399,8 +407,8 @@ describe("pre review gate", { concurrency: false }, () => {
   test('pre-review repair verifies by re-running the rebase before the gate', async () => {
     const order: string[] = [];
     const { context } = repairFixture({
-      rebase: () => { order.push('rebase'); return { ok: true }; },
-      runGate: () => { order.push('gate'); return { ok: true }; },
+      rebase: async () => { order.push('rebase'); return { ok: true as const }; },
+      runGate: async () => { order.push('gate'); return { ok: true as const }; },
     });
 
     const result = await repairPreReviewFailure(context, gateFailure({}), 2);
@@ -424,28 +432,29 @@ describe("pre review gate repair continues", { concurrency: false }, () => {
     const logs: string[] = [];
     const transitions: string[] = [];
     const prompts: string[] = [];
-    let persisted: any = null;
+    let persisted: { value: ReviewLoopState | null } = { value: null };
     let gateRuns = 0;
     let rebaseRuns = 0;
     let reviewerLaunches = 0;
 
-    const lifecycleCommands: any[] = [];
+    const lifecycleCommands: Parameters<MissionLifecycleService['transition']>[0][] = [];
     const missionStore = {
-      load: async () => ({ kind: 'found', version: 1, mission: { id: slug, status: lifecycleCommands.at(-1)?.command.type === 'rebound-to-active' ? 'active' : 'review', review: { rounds: [{ number: 1, reviewer: 'claude', implementer: 'codex' }] } } }),
+      load: async () => ({ kind: 'found' as const, version: missionVersion(1), mission: fixtureMission(slug, { status: lifecycleCommands.at(-1)?.command.type === 'rebound-to-active' ? 'active' : 'review', review: pendingReview(slug) }) }),
+      save: async () => { throw new Error('Unexpected fixture save'); },
     };
-    const lifecycle = { transition: async (request: any) => { lifecycleCommands.push(request); return { status: 'completed' }; } };
+    const lifecycle = { transition: async (request: Parameters<MissionLifecycleService['transition']>[0]) => { lifecycleCommands.push(request); return { durableEvidence: [],  status: 'completed' as const }; } };
     const gateFailure = { area: 'static-analysis', exitCode: 1, diagnostic: 'gate diagnostic', reason: gateFailureReason({ ok: false, area: 'static-analysis', command: './scripts/verify-local.sh static-analysis', exitCode: 1, stdout: 'gate diagnostic', stderr: '', error: 'gate failed' }) };
     const fake = fakeReviewLoopPorts({
       slug,
       worktree,
       routing: { eligibleFamilies: () => ['codex', 'claude'] },
-      handoff: { handoff: async () => ({ ok: true }) },
+      handoff: { handoff: async () => ({ ok: true as const }) },
       provider: { pollReview: async () => 'APPROVED', pollDisposition: async () => 'CHANGES_MADE' },
-      missionStore: missionStore as never,
-      lifecycle: lifecycle as never,
+      missionStore: missionStore,
+      lifecycle: lifecycle,
       stateport: {
-        read: async () => persisted,
-        persist: async state => { persisted = state; },
+        read: async () => persisted.value,
+        persist: async state => { persisted.value = state; },
       },
       task: { mirror: async lane => { transitions.push(lane); } },
       preReview: {
@@ -470,7 +479,8 @@ describe("pre review gate repair continues", { concurrency: false }, () => {
     await runReviewLoop({ slug, implementer: 'codex', reviewer: 'claude', maxAttempts: 1 }, fake.ports);
 
     const resumed = lifecycleCommands.find(request => request.command.type === 'submit-for-review');
-    assert.deepEqual(resumed?.command.reviewerEligibility?.reviewers, ['codex', 'claude'],
+    assert.ok(resumed?.command.type === 'submit-for-review');
+    assert.deepEqual(resumed.command.reviewerEligibility?.reviewers, ['codex', 'claude'],
       'repair resumption receives the full configured review pool');
     // Green contract: the verified gate-only repair never reaches exit(1) and
     // launches the reviewer exactly once in the same round.
@@ -500,18 +510,21 @@ describe("rebounce review submit repro", { concurrency: false }, () => {
   test('task-2439 repro: review-submit declared-gate prose is a reboundable validation failure, never a Bash command', () => {
     const command = './scripts/verify-local.sh all (CP-4: exit 0, 0 test failures)';
     let shellRuns = 0;
+    const base = makePorts(makeRecorder());
     const useCase = new HandoffCommandUseCase({
-      fileSystem: {
+      ...base,
+      fileSystem: { ...base.fileSystem,
         existsSync: () => true,
       },
       verification: {
-        readReusableVerificationProof: () => ({ ok: false }),
-        writeReusableVerificationProof: () => ({ ok: true }),
+        ...base.verification,
+        readReusableVerificationProof: () => ({ ok: false as const }),
+        writeReusableVerificationProof: () => ({ ok: true as const }),
       },
       process: {
         spawnSync: () => { shellRuns++; return { status: 2, stdout: '', stderr: 'syntax error' }; },
       },
-    } as any);
+    });
 
     const result = useCase.executeGateCommands([command], '/worktree');
 
@@ -522,7 +535,7 @@ describe("rebounce review submit repro", { concurrency: false }, () => {
   });
 
   test('task-2439 validator keeps exact commands and rejects documented outcomes', () => {
-    const useCase = new HandoffCommandUseCase({ fileSystem: { existsSync: () => true } } as any);
+    const useCase = new HandoffCommandUseCase(makePorts(makeRecorder()));
 
     assert.equal(useCase.validateDeclaredGates(['./scripts/verify-local.sh all'], '/worktree').ok, true);
     for (const declaration of [
@@ -538,18 +551,18 @@ describe("rebounce review submit repro", { concurrency: false }, () => {
   });
 
   test('task-2439 review-submit enables declared-gate recovery at the handoff seam', async () => {
-    let handoffOptions: Record<string, unknown> | undefined;
+    let handoffOptions: Parameters<NonNullable<NonNullable<Parameters<typeof submitForReview>[2]>['performHandoffFn']>>[1];
     await submitForReview('task-2439', false, {
       resolveWorktreeFn: () => '/worktree',
       readReviewStateFn: () => null,
-      resolveTaskFileFn: () => ({ ok: true, taskFile: '/worktree/task.md', matches: [] }),
+      resolveTaskFileFn: () => ({ ok: true as const, taskFile: '/worktree/task.md', matches: [] }),
       getTaskImplementerFn: () => 'codex',
       isReviewProviderEnabledFn: () => false,
       performHandoffFn: async (_slug, options) => {
         handoffOptions = options;
-        return { ok: false, recoveryAttempted: true };
+        return { ok: false as const, recoveryAttempted: true };
       },
-      exit: () => undefined as never,
+      exit: () => undefined,
     });
     assert.equal(handoffOptions?.recoverGateFailure, true);
   });
@@ -567,8 +580,8 @@ describe("rebounce review submit repro", { concurrency: false }, () => {
       worktree: '/worktree',
       implementer: 'codex',
       transitionToImplementer: async () => { transitions.push('active'); },
-      startAgent: async (_step, options: any) => {
-        prompts.push(options.prompt('codex'));
+      startAgent: async (_step, options) => {
+        prompts.push(typeof options.prompt === 'function' ? options.prompt('codex') : options.prompt ?? '');
         return { agent: 'codex', result: { status: 0 } };
       },
       verify: () => ({ ok: ++verifies === 2, diagnostic: 'still malformed' }),
@@ -607,5 +620,169 @@ describe("rebounce review submit repro", { concurrency: false }, () => {
       ['MalformedGates', 'HumanOnly'],
       ['MalformedGates', 'HumanOnly'],
     ]);
+  });
+});
+
+
+describe('retained verification repair continuation', { concurrency: false }, () => {
+  const directories: string[] = [];
+  afterEach(() => {
+    for (const dir of directories.splice(0)) { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+  function fixture({ passing = false, status = 0, recorded = false }: { passing?: boolean; status?: number | null; recorded?: boolean } = {}) {
+    const worktree = registeredMkdtemp('retained-repair-');
+    directories.push(worktree);
+    const command = 'npm run original-check';
+    const repair = { command, incidentId: 'incident', attempt: 1, evidenceRecorded: recorded, verified: false,
+      authorizedGates: [command], authorizedCriteria: ['original criterion'] };
+    const mission = { ...fixtureMission('task-2757'), declaredGates: [command], successCriteria: ['original criterion'],
+      checkpoints: [{ ...fixtureMission('task-2757').checkpoints[0], name: 'CP-2', repair }] };
+    const fake = fakeReviewLoopPorts({
+      worktree,
+      missionStore: { load: async () => ({ kind: 'found' as const, mission, version: missionVersion(1) }),
+        save: async () => assert.fail('retained recovery writes through checkpoint ports') },
+      agents: { launch: async launch => ({ agent: launch.agent, result: { status } }) },
+    });
+    const checks: [string, string][] = [];
+    const verified: Parameters<RepairCheckpointPort['verify']>[] = [];
+    const opens: Parameters<RepairCheckpointPort['open']>[0][] = [];
+    const retainedRepair: RetainedRepairPort = {
+      read: async () => ({ evidence: { version: 1, attempt: 1, capturedRevision: 'head-1', signal: null,
+        stdoutBytes: Buffer.byteLength('original stdout'), stderrBytes: Buffer.byteLength('original stderr'),
+        truncatedFrom: null, redacted: false, incidentId: 'retained-incident', capturedAt: new Date().toISOString(), command,
+        cwd: fake.ports.worktree, exitCode: 1, captureComplete: true, stdoutPath: '/retained/stdout', stderrPath: '/retained/stderr' },
+        stdout: 'original stdout', stderr: 'original stderr' }),
+      verify: async (actual, cwd) => { checks.push([actual, cwd]); return { ok: passing, command: actual, diagnostic: 'original check still fails' }; },
+      checkpoints: { open: async request => { opens.push(request); return { name: 'CP-2', version: 8 }; },
+        readBlocker: async () => undefined, verify: async (...args) => { verified.push(args); } },
+    };
+    const ports = { ...fake.ports, retainedRepair };
+    const run = (options: Partial<ReviewLoopRequest> = {}) => runReviewLoop({ slug: 'task-2757', isContinue: true, implementer: 'codex', ...options }, ports);
+    return { fake: { ...fake, ports }, mission, repair, run, checks, verified, opens, command };
+  }
+
+  test('no-op continuation reruns the retained failed check and stays failed (TASK-2757)', async () => {
+    const f = fixture();
+    await f.run();
+    assert.deepEqual(f.checks, Array(2).fill([f.command, f.fake.ports.worktree]));
+    assert.deepEqual(f.fake.exits, [1]);
+    assert.deepEqual(f.verified, []);
+    assert.equal(f.fake.launches.length, 2);
+    assert.ok(f.fake.launches.every(launch => !launch.prompt && launch.recovery?.sessionPolicy === 'fresh-ephemeral'));
+    const prompt = String(f.fake.launches[0].recovery?.prompt('codex'));
+    for (const text of [f.command, f.fake.ports.worktree, '/retained/stdout', '/retained/stderr', 'original stdout', 'original stderr', 'REPAIR AUTHORITY', 'CP-2', 'Version at launch: 8']) {
+      assert.ok(prompt.includes(text), text);
+    }
+    assert.ok(f.opens.every(request => request.incidentId === f.repair.incidentId));
+    assert.ok(f.fake.errors.some(line => line.includes('repair budget (2)')));
+  });
+
+  for (const command of ['px handoff', 'hook-failure', 'artifact-incomplete', 'agent-timeout']) {
+    for (const verifiedGate of [false, true]) {
+      test(`non-gate ${command} resumes without retained evidence, verified gate=${verifiedGate} (TASK-2757 F1)`, async () => {
+        const f = fixture();
+        const orphan = { ...f.mission.checkpoints[0], name: 'CP-1', repair: { ...f.repair, command, incidentId: 'non-gate' } };
+        f.repair.verified = true;
+        f.mission.checkpoints = verifiedGate ? [orphan, ...f.mission.checkpoints] : [orphan];
+        let reads = 0;
+        f.fake.ports.retainedRepair.read = async () => { reads++; throw new Error('never captured'); };
+        f.mission.review = pendingReview('task-2757');
+        let handoffs = 0;
+        f.fake.ports.handoff = { handoff: async () => { handoffs++; return { gatekeeperPushedBack: true }; } };
+        await f.run();
+        assert.equal(reads, 0);
+        assert.equal(handoffs, 1, 'ordinary handoff resume remains reachable');
+        assert.deepEqual(f.fake.exits, [1], 'handoff still owns its validation decision');
+        assert.equal(f.fake.launches.length, 0);
+        assert.equal(orphan.repair.verified, false, 'routing never fabricates repair proof');
+      });
+    }
+  }
+
+  test('orphan non-gate checkpoint cannot shadow an unfinished gate repair (TASK-2757 F1)', async () => {
+    const f = fixture();
+    f.mission.checkpoints.unshift({ ...f.mission.checkpoints[0], name: 'CP-1', repair: { ...f.repair, command: 'px handoff', incidentId: 'orphan' } });
+    const read = f.fake.ports.retainedRepair.read;
+    const commands: string[] = [];
+    f.fake.ports.retainedRepair.read = async command => { commands.push(command); return read(command); };
+    await f.run();
+    assert.deepEqual(commands, [f.command]);
+    assert.deepEqual(f.checks, Array(2).fill([f.command, f.fake.ports.worktree]));
+    assert.deepEqual(f.fake.exits, [1]);
+  });
+
+  test('exhausted round budget launches no repair (TASK-2757)', async () => {
+    const f = fixture();
+    await f.run({ reboundsPerRound: 0 });
+    assert.deepEqual(f.fake.launches, []);
+    assert.deepEqual(f.checks, []);
+    assert.deepEqual(f.fake.exits, [1]);
+    assert.ok(f.fake.errors.some(line => line.includes('repair budget (0)')));
+  });
+
+  test('recorded but unverified repair completes only after the exact check passes (TASK-2757)', async () => {
+    const f = fixture({ passing: true, recorded: true });
+    await f.run();
+    assert.deepEqual(f.checks, [[f.command, f.fake.ports.worktree]]);
+    assert.deepEqual(f.verified, [['task-2757', 'CP-2']]);
+    assert.deepEqual(f.fake.exits, []);
+    assert.equal(f.fake.launches.length, 1);
+  });
+
+  test('unrelated passing check cannot certify retained recovery (TASK-2757)', async () => {
+    const f = fixture();
+    f.fake.ports.retainedRepair.verify = async () => ({ ok: true, command: 'unrelated' });
+    await f.run();
+    assert.deepEqual(f.verified, []);
+    assert.deepEqual(f.fake.exits, [1]);
+    assert.ok(f.fake.errors.some(line => line.includes('Unrelated check')));
+  });
+
+  for (const status of [null, 130]) {
+    test(`interrupted repair status ${status} remains failed and bounded (TASK-2757)`, async () => {
+      const f = fixture({ status });
+      await f.run();
+      assert.deepEqual(f.fake.exits, [1]);
+      assert.deepEqual(f.verified, []);
+      assert.deepEqual(f.checks, []);
+      assert.equal(f.fake.launches.length, 2);
+    });
+  }
+
+  for (const error of ['missing', 'access-denied']) {
+    test(`unavailable retained evidence ${error} fails without ordinary launch (TASK-2757)`, async () => {
+      const f = fixture();
+      f.fake.ports.retainedRepair.read = async () => { throw new Error(error); };
+      await f.run();
+      assert.deepEqual(f.fake.exits, [1]);
+      assert.equal(f.fake.launches.length, 0);
+      assert.ok(f.fake.errors.some(line => line.includes(error)));
+    });
+  }
+
+  test('changed locked authority stops retained repair before launch (TASK-2757)', async () => {
+    const f = fixture();
+    f.mission.declaredGates = ['weakened'];
+    await f.run();
+    assert.equal(f.fake.launches.length, 0);
+    assert.deepEqual(f.fake.exits, [1]);
+    assert.ok(f.fake.errors.some(line => line.includes('operator decision')));
+  });
+
+  test('changed authority during repair stops before verification (TASK-2757)', async () => {
+    const f = fixture({ passing: true });
+    f.fake.ports.agents.launch = async () => { f.mission.successCriteria = ['changed']; return { result: { status: 0 } }; };
+    await f.run();
+    assert.deepEqual(f.checks, []);
+    assert.deepEqual(f.verified, []);
+    assert.deepEqual(f.fake.exits, [1]);
+  });
+
+  test('checkpoint evidence rejection prevents successful recovery (TASK-2757)', async () => {
+    const f = fixture({ passing: true });
+    f.fake.ports.retainedRepair.checkpoints.verify = async () => { throw new Error('fresh evidence required'); };
+    await f.run();
+    assert.deepEqual(f.fake.exits, [1]);
+    assert.ok(f.fake.errors.some(line => line.includes('fresh evidence required')));
   });
 });

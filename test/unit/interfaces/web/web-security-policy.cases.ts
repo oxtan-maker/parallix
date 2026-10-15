@@ -1,3 +1,6 @@
+import Fastify from 'fastify';
+import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 // web-security-policy — hermetic unit tests for the loopback web host policy.
 //
 // These tests exercise the pure decision functions in
@@ -51,7 +54,7 @@ test('web security: expected Host header matches only actual loopback host and b
 });
 
 test('web security: mutation authorization rejects an absent or wrong Origin', () => {
-  const base = { sessionCookie: LAUNCH_VALUE, csrfHeader: LAUNCH_VALUE };
+  const base = { sessionCookie: LAUNCH_VALUE, csrfHeader: LAUNCH_VALUE } satisfies Partial<NonNullable<Parameters<typeof evaluateMutationAuthorization>[0]>>;
   assert.deepEqual(evaluateMutationAuthorization({ ...base, origin: undefined }, ORIGIN, LAUNCH_VALUE), { result: 'reject', reason: 'absent-origin' });
   assert.deepEqual(evaluateMutationAuthorization({ ...base, origin: '' }, ORIGIN, LAUNCH_VALUE), { result: 'reject', reason: 'absent-origin' });
   assert.deepEqual(evaluateMutationAuthorization({ ...base, origin: 'http://evil.example' }, ORIGIN, LAUNCH_VALUE), { result: 'reject', reason: 'wrong-origin' });
@@ -59,14 +62,14 @@ test('web security: mutation authorization rejects an absent or wrong Origin', (
 });
 
 test('web security: mutation authorization rejects an absent or wrong session cookie', () => {
-  const base = { origin: ORIGIN, csrfHeader: LAUNCH_VALUE };
+  const base = { origin: ORIGIN, csrfHeader: LAUNCH_VALUE } satisfies Partial<NonNullable<Parameters<typeof evaluateMutationAuthorization>[0]>>;
   assert.deepEqual(evaluateMutationAuthorization({ ...base, sessionCookie: undefined }, ORIGIN, LAUNCH_VALUE), { result: 'reject', reason: 'absent-session' });
   assert.deepEqual(evaluateMutationAuthorization({ ...base, sessionCookie: '' }, ORIGIN, LAUNCH_VALUE), { result: 'reject', reason: 'absent-session' });
   assert.deepEqual(evaluateMutationAuthorization({ ...base, sessionCookie: 'stale-or-forged' }, ORIGIN, LAUNCH_VALUE), { result: 'reject', reason: 'wrong-session' });
 });
 
 test('web security: mutation authorization rejects an absent or wrong CSRF header', () => {
-  const base = { origin: ORIGIN, sessionCookie: LAUNCH_VALUE };
+  const base = { origin: ORIGIN, sessionCookie: LAUNCH_VALUE } satisfies Partial<NonNullable<Parameters<typeof evaluateMutationAuthorization>[0]>>;
   assert.deepEqual(evaluateMutationAuthorization({ ...base, csrfHeader: undefined }, ORIGIN, LAUNCH_VALUE), { result: 'reject', reason: 'absent-csrf' });
   assert.deepEqual(evaluateMutationAuthorization({ ...base, csrfHeader: '' }, ORIGIN, LAUNCH_VALUE), { result: 'reject', reason: 'absent-csrf' });
   assert.deepEqual(evaluateMutationAuthorization({ ...base, csrfHeader: 'stale-or-forged' }, ORIGIN, LAUNCH_VALUE), { result: 'reject', reason: 'wrong-csrf' });
@@ -181,15 +184,15 @@ test('web security: asset path resolution rejects traversal and non-allowlisted 
 });
 
 test('mission history routes fail closed when projection or capability is unavailable (TASK-2661, TASK-2749)', async () => {
-  const { registerTerminalRoute, WEB_TERMINAL_PATH } = await import('../../../../src/interfaces/web/terminal-route.js');
-  async function invoke(options: Parameters<typeof registerTerminalRoute>[1], params = { missionId: 'task-1' }) {
-    const handlers = new Map<string, any>();
-    registerTerminalRoute({ get: (path: string, fn: any) => { handlers.set(path, fn); } } as never, options);
-    let status = 0;
-    let body: any;
-    const reply = { code: (value: number) => { status = value; return reply; }, type: () => reply, send: (value: any) => { body = value; return reply; } };
-    await handlers.get(WEB_TERMINAL_PATH)({ params, query: {} }, reply);
-    return { status, body };
+  const { registerTerminalRoute } = await import('../../../../src/interfaces/web/terminal-route.js');
+  async function invoke(options: Parameters<typeof registerTerminalRoute>[1], params: { missionId?: string } = { missionId: 'task-1' }) {
+    const app = Fastify();
+    app.addHook('preHandler', async request => { request.params = params; });
+    registerTerminalRoute(app, options);
+    try {
+      const response = await app.inject({ method: 'GET', url: '/api/terminal/task-1' });
+      return { status: response.statusCode, body: response.json<unknown>() };
+    } finally { await app.close(); }
   }
   const terminal = { overview: () => ({ state: 'missing' }) } as never;
   assert.equal((await invoke({})).status, 503);

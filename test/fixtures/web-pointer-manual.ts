@@ -42,14 +42,14 @@ try {
   const board = { ...compact, stages: compact.stages.map((stage) => {
     const lane = lanes.find((lane) => lane === stage.lane);
     return lane ? compactPointerSnapshot(lane).stages.find((next) => next.lane === lane)! : stage;
-  }) };
+  }) } satisfies NonNullable<Parameters<typeof fixture.render>[0]>;
   await fixture.render(board);
   assert.equal(await page.locator('[data-board-card]').count(), 5);
   assert.equal(await page.locator('[data-board-card] button:not([data-action-kind="mission:edit"])').count(), 10);
   await page.screenshot({ path: '/tmp/task-2705-compact-board.png' });
   console.log('PASS manual normal server projections: five lanes, two controls per card; screenshot /tmp/task-2705-compact-board.png');
   const base = pointerSnapshot('active');
-  const supplied = {...base, stages: base.stages.map((stage) => ({...stage, cards: stage.cards.map((card) => ({...card, actions: card.actions.map((action) => ({...action, state: 'enabled' as const, reason: null}))}))}))};
+  const supplied = {...base, stages: base.stages.map((stage) => ({...stage, cards: stage.cards.map((card) => ({...card, actions: card.actions.map((action) => ({...action, state: 'enabled' as const, reason: null}))}))}))} satisfies NonNullable<Parameters<typeof fixture.render>[0]>;
   await fixture.render(supplied);
   for (const command of ['active', 'handoff', 'review', 'integrate']) {
     await press(page.locator(`[data-board-card] button[aria-label^="px ${command}"]`));
@@ -57,7 +57,7 @@ try {
   }
   assert.deepEqual(requests.map((request) => (request as {kind: string}).kind), ['active:execute', 'handoff:record', 'review:submit', 'integrate:merge']);
   const backlog = pointerSnapshot('backlog', ['cancel']);
-  const tall = {...backlog, stages: backlog.stages.map((stage) => ({...stage, cards: stage.cards.flatMap((card) => Array.from({length: 40}, (_, index) => ({...card, id: index === 39 ? card.id : `task-disposable-${index}`}))) }))};
+  const tall = {...backlog, stages: backlog.stages.map((stage) => ({...stage, cards: stage.cards.flatMap((card) => Array.from({length: 40}, (_, index) => ({...card, id: index === 39 ? card.id : `task-disposable-${index}`}))) }))} satisfies NonNullable<Parameters<typeof fixture.render>[0]>;
   await fixture.render(tall);
   await press(page.locator('[data-board-card="task-pointer-disposable"] button[data-action-kind="mission:cancel"]'));
   const box = await page.getByRole('dialog').boundingBox(); assert.ok(box);

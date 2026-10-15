@@ -302,7 +302,7 @@ async function seedInflightMission(fixtureRoot: string, stateRoot: string): Prom
   assert.equal(intake.status, 'completed', 'the fixture mission must be materialized for the authoritative board guard');
   // Intake materializes every mission as `backlog`; refinement is what
   // `px draft` records once the contract is recorded, and activation demands it.
-  const context = { missionId: id, capabilities: new Set(['mission:context'] as const) };
+  const context = { missionId: id, capabilities: new Set(['mission:context'] as const) } satisfies Partial<NonNullable<Parameters<typeof services.brief.update>[0]>>;
   for (const write of [
     () => services.brief.update({ ...context, operationId: `${SC3_SLUG}-brief`, patch: { goal: 'Shut down cleanly', why: 'Fixture', scope: 'Fixture scope' } }),
     () => services.brief.setSuccessCriteria({ ...context, operationId: `${SC3_SLUG}-criteria`, criteria: ['The fixture shuts down'] }),

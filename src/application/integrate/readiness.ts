@@ -1,3 +1,4 @@
+import type { IntegrationContext } from './context.js';
 /**
  * The trust evidence a human needs to authorize landing, and nothing else.
  */
@@ -10,24 +11,8 @@ import * as fmt from '../presentation/cli-format.js';
  * notably, invoking `px integrate` *is* the human decision, so no row ever
  * asserts that a human inspected the diff.
  */
-export function buildIntegrationReadiness(
-  context: any,
-  { verification }: { verification: string },
-  primaryBranch: () => string,
-): [string, string][] {
-  const rounds: any[] = context.missionReview?.rounds ?? [];
-  const approvedRound = [...rounds].reverse().find(round => round?.decision?.kind === 'approved') ?? null;
-  const lastRound = rounds.length > 0 ? rounds[rounds.length - 1] : null;
-  const evidenceRound = approvedRound ?? lastRound;
-
-  const rows: [string, string][] = [['Mission', context.slug]];
-
-  if (approvedRound) {
-    rows.push(['Review', `approved (round ${approvedRound.number})`]);
-  } else if (context.approval?.ok && context.approval?.reviewState === 'APPROVED') {
-    rows.push(['Review', 'approved']);
-  }
-
+function reviewIdentityRows(evidenceRound: NonNullable<IntegrationContext['missionReview']>['rounds'][number] | null): [string, string][] {
+  const rows: [string, string][] = [];
   const reviewer = evidenceRound?.reviewer ?? null;
   const implementer = evidenceRound?.implementer ?? null;
   if (reviewer) {
@@ -42,6 +27,33 @@ export function buildIntegrationReadiness(
     ]);
   }
 
+  return rows;
+}
+
+function reviewReadinessRows(context: IntegrationContext): [string, string][] {
+  const rounds = context.missionReview?.rounds ?? [];
+  const approvedRound = [...rounds].reverse().find(round => round?.decision?.kind === 'approved') ?? null;
+  const lastRound = rounds.length > 0 ? rounds[rounds.length - 1] : null;
+  const evidenceRound = approvedRound ?? lastRound;
+
+  const rows: [string, string][] = [['Mission', context.slug]];
+
+  if (approvedRound) {
+    rows.push(['Review', `approved (round ${approvedRound.number})`]);
+  } else if (context.approval?.ok && context.approval?.reviewState === 'APPROVED') {
+    rows.push(['Review', 'approved']);
+  }
+
+  rows.push(...reviewIdentityRows(evidenceRound));
+  return rows;
+}
+
+export function buildIntegrationReadiness(
+  context: IntegrationContext,
+  { verification }: { verification: string },
+  primaryBranch: () => string,
+): [string, string][] {
+  const rows = reviewReadinessRows(context);
   rows.push(['Verification', verification]);
   rows.push(['Target', String(context.baseBranch || primaryBranch())]);
   rows.push([
@@ -54,7 +66,7 @@ export function buildIntegrationReadiness(
   return rows;
 }
 
-export function printIntegrationReadiness(rows: [string, string][], { log = fmt.log.plain }: { log?: Function } = {}) {
+export function printIntegrationReadiness(rows: [string, string][], { log = fmt.log.plain }: { log?: (text: string) => unknown } = {}) {
   log('');
   log(fmt.bold('READY TO INTEGRATE'));
   log(fmt.table(rows.map(([label, value]) => [label, value])));

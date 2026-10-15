@@ -205,7 +205,6 @@ export function isTransientVerifierFailure(reason: ReboundReason): boolean {
   return reason.kind === 'gate-failure' && reason.transient === true;
 }
 
-
 export const DEFAULT_REBOUND_ATTEMPTS = 2;
 
 export function transientRetryAllowed(reason: ReboundReason, attempt: number, retries: number): boolean {
@@ -222,9 +221,11 @@ export function repairStrategy(_attempt: number): 'fresh-diagnostic' {
   return 'fresh-diagnostic';
 }
 
-export function launchRecoveryAction(ok: boolean, repairAttempted: boolean, attempts: number, launchFailures: number, maxRetries: number): 'verify' | 'skip' | 'stop' | 'retry' {
+export function launchRecoveryAction(ok: boolean, repairAttempted: boolean, attempts: number, launchFailures: number, maxRetries: number, deterministic = false): 'verify' | 'skip' | 'stop' | 'retry' {
   if (ok) { return 'verify'; }
   if (repairAttempted) { return 'skip'; }
+  // A launch the operating system refused (E2BIG, ENOENT, ...) fails again unchanged.
+  if (deterministic) { return 'stop'; }
   return attempts > 0 || launchFailures + 1 > maxRetries ? 'stop' : 'retry';
 }
 
@@ -233,4 +234,14 @@ export function repairBudgetAllows(attempt: number, maximum: number): boolean { 
 export function reboundExhaustion(classification: ReboundClassification, attempts: number, maximum: number): 'human' | 'repair-budget' | 'launcher-budget' {
   if (!classification.isRelaunchable) { return 'human'; }
   return attempts >= maximum ? 'repair-budget' : 'launcher-budget';
+}
+
+/** A different successful check cannot certify the original failing gate. */
+export function differentGateVerification(original: ReboundReason, verified: { ok: boolean; command?: string }, hasRepairCheckpoint: boolean): { originalCommand: string } | null {
+  if (verified.ok && original.kind === 'gate-failure' && (hasRepairCheckpoint || verified.command) && verified.command !== original.command) { return { originalCommand: original.command }; }
+  return null;
+}
+/** Invalid locked contracts escalate immediately after a repair verification. */
+export function repairVerificationRequiresHuman(reason: ReboundReason | undefined): boolean {
+  return Boolean(reason && (reason.kind === 'declared-gate-validation' || (reason.kind === 'gate-failure' && reason.invalidContract)));
 }

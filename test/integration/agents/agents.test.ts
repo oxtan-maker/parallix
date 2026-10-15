@@ -1,7 +1,11 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import { missionId as fixtureMissionId } from '../../../src/domain/mission.js';
+import { agentFamily as fixtureAgentFamily } from '../../../src/domain/agents.js';
+import type { AgentLauncherInput, AgentProcessResult } from '../../../src/adapters/agents/agent-process-types.js';
+import type { SessionMarkerPort } from '../../../src/application/domain-ports.js';
+import { agentFamily } from '../../../src/domain/agents.js';
+import type { AgentInvocation } from "../../../src/adapters/agents/agent-process-types.js";
 
 import { clearCustomAdmissionStateCache } from '../../../src/adapters/sqlite/custom-admission-state.js';
-import { pinnedCliBootstrap } from '../../../src/adapters/agents/launch-prompt-context.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
@@ -35,34 +39,35 @@ const originalPath = process.env.PATH;
 const originalPiBin = process.env.PI_BIN;
 
 test('a recovery launch uses the fresh-session marker port', async () => {
-  let launched;
+  let launched: { value: import("../../../src/adapters/agents/agent-process-types.js").AgentLauncherInput | undefined } = { value: undefined };
   await startAgent('execute', { configuration: resolveConfiguration(process.env),
     prompt: 'Recover this mission.', worktree: '/tmp/task-2489-recovery', agent: 'claude',
     slug: 'task-2489-stuck', role: 'implementer', sessionMarkerPort: FRESH_SESSION_MARKER_PORT,
     isAgentBlockedFn: () => false, resolveAgentModelFn: () => null, assertAgentSupportedFn: () => {}, log: () => {},
     launchAgentFn: (options) => {
-      launched = options;
+      launched.value = options;
       return { invocation: { command: 'claude', args: [], options: {} }, resultPromise: Promise.resolve({ status: 0, stdout: '', stderr: '' }) };
     },
   });
-  assert.equal(launched.resume, false);
-  assert.equal(launched.sessionId, null);
+  assert.ok(launched.value != null);
+  assert.equal(launched.value.resume, false);
+  assert.equal(launched.value.sessionId, null);
 });
 
 test('startAgent sessionPolicy keeps the normal marker while fresh recovery bypasses it', async () => {
   const markerCalls = { shouldResume: 0, find: 0, save: 0, delete: 0 };
   const sessionMarkerPort = {
-    shouldResume: () => (markerCalls.shouldResume++, true),
-    find: () => (markerCalls.find++, { sessionId: 'durable-normal-session' }),
-    save: () => { markerCalls.save++; },
-    delete: () => { markerCalls.delete++; },
-  };
-  const launches: any[] = [];
-  const launchAgentFn = (options) => {
+    shouldResume: async () => (markerCalls.shouldResume++, true),
+    find: async (id, role) => (markerCalls.find++, { missionId: id, role, agent: agentFamily('claude'), lastLaunched: '2026-08-01T00:00:00Z', sessionId: 'durable-normal-session' }),
+    save: async () => { markerCalls.save++; },
+    delete: async () => { markerCalls.delete++; },
+  } satisfies SessionMarkerPort;
+  const launches: AgentLauncherInput[] = [];
+  const launchAgentFn: import("../../../src/adapters/agents/agent-process-types.js").AgentLauncher = (options) => {
     launches.push(options);
     return { invocation: { command: 'claude', args: [], options: {} }, resultPromise: Promise.resolve({ status: 0, stdout: '', stderr: '' }) };
   };
-  const common = { prompt: 'repair', worktree: '/tmp/task-2588-session-policy', agent: 'claude', slug: 'task-2588', role: 'implementer', sessionMarkerPort, isAgentBlockedFn: () => false, resolveAgentModelFn: () => null, assertAgentSupportedFn: () => {}, log: () => {}, launchAgentFn };
+  const common = { prompt: 'repair', worktree: '/tmp/task-2588-session-policy', agent: 'claude', slug: 'task-2588', role: 'implementer', sessionMarkerPort, isAgentBlockedFn: () => false, resolveAgentModelFn: () => null, assertAgentSupportedFn: () => {}, log: () => {}, launchAgentFn } satisfies Partial<NonNullable<Parameters<typeof startAgent>[1]>>;
 
   await startAgent('act-on-review', { configuration: resolveConfiguration(process.env), ...common, sessionPolicy: 'resume' });
   const callsAfterResume = { ...markerCalls };
@@ -103,7 +108,7 @@ const {
   shouldPersistLaunchFailureBlock
 } = resolveNoOutputWatchdogConfigModule;
 
-function formatBlockUntil(date) {
+function formatBlockUntil(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
@@ -121,7 +126,7 @@ test.before(() => {
   process.env.PATH = `${sharedLauncherBin}${path.delimiter}${originalPath}`;
   // Pi checks global installs before PATH, so keep it pinned to our fixture.
   process.env.PI_BIN = path.join(sharedLauncherBin, 'pi');
-  setCommandPathProbe(name => fs.existsSync(path.join(sharedLauncherBin, name)));
+  setCommandPathProbe(name => fs.existsSync(path.join(sharedLauncherBin, name)) ? path.join(sharedLauncherBin, name) : null);
 });
 
 test.after(() => {
@@ -149,7 +154,7 @@ test('custom capacity saturation reports at launch while selection remains eligi
       draft: { eligible: ['custom', 'codex'], selection: 'first' },
       review: { eligible: ['custom'], selection: 'first' }
     }
-  };
+  } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
   const reservation = await tryAcquireCustomCapacity(worktree);
   assert.ok(reservation, 'the first custom reservation should acquire the default capacity');
   try {
@@ -178,7 +183,7 @@ test('custom capacity releases after clean completion, launch failure, signal ca
     PARALLIX_CUSTOM_ADMISSION_HOME: path.join(worktree, 'admission'),
     PARALLIX_CUSTOM_ADMISSION_REPOSITORY: worktree });
   try {
-    const invocation = { command: 'opencode', args: [], options: {} };
+    const invocation = { command: 'opencode', args: [], options: {} } satisfies AgentInvocation;
     const base = {
       prompt: 'test',
       agent: 'custom',
@@ -192,8 +197,8 @@ test('custom capacity releases after clean completion, launch failure, signal ca
       // leaving the rejected promise unhandled (unhandledRejection crash).
       // Capacity accounting does not depend on launcher availability.
       assertAgentSupportedFn: () => {}
-    };
-    const run = async resultPromise => {
+    } satisfies Partial<NonNullable<Parameters<typeof startAgent>[1]>>;
+    const run = async (resultPromise: Promise<AgentProcessResult>) => {
       try {
         await startAgent('draft', { configuration,
           ...base,
@@ -220,7 +225,9 @@ test('custom capacity releases after clean completion, launch failure, signal ca
   }
 });
 
-function withPathLaunchers(entries, run) {
+function withPathLaunchers<T>(entries: Record<string, string>, run: () => Promise<T>): Promise<T>;
+function withPathLaunchers<T>(entries: Record<string, string>, run: () => T): T;
+function withPathLaunchers(entries: Record<string, string>, run: () => unknown): unknown {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-path-'));
   const binDir = path.join(tmpRoot, 'bin');
   fs.mkdirSync(binDir, { recursive: true });
@@ -257,7 +264,7 @@ function withPathLaunchers(entries, run) {
   };
   try {
     const result = run();
-    if (result && typeof result.then === 'function') {
+    if (result instanceof Promise) {
       return result.finally(cleanup);
     }
     cleanup();
@@ -268,15 +275,17 @@ function withPathLaunchers(entries, run) {
   }
 }
 
-function withCommandPathProbe(available, run) {
+function withCommandPathProbe<T>(available: readonly string[], run: () => Promise<T>): Promise<T>;
+function withCommandPathProbe<T>(available: readonly string[], run: () => T): T;
+function withCommandPathProbe(available: readonly string[], run: () => unknown): unknown {
   const availableSet = new Set(available);
-  setCommandPathProbe(name => availableSet.has(name));
+  setCommandPathProbe(name => availableSet.has(name) ? name : null);
   const restore = () => {
-    setCommandPathProbe(name => fs.existsSync(path.join(sharedLauncherBin, name)));
+    setCommandPathProbe(name => fs.existsSync(path.join(sharedLauncherBin, name)) ? path.join(sharedLauncherBin, name) : null);
   };
   try {
     const result = run();
-    if (result && typeof result.then === 'function') {
+    if (result instanceof Promise) {
       return result.finally(restore);
     }
     restore();
@@ -351,7 +360,7 @@ test('isAgentBlocked degrades safely on malformed blocklist entries', () => {
 
 // ---------- readAgentConfig ----------
 
-function withTempAgentConfigTree(run) {
+function withTempAgentConfigTree(run: (_arg0: { configPath: string; projectRoot: string; configDir: string; mainWorktreePath: string; targetPath: string; }) => void) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-config-test-'));
   const projectRoot = path.join(tmpRoot, 'project');
   const configDir = path.join(projectRoot, 'workflow', 'config');
@@ -441,6 +450,7 @@ test('all three agents.local.json blocklist locations are gitignored operator-lo
       // git check-ignore exits 0 (and echoes the path) when the path is ignored.
       execFileSync('git', ['check-ignore', '-q', rel], { cwd: repoRoot });
     } catch (err) {
+      assert.ok(err instanceof Error && 'status' in err);
       ignored = err.status === 0;
     }
     assert.equal(ignored, true, `${rel} must be gitignored (operator-local blocklist)`);
@@ -452,6 +462,7 @@ test('all three agents.local.json blocklist locations are gitignored operator-lo
     execFileSync('git', ['check-ignore', '-q', path.join('workflow', 'config', 'agents.json')], { cwd: repoRoot });
     agentsJsonIgnored = true;
   } catch (err) {
+    assert.ok(err instanceof Error && 'status' in err);
     agentsJsonIgnored = err.status === 0;
   }
   assert.equal(agentsJsonIgnored, false, 'workflow/config/agents.json is committed tool-owned state, not operator-local');
@@ -479,13 +490,14 @@ test('readAgentConfig reports legacy conflicts and applies precedence in lookup 
     fs.writeFileSync(rootPath, JSON.stringify({ blocklist: { gemini: false } }));
     fs.writeFileSync(mainLocalPath, JSON.stringify({ blocklist: { gemini: { blocked: true } } }));
 
-    const warnings = [];
+    const warnings: string[] = [];
     const config = readAgentConfig(configPath, { configuration: resolveConfiguration(process.env),
       mergeLocal: true,
       mainWorktreePath,
       targetPath,
       warn: message => warnings.push(message)
     });
+    assert.ok(config.blocklist != null);
     assert.deepEqual(config.blocklist.gemini, { blocked: true });
     assert.equal(warnings.length, 2);
     assert.match(warnings[0], /Agent blocklist conflict for "gemini"/);
@@ -497,7 +509,7 @@ test('readAgentConfig reports and skips malformed workflow/config/agents.local.j
     const localPath = path.join(configDir, 'agents.local.json');
     fs.writeFileSync(localPath, '{ "blocklist": { "gemini": true, } }\n');
 
-    const warnings = [];
+    const warnings: string[] = [];
     const config = readAgentConfig(configPath, { configuration: resolveConfiguration(process.env),
       mergeLocal: true, mainWorktreePath, targetPath, warn: message => warnings.push(message)
     });
@@ -511,7 +523,7 @@ test('readAgentConfig reports and skips malformed project-root agents.local.json
     const rootPath = path.join(projectRoot, 'agents.local.json');
     fs.writeFileSync(rootPath, '{ "blocklist": { "claude": { "until": "2026-05-01 12" }, } }\n');
 
-    const warnings = [];
+    const warnings: string[] = [];
     readAgentConfig(configPath, { configuration: resolveConfiguration(process.env),
       mergeLocal: true, mainWorktreePath, targetPath, warn: message => warnings.push(message)
     });
@@ -524,7 +536,7 @@ test('readAgentConfig reports and skips malformed main-worktree agents.local.jso
     const mainLocalPath = path.join(mainWorktreePath, 'agents.local.json');
     fs.writeFileSync(mainLocalPath, '{ "blocklist": { "codex": true, } }\n');
 
-    const warnings = [];
+    const warnings: string[] = [];
     readAgentConfig(configPath, { configuration: resolveConfiguration(process.env),
       mergeLocal: true, mainWorktreePath, targetPath, warn: message => warnings.push(message)
     });
@@ -534,7 +546,7 @@ test('readAgentConfig reports and skips malformed main-worktree agents.local.jso
 
 test('readAgentConfig does not warn when main-worktree lookup runs outside a git repo', () => {
   withTempAgentConfigTree(({ configPath, targetPath }) => {
-    const warnings = [];
+    const warnings: string[] = [];
 
     const config = readAgentConfig(configPath, { configuration: resolveConfiguration(process.env),
       mergeLocal: true,
@@ -569,7 +581,7 @@ test('eligibleAgentsForStep returns config list for a known step', () => {
     steps: {
       draft: { eligible: ['codex', 'gemini'], selection: 'random' }
     }
-  };
+  } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
   assert.deepEqual(eligibleAgentsForStep('draft', { configuration: resolveConfiguration(process.env), config }), ['codex', 'gemini']);
 });
 
@@ -581,7 +593,7 @@ test('eligibleAgentsForStep filters out blocked agents', () => {
     blocklist: {
       claude: true
     }
-  };
+  } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
   assert.deepEqual(eligibleAgentsForStep('draft', { configuration: resolveConfiguration(process.env), config }), ['gemini', 'codex']);
 });
 
@@ -605,7 +617,7 @@ test('eligibleAgentsForStep falls back to all supported agents when config is ab
 });
 
 test('eligibleAgentsForStep falls back when step is not in config', () => {
-  const config = { steps: {} };
+  const config = { steps: {} } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
   const eligible = eligibleAgentsForStep('active', { configuration: resolveConfiguration(process.env), config });
   assert.ok(Array.isArray(eligible));
   assert.ok(eligible.length > 0);
@@ -696,7 +708,7 @@ test('selectAgent bypasses WORKFLOW_AGENT override when it is in the exclude set
           steps: {
             review: { eligible: ['claude', 'codex'], selection: 'random' }
           }
-        };
+        } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
         // First call: no exclude → returns the pinned override.
         assert.equal(selectAgent('review', { configuration: resolveConfiguration(process.env), config }), 'claude');
         // Second call: claude in exclude (post-limit-hit) → must NOT return claude.
@@ -730,7 +742,7 @@ test('selectAgent ignores WORKFLOW_AGENT override when the pinned agent is not i
           steps: {
             review: { eligible: ['codex'], selection: 'random' }
           }
-        };
+        } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
         const agent = selectAgent('review', { configuration: resolveConfiguration(process.env), config });
         assert.equal(agent, 'codex', 'override outside the eligible pool must fall through to normal selection');
 
@@ -740,7 +752,7 @@ test('selectAgent ignores WORKFLOW_AGENT override when the pinned agent is not i
             review: { eligible: ['claude', 'codex'], selection: 'random' }
           },
           blocklist: { claude: { until: '2099-12-31 23' } }
-        };
+        } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
         const fallback = selectAgent('review', { configuration: resolveConfiguration(process.env), config: blockedConfig });
         assert.equal(fallback, 'codex', 'override that is hard-blocked must fall through');
       });
@@ -761,7 +773,7 @@ test('selectAgent throws when WORKFLOW_AGENT override is excluded and pool is em
       steps: {
         review: { eligible: ['claude'], selection: 'random' }
       }
-    };
+    } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
     assert.throws(
       () => selectAgent('review', { configuration: resolveConfiguration(process.env), config, exclude: new Set(['claude']) }),
       /exhausted/i
@@ -784,7 +796,7 @@ test('selectAgent picks from eligible list when no env override', () => {
           steps: {
             draft: { eligible: ['codex'], selection: 'random' }
           }
-        };
+        } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
         const agent = selectAgent('draft', { configuration: resolveConfiguration(process.env), config });
         assert.equal(agent, 'codex');
       });
@@ -842,7 +854,7 @@ test('selectAgent throws when eligible list is empty', () => {
       steps: {
         draft: { eligible: [], selection: 'random' }
       }
-    };
+    } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
     assert.throws(() => selectAgent('draft', { configuration: resolveConfiguration(process.env), config }), /No agents are eligible/);
   } finally {
     if (previous !== undefined) process.env.WORKFLOW_AGENT = previous;
@@ -858,7 +870,7 @@ test('selectAgent throws with a clear message when all eligible agents are unsup
         steps: {
           draft: { eligible: ['codex', 'gemini'], selection: 'random' }
         }
-      };
+      } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
       assert.throws(
         () => selectAgent('draft', { configuration: resolveConfiguration(process.env), config }),
         /No eligible agents have a working launcher/
@@ -879,7 +891,7 @@ test('selectAgent random result is always within the eligible-and-supported set'
         steps: {
           draft: { eligible: ['codex', 'claude'], selection: 'random' }
         }
-      };
+      } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
       for (let i = 0; i < 10; i++) {
         const agent = selectAgent('draft', { configuration: resolveConfiguration(process.env), config });
         assert.equal(agent, 'claude', `Expected only claude (codex blocked), got: ${agent}`);
@@ -902,7 +914,7 @@ test('selectAgent weighted result always stays within the available set', () => 
           weights: { codex: 30, claude: 10, gemini: 60 }
         }
       }
-    };
+    } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
     for (let i = 0; i < 30; i++) {
       const agent = selectAgent('active', { configuration: resolveConfiguration(process.env), config });
       assert.ok(
@@ -919,13 +931,13 @@ test('selectAgent weighted result always stays within the available set', () => 
 // test/bootstrap-parallix-home.ts) so no unit test spawns a real agent CLI.
 // Tests that deliberately exercise the real spawn-based probe against fixture
 // binaries restore it for their scope only.
-async function withRealHealthProbe(run) {
+async function withRealHealthProbe<T>(run: () => T | Promise<T>) {
   setLauncherHealthProbe(null);
-  try { return await run(); } finally { setLauncherHealthProbe(() => ({ ok: true })); }
+  try { return await run(); } finally { setLauncherHealthProbe(() => ({ ok: true as const })); }
 }
 
 test('a help probe timeout keeps the present launcher eligible for a real launch', () => {
-  setLauncherHealthProbe(() => ({ ok: false, reason: 'ETIMEDOUT' }));
+  setLauncherHealthProbe(() => ({ ok: false as const, reason: 'ETIMEDOUT' as const }));
   try {
     withPathLaunchers({ pi: 'process.exit(0);' }, () => {
       const status = workflowLauncherStatus('pi', undefined, resolveConfiguration(process.env));
@@ -933,7 +945,7 @@ test('a help probe timeout keeps the present launcher eligible for a real launch
       assert.equal(status.health, 'probe-timeout');
       assert.doesNotThrow(() => assertAgentSupported('custom', undefined, resolveConfiguration(process.env)));
     });
-  } finally { setLauncherHealthProbe(() => ({ ok: true })); }
+  } finally { setLauncherHealthProbe(() => ({ ok: true as const })); }
 });
 
 test('workflowLauncherStatus rejects a launcher that exists but fails its health probe', async () => {
@@ -971,7 +983,7 @@ test('workflowLauncherStatus probes Pi with its side-effect-free version command
       assert.equal(status.supported, true);
       assert.equal(status.health, 'ok');
     });
-  } finally { setLauncherHealthProbe(() => ({ ok: true })); }
+  } finally { setLauncherHealthProbe(() => ({ ok: true as const })); }
 });
 
 test('selectAgent bypasses a broken launcher even when the binary exists', async () => {
@@ -985,7 +997,7 @@ test('selectAgent bypasses a broken launcher even when the binary exists', async
         steps: {
           review: { eligible: ['codex', 'claude'], selection: 'random' }
         }
-      };
+      } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
       const agent = selectAgent('review', { configuration: resolveConfiguration(process.env), config });
       assert.equal(agent, 'claude');
     }));
@@ -1085,11 +1097,11 @@ test('buildClaudeInvocation ignores sessionId when resume is false (cross-family
 });
 
 test('resolveClaudeCommand returns bare claude', () => {
-  assert.equal(resolveClaudeCommand(resolveConfiguration(process.env)), 'claude');
+  assert.equal(resolveClaudeCommand(), 'claude');
 });
 
 test('startAgent calls onLaunch callback immediately after process launch', async () => {
-  const launches = [];
+  const launches: { agent: string; invocation: AgentInvocation | null | undefined; startedAtMs: number; }[] = [];
   let launchLoggedAtMs = Number.POSITIVE_INFINITY;
   const result = await startAgent('review', { configuration: resolveConfiguration(process.env),
     prompt: 'test',
@@ -1104,6 +1116,7 @@ test('startAgent calls onLaunch callback immediately after process launch', asyn
 
   assert.equal(launches.length, 1);
   assert.equal(launches[0].agent, 'claude');
+  assert.ok(launches[0].invocation != null);
   assert.equal(launches[0].invocation.command, 'claude');
   assert.ok(Number.isFinite(launchLoggedAtMs));
   assert.ok(launches[0].startedAtMs <= launchLoggedAtMs, 'deadline starts before launch logging');
@@ -1118,7 +1131,7 @@ test('a rejecting onLaunch stops the already-spawned agent child (TASK-2582 F4)'
       // invocation, so the test proves that exact process is actually gone.
       opencode: 'if (process.argv.includes("--help")) process.exit(0); setInterval(() => {}, 1000);'
     }, async () => {
-      let childPid: number | null = null;
+      let childPid: { value: number | null } = { value: null };
       await assert.rejects(
         startAgent('active', { configuration: resolveConfiguration(process.env),
           agent: 'custom',
@@ -1127,20 +1140,20 @@ test('a rejecting onLaunch stops the already-spawned agent child (TASK-2582 F4)'
           log: () => {},
           isAgentBlockedFn: () => false,
           onLaunch: async ({ invocation }) => {
-            childPid = invocation?.childPid ?? null;
+            childPid.value = invocation?.childPid ?? null;
             throw new Error('activation boundary refused');
           }
         }),
         /activation boundary refused/,
       );
 
-      assert.ok(typeof childPid === 'number', 'the launcher must expose the spawned child pid on the invocation');
+      assert.ok(typeof childPid.value === 'number', 'the launcher must expose the spawned child pid on the invocation');
 
       // The launcher must have stopped the child after the rejection.
       let alive = true;
       const deadline = Date.now() + 5000;
       while (Date.now() < deadline) {
-        try { process.kill(childPid, 0); }
+        try { process.kill(childPid.value, 0); }
         catch (err) { if ((err as NodeJS.ErrnoException).code === 'ESRCH') { alive = false; break; } }
         await new Promise((resolve) => { setTimeout(resolve, 50); });
       }
@@ -1157,7 +1170,7 @@ test('the active deadline starts at the real spawn, excluding slow pre-spawn lau
   // onSpawn, so the refusal path's child-stop exercises a live process.
   const probe = spawnChildProcess(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
   try {
-    let boundaryStartMs: number | null = null;
+    let boundaryStartMs: { value: number | null } = { value: null };
     const preLaunchMs = performance.now();
     await assert.rejects(
       startAgent('active', { configuration: resolveConfiguration(process.env),
@@ -1171,29 +1184,30 @@ test('the active deadline starts at the real spawn, excluding slow pre-spawn lau
         // child and reports it through teeOptions.onSpawn. That prep must not
         // sit inside the lifecycle persistence window: the deadline has to
         // start at the real spawn, not before the launcher.
-        launchAgentFn: (/** @type{{ teeOptions: { onSpawn: (child: {pid?: number}) => void} }} */ opts) => {
+        launchAgentFn: (opts) => {
           const t = Date.now();
           while (Date.now() - t < 300) { /* slow pre-spawn launch prep */ }
-          opts.teeOptions.onSpawn({ pid: probe.pid });
+          assert.ok(opts.teeOptions?.onSpawn);
+          opts.teeOptions.onSpawn(probe);
           return {
             invocation: { command: 'fake', args: [], options: {} },
             resultPromise: new Promise(() => {}),
           };
         },
         onLaunch: async ({ startedAtMs }) => {
-          boundaryStartMs = startedAtMs;
+          boundaryStartMs.value = startedAtMs;
           throw new Error('stop after boundary start captured');
         }
       }),
       /stop after boundary start captured/,
     );
-    assert.ok(typeof boundaryStartMs === 'number', 'onLaunch must receive the deadline start');
+    assert.ok(typeof boundaryStartMs.value === 'number', 'onLaunch must receive the deadline start');
     // The 300 ms pre-spawn prep must not sit inside the lifecycle persistence
     // window: the clock has to start at the real child spawn, well after the
     // pre-launch instant. (Pre-spawn clocking is what made the real-agent
     // smoke miss the 200 ms deadline on a loaded host.)
-    assert.ok(boundaryStartMs! - preLaunchMs >= 200,
-      `deadline started only ${Math.round(boundaryStartMs! - preLaunchMs)} ms after pre-launch; the 300 ms pre-spawn launch prep must be excluded`);
+    assert.ok(boundaryStartMs.value! - preLaunchMs >= 200,
+      `deadline started only ${Math.round(boundaryStartMs.value! - preLaunchMs)} ms after pre-launch; the 300 ms pre-spawn launch prep must be excluded`);
   } finally {
     if (probe.exitCode === null && probe.signalCode === null) {
       try { probe.kill('SIGKILL'); } catch { /* already gone */ }
@@ -1208,7 +1222,7 @@ test('startAgent logs no-output diagnostics with agent, step, and child pid', as
     await withPathLaunchers({
       opencode: 'if (process.argv.includes("--help")) process.exit(0); setTimeout(() => process.exit(0), 75);'
     }, async () => {
-      const log = [];
+      const log: string[] = [];
       const result = await startAgent('active', { configuration: resolveConfiguration(process.env),
         agent: 'custom',
         prompt: 'Execute.',
@@ -1239,7 +1253,7 @@ test('startAgent summarizes the prompt in the launch echo and restores it under 
   const previousDebug = process.env.DEBUG;
   delete process.env.DEBUG;
   try {
-    const log = [];
+    const log: string[] = [];
     await startAgent('review', { configuration: resolveConfiguration(process.env),
       prompt: 'Mode: review.\nSecret harness paragraph nobody reads.',
       selectAgentFn: () => 'claude',
@@ -1251,7 +1265,7 @@ test('startAgent summarizes the prompt in the launch echo and restores it under 
     assert.ok(!launchLine.includes('Secret harness paragraph'), 'the prompt body must not be echoed by default');
 
     process.env.DEBUG = '1';
-    const debugLog = [];
+    const debugLog: string[] = [];
     await startAgent('review', { configuration: resolveConfiguration(process.env),
       prompt: 'Mode: review.\nSecret harness paragraph nobody reads.',
       selectAgentFn: () => 'claude',
@@ -1272,7 +1286,7 @@ test('startAgent stays quiet while the agent is still streaming output', async (
     await withPathLaunchers({
       opencode: 'if (process.argv.includes("--help")) process.exit(0); const t = setInterval(() => process.stdout.write("working\\n"), 10); setTimeout(() => { clearInterval(t); process.exit(0); }, 200);'
     }, async () => {
-      const log = [];
+      const log: string[] = [];
       const result = await startAgent('active', { configuration: resolveConfiguration(process.env),
         agent: 'custom',
         prompt: 'Execute.',
@@ -1318,6 +1332,7 @@ test('resolveVibeCommand returns bare vibe', () => {
 });
 
 test('extractVibeSessionId returns null (vibe has no stdout resume hint)', () => {
+  // @ts-expect-error Null deliberately exercises the missing-output input contract.
   assert.equal(extractVibeSessionId(null), null);
   assert.equal(extractVibeSessionId(''), null);
   assert.equal(extractVibeSessionId('Session completed successfully'), null);
@@ -1330,13 +1345,13 @@ test('startAgent injects FORGEJO_USER into subprocess env', async () => {
     prompt: 'Execute the mission.',
     worktree: '/tmp/mission-task-095',
     agent: 'codex',
-    config: {},
     isAgentBlockedFn: () => false
   });
 
   assert.equal(result.agent, 'codex');
   assert.ok(result.invocation);
   assert.ok(result.invocation.options);
+  assert.ok(result.invocation.options.env != null);
   assert.equal(result.invocation.options.env.FORGEJO_USER, 'codex');
 });
 
@@ -1351,6 +1366,7 @@ test('startDraftAgent injects FORGEJO_USER into subprocess env', async () => {
   assert.equal(result.agent, 'claude');
   assert.ok(result.invocation);
   assert.ok(result.invocation.options);
+  assert.ok(result.invocation.options.env != null);
   assert.equal(result.invocation.options.env.FORGEJO_USER, 'claude');
 });
 
@@ -1360,13 +1376,13 @@ test('startAgent merges caller-supplied env with FORGEJO_USER', async () => {
     worktree: '/tmp/mission-task-095',
     agent: 'codex',
     env: { SOME_CUSTOM_VAR: 'custom-value' },
-    config: {},
     isAgentBlockedFn: () => false
   });
 
   assert.equal(result.agent, 'codex');
   assert.ok(result.invocation);
   assert.ok(result.invocation.options);
+  assert.ok(result.invocation.options.env != null);
   assert.equal(result.invocation.options.env.FORGEJO_USER, 'codex');
   assert.equal(result.invocation.options.env.SOME_CUSTOM_VAR, 'custom-value');
   assert.ok(result.invocation.options.env.HOME);
@@ -1380,39 +1396,40 @@ test('startAgent harness identity wins over caller-supplied FORGEJO_USER', async
     worktree: '/tmp/mission-task-095',
     agent: 'codex',
     env: { FORGEJO_USER: 'wrong-identity' },
-    config: {},
     isAgentBlockedFn: () => false
   });
 
+  assert.ok(result.invocation != null);
+  assert.ok(result.invocation.options != null);
+  assert.ok(result.invocation.options.env != null);
   assert.equal(result.invocation.options.env.FORGEJO_USER, 'codex');
 });
 
 test('startAgent supports a function for prompt and calls it with chosen agent', async () => {
-  const configuration = resolveConfiguration({ ...process.env, PARALLIX_CLI_COMMAND: '/fixture/pinned-cli/px' });
-  const result = await startAgent('review', { configuration,
+  const result = await startAgent('review', { configuration: resolveConfiguration(process.env),
     prompt: (chosen) => `You are ${chosen}.`,
     worktree: '/tmp/mission-task-1051',
     agent: 'codex',
-    config: {},
     isAgentBlockedFn: () => false
   });
 
   assert.equal(result.agent, 'codex');
   assert.ok(result.invocation);
-  const prompt = result.invocation.args.at(-1);
-  assert.ok(prompt.startsWith('You are codex.\n\nPinned CLI shell bootstrap:'));
-  assert.ok(prompt.endsWith(`\n${pinnedCliBootstrap(configuration.agents.cliCommand!)}\n` + '```'));
+  const prompt = result.invocation.options?.input;
+  assert.equal(typeof prompt, 'string');
+  assert.ok(typeof prompt === 'string');
+  assert.equal(prompt, 'You are codex.');
 });
 
 test('startAgent reroutes when the selected agent has no launcher (missing binary)', async () => {
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-reroute-missing-'));
   try {
-    const log = [];
+    const log: string[] = [];
     const result = await withCommandPathProbe(['claude'], () => startAgent('draft', { configuration: resolveConfiguration(process.env),
       prompt: 'Execute',
       worktree,
       selectAgentFn: (step, opts) => {
-        if (!opts.exclude.has('codex')) return 'codex';
+        if (!new Set(opts?.exclude ?? []).has('codex')) return 'codex';
         return 'claude';
       },
       isAgentBlockedFn: () => false,
@@ -1433,12 +1450,12 @@ test('startAgent reroutes when the selected agent fails its health probe', async
     const result = await withRealHealthProbe(() => withPathLaunchers({
       codex: 'process.exit(process.argv.includes("--help") ? 1 : 0);'
     }, async () => {
-      const log = [];
+      const log: string[] = [];
       const launchResult = await startAgent('draft', { configuration: resolveConfiguration(process.env),
         prompt: 'Execute',
         worktree,
         selectAgentFn: (step, opts) => {
-          if (!opts.exclude.has('codex')) return 'codex';
+          if (!new Set(opts?.exclude ?? []).has('codex')) return 'codex';
           return 'claude';
         },
         isAgentBlockedFn: () => false,
@@ -1473,8 +1490,11 @@ test('startAgent with pinnedAgent fails instead of rerouting when the launcher i
           log: () => {}
         }),
         (err) => {
+          assert.ok(err instanceof Error && "code" in err);
           assert.equal(err.code, 'PINNED_AGENT_UNAVAILABLE');
+          assert.ok(err instanceof Error);
           assert.match(err.message, /codex/);
+          assert.ok(err instanceof Error);
           assert.match(err.message, /launcher is not available/);
           return true;
         },
@@ -1499,8 +1519,11 @@ test('startAgent with pinnedAgent fails instead of rerouting when the agent is b
       log: () => {}
     }),
     (err) => {
+      assert.ok(err instanceof Error && "code" in err);
       assert.equal(err.code, 'PINNED_AGENT_UNAVAILABLE');
+      assert.ok(err instanceof Error);
       assert.match(err.message, /codex/);
+      assert.ok(err instanceof Error);
       assert.match(err.message, /blocked/);
       return true;
     },
@@ -1509,7 +1532,7 @@ test('startAgent with pinnedAgent fails instead of rerouting when the agent is b
 });
 
 test('startAgent with pinnedAgent returns the pinned agent failure instead of retrying another family', async () => {
-  const log = [];
+  const log: string[] = [];
   let reselected = false;
   const result = await startAgent('conflict-resolution', { configuration: resolveConfiguration(process.env),
     prompt: 'Execute',
@@ -1519,7 +1542,7 @@ test('startAgent with pinnedAgent returns the pinned agent failure instead of re
     selectAgentFn: () => { reselected = true; return 'claude'; },
     isAgentBlockedFn: () => false,
     detectLimitHitFn: () => null,
-    updateAgentBlockFn: async () => ({ reason: 'transient crash' }),
+    updateAgentBlockFn: async () => ({ reason: 'transient crash' as const }),
     launchAgentFn: () => ({ invocation: null, result: { status: 3, stdout: '', stderr: 'boom' } }),
     log: msg => log.push(msg)
   });
@@ -1553,11 +1576,14 @@ test('startAgent fails loudly when an unknown agent is requested', async () => {
   try {
     await startAgent('draft', { configuration: resolveConfiguration(process.env),
       agent: 'unknown-agent-typo',
+      prompt: 'Execute.',
       isAgentBlockedFn: () => false
     });
-    assert.fail('Should have thrown an error for unknown agent');
+    return assert.fail('Should have thrown an error for unknown agent');
   } catch (err) {
+    assert.ok(err instanceof Error && "code" in err);
     assert.equal(err.code, 'UNKNOWN_AGENT');
+    assert.ok(err instanceof Error);
     assert.ok(err.message.includes('Unknown agent: "unknown-agent-typo"'));
   }
 });
@@ -1571,6 +1597,9 @@ test('startDraftAgent harness identity wins over caller-supplied FORGEJO_USER', 
     env: { FORGEJO_USER: 'wrong-identity' }
   });
 
+  assert.ok(result.invocation != null);
+  assert.ok(result.invocation.options != null);
+  assert.ok(result.invocation.options.env != null);
   assert.equal(result.invocation.options.env.FORGEJO_USER, 'claude');
 });
 
@@ -1598,14 +1627,15 @@ test('buildCodexDraftInvocation uses the native sandbox only when requested', ()
     'workspace-write',
     '--cd',
     '/tmp/mission-task-088',
-    'Execute the mission.'
+    '-'
   ]);
+  assert.equal(invocation.options.input, 'Execute the mission.');
   assert.equal(invocation.options.cwd, '/tmp/mission-task-088');
   assert.equal(invocation.options.stdio, 'inherit');
 });
 
 test('resolveCodexCommand returns bare codex', () => {
-  assert.equal(resolveCodexCommand(resolveConfiguration(process.env)), 'codex');
+  assert.equal(resolveCodexCommand(), 'codex');
 });
 
 // ---------- Opencode (custom) launcher ----------
@@ -1695,23 +1725,22 @@ test('resolveOpencodeCommand returns bare opencode', () => {
 // ---------- session-reuse threading ----------
 
 test('startAgent passes resume:false to claude on the first launch and writes a marker', async () => {
-  const configuration = resolveConfiguration({ ...process.env, PARALLIX_CLI_COMMAND: '/fixture/pinned-cli/px' });
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'startagent-resume-'));
   try {
     let writes = 0;
     const sessionMarkerPort = {
-      shouldResume: () => false,
-      find: () => null,
-      save: (marker) => {
+      shouldResume: async () => false,
+      find: async () => null,
+      save: async (marker) => {
         writes += 1;
         assert.equal(marker.missionId, 'task-1025');
         assert.equal(marker.role, 'execute');
         assert.equal(marker.agent, 'claude');
       },
-      delete: () => {}
-    };
+      delete: async () => {}
+    } satisfies SessionMarkerPort;
 
-    const result = await startAgent('active', { configuration,
+    const result = await startAgent('active', { configuration: resolveConfiguration(process.env),
       prompt: 'Execute the mission.',
       worktree: tmpRoot,
       agent: 'claude',
@@ -1723,17 +1752,16 @@ test('startAgent passes resume:false to claude on the first launch and writes a 
     });
 
     assert.equal(result.agent, 'claude');
-    assert.deepEqual(result.invocation.args.slice(0, -1), [
+    assert.ok(result.invocation != null);
+    assert.deepEqual(result.invocation.args, [
       '--dangerously-skip-permissions',
       '--output-format',
       'stream-json',
       '--verbose',
       '--include-partial-messages',
-      '-p'
+      '-p',
+      'Execute the mission.'
     ]);
-    const prompt = result.invocation.args.at(-1);
-    assert.ok(prompt.startsWith('Execute the mission.\n\nPinned CLI shell bootstrap:'));
-    assert.ok(prompt.endsWith(`\n${pinnedCliBootstrap(configuration.agents.cliCommand!)}\n` + '```'));
     assert.equal(writes, 1);
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -1742,11 +1770,11 @@ test('startAgent passes resume:false to claude on the first launch and writes a 
 
 test('startAgent rejects instead of reporting launch success when session persistence fails', async () => {
   const sessionMarkerPort = {
-    shouldResume: () => false,
-    find: () => null,
+    shouldResume: async () => false,
+    find: async () => null,
     save: () => { throw new Error('injected marker failure'); },
-    delete: () => {}
-  };
+    delete: async () => {}
+  } satisfies SessionMarkerPort;
   await assert.rejects(
     () => startAgent('active', { configuration: resolveConfiguration(process.env),
       prompt: 'Execute the mission.',
@@ -1768,22 +1796,21 @@ test('startAgent rejects instead of reporting launch success when session persis
 });
 
 test('startAgent passes resume:true to claude when a matching marker exists', async () => {
-  const configuration = resolveConfiguration({ ...process.env, PARALLIX_CLI_COMMAND: '/fixture/pinned-cli/px' });
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'startagent-resume-hit-'));
   try {
     const sessionMarkerPort = {
-      shouldResume: (missionId, role, agent) => {
+      shouldResume: async (missionId, role, agent) => {
         assert.equal(missionId, 'task-1025');
         assert.equal(role, 'execute');
         assert.equal(agent, 'claude');
         return true;
       },
-      find: () => null,
-      save: () => {},
-      delete: () => {}
-    };
+      find: async () => null,
+      save: async () => {},
+      delete: async () => {}
+    } satisfies SessionMarkerPort;
 
-    const result = await startAgent('act-on-review', { configuration,
+    const result = await startAgent('act-on-review', { configuration: resolveConfiguration(process.env),
       prompt: 'Address review.',
       worktree: tmpRoot,
       agent: 'claude',
@@ -1794,18 +1821,17 @@ test('startAgent passes resume:true to claude when a matching marker exists', as
       log: () => {}
     });
 
-    assert.deepEqual(result.invocation.args.slice(0, -1), [
+    assert.ok(result.invocation != null);
+    assert.deepEqual(result.invocation.args, [
       '--dangerously-skip-permissions',
       '--continue',
       '--output-format',
       'stream-json',
       '--verbose',
       '--include-partial-messages',
-      '-p'
+      '-p',
+      'Address review.'
     ]);
-    const prompt = result.invocation.args.at(-1);
-    assert.ok(prompt.startsWith('Address review.\n\nPinned CLI shell bootstrap:'));
-    assert.ok(prompt.endsWith(`\n${pinnedCliBootstrap(configuration.agents.cliCommand!)}\n` + '```'));
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
@@ -1817,17 +1843,17 @@ test('startAgent does not pass --continue to non-resume-capable launchers even w
     // Even if shouldResume reported true, codex's launcher does not support
     // a per-call resume flag; the resume option must be dropped silently.
     const sessionMarkerPort = {
-      shouldResume: () => true,
-      find: () => ({
-        missionId: 'task-1025',
+      shouldResume: async () => true,
+      find: async () => ({
+        missionId: fixtureMissionId('task-1025'),
         role: 'execute',
-        agent: 'codex',
+        agent: fixtureAgentFamily('codex'),
         lastLaunched: new Date().toISOString(),
         sessionId: null
       }),
-      save: () => {},
-      delete: () => {}
-    };
+      save: async () => {},
+      delete: async () => {}
+    } satisfies SessionMarkerPort;
 
     const result = await startAgent('act-on-review', { configuration: resolveConfiguration(process.env),
       prompt: 'Address review.',
@@ -1841,6 +1867,7 @@ test('startAgent does not pass --continue to non-resume-capable launchers even w
     });
 
     // Codex args do not contain --continue.
+    assert.ok(result.invocation != null);
     assert.equal(result.invocation.args.includes('--continue'), false);
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -1848,21 +1875,21 @@ test('startAgent does not pass --continue to non-resume-capable launchers even w
 });
 
 test('startAgent maps reviewer to review and forwards the checked port to the launcher', async () => {
-  const sessionMarkerPort = {
-    shouldResume: (_missionId, role) => {
+  const sessionMarkerPort: SessionMarkerPort = {
+    shouldResume: async (_missionId, role) => {
       assert.equal(role, 'review');
       return false;
     },
-    find: (_missionId, role) => {
+    find: async (_missionId, role) => {
       assert.equal(role, 'review');
       return null;
     },
-    save: (marker) => {
+    save: async (marker) => {
       assert.equal(marker.role, 'review');
     },
-    delete: () => {}
+    delete: async () => {}
   };
-  let launcherOptions;
+  let launcherOptions: { value: import("../../../src/adapters/agents/agent-process-types.js").AgentLauncherInput | undefined } = { value: undefined };
 
   await startAgent('review', { configuration: resolveConfiguration(process.env),
     prompt: 'Review the mission.',
@@ -1875,7 +1902,7 @@ test('startAgent maps reviewer to review and forwards the checked port to the la
     resolveAgentModelFn: () => null,
     log: () => {},
     launchAgentFn: (options) => {
-      launcherOptions = options;
+      launcherOptions.value = options;
       return {
         invocation: { command: 'claude', args: [], options: {} },
         resultPromise: Promise.resolve({ status: 0, stdout: '', stderr: '' })
@@ -1883,8 +1910,9 @@ test('startAgent maps reviewer to review and forwards the checked port to the la
     }
   });
 
-  assert.equal(launcherOptions.role, 'review');
-  assert.equal(launcherOptions.sessionMarkerPort, sessionMarkerPort);
+  assert.ok(launcherOptions.value != null);
+  assert.equal(launcherOptions.value.role, 'review');
+  assert.equal(launcherOptions.value.sessionMarkerPort, sessionMarkerPort);
 });
 
 test('startAgent rejects unsupported session marker roles before launching', async () => {
@@ -1897,10 +1925,10 @@ test('startAgent rejects unsupported session marker roles before launching', asy
       slug: 'task-2322.09',
       role: 'reviewing',
       sessionMarkerPort: {
-        shouldResume: () => false,
-        find: () => null,
-        save: () => {},
-        delete: () => {}
+        shouldResume: async () => false,
+        find: async () => null,
+        save: async () => {},
+        delete: async () => {}
       },
       isAgentBlockedFn: () => false,
       resolveAgentModelFn: () => null,
@@ -1979,6 +2007,7 @@ test('extractCodexSessionId finds session ID from Interaction Summary block', ()
 
 test('extractCodexSessionId returns null when no session ID found', () => {
   assert.equal(extractCodexSessionId('no session info here'), null);
+  // @ts-expect-error Null deliberately exercises the missing-output input contract.
   assert.equal(extractCodexSessionId(null), null);
   assert.equal(extractCodexSessionId(''), null);
 });
@@ -1996,7 +2025,7 @@ test('selectAgent active-step excludes claude blocked with a future local-hour t
     const config = {
       steps: { active: { eligible: ['codex', 'claude'], selection: 'random' } },
       blocklist: { claude: { until: future } }
-    };
+    } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
     for (let i = 0; i < 10; i++) {
       const agent = selectAgent('active', { configuration: resolveConfiguration(process.env), config });
       assert.equal(agent, 'codex', `Expected codex (claude timed-blocked until ${future}), got: ${agent}`);
@@ -2013,7 +2042,7 @@ test('selectAgent active-step excludes claude when permanently blocked', () => {
     const config = {
       steps: { active: { eligible: ['codex', 'claude'], selection: 'random' } },
       blocklist: { claude: true }
-    };
+    } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
     for (let i = 0; i < 10; i++) {
       const agent = selectAgent('active', { configuration: resolveConfiguration(process.env), config });
       assert.equal(agent, 'codex', `Expected codex when claude is permanently blocked, got: ${agent}`);
@@ -2047,7 +2076,7 @@ test('selectAgent active-step applies main-worktree agents.local.json block befo
       const activeConfig = {
         steps: { active: { eligible: ['codex', 'claude'], selection: 'random' } },
         blocklist: agentConfig.blocklist
-      };
+      } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
       for (let i = 0; i < 5; i++) {
         const agent = selectAgent('active', { configuration: resolveConfiguration(process.env), config: activeConfig });
         assert.equal(
@@ -2070,7 +2099,7 @@ test('startAgent retries with next agent when first agent exits non-zero (launch
     delete process.env.WORKFLOW_AGENT;
 
     try {
-      const log = [];
+      const log: string[] = [];
 
       const result = await withPathLaunchers({
         opencode: 'if (process.argv.includes("--help")) process.exit(0); console.error("Error: Model not found"); process.exit(1);'
@@ -2078,7 +2107,7 @@ test('startAgent retries with next agent when first agent exits non-zero (launch
         prompt: 'Execute the mission.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
-          if (!opts.exclude.has('custom')) return 'custom';
+          if (!new Set(opts?.exclude ?? []).has('custom')) return 'custom';
           return 'claude';
         },
         detectLimitHitFn: () => null,
@@ -2103,7 +2132,7 @@ test('startAgent attempts at least 3 eligible agents before giving up (SC 3)', a
     delete process.env.WORKFLOW_AGENT;
 
     try {
-      const log = [];
+      const log: string[] = [];
 
       const error = await withPathLaunchers({
         opencode: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);',
@@ -2113,9 +2142,9 @@ test('startAgent attempts at least 3 eligible agents before giving up (SC 3)', a
         prompt: 'Execute.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
-          if (!opts.exclude.has('custom')) return 'custom';
-          if (!opts.exclude.has('vibe')) return 'vibe';
-          if (!opts.exclude.has('codex')) return 'codex';
+          if (!new Set(opts?.exclude ?? []).has('custom')) return 'custom';
+          if (!new Set(opts?.exclude ?? []).has('vibe')) return 'vibe';
+          if (!new Set(opts?.exclude ?? []).has('codex')) return 'codex';
           throw new AgentPoolExhaustedError(step, 'No agents available');
         },
         detectLimitHitFn: () => null,
@@ -2158,7 +2187,7 @@ test('startAgent retries when first agent fails with non-zero exit code', async 
         prompt: 'Execute.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
-          if (!opts.exclude.has('custom')) { customAttempted = true; return 'custom'; }
+          if (!new Set(opts?.exclude ?? []).has('custom')) { customAttempted = true; return 'custom'; }
           mistralAttempted = true;
           return 'vibe';
         },
@@ -2186,7 +2215,7 @@ test('startAgent launch failure includes stderr snippet in log', async () => {
     delete process.env.WORKFLOW_AGENT;
 
     try {
-      const log = [];
+      const log: string[] = [];
 
       const result = await withPathLaunchers({
         opencode: 'if (process.argv.includes("--help")) process.exit(0); process.stderr.write("Error: Model not found\\n"); process.exit(1);',
@@ -2195,7 +2224,7 @@ test('startAgent launch failure includes stderr snippet in log', async () => {
         prompt: 'Execute.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
-          if (!opts.exclude.has('custom')) return 'custom';
+          if (!new Set(opts?.exclude ?? []).has('custom')) return 'custom';
           return 'vibe';
         },
         detectLimitHitFn: () => null,
@@ -2219,21 +2248,21 @@ test('startAgent launch failure does not retry when limit-hit is detected', asyn
     delete process.env.WORKFLOW_AGENT;
 
     try {
-      const log = [];
+      const log: string[] = [];
       let limitHitCount = 0;
 
       const result = await startAgent('draft', { configuration: resolveConfiguration(process.env),
         prompt: 'Execute.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
-          if (!opts.exclude.has('custom')) return 'custom';
+          if (!new Set(opts?.exclude ?? []).has('custom')) return 'custom';
           return 'vibe';
         },
-        detectLimitHitFn: ({ agent }) => {
-          if (agent === 'custom') { limitHitCount++; return { until: '2026-05-01 18', source: 'test' }; }
+        detectLimitHitFn: (input) => {
+          if (input?.agent === 'custom') { limitHitCount++; return { until: '2026-05-01 18', source: 'test', reason: 'fixture rate limit' }; }
           return null;
         },
-        updateAgentBlockFn: () => ({ path: 'noop' }),
+        updateAgentBlockFn: () => ({ path: 'noop', reason: undefined }),
         log: msg => log.push(msg),
 
       });
@@ -2256,7 +2285,7 @@ test('startAgent launch failure with signal retries next agent', async () => {
     delete process.env.WORKFLOW_AGENT;
 
     try {
-      const log = [];
+      const log: string[] = [];
 
       const result = await withPathLaunchers({
         opencode: 'if (process.argv.includes("--help")) process.exit(0); setTimeout(() => process.kill(process.pid, "SIGKILL"), 20);',
@@ -2265,7 +2294,7 @@ test('startAgent launch failure with signal retries next agent', async () => {
         prompt: 'Execute.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
-          if (!opts.exclude.has('custom')) return 'custom';
+          if (!new Set(opts?.exclude ?? []).has('custom')) return 'custom';
           return 'vibe';
         },
         detectLimitHitFn: () => null,
@@ -2288,15 +2317,18 @@ test('resolveNoOutputWatchdogConfig returns draft-specific defaults when step is
 
   // Draft step defaults must be 15s initial / 30s interval.
   const draftConfig = resolveNoOutputWatchdogConfig({}, 'draft', resolveConfiguration(process.env));
+  assert.ok(draftConfig != null);
   assert.equal(draftConfig.initialDelayMs, 15_000, 'draft initial delay must be 15000ms');
   assert.equal(draftConfig.intervalMs, 30_000, 'draft interval must be 30000ms');
 
   // Non-draft step defaults must remain 60s initial / 60s interval.
   const nullConfig = resolveNoOutputWatchdogConfig({}, null, resolveConfiguration(process.env));
+  assert.ok(nullConfig != null);
   assert.equal(nullConfig.initialDelayMs, 60_000, 'null step initial delay defaults to 60000ms');
   assert.equal(nullConfig.intervalMs, 60_000, 'null step interval defaults to 60000ms');
 
   const activeConfig = resolveNoOutputWatchdogConfig({}, 'active', resolveConfiguration(process.env));
+  assert.ok(activeConfig != null);
   assert.equal(activeConfig.initialDelayMs, 60_000, 'active initial delay must be 60000ms');
   assert.equal(activeConfig.intervalMs, 60_000, 'active interval must be 60000ms');
 });
@@ -2315,7 +2347,7 @@ test('draft launch shows agent-stage in no-output watchdog messages', async () =
       await withPathLaunchers({
         opencode: 'if (process.argv.includes("--help")) process.exit(0); setTimeout(() => process.exit(0), 200);'
       }, async () => {
-      const log = [];
+      const log: string[] = [];
       const result = await startAgent('draft', { configuration: resolveConfiguration(process.env),
         agent: 'custom',
         prompt: 'Execute.',
@@ -2357,7 +2389,9 @@ test('draft launch preserves the mission worktree in cwd and PWD for child CLIs'
 
       assert.equal(result.agent, 'custom');
       assert.equal(result.result.status, 0);
-      const parsed = JSON.parse(result.result.stdout);
+      assert.ok(result.result.stdout !== undefined);
+      const parsed: unknown = JSON.parse(result.result.stdout);
+      assert.ok(parsed && typeof parsed === 'object' && 'cwd' in parsed && 'pwd' in parsed);
       // macOS resolves /var through its /private/var symlink for process.cwd().
       // Compare canonical paths while preserving the exact PWD contract below.
       assert.equal(parsed.cwd, fs.realpathSync(tmpRoot));
@@ -2382,7 +2416,7 @@ test('non-draft launch uses generic no-output watchdog', async () => {
       await withPathLaunchers({
         vibe: 'if (process.argv.includes("--help")) process.exit(0); setTimeout(() => process.exit(0), 200);'
       }, async () => {
-      const log = [];
+      const log: string[] = [];
       const result = await startAgent('active', { configuration: resolveConfiguration(process.env),
         agent: 'vibe',
         prompt: 'Execute.',
@@ -2417,7 +2451,7 @@ test('startAgent throws with clear error when all agents exhausted', async () =>
     delete process.env.WORKFLOW_AGENT;
 
     try {
-      const log = [];
+      const log: string[] = [];
 
       const error = await withPathLaunchers({
         opencode: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);',
@@ -2426,8 +2460,8 @@ test('startAgent throws with clear error when all agents exhausted', async () =>
         prompt: 'Execute.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
-          if (!opts.exclude.has('custom')) return 'custom';
-          if (!opts.exclude.has('vibe')) return 'vibe';
+          if (!new Set(opts?.exclude ?? []).has('custom')) return 'custom';
+          if (!new Set(opts?.exclude ?? []).has('vibe')) return 'vibe';
           throw new AgentPoolExhaustedError(step, 'No agents available');
         },
         detectLimitHitFn: () => null,
@@ -2452,8 +2486,8 @@ test('startAgent throws with clear error when all agents exhausted', async () =>
 test('startAgent passes the resolved model to the launcher invocation', async (t) => {
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-model-'));
   t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
-  const log = [];
-  let launcherModel;
+  const log: string[] = [];
+  let launcherModel: { value: string | null | undefined | undefined } = { value: undefined };
   const result = await startAgent('review', { configuration: resolveConfiguration(process.env),
     prompt: 'test',
     worktree,
@@ -2461,7 +2495,7 @@ test('startAgent passes the resolved model to the launcher invocation', async (t
     resolveAgentModelFn: (agent) => (agent === 'custom' ? 'qwen3.5:9b' : null),
     log: msg => log.push(msg),
     launchAgentFn: (opts) => {
-      launcherModel = opts.model;
+      launcherModel.value = opts.model;
       const args = ['run', '--pure', opts.prompt];
       if (opts.model) {
         args.push('-m', opts.model);
@@ -2470,7 +2504,8 @@ test('startAgent passes the resolved model to the launcher invocation', async (t
     }
   });
 
-  assert.equal(launcherModel, 'qwen3.5:9b', 'launcher must receive the resolved model');
+  assert.equal(launcherModel.value, 'qwen3.5:9b', 'launcher must receive the resolved model');
+  assert.ok(result.invocation);
   const i = result.invocation.args.findIndex(arg => arg === '-m' || arg === '--model');
   assert.ok(i !== -1, `expected model flag in args: ${result.invocation.args.join(' ')}`);
   assert.equal(result.invocation.args[i + 1], 'qwen3.5:9b');
@@ -2480,14 +2515,14 @@ test('startAgent passes the resolved model to the launcher invocation', async (t
 test('startAgent omits the model flag when resolveAgentModel returns null', async (t) => {
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-model-'));
   t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
-  let launcherModel;
+  let launcherModel: { value: string | null | undefined | undefined } = { value: undefined };
   const result = await startAgent('review', { configuration: resolveConfiguration(process.env),
     prompt: 'test',
     worktree,
     selectAgentFn: () => 'custom',
     resolveAgentModelFn: () => null,
     launchAgentFn: (opts) => {
-      launcherModel = opts.model;
+      launcherModel.value = opts.model;
       const args = ['run', '--pure', opts.prompt];
       if (opts.model) {
         args.push('-m', opts.model);
@@ -2496,7 +2531,8 @@ test('startAgent omits the model flag when resolveAgentModel returns null', asyn
     }
   });
 
-  assert.equal(launcherModel, null, 'launcher must receive null model');
+  assert.equal(launcherModel.value, null, 'launcher must receive null model');
+  assert.ok(result.invocation != null);
   assert.ok(!result.invocation.args.includes('-m'));
 });
 
@@ -2507,10 +2543,10 @@ test('startAgent omits the model flag when resolveAgentModel returns null', asyn
 test('non-limit launch failure with transient error retries without persisting a block', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-non-limit-'));
   try {
-    let blockCalls = [];
-    const fakeBlockFn = (agent, until) => {
+    let blockCalls: { agent: string; until: string; }[] = [];
+    const fakeBlockFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["updateAgentBlockFn"]> = (agent, until) => {
       blockCalls.push({ agent, until });
-      return { path: '/fake/agents.local.json', blocklist: {} };
+      return { path: '/fake/agents.local.json', blocklist: {}, reason: undefined };
     };
 
     const error = await withPathLaunchers({
@@ -2520,8 +2556,8 @@ test('non-limit launch failure with transient error retries without persisting a
       prompt: 'Execute.',
       worktree: tmpRoot,
       selectAgentFn: (step, opts) => {
-        if (!opts.exclude.has('vibe')) return 'vibe';
-        if (!opts.exclude.has('custom')) return 'custom';
+        if (!new Set(opts?.exclude ?? []).has('vibe')) return 'vibe';
+        if (!new Set(opts?.exclude ?? []).has('custom')) return 'custom';
         throw new Error('All eligible agents exhausted');
       },
       detectLimitHitFn: () => null,
@@ -2542,10 +2578,10 @@ test('non-limit launch failure with transient error retries without persisting a
 test('invalid-model launch failure retries without persisting a blocklist entry', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-invalid-model-'));
   try {
-    let blockCalls = [];
-    const fakeBlockFn = (agent, until) => {
+    let blockCalls: { agent: string; until: string; }[] = [];
+    const fakeBlockFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["updateAgentBlockFn"]> = (agent, until) => {
       blockCalls.push({ agent, until });
-      return { path: '/fake/agents.local.json', blocklist: {} };
+      return { path: '/fake/agents.local.json', blocklist: {}, reason: undefined };
     };
 
     const result = await withPathLaunchers({
@@ -2555,7 +2591,7 @@ test('invalid-model launch failure retries without persisting a blocklist entry'
       prompt: 'Execute.',
       worktree: tmpRoot,
       selectAgentFn: (step, opts) => {
-        if (!opts.exclude.has('codex')) return 'codex';
+        if (!new Set(opts?.exclude ?? []).has('codex')) return 'codex';
         return 'vibe';
       },
       detectLimitHitFn: () => null,
@@ -2576,10 +2612,10 @@ test('invalid-model launch failure retries without persisting a blocklist entry'
 test('transient non-limit failures do not blocklist any family', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-custom-excluded-'));
   try {
-    let blockCalls = [];
-    const fakeBlockFn = (agent, until) => {
+    let blockCalls: { agent: string; until: string; }[] = [];
+    const fakeBlockFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["updateAgentBlockFn"]> = (agent, until) => {
       blockCalls.push({ agent, until });
-      return { path: '/fake/agents.local.json', blocklist: {} };
+      return { path: '/fake/agents.local.json', blocklist: {}, reason: undefined };
     };
 
     const error = await withPathLaunchers({
@@ -2589,8 +2625,8 @@ test('transient non-limit failures do not blocklist any family', async () => {
       prompt: 'Execute.',
       worktree: tmpRoot,
       selectAgentFn: (step, opts) => {
-        if (!opts.exclude.has('custom')) return 'custom';
-        if (!opts.exclude.has('vibe')) return 'vibe';
+        if (!new Set(opts?.exclude ?? []).has('custom')) return 'custom';
+        if (!new Set(opts?.exclude ?? []).has('vibe')) return 'vibe';
         throw new Error('All eligible agents exhausted');
       },
       detectLimitHitFn: () => null,
@@ -2611,10 +2647,10 @@ test('transient non-limit failures do not blocklist any family', async () => {
 test('hard launch failure (model not found) does not blocklist agent family', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-hard-failure-'));
   try {
-    let blockCalls = [];
-    const fakeBlockFn = (agent, until) => {
+    let blockCalls: { agent: string; until: string; }[] = [];
+    const fakeBlockFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["updateAgentBlockFn"]> = (agent, until) => {
       blockCalls.push({ agent, until });
-      return { path: '/fake/agents.local.json', blocklist: {} };
+      return { path: '/fake/agents.local.json', blocklist: {}, reason: undefined };
     };
 
     const error = await withPathLaunchers({
@@ -2624,8 +2660,8 @@ test('hard launch failure (model not found) does not blocklist agent family', as
       prompt: 'Execute.',
       worktree: tmpRoot,
       selectAgentFn: (step, opts) => {
-        if (!opts.exclude.has('vibe')) return 'vibe';
-        if (!opts.exclude.has('custom')) return 'custom';
+        if (!new Set(opts?.exclude ?? []).has('vibe')) return 'vibe';
+        if (!new Set(opts?.exclude ?? []).has('custom')) return 'custom';
         throw new Error('All eligible agents exhausted');
       },
       detectLimitHitFn: () => null,
@@ -2698,10 +2734,10 @@ test('expired credentials are diagnostic-only while API-key failures remain non-
 // regexes, so shouldPersistLaunchFailureBlock (agents.ts:171-181) falls through
 // to its default `true` and writes a fresh blocklist entry every single launch.
 test('mistral without a non-interactive tool-approval bypass gets re-blocklisted on every launch', async () => {
-  let blockCalls = [];
-  const fakeBlockFn = (agent, until) => {
+  let blockCalls: { agent: string; until: string; }[] = [];
+  const fakeBlockFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["updateAgentBlockFn"]> = (agent, until) => {
     blockCalls.push({ agent, until });
-    return { path: '/fake/agents.local.json', blocklist: {} };
+    return { path: '/fake/agents.local.json', blocklist: {}, reason: undefined };
   };
 
   const vibeBody = `
@@ -2717,7 +2753,7 @@ test('mistral without a non-interactive tool-approval bypass gets re-blocklisted
   const result = await withPathLaunchers({ vibe: vibeBody }, () => startAgent('active', { configuration: resolveConfiguration(process.env),
     prompt: 'Execute.',
     selectAgentFn: (step, opts) => {
-      if (!opts.exclude.has('vibe')) return 'vibe';
+      if (!new Set(opts?.exclude ?? []).has('vibe')) return 'vibe';
       throw new Error('All eligible agents exhausted');
     },
     detectLimitHitFn: () => null,
@@ -2737,4 +2773,101 @@ test('Vibe fresh repairs ignore historical conversation markers (TASK-2700)', ()
     assert.ok(!invocation.args.includes('--resume'));
     assert.ok(!invocation.args.includes('--continue'));
   }
+});
+
+// TASK-2760: a 188,583-character recovery prompt passed as one argv element
+// failed spawn with E2BIG (Linux caps one argument at 128 KiB). The headless
+// Codex adapter must deliver the exact prompt bytes through stdin instead.
+const OVERSIZED_RECOVERY_PROMPT = (() => {
+  const lines: string[] = [];
+  for (let index = 0; Buffer.byteLength(lines.join('')) <= 200_000; index++) {
+    lines.push(`Recovery evidence ${index}: räksmörgås — 修复 🚀 "quoted" $HOME \\ -- --last\n`);
+  }
+  return lines.join('');
+})();
+const RECEIPT_CODEX_BODY = `
+  const fs = process.getBuiltinModule('node:fs');
+  const args = process.argv.slice(2);
+  const receipt = process.env.TASK_2760_RECEIPT;
+  if (args.at(-1) !== '-') {
+    fs.writeFileSync(receipt + '.args', JSON.stringify({ argv: true, bytes: Buffer.byteLength(args.at(-1) || '') }));
+    fs.writeFileSync(receipt, args.at(-1) || '');
+    process.exit(0);
+  }
+  const chunks = [];
+  process.stdin.on('data', chunk => chunks.push(chunk));
+  process.stdin.on('end', () => {
+    fs.writeFileSync(receipt + '.args', JSON.stringify({ argv: false, args }));
+    fs.writeFileSync(receipt, Buffer.concat(chunks));
+    process.stdout.write('codex resume 0e2a7f1c-1111-2222-3333-444455556666\\n');
+    process.exit(0);
+  });
+`;
+
+for (const resume of [false, true]) {
+  test(`Codex ${resume ? 'resumed' : 'fresh'} recovery launch delivers an oversized multibyte prompt byte-for-byte through stdin (TASK-2760)`, { timeout: 15_000 }, async () => {
+    assert.ok(Buffer.byteLength(OVERSIZED_RECOVERY_PROMPT) > 188_583);
+    const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2760-codex-'));
+    const receipt = path.join(worktree, 'receipt');
+    const childRef: { current: import('node:child_process').ChildProcess | null } = { current: null };
+    try {
+      const result = await withPathLaunchers({ codex: RECEIPT_CODEX_BODY }, () => {
+        const { resultPromise } = buildCodexDraftInvocationModule.startCodexDraftAgent({
+          configuration: resolveConfiguration(process.env), prompt: OVERSIZED_RECOVERY_PROMPT, worktree, env: { TASK_2760_RECEIPT: receipt },
+          resume, sessionId: resume ? 'session-2760' : null,
+          teeOptions: { stdoutSink: { write() {} }, stderrSink: { write() {} }, onSpawn: (spawned) => { childRef.current = spawned; } },
+        });
+        return resultPromise;
+      });
+      assert.equal((result.error as NodeJS.ErrnoException | null)?.code, undefined, `spawn failed: ${(result.error as Error | null)?.message}`);
+      assert.equal(result.status, 0);
+      const transport = JSON.parse(fs.readFileSync(`${receipt}.args`, 'utf8'));
+      assert.equal(transport.argv, false, 'the prompt must not travel as an argv element');
+      if (resume) { assert.deepEqual(transport.args.slice(-2), ['session-2760', '-']); }
+      assert.ok(fs.readFileSync(receipt).equals(Buffer.from(OVERSIZED_RECOVERY_PROMPT, 'utf8')), 'prompt bytes and EOF reach the child exactly');
+      assert.equal(result.sessionId, '0e2a7f1c-1111-2222-3333-444455556666', 'stdout capture survives stdin transport');
+    } finally {
+      if (childRef.current?.exitCode === null && childRef.current.signalCode === null) { childRef.current.kill('SIGKILL'); }
+      fs.rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+}
+
+test('a silent Codex stdin launch is still cancelled by the no-output deadline and its child is stopped (TASK-2760)', { timeout: 15_000 }, async () => {
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2760-cancel-'));
+  const pidFile = path.join(worktree, 'pid');
+  const childRef: { current: import('node:child_process').ChildProcess | null } = { current: null };
+  const silentBody = `
+    const fs = process.getBuiltinModule('node:fs');
+    process.stdin.resume();
+    process.stdin.on('end', () => { fs.writeFileSync(process.env.TASK_2760_PID, String(process.pid)); setInterval(() => {}, 1000); });
+  `;
+  try {
+    const result = await withPathLaunchers({ codex: silentBody }, () => buildCodexDraftInvocationModule.startCodexDraftAgent({
+      configuration: resolveConfiguration(process.env), prompt: OVERSIZED_RECOVERY_PROMPT, worktree, env: { TASK_2760_PID: pidFile },
+      teeOptions: { stdoutSink: { write() {} }, stderrSink: { write() {} }, noOutputWatchdog: { maxNoOutputMs: 400 }, onSpawn: (spawned) => { childRef.current = spawned; } },
+    }).resultPromise);
+    assert.equal((result.error as NodeJS.ErrnoException | null)?.code, 'NO_OUTPUT_TIMEOUT');
+    assert.equal(result.status, null);
+    const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+    assert.throws(() => process.kill(pid, 0), /ESRCH/, 'the cancelled agent child is gone');
+  } finally {
+    if (childRef.current?.exitCode === null && childRef.current.signalCode === null) { childRef.current.kill('SIGKILL'); }
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test('an argv launcher that hits E2BIG reports the spawn code and message once instead of an ambiguous null exit (TASK-2760)', { timeout: 15_000 }, async () => {
+  const lines: string[] = [];
+  let launches = 0;
+  const result = await withPathLaunchers({ claude: 'process.exit(0);' }, () => startAgent('active', { configuration: resolveConfiguration(process.env),
+    prompt: OVERSIZED_RECOVERY_PROMPT, agent: 'claude', pinnedAgent: true,
+    selectAgentFn: () => { launches++; return 'claude'; },
+    detectLimitHitFn: () => null, updateAgentBlockFn: async () => ({}), log: (line) => lines.push(line),
+  }));
+  assert.equal(result.result.status, null, 'null stays a failure for the caller');
+  assert.ok(result.result.error instanceof Error);
+  assert.equal((result.result.error as NodeJS.ErrnoException).code, 'E2BIG');
+  assert.ok(lines.some(line => /Launcher for "claude" did not start or report an exit status: code E2BIG, message "spawn E2BIG"\. The launch command line exceeded/.test(line)), lines.join('\n'));
+  assert.ok(launches <= 1, 'the unchanged oversized launch is not relaunched');
 });

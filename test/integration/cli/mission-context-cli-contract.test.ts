@@ -1,3 +1,4 @@
+import { missionVersion } from '../../../src/application/domain-ports.js';
 // Mission context CLI contract: context CLI mutation,
 // dependency recording, and Mission title resolution across the CLI boundary.
 //
@@ -76,6 +77,13 @@ describe('Context CLI', () => {
     process.env.PARALLIX_HOME = home;
 
     try {
+      // Review verdicts require an actual implementer revision.
+      for (const args of [
+        ['init', '-b', 'main'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '--allow-empty', '-m', 'Seed review revision'],
+      ]) {
+        const result = childProcess.spawnSync('git', args, { cwd: repo, encoding: 'utf8' });
+        assert.equal(result.status, 0, result.stderr);
+      }
       const { db } = await initOperatorState({ homeDir: home });
       const store = new SqliteMissionStore(db);
       const mission: Mission = {
@@ -102,12 +110,12 @@ describe('Context CLI', () => {
         output.length = 0;
         errors.length = 0;
         const write = process.stdout.write.bind(process.stdout);
-        (process.stdout as unknown as { write: (_chunk: string) => boolean }).write = (chunk) => {
+        process.stdout.write = (chunk) => {
           output.push(String(chunk));
           return true;
         };
         try { return await run(args, { baseCwd: repo, error: (message) => { errors.push(message); return message; } }); }
-        finally { (process.stdout as unknown as { write: typeof write }).write = write; }
+        finally { process.stdout.write = write; }
       };
       /** Re-read the Mission exactly as a later agent would: from the database. */
       const statusJson = async () => {
@@ -125,7 +133,6 @@ describe('Context CLI', () => {
           brief,
           declaredGates: found.mission.declaredGates ?? [],
           successCriteria: found.mission.successCriteria ?? [],
-          completedSuccessCriteria: found.mission.completedSuccessCriteria ?? [],
           checkpoints: found.mission.checkpoints.map(({ name, firstLine, goalCheck }) => ({ name, description: firstLine, recorded: goalCheck.length > 0 })),
           predictedNelBucket: found.mission.predictedNelBucket ?? null,
           latestCheckpoint: latest
@@ -139,6 +146,7 @@ describe('Context CLI', () => {
       // --- read -------------------------------------------------------------
       const first = await statusJson();
       assert.equal(first.slug, SLUG);
+      assert.ok(first.brief != null);
       assert.equal(first.brief.goal, 'Prove the real CLI reads and writes Mission state');
       assert.deepEqual(first.declaredGates, ['npm test']);
       const version = first.version;
@@ -149,7 +157,9 @@ describe('Context CLI', () => {
         'goal', 'set', '--slug', SLUG,
         '--goal', 'Prove the typed verbs write', '--why', 'AC #15 needs a real round trip',
       ]), 0, errors.join('\n'));
-      assert.equal((await statusJson()).brief.goal, 'Prove the typed verbs write');
+      const afterWrite1 = await statusJson();
+      assert.ok(afterWrite1.brief);
+      assert.equal(afterWrite1.brief.goal, 'Prove the typed verbs write');
 
       // --- genuinely sequential flag-free writes need no readback between ---
       // No statusJson read between writes: each resolves its own stored version
@@ -176,7 +186,7 @@ describe('Context CLI', () => {
       assert.equal([win, lose].filter((c) => c === 1).length, 1, 'the other conflicts');
       const competing = await statusJson();
       assert.equal(competing.version, before + 1, 'one competing write advanced the version once');
-      assert.equal(['Small', 'Medium'].includes(competing.predictedNelBucket), true, 'the winner landed, the loser did not');
+      assert.equal(['Small', 'Medium'].includes(competing.predictedNelBucket ?? ''), true, 'the winner landed, the loser did not');
 
       // --- a stale write is rejected and changes nothing --------------------
       assert.equal(await invoke([
@@ -184,6 +194,7 @@ describe('Context CLI', () => {
         '--expected-version', String(version),
       ]), 1);
       const afterGoal = await statusJson();
+      assert.ok(afterGoal.brief != null);
       assert.equal(afterGoal.brief.goal, 'Prove the typed verbs write');
       assert.equal(afterGoal.brief.why, 'AC #15 needs a real round trip');
       // Omitted fields are preserved: the scope written by the fixture survives.
@@ -195,7 +206,9 @@ describe('Context CLI', () => {
         '--expected-version', String(version),
       ]), 1);
       assert.match(errors.join('\n'), /expected version/);
-      assert.equal((await statusJson()).brief.goal, 'Prove the typed verbs write');
+      const afterWrite2 = await statusJson();
+      assert.ok(afterWrite2.brief);
+      assert.equal(afterWrite2.brief.goal, 'Prove the typed verbs write');
 
       // --- one gate per call, and gates round-trip --------------------------
       let current = (await statusJson()).version;
@@ -248,6 +261,7 @@ describe('Context CLI', () => {
         '--next', 'Read the status again.', '--expected-version', String(current),
       ]), 0, errors.join('\n'));
       const afterCheckpoint = await statusJson();
+      assert.ok(afterCheckpoint.latestCheckpoint != null);
       assert.equal(afterCheckpoint.latestCheckpoint.name, 'CP-1');
       assert.equal(afterCheckpoint.latestCheckpoint.goalCheck[0].criterion, 'CLI round trip');
       assert.equal(afterCheckpoint.latestCheckpoint.nextAction, 'Read the status again.');
@@ -265,6 +279,7 @@ describe('Context CLI', () => {
         '--next', 'Replaced evidence.', '--expected-version', String(current),
       ]), 0, errors.join('\n'));
       const replaced = await statusJson();
+      assert.ok(replaced.latestCheckpoint != null);
       assert.deepEqual(replaced.latestCheckpoint.goalCheck, [
         { criterion: 'CLI round trip', criterionId: null, evidence: 'test/task-2521-03-review-verbs.test.ts' },
       ]);
@@ -279,28 +294,9 @@ describe('Context CLI', () => {
         '--next', 'This must fail.', '--expected-version', String(current),
       ]), 1);
       assert.match(errors.join('\n'), /--criterion and --evidence must pair up/);
-      assert.equal((await statusJson()).latestCheckpoint.name, 'CP-1', 'the rejected write changed nothing');
-
-      // TASK-2747: evidence and named completion are one durable CLI write.
-      const beforeComplete = await statusJson();
-      const evidenceArgs = ['checkpoint', 'record', '--slug', SLUG, '--name', 'CP-1',
-        '--criterion', 'Stale writes change nothing', '--evidence', '`npm test`',
-        '--next', 'Verify the second checkpoint', '--complete-criteria'];
-      assert.equal(await invoke([...evidenceArgs, '--expected-version', String(version)]), 1);
-      assert.deepEqual(await statusJson(), beforeComplete, 'conflict cannot partly complete');
-      const unknownArgs = [...evidenceArgs];
-      unknownArgs[unknownArgs.indexOf('--criterion') + 1] = 'unknown';
-      assert.equal(await invoke(unknownArgs), 1);
-      assert.deepEqual(await statusJson(), beforeComplete, 'unknown criterion cannot partly record');
-      const outputStart = output.length;
-      assert.equal(await invoke(evidenceArgs), 0, errors.join('\n'));
-      const readback = JSON.parse(output.slice(outputStart).join(''));
-      assert.deepEqual(readback.completedSuccessCriteria, [0]);
-      assert.equal(readback.checkpoint.name, 'CP-1');
-      const completed = await statusJson();
-      assert.equal(completed.version, beforeComplete.version + 1);
-      assert.deepEqual(completed.completedSuccessCriteria, [0]);
-      assert.equal(readback.version, completed.version);
+      const afterWrite3 = await statusJson();
+      assert.ok(afterWrite3.latestCheckpoint);
+      assert.equal(afterWrite3.latestCheckpoint.name, 'CP-1', 'the rejected write changed nothing');
 
       // --- assignment set and clear -----------------------------------------
       current = (await statusJson()).version;
@@ -322,8 +318,11 @@ describe('Context CLI', () => {
       const reviewer = agentFamily('reviewer');
       const implementer = agentFamily('codex');
       const opened = await statusJson();
+      const reviewLoad = await new SqliteMissionStore((await initOperatorState({ homeDir: home })).db).load(missionId(SLUG));
+      assert.equal(reviewLoad.kind, 'found');
+      assert.equal(reviewLoad.mission.closedAt, null);
       const withReview = {
-        ...(await new SqliteMissionStore((await initOperatorState({ homeDir: home })).db).load(missionId(SLUG)) as { mission: Mission }).mission,
+        ...reviewLoad.mission,
         status: 'review' as const,
         review: startReview(
           { change: { kind: 'local-branch', sourceBranch: `mission/${SLUG}`, targetBranch: 'main' }, revision: changeRevision('base') },
@@ -332,7 +331,7 @@ describe('Context CLI', () => {
         ),
       };
       await new SqliteMissionStore((await initOperatorState({ homeDir: home })).db)
-        .save(withReview as Mission, opened.version as never);
+        .save(withReview, missionVersion(opened.version));
       await clearOperatorStateCache();
 
       assert.equal(await invoke([
@@ -445,7 +444,7 @@ describe('Context CLI', () => {
       assert.equal(competing.kind, 'found');
       if (competing.kind !== 'found') { throw new Error('missing'); }
       assert.equal(competing.version, before + 1, 'one competing write advanced the version once');
-      assert.ok(['Small', 'Medium'].includes(competing.mission.predictedNelBucket ?? null), 'the winner landed');
+      assert.ok(['Small', 'Medium'].includes(competing.mission.predictedNelBucket ?? ''), 'the winner landed');
     } finally {
       await clearOperatorStateCache();
       if (previousHome === undefined) { delete process.env.PARALLIX_HOME; } else { process.env.PARALLIX_HOME = previousHome; }
@@ -508,10 +507,10 @@ describe('Mission dependencies CLI', () => {
       const invoke = async (args: readonly string[]) => {
         errors.length = 0;
         const write = process.stdout.write.bind(process.stdout);
-        (process.stdout as unknown as { write: (_chunk: string) => boolean }).write = () => true;
+        process.stdout.write = () => true;
         try {
           return await run([...args], { baseCwd: repo, error: (message) => { errors.push(message); return message; } });
-        } finally { (process.stdout as unknown as { write: typeof write }).write = write; }
+        } finally { process.stdout.write = write; }
       };
       /** Re-read the Mission exactly as a later agent would: from the database. */
       const recorded = async () => {
@@ -657,10 +656,10 @@ describe('Mission title', () => {
           rootDir: root,
           missionStore: opened.store,
           repositoryId: repository,
-          blocklistRepo: { async findAll() { return []; } } as never,
-          historyRepo: { async findAll() { return []; }, async findByType() { return []; } } as never,
-          laneEventRepo: { async findAll() { return []; } } as never,
-          usageRepo: { async findAll() { return []; } } as never,
+          blocklistRepo: { async findAll() { return []; }, async findByAgent() { return undefined; }, async save() { throw new Error('Unexpected block save'); }, async deleteByAgent() { throw new Error('Unexpected block delete'); }, async clear() { throw new Error('Unexpected block clear'); } },
+          historyRepo: { async findAll() { return []; }, async findByType() { return []; }, async append() { throw new Error('Unexpected history append'); }, async clear() { throw new Error('Unexpected history clear'); } },
+          laneEventRepo: { async findAll() { return []; }, async findByMissionId() { return []; }, async findByRepositoryId() { return []; }, async append() { throw new Error('Unexpected lane append'); }, async clear() { throw new Error('Unexpected lane clear'); } },
+          usageRepo: { async findAll() { return []; }, async findWhere() { return []; } },
           knownAgentFamilies: [],
         });
         const projection = await board.builder.build();
@@ -674,7 +673,7 @@ describe('Mission title', () => {
           assert.equal(card.title, STORED_TITLE, `${lane.id} card title comes from the recorded Mission`);
 
           const output = await renderToString(
-            React.createElement(MissionCard, { card, width: 60 } as never),
+            React.createElement(MissionCard, { card, width: 60 }),
             { columns: 80 },
           );
           assert.ok(output.includes(STORED_TITLE), `${lane.lane} card must render "${STORED_TITLE}"; got:\n${output}`);
@@ -702,7 +701,7 @@ test('CLI mutations preserve invalid-contract blockers, evidence and optimistic 
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { review: { provider: 'none' } } }));
     const { db } = await initOperatorState({ homeDir: home });
     const store = new SqliteMissionStore(db);
-    const blocker = { command: 'npm test', diagnostic: 'obsolete assertion', authorityReason: 'locked', proposedCorrection: 'correct assertion' };
+    const blocker = { command: 'npm test', diagnostic: 'obsolete assertion', authorityReason: 'locked', proposedCorrection: 'correct assertion' } satisfies import("../../../src/domain/rebound-policy.js").InvalidContractBlocker;
     await store.save({ ...intakeMission({ id, repositoryId: repositoryId('parallix'), title: 'Restart fixture' }),
       brief: missionBrief({ goal: 'before', why: 'fixture', scope: null, outOfScope: [] }),
       checkpoints: [{ missionId: id, name: 'CP-1', goalCheck: [{ criterion: 'existing proof', evidence: 'test/unit/domain/checkpoint-repair-freshness-contract.test.ts' }], nextActionText: 'repair', repair: {

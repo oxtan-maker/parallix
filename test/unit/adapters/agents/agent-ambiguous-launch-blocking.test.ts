@@ -1,4 +1,3 @@
-// @ts-nocheck -- task-2536: all agent/process/SQLite boundaries are injected seams.
 //
 // Regression for the 2026-09-18 06:13 CEST incident: a single ambiguous Codex
 // launch (`exit 1`, generic stderr) was widened into a three-hour family-wide
@@ -63,7 +62,7 @@ test('task-2536: ambiguous launch does not write a global block and leaves the f
       };
     };
 
-    const selectAgentFn = (_step: string, opts: { exclude?: Set<string> } = {}) => {
+    const selectAgentFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["selectAgentFn"]> = (_step, opts = {}) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set();
       // First pick codex (empty exclude); the retry excludes codex and returns claude.
       return exclude.has('codex') ? 'claude' : 'codex';
@@ -78,7 +77,7 @@ test('task-2536: ambiguous launch does not write a global block and leaves the f
       // does not consult the injected function — it relies on the module-level
       // detectLimitHit, which returns null for a generic crash.
       detectLimitHitFn: () => null,
-      updateAgentBlockFn: (agent: string) => { blockCalls.push(agent); return { reason: 'block' }; },
+      updateAgentBlockFn: (agent: string) => { blockCalls.push(agent); return { reason: 'block' as const }; },
       selectAgentFn,
       launchAgentFn: () => { launches += 1; return launchAgentFn(); },
       assertAgentSupportedFn: () => {},
@@ -110,7 +109,7 @@ for (const phase of ['startup', 'execution']) {
       const sigterm = phase === 'startup'
         ? { status: null, signal: 'SIGTERM', stdout: '', stderr: '' }
         : { status: null, signal: 'SIGTERM', stdout: 'partial work\n', stderr: 'working...\n' };
-      const selectAgentFn = (_step: string, opts: { exclude?: Set<string> } = {}) => {
+      const selectAgentFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["selectAgentFn"]> = (_step, opts = {}) => {
         const exclude = opts.exclude instanceof Set ? opts.exclude : new Set(opts.exclude ?? []);
         // Next-run eligibility: only a block (or this session's exclusion) hides custom.
         if (!exclude.has('custom') && !blockCalls.includes('custom')) { return 'custom'; }
@@ -122,7 +121,7 @@ for (const phase of ['startup', 'execution']) {
           prompt: (agent: string) => { launched.push(agent); return 'repro'; },
           worktree: tmpRoot,
           isAgentBlockedFn: (agent: string) => blockCalls.includes(agent),
-          updateAgentBlockFn: (agent: string) => { blockCalls.push(agent); return { reason: 'block' }; },
+          updateAgentBlockFn: (agent: string) => { blockCalls.push(agent); return { reason: 'block' as const }; },
           selectAgentFn,
           launchAgentFn: (params: { prompt?: string }) => {
             prompts.push(params.prompt ?? '');

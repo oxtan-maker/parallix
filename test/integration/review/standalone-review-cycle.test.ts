@@ -1,3 +1,4 @@
+import type { ReviewArtifactPort, ReviewLoopPorts } from '../../../src/application/ports/review-round.js';
 
 /**
  * task-1272 CP-4: full review cycle survives in a standalone (Forgejo-disabled)
@@ -31,7 +32,7 @@ const { findMissionDir, missionDirForSlug, missionPathForSlug } = findMissionDir
 
 const { mock } = test;
 
-async function withTempGitRepo(fn) {
+async function withTempGitRepo(fn: (_arg0: string) => void | Promise<void>) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-test-1272-cycle-'));
   try {
     childProcess.spawnSync('git', ['init', '-b', 'master'], { cwd: root });
@@ -52,7 +53,7 @@ async function withTempGitRepo(fn) {
 
 // SC7: --mission path resolution.
 test('findMissionDir reads a mission contract from a non-standard --mission path', async () => {
-  await withTempGitRepo((root) => {
+  await withTempGitRepo((root: string) => {
     const slug = 'task-1272';
     // Mission deliberately placed OUTSIDE docs/missions/.
     const customDir = path.join(root, 'elsewhere', 'review-pack');
@@ -89,10 +90,10 @@ test('findMissionDir reads a mission contract from a non-standard --mission path
  * with no review provider configured, with the reviewer/implementer outputs,
  * the Backlog mirror and the pre-review checks faked.
  */
-function standalone(root, options: { missionPath?: string; reviewer?: () => Promise<unknown>; implementer?: () => Promise<unknown> } = {}) {
+function standalone(root: string, options: { missionPath?: string; reviewer?: ReviewArtifactPort['consumeReviewer']; implementer?: ReviewArtifactPort['consumeImplementer'] } = {}) {
   // Forgejo surfaces — must remain untouched in standalone mode (SC2).
   const forgejo = {
-    getPrStatus: mock.method(reviewAdapterModule, 'getPrStatus', () => ({ exists: false })),
+    getPrStatus: mock.method(reviewAdapterModule, 'getPrStatus', () => ({ exists: false as const })),
     providerAvailable: mock.method(reviewAdapterModule, 'providerAvailable', async () => false),
     readToken: mock.method(reviewAdapterModule, 'readToken', () => 'should-not-be-read'),
     getLatestReviewForPr: mock.method(reviewAdapterModule, 'getLatestReviewForPr', async () => null),
@@ -102,11 +103,11 @@ function standalone(root, options: { missionPath?: string; reviewer?: () => Prom
   const fake = fakeReviewLoopPorts({
     slug: 'task-1272',
     worktree: root,
-    handoff: { handoff: async () => ({ ok: true }) },
+    handoff: { handoff: async () => ({ ok: true as const }) },
     routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
     artifacts: {
-      ...(options.reviewer ? { consumeReviewer: options.reviewer as never } : {}),
-      ...(options.implementer ? { consumeImplementer: options.implementer as never } : {}),
+      ...(options.reviewer ? { consumeReviewer: options.reviewer } : {}),
+      ...(options.implementer ? { consumeImplementer: options.implementer } : {}),
     },
     // The implementer commits a revised tree between rounds.
     preReview: { head: () => `head-${++head}` },
@@ -115,17 +116,18 @@ function standalone(root, options: { missionPath?: string; reviewer?: () => Prom
   return { fake, ports, forgejo };
 }
 
-function assertNoForgejoApiCalls(ports, forgejo) {
+function assertNoForgejoApiCalls(ports: ReviewLoopPorts, forgejo: ReturnType<typeof standalone>['forgejo']) {
   assert.equal(ports.provider, null, 'standalone mode binds no review provider');
   for (const [name, fn] of Object.entries(forgejo)) {
-    assert.equal((fn as any).mock.callCount(), 0, `no Forgejo ${name} call in standalone mode`);
+    assert.equal((fn).mock.callCount(), 0, `no Forgejo ${name} call in standalone mode`);
   }
 }
 
 /** Capture the rendered reviewer prompt from the real agent port. */
 function capturePrompt() {
   const captured: { prompt: string | null } = { prompt: null };
-  mock.method(agentsModule, 'startAgent', async (step, agentOpts) => {
+  mock.method(agentsModule, 'startAgent', async (step: Parameters<(typeof agentsModule)["startAgent"]>[0], agentOpts: Parameters<(typeof agentsModule)["startAgent"]>[1]) => {
+    assert.ok(agentOpts?.agent);
     if (step === 'review' && typeof agentOpts.prompt === 'function') { captured.prompt = await agentOpts.prompt('codex'); }
     return { agent: agentOpts.agent };
   });
@@ -135,7 +137,7 @@ function capturePrompt() {
 // SC7 integration: the review loop must thread a --mission override into the
 // launched reviewer/implementer prompts (not just findMissionDir in isolation).
 test('review loop threads --mission override into the launched reviewer prompt', async () => {
-  await withTempGitRepo(async (root) => {
+  await withTempGitRepo(async (root: string) => {
     // Mission contract at a non-standard location (outside docs/missions/).
     const customDir = path.join(root, 'review-pack');
     fs.mkdirSync(customDir, { recursive: true });
@@ -146,7 +148,7 @@ test('review loop threads --mission override into the launched reviewer prompt',
     fs.writeFileSync(customMission, '# Mission: custom standalone contract\n\n## Gates\n- `npm run override-gate`\n');
 
     const captured = capturePrompt();
-    const { ports } = standalone(root, { missionPath: customMission, reviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) });
+    const { ports } = standalone(root, { missionPath: customMission, reviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) });
     await runReviewLoop({ slug: 'task-1272', implementer: 'claude', reviewer: 'codex' }, ports);
     const capturedPrompt = captured.prompt;
 
@@ -165,12 +167,12 @@ test('review loop threads --mission override into the launched reviewer prompt',
 
 // Negative control: absent --mission, the harness resolves the slug-derived path.
 test('review loop uses the slug-derived mission path when --mission is absent', async () => {
-  await withTempGitRepo(async (root) => {
+  await withTempGitRepo(async (root: string) => {
     const derived = missionPathForSlug(root, 'task-1272');
     fs.mkdirSync(path.dirname(derived), { recursive: true });
     fs.writeFileSync(derived, '# Mission: derived\n\n## Gates\n- `npm run derived-gate`\n');
     const captured = capturePrompt();
-    const { ports } = standalone(root, { reviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) });
+    const { ports } = standalone(root, { reviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) });
     await runReviewLoop({ slug: 'task-1272', implementer: 'claude', reviewer: 'codex' }, ports);
     const capturedPrompt = captured.prompt;
 
@@ -187,7 +189,7 @@ test('review loop uses the slug-derived mission path when --mission is absent', 
 test('standalone review loop completes a first round to APPROVED with no Forgejo calls', async () => {
   await withTempGitRepo(async (root) => {
     capturePrompt();
-    const { fake, ports, forgejo } = standalone(root, { reviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) });
+    const { fake, ports, forgejo } = standalone(root, { reviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) });
     // SC4: the disabled-provider "Forgejo validation skipped" line is demoted
     // to verbose by default; reveal it here to prove no Forgejo calls.
     await runReviewLoop({ slug: 'task-1272', implementer: 'claude', reviewer: 'codex', verbose: true }, ports);
@@ -209,10 +211,10 @@ test('standalone loop survives REQUEST_CHANGES -> CHANGES_MADE -> APPROVED acros
   await withTempGitRepo(async (root) => {
     const reviewOutcomes = ['REQUEST_CHANGES', 'APPROVED'];
     let reviewIdx = 0;
-    mock.method(agentsModule, 'startAgent', async (_step, agentOpts) => ({ agent: agentOpts.agent }));
+    mock.method(agentsModule, 'startAgent', async (_step: Parameters<(typeof agentsModule)["startAgent"]>[0], agentOpts: Parameters<(typeof agentsModule)["startAgent"]>[1]) => { assert.ok(agentOpts?.agent); return { agent: agentOpts.agent, result: { status: 0 } }; });
     const { fake, ports, forgejo } = standalone(root, {
-      reviewer: async () => ({ consumed: true, ok: true, reviewState: reviewOutcomes[reviewIdx++] }),
-      implementer: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' }),
+      reviewer: async () => ({ consumed: true, ok: true as const, reviewState: reviewOutcomes[reviewIdx++] }),
+      implementer: async () => ({ consumed: true, ok: true as const, disposition: 'CHANGES_MADE' }),
     });
     await runReviewLoop({ slug: 'task-1272', implementer: 'claude', reviewer: 'codex' }, ports);
     const { errors, exits: exitCodes } = fake;

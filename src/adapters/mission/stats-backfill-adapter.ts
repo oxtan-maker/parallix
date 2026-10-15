@@ -16,8 +16,8 @@ export class LegacyStatsBackfillAdapter implements StatsBackfillPort {
   constructor(
     private readonly _rootDir: string,
     private readonly _measurementStore: { configuration?: ParallixConfiguration; dbPath?: string; store?: import('../../application/measurement-ports.js').MeasurementStorePort } = {},
-    private readonly _missionStore: unknown = null,
-  ) {}
+    private readonly _missionStore: Parameters<typeof collectHistoricalStatsBackfill>[2] = null,
+  ) { }
 
   async readProjection(_options: { readonly filePath?: string | null } = {}): Promise<StatsProjection> {
     const report = await collectHistoricalStatsBackfill(this._rootDir, this._measurementStore, this._missionStore);
@@ -36,7 +36,7 @@ export class LegacyStatsBackfillAdapter implements StatsBackfillPort {
     // deliberately ignored — no default execution resolves or writes stats.csv.
     const evidence: DurableEvidence[] = [];
     for (const row of rows) {
-      const result = stats.upsertMeasurementRow(row as Record<string, string>, { rootDir: this._rootDir, ...this._measurementStore });
+      const result = stats.upsertMeasurementRow(row, { rootDir: this._rootDir, ...this._measurementStore });
       if (result.changed) {
         evidence.push({ id: row.mission, source: 'stats', detail: `legacy stats row applied for ${row.mission}` });
       }

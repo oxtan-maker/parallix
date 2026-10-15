@@ -165,19 +165,19 @@ export class BoardProjectionBuilder {
     private readonly _git: GitReadAdapter,
     private readonly _operationLog: OperationLogReadAdapter,
     private readonly _options?: BoardProjectionOptions,
-  ) {}
+  ) { }
 
   /** Build the full BoardProjection from all authority adapters. */
   async build(): Promise<BoardProjection> {
     this._options?.prepareReads?.();
-    const nowMs = (this._options?.now ?? Date.now)();
+    const nowMs = this.now();
     const [repositoryId, missions, operationLog, agentAvailability, runningSessions, currentWorkEvents] = await Promise.all([
       this._git.loadRepositoryId(),
       this._missions.loadAllMissions(),
       this._operationLog.loadOperationLog(),
       this._agents.loadAgentAvailability(),
-      this._agents.loadRunningSessions?.() ?? Promise.resolve(null),
-      this._options?.currentWork?.loadCurrentWork() ?? Promise.resolve([]),
+      this.runningSessions(),
+      this.currentWorkEvents(),
     ]);
 
     const sourceFacts = this._missions.getSourceFacts();
@@ -265,12 +265,12 @@ export class BoardProjectionBuilder {
     const [reviews, gateStatus, runningSessions, currentWorkEvents] = await Promise.all([
       this._reviews.loadReviews([mission.id]),
       this._gates.loadGateStatus(mission.id),
-      this._agents.loadRunningSessions?.() ?? Promise.resolve(null),
-      this._options?.currentWork?.loadMissionCurrentWork?.(mission.id) ?? Promise.resolve([]),
+      this.runningSessions(),
+      this.missionCurrentWorkEvents(mission.id),
     ]);
 
     const work = reconcileCurrentWork(currentWorkEvents, {
-      nowMs: (this._options?.now ?? Date.now)(),
+      nowMs: this.now(),
       ttlMs: this._options?.currentWorkTtlMs ?? CURRENT_WORK_TTL_MS,
       isProcessAlive: this._options?.isProcessAlive,
     }).get(mission.id) ?? NO_CURRENT_WORK;
@@ -287,6 +287,11 @@ export class BoardProjectionBuilder {
       liveSession,
     );
   }
+
+  private now(): number { return (this._options?.now ?? Date.now)(); }
+  private runningSessions() { return this._agents.loadRunningSessions?.() ?? Promise.resolve(null); }
+  private currentWorkEvents() { return this._options?.currentWork?.loadCurrentWork() ?? Promise.resolve([]); }
+  private missionCurrentWorkEvents(id: MissionId) { return this._options?.currentWork?.loadMissionCurrentWork?.(id) ?? Promise.resolve([]); }
 
   /** The single place operational facts become a card, shared by both routes. */
   private composeCard(

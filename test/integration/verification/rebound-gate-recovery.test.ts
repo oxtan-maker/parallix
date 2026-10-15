@@ -24,14 +24,14 @@ import { initCommittedRepository } from '../../fixtures/git-repository.js';
 import { captureVerifiedTreeProof, isTransientVerificationFailure } from '../../../src/adapters/verification/verification.js';
 import { classifyReboundReason, rebound, type ReboundReason } from '../../../src/application/rebound-kernel.js';
 
-function withTempDir(fn) {
+function withTempDir(fn: (_arg0: string) => void) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-2413-'));
   try { fn(dir); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
 // A configured verification command so the gate actually runs the injected
 // runFn instead of no-op passing (mirrors workflow.config.json).
-function initCommittedGitRepo(root) {
+function initCommittedGitRepo(root: string) {
   initCommittedRepository(root, {
     'workflow.config.json': JSON.stringify({
       product: { name: 'Task 2413 Repro' },
@@ -43,7 +43,7 @@ function initCommittedGitRepo(root) {
 }
 
 test('task-2413: publication verifier failure preserves the structured root failure', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     initCommittedGitRepo(root);
     const capturedStdout = 'FAIL  test/feature.test.ts\n  AssertionError: boom expected 1 == 2';
     const capturedStderr = 'npm error code ECONTENTION\nnpm error run under host contention';
@@ -62,25 +62,26 @@ test('task-2413: publication verifier failure preserves the structured root fail
     // the wrapper string — this is what the handoff caller and classifier read.
     assert.equal(result.exitCode, 1);
     assert.equal(result.command, 'npm run verify:docs');
+    assert.ok(result.cwd != null);
     assert.ok(result.cwd.includes(path.basename(root)));
     assert.equal(result.stdout, capturedStdout);
     assert.equal(result.stderr, capturedStderr);
 
     // The exact command that failed is retained for the next agent.
-    assert.match(result.error, /verification gate failed/);
+    assert.match(result.error ?? '', /verification gate failed/);
     // The exit status is retained, not collapsed to a boolean.
-    assert.match(result.error, /exit code 1/);
+    assert.match(result.error ?? '', /exit code 1/);
     // The captured stdout/stderr survive the wrapper — this is the information
     // loss the task-2373.01 incident exposed at the parent commit.
-    assert.match(result.error, /AssertionError: boom expected 1 == 2/);
-    assert.match(result.error, /ECONTENTION/);
+    assert.match(result.error ?? '', /AssertionError: boom expected 1 == 2/);
+    assert.match(result.error ?? '', /ECONTENTION/);
     // The cwd the gate ran against is retained.
     assert.ok(result.error.includes(path.basename(root)), 'error retains the cwd');
   });
 });
 
 test('task-2413: raw spawn capture safely bounds verifier output above the Node default buffer', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     initCommittedGitRepo(root);
     const command = `node -e "process.stdout.write('x'.repeat(1200000)); process.stderr.write('tail-marker'); process.exit(4)"`;
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
@@ -89,7 +90,7 @@ test('task-2413: raw spawn capture safely bounds verifier output above the Node 
     childProcess.spawnSync('git', ['-C', root, 'add', 'workflow.config.json']);
     childProcess.spawnSync('git', ['-C', root, 'commit', '-m', 'large verifier']);
 
-    const result = captureVerifiedTreeProof('docs', root, { runFn: childProcess.spawnSync });
+    const result = captureVerifiedTreeProof('docs', root, { runFn: (command, args, options) => childProcess.spawnSync(command, args, { ...options, encoding: 'utf8' }) });
     assert.equal(result.ok, false);
     assert.equal(result.exitCode, 4);
     assert.equal(result.stdout?.length, 8000);
@@ -131,15 +132,15 @@ test('task-2413: a materially changed failure is reclassified from its own evide
 });
 
 test('task-2413: a deterministic gate failure is not masked as a transient/no-output pass', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     initCommittedGitRepo(root);
     const result = captureVerifiedTreeProof('docs', root, {
       runFn() { return { status: 3, signal: null, stdout: 'deterministic test failure', stderr: '' }; },
       stdio: 'pipe',
     });
     assert.equal(result.ok, false);
-    assert.match(result.error, /exit code 3/);
-    assert.match(result.error, /deterministic test failure/);
+    assert.match(result.error ?? '', /exit code 3/);
+    assert.match(result.error ?? '', /deterministic test failure/);
   });
 });
 
@@ -163,7 +164,7 @@ test('task-2413: a slow unit-test gate retries before it can be mistaken for a G
   }, {
     slug: 'task-2413', worktree: '/tmp/task-2413', implementer: 'codex',
     startAgent: async () => { launches++; return { result: { status: 0 } }; },
-    verify: () => { reruns++; return { ok: true }; },
+    verify: () => { reruns++; return { ok: true as const }; },
     log: () => {}, error: () => {},
   });
 
@@ -183,12 +184,12 @@ test('task-2413: an exhausted slow-test retry launches a repair with the exact g
     transient: true,
   }, {
     slug: 'task-2413', worktree: '/tmp/task-2413', implementer: 'custom',
-    startAgent: async (_step, options: any) => {
+    startAgent: async (_step, options) => {
       launches++;
-      prompts.push(options.prompt('custom'));
+      prompts.push(typeof options.prompt === 'function' ? options.prompt('custom') : options.prompt ?? '');
       return { result: { status: 1 } };
     },
-    verify: () => { reruns++; return { ok: false, reason: {
+    verify: () => { reruns++; return { ok: false as const, reason: {
       kind: 'gate-failure', area: 'all', command: './scripts/verify-local.sh all', exitCode: 1,
       stdout: '[unit-test-budget:exceeded] review test exceeded 1000ms', stderr: '',
       transient: true,
@@ -213,7 +214,7 @@ test('task-2413: fresh structured evidence reclassifies recovery instead of reta
   }, {
     slug: 'task-2413', worktree: '/tmp/task-2413', implementer: 'codex',
     startAgent: async () => { launches++; return { result: { status: 0 } }; },
-    verify: () => ({ ok: false, reason: {
+    verify: () => ({ ok: false as const, reason: {
       kind: 'gate-failure', area: 'all', command: 'npm test', exitCode: 1,
       stdout: '', stderr: 'forgejo connection refused',
     } }),
@@ -234,7 +235,7 @@ test('task-2413: launcher failure uses its own budget and never pretends code re
     slug: 'task-2413', worktree: '/tmp/task-2413', implementer: 'codex',
     maxAttempts: 2, maxLaunchRetries: 0,
     startAgent: async () => ({ result: { status: null } }),
-    verify: () => { verifies++; return { ok: false }; },
+    verify: () => { verifies++; return { ok: false as const }; },
     log: () => {}, error: () => {},
   });
 

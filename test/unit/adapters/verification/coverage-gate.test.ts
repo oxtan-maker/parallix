@@ -24,7 +24,7 @@ test('native coverage keeps the historical c8 contract: src denominator, unloade
   const plan = buildTestRunPlan({ executionRoot: REPO_ROOT, requestedArgs: ['--integration-ci'], probeNodeVersion: () => 'v26.7.0', coverage: true });
   const args = withCoverageReporters(plan.nodeArgs, 'coverage/.lcov-integration-ci.info');
   const coverageArgs = args.slice(0, args.indexOf('--test'));
-  assert.deepEqual(COVERAGE_INCLUDES, ['src/**/*.ts']);
+  assert.deepEqual(COVERAGE_INCLUDES, ['src/**/*.ts', 'src/**/*.tsx']);
   assert.deepEqual(COVERAGE_EXCLUDES, ['test/**', 'prompts/**', 'config/*.json', '.workflow/**', 'node_modules/**']);
   for (const flag of [
     '--enable-source-maps',
@@ -41,7 +41,7 @@ test('native coverage keeps the historical c8 contract: src denominator, unloade
 });
 
 test('coverage runs require Node 26.7+ for --test-coverage-include-all', () => {
-  const options = { executionRoot: REPO_ROOT, requestedArgs: [], coverage: true };
+  const options = { executionRoot: REPO_ROOT, requestedArgs: [], coverage: true } satisfies Partial<NonNullable<Parameters<typeof buildTestRunPlan>[0]>>;
   const previous = environment.PARALLIX_TEST_NODE;
   delete environment.PARALLIX_TEST_NODE;
   try {
@@ -106,4 +106,10 @@ test('mergeLcov handles a line zero-hit in both fragments and empty input', () =
   // Both lines are zero-hit: LF counts them, LH counts only covered lines.
   assert.equal(merged, 'SF:src/a.ts\nDA:1,0\nDA:2,0\nLF:2\nLH:0\nend_of_record\n');
   assert.equal(mergeLcov([]), '');
+});
+
+test('native coverage includes TSX components alongside TypeScript modules (TASK-2746)', () => {
+  const args = withCoverageReporters(['--test'], 'coverage/tsx.info');
+  assert.ok(args.includes('--test-coverage-include=src/**/*.tsx'));
+  assert.ok(args.includes('--test-coverage-include=src/**/*.ts'));
 });

@@ -12,12 +12,40 @@ import { getPrStatus } from '../forgejo/forgejo.js';
 import { isForgejoReviewEnabled } from '../config/product-config.js';
 import stats from './commands/stats.js';
 
-/** @param {string[]} args @param {{log?: Function, error?: Function, cwdFn?: Function, getCurrentBranchFn?: Function, resolveTaskFileFn?: Function, getTaskStatusFn?: Function, toVirtualFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, inferSlugFn?: Function, getMissionYearFn?: Function, conventionalWorktreePathFn?: Function, getLastCommitFn?: Function, getPrStatusFn?: Function, evaluateRepositoryReadinessFn?: Function, evaluateReviewSetupFn?: Function, adapterChecklistFn?: Function, resolveMissionClassificationFn?: Function, isForgejoReviewEnabledFn?: Function, fsExistsSync?: Function, resolveMissionBaseBranchFn?: Function, getPrimaryBranchFn?: Function, gitFn?: Function, command?: string, returnResult?: boolean, quiet?: boolean}} opts */
+type PreflightLog = (message: string) => void;
+interface StartupPreflightOptions {
+  configuration?: ParallixConfiguration;
+  log?: PreflightLog; error?: PreflightLog; cwdFn?: () => string;
+  getCurrentBranchFn?: typeof getCurrentBranch;
+  resolveTaskFileFn?: typeof resolveTaskFile;
+  getTaskStatusFn?: typeof getTaskStatus;
+  toVirtualFn?: (_actualState: string | null) => string | null;
+  findMissionDirFn?: typeof findMissionDir;
+  findCheckpointsFn?: typeof findCheckpoints;
+  getFirstLineFn?: typeof getFirstLine;
+  inferSlugFn?: typeof inferSlug;
+  getMissionYearFn?: typeof getMissionYear;
+  conventionalWorktreePathFn?: typeof conventionalWorktreePath;
+  getLastCommitFn?: typeof getLastCommit;
+  getPrStatusFn?: typeof getPrStatus;
+  evaluateRepositoryReadinessFn?: typeof evaluateRepositoryReadiness;
+  evaluateReviewSetupFn?: typeof evaluateReviewSetup;
+  adapterChecklistFn?: typeof adapterChecklist;
+  isForgejoReviewEnabledFn?: typeof isForgejoReviewEnabled;
+  resolveMissionBaseBranchFn?: typeof resolveMissionBaseBranch;
+  getPrimaryBranchFn?: typeof getPrimaryBranch;
+  resolveMissionClassificationFn?: (slug: string, rootDir: string) => ReturnType<typeof stats.resolveMissionClassification>;
+  fsExistsSync?: typeof fs.existsSync;
+  gitFn?: typeof git;
+  command?: string; returnResult?: boolean; quiet?: boolean;
+}
+
+/** @param {string[]} args @param {{log?: PreflightLog, error?: PreflightLog, cwdFn?: Function, getCurrentBranchFn?: Function, resolveTaskFileFn?: Function, getTaskStatusFn?: Function, toVirtualFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, inferSlugFn?: Function, getMissionYearFn?: Function, conventionalWorktreePathFn?: Function, getLastCommitFn?: Function, getPrStatusFn?: Function, evaluateRepositoryReadinessFn?: Function, evaluateReviewSetupFn?: Function, adapterChecklistFn?: Function, resolveMissionClassificationFn?: Function, isForgejoReviewEnabledFn?: Function, fsExistsSync?: Function, resolveMissionBaseBranchFn?: Function, getPrimaryBranchFn?: Function, gitFn?: Function, command?: string, returnResult?: boolean, quiet?: boolean}} opts */
 /** A failed check sets `fail`; only a check with an operator repair adds a step. */
 type PreflightVerdict = { fail: boolean; remediationSteps: string[] };
 
 /** Forgejo token files, auth and git remote. Never fatal: it only warns. */
-function reportReviewSetup(cwd: string, evaluateReviewSetupFn: Function, log: Function): void {
+function reportReviewSetup(cwd: string, evaluateReviewSetupFn: typeof evaluateReviewSetup, log: PreflightLog): void {
   const reviewSetup = evaluateReviewSetupFn(cwd);
   if (!reviewSetup.required) { return; }
   if (reviewSetup.ok) {
@@ -29,7 +57,7 @@ function reportReviewSetup(cwd: string, evaluateReviewSetupFn: Function, log: Fu
   for (const step of reviewSetup.steps) { log(fmt.status('INFO', step)); }
 }
 
-function reportRepositoryReadiness(cwd: string, deps: any, verdict: PreflightVerdict, log: Function): void {
+function reportRepositoryReadiness(cwd: string, deps: Pick<ReturnType<typeof preflightDependencies>, 'evaluateRepositoryReadinessFn' | 'evaluateReviewSetupFn' | 'adapterChecklistFn'>, verdict: PreflightVerdict, log: PreflightLog): void {
   const { evaluateRepositoryReadinessFn, evaluateReviewSetupFn, adapterChecklistFn } = deps;
   const readiness = evaluateRepositoryReadinessFn(cwd);
   if (readiness.mode === 'default') {
@@ -51,7 +79,7 @@ function reportRepositoryReadiness(cwd: string, deps: any, verdict: PreflightVer
   verdict.remediationSteps.push('Fix workflow.config.json: ensure it is valid JSON and adapters is an object with valid subsections.');
 }
 
-function checkWorktreePath(cwd: string, slug: string, isVerifyOnly: boolean, verdict: PreflightVerdict, conventionalWorktreePathFn: Function, log: Function): void {
+function checkWorktreePath(cwd: string, slug: string, isVerifyOnly: boolean, verdict: PreflightVerdict, conventionalWorktreePathFn: typeof conventionalWorktreePath, log: PreflightLog): void {
   if (isVerifyOnly) { log(fmt.status('PASS', `PWD: ${fmt.path(cwd)}`)); return; }
   const expectedPath = conventionalWorktreePathFn(slug);
   if (cwd === expectedPath || cwd.endsWith(slug)) {
@@ -62,7 +90,7 @@ function checkWorktreePath(cwd: string, slug: string, isVerifyOnly: boolean, ver
   verdict.fail = true;
 }
 
-function checkMissionBranch(currentBranch: string, slug: string, isVerifyOnly: boolean, verdict: PreflightVerdict, log: Function): void {
+function checkMissionBranch(currentBranch: string, slug: string, isVerifyOnly: boolean, verdict: PreflightVerdict, log: PreflightLog): void {
   const expectedBranch = `mission/${slug}`;
   if (isVerifyOnly || currentBranch === expectedBranch) {
     log(fmt.status('PASS', `Branch: ${fmt.branch(currentBranch)}`));
@@ -73,8 +101,8 @@ function checkMissionBranch(currentBranch: string, slug: string, isVerifyOnly: b
 }
 
 /** A mission may only start from a status that has not already completed. */
-function reportBacklogTaskStatus(status: string, virtualStatus: string, isVerifyOnly: boolean, verdict: PreflightVerdict, log: Function): void {
-  if (isVerifyOnly || ['ready', 'active', 'review'].includes(virtualStatus)) {
+function reportBacklogTaskStatus(status: string | null, virtualStatus: string | null | undefined, isVerifyOnly: boolean, verdict: PreflightVerdict, log: PreflightLog): void {
+  if (isVerifyOnly || ['ready', 'active', 'review'].includes(virtualStatus ?? '')) {
     log(fmt.status('PASS', `Backlog task status: ${status}`));
     return;
   }
@@ -90,7 +118,7 @@ function reportBacklogTaskStatus(status: string, virtualStatus: string, isVerify
  * Classification is Mission state: a missing or unreadable aggregate fails
  * preflight even when a provider task carries a valid label.
  */
-function reportMissionClassification(slug: string, cwd: string, resolveMissionClassificationFn: Function, verdict: PreflightVerdict, log: Function): void {
+function reportMissionClassification(slug: string, cwd: string, resolveMissionClassificationFn: (slug: string, rootDir: string) => ReturnType<typeof stats.resolveMissionClassification>, verdict: PreflightVerdict, log: PreflightLog): void {
   try {
     const { classification, error: classificationError } = resolveMissionClassificationFn(slug, cwd);
     const label = 'Mission classification';
@@ -102,7 +130,7 @@ function reportMissionClassification(slug: string, cwd: string, resolveMissionCl
   verdict.fail = true;
 }
 
-function checkBacklogTask(slug: string, cwd: string, isVerifyOnly: boolean, verdict: PreflightVerdict, deps: any, log: Function): void {
+function checkBacklogTask(slug: string, cwd: string, isVerifyOnly: boolean, verdict: PreflightVerdict, deps: Pick<ReturnType<typeof preflightDependencies>, 'resolveTaskFileFn' | 'getTaskStatusFn' | 'toVirtualFn' | 'resolveMissionClassificationFn'>, log: PreflightLog): void {
   const { resolveTaskFileFn, getTaskStatusFn, toVirtualFn, resolveMissionClassificationFn } = deps;
   const taskResolution = resolveTaskFileFn(slug, cwd);
   if (taskResolution.ok) {
@@ -126,7 +154,7 @@ function checkBacklogTask(slug: string, cwd: string, isVerifyOnly: boolean, verd
  * When a mission records a non-primary base, verify that base branch exists
  * locally so `px integrate` does not fail silently at landing time.
  */
-function checkRecordedBaseBranch(slug: string, cwd: string, verdict: PreflightVerdict, deps: any, log: Function): void {
+function checkRecordedBaseBranch(slug: string, cwd: string, verdict: PreflightVerdict, deps: Pick<ReturnType<typeof preflightDependencies>, 'resolveMissionBaseBranchFn' | 'getPrimaryBranchFn' | 'runFn'>, log: PreflightLog): void {
   const { resolveMissionBaseBranchFn, getPrimaryBranchFn, runFn } = deps;
   const primaryBranch = getPrimaryBranchFn();
   let recordedBase: string | null;
@@ -141,7 +169,7 @@ function checkRecordedBaseBranch(slug: string, cwd: string, verdict: PreflightVe
   verdict.fail = true;
 }
 
-function checkMissionDocs(slug: string, cwd: string, verdict: PreflightVerdict, deps: any, log: Function): void {
+function checkMissionDocs(slug: string, cwd: string, verdict: PreflightVerdict, deps: Pick<ReturnType<typeof preflightDependencies>, 'findMissionDirFn' | 'findCheckpointsFn' | 'getFirstLineFn' | 'getMissionYearFn' | 'fsExistsSync' | 'resolveMissionBaseBranchFn' | 'getPrimaryBranchFn' | 'runFn'>, log: PreflightLog): void {
   const { findMissionDirFn, findCheckpointsFn, getFirstLineFn, fsExistsSync } = deps;
   const missionDir = findMissionDirFn(slug, cwd);
   if (!missionDir) {
@@ -168,13 +196,65 @@ function checkMissionDocs(slug: string, cwd: string, verdict: PreflightVerdict, 
 }
 
 /** Informational only: any PR state is a usable startup state. */
-function reportForgejoPr(pr: any, log: Function): void {
+function reportForgejoPr(pr: ReturnType<typeof getPrStatus>, log: PreflightLog): void {
   if (!pr.exists) { log(fmt.status('PASS', `Forgejo PR: no PR found (ready for startup)`)); return; }
   if (pr.state === 'open') { log(fmt.status('PASS', `Forgejo PR: found OPEN PR (#${pr.number})`)); return; }
   log(fmt.status('PASS', `Forgejo PR: found ${pr.state ? pr.state.toUpperCase() : 'UNKNOWN'} PR (#${pr.number})`));
 }
 
-function startupPreflight(args: string[], opts: { configuration?: ParallixConfiguration, log?: Function, error?: Function, cwdFn?: Function, getCurrentBranchFn?: Function, resolveTaskFileFn?: Function, getTaskStatusFn?: Function, toVirtualFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, inferSlugFn?: Function, getMissionYearFn?: Function, conventionalWorktreePathFn?: Function, getLastCommitFn?: Function, getPrStatusFn?: Function, evaluateRepositoryReadinessFn?: Function, evaluateReviewSetupFn?: Function, adapterChecklistFn?: Function, resolveMissionClassificationFn?: Function, isForgejoReviewEnabledFn?: Function, fsExistsSync?: Function, resolveMissionBaseBranchFn?: Function, getPrimaryBranchFn?: Function, gitFn?: Function, command?: string, returnResult?: boolean, quiet?: boolean } = {}) {
+function preflightReadinessDependencies(opts: StartupPreflightOptions) {
+  const evaluateRepositoryReadinessFn = opts.evaluateRepositoryReadinessFn || evaluateRepositoryReadiness;
+  const evaluateReviewSetupFn = opts.evaluateReviewSetupFn || evaluateReviewSetup;
+  const adapterChecklistFn = opts.adapterChecklistFn || adapterChecklist;
+  const resolveMissionClassificationFn = opts.resolveMissionClassificationFn || ((slug: string, rootDir: string) => stats.resolveMissionClassification(slug, rootDir, undefined, opts.configuration));
+  const isForgejoReviewEnabledFn = opts.isForgejoReviewEnabledFn || isForgejoReviewEnabled;
+  const fsExistsSync = opts.fsExistsSync || fs.existsSync;
+  const resolveMissionBaseBranchFn = opts.resolveMissionBaseBranchFn || resolveMissionBaseBranch;
+  const getPrimaryBranchFn = opts.getPrimaryBranchFn || getPrimaryBranch;
+  const runFn = opts.gitFn || git;
+
+  return { evaluateRepositoryReadinessFn, evaluateReviewSetupFn, adapterChecklistFn, resolveMissionClassificationFn, isForgejoReviewEnabledFn, fsExistsSync, resolveMissionBaseBranchFn, getPrimaryBranchFn, runFn };
+}
+
+function preflightDependencies(opts: StartupPreflightOptions) {
+  const resolveTaskFileFn = opts.resolveTaskFileFn || resolveTaskFile;
+  const getTaskStatusFn = opts.getTaskStatusFn || getTaskStatus;
+  const toVirtualFn = opts.toVirtualFn || toVirtual;
+  const findMissionDirFn = opts.findMissionDirFn || findMissionDir;
+  const findCheckpointsFn = opts.findCheckpointsFn || findCheckpoints;
+  const getFirstLineFn = opts.getFirstLineFn || getFirstLine;
+  const inferSlugFn = opts.inferSlugFn || inferSlug;
+  const getMissionYearFn = opts.getMissionYearFn || getMissionYear;
+  const conventionalWorktreePathFn = opts.conventionalWorktreePathFn || ((slug: string) => conventionalWorktreePath(slug, getPrimaryWorktree(opts.configuration)));
+  const getLastCommitFn = opts.getLastCommitFn || getLastCommit;
+  const getPrStatusFn = opts.getPrStatusFn || getPrStatus;
+  const { evaluateRepositoryReadinessFn, evaluateReviewSetupFn, adapterChecklistFn, resolveMissionClassificationFn, isForgejoReviewEnabledFn, fsExistsSync, resolveMissionBaseBranchFn, getPrimaryBranchFn, runFn } = preflightReadinessDependencies(opts);
+
+  return { resolveTaskFileFn, getTaskStatusFn, toVirtualFn, findMissionDirFn, findCheckpointsFn, getFirstLineFn, inferSlugFn, getMissionYearFn, conventionalWorktreePathFn, getLastCommitFn, getPrStatusFn, evaluateRepositoryReadinessFn, evaluateReviewSetupFn, adapterChecklistFn, resolveMissionClassificationFn, isForgejoReviewEnabledFn, fsExistsSync, resolveMissionBaseBranchFn, getPrimaryBranchFn, runFn };
+}
+
+function preflightLogger(baseLog: PreflightLog, quiet: boolean): PreflightLog {
+  const log = quiet
+    ? ((msg: string) => {
+      // Some lines (the final verdict) are prefixed with a newline, so allow
+      // leading whitespace before the status tag.
+      if (/^\s*\[PASS\]/.test(fmt.stripAnsi(String(msg)))) {return;}
+      baseLog(msg);
+    })
+    : baseLog;
+  return log;
+}
+
+function reportPreflightStart(slug: string | null, isVerifyOnly: boolean, quiet: boolean, log: PreflightLog): void {
+  if (isVerifyOnly) {
+    log(fmt.status('INFO', 'Running environment diagnostics (verify-env)...'));
+  } else if (!quiet) {
+    log(fmt.status('INFO', `Running mission startup preflight for: ${fmt.slug(slug ?? '')}`));
+  }
+
+}
+
+function startupPreflight(args: string[], opts: StartupPreflightOptions = {}) {
   const baseLog = opts.log || fmt.log.plain;
   // `quiet` suppresses routine PASS diagnostics and the preflight header while
   // keeping every FAIL/WARN line. The NOT-USABLE verdict survives (it is a
@@ -184,14 +264,7 @@ function startupPreflight(args: string[], opts: { configuration?: ParallixConfig
   // (mission -> implementer -> live work) instead of a PWD/branch/backlog dump;
   // draft, review and verify-env keep the full diagnostic preflight.
   const quiet = Boolean(opts.quiet);
-  const log = quiet
-    ? ((msg: unknown) => {
-      // Some lines (the final verdict) are prefixed with a newline, so allow
-      // leading whitespace before the status tag.
-      if (/^\s*\[PASS\]/.test(fmt.stripAnsi(String(msg)))) {return;}
-      baseLog(msg);
-    })
-    : baseLog;
+  const log = preflightLogger(baseLog, quiet);
   const error = opts.error || fmt.log.plainError;
   const explicitBranchFn = opts.getCurrentBranchFn;
   let branchRoot: string | null = null;
@@ -211,46 +284,23 @@ function startupPreflight(args: string[], opts: { configuration?: ParallixConfig
     return process.cwd();
   };
   const getCurrentBranchFn = explicitBranchFn ?? (() => getCurrentBranch(branchRoot ?? process.cwd()));
-  const resolveTaskFileFn = opts.resolveTaskFileFn || resolveTaskFile;
-  const getTaskStatusFn = opts.getTaskStatusFn || getTaskStatus;
-  const toVirtualFn = opts.toVirtualFn || toVirtual;
-  const findMissionDirFn = opts.findMissionDirFn || findMissionDir;
-  const findCheckpointsFn = opts.findCheckpointsFn || findCheckpoints;
-  const getFirstLineFn = opts.getFirstLineFn || getFirstLine;
-  const inferSlugFn = opts.inferSlugFn || inferSlug;
-  const getMissionYearFn = opts.getMissionYearFn || getMissionYear;
-  const conventionalWorktreePathFn = opts.conventionalWorktreePathFn || ((slug: string) => conventionalWorktreePath(slug, getPrimaryWorktree(opts.configuration)));
-  const getLastCommitFn = opts.getLastCommitFn || getLastCommit;
-  const getPrStatusFn = opts.getPrStatusFn || getPrStatus;
-  const evaluateRepositoryReadinessFn = opts.evaluateRepositoryReadinessFn || evaluateRepositoryReadiness;
-  const evaluateReviewSetupFn = opts.evaluateReviewSetupFn || evaluateReviewSetup;
-  const adapterChecklistFn = opts.adapterChecklistFn || adapterChecklist;
-  const resolveMissionClassificationFn = opts.resolveMissionClassificationFn || ((slug: string, rootDir: string) => stats.resolveMissionClassification(slug, rootDir, undefined, opts.configuration));
-  const isForgejoReviewEnabledFn = opts.isForgejoReviewEnabledFn || isForgejoReviewEnabled;
-  const fsExistsSync = opts.fsExistsSync || fs.existsSync;
-  const resolveMissionBaseBranchFn = opts.resolveMissionBaseBranchFn || resolveMissionBaseBranch;
-  const getPrimaryBranchFn = opts.getPrimaryBranchFn || getPrimaryBranch;
-  const runFn = opts.gitFn || git;
+  const { resolveTaskFileFn, getTaskStatusFn, toVirtualFn, findMissionDirFn, findCheckpointsFn, getFirstLineFn, inferSlugFn, getMissionYearFn, conventionalWorktreePathFn, getLastCommitFn, getPrStatusFn, evaluateRepositoryReadinessFn, evaluateReviewSetupFn, adapterChecklistFn, resolveMissionClassificationFn, isForgejoReviewEnabledFn, fsExistsSync, resolveMissionBaseBranchFn, getPrimaryBranchFn, runFn } = preflightDependencies(opts);
 
   const explicitSlug = args[0];
   const slug = inferSlugFn(explicitSlug);
   const isVerifyOnly = opts.command === 'verify-env' || !slug;
   const returnResult = Boolean(opts.returnResult);
 
-  if (isVerifyOnly) {
-    log(fmt.status('INFO', 'Running environment diagnostics (verify-env)...'));
-  } else if (!quiet) {
-    log(fmt.status('INFO', `Running mission startup preflight for: ${fmt.slug(slug)}`));
-  }
+  reportPreflightStart(slug, isVerifyOnly, quiet, log);
 
   const verdict: PreflightVerdict = { fail: false, remediationSteps: [] };
 
   // Check 1: PWD
   const cwd = resolveCwd();
-  checkWorktreePath(cwd, slug, isVerifyOnly, verdict, conventionalWorktreePathFn, log);
+  checkWorktreePath(cwd, slug ?? '', isVerifyOnly, verdict, conventionalWorktreePathFn, log);
 
   // Check 2: Branch
-  checkMissionBranch(getCurrentBranchFn(), slug, isVerifyOnly, verdict, log);
+  checkMissionBranch(getCurrentBranchFn(), slug ?? '', isVerifyOnly, verdict, log);
 
   if (isVerifyOnly) {
     reportRepositoryReadiness(cwd, { evaluateRepositoryReadinessFn, evaluateReviewSetupFn, adapterChecklistFn }, verdict, log);
@@ -263,7 +313,7 @@ function startupPreflight(args: string[], opts: { configuration?: ParallixConfig
 
   // Check 4: Mission docs + base branch
   if (!isVerifyOnly) {
-    checkMissionDocs(slug, cwd, verdict, {
+    checkMissionDocs(slug ?? '', cwd, verdict, {
       findMissionDirFn, findCheckpointsFn, getFirstLineFn, getMissionYearFn, fsExistsSync,
       resolveMissionBaseBranchFn, getPrimaryBranchFn, runFn,
     }, log);
@@ -284,9 +334,9 @@ function startupPreflight(args: string[], opts: { configuration?: ParallixConfig
 }
 
 // Extracted so callers can test the returnResult path without live git dependencies.
-/** @param {boolean} overallFail @param {boolean} returnResult @param {{error?: Function, log?: Function, remediationSteps?: string[]}} options */
-function completePreflightOrExit(overallFail: boolean, returnResult: boolean, options: { error?: Function, log?: Function, remediationSteps?: string[] } = {}) {
-  /** @type{{error?: Function, log?: Function, remediationSteps?: string[]}} */
+/** @param {boolean} overallFail @param {boolean} returnResult @param {{error?: PreflightLog, log?: PreflightLog, remediationSteps?: string[]}} options */
+function completePreflightOrExit(overallFail: boolean, returnResult: boolean, options: { error?: PreflightLog, log?: PreflightLog, remediationSteps?: string[] } = {}) {
+  /** @type{{error?: PreflightLog, log?: PreflightLog, remediationSteps?: string[]}} */
   const opts = options;
   const error = opts.error || fmt.log.plainError;
   const log = opts.log || fmt.log.plain;
@@ -311,7 +361,7 @@ function completePreflightOrExit(overallFail: boolean, returnResult: boolean, op
   }
 }
 
-(startupPreflight as any).completePreflightOrExit = completePreflightOrExit;
+Object.assign(startupPreflight, { completePreflightOrExit });
 
 export default startupPreflight;
 export { startupPreflight, completePreflightOrExit };

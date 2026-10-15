@@ -17,17 +17,17 @@ function requestChanges(consumeReviewer?: () => Promise<ReviewerArtifactFacts>) 
     slug: 'task-999',
     routing: { eligibleFamilies: () => ['codex'] },
     // provider-disabled --start performs the handoff transition.
-    handoff: { handoff: async () => ({ ok: true }) },
+    handoff: { handoff: async () => ({ ok: true as const }) },
     task: { implementer: () => 'claude' },
     artifacts: {
       consumeReviewer: consumeReviewer ?? (async () => ({
-        consumed: true, ok: true, reviewState: 'REQUEST_CHANGES',
+        consumed: true, ok: true as const, reviewState: 'REQUEST_CHANGES',
         reviewFindings: [
           { id: 'F1', summary: 'fractional input accepted instead of rejected' },
           { id: 'F2', summary: 'negative input dropped' },
         ],
       })),
-      consumeImplementer: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' }),
+      consumeImplementer: async () => ({ consumed: true, ok: true as const, disposition: 'CHANGES_MADE' }),
     },
     agents: { launch: async () => ({ result: {} }) },
     preReview: { head: () => `head-${++head}` },

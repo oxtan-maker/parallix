@@ -48,7 +48,6 @@ try {
     'integration-probe.cjs': "const fs=require('node:fs'); if(fs.readFileSync('src/value.js','utf8').includes('value = 2')) { console.error('Integration requires repaired value 3'); process.exit(1); } fs.copyFileSync('coverage/.lcov-unit.info','coverage/.lcov-integration-ci.info');\n",
     'package.json': JSON.stringify({ type: 'module', version: '1.0.0', scripts: { build: 'node -e ""', test: 'node unit-probe.cjs' } }),
     'scripts/verify-local.sh': fs.readFileSync(path.join(repository, 'scripts/verify-local.sh'), 'utf8'),
-    'scripts/verify-docs.mjs': '',
     'workflow.config.json': JSON.stringify({ adapters: {
       tasks: { provider: 'backlog-md', storage: 'backlog' },
       agents: { models: { custom: 'stub/custom' }, runners: { custom: 'opencode' } },

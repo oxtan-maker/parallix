@@ -27,13 +27,14 @@ function cachedCodexBinary(npmCache: string): string | null {
   return null;
 }
 
-function runPinnedCodex(args: string[], env: NodeJS.ProcessEnv, npmCache: string) {
+function runPinnedCodex(args: string[], env: NodeJS.ProcessEnv, npmCache: string, input?: string) {
   const binary = cachedCodexBinary(npmCache);
   const command = binary ?? 'npx';
   const commandArgs = binary ? args : ['--yes', '--package', CODEX_PACKAGE, 'codex', ...args];
   return childProcess.spawnSync(command, commandArgs, {
     encoding: 'utf8',
     env,
+    input,
     timeout: 30_000,
   });
 }
@@ -74,6 +75,7 @@ test('task-2570: generated Codex v0.156.1 mission config has supported approval 
     // `--help` exits before Codex parses config.toml. Run `exec --strict-config`
     // instead so the pinned CLI validates the linked mission config. A missing
     // output schema stops the fixed launch before any provider is contacted.
+    // Headless exec reads the prompt from stdin (`-`), so feed the invocation's input.
     const launchArgs = [
       ...invocation.args.slice(0, -1),
       '--skip-git-repo-check',
@@ -82,7 +84,7 @@ test('task-2570: generated Codex v0.156.1 mission config has supported approval 
       path.join(root, 'missing-output-schema.json'),
       invocation.args.at(-1)!,
     ];
-    const launch = runPinnedCodex(launchArgs, env, npmCache);
+    const launch = runPinnedCodex(launchArgs, env, npmCache, invocation.options.input);
     assert.notEqual((launch.error as NodeJS.ErrnoException | undefined)?.code, 'ETIMEDOUT', 'Codex did not reach config validation before timing out');
     assert.match(`${launch.stdout}\n${launch.stderr}`, /Failed to read output schema file/i);
     assert.doesNotMatch(`${launch.stdout}\n${launch.stderr}`, /unrecognized.*setting/i);
@@ -91,7 +93,7 @@ test('task-2570: generated Codex v0.156.1 mission config has supported approval 
       .replace(/^approval_policy = "never"\n\n/m, '')
       .replace(/^trust_level = "trusted"$/m, 'trust_level = "trusted"\napproval_policy = "never"');
     fs.writeFileSync(path.join(operatorCodexHome, 'config.toml'), unsupportedParentConfig);
-    const unsupportedLaunch = runPinnedCodex(launchArgs, env, npmCache);
+    const unsupportedLaunch = runPinnedCodex(launchArgs, env, npmCache, invocation.options.input);
     assert.notEqual((unsupportedLaunch.error as NodeJS.ErrnoException | undefined)?.code, 'ETIMEDOUT', 'Codex did not reach config validation before timing out');
     assert.match(`${unsupportedLaunch.stdout}\n${unsupportedLaunch.stderr}`, /approval_policy/i);
   } finally {

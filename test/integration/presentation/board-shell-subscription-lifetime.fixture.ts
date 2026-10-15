@@ -1,22 +1,10 @@
+import { TerminalStream } from '../../helpers/terminal-stream.js';
 // Regression provenance: TASK-2424.
 import { EventEmitter } from 'node:events';
 import assert from 'node:assert/strict';
 import { makeProjection } from '../../fixtures/board-projection.js';
 
-class Stream extends EventEmitter {
-  public columns = 120;
-  public rows = 30;
-  public readonly isTTY = true;
-  public readonly writes: string[] = [];
-
-  write(value: string): boolean { this.writes.push(value); this.emit('write'); return true; }
-  setRawMode(_enabled: boolean): void {}
-  setEncoding(_encoding: string): void {}
-  resume(): void {}
-  pause(): void {}
-  ref(): void {}
-  unref(): void {}
-  read(): string | null { return null; }
+class Stream extends TerminalStream {
 }
 
 async function settle(): Promise<void> {
@@ -45,8 +33,8 @@ export async function run(): Promise<void> {
   };
 
   const instance = ink.render(
-    React.createElement(BoardShell, { projection: makeProjection(), subscribeProjection } as never),
-    { stdin: new Stream() as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false },
+    React.createElement(BoardShell, { projection: makeProjection(), subscribeProjection }),
+    { stdin: new Stream(), stdout: stdout, patchConsole: false, exitOnCtrlC: false },
   );
   await settle();
   assert.equal(callbacks.size, 1, 'the mounted board must own one live projection subscription');

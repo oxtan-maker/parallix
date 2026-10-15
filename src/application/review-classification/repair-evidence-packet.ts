@@ -1,12 +1,14 @@
 import type { DecisionData, DecisionRequest, DecisionRequestBudget } from '../ports/decision.js';
-import { EvidenceOverBudgetError, EvidenceReadError, type ReviewFindingEvidence, type ReviewEvidencePort } from '../ports/review-evidence.js';
+import { EvidenceReadError, type ReviewFindingEvidence, type ReviewEvidencePort } from '../ports/review-evidence.js';
 import type { EvidencePacket } from './evidence-packet.js';
 
-export const REPAIR_PROMPT_VERSION = 'gate-repair-preservation-v1';
-export const REPAIR_PACKET_VERSION = 'complete-repair-token-budget-v1';
+import { fitPacket } from './fit-packet.js';
+
+export const REPAIR_PROMPT_VERSION = 'gate-repair-preservation-omissions-v2';
+export { REPAIR_PACKET_VERSION } from '../../domain/classifier-review.js';
 export const REPAIR_RESOLUTION_QUESTION = {
   type: 'choice' as const,
-  instructions: 'Machine-recorded gate results are authoritative execution facts only at their stated revision and scope. Use them as evidence; do not treat them as implementer claims. Infer individual test execution only when explicitly recorded. Previously approved changes are outside this repair assessment. Do not approve the whole PR, reopen unrelated behavior, or assume omitted material dependencies. A passing gate alone does not prove the obligation was preserved. Assess whether this repair resolves every reported failure while preserving the checked obligation. Use the complete repair diff, relevant supplied code and recorded execution facts together. Disabling or skipping checks, deleting required assertions, suppressing required output, or bypassing required behavior does not resolve the obligation. Select insufficient_evidence only when a material gap prevents this scoped judgment.',
+  instructions: 'Machine-recorded gate results are authoritative execution facts only at their stated revision and scope. Use them as evidence; do not treat them as implementer claims. Infer individual test execution only when explicitly recorded. Previously approved changes are outside this repair assessment. Do not approve the whole PR, reopen unrelated behavior, or assume omitted material dependencies. A passing gate alone does not prove the obligation was preserved. Assess whether this repair resolves every reported failure while preserving the checked obligation. Use the supplied repair diff, relevant supplied code and recorded execution facts together. Disabling or skipping checks, deleting required assertions, suppressing required output, or bypassing required behavior does not resolve the obligation. When the state lists omissions, that evidence was not shown. Select insufficient_evidence when an omitted change could decide the answer. Select insufficient_evidence only when a material gap prevents this scoped judgment.',
   criteria: {
     addresses: 'The supplied repair and recorded evidence establish resolution of the reported failure without weakening its obligation.',
     does_not_address: 'The failure remains, or the repair merely hides it by weakening or bypassing the checked obligation.',
@@ -55,9 +57,9 @@ function repairComparison(input: ReviewFindingEvidence): string {
     + (rebased ? ' The candidate was rebased onto a newer baseline: rebase-induced and conflict-resolution changes appear in this diff and are not the implementer\'s repair of the failure.' : '');
 }
 
-interface SourcePair { path: string; before: string | null; after: string | null; coverage: string }
+type SourcePair = { path: string; before: string | null; after: string | null; coverage: string };
 
-/** Complete repair diff is mandatory; optional context never displaces or truncates it. */
+/** Optional whole-file context yields before per-file repair diffs. */
 export async function buildRepairEvidencePacket(input: ReviewFindingEvidence, repository: ReviewEvidencePort,
   measure: MeasureBudget, verification?: DecisionData): Promise<EvidencePacket> {
   const { beforeTree, afterTree, diff, paths } = await readRepairDiff(input, repository);
@@ -70,12 +72,12 @@ export async function buildRepairEvidencePacket(input: ReviewFindingEvidence, re
     priorReviewComment: input.priorReviewComment, implementerResponse: input.implementerResponse,
     ...(input.humanFeedback ? { humanFeedback: input.humanFeedback } : {}),
     repairRange: { before: input.priorRevision, after: input.candidateRevision }, repairComparison: comparison,
-    repairDiff: diff, changedPaths: paths, sourcePairs: pairs as unknown as DecisionData,
-    contextOmissions: [...omitted].map(p => `${p}: complete source pair omitted; complete repair diff retained`).concat(losses),
-    coverage: 'Complete repair diff. Individual source coverage is labelled; unreferenced dependencies are not established. Omitted material contracts require insufficient_evidence.',
+    repairDiff: diff, changedPaths: paths, sourcePairs: pairs,
+    contextOmissions: [...omitted].map(p => `${p}: complete source pair omitted; repair diff coverage is declared separately`).concat(losses),
+    coverage: 'Repair diff coverage is declared by omittedDiffs when present. Individual source coverage is labelled; unreferenced dependencies are not established. Omitted material contracts require insufficient_evidence.',
     validation: verification ?? { status: 'unknown', specificTestResult: 'unknown', failedIntegrationGateRerun: 'unknown' },
   }, questions: { resolution: REPAIR_RESOLUTION_QUESTION } });
-  if (!fitsBudget(packet(), measure)) { throw new EvidenceOverBudgetError('Complete repair diff and failure evidence exceed the decision budget'); }
+
   const cited = input.findings.map(f => `${f.summary}\n${f.location ?? ''}`).join('\n');
   const tree = [...new Set([...beforeTree, ...afterTree])];
   const basenames = new Map<string, number>();
@@ -99,11 +101,11 @@ export async function buildRepairEvidencePacket(input: ReviewFindingEvidence, re
     pairs.push(pair); omitted.delete(path);
     if (!fitsBudget(packet(), measure)) {
       pairs.pop();
-      pairs.push({ path, before: null, after, coverage: 'Complete candidate file; prior whole file omitted, not absent. All before-change hunks remain in the complete repair diff.' });
+      pairs.push({ path, before: null, after, coverage: 'Complete candidate file; prior whole file omitted, not absent. Repair diff omissions are declared separately.' });
       if (!fitsBudget(packet(), measure)) { pairs.pop(); omitted.add(path); }
     }
   }
   const request = packet();
-  if (!fitsBudget(request, measure)) { throw new EvidenceOverBudgetError('Repair evidence omissions exceed the decision budget'); }
+  fitPacket(request, measure, { diffKey: 'repairDiff', context: pairs.map(pair => ({ text: pair as unknown as DecisionData, omit: () => { pairs.splice(pairs.indexOf(pair), 1); } })) });
   return { request, paths };
 }

@@ -1,10 +1,11 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import type { StatsRow } from "../../../../../src/application/services/statistics-row.js";
 
 
 
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { mockModule, installModuleMocks } from '../../../../lib/module-mock.js';
+import { ReportRow } from '../../../../../src/adapters/cli/commands/stats-rendering-types.js';
 const stats = mockModule<typeof import('../../../../../src/adapters/cli/commands/stats.js')>('../../../../../src/adapters/cli/commands/stats.js', import.meta.url);
 const __mm1 = mockModule<typeof import('../../../../../src/application/presentation/cli-format.js')>('../../../../../src/application/presentation/cli-format.js', import.meta.url);
 await installModuleMocks();
@@ -14,7 +15,9 @@ const WINDOW = {
   end: new Date('2026-07-11T23:59:59Z'),
 };
 
-function row(overrides = {}) {
+interface TestRow extends StatsRow { date: string; repo: string; mission: string; completedForTest: string; }
+
+function row(overrides: Partial<TestRow> = {}): TestRow {
   return {
     date: '2026-07-08',
     repo: 'parallix',
@@ -28,21 +31,21 @@ function row(overrides = {}) {
   };
 }
 
-function completedMissionKeys(rows, window) {
-  return new Set(rows.filter(row => row.completedForTest === 'yes' && row.date >= window.start.toISOString().slice(0, 10) && row.date <= window.end.toISOString().slice(0, 10))
+function completedMissionKeys(rows: readonly TestRow[], window: typeof WINDOW) {
+  return new Set(rows.filter((row) => row.completedForTest === 'yes' && row.date >= window.start.toISOString().slice(0, 10) && row.date <= window.end.toISOString().slice(0, 10))
     .map(row => `${row.repo}::${String(row.mission).trim().toLowerCase()}`));
 }
 
-function missionFlow(rows) {
-  return rows.filter(row => row.completedForTest === 'yes')
+function missionFlow(rows: readonly TestRow[]) {
+  return rows.filter((row) => row.completedForTest === 'yes')
     .map(row => ({ repo: row.repo, mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [], implementer: row.implementer }));
 }
 
-function renderWeeklyStatsReport(rows, options = {}) {
+function renderWeeklyStatsReport(rows: readonly TestRow[]|{ date: string; repo: string; classification: string; implementer: string; model: string; mission: string; pr_fix_rounds: string; completedForTest: string; }[], options = {}) {
   return stats.renderWeeklyStatsReport(rows, { ...options, missionFlow: missionFlow(rows) });
 }
 
-function summarizeAgentWindow(rows, window, options = {}) {
+function summarizeAgentWindow(rows: readonly TestRow[], window: { start: Date; end: Date; }, options = {}) {
   return stats._internals.summarizeAgentWindow(rows, window, { ...options, completedMissionKeys: completedMissionKeys(rows, window) });
 }
 

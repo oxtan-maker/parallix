@@ -1,3 +1,4 @@
+import { assertClassifierReviewSource } from '../../../src/domain/classifier-review.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,6 +17,15 @@ import { fakeLifecycleAgent } from '../../fixtures/e2e-lifecycle-fake-agent.js';
 import { isolatedForgejo } from '../../fixtures/isolated-forgejo.js';
 import { createTempRootRegistry } from '../../../src/adapters/verification/temp-root-registry.js';
 import { childCpuUsageModule } from '../../lib/child-cpu-usage.js';
+
+function record(value: unknown): Record<string, unknown> {
+  assert.ok(value && typeof value === 'object' && !Array.isArray(value));
+  return value as Record<string, unknown>;
+}
+function records(value: unknown): Record<string, unknown>[] {
+  assert.ok(Array.isArray(value));
+  return value.map(record);
+}
 
 // Owns live classifier lifecycle: real CLI, Git, SQLite, gate failure, Forgejo
 // publication and Jev model. Deterministic drafting/implementation use the same
@@ -44,17 +54,21 @@ test('live Jev applies an integration-repair verdict and the standard lifecycle 
   };
   const readDb = (sql: string) => {
     const db = new DatabaseSync(path.join(home, 'parallix.db'), { readOnly: true });
-    try { return db.prepare(sql).all() as Record<string, any>[]; } finally { db.close(); }
+    try { return db.prepare(sql).all(); } finally { db.close(); }
   };
   async function px(cwd: string, args: string[], allowFailure = false) {
     process.chdir(cwd);
     const lines: string[] = [];
     const stdout = process.stdout.write;
     const stderr = process.stderr.write;
-    const capture = (original: typeof stdout) => ((chunk: string | Uint8Array, ...rest: any[]) => {
-      if (typeof chunk !== 'string') { return (original as any).call(process.stdout, chunk, ...rest); }
+    const capture = (original: typeof stdout): typeof stdout => (chunk: string | Uint8Array, encoding?: BufferEncoding | ((_error?: Error | null) => void), callback?: (_error?: Error | null) => void) => {
+      if (typeof chunk !== 'string') {
+        return typeof encoding === 'function'
+          ? original.call(process.stdout, chunk, undefined, encoding)
+          : original.call(process.stdout, chunk, encoding, callback);
+      }
       lines.push(chunk); return true;
-    }) as typeof stdout;
+    };
     process.stdout.write = capture(stdout); process.stderr.write = capture(stderr);
     let status: number;
     try {
@@ -113,7 +127,7 @@ test('live Jev applies an integration-repair verdict and the standard lifecycle 
     let repairLaunches = 0;
     let reviewLaunches = 0;
     setCommandPathProbe(() => '/in-process-fake-agent');
-    setLauncherHealthProbe(() => ({ ok: true }));
+    setLauncherHealthProbe(() => ({ ok: true as const }));
     setWorkflowLaunchPort(options => {
       transcript.push(`agent: ${options.prompt.match(/^Mode:.*$/m)?.[0] ?? options.prompt.slice(0, 120)}`);
       const reviewing = /^Mode: review\./m.test(options.prompt);
@@ -143,36 +157,37 @@ test('live Jev applies an integration-repair verdict and the standard lifecycle 
     await px(repo, ['draft', slug, '--agent', 'custom']);
     await px(worktree, ['active', slug, '--implementer', 'custom']);
     assert.equal(readDb('SELECT status FROM missions')[0].status, 'integration');
-    const firstMeasurements = readDb('SELECT samples FROM review_classifier_measurements').flatMap(row => JSON.parse(row.samples));
+    const firstMeasurements = readDb('SELECT samples FROM review_classifier_measurements').flatMap(row => records(JSON.parse(String(row.samples))));
     assert.ok(firstMeasurements.some(row => row.round === 1 && row.reason === 'first-review'
       && row.classificationMs === null && row.provider === null), 'first review records a skip without calling Jev (TASK-2703)');
     const firstStats = await px(repo, ['stats']);
     assert.doesNotMatch(firstStats.output, /first-review|first review/);
     assert.equal(firstStats.output.split('\n').filter(line => /^\| (This|Last) week.*\| re-review\s+\|/.test(line)).length, 2);
-    const prs = await provider.api('GET', '/repos/human/probe/pulls?state=open');
+    const prs = records(await provider.api('GET', '/repos/human/probe/pulls?state=open'));
     assert.equal(prs.length, 1);
-    await provider.api('POST', `/repos/human/probe/pulls/${prs[0].number}/reviews`, { event: 'APPROVED', body: 'Initial fixture approval', commit_id: prs[0].head.sha });
+    await provider.api('POST', `/repos/human/probe/pulls/${prs[0].number}/reviews`, { event: 'APPROVED', body: 'Initial fixture approval', commit_id: record(prs[0].head).sha });
     const failedIntegration = await px(worktree, ['integrate', slug], true);
     assert.match(failedIntegration.output, /required-output/);
     transcript.push('Classifier measurements: ' + JSON.stringify(readDb('SELECT samples FROM review_classifier_measurements')));
     const rounds = readDb('SELECT * FROM mission_review_rounds ORDER BY position');
     assert.equal(rounds[0].revoked_cause, 'integration-gate-failure');
-    assert.match(rounds[0].revoked_gate_log, new RegExp(`${worktree}/answer.mjs`));
+    assert.match(String(rounds[0].revoked_gate_log), new RegExp(`${worktree}/answer.mjs`));
     assert.equal(executeLaunches, 1);
     assert.equal(repairLaunches, 1, 'the normal integration rebound must run the repair implementer');
     assert.equal(reviewLaunches, 1);
     const classified = readDb('SELECT * FROM mission_review_rounds WHERE classifier_source IS NOT NULL');
     assert.equal(classified.length, 1, transcript.join('\n'));
     assert.equal(classified[0].decision_kind, 'approved');
-    const source = JSON.parse(classified[0].classifier_source);
+    const source: unknown = JSON.parse(String(classified[0].classifier_source));
+    assertClassifierReviewSource(source);
     assert.equal(source.identity, 'jev');
     assert.equal(source.policyVersion, 'integration-repair-52-67-v1');
-    assert.equal(source.integrationRepair.revokedAt, rounds[0].revoked_at);
+    assert.equal(record(source.integrationRepair).revokedAt, rounds[0].revoked_at);
     assert.equal(source.candidateRevision, classified[0].revision);
-    const measurements = readDb('SELECT samples FROM review_classifier_measurements').flatMap(row => JSON.parse(row.samples));
+    const measurements = readDb('SELECT samples FROM review_classifier_measurements').flatMap(row => records(JSON.parse(String(row.samples))));
     assert.ok(measurements.some(row => row.model && row.classificationMs !== null && row.route === 'clear'), 'live Jev call must clear the packet');
-    const reviews = await provider.api('GET', `/repos/human/probe/pulls/${prs[0].number}/reviews`);
-    assert.ok(reviews.some((review: any) => review.user.login === 'jev' && review.state === 'APPROVED' && review.commit_id === source.candidateRevision));
+    const reviews = records(await provider.api('GET', `/repos/human/probe/pulls/${prs[0].number}/reviews`));
+    assert.ok(reviews.some(review => record(review.user).login === 'jev' && review.state === 'APPROVED' && review.commit_id === source.candidateRevision));
     // A lane transition commits locally after the last push, so the PR head trails the revision Jev judged (TASK-2675).
     const pushedHead = git(worktree, 'rev-parse', 'HEAD');
     git(worktree, 'commit', '--allow-empty', '-m', 'backlog: local lane transition');
@@ -195,7 +210,7 @@ test('live Jev applies an integration-repair verdict and the standard lifecycle 
   } catch (error) {
     if (fs.existsSync(worktree)) {
       const first = readDb('SELECT revision FROM mission_review_rounds ORDER BY position LIMIT 1')[0];
-      if (first) { t.diagnostic(git(worktree, 'diff', first.revision, 'HEAD')); }
+      if (first) { t.diagnostic(git(worktree, 'diff', String(first.revision), 'HEAD')); }
     }
     t.diagnostic(transcript.join('\n').split('\n').filter(Boolean).slice(-100).join('\n')); throw error;
   }

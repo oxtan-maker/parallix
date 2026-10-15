@@ -4,6 +4,7 @@ import type { ReviewEvidencePort } from '../ports/review-evidence.js';
 /** One recorded green integration validation: the hooks that passed at a revision, and when. */
 export interface RecordedValidation {
   readonly sha: string;
+  readonly baseline?: string;
   readonly hooks: readonly string[];
   readonly recordedAt: string;
 }
@@ -49,13 +50,12 @@ async function sameApartFromRootVersion(path: string, validated: string, candida
 
 /** Relation of a validated revision to the candidate; a failed git read is `null`, never an admission. */
 export async function relateToCandidate(validated: string, candidate: string, repository: ReviewEvidencePort,
-  candidateBaseline: string | null, targetRef: string): Promise<GateFactRelation | null> {
+  candidateBaseline: string | null, validatedBaseline: string | null): Promise<GateFactRelation | null> {
   if (validated === candidate) { return 'same'; }
   try {
     const changed = await repository.changedPaths(validated, candidate);
     if (changed.every(isBookkeepingPath)) { return 'backlog-only'; }
-    if (!candidateBaseline) { return 'code-changed'; }
-    const validatedBaseline = await repository.mergeBase(validated, targetRef);
+    if (!candidateBaseline || !validatedBaseline) { return null; }
     const interdiff = await repository.missionInterdiff({ baseline: validatedBaseline, revision: validated }, { baseline: candidateBaseline, revision: candidate }, { unbounded: true });
     const remaining = substantiveInterdiffPaths(interdiff.paths);
     const unexplained = await Promise.all(remaining.map(async path => !(await sameApartFromRootVersion(path, validated, candidate, repository))));
@@ -73,7 +73,7 @@ export async function admitGateFact(input: {
   readonly gate: string | null;
   readonly roundStartedAt: string;
   readonly candidate: string;
-  readonly relate: (_validatedSha: string) => Promise<GateFactRelation | null>;
+  readonly relate: (_validatedSha: string, _validation: RecordedValidation) => Promise<GateFactRelation | null>;
 }): Promise<GateFactResult> {
   if (!input.validations.length) { return { admitted: false, reason: 'no-fact' }; }
   const started = Date.parse(input.roundStartedAt);
@@ -83,7 +83,7 @@ export async function admitGateFact(input: {
   if (!covering.length) { return { admitted: false, reason: 'gate-not-validated' }; }
   let unavailable = false;
   for (const validation of [...covering].reverse()) {
-    const relation = await input.relate(validation.sha);
+    const relation = await input.relate(validation.sha, validation);
     if (relation === null) { unavailable = true; continue; }
     if (relation !== 'code-changed') {
       return { admitted: true, fact: { gate: input.gate!, validationSha: validation.sha, recordedAt: validation.recordedAt, candidate: input.candidate, relation } };

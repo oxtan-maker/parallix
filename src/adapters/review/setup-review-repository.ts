@@ -1,6 +1,7 @@
 import _cp from 'child_process';
 import { eligibleAgentsForStep } from '../agents/agents.js';
 import { apiRequest, normalizeBaseUrl, parseRepoSlug, unique } from './setup-review-auth.js';
+import type { ApiRequestFn, EnsureResult } from './setup-review-types.js';
 
 const { spawnSync } = _cp;
 
@@ -18,7 +19,7 @@ export function readConfiguredReviewRemote(rootDir?: string, remoteName?: string
   return result.status === 0 ? (result.stdout || '').trim() || null : null;
 }
 
-export function ensureRepo(baseUrl: string, repoSlug: string, ownerLogin: string, ownerToken: string, requestFn: Function = apiRequest) {
+export function ensureRepo(baseUrl: string, repoSlug: string, ownerLogin: string, ownerToken: string, requestFn: ApiRequestFn = apiRequest): EnsureResult {
   const repoInfo = parseRepoSlug(repoSlug);
   if (!repoInfo) {return { ok: false, error: `invalid review repo slug: ${repoSlug}` };}
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
@@ -30,7 +31,7 @@ export function ensureRepo(baseUrl: string, repoSlug: string, ownerLogin: string
   return created.ok ? { ok: true, created: true } : { ok: false, error: `failed to create review repo ${repoSlug} (HTTP ${created.statusCode || 'n/a'})`, response: created.data };
 }
 
-export function ensureRepoCollaborator(baseUrl: string, repoSlug: string, ownerToken: string, collaborator: string, permission: string = 'write', requestFn: Function = apiRequest) {
+export function ensureRepoCollaborator(baseUrl: string, repoSlug: string, ownerToken: string, collaborator: string, permission: string = 'write', requestFn: ApiRequestFn = apiRequest): EnsureResult {
   const repoInfo = parseRepoSlug(repoSlug);
   if (!repoInfo) {return { ok: false, error: `invalid review repo slug: ${repoSlug}` };}
   if (!collaborator || collaborator === repoInfo.owner) {return { ok: true, skipped: true };}
@@ -38,8 +39,8 @@ export function ensureRepoCollaborator(baseUrl: string, repoSlug: string, ownerT
   return result.ok ? { ok: true, created: true } : { ok: false, error: `failed to add review collaborator ${collaborator} to ${repoSlug} (HTTP ${result.statusCode || 'n/a'})`, response: result.data };
 }
 
-export function ensureRepoCollaborators(baseUrl: string, repoSlug: string, ownerToken: string, collaborators: string[] = [], permission: string = 'write', requestFn: Function = apiRequest) {
-  const created = [];
+export function ensureRepoCollaborators(baseUrl: string, repoSlug: string, ownerToken: string, collaborators: string[] = [], permission: string = 'write', requestFn: ApiRequestFn = apiRequest): { ok: boolean; created: string[] } {
+  const created: string[] = [];
   for (const collaborator of unique(collaborators.map(user => typeof user === 'string' ? user.trim() : '').filter(Boolean))) {
     const result = ensureRepoCollaborator(baseUrl, repoSlug, ownerToken, collaborator, permission, requestFn);
     if (!result.ok) {return { ok: false, created: [] };}
@@ -48,7 +49,7 @@ export function ensureRepoCollaborators(baseUrl: string, repoSlug: string, owner
   return { ok: true, created };
 }
 
-export function ensureForgejoUser(baseUrl: string, user: string, ownerLogin: string, ownerPassword: string, password: string, requestFn: Function = apiRequest, options: any = {}) {
+export function ensureForgejoUser(baseUrl: string, user: string, ownerLogin: string, ownerPassword: string, password: string, requestFn: ApiRequestFn = apiRequest, options: { ownerToken?: string; email?: string } = {}): EnsureResult {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
   const auth = options.ownerToken ? { token: options.ownerToken } : { basicAuth: { user: ownerLogin, password: ownerPassword } };
   const existing = requestFn('GET', `${normalizedBaseUrl}/api/v1/users/${encodeURIComponent(user)}`, auth);
@@ -60,7 +61,7 @@ export function ensureForgejoUser(baseUrl: string, user: string, ownerLogin: str
   return { ok: false, error: `failed to create Forgejo user ${user} (HTTP ${created.statusCode || 'n/a'}).${scopeHint}`, response: created.data };
 }
 
-export function ensureReviewRemote(rootDir: string, remoteName: string, remoteUrl: string) {
+export function ensureReviewRemote(rootDir: string, remoteName: string, remoteUrl: string): EnsureResult {
   const current = readConfiguredReviewRemote(rootDir, remoteName);
   const result = spawnSync('git', current ? ['-C', rootDir, 'remote', 'set-url', remoteName, remoteUrl] : ['-C', rootDir, 'remote', 'add', remoteName, remoteUrl], { encoding: 'utf8' });
   if (result.status !== 0) {return { ok: false, error: (result.stderr || result.stdout || `git remote ${current ? 'set-url' : 'add'} failed`).trim() };}

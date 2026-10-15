@@ -1,4 +1,6 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import type { SessionMarkerPort } from '../../../../src/application/domain-ports.js';
+import type { StatsRow } from '../../../../src/application/services/statistics-row.js';
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 import { resolveConfiguration } from '../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 // Historical regression provenance: TASK-1322, TASK-1339, TASK-1316.
@@ -103,6 +105,7 @@ describe("OpenCode launcher ,", () => {
 
   test('extractOpencodeSessionId returns null for no match', () => {
     const { extractOpencodeSessionId } = opencode;
+    // @ts-expect-error Intentional absent launcher result or parser input.
     assert.equal(extractOpencodeSessionId(null), null);
     assert.equal(extractOpencodeSessionId(''), null);
   });
@@ -205,9 +208,10 @@ describe("OpenCode launcher ,", () => {
   // ---------- startOpencodeAgent stale session detection (task-1322) ----------
 
   test('startOpencodeAgent retries without -s when spawn returns "Session not found" in stderr', async () => {
-    const mockSessionPort = { deleted: null, async delete(missionId, role) { this.deleted = { missionId, role }; } };
+    const deletion: { value: Parameters<SessionMarkerPort['delete']> | null } = { value: null };
+    const mockSessionPort: SessionMarkerPort = { find: async () => null, save: async () => { throw new Error('Unexpected session save'); }, shouldResume: async () => false, delete: async (...args) => { deletion.value = args; } };
     let spawnCount = 0;
-    const mockSpawn = (cmd, args, opts) => {
+    const mockSpawn: NonNullable<Parameters<typeof opencode.__setSpawnAndTeeForTest>[0]> = (_cmd, args, _opts) => {
       spawnCount++;
       if (spawnCount === 1) {
         // First call: stale session error
@@ -220,7 +224,6 @@ describe("OpenCode launcher ,", () => {
 
     opencode.__setSpawnAndTeeForTest(mockSpawn);
     opencode.__setExportCaptureForTest(mockExport);
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     opencode.__setSessionPortForTest(mockSessionPort);
 
     const { invocation, resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment),
@@ -229,17 +232,15 @@ describe("OpenCode launcher ,", () => {
       env: {},
       resume: true,
       sessionId: 'ses_stale',
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-      slug: 'task-1322',
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-      role: 'reviewer'
+      slug: fixtureMissionId('task-1322'),
+      role: 'review'
     });
 
     const result = await resultPromise;
 
     assert.equal(spawnCount, 2, 'must spawn twice: stale session then fresh');
     assert.equal(invocation.args.includes('-s'), true, 'original invocation must include -s');
-    assert.deepEqual(mockSessionPort.deleted, { missionId: 'task-1322', role: 'reviewer' }, 'marker must be cleared through the port');
+    assert.deepEqual(deletion.value, ['task-1322', 'review'], 'marker must be cleared through the port');
     assert.equal(result.status, 0, 'final result must show success');
 
     // Restore originals
@@ -252,7 +253,7 @@ describe("OpenCode launcher ,", () => {
   test('startOpencodeAgent does NOT retry when resume is false', async () => {
     opencode.__setJsonFormatSupportForTest(true);
     let spawnCount = 0;
-    const mockSpawn = (cmd, args, opts) => {
+    const mockSpawn: NonNullable<Parameters<typeof opencode.__setSpawnAndTeeForTest>[0]> = (_cmd, args, _opts) => {
       spawnCount++;
       return Promise.resolve({ status: 1, signal: null, stdout: '', stderr: 'Session not found', error: null });
     };
@@ -277,7 +278,7 @@ describe("OpenCode launcher ,", () => {
   test('startOpencodeAgent healthy resume still uses -s flag', async () => {
     opencode.__setJsonFormatSupportForTest(true);
     let spawnCount = 0;
-    const mockSpawn = (cmd, args, opts) => {
+    const mockSpawn: NonNullable<Parameters<typeof opencode.__setSpawnAndTeeForTest>[0]> = (_cmd, args, _opts) => {
       spawnCount++;
       assert.ok(args.includes('-s'), 'must include -s flag for healthy resume');
       assert.ok(args.includes('ses_valid'), 'must include the session ID');
@@ -306,7 +307,7 @@ describe("OpenCode launcher ,", () => {
     // includes --format json, then the mock spawn rejects it at runtime.
     opencode.__setJsonFormatDetectForTest(() => true);
     let spawnCount = 0;
-    const mockSpawn = (cmd, args, opts) => {
+    const mockSpawn: NonNullable<Parameters<typeof opencode.__setSpawnAndTeeForTest>[0]> = (_cmd, args, _opts) => {
       spawnCount++;
       if (spawnCount === 1) {
         assert.ok(args.includes('--format'), 'first invocation must include --format json');
@@ -383,7 +384,9 @@ describe("OpenCode launcher telemetry ,", () => {
 
     assert.ok(result.telemetry, 'telemetry must be attached');
     assert.equal(result.telemetry.provider, 'opencode');
+    assert.ok(result.telemetry.inputTokens != null);
     assert.ok(result.telemetry.inputTokens > 0);
+    assert.ok(result.telemetry.outputTokens != null);
     assert.ok(result.telemetry.outputTokens > 0);
     assert.equal(result.telemetry.toolCalls, 59);
   });
@@ -401,17 +404,19 @@ describe("OpenCode launcher telemetry ,", () => {
       '{"type":"step_finish","timestamp":3,"sessionID":"ses_132f470d8ffexge85esdX0nzCs","part":{"type":"step-finish"}}',
       '',
     ].join('\n');
-    let exportedSessionId = null;
+    let exportedSessionId: { value: string | null } = { value: null };
     opencode.__setSpawnAndTeeForTest(async () => ({ status: 0, stdout: jsonStdout, stderr: '' }));
-    opencode.__setExportCaptureForTest(async (sessionId) => { exportedSessionId = sessionId; return exportJson; });
+    opencode.__setExportCaptureForTest(async (sessionId) => { exportedSessionId.value = sessionId; return exportJson; });
 
     const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
     const result = await resultPromise;
 
     assert.equal(result.sessionId, 'ses_132f470d8ffexge85esdX0nzCs');
-    assert.equal(exportedSessionId, 'ses_132f470d8ffexge85esdX0nzCs', 'export must be called with the recovered id');
+    assert.equal(exportedSessionId.value, 'ses_132f470d8ffexge85esdX0nzCs', 'export must be called with the recovered id');
     assert.ok(result.telemetry, 'telemetry must be attached from JSON-stdout session id');
+    assert.ok(result.telemetry.inputTokens != null);
     assert.ok(result.telemetry.inputTokens > 0);
+    assert.ok(result.telemetry.outputTokens != null);
     assert.ok(result.telemetry.outputTokens > 0);
   });
 
@@ -482,7 +487,7 @@ describe("OpenCode launcher telemetry ,", () => {
 
       const rows = stats.loadMeasurementRows({ dbPath: dbFile }).rows;
       assert.equal(rows.length, 1);
-      const cell = (name) => rows[0][name];
+      const cell = (name: keyof StatsRow) => rows[0][name];
 
       assert.ok(Number(cell('input_tokens')) > 0, 'input_tokens must be non-zero in the database');
       assert.ok(Number(cell('output_tokens')) > 0, 'output_tokens must be non-zero in the database');
@@ -533,6 +538,7 @@ describe('OpenCode provider-failure retry', () => {
   test('isTransientOpencodeFailure is false for non-transient / empty output', () => {
     assert.equal(opencode.isTransientOpencodeFailure({ stdout: '', stderr: '' }), false);
     assert.equal(opencode.isTransientOpencodeFailure({ stderr: 'model not found' }), false);
+    // @ts-expect-error Intentional absent launcher result or parser input.
     assert.equal(opencode.isTransientOpencodeFailure(null), false);
   });
 
@@ -561,6 +567,7 @@ describe('OpenCode provider-failure retry', () => {
   test('isHardOpencodeFailure is false for transient / empty / null output', () => {
     assert.equal(opencode.isHardOpencodeFailure({ stderr: 'fetch failed' }), false);
     assert.equal(opencode.isHardOpencodeFailure({ stdout: '', stderr: '' }), false);
+    // @ts-expect-error Intentional absent launcher result or parser input.
     assert.equal(opencode.isHardOpencodeFailure(null), false);
   });
 
@@ -778,7 +785,9 @@ describe('OpenCode provider-failure retry', () => {
   });
 
   test('isSpuriousOpencodeExit returns false for null/undefined', () => {
+    // @ts-expect-error Intentional absent launcher result or parser input.
     assert.equal(opencode.isSpuriousOpencodeExit(null), false);
+    // @ts-expect-error Intentional absent launcher result or parser input.
     assert.equal(opencode.isSpuriousOpencodeExit(undefined), false);
   });
 
@@ -802,7 +811,7 @@ test('first and later fresh repair ignore historical session IDs (TASK-2700)', (
   for (const attempt of [1, 2]) {
     const invocation = opencodeModule.buildOpencodeInvocation({
       prompt: `repair ${attempt}`, worktree: '/tmp/fresh-repair',
-      resume: false, sessionId: 'prior-conversation-marker', interactive: false,
+      resume: false, sessionId: 'prior-conversation-marker',
     });
     assert.ok(!invocation.args.includes('prior-conversation-marker'));
     for (const flag of ['resume', '--resume', '--continue', '--last', '-r', '-c', '-s']) {

@@ -65,9 +65,9 @@ describe('Mission use cases', () => {
     async load(id: string): Promise<MissionLoadResult> {
       this.calls.push(`load:${id}`);
       if (this.mission === null) {
-        return { kind: 'missing' };
+        return { kind: 'missing' as const };
       }
-      return { kind: 'found', mission: this.mission, version: this.version };
+      return { kind: 'found' as const, mission: this.mission, version: this.version };
     }
 
     async save(mission: Mission, expectedVersion: MissionVersion | null): Promise<MissionVersion> {
@@ -593,7 +593,7 @@ describe('Mission use cases', () => {
         receipts.push(`recorded:${record.netEngineeringLines}`);
         return { reference: 'missions/task-2322-05/nel-record.json' };
       },
-    };
+    } satisfies NonNullable<ConstructorParameters<typeof MissionHandoffService>[1]>;
     const outcome = await new MissionHandoffService(store, recorder).recordNel({
       operationId: 'op-handoff',
       missionId: MISSION,
@@ -767,11 +767,11 @@ describe('Lifecycle ordering', () => {
   ): Promise<Fixture> {
     const migrated = await openMigratedMissionStore([mission]);
     const { store } = migrated;
-    const ports = {
+    const ports = ({
       workspace: {
         async preflight() { return true; },
         async resolveWorktree() { return '/worktree'; },
-        async resolveTaskFile() { return { ok: false }; },
+        async resolveTaskFile() { return { ok: false as const }; },
         async readTaskStatus() { return null; },
         async enforceCommitSafety() {},
       },
@@ -780,11 +780,11 @@ describe('Lifecycle ordering', () => {
         launch,
       },
       // The real mission store: the authoritative boundary under test.
-      missionTransitions: store as unknown as ExecuteMissionPorts['missionTransitions'],
+      missionTransitions: (store),
       telemetry: { async recordLaunchTelemetry() {} },
-      checkpointValidation: { async validateBeforeHandoff() { return { ok: true }; } },
+      checkpointValidation: { async validateBeforeHandoff() { return { ok: true as const }; } },
       handoffExecution: {
-        async run() { return { ok: true }; },
+        async run() { return { ok: true as const }; },
         async repairHygiene() { return { repaired: false }; },
         classifyFailure() { return null; },
         isRelaunchableFailure() { return false; },
@@ -796,7 +796,7 @@ describe('Lifecycle ordering', () => {
         readHead() { return null; },
       },
       output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
-    } as unknown as ExecuteMissionPorts;
+    });
     return { ...migrated, ports };
   }
 
@@ -827,7 +827,7 @@ describe('Lifecycle ordering', () => {
         slug: SLUG,
         agent: 'claude',
         capabilities: new Set(['active:execute']),
-      } as never);
+      });
 
       await until(() => launchEntered, 'the launch to confirm');
       // Downstream work is still running: the committed boundary must already
@@ -866,7 +866,7 @@ describe('Lifecycle ordering', () => {
         slug: SLUG,
         agent: 'claude',
         capabilities: new Set(['active:execute']),
-      } as never);
+      });
       assert.equal(outcome.status, 'completed');
       assert.deepEqual(boundaryAgents, [AGENT, FALLBACK_AGENT]);
 
@@ -895,7 +895,7 @@ describe('Lifecycle ordering', () => {
       const outcome = await new ExecuteMissionService(ports).execute({
         operationId: `active:${SLUG}:blocked`, slug: SLUG, agent: 'claude',
         capabilities: new Set(['active:execute']),
-      } as never);
+      });
       assert.equal(outcome.status, 'failed');
       assert.equal(launched, false);
       const loaded = await store.load(missionId(SLUG));
@@ -914,7 +914,7 @@ test('authoring batches persist a full aggregate and SQLite failures roll back a
     const request = { operationId: 'batch', missionId: mission.id, capabilities: new Set(['mission:context'] as const),
       brief: { goal: 'Goal', why: 'Why', scope: 'Scope', outOfScope: ['Excluded'] },
       criteria: ['first', 'second'], gates: ['npm test'], checkpoints: [{ name: 'CP-1', description: 'Deliver' }],
-      predictedNelBucket: 'Small' as const, classification: 'user_value' as const };
+      predictedNelBucket: 'Small' as const, classification: 'user_value' as const } satisfies Partial<NonNullable<Parameters<typeof service.author>[0]>>;
     assert.equal((await service.author(request)).status, 'completed');
     const read = await f.store.load(mission.id); assert.equal(read.kind, 'found');
     if (read.kind !== 'found') { throw new Error('mission missing'); }

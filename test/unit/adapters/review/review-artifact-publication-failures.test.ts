@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 // Coverage tests for review.js as requested in Finding 3 of task-1135 review.
 
@@ -23,13 +22,13 @@ const TEST_SLUG = 'task-1135-coverage';
 
 test('commitSafeMissionArtifacts handles commit failure', async () => {
   const logs = [];
-  const errors = [];
+  const errors: string[] = [];
 
   const result = await commitSafeMissionArtifacts(TEST_SLUG, '/tmp/worktree', {
     gitFn: (args) => {
-      if (args.includes('status')) return { status: 0, stdout: Buffer.from(' M safe.js\0') };
-      if (args.includes('commit')) return { status: 1, stderr: 'commit failed' };
-      return { status: 0, stdout: '' };
+      if (args.includes('status')) return { signal: null, stderr: '',  status: 0, stdout: ' M safe.js\0' };
+      if (args.includes('commit')) return { signal: null, stdout: '',  status: 1, stderr: 'commit failed' };
+      return { signal: null, stderr: '',  status: 0, stdout: '' };
     },
     isMissionArtifactFn: () => true, // Force safe
     isWorkflowGeneratedArtifactFn: () => true, // Force safe
@@ -51,15 +50,15 @@ test('commitSafeMissionArtifacts no longer treats a repo stats CSV as a safe mis
 });
 
 test('commitSafeMissionArtifacts leaves a non-mission stats CSV untouched', async () => {
-  const added = [];
-  const errors = [];
+  const added: string[] = [];
+  const errors: string[] = [];
 
   const result = await commitSafeMissionArtifacts(TEST_SLUG, '/tmp/worktree', {
     gitFn: (args) => {
-      if (args.includes('status')) return { status: 0, stdout: Buffer.from(' M stats.csv\0') };
-      if (args.includes('add')) { added.push(args[args.length - 1]); return { status: 0, stdout: '' }; }
-      if (args.includes('commit')) return { status: 0, stdout: '' };
-      return { status: 0, stdout: '' };
+      if (args.includes('status')) return { signal: null, stderr: '',  status: 0, stdout: ' M stats.csv\0' };
+      if (args.includes('add')) { added.push(args[args.length - 1]); return { signal: null, stderr: '',  status: 0, stdout: '' }; }
+      if (args.includes('commit')) return { signal: null, stderr: '',  status: 0, stdout: '' };
+      return { signal: null, stderr: '',  status: 0, stdout: '' };
     },
     isMissionArtifactFn: () => false,
     isWorkflowGeneratedArtifactFn: () => false,
@@ -72,12 +71,12 @@ test('commitSafeMissionArtifacts leaves a non-mission stats CSV untouched', asyn
 });
 
 test('commitSafeMissionArtifacts leaves genuinely non-mission paths untouched', async () => {
-  const errors = [];
+  const errors: string[] = [];
 
   const result = await commitSafeMissionArtifacts(TEST_SLUG, '/tmp/worktree', {
     gitFn: (args) => {
-      if (args.includes('status')) return { status: 0, stdout: Buffer.from(' M server/src/Main.java\0') };
-      return { status: 0, stdout: '' };
+      if (args.includes('status')) return { signal: null, stderr: '',  status: 0, stdout: ' M server/src/Main.java\0' };
+      return { signal: null, stderr: '',  status: 0, stdout: '' };
     },
     isMissionArtifactFn: () => false,
     isWorkflowGeneratedArtifactFn: () => false,
@@ -89,12 +88,12 @@ test('commitSafeMissionArtifacts leaves genuinely non-mission paths untouched', 
 });
 
 test('postStaticReviewComment handles missing token', async () => {
-  const errors = [];
+  const errors: string[] = [];
 
   const result = await postStaticReviewComment(TEST_SLUG, 'message', {
     readTokenFn: () => null, // No token
     resolveWorktreeFn: () => '/tmp/worktree',
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    resolveTaskFileFn: () => ({ matches: ['/tmp/task.md'],  ok: true as const, taskFile: '/tmp/task.md' }),
     getTaskImplementerFn: () => 'gemini',
     resolveForgejoUserFn: (u) => u,
     error: m => errors.push(m)
@@ -112,7 +111,7 @@ test('performStaticReview handles missing Goal Check section', async () => {
     findMissionDir: () => '/tmp/mission',
     findCheckpoints: () => ['/tmp/mission/CP-1.md'],
     readFileSync: () => '# CP-1\nNo goal check here.',
-    run: () => ({ status: 0, stdout: '' }),
+    run: () => ({ signal: null, stderr: '',  status: 0, stdout: '' }),
     log: m => logs.push(m)
   });
 
@@ -127,7 +126,7 @@ test('performStaticReview handles Goal Check section with no evidence rows', asy
     findMissionDir: () => '/tmp/mission',
     findCheckpoints: () => ['/tmp/mission/CP-1.md'],
     readFileSync: () => '## Goal Check\n| Goal | Evidence | Status |\n|---|---|---|',
-    run: () => ({ status: 0, stdout: '' }),
+    run: () => ({ signal: null, stderr: '',  status: 0, stdout: '' }),
     log: m => logs.push(m)
   });
 

@@ -1,3 +1,4 @@
+import { fixtureMission as typedMissionFixture } from '../fixtures/mission-builders.js';
 // Composed fixture for the integration repair loop (TASK-2620).
 //
 // A real Git repository with a mission worktree, the production SQLite Mission
@@ -121,7 +122,10 @@ export async function openRepairFixture(options: {
   let seeded = seedMission(slug, undecided ? pendingReview(slug, approvedRevision) : approvedReview(slug, approvedRevision));
   if (options.recordBaseline) {
     const baseline = changeRevision(git(repo, ['rev-parse', 'main']));
-    seeded = { ...seeded, review: { ...seeded.review!, rounds: seeded.review!.rounds.map(r => ({ ...r, subject: { ...r.subject, baseline } })) as unknown as Review['rounds'] } } as Mission;
+    assert.ok(seeded.review);
+    const [first, ...rest] = seeded.review.rounds;
+    const withBaseline = (round: Review['rounds'][number]) => ({ ...round, subject: { ...round.subject, baseline } });
+    seeded = { ...seeded, review: { ...seeded.review, rounds: [withBaseline(first), ...rest.map(withBaseline)] } };
   }
   // The board lists the missions of the repository it runs in, so a mission
   // the board must see carries that repository's canonical identity.
@@ -171,12 +175,11 @@ function pendingReview(slug: string, revision: string): Review {
 }
 
 function approvedReview(slug: string, revision: string): Review {
-  return applyReviewerCommand(pendingReview(slug, revision), { type: 'approve', decidedAt: '2026-09-20T11:00:00.000Z', comment: 'Looks right', source: { kind: 'local' } });
+  return applyReviewerCommand(pendingReview(slug, revision), { type: 'approve', revision: changeRevision(revision), decidedAt: '2026-09-20T11:00:00.000Z', comment: 'Looks right', source: { kind: 'local' } });
 }
 
 function seedMission(slug: string, review: Review): Mission {
-  return {
-    id: missionId(slug),
+  return typedMissionFixture(String(missionId(slug)), {
     repositoryId: repositoryId('parallix'),
     title: `Mission ${slug}`,
     labels: missionLabels(['user_value']),
@@ -199,9 +202,7 @@ function seedMission(slug: string, review: Review): Mission {
     reproductionTest: null,
     assignee: IMPLEMENTER,
     externalTaskRef: null,
-    intakeTrace: null,
     review,
     netEngineeringLines: null,
-    closedAt: null,
-  } as unknown as Mission;
+    closedAt: null});
 }

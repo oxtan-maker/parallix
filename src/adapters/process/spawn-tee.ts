@@ -30,14 +30,14 @@ export interface TeeSink {
   write(_chunk: Buffer | string): unknown;
 }
 
-interface SpawnTeeOptions {
+export interface SpawnTeeOptions {
   configuration?: ParallixConfiguration;
   stdoutSink?: TeeSink;
   stderrSink?: TeeSink;
   maxTailBytes?: number;
   noOutputWatchdog?: NoOutputWatchdog | null;
   cwd?: string;
-  env?: Record<string, string>;
+  env?: NodeJS.ProcessEnv;
   /**
    * Unref the child and its piped stdio so a long-running child cannot keep
    * the host process alive. Used by board fire-and-forget dispatch, where the
@@ -59,6 +59,12 @@ interface SpawnTeeOptions {
    * terminal. The sinks, tail and capture still receive the raw bytes.
    */
   hostPresentation?: HostPresentation;
+  /**
+   * Bytes the child reads from stdin, followed by EOF. A launcher passes a
+   * prompt here when the provider accepts it on stdin, so prompt size is not
+   * bounded by the per-argument exec limit. Absent: stdin is inherited.
+   */
+  input?: string | Buffer;
   [key: string]: unknown;
 }
 
@@ -66,7 +72,8 @@ interface SpawnTeeOptions {
 export type HostPresentation = 'claude-stream';
 
 export interface TerminalHost {
-  host(_launch: { command: string; args: string[] }, _context: { cwd: string; env: Record<string, string>; presentation?: HostPresentation }): { command: string; args: string[]; cleanup(): void };
+  /** A host must deliver `input`, when present, as the hosted command's stdin followed by EOF. */
+  host(_launch: { command: string; args: string[]; input?: Buffer }, _context: { cwd: string; env: NodeJS.ProcessEnv; presentation?: HostPresentation }): { command: string; args: string[]; cleanup(): void };
 }
 
 export interface OutputCapture {
@@ -121,18 +128,100 @@ interface FinishPayload {
   endedAt?: string;
 }
 
+function outputDeadlineEnabled(watchdog: NoOutputWatchdog | null) { return Number.isFinite(watchdog?.maxNoOutputMs) && (watchdog?.maxNoOutputMs ?? 0) > 0; }
+
+function superviseOutput(child: ChildProcess, noOutputWatchdog: NoOutputWatchdog | null, hasNoOutputDeadline: boolean, command: string, args: string[], startTime: number) {
+  const watchdog = createOutputWatchdog(noOutputWatchdog, { command, args, pid: child.pid }, startTime);
+  let noOutputTimedOut = false;
+  let noOutputTimer: ReturnType<typeof setTimeout> | null = null;
+  let escalationTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearDeadlineTimer = () => {
+    if (noOutputTimer) { clearTimeout(noOutputTimer); noOutputTimer = null; }
+  };
+  const clearEscalationTimer = () => {
+    if (escalationTimer) { clearTimeout(escalationTimer); escalationTimer = null; }
+  };
+  const killGroup = (signal: NodeJS.Signals) => {
+    try { process.kill(-child.pid!, signal); } catch { try { child.kill(signal); } catch { /* settled */ } }
+  };
+  const forward = (signal: NodeJS.Signals) => {
+    killGroup(signal);
+    // Detached children miss the terminal signal, but the parent must retain
+    // Node's normal termination semantics after forwarding it.
+    process.kill(process.pid, signal);
+  };
+  const forwardSigint = () => forward('SIGINT');
+  const forwardSigterm = () => forward('SIGTERM');
+  if (hasNoOutputDeadline) {
+    process.once('SIGINT', forwardSigint);
+    process.once('SIGTERM', forwardSigterm);
+    noOutputTimer = setTimeout(() => {
+      noOutputTimer = null;
+      noOutputTimedOut = true;
+      killGroup('SIGINT');
+      escalationTimer = setTimeout(() => {
+        killGroup('SIGTERM');
+        escalationTimer = setTimeout(() => killGroup('SIGKILL'), 250);
+        escalationTimer.unref?.();
+      }, 250);
+      escalationTimer.unref?.();
+    }, noOutputWatchdog!.maxNoOutputMs!);
+    noOutputTimer.unref?.();
+  }
+
+  return {
+    get timedOut() { return noOutputTimedOut; },
+    noteOutput() { if (!noOutputTimedOut) { clearDeadlineTimer(); } watchdog.noteOutput(); },
+    clear() {
+      watchdog.clear();
+      clearDeadlineTimer();
+      clearEscalationTimer();
+      if (hasNoOutputDeadline) {
+        process.removeListener('SIGINT', forwardSigint);
+        process.removeListener('SIGTERM', forwardSigterm);
+      }
+    },
+  };
+}
+
+function forwardOutput(chunk: Buffer, stream: 'stdout' | 'stderr', tail: TailBuffer, sink: TeeSink, supervisor: ReturnType<typeof superviseOutput>, capture?: OutputCapture) {
+  supervisor.noteOutput();
+  capture?.write(stream, chunk);
+  tail.push(chunk);
+  if (sink && typeof sink.write === 'function') { sink.write(chunk); }
+}
+
+function spawnCapturedChild(launch: { command: string; args: string[] }, spawnOptions: SpawnOptions, env: NodeJS.ProcessEnv, hasNoOutputDeadline: boolean, onSpawn: SpawnTeeOptions['onSpawn'], unrefChild: boolean, inputBytes: Buffer | null): ChildProcess {
+  const child = childProcess.spawn(launch.command, launch.args, {
+    ...spawnOptions, env, ...(hasNoOutputDeadline ? { detached: true } : {}), stdio: [inputBytes ? 'pipe' : 'inherit', 'pipe', 'pipe'],
+  });
+  if (inputBytes) {
+    // An early child exit can close stdin before the prompt is flushed.
+    child.stdin?.on('error', () => { /* reported through the exit status */ });
+    child.stdin?.end(inputBytes);
+  }
+  onSpawn?.(child);
+  if (unrefChild) {
+    child.unref();
+    (child.stdout as { unref?: () => void } | null)?.unref?.();
+    (child.stderr as { unref?: () => void } | null)?.unref?.();
+  }
+  return child;
+}
+
 export function spawnAndTee(command: string, args: string[], options: SpawnTeeOptions = {}): Promise<SpawnTeeResult> {
   const {
     configuration = DEFAULT_CONFIGURATION,
     stdoutSink = process.stdout,
     stderrSink = process.stderr,
     maxTailBytes = DEFAULT_MAX_TAIL_BYTES,
-      noOutputWatchdog = null,
-      unrefChild = false,
-      onSpawn,
-      terminalHost,
-      capture,
-      hostPresentation,
+    noOutputWatchdog = null,
+    unrefChild = false,
+    onSpawn,
+    terminalHost,
+    capture,
+    hostPresentation,
+    input,
     ...spawnOptions
   } = options;
 
@@ -142,7 +231,7 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     let settled = false;
     const startTime = Date.now();
     const resolvedCwd = path.resolve((spawnOptions.cwd as string) || process.cwd());
-    const env: Record<string, string> = {
+    const env: NodeJS.ProcessEnv = {
       ...process.env,
       ...(spawnOptions.env || {}),
       PWD: resolvedCwd
@@ -152,9 +241,10 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     // Guard construction errors deliberately reject this launch. An available
     // but broken Bubblewrap guard must never retry the child unsandboxed.
     const confined = wrapWithBubblewrap(command, args, resolvedCwd, configuration);
+    const inputBytes = input === undefined ? null : Buffer.from(input);
     let hosted: ReturnType<TerminalHost['host']> | null = null;
     try {
-      hosted = terminalHost ? terminalHost.host(confined, { cwd: resolvedCwd, env, ...(hostPresentation ? { presentation: hostPresentation } : {}) }) : null;
+      hosted = terminalHost ? terminalHost.host({ ...confined, ...(inputBytes ? { input: inputBytes } : {}) }, { cwd: resolvedCwd, env, ...(hostPresentation ? { presentation: hostPresentation } : {}) }) : null;
     } catch (err) {
       const now = new Date().toISOString();
       resolve({ status: null, signal: null, stdout: '', stderr: '', error: err, startedAt: now, endedAt: now });
@@ -162,23 +252,10 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     }
     const launch = hosted ?? confined;
 
-    const hasNoOutputDeadline = Number.isFinite(noOutputWatchdog?.maxNoOutputMs) && (noOutputWatchdog?.maxNoOutputMs ?? 0) > 0;
+    const hasNoOutputDeadline = outputDeadlineEnabled(noOutputWatchdog);
     let child: ChildProcess;
     try {
-      child = childProcess.spawn(launch.command, launch.args, {
-        ...spawnOptions,
-        env,
-        ...(hasNoOutputDeadline ? { detached: true } : {}),
-        stdio: ['inherit', 'pipe', 'pipe']
-      } as SpawnOptions);
-      onSpawn?.(child);
-      if (unrefChild) {
-        // child.unref() alone does not release the piped stdio handles — the
-        // pipes would still anchor the event loop. Unref all three.
-        child.unref();
-        (child.stdout as { unref?: () => void } | null)?.unref?.();
-        (child.stderr as { unref?: () => void } | null)?.unref?.();
-      }
+      child = spawnCapturedChild(launch, spawnOptions as SpawnOptions, env, hasNoOutputDeadline, onSpawn, unrefChild, hosted ? null : inputBytes);
     } catch (err) {
       hosted?.cleanup();
       resolve({
@@ -188,78 +265,20 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
       return;
     }
 
-    const watchdog = createOutputWatchdog(noOutputWatchdog, { command, args, pid: child.pid }, startTime);
-    let noOutputTimedOut = false;
-    let noOutputTimer: ReturnType<typeof setTimeout> | null = null;
-    let escalationTimer: ReturnType<typeof setTimeout> | null = null;
-    const clearDeadlineTimer = () => {
-      if (noOutputTimer) { clearTimeout(noOutputTimer); noOutputTimer = null; }
-    };
-    const clearEscalationTimer = () => {
-      if (escalationTimer) { clearTimeout(escalationTimer); escalationTimer = null; }
-    };
-    const killGroup = (signal: NodeJS.Signals) => {
-      try { process.kill(-child.pid!, signal); } catch { try { child.kill(signal); } catch { /* settled */ } }
-    };
-    const forward = (signal: NodeJS.Signals) => {
-      killGroup(signal);
-      // Detached children miss the terminal signal, but the parent must retain
-      // Node's normal termination semantics after forwarding it.
-      process.kill(process.pid, signal);
-    };
-    const forwardSigint = () => forward('SIGINT');
-    const forwardSigterm = () => forward('SIGTERM');
-    if (hasNoOutputDeadline) {
-      process.once('SIGINT', forwardSigint);
-      process.once('SIGTERM', forwardSigterm);
-      noOutputTimer = setTimeout(() => {
-        noOutputTimer = null;
-        noOutputTimedOut = true;
-        killGroup('SIGINT');
-        escalationTimer = setTimeout(() => {
-          killGroup('SIGTERM');
-          escalationTimer = setTimeout(() => killGroup('SIGKILL'), 250);
-          escalationTimer.unref?.();
-        }, 250);
-        escalationTimer.unref?.();
-      }, noOutputWatchdog!.maxNoOutputMs);
-      noOutputTimer.unref?.();
-    }
+    const supervisor = superviseOutput(child, noOutputWatchdog, hasNoOutputDeadline, command, args, startTime);
 
     const finish = (payload: FinishPayload): void => {
       if (settled) {return;}
       settled = true;
       try { hosted?.cleanup(); } catch { /* a failed host cleanup must not mask the launch result */ }
-      watchdog.clear();
-      clearDeadlineTimer();
-      clearEscalationTimer();
-      if (hasNoOutputDeadline) {
-        process.removeListener('SIGINT', forwardSigint);
-        process.removeListener('SIGTERM', forwardSigterm);
-      }
+      supervisor.clear();
       payload.startedAt = new Date(startTime).toISOString();
       payload.endedAt = new Date().toISOString();
       resolve(payload as SpawnTeeResult);
     };
 
-    child.stdout?.on('data', (chunk: Buffer) => {
-      if (!noOutputTimedOut) { clearDeadlineTimer(); }
-      watchdog.noteOutput();
-      capture?.write('stdout', chunk);
-      stdoutTail.push(chunk);
-      if (stdoutSink && typeof stdoutSink.write === 'function') {
-        stdoutSink.write(chunk);
-      }
-    });
-    child.stderr?.on('data', (chunk: Buffer) => {
-      if (!noOutputTimedOut) { clearDeadlineTimer(); }
-      watchdog.noteOutput();
-      capture?.write('stderr', chunk);
-      stderrTail.push(chunk);
-      if (stderrSink && typeof stderrSink.write === 'function') {
-        stderrSink.write(chunk);
-      }
-    });
+    child.stdout?.on('data', (chunk: Buffer) => forwardOutput(chunk, 'stdout', stdoutTail, stdoutSink, supervisor, capture));
+    child.stderr?.on('data', (chunk: Buffer) => forwardOutput(chunk, 'stderr', stderrTail, stderrSink, supervisor, capture));
 
     child.on('error', (err: Error) => {
       finish({
@@ -273,11 +292,11 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
 
     child.on('close', (code: number | null, signal: string | null) => {
       finish({
-        status: noOutputTimedOut ? null : code,
-        signal: noOutputTimedOut ? null : signal,
+        status: supervisor.timedOut ? null : code,
+        signal: supervisor.timedOut ? null : signal,
         stdout: stdoutTail.toString(),
         stderr: stderrTail.toString(),
-        error: noOutputTimedOut ? Object.assign(new Error('No output before configured liveness deadline'), { code: 'NO_OUTPUT_TIMEOUT' }) : null,
+        error: supervisor.timedOut ? Object.assign(new Error('No output before configured liveness deadline'), { code: 'NO_OUTPUT_TIMEOUT' }) : null,
       });
     });
   });

@@ -53,7 +53,7 @@ const LOCKFILE = [
 ].join('\n');
 
 /** @param {string} dir @param {{version?: string, dependencies?: Record<string,string>}} [options] */
-function seedWorktree(dir, { version = '1.0.0', dependencies = { left: '^1.0.0' } } = {}) {
+function seedWorktree(dir: string, { version = '1.0.0', dependencies = { left: '^1.0.0' } } = {}) {
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
     name: 'fixture',
     version,
@@ -232,6 +232,7 @@ test('a failed install publishes no successful identity, keeps the prior record 
   try {
     const first = ensureDependencies({ worktree, spawnFn: ok.spawnFn, logFn: () => {} });
     const published = readInstalledIdentity(worktree);
+    assert.ok(published != null);
     assert.equal(published.identity, first.identity);
 
     fs.writeFileSync(path.join(worktree, 'package.json'), JSON.stringify({
@@ -251,7 +252,7 @@ test('a failed install publishes no successful identity, keeps the prior record 
     const retry = spawnRecorder(worktree, 0);
     const next = ensureDependencies({ worktree, spawnFn: retry.spawnFn, logFn: () => {} });
     assert.equal(next.action, 'installed');
-    assert.equal(readInstalledIdentity(worktree).identity, next.identity);
+    assert.equal(readInstalledIdentity(worktree)?.identity, next.identity);
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
   }
@@ -294,14 +295,14 @@ test('trust is withdrawn before the installer mutates the tree, so a partial ins
   try {
     const first = ensureDependencies({ worktree, spawnFn: ok.spawnFn, logFn: () => {} });
     const manifestA = fs.readFileSync(path.join(worktree, 'package.json'), 'utf8');
-    assert.equal(readInstalledIdentity(worktree).identity, first.identity);
+    assert.equal(readInstalledIdentity(worktree)?.identity, first.identity);
 
     // Inputs change to B and the installer mutates the tree, then fails.
     fs.writeFileSync(path.join(worktree, 'package.json'), JSON.stringify({
       name: 'fixture', version: '1.0.0', packageManager: 'pnpm@12.9.1', dependencies: { left: '^1.0.0', right: '^2.0.0' },
     }, null, 2), 'utf8');
     const partial = { status: 1, seen: [] as string[] };
-    const failingSpawn = (_command: string, args: string[]) => {
+    const failingSpawn: NonNullable<NonNullable<Parameters<typeof ensureDependencies>[0]>["spawnFn"]> = (_command, args) => {
       // A real pnpm writes into node_modules before it fails.
       fs.rmSync(path.join(worktree, INSTALL_STATE_DIRECTORY, '.pnpm', 'left@1.0.0'), { recursive: true, force: true });
       fs.mkdirSync(path.join(worktree, INSTALL_STATE_DIRECTORY, '.pnpm', 'right@2.0.0-beta'), { recursive: true });
@@ -320,7 +321,7 @@ test('trust is withdrawn before the installer mutates the tree, so a partial ins
     const reverted = ensureDependencies({ worktree, spawnFn: spawnRecorder(worktree, 0).spawnFn, logFn: () => {} });
     assert.equal(reverted.action, 'installed', 'reverted inputs after a partial failure still reconcile');
     assert.equal(reverted.identity, first.identity);
-    assert.equal(readInstalledIdentity(worktree).identity, first.identity, 'success republishes a trusted record');
+    assert.equal(readInstalledIdentity(worktree)?.identity, first.identity, 'success republishes a trusted record');
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
   }
@@ -368,7 +369,7 @@ test('parallel worktrees keep independent identities and never overwrite each ot
     fs.writeFileSync(path.join(b, 'pnpm-workspace.yaml'), 'overrides:\n  source-map-js: 1.3.0\n', 'utf8');
     const third = ensureDependencies({ worktree: b, spawnFn: spawnB.spawnFn, logFn: () => {} });
     assert.equal(third.action, 'installed');
-    assert.equal(readInstalledIdentity(a).identity, first.identity, 'worktree A keeps its own record');
+    assert.equal(readInstalledIdentity(a)?.identity, first.identity, 'worktree A keeps its own record');
   } finally {
     fs.rmSync(parent, { recursive: true, force: true });
   }

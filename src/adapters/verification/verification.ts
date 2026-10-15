@@ -8,7 +8,7 @@ import * as fsMod from 'node:fs';
 import * as pathMod from 'node:path';
 import { getPrimaryBranch } from '../filesystem/mission-utils.js';
 import { resolveParallixHome, readJson, writeJson } from '../storage/storage.js';
-import { captureRecoveryEvidence, resolveConfiguredCredentialRedactor } from '../../application/recovery-evidence.js';
+import { captureFailedVerification } from './verification-failure-capture.js';
 import { createActiveVerificationIdentity, readActiveVerificationProof, writeActiveVerificationProof } from './active-verification-proof.js';
 interface GitOptions {
   encoding?: BufferEncoding;
@@ -26,6 +26,10 @@ interface GitResult {
   stderr: string;
   error?: Error | null;
 }
+
+export type VerificationGateResult = Pick<GitResult, 'status'> & Partial<Omit<GitResult, 'status'>>;
+type VerificationRunOptions = import('../../application/ports/handoff-workflow.js').HandoffGitOptions;
+export type VerificationRunner = (_command: string, _args: string[], _options?: VerificationRunOptions) => VerificationGateResult;
 
 export type GitFn = (_args: string[], _options?: GitOptions) => GitResult;
 
@@ -107,7 +111,7 @@ export function detectAreasFromChangedFiles(filesOutput: string): string[] {
   const areas = new Set<string>();
   filesOutput.split('\n').forEach((rawFile) => {
     const file = rawFile.trim();
-    if (!file || !file.includes('/')) {return;}
+    if (!file || !file.includes('/')) { return; }
     const topDir = file.split('/')[0];
     if (KNOWN_CHANGE_AREAS.includes(topDir)) {
       areas.add(topDir);
@@ -130,13 +134,13 @@ export function detectMissionChangedArea(
   rootDir: string = process.cwd(),
   options: { gitRunner?: GitFn; baseBranch?: string } = {}
 ): string | null {
-  if (!missionDir) {return null;}
+  if (!missionDir) { return null; }
 
   const gitRunner = options.gitRunner || git;
   let baseBranch = options.baseBranch;
   if (!baseBranch) {
     try {
-      baseBranch = getPrimaryBranch(rootDir, gitRunner as unknown as Function);
+      baseBranch = getPrimaryBranch(rootDir, gitRunner);
     } catch {
       return null;
     }
@@ -151,13 +155,13 @@ export function detectMissionChangedArea(
   // A verification command accepts one area. Mixed-area changes must use the
   // strict superset rather than silently choosing the first path in git's
   // alphabetical output (for example, docs before lib).
-  if (areas.length > 1) {return 'all';}
+  if (areas.length > 1) { return 'all'; }
   return areas[0] || null;
 }
 
 /** Resolve an explicit, diff-scoped, or configured verification area. */
 export function resolveEffectiveArea(area: string | undefined, rootDir: string = process.cwd(), missionDir: string | null = null): string {
-  if (area) {return area;}
+  if (area) { return area; }
   const { defaultArea } = resolveVerificationAdapter(rootDir);
   return detectMissionChangedArea(missionDir, rootDir) || defaultArea;
 }
@@ -174,8 +178,8 @@ export function formatVerificationCommand(area: string | undefined, rootDir: str
   return command.replaceAll('{{area}}', effectiveArea || DEFAULT_AREA);
 }
 
-/** @param {string} [area] @param {{rootDir?: string, log?: Function, stdio?: string, runFn?: Function}} [options] */
-export function runVerificationGate(area: string | undefined, options: { rootDir?: string; log?: Function; stdio?: string; runFn?: Function; maxBuffer?: number } = {}): import('child_process').SpawnSyncReturns<string> {
+/** @param {string} [area] @param {{rootDir?: string, log?: (_message: string) => void, stdio?: SpawnSyncOptions['stdio'], runFn?: VerificationRunner}} [options] */
+export function runVerificationGate(area: string | undefined, options: { rootDir?: string; log?: (_message: string) => void; stdio?: VerificationRunOptions['stdio']; runFn?: VerificationRunner; maxBuffer?: number } = {}): VerificationGateResult {
   const opts = options;
   const rootDir = opts.rootDir || process.cwd();
   const { command, defaultArea } = resolveVerificationAdapter(rootDir);
@@ -185,7 +189,7 @@ export function runVerificationGate(area: string | undefined, options: { rootDir
     const info = opts.log || log.info;
     info(`No verification gate configured for area: ${effectiveArea}; default is no validation. `
       + 'Set adapters.verification.command in workflow.config.json to enforce one.');
-    return { status: 0 } as import('child_process').SpawnSyncReturns<string>;
+    return { status: 0 };
   }
 
   const stdio = opts.stdio || 'inherit';
@@ -286,13 +290,17 @@ export function readReusableVerificationProof(command: string, rootDir: string =
   const filePath = options.proofPath || verificationProofPath(identityResult.identity!, resolveParallixHome({ configuration: options.configuration, ensureDir: false }));
   const result = readJson<ReusableVerificationProof>(filePath);
   const proof = result.data;
-  if (!result.ok || !proof || proof.version !== 3 || proof.status !== 'passed'
-    || proof.identity !== identityResult.identity || proof.command !== command.trim()
-    || proof.inputFingerprint !== identityResult.inputFingerprint || proof.toolchain !== identityResult.toolchain
-    || proof.commit !== identityResult.commit || proof.tree !== identityResult.tree || proof.context !== identityResult.context) {
+  if (!result.ok || !validVerificationProof(proof, identityResult, command)) {
     return { ok: false, identity: identityResult.identity, error: 'verification proof is missing, malformed, or does not match current inputs' };
   }
   return { ok: true, proof, identity: identityResult.identity };
+}
+
+function validVerificationProof(proof: ReusableVerificationProof | null | undefined, identityResult: ReturnType<typeof createVerificationProofIdentity>, command: string): proof is ReusableVerificationProof {
+  return !(!proof || proof.version !== 3 || proof.status !== 'passed'
+    || proof.identity !== identityResult.identity || proof.command !== command.trim()
+    || proof.inputFingerprint !== identityResult.inputFingerprint || proof.toolchain !== identityResult.toolchain
+    || proof.commit !== identityResult.commit || proof.tree !== identityResult.tree || proof.context !== identityResult.context);
 }
 
 export function writeReusableVerificationProof(command: string, rootDir: string = process.cwd(), options: { configuration?: ParallixConfiguration; gitRunner?: GitFn; proofPath?: string; expectedIdentity?: string; context?: string } = {}): { ok: boolean; proof?: ReusableVerificationProof; identity?: string; error?: string } {
@@ -341,7 +349,6 @@ export function readPublishedTreeState(rootDir: string, options: { gitRunner?: G
 }
 
 /** Cap of captured verifier characters carried on a structured gate failure. */
-const BOUNDED_VERIFIER_OUTPUT = 8000;
 
 /** Resolve the exact command that executes for this area, never its template. */
 function resolveVerificationCommand(rootDir: string, area?: string): string | null {
@@ -349,8 +356,12 @@ function resolveVerificationCommand(rootDir: string, area?: string): string | nu
   return command?.replaceAll('{{area}}', area || defaultArea) || null;
 }
 
-/** @param {string} [area] @param {string} [rootDir] @param {{gitRunner?: GitFn, runFn?: Function, stdio?: string, maxBuffer?: number}} [options] */
-export function captureVerifiedTreeProof(area: string | undefined, rootDir: string = process.cwd(), options: { gitRunner?: GitFn; runFn?: Function; stdio?: string; maxBuffer?: number; proofPath?: string; missionId?: string } = {}): { ok: boolean; proof?: VerificationProof; error?: string; exitCode?: number | null; command?: string | null; cwd?: string; stdout?: string; stderr?: string; recoveryEvidence?: import('../../application/recovery-evidence.js').RecoveryEvidenceRef; recoveryEvidenceError?: string } {
+/** @param {string} [area] @param {string} [rootDir] @param {{gitRunner?: GitFn, runFn?: VerificationRunner, stdio?: SpawnSyncOptions['stdio'], maxBuffer?: number}} [options] */
+function readPublishedVerificationProof(command: string | null, rootDir: string, gitRunner: GitFn, proofPath: string | undefined) {
+  return command ? readReusableVerificationProof(command, rootDir, { gitRunner, proofPath }) : { ok: false };
+}
+
+export function captureVerifiedTreeProof(area: string | undefined, rootDir: string = process.cwd(), options: { gitRunner?: GitFn; runFn?: VerificationRunner; stdio?: VerificationRunOptions['stdio']; maxBuffer?: number; proofPath?: string; missionId?: string } = {}): { ok: boolean; proof?: VerificationProof; error?: string; exitCode?: number | null; command?: string | null; cwd?: string; stdout?: string; stderr?: string; recoveryEvidence?: import('../../application/recovery-evidence.js').RecoveryEvidenceRef; recoveryEvidenceError?: string } {
   const {
     gitRunner = git,
     runFn = run,
@@ -363,12 +374,10 @@ export function captureVerifiedTreeProof(area: string | undefined, rootDir: stri
   } = options;
 
   const before = readPublishedTreeState(rootDir, { gitRunner });
-  if (!before.ok) {return before;}
+  if (!before.ok) { return before; }
 
   const command = resolveVerificationCommand(before.rootDir, area);
-  const reusable = command
-    ? readReusableVerificationProof(command, before.rootDir, { gitRunner, proofPath })
-    : { ok: false };
+  const reusable = readPublishedVerificationProof(command, before.rootDir, gitRunner, proofPath);
   if (reusable.ok) {
     return {
       ok: true,
@@ -391,48 +400,11 @@ export function captureVerifiedTreeProof(area: string | undefined, rootDir: stri
     maxBuffer,
   });
   if (verification.status !== 0) {
-    // Preserve the structured root failure end-to-end: the exact exit status
-    // plus bounded captured stdout/stderr, so an outer Forgejo/publish wrapper
-    // cannot collapse a gate failure to an exit-code-only string and strand the
-    // next agent (task-2373.01). The wrapper string is presentation only; the
-    // structured fields below are what classification and repair prompting read.
-    const stdout = String(verification.stdout ?? '').trim().slice(-BOUNDED_VERIFIER_OUTPUT);
-    const stderr = String(verification.stderr ?? '').trim().slice(-BOUNDED_VERIFIER_OUTPUT);
-    const detail = `${stdout}\n${stderr}`.slice(-BOUNDED_VERIFIER_OUTPUT);
-    // Persist attributable, retrievable evidence of this failed command to the
-    // mission worktree before any repair launches (TASK-2642). The worktree is
-    // unique to one mission and one repository, so original and retry evidence
-    // cannot overwrite or be confused with another concurrent mission. It is a
-    // best-effort side effect: recording never blocks the failure that produced
-    // it, so a write failure reports honestly on the returned ref rather than
-    // hiding the gate failure. Obtain and pass the operator-configured
-    // credential redactor so retained streams scrub before write (mission criterion).
-    const redactor = resolveConfiguredCredentialRedactor();
-    const capture = captureRecoveryEvidence({
-      command: command ?? '',
-      cwd: before.rootDir,
-      capturedRevision: before.commit,
-      exitCode: verification.status,
-      signal: (verification as { signal?: string | null }).signal ?? null,
-      stdout: String(verification.stdout ?? ''),
-      stderr: String(verification.stderr ?? ''),
-      diagnostic: detail,
-      ...(redactor ? { redactor } : {}),
-    });
-    return {
-      ok: false,
-      exitCode: verification.status,
-      command,
-      cwd: before.rootDir,
-      stdout,
-      stderr,
-      error: `verification gate failed for ${before.rootDir} with exit code ${verification.status}${detail ? `:\n${detail}` : ''}`,
-      ...(capture.ok ? { recoveryEvidence: capture.ref } : { recoveryEvidenceError: 'capture-failed' }),
-    };
+    return captureFailedVerification(before, verification, command);
   }
 
   const after = readPublishedTreeState(before.rootDir!, { gitRunner });
-  if (!after.ok) {return after;}
+  if (!after.ok) { return after; }
   if (after.commit !== before.commit || after.tree !== before.tree) {
     return {
       ok: false,
@@ -466,7 +438,7 @@ export function assertVerifiedTreeProof(proof: { rootDir?: string; branch?: stri
   const o = opts;
   const gitRunner = o.gitRunner || git;
   const current = readPublishedTreeState(rootDir, { gitRunner });
-  if (!current.ok) {return current;}
+  if (!current.ok) { return current; }
 
   if (proof.rootDir !== current.rootDir) {
     return { ok: false, error: `verification proof was captured from a different checkout: ${proof.rootDir}` };
@@ -478,18 +450,18 @@ export function assertVerifiedTreeProof(proof: { rootDir?: string; branch?: stri
   return { ok: true, proof: current };
 }
 
-export default function runWorkflow(args: string[], options: { log?: Function; configuration?: ParallixConfiguration } = {}): import('child_process').SpawnSyncReturns<string> {
+export default function runWorkflow(args: string[], options: { log?: (_message: string) => void; configuration?: ParallixConfiguration } = {}): VerificationGateResult {
   const logFn = options.log || log.plain;
   const root = process.cwd();
   const area = resolveEffectiveArea(args[0] || options.configuration?.runtime.verifyArea, root);
   logFn(`Running verification gate for area: ${area}...`);
   const command = formatVerificationCommand(area, root);
   const before = createActiveVerificationIdentity(command, root, options);
-  if (before.ok === false && 'blocked' in before) { logFn(before.error); return { status: 1 } as import('child_process').SpawnSyncReturns<string>; }
+  if (before.ok === false && 'blocked' in before) { logFn(before.error); return { status: 1 }; }
   const reusable = readActiveVerificationProof(command, root, options);
   if (reusable.ok) {
     logFn(reusable.diagnostic);
-    return { status: 0 } as import('child_process').SpawnSyncReturns<string>;
+    return { status: 0 };
   }
   const result = runVerificationGate(area, { stdio: 'inherit' });
   if (result.status === 0 && before.ok) {

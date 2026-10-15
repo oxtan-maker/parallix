@@ -77,7 +77,7 @@ if (!fs.existsSync(dbPath)) {
 const db = new DatabaseSync(dbPath, { readOnly: dryRun });
 const ph = FIXTURE_REPOS.map(() => '?').join(',');
 const fixtureMissions = db.prepare(`SELECT id FROM missions WHERE repository_id IN (${ph})`).all(...FIXTURE_REPOS)
-  .map((row: { id: string }) => row.id);
+  .map(row => row.id as string);
 
 function count(table: string, clause: string, params: (string | number | null)[]): number | null {
   try { return (db.prepare(`SELECT COUNT(*) AS c FROM ${table} WHERE ${clause}`).get(...params) as { c: number }).c; }
@@ -95,7 +95,7 @@ console.log(`Operator database: ${dbPath}`);
 console.log(`Fixture repository ids: ${FIXTURE_REPOS.length}; fixture mission ids: ${fixtureMissions.length}`);
 console.log(`Rows in scope: missions=${scope.missions}, board_lane_events=${scope.board_lane_events}, session_markers=${scope.session_markers}, usage_statistics=${scope.usage_statistics}, known_repositories=${scope.known_repositories ?? 'n/a'}`);
 
-const total = Object.values(scope).reduce((sum, value) => sum + (value ?? 0), 0);
+const total = Object.values(scope).reduce<number>((sum, value) => sum + (value ?? 0), 0);
 if (total === 0) {
   console.log('No fixture rows remain; nothing to do.');
   db.close();
@@ -129,7 +129,7 @@ if (sqlite3.status !== 0 || !fs.existsSync(backupPath)) {
   console.log(`Backup via sqlite3 .backup: ${backupPath}`);
 }
 const backupDb = new DatabaseSync(backupPath, { readOnly: true });
-const integrity = backupDb.prepare('PRAGMA integrity_check').all().map((row: Record<string, string>) => Object.values(row)[0]);
+const integrity = backupDb.prepare('PRAGMA integrity_check').all().map(row => Object.values(row)[0]);
 backupDb.close();
 if (integrity.length !== 1 || integrity[0] !== 'ok') {
   console.error(`Backup integrity check FAILED: ${integrity.join(', ')} — aborting, no rows removed.`);

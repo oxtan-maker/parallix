@@ -1,3 +1,4 @@
+import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
 // TASK-2368: a mission whose review is being run by a live agent session must
 // not be queued as human attention ("Awaiting review decision").
 import test from 'node:test';
@@ -26,7 +27,7 @@ const reviewed = missionId('task-2274');
 // ---------------------------------------------------------------------------
 
 function reviewLaneMission(): Mission {
-  return {
+  return completeMissionFixture(String(reviewed), {
     id: reviewed,
     repositoryId: repo,
     title: 'route role-owned review artifact failures to their producer',
@@ -37,7 +38,7 @@ function reviewLaneMission(): Mission {
     checkpoints: [],
     review: null,
     netEngineeringLines: null,
-  };
+  });
 }
 
 /** A review whose current round is still being worked: no decision yet. */
@@ -65,7 +66,7 @@ function pendingReview(): Review {
     reviewEvents: [],
     intervention: null,
     stageLaunches: [],
-  } as unknown as Review;
+  };
 }
 
 function makeBuilder(runningSessions: readonly RunningAgentSession[] | null): BoardProjectionBuilder {

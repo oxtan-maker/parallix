@@ -39,23 +39,32 @@ const TELEMETRY_WINDOW_SECONDS = 60;
  * Parse a single line from token-usage-YYYY-MM.jsonl.
  * Returns null for malformed lines.
  */
-function parseTokenUsageLine(line: string) {
-  const trimmed = line.trim();
-  if (!trimmed.startsWith('{')) {return null;}
-  let record;
-  try { record = JSON.parse(trimmed); } catch { return null; }
-  if (!record || typeof record !== 'object' || Object.keys(record).length === 0) {return null;}
+type QwenTokenRecord = { sessionId?: string; model?: string; authType?: string; inputTokens?: unknown; outputTokens?: unknown; cachedTokens?: unknown; thoughtsTokens?: unknown; totalTokens?: unknown; apiDurationMs?: unknown; timestamp?: string };
+type QwenSessionRecord = { sessionId?: string; project?: string; startTime?: number; endTime?: number; durationMs?: unknown; models?: Record<string, unknown>; tools?: { totalCalls?: unknown; totalSuccess?: unknown; totalFail?: unknown }; files?: { linesAdded?: unknown; linesRemoved?: unknown } };
 
+function qwenTokenCounts(record: QwenTokenRecord) {
   return {
-    sessionId: record.sessionId || null,
-    model: record.model || null,
-    authType: record.authType || null,
     inputTokens: Number(record.inputTokens) || 0,
     outputTokens: Number(record.outputTokens) || 0,
     cachedTokens: Number(record.cachedTokens) || 0,
     thoughtsTokens: Number(record.thoughtsTokens) || 0,
     totalTokens: Number(record.totalTokens) || 0,
     apiDurationMs: Number(record.apiDurationMs) || 0,
+  };
+}
+
+function parseTokenUsageLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('{')) {return null;}
+  let record: QwenTokenRecord | null;
+  try { record = JSON.parse(trimmed) as QwenTokenRecord | null; } catch { return null; }
+  if (!record || typeof record !== 'object' || Object.keys(record).length === 0) {return null;}
+
+  return {
+    sessionId: record.sessionId || null,
+    model: record.model || null,
+    authType: record.authType || null,
+    ...qwenTokenCounts(record),
     timestamp: record.timestamp || null,
   };
 }
@@ -64,11 +73,21 @@ function parseTokenUsageLine(line: string) {
  * Parse a single line from usage_record.jsonl.
  * Returns null for malformed lines.
  */
+function qwenSessionCounts(tools: NonNullable<QwenSessionRecord['tools']>, files: NonNullable<QwenSessionRecord['files']>) {
+  return {
+    toolCalls: Number(tools.totalCalls) || 0,
+    toolSuccess: Number(tools.totalSuccess) || 0,
+    toolFail: Number(tools.totalFail) || 0,
+    linesAdded: Number(files.linesAdded) || 0,
+    linesRemoved: Number(files.linesRemoved) || 0,
+  };
+}
+
 function parseUsageRecordLine(line: string) {
   const trimmed = line.trim();
   if (!trimmed.startsWith('{')) {return null;}
-  let record;
-  try { record = JSON.parse(trimmed); } catch { return null; }
+  let record: QwenSessionRecord | null;
+  try { record = JSON.parse(trimmed) as QwenSessionRecord | null; } catch { return null; }
   if (!record || typeof record !== 'object' || Object.keys(record).length === 0) {return null;}
 
   const models = record.models || {};
@@ -82,11 +101,7 @@ function parseUsageRecordLine(line: string) {
     endTime: record.endTime || null,
     durationMs: Number(record.durationMs) || 0,
     models,
-    toolCalls: Number(tools.totalCalls) || 0,
-    toolSuccess: Number(tools.totalSuccess) || 0,
-    toolFail: Number(tools.totalFail) || 0,
-    linesAdded: Number(files.linesAdded) || 0,
-    linesRemoved: Number(files.linesRemoved) || 0,
+    ...qwenSessionCounts(tools, files),
   };
 }
 
@@ -119,7 +134,7 @@ function tokenRecordsFromFile(filePath: string, sinceMs: number, sessionId: stri
   const content = fs.readFileSync(filePath, 'utf8');
   return content.split('\n')
     .map(parseTokenUsageLine)
-    .filter((record): record is NonNullable<typeof record> => Boolean(record?.timestamp))
+    .filter((record): record is NonNullable<typeof record> & { timestamp: string } => Boolean(record?.timestamp))
     .filter((record) => (!sessionId || record.sessionId === sessionId) && timestampIsCurrent(record.timestamp, sinceMs))
     .map((record) => ({ record, timestamp: record.timestamp }));
 }
@@ -182,6 +197,29 @@ function collectUsageRecord(
  *
  * Returns null when no artifacts exist in the window.
  */
+type QwenToken = NonNullable<ReturnType<typeof parseTokenUsageLine>>;
+type QwenSession = ReturnType<typeof parseUsageRecordLine>;
+
+function qwenAttribution(tokenRecords: QwenToken[], sessionRecord: QwenSession, agg: ReturnType<typeof qwenTokenCounts>) {
+  // Detect honest-zeros: records exist but all token counts are zero.
+  // This happens when the endpoint does not report usage for a session.
+  const hasRecords = tokenRecords.length > 0;
+  const allZeros = hasRecords && agg.inputTokens === 0 && agg.outputTokens === 0 &&
+    agg.cachedTokens === 0 && agg.thoughtsTokens === 0 && agg.totalTokens === 0;
+
+  // Use the most recent model as the primary attribution
+  const primaryModel = tokenRecords.length > 0
+    ? tokenRecords[tokenRecords.length - 1].model
+    : (sessionRecord && Object.keys(sessionRecord.models)[0]) || null;
+
+  // Use authType from first record as provider
+  const provider = tokenRecords.length > 0
+    ? (tokenRecords[0].authType || 'openai')
+    : 'openai';
+
+  return { provider, model: primaryModel, honestZeros: allZeros };
+}
+
 function extractQwenTelemetry(
   qwenHome: string,
   { sinceMs = 0, sessionId = null }: { sinceMs?: number; sessionId?: string | null } = {}
@@ -229,35 +267,18 @@ function extractQwenTelemetry(
     modelMap[model].apiDurationMs += rec.apiDurationMs;
   }
 
-  // Detect honest-zeros: records exist but all token counts are zero.
-  // This happens when the endpoint does not report usage for a session.
-  const hasRecords = tokenRecords.length > 0;
-  const allZeros = hasRecords && agg.inputTokens === 0 && agg.outputTokens === 0 &&
-    agg.cachedTokens === 0 && agg.thoughtsTokens === 0 && agg.totalTokens === 0;
-
-  // Use the most recent model as the primary attribution
-  const primaryModel = tokenRecords.length > 0
-    ? tokenRecords[tokenRecords.length - 1].model
-    : (sessionRecord && Object.keys(sessionRecord.models)[0]) || null;
-
-  // Use authType from first record as provider
-  const provider = tokenRecords.length > 0
-    ? (tokenRecords[0].authType || 'openai')
-    : 'openai';
-
+  const attribution = qwenAttribution(tokenRecords, sessionRecord, agg);
   // Tool calls from session summary (more reliable than per-call count)
   const toolCalls = sessionRecord ? sessionRecord.toolCalls : 0;
   const durationMs = sessionRecord ? sessionRecord.durationMs : agg.apiDurationMs;
 
   return {
     sessionId: sessionRecord?.sessionId || (tokenRecords.length > 0 ? tokenRecords[0].sessionId : null),
-    provider,
-    model: primaryModel,
+    ...attribution,
     modelBreakdown: modelMap,
     ...agg,
     toolCalls,
     durationMs,
-    honestZeros: allZeros,
     recordCount: tokenRecords.length,
   };
 }

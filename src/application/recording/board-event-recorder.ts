@@ -20,10 +20,10 @@ import type { MissionCommand, MissionTransition } from '../../domain/mission-wor
  * mutates repository Git/Markdown lifecycle state.
  */
 export class BoardEventRecorder {
-  private readonly laneEventRepo: BoardLaneEventRepository;
+  private readonly laneEventRepo: Pick<BoardLaneEventRepository, 'append'>;
   private _failureCount = 0;
 
-  constructor(laneEventRepo: BoardLaneEventRepository) {
+  constructor(laneEventRepo: Pick<BoardLaneEventRepository, 'append'>) {
     this.laneEventRepo = laneEventRepo;
   }
 

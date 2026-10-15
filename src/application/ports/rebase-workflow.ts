@@ -1,3 +1,6 @@
+import type { ReviewStateData, ReviewStateWriter, ReviewStatePersistenceResult } from './review-persistence.js';
+import type { MissionStore } from '../domain-ports.js';
+import type { ReboundLaunchOptions } from '../rebound-kernel.js';
 /** Application-owned ports for the rebase workflow (TASK-2332.12).
  *
  * Every external dependency the rebase policy needs — Git, agents, Forgejo,
@@ -9,7 +12,7 @@
  */
 
 export interface GitCommandResult {
-  status: number;
+  status: number | null;
   stdout: string;
   stderr: string;
 }
@@ -32,7 +35,7 @@ export interface MissionConflictClassification {
 
 export interface AgentLaunchResult {
   agent: string;
-  result: { status: number };
+  result: { status?: number | null };
 }
 
 // --- pre-review rebase result contract (TASK-2377.02) ---------------------
@@ -113,7 +116,7 @@ export interface RebaseWorkflowPort {
   resolvePromptBaseBranch(_slug: string, _worktreePath: string, _gitFn?: GitRunner): string;
 
   // --- agents adapter ----------------------------------------------------
-  startAgent(_step: string, _options: Record<string, unknown>): Promise<AgentLaunchResult>;
+  startAgent(_step: string, _options: ReboundLaunchOptions): Promise<AgentLaunchResult>;
   // Production contract (launcher-selection.ts): `selectAgent(step, options)`
   // where `options.exclude` is a Set of families to skip. Called with policy
   // key `active` (config/agents.json key that owns implementation work) and an
@@ -125,25 +128,25 @@ export interface RebaseWorkflowPort {
   // Real launcher-status contract: probe a *selected* agent. An absent launcher
   // returns { supported: false }, so only a supported family is launchable.
   workflowLauncherStatus(_agent: string, _worktree?: string): { supported: boolean; agent: string | null };
-  applyAgentFallback(_options: Record<string, unknown>): Promise<unknown>;
+  applyAgentFallback(_options: { role: string; original: string; launchResult?: { agent?: string | null } | null; state?: ReviewStateData; slug: string; worktree?: string; log?: (message: string) => void; writeReviewStateFn?: ReviewStateWriter }): Promise<string>;
 
   // --- forgejo adapter ---------------------------------------------------
-  createPr(_branch: string, _user: string, _token: string, _options: Record<string, unknown>): { ok: boolean; error?: string; gateFailure?: Omit<PreReviewRebaseGateEvidence, 'exitCode'> & { exitCode: number | null } };
+  createPr(_branch: string, _user: string, _token: string, _options: Record<string, unknown>): { ok: boolean; error?: string | null; gateFailure?: Omit<PreReviewRebaseGateEvidence, 'exitCode'> & { exitCode: number | null } };
   readToken(_user: string): string | null;
   resolveForgejoUser(_user: string | null): string | null;
-  fetchReviewBranch(..._args: unknown[]): unknown;
+  fetchReviewBranch(_branch: string, _root?: string, _options?: { token?: string | null }): unknown;
 
   // --- backlog adapter ---------------------------------------------------
   resolveTaskFile(_slug: string, _root: string): { ok: boolean; taskFile?: string; task?: unknown };
-  getTaskImplementer(_task: unknown): string | null;
-  transitionTask(_slug: string, _status: string, _options: Record<string, unknown>): Promise<unknown> | unknown;
+  getTaskImplementer(_task: string): string | null;
+  transitionTask(_slug: string, _status: string, _options: { rootDir?: string; log?: (message: string) => void }): Promise<unknown> | unknown;
 
   // --- review adapter ----------------------------------------------------
-  resolveReviewIdentity(_slug: string, _root: string): { forgejoUser?: string | null };
-  readReviewState(_slug: string, _worktree: string, _missionStore?: unknown): unknown;
-  writeReviewState(_slug: string, _state: unknown, _worktree: string, _missionStore?: unknown): unknown;
+  resolveReviewIdentity(_slug: string, _root: string): { forgejoUser?: string | null } | Promise<{ forgejoUser?: string | null }>;
+  readReviewState(_slug: string, _worktree: string, _missionStore?: MissionStore | null): Promise<ReviewStateData | null>;
+  writeReviewState: ReviewStateWriter;
   /** Persist-or-throw wrapper around `writeReviewState`. */
-  persistReviewState(_slug: string, _state: unknown, _worktree: string, _missionStore?: unknown): Promise<unknown>;
+  persistReviewState(_slug: string, _state: ReviewStateData, _worktree: string, _missionStore?: MissionStore | null): Promise<ReviewStatePersistenceResult>;
 
   // --- product configuration adapter ------------------------------------
   isForgejoReviewEnabled(_root: string): boolean;
@@ -164,7 +167,7 @@ export interface RebaseWorkflowPort {
 
   // --- runtime seams -----------------------------------------------------
   /** Mission persistence services for the selected root; absent for callers that did not compose them. */
-  missionServices?: ((_root: string) => Promise<{ store: unknown }>) | null;
+  missionServices?: ((_root: string) => Promise<{ store: MissionStore | null }>) | null;
   /**
    * Hook-failure interception seam (TASK-2377.05). Return `false` to decline the
    * in-child rebound-kernel bounce; the pre-review path installs a recorder that
@@ -176,4 +179,10 @@ export interface RebaseWorkflowPort {
     _output: string,
   ) => Promise<boolean> | boolean;
   exit(_code: number): void;
+}
+
+/** Authority required by a rebase repair, supplied by composition. */
+export interface RebaseMissionServices {
+  readonly store: MissionStore;
+  readonly lifecycle?: Pick<import('../mission-lifecycle-service.js').MissionLifecycleService, 'transition'> | null;
 }

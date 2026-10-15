@@ -184,9 +184,7 @@ function missionCardDetails(card: MissionCardFacts, width: number, selected: boo
   const agent = card.agent ?? UNAVAILABLE;
   const title = isPlaceholderTitle(card.title) ? UNAVAILABLE : card.title;
   const checkpoint = formatCheckpoint(card.checkpoint);
-  const nextAction = card.nextActionText === null || card.nextActionText === undefined || card.nextActionText === ''
-    ? UNAVAILABLE
-    : card.nextActionText;
+  const nextAction = nextActionLabel(card.nextActionText);
   const pullRequestId = card.pullRequest?.id ?? null;
   const review = card.reviewApproved ? 'approved' : 'pending';
 
@@ -196,9 +194,7 @@ function missionCardDetails(card: MissionCardFacts, width: number, selected: boo
    * for the slug so it survives at MIN_LANE_WIDTH. */
   const slugBudget = label ? Math.max(8, inner - (label.length + 4)) : inner;
   const enabledCommands = card.commands.filter((cmd) => cmd.enabled);
-  const reviewRound = reviewRoundFromFlags(card.flags);
-  const blockingFindings = blockingFindingsFromFlags(card.flags);
-  const reviewDetail = [reviewRound !== null ? `R${reviewRound}` : null, blockingFindings !== null && blockingFindings > 0 ? `${blockingFindings} blocking` : null].filter(Boolean).join(' · ');
+  const reviewDetail = reviewDetailLabel(card.flags);
 
   const isInFlight = IN_FLIGHT_LANES.includes(card.lane as BoardLane);
 
@@ -224,4 +220,16 @@ function missionCardDetails(card: MissionCardFacts, width: number, selected: boo
     : glyph;
 
   return { agent, title, checkpoint, nextAction, label, slugBudget, enabledCommands, prLine, isInFlight, headerRight, marker };
+}
+
+function nextActionLabel(value: MissionCardFacts['nextActionText']): string {
+  return value === null || value === undefined || value === ''
+    ? UNAVAILABLE
+    : value;
+}
+
+function reviewDetailLabel(flags: MissionCardFacts['flags']): string {
+  const reviewRound = reviewRoundFromFlags(flags);
+  const blockingFindings = blockingFindingsFromFlags(flags);
+  return [reviewRound !== null ? `R${reviewRound}` : null, blockingFindings !== null && blockingFindings > 0 ? `${blockingFindings} blocking` : null].filter(Boolean).join(' · ');
 }

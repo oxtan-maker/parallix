@@ -1,3 +1,4 @@
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 import { AgentStrip } from '../../../../src/interfaces/tui/agent-strip.js';
 import { renderToString } from 'ink';
 import React from 'react';
@@ -261,8 +262,8 @@ test('AgentStrip reports observed live px commands per family without calling th
     ],
     NOW_MS,
     [
-      { missionId: 'task-2328' as never, family: agentFamily('claude') },
-      { missionId: 'task-2340' as never, family: agentFamily('claude') },
+      { missionId: fixtureMissionId('task-2328'), family: agentFamily('claude') },
+      { missionId: fixtureMissionId('task-2340'), family: agentFamily('claude') },
     ],
   );
 
@@ -306,17 +307,17 @@ test('AgentStrip counts a session no family can claim instead of dropping it', a
   const rows = projectAgentAvailability(
     [{ family: agentFamily('claude'), launcherAvailable: true, block: { kind: 'none' } }],
     NOW_MS,
-    [{ missionId: 'task-2328' as never, family: null }],
+    [{ missionId: fixtureMissionId('task-2328'), family: null }],
   );
 
-  const frame = await renderStrip(rows, countUnattributedSessions([{ missionId: 'task-2328' as never, family: null }]));
+  const frame = await renderStrip(rows, countUnattributedSessions([{ missionId: fixtureMissionId('task-2328'), family: null }]));
 
   assert.ok(frame.includes('claude 0 px cmd live'), `no family may claim the process. Got: ${frame}`);
   assert.ok(frame.includes('1 px cmd live · family unknown'), `the process must still be counted. Got: ${frame}`);
 });
 
 test('AgentStrip omits the unattributed entry when every session is attributed', async () => {
-  const sessions = [{ missionId: 'task-2328' as never, family: agentFamily('claude') }];
+  const sessions = [{ missionId: fixtureMissionId('task-2328'), family: agentFamily('claude') }];
   const rows = projectAgentAvailability(
     [{ family: agentFamily('claude'), launcherAvailable: true, block: { kind: 'none' } }],
     NOW_MS,

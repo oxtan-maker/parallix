@@ -76,7 +76,10 @@ test('SEA surfaces: a non-boolean surface result is a failure, never an implicit
   // pending promise) must not be read as "the surface worked".
   for (const sloppy of ['ok', 1, {}, [], null, undefined]) {
     assert.throws(
-      () => assertSurface('sqlite', sloppy as unknown as boolean, 'probe returned a non-boolean'),
+      () => {
+        // @ts-expect-error Intentional non-boolean probe results must fail the surface contract.
+        assertSurface('sqlite', sloppy, 'probe returned a non-boolean');
+      },
       SeaStopAndReassessError,
     );
   }

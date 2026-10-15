@@ -1,3 +1,5 @@
+import { rebaseWorkflowFixture } from '../../helpers/rebase-workflow-fixture.js';
+import { integrationContext } from '../../fixtures/integration-context.js';
 // Historical regression provenance: TASK-1104, TASK-1272.
 // Behavior-owned suite (TASK-2622.09, integration-ci): the pre-review rebase over disposable Git
 // topologies — safe artifact auto-commit (task-1104), standalone mode (task-1272), hardening, and
@@ -26,7 +28,7 @@ describe("rebase cleanup", () => {
   const { rebaseBeforeReviewRound } = rebaseBeforeReviewRoundModule;
   const { mock } = test;
 
-  async function withTempGitRepo(fn) {
+  async function withTempGitRepo(fn: (_arg0: string) => void | Promise<void>) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-test-rebase-'));
     try {
       childProcess.spawnSync('git', ['init', '-b', 'master'], { cwd: root });
@@ -39,7 +41,7 @@ describe("rebase cleanup", () => {
   }
 
   test('rebaseBeforeReviewRound auto-commits safe mission artifacts', async () => {
-    await withTempGitRepo(async (root) => {
+    await withTempGitRepo(async (root: string) => {
       const slug = 'task-1104';
       const missionDir = path.join(root, 'docs', 'missions', '2026', slug);
       fs.mkdirSync(missionDir, { recursive: true });
@@ -57,8 +59,8 @@ describe("rebase cleanup", () => {
       // Make MISSION.md dirty
       fs.writeFileSync(missionPath, '# MISSION - modified');
 
-      const logs = [];
-      const rebaseCalls = [];
+      const logs: string[] = [];
+      const rebaseCalls: string[][] = [];
       // In-process rebase-workflow seam (TASK-2377.02): the pre-review rebase no
       // longer spawns the `px rebase` CLI, so the workflow is driven in-process.
       const result = await rebaseBeforeReviewRound(slug, {
@@ -68,7 +70,7 @@ describe("rebase cleanup", () => {
         isForgejoReviewEnabledFn: () => true,
         createRebaseWorkflowPortFn: () =>
           // Partial seam double: only `exit` is touched by this test's workflow fn.
-          ({ exit: () => {} } as unknown as import('../../../src/application/ports/rebase-workflow.js').RebaseWorkflowPort),
+          rebaseWorkflowFixture({ exit: () => {} }),
         runRebaseWorkflowFn: async (args, workflowPort) => {
           rebaseCalls.push(args);
           workflowPort.exit(0);
@@ -94,7 +96,7 @@ describe("rebase cleanup", () => {
   });
 
   test('rebaseBeforeReviewRound leaves unrelated dirty files untouched', async () => {
-    await withTempGitRepo(async (root) => {
+    await withTempGitRepo(async (root: string) => {
       const slug = 'task-1104';
       const unsafePath = path.join(root, 'unsafe.js');
       fs.writeFileSync(unsafePath, 'console.log(1)');
@@ -142,16 +144,17 @@ describe("standalone rebase", () => {
 
   const { mock } = test;
 
-  function runGit(root, args) {
+  function runGit(root: string, args: string[]) {
     const result = childProcess.spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
     return {
+      signal: result.signal,
       status: result.status,
       stdout: result.stdout || '',
       stderr: result.stderr || '',
     };
   }
 
-  async function withTempGitRepo(fn) {
+  async function withTempGitRepo(fn: (_arg0: string) => void | Promise<void>) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-test-1272-'));
     try {
       childProcess.spawnSync('git', ['init', '-b', 'master'], { cwd: root });
@@ -164,7 +167,7 @@ describe("standalone rebase", () => {
   }
 
   test('rebaseBeforeReviewRound commits safe artifacts and skips rebase when Forgejo is disabled', async () => {
-    await withTempGitRepo(async (root) => {
+    await withTempGitRepo(async (root: string) => {
       const slug = 'task-1272';
       const missionDir = path.join(root, 'docs', 'missions', '2026', slug);
       fs.mkdirSync(missionDir, { recursive: true });
@@ -177,13 +180,12 @@ describe("standalone rebase", () => {
       // Make a safe mission artifact dirty.
       fs.writeFileSync(missionPath, '# MISSION - modified');
 
-      const logs = [];
+      const logs: string[] = [];
       const runFn = mock.fn(() => ({ status: 0, stdout: 'success', stderr: '' }));
 
       const result = await rebaseBeforeReviewRound(slug, {
         worktree: root,
         runFn,
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
         gitFn: (args) => runGit(root, args),
         isForgejoReviewEnabledFn: () => false,
         log: m => logs.push(m)
@@ -206,7 +208,7 @@ describe("standalone rebase", () => {
   });
 
   test('rebaseBeforeReviewRound carries committed mission work forward with non-mission files present', async () => {
-    await withTempGitRepo(async (root) => {
+    await withTempGitRepo(async (root: string) => {
       const slug = 'task-2592';
       const missionPath = path.join(root, 'docs', 'missions', '2026', slug, 'MISSION.md');
       const unrelatedPath = path.join(root, 'scratch-notes.txt');
@@ -221,7 +223,6 @@ describe("standalone rebase", () => {
 
       const result = await rebaseBeforeReviewRound(slug, {
         worktree: root,
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
         gitFn: (args) => runGit(root, args),
         isForgejoReviewEnabledFn: () => false,
         error: message => assert.fail(`Should not have errored: ${message}`),
@@ -236,7 +237,7 @@ describe("standalone rebase", () => {
   });
 
   test('rebaseBeforeReviewRound leaves non-mission dirty files alone in standalone mode', async () => {
-    await withTempGitRepo(async (root) => {
+    await withTempGitRepo(async (root: string) => {
       const slug = 'task-1272';
       const unsafePath = path.join(root, 'unsafe.js');
       fs.writeFileSync(unsafePath, 'console.log(1)');
@@ -250,7 +251,6 @@ describe("standalone rebase", () => {
       const result = await rebaseBeforeReviewRound(slug, {
         worktree: root,
         runFn,
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
         gitFn: (args) => runGit(root, args),
         isForgejoReviewEnabledFn: () => false,
         error: m => assert.fail(`Should not have errored: ${m}`)
@@ -271,7 +271,7 @@ describe("rebase hardening", () => {
   test.afterEach(() => mock.restoreAll());
   const rebase = rebaseModule.default;
   test('rebase applies core.editor=true to initial rebase call', async () => {
-    let capturedArgs = null;
+    let capturedArgs: { value: string[] | null } = { value: null };
     await rebase(['task-1077'], {
       isForgejoReviewEnabledFn: () => false,
       inferSlugFn: () => 'task-1077',
@@ -279,25 +279,25 @@ describe("rebase hardening", () => {
       findMissionAreaFn: () => 'workflow',
       getCurrentBranchFn: () => 'mission/task-1077',
       gitFn: (args, opts) => {
-        if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
-        if (args[0] === 'fetch') return { status: 0 };
+        if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
+        if (args[0] === 'fetch') return { signal: null, stdout: '', stderr: '',  status: 0 };
         if (args.includes('rebase') && args.includes('main')) {
-          capturedArgs = args;
-          return { status: 0 };
+          capturedArgs.value = args;
+          return { signal: null, stdout: '', stderr: '',  status: 0 };
         }
-        if (args.includes('rebase') && args.includes('--show-current')) return { status: 0, stdout: '' };
-        return { status: 0, stdout: '' };
+        if (args.includes('rebase') && args.includes('--show-current')) return { signal: null, stderr: '',  status: 0, stdout: '' };
+        return { signal: null, stderr: '',  status: 0, stdout: '' };
       },
       exitFn: () => {},
     });
 
-    assert.ok(capturedArgs, 'Args should be captured');
-    assert.ok(capturedArgs.indexOf('core.editor=true') < capturedArgs.indexOf('rebase'), 'core.editor=true should be before rebase');
-    assert.ok(capturedArgs.indexOf('merge.autoedit=no') < capturedArgs.indexOf('rebase'), 'merge.autoedit=no should be before rebase');
+    assert.ok(capturedArgs.value, 'Args should be captured');
+    assert.ok(capturedArgs.value.indexOf('core.editor=true') < capturedArgs.value.indexOf('rebase'), 'core.editor=true should be before rebase');
+    assert.ok(capturedArgs.value.indexOf('merge.autoedit=no') < capturedArgs.value.indexOf('rebase'), 'merge.autoedit=no should be before rebase');
   });
 
   test('rebase applies core.editor=true to continueRebase calls', async () => {
-    let capturedArgsList = [];
+    let capturedArgsList: string[][] = [];
     await rebase(['task-1077'], {
       isForgejoReviewEnabledFn: () => false,
       inferSlugFn: () => 'task-1077',
@@ -305,23 +305,23 @@ describe("rebase hardening", () => {
       findMissionAreaFn: () => 'workflow',
       getCurrentBranchFn: () => 'mission/task-1077',
       resolveConflictsFn: () => ({
-        ok: true,
+        ok: true as const,
         conflictFiles: ['file.js'],
         missionSpecificFiles: ['file.js'],
         sharedFiles: [],
       }),
       gitFn: (args, opts) => {
-        if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
-        if (args[0] === 'fetch') return { status: 0 };
-        if (args.includes('rebase') && args.includes('main')) return { status: 1, stderr: 'CONFLICT' };
-        if (args[0] === 'checkout') return { status: 0 };
-        if (args[0] === 'add') return { status: 0 };
+        if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
+        if (args[0] === 'fetch') return { signal: null, stdout: '', stderr: '',  status: 0 };
+        if (args.includes('rebase') && args.includes('main')) return { signal: null, stdout: '',  status: 1, stderr: 'CONFLICT' };
+        if (args[0] === 'checkout') return { signal: null, stdout: '', stderr: '',  status: 0 };
+        if (args[0] === 'add') return { signal: null, stdout: '', stderr: '',  status: 0 };
         if (args.includes('rebase') && args.includes('--continue')) {
           capturedArgsList.push(args);
-          return { status: 0 };
+          return { signal: null, stdout: '', stderr: '',  status: 0 };
         }
-        if (args.includes('rebase') && args.includes('--show-current')) return { status: 0, stdout: '' };
-        return { status: 0, stdout: '' };
+        if (args.includes('rebase') && args.includes('--show-current')) return { signal: null, stderr: '',  status: 0, stdout: '' };
+        return { signal: null, stderr: '',  status: 0, stdout: '' };
       },
       exitFn: () => {},
     });
@@ -335,33 +335,34 @@ describe("rebase hardening", () => {
 
   test('rebase uses the selected mission root for rebase state, Git, and publication', async () => {
     const missionRoot = '/tmp/mission-tree';
-    let stateRoot = null;
-    let publishedRoot = null;
-    let rebaseArgs = null;
+    let stateRoot: { value: string | undefined | null } = { value: null };
+    let publishedRoot: { value: string | undefined | null } = { value: null };
+    let rebaseArgs: { value: string[] | null } = { value: null };
     await rebase(['task-1077', '--push'], {
       inferSlugFn: () => 'task-1077',
       resolveWorktreeFn: () => missionRoot,
       findMissionDirFn: (_slug, root) => root === missionRoot ? '/tmp/mission-tree/missions/task-1077' : null,
       findMissionAreaFn: () => 'workflow',
       detectRebaseStateFn: root => {
-        stateRoot = root;
+        stateRoot.value = root;
         return { inProgress: false, unmergedFiles: [] };
       },
       isForgejoReviewEnabledFn: root => root === missionRoot,
       getCurrentBranchFn: root => root === missionRoot ? 'mission/task-1077' : 'main',
       resolveMissionBaseBranchFn: (_slug, root) => root === missionRoot ? 'main' : 'wrong-base',
-      resolveReviewIdentityFn: () => ({ forgejoUser: 'tester' }),
+      resolveReviewIdentityFn: async () => ({ identityUser: 'tester', commentIdentityUser: 'tester', forgejoUser: 'tester', commentForgejoUser: 'tester', reviewState: null, source: null }),
       readTokenFn: () => 'token',
-      createPrFn: (_branch, _user, _token, options) => { publishedRoot = options.rootDir; return { ok: true }; },
+      createPrFn: (_branch, _user, _token, options) => { assert.ok(options); publishedRoot.value = options.rootDir; return { ok: true as const }; },
       gitFn: args => {
-        if (args.includes('rebase') && args.includes('main')) { rebaseArgs = args; return { status: 0, stdout: '', stderr: '' }; }
-        return { status: 0, stdout: '', stderr: '' };
+        if (args.includes('rebase') && args.includes('main')) { rebaseArgs.value = args; return { signal: null,  status: 0, stdout: '', stderr: '' }; }
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
       exitFn: () => {},
     });
-    assert.equal(stateRoot, missionRoot);
-    assert.equal(publishedRoot, missionRoot);
-    assert.deepEqual(rebaseArgs.slice(0, 2), ['-C', missionRoot]);
+    assert.equal(stateRoot.value, missionRoot);
+    assert.equal(publishedRoot.value, missionRoot);
+    assert.ok(rebaseArgs.value != null);
+    assert.deepEqual(rebaseArgs.value.slice(0, 2), ['-C', missionRoot]);
   });
 });
 
@@ -411,7 +412,7 @@ describe("rebase diagnostics", () => {
 
   test('rebase reports git output and hook hints on non-conflict failure', async () => {
     let stderrLines = [];
-    const capturedStderr = [];
+    const capturedStderr: string[] = [];
     const originalError = console.error;
     console.error = (...args) => { capturedStderr.push(args.join(' ')); };
 
@@ -422,12 +423,12 @@ describe("rebase diagnostics", () => {
       findMissionAreaFn: () => 'workflow',
       getCurrentBranchFn: () => 'mission/task-1077',
       gitFn: (args, opts) => {
-        if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
-        if (gitSubcommandArgs(args)[0] === 'fetch') return { status: 0 };
+        if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
+        if (gitSubcommandArgs(args)[0] === 'fetch') return { signal: null, stdout: '', stderr: '',  status: 0 };
         if (args.includes('rebase') && args.includes('main')) {
-          return { status: 1, stdout: '', stderr: 'error: pre-commit hook failed\nAborting rebase' };
+          return { signal: null,  status: 1, stdout: '', stderr: 'error: pre-commit hook failed\nAborting rebase' };
         }
-        return { status: 0, stdout: '' };
+        return { signal: null, stderr: '',  status: 0, stdout: '' };
       },
       exitFn: () => {},
     });
@@ -445,7 +446,7 @@ describe("rebase diagnostics", () => {
 
   test('rebase reports git output on failed continue attempt', async () => {
     let stderrLines = [];
-    const capturedStderr = [];
+    const capturedStderr: string[] = [];
     const originalError = console.error;
     console.error = (...args) => { capturedStderr.push(args.join(' ')); };
 
@@ -456,23 +457,23 @@ describe("rebase diagnostics", () => {
       findMissionAreaFn: () => 'workflow',
       getCurrentBranchFn: () => 'mission/task-1077',
       resolveConflictsFn: () => ({
-        ok: true,
+        ok: true as const,
         conflictFiles: ['file.js'],
         missionSpecificFiles: ['file.js'],
         sharedFiles: [],
       }),
       gitFn: (args, opts) => {
-        if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
-        if (gitSubcommandArgs(args)[0] === 'fetch') return { status: 0 };
-        if (args.includes('rebase') && args.includes('main')) return { status: 1, stderr: 'CONFLICT' };
-        if (gitSubcommandArgs(args)[0] === 'checkout') return { status: 0 };
-        if (gitSubcommandArgs(args)[0] === 'add') return { status: 0 };
+        if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
+        if (gitSubcommandArgs(args)[0] === 'fetch') return { signal: null, stdout: '', stderr: '',  status: 0 };
+        if (args.includes('rebase') && args.includes('main')) return { signal: null, stdout: '',  status: 1, stderr: 'CONFLICT' };
+        if (gitSubcommandArgs(args)[0] === 'checkout') return { signal: null, stdout: '', stderr: '',  status: 0 };
+        if (gitSubcommandArgs(args)[0] === 'add') return { signal: null, stdout: '', stderr: '',  status: 0 };
         if (args.includes('rebase') && args.includes('--continue')) {
-          return { status: 1, stdout: '', stderr: 'error: another hook failed' };
+          return { signal: null,  status: 1, stdout: '', stderr: 'error: another hook failed' };
         }
-        if (gitSubcommandArgs(args)[0] === 'status' && gitSubcommandArgs(args)[1] === '--porcelain') return { status: 0, stdout: 'M  file.js' };
-        if (gitSubcommandArgs(args)[0] === 'rebase' && gitSubcommandArgs(args)[1] === '--show-current') return { status: 0, stdout: 'mission/task-1077' };
-        return { status: 0, stdout: '' };
+        if (gitSubcommandArgs(args)[0] === 'status' && gitSubcommandArgs(args)[1] === '--porcelain') return { signal: null, stderr: '',  status: 0, stdout: 'M  file.js' };
+        if (gitSubcommandArgs(args)[0] === 'rebase' && gitSubcommandArgs(args)[1] === '--show-current') return { signal: null, stderr: '',  status: 0, stdout: 'mission/task-1077' };
+        return { signal: null, stderr: '',  status: 0, stdout: '' };
       },
       exitFn: () => {},
     });
@@ -487,8 +488,8 @@ describe("rebase diagnostics", () => {
   });
 
   test('task-1322 recovery diagnostics report an in-progress rebase across status, rebase, and integrate preflight', async () => {
-    const statusLines = [];
-    let statusExitCode = null;
+    const statusLines: string[] = [];
+    let statusExitCode: { value: number | null } = { value: null };
 
     await status(['task-1322'], {
       inferSlugFn: () => 'task-1322',
@@ -496,7 +497,7 @@ describe("rebase diagnostics", () => {
       findTaskFileFn: () => '/tmp/task-1322.md',
       getTaskStatusFn: () => 'active',
       findMissionDirFn: () => null,
-      getPrStatusFn: () => ({ exists: false }),
+      getPrStatusFn: () => ({ raw: '',  exists: false as const }),
       readAgentConfigOrExitFn: () => ({}),
       eligibleAgentsForStepFn: () => [],
       workflowLauncherStatusFn: () => ({ supported: false }),
@@ -504,22 +505,22 @@ describe("rebase diagnostics", () => {
       getUncommittedCountFn: () => TASK_1322_UNMERGED.length,
       detectRebaseStateFn: () => task1322RebaseState(),
       log: line => statusLines.push(line),
-      exit: code => { statusExitCode = code; }
+      exit: code => { statusExitCode.value = code; }
     });
 
-    assert.equal(statusExitCode, 0);
+    assert.equal(statusExitCode.value, 0);
     const statusOutput = statusLines.join('\n');
     assert.match(statusOutput, /Detached HEAD: rebase in progress: detached HEAD, 3 unmerged file\(s\)/);
     TASK_1322_UNMERGED.forEach(file => assert.match(statusOutput, new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))));
 
-    const rebaseStdout = [];
-    const rebaseStderr = [];
+    const rebaseStdout: string[] = [];
+    const rebaseStderr: string[] = [];
     const originalLog = console.log;
     const originalError = console.error;
     console.log = (...args) => { rebaseStdout.push(args.join(' ')); };
     console.error = (...args) => { rebaseStderr.push(args.join(' ')); };
 
-    let rebaseExitCode = null;
+    let rebaseExitCode: { value: number | null } = { value: null };
     let attemptedFreshRebase = false;
 
     try {
@@ -534,16 +535,16 @@ describe("rebase diagnostics", () => {
           if (args.includes('rebase') && args.includes('main')) {
             attemptedFreshRebase = true;
           }
-          return { status: 0, stdout: '', stderr: '' };
+          return { signal: null,  status: 0, stdout: '', stderr: '' };
         },
-        exitFn: code => { rebaseExitCode = code; }
+        exitFn: code => { rebaseExitCode.value = code; }
       });
     } finally {
       console.log = originalLog;
       console.error = originalError;
     }
 
-    assert.equal(rebaseExitCode, 1);
+    assert.equal(rebaseExitCode.value, 1);
     assert.equal(attemptedFreshRebase, false);
     const rebaseOutput = [...rebaseStderr, ...rebaseStdout].join('\n');
     assert.match(rebaseOutput, /Rebase already in progress for mission\/task-1322/);
@@ -553,12 +554,12 @@ describe("rebase diagnostics", () => {
     assert.match(rebaseOutput, /git rebase --abort/);
     assert.match(rebaseOutput, /git rebase --skip/);
 
-    const integrateLines = [];
+    const integrateLines: unknown[] = [];
     const integrateOriginalLog = console.log;
-    console.log = line => integrateLines.push(line);
+    console.log = (line: unknown) => integrateLines.push(line);
 
     try {
-      const result = printIntegrationPreflight({
+      const result = printIntegrationPreflight(integrationContext({
         slug: 'task-1322',
         branch: 'mission/task-1322',
         currentBranch: 'mission/task-1322',
@@ -571,15 +572,14 @@ describe("rebase diagnostics", () => {
         pr: { exists: true, state: 'open', merged: false, number: 1322 },
         approval: { ok: true, reviewState: 'APPROVED' },
         mainBranch: 'main',
-        mainAheadCount: 0,
         mainDirty: false,
         mainDirtyEntries: []
-      }, {
+      }), {
         readTokenFn: () => 'secret-token',
         resolveTokenFileFn: () => '/tmp/tokens/codex',
         isForgejoReviewEnabledFn: () => true,
         detectRebaseStateFn: () => task1322RebaseState(),
-        getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+        getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] })
       });
 
       assert.ok(result.failures.includes('rebase-in-progress'));

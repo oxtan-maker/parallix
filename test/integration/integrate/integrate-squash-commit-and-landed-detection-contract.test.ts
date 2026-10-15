@@ -1,3 +1,9 @@
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { integrationServices } from '../../helpers/stub-integration-services.js';
+import { integrationContext } from '../../fixtures/integration-context.js';
+import { integrationBounceSeams } from '../../helpers/integration-bounce-seams.js';
+import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflow-ports.js';
+import { missionVersion as fixtureVersion } from '../../../src/application/domain-ports.js';
 // Historical regression provenance: TASK-2595, TASK-2377.05, TASK-2517, TASK-2492.
 // Behavior-owned suite (TASK-2622.09, integration-ci): the landed squash commit and its detection —
 // commit subject/body (task-2595), hook-failure bounce (task-2377.05), base-branch landed scan
@@ -97,7 +103,7 @@ describe("squash landing commit message", () => {
    */
   function landing(root: string) {
     const abort = new Error('IntegrationAbort');
-    const { publishMission } = createMissionLanding({
+    const { publishMission } = createMissionLanding(stubIntegrateWorkflowPorts({
       git: {
         git: gitRun,
         getCurrentBranch: () => BRANCH,
@@ -134,7 +140,7 @@ describe("squash landing commit message", () => {
       },
       landing: {
         createAbort: () => abort,
-        classifyHookFailure: () => ({ isHookFailure: false }),
+        classifyHookFailure: () => ({ isHookFailure: false, hookType: null }),
         persistLandedIntegrationOrAbort: async () => {},
         closeLandedIntegrationOrAbort: async () => {},
         recordPostIntegrationStatsOrAbort: async () => {},
@@ -145,20 +151,18 @@ describe("squash landing commit message", () => {
       gates: { isIntendedPayloadAtHead: () => false },
       verification: {
         formatVerificationCommand: () => 'verify',
-        captureVerifiedTreeProof: () => ({ ok: true, proof: {} }),
-        assertVerifiedTreeProof: () => ({ ok: true }),
       },
-    } as never, { promoteTaskForIntegrationIfNeeded: async () => {} });
+    }), { promoteTaskForIntegrationIfNeeded: async () => {} });
     const run = {
       slug: SLUG,
-      context: { area: 'all', mainDirtyEntries: [] },
-      missionServices: { store: { load: async () => ({ kind: 'found', mission: { status: 'integration', title: TITLE }, version: 1 }) } },
+      context: integrationContext({ area: 'all', mainDirtyEntries: [] }),
+      missionServices: integrationServices({ store: { load: async () => ({ kind: 'found', mission: fixtureMission(SLUG, { status: 'integration', title: TITLE }), version: fixtureVersion(1) }) } }),
       baseWorktree: root,
       baseBranch: 'main',
-      seams: {},
+      seams: integrationBounceSeams(),
       state: { temporaryStash: null, nextActionMessage: null },
     };
-    return { publishMission: () => publishMission(run as never), abort };
+    return { publishMission: () => publishMission(run), abort };
   }
 
   test('TASK-2595: landed squash subject is the recorded title and body records the task reference', async (t) => {
@@ -278,8 +282,8 @@ describe("squash hook bounce", () => {
     const store = createFakeStore('done');
     return {
       store,
-      lifecycle: new MissionLifecycleService(store as never),
-      integration: new MissionIntegrationService(store as never),
+      lifecycle: new MissionLifecycleService(store),
+      integration: new MissionIntegrationService(store),
       handoff: { recordNel: async () => ({}) },
     };
   }
@@ -332,25 +336,25 @@ describe("squash hook bounce", () => {
       if (joined.includes('merge') && joined.includes('--squash')) { return ok(''); }
       // The worktree matches the staged payload; HEAD comparison still models new work.
       if (args.includes('diff') && args.includes('--quiet') && !args.includes('HEAD')) { return ok(''); }
-      if (args.includes('diff') && args.includes('--quiet')) { return { status: scenario.alreadyAtHead ? 0 : 1, stdout: '', stderr: '' }; }
+      if (args.includes('diff') && args.includes('--quiet')) { return { signal: null,  status: scenario.alreadyAtHead ? 0 : 1, stdout: '', stderr: '' }; }
       if (args.includes('diff') && args.includes('--cached')) { return ok('fixture.ts\n'); }
       if (args.includes('commit')) {
         const r = scenario.commitResults[Math.min(commitAttempt, scenario.commitResults.length - 1)];
         commitAttempt += 1;
-        return { status: r.status, stdout: '', stderr: r.stderr };
+        return { signal: null,  status: r.status, stdout: '', stderr: r.stderr };
       }
       if (args.includes('rev-parse')) { return ok(`${LANDED_SHA}\n`); }
       return ok('');
     });
-    mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+    mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
     mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
     mock.method(backlog, 'getTaskStatus', () => 'approved');
     mock.method(backlog, 'getTaskAssignee', () => 'codex');
     mock.method(backlog, 'completeTask', () => true);
     mock.method(backlog, 'setTaskStatus', () => true);
-    mock.method(forgejo, 'getPrStatus', () => ({ exists: true, state: 'open', merged: false, number: 1 }));
-    mock.method(verification, 'captureVerifiedTreeProof', () => ({ ok: true, proof: { rootDir: root } }));
-    mock.method(verification, 'assertVerifiedTreeProof', () => ({ ok: true }));
+    mock.method(forgejo, 'getPrStatus', () => ({ exists: true as const, state: 'open', merged: false, number: 1 }));
+    mock.method(verification, 'captureVerifiedTreeProof', () => ({ ok: true as const, proof: { rootDir: root } }));
+    mock.method(verification, 'assertVerifiedTreeProof', () => ({ ok: true as const }));
     mock.method(process, 'cwd', () => root);
     let exitCode: number | undefined;
     mock.method(process, 'exit', (code?: number) => { exitCode = code; });
@@ -359,7 +363,7 @@ describe("squash hook bounce", () => {
     try {
       await integrate.default([SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env),
         missionServicesFn: async () => services,
-        startAgentFn: async () => { launches.push('launched'); return { agent: 'codex', result: { status: 0 } } as never; },
+        startAgentFn: async () => { launches.push('launched'); return { agent: 'codex', result: { status: 0 } }; },
         transitionTaskFn: async () => true,
         applyAgentFallbackFn: async ({ original }: { original: string }) => original,
       });
@@ -603,10 +607,10 @@ describe("already-merged detection", () => {
       git(['merge', '--squash', 'mission/task-2492'], rootDir);
       git(['commit', '-m', 'mission/task-2492: add feature'], rootDir);
 
-      const mission = {
-        id: missionId('task-2492'), repositoryId: 'repo' as never, title: 'Fixture', labels: [], assignee: null,
+      const mission = fixtureMission('task-2492', {
+        id: missionId('task-2492'), title: 'Fixture', labels: [], assignee: null,
         checkpoints: [], review: null, netEngineeringLines: null, status: 'active' as const, closedAt: null,
-      };
+      });
       const errors: string[] = [];
       let cleanupCalls = 0;
       const resumed = await recoverMissionCommand(['task-2492'], {
@@ -616,11 +620,11 @@ describe("already-merged detection", () => {
         cleanup: () => { cleanupCalls += 1; return true; },
         error: (message) => errors.push(message),
         store: {
-          async load() { return { kind: 'found' as const, mission, version: 18 as never }; },
+          async load() { return { kind: 'found' as const, mission, version: fixtureVersion(18) }; },
           async save() { throw new Error('must not reopen'); },
           async saveWithTransition() { throw new Error('must not reopen'); },
           async findTransitions() { return []; },
-        } as never,
+        },
       });
 
       assert.equal(resumed, false);
@@ -635,20 +639,20 @@ describe("already-merged detection", () => {
     const rootDir = makeRepo();
     try {
       git(['checkout', '-b', 'mission/task-2481'], rootDir);
-      const mission = {
-        id: missionId('task-2481'), repositoryId: 'repo' as never, title: 'Fixture', labels: [], assignee: null,
+      const mission = fixtureMission('task-2481', {
+        id: missionId('task-2481'), title: 'Fixture', labels: [], assignee: null,
         checkpoints: [], review: null, netEngineeringLines: null, status: 'active' as const, closedAt: null,
-      };
+      });
       let saved = 0;
       const result = await recoverMissionLifecycle({
         missionId: mission.id, taskStatus: 'active', actor: 'codex', occurredAt: new Date().toISOString(),
         alreadyMerged: (async (slug: string) => findExistingSquashCommit(rootDir, slug) !== null) as () => Promise<boolean>,
         store: {
-          async load() { return { kind: 'found' as const, mission, version: 1 as never }; },
-          async save() { saved += 1; return 2 as never; },
-          async saveWithTransition() { saved += 1; return 3 as never; },
+          async load() { return { kind: 'found' as const, mission, version: fixtureVersion(1) }; },
+          async save() { saved += 1; return fixtureVersion(2); },
+          async saveWithTransition() { saved += 1; return fixtureVersion(3); },
           async findTransitions() { return []; },
-        } as never,
+        },
       });
 
       assert.equal(result.value?.action, 'none', 'not-landed mission must not be refused as integrated');

@@ -2,6 +2,7 @@ import type { ClassifierRoute } from '../review-classification/routing-policy.js
 
 /** Call measurements carry deduplication metadata; no durable launch or retry entity. */
 export interface ClassifierCallMeasurement {
+  readonly obligations?: readonly import('../review-classification/obligation-review.js').ObligationAnswer[];
   readonly panel?: import('../review-classification/panel.js').PanelMeasurement;
   readonly decisionId: string;
   readonly fingerprint: string;
@@ -12,6 +13,8 @@ export interface ClassifierCallMeasurement {
   readonly priorRevision: string;
   readonly candidateRevision: string;
   readonly findingIds: readonly string[];
+  readonly omittedDiffCount?: number;
+  readonly omittedTokens?: number;
   readonly packetHash: string | null;
   readonly packetVersion: string;
   readonly promptVersion: string;
@@ -25,7 +28,7 @@ export interface ClassifierCallMeasurement {
   readonly route: ClassifierRoute;
   readonly reason: string;
   readonly shadow: boolean;
-  /** Set when a recorded gate fact was admitted for the weakening question; absent on other rows. */
+  /** Whether a recorded gate fact was admitted for a weakening attempt; absent on other scopes. */
   readonly admissibleFact?: boolean;
   /** Per-question invocation evidence; absent on historical single-question rows. */
   readonly weakening?: {
@@ -40,22 +43,10 @@ export interface AppliedClassifierDecision {
   readonly decidedAt: string;
   readonly route: 'clear' | 'implementer';
 }
-export interface ClassifierObservation {
-  readonly decisionId: string;
-  readonly revision: string;
-  readonly findingIds: readonly string[];
-  readonly observedAt: string;
-  readonly originalFindings: 'resolved' | 'unresolved' | 'unobserved';
-  readonly newFindings: number | null;
-  readonly cycleMs: number | null;
-  readonly ordinaryReviewMs: number | null;
-}
 /** Operator-local measurements only; never a review or approval write authority. */
 export interface ReviewClassificationTelemetryPort {
   recordCall(_attempt: ClassifierCallMeasurement): Promise<void>;
-  recordObservation(_observation: ClassifierObservation): Promise<void>;
   calls(_repository: string): Promise<readonly ClassifierCallMeasurement[]>;
-  observations(_repository: string): Promise<readonly ClassifierObservation[]>;
 }
 
 export interface ClassifierStatisticsReadPort {

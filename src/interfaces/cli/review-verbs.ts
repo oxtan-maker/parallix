@@ -220,12 +220,14 @@ export function createResolveCommand(ports: ReviewVerbPorts) {
       items,
       evidence,
       blockedReason: blocked,
-      disposition: blocked ? 'BLOCKED'
-        : items.every((item) => item.kind === 'pushed_back') ? 'PUSHBACK_ALL'
-          : 'CHANGES_MADE',
+      disposition: resolutionDisposition(blocked, items),
       ...(revision ? { resultingRevision: revision } : {}),
     }, worktree, version);
     if (!result.consumed || !result.ok) { fail(`could not record the implementer resolution: ${result.diagnostic ?? 'unknown error'}`); }
     fmt.log.plain(fmt.status('PASS', `Recorded ${items.length} resolution(s) for ${slug} (round ${round}).`));
   };
+}
+
+function resolutionDisposition(blocked: string | null, items: readonly ReviewItemDisposition[]): string {
+  return blocked ? 'BLOCKED' : items.every(item => item.kind === 'pushed_back') ? 'PUSHBACK_ALL' : 'CHANGES_MADE';
 }

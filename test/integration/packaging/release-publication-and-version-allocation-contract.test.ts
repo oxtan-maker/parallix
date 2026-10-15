@@ -151,6 +151,7 @@ describe("NOTICES is an untracked, ignored, published artifact", () => {
 
   test('task-2319: /NOTICES pattern matches only the root artifact (not nested)', () => {
     const noticesLine = GITIGNORE_LINES.find(line => line.includes('NOTICES'));
+    assert.ok(noticesLine != null);
     assert.ok(noticesLine.startsWith('/'),
       'the NOTICES rule must start with / so it is root-anchored');
   });

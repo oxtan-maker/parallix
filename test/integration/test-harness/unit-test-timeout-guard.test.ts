@@ -62,7 +62,7 @@ test('unit-test timeout guard: runner enforces the reporter budget for the defau
 
 test('unit-test timeout guard: default plan keeps the reporter while headroom mode is opt-in', () => {
   const { defaultPlan, headroomPlan } = withLocalGitHubActions(() => {
-    const options = { executionRoot: ROOT, probeNodeVersion: () => 'v24.15.0' };
+    const options = { executionRoot: ROOT, probeNodeVersion: () => 'v24.15.0' } satisfies Partial<NonNullable<Parameters<typeof buildTestRunPlan>[0]>>;
     return {
       defaultPlan: buildTestRunPlan({ ...options, requestedArgs: [] }),
       headroomPlan: buildTestRunPlan({ ...options, requestedArgs: ['--unit-test-headroom'] }),

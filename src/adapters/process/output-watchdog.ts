@@ -4,7 +4,7 @@ export interface NoOutputWatchdog {
   initialDelayMs?: number;
   intervalMs?: number;
   /** Abort a launch which has not emitted any stdout/stderr by this deadline. */
-  maxNoOutputMs?: number;
+  maxNoOutputMs?: number | null;
 }
 
 /** The same liveness clock for a child process or an in-process SDK session. */

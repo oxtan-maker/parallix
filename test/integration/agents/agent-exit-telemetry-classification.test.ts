@@ -46,25 +46,19 @@ for (const name of ['codex', 'claude', 'opencode', 'vibe']) {
   fs.chmodSync(launcherPath, 0o755);
 }
 
-function withSharedLaunchers(run) {
+async function withSharedLaunchers<T>(run: () => T | Promise<T>): Promise<T> {
   const previousPath = process.env.PATH;
   process.env.PATH = `${sharedLauncherBin}${path.delimiter}${previousPath}`;
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-  setCommandPathProbe(name => fs.existsSync(path.join(sharedLauncherBin, name)));
-  const cleanup = () => {
-    process.env.PATH = previousPath;
-    setCommandPathProbe(null);
-  };
+  setCommandPathProbe(name => {
+    const executable = path.join(sharedLauncherBin, name);
+    return fs.existsSync(executable) ? executable : null;
+  });
   try {
-    const result = run();
-    if (result && typeof result.then === 'function') {
-      return result.finally(cleanup);
-    }
-    cleanup();
-    return result;
-  } catch (error) {
-    cleanup();
-    throw error;
+    return await run();
+  } finally {
+    if (previousPath === undefined) { delete process.env.PATH; }
+    else { process.env.PATH = previousPath; }
+    setCommandPathProbe(null);
   }
 }
 
@@ -80,7 +74,7 @@ function launchConfiguration() {
   return resolveConfiguration({ PARALLIX_NO_BUBBLEWRAP: '1', PATH: process.env.PATH, HOME: tmpHome });
 }
 
-function withPathLaunchers(entries, run) {
+async function withPathLaunchers<T>(entries: Record<string, string>, run: () => T | Promise<T>): Promise<T> {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1416-path-'));
   const binDir = path.join(tmpRoot, 'bin');
   fs.mkdirSync(binDir, { recursive: true });
@@ -96,7 +90,7 @@ function withPathLaunchers(entries, run) {
     process.env.PATH = previousPath;
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   };
-  return run().finally(cleanup);
+  try { return await run(); } finally { cleanup(); }
 }
 
 test('codex exit 1 with real rollout telemetry is misclassified as a launch failure', async (t) => {
@@ -107,10 +101,10 @@ test('codex exit 1 with real rollout telemetry is misclassified as a launch fail
     if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = originalCodexHome;
   });
-  let blockCalls = [];
-  const fakeBlockFn = (agent, until) => {
+  let blockCalls: { agent: string; until: string; }[] = [];
+  const fakeBlockFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["updateAgentBlockFn"]> = (agent, until) => {
     blockCalls.push({ agent, until });
-    return { path: '/fake/agents.local.json', blocklist: {} };
+    return { reason: null };
   };
 
   // A real Codex rollout JSONL: session_meta + a token_count event carrying
@@ -141,6 +135,7 @@ test('codex exit 1 with real rollout telemetry is misclassified as a launch fail
     isAgentBlockedFn: () => false,
     selectAgentFn: (step, opts) => {
       attempts += 1;
+      assert.ok(opts?.exclude instanceof Set);
       if (!opts.exclude.has('codex')) {return 'codex';}
       throw new Error('All eligible agents exhausted for step "draft"');
     },
@@ -161,10 +156,10 @@ test('codex exit 1 with real rollout telemetry is misclassified as a launch fail
 
 test('mistral exit 1 with real session telemetry is misclassified as a launch failure', async () => {
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1416-mistral-wt-'));
-  let blockCalls = [];
-  const fakeBlockFn = (agent, until) => {
+  let blockCalls: { agent: string; until: string; }[] = [];
+  const fakeBlockFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["updateAgentBlockFn"]> = (agent, until) => {
     blockCalls.push({ agent, until });
-    return { path: '/fake/agents.local.json', blocklist: {} };
+    return { reason: null };
   };
 
   // A real Vibe session meta.json under the worktree-scoped VIBE_HOME that the
@@ -213,6 +208,7 @@ test('mistral exit 1 with real session telemetry is misclassified as a launch fa
     isAgentBlockedFn: () => false,
     selectAgentFn: (step, opts) => {
       attempts += 1;
+      assert.ok(opts?.exclude instanceof Set);
       if (!opts.exclude.has('vibe')) {return 'vibe';}
       throw new Error('All eligible agents exhausted for step "draft"');
     },
@@ -247,10 +243,10 @@ test('codex exit 1 with no telemetry still reroutes (real-failure path unchanged
     if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = originalCodexHome;
   });
-  let blockCalls = [];
-  const fakeBlockFn = (agent, until) => {
+  let blockCalls: { agent: string; until: string; }[] = [];
+  const fakeBlockFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["updateAgentBlockFn"]> = (agent, until) => {
     blockCalls.push({ agent, until });
-    return { path: '/fake/agents.local.json', blocklist: {} };
+    return { reason: null };
   };
 
   const codexScript = `
@@ -265,6 +261,7 @@ test('codex exit 1 with no telemetry still reroutes (real-failure path unchanged
     assertAgentSupportedFn: () => {},
     isAgentBlockedFn: () => false,
     selectAgentFn: (step, opts) => {
+      assert.ok(opts?.exclude instanceof Set);
       if (!opts.exclude.has('codex')) {return 'codex';}
       return 'vibe';
     },
@@ -293,10 +290,10 @@ test('codex exit 1 with no telemetry still reroutes (real-failure path unchanged
 // availability/quota classification is (shouldPersistLaunchFailureBlock).
 test('mistral exit 1 with only stale telemetry still reroutes (real-failure path unchanged)', async () => {
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1416-mistral-real-fail-'));
-  let blockCalls = [];
-  const fakeBlockFn = (agent, until) => {
+  let blockCalls: { agent: string; until: string; }[] = [];
+  const fakeBlockFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["updateAgentBlockFn"]> = (agent, until) => {
     blockCalls.push({ agent, until });
-    return { path: '/fake/agents.local.json', blocklist: {} };
+    return { reason: null };
   };
 
   const staleSessionDir = path.join(worktree, '.workflow', 'vibe-home', 'logs', 'session', 'session_20260704_010000_stale0000');
@@ -329,6 +326,7 @@ test('mistral exit 1 with only stale telemetry still reroutes (real-failure path
     assertAgentSupportedFn: () => {},
     isAgentBlockedFn: () => false,
     selectAgentFn: (step, opts) => {
+      assert.ok(opts?.exclude instanceof Set);
       if (!opts.exclude.has('vibe')) {return 'vibe';}
       return 'codex';
     },

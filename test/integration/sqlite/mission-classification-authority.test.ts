@@ -1,3 +1,6 @@
+import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflow-ports.js';
+import { missionLabels as typedMissionLabels } from '../../../src/domain/mission.js';
+import { integrationContext } from '../../fixtures/integration-context.js';
 // TASK-2601 — task-2599 recorded `user_value` through `px classification set`,
 // so the Mission database held the classification while the Backlog task kept
 // `labels: []`. Draft completion accepted the stored classification, but the
@@ -68,7 +71,7 @@ function runStartupPreflight(root: string) {
     getCurrentBranchFn: () => `mission/${slug}`,
     conventionalWorktreePathFn: () => root,
     findMissionDirFn: () => null,
-    resolveMissionBaseBranchFn: () => null,
+    resolveMissionBaseBranchFn: () => 'main',
     getPrimaryBranchFn: () => 'main',
     getLastCommitFn: () => ({ sha: 'abcdef123456', subject: 'draft', date: '2026-09-28' }),
     isForgejoReviewEnabledFn: () => false,
@@ -163,7 +166,7 @@ test('TASK-2604: a task label cannot classify a Mission absent from px state', a
 test('TASK-2604: an unreadable px database cannot be rescued by a task label', async () => {
   await withStoredMission(null, '[ai_sdlc]', async (root) => {
     const absent = path.join(root, 'missing.db');
-    const resolution = stats.resolveMissionClassification(slug, root, () => ({ kind: 'unavailable', reason: `no Mission database at ${absent}` }), resolveConfiguration(process.env));
+    const resolution = stats.resolveMissionClassification(slug, root, () => ({ kind: 'unavailable' as const, reason: `no Mission database at ${absent}` }), resolveConfiguration(process.env));
     assert.equal(resolution.classification, null);
     assert.equal(resolution.source, 'mission');
     assert.equal(resolution.taskFile, null);
@@ -176,7 +179,7 @@ test('TASK-2604: integration statistics reject absent and unreadable Mission sta
     await assert.rejects(
       stats.recordIntegrationStats({ configuration: resolveConfiguration(process.env),
         slug, rootDir: root,
-        missionStore: { load: async () => ({ kind: 'missing' }) },
+        missionStore: { load: async () => ({ kind: 'missing' as const }) },
       }),
       /absent from the px database/,
     );
@@ -203,9 +206,10 @@ test('TASK-2601: stats backfill keeps stored Mission classification authoritativ
       fs.writeFileSync(path.join(missionDir, 'CP-1.md'), '# checkpoint\n');
 
       const report = await collectHistoricalStatsBackfill(root, { configuration: resolveConfiguration(process.env), dbPath: path.join(root, 'measurements.db') });
-      const entry = [...report.rows, ...report.unresolved].find(item => (item.mission ?? item.slug) === slug);
+      const entry = [...report.rows, ...report.unresolved].find(item => ('mission' in item ? item.mission : item.slug) === slug);
       assert.ok(entry, JSON.stringify(report));
       assert.equal(entry.classification, expected);
+      assert.ok(entry.sources != null);
       assert.equal(entry.sources.classification, 'mission-state');
     });
   }
@@ -226,12 +230,13 @@ test('TASK-2604: historical backfill leaves a labelled task unresolved without a
     const unresolved = report.unresolved.find(item => item.slug === slug);
     assert.ok(unresolved, JSON.stringify(report));
     assert.equal(unresolved.classification, null);
+    assert.ok(unresolved.sources != null);
     assert.equal(unresolved.sources.classification, 'mission-state');
   });
 });
 
 function integratePreflightPorts(): IntegrateWorkflowPorts {
-  return {
+  return stubIntegrateWorkflowPorts({
     missionPaths: {
       findMissionDir: () => null,
       resolveWorktree: () => '/mission',
@@ -241,7 +246,7 @@ function integratePreflightPorts(): IntegrateWorkflowPorts {
       conventionalWorktreePath: () => process.cwd(),
     },
     backlog: {
-      resolveTaskFile: () => ({ ok: true, taskFile: `/mission/backlog/tasks/${slug}.md` }),
+      resolveTaskFile: () => ({ matches: [], ok: true as const, taskFile: `/mission/backlog/tasks/${slug}.md` }),
       getTaskAssignee: () => 'codex',
       // The provider task carries a valid label; it must never classify a stored Mission.
       getTaskClassification: () => 'ai_sdlc',
@@ -254,14 +259,14 @@ function integratePreflightPorts(): IntegrateWorkflowPorts {
     productConfig: { isForgejoReviewEnabled: () => false },
     git: {
       getCurrentBranch: () => `mission/${slug}`,
-      git: (args: string[]) => ({ status: 0, stdout: args.includes('branch') ? 'main' : '', stderr: '' }),
-      detectRebaseState: () => ({ inProgress: false }),
+      git: (args: string[]) => ({ signal: null,  status: 0, stdout: args.includes('branch') ? 'main' : '', stderr: '' }),
+      detectRebaseState: () => ({ inProgress: false, unmergedFiles: [] }),
     },
-    checkout: { getUnresolvedIndexConflicts: () => ({ ok: true, files: [] }) },
+    checkout: { getUnresolvedIndexConflicts: () => ({ ok: true as const, files: [] }) },
     fileSystem: { existsSync: () => false },
-    forgejo: {}, review: {}, landing: {},
+    forgejo: {}, review: { readReviewState: async () => null }, landing: {},
     stateMap: { toVirtual: () => 'ready-for-integration' },
-  } as unknown as IntegrateWorkflowPorts;
+  });
 }
 
 test('TASK-2601: integration preflight never lets a Backlog label classify a stored Mission', async () => {
@@ -269,10 +274,10 @@ test('TASK-2601: integration preflight never lets a Backlog label classify a sto
   const context = await createIntegrationContextBuilder(ports).buildIntegrationContext(slug, { baseBranch: 'main', baseWorktree: '/base' });
   for (const [missionLabels, failed] of [[[], true], [['bug'], true], [['user_value'], false]] as const) {
     const lines: string[] = [];
-    const report = createIntegrationPreflight(ports).printIntegrationPreflight({
-      ...context, missionLabels, missionStatus: 'integration',
+    const report = createIntegrationPreflight(ports).printIntegrationPreflight(integrationContext({
+      ...context, missionLabels: typedMissionLabels(missionLabels), missionStatus: 'integration',
       missionBrief: { goal: 'g', why: 'w', scope: null, outOfScope: [] },
-    }, { configuration: resolveConfiguration(process.env), log: (line: string) => lines.push(line) });
+    }), { configuration: resolveConfiguration(process.env), log: (line: string) => lines.push(line) });
     assert.equal(report.failures.includes('classification'), failed, `${JSON.stringify(missionLabels)}: ${lines.join('\n')}`);
     if (failed) { assert.match(lines.join('\n'), /authoritative Mission state for task-2599/); }
   }

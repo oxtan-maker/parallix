@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2643: bounded real-agent evaluation of agent-run history retrieval.
 
 // Agent-E2E (ADR 0057): a configured real agent must retrieve an earlier run's
 // omitted command failure from the correct run and turn it into a useful
@@ -44,14 +43,14 @@ const TRIALS = Number(process.env.PARALLIX_RUN_HISTORY_EVAL_TRIALS || 2);
 const TIMEOUT_MS = Number(process.env.PARALLIX_RUN_HISTORY_EVAL_TIMEOUT_MS || 240000);
 const KEEP_TMP = process.env.PARALLIX_E2E_KEEP_TMP === '1';
 const FAILING_CASE = 'test_rounding[case-7193]';
-const sink = { write: () => true };
+const sink = { write: () => true } satisfies import("../../../src/adapters/process/spawn-tee.js").TeeSink;
 
-function git(cwd, args) {
+function git(cwd: string, args: readonly string[]) {
   const result = childProcess.spawnSync('git', args, { cwd, encoding: 'utf8' });
   if (result.status !== 0) { throw new Error(`git ${args.join(' ')}: ${result.stderr}`); }
 }
 
-function makeRepo(root, slug) {
+function makeRepo(root: string, slug: string) {
   const repo = path.join(root, `billing-${slug}`);
   fs.mkdirSync(path.join(repo, 'src'), { recursive: true });
   fs.mkdirSync(path.join(repo, 'tests'), { recursive: true });
@@ -75,11 +74,12 @@ function makeRepo(root, slug) {
 }
 
 /** Capture one earlier run through the production run session and spawn seam. */
-async function seedRun(repo, slug, family, attempt, script) {
+async function seedRun(repo: string, slug: string, family: string, attempt: number, script: string) {
   const run = openRunSession(
     { worktree: repo, slug, role: 'execute', family, attempt, log: () => {} },
     { config: () => ({ host: 'pipe', whenUnavailable: 'fallback' }), repositoryKey: () => 'evalrepo' },
   );
+  assert.ok(run, 'the fixture must open a captured run');
   const result = await spawnAndTee('sh', ['-c', script], { cwd: repo, stdoutSink: sink, stderrSink: sink, ...run.teeOptions });
   run.finish(result);
   return { runId: run.runId, result };
@@ -93,7 +93,7 @@ const LATEST_RUN_SCRIPT = [
   'exit 1',
 ].join('\n');
 
-function pxWrapper(root) {
+function pxWrapper(root: string) {
   const bin = path.join(root, 'bin');
   fs.mkdirSync(bin, { recursive: true });
   fs.writeFileSync(path.join(bin, 'px'), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(CLI_ENTRY)} "$@"\n`, { mode: 0o755 });
@@ -106,26 +106,35 @@ const QUESTION = [
   'End your answer with one JSON line: {"runRef": "<run: reference or null>", "failure": "<exact failing test id and error>", "repair": "<file and change>"}',
 ].join('\n');
 
-function runAgent(cwd, prompt, env) {
+function runAgent(cwd: string, prompt: string, env: { PATH: string; }) {
   const args = ['exec', '--json', '--sandbox', 'read-only'];
   if (MODEL) { args.push('--model', MODEL); }
   args.push(prompt);
   const out = childProcess.spawnSync('codex', args, { cwd, env, encoding: 'utf8', timeout: TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024 });
-  const events = (out.stdout || '').split('\n').filter(Boolean).flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
-  const result = events.find(e => e.type === 'turn.completed') || {};
-  const text = events.filter(e => e.type === 'item.completed' && e.item?.type === 'agent_message')
-    .map(e => e.item.text).join('\n');
-  const toolCommands = events.filter(e => e.type === 'item.completed' && e.item?.type === 'command_execution')
-    .map(e => e.item.command);
-  return { text, usage: result.usage ?? {}, cost: null, toolCommands, status: out.status };
+  const events = (out.stdout || '').split('\n').filter(Boolean).map(line => jsonObject(line));
+  const result = events.find(e => e.type === 'turn.completed') ?? {};
+  const items = events.filter(e => e.type === 'item.completed').map(e => record(e.item));
+  const text = items.filter(item => item.type === 'agent_message').map(item => String(item.text ?? '')).join('\n');
+  const toolCommands = items.filter(item => item.type === 'command_execution').map(item => String(item.command ?? ''));
+  const usage = record(result.usage);
+  return { text, usage: {
+    input_tokens: numeric(usage.input_tokens), cached_input_tokens: numeric(usage.cached_input_tokens), output_tokens: numeric(usage.output_tokens),
+  }, cost: null, toolCommands, status: out.status };
 }
 
-function lastJson(text) {
+function record(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+function jsonObject(text: string): Record<string, unknown> {
+  try { const value: unknown = JSON.parse(text); return record(value); } catch { return {}; }
+}
+function numeric(value: unknown): number { return typeof value === 'number' ? value : 0; }
+function lastJson(text: string) {
   const line = text.trim().split('\n').reverse().find(l => l.trim().startsWith('{'));
-  try { return line ? JSON.parse(line) : {}; } catch { return {}; }
+  return line ? jsonObject(line) : {};
 }
 
-function score(answer, latestRunId) {
+function score(answer: Record<string, unknown>, latestRunId: string) {
   const failure = String(answer.failure ?? '');
   const repair = String(answer.repair ?? '');
   return {
@@ -135,6 +144,16 @@ function score(answer, latestRunId) {
     usefulRepair: /billing\.py/.test(repair) && /HALF_EVEN/.test(repair),
   };
 }
+
+type Trial = ReturnType<typeof score> & {
+  answer: Record<string, unknown>; tools: string[]; historyCalls: number; promptBytes: number;
+  inputTokens: number; outputTokens: number; costUsd: number | null;
+};
+type EvaluationSummary = {
+  trials: number; retrievalAccuracy: string; correctRunReference: string; wrongRunAnswers: number;
+  usefulRepair: string; meanPromptBytes: number; meanInputTokens: number; meanOutputTokens: number;
+  totalCostUsd: number; historyCalls: number[];
+};
 
 test('a fresh agent retrieves the omitted failure from the correct run and decides the repair (TASK-2643)', { timeout: TIMEOUT_MS * TRIALS * 2 + 60000 }, async () => {
   assert.ok(fs.existsSync(CLI_ENTRY), 'build/px.mjs is required: run npm run build');
@@ -156,9 +175,9 @@ test('a fresh agent retrieves the omitted failure from the correct run and decid
       baseline: { cwd: baselineRepo, prompt: `${QUESTION}\n\nThe harness retained this output tail of the most recent run:\n${tail}` },
       treatment: { cwd: treatmentRepo, prompt: `${QUESTION}\n\n${pointer}` },
     };
-    const report = {};
+    const report: Record<string, EvaluationSummary | Trial[]> = {};
     for (const [name, condition] of Object.entries(conditions)) {
-      const trials = [];
+      const trials: Trial[] = [];
       for (let i = 0; i < TRIALS; i += 1) {
         const run = runAgent(condition.cwd, condition.prompt, env);
         const answer = lastJson(run.text);
@@ -174,7 +193,7 @@ test('a fresh agent retrieves the omitted failure from the correct run and decid
           costUsd: run.cost,
         });
       }
-      const count = key => trials.filter(t => t[key]).length;
+      const count = (key: keyof ReturnType<typeof score>) => trials.filter(t => t[key]).length;
       report[name] = {
         trials: trials.length,
         retrievalAccuracy: `${count('retrieved')}/${trials.length}`,
@@ -191,8 +210,9 @@ test('a fresh agent retrieves the omitted failure from the correct run and decid
     }
     console.log(`[run-history-eval] agent=codex model=${MODEL ?? 'configured-default'} latestRun=${latest.runId}\n${JSON.stringify(report, null, 2)}`);
     const treatment = report.treatmentTrials;
+    assert.ok(Array.isArray(treatment));
     assert.ok(treatment.filter(t => t.retrieved && t.correctRun).length >= Math.ceil(TRIALS / 2), 'the treatment retrieves the failure from the correct run');
-    assert.ok(treatment.every(t => t.historyCalls > 0), 'the treatment retrieves through px history');
+    assert.ok(treatment.every((t: { historyCalls: number; }) => t.historyCalls > 0), 'the treatment retrieves through px history');
     assert.equal(treatment.filter(t => t.wrongRun).length, 0, 'no treatment answer takes another run or Mission failure');
     assert.ok(treatment.filter(t => t.usefulRepair).length >= Math.ceil(TRIALS / 2), 'the treatment reaches a useful repair decision');
   } finally {

@@ -349,6 +349,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
   private async dispatchActive(request: BoardCommandRequest): Promise<BoardCommandResult<ExecuteMissionResult>> {
     const executeRequest: ExecuteMissionRequest = {
       operationId: request.operationId,
+      operatorInvocation: request.operatorInvocation,
       // Backlog card IDs retain their frontmatter casing; execute slugs are
       // canonical lowercase so a card such as TASK-2375SHUT can launch.
       slug: request.missionId.toLowerCase(),

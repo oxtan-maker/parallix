@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 
 
@@ -15,14 +14,14 @@ test.afterEach(() => mock.restoreAll());
 const missionStart = missionStartModule.default;
 const stats = statsModule.default;
 test('missionStart fails if the backlog task is missing classification', () => {
-  const lines = [];
-  const errors = [];
+  const lines: string[] = [];
+  const errors: string[] = [];
 
   const result = missionStart(['task-test'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-test',
     getCurrentBranchFn: () => 'mission/task-test',
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-test.md' }),
+    resolveTaskFileFn: () => ({ matches: ['/tmp/task-test.md'],  ok: true as const, taskFile: '/tmp/task-test.md' }),
     resolveMissionClassificationFn: () => {
       throw new Error('Missing or invalid classification for task-test; expected ai_sdlc or user_value');
     },
@@ -34,7 +33,7 @@ test('missionStart fails if the backlog task is missing classification', () => {
     getMissionYearFn: () => '2026',
     conventionalWorktreePathFn: () => '/tmp/project-task-test',
     getLastCommitFn: () => ({ sha: 'abcdef123456', subject: 'Initial', date: '2026-04-30' }),
-    getPrStatusFn: () => ({ exists: false }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
     log: line => lines.push(line),
     error: line => errors.push(line)
   });
@@ -45,15 +44,15 @@ test('missionStart fails if the backlog task is missing classification', () => {
 });
 
 test('missionStart passes if the backlog task has classification', () => {
-  const lines = [];
-  const errors = [];
+  const lines: string[] = [];
+  const errors: string[] = [];
 
   const result = missionStart(['task-test'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-test',
     getCurrentBranchFn: () => 'mission/task-test',
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-test.md' }),
-    resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc' }),
+    resolveTaskFileFn: () => ({ matches: ['/tmp/task-test.md'],  ok: true as const, taskFile: '/tmp/task-test.md' }),
+    resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc', taskFile: null, source: 'mission' }),
     getTaskStatusFn: () => 'ready',
     toVirtualFn: (s) => s,
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-test',
@@ -62,7 +61,7 @@ test('missionStart passes if the backlog task has classification', () => {
     getMissionYearFn: () => '2026',
     conventionalWorktreePathFn: () => '/tmp/project-task-test',
     getLastCommitFn: () => ({ sha: 'abcdef123456', subject: 'Initial', date: '2026-04-30' }),
-    getPrStatusFn: () => ({ exists: false }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
     log: line => lines.push(line),
     error: line => errors.push(line)
   });
@@ -73,8 +72,8 @@ test('missionStart passes if the backlog task has classification', () => {
 });
 
 test('missionStart quiet mode drops routine PASS diagnostics and the PASS USABLE verdict but keeps WARN', () => {
-  const lines = [];
-  const errors = [];
+  const lines: string[] = [];
+  const errors: string[] = [];
 
   // quiet:true mirrors the `active` execute-path preflight: the operator story
   // must not drown in PWD/branch/backlog/last-commit PASS lines (SC4). Genuine
@@ -84,8 +83,8 @@ test('missionStart quiet mode drops routine PASS diagnostics and the PASS USABLE
     quiet: true,
     cwdFn: () => '/tmp/project-task-test',
     getCurrentBranchFn: () => 'mission/task-test',
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-test.md' }),
-    resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc' }),
+    resolveTaskFileFn: () => ({ matches: ['/tmp/task-test.md'],  ok: true as const, taskFile: '/tmp/task-test.md' }),
+    resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc', taskFile: null, source: 'mission' }),
     getTaskStatusFn: () => 'ready',
     toVirtualFn: (s) => s,
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-test',
@@ -94,7 +93,7 @@ test('missionStart quiet mode drops routine PASS diagnostics and the PASS USABLE
     getMissionYearFn: () => '2026',
     conventionalWorktreePathFn: () => '/tmp/project-task-test',
     getLastCommitFn: () => ({ sha: 'abcdef123456', subject: 'Initial', date: '2026-04-30' }),
-    getPrStatusFn: () => ({ exists: false }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
     log: line => lines.push(line),
     error: line => errors.push(line)
   });
@@ -112,15 +111,15 @@ test('missionStart quiet mode drops routine PASS diagnostics and the PASS USABLE
 });
 
 test('missionStart passes when the task file is missing and classification falls back to unknown', () => {
-  const lines = [];
-  const errors = [];
+  const lines: string[] = [];
+  const errors: string[] = [];
 
   const result = missionStart(['task-free-text'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-free-text',
     getCurrentBranchFn: () => 'mission/task-free-text',
-    resolveTaskFileFn: () => ({ ok: false, reason: 'missing' }),
-    resolveMissionClassificationFn: () => ({ classification: 'unknown', taskFile: null }),
+    resolveTaskFileFn: () => ({ matches: [],  ok: false as const, reason: 'missing' as const }),
+    resolveMissionClassificationFn: () => ({ classification: 'unknown', taskFile: null, source: 'mission' }),
     getTaskStatusFn: () => 'ready',
     toVirtualFn: (s) => s,
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-free-text',
@@ -129,7 +128,7 @@ test('missionStart passes when the task file is missing and classification falls
     getMissionYearFn: () => '2026',
     conventionalWorktreePathFn: () => '/tmp/project-task-free-text',
     getLastCommitFn: () => ({ sha: 'abcdef123456', subject: 'Initial', date: '2026-04-30' }),
-    getPrStatusFn: () => ({ exists: false }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
     log: line => lines.push(line),
     error: line => errors.push(line)
   });
@@ -141,7 +140,7 @@ test('missionStart passes when the task file is missing and classification falls
 });
 
 test('missionStart verify-env reports standalone adapter readiness once', () => {
-  const lines = [];
+  const lines: string[] = [];
   const result = missionStart([], {
     returnResult: true,
     command: 'verify-env',
@@ -156,7 +155,7 @@ test('missionStart verify-env reports standalone adapter readiness once', () => 
     }),
     evaluateReviewSetupFn: () => ({
       required: true,
-      ok: true,
+      ok: true as const,
       issues: [],
       steps: [],
     }),
@@ -174,8 +173,8 @@ test('missionStart verify-env reports standalone adapter readiness once', () => 
 });
 
 test('missionStart passes if classification is provided via labels', () => {
-  const lines = [];
-  const errors = [];
+  const lines: string[] = [];
+  const errors: string[] = [];
 
   // Create a mock task file with labels but no classification field
   const taskFile = '/tmp/task-with-labels.md';
@@ -200,7 +199,7 @@ test('missionStart passes if classification is provided via labels', () => {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-labels',
     getCurrentBranchFn: () => 'mission/task-labels',
-    resolveTaskFileFn: () => ({ ok: true, taskFile }),
+    resolveTaskFileFn: () => ({ matches: [],  ok: true as const, taskFile }),
     getTaskStatusFn: () => 'ready',
     toVirtualFn: (s) => s,
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-labels',
@@ -209,7 +208,7 @@ test('missionStart passes if classification is provided via labels', () => {
     getMissionYearFn: () => '2026',
     conventionalWorktreePathFn: () => '/tmp/project-task-labels',
     getLastCommitFn: () => ({ sha: 'abcdef123456', subject: 'Initial', date: '2026-04-30' }),
-    getPrStatusFn: () => ({ exists: false }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
     // We do NOT mock resolveMissionClassificationFn here to test the real one
     log: line => lines.push(line),
     error: line => errors.push(line),
@@ -224,13 +223,13 @@ test('missionStart passes if classification is provided via labels', () => {
   // and assert it's logged.
   const result2 = missionStart(['task-labels'], {
     returnResult: true,
-    resolveMissionClassificationFn: () => ({ classification: 'user_value' }),
-    resolveTaskFileFn: () => ({ ok: true, taskFile: 'f' }),
+    resolveMissionClassificationFn: () => ({ classification: 'user_value', taskFile: null, source: 'mission' }),
+    resolveTaskFileFn: () => ({ matches: ['f'],  ok: true as const, taskFile: 'f' }),
     getTaskStatusFn: () => 'ready',
     findMissionDirFn: () => 'd',
     findCheckpointsFn: () => [],
     fsExistsSync: () => true,
-    getPrStatusFn: () => ({ exists: false }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
     log: line => lines.push(line)
   });
 
@@ -246,15 +245,15 @@ test('missionStart rejects a task label without stored Mission state (task-2604)
   const taskFile = path.join(tasksDir, 'task-2200-bug-combo.md');
   fs.writeFileSync(taskFile, '---\nid: TASK-2200-BUG-COMBO\nstatus: ready\nlabels: [ai_sdlc, bug]\n---\n');
 
-  const lines = [];
-  const errors = [];
+  const lines: string[] = [];
+  const errors: string[] = [];
 
   // Task resolution is available, but statistics classification requires px state.
   const result = missionStart(['task-2200-bug-combo'], {
     returnResult: true,
     cwdFn: () => root,
     getCurrentBranchFn: () => 'mission/task-2200-bug-combo',
-    resolveTaskFileFn: () => ({ ok: true, taskFile }),
+    resolveTaskFileFn: () => ({ matches: [],  ok: true as const, taskFile }),
     getTaskStatusFn: () => 'ready',
     toVirtualFn: (s) => s,
     findMissionDirFn: () => path.join(root, 'docs', 'missions', '2026', 'task-2200-bug-combo'),
@@ -263,7 +262,7 @@ test('missionStart rejects a task label without stored Mission state (task-2604)
     getMissionYearFn: () => '2026',
     conventionalWorktreePathFn: () => root,
     getLastCommitFn: () => ({ sha: 'abcdef123456', subject: 'Initial', date: '2026-04-30' }),
-    getPrStatusFn: () => ({ exists: false }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
     log: line => lines.push(line),
     error: line => errors.push(line)
   });
@@ -276,8 +275,8 @@ test('missionStart rejects a task label without stored Mission state (task-2604)
 });
 
 test('missionStart resolves the backlog task from the mission worktree, not process.cwd() (task-2200)', () => {
-  const lines = [];
-  const seenRootDirs = [];
+  const lines: string[] = [];
+  const seenRootDirs: (string | undefined)[] = [];
 
   const result = missionStart(['task-2200-root'], {
     returnResult: true,
@@ -285,9 +284,9 @@ test('missionStart resolves the backlog task from the mission worktree, not proc
     getCurrentBranchFn: () => 'mission/task-2200-root',
     resolveTaskFileFn: (slug, rootDir) => {
       seenRootDirs.push(rootDir);
-      return { ok: true, taskFile: `${rootDir}/${slug}.md` };
+      return { matches: [`${rootDir}/${slug}.md`],  ok: true as const, taskFile: `${rootDir}/${slug}.md` };
     },
-    resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc' }),
+    resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc', taskFile: null, source: 'mission' }),
     getTaskStatusFn: () => 'ready',
     toVirtualFn: (s) => s,
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-2200-root',
@@ -296,7 +295,7 @@ test('missionStart resolves the backlog task from the mission worktree, not proc
     getMissionYearFn: () => '2026',
     conventionalWorktreePathFn: () => '/tmp/project-task-2200-root',
     getLastCommitFn: () => ({ sha: 'abc123', subject: 'x', date: 'y' }),
-    getPrStatusFn: () => ({ exists: false }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
     log: line => lines.push(line)
   });
 
@@ -305,13 +304,13 @@ test('missionStart resolves the backlog task from the mission worktree, not proc
 });
 
 test('missionStart fails if the mission is already complete', () => {
-  const lines = [];
+  const lines: string[] = [];
   const result = missionStart(['task-done'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-done',
     getCurrentBranchFn: () => 'mission/task-done',
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-done.md' }),
-    resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc' }),
+    resolveTaskFileFn: () => ({ matches: ['/tmp/task-done.md'],  ok: true as const, taskFile: '/tmp/task-done.md' }),
+    resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc', taskFile: null, source: 'mission' }),
     getTaskStatusFn: () => 'done',
     toVirtualFn: (s) => s,
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-done',
@@ -320,7 +319,7 @@ test('missionStart fails if the mission is already complete', () => {
     getMissionYearFn: () => '2026',
     conventionalWorktreePathFn: () => '/tmp/project-task-done',
     getLastCommitFn: () => ({ sha: '123', subject: 'x', date: 'y' }),
-    getPrStatusFn: () => ({ exists: false }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
     log: line => lines.push(line)
   });
 
@@ -330,13 +329,13 @@ test('missionStart fails if the mission is already complete', () => {
 });
 
 test('missionStart verify-env with slug checks classification', () => {
-  const lines = [];
+  const lines: string[] = [];
   const result = missionStart(['task-test'], {
     command: 'verify-env',
     returnResult: true,
     cwdFn: () => '/tmp/project-task-test',
     getCurrentBranchFn: () => 'mission/task-test',
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-test.md' }),
+    resolveTaskFileFn: () => ({ matches: ['/tmp/task-test.md'],  ok: true as const, taskFile: '/tmp/task-test.md' }),
     resolveMissionClassificationFn: () => {
       throw new Error('missing classification');
     },
@@ -352,22 +351,22 @@ test('missionStart verify-env with slug checks classification', () => {
 
 for (const missionDir of ['/tmp/docs/missions/2026/task-test', null]) {
 test(`missionStart accepts a typed mission without ${missionDir ? 'MISSION.md' : 'a metadata directory'}`, () => {
-  const lines = [];
+  const lines: string[] = [];
   const result = missionStart(['task-test'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-test',
     getCurrentBranchFn: () => 'mission/task-test',
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-test.md' }),
-    resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc' }),
+    resolveTaskFileFn: () => ({ matches: ['/tmp/task-test.md'],  ok: true as const, taskFile: '/tmp/task-test.md' }),
+    resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc', taskFile: null, source: 'mission' }),
     getTaskStatusFn: () => 'ready',
     toVirtualFn: (s) => s,
     findMissionDirFn: () => missionDir,
-    fsExistsSync: (p) => !p.endsWith('MISSION.md'), // MISSION.md doesn't exist
+    fsExistsSync: (p) => typeof p === 'string' && !p.endsWith('MISSION.md'), // MISSION.md doesn't exist
     findCheckpointsFn: () => [],
     getMissionYearFn: () => '2026',
     conventionalWorktreePathFn: () => '/tmp/project-task-test',
     getLastCommitFn: () => ({ sha: '123', subject: 'x', date: 'y' }),
-    getPrStatusFn: () => ({ exists: false }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
     log: line => lines.push(line)
   });
 
@@ -379,15 +378,15 @@ test(`missionStart accepts a typed mission without ${missionDir ? 'MISSION.md' :
 
 for (const missionDir of ['/tmp/docs/missions/2026/task-broken-base', null]) {
 test(`missionStart rejects a missing recorded base branch ${missionDir ? 'with' : 'without'} a metadata directory`, () => {
-  const lines = [];
-  const errors = [];
+  const lines: string[] = [];
+  const errors: string[] = [];
 
   const result = missionStart(['task-broken-base'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-broken-base',
     getCurrentBranchFn: () => 'mission/task-broken-base',
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-broken-base.md' }),
-    resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc' }),
+    resolveTaskFileFn: () => ({ matches: ['/tmp/task-broken-base.md'],  ok: true as const, taskFile: '/tmp/task-broken-base.md' }),
+    resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc', taskFile: null, source: 'mission' }),
     getTaskStatusFn: () => 'ready',
     toVirtualFn: (s) => s,
     findMissionDirFn: () => missionDir,
@@ -396,12 +395,12 @@ test(`missionStart rejects a missing recorded base branch ${missionDir ? 'with' 
     getMissionYearFn: () => '2026',
     conventionalWorktreePathFn: () => '/tmp/project-task-broken-base',
     getLastCommitFn: () => ({ sha: 'abc123', subject: 'x', date: 'y' }),
-    getPrStatusFn: () => ({ exists: false }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
     // resolveMissionBaseBranchFn returns 'gone-branch' (not the primary 'main')
     resolveMissionBaseBranchFn: () => 'gone-branch',
     getPrimaryBranchFn: () => 'main',
     // simulates git show-ref returning non-zero (branch missing)
-    gitFn: () => ({ status: 1, stdout: '', stderr: '' }),
+    gitFn: () => ({ signal: null,  status: 1, stdout: '', stderr: '' }),
     log: line => lines.push(line),
     error: line => errors.push(line)
   });
@@ -415,16 +414,16 @@ test(`missionStart rejects a missing recorded base branch ${missionDir ? 'with' 
 }
 
 test('missionStart passes when recorded base branch exists locally', () => {
-  const lines = [];
-  const errors = [];
-  const seenRootDirs = [];
+  const lines: string[] = [];
+  const errors: string[] = [];
+  const seenRootDirs: (string | undefined)[] = [];
 
   const result = missionStart(['task-feat-base'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-feat-base',
     getCurrentBranchFn: () => 'mission/task-feat-base',
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-feat-base.md' }),
-    resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc' }),
+    resolveTaskFileFn: () => ({ matches: ['/tmp/task-feat-base.md'],  ok: true as const, taskFile: '/tmp/task-feat-base.md' }),
+    resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc', taskFile: null, source: 'mission' }),
     getTaskStatusFn: () => 'ready',
     toVirtualFn: (s) => s,
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-feat-base',
@@ -433,14 +432,14 @@ test('missionStart passes when recorded base branch exists locally', () => {
     getMissionYearFn: () => '2026',
     conventionalWorktreePathFn: () => '/tmp/project-task-feat-base',
     getLastCommitFn: () => ({ sha: 'abc123', subject: 'x', date: 'y' }),
-    getPrStatusFn: () => ({ exists: false }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
     resolveMissionBaseBranchFn: (_slug, rootDir) => {
       seenRootDirs.push(rootDir);
       return 'feat/some-feature';
     },
     getPrimaryBranchFn: () => 'main',
     // simulates git show-ref returning zero (branch exists)
-    gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
+    gitFn: () => ({ signal: null,  status: 0, stdout: '', stderr: '' }),
     log: line => lines.push(line),
     error: line => errors.push(line)
   });
@@ -453,16 +452,16 @@ test('missionStart passes when recorded base branch exists locally', () => {
 });
 
 test('missionStart skips base branch check when recorded base equals primary', () => {
-  const lines = [];
-  const errors = [];
+  const lines: string[] = [];
+  const errors: string[] = [];
   let runCalled = false;
 
   const result = missionStart(['task-primary-base'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-primary-base',
     getCurrentBranchFn: () => 'mission/task-primary-base',
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-primary-base.md' }),
-    resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc' }),
+    resolveTaskFileFn: () => ({ matches: ['/tmp/task-primary-base.md'],  ok: true as const, taskFile: '/tmp/task-primary-base.md' }),
+    resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc', taskFile: null, source: 'mission' }),
     getTaskStatusFn: () => 'ready',
     toVirtualFn: (s) => s,
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-primary-base',
@@ -471,11 +470,11 @@ test('missionStart skips base branch check when recorded base equals primary', (
     getMissionYearFn: () => '2026',
     conventionalWorktreePathFn: () => '/tmp/project-task-primary-base',
     getLastCommitFn: () => ({ sha: 'abc123', subject: 'x', date: 'y' }),
-    getPrStatusFn: () => ({ exists: false }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
     // resolveMissionBaseBranchFn returns 'main' == primary, so base check should be skipped
     resolveMissionBaseBranchFn: () => 'main',
     getPrimaryBranchFn: () => 'main',
-    gitFn: () => { runCalled = true; return { status: 0, stdout: '', stderr: '' }; },
+    gitFn: () => { runCalled = true; return { signal: null,  status: 0, stdout: '', stderr: '' }; },
     log: line => lines.push(line),
     error: line => errors.push(line)
   });
@@ -486,8 +485,8 @@ test('missionStart skips base branch check when recorded base equals primary', (
 });
 
 test('verify-env happy path prints USABLE verdict', () => {
-  const lines = [];
-  const errors = [];
+  const lines: string[] = [];
+  const errors: string[] = [];
 
   const result = missionStart([], {
     returnResult: true,
@@ -503,7 +502,7 @@ test('verify-env happy path prints USABLE verdict', () => {
     }),
     evaluateReviewSetupFn: () => ({
       required: true,
-      ok: true,
+      ok: true as const,
       issues: [],
       steps: [],
     }),
@@ -519,8 +518,8 @@ test('verify-env happy path prints USABLE verdict', () => {
 });
 
 test('verify-env blocked path prints NOT USABLE verdict with remediation', () => {
-  const lines = [];
-  const errors = [];
+  const lines: string[] = [];
+  const errors: string[] = [];
 
   const result = missionStart([], {
     returnResult: true,
@@ -536,7 +535,7 @@ test('verify-env blocked path prints NOT USABLE verdict with remediation', () =>
     }),
     evaluateReviewSetupFn: () => ({
       required: true,
-      ok: true,
+      ok: true as const,
       issues: [],
       steps: [],
     }),

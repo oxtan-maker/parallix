@@ -1,3 +1,15 @@
+import { stubMissionServices } from '../../../../helpers/stub-mission-services.js';
+import { rebaseWorkflowFixture } from '../../../../helpers/rebase-workflow-fixture.js';
+import { draftMissionServicesFixture } from '../../../../helpers/draft-mission-services.js';
+import type { IntegrationAgentFallbackOptions, IntegrationGateFailureRequest, IntegrationGateRoute } from '../../../../../src/application/ports/integrate-workflow.js';
+import { phaseGateResult } from '../../../../helpers/phase-gate-result.js';
+import { noFactIntegrationRepairClassifier, fixtureMission, pendingReview, approvedReview, requestedChangesReview } from '../../../../fixtures/mission-builders.js';
+import { missionVersion } from '../../../../../src/application/domain-ports.js';
+import { integrationServices } from '../../../../helpers/stub-integration-services.js';
+import { integrationContext } from '../../../../fixtures/integration-context.js';
+import { stubIntegrateWorkflowPorts } from '../../../../helpers/stub-integrate-workflow-ports.js';
+import { repositoryId as fixtureRepositoryId } from '../../../../../src/domain/repository.js';
+import { forgejoApiFixture, forgejoAsyncApiFixture } from '../../../../fixtures/forgejo-api.js';
 // Historical regression provenance: TASK-2565, TASK-2603, TASK-2369.05, TASK-1124, TASK-2561, TASK-2543, TASK-1268.
 // Behavior-owned suite (TASK-2622.09): integration-gate failure rebound and repair — lifecycle
 // reactivation (task-2565), active mission context binding (task-2603), gate helper ownership
@@ -12,12 +24,13 @@ import { mockModule, installModuleMocks } from '../../../../lib/module-mock.js';
 import type { DraftWorkflowContext } from '../../../../../src/application/ports/cli-workflows.js';
 import type { RebaseWorkflowPort } from '../../../../../src/application/ports/rebase-workflow.js';
 import type { IntegrateWorkflowPorts } from '../../../../../src/application/ports/integrate-workflow.js';
-import { SLUG, makePorts, makeRecorder, runOptions } from '../../../../helpers/handoff-ports.js';
+import { SLUG, makePorts, makeRecorder, runOptions, handoffTransitionValue } from '../../../../helpers/handoff-ports.js';
 import type { Mission } from '../../../../../src/domain/mission.js';
 import { MissionLifecycleService } from '../../../../../src/application/mission-lifecycle-service.js';
 import type { MissionVersion } from '../../../../../src/application/domain-ports.js';
 import { mkdtemp as registeredMkdtemp } from '../../../../helpers/temp-dir.js';
 import { fakeReviewLoopPorts } from '../../../../helpers/review-loop-ports.js';
+import { IntegrationGateRouteOptions } from '../../../../../src/adapters/cli/commands/integrate-gate-rebound.js';
 
 // Declaration order is load-bearing: installModuleMocks relinks modules in this order, so a
 // module must be declared after the modules it depends on (merged from every section below).
@@ -54,8 +67,6 @@ describe("gate rebound lifecycle", () => {
     await routeIntegrationGateFailure({
       slug: 'task-2565-fixture',
       missionWorktree: '/tmp/mission',
-      baseWorktree: '/tmp/base',
-      baseBranch: 'main',
       verificationCommand: 'npm test',
       failedGate: { key: 'unit', command: 'npm test', exitCode: 1, stdout: '', stderr: '' },
       gateError: 'unit failed',
@@ -65,13 +76,13 @@ describe("gate rebound lifecycle", () => {
       startAgentFn: async () => ({ result: { status: 0 } }),
       transitionTaskFn: async () => { backlogTransitions += 1; },
       reactivateMissionFn: async () => { lifecycleTransitions += 1; },
-      captureFinalTreeFn: () => ({ ok: true, rootDir: '/tmp/mission', tree: 'tree' }),
-      runPhaseGatesFn: async () => ({ ok: true, phase: 'integration', gates: [], executed: 0, skipped: false, dryRun: false, failedGate: null, error: null }),
+      captureFinalTreeFn: () => ({ ok: true as const, rootDir: '/tmp/mission', commit: 'commit', tree: 'tree' }),
+      runPhaseGatesFn: async () => ({ ok: true as const, phase: 'integration' as const, gates: [], executed: 0, skipped: false, dryRun: false, failedGate: null, error: null }),
       reboundFn: async (_reason, context) => {
         await context.transitionToImplementer?.('task-2565-fixture');
-        return { outcome: 'fixed', attempts: 1, diagnostic: '', classification: { failureClass: 'GateFailure', dispatchAction: 'AutoRepair', isRelaunchable: true, label: 'gate' }, implementer: 'codex' };
+        return { outcome: 'fixed' as const, attempts: 1, diagnostic: '', classification: { failureClass: 'GateFailure', dispatchAction: 'AutoRepair', isRelaunchable: true, label: 'gate' }, implementer: 'codex' };
       },
-    } as any);
+    });
 
     assert.equal(lifecycleTransitions, 1);
     assert.equal(backlogTransitions, 0, 'the Backlog mirror must not choose the Mission lifecycle');
@@ -84,11 +95,11 @@ describe("rebound active mission context", () => {
   // that ordinary review-loop fallbacks receive.
 
   const slug = 'task-2603-fixture';
-  const missionStore = { load: async () => ({ kind: 'found', mission: { status: 'integration' }, version: 1 }) };
+  const missionStore = integrationServices({ store: { load: async () => ({ kind: 'found', mission: fixtureMission(slug, { status: 'integration' }), version: missionVersion(1) }) } }).store;
   const reviewState = { implementer: 'claude', reviewer: 'codex', phase: 'approved', round: 2 };
   const taskResolution = { ok: true, taskFile: '/worktree/backlog/tasks/task-2603.md' };
 
-  function assertFallbackContext(options: Record<string, unknown>, worktree: string) {
+  function assertFallbackContext(options: IntegrationAgentFallbackOptions, worktree: string) {
     assert.equal(options.role, 'implementer');
     assert.equal(options.slug, slug);
     assert.equal(options.worktree, worktree);
@@ -101,31 +112,32 @@ describe("rebound active mission context", () => {
   }
 
   test('TASK-2603/TASK-2651: integration-gate rebound binds active mission context and preserves its snapshot when no live review aggregate exists', async () => {
-    const { runRequiredLocalGates } = createIntegrationGateStep({
+    const { runRequiredLocalGates } = createIntegrationGateStep(stubIntegrateWorkflowPorts({
       gates: {
         resolveIntegrationVerificationWorktree: () => '/mission-worktree',
-        captureFinalIntegrationTree: () => ({ ok: true, rootDir: '/mission-worktree', commit: 'c', tree: 't' }),
+        captureFinalIntegrationTree: () => ({ ok: true as const, rootDir: '/mission-worktree', commit: 'c', tree: 't' }),
         loadPhaseGates: () => [{ key: 'required', command: 'false', order: 1 }],
         loadRequirePreIntegration: () => false,
-        runPhaseGates: async () => ({ ok: false, skipped: false, cancelled: false, failedGate: { key: 'required' }, error: 'red' }),
+        runPhaseGates: async () => (phaseGateResult({ ok: false as const, skipped: false, cancelled: false, failedGate: { key: 'required' }, error: 'red' })),
       },
       landing: { createAbort: () => new Error('abort') },
       verification: { formatVerificationCommand: () => 'npm test' },
-    } as never);
+    }));
 
     await runRequiredLocalGates({
-      slug, context: { baseWorktree: '/base', taskAssignee: 'claude', branch: `mission/${slug}`, approval: {}, configuredReviewer: null, task: taskResolution, reviewState },
-      missionLoad: { kind: 'found', mission: { repositoryId: 'repo' } }, missionServices: { store: missionStore, lifecycle: { transition: async () => ({ status: 'completed' }) } },
+      slug, context: integrationContext({ baseWorktree: '/base', taskAssignee: 'claude', branch: `mission/${slug}`, approval: { ok: true }, configuredReviewer: null, task: taskResolution, reviewState }),
+      missionLoad: { kind: 'found', mission: fixtureMission(slug, { repositoryId: fixtureRepositoryId('repo') }), version: missionVersion(1) }, missionServices: integrationServices({ store: missionStore, lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const }) } }),
       dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
       seams: {
         startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }), transitionTaskFn: () => true,
-        applyAgentFallbackFn: (options: Record<string, unknown>) => assertFallbackContext(options, '/mission-worktree'),
-        routeIntegrationGateFailureFn: async (options: Record<string, any>) => {
+        applyAgentFallbackFn: (options: IntegrationAgentFallbackOptions) => assertFallbackContext(options, '/mission-worktree'),
+        routeIntegrationGateFailureFn: async (options: IntegrationGateFailureRequest) => {
+          assert.ok(options.applyAgentFallbackFn);
           await options.applyAgentFallbackFn({ original: 'claude', launchResult: { agent: 'codex' } });
           return { route: 'fixed', rebounds: 1 };
         },
       },
-    } as never);
+    });
   });
 
   test('TASK-2651: rebound fallback persists the live current round, not a stale snapshot round', async () => {
@@ -135,30 +147,32 @@ describe("rebound active mission context", () => {
     // the current round trips the TASK-2385 stale-flattened-write guard and
     // drops the fallback identity write. The snapshot must be aligned to the
     // live current round before it is handed to the fallback.
-    const contextReview = { kind: 'found', status: 'integration', repositoryId: 'repo', mission: { status: 'integration', repositoryId: 'repo', review: { rounds: [{ number: 7, phase: 'approved', disposition: null, implementer: 'custom', reviewer: 'codex' }] } } };
-    const liveReview = { kind: 'found', status: 'integration', repositoryId: 'repo', mission: { status: 'integration', repositoryId: 'repo', review: { rounds: [{ number: 7, phase: 'approved', disposition: null, implementer: 'custom', reviewer: 'codex' }, { number: 8, phase: 'fixing', disposition: null, implementer: 'custom', reviewer: 'codex' }] } } };
+    const previousRound = { ...approvedReview(slug).rounds[0], number: 7, implementer: agentFamily('custom'), reviewer: agentFamily('codex') };
+    const currentRound = { ...requestedChangesReview(slug, { startedAt: '2026-08-04T11:00:00Z', decidedAt: '2026-08-04T11:30:00Z' }).rounds[0], number: 8, implementer: agentFamily('custom'), reviewer: agentFamily('codex') };
+    const contextReview = { kind: 'found' as const, mission: fixtureMission(slug, { status: 'integration', repositoryId: fixtureRepositoryId('repo'), review: { ...pendingReview(slug), rounds: [previousRound] } }), version: missionVersion(1) };
+    const liveReview = { kind: 'found' as const, mission: fixtureMission(slug, { status: 'integration', repositoryId: fixtureRepositoryId('repo'), review: { ...pendingReview(slug), rounds: [previousRound, currentRound] } }), version: missionVersion(2) };
     const staleSnapshot = { implementer: 'custom', reviewer: 'codex', phase: 'approved', round: 7 };
     let persistedImplementer = '';
 
-    const { runRequiredLocalGates } = createIntegrationGateStep({
+    const { runRequiredLocalGates } = createIntegrationGateStep(stubIntegrateWorkflowPorts({
       gates: {
         resolveIntegrationVerificationWorktree: () => '/mission-worktree',
-        captureFinalIntegrationTree: () => ({ ok: true, rootDir: '/mission-worktree', commit: 'c', tree: 't' }),
+        captureFinalIntegrationTree: () => ({ ok: true as const, rootDir: '/mission-worktree', commit: 'c', tree: 't' }),
         loadPhaseGates: () => [{ key: 'required', command: 'false', order: 1 }],
         loadRequirePreIntegration: () => false,
-        runPhaseGates: async () => ({ ok: false, skipped: false, cancelled: false, failedGate: { key: 'required' }, error: 'red' }),
+        runPhaseGates: async () => (phaseGateResult({ ok: false as const, skipped: false, cancelled: false, failedGate: { key: 'required' }, error: 'red' })),
       },
       landing: { createAbort: () => new Error('abort') },
       verification: { formatVerificationCommand: () => 'npm test' },
-    } as never);
+    }));
 
     await runRequiredLocalGates({
-      slug, context: { baseWorktree: '/base', taskAssignee: 'claude', branch: `mission/${slug}`, approval: {}, configuredReviewer: null, task: taskResolution, reviewState: staleSnapshot },
-      missionLoad: contextReview, missionServices: { store: { load: async () => liveReview }, lifecycle: { transition: async () => ({ status: 'completed' }) } },
+      slug, context: integrationContext({ baseWorktree: '/base', taskAssignee: 'claude', branch: `mission/${slug}`, approval: { ok: true }, configuredReviewer: null, task: taskResolution, reviewState: staleSnapshot }),
+      missionLoad: contextReview, missionServices: integrationServices({ store: { load: async () => liveReview }, lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const }) } }),
       dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
       seams: {
         startAgentFn: async () => ({ agent: 'claude', result: { status: 0 } }), transitionTaskFn: () => true,
-        applyAgentFallbackFn: (options: Record<string, unknown>) => {
+        applyAgentFallbackFn: (options: IntegrationAgentFallbackOptions) => {
           const state = options.state as { round: number; implementer: string };
           assert.notEqual(state, staleSnapshot, 'a aligned copy is passed, not the stale snapshot');
           assert.equal(state.round, 8, 'the fallback persists the live current round');
@@ -166,12 +180,13 @@ describe("rebound active mission context", () => {
           persistedImplementer = 'claude';
           return 'claude';
         },
-        routeIntegrationGateFailureFn: async (options: Record<string, any>) => {
+        routeIntegrationGateFailureFn: async (options: IntegrationGateFailureRequest) => {
+          assert.ok(options.applyAgentFallbackFn);
           await options.applyAgentFallbackFn({ original: 'custom', launchResult: { agent: 'claude' } });
           return { route: 'fixed', rebounds: 1 };
         },
       },
-    } as never);
+    });
     assert.equal(persistedImplementer, 'claude', 'the fallback identity is persisted against live round 8');
   });
 
@@ -181,44 +196,45 @@ describe("rebound active mission context", () => {
     const store = { load: async () => {
       reads += 1;
       if (reads === 1) throw new Error('temporary review aggregate read failure');
-      return { kind: 'found', mission: { status: 'integration' }, version: 1 };
+      return { kind: 'found' as const, mission: fixtureMission(slug, { status: 'integration' }), version: missionVersion(1) };
     } };
-    const { runRequiredLocalGates } = createIntegrationGateStep({
-      gates: { resolveIntegrationVerificationWorktree: () => '/mission-worktree', captureFinalIntegrationTree: () => ({ ok: true, rootDir: '/mission-worktree', commit: 'c', tree: 't' }), loadPhaseGates: () => [{ key: 'required', command: 'false', order: 1 }], loadRequirePreIntegration: () => false, runPhaseGates: async () => ({ ok: false, skipped: false, cancelled: false, failedGate: { key: 'required' }, error: 'red' }) },
+    const { runRequiredLocalGates } = createIntegrationGateStep(stubIntegrateWorkflowPorts({
+      gates: { resolveIntegrationVerificationWorktree: () => '/mission-worktree', captureFinalIntegrationTree: () => ({ ok: true as const, rootDir: '/mission-worktree', commit: 'c', tree: 't' }), loadPhaseGates: () => [{ key: 'required', command: 'false', order: 1 }], loadRequirePreIntegration: () => false, runPhaseGates: async () => (phaseGateResult({ ok: false as const, skipped: false, cancelled: false, failedGate: { key: 'required' }, error: 'red' })) },
       landing: { createAbort: () => new Error('abort') }, verification: { formatVerificationCommand: () => 'npm test' },
-    } as never);
+    }));
     await runRequiredLocalGates({
-      slug, context: { baseWorktree: '/base', taskAssignee: 'claude', branch: `mission/${slug}`, approval: {}, configuredReviewer: null, task: taskResolution, reviewState: snapshot },
-      missionLoad: { kind: 'found', mission: { repositoryId: 'repo' } }, missionServices: { store, lifecycle: { transition: async () => ({ status: 'completed' }) } },
+      slug, context: integrationContext({ baseWorktree: '/base', taskAssignee: 'claude', branch: `mission/${slug}`, approval: { ok: true }, configuredReviewer: null, task: taskResolution, reviewState: snapshot }),
+      missionLoad: { kind: 'found', mission: fixtureMission(slug, { repositoryId: fixtureRepositoryId('repo') }), version: missionVersion(1) }, missionServices: integrationServices({ store, lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const }) } }),
       dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
       seams: { startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }), transitionTaskFn: () => true,
-        applyAgentFallbackFn: (options: Record<string, unknown>) => { assert.strictEqual(options.state, snapshot); return 'codex'; },
-        routeIntegrationGateFailureFn: async (options: Record<string, any>) => { await options.applyAgentFallbackFn({ original: 'claude', launchResult: { agent: 'codex' } }); return { route: 'fixed', rebounds: 1 }; } },
-    } as never);
+        applyAgentFallbackFn: (options: IntegrationAgentFallbackOptions) => { assert.strictEqual(options.state, snapshot); return 'codex'; },
+        routeIntegrationGateFailureFn: async (options: IntegrationGateFailureRequest) => { assert.ok(options.applyAgentFallbackFn);
+          await options.applyAgentFallbackFn({ original: 'claude', launchResult: { agent: 'codex' } }); return { route: 'fixed', rebounds: 1 }; } },
+    });
   });
 
   test('TASK-2603: squash-hook rebound binds the same active mission context before persisting a fallback implementer', async () => {
     let commits = 0;
-    const { squashAndLand } = createSquashLanding({
+    const { squashAndLand } = createSquashLanding(stubIntegrateWorkflowPorts({
       git: { git: (args: string[]) => {
         if (args.includes('commit')) { commits += 1; return commits === 1 ? { status: 1, stdout: '', stderr: 'pre-commit: failed' } : { status: 0, stdout: '', stderr: '' }; }
-        if (args.includes('diff')) { return { status: 0, stdout: args.includes('--cached') ? 'fixture.ts\0' : '', stderr: '' }; }
-        if (args.includes('ls-files')) { return { status: 0, stdout: '', stderr: '' }; }
-        return { status: 0, stdout: 'commit\n', stderr: '' };
+        if (args.includes('diff')) { return { signal: null,  status: 0, stdout: args.includes('--cached') ? 'fixture.ts\0' : '', stderr: '' }; }
+        if (args.includes('ls-files')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
+        return { signal: null,  status: 0, stdout: 'commit\n', stderr: '' };
       } },
       backlog: { checkBacklogIntegrity: () => [] }, fileSystem: { existsSync: () => false },
       missionPaths: { softResetTrailingBacklogNoise: () => false },
-      gates: { isIntendedPayloadAtHead: () => false }, verification: { captureVerifiedTreeProof: () => ({ ok: true, proof: {} }), assertVerifiedTreeProof: () => ({ ok: true }) },
+      gates: { isIntendedPayloadAtHead: () => false }, verification: {},
       productConfig: { isForgejoReviewEnabled: () => false },
       landing: { classifyHookFailure: () => ({ isHookFailure: true, hookType: 'pre-commit' }), createAbort: () => new Error('abort') },
-    } as never, { promoteTaskForIntegrationIfNeeded: async () => {} });
+    }), { promoteTaskForIntegrationIfNeeded: async () => {} });
 
     await assert.rejects(() => squashAndLand({
-      slug, context: { area: 'all', taskAssignee: 'claude', task: taskResolution, reviewState }, missionServices: { store: missionStore },
+      slug, context: integrationContext({ area: 'all', taskAssignee: 'claude', task: taskResolution, reviewState }), missionServices: integrationServices({ store: missionStore }),
       baseWorktree: '/base', baseBranch: 'main', state: { temporaryStash: null, nextActionMessage: null },
       seams: { startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }), transitionTaskFn: () => true,
-        applyAgentFallbackFn: (options: Record<string, unknown>) => assertFallbackContext(options, '/base') },
-    } as never, { branch: `mission/${slug}`, summary: 'fixture', landedFromSha: 'before', mainTaskFile: '/missing' }));
+        applyAgentFallbackFn: (options: IntegrationAgentFallbackOptions) => assertFallbackContext(options, '/base') },
+    }, { branch: `mission/${slug}`, summary: 'fixture', landedFromSha: 'before', mainTaskFile: '/missing' }));
     assert.equal(commits, 2, 'the hook repair re-verifies the same squash commit');
   });
 });
@@ -257,8 +273,8 @@ describe("integrate gate helpers", () => {
 
   test('integrate re-exports the extracted gate helpers as the same functions integrate-gates owns', () => {
     for (const name of REEXPORTED) {
-      assert.equal(typeof (gates as any)[name], 'function', `${name} missing from integrate-gates.js`);
-      assert.equal((integrate as any)[name], (gates as any)[name], `${name} is duplicated instead of re-exported`);
+      assert.equal(typeof (gates)[name], 'function', `${name} missing from integrate-gates.js`);
+      assert.equal((integrate)[name], (gates)[name], `${name} is duplicated instead of re-exported`);
     }
   });
 
@@ -291,13 +307,13 @@ describe("integrate gate helpers", () => {
       gitRunner: () => ({ status: 0, stdout: 'server/app.ts\n', stderr: '' })
     });
     assert.deepEqual(plan.changedAreas, ['server']);
-    assert.deepEqual(plan.gates.map((gate: any) => gate.key), ['server']);
+    assert.deepEqual(plan.gates.map((gate) => gate.key), ['server']);
   });
 
   test('integrate-gates resolves the verification worktree from the mission worktree before the conventional path', () => {
     const resolved = gates.resolveIntegrationVerificationWorktree('task-2369.05', {
       baseWorktree: '/tmp/base',
-      resolveWorktreeFn: (slug: string, opts: any) => `${opts.cwd}/wt-${slug}`,
+      resolveWorktreeFn: (slug, opts) => { assert.ok(opts); return `${opts.cwd}/wt-${slug}`; },
       conventionalWorktreePathFn: () => '/tmp/should-not-be-used'
     });
     assert.equal(resolved, '/tmp/base/wt-task-2369.05');
@@ -307,8 +323,8 @@ describe("integrate gate helpers", () => {
     const invocation = gates.buildIntegrationVerificationInvocation('task-2369.05', {
       baseWorktree: '/tmp/base',
       resolveWorktreeFn: () => null,
-      conventionalWorktreePathFn: (slug: string, base: string) => `${base}/conventional-${slug}`,
-      formatVerificationCommandFn: (phase: string, cwd: string) => `verify ${phase} in ${cwd}`
+      conventionalWorktreePathFn: (slug, base) => `${base}/conventional-${slug}`,
+      formatVerificationCommandFn: (phase, cwd) => `verify ${phase} in ${cwd}`
     });
     assert.deepEqual(invocation, {
       command: 'verify integrate in /tmp/base/conventional-task-2369.05',
@@ -360,12 +376,14 @@ describe("relaunchable repair", () => {
 
   test('SC 6: resume-capable agents use session persistence via startAgent', () => {
     const agentsSource = fs.readFileSync(path.join(import.meta.dirname, '../../../../../src/adapters/agents/agents.ts'), 'utf8');
+    const preparationSource = fs.readFileSync(path.join(import.meta.dirname, '../../../../../src/adapters/agents/agent-launch-preparation.ts'), 'utf8');
     const launcherSelectionSource = fs.readFileSync(path.join(import.meta.dirname, '../../../../../src/adapters/agents/launcher-selection.ts'), 'utf8');
     const activeSource = fs.readFileSync(path.join(import.meta.dirname, '../../../../../src/adapters/cli/commands/active.ts'), 'utf8');
 
     // Verify RESUME_CAPABLE matches the current resume-capable families
     assert.ok(launcherSelectionSource.includes("RESUME_CAPABLE = new Set(['claude', 'codex', 'custom', 'qwen'])"), 'RESUME_CAPABLE should include the current resume-capable agents');
-    assert.ok(agentsSource.includes('await launchSessionMarkerPort.shouldResume('), 'startAgent should query the checked session-marker port');
+    assert.ok(agentsSource.includes('await prepareLaunch(state, deps)'), 'startAgent delegates session preparation');
+    assert.ok(preparationSource.includes('await launchSessionMarkerPort.shouldResume('), 'launch preparation should query the checked session-marker port');
 
     // Verify the kernel's launch port calls startAgent, which handles resume
     assert.ok(activeSource.includes("startAgentFn('active'"), 'Should call startAgent');
@@ -382,10 +400,8 @@ describe("relaunchable repair", () => {
 
     // The biased, hardcoded implementer→reviewer routing has been removed in
     // favor of config-driven, unbiased selectAgent('review', { exclude: [implementer] }).
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    assert.equal(runtimeMatrix.reviewerFor, undefined, 'reviewerFor must no longer be exported');
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    assert.equal(runtimeMatrix.fallbackFor, undefined, 'fallbackFor must no longer be exported');
+    assert.equal('reviewerFor' in runtimeMatrix, false, 'reviewerFor must no longer be exported');
+    assert.equal('fallbackFor' in runtimeMatrix, false, 'fallbackFor must no longer be exported');
   });
 });
 
@@ -430,25 +446,25 @@ describe("handoff and push-gate regressions", () => {
     const repairs: string[] = [];
     let refineCalls = 0;
     const adapter = createDraftWorkflowAdapter({
-      exitFn: ((code?: number) => { exits.push(code ?? 0); }) as never,
+      exitFn: ((code?: number) => { exits.push(code ?? 0); }),
       logFn: (line: string) => logs.push(line),
       errorFn: (line: string) => errors.push(line),
-    } as never);
-    const ctx = {
+    });
+    const ctx: DraftWorkflowContext = {
       exited: false, slug: 'task-2561', mainRepo: '/repo', targetWorktree: '/repo-task-2561',
       missionFile: '/repo-task-2561/missions/task-2561/MISSION.md', recordedBase: null, syntheticTask: null,
       agent: 'claude', actualAgent: 'claude', agentResult: null,
       exitFn: () => { throw new Error('unused'); }, logFn: () => {}, errorFn: () => {},
-      missionServicesFn: async () => ({
+      missionServicesFn: async () => draftMissionServicesFixture({
         lifecycle: {
           async transition() {
             refineCalls += 1;
             return refineCalls === 1
-              ? { status: 'failed', error: { kind: 'validation', message: INCOMPLETE } }
-              : { status: 'completed' };
+              ? { status: 'failed', error: { kind: 'validation', message: INCOMPLETE }, durableEvidence: [] }
+              : { status: 'completed', durableEvidence: [] };
           },
         },
-        store: { async load() { return { kind: 'missing' }; } },
+        store: { async load() { return { kind: 'missing' as const }; } },
       }),
       options: {
         repairDraftContractFn: async (_slug: string, _worktree: string, agent: string, refusal: string) => {
@@ -459,7 +475,7 @@ describe("handoff and push-gate regressions", () => {
         transitionTaskFn: async () => true,
         transitionVirtualFn: async () => true,
       },
-    } as unknown as DraftWorkflowContext;
+    };
 
     await quietly(async () => { await adapter.finalTransition(ctx); });
 
@@ -472,9 +488,9 @@ describe("handoff and push-gate regressions", () => {
   // --- (b) push-time gate area ----------------------------------------------------
 
   test('(b) the push-time gate verifies the mission area, not the configured defaultArea', async () => {
-    const createPrOptions: Record<string, unknown>[] = [];
+    const createPrOptions: Parameters<RebaseWorkflowPort['createPr']>[3][] = [];
     const ok = { status: 0, stdout: '', stderr: '', signal: null };
-    const port = {
+    const port = rebaseWorkflowFixture({
       git: (args: string[]) => args.includes('rev-parse') ? { ...ok, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' } : ok,
       detectRebaseState: () => ({ inProgress: false, unmergedFiles: [] }),
       getCurrentBranch: () => `mission/${SLUG}`,
@@ -492,26 +508,26 @@ describe("handoff and push-gate regressions", () => {
       selectAgent: () => 'claude',
       workflowLauncherStatus: () => ({ supported: true, agent: 'claude' }),
       applyAgentFallback: async () => 'claude',
-      createPr: (_branch: string, _user: string, _token: string, options: Record<string, unknown>) => {
+      createPr: (_branch: string, _user: string, _token: string, options: Parameters<RebaseWorkflowPort['createPr']>[3]) => {
         createPrOptions.push(options);
-        return { ok: true };
+        return { ok: true as const };
       },
       readToken: () => 'token',
       resolveForgejoUser: (user: string | null) => user ?? 'claude',
       fetchReviewBranch: () => ok,
-      resolveTaskFile: () => ({ ok: true, taskFile: '/wt/backlog/tasks/task.md', task: {} }),
+      resolveTaskFile: () => ({ ok: true as const, taskFile: '/wt/backlog/tasks/task.md', task: {} }),
       getTaskImplementer: () => 'claude',
       transitionTask: async () => undefined,
       resolveReviewIdentity: () => ({ forgejoUser: 'claude' }),
-      readReviewState: () => ({ metadata: {} }),
-      writeReviewState: () => undefined,
-      persistReviewState: async () => undefined,
+      readReviewState: async () => ({ metadata: {} }),
+      writeReviewState: async () => ({ outcome: 'committed' as const }),
+      persistReviewState: async () => ({ outcome: 'committed' as const }),
       isForgejoReviewEnabled: () => true,
       formatVerificationCommand: (area: string) => `./scripts/verify-local.sh ${area}`,
-      resolveConflictsForMission: () => ({ ok: true, conflictFiles: [], missionSpecificFiles: [], sharedFiles: [] }),
+      resolveConflictsForMission: () => ({ ok: true as const, conflictFiles: [], missionSpecificFiles: [], sharedFiles: [] }),
       missionServices: null,
       exit: () => {},
-    } as unknown as RebaseWorkflowPort;
+    });
 
     await quietly(() => runRebaseWorkflow([SLUG, '--push'], port));
 
@@ -528,7 +544,7 @@ describe("handoff and push-gate regressions", () => {
       stdout: 'sh: 1: tsx: not found', stderr: 'sh: 1: tsx: not found',
     };
     const ports = makePorts(recorder, {
-      rebase: { rebaseBeforeReviewRound: async () => ({ ok: false, sharedFileConflicts: false, hookFailure: false, failure: { kind: 'gate', operation: 'push', gate } }) },
+      rebase: { rebaseBeforeReviewRound: async () => ({ ok: false as const, sharedFileConflicts: false, hookFailure: false, failure: { kind: 'gate', operation: 'push', gate } }) },
     });
 
     const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder, { recoverGateFailure: false }));
@@ -543,34 +559,34 @@ describe("handoff and push-gate regressions", () => {
 
   // --- (d) integration-gate repair re-review ----------------------------------------
 
-  function gateStepPorts(route: Record<string, unknown>): IntegrateWorkflowPorts {
-    return {
+  function gateStepPorts(route: IntegrationGateRoute): IntegrateWorkflowPorts {
+    return stubIntegrateWorkflowPorts({
       gates: {
         resolveIntegrationVerificationWorktree: () => '/wt',
-        captureFinalIntegrationTree: () => ({ ok: true, rootDir: '/wt', commit: 'c1', tree: 't1' }),
+        captureFinalIntegrationTree: () => ({ ok: true as const, rootDir: '/wt', commit: 'c1', tree: 't1' }),
         loadPhaseGates: () => [{ key: 'quality-gate', command: 'npm run quality', order: 1 }],
         loadRequirePreIntegration: () => true,
-        runPhaseGates: async () => ({ ok: false, error: 'quality-gate failed', failedGate: { key: 'quality-gate' } }),
+        runPhaseGates: async () => (phaseGateResult({ ok: false as const, error: 'quality-gate failed', failedGate: { key: 'quality-gate' } })),
         routeIntegrationGateFailure: async () => route,
       },
       landing: { createAbort: () => new Error('integration aborted'), isAbort: () => true },
       verification: { formatVerificationCommand: () => './scripts/verify-local.sh all' },
-    } as unknown as IntegrateWorkflowPorts;
+    });
   }
 
-  const REVISION_CHANGED = { route: 'revision-changed', rebounds: 2, repairedRevision: 't2', invalidation: { ok: true } };
+  const REVISION_CHANGED = { route: 'revision-changed', rebounds: 2, repairedRevision: 't2', invalidation: { ok: true, dismissed: [], errors: [] } };
 
-  function gateRequest(reReviewFn?: () => Promise<boolean>) {
+  function gateRequest(reReviewFn?: () => Promise<boolean>): Parameters<ReturnType<typeof createIntegrationGateStep>['runRequiredLocalGates']>[0] {
     return {
-      slug: 'task-2547', context: { baseWorktree: '/repo', area: 'all', branch: 'mission/task-2547' },
-      missionLoad: { kind: 'found', mission: { repositoryId: 'parallix' } },
+      slug: 'task-2547', context: integrationContext({ baseWorktree: '/repo', area: 'all', branch: 'mission/task-2547' }),
+      missionLoad: { kind: 'found', mission: fixtureMission('task-2547'), version: missionVersion(1) }, missionServices: integrationServices(),
       dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
       seams: {
         startAgentFn: async () => ({}), transitionTaskFn: () => true, applyAgentFallbackFn: async () => 'claude',
         routeIntegrationGateFailureFn: async () => REVISION_CHANGED,
         ...(reReviewFn ? { reReviewFn } : {}),
       },
-    } as never;
+    };
   }
 
   test('(d) a gate repair that changed the approved revision is re-reviewed, then integration stops in the integration lane for the human', async () => {
@@ -587,28 +603,28 @@ describe("handoff and push-gate regressions", () => {
 
   test('(e) the gatekeeper does not demand CP-*.md from a mission whose checkpoints are recorded in Mission state', async () => {
     const recorder = makeRecorder();
-    const gatekeeperOptions: Record<string, unknown>[] = [];
+    const gatekeeperOptions: NonNullable<Parameters<ReturnType<typeof makePorts>['gatekeeper']['runGatekeeper']>[1]>[] = [];
     const ports = makePorts(recorder, {
-      missionServices: async () => ({
-        checkpoints: { record: async () => ({ status: 'completed' }) },
-        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 3 } }) },
+      missionServices: stubMissionServices({
+        checkpoints: { record: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
+        lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: handoffTransitionValue() }) },
         store: {
           load: async () => ({
-            kind: 'found',
-            mission: {
-              checkpoints: [{ name: 'CP-1', goalCheck: [{ criterion: 'works', evidence: 'src/application/handoff-command-use-case.ts:1' }], nextActionText: 'review' }],
+            kind: 'found' as const,
+            mission: fixtureMission(SLUG, {
+              checkpoints: [{ missionId: handoffTransitionValue().mission.id, name: 'CP-1', goalCheck: [{ criterion: 'works', evidence: 'src/application/handoff-command-use-case.ts:1' }], nextActionText: 'review' }],
               brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
               successCriteria: ['works'],
               completedSuccessCriteria: [0],
               declaredGates: ['npm test'],
-            },
-            version: 4,
+            }),
+            version: missionVersion(4),
           }),
         },
-        handoff: { recordNel: async () => ({ status: 'completed' }) },
+        handoff: { recordNel: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
       }),
       gatekeeper: {
-        runGatekeeper: (_slug: string, options: Record<string, unknown>) => {
+        runGatekeeper: (_slug: string, options: NonNullable<Parameters<ReturnType<typeof makePorts>['gatekeeper']['runGatekeeper']>[1]>) => {
           gatekeeperOptions.push(options);
           return options.checkpointsRecorded
             ? { ok: true, missing: [], skipped: false, posted: false }
@@ -643,18 +659,19 @@ describe("integration repair", () => {
     let mission: Mission = {
       id: missionId(slug), repositoryId: repositoryId('parallix'), title: 'repair',
       labels: missionLabels([]), status, assignee: implementer, review,
-      checkpoints: [{ missionId: missionId(slug), name: 'CP-1', rawFilename: null, firstLine: '',
+      checkpoints: [{ missionId: missionId(slug), name: 'CP-1', rawFilename: 'CP-1.md', firstLine: '',
         goalCheck: [{ criterion: 'repair', evidence: 'src/application/handoff-command-use-case.ts', recordedRound: 2 }], nextActionText: 'review' }],
       closedAt: null, netEngineeringLines: null,
     };
-    let version = 1;
+    let version = missionVersion(1);
     const history: Array<{ trigger: string; idempotencyKey: string }> = [];
     const store = {
-      async load() { return { kind: 'found' as const, mission, version: version as MissionVersion }; },
+      async load() { return { kind: 'found' as const, mission, version }; },
       async save(next: Mission, expected: MissionVersion | null) {
         assert.equal(expected, version);
         mission = next;
-        return ++version as MissionVersion;
+        version = missionVersion(version + 1);
+        return version;
       },
       async saveWithTransition(next: Mission, expected: MissionVersion | null, event: { trigger: string; idempotencyKey: string }) {
         const result = await this.save(next, expected);
@@ -662,7 +679,7 @@ describe("integration repair", () => {
         return result;
       },
       async findTransitions() { return history; },
-    };
+    } satisfies NonNullable<ConstructorParameters<typeof MissionLifecycleService>[0]>;
     const lifecycle = new MissionLifecycleService(store);
     return { store, lifecycle, history, mission: () => mission };
   }
@@ -674,7 +691,7 @@ describe("integration repair", () => {
       capabilities: new Set(['mission:transition']), command, actor: implementer,
       occurredAt: new Date().toISOString(), idempotencyKey: `test:${loaded.version}`,
     });
-    assert.equal(result.status, 'completed', result.error?.message);
+    assert.equal(result.status, 'completed', String(result.error ?? ''));
   }
 
   test('an unchanged transient integration-gate retry stays approved and continues landing (TASK-2644)', async () => {
@@ -686,33 +703,33 @@ describe("integration repair", () => {
     const ports = {
       gates: {
         resolveIntegrationVerificationWorktree: () => '/fixture',
-        captureFinalIntegrationTree: () => ({ ok: true, rootDir: '/fixture', commit: 'approved', tree: 'approved' }),
+        captureFinalIntegrationTree: () => ({ ok: true as const, rootDir: '/fixture', commit: 'approved', tree: 'approved' }),
         loadPhaseGates: () => [{ key: 'agent-smoke', command: 'agent-smoke', order: 1 }],
         loadRequirePreIntegration: () => true,
-        runPhaseGates: async () => ++gateRuns === 1 ? { ok: false, failedGate, error: 'temporary model capacity' } : { ok: true },
+        runPhaseGates: async () => phaseGateResult(++gateRuns === 1 ? { ok: false, failedGate, error: 'temporary model capacity' } : { ok: true }),
       },
       landing: { createAbort: () => Object.assign(new Error('aborted'), { name: 'IntegrationAbort' }) },
       verification: { formatVerificationCommand: () => 'agent-smoke' },
     };
-    const step = createIntegrationGateStep(ports as never);
+    const step = createIntegrationGateStep(stubIntegrateWorkflowPorts(ports));
     const previous = setLogger({ log: () => {} });
     try {
       const result = await step.runRequiredLocalGates({
-        slug, context: { taskAssignee: implementer, baseWorktree: '/fixture', area: 'all', branch: `mission/${slug}`, approval: { ok: true } },
-        missionLoad: await fixture.store.load(), missionServices: fixture,
+        slug, context: integrationContext({ taskAssignee: implementer, baseWorktree: '/fixture', area: 'all', branch: `mission/${slug}`, approval: { ok: true } }),
+        missionLoad: await fixture.store.load(), missionServices: integrationServices(fixture),
         dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
         seams: {
           applyAgentFallbackFn: async () => implementer,
           transitionTaskFn: async (_slug: string, status: string) => { taskTransitions.push(status); return true; },
-          startAgentFn: async () => { launches += 1; return { agent: implementer, result: { status: 0 } } as never; },
-          routeIntegrationGateFailureFn: async options => routeIntegrationGateFailure({
+          startAgentFn: async () => { launches += 1; return { agent: implementer, result: { status: 0 } }; },
+          routeIntegrationGateFailureFn: async (options) => routeIntegrationGateFailure({
             ...options,
-            captureFinalTreeFn: ports.gates.captureFinalIntegrationTree as never,
-            runPhaseGatesFn: ports.gates.runPhaseGates as never,
+            captureFinalTreeFn: ports.gates.captureFinalIntegrationTree,
+            runPhaseGatesFn: ports.gates.runPhaseGates,
             invalidateApprovalFn: async () => { throw new Error('unchanged transient retry must not retract approval'); },
           }),
         },
-      } as never);
+      });
 
       assert.equal(result, '1 integration gate(s) passed after 0 integration-gate rebound(s)');
       assert.equal(gateRuns, 2, 'the outer failure and unchanged retry both ran');
@@ -724,28 +741,31 @@ describe("integration repair", () => {
     } finally { setLogger(previous); }
   });
 
-  test('integration repair withdraws approval before launch, survives review pingpong, and requests integration restart', async () => {
+  test('integration repair withdraws a no-fact classifier approval before launch, survives review pingpong, and requests integration restart (TASK-2754)', async () => {
     const fixture = memoryMission();
+    const prior = fixture.mission().review!.rounds.at(-1)!.decision!;
+    Object.assign(prior, { classifier: noFactIntegrationRepairClassifier(startedAt) });
     let providerRetracted = false;
+    let gateRuns = 0;
     let repaired = false;
     const failedGate = { key: 'integration', command: 'gate', exitCode: 1, stdout: '', stderr: 'regression' };
     const ports = {
       gates: {
         resolveIntegrationVerificationWorktree: () => '/fixture',
-        captureFinalIntegrationTree: () => ({ ok: true, rootDir: '/fixture', commit: repaired ? 'repair' : 'approved', tree: repaired ? 'repair' : 'approved' }),
+        captureFinalIntegrationTree: () => ({ ok: true as const, rootDir: '/fixture', commit: repaired ? 'repair' : 'approved', tree: repaired ? 'repair' : 'approved' }),
         loadPhaseGates: () => [{ key: 'integration', command: 'gate', order: 1 }],
         loadRequirePreIntegration: () => true,
-        runPhaseGates: async () => repaired ? { ok: true } : { ok: false, failedGate, error: 'red' },
+        runPhaseGates: async () => { gateRuns++; return phaseGateResult(repaired ? { ok: true } : { ok: false, failedGate, error: 'red' }); },
       },
       landing: { createAbort: () => Object.assign(new Error('aborted'), { name: 'IntegrationAbort' }) },
       verification: { formatVerificationCommand: () => 'gate' },
     };
-    const step = createIntegrationGateStep(ports as never);
+    const step = createIntegrationGateStep(stubIntegrateWorkflowPorts(ports));
     const previous = setLogger({ log: () => {} });
     try {
       await assert.rejects(step.runRequiredLocalGates({
-        slug, context: { taskAssignee: implementer, baseWorktree: '/fixture', area: 'all', branch: `mission/${slug}` },
-        missionLoad: await fixture.store.load(), missionServices: fixture,
+        slug, context: integrationContext({ taskAssignee: implementer, baseWorktree: '/fixture', area: 'all', branch: `mission/${slug}` }),
+        missionLoad: await fixture.store.load(), missionServices: integrationServices(fixture),
         dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
         seams: {
           applyAgentFallbackFn: async () => implementer,
@@ -757,26 +777,27 @@ describe("integration repair", () => {
             assert.ok(review.rounds[0].decision?.kind === 'approved' && review.rounds[0].decision.revocation);
             assert.equal(providerRetracted, true, 'provider approval is retracted before repair launches');
             repaired = true;
-            return { agent: implementer, result: { status: 0 } } as never;
+            return { agent: implementer, result: { status: 0 } };
           },
           routeIntegrationGateFailureFn: async options => routeIntegrationGateFailure({
             ...options,
-            captureFinalTreeFn: ports.gates.captureFinalIntegrationTree as never,
-            runPhaseGatesFn: ports.gates.runPhaseGates as never,
-            invalidateApprovalFn: async () => { providerRetracted = true; return { ok: true, dismissed: ['custom'], errors: [] }; },
-            reboundFn: (async (_reason: unknown, context: any) => {
+            captureFinalTreeFn: ports.gates.captureFinalIntegrationTree,
+            runPhaseGatesFn: ports.gates.runPhaseGates,
+            invalidateApprovalFn: async () => { providerRetracted = true; return { ok: true as const, dismissed: ['custom'], errors: [] }; },
+            reboundFn: (async (reason, context) => {
+              assert.ok(context.transitionToImplementer);
               await context.transitionToImplementer(slug);
-              await context.startAgent();
-              assert.equal((await context.verify()).ok, true);
-              return { outcome: 'fixed', implementer, attempts: 1 };
-            }) as never,
+              await context.startAgent('execute', { prompt: 'Repair integration gate', worktree: '/fixture' });
+              assert.equal((await context.verify(1)).ok, true);
+              return { outcome: 'fixed' as const, implementer, attempts: 1, diagnostic: '', classification: { failureClass: 'GateFailure', dispatchAction: 'AutoRepair', isRelaunchable: true, label: 'gate' } };
+            }),
           }),
           reReviewFn: async () => {
             let review = fixture.mission().review!;
             const round = currentReviewRound(review);
-            review = { ...review, rounds: [...review.rounds.slice(0, -1), {
-              ...round, subject: { ...round.subject, revision: changeRevision('repair') },
-            }] as unknown as typeof review.rounds };
+            const rounds: [typeof round, ...typeof round[]] = [...review.rounds];
+            rounds[rounds.length - 1] = { ...round, subject: { ...round.subject, revision: changeRevision('repair') } };
+            review = { ...review, rounds };
             await transition(fixture, { type: 'submit-for-review', gatesPassed: true, review, reviewerEligibility: eligibility });
             review = applyReviewerCommand(review, { type: 'request-changes', decidedAt: new Date().toISOString(), comment: null,
               findings: [{ id: reviewFindingId('F1'), summary: 'one more repair', location: null }] });
@@ -792,6 +813,7 @@ describe("integration repair", () => {
         },
       }), error => (error as Error).name === 'IntegrationStopsForHuman');
       assert.equal(fixture.mission().status, 'integration');
+      assert.ok(gateRuns > 0, 'a no-fact clear still executes mandatory gates and refuses on failure');
       assert.equal(fixture.mission().review!.rounds.length, 3);
       assert.equal(currentReviewRound(fixture.mission().review!).subject.revision, 'repair-2');
       assert.deepEqual(fixture.history.map(event => event.trigger), ['rebound-to-active', 'submit-for-review', 'request-changes', 'submit-for-review', 'approve']);
@@ -802,8 +824,8 @@ describe("integration repair", () => {
     const fixture = memoryMission('review');
     const approved = fixture.mission().review!;
     const pending = startReview(approved.rounds[0].subject, reviewer, implementer, startedAt, eligibility);
-    const rounds = Array.from({ length: 9 }, (_, index) => ({ ...pending.rounds[0], number: index + 1 }));
-    const review = requestReviewIntervention({ ...pending, rounds: rounds as unknown as typeof pending.rounds,
+    const rounds: typeof pending.rounds = [pending.rounds[0], ...Array.from({ length: 8 }, (_, index) => ({ ...pending.rounds[0], number: index + 2 }))];
+    const review = requestReviewIntervention({ ...pending, rounds,
       stageLaunches: [{ stageKey: 'review', fingerprints: ['prior-launch'] }] }, {
       requestedAt: startedAt, requestedBy: 'workflow', reason: 'MAX_ATTEMPTS',
     });
@@ -812,8 +834,8 @@ describe("integration repair", () => {
     const adapter = createReviewWorkflowAdapter({
       missionStore: fixture.store, inferSlugFn: () => slug, resolveWorktreeFn: () => '/fixture',
       readReviewStateFn: async () => ReviewState.from(slug, reviewStateDataFrom(fixture.mission().review!)),
-      createEventFn: async () => undefined as never, run: (() => ({ stdout: 'operator' })) as never,
-      log: () => {}, error: () => {}, exit: (() => { throw new Error('must resume'); }) as never,
+      createEventFn: async () => ({ ok: true, path: null }), run: (() => ({ status: 0, stderr: '', signal: null,  stdout: 'operator' })),
+      log: () => {}, error: () => {}, exit: (() => { throw new Error('must resume'); }),
       reviewLoopMechanisms: request => {
         continued = true;
         assert.equal(fixture.mission().review!.intervention, null);
@@ -831,10 +853,10 @@ describe("integration repair", () => {
 
   test('a repair review cannot consume an old or unassigned provider approval', async () => {
     const result = await getLatestReviewForPr(1, 'claude', '2026-01-01T00:03:00Z', 'fake', {
-      apiCall: async () => ({ ok: true, data: [
+      apiCall: forgejoAsyncApiFixture(async () => ({ ok: true as const, data: [
         { user: { login: 'claude' }, state: 'APPROVED', submitted_at: '2026-01-01T00:01:00Z' },
         { user: { login: 'custom' }, state: 'APPROVED', submitted_at: '2026-01-01T00:04:00Z' },
-      ] }),
+      ] })),
     });
     assert.equal(result, null);
   });
@@ -846,16 +868,16 @@ describe("integration repair", () => {
     const base = makePorts(recorder);
     const ports = makePorts(recorder, {
       missionServices: async () => ({ ...fixture,
-        handoff: { recordNel: async () => ({ status: 'completed' }) },
-        checkpoints: { record: async () => ({ status: 'completed' }) },
+        handoff: { recordNel: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
+        checkpoints: { record: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
       }),
-      git: { ...base.git, git: args => args.includes('rev-parse') && args.includes('HEAD')
+      git: { ...base.git, git: (args: string[]) => args.includes('rev-parse') && args.includes('HEAD')
         ? { status: 0, stdout: 'committed-repair\n', stderr: '' } : base.git.git(args) },
       reviewIdentity: { resolveReviewIdentity: async () => ({ forgejoUser: 'codex' }) },
       agentSelection: { eligibleAgentsForStep: () => ['claude', 'codex'], selectAgent: () => 'claude' },
     });
     const result = await new HandoffCommandUseCase(ports).performHandoff(slug, runOptions(recorder));
-    assert.equal(result.ok, true, result.error);
+    assert.equal(result.ok, true, result.error ?? '');
     assert.equal(fixture.mission().status, 'review');
     assert.equal(currentReviewRound(fixture.mission().review!).subject.revision, 'committed-repair');
     assert.equal(fixture.mission().review!.rounds[0].subject.revision, 'approved-commit');
@@ -865,9 +887,9 @@ describe("integration repair", () => {
   test('integration excludes a legacy approval from an earlier round but retains its holder for retraction', () => {
     const decision = getLatestReviewDecision(`mission/${slug}`, {
       token: 'fake', reviewerUser: 'claude', sinceIso: '2026-01-01T00:03:00Z',
-      apiCall: (_method: string, url: string) => ({ ok: true, data: url.includes('/reviews')
+      apiCall: forgejoApiFixture((_method: string, url: string) => ({ ok: true as const, data: url.includes('/reviews')
         ? [{ user: { login: 'claude' }, state: 'APPROVED', submitted_at: '2026-01-01T00:01:00Z' }]
-        : [{ number: 1, head: { ref: `mission/${slug}` } }] }),
+        : [{ number: 1, head: { ref: `mission/${slug}` } }] })),
     });
     assert.equal(decision.reviewerApproved, false);
     assert.equal(decision.reviewState, null);
@@ -877,27 +899,27 @@ describe("integration repair", () => {
     test(`a ${route} repair route leaves the old approval invalid and continuation available`, async () => {
       const fixture = memoryMission();
       let reviewed = false;
-      const step = createIntegrationGateStep({
+      const step = createIntegrationGateStep(stubIntegrateWorkflowPorts({
         gates: {
           resolveIntegrationVerificationWorktree: () => '/fixture',
-          captureFinalIntegrationTree: () => ({ ok: true, rootDir: '/fixture', commit: 'old', tree: 'old' }),
+          captureFinalIntegrationTree: () => ({ ok: true as const, rootDir: '/fixture', commit: 'old', tree: 'old' }),
           loadPhaseGates: () => [{ key: 'gate', command: 'gate', order: 1 }],
           loadRequirePreIntegration: () => true,
-          runPhaseGates: async () => ({ ok: false, failedGate: { key: 'gate' }, error: 'red' }),
+          runPhaseGates: async () => (phaseGateResult({ ok: false as const, failedGate: { key: 'gate' }, error: 'red' })),
         },
         landing: { createAbort: () => Object.assign(new Error('aborted'), { name: 'IntegrationAbort' }) },
         verification: { formatVerificationCommand: () => 'gate' },
-      } as never);
+      }));
       const previous = setLogger({ log: () => {} });
       try {
         await assert.rejects(step.runRequiredLocalGates({
-          slug, context: { taskAssignee: implementer, area: 'all', baseWorktree: '/fixture' },
-          missionLoad: await fixture.store.load(), missionServices: fixture,
+          slug, context: integrationContext({ taskAssignee: implementer, area: 'all', baseWorktree: '/fixture' }),
+          missionLoad: await fixture.store.load(), missionServices: integrationServices(fixture),
           dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
           seams: {
             transitionTaskFn: async () => true, startAgentFn: async () => { throw new Error('no launch'); },
             applyAgentFallbackFn: async () => implementer,
-            routeIntegrationGateFailureFn: async () => ({ route, rebounds: 2, repairedRevision: 'new', invalidation: { ok: false } } as never),
+            routeIntegrationGateFailureFn: async () => ({ route, rebounds: 2, repairedRevision: 'new', invalidation: { ok: false, dismissed: [], errors: ['provider failure'] } }),
             reReviewFn: async () => { reviewed = true; return false; },
           },
         }), { name: 'IntegrationAbort' });
@@ -950,17 +972,16 @@ describe("diff-scoped gate area", () => {
         },
       }));
 
-      const resolverCalls = [];
-      const commands = [];
+      const resolverCalls: { area: string | undefined; worktree: string | undefined; resolvedMissionDir: string | null | undefined; }[] = [];
+      const commands: string[] = [];
       const result = await runPreReviewGate('task-1268', root, {
         resolveEffectiveAreaFn: (area, worktree, resolvedMissionDir) => {
           resolverCalls.push({ area, worktree, resolvedMissionDir });
           return 'all';
         },
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
         runFn: (_command, args) => {
           commands.push(args[1]);
-          return { status: 0, stdout: 'area=all\n', stderr: '' };
+          return { signal: null,  status: 0, stdout: 'area=all\n', stderr: '' };
         },
         log: () => {},
         error: () => {},

@@ -1,3 +1,7 @@
+import type { MissionLoadResult } from '../domain-ports.js';
+import type { IntegrationMissionServices, IntegrationMissionServicesFactory } from '../ports/integration-records.js';
+import type { Review, ReviewRound } from '../../domain/review.js';
+import type { IntegrationContext } from './context.js';
 /**
  * Lifecycle recovery before integration: repair interrupted orchestration
  * through workflow operations (never by assigning Mission.status), record a
@@ -12,15 +16,29 @@ import { evaluateTaskStatusForIntegration, resolveAuthoritativeApprovalAt } from
 import { abortWith, resolveIntegrationTaskPath } from './support.js';
 import type { IntegrateReviewPort, IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
 
+export type IntegrationRecoveryContext = Pick<IntegrationContext, 'slug' | 'approval' | 'missionStatus'> & Partial<Pick<IntegrationContext, 'pr'>>;
+
 export interface MissionRecoveryOptions {
-  missionServices: any;
-  missionLoad?: any;
+  missionServices: IntegrationMissionServices;
+  missionLoad?: MissionLoadResult;
   submitForReviewFn?: IntegrateReviewPort['submitForReview'];
 }
 
-export function createMissionRecovery(ports: IntegrateWorkflowPorts) {
+function composeMissionRecoveryDependencies(ports: IntegrateWorkflowPorts) {
+
   const { backlog, landing } = ports;
-  const lastRound = (review: any) => review.rounds[review.rounds.length - 1];
+
+  const lastRound = (review: Review) => review.rounds[review.rounds.length - 1];
+  return { ports, backlog, landing, lastRound };
+}
+
+export function createMissionRecovery(ports: IntegrateWorkflowPorts) {
+  return new MissionRecovery(ports).surface();
+}
+
+class MissionRecovery {
+  private readonly dependencies: ReturnType<typeof composeMissionRecoveryDependencies>;
+  constructor(ports: IntegrateWorkflowPorts) { this.dependencies = composeMissionRecoveryDependencies(ports); }
 
   /**
    * Persist an explicit human override as a real `ReviewerDecision` through the
@@ -32,14 +50,15 @@ export function createMissionRecovery(ports: IntegrateWorkflowPorts) {
    * Returns null when the Review is not awaiting a decision (the domain refuses
    * to rewrite an already-decided round) or when persistence fails.
    */
-  async function recordHumanOverrideDecision(context: any, missionServices: any, missionLoad: any, overrideApprovedAt: string): Promise<any | null> {
-    const review = missionLoad.mission.review;
+  async recordHumanOverrideDecision(context: IntegrationRecoveryContext, missionServices: IntegrationMissionServices, missionLoad: Extract<MissionLoadResult, { kind: 'found' }>, overrideApprovedAt: string): Promise<Extract<MissionLoadResult, { kind: 'found' }> | null> {
+    const review = missionLoad.mission.review!;
     if (reviewStatus(review) !== 'awaiting-review') {
       fmt.log.fail(`Human override cannot be recorded for ${context.slug}: the Review is ${reviewStatus(review)}, not awaiting a decision. Resolve the current round (or start a new one with px review ${context.slug} --start) before overriding.`);
       return null;
     }
     const decidedReview = applyReviewerCommand(review, {
       type: 'approve',
+      revision: null, // Legacy provider response carries no verified commit; do not infer HEAD.
       decidedAt: overrideApprovedAt,
       comment: null,
       source: { kind: 'provider', provider: 'forgejo' },
@@ -65,12 +84,12 @@ export function createMissionRecovery(ports: IntegrateWorkflowPorts) {
    * recovery creates the Review through the handoff operation, the PR
    * creation time of the PR the provider approval was recorded on.
    */
-  async function recoverActiveMission(context: any, missionServices: any, missionLoad: any, overrideApprovedAt: string | undefined, submitForReviewFn: IntegrateReviewPort['submitForReview']) {
+  private recoveryEntryRound(context: IntegrationRecoveryContext, missionLoad: Extract<MissionLoadResult, { kind: 'found' }>, overrideApprovedAt: string | undefined) {
     const slugId = missionId(context.slug);
     if (!missionLoad.mission.review && overrideApprovedAt === undefined) {
-      throw abortWith(landing, `Mission ${slugId} is active with no authoritative Review. Run px review ${context.slug} --start (or record a human decision through px review) before integration.`);
+      throw abortWith(this.dependencies.landing, `Mission ${slugId} is active with no authoritative Review. Run px review ${context.slug} --start (or record a human decision through px review) before integration.`);
     }
-    const entryRound = missionLoad.mission.review?.rounds?.length ? lastRound(missionLoad.mission.review) : null;
+    const entryRound = missionLoad.mission.review?.rounds?.length ? this.dependencies.lastRound(missionLoad.mission.review) : null;
     // A stored approval alone is not authority while a review provider exists:
     // the provider approval must corroborate it. When no review provider is
     // configured (`review.provider !== 'forgejo'`), there is no provider state
@@ -79,31 +98,34 @@ export function createMissionRecovery(ports: IntegrateWorkflowPorts) {
     // repository permanently unintegratable.
     const providerlessStoredApproval = context.approval?.ok === true && context.approval.providerDisabled === true;
     if (entryRound?.decision?.kind === 'approved' && overrideApprovedAt === undefined && !providerlessStoredApproval) {
-      throw abortWith(landing, `Mission ${slugId} has a stored approval without the required provider approval. Refresh provider review state before integration; if an integration-gate repair retracted the approval, run px review ${context.slug} --start to review the repaired revision.`);
+      throw abortWith(this.dependencies.landing, `Mission ${slugId} has a stored approval without the required provider approval. Refresh provider review state before integration; if an integration-gate repair retracted the approval, run px review ${context.slug} --start to review the repaired revision.`);
     }
+    return entryRound;
+  }
+
+  private assertRecoveryTimestampOrder(context: IntegrationRecoveryContext, reviewEntryAt: string, approvalAt: string | undefined) {
+    const entryMs = Date.parse(reviewEntryAt);
+    const approvalMs = approvalAt !== undefined ? Date.parse(approvalAt) : NaN;
+    if (Number.isNaN(entryMs) || (approvalAt !== undefined && (Number.isNaN(approvalMs) || entryMs > approvalMs))) {
+      throw abortWith(this.dependencies.landing, `Authoritative timestamps for ${context.slug} are inverted or unparseable: review entry ${reviewEntryAt} vs approval ${approvalAt ?? 'none'}. Resolve the Review before integrating.`);
+    }
+  }
+
+  private recoveryEntryTime(context: IntegrationRecoveryContext, entryRound: ReviewRound | null, overrideApprovedAt: string | undefined): string {
     let reviewEntryAt = entryRound?.startedAt;
     if (!reviewEntryAt && typeof context.pr?.createdAt === 'string' && context.pr.createdAt) {
       reviewEntryAt = context.pr.createdAt;
     }
     if (!reviewEntryAt) {
-      throw abortWith(landing, `Cannot derive an authoritative review-entry timestamp for ${context.slug}: no Review round startedAt and no PR creation time. Re-run px review ${context.slug} --start to record the review entry, or record the decision through px review, before integration.`);
+      throw abortWith(this.dependencies.landing, `Cannot derive an authoritative review-entry timestamp for ${context.slug}: no Review round startedAt and no PR creation time. Re-run px review ${context.slug} --start to record the review entry, or record the decision through px review, before integration.`);
     }
     const approvalAt = (entryRound?.decision?.kind === 'approved' ? entryRound.decision.decidedAt : undefined) ?? overrideApprovedAt;
-    const entryMs = Date.parse(reviewEntryAt);
-    const approvalMs = approvalAt !== undefined ? Date.parse(approvalAt) : NaN;
-    if (Number.isNaN(entryMs) || (approvalAt !== undefined && (Number.isNaN(approvalMs) || entryMs > approvalMs))) {
-      throw abortWith(landing, `Authoritative timestamps for ${context.slug} are inverted or unparseable: review entry ${reviewEntryAt} vs approval ${approvalAt ?? 'none'}. Resolve the Review before integrating.`);
-    }
-    // An already-approved round is a decided review, not a fresh handoff:
-    // replaying submit-for-review would return the round unchanged and the
-    // workflow guard would reject it ("A submitted review must be awaiting a
-    // reviewer decision"). Skip the handoff replay (AC #2) and move the lane to
-    // review via a direct submit-for-review that passes the existing round
-    // through unchanged; the workflow guard recognises the decided round and
-    // moves active → review without rewriting it, so the approve transition
-    // below runs at the stored decidedAt. A genuinely fresh round still goes
-    // through the handoff operation unchanged (AC #3).
-    if (entryRound?.decision?.kind === 'approved') {
+    this.assertRecoveryTimestampOrder(context, reviewEntryAt, approvalAt);
+    return reviewEntryAt;
+  }
+
+  private async moveApprovedActiveToReview(context: IntegrationRecoveryContext, missionServices: IntegrationMissionServices, missionLoad: Extract<MissionLoadResult, { kind: 'found' }>, reviewEntryAt: string) {
+    const slugId = missionId(context.slug);
       const transition = await missionServices.lifecycle.transition({
         operationId: `integrate-active-review:${context.slug}`,
         missionId: slugId,
@@ -115,7 +137,7 @@ export function createMissionRecovery(ports: IntegrateWorkflowPorts) {
         command: {
           type: 'submit-for-review',
           gatesPassed: true,
-          review: missionLoad.mission.review,
+          review: missionLoad.mission.review!,
           reviewerEligibility: ConfiguredReviewerEligibility.fromReviewStep({
             eligible: [agentFamily('configured-reviewer')],
             strategy: 'random',
@@ -129,9 +151,28 @@ export function createMissionRecovery(ports: IntegrateWorkflowPorts) {
       // transition below can never run from a lane this transition was meant
       // to reach (TASK-2582 audit: the result used to be discarded).
       if (transition.status !== 'completed') {
-        throw abortWith(landing, `Mission ${slugId} could not be moved to review for integration: ${transition.error?.message || 'unknown'}.`);
+        throw abortWith(this.dependencies.landing, `Mission ${slugId} could not be moved to review for integration: ${transition.error?.message || 'unknown'}.`);
       }
-      return missionServices.store.load(slugId);
+      const reloaded = await missionServices.store.load(slugId);
+      if (reloaded.kind !== 'found') { throw abortWith(this.dependencies.landing, `Mission ${slugId} is unavailable for lifecycle recovery.`); }
+      return reloaded;
+  }
+
+  async recoverActiveMission(context: IntegrationRecoveryContext, missionServices: IntegrationMissionServices, missionLoad: Extract<MissionLoadResult, { kind: 'found' }>, overrideApprovedAt: string | undefined, submitForReviewFn: IntegrateReviewPort['submitForReview']) {
+    const slugId = missionId(context.slug);
+    const entryRound = this.recoveryEntryRound(context, missionLoad, overrideApprovedAt);
+    const reviewEntryAt = this.recoveryEntryTime(context, entryRound, overrideApprovedAt);
+    // An already-approved round is a decided review, not a fresh handoff:
+    // replaying submit-for-review would return the round unchanged and the
+    // workflow guard would reject it ("A submitted review must be awaiting a
+    // reviewer decision"). Skip the handoff replay (AC #2) and move the lane to
+    // review via a direct submit-for-review that passes the existing round
+    // through unchanged; the workflow guard recognises the decided round and
+    // moves active → review without rewriting it, so the approve transition
+    // below runs at the stored decidedAt. A genuinely fresh round still goes
+    // through the handoff operation unchanged (AC #3).
+    if (entryRound?.decision?.kind === 'approved') {
+      return this.moveApprovedActiveToReview(context, missionServices, missionLoad, reviewEntryAt);
     }
     // Submit through the existing handoff operation; it alone owns the
     // active → review rules and persists the Review aggregate. The
@@ -144,7 +185,7 @@ export function createMissionRecovery(ports: IntegrateWorkflowPorts) {
     });
     const reloaded = await missionServices.store.load(slugId);
     if (reloaded.kind !== 'found' || reloaded.mission.status !== 'review') {
-      throw abortWith(landing, `Mission ${slugId} did not reach review through submit-for-review; resolve the Review handoff before integration.`);
+      throw abortWith(this.dependencies.landing, `Mission ${slugId} did not reach review through submit-for-review; resolve the Review handoff before integration.`);
     }
     return reloaded;
   }
@@ -156,14 +197,34 @@ export function createMissionRecovery(ports: IntegrateWorkflowPorts) {
    * without Review facts must be handed off first, and a missing decision stops
    * recovery.
    */
-  async function recoverMissionForIntegration(
-    context: any,
-    { missionServices, missionLoad: suppliedLoad, submitForReviewFn = ports.review.submitForReview }: MissionRecoveryOptions,
+  private async approvedRecoveryRound(context: IntegrationRecoveryContext, missionServices: IntegrationMissionServices, missionLoad: Extract<MissionLoadResult, { kind: 'found' }>, overrideApprovedAt: string | undefined) {
+    const slugId = missionId(context.slug);
+    let reviewRound = this.dependencies.lastRound(missionLoad.mission.review!);
+    if (reviewRound.decision?.kind !== 'approved' && overrideApprovedAt !== undefined) {
+      // Observe the previously happened approval late: persist it at its own
+      // timestamp, then let the existing approve transition below run at that
+      // same time. Recovery never stamps the approval with its own start time.
+      const reloaded = await this.recordHumanOverrideDecision(context, missionServices, missionLoad, overrideApprovedAt);
+      if (!reloaded || reloaded.mission.status !== 'review' || !reloaded.mission.review) {
+        throw this.dependencies.landing.createAbort();
+      }
+      missionLoad = reloaded;
+      reviewRound = this.dependencies.lastRound(missionLoad.mission.review!);
+    }
+    if (reviewRound.decision?.kind !== 'approved') {
+      throw abortWith(this.dependencies.landing, `Mission ${slugId} is in review without an authoritative approval. Record a ReviewerDecision through px review before integration.`);
+    }
+    return { missionLoad, reviewRound, approvedAt: reviewRound.decision.decidedAt };
+  }
+
+  async recoverMissionForIntegration(
+    context: IntegrationRecoveryContext,
+    { missionServices, missionLoad: suppliedLoad, submitForReviewFn = this.dependencies.ports.review.submitForReview }: MissionRecoveryOptions,
   ) {
     const slugId = missionId(context.slug);
     let missionLoad = suppliedLoad ?? await missionServices.store.load(slugId);
     if (missionLoad.kind !== 'found') {
-      throw abortWith(landing, `Mission ${slugId} is unavailable for lifecycle recovery.`);
+      throw abortWith(this.dependencies.landing, `Mission ${slugId} is unavailable for lifecycle recovery.`);
     }
 
     if (missionLoad.mission.status === 'done') {
@@ -180,59 +241,62 @@ export function createMissionRecovery(ports: IntegrateWorkflowPorts) {
     const overrideApprovedAt = resolveAuthoritativeApprovalAt(context.approval);
 
     if (missionLoad.mission.status === 'active') {
-      missionLoad = await recoverActiveMission(context, missionServices, missionLoad, overrideApprovedAt, submitForReviewFn);
+      missionLoad = await this.recoverActiveMission(context, missionServices, missionLoad, overrideApprovedAt, submitForReviewFn);
     }
 
     if (missionLoad.mission.status === 'integration') {
       return { recovered: false, status: 'integration' };
     }
     if (missionLoad.mission.status !== 'review' || !missionLoad.mission.review) {
-      throw abortWith(landing, `Mission ${slugId} is ${missionLoad.mission.status}; integration requires an authoritative approved Review.`);
+      throw abortWith(this.dependencies.landing, `Mission ${slugId} is ${missionLoad.mission.status}; integration requires an authoritative approved Review.`);
     }
 
-    let reviewRound = lastRound(missionLoad.mission.review);
-    if (reviewRound.decision?.kind !== 'approved' && overrideApprovedAt !== undefined) {
-      // Observe the previously happened approval late: persist it at its own
-      // timestamp, then let the existing approve transition below run at that
-      // same time. Recovery never stamps the approval with its own start time.
-      const reloaded = await recordHumanOverrideDecision(context, missionServices, missionLoad, overrideApprovedAt);
-      if (!reloaded || reloaded.mission.status !== 'review' || !reloaded.mission.review) {
-        throw landing.createAbort();
-      }
-      missionLoad = reloaded;
-      reviewRound = lastRound(missionLoad.mission.review);
-    }
-    if (reviewRound.decision?.kind !== 'approved') {
-      throw abortWith(landing, `Mission ${slugId} is in review without an authoritative approval. Record a ReviewerDecision through px review before integration.`);
-    }
+    const approved = await this.approvedRecoveryRound(context, missionServices, missionLoad, overrideApprovedAt);
+    missionLoad = approved.missionLoad;
+    const reviewRound = approved.reviewRound;
     const approval = await missionServices.lifecycle.transition({
       operationId: `integrate-approve:${context.slug}`,
       missionId: slugId,
       expectedVersion: missionLoad.version,
       capabilities: new Set(['mission:transition']),
-      command: { type: 'approve', review: missionLoad.mission.review },
+      command: { type: 'approve', review: missionLoad.mission.review! },
       actor: missionLoad.mission.assignee ?? 'custom',
-      occurredAt: reviewRound.decision.decidedAt,
+      occurredAt: approved.approvedAt,
       idempotencyKey: `approve:${context.slug}:round-${reviewRound.number}`,
     });
     if (approval.status !== 'completed') {
-      throw abortWith(landing, `Mission approval failed before integration: ${approval.error?.message || 'unknown'}.`);
+      throw abortWith(this.dependencies.landing, `Mission approval failed before integration: ${approval.error?.message || 'unknown'}.`);
     }
     context.missionStatus = 'integration';
-    return { recovered: true, status: 'integration', occurredAt: reviewRound.decision.decidedAt };
+    return { recovered: true, status: 'integration', occurredAt: approved.approvedAt };
   }
 
-  async function promoteTaskForIntegrationIfNeeded(
-    context: any,
-    { dryRun = false, missionServicesFn }: { dryRun?: boolean, missionServicesFn?: Function } = {},
-  ) {
-    const taskStatusCheck = evaluateTaskStatusForIntegration(context, ports.stateMap);
-    const needsPromotion = context.task?.ok
+  private needsTaskPromotion(context: IntegrationContext, taskStatusCheck: { ok: boolean }) {
+    return ( context.task?.ok
       // Runtime integration always has Mission authority. taskStatus supports
       // direct callers that supply an older, pre-store context.
       && (context.missionStatus === 'review' || context.promoteBacklogOnCloseout === true
         || (context.missionStatus === undefined && context.taskStatus === 'review'))
-      && taskStatusCheck.ok;
+      && taskStatusCheck.ok);
+
+  }
+
+  private promotionTask(context: IntegrationContext) {
+    const taskPath = context.task?.taskFile
+      ? resolveIntegrationTaskPath(context.task.taskFile, context.missionWorktree, context.baseWorktree)
+        // buildIntegrationContext always supplies a worktree; direct callers may not.
+        || (!context.missionWorktree && context.baseWorktree ? this.dependencies.backlog.resolveTaskFile(context.slug, context.baseWorktree).taskFile : null)
+      : '';
+    const baseTask = taskPath ? { ok: true, taskFile: taskPath } : context.task?.taskFile ? { ok: false } : context.task;
+    return baseTask;
+  }
+
+  async promoteTaskForIntegrationIfNeeded(
+    context: IntegrationContext,
+    { dryRun = false, missionServicesFn }: { dryRun?: boolean, missionServicesFn?: IntegrationMissionServicesFactory } = {},
+  ) {
+    const taskStatusCheck = evaluateTaskStatusForIntegration(context, this.dependencies.ports.stateMap);
+    const needsPromotion = this.needsTaskPromotion(context, taskStatusCheck);
 
     if (!needsPromotion) {
       return { changed: false, dryRun: false };
@@ -250,24 +314,19 @@ export function createMissionRecovery(ports: IntegrateWorkflowPorts) {
     const missionServices = await missionServicesFn(context.baseWorktree || process.cwd());
     const missionLoad = await missionServices.store.load(missionId(context.slug));
     if (missionLoad.kind === 'unavailable') {
-      throw abortWith(landing, `Mission store unavailable: ${missionLoad.reason}. Refusing to promote the Backlog task.`);
+      throw abortWith(this.dependencies.landing, `Mission store unavailable: ${missionLoad.reason}. Refusing to promote the Backlog task.`);
     }
     if (missionLoad.kind === 'missing') {
-      throw abortWith(landing, `Mission ${missionId(context.slug)} not found in SQLite. Refusing to promote the Backlog task — file-only lifecycle state is not permitted after cutover.`);
+      throw abortWith(this.dependencies.landing, `Mission ${missionId(context.slug)} not found in SQLite. Refusing to promote the Backlog task — file-only lifecycle state is not permitted after cutover.`);
     }
 
-    await recoverMissionForIntegration(context, { missionServices, missionLoad });
+    await this.recoverMissionForIntegration(context, { missionServices, missionLoad });
 
     // External boundary effect after the durable lifecycle transition.
-    const approvedStatus = ports.stateMap.toActual('approved', { rootDir: context.baseWorktree }) || 'approved';
-    const taskPath = context.task?.taskFile
-      ? resolveIntegrationTaskPath(context.task.taskFile, context.missionWorktree, context.baseWorktree)
-        // buildIntegrationContext always supplies a worktree; direct callers may not.
-        || (!context.missionWorktree && context.baseWorktree ? backlog.resolveTaskFile(context.slug, context.baseWorktree).taskFile : null)
-      : '';
-    const baseTask = taskPath ? { ok: true, taskFile: taskPath } : context.task?.taskFile ? { ok: false } : context.task;
-    if (!baseTask?.ok || !backlog.setTaskStatus(baseTask.taskFile || '', approvedStatus)) {
-      throw abortWith(landing, 'Could not promote the Backlog task to approved before integration.');
+    const approvedStatus = this.dependencies.ports.stateMap.toActual('approved', { rootDir: context.baseWorktree }) || 'approved';
+    const baseTask = this.promotionTask(context);
+    if (!baseTask?.ok || !this.dependencies.backlog.setTaskStatus(baseTask.taskFile || '', approvedStatus)) {
+      throw abortWith(this.dependencies.landing, 'Could not promote the Backlog task to approved before integration.');
     }
 
     fmt.log.info('Promoted Backlog status from review to approved because review is already fulfilled.');
@@ -275,5 +334,7 @@ export function createMissionRecovery(ports: IntegrateWorkflowPorts) {
     return { changed: true, dryRun: false };
   }
 
-  return { recoverMissionForIntegration, promoteTaskForIntegrationIfNeeded };
+  surface() {
+    return { recoverMissionForIntegration: this.recoverMissionForIntegration.bind(this), promoteTaskForIntegrationIfNeeded: this.promoteTaskForIntegrationIfNeeded.bind(this) };
+  }
 }

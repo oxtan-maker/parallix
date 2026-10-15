@@ -41,9 +41,9 @@ export interface FirstRunAgentConfigOptions {
  * `readAgentConfig`, whose working-tree branch would read the very file we are
  * about to write.
  */
-function bundledDefault(): { [key: string]: any } {
+function bundledDefault(): Record<string, unknown> {
   const raw = runtimeAssetStore.readText(CONFIG_PATH);
-  const parsed = JSON.parse(raw);
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
   return parsed && typeof parsed === 'object' ? parsed : { steps: {} };
 }
 
@@ -65,18 +65,19 @@ function filterEligible(worktree: string | undefined, configuration?: ParallixCo
   return byStep;
 }
 
-function buildFilteredConfig(eligibleByStep: { [step: string]: string[] }): { [key: string]: any } {
+function buildFilteredConfig(eligibleByStep: { [step: string]: string[] }): Record<string, unknown> {
   const base = bundledDefault();
-  const steps = base.steps && typeof base.steps === 'object' ? base.steps : {};
-  const out: { [key: string]: any } = {};
+  const steps = base.steps && typeof base.steps === 'object' ? base.steps as Record<string, unknown> : {};
+  const out: Record<string, unknown> = {};
   // Preserve every non-step key: `_comment`, `_weights_comment`, `overrides`.
   for (const [key, value] of Object.entries(base)) {
     if (key !== 'steps') { out[key] = value; }
   }
-  out.steps = {};
+  const filteredSteps: Record<string, unknown> = {};
+  out.steps = filteredSteps;
   for (const step of CONFIG_STEPS) {
     const existing = steps[step] && typeof steps[step] === 'object' ? steps[step] : {};
-    out.steps[step] = { ...existing, eligible: eligibleByStep[step] || [] };
+    filteredSteps[step] = { ...existing, eligible: eligibleByStep[step] || [] };
   }
   return out;
 }

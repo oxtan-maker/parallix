@@ -1,3 +1,4 @@
+import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
 /**
  * A write the review loop leaves in flight can outlive the database handle that
  * accepted it — the loop reported
@@ -20,7 +21,7 @@ import { runReviewLoop } from '../../../src/application/review-loop/review-loop.
 import { fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
 
 function minimalMission(): Mission {
-  return {
+  return (completeMissionFixture(String(missionId('task-9003')), {
     id: missionId('task-9003'),
     repositoryId: repositoryId('repo-parallix'),
     title: 'writes outlive close',
@@ -32,7 +33,7 @@ function minimalMission(): Mission {
     netEngineeringLines: 0,
     closedAt: null,
     review: null,
-  } as unknown as Mission;
+  }));
 }
 
 test('drain resolves only after an in-flight aggregate write has settled', async () => {
@@ -71,7 +72,7 @@ test('the review loop awaits its stage-stats write before moving on', async () =
     artifacts: {
       consumeReviewer: async () => {
         order.push('consume');
-        return { consumed: true, ok: true, reviewState: 'APPROVED' };
+        return { consumed: true, ok: true as const, reviewState: 'APPROVED' };
       },
     },
   });

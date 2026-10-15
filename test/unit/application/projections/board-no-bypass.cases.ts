@@ -69,7 +69,7 @@ test('board controller and projections do not import forbidden dependencies', ()
     allViolations.push(...hasForbiddenImport(source, filePath));
   }
   if (allViolations.length > 0) {
-    assert.fail(`No-bypass violations found:\n${allViolations.join('\n')}`);
+    return assert.fail(`No-bypass violations found:\n${allViolations.join('\n')}`);
   }
 });
 

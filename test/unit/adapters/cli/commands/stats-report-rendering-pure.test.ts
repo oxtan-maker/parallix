@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2535: branch coverage for the pure `stats-report-rendering`
 // helpers. Imported via the `stats.js` re-export barrel (the production entry)
 // so the leaf module's circular-import TDZ is avoided; coverage still lands on
 // `stats-report-rendering.ts`. Pure functions only — in-memory StatsRow doubles,
@@ -46,6 +45,7 @@ test('colorAverageFixRounds colorizes best/worst and passes through non-finite v
     { averageFixRounds: 'n/a' },
   ]);
   assert.equal(out.length, 3);
+  assert.ok(out[0] != null);
   assert.ok(out[0].length > 0);
   assert.equal(out[2], 'n/a', 'non-finite value passes through unchanged');
 });

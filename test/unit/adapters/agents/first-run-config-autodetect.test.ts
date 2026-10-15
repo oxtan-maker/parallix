@@ -19,7 +19,7 @@ import { resolveConfiguration } from '../../../../src/composition/config.js';
 
 const CONFIG_REL = 'config/agents.json';
 
-function withTempDir(fn) {
+function withTempDir(fn: (_arg0: string) => void) {
   const root = registeredMkdtemp('first-run-config-');
   try {
     return fn(root);
@@ -50,7 +50,7 @@ function clearSeams() {
 }
 
 test('writes a filtered config on first run containing only available families', () => {
-  return withTempDir(async (root) => {
+  return withTempDir(async (root: string) => {
     setAvailability(['codex', 'vibe', 'opencode']); // custom -> opencode available
     try {
       const result = ensureFirstRunAgentConfig({ rootDir: root, worktree: root });
@@ -75,7 +75,7 @@ test('writes a filtered config on first run containing only available families',
 });
 
 test('absent family never appears in any eligible array; present family does', () => {
-  return withTempDir(async (root) => {
+  return withTempDir(async (root: string) => {
     setAvailability(['claude']); // only claude installed
     try {
       ensureFirstRunAgentConfig({ rootDir: root, worktree: root });
@@ -94,7 +94,7 @@ test('absent family never appears in any eligible array; present family does', (
 });
 
 test('judges the custom family against its configured runner', () => {
-  return withTempDir(async (root) => {
+  return withTempDir(async (root: string) => {
     // custom -> pi
     fs.mkdirSync(path.join(root, 'workflow'), { recursive: true });
     fs.writeFileSync(
@@ -114,7 +114,7 @@ test('judges the custom family against its configured runner', () => {
 });
 
 test('keeps custom in eligible when its configured runner is available', () => {
-  return withTempDir(async (root) => {
+  return withTempDir(async (root: string) => {
     fs.mkdirSync(path.join(root, 'workflow'), { recursive: true });
     fs.writeFileSync(
       path.join(root, 'workflow.config.json'),
@@ -132,7 +132,7 @@ test('keeps custom in eligible when its configured runner is available', () => {
 });
 
 test('leaves a pre-existing working-tree config byte-for-byte on a second run', () => {
-  return withTempDir(async (root) => {
+  return withTempDir(async (root: string) => {
     const configDir = path.join(root, 'config');
     fs.mkdirSync(configDir, { recursive: true });
     const authored = JSON.stringify(
@@ -165,7 +165,7 @@ test('leaves a pre-existing working-tree config byte-for-byte on a second run', 
 });
 
 test('written config feeds readAgentConfig and eligibleAgentsForStep', () => {
-  return withTempDir(async (root) => {
+  return withTempDir(async (root: string) => {
     setAvailability(['codex', 'vibe', 'opencode']);
     try {
       ensureFirstRunAgentConfig({ rootDir: root, worktree: root });
@@ -181,7 +181,7 @@ test('written config feeds readAgentConfig and eligibleAgentsForStep', () => {
 });
 
 test('writeAutodetectedAgentConfig returns written=false when a working-tree file already exists', () => {
-  return withTempDir(async (root) => {
+  return withTempDir(async (root: string) => {
     fs.mkdirSync(path.join(root, 'config'), { recursive: true });
     fs.writeFileSync(path.join(root, CONFIG_REL), '{}\n');
     setAvailability(['codex']);
@@ -195,7 +195,7 @@ test('writeAutodetectedAgentConfig returns written=false when a working-tree fil
 });
 
 test('does not persist an all-probes-fail detection; falls back to shipped default', () => {
-  return withTempDir(async (root) => {
+  return withTempDir(async (root: string) => {
     setAvailability([]); // no family available
     try {
       const result = ensureFirstRunAgentConfig({ rootDir: root, worktree: root });
@@ -213,7 +213,7 @@ test('does not persist an all-probes-fail detection; falls back to shipped defau
 });
 
 test('force regenerates an existing working-tree config (px config --write refresh)', () => {
-  return withTempDir(async (root) => {
+  return withTempDir(async (root: string) => {
     fs.mkdirSync(path.join(root, 'config'), { recursive: true });
     const stale = JSON.stringify({
       _comment: 'stale',
@@ -235,7 +235,7 @@ test('force regenerates an existing working-tree config (px config --write refre
 });
 
 test('force skips an empty detection instead of overwriting a live config', () => {
-  return withTempDir(async (root) => {
+  return withTempDir(async (root: string) => {
     fs.mkdirSync(path.join(root, 'config'), { recursive: true });
     const authored = JSON.stringify({
       _comment: 'user config',
@@ -257,13 +257,13 @@ test('force skips an empty detection instead of overwriting a live config', () =
 });
 
 test('supplied runner configuration controls partial, empty and preserved detection (TASK-2724)', () => {
-  withTempDir(root => {
+  withTempDir((root) => {
     const runner = path.join(root, 'supplied-opencode');
     fs.writeFileSync(runner, '', { mode: 0o755 });
     const configuration = resolveConfiguration({ HOME: root, PATH: '', OPENCODE_BIN: runner });
     const probed: string[] = [];
     setCommandPathProbe(() => null);
-    setLauncherHealthProbe(command => { probed.push(command); return { ok: true }; });
+    setLauncherHealthProbe(command => { probed.push(command); return { ok: true as const }; });
     try {
       const result = ensureFirstRunAgentConfig({ rootDir: root, worktree: root, configuration });
       assert.equal(result.written, true);

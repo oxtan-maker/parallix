@@ -1,3 +1,4 @@
+import { repositoryId as fixtureRepositoryId } from '../../../src/domain/repository.js';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -71,7 +72,7 @@ function laneEvent(
   }
   return {
     missionId: missionIdVal as MissionId,
-    repositoryId: '/repo' as RepositoryId,
+    repositoryId: fixtureRepositoryId('/repo') as RepositoryId,
     from: fromVal,
     to: toVal,
     trigger,

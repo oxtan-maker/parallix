@@ -91,7 +91,14 @@ same result.
 
 For a maintainer who wants mechanical defects found before review, Parallix
 runs the repository's configured validation gate at the relevant mission
-checkpoint.
+checkpoint. Continuing an unfinished verification repair supplies the repair agent
+with the original command, working directory and retained output references.
+Recovery succeeds only after that same check passes and fresh checkpoint evidence
+is accepted. An agent exit of zero alone leaves a failing check unresolved.
+Missing or unreadable retained gate diagnostics stop continuation visibly; restore the
+evidence before retrying. Interrupted repairs of workflow steps continue through
+their existing workflow checks without requiring gate output that was never captured. Interrupted and exhausted repairs retain their failure
+for a later continuation, while invalid locked contracts require an operator decision.
 
 **Confidence:** Confirmed for declared gates. Coverage is bounded by what the
 repository chooses to verify.

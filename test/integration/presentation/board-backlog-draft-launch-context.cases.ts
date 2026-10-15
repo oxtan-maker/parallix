@@ -39,8 +39,8 @@ const repositories = {
   agentBlocklist: { async findAll() { return []; }, async findByAgent() { return undefined; }, async save() {}, async deleteByAgent() {}, async clear() {} },
   operationalHistory: { async findAll() { return []; }, async findByType() { return []; }, async append() {}, async clear() {} },
   boardLaneEvents: { async findAll() { return []; }, async findByMissionId() { return []; }, async findByRepositoryId() { return []; }, async append() { return true; }, async clear() {} },
-  usage: { async findAll() { return []; }, async findWhere() { return []; }, async save() {}, async saveAll() {}, async clear() {} },
-};
+  usage: { async findAll() { return []; }, async findWhere() { return []; } },
+} satisfies NonNullable<Parameters<typeof composeProductionCapabilities>[2]>;
 
 async function isolatedStore() {
   const directory = registeredMkdtemp('parallix-task-2454-');
@@ -77,7 +77,7 @@ function draftAdapterDeps(launchedFrom: string): { deps: Record<string, unknown>
     detectLaunchBaseBranchFn: (dir: string) => { trace.launchDirs.push(dir); return null; },
     resolveTaskFileFn: (slug: string, root: string) => {
       trace.taskLookupRoots.push(root);
-      return { ok: true, taskFile: `${root}/backlog/tasks/${slug} - fixture.md`, matches: [] };
+      return { ok: true as const, taskFile: `${root}/backlog/tasks/${slug} - fixture.md`, matches: [] };
     },
     checkBacklogIntegrityFn: () => [],
     // Steps past preflight: recorded, never touching git or the filesystem.
@@ -187,8 +187,8 @@ test('board Draft on a pre-draft backlog card completes and runs the whole draft
     missionFile: `${MAIN_CHECKOUT}-${slug}/missions/${slug}/MISSION.md`,
     recordedBase: null, syntheticTask: null, agent: '', actualAgent: null, agentResult: null,
     exitFn: (_code?: number) => { throw new Error('mock must not exit'); },
-    logFn: () => {}, errorFn: () => {}, missionServicesFn: async () => ({}), options: {},
-  } as unknown as import('../../../src/application/ports/cli-workflows.js').DraftWorkflowContext;
+    logFn: () => {}, errorFn: () => {}, missionServicesFn: async () => { throw new Error('Mock draft steps must not load Mission services'); }, options: {},
+  } satisfies import('../../../src/application/ports/cli-workflows.js').DraftWorkflowContext;
   const draftWorkflow: import('../../../src/application/ports/cli-workflows.js').DraftWorkflowPort = {
     preflight: async (args) => { steps.push(`preflight:${args[0]}`); return ctx; },
     setup: (c) => { steps.push('setup'); return c; },

@@ -26,7 +26,7 @@ test('block persisted via updateAgentBlockChecked makes defaultIsAgentBlockedNow
       blocklistRepo: new SqliteBlocklistRepository(db),
       knownAgentFamilies: [agentFamily('codex')],
       readAgentConfig: () => ({}),
-      resolveTaskFile: () => ({ ok: false, matches: [] }),
+      resolveTaskFile: () => ({ ok: false as const, matches: [] }),
     });
     assert.notEqual((await board.loadAgentAvailability())[0].block.kind, 'none');
   } finally {
@@ -41,7 +41,7 @@ test('block persisted via updateAgentBlockChecked makes defaultIsAgentBlockedNow
 });
 
 test('local-only and SQLite-only blocks both resolve as blocked', () => {
-  const runtime = { agent: 'codex', eligible: false, blocked: true, until: null, reason: 'quota', limit: 'quota' };
+  const runtime = { agent: 'codex', eligible: false, blocked: true, until: null, reason: 'quota', limit: 'quota' } satisfies Partial<NonNullable<Parameters<typeof resolveAgentBlockAuthority>[1]>>;
 
   assert.equal(resolveAgentBlockAuthority('codex', { ...runtime, blocked: false, eligible: true, reason: null, limit: null }, { blocklist: { codex: true } }).blocked, true);
   assert.equal(resolveAgentBlockAuthority('codex', runtime, {}).blocked, true);

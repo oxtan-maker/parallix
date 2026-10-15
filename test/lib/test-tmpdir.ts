@@ -21,13 +21,3 @@ export function checkoutTestTmpdir(executionRoot: string, base: string = os.tmpd
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
 }
-
-/** Keep only tsx's content-addressed compiler cache between covered runs.
- * Raw V8 coverage and case fixtures still live in the invocation-owned root. */
-export function linkCheckoutTranspileCache(executionRoot: string, temporaryDir: string, base: string = os.tmpdir()): void {
-  const identity = process.geteuid ? process.geteuid() : os.userInfo().username;
-  const cacheName = `tsx-${identity}`;
-  const cache = path.join(checkoutTestTmpdir(executionRoot, base), cacheName);
-  fs.mkdirSync(cache, { recursive: true, mode: 0o700 });
-  fs.symlinkSync(cache, path.join(temporaryDir, cacheName), process.platform === 'win32' ? 'junction' : 'dir');
-}

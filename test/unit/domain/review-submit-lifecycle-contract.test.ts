@@ -42,7 +42,7 @@ describe("submit for review idempotent", { concurrency: false }, () => {
     url: '/pull/2339',
     sourceBranch: 'mission/task-2339',
     targetBranch: 'main',
-  };
+  } satisfies import("../../../src/domain/review.js").ReviewedChange;
 
   function activeMission(): Mission {
     return {
@@ -103,7 +103,7 @@ describe("submit for review idempotent", { concurrency: false }, () => {
       gatesPassed: true,
       review,
       reviewerEligibility,
-    };
+    } satisfies Partial<NonNullable<Parameters<typeof decideMission>[1]>>;
     const inReview = decideMission(activeMission(), command);
 
     // Even a retry carrying a different review payload leaves the persisted
@@ -124,7 +124,7 @@ describe("submit for review idempotent", { concurrency: false }, () => {
   test('retry completes a review lane left without its Review aggregate', () => {
     const review = submittedReview();
     const interrupted = { ...activeMission(), status: 'review', closedAt: null } as Mission;
-    const command = { type: 'submit-for-review' as const, gatesPassed: true, review, reviewerEligibility };
+    const command = { type: 'submit-for-review' as const, gatesPassed: true, review, reviewerEligibility } satisfies Partial<NonNullable<Parameters<typeof decideMission>[1]>>;
 
     assert.deepEqual(decideMission(interrupted, command).review, review);
     assert.throws(() => decideMission(interrupted, { ...command, gatesPassed: false }), /gates pass/);
@@ -148,7 +148,7 @@ describe("review write", { concurrency: false }, () => {
     public mission: Mission;
     private version: MissionVersion;
     constructor(mission: Mission, version = missionVersion(1)) { this.mission = mission; this.version = version; }
-    async load(): Promise<MissionLoadResult> { return { kind: 'found', mission: this.mission, version: this.version }; }
+    async load(): Promise<MissionLoadResult> { return { kind: 'found' as const, mission: this.mission, version: this.version }; }
     async save(mission: Mission, expected: MissionVersion | null): Promise<MissionVersion> {
       if (expected !== this.version) { throw new Error(`expected ${expected}, got ${this.version}`); }
       this.mission = mission;
@@ -167,6 +167,7 @@ describe("review write", { concurrency: false }, () => {
       actor: 'reviewer', occurredAt: decidedAt,
     });
     if (result.status !== 'completed') { throw new Error(result.error?.message ?? 'decision failed'); }
+    assert.ok(result.value);
     return result.value.mission;
   }
 

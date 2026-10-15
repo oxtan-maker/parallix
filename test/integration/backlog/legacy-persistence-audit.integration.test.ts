@@ -1,3 +1,10 @@
+import { pendingReview } from '../../fixtures/mission-builders.js';
+import { agentFamily } from '../../../src/domain/agents.js';
+import { missionId } from '../../../src/domain/mission.js';
+import { changeRevision, parseReviewDisposition, type ReviewDisposition } from '../../../src/domain/review.js';
+import { externalTaskRef } from '../../../src/domain/external-task.js';
+import { missionVersion } from '../../../src/application/domain-ports.js';
+import { fixtureMission as typedMissionFixture } from '../../fixtures/mission-builders.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -23,7 +30,7 @@ test('task-2521.06: runtime audit permits Backlog mirrors but rejects live legac
     };
     write('adapters/backlog/concrete-mission-read-adapter.ts', 'export class ConcreteMissionReadAdapter {}');
     write('adapters/backlog/task-transitions.ts', 'fs.writeFileSync(taskFilePath, content);');
-    const store = { loadByRepository: async () => [] } as unknown as MissionStore;
+    const store = { loadByRepository: async () => [] } satisfies Pick<MissionStore, 'loadByRepository'>;
     const allowed = await auditLegacyFiles(root, repositoryId('parallix'), store);
     assert.equal(allowed.counters.normalRuntimeReadersOfRetiredPaths, 0);
     assert.equal(allowed.counters.normalRuntimeWritersOfRetiredPaths, 0);
@@ -46,11 +53,9 @@ test('task-2521.06: legacy audit treats an archive copy as obsolete when the com
   execFileSync('git', ['-C', root, 'add', '.']);
   execFileSync('git', ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'fixture']);
   const commit = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  const mission = {
-    id: 'task-9001', repositoryId: repositoryId('parallix'), status: 'done', checkpoints: [],
-    externalTaskRef: { source: 'backlog-md', id: 'TASK-9001', url: `backlog/completed/task-9001.md@${commit}` },
-  } as unknown as Mission;
-  const store = { loadByRepository: async () => [mission] } as unknown as MissionStore;
+  const mission = typedMissionFixture(String('task-9001'), { repositoryId: repositoryId('parallix'), status: 'done', checkpoints: [],
+    externalTaskRef: externalTaskRef('backlog-md', 'TASK-9001', `backlog/completed/task-9001.md@${commit}`)});
+  const store = { loadByRepository: async () => [mission] } satisfies Pick<MissionStore, 'loadByRepository'>;
   const audit = await auditLegacyFiles(root, repositoryId('parallix'), store);
   assert.deepEqual(audit.files.map(file => file.classification), ['obsolete', 'imported Mission']);
   assert.equal(audit.counters.unresolvedLegacyFiles, 0);
@@ -74,7 +79,7 @@ test('task-2521.06: legacy audit verifies a committed preservation copy of a non
   }] }));
   run('add', '.');
   run('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'archive');
-  const store = { loadByRepository: async () => [] } as unknown as MissionStore;
+  const store = { loadByRepository: async () => [] } satisfies Pick<MissionStore, 'loadByRepository'>;
   const verified = await auditLegacyFiles(root, repositoryId('parallix'), store);
   assert.equal(verified.files.find(file => file.path === name)?.classification, 'retained external artifact');
   fs.writeFileSync(path.join(root, name), body + 'changed');
@@ -98,7 +103,7 @@ test('task-2521.06: legacy audit verifies historical artifacts outside the delet
     file: name, sha256: createHash('sha256').update(body).digest('hex'), content: body,
   }] }));
   run('add', '.'); run('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'archive');
-  const store = { loadByRepository: async () => [] } as unknown as MissionStore;
+  const store = { loadByRepository: async () => [] } satisfies Pick<MissionStore, 'loadByRepository'>;
   assert.equal((await auditLegacyFiles(root, repositoryId('parallix'), store)).files.find(file => file.path === name)?.classification, 'retained external artifact');
   fs.writeFileSync(path.join(root, name), 'Changed dataset\n');
   assert.equal((await auditLegacyFiles(root, repositoryId('parallix'), store)).files.find(file => file.path === name)?.classification, 'UNRESOLVED');
@@ -111,10 +116,9 @@ test('task-2521.06: legacy audit compares NEL export to recorded Mission measure
   fs.writeFileSync(path.join(dir, 'nel-record.json'), JSON.stringify({
     slug: 'task-9003', predictedBucket: 'Medium', actualNel: 42, actualBucket: 'Small',
   }));
-  const mission = { id: 'task-9003', repositoryId: repositoryId('parallix'),
-    netEngineeringLines: 42, predictedNelBucket: 'Medium', checkpoints: [], status: 'done',
-  } as unknown as Mission;
-  const store = { loadByRepository: async () => [mission] } as unknown as MissionStore;
+  const mission = typedMissionFixture(String('task-9003'), { repositoryId: repositoryId('parallix'),
+    netEngineeringLines: 42, predictedNelBucket: 'Medium', checkpoints: [], status: 'done'});
+  const store = { loadByRepository: async () => [mission] } satisfies Pick<MissionStore, 'loadByRepository'>;
   assert.equal((await auditLegacyFiles(root, repositoryId('parallix'), store)).files[0].classification, 'identical Mission');
   fs.writeFileSync(path.join(dir, 'nel-record.json'), JSON.stringify({
     slug: 'task-9003', predictedBucket: 'Medium', actualNel: 43, actualBucket: 'Small',
@@ -130,10 +134,9 @@ test('task-2521.06: legacy audit checks every exported review event against its 
   const file = path.join(dir, '2026-01-01-reviewer_findings.md');
   fs.writeFileSync(file, '---\nevent_type: reviewer_findings\ntimestamp: 2026-01-01T00:00:00.000Z\nround: 1\nphase: reviewing\nactor: codex\nslug: task-9004\n---\n\nFinding body\n');
   const events = readExportedReviewEvents('task-9004', root);
-  const mission = { id: 'task-9004', repositoryId: repositoryId('parallix'), checkpoints: [], status: 'done',
-    review: { reviewEvents: [{ position: 0, ...events[0] }] },
-  } as unknown as Mission;
-  const store = { loadByRepository: async () => [mission] } as unknown as MissionStore;
+  const mission = typedMissionFixture(String('task-9004'), { repositoryId: repositoryId('parallix'), checkpoints: [], status: 'done',
+    review: { ...pendingReview('task-9004'), reviewEvents: [events[0]] }});
+  const store = { loadByRepository: async () => [mission] } satisfies Pick<MissionStore, 'loadByRepository'>;
   assert.equal((await auditLegacyFiles(root, repositoryId('parallix'), store)).files[0].classification, 'identical Mission');
   fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('Finding body', 'Changed body'));
   assert.equal((await auditLegacyFiles(root, repositoryId('parallix'), store)).counters.migrationVerificationFailures, 1);
@@ -161,12 +164,11 @@ test('task-2521.06: legacy audit verifies review state and launch fingerprints',
     metadata: { recordedStageLaunches: { 'review:codex': ['fingerprint'] } },
   };
   fs.writeFileSync(path.join(dir, 'review-state.json'), JSON.stringify(state));
-  const mission = { id: 'task-9006', repositoryId: repositoryId('parallix'), checkpoints: [], status: 'done',
-    review: { rounds: [{ reviewer: 'codex', implementer: 'custom', number: 1,
-      startedAt: state.startedAt, phase: 'reviewing', disposition: null, subject: { change: { kind: 'local-branch' } },
-    }], intervention: null, stageLaunches: [{ stageKey: 'review:codex', fingerprints: ['fingerprint'] }], reviewEvents: [] },
-  } as unknown as Mission;
-  const store = { loadByRepository: async () => [mission] } as unknown as MissionStore;
+  const mission = typedMissionFixture(String('task-9006'), { repositoryId: repositoryId('parallix'), checkpoints: [], status: 'done',
+    review: { rounds: [{ ...pendingReview('task-9006').rounds[0], reviewer: agentFamily('codex'), implementer: agentFamily('custom'), number: 1,
+      startedAt: state.startedAt, phase: 'reviewing', disposition: null, subject: { change: { kind: 'local-branch', sourceBranch: 'mission/task-9006', targetBranch: 'main' }, revision: changeRevision('fixture-revision') },
+    }], intervention: null, stageLaunches: [{ stageKey: 'review:codex', fingerprints: ['fingerprint'] }], reviewEvents: [] }});
+  const store = { loadByRepository: async () => [mission] } satisfies Pick<MissionStore, 'loadByRepository'>;
   assert.equal((await auditLegacyFiles(root, repositoryId('parallix'), store)).files[0].classification, 'identical Mission');
   fs.writeFileSync(path.join(dir, 'review-state.json'), JSON.stringify({ ...state, metadata: { recordedStageLaunches: {} } }));
   assert.equal((await auditLegacyFiles(root, repositoryId('parallix'), store)).counters.migrationVerificationFailures, 1);
@@ -188,7 +190,7 @@ test('task-2521.06: legacy audit traverses unknown files and fails closed', asyn
   fs.mkdirSync(path.join(root, 'missions', 'task-9001', 'unexpected'), { recursive: true });
   fs.writeFileSync(path.join(root, 'missions', 'task-9001', 'MISSION.md'), '# Goal\n');
   fs.writeFileSync(path.join(root, 'missions', 'task-9001', 'unexpected', 'data.txt'), 'unknown');
-  const store = { loadByRepository: async () => [] } as unknown as MissionStore;
+  const store = { loadByRepository: async () => [] } satisfies Pick<MissionStore, 'loadByRepository'>;
   const audit = await auditLegacyFiles(root, repositoryId('parallix'), store);
   assert.equal(audit.files.length, 2);
   assert.equal(audit.counters.unresolvedLegacyFiles, 2);
@@ -203,21 +205,17 @@ test('task-2521.06: unstarted backlog input needs no Mission or archive and is r
   const file = path.join(root, 'backlog/tasks/task-9008.md');
   const body = '---\nid: TASK-9008\ntitle: Future work\nstatus: backlog\n---\n\nOperator has not started this.\n';
   fs.writeFileSync(file, body);
-  const store = { loadByRepository: async () => [] } as unknown as MissionStore;
+  const store = { loadByRepository: async () => [] } satisfies Pick<MissionStore, 'loadByRepository'>;
   const audit = await auditLegacyFiles(root, repositoryId('parallix'), store);
   assert.equal(audit.files[0].classification, 'retained product/configuration');
   assert.equal(audit.counters.requiredTaskRecordsMissing, 0);
   assert.equal(audit.verdict, 'GO');
   assert.equal(fs.readFileSync(file, 'utf8'), body);
-  const pendingStore = { loadByRepository: async () => [{
-    id: 'task-9008', status: 'backlog', checkpoints: [], externalTaskRef: null,
-  } as unknown as Mission] } as unknown as MissionStore;
+  const pendingStore = { loadByRepository: async () => [typedMissionFixture(String('task-9008'), { status: 'backlog', checkpoints: [], externalTaskRef: null})] } satisfies Pick<MissionStore, 'loadByRepository'>;
   const pending = await auditLegacyFiles(root, repositoryId('parallix'), pendingStore);
   assert.equal(pending.files[0].classification, 'retained product/configuration');
   assert.equal(pending.verdict, 'GO');
-  const nativeStore = { loadByRepository: async () => [{
-    id: 'task-9008', status: 'refined', checkpoints: [], externalTaskRef: null,
-  } as unknown as Mission] } as unknown as MissionStore;
+  const nativeStore = { loadByRepository: async () => [typedMissionFixture(String('task-9008'), { status: 'refined', checkpoints: [], externalTaskRef: null})] } satisfies Pick<MissionStore, 'loadByRepository'>;
   assert.equal((await auditLegacyFiles(root, repositoryId('parallix'), nativeStore)).files[0].classification, 'retained product/configuration');
 });
 
@@ -231,10 +229,10 @@ test('task-2521.06: TASK-2576 exception preserves the approved pair and fails cl
   run('init', '-q'); run('add', '.');
   run('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'summary');
   const sourceCommit = run('rev-parse', 'HEAD');
-  const checkpoint = { missionId: 'task-2576', name: 'CP-1', firstLine: 'Red reproduction',
+  const checkpoint = { missionId: missionId('task-2576'), name: 'CP-1', firstLine: 'Red reproduction',
     goalCheck: [{ criterion: 'Reproduced', evidence: 'Captured failing test' }], nextActionText: 'Implement fix.' };
-  const mission = { id: 'task-2576', repositoryId: repositoryId('parallix'), status: 'done',
-    closedAt: '2026-09-26T00:00:00.000Z', checkpoints: [checkpoint] } as unknown as Mission;
+  const mission = typedMissionFixture(String('task-2576'), { repositoryId: repositoryId('parallix'), status: 'done',
+    closedAt: '2026-09-26T00:00:00.000Z', checkpoints: [checkpoint]});
   const archive = path.join(root, 'missions/task-2521.06/artifacts/task-2576-checkpoint-comparison.json');
   fs.mkdirSync(path.dirname(archive), { recursive: true });
   fs.writeFileSync(archive, JSON.stringify({ missionId: mission.id,
@@ -245,11 +243,11 @@ test('task-2521.06: TASK-2576 exception preserves the approved pair and fails cl
   assert.equal(hasApprovedCheckpointException(root, mission, file, content), false);
   run('add', '.'); run('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'approve pair');
   const store = { loadByRepository: async () => [mission],
-    load: async () => ({ kind: 'found', mission, version: 1 }),
+    load: async () => ({ kind: 'found' as const, mission, version: missionVersion(1) }),
     save: async () => { throw new Error('Exception must never replace checkpoints'); },
-  } as unknown as MissionStore;
+  } satisfies MissionStore;
   assert.equal((await auditLegacyFiles(root, repositoryId('parallix'), store)).files[0].classification, 'retained external artifact');
-  const report = await importLegacyMissions({ repositoryId: repositoryId('parallix'), store } as unknown as MissionImportServices, { rootDir: root });
+  const report = await importLegacyMissions({ repositoryId: repositoryId('parallix'), store, intake: { execute: async () => { throw new Error('Exception must never allocate a Mission'); } }, dependencies: { setDependencies: async () => { throw new Error('Exception must never change dependencies'); } } }, { rootDir: root });
   assert.equal(report.conflicting, 0);
   assert.equal(report.checkpointFilesImportable, 0);
   assert.equal(hasApprovedCheckpointException(root, { ...mission, status: 'active', closedAt: null }, file, content), false);
@@ -262,9 +260,7 @@ test('task-2521.06: placeholder mission documents need no archive and do not sat
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2521-06-template-'));
   fs.mkdirSync(path.join(root, 'missions/task-9009'), { recursive: true });
   fs.writeFileSync(path.join(root, 'missions/task-9009/MISSION.md'), '# Mission: <Title>\n\n## Goal\n<Goal>\n');
-  const store = { loadByRepository: async () => [{
-    id: 'task-9009', status: 'active', brief: null, successCriteria: [], checkpoints: [],
-  } as unknown as Mission] } as unknown as MissionStore;
+  const store = { loadByRepository: async () => [typedMissionFixture(String('task-9009'), { status: 'active', brief: null, successCriteria: [], checkpoints: []})] } satisfies Pick<MissionStore, 'loadByRepository'>;
   const audit = await auditLegacyFiles(root, repositoryId('parallix'), store);
   assert.equal(audit.files[0].classification, 'obsolete');
   assert.equal(audit.counters.unparsedDataBearingFiles, 0);
@@ -279,11 +275,9 @@ test('task-2521.06: legacy audit excludes only a committed operator stop while r
   execFileSync('git', ['init', '-q', root]);
   execFileSync('git', ['-C', root, 'add', name]);
   execFileSync('git', ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'Record stop']);
-  let disposition = 'BLOCKED';
-  const store = { loadByRepository: async () => [{
-    id: 'task-2550', status: 'review', brief: null, successCriteria: [], checkpoints: [],
-    review: { rounds: [{ disposition }] },
-  } as unknown as Mission] } as unknown as MissionStore;
+  let disposition: ReviewDisposition = 'BLOCKED';
+  const store = { loadByRepository: async () => [typedMissionFixture(String('task-2550'), { status: 'review', brief: null, successCriteria: [], checkpoints: [],
+    review: { ...pendingReview('task-2550'), rounds: [{ ...pendingReview('task-2550').rounds[0], disposition }] }})] } satisfies Pick<MissionStore, 'loadByRepository'>;
   assert.equal((await auditLegacyFiles(root, repositoryId('parallix'), store)).counters.requiredMissionContextMissing, 0);
   disposition = 'PARKED';
   assert.equal((await auditLegacyFiles(root, repositoryId('parallix'), store)).counters.requiredMissionContextMissing, 1);

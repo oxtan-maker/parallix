@@ -35,8 +35,8 @@ type GetTaskLabelsFn = (_taskFilePath: string) => string[];
 type GetTaskStorageFn = (_rootDir?: string) => { tasksDir: string; completedDir: string; archiveTasksDir: string };
 type FindMissionDirFn = (_slug: string, _rootDir?: string, _options?: { missionPath?: string }) => string | null;
 type FindCheckpointsFn = (_missionDir: string) => string[];
-type ResolveWorktreeFn = (_slug: string, _options?: { cwd?: string; gitFn?: Function | null }) => string | null;
-type ResolveBaseWorktreeFn = (_slug: string, _options?: { rootDir?: string; gitFn?: Function | null }) => string;
+type ResolveWorktreeFn = (_slug: string, _options?: { cwd?: string; gitFn?: import('../git/worktree.js').GitReader | null }) => string | null;
+type ResolveBaseWorktreeFn = (_slug: string, _options?: { rootDir?: string; gitFn?: import('../git/worktree.js').GitReader | null }) => string;
 type GetFirstLineFn = (_filePath: string) => string;
 type ReadCheckpointFileFn = (_filePath: string) => string;
 
@@ -149,7 +149,7 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
     this.getTaskAssignee = options.getTaskAssignee ?? defaultGetTaskAssignee();
     this.getTaskFrontmatterValue = options.getTaskFrontmatterValue ?? defaultGetTaskFrontmatterValue();
     this.getTaskLabels = options.getTaskLabels ?? defaultGetTaskLabels();
-    this.usesCustomMetadataReaders = Boolean(options.getTaskStatus || options.getTaskAssignee || options.getTaskFrontmatterValue || options.getTaskLabels);
+    this.usesCustomMetadataReaders = hasCustomMetadataReaders(options);
     this.getTaskStorage = options.getTaskStorage ?? defaultGetTaskStorage();
     this.findMissionDir = options.findMissionDir ?? defaultFindMissionDir();
     this.findCheckpoints = options.findCheckpoints ?? defaultFindCheckpoints();
@@ -454,4 +454,8 @@ interface TaskMetadata {
   status: string | null;
   assignee: string | null;
   labels: string[];
+}
+
+function hasCustomMetadataReaders(options: ConcreteMissionReadAdapterOptions): boolean {
+  return Boolean(options.getTaskStatus || options.getTaskAssignee || options.getTaskFrontmatterValue || options.getTaskLabels);
 }

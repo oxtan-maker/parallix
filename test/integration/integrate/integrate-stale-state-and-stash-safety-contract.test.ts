@@ -1,3 +1,4 @@
+import { integrationContext } from '../../fixtures/integration-context.js';
 // Historical regression provenance: TASK-2532, TASK-1410, TASK-2212, TASK-2489.
 // Behavior-owned suite (TASK-2622.09, integration-ci): stale integration state and stash safety over
 // disposable Git topologies — dead rebase and marker-stash repair (task-2532), stash-pop payload collisions
@@ -27,7 +28,7 @@ describe("stale integration state repair", () => {
   test.afterEach(() => mock.restoreAll());
 
   /** Run git against a working directory, throwing on a non-zero exit. */
-  function runGit(cwd, args) {
+  function runGit(cwd: string, args: string[]) {
     const result = childProcess.spawnSync('git', args, { encoding: 'utf8', cwd });
     if (result.error) throw result.error;
     if (result.status !== 0) {
@@ -38,7 +39,7 @@ describe("stale integration state repair", () => {
 
   /** A git runner that mirrors the application seam: the caller supplies `-C <rootDir>` inside each call. */
   function gitRunner() {
-    return (args) => childProcess.spawnSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    return (args: readonly string[]) => childProcess.spawnSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   }
 
   /** Seed a throwaway Git repository on `main` with one commit and return its root. */
@@ -59,7 +60,7 @@ describe("stale integration state repair", () => {
    * shared file so rebasing the mission onto main dead-ends on a conflict, which
    * leaves a `rebase-merge/` directory and an unmerged index behind.
    */
-  function seedDeadRebase(root) {
+  function seedDeadRebase(root: string) {
     // Diverge from the initial commit: the mission branch changes shared.txt first.
     runGit(root, ['checkout', '-q', '-b', 'mission/task-2532']);
     fs.writeFileSync(path.join(root, 'shared.txt'), 'mission version\n', 'utf8');
@@ -78,24 +79,24 @@ describe("stale integration state repair", () => {
     }
   }
 
-  function stashList(root) {
+  function stashList(root: string) {
     return runGit(root, ['stash', 'list']).trim();
   }
 
-  function rebaseDirs(root) {
+  function rebaseDirs(root: string) {
     const gitDir = runGit(root, ['rev-parse', '--git-dir']).trim();
     const abs = path.isAbsolute(gitDir) ? gitDir : path.join(root, gitDir);
     return ['rebase-merge', 'rebase-apply'].filter((d) => fs.existsSync(path.join(abs, d)));
   }
 
-  function unmergedFiles(root) {
+  function unmergedFiles(root: string) {
     return runGit(root, ['ls-files', '-u'])
       .split('\n')
       .map((l) => l.trim())
       .filter(Boolean);
   }
 
-  function headSha(root) {
+  function headSha(root: string) {
     return runGit(root, ['log', '-1', '--format=%H']).trim();
   }
 
@@ -247,7 +248,7 @@ describe("stash-pop corruption", () => {
 
   // Helpers ---------------------------------------------------------------
 
-  function runGit(cwd, args, opts = {}) {
+  function runGit(cwd: string, args: string[], opts: Omit<childProcess.SpawnSyncOptionsWithStringEncoding, 'encoding'> = {}) {
     const result = childProcess.spawnSync('git', args, {
       encoding: 'utf8',
       cwd,
@@ -258,9 +259,7 @@ describe("stash-pop corruption", () => {
       const err = new Error(
         `git ${args.join(' ')} failed (exit ${result.status}): ${result.stderr.trim() || result.stdout.trim()}`
       );
-  // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `result` absent from its inferred mock shape.
-      err.result = result;
-      throw err;
+      throw Object.assign(err, { result });
     }
     return result.stdout;
   }
@@ -304,7 +303,7 @@ describe("stash-pop corruption", () => {
    * Simulate the integrate stash/closeout/restore sequence.
    * Returns { corruptionDetected: boolean, details: string }.
    */
-  function simulateStashCloseoutRestore(root, taskFile, missionDoc) {
+  function simulateStashCloseoutRestore(root: string, taskFile: fs.PathOrFileDescriptor, missionDoc: fs.PathOrFileDescriptor) {
     const originalTaskContent = fs.readFileSync(taskFile, 'utf8');
     const originalMissionContent = fs.readFileSync(missionDoc, 'utf8');
 
@@ -383,7 +382,7 @@ describe("stash-pop corruption", () => {
       const dirtyContent = originalContent + '\n<!-- operator local note -->';
       fs.writeFileSync(missionDoc, dirtyContent, 'utf8');
 
-      const context = {
+      const context = integrationContext({
         slug: 'task-1410',
         branch: 'mission/task-1410',
         currentBranch: 'main',
@@ -401,13 +400,13 @@ describe("stash-pop corruption", () => {
         mainBranch: 'main',
         mainDirty: true,
         mainDirtyEntries: [' M missions/task-1410/MISSION.md']
-      };
+      });
 
       const result = printIntegrationPreflight(context, {
         readTokenFn: () => null,
         resolveTokenFileFn: () => null,
         isForgejoReviewEnabledFn: () => false,
-        getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+        getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] })
       });
 
       // FIX VERIFICATION: overlapping dirty paths should produce FAIL
@@ -416,15 +415,15 @@ describe("stash-pop corruption", () => {
       );
 
       // Verify [STASH] prefix in fail output (fmt.log.fail uses console.error)
-      const failLines = [];
+      const failLines: unknown[] = [];
       const originalError = console.error;
-      console.error = line => failLines.push(line);
+      console.error = (line: unknown) => failLines.push(line);
       try {
         printIntegrationPreflight(context, {
           readTokenFn: () => null,
           resolveTokenFileFn: () => null,
           isForgejoReviewEnabledFn: () => false,
-          getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+          getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] })
         });
         const output = failLines.join('\n');
         assert.match(output, /\[STASH\]/, 'Should include [STASH] prefix for dirty-state interaction');
@@ -442,7 +441,7 @@ describe("stash-pop corruption", () => {
     try {
       const taskFile = path.join(root, 'backlog', 'tasks',
         'task-1410 - prevent-integrate-from-corrupting-main.md');
-      const context = {
+      const context = integrationContext({
         slug: 'task-1410',
         branch: 'mission/task-1410',
         currentBranch: 'main',
@@ -461,13 +460,13 @@ describe("stash-pop corruption", () => {
         mainBranch: 'main',
         mainDirty: true,
         mainDirtyEntries: [' M src/adapters/cli/commands/integrate.ts']
-      };
+      });
 
       const result = printIntegrationPreflight(context, {
         readTokenFn: () => null,
         resolveTokenFileFn: () => null,
         isForgejoReviewEnabledFn: () => false,
-        getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+        getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] }),
         gitFn: () => ({ status: 0, stdout: 'src/adapters/cli/commands/integrate.ts\n', stderr: '', signal: null })
       });
 
@@ -482,7 +481,7 @@ describe("stash-pop corruption", () => {
     try {
       const taskFile = path.join(root, 'backlog', 'tasks',
         'task-1410 - prevent-integrate-from-corrupting-main.md');
-      const context = {
+      const context = integrationContext({
         slug: 'task-1410', branch: 'mission/task-1410', currentBranch: 'main',
         missionDir: path.join(root, 'missions', 'task-1410'), missionWorktree: root,
         task: { ok: true, taskFile }, taskStatus: 'ready-for-integration',
@@ -491,11 +490,11 @@ describe("stash-pop corruption", () => {
         approval: { ok: false, error: 'forgejo-off', reviewState: null },
         baseBranch: 'main', baseWorktree: root, mainBranch: 'main',
         mainDirty: true, mainDirtyEntries: [' M README.md']
-      };
+      });
       const result = printIntegrationPreflight(context, {
         readTokenFn: () => null, resolveTokenFileFn: () => null,
         isForgejoReviewEnabledFn: () => false,
-        getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+        getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] }),
         gitFn: () => ({ status: 128, stdout: '', stderr: 'unknown revision', signal: null })
       });
       assert.ok(result.failures.includes('main-dirty-payload'));
@@ -509,7 +508,7 @@ describe("stash-pop corruption", () => {
     try {
       const taskFile = path.join(root, 'backlog', 'tasks',
         'task-1410 - prevent-integrate-from-corrupting-main.md');
-      const context = {
+      const context = integrationContext({
         slug: 'task-1410', branch: 'mission/task-1410', currentBranch: 'main',
         missionDir: path.join(root, 'missions', 'task-1410'), missionWorktree: root,
         task: { ok: true, taskFile }, taskStatus: 'ready-for-integration',
@@ -518,11 +517,11 @@ describe("stash-pop corruption", () => {
         approval: { ok: false, error: 'forgejo-off', reviewState: null },
         baseBranch: 'main', baseWorktree: root, mainBranch: 'main',
         mainDirty: true, mainDirtyEntries: ['?? config/agents.json']
-      };
+      });
       const result = printIntegrationPreflight(context, {
         readTokenFn: () => null, resolveTokenFileFn: () => null,
         isForgejoReviewEnabledFn: () => false,
-        getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+        getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] }),
         gitFn: () => ({ status: 0, stdout: 'config/agents.json\n', stderr: '', signal: null })
       });
       assert.ok(!result.failures.includes('main-dirty-overlap'));
@@ -548,7 +547,7 @@ describe("stash-pop corruption", () => {
       const taskFile = path.join(root, 'backlog', 'tasks',
         'task-1410 - prevent-integrate-from-corrupting-main.md');
 
-      const context = {
+      const context = integrationContext({
         slug: 'task-1410',
         branch: 'mission/task-1410',
         currentBranch: 'main',
@@ -566,13 +565,13 @@ describe("stash-pop corruption", () => {
         mainBranch: 'main',
         mainDirty: true,
         mainDirtyEntries: [' M README.md']
-      };
+      });
 
       const result = printIntegrationPreflight(context, {
         readTokenFn: () => null,
         resolveTokenFileFn: () => null,
         isForgejoReviewEnabledFn: () => false,
-        getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+        getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] })
       });
 
       assert.ok(!result.failures.includes('main-dirty-overlap'),
@@ -604,7 +603,7 @@ describe("stash-pop corruption", () => {
       fs.writeFileSync(missionDoc, dirtyMission, 'utf8');
 
       // 1. Run preflight
-      const context = {
+      const context = integrationContext({
         slug: 'task-1410',
         branch: 'mission/task-1410',
         currentBranch: 'main',
@@ -622,13 +621,13 @@ describe("stash-pop corruption", () => {
         mainBranch: 'main',
         mainDirty: true,
         mainDirtyEntries: [' M missions/task-1410/MISSION.md']
-      };
+      });
 
       const preflightResult = printIntegrationPreflight(context, {
         readTokenFn: () => null,
         resolveTokenFileFn: () => null,
         isForgejoReviewEnabledFn: () => false,
-        getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+        getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] })
       });
 
       // FIX EXPECTATION: preflight should return FAIL for overlapping dirty paths.
@@ -710,7 +709,7 @@ describe("stash-pop corruption", () => {
       const taskFile = path.join(root, 'backlog', 'tasks',
         'task-1410 - prevent-integrate-from-corrupting-main.md');
 
-      const context = {
+      const context = integrationContext({
         slug: 'task-1404',
         branch: 'mission/task-1404',
         currentBranch: 'main',
@@ -728,13 +727,13 @@ describe("stash-pop corruption", () => {
         mainBranch: 'main',
         mainDirty: true,
         mainDirtyEntries: [' M backlog/tasks/task-1403 - something-else.md']
-      };
+      });
 
       const result = printIntegrationPreflight(context, {
         readTokenFn: () => null,
         resolveTokenFileFn: () => null,
         isForgejoReviewEnabledFn: () => false,
-        getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+        getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] })
       });
 
       assert.ok(!result.failures.includes('main-dirty-overlap'));
@@ -752,7 +751,7 @@ describe("stash-pop corruption", () => {
       const taskFile = path.join(root, 'backlog', 'tasks',
         'task-1410 - prevent-integrate-from-corrupting-main.md');
 
-      const context = {
+      const context = integrationContext({
         slug: 'task-1404',
         branch: 'mission/task-1404',
         currentBranch: 'main',
@@ -770,13 +769,13 @@ describe("stash-pop corruption", () => {
         mainBranch: 'main',
         mainDirty: true,
         mainDirtyEntries: [' M backlog/completed/task-1399 - old-task.md']
-      };
+      });
 
       const result = printIntegrationPreflight(context, {
         readTokenFn: () => null,
         resolveTokenFileFn: () => null,
         isForgejoReviewEnabledFn: () => false,
-        getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+        getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: [] })
       });
 
       assert.ok(!result.failures.includes('main-dirty-overlap'));
@@ -791,7 +790,7 @@ describe("stash-pop corruption", () => {
 describe("interrupted fixtures leave no residue", () => {
   const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..');
 
-  function removeTestRepository(root) {
+  function removeTestRepository(root: string) {
     try {
       childProcess.spawnSync('git', ['-C', root, 'worktree', 'remove', '--force', `${root}-task-2001`], { encoding: 'utf8' });
     } catch (_) {
@@ -843,6 +842,7 @@ describe("interrupted fixtures leave no residue", () => {
       if (process.platform === 'win32') {
         child.kill('SIGKILL');
       } else {
+        assert.ok(child.pid);
         process.kill(-child.pid, 'SIGKILL');
       }
       await childExited;

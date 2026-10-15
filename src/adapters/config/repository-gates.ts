@@ -1,3 +1,5 @@
+import { normalizeGates, validateRepositoryGates, type RepositoryGate, type RepositoryGates } from './repository-gate-schema.js';
+export { validateRepositoryGates, type RepositoryGate, type RepositoryGates } from './repository-gate-schema.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 // Repository-configured lifecycle gates.
 //
@@ -14,7 +16,7 @@ import type { ParallixConfiguration } from "../../application/ports/configuratio
 import path from 'node:path';
 import { runGateCommand } from './gate-command-runner.js';
 export { runGateCommand } from './gate-command-runner.js';
-import type { IntegrationVerificationEvidencePort } from '../../application/ports/integration-verification-evidence.js';
+import type { IntegrationVerificationEvidencePort, ReusableVerificationProofPort } from '../../application/ports/integration-verification-evidence.js';
 import { GateDashboard } from './gate-dashboard.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { loadEffectiveConfig, loadWorkflowConfig } from './product-config.js';
@@ -22,6 +24,12 @@ import { loadEffectiveConfig, loadWorkflowConfig } from './product-config.js';
 /** Ordered lifecycle phases that may carry configured gates. */
 export const GATE_PHASES = ['handoff', 'review', 'integration'] as const;
 export type GatePhase = (typeof GATE_PHASES)[number];
+export type GateLog = (message: string) => void;
+type ConfigPhase = 'preHandoff' | 'preReview' | 'preIntegration';
+interface GateConfiguration {
+  preHandoff?: unknown; preReview?: unknown; preIntegration?: unknown;
+  requirePreIntegration?: unknown; parallel?: Partial<Record<ConfigPhase, number>>;
+}
 
 /** Environment keys shared by every configured gate command. */
 export const GATE_ENV = {
@@ -29,22 +37,6 @@ export const GATE_ENV = {
   CHECKOUT: 'PARALLIX_CHECKOUT_PATH',
   PHASE: 'PARALLIX_PHASE',
 } as const;
-
-/** A single ordered gate command for one phase. */
-export interface RepositoryGate {
-  key: string;
-  command: string;
-  order: number;
-  after?: string[];
-  reuse?: 'never' | 'clean-tree';
-}
-
-/** The complete declared gate surface for a repository. */
-export interface RepositoryGates {
-  preHandoff: RepositoryGate[];
-  preReview: RepositoryGate[];
-  preIntegration: RepositoryGate[];
-}
 
 const EMPTY_GATES: RepositoryGates = {
   preHandoff: [],
@@ -60,10 +52,10 @@ const EMPTY_GATES: RepositoryGates = {
 /** @param {'preHandoff'|'preReview'|'preIntegration'} phase */
 export function loadPhaseGates(rootDir: string, phase: 'preHandoff' | 'preReview' | 'preIntegration'): RepositoryGate[] {
   const declared = loadWorkflowConfig(rootDir || process.cwd());
-  const gateIssues = validateRepositoryGates((declared.config as any)?.adapters);
+  const gateIssues = validateRepositoryGates((declared.config as { adapters?: unknown } | null)?.adapters);
   if (gateIssues.length > 0) { throw new Error(gateIssues.join('; ')); }
   const config = loadEffectiveConfig(rootDir || process.cwd());
-  const gates = (config.adapters as any)?.gates;
+  const gates = (config.adapters as { gates?: GateConfiguration } | undefined)?.gates;
   if (!gates || typeof gates !== 'object' || !Array.isArray(gates[phase])) {
     return [];
   }
@@ -79,14 +71,14 @@ export function loadPhaseGates(rootDir: string, phase: 'preHandoff' | 'preReview
  */
 export function loadRequirePreIntegration(rootDir: string): boolean {
   const config = loadEffectiveConfig(rootDir || process.cwd());
-  const gates = (config.adapters as any)?.gates;
+  const gates = (config.adapters as { gates?: GateConfiguration } | undefined)?.gates;
   return typeof gates === 'object' && gates !== null && gates.requirePreIntegration === true;
 }
 
 /** Load all three phase gate lists at once. */
 export function loadRepositoryGates(rootDir: string): RepositoryGates {
   const config = loadEffectiveConfig(rootDir || process.cwd());
-  const gates = (config.adapters as any)?.gates;
+  const gates = (config.adapters as { gates?: GateConfiguration } | undefined)?.gates;
   if (!gates || typeof gates !== 'object') {
     return { ...EMPTY_GATES };
   }
@@ -95,129 +87,6 @@ export function loadRepositoryGates(rootDir: string): RepositoryGates {
     preReview: Array.isArray(gates.preReview) ? normalizeGates(gates.preReview) : [],
     preIntegration: Array.isArray(gates.preIntegration) ? normalizeGates(gates.preIntegration) : [],
   };
-}
-
-/** @param {unknown} raw */
-function normalizeGates(raw: unknown): RepositoryGate[] {
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-  /** @type {RepositoryGate[]} */
-  const gates = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry !== 'object') {
-      continue;
-    }
-    const key = (entry as any).key;
-    const command = (entry as any).command;
-    if (typeof key !== 'string' || !key) {
-      continue;
-    }
-    if (typeof command !== 'string' || !command.trim()) {
-      continue;
-    }
-    const order = typeof (entry as any).order === 'number' ? (entry as any).order : 0;
-    const after = Array.isArray((entry as any).after) && (entry as any).after.every((dependency: unknown) => typeof dependency === 'string' && dependency)
-      ? (entry as any).after
-      : undefined;
-    const reuse: RepositoryGate['reuse'] = (entry as any).reuse === 'clean-tree' ? 'clean-tree' : 'never';
-    gates.push({ key, command, order, ...(after ? { after } : {}), reuse });
-  }
-  return gates.sort((a, b) => a.order - b.order);
-}
-
-/**
- * Structural validation for the `adapters.gates` object. Returns a list of
- * human-readable issues; an empty list means the shape is acceptable.
- * @param {unknown} adapters
- */
-export function validateRepositoryGates(adapters: unknown): string[] {
-  const issues: string[] = [];
-  if (!adapters || typeof adapters !== 'object') {
-    return issues;
-  }
-  const gates = (adapters as any).gates;
-  if (gates === undefined) {
-    return issues;
-  }
-  if (typeof gates !== 'object' || Array.isArray(gates)) {
-    return ['adapters.gates must be an object'];
-  }
-  // adapters.gates declares additionalProperties:false in the workflow schema;
-  // reject any key it does not recognise so a typo (e.g. requireIntegration)
-  // fails validation instead of silently disappearing.
-  const KNOWN_GATE_KEYS = new Set(['requirePreIntegration', 'parallel', 'preHandoff', 'preReview', 'preIntegration']);
-  for (const key of Object.keys(gates)) {
-    if (!KNOWN_GATE_KEYS.has(key)) {
-      issues.push(`adapters.gates.${key} is not a recognised key (allowed: ${[...KNOWN_GATE_KEYS].join(', ')})`);
-    }
-  }
-  if (gates.requirePreIntegration !== undefined && typeof gates.requirePreIntegration !== 'boolean') {
-    issues.push('adapters.gates.requirePreIntegration must be a boolean');
-  }
-  if (gates.parallel !== undefined) {
-    if (!gates.parallel || typeof gates.parallel !== 'object' || Array.isArray(gates.parallel)) {
-      issues.push('adapters.gates.parallel must be an object');
-    } else {
-      for (const [phase, limit] of Object.entries(gates.parallel)) {
-        if (!['preHandoff', 'preReview', 'preIntegration'].includes(phase)) {
-          issues.push(`adapters.gates.parallel.${phase} is not a recognised phase`);
-        } else if (!Number.isInteger(limit) || (limit as number) < 2) {
-          issues.push(`adapters.gates.parallel.${phase} must be an integer of at least 2`);
-        }
-      }
-    }
-  }
-  const PHASE_LABELS = {
-    preHandoff: 'pre-handoff',
-    preReview: 'pre-review',
-    preIntegration: 'pre-integration',
-  } as const;
-  for (const [phase, expected] of Object.entries(PHASE_LABELS)) {
-    const value = gates[phase];
-    if (value === undefined) {
-      continue;
-    }
-    if (!Array.isArray(value)) {
-      issues.push(`adapters.gates.${phase} must be an array (${expected} gates)`);
-      continue;
-    }
-    value.forEach((entry, index) => {
-      if (!entry || typeof entry !== 'object') {
-        issues.push(`adapters.gates.${phase}[${index}] must be an object`);
-        return;
-      }
-      if (typeof entry.key !== 'string' || !entry.key) {
-        issues.push(`adapters.gates.${phase}[${index}].key must be a non-empty string`);
-      }
-      if (typeof entry.command !== 'string' || !entry.command.trim()) {
-        issues.push(`adapters.gates.${phase}[${index}].command must be a non-empty string`);
-      }
-      if (entry.order !== undefined && typeof entry.order !== 'number') {
-        issues.push(`adapters.gates.${phase}[${index}].order must be a number`);
-      }
-      if (entry.after !== undefined && (!Array.isArray(entry.after) || entry.after.some((dependency: unknown) => typeof dependency !== 'string' || !dependency))) {
-        issues.push(`adapters.gates.${phase}[${index}].after must be an array of non-empty gate keys`);
-      }
-      if (entry.reuse !== undefined && entry.reuse !== 'never' && entry.reuse !== 'clean-tree') {
-        issues.push(`adapters.gates.${phase}[${index}].reuse must be "never" or "clean-tree"`);
-      }
-    });
-    const seen = new Set<string>();
-    for (const entry of [...value].sort((a, b) => (a?.order ?? 0) - (b?.order ?? 0))) {
-      if (typeof entry?.key !== 'string') { continue; }
-      if (seen.has(entry.key)) { issues.push(`adapters.gates.${phase} has duplicate gate key "${entry.key}"`); }
-      if (Array.isArray(entry.after)) {
-        for (const dependency of entry.after) {
-          if (typeof dependency === 'string' && !seen.has(dependency)) {
-            issues.push(`adapters.gates.${phase} gate "${entry.key}" must depend on an earlier gate, not "${dependency}"`);
-          }
-        }
-      }
-      seen.add(entry.key);
-    }
-  }
-  return issues;
 }
 
 /** Result of running a configured gate. */
@@ -261,8 +130,8 @@ export type GateCommandRunner = (
 
 /** Read a phase's opt-in concurrency limit; serial is the default. */
 export function loadPhaseGateParallelism(rootDir: string, phase: 'preHandoff' | 'preReview' | 'preIntegration'): number {
-  const parallel = (loadEffectiveConfig(rootDir || process.cwd()).adapters as any)?.gates?.parallel?.[phase];
-  return Number.isInteger(parallel) && parallel >= 2 ? parallel : 1;
+  const parallel = (loadEffectiveConfig(rootDir || process.cwd()).adapters as { gates?: GateConfiguration } | undefined)?.gates?.parallel?.[phase];
+  return Number.isInteger(parallel) && (parallel as number) >= 2 ? parallel as number : 1;
 }
 
 /**
@@ -282,8 +151,10 @@ export function loadPhaseGateParallelism(rootDir: string, phase: 'preHandoff' | 
  * unscrubbed would make the `agent-smoke` gate run against an ambient
  * `PARALLIX_REAL_AGENT=codex` from an earlier session.
  */
+function inheritedGateEnvironment(): NodeJS.ProcessEnv { return { ...process.env }; }
+
 /** @param {GatePhase} phase @param {string} slug @param {string} checkoutPath */
-export function buildGateEnv(phase: GatePhase, slug: string, checkoutPath: string, inheritEnv: NodeJS.ProcessEnv = { ...process.env }, extraEnv: { realAgent?: string | null, realAgentModel?: string | null } = {}): NodeJS.ProcessEnv {
+export function buildGateEnv(phase: GatePhase, slug: string, checkoutPath: string, inheritEnv: NodeJS.ProcessEnv = inheritedGateEnvironment(), extraEnv: { realAgent?: string | null, realAgentModel?: string | null } = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...inheritEnv,
     [GATE_ENV.SLUG]: slug,
@@ -310,27 +181,26 @@ export function buildGateEnv(phase: GatePhase, slug: string, checkoutPath: strin
  * @param {GatePhase} phase
  * @param {{slug: string, checkoutPath: string, gates?: RepositoryGate[], commandRunner?: GateCommandRunner, log?: Function, error?: Function}} opts
  */
-export async function runPhaseGates(
-  phase: GatePhase,
-  opts: {
-    configuration?: ParallixConfiguration;
-    verificationEvidence?: IntegrationVerificationEvidencePort;
-    slug: string;
-    checkoutPath: string;
-    gates?: RepositoryGate[];
-    commandRunner?: GateCommandRunner;
-    log?: Function;
-    error?: Function;
-    /** Plan-only: resolve and print the gate list without executing it. */
-    dryRun?: boolean;
-    /** Optional self-development integration agent selection (F4 / TASK-2269). */
-    realAgent?: string | null;
-    realAgentModel?: string | null;
-    /** Override the configured parallelism (mainly for focused tests). */
-    maxParallel?: number;
-  },
-): Promise<PhaseGateRunResult> {
-  const { slug, checkoutPath } = opts;
+export interface PhaseGateOptions {
+  configuration?: ParallixConfiguration;
+  verificationEvidence?: IntegrationVerificationEvidencePort;
+  slug: string;
+  checkoutPath: string;
+  gates?: RepositoryGate[];
+  commandRunner?: GateCommandRunner;
+  log?: GateLog;
+  error?: GateLog;
+  /** Plan-only: resolve and print the gate list without executing it. */
+  dryRun?: boolean;
+  /** Optional self-development integration agent selection (F4 / TASK-2269). */
+  realAgent?: string | null;
+  realAgentModel?: string | null;
+  /** Override the configured parallelism (mainly for focused tests). */
+  maxParallel?: number;
+}
+
+export async function runPhaseGates(phase: GatePhase, opts: PhaseGateOptions): Promise<PhaseGateRunResult> {
+  const { checkoutPath } = opts;
   const gates = opts.gates ?? loadPhaseGates(checkoutPath, toConfigPhase(phase));
   const log = opts.log || fmt.log.plain;
   const error = opts.error || fmt.log.plainError;
@@ -339,6 +209,21 @@ export async function runPhaseGates(
   const skipped = skippedPhaseGateResult(phase, gates, dryRun, log);
   if (skipped) { return skipped; }
 
+  return new PhaseGateExecution(phase, opts, gates, log, error).execute();
+}
+
+function phaseDashboard(phase: GatePhase, opts: PhaseGateOptions, gates: RepositoryGate[], cancelByOperator: () => void): GateDashboard | null {
+  const dashboard = (!opts.log || opts.log === fmt.log.plain) && (!opts.error || opts.error === fmt.log.fail)
+    && process.stdin.isTTY && process.stdout.isTTY && !process.stdin.isRaw
+    ? new GateDashboard(phase, gates.map(gate => gate.key), cancelByOperator) : null;
+
+  return dashboard;
+}
+
+function phaseExecutionState(phase: GatePhase, opts: PhaseGateOptions, gates: RepositoryGate[], log: GateLog, error: GateLog) {
+
+  const { slug, checkoutPath } = opts;
+
   // Execute through `bash -c`, the same shell mechanism the handoff declared
   // gate runner and the integration gate use, so configured commands may be
   // arbitrary shell (pipelines, redirects, `./scripts/...`), not just bare
@@ -346,117 +231,153 @@ export async function runPhaseGates(
   // runner captures each gate's streams so concurrent output can later be
   // rendered as distinct sections instead of interleaving byte-by-byte.
   const runner = opts.commandRunner || runGateCommand;
+
   const env = buildGateEnv(phase, slug, checkoutPath, opts.configuration?.forwardedEnvironment ?? { ...process.env }, { realAgent: opts.realAgent, realAgentModel: opts.realAgentModel });
+
   const maxParallel = opts.maxParallel ?? loadPhaseGateParallelism(checkoutPath, toConfigPhase(phase));
+
   const phaseStarted = Date.now();
+
   const controller = new globalThis.AbortController();
-  let operatorCancelled = false;
-  const cancelByOperator = () => { operatorCancelled = true; controller.abort(); };
-  const dashboard = (!opts.log || opts.log === fmt.log.plain) && (!opts.error || opts.error === fmt.log.fail)
-    && process.stdin.isTTY && process.stdout.isTTY && !process.stdin.isRaw
-    ? new GateDashboard(phase, gates.map(gate => gate.key), cancelByOperator) : null;
+
+  const cancellation = { operatorCancelled: false };
+
+  const cancelByOperator = () => { cancellation.operatorCancelled = true; controller.abort(); };
+
+  const dashboard = phaseDashboard(phase, opts, gates, cancelByOperator);
+
   const liveSerial = maxParallel === 1 && !dashboard && !opts.commandRunner && (!opts.log || opts.log === fmt.log.plain);
 
-  let failedGate: GateRunOutcome | null = null;
-  let errorText: string | null = null;
+  const failure: { failedGate: GateRunOutcome | null; errorText: string | null } = { failedGate: null, errorText: null };
+
   let executed = 0;
+
   const outcomes: GateRunOutcome[] = [];
 
   const coverage = phase === 'integration' ? opts.verificationEvidence?.start(checkoutPath, gates) : null;
-  const pending = [...gates];
-  const completed = new Set<string>();
-  const running = new Set<Promise<GateRunOutcome>>();
-  while (pending.length > 0 || running.size > 0) {
-    while (failedGate === null && !controller.signal.aborted && running.size < maxParallel) {
-      const index = pending.findIndex(gate => (gate.after || []).every(dependency => completed.has(dependency)));
-      if (index < 0) { break; }
-      const gate = pending.splice(index, 1)[0];
-      if (dashboard) { dashboard.startGate(gate.key); }
-      else { log(`Repository gate (${phase}): ${gate.key} started (${running.size + 1}/${maxParallel} active).`); }
-      const started = Date.now();
-      // Delay proof loading until a clean-tree gate actually runs. This keeps
-      // bootstrap-only gate planning independent of Git verification modules.
-      const verification = gate.reuse === 'clean-tree'
-        ? await import('../verification/' + 'verification.js') : null;
-      const proofContext = JSON.stringify({ phase, slug, checkoutPath: path.resolve(checkoutPath), gate: gate.key });
-      const reusable: { ok: boolean; identity?: string; error?: string } = gate.reuse === 'clean-tree'
-        ? verification!.readReusableVerificationProof(gate.command, checkoutPath, { context: proofContext, configuration: opts.configuration }) : { ok: false, identity: undefined, error: 'reuse disabled' };
-      if (reusable.ok) {
-        const outcome = Promise.resolve({ key: gate.key, command: gate.command, exitCode: 0, stdout: 'reused exact clean-tree proof', stderr: '', durationMs: 0 });
-        running.add(outcome);
-        continue;
-      }
-      // Reuse the freshly checked identity snapshot returned even on a cache miss.
-      const beforeProof = { ok: Boolean(reusable.identity), identity: reusable.identity, error: reusable.error };
-      const run = Promise.resolve().then(() => runner(gate.command, [], { cwd: path.resolve(checkoutPath), env, stdio: 'pipe', signal: controller.signal,
-        forwardOutput: liveSerial,
-        onOutput: chunk => dashboard?.append(gate.key, chunk) }))
-        .then(result => {
-          const exitCode = typeof result.status === 'number' ? result.status : null;
-          if (exitCode === 0 && gate.reuse === 'clean-tree') {
-            const persisted = beforeProof.ok
-              ? verification!.writeReusableVerificationProof(gate.command, checkoutPath, { context: proofContext, configuration: opts.configuration, expectedIdentity: beforeProof.identity })
-              : beforeProof;
-            return { key: gate.key, command: gate.command, exitCode, stdout: String(result.stdout || ''), stderr: persisted.ok ? String(result.stderr || '') : `${String(result.stderr || '')}\nproof unavailable: ${persisted.error}`, durationMs: Date.now() - started };
-          }
-          return { key: gate.key, command: gate.command, exitCode, stdout: String(result.stdout || ''), stderr: String(result.stderr || ''), durationMs: Date.now() - started };
-        })
-        .catch(cause => ({ key: gate.key, command: gate.command, exitCode: null, stdout: '', stderr: String(cause), durationMs: Date.now() - started }));
-      running.add(run);
-    }
-    if (running.size === 0 && failedGate === null && !controller.signal.aborted) {
-      const gate = pending[0];
-      errorText = `Repository gate "${gate.key}" has unresolved dependencies for ${phase}.`;
-      failedGate = { key: gate.key, command: gate.command, exitCode: null, stdout: '', stderr: errorText };
-      if (!dashboard) { error(errorText); }
-      break;
-    }
-    if (running.size === 0) { break; }
-    const { run, outcome } = await Promise.race([...running].map(run => run.then(outcome => ({ run, outcome }))));
-    running.delete(run);
-    executed++;
-    outcomes.push(outcome);
-    dashboard?.finishGate(outcome.key, outcome.exitCode, [outcome.stdout, outcome.stderr].filter(Boolean).join('\n'), outcome.durationMs ?? 0, controller.signal.aborted);
-    if (!dashboard && !liveSerial && outcome.exitCode !== 0) { renderGateOutput(phase, outcome, log); }
-    if (outcome.exitCode !== 0 && failedGate === null) {
-      failedGate = outcome;
-      errorText = `Repository gate "${outcome.key}" exited with code ${outcome.exitCode ?? 'unknown'} for ${phase}.`;
-      if (!dashboard) { log(`Repository gate (${phase}): ${outcome.key} failed.`); error(errorText); }
-      controller.abort();
-    } else if (outcome.exitCode === 0) {
-      completed.add(outcome.key);
-      if (!dashboard) { log(`Repository gate (${phase}): ${outcome.key} passed.`); }
-    }
-  }
 
-  dashboard?.close();
-  if (dashboard) {
-    log(`Repository gates (${phase}): ${operatorCancelled ? 'cancelled' : failedGate ? 'failed' : 'passed'}; ${executed}/${gates.length} completed in ${((Date.now() - phaseStarted) / 1000).toFixed(1)}s.`);
-    for (const gate of gates) {
-      const outcome = outcomes.find(item => item.key === gate.key);
-      log(`  ${outcome ? controller.signal.aborted && outcome !== failedGate && outcome.exitCode !== 0 ? '×' : outcome.exitCode === 0 ? '✓' : '✗' : '·'} ${gate.key}${outcome ? ` ${((outcome.durationMs ?? 0) / 1000).toFixed(1)}s` : ' not run'}`);
-    }
-    if (failedGate && !operatorCancelled) { renderGateOutput(phase, failedGate, error); }
-  }
-  if (operatorCancelled) { errorText = `Repository gates (${phase}) cancelled.`; }
-  if (coverage && failedGate === null && !controller.signal.aborted) {
-    coverage.complete(outcomes);
-  }
-  return {
-    ok: failedGate === null && !controller.signal.aborted,
-    phase,
-    gates,
-    executed,
-    skipped: false,
-    dryRun: false,
-    cancelled: operatorCancelled,
-    failedGate,
-    outcomes,
-    error: errorText,
-  };
+  const pending = [...gates];
+
+  const completed = new Set<string>();
+
+  const running = new Set<Promise<GateRunOutcome>>();
+  return { phase, opts, gates, log, error, slug, checkoutPath, runner, env, maxParallel, phaseStarted, controller, cancelByOperator, dashboard, liveSerial, failure, executed, outcomes, coverage, pending, completed, running, cancellation };
 }
 
-function renderGateOutput(phase: GatePhase, outcome: GateRunOutcome, log: Function): void {
+class PhaseGateExecution {
+  private readonly state: ReturnType<typeof phaseExecutionState>;
+  constructor(phase: GatePhase, opts: PhaseGateOptions, gates: RepositoryGate[], log: GateLog, error: GateLog) { this.state = phaseExecutionState(phase, opts, gates, log, error); }
+
+  async startPending(): Promise<void> {
+    while (this.state.failure.failedGate === null && !this.state.controller.signal.aborted && this.state.running.size < this.state.maxParallel) {
+      const index = this.state.pending.findIndex(gate => (gate.after || []).every(dependency => this.state.completed.has(dependency)));
+      if (index < 0) { break; }
+      const gate = this.state.pending.splice(index, 1)[0];
+      if (this.state.dashboard) { this.state.dashboard.startGate(gate.key); }
+      else { this.state.log(`Repository gate (${this.state.phase}): ${gate.key} started (${this.state.running.size + 1}/${this.state.maxParallel} active).`); }
+      const verification = gate.reuse === 'clean-tree'
+        ? await import('../verification/' + 'verification.js') as ReusableVerificationProofPort : null;
+      this.state.running.add(this.launchGate(gate, verification));
+    }
+  }
+
+  launchGate(gate: RepositoryGate, verification: ReusableVerificationProofPort | null): Promise<GateRunOutcome> {
+    const started = Date.now();
+    // Delay proof loading until a clean-tree gate actually runs. This keeps
+    // bootstrap-only gate planning independent of Git verification modules.
+    const proofContext = JSON.stringify({ phase: this.state.phase, slug: this.state.slug, checkoutPath: path.resolve(this.state.checkoutPath), gate: gate.key });
+    const reusable: { ok: boolean; identity?: string; error?: string } = gate.reuse === 'clean-tree'
+      ? verification!.readReusableVerificationProof(gate.command, this.state.checkoutPath, { context: proofContext, configuration: this.state.opts.configuration }) : { ok: false, identity: undefined, error: 'reuse disabled' };
+    if (reusable.ok) {
+      const outcome = Promise.resolve({ key: gate.key, command: gate.command, exitCode: 0, stdout: 'reused exact clean-tree proof', stderr: '', durationMs: 0 });
+      return outcome;
+    }
+    // Reuse the freshly checked identity snapshot returned even on a cache miss.
+    const beforeProof = { ok: Boolean(reusable.identity), identity: reusable.identity, error: reusable.error };
+    const run = Promise.resolve().then(() => this.state.runner(gate.command, [], {
+      cwd: path.resolve(this.state.checkoutPath), env: this.state.env, stdio: 'pipe', signal: this.state.controller.signal,
+      forwardOutput: this.state.liveSerial,
+      onOutput: chunk => this.state.dashboard?.append(gate.key, chunk)
+    }))
+      .then(result => {
+        const exitCode = typeof result.status === 'number' ? result.status : null;
+        if (exitCode === 0 && gate.reuse === 'clean-tree') {
+          const persisted = beforeProof.ok
+            ? verification!.writeReusableVerificationProof(gate.command, this.state.checkoutPath, { context: proofContext, configuration: this.state.opts.configuration, expectedIdentity: beforeProof.identity })
+            : beforeProof;
+          return { key: gate.key, command: gate.command, exitCode, stdout: String(result.stdout || ''), stderr: persisted.ok ? String(result.stderr || '') : `${String(result.stderr || '')}\nproof unavailable: ${persisted.error}`, durationMs: Date.now() - started };
+        }
+        return { key: gate.key, command: gate.command, exitCode, stdout: String(result.stdout || ''), stderr: String(result.stderr || ''), durationMs: Date.now() - started };
+      })
+      .catch(cause => ({ key: gate.key, command: gate.command, exitCode: null, stdout: '', stderr: String(cause), durationMs: Date.now() - started }));
+    return run;
+  }
+
+  settleOutcome(run: Promise<GateRunOutcome>, outcome: GateRunOutcome): void {
+    this.state.running.delete(run);
+    this.state.executed++;
+    this.state.outcomes.push(outcome);
+    this.state.dashboard?.finishGate(outcome.key, outcome.exitCode, [outcome.stdout, outcome.stderr].filter(Boolean).join('\n'), outcome.durationMs ?? 0, this.state.controller.signal.aborted);
+    if (!this.state.dashboard && !this.state.liveSerial && outcome.exitCode !== 0) { renderGateOutput(this.state.phase, outcome, this.state.log); }
+    if (outcome.exitCode !== 0 && this.state.failure.failedGate === null) {
+      this.state.failure.failedGate = outcome;
+      this.state.failure.errorText = `Repository gate "${outcome.key}" exited with code ${outcome.exitCode ?? 'unknown'} for ${this.state.phase}.`;
+      if (!this.state.dashboard) { this.state.log(`Repository gate (${this.state.phase}): ${outcome.key} failed.`); this.state.error(this.state.failure.errorText); }
+      this.state.controller.abort();
+    } else if (outcome.exitCode === 0) {
+      this.state.completed.add(outcome.key);
+      if (!this.state.dashboard) { this.state.log(`Repository gate (${this.state.phase}): ${outcome.key} passed.`); }
+    }
+  }
+
+  reportDashboard(): void {
+    if (this.state.dashboard) {
+      this.state.log(`Repository gates (${this.state.phase}): ${this.state.cancellation.operatorCancelled ? 'cancelled' : this.state.failure.failedGate ? 'failed' : 'passed'}; ${this.state.executed}/${this.state.gates.length} completed in ${((Date.now() - this.state.phaseStarted) / 1000).toFixed(1)}s.`);
+      for (const gate of this.state.gates) {
+        const outcome = this.state.outcomes.find(item => item.key === gate.key);
+        this.state.log(`  ${outcome ? this.state.controller.signal.aborted && outcome !== this.state.failure.failedGate && outcome.exitCode !== 0 ? '×' : outcome.exitCode === 0 ? '✓' : '✗' : '·'} ${gate.key}${outcome ? ` ${((outcome.durationMs ?? 0) / 1000).toFixed(1)}s` : ' not run'}`);
+      }
+      if (this.state.failure.failedGate && !this.state.cancellation.operatorCancelled) { renderGateOutput(this.state.phase, this.state.failure.failedGate, this.state.error); }
+    }
+  }
+
+  async execute(): Promise<PhaseGateRunResult> {
+    while (this.state.pending.length > 0 || this.state.running.size > 0) {
+      await this.startPending();
+      if (this.state.running.size === 0 && this.state.failure.failedGate === null && !this.state.controller.signal.aborted) {
+        const gate = this.state.pending[0];
+        this.state.failure.errorText = `Repository gate "${gate.key}" has unresolved dependencies for ${this.state.phase}.`;
+        this.state.failure.failedGate = { key: gate.key, command: gate.command, exitCode: null, stdout: '', stderr: this.state.failure.errorText };
+        if (!this.state.dashboard) { this.state.error(this.state.failure.errorText); }
+        break;
+      }
+      if (this.state.running.size === 0) { break; }
+      const { run, outcome } = await Promise.race([...this.state.running].map(run => run.then(outcome => ({ run, outcome }))));
+      this.settleOutcome(run, outcome);
+    }
+    this.state.dashboard?.close();
+    this.reportDashboard();
+    if (this.state.cancellation.operatorCancelled) { this.state.failure.errorText = `Repository gates (${this.state.phase}) cancelled.`; }
+    if (this.state.coverage && this.state.failure.failedGate === null && !this.state.controller.signal.aborted) {
+      this.state.coverage.complete(this.state.outcomes);
+    }
+    return {
+      ok: this.state.failure.failedGate === null && !this.state.controller.signal.aborted,
+      phase: this.state.phase,
+      gates: this.state.gates,
+      executed: this.state.executed,
+      skipped: false,
+      dryRun: false,
+      cancelled: this.state.cancellation.operatorCancelled,
+      failedGate: this.state.failure.failedGate,
+      outcomes: this.state.outcomes,
+      error: this.state.failure.errorText,
+    };
+
+  }
+}
+
+function renderGateOutput(phase: GatePhase, outcome: GateRunOutcome, log: GateLog): void {
   log(`\n--- Repository gate (${phase}): ${outcome.key} output (exit ${outcome.exitCode ?? 'unknown'}) ---`);
   log(`Command: ${outcome.command}`);
   if (outcome.stdout) { log(outcome.stdout.trimEnd()); }
@@ -464,7 +385,7 @@ function renderGateOutput(phase: GatePhase, outcome: GateRunOutcome, log: Functi
   log(`--- End repository gate (${phase}): ${outcome.key} ---`);
 }
 
-function skippedPhaseGateResult(phase: GatePhase, gates: RepositoryGate[], dryRun: boolean, log: Function): PhaseGateRunResult | null {
+function skippedPhaseGateResult(phase: GatePhase, gates: RepositoryGate[], dryRun: boolean, log: GateLog): PhaseGateRunResult | null {
   if (dryRun) {
     log(gates.length === 0 ? `Repository gates (${phase}): none configured — dry run, nothing to plan.` : `Repository gates (${phase}): dry run — resolved plan (nothing executes):`);
     for (const gate of gates) { log(`  [${gate.order}] ${gate.key}: ${gate.command}`); }
@@ -479,5 +400,5 @@ function skippedPhaseGateResult(phase: GatePhase, gates: RepositoryGate[], dryRu
 
 /** @param {GatePhase} phase */
 function toConfigPhase(phase: GatePhase): 'preHandoff' | 'preReview' | 'preIntegration' {
-  return `pre${phase.charAt(0).toUpperCase() + phase.slice(1)}` as any;
+  return ({ handoff: 'preHandoff', review: 'preReview', integration: 'preIntegration' } as const)[phase];
 }

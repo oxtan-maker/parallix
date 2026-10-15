@@ -1,10 +1,29 @@
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
+import type { GitOptions, GitResult } from '../git/git.js';
 import { git } from '../git/git.js';
 import { getPrimaryBranch } from '../filesystem/mission-utils.js';
 import { resolveForgejoAuth, resolveForgejoUser } from './forgejo-auth.js';
 import { forgejoApi, codexSandboxHint } from './forgejo-api.js';
+import type { ForgejoApiCall, ForgejoLogFn, ForgejoPrLookupFailure, ForgejoPullRequest } from './forgejo-types.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { authenticatedReviewUrl, getPrNumber, isApiErrorResult } from './forgejo-pr.js';
+
+/**
+ * Injectable git seams for the review remote. Declaring them as ports keeps the
+ * sync-merged flow testable without reaching for `Function`/`any`.
+ */
+export type GitRunner = (args: string[], options?: GitOptions) => GitResult;
+export type ReviewRefAuthOptions = { user?: string; token?: string | null; configuration?: ParallixConfiguration };
+export type PushReviewRefOptions = ReviewRefAuthOptions & {
+  force?: boolean;
+  forceWithLease?: boolean;
+  forceWithLeaseRef?: string;
+};
+export type ReviewRefPush = (sourceRef: string, destinationRef: string, rootDir?: string, options?: PushReviewRefOptions) => GitResult;
+export type ReviewRefFetch = (branch: string, rootDir?: string, options?: ReviewRefAuthOptions) => GitResult;
+export type ReviewRefDelete = (branch: string, rootDir?: string, options?: ReviewRefAuthOptions) => GitResult;
+export type CommitAncestryCheck = (commit: string, remoteRef?: string, rootDir?: string) => GitResult;
+export type CommitExistenceCheck = (commit: string, rootDir?: string) => GitResult;
 
 /**
  * @param {string} user
@@ -15,7 +34,7 @@ import { authenticatedReviewUrl, getPrNumber, isApiErrorResult } from './forgejo
  */
 function syncPrimaryBaseline(user: string, token: string, rootDir: string = process.cwd(), {
   gitRunner = git
-} = {}) {
+}: { gitRunner?: GitRunner } = {}) {
   let primaryBranchName = 'main';
   try {
     primaryBranchName = getPrimaryBranch(rootDir);
@@ -54,7 +73,7 @@ function syncPrimaryBaseline(user: string, token: string, rootDir: string = proc
  */
 function ensureRemoteBaseBranch(baseBranch: string, user: string, token: string, rootDir: string = process.cwd(), {
   gitRunner = git
-} = {}) {
+}: { gitRunner?: GitRunner } = {}) {
   // A feature-branch mission opens its PR against a non-primary base branch.
   // syncPrimaryBaseline only mirrors the primary branch, so the PR base would
   // not exist on the review remote and PR creation would fail server-side.
@@ -89,7 +108,7 @@ function ensureRemoteBaseBranch(baseBranch: string, user: string, token: string,
  * @param {{force?: boolean, forceWithLease?: boolean, user?: string, token?: string}} [opts]
  * @returns {*}
  */
-function pushReviewRef(sourceRef: string, destinationRef: string, rootDir: string = process.cwd(), options?: { configuration?: ParallixConfiguration; force?: boolean, forceWithLease?: boolean, forceWithLeaseRef?: string, user?: string, token?: string }) {
+function pushReviewRef(sourceRef: string, destinationRef: string, rootDir: string = process.cwd(), options?: { configuration?: ParallixConfiguration; force?: boolean, forceWithLease?: boolean, forceWithLeaseRef?: string, user?: string, token?: string | null }) {
   const {
     force = false,
     forceWithLease = false,
@@ -123,7 +142,7 @@ function pushReviewRef(sourceRef: string, destinationRef: string, rootDir: strin
  * @param {{user?: string, token?: string}} options
  * @returns {*}
  */
-function fetchReviewBranch(branch: string, rootDir: string = process.cwd(), options: any = {}) {
+function fetchReviewBranch(branch: string, rootDir: string = process.cwd(), options: ReviewRefAuthOptions = {}) {
    const { user, token } = options || {};
   const source = token
     ? authenticatedReviewUrl(user || resolveForgejoUser(undefined, options?.configuration), token, rootDir, options?.configuration)
@@ -139,7 +158,7 @@ function fetchReviewBranch(branch: string, rootDir: string = process.cwd(), opti
 }
 
 /** @param {string} branch @param {string} rootDir @returns {{ok: boolean, ref?: string, sha?: string, error?: string}} */
-function resolveTrackingBranchSha(branch: string, rootDir: string = process.cwd()) {
+function resolveTrackingBranchSha(branch: string, rootDir: string = process.cwd()): TrackingRefResolution {
   const candidateRefs = [`refs/remotes/review/${branch}`];
   for (const ref of candidateRefs) {
     const result = git(['-C', rootDir, 'rev-parse', '--verify', `${ref}^{commit}`], {
@@ -156,14 +175,16 @@ function resolveTrackingBranchSha(branch: string, rootDir: string = process.cwd(
   };
 }
 
-function fetchTrackingBranchSha(branch: string, rootDir: string, gitFetch: Function) {
+type TrackingRefResolution = { ok: true; ref?: string; sha?: string; firstPush?: boolean } | { ok: false; error: string };
+
+function fetchTrackingBranchSha(branch: string, rootDir: string, gitFetch: ReviewRefFetch): TrackingRefResolution {
   const result = gitFetch(branch, rootDir);
   if (result.status === 0) { return resolveTrackingBranchSha(branch, rootDir); }
   if (isMissingRemoteRef(result)) { return { ok: true, firstPush: true }; }
   return { ok: false, error: `failed to fetch tracking ref for ${branch}: ${pushOutput(result) || 'git fetch failed'}` };
 }
 
-function forceWithLeaseArgument(branch: string, rootDir: string, remoteUrl: string, gitFetch: Function, refreshTrackingRef: boolean): { ok: boolean; pushArgs?: string[]; lease?: string; error?: string } {
+function forceWithLeaseArgument(branch: string, rootDir: string, remoteUrl: string, gitFetch: ReviewRefFetch, refreshTrackingRef: boolean): { ok: boolean; pushArgs?: string[]; lease?: string; error?: string } {
   if (refreshTrackingRef) {
     const refreshed = gitFetch(branch, rootDir);
     if (refreshed.status !== 0) {
@@ -173,8 +194,8 @@ function forceWithLeaseArgument(branch: string, rootDir: string, remoteUrl: stri
   }
   let tracked = resolveTrackingBranchSha(branch, rootDir);
   if (!tracked.ok && !refreshTrackingRef) {
-    const fetched: any = fetchTrackingBranchSha(branch, rootDir, gitFetch);
-    if (fetched.firstPush) { return { ok: true, pushArgs: ['-C', rootDir, 'push', remoteUrl, branch] }; }
+    const fetched = fetchTrackingBranchSha(branch, rootDir, gitFetch);
+    if (fetched.ok && fetched.firstPush) { return { ok: true, pushArgs: ['-C', rootDir, 'push', remoteUrl, branch] }; }
     if (!fetched.ok) { return fetched; }
     tracked = fetched;
   }
@@ -189,8 +210,12 @@ function forceWithLeaseArgument(branch: string, rootDir: string, remoteUrl: stri
  * @param {{force?: boolean, forceWithLease?: boolean, gitFetch?: Function, refreshTrackingRef?: boolean}} [options]
  * @returns {{ok: boolean, pushArgs?: string[], error?: string}}
  */
-function buildCreatePrPushArgs(branch: string, remoteUrl: string, rootDir: string = process.cwd(), options: any = {}) {
-  /** @type {{force?: boolean, forceWithLease?: boolean, gitFetch?: Function, refreshTrackingRef?: boolean}} */
+function buildCreatePrPushArgs(branch: string, remoteUrl: string, rootDir: string = process.cwd(), options: {
+  force?: boolean;
+  forceWithLease?: boolean;
+  gitFetch?: ReviewRefFetch;
+  refreshTrackingRef?: boolean;
+} = {}) {
   const {
     force = false,
     forceWithLease = false,
@@ -216,7 +241,7 @@ function buildCreatePrPushArgs(branch: string, remoteUrl: string, rootDir: strin
  * @param {{user?: string, token?: string}} [opts]
  * @returns {*}
  */
-function deleteReviewRef(branch: string, rootDir: string = process.cwd(), options?: { configuration?: ParallixConfiguration; user?: string, token?: string }) {
+function deleteReviewRef(branch: string, rootDir: string = process.cwd(), options?: { configuration?: ParallixConfiguration; user?: string, token?: string | null }) {
    const { user, token } = options || {};
    const remote = token
      ? authenticatedReviewUrl(user || resolveForgejoUser(undefined, options?.configuration), token, rootDir, options?.configuration)
@@ -257,7 +282,7 @@ function reconcileForgejoBase({
   gitFetch: typeof fetchReviewBranch;
   gitRunner: typeof git;
   gitPush: typeof pushReviewRef;
-  log: typeof fmt.log.info;
+  log: ForgejoLogFn;
 }): { ok: true, action: 'unchanged' | 'fast-forward' | 'force-with-lease', oldSha: string, newSha: string, diagnostic: string } | { ok: false, error: string, raw?: string, remoteSha?: string, localSha?: string, remoteTree?: string, localTree?: string, diagnostic: string } {
   const remoteRef = `refs/remotes/review/${primaryBranch}`;
   // Refresh our view of Forgejo's base before reading or leasing it. A stale
@@ -336,7 +361,7 @@ function cLocaleEnv(): Record<string, string> {
 }
 
 /** @param {{stderr?: string, stdout?: string}} result @returns {string} */
-function pushOutput(result: { stderr?: string, stdout?: string }): string {
+function pushOutput(result: { stderr?: string | null, stdout?: string | null }): string {
   return [result && result.stderr, result && result.stdout]
     .filter(Boolean)
     .join('\n')
@@ -356,45 +381,73 @@ function isMissingRemoteRef(result: { stderr?: string, stdout?: string }): boole
 }
 
 /** @param {{status?: number, stderr?: string, stdout?: string}} result @returns {boolean} */
-function isStaleInfoPushRejection(result: { status: number | null, stderr?: string, stdout?: string }): boolean {
+function isStaleInfoPushRejection(result: { status: number | null, stderr?: string | null, stdout?: string | null }): boolean {
   return result && result.status !== 0 && /\bstale info\b|\bstale ref\b|fetch first/i.test(pushOutput(result));
 }
 
 
-function syncMerged(branch: string, mergedCommit: string, options: any = {}) {
-  /** @type {{forgejoUser?: string, rootDir?: string, token?: string|null, baseBranch?: string|null, apiCall?: Function, resolvePrNumber?: Function, gitPush?: Function, gitFetch?: Function, gitContainsCommit?: Function, gitDelete?: Function, verifyCommit?: Function, log?: Function}} */
-  const {
-    forgejoUser,
-    rootDir = process.cwd(),
-    token: providedToken,
-    baseBranch = null,
-    apiCall = forgejoApi,
-    resolvePrNumber = getPrNumber,
-    gitPush = pushReviewRef,
-    gitFetch = fetchReviewBranch,
-    gitContainsCommit = remoteRefContainsCommit,
-    gitDelete = deleteReviewRef,
-    verifyCommit = verifyCommitExists,
-    gitRunner = git,
-    log = fmt.log.info
-  } = options;
+/** Ports the sync-merged flow drives. Every one is a seam a test can replace. */
+type SyncMergedPorts = {
+  forgejoUser?: string;
+  rootDir?: string;
+  token?: string | null;
+  baseBranch?: string | null;
+  apiCall?: ForgejoApiCall;
+  resolvePrNumber?: (branch: string, token: string, options: Record<string, unknown>) => number | null | ForgejoPrLookupFailure;
+  gitPush?: ReviewRefPush;
+  gitFetch?: ReviewRefFetch;
+  gitContainsCommit?: CommitAncestryCheck;
+  gitDelete?: ReviewRefDelete;
+  verifyCommit?: CommitExistenceCheck;
+  gitRunner?: GitRunner;
+  log?: ForgejoLogFn;
+  configuration?: ParallixConfiguration;
+  slug?: string | null;
+  [key: string]: unknown;
+};
 
-  if (!branch) {
-    return { ok: false, error: 'missing-branch' };
+type SyncMergedResult = {
+  ok: boolean;
+  error?: string;
+  prNumber?: number;
+  statusCode?: number | null;
+  raw?: string;
+  branchDeleted?: boolean;
+  expected?: string;
+  baseSha?: string | null;
+  headSha?: string | null;
+  diagnostic?: string;
+  remoteSha?: string;
+  localSha?: string;
+  remoteTree?: string;
+  localTree?: string;
+};
+
+type SyncMergedGitPorts = {
+  forgejoUser?: string;
+  token: string;
+  rootDir: string;
+  gitPush: ReviewRefPush;
+  gitFetch: ReviewRefFetch;
+  log: ForgejoLogFn;
+};
+
+/** The branch a mission lands back onto when it recorded no base of its own. */
+function resolvePrimaryBranchForSync(rootDir: string): string {
+  try {
+    return getPrimaryBranch(rootDir);
+  } catch (_) {
+    return 'main';
   }
+}
 
-  if (!mergedCommit) {
-    return { ok: false, error: 'missing-merged-commit' };
-  }
-
-  const { token } = resolveForgejoAuth({ forgejoUser, token: providedToken || undefined, rootDir, configuration: options.configuration });
-  if (!token) {
-    return { ok: false, error: 'missing-token' };
-  }
-
-  const slugMatch = branch.match(/^mission\/(task-\d+)/);
-  const slug = slugMatch ? slugMatch[1] : null;
-
+/** Resolve the PR the landed commit belongs to, or the reason it cannot be found. */
+function resolveSyncMergedPr(
+  branch: string,
+  token: string,
+  ports: { rootDir: string; slug: string | null; resolvePrNumber: NonNullable<SyncMergedPorts['resolvePrNumber']> }
+): { ok: true; prNumber: number } | { ok: false; error: string; raw?: string } {
+  const { rootDir, slug, resolvePrNumber } = ports;
   const prNumber = resolvePrNumber(branch, token, { slug, rootDir });
   if (isApiErrorResult(prNumber)) {
     const apiErr = prNumber._apiError || {};
@@ -404,93 +457,50 @@ function syncMerged(branch: string, mergedCommit: string, options: any = {}) {
       raw: `failed to resolve PR for ${branch}${(apiErr.status || 0) === 7 ? ` (${codexSandboxHint()})` : ''}`
     };
   }
-  if (!prNumber) {
-    return { ok: false, error: 'pr-not-found' };
-  }
+  if (!prNumber) { return { ok: false, error: 'pr-not-found' }; }
+  return { ok: true, prNumber };
+}
 
-  const commitResult = verifyCommit(mergedCommit, rootDir);
-  if (commitResult.status !== 0) {
-    return { ok: false, error: 'missing-commit' };
-  }
-
-  const verifyMergeState = (/** @type {number} */ statusCode: any) => {
-    const prDetails = apiCall('GET', `/pulls/${prNumber}`, token, undefined, { rootDir });
-    if (!prDetails.ok) {
-      return { ok: false, error: 'merge-verify-failed', prNumber, statusCode: prDetails.statusCode };
-    }
-
-    const pr = prDetails.data || {};
-    const baseSha = pr.base ? pr.base.sha : null;
-    const headSha = pr.head ? pr.head.sha : null;
-    const shaMatch = (/** @type {string|null} */ a: any, /** @type {string|null} */ b: any) => a && b && (a === b || b.startsWith(a));
-    if (shaMatch(baseSha, mergedCommit) && shaMatch(headSha, mergedCommit)) {
-      log(`PR #${prNumber} (${branch}): confirmed head/base match ${mergedCommit} (already merged)`);
-      return { ok: true };
-    }
-
-    return {
-      ok: false,
-      error: 'merge-conflict-sha-mismatch',
-      prNumber,
-      statusCode,
-      expected: mergedCommit,
-      baseSha,
-      headSha
-    };
-  };
-
-  // The mission lands back onto its recorded base branch, which is the primary
-  // branch (main) for normal missions but a feature branch (e.g. skunkworks) for
-  // missions started from a feature branch. Pushing the squash commit anywhere
-  // other than that base branch is a non-fast-forward and is rejected.
-  let primaryBranch = baseBranch;
-  if (!primaryBranch) {
-    try {
-      primaryBranch = getPrimaryBranch(rootDir);
-    } catch (_) {
-      primaryBranch = 'main';
-    }
-  }
-  // Reconcile Forgejo's recorded base with the authoritative local base before
-  // the landed commit is pushed (task-2520). Local base is the integration
-  // authority; Forgejo is a review mirror. A rewritten or diverged local base
-  // otherwise leaves Forgejo's base stale, so the landed-commit push below is a
-  // non-fast-forward and fails with `push-primary-failed`. Reconcile first so
-  // that push is always a fast-forward (SC1 / SC2). A content-different base is
-  // refused before any force push (SC3).
-  const reconcile = reconcileForgejoBase({
-    primaryBranch,
-    rootDir,
-    forgejoUser,
-    token,
-    gitFetch,
-    gitRunner,
-    gitPush,
-    log
-  });
-  if (!reconcile.ok) {
-    log(`PR #${prNumber} (${branch}): ${reconcile.diagnostic}`);
-    return reconcile;
-  }
-  if (reconcile.action === 'force-with-lease' || reconcile.action === 'fast-forward') {
-    log(`PR #${prNumber} (${branch}): Forgejo ${primaryBranch} reconciled ${reconcile.oldSha.slice(0, 12)} → ${reconcile.newSha.slice(0, 12)} before landing landed commit.`);
-  }
-
+/**
+ * Push the landed commit onto the review remote's base branch. A rejected push
+ * is accepted when the freshly fetched remote ref already contains the commit,
+ * which is the case when an earlier attempt landed but its response was lost.
+ */
+function pushLandedCommitToBase(
+  prNumber: number,
+  branch: string,
+  primaryBranch: string,
+  mergedCommit: string,
+  ports: SyncMergedGitPorts & { gitContainsCommit: CommitAncestryCheck }
+): SyncMergedResult | null {
+  const { forgejoUser, token, rootDir, gitPush, gitFetch, gitContainsCommit, log } = ports;
   log(`PR #${prNumber} (${branch}): pushing landed commit ${mergedCommit} to Forgejo ${primaryBranch}...`);
   const pushMasterResult = gitPush(mergedCommit, `refs/heads/${primaryBranch}`, rootDir, { user: forgejoUser, token });
-  if (pushMasterResult.status !== 0) {
-    log(`PR #${prNumber} (${branch}): ${primaryBranch} push failed; checking whether review/${primaryBranch} already contains ${mergedCommit}`);
-    const fetchMasterResult = gitFetch(primaryBranch, rootDir, { user: forgejoUser, token });
-    const containsResult = fetchMasterResult.status === 0
-      ? gitContainsCommit(mergedCommit, `refs/remotes/review/${primaryBranch}`, rootDir)
-      : { status: 1 };
-    if (containsResult.status === 0) {
-      log(`PR #${prNumber} (${branch}): review/${primaryBranch} already contains ${mergedCommit}; continuing sync-merged closeout`);
-    } else {
-      return { ok: false, error: 'push-primary-failed', prNumber, raw: pushOutput(pushMasterResult) };
-    }
+  if (pushMasterResult.status === 0) { return null; }
+  log(`PR #${prNumber} (${branch}): ${primaryBranch} push failed; checking whether review/${primaryBranch} already contains ${mergedCommit}`);
+  const fetchMasterResult = gitFetch(primaryBranch, rootDir, { user: forgejoUser, token });
+  const containsResult = fetchMasterResult.status === 0
+    ? gitContainsCommit(mergedCommit, `refs/remotes/review/${primaryBranch}`, rootDir)
+    : { status: 1 as number | null, signal: null, stdout: '', stderr: '', error: null };
+  if (containsResult.status === 0) {
+    log(`PR #${prNumber} (${branch}): review/${primaryBranch} already contains ${mergedCommit}; continuing sync-merged closeout`);
+    return null;
   }
+  return { ok: false, error: 'push-primary-failed', prNumber, raw: pushOutput(pushMasterResult) };
+}
 
+/**
+ * Point the mission branch ref at the landed squash commit. The squash commit is
+ * not a descendant of the branch tip, so a force push is required; a stale lease
+ * is retried once against a refreshed ref and then escalated to a plain force.
+ */
+function syncMergedBranchRef(
+  prNumber: number,
+  branch: string,
+  mergedCommit: string,
+  ports: SyncMergedGitPorts
+): SyncMergedResult | null {
+  const { forgejoUser, token, rootDir, gitPush, gitFetch, log } = ports;
   log(`PR #${prNumber} (${branch}): updating remote branch to ${mergedCommit}...`);
   const fetchBeforePushResult = gitFetch(branch, rootDir, { user: forgejoUser, token });
   if (fetchBeforePushResult.status === 0) {
@@ -513,7 +523,59 @@ function syncMerged(branch: string, mergedCommit: string, options: any = {}) {
   if (pushBranchResult.status !== 0) {
     return { ok: false, error: 'push-branch-failed', prNumber, raw: pushOutput(pushBranchResult) };
   }
+  return null;
+}
 
+/**
+ * Confirm on Forgejo that the PR already carries the landed commit, which is the
+ * only reading that makes a 409/405 merge answer non-fatal.
+ */
+function verifyMergeState(
+  prNumber: number,
+  branch: string,
+  mergedCommit: string,
+  token: string,
+  rootDir: string,
+  apiCall: ForgejoApiCall,
+  log: ForgejoLogFn,
+  statusCode: number | null
+): SyncMergedResult {
+  const prDetails = apiCall<ForgejoPullRequest>('GET', `/pulls/${prNumber}`, token, undefined, { rootDir });
+  if (!prDetails.ok) {
+    return { ok: false, error: 'merge-verify-failed', prNumber, statusCode: prDetails.statusCode };
+  }
+
+  const pr = prDetails.data || {};
+  const baseSha = pr.base ? pr.base.sha : null;
+  const headSha = pr.head ? pr.head.sha : null;
+  const shaMatch = (a: string | null | undefined, b: string | null | undefined) => Boolean(a && b && (a === b || b.startsWith(a)));
+  if (shaMatch(baseSha, mergedCommit) && shaMatch(headSha, mergedCommit)) {
+    log(`PR #${prNumber} (${branch}): confirmed head/base match ${mergedCommit} (already merged)`);
+    return { ok: true };
+  }
+
+  return {
+    ok: false,
+    error: 'merge-conflict-sha-mismatch',
+    prNumber,
+    statusCode,
+    expected: mergedCommit,
+    baseSha,
+    headSha
+  };
+}
+
+/**
+ * Record the manual merge on Forgejo. A 409/405 answer is not proof of failure:
+ * the PR may already carry the landed commit, so the head/base SHAs decide.
+ */
+function recordForgejoMerge(
+  prNumber: number,
+  branch: string,
+  mergedCommit: string,
+  ports: { token: string; rootDir: string; apiCall: ForgejoApiCall; log: ForgejoLogFn }
+): SyncMergedResult | null {
+  const { token, rootDir, apiCall, log } = ports;
   const mergePayload = {
     Do: 'manually-merged',
     MergeCommitID: mergedCommit,
@@ -521,27 +583,134 @@ function syncMerged(branch: string, mergedCommit: string, options: any = {}) {
     delete_branch_after_merge: true
   };
   const mergeResult = apiCall('POST', `/pulls/${prNumber}/merge`, token, mergePayload, { rootDir });
-  if (!mergeResult.ok) {
-    if (mergeResult.statusCode === 409 || mergeResult.statusCode === 405) {
-      log(`PR #${prNumber} (${branch}): received ${mergeResult.statusCode}${mergeResult.statusCode === 405 ? ' Method Not Allowed' : ' Conflict'}, verifying remote commit state...`);
-      const verificationResult = verifyMergeState(mergeResult.statusCode);
-      if (!verificationResult.ok) {
-        return verificationResult;
-      }
-    } else {
-      return { ok: false, error: 'merge-api-failed', prNumber, statusCode: mergeResult.statusCode };
-    }
+  if (mergeResult.ok) { return null; }
+  if (mergeResult.statusCode !== 409 && mergeResult.statusCode !== 405) {
+    return { ok: false, error: 'merge-api-failed', prNumber, statusCode: mergeResult.statusCode };
+  }
+  log(`PR #${prNumber} (${branch}): received ${mergeResult.statusCode}${mergeResult.statusCode === 405 ? ' Method Not Allowed' : ' Conflict'}, verifying remote commit state...`);
+  const verification = verifyMergeState(prNumber, branch, mergedCommit, token, rootDir, apiCall, log, mergeResult.statusCode);
+  return verification.ok ? null : verification;
+}
+
+function syncMergedPorts(options: SyncMergedPorts) {
+  return {
+    ...options,
+    rootDir: options.rootDir ?? process.cwd(),
+    apiCall: options.apiCall ?? forgejoApi,
+    resolvePrNumber: options.resolvePrNumber ?? getPrNumber,
+    gitPush: options.gitPush ?? pushReviewRef,
+    gitFetch: options.gitFetch ?? fetchReviewBranch,
+    gitContainsCommit: options.gitContainsCommit ?? remoteRefContainsCommit,
+    gitDelete: options.gitDelete ?? deleteReviewRef,
+    verifyCommit: options.verifyCommit ?? verifyCommitExists,
+    gitRunner: options.gitRunner ?? git,
+    log: options.log ?? fmt.log.info
+  };
+}
+
+function reconcileMergedBase(prNumber: number, branch: string, primaryBranch: string, token: string, ports: ReturnType<typeof syncMergedPorts>) {
+  const { rootDir, forgejoUser } = ports;
+  const reconcile = reconcileForgejoBase({
+    primaryBranch,
+    rootDir,
+    forgejoUser,
+    token,
+    gitFetch: ports.gitFetch,
+    gitRunner: ports.gitRunner,
+    gitPush: ports.gitPush,
+    log: ports.log
+  });
+  if (!reconcile.ok) {
+    ports.log(`PR #${prNumber} (${branch}): ${reconcile.diagnostic}`);
+    return reconcile;
+  }
+  if (reconcile.action === 'force-with-lease' || reconcile.action === 'fast-forward') {
+    ports.log(`PR #${prNumber} (${branch}): Forgejo ${primaryBranch} reconciled ${reconcile.oldSha.slice(0, 12)} → ${reconcile.newSha.slice(0, 12)} before landing landed commit.`);
   }
 
-  const deleteResult = gitDelete(branch, rootDir, { user: forgejoUser, token });
+  return null;
+}
+
+function deleteMergedBranch(prNumber: number, branch: string, token: string, ports: ReturnType<typeof syncMergedPorts>) {
+  const { rootDir, forgejoUser } = ports;
+  const deleteResult = ports.gitDelete(branch, rootDir, { user: forgejoUser, token });
   const branchDeleted = deleteResult.status === 0;
   if (branchDeleted) {
-    log(`PR #${prNumber} (${branch}): remote branch deleted`);
+    ports.log(`PR #${prNumber} (${branch}): remote branch deleted`);
   } else {
-    log(`PR #${prNumber} (${branch}): remote branch already gone or could not be deleted after merge`);
+    ports.log(`PR #${prNumber} (${branch}): remote branch already gone or could not be deleted after merge`);
   }
 
-  log(`PR #${prNumber} (${branch}) marked merged at ${mergedCommit}`);
+  return branchDeleted;
+}
+
+function mergedBaseBranch(baseBranch: string | null, rootDir: string) { return baseBranch || resolvePrimaryBranchForSync(rootDir); }
+
+function syncMerged(branch: string, mergedCommit: string, options: SyncMergedPorts = {}): SyncMergedResult {
+  const ports = syncMergedPorts(options);
+  const { forgejoUser, token: providedToken, baseBranch = null, rootDir } = ports;
+
+  if (!branch) {
+    return { ok: false, error: 'missing-branch' };
+  }
+
+  if (!mergedCommit) {
+    return { ok: false, error: 'missing-merged-commit' };
+  }
+
+  const { token } = resolveForgejoAuth({ forgejoUser, token: providedToken || undefined, rootDir, configuration: options.configuration });
+  if (!token) {
+    return { ok: false, error: 'missing-token' };
+  }
+
+  const slug = branch.match(/^mission\/(task-\d+)/)?.[1] ?? null;
+
+  const target = resolveSyncMergedPr(branch, token, { rootDir, slug, resolvePrNumber: ports.resolvePrNumber });
+  if (!target.ok) {
+    return target;
+  }
+  const prNumber = target.prNumber;
+
+  const commitResult = ports.verifyCommit(mergedCommit, rootDir);
+  if (commitResult.status !== 0) {
+    return { ok: false, error: 'missing-commit' };
+  }
+
+  // The mission lands back onto its recorded base branch, which is the primary
+  // branch (main) for normal missions but a feature branch (e.g. skunkworks) for
+  // missions started from a feature branch. Pushing the squash commit anywhere
+  // other than that base branch is a non-fast-forward and is rejected.
+  const primaryBranch = mergedBaseBranch(baseBranch, rootDir);
+  // Reconcile Forgejo's recorded base with the authoritative local base before
+  // the landed commit is pushed (task-2520). Local base is the integration
+  // authority; Forgejo is a review mirror. A rewritten or diverged local base
+  // otherwise leaves Forgejo's base stale, so the landed-commit push below is a
+  // non-fast-forward and fails with `push-primary-failed`. Reconcile first so
+  // that push is always a fast-forward (SC1 / SC2). A content-different base is
+  // refused before any force push (SC3).
+  const reconcileFailure = reconcileMergedBase(prNumber, branch, primaryBranch, token, ports);
+  if (reconcileFailure) { return reconcileFailure; }
+
+  const pushFailure = pushLandedCommitToBase(prNumber, branch, primaryBranch, mergedCommit, {
+    forgejoUser, token, rootDir,
+    gitPush: ports.gitPush, gitFetch: ports.gitFetch,
+    gitContainsCommit: ports.gitContainsCommit, log: ports.log
+  });
+  if (pushFailure) { return pushFailure; }
+
+  const branchFailure = syncMergedBranchRef(prNumber, branch, mergedCommit, {
+    forgejoUser, token, rootDir, gitPush: ports.gitPush, gitFetch: ports.gitFetch, log: ports.log
+  });
+  if (branchFailure) { return branchFailure; }
+
+  const mergeFailure = recordForgejoMerge(prNumber, branch, mergedCommit, {
+    token, rootDir, apiCall: ports.apiCall, log: ports.log
+  });
+  if (mergeFailure) { return mergeFailure; }
+
+  const branchDeleted = deleteMergedBranch(prNumber, branch, token, ports);
+
+  ports.log(`PR #${prNumber} (${branch}) marked merged at ${mergedCommit}`);
   return {
     ok: true,
     prNumber,

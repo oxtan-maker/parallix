@@ -1,3 +1,4 @@
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -125,7 +126,7 @@ test('SC11: ConcreteGateReadAdapter returns unknown when no gate artifacts exist
       rootDir: tmp,
     });
 
-    const status = await adapter.loadGateStatus('TASK-999' as MissionId);
+    const status = await adapter.loadGateStatus(fixtureMissionId('task-999'));
     assert.strictEqual(status, 'unknown', 'Gate status is unknown when no artifacts exist');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -140,10 +141,10 @@ test('SC11: ConcreteReviewReadAdapter returns null when no review state exists (
       missionStore: null,
     });
 
-    const review = await adapter.loadReview('TASK-999' as MissionId);
+    const review = await adapter.loadReview(fixtureMissionId('task-999'));
     assert.strictEqual(review, null, 'Review is null when no review state exists');
 
-    const approval = await adapter.loadReviewApproval('TASK-999' as MissionId);
+    const approval = await adapter.loadReviewApproval(fixtureMissionId('task-999'));
     assert.strictEqual(approval, null, 'Approval is null when no review state exists');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -171,7 +172,7 @@ test('SC11: ConcreteMissionReadAdapter loadMission reads specific file from repo
       repositoryId: repositoryId('test-repo'),
     });
 
-    const mission = await adapter.loadMission('task-003' as MissionId);
+    const mission = await adapter.loadMission(fixtureMissionId('task-003') as MissionId);
     assert.ok(mission, 'Should find specific mission');
     assert.strictEqual(mission.id.toLowerCase(), 'task-003', 'Correct mission loaded');
     assert.strictEqual(mission.status, 'review', 'Status from repository file');

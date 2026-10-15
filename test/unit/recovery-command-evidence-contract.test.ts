@@ -1,3 +1,4 @@
+import type { FixPromptSlots } from '../../src/application/rebound-prompts.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -328,18 +329,18 @@ test('CP-1 repaired fix prompt carries the evidence and a working retrieval rout
       diagnostic: 'unit-test-budget:exceeded',
     });
     assert.equal(captured.ok, true);
-    const slots = {
+    const slots: FixPromptSlots = {
       label: 'PRE-REVIEW GATE FAILURE',
       slug: 'task-1',
       worktree: root,
       area: 'gate',
       facts: [] as Array<[string, string]>,
       diagnostic: 'not ok — unit-test-budget: exceeded',
-      classification: { failureClass: 'GateFailure', dispatchAction: 'AutoSendBack', isRelaunchable: true, label: 'PRE-REVIEW GATE FAILURE' } as any,
+      classification: { failureClass: 'GateFailure', dispatchAction: 'AutoSendBack', isRelaunchable: true, label: 'PRE-REVIEW GATE FAILURE' },
       attempt: 1,
       maxAttempts: 2,
       remedy: 'fix it',
-    };
+    } satisfies Partial<NonNullable<Parameters<typeof buildFreshDiagnosticRepairPrompt>[0]>>;
     const fresh = buildFreshDiagnosticRepairPrompt({ ...slots, recoveryEvidence: captured.ref });
     assert.match(fresh, /Retained evidence/, 'fresh prompt exposes the retained evidence');
     assert.match(fresh, /unit-test-budget: exceeded/, 'the prompt names the retained command output');
@@ -358,14 +359,14 @@ test('CP-1 missing evidence is reported honestly with a fallback, not a complete
     assert.equal(lookup.ok, false);
     assert.equal(lookup.error, 'missing', 'a missing record is reported, never implied');
     // A prompt built with no retained evidence must not claim completeness.
-    const slots = {
+    const slots: FixPromptSlots = {
       label: 'PRE-REVIEW GATE FAILURE',
       slug: 'task-1',
       worktree: root,
       area: 'gate',
       facts: [] as Array<[string, string]>,
       diagnostic: 'no output',
-      classification: { failureClass: 'GateFailure', dispatchAction: 'AutoSendBack', isRelaunchable: true, label: 'PRE-REVIEW GATE FAILURE' } as any,
+      classification: { failureClass: 'GateFailure', dispatchAction: 'AutoSendBack', isRelaunchable: true, label: 'PRE-REVIEW GATE FAILURE' },
       attempt: 1,
       maxAttempts: 2,
       remedy: 'fix it',
@@ -399,27 +400,29 @@ test('CP-3 fresh-context repair receives the bounded route with omitted-middle r
     // only the durable store. Read the reference back from disk; the path and
     // incidentId are stable across processes, so the references are not
     // invalidated by the restart.
+    assert.ok(captured.ref);
     const readBack = lookupRecoveryEvidence({ cwd: root, incidentId: captured.ref.incidentId, attempt: 1 });
     assert.equal(readBack.ok, true, 'the reference resolves after a simulated restart');
     assert.ok(readBack.evidence?.stdoutPath, 'the recovered reference still names the stdout file');
-    const slots = {
+    const slots: FixPromptSlots = {
       label: 'PRE-REVIEW GATE FAILURE',
       slug: 'task-1',
       worktree: root,
       area: 'gate',
       facts: [] as Array<[string, string]>,
       diagnostic: 'not ok — unit-test-budget: exceeded',
-      classification: { failureClass: 'GateFailure', dispatchAction: 'AutoSendBack', isRelaunchable: true, label: 'PRE-REVIEW GATE FAILURE' } as any,
+      classification: { failureClass: 'GateFailure', dispatchAction: 'AutoSendBack', isRelaunchable: true, label: 'PRE-REVIEW GATE FAILURE' },
       attempt: 1,
       maxAttempts: 2,
       remedy: 'fix it',
-    };
+    } satisfies Partial<NonNullable<Parameters<typeof buildFreshDiagnosticRepairPrompt>[0]>>;
     // Fresh repairs get the bounded route: the retained command
     // and the retrieval route, not the previous model's assumptions.
     const fresh = buildFreshDiagnosticRepairPrompt({ ...slots, recoveryEvidence: readBack.evidence ?? null });
     assert.match(fresh, /Retained evidence for this failure/, `fresh prompt exposes retained evidence`);
     assert.match(fresh, /retrieve the omitted middle/, `fresh prompt includes omitted-middle retrieval`);
     assert.match(fresh, /bash .*verify\.sh docs/, `fresh prompt names the retained command`);
+    assert.ok(captured.ref != null);
     assert.match(fresh, new RegExp(`lookupRecoveryEvidence\\(\\{ cwd, incidentId: "${captured.ref.incidentId}" \\}\\)`), `fresh prompt gives a working retrieval route`);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -430,14 +433,14 @@ test('CP-4 truncated, expired, and redacted evidence are reported explicitly wit
   const root = mkdtemp('task-2642-recovery-honest-');
   try {
     initCommittedRepository(root);
-    const slots = (recoveryEvidence: RecoveryEvidenceRef | null, recoveryEvidenceError?: string) => ({
+    const slots = (recoveryEvidence: RecoveryEvidenceRef | null, recoveryEvidenceError?: string): FixPromptSlots => ({
       label: 'PRE-REVIEW GATE FAILURE',
       slug: 'task-1',
       worktree: root,
-      area: 'gate',
+      area: 'gate' as const,
       facts: [] as Array<[string, string]>,
       diagnostic: 'no output',
-      classification: { failureClass: 'GateFailure', dispatchAction: 'AutoSendBack', isRelaunchable: true, label: 'PRE-REVIEW GATE FAILURE' } as any,
+      classification: { failureClass: 'GateFailure', dispatchAction: 'AutoSendBack', isRelaunchable: true, label: 'PRE-REVIEW GATE FAILURE' },
       attempt: 1,
       maxAttempts: 2,
       remedy: 'fix it',
@@ -460,6 +463,7 @@ test('CP-4 truncated, expired, and redacted evidence are reported explicitly wit
       diagnostic: 'unit-test-budget:exceeded',
     });
     assert.equal(truncated.ok, true);
+    assert.ok(truncated.ref != null);
     assert.equal(truncated.ref.captureComplete, false, 'a record past the byte cap reports capture incomplete');
     assert.equal(truncated.ref.truncatedFrom, 'stdout');
     assert.match(truncated.ref.stdoutPath, /\.stdout\.txt$/);
@@ -482,6 +486,7 @@ test('CP-4 truncated, expired, and redacted evidence are reported explicitly wit
       redacted: true,
     });
     assert.equal(redacted.ok, true);
+    assert.ok(redacted.ref != null);
     assert.equal(redacted.ref.redacted, true);
     const redactedPrompt = buildFreshDiagnosticRepairPrompt(slots(redacted.ref));
     assert.match(redactedPrompt, /redacted per configured credential redaction/, 'the prompt discloses redaction');
@@ -501,6 +506,7 @@ test('CP-4 truncated, expired, and redacted evidence are reported explicitly wit
       redactor: (value) => value.replace(/SECRET\d+/g, 'REDACTED'),
     });
     assert.equal(scrubbed.ok, true);
+    assert.ok(scrubbed.ref != null);
     assert.equal(scrubbed.ref.redacted, true);
     const storedStdout = fs.readFileSync(scrubbed.ref.stdoutPath, 'utf8');
     assert.ok(!/SECRET123/.test(storedStdout), 'the configured redactor scrubbed the credential from the retained stream');
@@ -519,6 +525,7 @@ test('CP-4 truncated, expired, and redacted evidence are reported explicitly wit
       diagnostic: 'unit-test-budget:exceeded',
     });
     assert.equal(fresh.ok, true);
+    assert.ok(fresh.ref);
     const expired = lookupRecoveryEvidence({ cwd: root, incidentId: fresh.ref.incidentId, attempt: 1, now: () => new Date(Date.now() + 31 * 24 * 60 * 60 * 1000) });
     assert.equal(expired.ok, false, 'an expired record is not retrievable');
     assert.equal(expired.error, 'expired', 'the retrieval reports the expiry, not a missing record');
@@ -554,7 +561,7 @@ test('CP-5 opaque failure survives opaque capture; exhaustion still reports the 
         implementer: 'claude',
         maxAttempts: 1,
         startAgent: async () => ({ agent: 'claude', result: { status: 0 } }),
-        verify: () => ({ ok: false, diagnostic: 'still failing' }),
+        verify: () => ({ ok: false as const, diagnostic: 'still failing' }),
         log: () => {},
         error: (msg) => { dossier = msg; },
       },
@@ -564,6 +571,32 @@ test('CP-5 opaque failure survives opaque capture; exhaustion still reports the 
     assert.match(dossier, /Attempt 1:/, 'the exhaustion dossier reports the attempts');
     assert.match(dossier, /Retained evidence for this failure/, 'the exhaustion dossier carries the retrieval route');
     assert.match(dossier, /lookupRecoveryEvidence/, 'the exhaustion dossier exposes a working retrieval route');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('TASK-2760 a spawn failure keeps the retained gate evidence and adds its code, message and signal to the dossier', async () => {
+  const root = mkdtemp('task-2760-recovery-spawn-');
+  try {
+    let dossier = '';
+    let launches = 0;
+    const outcome = await rebound(
+      { kind: 'gate-failure', area: 'static-analysis', command: './scripts/verify-local.sh static-analysis', exitCode: 1, stdout: 'lint: 1 error', stderr: '' },
+      {
+        slug: 'task-2760', worktree: root, implementer: 'codex',
+        startAgent: async () => { launches++; return { agent: 'codex', result: { status: null, signal: null, error: Object.assign(new Error('spawn E2BIG'), { code: 'E2BIG' }) } }; },
+        verify: () => ({ ok: true }), log: () => {}, error: (msg) => { dossier = msg; },
+      },
+    );
+    assert.equal(outcome.outcome, 'exhausted', 'a launch that never started is not a fix');
+    assert.equal(launches, 1, 'the oversized launch is not repeated unchanged');
+    assert.deepEqual(outcome.launchFailure, { code: 'E2BIG', message: 'spawn E2BIG', signal: null });
+    assert.match(dossier, /Launch failure: code E2BIG, message "spawn E2BIG"/);
+    assert.match(dossier, /Retained evidence for this failure/, 'the original gate evidence stays retrievable');
+    const retained = listRecoveryEvidence({ cwd: root, missionId: 'task-2760' });
+    assert.equal(retained.length, 1);
+    assert.equal(retained[0].command, './scripts/verify-local.sh static-analysis');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

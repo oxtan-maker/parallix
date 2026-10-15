@@ -1,4 +1,5 @@
 import { correlateMissionCapture } from './mission-terminal.js';
+import type { SqliteMigrationRunner } from '../adapters/sqlite/migration-runner.js';
 import { configureRepairCheckpoints } from '../application/ports/repair-checkpoint.js';
 import { RepairCheckpointService } from '../application/repair-checkpoint-service.js';
 import { resolveProcessConfiguration } from './config.js';
@@ -53,9 +54,9 @@ import type { UsageRepository } from '../application/ports/mission-measurements.
 import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
 import type { ProductionCapabilities } from './production-capabilities.js';
 
-export interface OperatorStateServices {
-  readonly db: unknown;
-  readonly migrations: unknown;
+export type OperatorStateServices = {
+  readonly db: SqliteDatabaseAdapter;
+  readonly migrations: SqliteMigrationRunner;
   /**
    * Operator-local agent blocklist materialized once from SQLite at startup,
    * or `null` when the adapter is disabled/unavailable (rollback shim,
@@ -69,10 +70,13 @@ export interface OperatorStateServices {
    * adapters from the single composition root rather than opening the database
    * independently. `null` when the adapter is unavailable.
    */
-  readonly repositories: OperatorStateRepositories | null;
+  readonly repositories: OperatorStateRepositories;
   /** Finish this service scope by draining its accepted Mission operations. */
   readonly close: () => Promise<void>;
-}
+} | {
+  readonly db: null; readonly migrations: null; readonly blocklist: null; readonly repositories: null;
+  readonly close: () => Promise<void>;
+};
 
 /**
  * The concrete SQLite repositories materialized at composition time.
@@ -150,10 +154,11 @@ export interface ProductionApplicationServices {
 }
 
 /** Board integration keeps the CLI workflow but turns every non-zero exit into a typed failure. */
-export function createBoardIntegrateService(mission: MissionApplicationServices, currentWork: CurrentWorkPort): IntegrateCommandUseCase {
+export function createBoardIntegrateService(mission: import('../application/ports/integration-records.js').IntegrationMissionServices, currentWork: CurrentWorkPort, configuration?: ParallixConfiguration): IntegrateCommandUseCase {
   return new IntegrateCommandUseCase({
     async execute(args) {
       await integrate(args, {
+        configuration,
         missionServicesFn: async () => mission,
         exitFn: (code) => {
           if (code !== 0) { throw new Error(`integration workflow exited with code ${code}`); }
@@ -222,21 +227,7 @@ export async function createProductionApplicationServices(
   // startAgent reuses the composition root's SQLite handle instead of opening
   // a second independent connection (avoids "database is locked" contention
   // between DatabaseSync handles on the same file).
-  let sessionMarkerPort: import('../application/domain-ports.js').SessionMarkerPort | null = null;
-  // The board reads the same markers to attribute a running mission to the
-  // family that launched it.
-  let sessionMarkers: SessionMarkerRepository | null = null;
-  if (operatorState.repositories) {
-    const repoId = resolveCanonicalRepositoryId(rootDir);
-    sessionMarkerPort = new SqliteSessionMarkerAdapter(
-      operatorState.db as SqliteDatabaseAdapter,
-      repoId,
-    );
-    sessionMarkers = new SqliteSessionMarkerRepository(
-      operatorState.db as SqliteDatabaseAdapter,
-      repoId,
-    );
-  }
+  const { sessionMarkerPort, sessionMarkers } = bindSessionMarkers(operatorState, rootDir);
 
   const mission = options.includeOperatorState === false
     ? null
@@ -277,15 +268,7 @@ export async function createProductionApplicationServices(
   }, executeRuntime);
   // One publisher per process. The recorder appends to the same operational
   // history the board reads, so there is no second current-work authority.
-  const currentWork: CurrentWorkPort = operatorState.repositories
-    ? new CurrentWorkRecorder(operatorState.repositories.operationalHistory, {
-      processId: process.pid,
-      onPublication: work => correlateMissionCapture(rootDir, options.configuration, work),
-      // Pid plus start identity: a recycled pid must not keep a dead run's
-      // work displayed as live (TASK-2373 SC13).
-      processIdentity: processStartIdentity(process.pid),
-    })
-    : NO_CURRENT_WORK_PORT;
+  const currentWork = bindCurrentWork(operatorState, rootDir, options.configuration);
   // Bind the one production filesystem for the recovery store. The application
   // layer cannot import `node:fs`, so composition binds the `filesystem`
   // adapter here for every process (TASK-2642 boundary decision).
@@ -299,7 +282,7 @@ export async function createProductionApplicationServices(
       mission?.store ?? null,
       currentWork,
       activeProgress,
-      operatorState.db as SqliteDatabaseAdapter,
+      operatorState.db,
       { configuration: options.configuration },
       mission ? createBoardIntegrateService(mission, currentWork) : undefined,
     )
@@ -474,4 +457,37 @@ function bindRecoveryPorts(
   setRecoveryEvidenceFileSystem(recoveryEvidenceFileSystem);
   configureRepairCheckpoints(new RepairCheckpointService(mission?.store ?? unavailableMissionTransitionStore()));
   configureReboundTelemetry(repositories ? { repositoryId: mission?.repositoryId ?? resolveCanonicalRepositoryId(rootDir), history: repositories.operationalHistory } : null);
+}
+
+function bindSessionMarkers(operatorState: OperatorStateServices, rootDir: string) {
+  let sessionMarkerPort: import('../application/domain-ports.js').SessionMarkerPort | null = null;
+  // The board reads the same markers to attribute a running mission to the
+  // family that launched it.
+  let sessionMarkers: SessionMarkerRepository | null = null;
+  if (operatorState.repositories) {
+    const repoId = resolveCanonicalRepositoryId(rootDir);
+    sessionMarkerPort = new SqliteSessionMarkerAdapter(
+      operatorState.db,
+      repoId,
+    );
+    sessionMarkers = new SqliteSessionMarkerRepository(
+      operatorState.db,
+      repoId,
+    );
+  }
+
+  return { sessionMarkerPort, sessionMarkers };
+}
+
+function bindCurrentWork(operatorState: OperatorStateServices, rootDir: string, configuration: ParallixConfiguration): CurrentWorkPort {
+  const currentWork: CurrentWorkPort = operatorState.repositories
+    ? new CurrentWorkRecorder(operatorState.repositories.operationalHistory, {
+      processId: process.pid,
+      onPublication: work => correlateMissionCapture(rootDir, configuration, work),
+      // Pid plus start identity: a recycled pid must not keep a dead run's
+      // work displayed as live (TASK-2373 SC13).
+      processIdentity: processStartIdentity(process.pid),
+    })
+    : NO_CURRENT_WORK_PORT;
+  return currentWork;
 }

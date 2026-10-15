@@ -1,3 +1,4 @@
+import type { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
 // Historical regression provenance: TASK-2357.
 /**
  * Completed-mission population for the metrics slice (TASK-2622.13
@@ -54,7 +55,7 @@ const EXPECTED_COMPLETED = [DONE_WITH_TELEMETRY, DONE_WITHOUT_TELEMETRY];
 
 async function seed(
   laneEventRepo: { append: (_entry: ReturnType<typeof laneEvent>) => Promise<boolean> },
-  db: { execute: (_sql: string, _params: readonly unknown[]) => Promise<unknown> },
+  db: SqliteDatabaseAdapter,
 ): Promise<void> {
   for (const mission of [DONE_WITH_TELEMETRY, DONE_WITHOUT_TELEMETRY, TELEMETRY_WITHOUT_DONE]) {
     await laneEventRepo.append(laneEvent({ repositoryId: REPO, missionId: mission, from: null, to: 'backlog', at: INTAKE }));
@@ -63,12 +64,12 @@ async function seed(
   await laneEventRepo.append(laneEvent({ repositoryId: REPO, missionId: DONE_WITHOUT_TELEMETRY, from: 'backlog', to: 'done', at: CLOSED }));
   await laneEventRepo.append(laneEvent({ repositoryId: REPO, missionId: TELEMETRY_WITHOUT_DONE, from: 'backlog', to: 'active', at: CLOSED }));
 
-  await insertUsageRow(db as never, {
+  await insertUsageRow(db, {
     repo: REPO, mission: DONE_WITH_TELEMETRY, date: '2026-06-02',
     classification: 'user_value', prFixRounds: 1,
   });
   // Telemetry that claims closure for a mission the lifecycle never completed.
-  await insertUsageRow(db as never, {
+  await insertUsageRow(db, {
     repo: REPO, mission: TELEMETRY_WITHOUT_DONE, date: '2026-06-02',
     classification: 'ai_sdlc', prFixRounds: 3,
   });
@@ -123,7 +124,7 @@ describe("defect D: lifecycle `done` is the only completion definition", () => {
           log: (message: unknown) => { lines.push(String(message)); },
           error: (message: unknown) => { lines.push(`ERROR ${String(message)}`); },
           exit: () => undefined,
-        } as never);
+        });
       } finally {
         store.close();
         if (previousDebug === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = previousDebug; }

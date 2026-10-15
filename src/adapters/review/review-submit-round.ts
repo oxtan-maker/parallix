@@ -1,3 +1,4 @@
+import { headRevision } from './review-artifact-files.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 /**
  * Reviewer-side round submission: record the decision, apply local and
@@ -8,7 +9,7 @@ import * as fmt from '../../application/presentation/cli-format.js';
 import { resolveWorktree, missionBranchName } from '../filesystem/mission-utils.js';
 import { resolveTaskFile, getTaskStatus, transitionTask } from '../backlog/backlog.js';
 import { readToken, postReview, closePr, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
-import { readReviewState, writeReviewState, resolveReviewIdentity, ReviewState, persistReviewStateOrThrow } from './review-state.js';
+import { type ReviewStateInstanceReader, readReviewState, writeReviewState, resolveReviewIdentity, ReviewState, persistReviewStateOrThrow } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import { mirrorReviewOutcome } from '../../application/review-task-mirroring.js';
@@ -24,9 +25,9 @@ type SubmitReviewOptions = {
   configuration?: ParallixConfiguration;
   log?: (_msg: string) => void;
   error?: (_msg: string) => void;
-  exit?: (_code: number) => never;
+  exit?: (_code: number) => void;
   transitionTaskFn?: typeof transitionTask;
-  readReviewStateFn?: typeof readReviewState;
+  readReviewStateFn?: ReviewStateInstanceReader;
   writeReviewStateFn?: typeof writeReviewState;
   isReviewProviderEnabledFn?: typeof isProviderEnabled;
   isForgejoReviewEnabledFn?: typeof isProviderEnabled;
@@ -35,9 +36,10 @@ type SubmitReviewOptions = {
   resolveTaskFileFn?: typeof resolveTaskFile;
   getTaskStatusFn?: typeof getTaskStatus;
   worktree?: string;
+  revision?: string;
   readTokenFn?: typeof readToken;
   postReviewFn?: typeof postReview;
-  getPrAuthorFn?: unknown;
+  getPrAuthorFn?: NonNullable<Parameters<typeof postWorkflowReview>[3]>['getPrAuthorFn'];
   createEventFn?: typeof createEvent;
   buildMetadataFooterFn?: typeof buildMetadataFooter;
   missionStore?: MissionStore | null;
@@ -80,6 +82,7 @@ async function recordRequestChangesDecision(slug: string, outcome: string, messa
     }],
     comment: message || null,
     decidedAt: new Date().toISOString(),
+    revision: options.revision ?? headRevision(options.worktree || resolveWorktree(slug) || process.cwd()),
   }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
   if (decision.outcome === 'failed') {
     error(fmt.status('FAIL', `Review outcome "${outcome}" could not be recorded for ${slug}: ${decision.diagnostic}`));
@@ -101,6 +104,7 @@ async function recordApprovalDecision(slug: string, outcome: string, message: st
   const decision = await recordApprovalFn(slug, {
     comment: message || null,
     decidedAt: new Date().toISOString(),
+    revision: options.revision ?? headRevision(options.worktree || resolveWorktree(slug) || process.cwd()),
     source: { kind: 'local' },
   }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
   if (decision.outcome === 'failed') {
@@ -239,12 +243,7 @@ export async function submitReviewRound(
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const exit = options.exit || process.exit;
-  const transitionTaskFn = options.transitionTaskFn || transitionTask;
-  const readReviewStateFn = options.readReviewStateFn || readReviewState;
   const isReviewProviderEnabledFn = options.isReviewProviderEnabledFn || options.isForgejoReviewEnabledFn || isProviderEnabled;
-  const resolveReviewUserFn = options.resolveReviewUserFn || options.resolveForgejoUserFn || resolveReviewUser;
-  const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
-  const getTaskStatusFn = options.getTaskStatusFn || getTaskStatus;
   const VALID_OUTCOMES = ['approve', 'request-changes', 'comment'];
   if (!VALID_OUTCOMES.includes(outcome)) {
     error(fmt.status('FAIL', `Unknown review outcome "${outcome}". Valid: ${VALID_OUTCOMES.join(', ')}.`));
@@ -284,21 +283,39 @@ export async function submitReviewRound(
 
   // For provider=none (standalone), skip provider posting and only update review-state
   if (!providerEnabled) {
-    log(fmt.status('INFO', `Review provider is none — skipping provider posting, updating review-state only for ${slug}.`));
-    // No external POST can fail here, so record the authoritative approve
-    // immediately — before the flat review-state write — mirroring the
-    // provider-backed post-success recording.
-    if (outcome === 'approve' && await recordApprovalDecision(slug, outcome, message, options, log, error)) {
-      exit(1);
-      return;
-    }
-    if (await applyLocalReviewState(slug, outcome, message, worktree, options, log, error)) {
-      exit(1);
-      return;
-    }
+    await submitLocalReview(slug, outcome, message, worktree, options, log, error, exit);
     return;
   }
 
+  await submitProviderReview(slug, outcome, message, worktree, options, log, error, exit);
+}
+
+async function submitLocalReview(slug: string, outcome: string, message: string, worktree: string, options: SubmitReviewOptions, log: (_msg: string) => void, error: (_msg: string) => void, exit: (_code: number) => void): Promise<void> {
+  log(fmt.status('INFO', `Review provider is none — skipping provider posting, updating review-state only for ${slug}.`));
+  // No external POST can fail here, so record the authoritative approve
+  // immediately — before the flat review-state write — mirroring the
+  // provider-backed post-success recording.
+  if (outcome === 'approve' && await recordApprovalDecision(slug, outcome, message, options, log, error)) {
+    exit(1);
+    return;
+  }
+  if (await applyLocalReviewState(slug, outcome, message, worktree, options, log, error)) {
+    exit(1);
+    return;
+  }
+}
+
+function providerReviewBindings(options: SubmitReviewOptions) {
+  const transitionTaskFn = options.transitionTaskFn || transitionTask;
+  const readReviewStateFn = options.readReviewStateFn || readReviewState;
+  const resolveReviewUserFn = options.resolveReviewUserFn || options.resolveForgejoUserFn || resolveReviewUser;
+  const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
+  const getTaskStatusFn = options.getTaskStatusFn || getTaskStatus;
+  return { transitionTaskFn, readReviewStateFn, resolveReviewUserFn, resolveTaskFileFn, getTaskStatusFn };
+}
+
+async function submitProviderReview(slug: string, outcome: string, message: string, worktree: string, options: SubmitReviewOptions, log: (_msg: string) => void, error: (_msg: string) => void, exit: (_code: number) => void): Promise<void> {
+  const { transitionTaskFn, readReviewStateFn, resolveReviewUserFn, resolveTaskFileFn, getTaskStatusFn } = providerReviewBindings(options);
   // For provider-backed reviews, post through the adapter. Review-state is the normal source.
   let reviewIdentity = (await resolveReviewIdentity(slug, worktree, {
     readReviewStateFn,
@@ -326,9 +343,9 @@ export async function submitReviewRound(
     reviewIdentity: reviewIdentity || undefined,
     readTokenFn: options.readTokenFn,
     postReviewFn: options.postReviewFn,
-    getPrAuthorFn: options.getPrAuthorFn as any,
+    getPrAuthorFn: options.getPrAuthorFn,
     writeReviewStateFn: options.writeReviewStateFn,
-    createEventFn: options.createEventFn as any,
+    createEventFn: options.createEventFn,
     readReviewStateFn: options.readReviewStateFn,
     buildMetadataFooterFn: options.buildMetadataFooterFn,
     log,
@@ -384,9 +401,9 @@ export async function closeMissionPr(
   options: {
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
-    exit?: (_code: number) => never;
+    exit?: (_code: number) => void;
     readTokenFn?: typeof readToken;
-    readReviewStateFn?: typeof readReviewState;
+    readReviewStateFn?: ReviewStateInstanceReader;
     resolveReviewUserFn?: typeof resolveReviewUser;
     resolveForgejoUserFn?: typeof resolveReviewUser;
     closePrFn?: typeof closePr;

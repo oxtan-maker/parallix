@@ -199,21 +199,25 @@ export function selectReviewer(
   const willLaunchRounds = request.maxAttempts >= (request.persisted?.round || 1);
   const resumesInFixingPhase = request.persisted?.phase === 'fixing' && !request.dryRun;
 
-  let routed: boolean;
-  if (selection.source === 'fallback') {
-    context.emit({ kind: 'autonomous-reviewer-selected' });
-    routed = true;
-  } else if (resumesInFixingPhase) {
-    context.emit({ kind: 'fixing-reviewer-resumed', reviewer: selection.reviewer });
-    routed = true;
-  } else if ((request.dryRun && selection.source === 'explicit') || !willLaunchRounds) {
-    // No round will launch, so the reviewer only has to be an eligible family.
-    routed = validateWithoutLaunch(selection, context, persistedContinueReviewer);
-  } else {
-    routed = routeRunnableReviewer(selection, context, persistedContinueReviewer);
-  }
+  const routed = routeSelectedReviewer(selection, context, persistedContinueReviewer, willLaunchRounds, resumesInFixingPhase);
   if (!routed) { return null; }
 
   context.emit({ kind: 'reviewer-selected', reviewer: selection.reviewer, source: selection.source, round: request.persisted?.round || 1, isContinue: request.isContinue });
   return { reviewer: selection.reviewer!, reviewerSource: selection.source };
+}
+
+function routeSelectedReviewer(selection: Selection, context: Context, persistedContinueReviewer: string | null, willLaunchRounds: boolean, resumesInFixingPhase: boolean): boolean {
+  if (selection.source === 'fallback') {
+    context.emit({ kind: 'autonomous-reviewer-selected' });
+    return true;
+  } else if (resumesInFixingPhase) {
+    context.emit({ kind: 'fixing-reviewer-resumed', reviewer: selection.reviewer });
+    return true;
+  } else if ((context.dryRun && selection.source === 'explicit') || !willLaunchRounds) {
+    // No round will launch, so the reviewer only has to be an eligible family.
+    return validateWithoutLaunch(selection, context, persistedContinueReviewer);
+  } else {
+    return routeRunnableReviewer(selection, context, persistedContinueReviewer);
+  }
+
 }

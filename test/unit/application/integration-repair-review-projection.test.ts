@@ -1,3 +1,7 @@
+import { fakeReviewLoopPorts, fakeLoopContext } from '../../helpers/review-loop-ports.js';
+import { missionVersion } from '../../../src/application/domain-ports.js';
+import { replaceCurrentRound } from '../../../src/domain/review.js';
+import { fixtureMission as typedMissionFixture } from '../../fixtures/mission-builders.js';
 /**
  * TASK-2620 — `integrationRepairNeedsReview` lane-by-review-status-by-repair
  * history domain table.
@@ -35,13 +39,13 @@ import { repositoryId } from '../../../src/domain/repository.js';
 
 const REVIEWER = agentFamily('codex');
 const IMPLEMENTER = agentFamily('custom');
-const ELIGIBILITY = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [REVIEWER] } as never);
+const ELIGIBILITY = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [REVIEWER], strategy: 'random' });
 const SUBJECT = { change: { kind: 'local-branch' as const, sourceBranch: 'mission/task-2620', targetBranch: 'main' }, revision: changeRevision('a1b2c3') };
 
 /** A review whose approval was revoked by the workflow for a red gate, so it carries repair history. */
 function reviewWithRepairHistory(): Review {
   let review = startReview(SUBJECT, REVIEWER, IMPLEMENTER, '2026-09-20T10:00:00.000Z', ELIGIBILITY);
-  review = applyReviewerCommand(review, { type: 'approve', decidedAt: '2026-09-20T11:00:00.000Z', comment: 'looks right', source: { kind: 'provider', provider: 'forgejo' } });
+  review = applyReviewerCommand(review, { type: 'approve', revision: SUBJECT.revision, decidedAt: '2026-09-20T11:00:00.000Z', comment: 'looks right', source: { kind: 'provider', provider: 'forgejo' } });
   review = revokeApprovedDecision(review, currentReviewRound(review).number, {
     revokedAt: '2026-09-20T11:05:00.000Z',
     revokedBy: 'workflow',
@@ -68,31 +72,28 @@ function awaitingReviewNoRepair(): Review {
 
 function approvedNoRepair(): Review {
   let review = startReview(SUBJECT, REVIEWER, IMPLEMENTER, '2026-09-20T10:00:00.000Z', ELIGIBILITY);
-  return applyReviewerCommand(review, { type: 'approve', decidedAt: '2026-09-20T11:00:00.000Z', comment: 'looks right', source: { kind: 'provider', provider: 'forgejo' } });
+  return applyReviewerCommand(review, { type: 'approve', revision: SUBJECT.revision, decidedAt: '2026-09-20T11:00:00.000Z', comment: 'looks right', source: { kind: 'provider', provider: 'forgejo' } });
 }
 
 /** Build a mission with a given lane and review as an untyped aggregate. */
 function mission(status: Mission['status'], review: Review | null): Mission {
-  return {
-    id: missionId('task-2620'),
+  return typedMissionFixture(String(missionId('task-2620')), {
     repositoryId: repositoryId('parallix'),
     title: 'Mission task-2620',
     labels: [],
     status,
     rawStatus: status,
     checkpoints: [],
-    brief: {},
+    brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
     declaredGates: [],
     successCriteria: [],
     dependencies: [],
     predictedNelBucket: 'Small',
     assignee: IMPLEMENTER,
     externalTaskRef: null,
-    intakeTrace: null,
     review,
     netEngineeringLines: null,
-    closedAt: null,
-  } as unknown as Mission;
+    closedAt: null});
 }
 
 // hasIntegrationRepairHistory is the typed lifecycle fact the kernel reads.
@@ -136,8 +137,8 @@ test('task-2620: the latest integration repair reports the gate, range A..B and 
   assert.match(integrationRepairSummary(pending), /integration gate unit \(npm test\); repair range a1b2c3\.\.HEAD; re-review pending/);
 
   const round = currentReviewRound(review);
-  review = { ...review, rounds: [...review.rounds.slice(0, -1), { ...round, subject: { ...round.subject, revision: changeRevision('d4e5f6') } }] as unknown as Review['rounds'] };
-  review = applyReviewerCommand(review, { type: 'approve', decidedAt: '2026-09-20T12:00:00.000Z', comment: 'repair verified', source: { kind: 'local' } });
+  review = { ...review, rounds: replaceCurrentRound(review, { ...round, subject: { ...round.subject, revision: changeRevision('d4e5f6') } }) };
+  review = applyReviewerCommand(review, { type: 'approve', revision: changeRevision('d4e5f6'), decidedAt: '2026-09-20T12:00:00.000Z', comment: 'repair verified', source: { kind: 'local' } });
   const approved = latestIntegrationRepair(mission('integration', review))!;
   assert.equal(approved.reReview, 'approved');
   assert.match(integrationRepairSummary(approved), /repair range a1b2c3\.\.d4e5f6; re-review approved/);
@@ -160,7 +161,7 @@ test('task-2704: a rebased repair shows the same mission interdiff to the agent,
   let review = reviewWithRepairHistory();
   const [withdrawn, current] = review.rounds;
   review = { ...review, rounds: [{ ...withdrawn, subject: { ...withdrawn.subject, baseline: changeRevision('0ld0ba5e') } },
-    { ...current, subject: { ...current.subject, revision: changeRevision('d4e5f6'), baseline: changeRevision('4ewba5e') } }] as unknown as Review['rounds'] };
+    { ...current, subject: { ...current.subject, revision: changeRevision('d4e5f6'), baseline: changeRevision('4ewba5e') } }] };
   const facts = latestIntegrationRepair(mission('review', review))!;
   assert.deepEqual([facts.approvedBaseline, facts.repairedBaseline], ['0ld0ba5e', '4ewba5e']);
   const brief = integrationRepairReviewBrief(facts);
@@ -183,26 +184,31 @@ test('task-2704: a repair with no recorded baseline declares that its range may 
 });
 
 import { tryRestoreIntegrationApproval } from '../../../src/application/review-loop/restore-integration-approval.js';
-import type { LoopContext, ReviewRound as LoopRound } from '../../../src/application/review-loop/round.js';
+import { type LoopContext, ReviewRound as LoopRound } from '../../../src/application/review-loop/round.js';
 import { projectReviewHistory } from '../../../src/application/projections/mission-board.js';
 
 test('restoration dispatch falls back on changed patches, missing evidence, baseline loss and Git errors (TASK-2734)', async () => {
   for (const reason of ['mission-change-differs', 'gate-evidence-missing', 'gate-failed', 'comparison-error', 'missing-baseline']) {
     let review = reviewWithRepairHistory();
-    review = { ...review, rounds: review.rounds.map(r => ({ ...r, subject: { ...r.subject,
-      ...(reason === 'missing-baseline' ? {} : { baseline: changeRevision('base') }) } })) as unknown as Review['rounds'] };
+    const [first, ...rest] = review.rounds;
+    const addBaseline = (round: Review['rounds'][number]) => ({ ...round, subject: { ...round.subject,
+      ...(reason === 'missing-baseline' ? {} : { baseline: changeRevision('base') }) } });
+    review = { ...review, rounds: [addBaseline(first), ...rest.map(addBaseline)] };
     let persisted = mission('review', review), transitions = 0;
-    const context = { slug: 'task-2620', state: { round: 2 }, ports: {
-      missionStore: { load: async () => ({ kind: 'found', mission: persisted, version: 1 }), save: async (m: Mission) => { persisted = m; return 2; } },
-      preReview: { head: () => 'candidate' }, output: { log() {} },
+    const base = fakeLoopContext(fakeReviewLoopPorts());
+    const context: LoopContext = { ...base, slug: 'task-2620', state: { ...base.state, round: 2 }, ports: { ...base.ports,
+      missionStore: { load: async () => ({ kind: 'found' as const, mission: persisted, version: missionVersion(1) }), save: async (m: Mission) => { persisted = m; return missionVersion(2); } },
+      preReview: { ...base.ports.preReview, head: () => 'candidate' }, output: { ...base.ports.output, log() {} },
       lifecycle: { transition: async () => { transitions++; throw new Error('fallback cannot approve'); } },
-      restoration: { now: () => '2026-09-20T12:00:00Z', clock: () => 0,
+      restoration: { now: () => '2026-09-20T12:00:00Z',
         samePatch: async () => { if (reason === 'comparison-error') { throw new Error('git'); } return reason !== 'mission-change-differs'; },
         validation: async () => reason === 'gate-evidence-missing' ? null : { missionId: 'task-2620', sha: 'candidate', baseline: 'base', hooks: ['unit'],
           createdAt: '2026-09-20T11:10:00Z', reference: 'operational_history:1', failed: reason === 'gate-failed' },
       },
-    } } as unknown as LoopContext;
-    assert.equal(await tryRestoreIntegrationApproval(context, { verifiedRevision: 'candidate' } as LoopRound), null);
+    } };
+    const round = new LoopRound(2, context);
+    round.verifiedRevision = 'candidate';
+    assert.equal(await tryRestoreIntegrationApproval(context, round), null);
     assert.equal(transitions, 0);
     assert.equal(persisted.review!.rounds.at(-1)?.integrationRepairAssessment?.outcome,
       reason === 'missing-baseline' ? 'comparison-error' : reason);
@@ -214,10 +220,23 @@ test('mechanical approval history keeps provenance when a human revokes it (TASK
     validationRevision: 'a1b2c3', validationReference: 'operational_history:7', validatedAt: '2026-09-20T11:10:00Z' };
   let review = reviewWithRepairHistory();
   const current = currentReviewRound(review);
-  review = { ...review, rounds: [...review.rounds.slice(0, -1), { ...current, integrationRepairAssessment: {
-    assessedAt: '2026-09-20T12:00:00Z', approvedRevision: 'a', candidateRevision: 'a1b2c3', failedGate: 'unit', outcome: 'restored', source } }] as unknown as Review['rounds'] };
-  review = applyReviewerCommand(review, { type: 'approve', decidedAt: '2026-09-20T12:00:00Z', comment: 'Restored', source });
+  review = { ...review, rounds: replaceCurrentRound(review, { ...current, integrationRepairAssessment: {
+    assessedAt: '2026-09-20T12:00:00Z', approvedRevision: 'a', candidateRevision: 'a1b2c3', failedGate: 'unit', outcome: 'restored', source } }) };
+  review = applyReviewerCommand(review, { type: 'approve', revision: SUBJECT.revision, decidedAt: '2026-09-20T12:00:00Z', comment: 'Restored', source });
   review = revokeApprovedDecision(review, 2, { revokedAt: '2026-09-20T13:00:00Z', revokedBy: 'human', reason: 'wrong', cause: { kind: 'operator' } });
   assert.equal(projectReviewHistory(review)[1].integrationRepairAssessment?.source?.validationReference, 'operational_history:7');
   assert.equal(projectReviewHistory(review)[1].revocation?.by, 'human');
+});
+
+test('repair facts and history name decided code and retain unknown legacy heads (TASK-2752)', () => {
+  const review = reviewWithRepairHistory();
+  const [prior, current] = review.rounds;
+  const changed = { ...review, rounds: [{ ...prior, subject: { ...prior.subject, revision: changeRevision('start-A') } }, current] } as Review;
+  assert.equal(latestIntegrationRepair(mission('review', changed))?.approvedRevision, SUBJECT.revision);
+  const history = projectReviewHistory(changed);
+  assert.equal(history[0].startRevision, 'start-A');
+  assert.equal(history[0].decidedRevision, SUBJECT.revision);
+  const legacy = { ...changed, rounds: [{ ...changed.rounds[0], decision: { ...prior.decision!, revision: null } }, current] } as Review;
+  assert.equal(latestIntegrationRepair(mission('review', legacy)), null);
+  assert.equal(projectReviewHistory(legacy)[0].decidedRevision, null);
 });

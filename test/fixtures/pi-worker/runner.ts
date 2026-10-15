@@ -6,7 +6,7 @@ let mode = 'new';
 __setSdkForTest({
   SessionManager: {
     create: () => { mode = 'new'; return {}; },
-    list: () => [{ id: 'existing', path: '/fixture/existing' }],
+    list: async () => [{ id: 'existing', path: '/fixture/existing' }],
     open: () => { mode = 'resumed'; return {}; },
     continueRecent: () => { mode = 'recent'; return {}; },
   },

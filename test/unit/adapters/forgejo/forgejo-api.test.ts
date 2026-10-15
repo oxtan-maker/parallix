@@ -1,9 +1,16 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 /* global setImmediate */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import EventEmitter from 'events';
+import { IncomingMessage } from 'node:http';
+import { Socket } from 'node:net';
+
+class MockRequest extends EventEmitter {
+  write(_data: string): void {}
+  end(): void {}
+  destroy(): void {}
+}
 import { mockModule, installModuleMocks } from '../../../lib/module-mock.js';
 
 // Register all modules that participate in the dependency chain.
@@ -26,16 +33,15 @@ const { forgejoApi, forgejoApiAsync, HTTP_REQUEST_TIMEOUT, codexSandboxHint } = 
 // --- Helpers ---
 
 function mockResolveForgejoSettings() {
-  mock.method(forgejoAuthModule, 'resolveForgejoSettings', (_rootDir) => ({
+  mock.method(forgejoAuthModule, 'resolveForgejoSettings', (_rootDir: Parameters<(typeof forgejoAuthModule)["resolveForgejoSettings"]>[0]) => ({
     url: 'http://localhost:3300',
     repo: 'magnus/testproj',
   }));
 }
 
-function createMockResponse(statusCode, body) {
-  const res = new EventEmitter();
+function createMockResponse(statusCode: number, body: unknown) {
+  const res = new IncomingMessage(new Socket());
   res.statusCode = statusCode;
-  res.setEncoding = () => {};
   setImmediate(() => {
     if (body !== undefined && body !== null) {
       res.emit('data', typeof body === 'string' ? body : JSON.stringify(body));
@@ -45,21 +51,20 @@ function createMockResponse(statusCode, body) {
   return res;
 }
 
-function createMockError(code, message) {
-  const req = new EventEmitter();
+function createMockError(code: string, message: string) {
+  const req = new MockRequest();
   req.write = () => {};
   req.end = () => {};
   req.destroy = () => {};
   setImmediate(() => {
-    const err = new Error(message || code);
-    err.code = code;
+    const err = Object.assign(new Error(message || code), { code });
     req.emit('error', err);
   });
   return req;
 }
 
 function createMockTimeout() {
-  const req = new EventEmitter();
+  const req = new MockRequest();
   req.write = () => {};
   req.end = () => {};
   req.destroy = () => {};
@@ -92,9 +97,11 @@ test('forgejoApi returns ok with parsed JSON on 200', () => {
 
 test('forgejoApi returns ok on 201 with body payload', () => {
   mockResolveForgejoSettings();
-  const mockSpawnSync = mock.method(childProcessModule, 'spawnSync', (_cmd, args, opts) => {
+  const mockSpawnSync = mock.method(childProcessModule, 'spawnSync', (_cmd: Parameters<(typeof childProcessModule)["spawnSync"]>[0], args: Parameters<(typeof childProcessModule)["spawnSync"]>[1], opts: Parameters<(typeof childProcessModule)["spawnSync"]>[2]) => {
+    assert.ok(args != null);
     assert.ok(args.includes('--data-binary'), 'should include --data-binary for body');
     assert.ok(args.includes('@-'), 'should include @- for stdin body');
+    assert.ok(opts != null);
     assert.strictEqual(opts.input, '{"key":"value"}', 'body should be JSON-stringified');
     return {
       status: 0,
@@ -183,6 +190,7 @@ test('forgejoApi returns error on curl spawn failure (status 7 = sandbox)', () =
     assert.strictEqual(result.status, 7);
     assert.strictEqual(result.statusCode, null);
     assert.strictEqual(result.data, null);
+    assert.ok(typeof result.error === 'string');
     assert.match(result.error, /Codex runtime cannot reach local Forgejo/);
   } finally {
     mockSpawnSync.mock.restore();
@@ -211,19 +219,20 @@ test('forgejoApi returns error on curl spawn failure (generic status)', () => {
 
 test('forgejoApi constructs correct URL from settings', () => {
   mockResolveForgejoSettings();
-  let capturedArgs = null;
-  const mockSpawnSync = mock.method(childProcessModule, 'spawnSync', (_cmd, args) => {
-    capturedArgs = args;
+  let capturedArgs: { value: readonly string[] | undefined | null } = { value: null };
+  const mockSpawnSync = mock.method(childProcessModule, 'spawnSync', (_cmd: Parameters<(typeof childProcessModule)["spawnSync"]>[0], args: Parameters<(typeof childProcessModule)["spawnSync"]>[1]) => {
+    capturedArgs.value = args;
     return { status: 0, stdout: '{}\n200', stderr: null };
   });
 
   try {
     forgejoApi('GET', '/pulls/1', 'token-123', undefined, { rootDir: '/tmp' });
-    assert.ok(capturedArgs.includes('http://localhost:3300/api/v1/repos/magnus/testproj/pulls/1'),
-      `URL should be constructed correctly. Args: ${capturedArgs.join(' | ')}`);
-    assert.ok(capturedArgs.includes('Authorization: token token-123'),
+    assert.ok(capturedArgs.value != null);
+    assert.ok(capturedArgs.value.includes('http://localhost:3300/api/v1/repos/magnus/testproj/pulls/1'),
+      `URL should be constructed correctly. Args: ${capturedArgs.value.join(' | ')}`);
+    assert.ok(capturedArgs.value.includes('Authorization: token token-123'),
       'Authorization header should be set');
-    assert.ok(capturedArgs.includes('Content-Type: application/json'),
+    assert.ok(capturedArgs.value.includes('Content-Type: application/json'),
       'Content-Type header should be set');
   } finally {
     mockSpawnSync.mock.restore();
@@ -231,9 +240,9 @@ test('forgejoApi constructs correct URL from settings', () => {
 });
 
 test('forgejoApi uses rootDir option for settings resolution', () => {
-  let capturedRootDir = null;
-  mock.method(forgejoAuthModule, 'resolveForgejoSettings', (rootDir) => {
-    capturedRootDir = rootDir;
+  let capturedRootDir: { value: string | undefined | null } = { value: null };
+  mock.method(forgejoAuthModule, 'resolveForgejoSettings', (rootDir: Parameters<(typeof forgejoAuthModule)["resolveForgejoSettings"]>[0]) => {
+    capturedRootDir.value = rootDir;
     return { url: 'http://localhost:3300', repo: 'magnus/testproj' };
   });
   const mockSpawnSync = mock.method(childProcessModule, 'spawnSync', () => ({
@@ -242,7 +251,7 @@ test('forgejoApi uses rootDir option for settings resolution', () => {
 
   try {
     forgejoApi('GET', '/pulls/1', 'token-123', undefined, { rootDir: '/custom/root' });
-    assert.strictEqual(capturedRootDir, '/custom/root');
+    assert.strictEqual(capturedRootDir.value, '/custom/root');
   } finally {
     mockSpawnSync.mock.restore();
   }
@@ -252,8 +261,9 @@ test('forgejoApi uses rootDir option for settings resolution', () => {
 
 test('forgejoApiAsync returns ok with parsed JSON on 200', async () => {
   mockResolveForgejoSettings();
-  const mockRequest = mock.method(httpModule, 'request', (_url, _opts, callback) => {
-    const req = new EventEmitter();
+  const mockRequest = mock.method(httpModule, 'request', (_url: Parameters<(typeof httpModule)["request"]>[0], _opts: Parameters<(typeof httpModule)["request"]>[1], callback: Parameters<(typeof httpModule)["request"]>[2]) => {
+    assert.ok(callback);
+    const req = new MockRequest();
     req.write = () => {};
     req.end = () => { setImmediate(() => callback(createMockResponse(200, { id: 1, title: 'test' }))); };
     return req;
@@ -272,10 +282,11 @@ test('forgejoApiAsync returns ok with parsed JSON on 200', async () => {
 
 test('forgejoApiAsync sends body payload on POST', async () => {
   mockResolveForgejoSettings();
-  let capturedPayload = null;
-  const mockRequest = mock.method(httpModule, 'request', (_url, _opts, callback) => {
-    const req = new EventEmitter();
-    req.write = (data) => { capturedPayload = data; };
+  let capturedPayload: { value: string | null } = { value: null };
+  const mockRequest = mock.method(httpModule, 'request', (_url: Parameters<(typeof httpModule)["request"]>[0], _opts: Parameters<(typeof httpModule)["request"]>[1], callback: Parameters<(typeof httpModule)["request"]>[2]) => {
+    assert.ok(callback);
+    const req = new MockRequest();
+    req.write = (data) => { capturedPayload.value = data; };
     req.end = () => { setImmediate(() => callback(createMockResponse(201, { number: 5 }))); };
     return req;
   });
@@ -284,7 +295,7 @@ test('forgejoApiAsync sends body payload on POST', async () => {
     const result = await forgejoApiAsync('POST', '/pulls', 'token-123', { title: 'PR' }, { rootDir: '/tmp' });
     assert.strictEqual(result.ok, true);
     assert.strictEqual(result.statusCode, 201);
-    assert.strictEqual(capturedPayload, '{"title":"PR"}');
+    assert.strictEqual(capturedPayload.value, '{"title":"PR"}');
   } finally {
     mockRequest.mock.restore();
   }
@@ -292,8 +303,9 @@ test('forgejoApiAsync sends body payload on POST', async () => {
 
 test('forgejoApiAsync returns ok=false on 404', async () => {
   mockResolveForgejoSettings();
-  const mockRequest = mock.method(httpModule, 'request', (_url, _opts, callback) => {
-    const req = new EventEmitter();
+  const mockRequest = mock.method(httpModule, 'request', (_url: Parameters<(typeof httpModule)["request"]>[0], _opts: Parameters<(typeof httpModule)["request"]>[1], callback: Parameters<(typeof httpModule)["request"]>[2]) => {
+    assert.ok(callback);
+    const req = new MockRequest();
     req.end = () => { setImmediate(() => callback(createMockResponse(404, { message: 'Not Found' }))); };
     return req;
   });
@@ -310,8 +322,9 @@ test('forgejoApiAsync returns ok=false on 404', async () => {
 
 test('forgejoApiAsync handles malformed JSON gracefully', async () => {
   mockResolveForgejoSettings();
-  const mockRequest = mock.method(httpModule, 'request', (_url, _opts, callback) => {
-    const req = new EventEmitter();
+  const mockRequest = mock.method(httpModule, 'request', (_url: Parameters<(typeof httpModule)["request"]>[0], _opts: Parameters<(typeof httpModule)["request"]>[1], callback: Parameters<(typeof httpModule)["request"]>[2]) => {
+    assert.ok(callback);
+    const req = new MockRequest();
     req.end = () => { setImmediate(() => callback(createMockResponse(200, 'plain text response'))); };
     return req;
   });
@@ -328,7 +341,8 @@ test('forgejoApiAsync handles malformed JSON gracefully', async () => {
 
 test('forgejoApiAsync returns error on ECONNREFUSED with sandbox hint', async () => {
   mockResolveForgejoSettings();
-  const mockRequest = mock.method(httpModule, 'request', (_url, _opts, _callback) => {
+  const mockRequest = mock.method(httpModule, 'request', (_url: Parameters<(typeof httpModule)["request"]>[0], _opts: Parameters<(typeof httpModule)["request"]>[1], callback: Parameters<(typeof httpModule)["request"]>[2]) => {
+    assert.ok(callback);
     return createMockError('ECONNREFUSED', 'connect ECONNREFUSED 127.0.0.1:3300');
   });
 
@@ -337,6 +351,7 @@ test('forgejoApiAsync returns error on ECONNREFUSED with sandbox hint', async ()
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.statusCode, null);
     assert.strictEqual(result.status, null);
+    assert.ok(typeof result.error === 'string');
     assert.match(result.error, /Codex runtime cannot reach local Forgejo/);
   } finally {
     mockRequest.mock.restore();
@@ -345,13 +360,15 @@ test('forgejoApiAsync returns error on ECONNREFUSED with sandbox hint', async ()
 
 test('forgejoApiAsync returns error on ENOTFOUND', async () => {
   mockResolveForgejoSettings();
-  const mockRequest = mock.method(httpModule, 'request', (_url, _opts, _callback) => {
+  const mockRequest = mock.method(httpModule, 'request', (_url: Parameters<(typeof httpModule)["request"]>[0], _opts: Parameters<(typeof httpModule)["request"]>[1], callback: Parameters<(typeof httpModule)["request"]>[2]) => {
+    assert.ok(callback);
     return createMockError('ENOTFOUND', 'getaddrinfo ENOTFOUND forgejo.local');
   });
 
   try {
     const result = await forgejoApiAsync('GET', '/pulls/1', 'token-123', undefined, { rootDir: '/tmp' });
     assert.strictEqual(result.ok, false);
+    assert.ok(typeof result.error === 'string');
     assert.match(result.error, /Codex runtime cannot reach local Forgejo/);
   } finally {
     mockRequest.mock.restore();
@@ -360,7 +377,8 @@ test('forgejoApiAsync returns error on ENOTFOUND', async () => {
 
 test('forgejoApiAsync returns error on generic request failure without sandbox hint', async () => {
   mockResolveForgejoSettings();
-  const mockRequest = mock.method(httpModule, 'request', (_url, _opts, _callback) => {
+  const mockRequest = mock.method(httpModule, 'request', (_url: Parameters<(typeof httpModule)["request"]>[0], _opts: Parameters<(typeof httpModule)["request"]>[1], callback: Parameters<(typeof httpModule)["request"]>[2]) => {
+    assert.ok(callback);
     return createMockError('EPIPE', 'write EPIPE');
   });
 
@@ -376,7 +394,8 @@ test('forgejoApiAsync returns error on generic request failure without sandbox h
 
 test('forgejoApiAsync returns timeout error', async () => {
   mockResolveForgejoSettings();
-  const mockRequest = mock.method(httpModule, 'request', (_url, _opts, _callback) => {
+  const mockRequest = mock.method(httpModule, 'request', (_url: Parameters<(typeof httpModule)["request"]>[0], _opts: Parameters<(typeof httpModule)["request"]>[1], callback: Parameters<(typeof httpModule)["request"]>[2]) => {
+    assert.ok(callback);
     return createMockTimeout();
   });
 
@@ -394,17 +413,18 @@ test('forgejoApiAsync returns timeout error', async () => {
 
 test('forgejoApiAsync uses custom timeout from options', async () => {
   mockResolveForgejoSettings();
-  let capturedTimeout = null;
-  const mockRequest = mock.method(httpModule, 'request', (_url, opts, callback) => {
-    capturedTimeout = opts.timeout;
-    const req = new EventEmitter();
+  let capturedTimeout: { value: number | undefined | null } = { value: null };
+  const mockRequest = mock.method(httpModule, 'request', (_url: Parameters<(typeof httpModule)["request"]>[0], opts: Parameters<(typeof httpModule)["request"]>[1], callback: Parameters<(typeof httpModule)["request"]>[2]) => {
+    assert.ok(callback);
+    capturedTimeout.value = opts.timeout;
+    const req = new MockRequest();
     req.end = () => { setImmediate(() => callback(createMockResponse(200, {}))); };
     return req;
   });
 
   try {
     await forgejoApiAsync('GET', '/pulls/1', 'token-123', undefined, { rootDir: '/tmp', timeout: 15000 });
-    assert.strictEqual(capturedTimeout, 15000);
+    assert.strictEqual(capturedTimeout.value, 15000);
   } finally {
     mockRequest.mock.restore();
   }
@@ -412,17 +432,18 @@ test('forgejoApiAsync uses custom timeout from options', async () => {
 
 test('forgejoApiAsync uses default HTTP_REQUEST_TIMEOUT when no timeout option', async () => {
   mockResolveForgejoSettings();
-  let capturedTimeout = null;
-  const mockRequest = mock.method(httpModule, 'request', (_url, opts, callback) => {
-    capturedTimeout = opts.timeout;
-    const req = new EventEmitter();
+  let capturedTimeout: { value: number | undefined | null } = { value: null };
+  const mockRequest = mock.method(httpModule, 'request', (_url: Parameters<(typeof httpModule)["request"]>[0], opts: Parameters<(typeof httpModule)["request"]>[1], callback: Parameters<(typeof httpModule)["request"]>[2]) => {
+    assert.ok(callback);
+    capturedTimeout.value = opts.timeout;
+    const req = new MockRequest();
     req.end = () => { setImmediate(() => callback(createMockResponse(200, {}))); };
     return req;
   });
 
   try {
     await forgejoApiAsync('GET', '/pulls/1', 'token-123', undefined, { rootDir: '/tmp' });
-    assert.strictEqual(capturedTimeout, HTTP_REQUEST_TIMEOUT);
+    assert.strictEqual(capturedTimeout.value, HTTP_REQUEST_TIMEOUT);
   } finally {
     mockRequest.mock.restore();
   }
@@ -434,9 +455,10 @@ test('forgejoApiAsync uses https transport for https URLs', async () => {
     repo: 'owner/repo',
   }));
   let usedHttps = false;
-  const mockHttpsRequest = mock.method(httpsModule, 'request', (_url, _opts, callback) => {
+  const mockHttpsRequest = mock.method(httpsModule, 'request', (_url: Parameters<(typeof httpsModule)["request"]>[0], _opts: Parameters<(typeof httpsModule)["request"]>[1], callback: Parameters<(typeof httpsModule)["request"]>[2]) => {
+    assert.ok(callback);
     usedHttps = true;
-    const req = new EventEmitter();
+    const req = new MockRequest();
     req.end = () => { setImmediate(() => callback(createMockResponse(200, {}))); };
     return req;
   });
@@ -452,18 +474,22 @@ test('forgejoApiAsync uses https transport for https URLs', async () => {
 
 test('forgejoApiAsync constructs correct authorization header', async () => {
   mockResolveForgejoSettings();
-  let capturedHeaders = null;
-  const mockRequest = mock.method(httpModule, 'request', (_url, opts, callback) => {
-    capturedHeaders = opts.headers;
-    const req = new EventEmitter();
+  let capturedHeaders: { value: readonly string[] | import("node:http").OutgoingHttpHeaders | undefined | null } = { value: null };
+  const mockRequest = mock.method(httpModule, 'request', (_url: Parameters<(typeof httpModule)["request"]>[0], opts: Parameters<(typeof httpModule)["request"]>[1], callback: Parameters<(typeof httpModule)["request"]>[2]) => {
+    assert.ok(callback);
+    capturedHeaders.value = opts.headers;
+    const req = new MockRequest();
     req.end = () => { setImmediate(() => callback(createMockResponse(200, {}))); };
     return req;
   });
 
   try {
     await forgejoApiAsync('GET', '/pulls/1', 'my-secret-token', undefined, { rootDir: '/tmp' });
-    assert.strictEqual(capturedHeaders.Authorization, 'token my-secret-token');
-    assert.strictEqual(capturedHeaders['Content-Type'], 'application/json');
+    assert.ok(capturedHeaders.value != null);
+    assert.ok('Authorization' in capturedHeaders.value);
+    assert.ok('Content-Type' in capturedHeaders.value);
+    assert.strictEqual(capturedHeaders.value.Authorization, 'token my-secret-token');
+    assert.strictEqual(capturedHeaders.value['Content-Type'], 'application/json');
   } finally {
     mockRequest.mock.restore();
   }
@@ -471,10 +497,11 @@ test('forgejoApiAsync constructs correct authorization header', async () => {
 
 test('forgejoApiAsync sets Content-Length when body is present', async () => {
   mockResolveForgejoSettings();
-  let capturedHeaders = null;
-  const mockRequest = mock.method(httpModule, 'request', (_url, opts, callback) => {
-    capturedHeaders = opts.headers;
-    const req = new EventEmitter();
+  let capturedHeaders: { value: readonly string[] | import("node:http").OutgoingHttpHeaders | undefined | null } = { value: null };
+  const mockRequest = mock.method(httpModule, 'request', (_url: Parameters<(typeof httpModule)["request"]>[0], opts: Parameters<(typeof httpModule)["request"]>[1], callback: Parameters<(typeof httpModule)["request"]>[2]) => {
+    assert.ok(callback);
+    capturedHeaders.value = opts.headers;
+    const req = new MockRequest();
     req.write = () => {};
     req.end = () => { setImmediate(() => callback(createMockResponse(201, {}))); };
     return req;
@@ -483,8 +510,9 @@ test('forgejoApiAsync sets Content-Length when body is present', async () => {
   try {
     const body = { title: 'test' };
     await forgejoApiAsync('POST', '/pulls', 'token', body, { rootDir: '/tmp' });
-    assert.ok('Content-Length' in capturedHeaders, 'Content-Length should be set for body');
-    assert.strictEqual(capturedHeaders['Content-Length'], Buffer.byteLength(JSON.stringify(body)));
+    assert.ok(capturedHeaders.value != null);
+    assert.ok('Content-Length' in capturedHeaders.value, 'Content-Length should be set for body');
+    assert.strictEqual(capturedHeaders.value['Content-Length'], Buffer.byteLength(JSON.stringify(body)));
   } finally {
     mockRequest.mock.restore();
   }
@@ -492,17 +520,19 @@ test('forgejoApiAsync sets Content-Length when body is present', async () => {
 
 test('forgejoApiAsync omits Content-Length when no body', async () => {
   mockResolveForgejoSettings();
-  let capturedHeaders = null;
-  const mockRequest = mock.method(httpModule, 'request', (_url, opts, callback) => {
-    capturedHeaders = opts.headers;
-    const req = new EventEmitter();
+  let capturedHeaders: { value: readonly string[] | import("node:http").OutgoingHttpHeaders | undefined | null } = { value: null };
+  const mockRequest = mock.method(httpModule, 'request', (_url: Parameters<(typeof httpModule)["request"]>[0], opts: Parameters<(typeof httpModule)["request"]>[1], callback: Parameters<(typeof httpModule)["request"]>[2]) => {
+    assert.ok(callback);
+    capturedHeaders.value = opts.headers;
+    const req = new MockRequest();
     req.end = () => { setImmediate(() => callback(createMockResponse(200, {}))); };
     return req;
   });
 
   try {
     await forgejoApiAsync('GET', '/pulls', 'token', undefined, { rootDir: '/tmp' });
-    assert.ok(!('Content-Length' in capturedHeaders), 'Content-Length should be omitted for no body');
+    assert.ok(capturedHeaders.value != null);
+    assert.ok(!('Content-Length' in capturedHeaders.value), 'Content-Length should be omitted for no body');
   } finally {
     mockRequest.mock.restore();
   }

@@ -26,12 +26,12 @@ import { MissionCard } from '../../../../src/interfaces/tui/mission-card.js';
 const LONG_TITLE = `Wave two lane columns and mission cards with a deliberately very long title `
   + `that runs past eighty characters so truncation has something to cut`;
 
-async function renderLaneColumn(props: Record<string, unknown>): Promise<string> {
-  return renderToString(React.createElement(LaneColumn, props as never), { columns: 40 });
+async function renderLaneColumn(props: import('react').ComponentProps<typeof import('../../../../src/interfaces/tui/lane-column.js').LaneColumn>): Promise<string> {
+  return renderToString(React.createElement(LaneColumn, props), { columns: 40 });
 }
 
-async function renderMissionCard(props: Record<string, unknown>): Promise<string> {
-  return renderToString(React.createElement(MissionCard, props as never), { columns: 80 });
+async function renderMissionCard(props: import('react').ComponentProps<typeof import('../../../../src/interfaces/tui/mission-card.js').MissionCard>): Promise<string> {
+  return renderToString(React.createElement(MissionCard, props), { columns: 80 });
 }
 
 describe('LaneColumn renders one BoardStage', () => {
@@ -119,7 +119,7 @@ describe('MissionCard renders projection facts', () => {
 
   it('renders "unavailable" for every absent projection fact', async () => {
     const output = await renderMissionCard({
-      card: makeCard({ title: '', gate: null as never }),
+      card: makeCard({ title: '', gate: 'unknown' }),
       width: 60,
     });
 
@@ -237,7 +237,7 @@ describe('the board renders lane overflow through the full shell', () => {
 
     const projection = makeProjection({ backlog: makeCards(12, 'backlog') });
     const output = ink.renderToString(
-      React.createElement(BoardShell, { projection, columns: 60, rows: 80 } as never),
+      React.createElement(BoardShell, { projection, columns: 60, rows: 80 }),
       { columns: 60 },
     );
 
@@ -255,7 +255,7 @@ describe('the board renders lane overflow through the full shell', () => {
 
     const projection = makeProjection({ backlog: makeCards(12, 'backlog') });
     const output = ink.renderToString(
-      React.createElement(BoardLayout, { projection, columns: 120, rows: 40 } as never),
+      React.createElement(BoardLayout, { projection, columns: 120, rows: 40 }),
       { columns: 120 },
     );
 

@@ -669,16 +669,18 @@ test('a recovery launch is attributed, so mission usage does not under-report it
   // And the launch site records them: the wiring reads the launcher result and
   // hands it to the same stats recorder every other stage launch uses.
   const composition = fs.readFileSync('src/composition/create-cli.ts', 'utf8');
-  const launchRecovery = composition.slice(composition.indexOf('launchRecovery:'));
-  assert.match(launchRecovery.slice(0, launchRecovery.indexOf('\n      },')), /recordStageStatsSafe\('active', \{\s*\n\s*stage: 'recovery'/,
+  const launchRecovery = composition.slice(composition.indexOf('const launchRecovery:'), composition.indexOf('try { return await createLeadCommand'));
+  const supervisor = fs.readFileSync('src/composition/lead-supervisor.ts', 'utf8');
+  assert.match(launchRecovery, /const \{ worktree, prompt \} = leadRecoveryWorkspace\(request\)/, 'the guarded launch uses the composed workspace and prompt');
+  assert.match(launchRecovery, /recordStageStatsSafe\('active', \{\s*\n\s*stage: 'recovery'/,
     'the recovery launch records its telemetry');
-  assert.doesNotMatch(launchRecovery.slice(0, launchRecovery.indexOf('\n      },')), /unknown agent/,
+  assert.doesNotMatch(launchRecovery, /unknown agent/,
     'a launch without a reported family is not written as a fictitious implementer');
   assert.match(launchRecovery, /Starting fresh recovery agent/,
     'the operator can see that the general recovery prompt was launched');
-  assert.match(launchRecovery, /const worktree = missionWorktree \?\? expectedWorktree/,
+  assert.match(supervisor, /const worktree = missionWorktree \?\? expectedWorktree/,
     'a broken mission mapping still launches from its conventional workspace');
-  assert.match(launchRecovery, /repair its git worktree state while preserving unrelated changes/,
+  assert.match(supervisor, /repair its git worktree state while preserving unrelated changes/,
     'the recovery agent is told to preserve work found in the broken workspace');
   assert.match(launchRecovery, /Recovery prompt for .*\$\{prompt\}/,
     'the complete recovery prompt is visible while lead stabilizes');
@@ -698,14 +700,15 @@ test('a recovery launch is attributed, so mission usage does not under-report it
 
 test('lead starts long forward workflows without blocking fleet supervision', () => {
   const composition = fs.readFileSync('src/composition/create-cli.ts', 'utf8');
-  const runAction = composition.slice(composition.indexOf('runAction: async'));
+  const supervisor = fs.readFileSync('src/composition/lead-supervisor.ts', 'utf8');
+  const runAction = supervisor.slice(supervisor.indexOf('runAction: async'));
   assert.match(
     runAction,
     /openServices\(missionWorktree\)[\s\S]*?startForward\(mission, action, \(\) => active\(invocation\.args, \{[\s\S]*?controller,/,
     'lead active recovery must use a controller rooted in the mission worktree',
   );
   assert.match(
-    composition,
+    supervisor,
     /const forward: Promise<unknown> = Promise\.resolve\(\)\.then\(work\)[\s\S]*?currentWork\.ended\(publication\)/,
     'the forward workflow runs in the background and clears its liveness marker when it ends',
   );
@@ -716,7 +719,7 @@ test('lead starts long forward workflows without blocking fleet supervision', ()
   );
   assert.match(
     composition,
-    /createLeadCommand\(buildLeadPort\(services, forwards\)\)\(args\); \} finally \{ await Promise\.allSettled\(forwards\); \}/,
+    /createLeadCommand\(createLeadSupervisorPort\(services, forwards, \{ rootDir, scope, active, registry, runPublicCli: run, launchRecovery \}\)\)\(args\); \}\s*finally \{ await Promise\.allSettled\(forwards\); \}/,
     'lead settles the forwards it started only after its fleet loop returns, before its graph closes',
   );
 });
@@ -808,15 +811,24 @@ test('the polling pause keeps the process alive, and the loop cancels the one it
   // An unreferenced timer lets Node exit while the supervisor is waiting on
   // another process's agent or claim, ending supervision after one queue read.
   const handles: Array<{ unrefs: number; cleared: number }> = [];
+  const tracked = new Map<NodeJS.Timeout, { unrefs: number; cleared: number }>();
   const timers = {
     set: (fn: () => void, ms: number) => {
-      const handle = { unrefs: 0, cleared: 0, unref() { handle.unrefs += 1; return handle; } };
-      handles.push(handle);
-      setTimeout(fn, ms);
-      return handle as unknown as NodeJS.Timeout;
+      const counts = { unrefs: 0, cleared: 0 };
+      const handle = setTimeout(fn, ms);
+      const unref = handle.unref.bind(handle);
+      handle.unref = () => { counts.unrefs += 1; return unref(); };
+      tracked.set(handle, counts);
+      handles.push(counts);
+      return handle;
     },
-    clear: (handle: NodeJS.Timeout) => { (handle as unknown as { cleared: number }).cleared += 1; },
-  };
+    clear: (handle: NodeJS.Timeout) => {
+      const counts = tracked.get(handle);
+      assert.ok(counts);
+      counts.cleared += 1;
+      clearTimeout(handle);
+    },
+  } satisfies NonNullable<Parameters<typeof pollingPause>[1]>;
 
   const poll = pollingPause(1, timers);
   await poll.elapsed;

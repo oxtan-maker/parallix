@@ -1,5 +1,4 @@
-import { tryRestoreIntegrationApproval, observeNormalIntegrationRepair } from './restore-integration-approval.js';
-import { observeGeneralReview } from '../review-classification/observe-review.js';
+import { tryRestoreIntegrationApproval } from './restore-integration-approval.js';
 import { tryClassifyReview } from '../review-classification/classify-review.js';
 /**
  * The reviewing half of a round: open the round, run the pre-review
@@ -73,7 +72,6 @@ async function launchReviewer(context: LoopContext, round: ReviewRound): Promise
   if (await stopIfControllerSuperseded(context, 'reviewer-launch fallback')) { return 'stop'; }
   await adoptLaunchedAgent(context, 'reviewer', identities.reviewer, launch);
   await ports.agents.recordStage('reviewer', context.state, identities, launch);
-  round.normalReviewCostUsd = ports.agents.measuredCost?.(launch) ?? null;
   return null;
 }
 
@@ -89,8 +87,8 @@ function reviewerArtifactDiagnostic(context: LoopContext, artifacts: ReviewerArt
 async function consumeReviewerOutput(context: LoopContext, round: ReviewRound): Promise<{ step: RoundStep; reviewState?: unknown }> {
   const { ports, state, identities } = context;
   const persisted = await ports.state.read();
-  if (state.phase === 'reviewing' && persisted?.phase === 'approved' && persisted.disposition === 'APPROVED') { return { step: null, reviewState: 'APPROVED' }; }
-  if (state.phase === 'reviewing' && persisted?.phase === 'fixing' && persisted.disposition === 'REQUEST_CHANGES') { return { step: null, reviewState: 'REQUEST_CHANGES' }; }
+  const persistedOutcome = persistedReviewerOutcome(state, persisted);
+  if (persistedOutcome) { return { step: null, reviewState: persistedOutcome }; }
   let artifacts = await ports.artifacts.consumeReviewer(identities.reviewer, state);
   let reviewState: unknown = null;
   if (artifacts.consumed && !artifacts.ok) {
@@ -138,6 +136,12 @@ async function consumeReviewerOutput(context: LoopContext, round: ReviewRound): 
     reviewState = await ports.provider.pollReview(identities.reviewer, state.startedAt, { label: `round ${round.attempt} review`, retryCount: 0 });
   }
   return { step: null, reviewState };
+}
+
+function persistedReviewerOutcome(state: LoopContext['state'], persisted: Awaited<ReturnType<LoopContext['ports']['state']['read']>>): string | null {
+  if (state.phase === 'reviewing' && persisted?.phase === 'approved' && persisted.disposition === 'APPROVED') { return 'APPROVED'; }
+  if (state.phase === 'reviewing' && persisted?.phase === 'fixing' && persisted.disposition === 'REQUEST_CHANGES') { return 'REQUEST_CHANGES'; }
+  return null;
 }
 
 /**
@@ -237,43 +241,54 @@ export async function runReviewerPhase(context: LoopContext, round: ReviewRound)
     return { outcome: 'stop' };
   }
   if (!reviewState) {
-    if (await runPreReviewRebase(context, round)) { return { outcome: 'stop' }; }
-    if (await runDeclaredPreReviewGate(context, round)) { return { outcome: 'stop' }; }
-    round.preReviewSetupVerified = false;
-    // TASK-2478/criterion 7: a passing re-round gate is the post-fix
-    // verification the operator sees before the second review runs.
-    if (round.attempt > 1) {
-      context.emit({ kind: 'revision-verified', attempt: round.attempt });
-    }
-    // The task mirror can commit Backlog bookkeeping after the round was
-    // opened. Pin routing to the revision that passed the complete setup.
-    round.verifiedRevision = context.ports.preReview.head() ?? undefined;
-    await pinReviewBaseline(context, round);
-    const restored = await tryRestoreIntegrationApproval(context, round);
-    if (restored === 'stop') { return { outcome: 'stop' }; }
-    if (restored === 'APPROVED') {
-      await applyReviewerOutcome(context, restored);
-      return { outcome: 'stop' };
-    }
-    round.integrationRepair = await integrationRepairBrief(context);
-    const repairReviewStarted = context.ports.restoration?.clock();
-    const cycleStarted = context.ports.classification?.clock();
-    const classified = await tryClassifyReview(context, round, cycleStarted);
-    if (classified === 'stop') { return { outcome: 'stop' }; }
-    if (classified) {
-      if (await applyReviewerOutcome(context, classified)) { return { outcome: 'stop' }; }
-      return { reviewState: classified };
-    }
-    const reviewerStarted = context.ports.classification?.clock() ?? 0;
-    if (await launchReviewer(context, round)) { return { outcome: 'stop' }; }
-    const consumed = await consumeReviewerOutput(context, round);
-    if (consumed.step) { return { outcome: 'stop' }; }
-    const recovered = await recoverReviewerTimeout(context, round, consumed.reviewState);
-    if (recovered.step) { return { outcome: 'stop' }; }
-    reviewState = recovered.reviewState;
-    await observeGeneralReview(context, reviewerStarted, reviewState, cycleStarted);
-    if (repairReviewStarted !== undefined) { await observeNormalIntegrationRepair(context, round, repairReviewStarted); }
+    const fresh = await runFreshReviewer(context, round);
+    if (fresh.action === 'return') { return fresh.value; }
+    reviewState = fresh.reviewState;
+
   }
   if (await applyReviewerOutcome(context, reviewState)) { return { outcome: 'stop' }; }
   return { reviewState };
+}
+
+type FreshReviewerResult = { action: 'return'; value: ReviewOutcome } | { action: 'continue'; reviewState: unknown };
+async function runFreshReviewer(context: LoopContext, round: ReviewRound): Promise<FreshReviewerResult> {
+  if (await freshReviewSetup(context, round)) { return { action: 'return', value: { outcome: 'stop' } }; }
+  round.integrationRepair = await integrationRepairBrief(context);
+  const cycleStarted = context.ports.classification?.clock();
+  const classified = await tryClassifyReview(context, round, cycleStarted);
+  if (classified === 'stop') { return { action: 'return', value: { outcome: 'stop' } }; }
+  if (classified) {
+    if (await applyReviewerOutcome(context, classified)) { return { action: 'return', value: { outcome: 'stop' } }; }
+    return { action: 'return', value: { reviewState: classified } };
+  }
+  if (await launchReviewer(context, round)) { return { action: 'return', value: { outcome: 'stop' } }; }
+  const consumed = await consumeReviewerOutput(context, round);
+  if (consumed.step) { return { action: 'return', value: { outcome: 'stop' } }; }
+  const recovered = await recoverReviewerTimeout(context, round, consumed.reviewState);
+  if (recovered.step) { return { action: 'return', value: { outcome: 'stop' } }; }
+  const reviewState = recovered.reviewState;
+  return { action: 'continue', reviewState };
+}
+
+async function freshReviewSetup(context: LoopContext, round: ReviewRound): Promise<boolean> {
+  if (await runPreReviewRebase(context, round)) { return true; }
+  if (await runDeclaredPreReviewGate(context, round)) { return true; }
+  round.preReviewSetupVerified = false;
+  // TASK-2478/criterion 7: a passing re-round gate is the post-fix
+  // verification the operator sees before the second review runs.
+  if (round.attempt > 1) {
+    context.emit({ kind: 'revision-verified', attempt: round.attempt });
+  }
+  // The task mirror can commit Backlog bookkeeping after the round was
+  // opened. Pin routing to the revision that passed the complete setup.
+  round.verifiedRevision = context.ports.preReview.head() ?? undefined;
+  await pinReviewBaseline(context, round);
+  const restored = await tryRestoreIntegrationApproval(context, round);
+  if (restored === 'stop') { return true; }
+  if (restored === 'APPROVED') {
+    await applyReviewerOutcome(context, restored);
+    return true;
+  }
+
+  return false;
 }

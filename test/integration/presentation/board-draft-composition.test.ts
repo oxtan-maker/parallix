@@ -1,3 +1,4 @@
+import { draftMissionServicesFixture } from '../../helpers/draft-mission-services.js';
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
@@ -27,8 +28,8 @@ const repositories = {
   agentBlocklist: { async findAll() { return []; }, async findByAgent() { return undefined; }, async save() {}, async deleteByAgent() {}, async clear() {} },
   operationalHistory: { async findAll() { return []; }, async findByType() { return []; }, async append() {}, async clear() {} },
   boardLaneEvents: { async findAll() { return []; }, async findByMissionId() { return []; }, async findByRepositoryId() { return []; }, async append() { return true; }, async clear() {} },
-  usage: { async findAll() { return []; }, async findWhere() { return []; }, async save() {}, async saveAll() {}, async clear() {} },
-};
+  usage: { async findAll() { return []; }, async findWhere() { return []; } },
+} satisfies NonNullable<Parameters<typeof composeProductionCapabilities>[2]>;
 
 test('shared web and TUI board discovers launchers only on supplied PATH (TASK-2724)', async () => {
   const root = registeredMkdtemp('board-launcher-authority-');
@@ -61,7 +62,7 @@ test('shared web and TUI board discovers launchers only on supplied PATH (TASK-2
     }
   } finally {
     setCommandPathProbe(name => name);
-    setLauncherHealthProbe(() => ({ ok: true }));
+    setLauncherHealthProbe(() => ({ ok: true as const }));
   }
 });
 
@@ -137,7 +138,7 @@ function makeMockDraftWorkflow(slug: string) {
     exitFn: (_code?: number) => { throw new Error('mock must not exit'); },
     logFn: () => {},
     errorFn: () => {},
-    missionServicesFn: async () => ({}),
+    missionServicesFn: async () => (draftMissionServicesFixture({})),
     options: {},
   };
   const port: DraftWorkflowPort = {
@@ -229,7 +230,7 @@ test('production draft adapter maps worktree creation abort to typed failure wit
           ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
           ensureDraftRepoConfigCommittedFn: () => true,
           detectLaunchBaseBranchFn: () => null,
-          resolveTaskFileFn: () => ({ ok: true, taskFile: '/fixture/task.md' }),
+          resolveTaskFileFn: () => ({ matches: ['/fixture/task.md'],  ok: true as const, taskFile: '/fixture/task.md' }),
           checkBacklogIntegrityFn: () => [],
           ensureMissionBranchFn: () => {},
           conventionalWorktreePathFn: () => '/fixture/worktree',

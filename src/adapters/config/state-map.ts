@@ -75,7 +75,11 @@ export function toActual(virtualState: string, map: Record<string, unknown> = lo
   return virtualState;
 }
 
-export function toVirtual(actualState: string, map: Record<string, unknown> = loadStateMap()): string {
+export function toVirtual(actualState: string, map?: Record<string, unknown>): string;
+export function toVirtual(actualState: string | null, map?: Record<string, unknown>): string | null;
+export function toVirtual(actualState: string | undefined, map?: Record<string, unknown>): string | undefined;
+export function toVirtual(actualState: string | null | undefined, map?: Record<string, unknown>): string | null | undefined;
+export function toVirtual(actualState: string | null | undefined, map: Record<string, unknown> = loadStateMap()): string | null | undefined {
   const m = resolveMap(map) || {};
   const normalizedActual = normalizeState(actualState) as string;
   for (const [virtual, actual] of Object.entries(m)) {

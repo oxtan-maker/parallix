@@ -2,10 +2,7 @@ import type { ParallixConfiguration } from "../../../application/ports/configura
 /** Concrete injection seams for the draft CLI adapter. */
 import type { CommandAgentLaunch } from './agent-result.js';
 import type { DraftWorkflowContext } from '../../../application/ports/cli-workflows.js';
-import type { MissionStore } from '../../../application/domain-ports.js';
-import type { MissionIntakeService } from '../../../application/mission-intake-service.js';
-import type { MissionLifecycleService } from '../../../application/mission-lifecycle-service.js';
-import type { RepositoryId } from '../../../domain/repository.js';
+
 import type * as agents from '../../agents/agents.js';
 import type * as backlog from '../../backlog/backlog.js';
 import type * as missionUtils from '../../filesystem/mission-utils.js';
@@ -20,14 +17,9 @@ import type { runPreDraftHook } from '../../process/pre-draft-hook.js';
 
 export type DraftLog = (_message: string) => void;
 export type DraftExit = (_code?: number) => void;
-export interface DraftMissionServices {
-  repositoryId: RepositoryId;
-  store: Pick<MissionStore, 'load'>;
-  intake: Pick<MissionIntakeService, 'execute'>;
-  lifecycle: Pick<MissionLifecycleService, 'transition'>;
-}
-export interface DraftAdapterDependencies extends Record<string, unknown> {
-  missionStore?: Pick<MissionStore, 'load'>;
+export type { DraftMissionServices } from '../../../application/ports/cli-workflows.js';
+import type { DraftMissionServices } from '../../../application/ports/cli-workflows.js';
+export type DraftAdapterDependencies = {
   readonly configuration?: ParallixConfiguration;
   exitFn?: DraftExit; logFn?: DraftLog; errorFn?: DraftLog;
   missionServicesFn?: DraftWorkflowContext['missionServicesFn'];
@@ -60,13 +52,12 @@ export interface DraftAdapterDependencies extends Record<string, unknown> {
   recordDraftStatsFn?: typeof draftStats.recordDraftStats;
   restartDraftAgentFn?: (..._args: Parameters<typeof draftStats.restartDraftAgent>) => boolean | Promise<boolean>;
   repairDraftContractFn?: typeof draftStats.repairDraftContract;
-  enforceDraftCommitSafetyFn?: typeof conflicts.enforceDraftCommitSafety;
+  enforceDraftCommitSafetyFn?: (...args: Parameters<typeof conflicts.enforceDraftCommitSafety>) => void;
   cwdFn?: () => string;
   anchorLaunchDirToMainRepo?: boolean;
 }
 
 /** The broad workflow port retains the adapter's opaque services factory. */
 export function draftMissionServices(ctx: DraftWorkflowContext): Promise<DraftMissionServices> {
-  const factory = ctx.missionServicesFn as (_rootDir: string) => Promise<DraftMissionServices>;
-  return factory(ctx.targetWorktree);
+  return ctx.missionServicesFn(ctx.targetWorktree);
 }

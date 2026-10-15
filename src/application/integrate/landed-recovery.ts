@@ -1,3 +1,6 @@
+import type { MissionLoadResult } from '../domain-ports.js';
+import type { IntegrationMissionServices } from '../ports/integration-records.js';
+import type { IntegrationRecoveryContext } from './recovery.js';
 // TASK-2517 CP-3: close a mission whose squash already landed on the base branch
 // but whose aggregate is stranded in `active`/`review`.
 //
@@ -24,9 +27,18 @@ function fail(createAbort: () => Error, ...messages: string[]): never {
  * @param {any} missionServices
  * @param {string} rootDir
  */
+function closedRecoveryEvidence(mission: Extract<MissionLoadResult, { kind: 'found' }>['mission'], slug: string, rootDir: string, hasIntegrationMeasurement?: (slug: string, rootDir: string) => boolean, hasCleanupArtifacts?: (slug: string, rootDir: string) => boolean) {
+  const alreadyClosed = typeof mission.closedAt === 'string';
+  const alreadyMeasured = alreadyClosed && hasIntegrationMeasurement
+    ? hasIntegrationMeasurement(slug, rootDir) : false;
+  const artifactsRemain = alreadyClosed && hasCleanupArtifacts
+    ? hasCleanupArtifacts(slug, rootDir) : false;
+  return { alreadyClosed, alreadyMeasured, artifactsRemain };
+}
+
 export async function recoverLandedIntegration(
   slug: string,
-  missionServices: any,
+  missionServices: IntegrationMissionServices,
   rootDir: string,
   {
     findSquashCommit,
@@ -43,7 +55,7 @@ export async function recoverLandedIntegration(
     hasCleanupArtifacts,
   }: {
     findSquashCommit: IntegrateCheckoutPort['findExistingSquashCommit'];
-    recoverMissionForIntegration: (_context: any, _opts: { missionServices: any; missionLoad: any }) => Promise<{ status: string }>;
+    recoverMissionForIntegration: (_context: IntegrationRecoveryContext, _opts: { missionServices: IntegrationMissionServices; missionLoad: MissionLoadResult }) => Promise<{ status: string }>;
     persistLandedIntegrationOrAbort: IntegrateLandingPort['persistLandedIntegrationOrAbort'];
     recordPostIntegrationStatsOrAbort: IntegrateLandingPort['recordPostIntegrationStatsOrAbort'];
     closeLandedIntegrationOrAbort: IntegrateLandingPort['closeLandedIntegrationOrAbort'];
@@ -64,11 +76,7 @@ export async function recoverLandedIntegration(
   if (missionLoad.kind !== 'found') {
     fail(createAbort, `Mission ${missionId(slug)} is unavailable for closeout.`);
   }
-  const alreadyClosed = typeof missionLoad.mission.closedAt === 'string';
-  const alreadyMeasured = alreadyClosed && hasIntegrationMeasurement
-    ? hasIntegrationMeasurement(slug, rootDir) : false;
-  const artifactsRemain = alreadyClosed && hasCleanupArtifacts
-    ? hasCleanupArtifacts(slug, rootDir) : false;
+  const { alreadyClosed, alreadyMeasured, artifactsRemain } = closedRecoveryEvidence(missionLoad.mission, slug, rootDir, hasIntegrationMeasurement, hasCleanupArtifacts);
   if (alreadyClosed && alreadyMeasured && !artifactsRemain) { return; }
   if (alreadyClosed && !artifactsRemain && hasCleanupArtifacts && !alreadyMeasured) {
     fail(createAbort, `Mission ${slug} is closed with no cleanup artifacts but lacks integration statistics; recovery cannot prove whether its post-integrate hook ran.`);

@@ -1,3 +1,6 @@
+import { repositoryId as fixtureRepositoryId } from '../../../../src/domain/repository.js';
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
+import { agentFamily as fixtureAgentFamily } from '../../../../src/domain/agents.js';
 // Historical regression provenance: TASK-2373.
 /**
  * SC7: Component tests assert rendered semantics using mocked BoardProjection.
@@ -25,16 +28,16 @@ import { makeAttentionItem, makeCard, makeProjection } from '../../../fixtures/b
 
 describe('BoardShell component renders with mocked BoardProjection', () => {
   /** Empty metric series used in mocked BoardProjection. */
-  const emptySeries: MetricSeries = {
+  const emptySeries = {
     series: [],
     missingHistoryFallback: 'skip',
-  };
+  } satisfies MetricSeries;
 
   /** Empty BoardMetrics for mocked projection. */
   const emptyMetrics: BoardMetrics = {
     health: { state: 'no-telemetry' },
     provenance: {
-      repositoryId: 'test-repo' as RepositoryId,
+      repositoryId: fixtureRepositoryId('test-repo') as RepositoryId,
       evaluatedWindow: { startedAt: null, endedAt: null },
       sampleSize: 0,
       newestEventTimestamp: null,
@@ -42,13 +45,13 @@ describe('BoardShell component renders with mocked BoardProjection', () => {
       adapterSucceeded: true,
     },
     cumulativeFlow: emptySeries,
-    cumulativeFlowByState: emptySeries as unknown as BoardMetrics['cumulativeFlowByState'],
+    cumulativeFlowByState: emptySeries,
     medianStateTimes: emptySeries,
     medianAgentRuntime: emptySeries,
-    medianCycleTimeByState: emptySeries as unknown as BoardMetrics['medianCycleTimeByState'],
+    medianCycleTimeByState: emptySeries,
     throughput: emptySeries,
     reviewBounceRate: emptySeries,
-    medianAgeByLane: emptySeries as unknown as BoardMetrics['medianAgeByLane'],
+    medianAgeByLane: emptySeries,
     agentAvailability: [],
     bottleneck: {
       sentence: 'Bottleneck unavailable: history is missing.',
@@ -58,20 +61,20 @@ describe('BoardShell component renders with mocked BoardProjection', () => {
 
   /** Minimal MissionCard for mocked projection (partial, cast to type). */
   const testCard: MissionCard = {
-    id: 'task-9999' as MissionId,
-    repositoryId: 'test-repo' as RepositoryId,
+    id: fixtureMissionId('task-9999') as MissionId,
+    repositoryId: fixtureRepositoryId('test-repo') as RepositoryId,
     title: 'Test task-9999',
     labels: [],
     lane: 'active' as const,
     status: 'active' as const,
     rawStatus: 'active',
     closed: false,
-    agent: 'custom' as AgentFamily,
+    agent: fixtureAgentFamily('custom') as AgentFamily,
     checkpoint: null,
     checkpointDescription: null,
     checkpointEvidence: [],
     nextActionText: null,
-    gate: null,
+    gate: 'unknown',
     pullRequest: null,
     reviewApproved: false,
     reviewRound: null,
@@ -86,7 +89,7 @@ describe('BoardShell component renders with mocked BoardProjection', () => {
 
   /** Minimal AttentionItem for mocked projection. */
   const testAttention: AttentionItem = {
-    missionId: 'task-9999' as MissionId,
+    missionId: fixtureMissionId('task-9999') as MissionId,
     rank: 1,
     reason: { kind: 'review-lane', detail: 'Awaiting review' },
     card: testCard,
@@ -97,7 +100,7 @@ describe('BoardShell component renders with mocked BoardProjection', () => {
   /** Minimal BoardProjection matching the actual data model (all required fields). */
   const mockProjection: BoardProjection = {
     version: 1,
-    repositoryId: 'test-repo' as RepositoryId,
+    repositoryId: fixtureRepositoryId('test-repo') as RepositoryId,
     wipCounts: [
       { lane: 'backlog', count: 2 },
       { lane: 'refined', count: 0 },
@@ -125,7 +128,7 @@ describe('BoardShell component renders with mocked BoardProjection', () => {
   /** Empty BoardProjection for edge-case testing. */
   const emptyProjection: BoardProjection = {
     version: 1,
-    repositoryId: 'test-empty' as RepositoryId,
+    repositoryId: fixtureRepositoryId('test-empty') as RepositoryId,
     wipCounts: [
       { lane: 'backlog', count: 0 },
       { lane: 'refined', count: 0 },
@@ -286,12 +289,12 @@ describe('BoardShell component renders with mocked BoardProjection', () => {
 describe("Operator rail — SC15-SC18", () => {
   test('SC15: the rail begins with the attention heading; live-work totals stay in the agent strip', () => {
     const cards = Array.from({ length: 4 }, (_unused, index) => makeCard({
-      id: `task-working-${index + 1}` as never,
+      id: fixtureMissionId(`task-working-${index + 1}`),
       currentWork: {
         operationId: `work-${index + 1}`,
         phase: 'execute',
         summary: 'working',
-        agent: 'qwen' as never,
+        agent: fixtureAgentFamily('qwen'),
         updatedAt: new Date().toISOString(),
         freshness: 'live',
       },
@@ -310,8 +313,8 @@ describe("Operator rail — SC15-SC18", () => {
 
   test('SC16: recovery evidence no longer renders a working row in the rail', () => {
     const card = makeCard({
-      id: 'task-recovery' as never,
-      liveSession: { missionId: 'task-recovery' as never, family: 'qwen' as never },
+      id: fixtureMissionId('task-recovery'),
+      liveSession: { missionId: fixtureMissionId('task-recovery'), family: fixtureAgentFamily('qwen') },
     });
     const output = renderToString(React.createElement(BoardShell, {
       projection: makeProjection({ active: [card] }), columns: 120, rows: 30,
@@ -325,8 +328,8 @@ describe("Operator rail — SC15-SC18", () => {
   });
 
   test('SC17 and SC18: unavailable review and integration actions never render a green runnable affordance', () => {
-    const review = makeCard({ id: 'task-review' as never, lane: 'review', status: 'review' });
-    const integration = makeCard({ id: 'task-integrate' as never, lane: 'integration', status: 'integration' });
+    const review = makeCard({ id: fixtureMissionId('task-review'), lane: 'review', status: 'review' });
+    const integration = makeCard({ id: fixtureMissionId('task-integrate'), lane: 'integration', status: 'integration' });
     const projection = makeProjection({ review: [review], integration: [integration] });
     const output = renderToString(React.createElement(BoardShell, {
       projection: {

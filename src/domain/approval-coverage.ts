@@ -1,6 +1,6 @@
 import {
   changeRevision,
-  currentReviewRound,
+  currentReviewRound, replaceCurrentRound,
   reviewStatus,
   type ChangeRevision,
   type Review,
@@ -55,7 +55,7 @@ export type ApprovalCoverage =
     /** The branch move that recorded the staleness, or null when only computed. */
     readonly recorded: ReviewDecisionSupersession | null;
   }
-  | { readonly kind: 'unverifiable'; readonly round: number; readonly approvedRevision: ChangeRevision; readonly reason: string };
+  | { readonly kind: 'unverifiable'; readonly round: number; readonly approvedRevision: ChangeRevision | null; readonly reason: string };
 
 /**
  * What the branch would land now, compared with the approved revision by an
@@ -71,8 +71,6 @@ export interface LandedChangeObservation {
 function effectiveApproval(review: Review | null) {
   if (!review || reviewStatus(review) !== 'approved') { return null; }
   const round = currentReviewRound(review);
-  // A legacy round that recorded no reviewed subject has nothing to compare.
-  if (!round.subject?.revision) { return null; }
   return round.decision?.kind === 'approved' ? { round, decision: round.decision } : null;
 }
 
@@ -90,7 +88,8 @@ export function assessApprovalCoverage(
   const effective = effectiveApproval(review);
   if (!effective) { return null; }
   const round = effective.round.number;
-  const approvedRevision = effective.round.subject.revision;
+  const approvedRevision = effective.decision.revision ?? null;
+  if (!approvedRevision) { return { kind: 'unverifiable', round, approvedRevision: null, reason: 'the decided revision was not recorded' }; }
   const recorded = effective.decision.supersession ?? null;
   if (recorded) {
     return { kind: 'stale', round, approvedRevision, landedRevision: recorded.supersedingRevision, recorded };
@@ -134,7 +133,7 @@ export function recordApprovalSuperseded(
       },
     },
   };
-  return { ...review, rounds: [...review.rounds.slice(0, -1), round] as unknown as Review['rounds'] };
+  return { ...review, rounds: replaceCurrentRound(review, round) };
 }
 
 /** Operator-facing sentence for a stale approval; never phrased as requested changes. */

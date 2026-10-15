@@ -30,11 +30,14 @@ function validateWithVersion<T>(
     };
   }
   const problems: string[] = [];
-  validateShape(payload, problems);
-  if (problems.length > 0) {
+  const matchesShape = (value: Record<string, unknown>): value is Record<string, unknown> & T => {
+    validateShape(value, problems);
+    return problems.length === 0;
+  };
+  if (!matchesShape(payload)) {
     return { ok: false, code: 'invalid-payload', problems };
   }
-  return { ok: true, value: payload as unknown as T };
+  return { ok: true, value: payload };
 }
 
 /** Validate a parsed board snapshot payload. */

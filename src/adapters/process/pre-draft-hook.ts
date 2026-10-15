@@ -24,7 +24,7 @@ export type StoreState = 'cold' | 'warm' | 'unknown';
 
 export const FAILURE_TAIL_MAX_CHARS = 2048;
 
-type RunFn = (_cmd: string, _args: string[], _options: Record<string, unknown>) => { status: number | null; stdout: string; stderr: string };
+type RunFn = (_cmd: string, _args: string[], _options: child_process.SpawnSyncOptionsWithStringEncoding) => { status: number | null; stdout: string; stderr: string };
 
 export function resolvePreDraftCommand(rootDir: string): string | null {
   const value = ((loadAdapterConfig(rootDir).draft as Record<string, unknown>) || {}).preDraftCommand;
@@ -52,8 +52,7 @@ export function runPreDraftHook(params: {
 }): PreDraftHookResult {
   const command = resolvePreDraftCommand(params.worktree);
   if (!command) { return { ran: false, ok: true }; }
-  const runFn = params.runFn || ((cmd: string, args: string[], options: Record<string, unknown>) =>
-    child_process.spawnSync(cmd, args, options as child_process.SpawnSyncOptions) as unknown as ReturnType<RunFn>);
+  const runFn: RunFn = params.runFn || ((cmd, args, options) => child_process.spawnSync(cmd, args, options));
   const { nowFn = () => performance.now(), logFn = () => undefined } = params;
   logFn(`pre-draft hook start: slug=${params.slug} command=\`${command}\``);
   const startedAt = nowFn();

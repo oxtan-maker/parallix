@@ -21,6 +21,7 @@ export function createReviewClassification(slug: string, worktree: string,
   const raw = settings.reviewMode;
   const mode = raw === undefined || raw === '' || raw === 'on' ? 'enabled' : raw === 'shadow' ? 'shadow' : 'disabled';
   return {
+    obligationMode: settings.obligationReviewMode === 'on' ? 'enabled' : 'shadow',
     mode, decision: createDecisionPort(settings), evidence: new GitReviewEvidence(worktree),
     telemetry: async () => new SqliteReviewClassificationStore((await initOperatorState({ configuration })).db),
     async validations(mission) {
@@ -28,7 +29,10 @@ export function createReviewClassification(slug: string, worktree: string,
       const history = new OperationalHistoryService(new SqliteOperationalHistoryRepository(db));
       return (await history.loadAllByTypeForMission(INTEGRATION_VALIDATION_EVENT_TYPE, mission)).flatMap(entry => {
         const marker = parseIntegrationValidationMarker(entry);
-        return marker ? [{ sha: marker.sha, hooks: marker.hooks, recordedAt: entry.createdAt }] : [];
+        if (!marker) { return []; }
+        const data = JSON.parse(entry.eventData!) as { baseline?: unknown };
+        return [{ sha: marker.sha, ...(typeof data.baseline === 'string' ? { baseline: data.baseline } : {}),
+          hooks: marker.hooks, recordedAt: entry.createdAt }];
       });
     },
     hash: text => createHash('sha256').update(text).digest('hex'), fingerprint: randomUUID,
@@ -48,7 +52,7 @@ export function createIntegrationApprovalRestoration(worktree: string, configura
   const comparison = new GitMissionPatchComparison(worktree);
   return {
     samePatch: (a, b) => comparison.samePatch(a, b),
-    now: () => new Date().toISOString(), clock: () => performance.now(),
+    now: () => new Date().toISOString(),
     async validation(missionId) {
       const { db } = await initOperatorState({ configuration });
       return new SqliteIntegrationValidationReader(db).read(missionId);

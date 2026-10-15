@@ -165,7 +165,7 @@ function service(repositoryRoot: string, options: { host?: MissionTerminalHostPo
 }
 
 function ok<T>(value: T): Exclude<T, MissionHistoryError> {
-  assert.notEqual((value as { ok?: unknown }).ok, false, (value as { detail?: string }).detail);
+  assert.notEqual((value as { ok?: unknown }).ok, false, (value as { detail?: string }).detail ?? 'history operation failed');
   return value as Exclude<T, MissionHistoryError>;
 }
 
@@ -405,4 +405,20 @@ test('hyphenated families retain canonical attribution and old encoded history r
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).family, 'custom_pi', 'reading never rewrites legacy evidence');
   fs.writeFileSync(file, JSON.stringify({ ...record, family: '../other' }));
   assert.equal(getRun(scope(repository), record.runId).error, 'malformed');
+});
+
+test('terminal sequences preserve text around CSI, OSC and incomplete escapes (TASK-2746)', () => {
+  const fixtures = [
+    ['a\x1b[31mb\x1b[0mc', 'abc'],
+    ['a\x1b]title\x07b', 'ab'],
+    ['a\x1b]title\x1b\\b', 'ab'],
+    ['a\x1bMb', 'ab'],
+    ['a\x1b[12', 'a[12'],
+    ['a\x1b]title', 'atitle'],
+    ['a\x1b[  mb', 'ab'],
+    ['a\x1b[0;? mb', 'ab'],
+    ['a\x1bxb', 'axb'],
+    ['\x00a\t\nb\r\n\x7f', 'a\t\nb\n'],
+  ];
+  for (const [input, expected] of fixtures) { assert.equal(stripTerminalControl(input), expected); }
 });

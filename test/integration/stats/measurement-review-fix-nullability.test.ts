@@ -55,7 +55,7 @@ describe("defect A: an unrecorded review-fix count stays unknown", () => {
     await withStatisticsDatabase(async ({ db, databasePath }) => {
       const store = new SqliteMeasurementStore(databasePath);
       try {
-        recordStageStats({ configuration: resolveConfiguration(process.env), ...({ slug: 'task-501', stage: 'active', rootDir: root, date: '2026-06-02', implementer: 'claude', store } as any) });
+        recordStageStats({ configuration: resolveConfiguration(process.env), ...({ slug: 'task-501', stage: 'active', rootDir: root, date: '2026-06-02', implementer: 'claude', store }) });
       } finally {
         store.close();
       }
@@ -74,7 +74,7 @@ describe("defect A: an unrecorded review-fix count stays unknown", () => {
     await withStatisticsDatabase(async ({ db, databasePath }) => {
       const store = new SqliteMeasurementStore(databasePath);
       try {
-        recordStageStats({ configuration: resolveConfiguration(process.env), ...({ slug: 'task-500', stage: 'review', rootDir: root, date: '2026-06-02', reviewer: 'claude', prFixRounds: '0', store } as any) });
+        recordStageStats({ configuration: resolveConfiguration(process.env), ...({ slug: 'task-500', stage: 'review', rootDir: root, date: '2026-06-02', reviewer: 'claude', prFixRounds: '0', store }) });
       } finally {
         store.close();
       }
@@ -97,11 +97,11 @@ describe("defect A: an unrecorded review-fix count stays unknown", () => {
         upsertMeasurementRow({
           date: '2026-06-02', repo: REPO, mission: KNOWN_ZERO, classification: 'ai_sdlc',
           implementer: 'claude', pr_fix_rounds: '0', stage: 'default',
-        } as any, { configuration: resolveConfiguration(process.env), store });
+        }, { configuration: resolveConfiguration(process.env), store });
         upsertMeasurementRow({
           date: '2026-06-02', repo: REPO, mission: UNKNOWN, classification: 'ai_sdlc',
           implementer: 'claude', stage: 'default',
-        } as any, { configuration: resolveConfiguration(process.env), store });
+        }, { configuration: resolveConfiguration(process.env), store });
       } finally {
         store.close();
       }

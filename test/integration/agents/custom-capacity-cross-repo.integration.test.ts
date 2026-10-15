@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../../src/application/ports/configuration.js";
+import type { SqliteDatabaseAdapter } from "../../../src/adapters/sqlite/database-adapter.js";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -47,7 +49,7 @@ test('disposable repositories and mission worktrees share canonical capacity two
   const policy = path.join(temp, 'policy');
   fs.mkdirSync(policy);
   fs.writeFileSync(path.join(policy, 'workflow.config.json'), JSON.stringify({ adapters: { agents: { maxConcurrentCustom: 2 } } }));
-  const clients = [];
+  const clients: { worktree: string; home: string; configuration: ParallixConfiguration; db: SqliteDatabaseAdapter; }[] = [];
   for (const name of ['one', 'two', 'three']) {
     const root = path.join(temp, name);
     fs.mkdirSync(root);

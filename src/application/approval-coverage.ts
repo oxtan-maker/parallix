@@ -5,7 +5,7 @@ import {
   staleApprovalSentence,
   type LandedChangeObservation,
 } from '../domain/approval-coverage.js';
-import { changeRevision, currentReviewRound, type Review } from '../domain/review.js';
+import { changeRevision, currentReviewRound, decidedRevisionOf, type Review } from '../domain/review.js';
 import { missionId } from '../domain/mission.js';
 import type { MissionStore } from './domain-ports.js';
 
@@ -37,9 +37,10 @@ export function observeLandedChange(
   identity: ChangeIdentityPort,
   move: { readonly landedRevision?: string | null; readonly movedFrom?: string | null } = {},
 ): LandedChangeObservation | null {
-  const subject = review ? currentReviewRound(review).subject : null;
-  if (!subject?.revision) { return null; }
-  const { change, revision } = subject;
+  const round = review ? currentReviewRound(review) : null;
+  const revision = decidedRevisionOf(round);
+  if (!round || !revision) { return null; }
+  const { change } = round.subject;
   const landed = move.landedRevision ?? identity.branchHead(change.sourceBranch);
   if (!landed) { return { landedRevision: null, sameChange: null }; }
   if (landed === revision || identity.onlyBookkeepingSince?.(revision, landed) === true) {

@@ -18,7 +18,9 @@ export interface TmuxProbe {
   readonly reason: string | null;
 }
 
-type SpawnSyncFn = typeof childProcess.spawnSync;
+export type SpawnSyncFn = (command: string, args: string[], options: childProcess.SpawnSyncOptions) => {
+  status: number | null; stdout?: string | Buffer | null; stderr?: string | Buffer | null; error?: NodeJS.ErrnoException;
+};
 
 /** Probe whether tmux can host a launch on this platform. */
 export function probeTmux(spawnSyncFn: SpawnSyncFn = childProcess.spawnSync, platform: NodeJS.Platform = process.platform): TmuxProbe {
@@ -27,7 +29,7 @@ export function probeTmux(spawnSyncFn: SpawnSyncFn = childProcess.spawnSync, pla
   }
   const probe = spawnSyncFn('tmux', ['-V'], { encoding: 'utf8', timeout: 5000 });
   if (probe.error || probe.status !== 0) {
-    const cause = probe.error ? (probe.error as NodeJS.ErrnoException).code || probe.error.message : `exit ${probe.status}`;
+    const cause = probe.error ? probe.error.code || probe.error.message : `exit ${probe.status}`;
     return { available: false, version: null, reason: `tmux is not runnable (${cause}); install tmux or set adapters.terminal.host to "pipe"` };
   }
   return { available: true, version: String(probe.stdout).trim() || null, reason: null };
@@ -87,6 +89,8 @@ export type TmuxLaunchInput = {
    * the rendered view while the supervisor still receives the raw bytes.
    */
   readonly presenter?: { readonly command: string; readonly args: readonly string[] };
+  /** Bytes the command reads from stdin, followed by EOF, instead of the pane terminal. */
+  readonly input?: Buffer;
 } & ({ readonly identity: NativeMissionTerminalIdentity; readonly runId: string }
   | { readonly identity: NativeTerminalRun; readonly runId?: undefined });
 
@@ -112,13 +116,18 @@ function operationWindowName(runId: string, spawnIndex: number): string {
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/** Record the supervised command PID before exec, without changing its terminal. */
-function commandScript(socketPath: string, scratch: string, command: string, args: readonly string[]): string {
+/**
+ * Record the supervised command PID before exec, without changing its terminal.
+ * Supplied input becomes the command's stdin; its private file is unlinked once open.
+ */
+function commandScript(socketPath: string, scratch: string, command: string, args: readonly string[], hasInput: boolean): string {
+  const input = shellQuote(path.join(scratch, 'stdin'));
   return [
     '#!/bin/sh',
     `printf '%s' "$$" > ${shellQuote(path.join(scratch, 'command.pid'))}`,
     `tmux -S ${shellQuote(socketPath)} set-option -w -t "$TMUX_PANE" @px_command_pid "$$"`,
-    `exec ${[command, ...args].map(shellQuote).join(' ')}`,
+    ...(hasInput ? [`exec 3< ${input} || exit 66`, `rm -f ${input}`] : []),
+    `exec ${[command, ...args].map(shellQuote).join(' ')}${hasInput ? ' <&3 3<&-' : ''}`,
     '',
   ].join('\n');
 }
@@ -272,7 +281,8 @@ export function prepareTmuxLaunch(input: TmuxLaunchInput, options: { configurati
   });
   fs.writeFileSync(path.join(consoleBin, 'px'), consolePxScript(commandPath), { mode: 0o700 });
   writeEnvFile(path.join(scratch, 'pane.env'), { ...input.env, PWD: input.cwd, PARALLIX_MISSION_TERMINAL: input.identity.missionId, PARALLIX_MISSION_SOCKET: socketPath });
-  fs.writeFileSync(path.join(scratch, 'command.sh'), commandScript(socketPath, scratch, input.command, input.args), { mode: 0o700 });
+  if (input.input) { fs.writeFileSync(path.join(scratch, 'stdin'), input.input, { mode: 0o600 }); }
+  fs.writeFileSync(path.join(scratch, 'command.sh'), commandScript(socketPath, scratch, input.command, input.args, Boolean(input.input)), { mode: 0o700 });
   fs.writeFileSync(path.join(scratch, 'pane.sh'), paneScript(socketPath, windowName, scratch, input.presenter), { mode: 0o700 });
   fs.writeFileSync(path.join(scratch, 'host.sh'), hostScript(socketPath, sessionName, windowName, scratch, input.cwd, input.supervisorPid ?? process.pid, consoleBin, missionTerminalCapturePath(input.identity, configuration), terminalStateRoot(configuration), configuration, Boolean(input.presenter), runId), { mode: 0o700 });
   const spawnSyncFn = options.spawnSyncFn ?? childProcess.spawnSync;

@@ -1,3 +1,4 @@
+import { repositoryId } from '../src/domain/repository.js';
 /** Repeatable runtime measurements; writes volatile results outside documentation. */
 import childProcess from 'node:child_process';
 import fs from 'node:fs';
@@ -65,13 +66,13 @@ function counted(log: string): Pick<Counters, 'gitSubprocesses' | 'gitWorktreeLi
 }
 
 async function boardBuild(count: number) {
-  const missions = Array.from({ length: count }, (_, index) => intakeMission({ id: missionId(`task-${String(index + 1).padStart(4, '0')}`), repositoryId: 'benchmark' as any, title: `Fixture ${index + 1}` }));
+  const missions = Array.from({ length: count }, (_, index) => intakeMission({ id: missionId(`task-${String(index + 1).padStart(4, '0')}`), repositoryId: repositoryId('benchmark'), title: `Fixture ${index + 1}` }));
   const builder = new BoardProjectionBuilder(
     { loadAllMissions: async () => missions, loadMission: async id => missions.find(mission => mission.id === id) ?? null, getSourceFacts: () => [] },
     { loadReviews: async ids => new Map(ids.map(id => [id, { review: null, approval: null }])) },
     { loadGateStatus: async () => 'unknown' },
     { loadAgentAvailability: async () => [], loadAssignedAgent: async () => null },
-    { loadRepositoryId: async () => 'benchmark' as any, loadHeadCommit: async () => 'fixture' },
+    { loadRepositoryId: async () => repositoryId('benchmark'), loadHeadCommit: async () => 'fixture' },
     { loadOperationLog: async () => [] },
   );
   await builder.build();

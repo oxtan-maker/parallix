@@ -5,7 +5,7 @@ import type { NelBucketLabel } from '../../domain/net-engineering-lines.js';
 
 function containsPlaceholder(value: string): boolean {
   let opening = -1;
-  for (let index = 0; index < value.length; index += 1) {
+  for (let index = 0;index < value.length;index += 1) {
     if (value[index] === '>') {
       if (opening >= 0 && index > opening + 1) { return true; }
       opening = -1;
@@ -57,22 +57,12 @@ export function parseLegacyMissionDocument(content: string): {
     predictedNelBucket?: NelBucketLabel; reproductionTest?: string;
     checkpoints: { name: string; description: string }[];
   } = { checkpoints: [] };
-  const goal = section('Goal');
-  const why = section('Why Now');
-  const scope = section('Scope');
-  const outOfScope = bullets(section('Out of Scope'));
-  if (goal && why && outOfScope && !placeholder([goal, why, scope, ...outOfScope].join('\n'))) {
-    try { parsed.brief = missionBrief({ goal, why, scope: scope || null, outOfScope }); } catch { /* full text remains queryable */ }
-  }
-  const criteria = bullets(section('Success Criteria'), true);
-  if (criteria?.length && !placeholder(criteria.join('\n'))) {
-    try { parsed.successCriteria = successCriteria(criteria); } catch { /* historical prose remains archived */ }
-  }
-  const gateLines = section('Gates').split('\n').filter(line => line.trim());
-  const gates = gateLines.map(line => line.replace(/^- \[[ xX]\] /, '').trim());
-  if (gateLines.length && gateLines.every(line => /^- \[[ xX]\] /.test(line)) && !placeholder(gates.join('\n'))) {
-    try { parsed.declaredGates = declaredGates(gates); } catch { /* historical prose remains archived */ }
-  }
+  const brief = legacyDocumentBrief(section, bullets);
+  if (brief) { parsed.brief = brief; }
+  const criteria = legacyDocumentCriteria(section, bullets);
+  if (criteria) { parsed.successCriteria = criteria; }
+  const gates = legacyDocumentGates(section);
+  if (gates) { parsed.declaredGates = gates; }
   const prediction = /^- Predicted NEL bucket: (Small|Medium|Large) \(/m.exec(section('Refinement Signals'));
   if (prediction) { parsed.predictedNelBucket = prediction[1] as NelBucketLabel; }
   const reproduction = /^Reproduction-Test: ([^\s<>]+)$/m.exec(content);
@@ -84,4 +74,38 @@ export function parseLegacyMissionDocument(content: string): {
     }
   }
   return parsed;
+}
+
+function legacyDocumentBrief(section: (_name: string) => string, bullets: (_value: string, _allowPreamble?: boolean) => string[] | null): ReturnType<typeof parseLegacyMissionDocument>['brief'] {
+  const placeholder = containsPlaceholder;
+  const goal = section('Goal');
+  const why = section('Why Now');
+  const scope = section('Scope');
+  const outOfScope = bullets(section('Out of Scope'));
+  if (goal && why && outOfScope && !placeholder([goal, why, scope, ...outOfScope].join('\n'))) {
+    try { return missionBrief({ goal, why, scope: scope || null, outOfScope }); } catch { /* full text remains queryable */ }
+  }
+
+  return undefined;
+}
+
+function legacyDocumentCriteria(section: (_name: string) => string, bullets: (_value: string, _allowPreamble?: boolean) => string[] | null): ReturnType<typeof parseLegacyMissionDocument>['successCriteria'] {
+  const placeholder = containsPlaceholder;
+  const criteria = bullets(section('Success Criteria'), true);
+  if (criteria?.length && !placeholder(criteria.join('\n'))) {
+    try { return successCriteria(criteria); } catch { /* historical prose remains archived */ }
+  }
+
+  return undefined;
+}
+
+function legacyDocumentGates(section: (_name: string) => string): ReturnType<typeof parseLegacyMissionDocument>['declaredGates'] {
+  const placeholder = containsPlaceholder;
+  const gateLines = section('Gates').split('\n').filter(line => line.trim());
+  const gates = gateLines.map(line => line.replace(/^- \[[ xX]\] /, '').trim());
+  if (gateLines.length && gateLines.every(line => /^- \[[ xX]\] /.test(line)) && !placeholder(gates.join('\n'))) {
+    try { return declaredGates(gates); } catch { /* historical prose remains archived */ }
+  }
+
+  return undefined;
 }

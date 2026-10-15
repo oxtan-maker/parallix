@@ -1,3 +1,5 @@
+import { fixtureMission as completeMissionFixture } from '../../../fixtures/mission-builders.js';
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 // Historical regression provenance: TASK-2521.04.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -109,11 +111,11 @@ const OPEN_TASK = frontmatter({
 it('does not turn a native landed Mission into a closed Mission during import', async () => {
   const root = workspace([]);
   const store = new RecordingStore();
-  const mission = {
-    id: 'task-9007' as MissionId, repositoryId: REPOSITORY, title: 'Landed, closeout pending',
+  const mission = completeMissionFixture(String(fixtureMissionId('task-9007') as MissionId), {
+    id: fixtureMissionId('task-9007') as MissionId, repositoryId: REPOSITORY, title: 'Landed, closeout pending',
     labels: [missionLabel('ai_sdlc')], assignee: null, checkpoints: [], review: null,
     netEngineeringLines: null, status: 'done' as const, closedAt: null,
-  };
+  }) satisfies Mission;
   store.missions.set(mission.id, { mission, version: missionVersion(1) });
   let historyReads = 0;
   const withHistory = Object.assign(store, {
@@ -439,11 +441,11 @@ describe("legacy Mission import into the existing aggregate", () => {
     const root = workspace([{ name: 'task-9001 - Open.md', body: OPEN_TASK }]);
     const store = new RecordingStore();
     store.missions.set('task-9001', {
-      mission: {
-        id: 'task-9001' as MissionId, repositoryId: REPOSITORY, title: 'Open legacy record',
+      mission: completeMissionFixture(String(fixtureMissionId('task-9001') as MissionId), {
+        id: fixtureMissionId('task-9001') as MissionId, repositoryId: REPOSITORY, title: 'Open legacy record',
         labels: [missionLabel('ai_sdlc')], assignee: null, checkpoints: [], review: null, netEngineeringLines: null,
-        status: 'backlog', closedAt: null,
-      },
+        status: 'backlog', closedAt: null, externalTaskRef: undefined,
+      }),
       version: missionVersion(1),
     });
 
@@ -466,11 +468,11 @@ describe("legacy Mission import into the existing aggregate", () => {
     const root = workspace([{ name: 'task-9001 - Open.md', body: OPEN_TASK }]);
     const store = new RecordingStore();
     store.missions.set('task-9001', {
-      mission: {
-        id: 'task-9001' as MissionId, repositoryId: REPOSITORY, title: 'Open legacy record',
+      mission: completeMissionFixture(String(fixtureMissionId('task-9001') as MissionId), {
+        id: fixtureMissionId('task-9001') as MissionId, repositoryId: REPOSITORY, title: 'Open legacy record',
         labels: [missionLabel('current')], assignee: null, checkpoints: [], review: null,
-        netEngineeringLines: null, status: 'backlog', closedAt: null,
-      }, version: missionVersion(1),
+        netEngineeringLines: null, status: 'backlog', closedAt: null, externalTaskRef: undefined,
+      }), version: missionVersion(1),
     });
     const report = await importLegacyMissions(services(store), { rootDir: root, commit: COMMIT });
     assert.equal(report.conflicting, 0);
@@ -482,11 +484,11 @@ describe("legacy Mission import into the existing aggregate", () => {
     const root = workspace([{ name: 'task-9001 - Open.md', body: OPEN_TASK }]);
     const store = new RecordingStore();
     store.missions.set('task-9001', {
-      mission: {
-        id: 'task-9001' as MissionId, repositoryId: repositoryId('fixture'), title: 'Fixture',
+      mission: completeMissionFixture(String(fixtureMissionId('task-9001') as MissionId), {
+        id: fixtureMissionId('task-9001') as MissionId, repositoryId: repositoryId('fixture'), title: 'Fixture',
         labels: [], assignee: null, checkpoints: [], review: null, netEngineeringLines: null,
-        status: 'active', closedAt: null,
-      }, version: missionVersion(1),
+        status: 'active', closedAt: null, externalTaskRef: undefined,
+      }), version: missionVersion(1),
     });
     const report = await importLegacyMissions(services(store), { rootDir: root, commit: COMMIT });
     assert.match(report.conflicts[0], /belongs to repository fixture/);
@@ -497,11 +499,11 @@ describe("legacy Mission import into the existing aggregate", () => {
     const root = workspace([{ name: 'task-9001 - Open.md', body: OPEN_TASK }]);
     const store = new RecordingStore();
     store.missions.set('task-9001', {
-      mission: {
-        id: 'task-9001' as MissionId, repositoryId: REPOSITORY, title: 'task-9001',
+      mission: completeMissionFixture(String(fixtureMissionId('task-9001') as MissionId), {
+        id: fixtureMissionId('task-9001') as MissionId, repositoryId: REPOSITORY, title: 'task-9001',
         labels: [missionLabel('[ai_sdlc]')], assignee: null, checkpoints: [], review: null,
-        netEngineeringLines: null, status: 'backlog', closedAt: null,
-      },
+        netEngineeringLines: null, status: 'backlog', closedAt: null, externalTaskRef: undefined,
+      }),
       version: missionVersion(1),
     });
 
@@ -518,11 +520,11 @@ describe("legacy Mission import into the existing aggregate", () => {
       const root = workspace([{ name: 'task-9001 - Open.md', body: OPEN_TASK }]);
       const store = new RecordingStore();
       store.missions.set('task-9001', {
-        mission: {
-          id: 'task-9001' as MissionId, repositoryId: REPOSITORY, title: storedTitle,
+        mission: completeMissionFixture(String(fixtureMissionId('task-9001') as MissionId), {
+          id: fixtureMissionId('task-9001') as MissionId, repositoryId: REPOSITORY, title: storedTitle,
           labels: [missionLabel('ai_sdlc')], assignee: null, checkpoints: [], review: null,
-          netEngineeringLines: null, status: 'backlog', closedAt: null,
-        },
+          netEngineeringLines: null, status: 'backlog', closedAt: null, externalTaskRef: undefined,
+        }),
         version: missionVersion(1),
       });
       const report = await importLegacyMissions(services(store), { rootDir: root, commit: COMMIT });
@@ -535,11 +537,11 @@ describe("legacy Mission import into the existing aggregate", () => {
     const root = workspace([{ name: 'task-9001 - Open.md', body: OPEN_TASK }]);
     const store = new RecordingStore();
     store.missions.set('task-9001', {
-      mission: {
-        id: 'task-9001' as MissionId, repositoryId: REPOSITORY, title: 'Locally created',
+      mission: completeMissionFixture(String(fixtureMissionId('task-9001') as MissionId), {
+        id: fixtureMissionId('task-9001') as MissionId, repositoryId: REPOSITORY, title: 'Locally created',
         labels: [], assignee: null, checkpoints: [], review: null, netEngineeringLines: null,
-        status: 'backlog', closedAt: null,
-      },
+        status: 'backlog', closedAt: null, externalTaskRef: undefined,
+      }),
       version: missionVersion(1),
     });
 
@@ -699,7 +701,7 @@ describe("legacy Mission import into the existing aggregate", () => {
       dependencies: {
         setDependencies: async () => failure<MissionDependenciesResult>('validation', 'dependency write refused'),
       },
-    };
+    } satisfies NonNullable<Parameters<typeof importLegacyMissions>[0]>;
 
     const report = await importLegacyMissions(refusing, { rootDir: root, commit: COMMIT });
 
@@ -725,7 +727,7 @@ describe("legacy Mission import into the existing aggregate", () => {
     // The operator adds one of their own with `px depends add`.
     const held = store.missions.get('task-9019')!;
     store.missions.set('task-9019', {
-      mission: { ...held.mission, dependencies: ['task-9016' as never] },
+      mission: { ...held.mission, dependencies: [fixtureMissionId('task-9016')] },
       version: held.version,
     });
     await importLegacyMissions(services(store), { rootDir: root, commit: COMMIT });

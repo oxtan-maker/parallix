@@ -1,3 +1,6 @@
+import { piSdkFixture } from '../../../helpers/pi-sdk-fixture.js';
+import type { PiSession, PiStreamEvent } from '../../../../src/adapters/agents/pi-sdk-types.js';
+type PiTeeOptions = NonNullable<NonNullable<Parameters<typeof pi.startPiAgent>[0]>['teeOptions']>;
 import { resolveConfiguration } from '../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 
@@ -15,7 +18,7 @@ const productConfig = mockModule<typeof import('../../../../src/adapters/config/
 const launcherSelection = mockModule<typeof import('../../../../src/adapters/agents/launcher-selection.js')>('../../../../src/adapters/agents/launcher-selection.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
-test.beforeEach(() => pi.__setSdkForTest({ SessionManager: { create: () => ({}) } }));
+test.beforeEach(() => pi.__setSdkForTest(piSdkFixture({ SessionManager: { create: () => ({}) } })));
 test.afterEach(() => {
   // Reset Pi module test hooks
   pi.__setSdkForTest(null);
@@ -183,7 +186,7 @@ test('startPiAgent renders thinking and tool progress without polluting the fina
   // events and only text_delta contributes to visible output.
   pi.__setCreateAgentSessionForTest(async () => {
     // SDK event stream emitted during prompt execution.
-    const sdkEvents = [
+    const sdkEvents: PiStreamEvent[] = [
       { type: 'agent_start' },
       { type: 'turn_start' },
       { type: 'message_start', message: { role: 'assistant' } },
@@ -191,26 +194,26 @@ test('startPiAgent renders thinking and tool progress without polluting the fina
       { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: ' world' } },
       { type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: '<thinking>...' } },
       { type: 'tool_execution_start', toolName: 'bash', toolCallId: 't1' },
-      { type: 'tool_execution_end', toolName: 'bash', toolCallId: 't1', result: { content: [{ type: 'text', text: 'OK' }], details: {} }, isError: false },
+      { type: 'tool_execution_end', toolName: 'bash', toolCallId: 't1', result: { content: [{ type: 'text', text: 'OK' }] }, isError: false },
       { type: 'tool_execution_start', toolName: 'read', toolCallId: 't2' },
-      { type: 'tool_execution_end', toolName: 'read', toolCallId: 't2', result: { content: [{ type: 'text', text: 'Permission denied' }], details: {} }, isError: true },
+      { type: 'tool_execution_end', toolName: 'read', toolCallId: 't2', result: { content: [{ type: 'text', text: 'Permission denied' }] }, isError: true },
       { type: 'message_end', message: { role: 'assistant' } },
       { type: 'turn_end', message: { role: 'assistant' } },
       { type: 'agent_end', messages: [{ role: 'assistant' }] },
     ];
-    let listener: any = null;
+    let listener: { value: Parameters<PiSession['subscribe']>[0] | null } = { value: null };
     const session = {
       sessionId: 'test-session-001',
-      subscribe: (l: any) => {
+      subscribe: (l: Parameters<PiSession['subscribe']>[0]) => {
         // Register the listener — production code calls this before prompt().
-        listener = l;
-        return () => { listener = null; };
+        listener.value = l;
+        return () => { listener.value = null; };
       },
       prompt: async () => {
         // Emit events directly to the registered listener, simulating the real
         // SDK event stream delivered during prompt execution.
         for (const event of sdkEvents) {
-          if (listener) listener(event);
+          if (listener.value) listener.value(event);
         }
       },
       waitForIdle: async () => {},
@@ -280,6 +283,7 @@ test('startPiAgent SDK execution returns session ID and telemetry from session s
   const result = await resultPromise;
 
   assert.equal(result.sessionId, 'sdk-session-abc-123', 'sessionId from session state');
+  assert.ok(result.telemetry != null);
   assert.equal(result.telemetry.provider, 'pi', 'telemetry provider');
   assert.equal(result.telemetry.inputTokens, 200, 'telemetry inputTokens');
   assert.equal(result.telemetry.outputTokens, 80, 'telemetry outputTokens');
@@ -304,9 +308,9 @@ test('startPiAgent completes when prompt resolves without a second idle wait', a
     extensionsResult: { extensions: [], diagnostics: [] },
   }));
 
-  const result: any = await Promise.race([
+  const result = await Promise.race([
     pi.startPiAgent({ configuration: resolveConfiguration(environment), prompt: 'Test', worktree: '/tmp/test' }).resultPromise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('launcher did not settle')), 100)),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('launcher did not settle')), 100)),
   ]);
 
   assert.equal(result.status, 0);
@@ -329,48 +333,50 @@ test('startPiAgent supports legacy and current Pi SDK model APIs', async () => {
     find: () => model,
     getAll: () => [model],
   };
-  let legacyOptions = null;
-  pi.__setSdkForTest({
+  let legacyOptions: { value: import("../../../../src/adapters/agents/pi-sdk-types.js").PiSessionOptions | null } = { value: null };
+  pi.__setSdkForTest(piSdkFixture({
     AuthStorage: { create: () => legacyAuthStorage },
     ModelRegistry: { create: (authStorage) => {
       assert.equal(authStorage, legacyAuthStorage);
       return legacyRegistry;
     } },
     SessionManager: { create: () => ({}) },
-  });
+  }));
   pi.__setCreateAgentSessionForTest(async options => {
-    legacyOptions = options;
+    legacyOptions.value = options;
     return { session, extensionsResult: { extensions: [], diagnostics: [] } };
   });
   await pi.startPiAgent({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/tmp/test', model: 'provider/model-id' }).resultPromise;
-  assert.equal(legacyOptions.authStorage, legacyAuthStorage);
-  assert.equal(legacyOptions.modelRegistry, legacyRegistry);
-  assert.equal(legacyOptions.model, model);
+  assert.ok(legacyOptions.value != null);
+  assert.equal(legacyOptions.value.authStorage, legacyAuthStorage);
+  assert.equal(legacyOptions.value.modelRegistry, legacyRegistry);
+  assert.equal(legacyOptions.value.model, model);
 
   const currentRuntime = { source: 'current-runtime' };
   let runtimeCreated = 0;
-  let currentOptions = null;
+  let currentOptions: { value: import("../../../../src/adapters/agents/pi-sdk-types.js").PiSessionOptions | null } = { value: null };
   class CurrentModelRegistry {
-    constructor(runtime) { assert.equal(runtime, currentRuntime); }
+    constructor(runtime: unknown) { assert.equal(runtime, currentRuntime); }
     async refresh() {}
     find() { return model; }
     getAll() { return [model]; }
   }
-  pi.__setSdkForTest({
+  pi.__setSdkForTest(piSdkFixture({
     ModelRuntime: { create: async () => { runtimeCreated++; return currentRuntime; } },
     ModelRegistry: CurrentModelRegistry,
     SessionManager: { create: () => ({}) },
-  });
+  }));
   pi.__setCreateAgentSessionForTest(async options => {
-    currentOptions = options;
+    currentOptions.value = options;
     return { session, extensionsResult: { extensions: [], diagnostics: [] } };
   });
   await pi.startPiAgent({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/tmp/test', model: 'provider/model-id' }).resultPromise;
   assert.equal(runtimeCreated, 1);
-  assert.equal(currentOptions.modelRuntime, currentRuntime);
-  assert.equal(currentOptions.model, model);
-  assert.equal(currentOptions.authStorage, undefined);
-  assert.equal(currentOptions.modelRegistry, undefined);
+  assert.ok(currentOptions.value != null);
+  assert.equal(currentOptions.value.modelRuntime, currentRuntime);
+  assert.equal(currentOptions.value.model, model);
+  assert.equal(currentOptions.value.authStorage, undefined);
+  assert.equal(currentOptions.value.modelRegistry, undefined);
 });
 
 test('startPiAgent SDK handles errors and maps them to result shape', async () => {
@@ -399,7 +405,7 @@ test('startPiAgent SDK handles errors and maps them to result shape', async () =
 // ---------- Resume / session identity (P1-1) ----------
 
 test('startPiAgent resume with sessionId opens the matching session via SessionManager', async () => {
-  const sdk: any = { SessionManager: { list: async () => [], open: () => ({}) } };
+  const sdk = piSdkFixture({ SessionManager: { list: async () => [], open: () => ({}) } });
   const originalList = sdk.SessionManager.list;
   const originalOpen = sdk.SessionManager.open;
   let openPath = null;
@@ -452,7 +458,7 @@ test('startPiAgent resume with sessionId opens the matching session via SessionM
 });
 
 test('startPiAgent resume without sessionId uses SessionManager.continueRecent', async () => {
-  const sdk: any = { SessionManager: { continueRecent: () => ({}) } };
+  const sdk = piSdkFixture({ SessionManager: { continueRecent: () => ({}) } });
   const originalContinueRecent = sdk.SessionManager.continueRecent;
   let continueRecentCalled = false;
 
@@ -498,11 +504,11 @@ test('startPiAgent resume without sessionId uses SessionManager.continueRecent',
 
 test('startPiAgent propagates caller model to SDK createAgentSession', async () => {
   const resolvedModel = { id: 'claude-sonnet-4-20250514' };
-  const sdk = {
+  const sdk = piSdkFixture({
     SessionManager: { create: () => ({}) },
     AuthStorage: { create: () => ({}) },
     ModelRegistry: { create: () => ({ find: () => resolvedModel, getAll: () => [resolvedModel] }) },
-  };
+  }) satisfies NonNullable<Parameters<typeof pi.__setSdkForTest>[0]>;
   let capturedModel = undefined;
   pi.__setCreateAgentSessionForTest(async (options) => {
     capturedModel = options?.model;
@@ -540,7 +546,7 @@ test('startPiAgent propagates caller model to SDK createAgentSession', async () 
 });
 
 test('startPiAgent forwards caller environment without mutating the parent (TASK-2668.08)', async () => {
-  const sdk = { SessionManager: { create: () => ({}) } };
+  const sdk = piSdkFixture({ SessionManager: { create: () => ({}) } }) satisfies NonNullable<Parameters<typeof pi.__setSdkForTest>[0]>;
   let envWasSet = false;
   // Ensure the test key doesn't already exist.
   const origTestVar = environment.TASK_2238_TEST_VAR;
@@ -592,7 +598,7 @@ test('startPiAgent forwards caller environment without mutating the parent (TASK
 // ---------- Console stdout tee (task-2311, SC3) ----------
 
 test('startPiAgent writes text_delta to process.stdout during SDK execution', async () => {
-  let stdoutWrites = [];
+  let stdoutWrites: string[] = [];
   const originalWrite = process.stdout.write.bind(process.stdout);
   process.stdout.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
     stdoutWrites.push(typeof chunk === 'string' ? chunk : chunk.toString());
@@ -603,17 +609,17 @@ test('startPiAgent writes text_delta to process.stdout during SDK execution', as
 
   try {
     pi.__setCreateAgentSessionForTest(async () => {
-      const sdkEvents = [
+      const sdkEvents: PiStreamEvent[] = [
         { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Hello' } },
         { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: ' world' } },
         { type: 'agent_end', messages: [{ role: 'assistant' }] },
       ];
-      let listener: any = null;
+      let listener: { value: Parameters<PiSession['subscribe']>[0] | null } = { value: null };
       const session = {
         sessionId: 'stdout-tee-session',
-        subscribe: (l) => { listener = l; return () => { listener = null; }; },
+        subscribe: (l: Parameters<PiSession['subscribe']>[0]) => { listener.value = l; return () => { listener.value = null; }; },
         prompt: async () => {
-          for (const event of sdkEvents) { if (listener) listener(event); }
+          for (const event of sdkEvents) { if (listener.value) listener.value(event); }
         },
         waitForIdle: async () => {},
         dispose: () => {},
@@ -640,28 +646,28 @@ test('startPiAgent writes text_delta to process.stdout during SDK execution', as
 
 test('startPiAgent invokes teeOptions.noOutputWatchdog.onNoOutput when no text arrives', async () => {
   let watchdogCalled = false;
-  let watchdogEvent = null;
+  const watchdogEvent: { value: Parameters<NonNullable<NonNullable<PiTeeOptions['noOutputWatchdog']>['onNoOutput']>>[0] | null } = { value: null };
 
   const teeOptions = {
     noOutputWatchdog: {
       initialDelayMs: 10,
       intervalMs: 50,
-      onNoOutput: (event) => { watchdogCalled = true; watchdogEvent = event; },
+      onNoOutput: (event) => { watchdogCalled = true; watchdogEvent.value = event; },
     },
-  };
+  } satisfies PiTeeOptions;
 
   pi.__setCreateAgentSessionForTest(async () => {
-    const sdkEvents = [
+    const sdkEvents: PiStreamEvent[] = [
       { type: 'agent_start' },
-      { type: 'tool_execution_end', toolName: 'bash', toolCallId: 't1', result: 'OK', isError: false },
+      { type: 'tool_execution_end', toolName: 'bash', toolCallId: 't1', result: { content: 'OK' }, isError: false },
       { type: 'agent_end', messages: [{ role: 'assistant' }] },
     ];
-    let listener: any = null;
+    let listener: { value: Parameters<PiSession['subscribe']>[0] | null } = { value: null };
     const session = {
       sessionId: 'watchdog-session',
-      subscribe: (l) => { listener = l; return () => { listener = null; }; },
+      subscribe: (l: Parameters<PiSession['subscribe']>[0]) => { listener.value = l; return () => { listener.value = null; }; },
       prompt: async () => {
-        for (const event of sdkEvents) { if (listener) listener(event); }
+        for (const event of sdkEvents) { if (listener.value) listener.value(event); }
         await new Promise((resolve) => setTimeout(resolve, 100));
       },
       waitForIdle: async () => {},
@@ -676,15 +682,15 @@ test('startPiAgent invokes teeOptions.noOutputWatchdog.onNoOutput when no text a
   const result = await resultPromise;
 
   assert.ok(watchdogCalled, 'onNoOutput should be invoked when no text_delta arrives');
-  assert.ok(watchdogEvent, 'Watchdog event object should be passed to callback');
-  assert.ok(watchdogEvent.elapsedMs >= 10, `elapsedMs (${watchdogEvent.elapsedMs}) should be >= initialDelayMs (10)`);
+  assert.ok(watchdogEvent.value, 'Watchdog event object should be passed to callback');
+  assert.ok(watchdogEvent.value.elapsedMs >= 10, `elapsedMs (${watchdogEvent.value.elapsedMs}) should be >= initialDelayMs (10)`);
   assert.equal(result.status, 0);
 });
 
 // ---------- Pi launcher model propagation (task-2337) ----------
 
 test('startPiAgent result includes session.model.id in result.model and result.telemetry.model (task-2337)', async () => {
-  const sdk = { SessionManager: { create: () => ({}) } };
+  const sdk = piSdkFixture({ SessionManager: { create: () => ({}) } }) satisfies NonNullable<Parameters<typeof pi.__setSdkForTest>[0]>;
   const expectedModelId = 'qwen3.6-27b-q8';
 
   pi.__setCreateAgentSessionForTest(async () => {
@@ -735,7 +741,7 @@ test('startPiAgent result includes session.model.id in result.model and result.t
 });
 
 test('startPiAgent result.model is undefined when session.model is absent (task-2337)', async () => {
-  const sdk = { SessionManager: { create: () => ({}) } };
+  const sdk = piSdkFixture({ SessionManager: { create: () => ({}) } }) satisfies NonNullable<Parameters<typeof pi.__setSdkForTest>[0]>;
 
   pi.__setCreateAgentSessionForTest(async () => {
     const session = {
@@ -781,17 +787,17 @@ test('startPiAgent fails when the session settles on a provider error instead of
   // an errored assistant message and zero tokens. Reporting status 0 there let
   // a stage commit phantom work (an unfilled MISSION.md scaffold).
   pi.__setCreateAgentSessionForTest(async () => {
-    const sdkEvents = [
+    const sdkEvents: PiStreamEvent[] = [
       { type: 'agent_start' },
       { type: 'agent_end', messages: [{ role: 'assistant', stopReason: 'error', errorMessage: 'Connection error.' }], willRetry: false },
       { type: 'auto_retry_end', success: false, attempt: 3, finalError: 'Connection error.' },
       { type: 'agent_settled' },
     ];
-    let listener: any = null;
+    let listener: { value: Parameters<PiSession['subscribe']>[0] | null } = { value: null };
     const session = {
       sessionId: 'test-session-err',
-      subscribe: (l: any) => { listener = l; return () => { listener = null; }; },
-      prompt: async () => { for (const event of sdkEvents) { if (listener) listener(event); } },
+      subscribe: (l: Parameters<PiSession['subscribe']>[0]) => { listener.value = l; return () => { listener.value = null; }; },
+      prompt: async () => { for (const event of sdkEvents) { if (listener.value) listener.value(event); } },
       dispose: () => {},
       getLastAssistantText: () => '',
       getSessionStats: () => ({ toolCalls: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }),
@@ -808,12 +814,12 @@ test('startPiAgent fails when the session settles on a provider error instead of
 
 test('first and later fresh SDK repairs create independent sessions (TASK-2700)', async () => {
   const managers: object[] = [];
-  pi.__setSdkForTest({ SessionManager: {
+  pi.__setSdkForTest(piSdkFixture({ SessionManager: {
     create: () => { const manager = {}; managers.push(manager); return manager; },
     list: () => { throw new Error('fresh repair must not list historical sessions'); },
     open: () => { throw new Error('fresh repair must not open historical sessions'); },
     continueRecent: () => { throw new Error('fresh repair must not continue historical sessions'); },
-  } } as any);
+  } }));
   pi.__setCreateAgentSessionForTest(async () => ({
     session: {
       sessionId: `fresh-${managers.length}`, prompt: async () => {}, subscribe: () => () => {},

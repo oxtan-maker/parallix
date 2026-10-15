@@ -178,6 +178,9 @@ importers:
       '@types/react':
         specifier: ^19.2.14
         version: 19.2.14
+      '@types/react-dom':
+        specifier: 19.2.7
+        version: 19.2.7(@types/react@19.2.14)
       '@typescript-eslint/eslint-plugin':
         specifier: ^8.62.1
         version: 8.62.1(@typescript-eslint/parser@8.62.1(eslint@9.39.4(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@5.9.3))(eslint@9.39.4(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@5.9.3)
@@ -774,6 +777,11 @@ packages:
 
   '@types/node@26.6.4':
     resolution: {integrity: sha512-ldVPDCzj7fsaGZrLB0NuHuTvJcsNasysBAqMolr/cgxrLd1xbqxIr3XJiPnHHJUCxj5sNF1vnRj9aWnrVh5Jcg==}
+
+  '@types/react-dom@19.2.7':
+    resolution: {integrity: sha512-I8bPpDLcHBv1qiIiXDCy71Rt8eQDKJP0sMSWJphDdAcdqiJ1sGpZamavoEIRZmYzjia9LuEb2HlYdDpmoENpvQ==}
+    peerDependencies:
+      '@types/react': ^19.2.0
 
   '@types/react@19.2.14':
     resolution: {integrity: sha512-ilcTH/UniCkMdtexkoCN0bI7pMcJDvmQFPvuPvmEaYA/NSfFTAgdUSLAoVjaRJm7+6PvcM+q1zYOwS4wTYMF9w==}
@@ -2488,6 +2496,10 @@ snapshots:
   '@types/node@26.6.4':
     dependencies:
       undici-types: 8.9.0
+
+  '@types/react-dom@19.2.7(@types/react@19.2.14)':
+    dependencies:
+      '@types/react': 19.2.14
 
   '@types/react@19.2.14':
     dependencies:

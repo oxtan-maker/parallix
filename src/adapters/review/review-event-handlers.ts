@@ -13,7 +13,7 @@ import { readReviewState, resolveReviewIdentity, backfillReviewFromLegacyState, 
 import type { MissionStore } from '../../application/domain-ports.js';
 import { missionId } from '../../domain/mission.js';
 import { type ReviewItemDisposition, type ReviewFindingId } from '../../domain/review.js';
-import { createEvent, ALL_EVENT_TYPES, isValidEventType, shouldMirrorToProvider } from './review-events.js';
+import { type CreateEventParams, createEvent, ALL_EVENT_TYPES, isValidEventType, shouldMirrorToProvider } from './review-events.js';
 import { flagValue, repeatedFlagValues } from './review-cli-flags.js';
 
 const EVENT_ITEM_LISTS: ReadonlyArray<readonly [RegExp, ReviewItemDisposition['kind']]> = [
@@ -27,7 +27,7 @@ const EVENT_ITEM_LISTS: ReadonlyArray<readonly [RegExp, ReviewItemDisposition['k
  * onto `params`. A malformed list is skipped, never fatal: the event body is
  * agent-authored, and a half-parsed list must not lose the event itself.
  */
-function applyStructuredEventFields(content: string, params: Record<string, unknown>): void {
+function applyStructuredEventFields(content: string, params: CreateEventParams): void {
   if (!content.includes('fixed_items:') && !content.includes('fixedItems:')) { return; }
   const itemDispositions: ReviewItemDisposition[] = [];
   for (const [pattern, kind] of EVENT_ITEM_LISTS) {
@@ -53,12 +53,12 @@ function parseCreateEventArgs(
   log: (_msg: string) => void,
   error: (_msg: string) => void,
   exit: (_code: number) => void,
-): { eventType: string; actor: string | null; content: string; params: Record<string, unknown> } | null {
+): { eventType: string; actor: string | null; content: string; params: CreateEventParams } | null {
   const fail = (message: string) => { error(fmt.status('FAIL', message)); exit(1); return null; };
   const eventType = flagValue(args, '--type');
   if (!eventType) { return fail('--create-event requires --type <classification>'); }
   if (!isValidEventType(eventType)) {
-    return fail(`Invalid event type "${eventType}". Valid: ${(ALL_EVENT_TYPES as unknown as string[]).join(', ')}`);
+    return fail(`Invalid event type "${eventType}". Valid: ${ALL_EVENT_TYPES.join(', ')}`);
   }
 
   const inputFile = flagValue(args, '--input-file');
@@ -73,11 +73,11 @@ function parseCreateEventArgs(
   }
 
   const roundRaw = flagValue(args, '--round');
-  const round = roundRaw ? parseInt(roundRaw, 10) : undefined;
+  const round = roundRaw ? Number.parseInt(roundRaw, 10) : undefined;
   if (roundRaw && Number.isNaN(round!)) { return fail(`--round must be a number, got "${roundRaw}"`); }
 
   const actor = flagValue(args, '--actor');
-  const params: Record<string, unknown> = { content };
+  const params: CreateEventParams = { content };
   if (round !== undefined) { params.round = round; }
   for (const [flag, key] of [['--phase', 'phase'], ['--actor', 'actor'], ['--disposition', 'disposition'], ['--verdict', 'verdict']] as const) {
     const value = flagValue(args, flag);
@@ -96,6 +96,7 @@ export async function createEventHandler(
     exit?: (_code: number) => never;
     resolveWorktreeFn?: typeof resolveWorktree;
     readReviewStateFn?: typeof readReviewState;
+    createEventFn?: typeof createEvent;
   } = {}
 ): Promise<void> {
   const log = options.log || fmt.log.plain;
@@ -125,8 +126,8 @@ export async function createEventHandler(
   applyStructuredEventFields(content, params);
 
   // Create the event
-  const createEventFn = (options as any).createEventFn || createEvent;
-  const result = await createEventFn(slug, eventType, params as any, {
+  const createEventFn = options.createEventFn || createEvent;
+  const result = await createEventFn(slug, eventType, params, {
     worktree,
     skipGit: false,
     log,
@@ -198,30 +199,30 @@ export async function backfillReviewHandler(
   const result = await backfillReviewFn(slug, worktree, { apply });
 
   switch (result.outcome) {
-  case 'backfilled':
-    log(fmt.status('PASS', `Backfilled review for ${slug}: ${result.rounds} round(s), now at round ${result.round} (${result.phase}).`));
-    return;
-  case 'would-backfill':
-    log(fmt.status('INFO', `Would backfill review for ${slug}: ${result.rounds} round(s), resuming at round ${result.round} (${result.phase}).`));
-    log(fmt.status('INFO', 'Dry run — re-run without --dry-run to write.'));
-    return;
-  case 'events-backfilled':
-    log(fmt.status('PASS', `Backfilled ${result.events} review event(s) for ${slug} from its exported review-events files.`));
-    return;
-  case 'would-backfill-events':
-    log(fmt.status('INFO', `Would backfill ${result.events} review event(s) for ${slug} from its exported review-events files.`));
-    log(fmt.status('INFO', 'Dry run — re-run without --dry-run to write.'));
-    return;
-  case 'already-present':
-    log(fmt.status('INFO', `Mission ${slug} already has a review; nothing to backfill.`));
-    return;
-  case 'no-legacy-state':
-    log(fmt.status('INFO', `Mission ${slug} has no review-state.json to migrate.`));
-    return;
-  case 'failed':
-    error(fmt.status('FAIL', `Could not backfill review for ${slug}: ${result.diagnostic}`));
-    exit(1);
-    return;
+    case 'backfilled':
+      log(fmt.status('PASS', `Backfilled review for ${slug}: ${result.rounds} round(s), now at round ${result.round} (${result.phase}).`));
+      return;
+    case 'would-backfill':
+      log(fmt.status('INFO', `Would backfill review for ${slug}: ${result.rounds} round(s), resuming at round ${result.round} (${result.phase}).`));
+      log(fmt.status('INFO', 'Dry run — re-run without --dry-run to write.'));
+      return;
+    case 'events-backfilled':
+      log(fmt.status('PASS', `Backfilled ${result.events} review event(s) for ${slug} from its exported review-events files.`));
+      return;
+    case 'would-backfill-events':
+      log(fmt.status('INFO', `Would backfill ${result.events} review event(s) for ${slug} from its exported review-events files.`));
+      log(fmt.status('INFO', 'Dry run — re-run without --dry-run to write.'));
+      return;
+    case 'already-present':
+      log(fmt.status('INFO', `Mission ${slug} already has a review; nothing to backfill.`));
+      return;
+    case 'no-legacy-state':
+      log(fmt.status('INFO', `Mission ${slug} has no review-state.json to migrate.`));
+      return;
+    case 'failed':
+      error(fmt.status('FAIL', `Could not backfill review for ${slug}: ${result.diagnostic}`));
+      exit(1);
+      return;
   }
 }
 
@@ -256,15 +257,7 @@ export async function reconcileInterruptedHandoffHandler(
     exit(1);
     return;
   }
-  const result = await (options.reconcileInterruptedHandoffFn || reconcileInterruptedHandoff)(slug, {
-    sourceBranch: flagValue(args, '--branch') || '',
-    targetBranch: flagValue(args, '--target') || '',
-    reviewer: flagValue(args, '--reviewer') || '',
-    implementer: flagValue(args, '--implementer') || '',
-    revision: flagValue(args, '--revision') || '',
-    eligibleReviewers: repeatedFlagValues(args, '--eligible-reviewer'),
-    startedAt: new Date().toISOString(),
-  }, worktree, { missionStore: options.missionStore });
+  const result = await (options.reconcileInterruptedHandoffFn || reconcileInterruptedHandoff)(slug, reconciliationInputs(args), worktree, { missionStore: options.missionStore });
   if (result.outcome === 'reconciled') {
     log(fmt.status('PASS', `Reconciled round-one review for ${slug}. Re-run px review ${slug} --start to launch the reviewer.`));
     return;
@@ -297,4 +290,16 @@ async function isReconcilableMission(slug: string, store: MissionStore | null | 
   } catch {
     return false;
   }
+}
+
+function reconciliationInputs(args: string[]) {
+  return {
+    sourceBranch: flagValue(args, '--branch') || '',
+    targetBranch: flagValue(args, '--target') || '',
+    reviewer: flagValue(args, '--reviewer') || '',
+    implementer: flagValue(args, '--implementer') || '',
+    revision: flagValue(args, '--revision') || '',
+    eligibleReviewers: repeatedFlagValues(args, '--eligible-reviewer'),
+    startedAt: new Date().toISOString(),
+  };
 }

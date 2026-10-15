@@ -142,6 +142,9 @@ export class HandoffContractVerifier {
     // Per review.md step 5, a missing or empty goal-check table means the
     // checkpoint has not satisfied the mission's evidence requirement. Both the
     // `## Goal Check` and `## Goal Check Table` headings are accepted.
+    if (!ports.fileSystem.existsSync(finalCheckpoint)) {
+      return fail(`The final checkpoint at ${fmt.path(relativeCheckpointPath)} was not found. Import historical evidence or record it with px checkpoint record; handoff never generates evidence.`);
+    }
     const checkpointContent = ports.fileSystem.readText(finalCheckpoint);
     const goalCheckMatch = checkpointContent.match(/^## Goal Check(?: Table)?\s*$/m);
     if (!goalCheckMatch) {
@@ -174,6 +177,14 @@ export class HandoffContractVerifier {
   ): HandoffResult | VerifiedCheckpointDocument {
     const ports = this.ports;
     const { rootDir, missionDirPath, log, error } = context;
+    if (!contract.draftedInDb) {
+      const missionMdPath = path.join(missionDirPath, 'MISSION.md');
+      if (!ports.fileSystem.existsSync(missionMdPath)) {
+        const message = `MISSION.md not found at ${missionMdPath}. Import the historical contract before handoff.`;
+        error(message);
+        return { ok: false, error: message };
+      }
+    }
     const readiness = evaluateMissionEvidence(contract, ports.fileSystem, rootDir);
     const recorded = contract.checkpoints;
     let finalCheckpoint: string | null = null;

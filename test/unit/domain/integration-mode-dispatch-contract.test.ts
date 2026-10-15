@@ -1,3 +1,6 @@
+import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflow-ports.js';
+import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
+import { integrationContext } from '../../fixtures/integration-context.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 // Historical regression provenance: TASK-2500.
 // Behavior-owned suite (TASK-2622.09): integration mode capability dispatch (local, github-publish,
@@ -122,15 +125,15 @@ describe("integration strategy dispatch", () => {
   test('closure blocker enforces each mode\'s evidence requirement', () => {
     assert.equal(strategy('local').closureBlocker({ ...NO_INTEGRATION_EVIDENCE, candidateSha: 'abc123' }), null);
     assert.match(
-      strategy('local').closureBlocker(NO_INTEGRATION_EVIDENCE),
+      strategy('local').closureBlocker(NO_INTEGRATION_EVIDENCE) ?? '',
       /no integration candidate commit was produced/,
     );
     assert.match(
-      strategy('github-publish').closureBlocker({ ...NO_INTEGRATION_EVIDENCE, candidateSha: 'abc123' }),
+      strategy('github-publish').closureBlocker({ ...NO_INTEGRATION_EVIDENCE, candidateSha: 'abc123' }) ?? '',
       /no external verification/,
     );
     assert.match(
-      strategy('github-publish').closureBlocker({ candidateSha: 'abc123', verifiedSha: 'def456', externalIntegrationObserved: false }),
+      strategy('github-publish').closureBlocker({ candidateSha: 'abc123', verifiedSha: 'def456', externalIntegrationObserved: false }) ?? '',
       /external verification covers def456, not the integration candidate abc123/,
     );
     assert.equal(
@@ -138,7 +141,7 @@ describe("integration strategy dispatch", () => {
       null,
     );
     assert.match(
-      strategy('github-pr').closureBlocker(NO_INTEGRATION_EVIDENCE),
+      strategy('github-pr').closureBlocker(NO_INTEGRATION_EVIDENCE) ?? '',
       /no external integration into the primary branch was observed/,
     );
     assert.equal(
@@ -173,13 +176,13 @@ describe("integration mode CLI reporting", () => {
   function runConfig(root: string, args: string[] = []) {
     const logs: string[] = [];
     const errors: string[] = [];
-    let exitCode: number | null = null;
+    let exitCode: { value: number | null } = { value: null };
     return config.default(args, {
       rootDir: root,
       logFn: message => logs.push(message),
       errorFn: message => errors.push(message),
-      exitFn: code => { exitCode = code; },
-    }).then(() => ({ logs, errors, exitCode }));
+      exitFn: code => { exitCode.value = code; },
+    }).then(() => ({ logs, errors, exitCode: exitCode.value }));
   }
 
   function runStatus(root: string) {
@@ -190,12 +193,12 @@ describe("integration mode CLI reporting", () => {
       log: message => logs.push(message),
       inferSlugFn: () => null,
       getCurrentBranchFn: () => 'main',
-      findTaskFileFn: () => undefined,
+      findTaskFileFn: () => null,
       getTaskStatusFn: () => null,
-      findMissionDirFn: () => undefined,
-      findCheckpointsFn: () => undefined,
+      findMissionDirFn: () => null,
+      findCheckpointsFn: () => [],
       getFirstLineFn: () => '',
-      getPrStatusFn: () => ({ exists: false }),
+      getPrStatusFn: () => ({ raw: '',  exists: false as const }),
       findStaleMissionWorktreesFn: () => [],
       readAgentConfigOrExitFn: () => ({}),
       eligibleAgentsForStepFn: () => [],
@@ -239,7 +242,7 @@ describe("integration mode CLI reporting", () => {
 describe("integration recorded contract", () => {
   function fixture() {
     let searches = 0;
-    const ports = {
+    const ports = stubIntegrateWorkflowPorts({
       missionPaths: {
         findMissionDir: () => null,
         resolveWorktree: () => '/mission',
@@ -249,21 +252,21 @@ describe("integration recorded contract", () => {
         conventionalWorktreePath: () => process.cwd(),
       },
       backlog: {
-        resolveTaskFile: () => ({ ok: true, taskFile: '/mission/backlog/tasks/task-2543.md' }),
+        resolveTaskFile: () => ({ ok: true as const, taskFile: '/mission/backlog/tasks/task-2543.md' }),
         getTaskAssignee: () => 'codex',
         getTaskClassification: () => 'ai_sdlc',
       },
       productConfig: { isForgejoReviewEnabled: () => false },
       git: {
         getCurrentBranch: () => 'mission/task-2543',
-        git: (args: string[]) => ({ status: 0, stdout: args.includes('branch') ? 'main' : '', stderr: '' }),
-        detectRebaseState: () => ({ inProgress: false }),
+        git: (args: string[]) => ({ signal: null,  status: 0, stdout: args.includes('branch') ? 'main' : '', stderr: '' }),
+        detectRebaseState: () => ({ inProgress: false, unmergedFiles: [] }),
       },
-      checkout: { getUnresolvedIndexConflicts: () => ({ ok: true, files: [] }) },
+      checkout: { getUnresolvedIndexConflicts: () => ({ ok: true as const, files: [] }) },
       fileSystem: { existsSync: () => false },
-      forgejo: {}, review: {}, landing: {},
+      forgejo: {}, review: { readReviewState: async () => null }, landing: {},
       stateMap: { toVirtual: () => 'ready-for-integration' },
-    } as unknown as IntegrateWorkflowPorts;
+    });
     return { ports, searches: () => searches };
   }
 
@@ -275,10 +278,10 @@ describe("integration recorded contract", () => {
       });
       assert.equal(context.area, 'all', 'missing mission files must not narrow verification to docs');
       const lines: string[] = [];
-      const result = createIntegrationPreflight(ports).printIntegrationPreflight({
+      const result = createIntegrationPreflight(ports).printIntegrationPreflight(integrationContext({
         ...context, missionStatus: 'integration',
         missionBrief: recorded ? { goal: 'repair', why: 'unblock integration', scope: null, outOfScope: [] } : null,
-      }, { log: line => lines.push(line) });
+      }), { log: line => lines.push(line) });
       assert.deepEqual(result.failures, recorded ? [] : ['mission-doc']);
       assert.equal(searches(), recorded ? 0 : 1);
       if (!recorded) {
@@ -294,11 +297,11 @@ describe("integration recorded contract", () => {
 // ---- Mission integration service (consolidated from test/mission-integration-service.test.ts, TASK-2622.09) ----
 describe("Mission integration service", () => {
   const ID = missionId('task-2322-06-fixture');
-  const mission: Mission = {
+  const mission: Mission = completeMissionFixture(String(ID), {
     id: ID, repositoryId: repositoryId('parallix'), title: 'fixture', labels: missionLabels([]),
     assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null,
     status: 'integration', closedAt: null,
-  };
+  });
   const capabilities = new Set(['integration:decide', 'closure:record'] as const);
 
   /**
@@ -328,15 +331,15 @@ describe("Mission integration service", () => {
 
   describe('MissionIntegrationService', () => {
     it('accepts explicit fresh merge and verification facts before integration persistence', async () => {
-      let saved: Mission | null = null;
+      let saved: { value: Mission | null } = { value: null };
       const events: LaneTransitionEvent[] = [];
-      const outcome = await new MissionIntegrationService(store({ save: async (next) => { saved = next; return missionVersion(4); } }, events)).decideIntegration({
+      const outcome = await new MissionIntegrationService(store({ save: async (next) => { saved.value = next; return missionVersion(4); } }, events)).decideIntegration({
         operationId: 'integrate', missionId: ID, capabilities, expectedVersion: missionVersion(3),
         occurredAt: '2026-07-30T06:00:00Z',
         facts: { git: fresh({ merged: true }), verification: fresh({ passed: true }) },
       });
       assert.equal(outcome.status, 'completed');
-      assert.equal(saved!.status, 'done');
+      assert.equal(saved.value!.status, 'done');
       // The lane event commits with the aggregate: throughput is derived from it.
       assert.deepEqual(events.map((event) => ({ from: event.from, to: event.to, trigger: event.trigger, key: event.idempotencyKey })), [
         { from: 'integration', to: 'done', trigger: 'integrate', key: `${ID}:integrate:2026-07-30T06:00:00Z` },
@@ -345,7 +348,7 @@ describe("Mission integration service", () => {
 
     it('rejects an absent observed verification fact before loading the Mission', async () => {
       let loaded = false;
-      const outcome = await new MissionIntegrationService(store({ load: async () => { loaded = true; return { kind: 'found', mission, version: missionVersion(3) }; } })).decideIntegration({
+      const outcome = await new MissionIntegrationService(store({ load: async () => { loaded = true; return { kind: 'found' as const, mission, version: missionVersion(3) }; } })).decideIntegration({
         operationId: 'integrate', missionId: ID, capabilities,
         facts: { git: fresh({ merged: true }), verification: { source: 'git', status: 'unavailable' } },
       });
@@ -363,7 +366,7 @@ describe("Mission integration service", () => {
 
     it('rejects integration from a Mission outside the integration lane', async () => {
       const outcome = await new MissionIntegrationService(store({
-        load: async () => ({ kind: 'found', mission: { ...mission, status: 'active' }, version: missionVersion(3) }),
+        load: async () => ({ kind: 'found' as const, mission: { ...mission, status: 'active', closedAt: null }, version: missionVersion(3) }),
       })).decideIntegration({
         operationId: 'integrate', missionId: ID, capabilities,
         facts: { git: fresh({ merged: true }), verification: fresh({ passed: true }) },
@@ -386,7 +389,7 @@ describe("Mission integration service", () => {
     it('records closure only from a fresh completed integration observation', async () => {
       const done = { ...mission, status: 'done' as const, closedAt: null };
       const events: LaneTransitionEvent[] = [];
-      const outcome = await new MissionIntegrationService(store({ load: async () => ({ kind: 'found', mission: done, version: missionVersion(3) }) }, events)).close({
+      const outcome = await new MissionIntegrationService(store({ load: async () => ({ kind: 'found' as const, mission: done, version: missionVersion(3) }) }, events)).close({
         operationId: 'close', missionId: ID, capabilities, closedAt: '2026-07-30T07:00:00Z',
         integration: fresh({ completed: true }),
       });
@@ -443,8 +446,8 @@ describe("integrate mode dispatch", () => {
     const store = createFakeStore('integration');
     return {
       store,
-      lifecycle: new MissionLifecycleService(store as never),
-      integration: new MissionIntegrationService(store as never),
+      lifecycle: new MissionLifecycleService(store),
+      integration: new MissionIntegrationService(store),
       handoff: { recordNel: async () => ({ }) },
     };
   }
@@ -500,16 +503,16 @@ describe("integrate mode dispatch", () => {
       if (args.includes('rev-parse')) { return ok(`${LANDED_SHA}\n`); }
       return ok('');
     });
-    mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+    mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
     mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
     mock.method(backlog, 'getTaskStatus', () => 'approved');
     mock.method(backlog, 'getTaskAssignee', () => 'codex');
     mock.method(backlog, 'completeTask', () => true);
     mock.method(backlog, 'setTaskStatus', () => true);
-    mock.method(forgejo, 'getPrStatus', () => ({ exists: true, state: 'open', merged: false, number: 1 }));
+    mock.method(forgejo, 'getPrStatus', () => ({ exists: true as const, state: 'open', merged: false, number: 1 }));
     mock.method(github, 'submitOrObserveGithubPr', () => ({ kind: 'pending' as const, number: 1, base: 'main' }));
-    mock.method(verification, 'captureVerifiedTreeProof', () => ({ ok: true, proof: { rootDir: root } }));
-    mock.method(verification, 'assertVerifiedTreeProof', () => ({ ok: true }));
+    mock.method(verification, 'captureVerifiedTreeProof', () => ({ ok: true as const, proof: { rootDir: root } }));
+    mock.method(verification, 'assertVerifiedTreeProof', () => ({ ok: true as const }));
     mock.method(process, 'cwd', () => root);
     let exitCode: number | undefined;
     mock.method(process, 'exit', (code?: number) => { exitCode = code; });

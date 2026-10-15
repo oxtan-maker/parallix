@@ -106,8 +106,9 @@ test('headless-isolation: headless entry module graph contains no react or ink',
 });
 
 test('headless-isolation: ui command is composed lazily in create-cli.ts', () => {
+  assert.match(fs.readFileSync(path.join(root, 'src/composition/create-cli.ts'), 'utf8'), /\.\.\.createReadCommands\(context\)/);
   const indexSource = fs.readFileSync(
-    path.join(root, 'src', 'composition', 'create-cli.ts'),
+    path.join(root, 'src', 'composition', 'cli-read-commands.ts'),
     'utf8',
   );
 
@@ -150,8 +151,9 @@ test('headless-isolation: static import graph of the headless entry never reache
 });
 
 test('headless-isolation: ui command is in the composed command registry', () => {
+  assert.match(fs.readFileSync(path.join(root, 'src/composition/create-cli.ts'), 'utf8'), /\.\.\.createReadCommands\(context\)/);
   const indexSource = fs.readFileSync(
-    path.join(root, 'src', 'composition', 'create-cli.ts'),
+    path.join(root, 'src', 'composition', 'cli-read-commands.ts'),
     'utf8',
   );
 

@@ -76,6 +76,7 @@ export function resolveConfiguration(source: Source): ParallixConfiguration {
         AI_GATEWAY_API_KEY: e('AI_GATEWAY_API_KEY')?.trim(),
       }),
       timeoutMs: e('JEV_CODE_TIMEOUT_MS')?.trim(), model: e('TYPESAFE_DEFAULT_MODEL')?.trim(),
+      obligationReviewMode: e('PARALLIX_JEV_OBLIGATION_REVIEW')?.trim().toLowerCase(),
       reviewMode: e('PARALLIX_JEV_REVIEW')?.trim().toLowerCase(),
     }),
     runtime: Object.freeze({

@@ -1,3 +1,4 @@
+import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
 /**
  * Characterization tests for the observable CLI, TUI, and shared board-projection
  * behavior that the ADR 0053 migration must retain.
@@ -97,15 +98,16 @@ test('SC3: CLI statsBackfill distinguishes --apply (mutation) from read-only rep
   // --apply passes 'stats:apply' capability and writes rows.
   // Without --apply, it produces a read-only report (no capabilities).
   // This --apply mutation boundary must survive the ADR 0053 migration.
-  let receivedCapabilities: Set<string> | null = null;
-  let receivedApply: boolean | null = null;
+  let receivedCapabilities: { value: ReadonlySet<string> | null } = { value: null };
+  const observedCapabilities = () => receivedCapabilities.value;
+  let receivedApply: { value: boolean | null } = { value: null };
   const mockService = {
-    async execute(params: { apply: boolean; capabilities: Set<string> }) {
-      receivedApply = params.apply;
-      receivedCapabilities = params.capabilities;
+    async execute(params: { apply: boolean; capabilities: ReadonlySet<string> }) {
+      receivedApply.value = params.apply;
+      receivedCapabilities.value = params.capabilities;
       return {
         status: 'completed' as const,
-        value: { rows: [], unresolved: [], skipped: [] },
+        value: { rows: [], sources: [], unresolved: [], skipped: [] },
         durableEvidence: [],
       };
     },
@@ -115,30 +117,30 @@ test('SC3: CLI statsBackfill distinguishes --apply (mutation) from read-only rep
 
   // Test with --apply
   await statsBackfill(['--apply'], {
-    service: mockService as any,
+    service: mockService,
     log: (msg: string) => { logs.push(msg); return null; },
     error: (msg: string) => { logs.push(msg); return null; },
     exit: (code?: number) => { exitCode.push(code ?? 0); throw new Error('exit'); },
   });
-  assert.equal(receivedApply, true, 'statsBackfill --apply must set apply=true');
+  assert.equal(receivedApply.value, true, 'statsBackfill --apply must set apply=true');
   assert.ok(
-    receivedCapabilities?.has('stats:apply'),
+    observedCapabilities()?.has('stats:apply'),
     'statsBackfill --apply must include stats:apply capability',
   );
 
   // Test without --apply (reset state)
-  receivedApply = null;
-  receivedCapabilities = null;
+  receivedApply.value = null;
+  receivedCapabilities.value = null;
   logs.length = 0;
   await statsBackfill(['--json'], {
-    service: mockService as any,
+    service: mockService,
     log: (msg: string) => { logs.push(msg); return null; },
     error: (msg: string) => { logs.push(msg); return null; },
     exit: (code?: number) => { exitCode.push(code ?? 0); throw new Error('exit'); },
   });
-  assert.equal(receivedApply, false, 'statsBackfill without --apply must set apply=false');
+  assert.equal(receivedApply.value, false, 'statsBackfill without --apply must set apply=false');
   assert.ok(
-    !receivedCapabilities?.has('stats:apply'),
+    !observedCapabilities()?.has('stats:apply'),
     'statsBackfill without --apply must not include stats:apply capability',
   );
 });
@@ -149,11 +151,11 @@ test('SC3: CLI statsBackfill --help returns usage without contacting storage', a
   const logs: string[] = [];
   const mockService = {
     async execute() {
-      assert.fail('service.execute must not be called for --help');
+      return assert.fail('service.execute must not be called for --help');
     },
   };
   await statsBackfill(['--help'], {
-    service: mockService as any,
+    service: mockService,
     log: (msg: string) => { logs.push(msg); return null; },
     error: (msg: string) => { logs.push(msg); return null; },
     exit: () => { throw new Error('exit'); },
@@ -211,7 +213,7 @@ test('SC3: TUI resolveKnownAgentFamilies returns empty list when config is missi
 
 test('SC3: BoardProjectionBuilder composes mocked read adapters into a valid projection', async () => {
   const missions: Mission[] = [
-    {
+    completeMissionFixture(String(missionId('task-0001')), {
       id: missionId('task-0001'),
       repositoryId: repo,
       title: 'Active mission',
@@ -223,7 +225,7 @@ test('SC3: BoardProjectionBuilder composes mocked read adapters into a valid pro
       checkpoints: [],
       review: null,
       netEngineeringLines: null,
-    },
+    }),
   ];
 
   const builder = new BoardProjectionBuilder(
@@ -377,7 +379,7 @@ test('SC3: parseMissionStatus recognizes all valid MissionStatus values', () => 
 // ---------------------------------------------------------------------------
 
 test('SC3: completedMissionStatistics derives correct statistics from closed mission and outcome', () => {
-  const closedMission: Mission = {
+  const closedMission: Mission = completeMissionFixture(String(missionId('task-0001')), {
     id: missionId('task-0001'),
     repositoryId: repo,
     title: 'Closed mission',
@@ -389,7 +391,7 @@ test('SC3: completedMissionStatistics derives correct statistics from closed mis
     checkpoints: [],
     review: null,
     netEngineeringLines: 42,
-  };
+  });
   const outcome: MissionOutcome = missionOutcome({
     missionId: missionId('task-0001'),
     repositoryId: repo,
@@ -420,6 +422,7 @@ test('SC3: completedMissionStatistics derives correct statistics from closed mis
     ],
   });
 
+  assert.ok(closedMission.closedAt);
   const stats = completedMissionStatistics(closedMission, outcome);
   assert.equal(stats.missionId, 'task-0001');
   assert.equal(stats.netEngineeringLines, 42);
@@ -430,7 +433,7 @@ test('SC3: completedMissionStatistics derives correct statistics from closed mis
 });
 
 test('SC3: completedMissionStatistics rejects mismatched mission identity', () => {
-  const closedMission: Mission = {
+  const closedMission: Mission = completeMissionFixture(String(missionId('task-0001')), {
     id: missionId('task-0001'),
     repositoryId: repo,
     title: 'Mission',
@@ -442,7 +445,7 @@ test('SC3: completedMissionStatistics rejects mismatched mission identity', () =
     checkpoints: [],
     review: null,
     netEngineeringLines: 10,
-  };
+  });
   const outcome: MissionOutcome = missionOutcome({
     missionId: missionId('task-9999'),
     repositoryId: repo,
@@ -452,7 +455,7 @@ test('SC3: completedMissionStatistics rejects mismatched mission identity', () =
   });
 
   assert.throws(
-    () => completedMissionStatistics(closedMission, outcome),
+    () => { assert.ok(closedMission.closedAt); return completedMissionStatistics(closedMission, outcome); },
     /Mission outcome identity does not match the closed mission/,
   );
 });

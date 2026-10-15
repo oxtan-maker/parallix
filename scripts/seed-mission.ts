@@ -1,5 +1,7 @@
 import { missionId, missionLabels, type Mission } from '../src/domain/mission.js';
-import type { RepositoryId } from '../src/domain/repository.js';
+import { repositoryId } from '../src/domain/repository.js';
+import { agentFamily } from '../src/domain/agents.js';
+import { changeRevision, type Review } from '../src/domain/review.js';
 import { SqliteMissionStore } from '../src/adapters/sqlite/mission-store.js';
 import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sqlite/index.js';
@@ -9,13 +11,13 @@ const slug = process.argv[2];
 if (!slug) { throw new Error('usage: seed-mission.ts <slug>'); }
 
 const now = new Date().toISOString();
-const review = {
+const review: Review = {
   rounds: [
     {
       number: 1,
-      subject: { change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' }, revision: 'seed-revision-0001' },
-      reviewer: 'claude',
-      implementer: 'codex',
+      subject: { change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' }, revision: changeRevision('seed-revision-0001') },
+      reviewer: agentFamily('claude'),
+      implementer: agentFamily('codex'),
       startedAt: now,
       decision: { kind: 'approved', decidedAt: now, comment: 'seed approval', source: { kind: 'local' } },
       response: null,
@@ -29,7 +31,6 @@ const review = {
   stageLaunches: [],
   reviewEvents: [
     {
-      missionId: slug,
       position: 0,
       eventType: 'reviewer_outcome',
       roundNumber: 1,
@@ -46,13 +47,13 @@ const review = {
   ],
 };
 
-const mission = {
+const mission: Mission = {
   id: missionId(slug),
-  repositoryId: 'local' as RepositoryId,
+  repositoryId: repositoryId('local'),
   title: 'Fix hello world greeting',
   status: 'review',
   rawStatus: 'review',
-  assignee: 'claude',
+  assignee: agentFamily('claude'),
   labels: missionLabels(['user_value']),
   checkpoints: [],
   review,
@@ -64,6 +65,6 @@ const db = new SqliteDatabaseAdapter();
 await db.open({ path: resolveDatabasePath() });
 await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
 const store = new SqliteMissionStore(db);
-const version = await store.save(mission as unknown as Mission, null);
+const version = await store.save(mission, null);
 console.log('seeded', slug, 'version', Number(version), 'status', mission.status);
 await db.close?.();

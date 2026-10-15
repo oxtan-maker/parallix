@@ -253,10 +253,12 @@ jobs:
     name: publication-proof
     outputs:
       verified: ${{ steps.proof.outputs.verified }}
+      eligible: ${{ steps.policy.outcome == 'success' && steps.policy.outputs.eligible || 'false' }}
     runs-on: ubuntu-latest
     permissions:
       actions: read
       contents: read
+      pull-requests: read
     steps:
       - name: Check out the triggering main SHA
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -276,13 +278,22 @@ jobs:
         run: node scripts/verify-github-publication-proof.ts
         env:
           # This ephemeral token inherits only this job's actions: read and
-          # contents: read permissions. It is not an npm or release credential.
+          # contents/pull-requests: read permissions. It is not a release credential.
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Check merged PR author before releasing
+        id: policy
+        # Failed provenance denies release while allowing source verification.
+        continue-on-error: true
+        run: node scripts/github-release-policy.ts
+        env:
           GH_TOKEN: ${{ github.token }}
 
   release:
     needs: [publication-proof, ci-required]
     if: >-
       always() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.publication-proof.result == 'success' &&
+      needs.publication-proof.outputs.eligible == 'true' &&
       ((needs.publication-proof.outputs.verified == 'true' && needs.ci-required.result == 'skipped') ||
        (needs.publication-proof.outputs.verified == 'false' && needs.ci-required.result == 'success'))
     runs-on: ubuntu-latest

@@ -1,3 +1,5 @@
+import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
+import { repositoryId as fixtureRepositoryId } from '../../../src/domain/repository.js';
 // Historical regression provenance: TASK-2363.
 import { describe, it, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -72,7 +74,7 @@ test('checkLifecycleDeadline passes at exactly the deadline boundary', () => {
 test('checkLifecycleDeadline throws LifecycleDeadlineMissed past the budget', () => {
   try {
     checkLifecycleDeadline({ startedAtMs: 0, nowMs: LIFECYCLE_DEADLINE_MS + 1, what: 'active lifecycle boundary for task-1' });
-    assert.fail('expected LifecycleDeadlineMissed');
+    return assert.fail('expected LifecycleDeadlineMissed');
   } catch (error) {
     assert.ok(error instanceof LifecycleDeadlineMissed, `expected LifecycleDeadlineMissed, got ${String(error)}`);
     assert.match(error.message, /active lifecycle boundary for task-1 missed the 200 ms lifecycle persistence deadline/);
@@ -237,7 +239,7 @@ test('duplicate transitions collapsed — same missionId+from+to+occurredAt yiel
 // for, so a projection that reports 37 as "cycle time" is detectably wrong.
 // ---------------------------------------------------------------------------
 
-const REPO = '/repo' as RepositoryId;
+const REPO = fixtureRepositoryId('/repo') as RepositoryId;
 const TASK = 'task-2347.05-fixture';
 const ID: MissionId = missionId(TASK);
 
@@ -463,7 +465,7 @@ test('SC5: FLOW panel labels lifecycle cycle time and agent runtime distinctly (
 
 test('SC6: CompletedMissionStatistics still sums runtime from outcome.runs (task-2347.05)', async () => {
   const outcomes = await adapter().readOutcomes();
-  const mission = requireClosedMission({
+  const mission = requireClosedMission(completeMissionFixture(String(ID), {
     id: ID,
     repositoryId: REPO,
     title: 'Separate agent runtime from lifecycle cycle time',
@@ -475,7 +477,7 @@ test('SC6: CompletedMissionStatistics still sums runtime from outcome.runs (task
     checkpoints: [],
     review: null,
     netEngineeringLines: 120,
-  });
+  }));
   const statistics = completedMissionStatistics(mission, outcomes[0]!);
   assert.equal(statistics.totalDurationMinutes, RUNTIME_MINUTES);
   assert.equal(statistics.totalCostUsd, 0.75);

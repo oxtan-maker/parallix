@@ -32,7 +32,7 @@ export class RoundTelemetry {
       findingIds: [...identity.findingIds], packetHash: null, packetVersion: ARCHIVED_PACKING_VERSION, promptVersion: PANEL_PROMPT_VERSION,
       policyVersion: ROUTING_POLICY_VERSION, provider: null, model: null, implementer: context.identities.implementer,
       reviewer: context.identities.reviewer, label: null, score: null, route: 'reviewer', reason: 'unrecorded',
-      shadow: ports.mode === 'shadow', preparationMs: null, classificationMs: null,
+      omittedDiffCount: 0, omittedTokens: 0, shadow: ports.mode === 'shadow', preparationMs: null, classificationMs: null,
       panel: { policyVersion: ROUTING_POLICY_VERSION, promptVersion: PANEL_PROMPT_VERSION, calls: 0, members: [], outcome: 'reviewer', reason: 'unrecorded' },
     };
   }

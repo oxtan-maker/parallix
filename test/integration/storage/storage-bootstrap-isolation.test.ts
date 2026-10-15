@@ -88,7 +88,7 @@ for (const scriptName of ['test:lifecycle-e2e', 'test:agent-e2e']) {
     );
     const childEnv = { ...process.env, PARALLIX_HOME: undefined, HOME: process.env.HOME };
     const operatorDefault = resolveParallixHome({
-      configuration: resolveConfiguration(childEnv as Record<string, string>),
+      configuration: resolveConfiguration(childEnv),
       platform: process.platform,
       homedir: () => String(process.env.HOME)
     });

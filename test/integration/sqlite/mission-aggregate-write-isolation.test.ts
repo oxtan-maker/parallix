@@ -1,3 +1,4 @@
+import { fixtureMission as typedMissionFixture } from '../../fixtures/mission-builders.js';
 /**
  * The Mission aggregate is rewritten as DELETE-then-INSERT and composition
  * shares one SQLite handle process-wide, so a transaction gives a concurrent
@@ -48,8 +49,7 @@ function reviewWith(overrides: Partial<Review> = {}): Review {
 }
 
 function missionWith(review: Review, title = 'aggregate read during write'): Mission {
-  return {
-    id: MISSION_ID,
+  return typedMissionFixture(String(MISSION_ID), {
     repositoryId: repositoryId('repo-parallix'),
     title,
     status: 'review',
@@ -59,8 +59,7 @@ function missionWith(review: Review, title = 'aggregate read during write'): Mis
     checkpoints: [],
     netEngineeringLines: 0,
     closedAt: null,
-    review,
-  } as unknown as Mission;
+    review});
 }
 
 async function openStore() {
@@ -204,7 +203,7 @@ test('a save that drops the Review still clears the review tables', async () => 
   const { db, store } = await openStore();
   try {
     const version = await store.save(missionWith(reviewWith()), null);
-    const withoutReview = { ...missionWith(reviewWith()), review: null } as unknown as Mission;
+    const withoutReview = ({ ...missionWith(reviewWith()), review: null });
     await store.save(withoutReview, version);
 
     const rows = await db.query('SELECT mission_id FROM mission_reviews WHERE mission_id = ?', [MISSION_ID]);

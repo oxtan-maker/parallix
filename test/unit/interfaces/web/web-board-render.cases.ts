@@ -1,3 +1,7 @@
+import type { BoardLane } from '../../../../src/application/projections/mission-board.js';
+const laneCounts = (values: Partial<Record<BoardLane, number>>) => ({ backlog: 0, refined: 0, active: 0, review: 0, integration: 0, done: 0, ...values });
+
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 /**
  * Focused component tests for the read-only browser board (TASK-2434).
  *
@@ -54,7 +58,7 @@ function metric(overrides: Partial<AgentAvailabilityMetric>): AgentAvailabilityM
 /** A snapshot with a card in every lane, an attention item, and agent facts. */
 function populated(): WebBoardSnapshot {
   const blocked = makeCard({
-    id: 'task-0001' as MissionCard['id'],
+    id: fixtureMissionId('task-0001') as MissionCard['id'],
     title: 'blocked mission',
     lane: 'review',
     status: 'review',
@@ -74,12 +78,12 @@ function populated(): WebBoardSnapshot {
     commands: [{ command: 'integrate', enabled: false, reason: 'review is not approved', targetLane: 'integration' }],
   });
   const base = makeProjection({
-    backlog: [makeCard({ id: 'task-0002' as MissionCard['id'], title: 'backlog mission', lane: 'backlog', status: 'backlog' })],
-    refined: [makeCard({ id: 'task-0003' as MissionCard['id'], title: 'refined mission', lane: 'refined', status: 'refined' })],
-    active: [makeCard({ id: 'task-0004' as MissionCard['id'], title: 'active mission', lane: 'active', status: 'active' })],
+    backlog: [makeCard({ id: fixtureMissionId('task-0002') as MissionCard['id'], title: 'backlog mission', lane: 'backlog', status: 'backlog' })],
+    refined: [makeCard({ id: fixtureMissionId('task-0003') as MissionCard['id'], title: 'refined mission', lane: 'refined', status: 'refined' })],
+    active: [makeCard({ id: fixtureMissionId('task-0004') as MissionCard['id'], title: 'active mission', lane: 'active', status: 'active' })],
     review: [blocked],
-    integration: [makeCard({ id: 'task-0005' as MissionCard['id'], title: 'integration mission', lane: 'integration', status: 'integration' })],
-    done: [makeCard({ id: 'task-0006' as MissionCard['id'], title: 'shipped mission', lane: 'done', status: 'done', closed: true })],
+    integration: [makeCard({ id: fixtureMissionId('task-0005') as MissionCard['id'], title: 'integration mission', lane: 'integration', status: 'integration' })],
+    done: [makeCard({ id: fixtureMissionId('task-0006') as MissionCard['id'], title: 'shipped mission', lane: 'done', status: 'done', closed: true })],
   });
   return toWebBoardSnapshot({
     ...base,
@@ -133,7 +137,7 @@ test('a card action renders the server\'s verb for the mission\'s state', () => 
       lane: 'review',
       count: 1,
       cards: [makeCard({
-        id: 'task-0009' as MissionCard['id'],
+        id: fixtureMissionId('task-0009') as MissionCard['id'],
         lane: 'review',
         status: 'review',
         commands: [{ command: 'active', enabled: true, reason: null, targetLane: 'active', label: 'act on review' }],
@@ -150,7 +154,7 @@ test('a card with no runnable action exposes its disabled projected control and 
       lane: 'review',
       count: 1,
       cards: [makeCard({
-        id: 'task-0010' as MissionCard['id'],
+        id: fixtureMissionId('task-0010') as MissionCard['id'],
         lane: 'review',
         status: 'review',
         commands: [
@@ -169,7 +173,7 @@ test('a card shows runnable projected controls without unrelated unavailable but
   const html = render(snapshotOf({
     stages: [{
       lane: 'active', count: 1, cards: [makeCard({
-        id: 'task-2657-mixed' as MissionCard['id'], lane: 'active', status: 'active', commands: [
+        id: fixtureMissionId('task-2657-mixed') as MissionCard['id'], lane: 'active', status: 'active', commands: [
           { command: 'active', enabled: false, reason: 'not eligible', targetLane: 'active' },
           { command: 'handoff', enabled: true, reason: null, targetLane: 'review', label: 'record handoff' },
         ],
@@ -226,7 +230,7 @@ test('a checkpoint with evidence renders a clickable label that opens its detail
   const snapshot = snapshotOf({
     stages: makeProjection({
       review: [makeCard({
-        id: 'task-0100' as MissionCard['id'],
+        id: fixtureMissionId('task-0100') as MissionCard['id'],
         lane: 'review',
         status: 'review',
         checkpoint: 'CP-2.md',
@@ -248,7 +252,7 @@ test('the checkpoint detail renders the description and every evidence row', () 
   const snapshot = snapshotOf({
     stages: makeProjection({
       review: [makeCard({
-        id: 'task-0100' as MissionCard['id'],
+        id: fixtureMissionId('task-0100') as MissionCard['id'],
         checkpoint: 'CP-2.md',
         checkpointDescription: 'CP-2: components extracted',
         checkpointEvidence: [
@@ -259,6 +263,7 @@ test('the checkpoint detail renders the description and every evidence row', () 
     }).stages,
   });
   const card = snapshot.stages.flatMap((stage) => stage.cards).find((wireCard) => wireCard.checkpoint !== null);
+  assert.ok(card);
   const html = renderToStaticMarkup(React.createElement(CheckpointDetail, { card, initial: 'CP-2.md', onClose: () => {} }));
   // The opened checkpoint is CP-2, so its description and every one of its
   // Goal Check rows render; the unopened CP-1 rows do not.
@@ -275,6 +280,7 @@ test('the checkpoint detail renders nothing when the card carries no evidence ro
     stages: makeProjection({ review: [makeCard({ checkpoint: 'CP-1.md', checkpointEvidence: [] })] }).stages,
   });
   const card = snapshot.stages.flatMap((stage) => stage.cards).find((wireCard) => wireCard.checkpoint !== null);
+  assert.ok(card);
   const html = renderToStaticMarkup(React.createElement(CheckpointDetail, { card, initial: 'CP-1.md', onClose: () => {} }));
   assert.equal(html, '', 'an empty mission keeps its layout with no panel');
 });
@@ -286,7 +292,7 @@ test('the operation log renders the server entry rather than a reconstructed one
 });
 
 test('operation progress deduplicates reconnects and evicts oldest entries', () => {
-  const progress = { kind: 'progress' as const, transportVersion: 2 as const, operationId: 'op-reconnect', sequence: 1, phase: 'run', message: 'one', timestamp: '2026-08-30T11:00:00.000Z' };
+  const progress = { kind: 'progress' as const, transportVersion: 2 as const, operationId: 'op-reconnect', sequence: 1, phase: 'run', message: 'one', timestamp: '2026-08-30T11:00:00.000Z' } satisfies Partial<NonNullable<Parameters<typeof recordProgress>[1]>>;
   const once = recordProgress(EMPTY_LIVE_PROGRESS, progress);
   assert.equal(recordProgress(once, progress).entries.length, once.entries.length);
   let bounded = once;
@@ -308,7 +314,7 @@ test('FLOW renders populated projected values with whole-number display formatti
     ...emptyMetrics,
     health: { state: 'healthy' },
     provenance: { ...emptyMetrics.provenance, sampleSize: 4 },
-    cumulativeFlowByState: { series: [{ at: '2026-08-30', counts: { active: 2, review: 1 }, observationCount: 3 }], missingHistoryFallback: 'skip' } as unknown as typeof emptyMetrics.cumulativeFlowByState,
+    cumulativeFlowByState: { series: [{ at: '2026-08-30', counts: laneCounts({ active: 2, review: 1 }), observationCount: 3 }], missingHistoryFallback: 'skip' } satisfies typeof emptyMetrics.cumulativeFlowByState,
     medianCycleTimeByState: { series: [{ lane: 'active', value: 42.5, observationCount: 2.5 }, { lane: 'review', value: 0.4, observationCount: 1 }], missingHistoryFallback: 'null' } as typeof emptyMetrics.medianCycleTimeByState,
   } }).metrics);
   assert.match(html, /Cumulative flow chart/);
@@ -326,17 +332,17 @@ test('FLOW charts the server-owned weekly series and never the historical stock 
     ...emptyMetrics,
     // The all-history series still carries every pre-window completion...
     cumulativeFlowByState: { series: [
-      { at: '2026-08-23T23:59:59.000Z', counts: { old: 99 }, observationCount: 99 },
-    ], missingHistoryFallback: 'estimate' } as unknown as typeof emptyMetrics.cumulativeFlowByState,
+      { at: '2026-08-23T23:59:59.000Z', counts: laneCounts({ done: 99 }), observationCount: 99 },
+    ], missingHistoryFallback: 'estimate' } satisfies typeof emptyMetrics.cumulativeFlowByState,
     // ...and FLOW charts the weekly series the projection published instead.
     weeklyCumulativeFlow: { series: [
-      { at: '2026-08-24T23:59:59.999Z', counts: { active: 2 }, observationCount: 2 },
-      { at: '2026-08-30T23:59:59.999Z', counts: { active: 2 }, observationCount: 2 },
-    ], missingHistoryFallback: 'estimate', window: { startDate: '2026-08-24', endDate: '2026-08-30', label: '2026-08-24 → 2026-08-30' } } as unknown as NonNullable<typeof emptyMetrics.weeklyCumulativeFlow>,
+      { at: '2026-08-24T23:59:59.999Z', counts: laneCounts({ active: 2 }), observationCount: 2 },
+      { at: '2026-08-30T23:59:59.999Z', counts: laneCounts({ active: 2 }), observationCount: 2 },
+    ], missingHistoryFallback: 'estimate', window: { startDate: '2026-08-24', endDate: '2026-08-30', label: '2026-08-24 → 2026-08-30' } } satisfies NonNullable<typeof emptyMetrics.weeklyCumulativeFlow>,
   } }).metrics);
   assert.match(html, /2026-08-24 → 2026-08-30/);
   assert.match(html, / active<\/span>/);
-  assert.doesNotMatch(html, / old<\/span>/);
+  assert.doesNotMatch(html, />99<\//);
 });
 
 test('the web transport carries the weekly cumulative-flow series and its window unchanged', () => {
@@ -347,7 +353,7 @@ test('the web transport carries the weekly cumulative-flow series and its window
     ],
     missingHistoryFallback: 'estimate',
     window: { startDate: '2026-08-25', endDate: '2026-08-26', label: '2026-08-25 → 2026-08-26' },
-  } as unknown as NonNullable<typeof emptyMetrics.weeklyCumulativeFlow>;
+  } satisfies NonNullable<typeof emptyMetrics.weeklyCumulativeFlow>;
   const snapshot = toWebBoardSnapshot({ ...makeProjection(), metrics: { ...emptyMetrics, weeklyCumulativeFlow: weekly } });
   assert.deepEqual(snapshot.metrics.weeklyCumulativeFlow, JSON.parse(JSON.stringify(weekly)));
   assert.deepEqual(validateWebBoardSnapshot(JSON.parse(JSON.stringify(snapshot))).ok, true);
@@ -367,7 +373,7 @@ test('FLOW draws every published weekly point without rebasing or inferring lane
   }));
   const html = renderFlow(toWebBoardSnapshot({ ...makeProjection(), metrics: {
     ...emptyMetrics,
-    weeklyCumulativeFlow: { series: points, missingHistoryFallback: 'estimate', window: { startDate: '2026-08-25', endDate: '2026-08-31', label: '2026-08-25 → 2026-08-31' } } as unknown as NonNullable<typeof emptyMetrics.weeklyCumulativeFlow>,
+    weeklyCumulativeFlow: { series: points, missingHistoryFallback: 'estimate', window: { startDate: '2026-08-25', endDate: '2026-08-31', label: '2026-08-25 → 2026-08-31' } } satisfies NonNullable<typeof emptyMetrics.weeklyCumulativeFlow>,
   } }).metrics);
   // One polygon per lane; every one plots all seven published points (7 up + 7 down).
   const polygons = [...html.matchAll(/points="([^"]+)"/g)].map((match) => match[1]!.split(' '));
@@ -442,11 +448,11 @@ test('the audited reference treatment omits non-reference source and attribution
 });
 
 test('activity, coordinator recovery evidence, and reduced motion stay truthful', () => {
-  const live = makeCard({ id: 'task-1111' as MissionCard['id'], currentWork: { operationId: 'op', phase: 'implement', summary: 'live work', agent: agentFamily('codex'), updatedAt: '2026-08-30T00:00:00.000Z', freshness: 'live' }, liveSession: { missionId: 'task-1111' as MissionCard['id'], family: agentFamily('codex') } });
-  const uncertain = makeCard({ id: 'task-1112' as MissionCard['id'], currentWork: { ...live.currentWork!, freshness: 'unverified' } });
-  const stale = makeCard({ id: 'task-1113' as MissionCard['id'], currentWork: { ...live.currentWork!, freshness: 'stale' }, liveSession: { missionId: 'task-1113' as MissionCard['id'], family: agentFamily('codex') } });
-  const blocked = makeCard({ id: 'task-1114' as MissionCard['id'], blockingReason: 'waiting' });
-  const idle = makeCard({ id: 'task-1115' as MissionCard['id'] });
+  const live = makeCard({ id: fixtureMissionId('task-1111') as MissionCard['id'], currentWork: { operationId: 'op', phase: 'implement', summary: 'live work', agent: agentFamily('codex'), updatedAt: '2026-08-30T00:00:00.000Z', freshness: 'live' }, liveSession: { missionId: fixtureMissionId('task-1111') as MissionCard['id'], family: agentFamily('codex') } });
+  const uncertain = makeCard({ id: fixtureMissionId('task-1112') as MissionCard['id'], currentWork: { ...live.currentWork!, freshness: 'unverified' } });
+  const stale = makeCard({ id: fixtureMissionId('task-1113') as MissionCard['id'], currentWork: { ...live.currentWork!, freshness: 'stale' }, liveSession: { missionId: fixtureMissionId('task-1113') as MissionCard['id'], family: agentFamily('codex') } });
+  const blocked = makeCard({ id: fixtureMissionId('task-1114') as MissionCard['id'], blockingReason: 'waiting' });
+  const idle = makeCard({ id: fixtureMissionId('task-1115') as MissionCard['id'] });
   const html = render(snapshotOf({ stages: makeProjection({ active: [live, uncertain, stale, blocked, idle] }).stages }));
   assert.doesNotMatch(html, /working · (?:live|unknown|stale)/);
   assert.match(html, /waiting/);
@@ -464,7 +470,7 @@ test('activity, coordinator recovery evidence, and reduced motion stay truthful'
 test('fans retain the pre-TASK-2576 work behavior independently of agent identity and coordinator scans', () => {
   for (const freshness of ['live', 'unverified', 'stale'] as const) {
     for (const agent of [null, agentFamily('codex')]) {
-      for (const liveSession of [undefined, null, { missionId: 'task-9999' as MissionCard['id'], family: agentFamily('codex') }]) {
+      for (const liveSession of [undefined, null, { missionId: fixtureMissionId('task-9999') as MissionCard['id'], family: agentFamily('codex') }]) {
         const card = makeCard({ currentWork: { operationId: 'op', phase: 'integrate', summary: 'work in progress', agent, updatedAt: '2026-08-30T00:00:00.000Z', freshness }, liveSession });
         const snapshot = snapshotOf({ stages: makeProjection({ active: [card] }).stages });
         const webCard = snapshot.stages.flatMap(stage => stage.cards)[0];
@@ -485,8 +491,8 @@ test('fans retain the pre-TASK-2576 work behavior independently of agent identit
 });
 
 test('a blocked or idle card keeps its implementer tooltip without an activity dot (TASK-2687)', () => {
-  const blocked = makeCard({ id: 'task-blocked' as MissionCard['id'], agent: agentFamily('codex'), blockingReason: 'waiting' });
-  const idle = makeCard({ id: 'task-idle' as MissionCard['id'], agent: agentFamily('codex') });
+  const blocked = makeCard({ id: fixtureMissionId('task-blocked') as MissionCard['id'], agent: agentFamily('codex'), blockingReason: 'waiting' });
+  const idle = makeCard({ id: fixtureMissionId('task-idle') as MissionCard['id'], agent: agentFamily('codex') });
   for (const card of [blocked, idle]) {
     const snapshot = snapshotOf({ stages: makeProjection({ active: [card] }).stages });
     const webCard = snapshot.stages.flatMap(stage => stage.cards)[0];
@@ -520,8 +526,8 @@ test('flight headers omit work badges and agent dots in every flight lane (TASK-
 });
 
 test('blocked and idle body activity dots stay static and distinguish blocked work (TASK-2687)', () => {
-  const blocked = makeCard({ id: 'task-blocked' as MissionCard['id'], agent: agentFamily('codex'), blockingReason: 'waiting' });
-  const idle = makeCard({ id: 'task-idle' as MissionCard['id'], agent: agentFamily('codex') });
+  const blocked = makeCard({ id: fixtureMissionId('task-blocked') as MissionCard['id'], agent: agentFamily('codex'), blockingReason: 'waiting' });
+  const idle = makeCard({ id: fixtureMissionId('task-idle') as MissionCard['id'], agent: agentFamily('codex') });
   for (const card of [blocked, idle]) {
     const snapshot = snapshotOf({ stages: makeProjection({ active: [card] }).stages });
     const webCard = snapshot.stages.flatMap(stage => stage.cards)[0];
@@ -568,7 +574,7 @@ test('each card renders projected action availability without inventing a runnab
 
 test('advertised actions dispatch directly without a confirmation dialog', () => {
   assert.ok(!browserSources.find((file) => file.name === 'board.tsx')?.text.includes('CommandDialog'));
-  assert.match(browserSources.find((file) => file.name === 'board.tsx')?.text ?? '', /Starting \$\{action\.display\}/,
+  assert.match(browserSources.find((file) => file.name === 'board-command-controller.ts')?.text ?? '', /Starting \$\{action\.display\}/,
     'click and drop both announce that the projected action is starting');
 });
 

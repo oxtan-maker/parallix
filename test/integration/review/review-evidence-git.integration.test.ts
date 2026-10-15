@@ -147,3 +147,33 @@ test('release exception preserves approved manifest edits and rejects ordinary v
     assert.equal(await compare.samePatch({ baseline: base, revision: approved }, { baseline: base, revision: ordinary }), false);
   } finally { rmSync(repo, { recursive: true, force: true }); }
 });
+
+
+test('weakening packets retain actual historical main baselines after rewritten main (TASK-2754)', async () => {
+  const repo = mkdtempSync(join(tmpdir(), 'px-rewritten-main-'));
+  try {
+    const git = (...args: string[]) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
+    const commit = (file: string, text: string) => { writeFileSync(join(repo, file), text); git('add', '-A'); git('commit', '-qm', file); return git('rev-parse', 'HEAD'); };
+    git('init', '-q', '-b', 'main');
+    const root = commit('check.ts', 'assert(true);\n');
+    const oldMain = commit('main.ts', 'original main\n');
+    git('checkout', '-qb', 'mission');
+    const approved = commit('check.ts', 'assert(true);\n// approved fixture\n');
+    git('checkout', '-q', 'main'); git('reset', '--hard', root);
+    const newMain = commit('main.ts', 'rewritten main\n');
+    git('checkout', '-q', 'mission'); git('rebase', '--onto', newMain, oldMain);
+    const candidate = commit('check.ts', 'assert(true);\n// approved fixture\n// isolated cleanup\n');
+    const evidence = new GitReviewEvidence(repo);
+    assert.equal(await evidence.mergeBase(approved, 'main'), root);
+    const { buildWeakeningPacket } = await import('../../../src/application/review-classification/weakening-packet.js');
+    const request = await buildWeakeningPacket({ gate: 'unit', log: 'failed cleanup',
+      approved: { baseline: oldMain, revision: approved }, candidate: { baseline: newMain, revision: candidate } },
+      evidence, () => ({ inputTokens: 1, contextTokens: 1, maxInputTokens: 64000, maxContextTokens: 64000,
+        requestBytes: 1, maxRequestBytes: 1000000, tokenizerModel: 'stub' }));
+    const state = request.state as { rebase: { approvedBaseline: string; candidateBaseline: string }; changedPaths: string[]; repairDiff: string };
+    assert.equal(state.rebase.approvedBaseline, oldMain);
+    assert.equal(state.rebase.candidateBaseline, newMain);
+    assert.deepEqual(state.changedPaths, ['check.ts']);
+    assert.doesNotMatch(state.repairDiff, /rewritten main|original main/);
+  } finally { rmSync(repo, { recursive: true, force: true }); }
+});

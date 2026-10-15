@@ -22,6 +22,17 @@ function look(state: WebCommandAction['state']): CSSProperties {
     : { background: 'none', border: `1px solid ${C.cardEdge}`, color: C.faint };
 }
 
+function pendingLabel(action: WebCommandAction, label: string | undefined, ownPending: boolean, working: boolean) {
+  return ownPending ? `${label ?? action.display} · ${working ? 'working…' : 'starting…'}` : label ?? action.display;
+}
+
+function actionAccessibility(action: WebCommandAction, ownPending: boolean, working: boolean, reason: string | null) {
+  return {
+    title: ownPending ? `${working ? 'Working' : 'Starting'} ${action.display}` : reason ?? action.display,
+    'aria-label': `${action.display} — ${ownPending ? (working ? 'working' : 'starting') : reason === null ? 'enabled' : `unavailable: ${reason ?? UNAVAILABLE_HINT}`}`,
+  };
+}
+
 export function ActionButton({ action, style, label, pending, working = false, onInvoke }: {
   action: WebCommandAction;
   style?: CSSProperties;
@@ -59,10 +70,9 @@ export function ActionButton({ action, style, label, pending, working = false, o
         whiteSpace: 'nowrap',
         ...style,
       }}
-      title={ownPending ? `${working ? 'Working' : 'Starting'} ${action.display}` : reason ?? action.display}
-      aria-label={`${action.display} — ${ownPending ? (working ? 'working' : 'starting') : enabled ? 'enabled' : `unavailable: ${reason ?? UNAVAILABLE_HINT}`}`}
+      {...actionAccessibility(action, ownPending, working, reason)}
     >
-      {ownPending ? `${label ?? action.display} · ${working ? 'working…' : 'starting…'}` : label ?? action.display}
+      {pendingLabel(action, label, ownPending, working)}
     </button>
   );
 }

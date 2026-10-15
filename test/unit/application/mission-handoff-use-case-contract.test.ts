@@ -1,3 +1,9 @@
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { missionId } from '../../../src/domain/mission.js';
+import { missionVersion, type MissionStore } from '../../../src/application/domain-ports.js';
+import { stubMissionServices } from '../../helpers/stub-mission-services.js';
+import { handoffTransitionValue } from '../../helpers/handoff-ports.js';
+import { phaseGateResult } from '../../helpers/phase-gate-result.js';
 // Mission handoff use-case contract: handoff command orchestration, composition, and recorded-gate
 // validation.
 //
@@ -46,7 +52,7 @@ describe('Handoff command use case', () => {
       rebase: {
         rebaseBeforeReviewRound: async () => {
           rebaseCalls += 1;
-          return { ok: true, sharedFileConflicts: false, hookFailure: false };
+          return { ok: true as const, sharedFileConflicts: false, hookFailure: false };
         },
       },
     });
@@ -75,7 +81,7 @@ describe('Handoff command use case', () => {
     const ports = makePorts(recorder);
     ports.missionUtils.findMissionDir = () => null;
     const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder, {
-      missionServicesFn: async () => ({ store: { load: async () => ({ kind: 'missing' }) } }),
+      missionServicesFn: async () => ({ store: { load: async () => ({ kind: 'missing' as const }) } }),
     }));
     assert.equal(result.ok, false);
     assert.match(result.error ?? '', /holds no Mission/);
@@ -95,7 +101,7 @@ describe('Handoff command use case', () => {
           assert.equal(phase, 'handoff');
           assert.equal(opts.slug, SLUG);
           assert.equal(opts.checkoutPath, ROOT);
-          return { ok: false, skipped: false, executed: 1, failedGate: { key: 'smoke', command: 'false', exitCode: 1, stdout: '', stderr: 'fail' }, error: 'pre-handoff gate failed' };
+          return phaseGateResult({ ok: false as const, skipped: false, executed: 1, failedGate: { key: 'smoke', command: 'false', exitCode: 1, stdout: '', stderr: 'fail' }, error: 'pre-handoff gate failed' });
         },
       },
     });
@@ -112,7 +118,7 @@ describe('Handoff command use case', () => {
     const ports = makePorts(recorder, {
       repositoryGates: {
         loadPhaseGates: () => [{ key: 'smoke', command: 'true', order: 0 }],
-        runPhaseGates: async () => ({ ok: true, skipped: false, executed: 1, failedGate: null, error: null }),
+        runPhaseGates: async () => (phaseGateResult({ ok: true as const, skipped: false, executed: 1, failedGate: null, error: null })),
       },
     });
     const useCase = new HandoffCommandUseCase(ports);
@@ -140,7 +146,7 @@ describe('Handoff command use case', () => {
     const recorder = makeRecorder();
     const basePorts = makePorts(recorder);
     const ports = makePorts(recorder, {
-      verification: { ...basePorts.verification, readReusableVerificationProof: () => ({ ok: true, identity: 'proof-1' }) },
+      verification: { ...basePorts.verification, readReusableVerificationProof: () => ({ ok: true as const, identity: 'proof-1' }) },
     });
     let gateRuns = 0;
     const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder, {
@@ -177,9 +183,9 @@ describe('Handoff command use case', () => {
       git: {
         git: (args: string[]) => {
           gitCalls.push(args);
-          return { status: 0, stdout: args.includes('rev-parse') ? 'repair-before-and-after' : '', stderr: '' };
+          return { signal: null,  status: 0, stdout: args.includes('rev-parse') ? 'repair-before-and-after' : '', stderr: '' };
         },
-        run: () => ({ status: 0 }), getCurrentBranch: () => BRANCH, getWorktreeStatus: () => [],
+        run: () => ({ signal: null, stdout: '', stderr: '',  status: 0 }), getCurrentBranch: () => BRANCH, getWorktreeStatus: () => [],
       },
       agents: {
         startAgent: async (_step: string, options: Record<string, unknown>) => {
@@ -237,7 +243,7 @@ describe('Handoff command use case', () => {
           recorder.gatekeeperCalls.push(gatekeeperCall);
           return gatekeeperCall === 1
             ? { ok: false, posted: true, missing: ['missions/task-2332.09/CP-1.md'] }
-            : { ok: true };
+            : { ok: true, missing: [] };
         },
       },
       agents: {
@@ -261,16 +267,16 @@ describe('Handoff command use case', () => {
     const recorder = makeRecorder();
     let capturedOccurredAt: string | undefined;
     const ports = makePorts(recorder, {
-      missionServices: async () => ({
-        checkpoints: { record: async () => ({ status: 'completed' }) },
+      missionServices: stubMissionServices({
+        checkpoints: { record: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
         lifecycle: {
           transition: async (request: { occurredAt?: string }) => {
             capturedOccurredAt = request.occurredAt;
-            return { status: 'completed', value: { version: 3 } };
+            return { durableEvidence: [],  status: 'completed' as const, value: handoffTransitionValue(missionVersion(3)) };
           },
         },
         store: { load: async () => RECORDED_MISSION_LOAD },
-        handoff: { recordNel: async () => ({ status: 'completed' }) },
+        handoff: { recordNel: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
       }),
     });
     const authoritative = '2026-07-24T08:00:00.000Z';
@@ -289,16 +295,16 @@ describe('Handoff command use case', () => {
     const recorder = makeRecorder();
     let capturedOccurredAt: string | undefined;
     const ports = makePorts(recorder, {
-      missionServices: async () => ({
-        checkpoints: { record: async () => ({ status: 'completed' }) },
+      missionServices: stubMissionServices({
+        checkpoints: { record: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
         lifecycle: {
           transition: async (request: { occurredAt?: string }) => {
             capturedOccurredAt = request.occurredAt;
-            return { status: 'completed', value: { version: 3 } };
+            return { durableEvidence: [],  status: 'completed' as const, value: handoffTransitionValue(missionVersion(3)) };
           },
         },
         store: { load: async () => RECORDED_MISSION_LOAD },
-        handoff: { recordNel: async () => ({ status: 'completed' }) },
+        handoff: { recordNel: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
       }),
     });
     const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
@@ -313,7 +319,7 @@ describe('Handoff command use case', () => {
       gatekeeper: {
         runGatekeeper: () => {
           recorder.gatekeeperCalls.push(1);
-          return { ok: false, posted: true, missing: ['MISSION.md'] };
+          return { ok: false as const, posted: true, missing: ['MISSION.md'] };
         },
       },
       agents: {
@@ -333,7 +339,7 @@ describe('Handoff command use case', () => {
     const recorder = makeRecorder();
     const ports = makePorts(recorder, {
       gatekeeper: {
-        runGatekeeper: () => ({ ok: false, posted: false, skipped: true, missing: ['MISSION.md'] }),
+        runGatekeeper: () => ({ ok: false as const, posted: false, skipped: true, missing: ['MISSION.md'] }),
       },
     });
     const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
@@ -354,11 +360,11 @@ describe('Handoff command use case', () => {
         ...base.fileSystem,
         readText: () => 'Predicted NEL bucket: Large',
       },
-      missionServices: async () => ({
+      missionServices: stubMissionServices({
         store: { load: async () => LEGACY_MISSION_LOAD },
-        handoff: { recordNel: async (request: { predictedBucket: string }) => {
-          predictedBucket = request.predictedBucket;
-          return { status: 'completed' };
+        handoff: { recordNel: async (request) => {
+          predictedBucket = request.predictedBucket ?? undefined;
+          return { durableEvidence: [],  status: 'completed' as const };
         } },
       }),
     });
@@ -374,11 +380,11 @@ describe('Handoff command use case', () => {
   test('handoff use case stops before review state advances when NEL persistence fails', async () => {
     const recorder = makeRecorder();
     const ports = makePorts(recorder, {
-      missionServices: async () => ({
-        checkpoints: { record: async () => ({ status: 'completed' }) },
-        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 1 } }) },
+      missionServices: stubMissionServices({
+        checkpoints: { record: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
+        lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: handoffTransitionValue(missionVersion(1)) }) },
         store: { load: async () => RECORDED_MISSION_LOAD },
-        handoff: { recordNel: async () => ({ status: 'failed', error: { message: 'database is locked' } }) },
+        handoff: { recordNel: async () => ({ durableEvidence: [],  status: 'failed' as const, error: { kind: 'unavailable',  message: 'database is locked' } }) },
       }),
     });
     const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
@@ -405,11 +411,11 @@ describe('Handoff command use case', () => {
   test('handoff use case does not record checkpoint evidence again', async () => {
     const recorder = makeRecorder();
     const ports = makePorts(recorder, {
-      missionServices: async () => ({
-        checkpoints: { record: async () => ({ status: 'rejected', error: { message: 'evidence missing' } }) },
-        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 1 } }) },
+      missionServices: stubMissionServices({
+        checkpoints: { record: async () => ({ durableEvidence: [],  status: 'rejected' as const, error: { kind: 'unavailable',  message: 'evidence missing' } }) },
+        lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: handoffTransitionValue(missionVersion(1)) }) },
         store: { load: async () => RECORDED_MISSION_LOAD },
-        handoff: { recordNel: async () => ({ status: 'completed' }) },
+        handoff: { recordNel: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
       }),
     });
     const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
@@ -421,11 +427,11 @@ describe('Handoff command use case', () => {
   test('handoff use case fails when the mission lifecycle transition is rejected', async () => {
     const recorder = makeRecorder();
     const ports = makePorts(recorder, {
-      missionServices: async () => ({
-        checkpoints: { record: async () => ({ status: 'completed' }) },
-        lifecycle: { transition: async () => ({ status: 'rejected', error: { message: 'not in active' } }) },
+      missionServices: stubMissionServices({
+        checkpoints: { record: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
+        lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'rejected' as const, error: { kind: 'unavailable',  message: 'not in active' } }) },
         store: { load: async () => RECORDED_MISSION_LOAD },
-        handoff: { recordNel: async () => ({ status: 'completed' }) },
+        handoff: { recordNel: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
       }),
     });
     const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
@@ -451,8 +457,8 @@ describe('Handoff command use case', () => {
   test('handoff use case rejects a checkpoint whose Goal Check rows cite nothing verifiable', async () => {
     const recorder = makeRecorder();
     const ports = makePorts(recorder, {
-      missionServices: async () => ({
-        store: { load: async () => ({ ...RECORDED_MISSION_LOAD, mission: { ...RECORDED_MISSION_LOAD.mission, checkpoints: [{ name: 'CP-1', goalCheck: [{ criterion: 'Workflow re-homed', evidence: 'trust me' }] }] } }) },
+      missionServices: stubMissionServices({
+        store: { load: async () => ({ ...RECORDED_MISSION_LOAD, mission: fixtureMission(SLUG, { ...RECORDED_MISSION_LOAD.mission, checkpoints: [{ nextActionText: 'review',  missionId: missionId(SLUG),  name: 'CP-1', goalCheck: [{ criterion: 'Workflow re-homed', evidence: 'trust me' }] }] }) }) },
       }),
     });
     const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
@@ -478,7 +484,7 @@ describe('Handoff command use case', () => {
     let prCalls = 0;
     const ports = makePorts(recorder, {
       productConfig: { isForgejoReviewEnabled: () => false },
-      forgejo: { ...makePorts(recorder).forgejo, createPr: () => { prCalls += 1; return { ok: true }; } },
+      forgejo: { ...makePorts(recorder).forgejo, createPr: () => { prCalls += 1; return { ok: true as const, missing: [] }; } },
     });
     const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
 
@@ -492,7 +498,7 @@ describe('Handoff command use case', () => {
     const created: string[] = [];
     const ports = makePorts(recorder, {
       productConfig: { isForgejoReviewEnabled: () => true },
-      forgejo: { ...makePorts(recorder).forgejo, createPr: (branch: string) => { created.push(branch); return { ok: true }; } },
+      forgejo: { ...makePorts(recorder).forgejo, createPr: (branch: string) => { created.push(branch); return { ok: true as const }; } },
     });
     const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder, { force: false }));
 
@@ -509,7 +515,7 @@ describe('Handoff command use case', () => {
       productConfig: { isForgejoReviewEnabled: () => true },
       forgejo: {
         ...makePorts(recorder).forgejo,
-        createPr: () => ({ ok: false, error: 'verification gate failed', gateFailure }),
+        createPr: () => ({ ok: false as const, error: 'verification gate failed', gateFailure }),
       },
     });
 
@@ -571,13 +577,13 @@ describe('Handoff command use case', () => {
   });
 
   /** TASK-2521.03 review F1/F2: handoff reads the recorded contract fail-closed. */
-  function contractServices(load: () => Promise<unknown>) {
+  function contractServices(load: MissionStore['load']) {
     return {
-      missionServices: async () => ({
-        checkpoints: { record: async () => ({ status: 'completed' }) },
-        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 3 } }) },
+      missionServices: stubMissionServices({
+        checkpoints: { record: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
+        lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: handoffTransitionValue(missionVersion(3)) }) },
         store: { load },
-        handoff: { recordNel: async () => ({ status: 'completed' }) },
+        handoff: { recordNel: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
       }),
     };
   }
@@ -595,7 +601,7 @@ describe('Handoff command use case', () => {
 
   test('handoff fails when the operator database holds no such Mission', async () => {
     const recorder = makeRecorder();
-    const ports = makePorts(recorder, contractServices(async () => ({ kind: 'missing' })));
+    const ports = makePorts(recorder, contractServices(async () => ({ kind: 'missing' as const })));
     const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
     assert.equal(result.ok, false);
     assert.match(result.error ?? '', /holds no Mission/);
@@ -607,7 +613,7 @@ describe('Handoff command use case', () => {
     // be allowed to hand off on it, nor have one generated for it.
     const recorder = makeRecorder();
     const ports = makePorts(recorder, contractServices(async () => ({
-      kind: 'found', mission: { checkpoints: [], brief: DRAFTED_BRIEF, declaredGates: ['npm test'] }, version: 4,
+      kind: 'found' as const, mission: fixtureMission(SLUG, { checkpoints: [], brief: DRAFTED_BRIEF, declaredGates: ['npm test'] }), version: missionVersion(4),
     })));
     const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
     assert.equal(result.ok, false);
@@ -619,13 +625,13 @@ describe('Handoff command use case', () => {
   test('a Mission drafted through the typed verbs with no recorded gate fails handoff instead of skipping gates', async () => {
     const recorder = makeRecorder();
     const ports = makePorts(recorder, contractServices(async () => ({
-      kind: 'found',
-      mission: {
-        checkpoints: [{ name: 'CP-1', goalCheck: [{ criterion: 'works', evidence: '`test/unit/application/handoff-use-case.test.ts`' }], nextAction: 'review' }],
+      kind: 'found' as const,
+      mission: fixtureMission(SLUG, {
+        checkpoints: [{ missionId: missionId(SLUG),  name: 'CP-1', goalCheck: [{ criterion: 'works', evidence: '`test/unit/application/handoff-use-case.test.ts`' }], nextActionText: 'review' }],
         brief: DRAFTED_BRIEF,
         declaredGates: [],
-      },
-      version: 4,
+      }),
+      version: missionVersion(4),
     })));
     const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
     assert.equal(result.ok, false);
@@ -639,17 +645,17 @@ describe('Handoff command use case', () => {
 
   test('a typed-verb Mission requires completion and one verifiable row per distinct success criterion (TASK-2631)', async () => {
     const load = (criteria: readonly string[], goalCheck = [{ criterion: 'The greeting is fixed', evidence: '`test/unit/application/handoff-use-case.test.ts`' }]) => async () => ({
-      kind: 'found',
-      mission: {
-        checkpoints: [{ name: 'CP-1', goalCheck, nextAction: 'review' }],
+      kind: 'found' as const,
+      mission: fixtureMission(SLUG, {
+        checkpoints: [{ missionId: missionId(SLUG), name: 'CP-1', goalCheck, nextActionText: 'review' }],
         brief: DRAFTED_BRIEF,
         successCriteria: criteria,
         completedSuccessCriteria: criteria.map((_, index) => index),
         // No gate recorded: a run that gets past the criteria check stops there,
         // which proves the criteria check passed without running the full handoff.
         declaredGates: [],
-      },
-      version: 4,
+      }),
+      version: missionVersion(4),
     });
 
     const recorder = makeRecorder();
@@ -673,15 +679,15 @@ describe('Handoff command use case', () => {
   test('a typed-verb Mission whose recorded evidence cites nothing verifiable is sent back to the implementer', async () => {
     const recorder = makeRecorder();
     const ports = makePorts(recorder, contractServices(async () => ({
-      kind: 'found',
-      mission: {
-        checkpoints: [{ name: 'CP-1', goalCheck: [{ criterion: 'works', evidence: 'it works, trust me' }], nextAction: 'review' }],
+      kind: 'found' as const,
+      mission: fixtureMission(SLUG, {
+        checkpoints: [{ missionId: missionId(SLUG),  name: 'CP-1', goalCheck: [{ criterion: 'works', evidence: 'it works, trust me' }], nextActionText: 'review' }],
         brief: DRAFTED_BRIEF,
         successCriteria: ['works'],
         completedSuccessCriteria: [0],
         declaredGates: ['npm test'],
-      },
-      version: 4,
+      }),
+      version: missionVersion(4),
     })));
     const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
     assert.equal(result.ok, false);
@@ -696,9 +702,11 @@ describe('Handoff composition', () => {
   const root = path.join(import.meta.dirname, '..', '..', '..');
 
   test('task-2332.09: every composed review loop injects mission services into automatic handoff', () => {
+    const cli = fs.readFileSync(path.join(root, 'src/composition/create-cli.ts'), 'utf8');
+    assert.match(cli, /\.\.\.createLifecycleCommands\(context\)/, 'CLI must register the Mission-backed lifecycle commands');
     const compositionFiles = [
       'src/composition/application-services.ts',
-      'src/composition/create-cli.ts',
+      'src/composition/cli-lifecycle-commands.ts',
     ];
 
     for (const relative of compositionFiles) {
@@ -714,7 +722,7 @@ describe('Handoff composition', () => {
 describe('Recorded gate prose rejection', () => {
   test('recorded gate rejects prose-appended commands before execution', () => {
     const command = '`./scripts/verify-local.sh all` passes on the final tree.';
-    const useCase = new HandoffCommandUseCase({ fileSystem: { existsSync: () => true } } as any);
+    const useCase = new HandoffCommandUseCase(makePorts(makeRecorder()));
     const result = useCase.validateDeclaredGates([command], '/repo');
 
     assert.equal(result.ok, false);

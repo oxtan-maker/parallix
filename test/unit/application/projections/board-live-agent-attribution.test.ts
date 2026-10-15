@@ -1,3 +1,5 @@
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
+import { agentFamily as fixtureAgentFamily } from '../../../../src/domain/agents.js';
 /**
  * Reproduction for TASK-2498: the null-agent code-run phase of `px review
  * --continue` (a `review/running` current-work fact with `agent: null`)
@@ -25,7 +27,7 @@ import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js'
 import type { MissionCard } from '../../../../src/application/projections/mission-board.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
 
-const missionId = 'task-2498' as MissionId;
+const missionId = fixtureMissionId('task-2498') as MissionId;
 
 // ---------------------------------------------------------------------------
 // Defect 1 — web flight-card agent pill (SC1, SC2)
@@ -36,7 +38,7 @@ const render = (snapshot: ReturnType<typeof toWebBoardSnapshot>): string =>
 
 test('a working card with an unidentified agent omits its label and dot, never the assignee family', () => {
   const workingNull = makeCard({
-    id: 'task-2498' as MissionCard['id'],
+    id: fixtureMissionId('task-2498') as MissionCard['id'],
     lane: 'review',
     status: 'review',
     agent: agentFamily('custom'),
@@ -57,7 +59,7 @@ test('a working card with an unidentified agent omits its label and dot, never t
 
 test('an idle card still renders its assignee family unchanged', () => {
   const idle = makeCard({
-    id: 'task-2498b' as MissionCard['id'],
+    id: fixtureMissionId('task-2498b') as MissionCard['id'],
     lane: 'active',
     status: 'active',
     agent: agentFamily('custom'),
@@ -82,7 +84,7 @@ function nullAgentWork(overrides: Partial<CurrentWorkEvent> = {}): CurrentWorkEv
   return {
     missionId,
     operationId: 'review:task-2498:current',
-    phase: 'review',
+    phase: 'review' as const,
     state: 'running',
     summary: 'px review --continue',
     agent: null,
@@ -104,7 +106,7 @@ test('a live null-agent review session attributes to the mission assignee family
     rootDir: '/home/dev/parallix',
     blocklistRepo: new EmptyBlocklistRepo(),
     knownAgentFamilies: [agentFamily('custom')],
-    resolveTaskFile: () => ({ ok: true, taskFile: '/home/dev/parallix-task-2498/task-2498.md', matches: [] }),
+    resolveTaskFile: () => ({ ok: true as const, taskFile: '/home/dev/parallix-task-2498/task-2498.md', matches: [] }),
     getTaskAssignee: () => 'custom',
     currentWork: currentWork(nullAgentWork()),
     detectRunningSessions: () => [{
@@ -115,7 +117,7 @@ test('a live null-agent review session attributes to the mission assignee family
       pinnedAgent: null,
     }],
   });
-  assert.deepEqual(await adapter.loadRunningSessions(), [{ missionId, family: 'custom' as AgentFamily }]);
+  assert.deepEqual(await adapter.loadRunningSessions(), [{ missionId, family: fixtureAgentFamily('custom') as AgentFamily }]);
 });
 
 test('a live non-null agent session still attributes to that agent (SC5)', async () => {
@@ -123,7 +125,7 @@ test('a live non-null agent session still attributes to that agent (SC5)', async
     rootDir: '/home/dev/parallix',
     blocklistRepo: new EmptyBlocklistRepo(),
     knownAgentFamilies: [agentFamily('claude')],
-    resolveTaskFile: () => ({ ok: false, matches: [] }),
+    resolveTaskFile: () => ({ ok: false as const, matches: [] }),
     currentWork: currentWork(nullAgentWork({ agent: agentFamily('claude') })),
     detectRunningSessions: () => [{
       missionId,
@@ -133,7 +135,7 @@ test('a live non-null agent session still attributes to that agent (SC5)', async
       pinnedAgent: null,
     }],
   });
-  assert.deepEqual(await adapter.loadRunningSessions(), [{ missionId, family: 'claude' as AgentFamily }]);
+  assert.deepEqual(await adapter.loadRunningSessions(), [{ missionId, family: fixtureAgentFamily('claude') as AgentFamily }]);
 });
 
 test('a non-review null-agent session does NOT fall back to the assignee (F1)', async () => {
@@ -145,7 +147,7 @@ test('a non-review null-agent session does NOT fall back to the assignee (F1)', 
     rootDir: '/home/dev/parallix',
     blocklistRepo: new EmptyBlocklistRepo(),
     knownAgentFamilies: [agentFamily('custom')],
-    resolveTaskFile: () => ({ ok: true, taskFile: '/home/dev/parallix-task-2498/task-2498.md', matches: [] }),
+    resolveTaskFile: () => ({ ok: true as const, taskFile: '/home/dev/parallix-task-2498/task-2498.md', matches: [] }),
     getTaskAssignee: () => 'custom',
     currentWork: currentWork(nullAgentWork()),
     detectRunningSessions: () => [{

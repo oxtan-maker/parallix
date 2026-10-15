@@ -1,3 +1,6 @@
+import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
+import { integrationContext } from '../../fixtures/integration-context.js';
+import { integrationServices } from '../../helpers/stub-integration-services.js';
 // TASK-2379 CP-1 — red reproduction of the approval-boundary divergence.
 //
 // Deterministic fixture (mission Part M):
@@ -31,7 +34,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { agentFamily } from '../../../src/domain/agents.js';
-import { missionId } from '../../../src/domain/mission.js';
+import { missionId, type MissionStatus } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import {
   ConfiguredReviewerEligibility,
@@ -97,7 +100,7 @@ test('delayed integration: review dwell is 30m and integration dwell is 225m (R2
     REVIEW_ENTERED_AT,
     reviewerEligibility,
   );
-  const mission = {
+  const mission = completeMissionFixture(String(missionId(slug)), {
     id: missionId(slug),
     repositoryId: repositoryId('parallix'),
     title: 'Task 2379 repro',
@@ -116,9 +119,9 @@ test('delayed integration: review dwell is 30m and integration dwell is 225m (R2
     netEngineeringLines: null,
     closedAt: null,
     externalTaskRef: null,
-    intakeTrace: null,
+    
     review: null,
-  };
+  });
   await store.save(mission, null);
 
   try {
@@ -128,7 +131,7 @@ test('delayed integration: review dwell is 30m and integration dwell is 225m (R2
     const submitted = await lifecycle.transition({
       operationId: `repro-submit:${slug}`,
       missionId: missionId(slug),
-      expectedVersion: seedLoad.kind === 'found' ? seedLoad.version : null,
+      expectedVersion: seedLoad.kind === 'found' ? seedLoad.version : undefined,
       capabilities: new Set(['mission:transition']),
       command: { type: 'submit-for-review', gatesPassed: true, review, reviewerEligibility },
       actor: implementer,
@@ -139,7 +142,7 @@ test('delayed integration: review dwell is 30m and integration dwell is 225m (R2
     // 10:30 — the human (repo default user) approved on the provider. The
     // integrate context carries that override fact, including the
     // authoritative approval time.
-    const context = {
+    const context = integrationContext({
       slug,
       approval: {
         ok: true,
@@ -147,13 +150,13 @@ test('delayed integration: review dwell is 30m and integration dwell is 225m (R2
         defaultUserApproved: true,
         defaultUserApprovedAt: APPROVED_AT,
       },
-    };
+    });
 
     // 14:00 — px integrate runs. Its recovery step must observe the
     // previously happened approval, persist it as a real ReviewerDecision,
     // and invoke the existing approve transition at decidedAt (10:30) —
     // never at the 14:00 integration start.
-    await recoverMissionForIntegration(context, { missionServices: { store, lifecycle } });
+    await recoverMissionForIntegration(context, { missionServices: integrationServices({ store, lifecycle }) });
 
     const loaded = await store.load(missionId(slug));
     assert.equal(loaded.kind, 'found');
@@ -173,7 +176,7 @@ test('delayed integration: review dwell is 30m and integration dwell is 225m (R2
     const landed = await integration.decideIntegration({
       operationId: `repro-land:${slug}`,
       missionId: missionId(slug),
-      expectedVersion: preLandLoad.kind === 'found' ? preLandLoad.version : null,
+      expectedVersion: preLandLoad.kind === 'found' ? preLandLoad.version : undefined,
       capabilities: new Set(['integration:decide']),
       idempotencyKey: `integrate:${slug}:land`,
       actor: implementer,
@@ -186,7 +189,7 @@ test('delayed integration: review dwell is 30m and integration dwell is 225m (R2
     assert.equal(landed.status, 'completed', 'landing closes the integration lane');
 
     const events = await database.query<{
-      mission_id: string; from_status: string | null; to_status: string; trigger: string; occurred_at: string; agent: string;
+      mission_id: string; from_status: MissionStatus | null; to_status: MissionStatus; trigger: import('../../../src/domain/mission-workflow.js').MissionCommand['type']; occurred_at: string; agent: string;
     }>(
       'SELECT mission_id, from_status, to_status, trigger, occurred_at, agent FROM board_lane_events WHERE mission_id = ? ORDER BY occurred_at',
       [missionId(slug)],
@@ -206,14 +209,14 @@ test('delayed integration: review dwell is 30m and integration dwell is 225m (R2
     // The same projection Board/FLOW consumes: review dwell = 30m,
     // integration dwell = 225m.
     const transitions = events.map((e) => ({
-      missionId: e.mission_id,
+      missionId: missionId(e.mission_id),
       from: e.from_status,
       to: e.to_status,
       trigger: e.trigger,
       actor: e.agent,
       occurredAt: e.occurred_at,
     }));
-    const dwell = medianCycleTimeByStateSeries(transitions as never);
+    const dwell = medianCycleTimeByStateSeries(transitions);
     const reviewDwell = dwell.series.find((s) => s.lane === 'review');
     const integrationDwell = dwell.series.find((s) => s.lane === 'integration');
     assert.equal(reviewDwell?.value, 30, `review dwell must be 30m (got ${reviewDwell?.value}m)`);

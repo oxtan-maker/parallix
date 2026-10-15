@@ -21,11 +21,11 @@ function reporterFlags(args: readonly string[]) {
   };
 }
 
-function completion(file: string, name: string, durationMs: number, nesting = 0, error?: Error): TestEvent {
+function completion(file: string, name: string, durationMs: number, nesting = 0, error?: Error): Extract<TestEvent, { type: 'test:complete' }> {
   return {
     type: 'test:complete',
-    data: { file, name, nesting, details: { duration_ms: durationMs, passed: error === undefined, ...(error ? { error } : {}) } },
-  } as unknown as TestEvent;
+    data: { file, name, nesting, testNumber: 1, parentId: undefined, testId: 1, tags: [], details: { duration_ms: durationMs, passed: error === undefined, ...(error ? { error: Object.assign(error, { cause: error.cause }) } : {}) } },
+  };
 }
 
 test('task-2590: profiling is disabled unless PARALLIX_TEST_PROFILE opts in', () => {
@@ -95,7 +95,7 @@ test('task-2590: only top-level per-file completions are profiled', () => {
   assert.equal(isFileCompletion(completion('/repo/test/a.test.ts', 'test/a.test.ts', 10), cwd), true);
   assert.equal(isFileCompletion(completion('/repo/test/a.test.ts', 'a subtest', 10), cwd), false);
   assert.equal(isFileCompletion(completion('/repo/test/a.test.ts', 'test/a.test.ts', 10, 1), cwd), false);
-  assert.equal(isFileCompletion({ type: 'test:pass', data: { file: '/repo/test/a.test.ts', name: 'test/a.test.ts', nesting: 0 } } as unknown as TestEvent, cwd), false);
+  assert.equal(isFileCompletion({ type: 'test:pass', data: { ...completion('/repo/test/a.test.ts', 'test/a.test.ts', 10).data, testNumber: 1 } }, cwd), false);
 });
 
 test('task-2590: reporter emits JSON Lines records and a duration-sorted summary', async () => {

@@ -486,8 +486,9 @@ test('the render sink renders a chunk-split stream exactly once', () => {
 });
 
 test('startClaudeAgent attaches the renderer sink without changing the telemetry tail size', async () => {
-  const captured: Array<Record<string, any>> = [];
-  __setSpawnAndTeeForTest((_command: string, _args: string[], options: Record<string, any>) => {
+  const captured: NonNullable<Parameters<NonNullable<Parameters<typeof __setSpawnAndTeeForTest>[0]>>[2]>[] = [];
+  __setSpawnAndTeeForTest((_command, _args, options) => {
+    assert.ok(options);
     captured.push(options);
     return Promise.resolve({ status: 0, stdout: CLAUDE_STREAM_FIXTURE, stderr: '' });
   });
@@ -496,10 +497,13 @@ test('startClaudeAgent attaches the renderer sink without changing the telemetry
     const result = await resultPromise;
     assert.equal(captured.length, 1);
     assert.equal(captured[0].maxTailBytes, 8 * 1024 * 1024, 'the telemetry tail budget is unchanged');
+    assert.ok(captured[0].stdoutSink);
     assert.equal(typeof captured[0].stdoutSink.write, 'function', 'a renderer sink is attached');
+    assert.ok('close' in captured[0].stdoutSink);
     assert.equal(typeof captured[0].stdoutSink.close, 'function');
     // Telemetry still comes from the raw stdout the tail captured.
     assert.equal(result.sessionId, 'sess-2461');
+    assert.ok(result.telemetry != null);
     assert.equal(result.telemetry.outputTokens, 640);
     assert.equal(result.telemetry.cost_usd, 0.1234);
   } finally {

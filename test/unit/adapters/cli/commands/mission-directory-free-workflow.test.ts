@@ -1,3 +1,9 @@
+import { fixtureMission } from '../../../../fixtures/mission-builders.js';
+import { missionLabels } from '../../../../../src/domain/mission.js';
+import { draftMissionServicesFixture } from '../../../../helpers/draft-mission-services.js';
+
+import { repositoryId as fixtureRepositoryId } from '../../../../../src/domain/repository.js';
+import { missionVersion as fixtureVersion } from '../../../../../src/application/domain-ports.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -72,19 +78,21 @@ test('the retired archive guard rejects task history and ledger files (TASK-2712
 test('a normal typed draft workflow does not recreate the retired mission tree', async () => {
   const root = registeredMkdtemp('parallix-file-free-draft-');
   const slug = 'task-2560-repro';
+  const taskFile = path.join(root, 'task.md');
+  fs.writeFileSync(taskFile, '---\nid: TASK-2560-REPRO\ntitle: File-free draft\nstatus: backlog\nlabels: [ai_sdlc]\n---\n');
   try {
-    const missionServices = async () => ({
-      repositoryId: 'test-repository',
-      intake: { execute: async () => ({ status: 'completed', value: { version: 1 } }) },
-      lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 } }) },
-      store: { load: async () => ({ kind: 'found', mission: { title: 'File-free draft' } }) },
-    });
+    const missionServices: NonNullable<NonNullable<Parameters<typeof runDraftCommand>[1]>["missionServicesFn"]> = async () => (draftMissionServicesFixture({
+      repositoryId: fixtureRepositoryId('test-repository'),
+      intake: { execute: async () => ({ durableEvidence: [],  status: 'completed' as const, value: { version: fixtureVersion(1), mission: fixtureMission(slug) } }) },
+      lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: { version: fixtureVersion(2), mission: fixtureMission(slug, { status: 'refined' }), previousAssignee: null, from: 'backlog', to: 'refined', laneChanged: true } }) },
+      store: { load: async () => ({ kind: 'found' as const, mission: fixtureMission(slug, { title: 'File-free draft', labels: missionLabels(['ai_sdlc']) }), version: fixtureVersion(1) }) },
+    }));
     await runDraftCommand([slug], {
       inferSlugFn: () => slug,
       resolveMainRepoFn: () => root,
       conventionalWorktreePathFn: () => root,
       ensureRepoExistsFn: () => true,
-      resolveTaskFileFn: () => ({ ok: true, taskFile: null, matches: [] }),
+      resolveTaskFileFn: () => ({ ok: true, taskFile, matches: [taskFile] }),
       checkBacklogIntegrityFn: () => [],
       detectLaunchBaseBranchFn: () => null,
       ensureMissionBranchFn: () => {},
@@ -92,8 +100,8 @@ test('a normal typed draft workflow does not recreate the retired mission tree',
       ensureGraphifyWorkspaceFn: () => {},
       ensureGraphifyIgnoreFn: () => {},
       bootstrapBacklogTaskFn: () => true,
-      validateDraftClassificationFn: () => ({ ok: true }),
-      normalizeDraftClassificationFn: () => ({ ok: true, classification: 'ai_sdlc' }),
+      validateDraftClassificationFn: () => ({ ok: true as const }),
+      normalizeDraftClassificationFn: () => ({ ok: true as const, classification: 'ai_sdlc' }),
       readAgentConfigOrExitFn: () => ({}),
       selectAgentFn: () => 'codex',
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
@@ -101,7 +109,7 @@ test('a normal typed draft workflow does not recreate the retired mission tree',
       recordDraftStatsFn: () => {},
       enforceDraftCommitSafetyFn: () => false,
       transitionTaskFn: () => true,
-      transitionVirtualFn: async (transition, target, status, options) => transition(target, status, options),
+      transitionVirtualFn: async (transition, target, status, options) => transition(target, status, options ?? {}),
       missionServicesFn: missionServices,
       exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
       logFn: () => {},
@@ -133,9 +141,9 @@ test('typed handoff succeeds without a mission directory or Markdown artifacts',
 });
 
 for (const [name, load] of [
-  ['missing mission', { kind: 'not-found' }],
+  ['missing mission', { kind: 'missing' }],
   ['legacy mission without directory', LEGACY_MISSION_LOAD],
-  ['typed mission without evidence', { kind: 'found', mission: { brief: { goal: 'g' }, checkpoints: [] } }],
+  ['typed mission without evidence', { kind: 'found', mission: fixtureMission(SLUG, { brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] }, checkpoints: [] }), version: fixtureVersion(1) }],
 ] as const) {
   test(`directory-free handoff refuses ${name}`, async () => {
     const recorder = makeRecorder();

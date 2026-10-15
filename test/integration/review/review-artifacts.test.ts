@@ -1,4 +1,6 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import { fixtureMission, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
+import { reviewStateWriterFixture } from '../../helpers/review-state-writer.js';
+import type { ReviewApprovalSource } from "../../../src/domain/review.js";
 
 
 import test, { mock } from 'node:test';
@@ -103,7 +105,7 @@ test('readArtifactFile returns null for non-string read result', () => {
 });
 
 test('readArtifactFile uses injected readFileSync function', () => {
-  const mockRead = (p, enc) => {
+  const mockRead: NonNullable<Parameters<typeof readArtifactFile>[1]> = (p, enc) => {
     assert.equal(p, '/mock/path');
     assert.equal(enc, 'utf8');
     return 'mock content';
@@ -152,7 +154,9 @@ test('normalizeReviewVerdict works', () => {
   assert.equal(normalizeReviewVerdict('  APPROVE  '), 'approve');
   assert.equal(normalizeReviewVerdict('invalid'), null);
   assert.equal(normalizeReviewVerdict(''), null);
+  // @ts-expect-error Intentional non-string normalization input.
   assert.equal(normalizeReviewVerdict(null), null);
+  // @ts-expect-error Intentional non-string normalization input.
   assert.equal(normalizeReviewVerdict(undefined), null);
 });
 
@@ -164,7 +168,9 @@ test('normalizeDisposition works', () => {
   assert.equal(normalizeDisposition('  changes_made  '), 'CHANGES_MADE');
   assert.equal(normalizeDisposition('invalid'), null);
   assert.equal(normalizeDisposition(''), null);
+  // @ts-expect-error Intentional non-string normalization input.
   assert.equal(normalizeDisposition(null), null);
+  // @ts-expect-error Intentional non-string normalization input.
   assert.equal(normalizeDisposition(undefined), null);
 });
 
@@ -197,14 +203,14 @@ test('postWorkflowComment infers forgejoUser from review state', async () => {
     implementer: 'test-implementer'
   }, null, 2));
 
-  let capturedUser = null;
+  let capturedUser: { value: string | null } = { value: null };
   const result = await postWorkflowComment('test-slug', 'test message', {
     rootDir: tmpDir,
     readTokenFn: (user) => {
-      capturedUser = user;
+      capturedUser.value = user;
       return 'mock-token';
     },
-    postCommentFn: () => ({ ok: true }),
+    postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
     readReviewStateFn: (slug, dir) => {
       assert.equal(slug, 'test-slug');
       assert.equal(dir, tmpDir);
@@ -216,7 +222,7 @@ test('postWorkflowComment infers forgejoUser from review state', async () => {
   });
 
   assert.equal(result.ok, true);
-  assert.equal(capturedUser, 'test-implementer');
+  assert.equal(capturedUser.value, 'test-implementer');
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -224,7 +230,7 @@ test('postWorkflowComment handles postComment failure', async () => {
   const result = await postWorkflowComment('test-slug', 'test message', {
     forgejoUser: 'test-user',
     readTokenFn: () => 'mock-token',
-    postCommentFn: () => ({ ok: false, error: 'API error' }),
+    postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null,  ok: false as const, error: 'API error' }),
     log: () => {},
     error: () => {}
   });
@@ -262,14 +268,14 @@ test('postWorkflowReview infers forgejoUser from review state (reviewer first)',
     implementer: 'test-implementer'
   }, null, 2));
 
-  let capturedUser = null;
+  let capturedUser: { value: string | null } = { value: null };
   const result = await postWorkflowReview('test-slug', 'approve', 'test message', {
     worktree: tmpDir,
     readTokenFn: (user) => {
-      capturedUser = user;
+      capturedUser.value = user;
       return 'mock-token';
     },
-    postReviewFn: () => ({ ok: true }),
+    postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
     readReviewStateFn: (slug, dir) => {
       assert.equal(slug, 'test-slug');
       assert.equal(dir, tmpDir);
@@ -281,7 +287,7 @@ test('postWorkflowReview infers forgejoUser from review state (reviewer first)',
   });
 
   assert.equal(result.ok, true);
-  assert.equal(capturedUser, 'test-reviewer');
+  assert.equal(capturedUser.value, 'test-reviewer');
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -290,7 +296,7 @@ test('postWorkflowReview handles postReview failure', async () => {
     forgejoUser: 'test-user',
     readTokenFn: () => 'mock-token',
     getPrAuthorFn: () => null,
-    postReviewFn: () => ({ ok: false, error: 'API error' }),
+    postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null,  ok: false as const, error: 'API error' }),
     log: () => {},
     error: () => {}
   });
@@ -301,16 +307,16 @@ test('postWorkflowReview handles postReview failure', async () => {
 // task-1255: reviewer==author self-approval short-circuit + 422 passthrough
 test('postWorkflowReview skips the Forgejo POST when reviewer is the PR author', async () => {
   let postCalled = false;
-  let writtenState = null;
-  let recordedEvent = null;
-  const warnings = [];
+  let writtenState: { value: Record<string, unknown> | import("../../../src/adapters/review/review-state.js").ReviewState | import("../../../src/application/ports/review-persistence.js").ReviewStateData | null } = { value: null };
+  let recordedEvent: { value: { slug: string; type: string; params: Record<string, unknown>; } | null } = { value: null };
+  const warnings: string[] = [];
   const result = await postWorkflowReview('test-slug', 'approve', 'looks good', {
     readTokenFn: () => 'mock-token',
     getPrAuthorFn: () => 'custom', // reviewer == PR author
-    postReviewFn: () => { postCalled = true; return { ok: true }; },
+    postReviewFn: () => { postCalled = true; return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
     readReviewStateFn: () => ({ mission: 'test-slug', reviewer: 'custom', implementer: 'custom' }),
-    writeReviewStateFn: (slug, state) => { writtenState = state; },
-    createEventFn: (slug, type, params) => { recordedEvent = { slug, type, params }; return { ok: true, path: '/mock' }; },
+    writeReviewStateFn: reviewStateWriterFixture((slug, state) => { writtenState.value = state; }),
+    createEventFn: (slug, type, params) => { recordedEvent.value = { slug, type, params }; return { ok: true as const, path: '/mock' }; },
     buildMetadataFooterFn: () => '',
     log: (msg) => { if (/WARN/.test(msg)) warnings.push(msg); },
     error: () => {}
@@ -322,11 +328,11 @@ test('postWorkflowReview skips the Forgejo POST when reviewer is the PR author',
   assert.equal(postCalled, false, 'must NOT POST a self-approval to Forgejo');
 
   // Verdict recorded locally in review-state.json and review-events.
-  assert.ok(writtenState, 'review-state must be written locally');
-  assert.equal(writtenState.disposition, 'APPROVED');
-  assert.ok(recordedEvent, 'a reviewer_outcome event must be recorded');
-  assert.equal(recordedEvent.type, 'reviewer_outcome');
-  assert.equal(recordedEvent.params.verdict, 'approve');
+  assert.ok(writtenState.value, 'review-state must be written locally');
+  assert.equal(writtenState.value.disposition, 'APPROVED');
+  assert.ok(recordedEvent.value, 'a reviewer_outcome event must be recorded');
+  assert.equal(recordedEvent.value.type, 'reviewer_outcome');
+  assert.equal(recordedEvent.value.params.verdict, 'approve');
 
   // WARN mentions the self-approval and instructs a different agent/human to post.
   assert.equal(warnings.length, 1);
@@ -340,32 +346,33 @@ test('postWorkflowReview surfaces real 422 status and body instead of "API error
     forgejoUser: 'reviewer-agent',
     readTokenFn: () => 'mock-token',
     getPrAuthorFn: () => 'some-other-author', // not self => proceeds to POST
-    postReviewFn: () => ({ ok: false, status: 422, data: { message: 'approve your own pull is not allowed' } }),
+    postReviewFn: () => ({ statusCode: null, stderr: null, error: null,  ok: false as const, status: 422, data: { message: 'approve your own pull is not allowed' } }),
     buildMetadataFooterFn: () => '',
     log: () => {},
     error: () => {}
   });
   assert.equal(result.ok, false);
+  assert.ok(result.error);
   assert.ok(/422/.test(result.error), `error should surface HTTP 422: ${result.error}`);
   assert.ok(/approve your own pull is not allowed/.test(result.error), `error should surface body: ${result.error}`);
   assert.notEqual(result.error, 'API error');
 });
 
 test('postWorkflowReview posts normally when reviewer differs from PR author', async () => {
-  let postArgs = null;
+  let postArgs: { value: { branch: string; outcome: string; } | null } = { value: null };
   const result = await postWorkflowReview('test-slug', 'approve', 'looks good', {
     forgejoUser: 'reviewer-agent',
     readTokenFn: () => 'mock-token',
     getPrAuthorFn: () => 'author-agent', // different => normal path
-    postReviewFn: (branch, token, outcome) => { postArgs = { branch, outcome }; return { ok: true }; },
+    postReviewFn: (branch, token, outcome) => { postArgs.value = { branch, outcome }; return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
     buildMetadataFooterFn: () => '',
     log: () => {},
     error: () => {}
   });
   assert.equal(result.ok, true);
   assert.notEqual(result.skipped, true);
-  assert.ok(postArgs, 'postReviewFn must be called on the non-author path');
-  assert.equal(postArgs.outcome, 'approve');
+  assert.ok(postArgs.value, 'postReviewFn must be called on the non-author path');
+  assert.equal(postArgs.value.outcome, 'approve');
 });
 
 // ============================================================================
@@ -399,7 +406,7 @@ test('consumeReviewerArtifacts returns ok:false when findings are missing', asyn
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
     log: () => {},
     error: () => {}
@@ -429,7 +436,7 @@ test('consumeReviewerArtifacts returns ok:false when outcome is missing', async 
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
     log: () => {},
     error: () => {}
@@ -458,7 +465,7 @@ test('consumeReviewerArtifacts returns ok:false when verdict is missing', async 
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
     log: () => {},
     error: () => {}
@@ -483,7 +490,7 @@ test('consumeReviewerArtifacts handles all three artifact files', async () => {
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     log: () => {},
@@ -525,7 +532,7 @@ test('consumeReviewerArtifacts treats malformed request-changes findings as repa
 // /tmp when the loop is looking elsewhere is not found — there is one place to
 // look, and the loop reports it plainly instead of guessing.
 test('consumeReviewerArtifacts does not recover artifacts written to /tmp when the artifact dir is elsewhere', async () => {
-  const readFromTmpOnly = (p) => {
+  const readFromTmpOnly: NonNullable<NonNullable<Parameters<typeof consumeReviewerArtifacts>[2]>["readArtifactFn"]> = (p) => {
     if (!p.startsWith('/tmp/')) return null;
     if (p.includes('review-findings.md')) return 'test findings';
     if (p.includes('review-outcome.md')) return 'test outcome message';
@@ -538,7 +545,7 @@ test('consumeReviewerArtifacts does not recover artifacts written to /tmp when t
     tmpDir: '/var/tmp',
     worktree: '/var/tmp',
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     log: () => {},
@@ -551,7 +558,7 @@ test('consumeReviewerArtifacts does not recover artifacts written to /tmp when t
 // The same, stated from the other side: an explicit artifact dir is the only
 // place looked at, which is also what keeps a scratch-dir test isolated.
 test('consumeReviewerArtifacts ignores /tmp artifacts when the artifact dir is explicit (test isolation preserved)', async () => {
-  const readFromTmpOnly = (p) => {
+  const readFromTmpOnly: NonNullable<NonNullable<Parameters<typeof consumeReviewerArtifacts>[2]>["readArtifactFn"]> = (p) => {
     if (!p.startsWith('/tmp/')) return null;
     if (p.includes('review-findings.md')) return 'test findings';
     if (p.includes('review-outcome.md')) return 'test outcome message';
@@ -564,7 +571,7 @@ test('consumeReviewerArtifacts ignores /tmp artifacts when the artifact dir is e
     tmpDir: '/var/tmp',
     worktree: '/var/tmp',
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     log: () => {},
@@ -577,7 +584,7 @@ test('consumeReviewerArtifacts ignores /tmp artifacts when the artifact dir is e
 // task-1264 SC1 (implementer side): same /tmp recovery for round-resolution /
 // review-disposition artifacts.
 test('consumeImplementerArtifacts does not recover artifacts written to /tmp when the artifact dir is elsewhere', async () => {
-  const readFromTmpOnly = (p) => {
+  const readFromTmpOnly: NonNullable<NonNullable<Parameters<typeof consumeImplementerArtifacts>[2]>["readArtifactFn"]> = (p) => {
     if (!p.startsWith('/tmp/')) return null;
     if (p.includes('round-resolution.md')) return 'resolution body';
     if (p.includes('review-disposition.txt')) return 'CHANGES_MADE';
@@ -589,7 +596,7 @@ test('consumeImplementerArtifacts does not recover artifacts written to /tmp whe
     tmpDir: '/var/tmp',
     worktree: '/var/tmp',
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     log: () => {},
@@ -612,14 +619,14 @@ test('consumeReviewerArtifacts returns REQUEST_CHANGES reviewState for request-c
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     log: () => {},
     error: () => {},
     // The decision record needs the operator store; this test exercises the
     // artifact-to-reviewState mapping, not persistence.
-    recordRequestedChangesFn: async () => ({ outcome: 'recorded' }),
+    recordRequestedChangesFn: async () => ({ outcome: 'recorded' as const }),
   });
 
   assert.equal(result.consumed, true);
@@ -656,7 +663,7 @@ test('consumeImplementerArtifacts returns ok:false when resolution is missing', 
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
     log: () => {},
     error: () => {}
@@ -683,7 +690,7 @@ test('consumeImplementerArtifacts returns ok:false when disposition is missing',
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
     log: () => {},
     error: () => {}
@@ -703,7 +710,7 @@ test('consumeImplementerArtifacts parses structured resolution content', async (
   fs.writeFileSync(resolutionPath, 'fixed_items: ["F1", "F2"]\npushed_back_items: ["P1"]\nparked_items: []', 'utf8');
   fs.writeFileSync(dispositionPath, 'CHANGES_MADE', 'utf8');
 
-  let eventPayload = null;
+  let eventPayload: { value: import("../../../src/adapters/review/review-events.js").CreateEventParams | null } = { value: null };
   const result = await consumeImplementerArtifacts('test-slug', 'test-implementer', {
     readArtifactFn: (p) => {
       if (p === resolutionPath) return 'fixed_items: ["F1", "F2"]\npushed_back_items: ["P1"]\nparked_items: []';
@@ -715,9 +722,9 @@ test('consumeImplementerArtifacts parses structured resolution content', async (
     readReviewStateFn: () => null,
     createEventFn: (slug, type, payload, opts) => {
       if (type === 'implementer_round_summary') {
-        eventPayload = payload;
+        eventPayload.value = payload;
       }
-      return { ok: true, path: '/mock/path' };
+      return { ok: true as const, path: '/mock/path' };
     },
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
@@ -726,14 +733,15 @@ test('consumeImplementerArtifacts parses structured resolution content', async (
     // Bare temp dir has no checkout; supply the branch tip and stub the
     // round-closing record (covered in test/unit/adapters/review/review-round-loop.test.ts).
     headRevisionFn: () => 'rev-4',
-    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' }),
+    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' as const }),
   });
 
   assert.equal(result.consumed, true);
   assert.equal(result.ok, true);
   assert.equal(result.disposition, 'CHANGES_MADE');
   // The event carries the domain's item dispositions, not three parallel lists.
-  assert.deepEqual(eventPayload.itemDispositions, [
+  assert.ok(eventPayload.value != null);
+  assert.deepEqual(eventPayload.value.itemDispositions, [
     { kind: 'fixed', findingId: 'F1' },
     { kind: 'fixed', findingId: 'F2' },
     { kind: 'pushed_back', findingId: 'P1' },
@@ -758,7 +766,7 @@ test('consumeImplementerArtifacts handles BLOCKED disposition with blockedReason
       if (type === 'implementer_round_summary') {
         assert.equal(payload.blockedReason, 'Test block reason');
       }
-      return { ok: true, path: '/mock/path' };
+      return { ok: true as const, path: '/mock/path' };
     },
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
@@ -786,14 +794,14 @@ test('postWorkflowComment falls back to human when review-state has no identity'
     reviewer: null
   }, null, 2));
 
-  let capturedUser = null;
+  let capturedUser: { value: string | null } = { value: null };
   const result = await postWorkflowComment('test-slug', 'test message', {
     rootDir: tmpDir,
     readTokenFn: (user) => {
-      capturedUser = user;
+      capturedUser.value = user;
       return 'mock-token';
     },
-    postCommentFn: () => ({ ok: true }),
+    postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
     readReviewStateFn: (slug, dir) => JSON.parse(fs.readFileSync(statePath, 'utf8')),
     buildMetadataFooterFn: () => '',
     log: () => {},
@@ -801,7 +809,7 @@ test('postWorkflowComment falls back to human when review-state has no identity'
   });
 
   assert.equal(result.ok, true);
-  assert.equal(capturedUser, 'human');
+  assert.equal(capturedUser.value, 'human');
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -814,14 +822,14 @@ test('postWorkflowReview falls back to human when review-state has no identity',
     implementer: null
   }, null, 2));
 
-  let capturedUser = null;
+  let capturedUser: { value: string | null } = { value: null };
   const result = await postWorkflowReview('test-slug', 'approve', 'test message', {
     worktree: tmpDir,
     readTokenFn: (user) => {
-      capturedUser = user;
+      capturedUser.value = user;
       return 'mock-token';
     },
-    postReviewFn: () => ({ ok: true }),
+    postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
     readReviewStateFn: (slug, dir) => JSON.parse(fs.readFileSync(statePath, 'utf8')),
     buildMetadataFooterFn: () => '',
     log: () => {},
@@ -829,7 +837,7 @@ test('postWorkflowReview falls back to human when review-state has no identity',
   });
 
   assert.equal(result.ok, true);
-  assert.equal(capturedUser, 'human');
+  assert.equal(capturedUser.value, 'human');
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -845,15 +853,15 @@ test('postWorkflowComment handles forgejoUser from review-state implementer fall
   const originalEnv = process.env.FORGEJO_USER;
   try {
     process.env.FORGEJO_USER = '';
-    let capturedUser = null;
+    let capturedUser: { value: string | null } = { value: null };
     const result = await postWorkflowComment('test-slug', 'test message', {
       rootDir: tmpDir,
       forgejoUser: '',
       readTokenFn: (user) => {
-        capturedUser = user;
+        capturedUser.value = user;
         return 'mock-token';
       },
-      postCommentFn: () => ({ ok: true }),
+      postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
       readReviewStateFn: (slug, dir) => JSON.parse(fs.readFileSync(statePath, 'utf8')),
       buildMetadataFooterFn: () => '',
       log: () => {},
@@ -861,7 +869,7 @@ test('postWorkflowComment handles forgejoUser from review-state implementer fall
     });
 
     assert.equal(result.ok, true);
-    assert.equal(capturedUser, 'test-implementer');
+    assert.equal(capturedUser.value, 'test-implementer');
   } finally {
     process.env.FORGEJO_USER = originalEnv;
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -880,15 +888,15 @@ test('postWorkflowReview handles forgejoUser from review-state reviewer fallback
   const originalEnv = process.env.FORGEJO_USER;
   try {
     process.env.FORGEJO_USER = '';
-    let capturedUser = null;
+    let capturedUser: { value: string | null } = { value: null };
     const result = await postWorkflowReview('test-slug', 'approve', 'test message', {
       worktree: tmpDir,
       forgejoUser: '',
       readTokenFn: (user) => {
-        capturedUser = user;
+        capturedUser.value = user;
         return 'mock-token';
       },
-      postReviewFn: () => ({ ok: true }),
+      postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
       readReviewStateFn: (slug, dir) => JSON.parse(fs.readFileSync(statePath, 'utf8')),
       buildMetadataFooterFn: () => '',
       log: () => {},
@@ -896,7 +904,7 @@ test('postWorkflowReview handles forgejoUser from review-state reviewer fallback
     });
 
     assert.equal(result.ok, true);
-    assert.equal(capturedUser, 'test-reviewer');
+    assert.equal(capturedUser.value, 'test-reviewer');
   } finally {
     process.env.FORGEJO_USER = originalEnv;
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -907,7 +915,7 @@ test('postWorkflowComment fails when token not found', async () => {
   const result = await postWorkflowComment('test-slug', 'test message', {
     forgejoUser: 'test-user',
     readTokenFn: () => null,
-    postCommentFn: () => ({ ok: true }),
+    postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
     readReviewStateFn: () => null,
     buildMetadataFooterFn: () => '',
     log: () => {},
@@ -921,7 +929,7 @@ test('postWorkflowReview fails when token not found', async () => {
   const result = await postWorkflowReview('test-slug', 'approve', 'test message', {
     forgejoUser: 'test-user',
     readTokenFn: () => null,
-    postReviewFn: () => ({ ok: true }),
+    postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
     readReviewStateFn: () => null,
     buildMetadataFooterFn: () => '',
     log: () => {},
@@ -944,7 +952,7 @@ test('consumeReviewerArtifacts fails when findings event creation fails', async 
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: false, error: 'Event creation failed' }),
+    createEventFn: () => ({ path: null, ok: false as const, error: 'Event creation failed' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     log: () => {},
@@ -973,8 +981,8 @@ test('consumeReviewerArtifacts fails when outcome event creation fails', async (
     readReviewStateFn: () => null,
     createEventFn: (slug, type, payload, opts) => {
       callCount++;
-      if (callCount === 1) return { ok: true, path: '/mock/findings' };
-      return { ok: false, error: 'Outcome event creation failed' };
+      if (callCount === 1) return { ok: true as const, path: '/mock/findings' };
+      return { path: null, ok: false as const, error: 'Outcome event creation failed' };
     },
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
@@ -1001,7 +1009,7 @@ test('consumeReviewerArtifacts with non-approve/non-request-changes verdict', as
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     log: () => {},
@@ -1030,7 +1038,7 @@ test('consumeImplementerArtifacts fails when summary event creation fails', asyn
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: false, error: 'Summary event creation failed' }),
+    createEventFn: () => ({ path: null, ok: false as const, error: 'Summary event creation failed' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     log: () => {},
@@ -1058,8 +1066,8 @@ test('consumeImplementerArtifacts fails when disposition event creation fails', 
     readReviewStateFn: () => null,
     createEventFn: (slug, type, payload, opts) => {
       callCount++;
-      if (callCount === 1) return { ok: true, path: '/mock/summary' };
-      return { ok: false, error: 'Disposition event creation failed' };
+      if (callCount === 1) return { ok: true as const, path: '/mock/summary' };
+      return { path: null, ok: false as const, error: 'Disposition event creation failed' };
     },
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
@@ -1089,7 +1097,7 @@ test('consumeImplementerArtifacts parses blockedReason from resolution content w
       if (type === 'implementer_round_summary') {
         assert.equal(payload.blockedReason, 'Some block reason');
       }
-      return { ok: true, path: '/mock/path' };
+      return { ok: true as const, path: '/mock/path' };
     },
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
@@ -1116,13 +1124,13 @@ test('consumeImplementerArtifacts with PARKED disposition', async () => {
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     log: () => {},
     error: () => {},
     headRevisionFn: () => 'rev-4',
-    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' }),
+    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' as const }),
   });
 
   assert.equal(result.consumed, true);
@@ -1144,13 +1152,13 @@ test('consumeImplementerArtifacts with PUSHBACK_ALL disposition', async () => {
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     log: () => {},
     error: () => {},
     headRevisionFn: () => 'rev-4',
-    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' }),
+    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' as const }),
   });
 
   assert.equal(result.consumed, true);
@@ -1166,7 +1174,6 @@ test('consumeImplementerArtifacts with PUSHBACK_ALL disposition', async () => {
 
 test('consumeReviewerArtifacts with forgejoEnabled and consumeHumanNotes', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-consume-human-'));
-  let humanNotesCalled = false;
 
   const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
     readArtifactFn: (p) => {
@@ -1178,14 +1185,13 @@ test('consumeReviewerArtifacts with forgejoEnabled and consumeHumanNotes', async
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: true,
     readTokenFn: () => 'mock-token',
-    getCommentsFn: () => [],
-    consumeHumanNotesFn: () => { humanNotesCalled = true; },
-    postCommentFn: () => ({ ok: true }),
-    postReviewFn: () => ({ ok: true }),
+    getCommentsFn: async () => [],
+    postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
+    postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
     buildMetadataFooterFn: () => '',
     log: () => {},
     error: () => {}
@@ -1210,12 +1216,12 @@ test('consumeReviewerArtifacts fails when commentResult is not ok', async () => 
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: true,
     readTokenFn: () => 'mock-token',
-    postCommentFn: () => ({ ok: false, error: 'Comment failed' }),
-    postReviewFn: () => ({ ok: true }),
+    postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null,  ok: false as const, error: 'Comment failed' }),
+    postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
     buildMetadataFooterFn: () => '',
     log: () => {},
     error: () => {}
@@ -1240,12 +1246,12 @@ test('consumeReviewerArtifacts fails when reviewResult is not ok', async () => {
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: true,
     readTokenFn: () => 'mock-token',
-    postCommentFn: () => ({ ok: true }),
-    postReviewFn: () => ({ ok: false, error: 'Review failed' }),
+    postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
+    postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null,  ok: false as const, error: 'Review failed' }),
     buildMetadataFooterFn: () => '',
     log: () => {},
     error: () => {}
@@ -1270,7 +1276,7 @@ test('consumeReviewerArtifacts with forgejo disabled', async () => {
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     log: () => {},
@@ -1295,17 +1301,17 @@ test('consumeImplementerArtifacts with consumeHumanNotes', async () => {
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: true,
     readTokenFn: () => 'mock-token',
-    getCommentsFn: () => [],
-    postCommentFn: () => ({ ok: true }),
+    getCommentsFn: async () => [],
+    postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
     buildMetadataFooterFn: () => '',
     log: () => {},
     error: () => {},
     headRevisionFn: () => 'rev-4',
-    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' }),
+    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' as const }),
   });
 
   assert.equal(result.consumed, true);
@@ -1327,11 +1333,11 @@ test('consumeImplementerArtifacts fails when resolution comment fails', async ()
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: true,
     readTokenFn: () => 'mock-token',
-    postCommentFn: () => ({ ok: false, error: 'Comment failed' }),
+    postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null,  ok: false as const, error: 'Comment failed' }),
     buildMetadataFooterFn: () => '',
     log: () => {},
     error: () => {}
@@ -1356,13 +1362,13 @@ test('consumeImplementerArtifacts fails when disposition comment fails', async (
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: true,
     readTokenFn: () => 'mock-token',
     postCommentFn: () => {
       callCount++;
-      return callCount === 1 ? { ok: true } : { ok: false, error: 'Disposition comment failed' };
+      return callCount === 1 ? { ok: true as const, data: null, status: null, statusCode: null, stderr: null, error: null } : { ok: false as const, data: null, status: null, statusCode: null, stderr: null, error: 'Disposition comment failed' };
     },
     buildMetadataFooterFn: () => '',
     log: () => {},
@@ -1387,13 +1393,13 @@ test('consumeImplementerArtifacts with forgejo disabled', async () => {
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     log: () => {},
     error: () => {},
     headRevisionFn: () => 'rev-4',
-    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' }),
+    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' as const }),
   });
 
   assert.equal(result.consumed, true);
@@ -1415,13 +1421,13 @@ test('consumeImplementerArtifacts with invalid JSON in resolution', async () => 
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     log: () => {},
     error: () => {},
     headRevisionFn: () => 'rev-4',
-    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' }),
+    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' as const }),
   });
 
   assert.equal(result.consumed, true);
@@ -1474,7 +1480,7 @@ test('REGRESSION task-1264: os.tmpdir() != /tmp + Forgejo off -> reviewer artifa
       worktree: scratch,
       forgejoEnabled: false,
       readReviewStateFn: () => null,
-      createEventFn: () => ({ ok: true, path: '/mock/event.md' }),
+      createEventFn: () => ({ ok: true as const, path: '/mock/event.md' }),
       deleteArtifactFn: () => {},
       log: () => {},
       error: () => {}
@@ -1494,23 +1500,25 @@ test('an approve is persisted on the aggregate even with the review provider dis
   // without persisting. Either way the consumer answered APPROVED while the
   // Mission stayed unapproved, so `px integrate` had nothing to gate on.
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-approve-persist-'));
-  const approvals = [];
+  const approvals: { slug: string; input: { comment: string | null; decidedAt: string; source?: ReviewApprovalSource; expectedVersion?: number; }; }[] = [];
 
   const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
     output: { findings: [], comment: 'looks good', verdict: 'approve' },
     expectedVersion: 7,
     tmpDir,
     worktree: tmpDir,
+    // This fixture doubles the recorder and has no Git checkout.
+    revision: 'reviewed-fixture-revision',
     // AC #10: the consumer compares the caller's version at entry, before it
     // writes any review event of its own.
-    missionStore: { async load() { return { kind: 'found', mission: {}, version: 7 }; } },
+    missionStore: inMemoryTransitionStore(fixtureMission('test-slug'), { version: 7 }),
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     recordApprovalFn: async (slug, input) => {
       approvals.push({ slug, input });
-      return { outcome: 'recorded' };
+      return { outcome: 'recorded' as const };
     },
     log: () => {},
     error: () => {}
@@ -1531,17 +1539,20 @@ test('a failed approval persist fails the consumer instead of reporting APPROVED
     output: { findings: [], comment: null, verdict: 'approve' },
     tmpDir,
     worktree: tmpDir,
-    missionStore: {},
+    // This fixture doubles the recorder and has no Git checkout.
+    revision: 'reviewed-fixture-revision',
+    missionStore: inMemoryTransitionStore(fixtureMission('test-slug')),
     readReviewStateFn: () => null,
-    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
-    recordApprovalFn: async () => ({ outcome: 'failed', diagnostic: 'expected version 7, found 9' }),
+    recordApprovalFn: async () => ({ outcome: 'failed' as const, diagnostic: 'expected version 7, found 9' }),
     log: () => {},
     error: () => {}
   });
 
   assert.equal(result.ok, false);
+  assert.ok(result.diagnostic);
   assert.match(result.diagnostic, /expected version 7, found 9/);
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -1552,7 +1563,7 @@ test('a review decision against a stale Mission is refused before anything is wr
   // to the recorder, so a version compared further down would only ever see the
   // consumer's own writes rather than the other agent's.
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-stale-verdict-'));
-  const approvals = [];
+  const approvals: "approved"[] = [];
   const events = [];
 
   const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
@@ -1560,17 +1571,20 @@ test('a review decision against a stale Mission is refused before anything is wr
     expectedVersion: 7,
     tmpDir,
     worktree: tmpDir,
-    missionStore: { async load() { return { kind: 'found', mission: {}, version: 9 }; } },
+    // This fixture doubles the recorder and has no Git checkout.
+    revision: 'reviewed-fixture-revision',
+    missionStore: inMemoryTransitionStore(fixtureMission('test-slug'), { version: 9 }),
     readReviewStateFn: () => null,
-    createEventFn: () => { events.push('event'); return { ok: true, path: '/mock/path' }; },
+    createEventFn: () => { events.push('event'); return { ok: true as const, path: '/mock/path' }; },
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
-    recordApprovalFn: async () => { approvals.push('approved'); return { outcome: 'recorded' }; },
+    recordApprovalFn: async () => { approvals.push('approved'); return { outcome: 'recorded' as const }; },
     log: () => {},
     error: () => {}
   });
 
   assert.equal(result.ok, false);
+  assert.ok(result.diagnostic);
   assert.match(result.diagnostic, /expected version 7, found 9/);
   assert.equal(approvals.length, 0, 'no decision may be recorded');
   assert.equal(events.length, 0, 'no review event may be written either');
@@ -1585,21 +1599,23 @@ test('the decision is committed with the caller version before any review event'
   // landed in between. The decision goes first, carrying that version, and the
   // recorder's compare-and-swap closes the window.
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-decision-order-'));
-  const order = [];
+  const order: ("event" | string)[] = [];
 
   const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
     output: { findings: [], comment: null, verdict: 'approve' },
     expectedVersion: 7,
     tmpDir,
     worktree: tmpDir,
-    missionStore: { async load() { return { kind: 'found', mission: {}, version: 7 }; } },
+    // This fixture doubles the recorder and has no Git checkout.
+    revision: 'reviewed-fixture-revision',
+    missionStore: inMemoryTransitionStore(fixtureMission('test-slug'), { version: 7 }),
     readReviewStateFn: () => null,
-    createEventFn: () => { order.push('event'); return { ok: true, path: '/mock/path' }; },
+    createEventFn: () => { order.push('event'); return { ok: true as const, path: '/mock/path' }; },
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     recordApprovalFn: async (_slug, input) => {
       order.push(`decision:${input.expectedVersion}`);
-      return { outcome: 'recorded' };
+      return { outcome: 'recorded' as const };
     },
     log: () => {},
     error: () => {}
@@ -1614,25 +1630,28 @@ test('the decision is committed with the caller version before any review event'
 
 test('a refused decision writes no review event at all', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-decision-refused-'));
-  const order = [];
+  const order: "event"[] = [];
 
   const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
     output: { findings: [], comment: null, verdict: 'approve' },
     expectedVersion: 7,
     tmpDir,
     worktree: tmpDir,
-    missionStore: { async load() { return { kind: 'found', mission: {}, version: 7 }; } },
+    // This fixture doubles the recorder and has no Git checkout.
+    revision: 'reviewed-fixture-revision',
+    missionStore: inMemoryTransitionStore(fixtureMission('test-slug'), { version: 7 }),
     readReviewStateFn: () => null,
-    createEventFn: () => { order.push('event'); return { ok: true, path: '/mock/path' }; },
+    createEventFn: () => { order.push('event'); return { ok: true as const, path: '/mock/path' }; },
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     // What a concurrent write looks like from the recorder's compare-and-swap.
-    recordApprovalFn: async () => ({ outcome: 'failed', diagnostic: 'expected version 7, found 8' }),
+    recordApprovalFn: async () => ({ outcome: 'failed' as const, diagnostic: 'expected version 7, found 8' }),
     log: () => {},
     error: () => {}
   });
 
   assert.equal(result.ok, false);
+  assert.ok(result.diagnostic);
   assert.match(result.diagnostic, /expected version 7, found 8/);
   assert.deepEqual(order, [], 'a refused decision leaves no event behind');
 

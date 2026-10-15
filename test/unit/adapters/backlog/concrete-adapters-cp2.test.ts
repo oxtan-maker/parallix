@@ -73,7 +73,7 @@ test('ConcreteReviewReadAdapter batch fallback preserves flat and missing review
       phase: 'reviewing',
       disposition: null,
       metadata: {},
-    } as any) : null,
+    }) : null,
     findMissionDir: () => '/tmp/missions/task-1001',
   });
 
@@ -99,7 +99,7 @@ test('ReviewReadAdapter loadReview returns domain Review from review state', asy
       implementerRetryCount: 0,
       metadata: {},
       phaseOriginal: null,
-    } as any),
+    }),
     findMissionDir: () => '/tmp/missions/task-1001',
   });
 
@@ -127,7 +127,7 @@ test('ReviewReadAdapter loadReview returns Review with approved decision', async
       implementerRetryCount: 0,
       metadata: {},
       phaseOriginal: null,
-    } as any),
+    }),
     findMissionDir: () => '/tmp/missions/task-1001',
   });
 
@@ -152,7 +152,7 @@ test('ReviewReadAdapter loadReviewApproval returns null for non-approved phase',
       implementerRetryCount: 0,
       metadata: {},
       phaseOriginal: null,
-    } as any),
+    }),
     findMissionDir: () => '/tmp/missions/task-1001',
   });
 
@@ -176,7 +176,7 @@ test('ReviewReadAdapter loadReviewApproval returns approval data for approved ph
       implementerRetryCount: 0,
       metadata: {},
       phaseOriginal: null,
-    } as any),
+    }),
     findMissionDir: () => '/tmp/missions/task-1001',
   });
 
@@ -268,7 +268,7 @@ test('AgentReadAdapter loadAgentAvailability returns availability from blocklist
     rootDir: '/tmp',
     blocklistRepo: blocklist,
     knownAgentFamilies: [agentFamily('codex'), agentFamily('claude')],
-    resolveTaskFile: () => ({ ok: false, matches: [] }),
+    resolveTaskFile: () => ({ ok: false as const, matches: [] }),
   });
 
   const availability = await adapter.loadAgentAvailability();
@@ -294,7 +294,7 @@ test('AgentReadAdapter loadAgentAvailability handles timed blocks', async () => 
     rootDir: '/tmp',
     blocklistRepo: blocklist,
     knownAgentFamilies: [agentFamily('gemini')],
-    resolveTaskFile: () => ({ ok: false, matches: [] }),
+    resolveTaskFile: () => ({ ok: false as const, matches: [] }),
   });
 
   const availability = await adapter.loadAgentAvailability();
@@ -313,7 +313,7 @@ test('AgentReadAdapter loadAssignedAgent returns agent from task file', async ()
       rootDir: tmpDir,
       blocklistRepo: new MockBlocklistRepo(),
       knownAgentFamilies: [agentFamily('codex')],
-      resolveTaskFile: () => ({ ok: true, taskFile, matches: [taskFile] }),
+      resolveTaskFile: () => ({ ok: true as const, taskFile, matches: [taskFile] }),
       getTaskAssignee: (f) => {
         if (f === taskFile) return 'codex';
         return null;
@@ -332,7 +332,7 @@ test('AgentReadAdapter loadAssignedAgent returns null for missing task', async (
     rootDir: '/tmp',
     blocklistRepo: new MockBlocklistRepo(),
     knownAgentFamilies: [agentFamily('codex')],
-    resolveTaskFile: () => ({ ok: false, matches: [] }),
+    resolveTaskFile: () => ({ ok: false as const, matches: [] }),
   });
 
   const assigned = await adapter.loadAssignedAgent(missionId('task-9999'));
@@ -346,7 +346,7 @@ test('AgentReadAdapter loadAgentAvailability returns empty blocklist as all avai
     rootDir: '/tmp',
     blocklistRepo: blocklist,
     knownAgentFamilies: [agentFamily('codex'), agentFamily('claude'), agentFamily('gemini')],
-    resolveTaskFile: () => ({ ok: false, matches: [] }),
+    resolveTaskFile: () => ({ ok: false as const, matches: [] }),
   });
 
   const availability = await adapter.loadAgentAvailability();

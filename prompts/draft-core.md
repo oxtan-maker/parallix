@@ -6,7 +6,7 @@ Backlog task: {{taskPath}}
 The harness has already created the mission branch, worktree, mission record, and backlog task. Your job is to turn the user's intent from `{{taskPath}}` into a complete mission record. There is no mission document to write; every fact below is recorded with a command.
 
 Allowed actions:
-- read files
+- read files and graphify index if present
 - run graphify queries and updates
 - run `{{verifyCmd}}` to verify the draft
 
@@ -18,7 +18,7 @@ Forbidden actions:
 
 Mission state authority: `px status {{slug}}` is the authority for recorded Mission facts.
 
-Use the authoritative status snapshot supplied at launch; no initial px status read is needed. Prefer one foreground px mission author invocation to record the complete contract atomically. Its successful output is the authoritative readback; check the returned mission and version without a separate status call. Exact flags are in the example below. The slug is inferred from this worktree. Each write resolves its own current version automatically; --expected-version is optional when you want to pin an earlier read. Validation or a version conflict rejects the whole batch without partial writes.
+Prefer one foreground px mission author invocation to record the complete contract atomically, then read it back once with px status {{slug}}. Run px mission --help for the typed flags. The slug is inferred from this worktree. Each write resolves its own current version automatically; --expected-version is optional when you want to pin an earlier read. Validation or a version conflict rejects the whole batch without partial writes.
 
 For example, a small greeting fix can use plain criterion text:
 
@@ -44,13 +44,13 @@ The required parts and their existing single-concept commands are listed below. 
 | Reproduction test | `px repro set --test <path>` | required for a `bug` mission only |
 | Dependencies | `px depends add --on <slug>`, one call each | optional; nothing enforces it |
 
-Existing single-concept commands remain available for focused edits. Record a reproduction test with px repro set --test <path> for a bug mission; add optional dependencies with px depends add --on <slug>. Neither changes lifecycle state.
+Existing single-concept commands remain available for focused edits. Record a reproduction test with px repro set --test <path> for a bug mission; add optional dependencies with px depends add --on <slug>. Neither changes lifecycle state. Run any command with --help for exact flags.
 
 Wait for each foreground write to finish; never end your turn while a `px` command is still running: when your turn ends, anything still running is killed and was not recorded.
 
 A write against a stale version is rejected with an explicit conflict and changes nothing; re-read the version with `px status {{slug}}` and retry.
 
-Before finishing, check every required part against the successful mutation output. A failed write is not recorded. Read px status {{slug}} only to recover missing context or a version conflict.
+Before you finish, read the contract back with `px status {{slug}}` and check every required part above. Anything it does not report was not recorded.
 
 Plan the checkpoints; do not record their evidence. `px checkpoint record` is for execution: evidence is what the work produces, and there is nothing to cite yet.
 
@@ -58,6 +58,7 @@ Drafting requirements:
 - every part you record is concrete and specific to this mission; no placeholders or "TBD"
 - plan checkpoints as coherent, independently verifiable slices of the work; together they must cover every success criterion
 - each success criterion must be specific and checkable: execution records one Goal Check row of evidence per criterion
+- Before locking, check that all criteria and scope constraints can hold together. Challenge absolute guarantees with boundary cases; finite budgets must include all mandatory content, metadata and request overhead. Resolve contradictions during drafting.
 - {{classificationInstructions}}
 - preserve `{{taskPath}}`: update content as needed but do not delete, rename, or move the file
 - do not edit the backlog `assignee` field; the workflow records ownership itself
@@ -75,5 +76,3 @@ Graphify-first: before drafting, check if `graphify-out/graph.json` exists. If i
 Finishing:
 - verify the draft with `{{verifyCmd}}` before stopping
 - the harness will transition the task to `ready` after a clean draft; do not transition it yourself
-
-Keep the final response to two to three lines: contract recorded, verification result, and any blocker.

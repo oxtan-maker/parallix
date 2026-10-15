@@ -33,7 +33,7 @@ function createTempTargetRepo() {
   return d;
 }
 
-function setupMiniTargetRepo(tempDir) {
+function setupMiniTargetRepo(tempDir: string) {
   const year = new Date().getFullYear().toString();
   const slug = 'task-test-999';
 
@@ -200,8 +200,7 @@ test('node parallix verify-env resolves from a temp dir without reading parallix
       timeout: 15000,
     });
     const output = `${result.stdout || ''}${result.stderr || ''}`;
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    if (result.error && result.error.code === 'EPERM' && !output) {
+    if (result.error && 'code' in result.error && result.error.code === 'EPERM' && !output) {
       return;
     }
     assert.equal(result.status, 0, output);
@@ -219,13 +218,12 @@ test('node parallix verify-env resolves from a temp dir without reading parallix
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
-function runCommand(command, args, options = {}) {
+function runCommand(command: string, args: string[], options: Omit<import('node:child_process').SpawnSyncOptionsWithStringEncoding, 'encoding'> = {}) {
   const result = spawnSync(command, args, {
     encoding: 'utf8',
     ...options
   });
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-  if (result.error && !(result.error.code === 'EPERM' && result.status === 0)) {
+  if (result.error && !('code' in result.error && result.error.code === 'EPERM' && result.status === 0)) {
     throw result.error;
   }
   assert.equal(result.status, 0, `${command} ${args.join(' ')}\n${result.stderr}${result.stdout}`);

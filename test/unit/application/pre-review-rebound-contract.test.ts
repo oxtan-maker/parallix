@@ -59,7 +59,8 @@ describe('classifyHookFailure (rebase.ts) — SC1/SC7', () => {
   });
 
   it('returns false for undefined output', () => {
-    const result = classifyHookFailure(undefined as any);
+    // @ts-expect-error Intentional absent process output must classify as no hook failure.
+    const result = classifyHookFailure(undefined);
     assert.ok(!result.isHookFailure);
     assert.equal(result.hookType, null);
   });
@@ -234,7 +235,7 @@ describe("Hook bounce on the rebound kernel —", () => {
       worktree: '/worktree',
       implementer: 'claude',
       startAgent: async () => { launches++; return { agent: 'claude', result: { status: 0 } }; },
-      verify: () => { verifies++; return { ok: true }; },
+      verify: () => { verifies++; return { ok: true as const }; },
       log: () => {},
       error: () => {},
     });
@@ -251,7 +252,7 @@ describe("Hook bounce on the rebound kernel —", () => {
       worktree: '/worktree',
       implementer: 'claude',
       startAgent: async () => { launches++; return { agent: 'claude', result: { status: 0 } }; },
-      verify: () => ({ ok: false, diagnostic: 'pre-commit: still failing' }),
+      verify: () => ({ ok: false as const, diagnostic: 'pre-commit: still failing' }),
       log: () => {},
       error: () => {},
     });
@@ -269,7 +270,7 @@ describe("Hook bounce on the rebound kernel —", () => {
         worktree: '/worktree',
         implementer: 'claude',
         startAgent: async () => { launches++; return { agent: 'claude', result: { status: 0 } }; },
-        verify: () => ({ ok: false }),
+        verify: () => ({ ok: false as const }),
         log: () => {},
         error: () => {},
       });
@@ -290,7 +291,7 @@ describe("Hook bounce on the rebound kernel —", () => {
         capturedPrompt = typeof slot === 'function' ? slot('claude') : String(slot);
         return { agent: 'claude', result: { status: 0 } };
       },
-      verify: () => ({ ok: true }),
+      verify: () => ({ ok: true as const }),
       log: () => {},
       error: () => {},
     });
@@ -314,7 +315,7 @@ describe("Hook bounce on the rebound kernel —", () => {
         return { agent: opts.agent as string, result: { status: 0 } };
       },
       applyAgentFallback: async ({ original }: { original: string }) => { fallbackCalled = true; return original; },
-      verify: () => ({ ok: true }),
+      verify: () => ({ ok: true as const }),
       log: () => {},
       error: () => {},
     });
@@ -333,7 +334,7 @@ describe("Declared gate rebounce and review-loop resume —", () => {
     const logs: string[] = [];
     const transitions: string[] = [];
     const prompts: string[] = [];
-    let persisted: any = null;
+    let persisted: { value: import('../../../src/application/ports/review-round.js').ReviewLoopState | null } = { value: null };
     let gateRuns = 0;
     let rebaseRuns = 0;
     let reviewerLaunches = 0;
@@ -347,10 +348,10 @@ describe("Declared gate rebounce and review-loop resume —", () => {
       worktree,
       routing: { eligibleFamilies: () => ['codex', 'claude'] },
       provider: { pollReview: async () => 'APPROVED', pollDisposition: async () => 'CHANGES_MADE' },
-      stateport: { read: async () => persisted, persist: async state => { persisted = state; } },
+      stateport: { read: async () => persisted.value, persist: async state => { persisted.value = state; } },
       task: { mirror: async lane => { transitions.push(lane); } },
       preReview: {
-        rebase: async () => { rebaseRuns++; return { ok: true }; },
+        rebase: async () => { rebaseRuns++; return { ok: true as const }; },
         runGate: async () => (++gateRuns === 1
           ? { ok: false, area: 'static-analysis', exitCode: 1, diagnostic: 'failing static analysis diagnostic', reason: gateFailure }
           : { ok: true }),
@@ -376,7 +377,7 @@ describe("Declared gate rebounce and review-loop resume —", () => {
     assert.match(prompts[0], /The failing check re-runs automatically after your fix/);
     // TASK-2377.03: the budget is per occurrence and in-memory (SC3), so no
     // retry counter is written to review-state metadata by the bounce path.
-    assert.equal(persisted?.metadata?.gateFailureRetryCount, undefined,
+    assert.equal(persisted.value?.metadata?.gateFailureRetryCount, undefined,
       'the kernel keeps its budget in memory and writes no retry counter');
     assert.equal(rebaseRuns, 2, 'repair resumes by replaying the pre-review rebase');
     assert.equal(gateRuns, 2, 'repair resumes by replaying the declared gate');

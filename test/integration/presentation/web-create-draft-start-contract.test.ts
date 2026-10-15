@@ -1,4 +1,5 @@
-// @ts-nocheck -- Controller/SQLite/Git integration contract (TASK-2706, TASK-2717).
+import type { DraftAdapterDependencies } from '../../../src/adapters/cli/commands/draft-adapter-types.js';
+import type { BoardCommandRequest } from '../../../src/application/controller/board-command.js';
 // Creates through the board controller and drafts through the production adapter.
 // All draft launches are injected; execute ports are controlled doubles with real
 // Mission transitions. Proves identity/contract persistence and Start wiring;
@@ -35,9 +36,9 @@ const repositories = {
   agentBlocklist: { async findAll() { return []; }, async findByAgent() { return undefined; }, async save() {}, async deleteByAgent() {}, async clear() {} },
   operationalHistory: { async findAll() { return []; }, async findByType() { return []; }, async append() {}, async clear() {} },
   boardLaneEvents: { async findAll() { return []; }, async findByMissionId() { return []; }, async findByRepositoryId() { return []; }, async append() { return true; }, async clear() {} },
-  usage: { async findAll() { return []; }, async findWhere() { return []; }, async save() {}, async saveAll() {}, async clear() {} },
-  sessionMarkers: { async append() {}, async clear() {} },
-};
+  usage: { async findAll() { return []; }, async findWhere() { return []; } },
+  sessionMarkers: { async findAll() { return []; }, async findByMissionAndRole() { return undefined; }, async save() {}, async deleteByMissionAndRole() {}, async clear() {} },
+} satisfies NonNullable<Parameters<typeof composeProductionCapabilities>[2]>;
 
 async function isolatedGitRepo() {
   const directory = registeredMkdtemp('parallix-task-2706-web-');
@@ -128,8 +129,9 @@ async function build(directory: string): Promise<Isolated> {
   // keeps the suite hermetic (no opencode/codex invocation) while still proving
   // the draft advances past the previously-failing preflight.
   const launches: string[] = [];
-  const draftAdapterDeps = {
+  const draftAdapterDeps: DraftAdapterDependencies = {
     startDraftAgentFn: async ({ worktree }) => {
+      assert.ok(worktree);
       launches.push('draft');
       if (launches.length > 1) { await recordContract(store, path.basename(worktree).match(/px-\d{4}$/)![0]); }
       return { agent: 'custom', result: { status: 0 } };
@@ -150,10 +152,11 @@ async function build(directory: string): Promise<Isolated> {
 }
 
 // The board create payload the web board sends for a free-text mission.
-function createPayload(requestKey: string, title: string) {
+function createPayload(requestKey: string, title: string): BoardCommandRequest {
   return {
     operationId: `board-create-${requestKey}`,
-    kind: 'mission:create',
+    missionId: '',
+    kind: 'mission:create' as const,
     capabilities: new Set(['mission:intake']),
     payload: {
       kind: 'mission:create',
@@ -176,8 +179,9 @@ test('web create draft completes through isolated launches without Bubblewrap (T
     const controller = capabilities.commandController;
 
     // --- Web/board creation: the board mints a DB-owned px-<NNNN> identity. ---
-    const created = await controller.dispatch(createPayload('web-key-1', 'Web board mission'));
+    const created = await controller.dispatch<{ missionId: string }>(createPayload('web-key-1', 'Web board mission'));
     assert.equal(created.status, 'completed', `create failed: ${JSON.stringify(created.error ?? created.value)}`);
+    assert.ok(created.value);
     const createdId: string = created.value.missionId;
     registerTempRoot(`${directory}-${createdId}`);
     assert.match(createdId, /^px-\d{4}$/, `board must mint a px-<NNNN> identity, got ${createdId}`);
@@ -195,7 +199,7 @@ test('web create draft completes through isolated launches without Bubblewrap (T
     // preflight with "no Backlog task file". The preflight now recognises the
     // DB-owned identity and proceeds to the contract-recording step, so the
     // draft must launch the agent (the last step the pre-fix draft never reached).
-    const drafted = await controller.dispatch({
+    const drafted = await controller.dispatch<{ slug: string }>({
       operationId: 'board-draft',
       kind: 'draft:create',
       missionId: missionId(createdId),
@@ -204,6 +208,7 @@ test('web create draft completes through isolated launches without Bubblewrap (T
     });
     assert.equal(drafted.status, 'completed', `draft failed: ${JSON.stringify(drafted.error ?? drafted.value)}`);
     assert.ok(iso.launches.length > 1, 'contract repair must use the injected isolated launcher (TASK-2717)');
+    assert.ok(drafted.value);
     assert.equal(drafted.value.slug, createdId, 'draft must reuse the board-minted identity, not mint a new one');
 
     // The identity is unchanged after the draft: no second identity was minted
@@ -220,6 +225,7 @@ test('web create draft completes through isolated launches without Bubblewrap (T
     // board-minted identity instead of minting a second one for the same
     // mission (no identity allocation, no counter increment for this mission).
     assert.equal(drafted.status, 'completed', 'draft must complete the DB-owned preflight, not bail');
+    assert.ok(drafted.value);
     assert.equal(drafted.value.slug, createdId, 'draft must reuse the board-minted identity, not mint a new one');
 
     // The persisted planning fields are still the board's fields after the
@@ -238,6 +244,7 @@ test('web create draft completes through isolated launches without Bubblewrap (T
       command: { type: 'refine' }, actor: 'custom', occurredAt: now, idempotencyKey: `${createdId}:refine`,
     });
     assert.equal(refined.status, 'completed', `refine must complete: ${JSON.stringify(refined.error ?? refined.value)}`);
+    assert.ok(refined.value != null);
     assert.equal(refined.value.to, 'refined', 'the mission must leave the backlog for refined');
     assert.equal(afterDraft.mission.status, 'refined', 'the draft repair records the complete contract before refinement');
     assert.equal(refined.value.mission.id, createdId, 'refine must not rename the identity');

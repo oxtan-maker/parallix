@@ -1,3 +1,9 @@
+import { makeExecutePorts as completeExecuteFixture } from '../../../fixtures/execute-mission-ports.js';
+import { fixtureMission as completeMission } from '../../../fixtures/mission-builders.js';
+import { missionId as completeMissionId } from '../../../../src/domain/mission.js';
+import { repositoryId as completeRepositoryId } from '../../../../src/domain/repository.js';
+import { missionVersion as completeVersion } from '../../../../src/application/domain-ports.js';
+import { fixtureMission, inMemoryTransitionStore } from '../../../fixtures/mission-builders.js';
 // Historical regression provenance: TASK-2373, TASK-2387.
 /**
  * TASK-2370 CP-2 — the mission-scoped current-work authority and the
@@ -58,12 +64,12 @@ function published(appended: readonly OperationalHistoryEntry[]) {
 
 function strictPorts(overrides: Record<string, unknown> = {}) {
   const calls: string[] = [];
-  const parts = {
+  const parts = completeExecuteFixture({
     ...makeExecutePorts().ports,
     workspace: {
       async preflight() { return true; },
       async resolveWorktree() { return '/worktree'; },
-      async resolveTaskFile() { return { ok: true, taskFile: '/worktree/task.md' }; },
+      async resolveTaskFile() { return { ok: true as const, taskFile: '/worktree/task.md' }; },
       async readTaskStatus() { return 'active'; },
       async enforceCommitSafety() { calls.push('safety'); },
     },
@@ -75,19 +81,14 @@ function strictPorts(overrides: Record<string, unknown> = {}) {
       },
     },
     missionTransitions: {
-      async load() { return { kind: 'found' as const, version: 1, mission: {
-        id: 'task-2370', repositoryId: 'repo', title: 'Fixture', labels: [], assignee: null,
-        checkpoints: [{ missionId: 'task-2370', name: 'CP-1', firstLine: 'work', goalCheck: [], nextActionText: '' }],
-        review: null, netEngineeringLines: null, brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
-        declaredGates: ['npm test'], successCriteria: ['done'], predictedNelBucket: 'Small', status: 'refined' as const, closedAt: null,
-      } }; },
-      async save() { calls.push('lifecycle'); return 2; },
-      async saveWithTransition() { calls.push('lifecycle'); return 2; },
+      async load() { return { kind: 'found' as const, version: completeVersion(1), mission: completeMission(String('task-2370'), {repositoryId: completeRepositoryId('repo'),title: 'Fixture',labels: [],assignee: null,checkpoints: [{ missionId: completeMissionId('task-2370'), name: 'CP-1', firstLine: 'work', goalCheck: [], nextActionText: '' }],review: null,netEngineeringLines: null,brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },declaredGates: ['npm test'],successCriteria: ['done'],predictedNelBucket: 'Small',status: 'refined' as const,closedAt: null}) }; },
+      async save() { calls.push('lifecycle'); return completeVersion(2); },
+      async saveWithTransition() { calls.push('lifecycle'); return completeVersion(2); },
     },
     telemetry: { async recordLaunchTelemetry() { calls.push('telemetry'); } },
-    handoffExecution: { ...makeExecutePorts().ports.handoffExecution, async run() { calls.push('handoff'); return { ok: true }; } },
-  };
-  return { ports: { ...parts, ...overrides } as unknown as ExecuteMissionPorts, calls };
+    handoffExecution: { ...makeExecutePorts().ports.handoffExecution, async run() { calls.push('handoff'); return { ok: true as const }; } },
+  }).ports;
+  return { ports: { ...parts, ...overrides }, calls };
 }
 
 function executeRequest(overrides: Record<string, unknown> = {}) {
@@ -97,7 +98,7 @@ function executeRequest(overrides: Record<string, unknown> = {}) {
     agent: 'claude',
     capabilities: new Set(['active:execute'] as const),
     ...overrides,
-  } as never;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -119,7 +120,7 @@ test('a recorded current-work fact round-trips through the operational-history e
   assert.equal(appended.length, 1);
   assert.equal(appended[0].eventType, CURRENT_WORK_EVENT_TYPE);
   assert.deepEqual(parseCurrentWorkEntry(appended[0]), {
-    missionId: 'task-2370',
+    missionId: completeMissionId('task-2370'),
     operationId: 'active:task-2370',
     phase: 'execute',
     state: 'running',
@@ -137,7 +138,7 @@ test('a recorded current-work fact round-trips through the operational-history e
 test('a stored entry of another event type is never read as current work', () => {
   assert.equal(parseCurrentWorkEntry({
     eventType: 'mission.activate',
-    eventData: JSON.stringify({ missionId: 'task-2370', phase: 'execute', state: 'running' }),
+    eventData: JSON.stringify({ missionId: completeMissionId('task-2370'), phase: 'execute', state: 'running' }),
     createdAt: '2026-08-13T10:00:00.000Z',
   }), null);
 });
@@ -244,7 +245,7 @@ test('a recorder outage never turns a completed execute run into a failure', asy
     async running() { throw new Error('database is locked'); },
     async blocked() { throw new Error('database is locked'); },
     async ended() { throw new Error('database is locked'); },
-  };
+  } satisfies NonNullable<ConstructorParameters<typeof ExecuteMissionService>[2]>;
 
   const outcome = await new ExecuteMissionService(ports, undefined, brokenRecorder).execute(executeRequest());
   assert.equal(outcome.status, 'completed');
@@ -307,9 +308,11 @@ test('px review republishes current work with the family that actually launched'
   const workflow = {
     ...makeReviewWorkflow([]),
     start: async (context) => {
-      await (context as any).options.onAgentLaunched('custom', 'review');
+      const launched = context.options.onAgentLaunched;
+      assert.equal(typeof launched, 'function');
+      if (typeof launched === 'function') { await launched('custom', 'review'); }
     },
-  };
+  } satisfies NonNullable<ConstructorParameters<typeof ReviewCommandUseCase>[0]>;
   await new ReviewCommandUseCase(workflow, new CurrentWorkRecorder(repo, { processId: 9 }))
     .execute(['task-2370', '--start']);
 
@@ -335,7 +338,7 @@ test('a failing review operation stops claiming work and keeps its reason', asyn
   const workflow = {
     ...makeReviewWorkflow([]),
     start: async () => { throw new Error('review loop failed'); },
-  };
+  } satisfies NonNullable<ConstructorParameters<typeof ReviewCommandUseCase>[0]>;
   await assert.rejects(
     new ReviewCommandUseCase(workflow, new CurrentWorkRecorder(repo, { processId: 9 })).execute(['task-2370', '--start']),
     /review loop failed/,
@@ -415,12 +418,12 @@ describe("Workflow current work follows launches —", () => {
   }
 
   function strictPorts(overrides: Record<string, unknown> = {}) {
-    const parts = {
+    const parts = completeExecuteFixture({
       ...makeExecutePorts().ports,
       workspace: {
         async preflight() { return true; },
         async resolveWorktree() { return '/worktree'; },
-        async resolveTaskFile() { return { ok: true, taskFile: '/worktree/task.md' }; },
+        async resolveTaskFile() { return { ok: true as const, taskFile: '/worktree/task.md' }; },
         async readTaskStatus() { return 'active'; },
         async enforceCommitSafety() {},
       },
@@ -431,14 +434,14 @@ describe("Workflow current work follows launches —", () => {
         },
       },
       missionTransitions: {
-        async load() { return { kind: 'found' as const, version: 1, mission: { id: SLUG, repositoryId: 'repo', title: 'Fixture', labels: [], assignee: null, checkpoints: [{ missionId: SLUG, name: 'CP-1', firstLine: 'work', goalCheck: [], nextActionText: '' }], review: null, netEngineeringLines: null, brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] }, declaredGates: ['npm test'], successCriteria: ['done'], predictedNelBucket: 'Small', status: 'refined' as const, closedAt: null } }; },
-        async save() { return 2; },
-        async saveWithTransition() { return 2; },
+        async load() { return { kind: 'found' as const, version: completeVersion(1), mission: completeMission(String(SLUG), {repositoryId: completeRepositoryId('repo'),title: 'Fixture',labels: [],assignee: null,checkpoints: [{ missionId: completeMissionId(SLUG), name: 'CP-1', firstLine: 'work', goalCheck: [], nextActionText: '' }],review: null,netEngineeringLines: null,brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },declaredGates: ['npm test'],successCriteria: ['done'],predictedNelBucket: 'Small',status: 'refined' as const,closedAt: null}) }; },
+        async save() { return completeVersion(2); },
+        async saveWithTransition() { return completeVersion(2); },
       },
       telemetry: { async recordLaunchTelemetry() {} },
-      autonomousReview: { async start() { return true; } },
-    };
-    return { ...parts, ...overrides } as unknown as ExecuteMissionPorts;
+      autonomousReview: { async start() {} },
+    }).ports;
+    return { ...parts, ...overrides };
   }
 
   function executeRequest() {
@@ -447,7 +450,7 @@ describe("Workflow current work follows launches —", () => {
       slug: SLUG,
       agent: 'claude',
       capabilities: new Set(['active:execute'] as const),
-    } as never;
+    };
   }
 
   /** A handoff/review port that replays a scripted sequence of agent launches. */
@@ -469,7 +472,7 @@ describe("Workflow current work follows launches —", () => {
 
   test('SC2: current work follows reviewer and implementer launches after handoff instead of the original implementer', async () => {
     const { repo, appended } = inMemoryOperationalHistory({ assignIds: true });
-    const observed: { agent: string | null; phase: string | null; working: boolean }[] = [];
+    const observed: { agent: import("../../../../src/domain/agents.js").AgentFamily | null; phase: string | null; working: boolean; }[] = [];
     const ports = strictPorts({
       autonomousReview: scriptedReviewLoop(
         [['qwen', 'review'], ['claude', 'review-response'], ['codex', 'review']],
@@ -631,7 +634,7 @@ describe("Workflow current work follows launches —", () => {
       },
       blocked: slowRecorder.blocked.bind(slowRecorder),
       ended: slowRecorder.ended.bind(slowRecorder),
-    };
+    } satisfies NonNullable<ConstructorParameters<typeof ExecuteMissionService>[2]>;
 
     let stateAfterLaunch = boardState(appended);
     const ports = strictPorts({
@@ -658,7 +661,7 @@ describe("Board-launched current work —", () => {
     return {
       operationId: 'active:task-2387',
       kind: 'active:execute',
-      missionId: 'task-2387',
+      missionId: completeMissionId('task-2387'),
       missionStatusAtRequest: 'refined',
       agent: 'codex',
       capabilities: new Set(['active:execute']),
@@ -753,7 +756,8 @@ describe("Board-launched current work —", () => {
     const { repo } = inMemoryOperationalHistory();
     const recorder = new CurrentWorkRecorder(repo, { processId: 2387 });
     const missionStore = {
-      async load() { return { kind: 'found', mission: { status: 'refined' }, version: 1 }; },
+      ...inMemoryTransitionStore(fixtureMission('task-fixture', { status: 'refined' })),
+      async recordNel(): Promise<never> { throw new Error('Unexpected NEL write'); },
     };
 
     // Built via a typed const so the repository fakes are structurally checked
@@ -762,15 +766,15 @@ describe("Board-launched current work —", () => {
       agentBlocklist: { async findAll() { return []; }, async findByAgent() { return undefined; }, async save() {}, async deleteByAgent() {}, async clear() {} },
       operationalHistory: { async findAll() { return []; }, async findByType() { return []; }, async append() {}, async clear() {} },
       boardLaneEvents: { async findAll() { return []; }, async findByMissionId() { return []; }, async findByRepositoryId() { return []; }, async append() { return true; }, async clear() {} },
-      usage: { async findAll() { return []; }, async findWhere() { return []; }, async save() {}, async saveAll() {}, async clear() {} },
-    };
+      usage: { async findAll() { return []; }, async findWhere() { return []; } },
+    } satisfies NonNullable<Parameters<typeof composeProductionCapabilities>[2]>;
 
     const capabilities = composeProductionCapabilities(
       '/fixture-repository',
       repositoryId('/fixture-repository'),
       repositories,
       ports,
-      missionStore as never,
+      missionStore,
       recorder,
       undefined,
       undefined,

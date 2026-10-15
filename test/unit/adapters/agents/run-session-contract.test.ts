@@ -21,7 +21,7 @@ function setup(host: 'pipe' | 'tmux', whenUnavailable: 'fallback' | 'fail' = 'fa
     repositoryKey: () => 'abc123',
     env: { PARALLIX_TERMINAL_STATE_DIR: path.join(worktree, '.term') },
     now: () => new Date('2026-10-05T12:00:00Z'),
-    spawnSyncFn: (() => ({ status: 0, stdout: '', stderr: '' })) as never,
+    spawnSyncFn: (() => ({ status: 0, stdout: '', stderr: '' })),
   };
   const input = { worktree, slug: 'task-7', role: 'execute', family: 'codex', attempt: 1, log: (line: string) => logs.push(line) };
   return { worktree, logs, deps, input };

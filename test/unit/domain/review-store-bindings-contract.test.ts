@@ -1,3 +1,6 @@
+import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
+import { fixtureMission, pendingReview, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
+import type { ReviewRound, ReviewEventRecord } from '../../../src/domain/review.js';
 // review store bindings contract.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
 import test, { describe } from 'node:test';
@@ -20,59 +23,39 @@ describe("review store bindings", { concurrency: false }, () => {
    * from the unbound default (which reads no state and falls back to round 1).
    */
   function missionWithReview() {
-    const currentRound = {
-      number: 3,
-      subject: {
-        change: { kind: 'local-branch' as const, sourceBranch: 'mission/task-9001', targetBranch: 'main' },
-        revision: 'rev-3',
-      },
-      reviewer: 'claude',
-      implementer: 'codex',
-      startedAt: '2026-08-04T09:00:00.000Z',
-      decision: null,
-      response: null,
-      phase: 'reviewing',
-      disposition: null,
-      reviewerRetryCount: 0,
-      implementerRetryCount: 0,
-    };
-    return {
-      id: 'task-9001',
-      repositoryId: 'repo',
-      title: 'bound review persistence',
-      status: 'review',
-      rawStatus: 'review',
-      assignee: 'claude',
-      labels: [],
-      checkpoints: [],
-      netEngineeringLines: 0,
-      closedAt: null,
-      review: {
-        rounds: [{ ...currentRound, number: 1 }, { ...currentRound, number: 2 }, currentRound],
-        intervention: null,
-        stageLaunches: [],
-        reviewEvents: [],
-      },
-    };
+    const base = pendingReview('task-9001', '2026-08-04T09:00:00.000Z');
+    const currentRound = { ...base.rounds[0], number: 3 };
+    const review = { ...base, rounds: [{ ...currentRound, number: 1 }, { ...currentRound, number: 2 }, currentRound] as const };
+    return { ...fixtureMission('task-9001', { repositoryId: repositoryId('repo'), title: 'bound review persistence', status: 'review', rawStatus: 'review', assignee: agentFamily('claude'), checkpoints: [], netEngineeringLines: 0 }), review };
   }
 
   function fakeStore() {
-    const state = { mission: missionWithReview(), version: 1, saves: [] as unknown[] };
+    const state: { mission: Mission & { review: NonNullable<Mission['review']> }; version: ReturnType<typeof missionVersion>; saves: Mission[] } = { mission: missionWithReview(), version: missionVersion(1), saves: [] };
     return {
       state,
-      async load() { return { kind: 'found', mission: state.mission, version: state.version }; },
-      async save(mission: any) {
-        state.mission = mission;
-        state.version += 1;
+      async load() { return { kind: 'found' as const, mission: state.mission, version: state.version }; },
+      async save(mission: Mission) {
+        assert.ok(mission.review);
+        state.mission = { ...mission, review: mission.review };
+        state.version = missionVersion(state.version + 1);
         state.saves.push(mission);
         return state.version;
       },
-      async saveWithTransition(mission: any) { return this.save(mission); },
+      async saveWithTransition(mission: Mission) { return this.save(mission); },
+      setReviewEvents(events: readonly (Pick<ReviewEventRecord, 'eventType' | 'roundNumber' | 'actor' | 'content' | 'createdAt'> & Partial<ReviewEventRecord>)[]) {
+        state.mission = { ...state.mission, review: { ...state.mission.review, reviewEvents: events.map((event, index) => ({ position: index + 1, phase: null, disposition: null, verdict: null, itemDispositions: null, blockedReason: null, followUpReference: null, ...event })) } };
+      },
+      setCurrentRound(overrides: Partial<ReviewRound>) {
+        const rounds: [ReviewRound, ...ReviewRound[]] = [...state.mission.review.rounds];
+        const index = rounds.length - 1;
+        rounds[index] = { ...rounds[index], ...overrides };
+        state.mission = { ...state.mission, review: { ...state.mission.review, rounds } };
+      },
     };
   }
 
   test('reviewLoopBindings supplies persisted-output readers, not only review-state projections', () => {
-    const bindings = reviewLoopBindings(fakeStore() as never);
+    const bindings = reviewLoopBindings(fakeStore());
     assert.deepEqual(Object.keys(bindings).sort(), [
       'consumeImplementerArtifacts',
       'consumeReviewerArtifacts',
@@ -88,12 +71,12 @@ describe("review store bindings", { concurrency: false }, () => {
 
   test('loop reviewer reader uses persisted SQLite events rather than artifacts', async () => {
     const store = fakeStore();
-    store.state.mission.review.reviewEvents = [
+    store.setReviewEvents([
       { eventType: 'reviewer_findings', roundNumber: 3, actor: 'claude', content: '## F1: persisted finding', createdAt: '2026-08-04T10:00:00.000Z' },
       { eventType: 'reviewer_outcome', roundNumber: 3, actor: 'claude', verdict: 'request-changes', content: 'Outcome: request-changes', createdAt: '2026-08-04T10:00:01.000Z' },
-    ];
+    ]);
 
-    const result = await reviewLoopBindings(store as never).consumeReviewerArtifacts('task-9001', 'claude', {
+    const result = await reviewLoopBindings(store).consumeReviewerArtifacts('task-9001', 'claude', {
       worktree: '/tmp/worktree',
     });
 
@@ -105,12 +88,12 @@ describe("review store bindings", { concurrency: false }, () => {
 
   test('loop reviewer reader ignores events from another round or reviewer', async () => {
     const store = fakeStore();
-    store.state.mission.review.reviewEvents = [
+    store.setReviewEvents([
       { eventType: 'reviewer_outcome', roundNumber: 2, actor: 'claude', verdict: 'approve', content: 'old', createdAt: '2026-08-04T10:00:00.000Z' },
       { eventType: 'reviewer_outcome', roundNumber: 3, actor: 'codex', verdict: 'approve', content: 'other', createdAt: '2026-08-04T10:00:01.000Z' },
-    ];
+    ]);
 
-    const result = await reviewLoopBindings(store as never).consumeReviewerArtifacts('task-9001', 'claude', {
+    const result = await reviewLoopBindings(store).consumeReviewerArtifacts('task-9001', 'claude', {
       worktree: '/tmp/worktree',
     });
 
@@ -119,22 +102,22 @@ describe("review store bindings", { concurrency: false }, () => {
 
   test('loop reviewer reader ignores an outcome from before a reset', async () => {
     const store = fakeStore();
-    store.state.mission.review.rounds[2].startedAt = '2026-08-04T11:00:00.000Z';
-    store.state.mission.review.reviewEvents = [
+    store.setCurrentRound({ startedAt: '2026-08-04T11:00:00.000Z' });
+    store.setReviewEvents([
       { eventType: 'reviewer_outcome', roundNumber: 3, actor: 'claude', verdict: 'approve', content: 'old approval', createdAt: '2026-08-04T10:00:00.000Z' },
-    ];
+    ]);
 
-    const result = await reviewLoopBindings(store as never).consumeReviewerArtifacts('task-9001', 'claude', { worktree: '/tmp/worktree' });
+    const result = await reviewLoopBindings(store).consumeReviewerArtifacts('task-9001', 'claude', { worktree: '/tmp/worktree' });
     assert.equal(result.consumed, false);
   });
 
   test('loop implementer reader uses the persisted disposition event', async () => {
     const store = fakeStore();
-    store.state.mission.review.reviewEvents = [
+    store.setReviewEvents([
       { eventType: 'implementer_disposition', roundNumber: 3, actor: 'codex', disposition: 'PUSHBACK_ALL', content: 'Autonomous review disposition: PUSHBACK_ALL', createdAt: '2026-08-04T10:00:00.000Z' },
-    ];
+    ]);
 
-    const result = await reviewLoopBindings(store as never).consumeImplementerArtifacts('task-9001', 'codex', {
+    const result = await reviewLoopBindings(store).consumeImplementerArtifacts('task-9001', 'codex', {
       worktree: '/tmp/worktree',
     });
 
@@ -145,17 +128,17 @@ describe("review store bindings", { concurrency: false }, () => {
 
   test('loop implementer reader ignores a disposition from before a reset', async () => {
     const store = fakeStore();
-    store.state.mission.review.rounds[2].startedAt = '2026-08-04T11:00:00.000Z';
-    store.state.mission.review.reviewEvents = [
+    store.setCurrentRound({ startedAt: '2026-08-04T11:00:00.000Z' });
+    store.setReviewEvents([
       { eventType: 'implementer_disposition', roundNumber: 3, actor: 'codex', disposition: 'CHANGES_MADE', content: 'old', createdAt: '2026-08-04T10:00:00.000Z' },
-    ];
+    ]);
 
-    const result = await reviewLoopBindings(store as never).consumeImplementerArtifacts('task-9001', 'codex', { worktree: '/tmp/worktree' });
+    const result = await reviewLoopBindings(store).consumeImplementerArtifacts('task-9001', 'codex', { worktree: '/tmp/worktree' });
     assert.equal(result.consumed, false);
   });
 
   test('bindReviewPersistence exposes the same bound consumers', async () => {
-    const persistence = bindReviewPersistence(fakeStore() as never);
+    const persistence = bindReviewPersistence(fakeStore());
     assert.equal(typeof persistence.consumeReviewerArtifacts, 'function');
     assert.equal(typeof persistence.consumeImplementerArtifacts, 'function');
   });
@@ -170,6 +153,7 @@ describe("review store bindings", { concurrency: false }, () => {
     );
 
     assert.equal(result.ok, false);
+    assert.ok(result.error);
     assert.match(result.error, /No Mission store supplied/);
     assert.match(messages.join('\n'), /no Mission store was supplied/i);
     assert.doesNotMatch(messages.join('\n'), /backfill-review/);
@@ -178,7 +162,7 @@ describe("review store bindings", { concurrency: false }, () => {
 
 // Regression provenance: TASK-2341.
 describe("review store wiring", { concurrency: false }, () => {
-  const reviewMission: Mission = {
+  const reviewMission: Mission = completeMissionFixture(String(missionId('task-2341')), {
     id: missionId('task-2341'),
     repositoryId: repositoryId('parallix'),
     title: 'Review state is stored in the operator database',
@@ -209,11 +193,11 @@ describe("review store wiring", { concurrency: false }, () => {
       stageLaunches: [],
       reviewEvents: [],
     },
-  };
+  });
 
   const missionStore: MissionStore = {
     async load() {
-      return { kind: 'found', mission: reviewMission, version: missionVersion(1) };
+      return { kind: 'found' as const, mission: reviewMission, version: missionVersion(1) };
     },
     async save() {
       return missionVersion(1);
@@ -239,15 +223,13 @@ describe("missionstore repro", { concurrency: false }, () => {
     let receivedArgs: unknown[] = [];
     const mockWriteFn = async (...args: unknown[]) => {
       receivedArgs = args;
-      return { outcome: 'committed' };
+      return { outcome: 'committed' as const };
     };
 
-    const mockStore = { id: 'test-store' };
+    const mockStore = Object.assign(inMemoryTransitionStore(fixtureMission('test-store')), { id: 'test-store' });
     const slug = 'task-2342';
     const state = new ReviewState(slug, { reviewer: 'codex', implementer: 'claude' });
     const worktree = '/tmp/worktree';
-
-    // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
     await persistReviewStateOrThrow(mockWriteFn, slug, state, worktree, mockStore);
 
     // writeFn must be called with 4 args: (slug, state, worktree, { missionStore, lifecycleService })
@@ -266,7 +248,7 @@ describe("missionstore repro", { concurrency: false }, () => {
     let receivedArgs: unknown[] = [];
     const mockWriteFn = async (...args: unknown[]) => {
       receivedArgs = args;
-      return { outcome: 'committed' };
+      return { outcome: 'committed' as const };
     };
 
     const slug = 'task-2342';
@@ -274,7 +256,6 @@ describe("missionstore repro", { concurrency: false }, () => {
     const worktree = '/tmp/worktree';
 
     // Call with only 4 args (no missionStore) — missionStore param omitted by caller
-    // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
     await persistReviewStateOrThrow(mockWriteFn, slug, state, worktree);
 
     // After fix: always 4 args (options.missionStore = undefined when omitted)

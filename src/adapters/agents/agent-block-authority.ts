@@ -4,27 +4,26 @@ import { parseBlockUntil, type AgentConfig } from './agent-config.js';
 function localOverride(agent: string, config: AgentConfig | null | undefined, nowMs: number): AgentBlockState | null {
   const entry = config?.blocklist?.[agent];
   if (entry === undefined) { return null; }
-  const unblocked = entry === false || (entry && typeof entry === 'object' && (entry as any).blocked === false);
+  const block = entry && typeof entry === 'object' ? entry as { blocked?: unknown; until?: unknown; reason?: string | null } : null;
+  const unblocked = entry === false || block?.blocked === false;
   if (unblocked) {
     return { agent, eligible: true, blocked: false, until: null, reason: null, limit: null };
   }
-  const indefinitelyBlocked = entry === true || (entry && typeof entry === 'object' && (entry as any).blocked === true);
+  const indefinitelyBlocked = entry === true || block?.blocked === true;
   if (indefinitelyBlocked) {
-    return {
-      agent,
-      eligible: false,
-      blocked: true,
-      until: null,
-      reason: entry && typeof entry === 'object' ? (entry as any).reason ?? null : null,
-      limit: null,
-    };
+    return { agent, eligible: false, blocked: true, until: null, reason: block?.reason ?? null, limit: null };
   }
-  if (entry && typeof entry === 'object' && typeof (entry as any).until === 'string') {
-    const until = (entry as any).until;
+  return timedOverride(agent, block, nowMs);
+}
+
+function timedOverride(agent: string, block: { until?: unknown; reason?: string | null } | null, nowMs: number): AgentBlockState | null {
+  if (block && typeof block.until === 'string') {
+    const until = block.until;
     if (parseBlockUntil(until) > nowMs) {
-      return { agent, eligible: false, blocked: true, until, reason: (entry as any).reason ?? null, limit: null };
+      return { agent, eligible: false, blocked: true, until, reason: block.reason ?? null, limit: null };
     }
   }
+
   return null;
 }
 

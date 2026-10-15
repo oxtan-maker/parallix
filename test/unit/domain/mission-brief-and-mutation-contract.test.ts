@@ -1,3 +1,7 @@
+import { missionId as fixtureMissionId } from '../../../src/domain/mission.js';
+import { statusResult, statusMissionData } from '../../fixtures/status-result.js';
+import { fixtureMission as typedMissionFixture } from '../../fixtures/mission-builders.js';
+import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
 import './mission-authoring.cases.js';
 import './mission-edit.cases.js';
 // Mission brief and typed mutation contract: checkpoint documents, prompt authority and parity, typed
@@ -41,7 +45,7 @@ import { reviewFindingId, type Review } from '../../../src/domain/review.js';
 
 // no task ID in the legacy file (was test/checkpoint-document.test.ts)
 describe('Checkpoint document', () => {
-  const missionId = 'task-2525.04' as unknown as MissionId;
+  const missionId = fixtureMissionId('task-2525.04');
 
   const DOC = `# CP-2: First fix + regression tests
 
@@ -175,7 +179,7 @@ describe('Checkpoint document', () => {
 
   test('legacy checkpoint reconciliation replaces only a synthetic handoff action', () => {
     const source = parseCheckpointDocument(missionId, 'CP-2.md', DOC);
-    const synthetic = { ...source, nextActionText: 'Review the handed-off change.' };
+    const synthetic = { ...source, nextActionText: 'Review the handed-off change.' } satisfies Partial<NonNullable<Parameters<typeof reconcileLegacyCheckpoint>[0]>>;
     assert.equal(reconcileLegacyCheckpoint(synthetic, source)?.nextActionText, source.nextActionText);
     assert.equal(reconcileLegacyCheckpoint({ ...synthetic, goalCheck: [] }, source), null);
     assert.equal(reconcileLegacyCheckpoint({ ...synthetic, goalCheck: [{ criterion: 'Other', evidence: 'Other' }] }, source), null);
@@ -193,7 +197,7 @@ describe('Prompt parity', () => {
 
 
 
-  function writeTask(rootDir, slug, body) {
+  function writeTask(rootDir: string, slug: string, body: string|NodeJS.ArrayBufferView<ArrayBufferLike>) {
     const tasksDir = path.join(rootDir, 'backlog', 'tasks');
     fs.mkdirSync(tasksDir, { recursive: true });
     const file = path.join(tasksDir, `${slug} - ${slug.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.md`);
@@ -263,7 +267,7 @@ describe('Prompt parity', () => {
       // Normalize away the per-mission identity (slug + absolute paths) and the
       // substituted intake block, then the instruction bodies must match: the
       // intake difference is confined to that one block.
-      const normalize = (prompt, instructions, root) =>
+      const normalize = (prompt: string, instructions: string, root: string) =>
         prompt
           .replace(instructions, '{{classificationInstructions}}')
           .replaceAll(root, '<root>')
@@ -330,8 +334,7 @@ describe('Prompt authority', () => {
     assert.match(source, /px status \{\{slug\}\}/);
     assert.match(source, /px checkpoint record --name/);
     assert.match(source, /px mission mark-complete --slug \{\{slug\}\} --criterion <index>/);
-    assert.match(source, /--complete-criteria atomically completes exactly the supplied named criteria/);
-    assert.match(source, /omit it to record evidence only/);
+    assert.match(source, /Recording checkpoint evidence does not mark criteria complete/);
     // Evidence guidance matches the shared reference check (TASK-2662).
     assert.match(source, /px checkpoint record --name CP-2 --criterion/, 'one concrete recording example');
     assert.match(source, /repository-relative path[^\n]*bare basename[^\n]*does not resolve/);
@@ -500,13 +503,13 @@ describe('Mission dependency value', () => {
   const OWNER = missionId('task-2521.04');
 
   function status(dependencies: readonly string[] | undefined): StatusResult {
-    const missionData = {
+    const missionData = statusMissionData({
       backlogStatus: 'active',
       assignee: 'claude',
       reviewHistory: [],
       dependencies,
-    } as unknown as StatusMissionData;
-    return {
+    });
+    return statusResult({
       slug: 'task-2521.04',
       branch: 'mission/task-2521.04',
       missionData,
@@ -514,7 +517,7 @@ describe('Mission dependency value', () => {
       agents: [],
       lastThreeCommits: [],
       uncommittedCount: 0,
-    } as unknown as StatusResult;
+    });
   }
 
   describe('Mission dependencies', () => {
@@ -590,7 +593,7 @@ describe('Backlog Mission materialization', () => {
   });
 
   function record(overrides: Partial<BacklogMissionRecord> = {}): BacklogMissionRecord {
-    return {
+    return completeMissionFixture(String(missionId('task-2294')), {
       id: missionId('task-2294'),
       repositoryId: repositoryId('parallix'),
       title: 'base title',
@@ -601,7 +604,7 @@ describe('Backlog Mission materialization', () => {
       review: null,
       netEngineeringLines: null,
       ...overrides,
-    };
+    });
   }
 
   function snapshot(
@@ -739,16 +742,14 @@ describe('Backlog Mission materialization', () => {
 describe('Checkpoint evidence recording', () => {
   // Recording applies handoff's reference semantics (TASK-2662) so a row handoff
   // would refuse is refused when it is written.
-  function fixture(rootDir: string | null = '/repo', saveError?: Error) {
-    let mission = {
-      id: missionId('task-2662'), repositoryId: repositoryId('repo'), status: 'active',
+  function fixture(rootDir: string | null = '/repo') {
+    let mission = typedMissionFixture(String(missionId('task-2662')), { repositoryId: repositoryId('repo'), status: 'active',
       successCriteria: ['first', 'second'], completedSuccessCriteria: [],
-      checkpoints: [1, 2].map((n) => ({ missionId: missionId('task-2662'), name: `CP-${n}`, firstLine: 'planned', goalCheck: [], nextActionText: '' })),
-    } as unknown as Mission;
+      checkpoints: [1, 2].map((n) => ({ missionId: missionId('task-2662'), name: `CP-${n}`, firstLine: 'planned', goalCheck: [], nextActionText: '' }))});
     let saves = 0;
     const store: MissionStore = {
-      load: async () => ({ kind: 'found', mission, version: missionVersion(1) }) as never,
-      save: async (next) => { if (saveError) { throw saveError; } mission = next; saves += 1; return missionVersion(2); },
+      load: async () => ({ kind: 'found', mission, version: missionVersion(1) }),
+      save: async (next) => { mission = next; saves += 1; return missionVersion(2); },
     };
     const existing = new Set(['/repo/test/unit/example.test.ts']);
     const service = new MissionCheckpointService(store, {
@@ -758,47 +759,12 @@ describe('Checkpoint evidence recording', () => {
     // Rows resolve to the authoritative success-criterion identity so handoff's
     // distinct-coverage check (TASK-2665) can match a row to the criterion it
     // evidences; a row for one criterion never counts as evidence for another.
-    const record = (name: string, evidence: readonly string[], options: { complete?: boolean; criteria?: readonly string[]; completionCapability?: boolean } = {}) => service.record({
-      operationId: 'op', missionId: missionId('task-2662'), capabilities: new Set(['checkpoint:record', ...(options.completionCapability === false ? [] : ['mission:context'])]), expectedVersion: missionVersion(1),
-      completeCriteria: options.complete,
-      checkpoint: { missionId: missionId('task-2662'), name, nextActionText: 'continue', goalCheck: evidence.map((text, index) => ({ criterion: options.criteria?.[index] ?? mission.successCriteria[index], evidence: text })) },
-    } as never);
+    const record = (name: string, evidence: readonly string[], options: { criteria?: readonly string[] } = {}) => service.record({
+      operationId: 'op', missionId: missionId('task-2662'), capabilities: new Set<import('../../../src/application/contracts.js').Capability>(['checkpoint:record']), expectedVersion: missionVersion(1),
+      checkpoint: { missionId: missionId('task-2662'), name, nextActionText: 'continue', goalCheck: evidence.map((text, index) => ({ criterion: options.criteria?.[index] ?? (mission.successCriteria ?? [])[index] ?? '', evidence: text })) },
+    });
     return { record, current: () => mission, saves: () => saves };
   }
-
-  test('one checkpoint write completes only supplied exact criteria and returns readback (TASK-2747)', async () => {
-    const f = fixture();
-    assert.equal((await f.record('CP-1', ['test/unit/example.test.ts'])).status, 'completed');
-    assert.deepEqual(f.current().completedSuccessCriteria, [], 'old invocation records evidence only');
-    const result = await f.record('CP-1', ['test/unit/example.test.ts'], { complete: true, criteria: ['second'] });
-    assert.equal(result.status, 'completed');
-    assert.deepEqual(result.value?.mission.completedSuccessCriteria, [1], 'retained first row is not completed');
-    assert.equal(result.value?.checkpoint.goalCheck.length, 2, 'prior valid evidence remains');
-    assert.equal(f.saves(), 2, 'one save per successful invocation');
-  });
-
-  for (const [label, evidence, criteria, completionCapability] of [
-    ['invalid evidence', 'trust me', ['first'], true],
-    ['unknown criterion', 'test/unit/example.test.ts', ['unknown'], true],
-    ['edited criterion', 'test/unit/example.test.ts', ['First'], true],
-    ['missing completion capability', 'test/unit/example.test.ts', ['first'], false],
-  ] as const) {
-    test(`checkpoint completion rejects ${label} without partial writes (TASK-2747)`, async () => {
-      const f = fixture();
-      const before = f.current();
-      assert.notEqual((await f.record('CP-1', [evidence], { complete: true, criteria, completionCapability })).status, 'completed');
-      assert.equal(f.current(), before);
-      assert.equal(f.saves(), 0);
-    });
-  }
-
-  test('checkpoint completion cannot survive a failed compare-and-swap (TASK-2747)', async () => {
-    const f = fixture('/repo', new Error('store write refused'));
-    const before = f.current();
-    assert.notEqual((await f.record('CP-1', ['test/unit/example.test.ts'], { complete: true })).status, 'completed');
-    assert.equal(f.current(), before);
-    assert.equal(f.saves(), 0);
-  });
 
   test('record rejects an unsupported evidence reference with an actionable diagnostic and writes nothing (TASK-2662)', async () => {
     const { record, saves } = fixture();
@@ -864,20 +830,18 @@ describe('Checkpoint evidence recording', () => {
 
 describe('Success criterion completion value', () => {
   function fixture(completed: readonly number[] = []) {
-    let mission = {
-      id: missionId('task-2631'), repositoryId: repositoryId('repo'), status: 'active',
-      successCriteria: ['first', 'second', 'third'], completedSuccessCriteria: completed,
-    } as unknown as Mission;
+    let mission = typedMissionFixture(String(missionId('task-2631')), { repositoryId: repositoryId('repo'), status: 'active',
+      successCriteria: ['first', 'second', 'third'], completedSuccessCriteria: completed});
     let version = 1;
     const store: MissionStore = {
-      load: async () => ({ kind: 'found', mission, version: missionVersion(version) }) as never,
+      load: async () => ({ kind: 'found', mission, version: missionVersion(version) }),
       save: async (next) => { mission = next; version += 1; return missionVersion(version); },
     };
     const history: OperationalHistoryEntry[] = [];
     const service = new MissionBriefService(store, { append: async (entry) => { history.push(entry); } });
     const mark = (criterion: number | 'all') => service.markSuccessCriteriaComplete({
       operationId: 'op', missionId: missionId('task-2631'), capabilities: new Set(['mission:context']), criterion,
-    } as never);
+    });
     return { mark, history, current: () => mission };
   }
 
@@ -909,11 +873,11 @@ describe('Success criterion completion value', () => {
 
   test('px status renders each criterion with its index and [X] or [ ] (TASK-2631)', () => {
     const lines: string[] = [];
-    renderStatus({
+    renderStatus(statusResult({
       slug: 'task-2631', branch: 'mission/task-2631',
-      missionData: { successCriteria: ['first', 'second'], completedSuccessCriteria: [1] } as unknown as StatusMissionData,
+      missionData: statusMissionData({ successCriteria: ['first', 'second'], completedSuccessCriteria: [1] }),
       staleWorktrees: [], agents: [], lastThreeCommits: [], uncommittedCount: 0,
-    } as unknown as StatusResult, (message) => lines.push(message));
+    }), (message) => lines.push(message));
     assert.ok(lines.includes('  1. [ ] first'), lines.join(' | '));
     assert.ok(lines.includes('  2. [X] second'), lines.join(' | '));
   });
@@ -930,14 +894,14 @@ describe('Success criterion completion value', () => {
   });
 
   test('mission mark-complete CLI maps its exclusive indexed and all forms to the completion service (TASK-2631)', async () => {
-    const received: Array<Record<string, unknown>> = [];
+    const received: Parameters<import('../../../src/application/mission-brief-service.js').MissionBriefService['markSuccessCriteriaComplete']>[0][] = [];
     const command = createMissionCommand({
-      brief: { markSuccessCriteriaComplete: async (request: Record<string, unknown>) => {
+      brief: { author: async () => { throw new Error('Unexpected author command'); }, markSuccessCriteriaComplete: async request => {
         received.push(request);
-        return { status: 'completed', value: { completed: [0], version: missionVersion(8) } };
+        return { status: 'completed', durableEvidence: [], value: { completed: [0], version: missionVersion(8) } };
       } },
       resolveSlug: () => 'task-2631',
-    } as never);
+    });
 
     await command(['mark-complete', '--criterion', '2', '--expected-version', '7']);
     await command(['mark-complete', '--all', '--expected-version', '7']);

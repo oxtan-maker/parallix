@@ -31,12 +31,10 @@ import * as reviewAdapter from '../../review/review-adapter.js';
 import * as rebaseWorkflow from '../../rebase/rebase-workflow-adapter.js';
 import * as repositoryGates from '../../config/repository-gates.js';
 import * as gates from './integrate-gates.js';
-import { runStagedTierGuards } from './integrate-staged-guards.js';
 import * as integrationGateRebound from './integrate-gate-rebound.js';
 import * as conflict from './integrate-conflict.js';
 import * as post from './integrate-post.js';
 import type { IntegrateWorkflowPorts } from '../../../application/ports/integrate-workflow.js';
-
 
 /**
  * Bind the concrete mechanisms to the workflow ports. Every method reaches its
@@ -49,15 +47,7 @@ export function createIntegratePorts(configuration?: ParallixConfiguration): Int
     ...options, configuration, verificationEvidence: createIntegrationVerificationEvidencePort(configuration),
   });
   return {
-    process: {
-      terminate: code => process.exit(code),
-      cwd: () => process.cwd(),
-      chdir: directory => process.chdir(directory),
-      claimIntegration: async slug => {
-        const rootKey = crypto.createHash('sha256').update(getPrimaryWorktree(configuration)).digest('hex').slice(0, 16);
-        return claimRecoveryLock(`integrate-${rootKey}-${slug}`);
-      },
-    },
+    process: composeIntegrationProcess(configuration),
     fileSystem: {
       existsSync: target => fs.existsSync(target),
       isSymbolicLink: target => fs.lstatSync(target).isSymbolicLink(),
@@ -114,7 +104,7 @@ export function createIntegratePorts(configuration?: ParallixConfiguration): Int
       formatVerificationCommand: (area, rootDir) => verification.formatVerificationCommand(area, rootDir),
     },
     agents: {
-      startAgent: (step, options) => agents.startAgent(step, { ...options, configuration } as unknown as Parameters<typeof agents.startAgent>[1]),
+      startAgent: (step, options) => agents.startAgent(step, { ...options, configuration }),
       selectAgent: step => agents.selectAgent(step, { configuration }),
       workflowLauncherStatus: (agent, rootDir) => agents.workflowLauncherStatus(agent, rootDir, configuration),
       applyAgentFallback: options => applyAgentFallback(options as Parameters<typeof applyAgentFallback>[0]),
@@ -135,44 +125,63 @@ export function createIntegratePorts(configuration?: ParallixConfiguration): Int
     gates: {
       loadPhaseGates: (rootDir, phase) => repositoryGates.loadPhaseGates(rootDir, phase),
       loadRequirePreIntegration: rootDir => repositoryGates.loadRequirePreIntegration(rootDir),
-      runPhaseGates: (phase, options) => runIntegrationGates(phase, options as Parameters<typeof repositoryGates.runPhaseGates>[1]),
+      runPhaseGates: (phase, options) => runIntegrationGates(phase, options),
       captureFinalIntegrationTree: rootDir => gates.captureFinalIntegrationTree(rootDir),
       listChangedPathsBetween: (rootDir, fromCommit, toCommit) => gates.listChangedPathsBetween(rootDir, fromCommit, toCommit),
       resolveIntegrationVerificationWorktree: (slug, options) => gates.resolveIntegrationVerificationWorktree(slug, options),
       isIntendedPayloadAtHead: (rootDir, paths, options) => gates.isIntendedPayloadAtHead(rootDir, paths, options),
-      runStagedTierGuards,
       routeIntegrationGateFailure: options => integrationGateRebound.routeIntegrationGateFailure({ ...options, runPhaseGatesFn: runIntegrationGates }),
     },
-    checkout: {
-      stashMainCheckoutIfNeeded: options => conflict.stashMainCheckoutIfNeeded(options),
-      restoreMainCheckoutStash: stash => conflict.restoreMainCheckoutStash(stash),
-      maybeDropStashAfterCollision: (restoreResult, rootDir) => conflict.maybeDropStashAfterCollision(restoreResult, rootDir),
-      reportStashPopFailure: (slug, restoreResult, options) => conflict.reportStashPopFailure(slug, restoreResult, options),
-      prepareNoisePatchForSquash: (rootDir, options) => conflict.prepareNoisePatchForSquash(rootDir, options),
-      restoreNoisePatchAfterSquash: (rootDir, patchPath, options) => conflict.restoreNoisePatchAfterSquash(rootDir, patchPath, options),
-      getUnresolvedIndexConflicts: rootDir => conflict.getUnresolvedIndexConflicts(rootDir) as { ok: boolean; error?: string; files: string[] },
-      areAllBacklogOnlyConflicts: files => conflict.areAllBacklogOnlyConflicts(files),
-      findExistingSquashCommit: (rootDir, slug) => conflict.findExistingSquashCommit(rootDir, slug),
-      findLandedSquashOnBaseBranch: (rootDir, slug) => conflict.findLandedSquashOnBaseBranch(rootDir, slug),
-      buildConflictResolutionPrompt: (slug, area, options) => conflict.buildConflictResolutionPrompt(slug, area, options),
-      rewriteWorktreePaths: (taskFile, slug, options) => conflict.rewriteWorktreePaths(taskFile, slug, options),
+    checkout: composeIntegrationCheckout(),
+    landing: composeIntegrationLanding(configuration),
+  };
+}
+
+function composeIntegrationProcess(configuration: ParallixConfiguration | undefined): IntegrateWorkflowPorts['process'] {
+  return {
+    terminate: code => process.exit(code),
+    cwd: () => process.cwd(),
+    chdir: directory => process.chdir(directory),
+    claimIntegration: async slug => {
+      const rootKey = crypto.createHash('sha256').update(getPrimaryWorktree(configuration)).digest('hex').slice(0, 16);
+      return claimRecoveryLock(`integrate-${rootKey}-${slug}`);
     },
-    landing: {
-      updateGraphifyRepository: rootDir => missionUtils.updateGraphifyKnowledgeGraph({ rootDir, configuration, failureHint: 'Continuing without blocking integration.' }),
-      createAbort: () => new post.IntegrationAbort(),
-      isAbort: error => error instanceof post.IntegrationAbort,
-      classifyHookFailure: output => post.classifyHookFailure(output),
-      reportSyncMergedFailure: syncResult => post.reportSyncMergedFailure(syncResult),
-      resolveForgejoUserForIntegration: taskAssignee => post.resolveForgejoUserForIntegration(taskAssignee),
-      isNoMergeToAbortResult: result => post.isNoMergeToAbortResult(result),
-      persistLandedIntegrationOrAbort: (slug, commit, missionServices, options) => post.persistLandedIntegrationOrAbort(slug, commit, missionServices, options),
-      closeLandedIntegrationOrAbort: (slug, commit, missionServices) => post.closeLandedIntegrationOrAbort(slug, commit, missionServices),
-      recordPostIntegrationStatsOrAbort: (slug, options) => post.recordPostIntegrationStatsOrAbort(slug, { ...options, configuration }),
-      hasIntegrationMeasurement: (slug, rootDir) => post.hasIntegrationMeasurement(slug, rootDir),
-      runPreCommitHookOrAbort: (slug, options) => post.runPreCommitHookOrAbort(slug, options),
-      runPostIntegrateHookOrAbort: (slug, options) => post.runPostIntegrateHookOrAbort(slug, options),
-      cleanupMissionWorktree: slug => post.cleanupMissionWorktree(slug, { rootDir: missionUtils.getPrimaryWorktree(configuration), configuration }),
-    },
+  };
+}
+
+function composeIntegrationCheckout(): IntegrateWorkflowPorts['checkout'] {
+  return {
+    stashMainCheckoutIfNeeded: options => conflict.stashMainCheckoutIfNeeded(options),
+    restoreMainCheckoutStash: stash => conflict.restoreMainCheckoutStash(stash),
+    maybeDropStashAfterCollision: (restoreResult, rootDir) => conflict.maybeDropStashAfterCollision(restoreResult, rootDir),
+    reportStashPopFailure: (slug, restoreResult, options) => conflict.reportStashPopFailure(slug, restoreResult, options),
+    prepareNoisePatchForSquash: (rootDir, options) => conflict.prepareNoisePatchForSquash(rootDir, options),
+    restoreNoisePatchAfterSquash: (rootDir, patchPath, options) => conflict.restoreNoisePatchAfterSquash(rootDir, patchPath, options),
+    getUnresolvedIndexConflicts: rootDir => conflict.getUnresolvedIndexConflicts(rootDir),
+    areAllBacklogOnlyConflicts: files => conflict.areAllBacklogOnlyConflicts(files),
+    findExistingSquashCommit: (rootDir, slug) => conflict.findExistingSquashCommit(rootDir, slug),
+    findLandedSquashOnBaseBranch: (rootDir, slug) => conflict.findLandedSquashOnBaseBranch(rootDir, slug),
+    buildConflictResolutionPrompt: (slug, area, options) => conflict.buildConflictResolutionPrompt(slug, area, options),
+    rewriteWorktreePaths: (taskFile, slug, options) => conflict.rewriteWorktreePaths(taskFile, slug, options),
+  };
+}
+
+function composeIntegrationLanding(configuration: ParallixConfiguration | undefined): IntegrateWorkflowPorts['landing'] {
+  return {
+    updateGraphifyRepository: rootDir => missionUtils.updateGraphifyKnowledgeGraph({ rootDir, configuration, failureHint: 'Continuing without blocking integration.' }),
+    createAbort: () => new post.IntegrationAbort(),
+    isAbort: error => error instanceof post.IntegrationAbort,
+    classifyHookFailure: output => post.classifyHookFailure(output),
+    reportSyncMergedFailure: syncResult => post.reportSyncMergedFailure(syncResult),
+    resolveForgejoUserForIntegration: taskAssignee => post.resolveForgejoUserForIntegration(taskAssignee),
+    isNoMergeToAbortResult: result => post.isNoMergeToAbortResult(result),
+    persistLandedIntegrationOrAbort: (slug, commit, missionServices, options) => post.persistLandedIntegrationOrAbort(slug, commit, missionServices, options),
+    closeLandedIntegrationOrAbort: (slug, commit, missionServices) => post.closeLandedIntegrationOrAbort(slug, commit, missionServices),
+    recordPostIntegrationStatsOrAbort: (slug, options) => post.recordPostIntegrationStatsOrAbort(slug, { ...options, configuration }),
+    hasIntegrationMeasurement: (slug, rootDir) => post.hasIntegrationMeasurement(slug, rootDir),
+    runPreCommitHookOrAbort: (slug, options) => post.runPreCommitHookOrAbort(slug, options),
+    runPostIntegrateHookOrAbort: (slug, options) => post.runPostIntegrateHookOrAbort(slug, options),
+    cleanupMissionWorktree: slug => post.cleanupMissionWorktree(slug, { rootDir: missionUtils.getPrimaryWorktree(configuration), configuration }),
   };
 }
 
@@ -255,7 +264,7 @@ export {
  * they default to, so a partial test double is still a type error here rather
  * than silently accepted through the port's structural types.
  */
-function printIntegrationPreflight(context: any, options: {
+function printIntegrationPreflight(context: Parameters<typeof workflow.printIntegrationPreflight>[0], options: {
   configuration?: ParallixConfiguration;
   readTokenFn?: typeof forgejo.readToken,
   resolveTokenFileFn?: typeof forgejo.resolveTokenFile,
@@ -266,14 +275,14 @@ function printIntegrationPreflight(context: any, options: {
   isForgejoReviewEnabledFn?: typeof productConfig.isForgejoReviewEnabled,
   gitFn?: typeof git.git,
   // Matches `fmt.log.plain`, the production default the workflow uses.
-  log?: (_text: string) => string | null,
+  log?: (_text: string) => void,
 } = {}) {
   return workflow.printIntegrationPreflight(context, options as Parameters<typeof workflow.printIntegrationPreflight>[1]);
 }
 
 // The default export also carries the named symbols as properties, mirroring
 // the original CommonJS shape for callers that reach them through `default`.
-Object.assign(integrate, {
+const integrateWithHelpers = Object.assign(integrate, {
   resolveConflictsForMission: conflict.resolveConflictsForMission,
   rewriteWorktreePaths: conflict.rewriteWorktreePaths,
   buildConflictResolutionPrompt: conflict.buildConflictResolutionPrompt,
@@ -321,7 +330,7 @@ Object.assign(integrate, {
   runIntegrationRebase,
 });
 
-export default integrate;
+export default integrateWithHelpers;
 export {
   integrate,
   parseIntegrateArgs,

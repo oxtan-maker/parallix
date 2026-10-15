@@ -1,3 +1,4 @@
+import { seedDraftedContract } from '../../helpers/seed-drafted-contract.js';
 // Historical regression provenance: TASK-2347.02.
 /**
  * Lifecycle event stream for the metrics slice (TASK-2622.13 consolidation).
@@ -15,8 +16,6 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { MissionBriefService } from '../../../src/application/mission-brief-service.js';
-import { MissionCheckpointService } from '../../../src/application/mission-checkpoint-service.js';
 import { MissionIntakeService } from '../../../src/application/mission-intake-service.js';
 import { MissionIntegrationService } from '../../../src/application/mission-integration-service.js';
 import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
@@ -46,33 +45,7 @@ import { repositoryId } from '../../../src/domain/repository.js';
  * least one verification gate (`requireDraftedContract` in mission-workflow.ts).
  * A fixture that activates without it is not a mission the workflow can produce.
  */
-async function seedDraftedContract(store: never, mission: never): Promise<number> {
-  const briefService = new MissionBriefService(store as never);
-  await briefService.update({
-    operationId: 'op-brief', missionId: mission,
-    capabilities: new Set(['mission:context']),
-    patch: { goal: 'Fixture goal', why: 'Fixture why', scope: 'Fixture scope' },
-  } as never);
-  await briefService.setGates({
-    operationId: 'op-gates', missionId: mission,
-    capabilities: new Set(['mission:context']), gates: ['npm test'],
-  } as never);
-  await briefService.setSuccessCriteria({
-    operationId: 'op-criteria', missionId: mission,
-    capabilities: new Set(['mission:context']), criteria: ['The fixture mission is done'],
-  } as never);
-  await briefService.setPredictedNelBucket({
-    operationId: 'op-nel', missionId: mission,
-    capabilities: new Set(['mission:context']), bucket: 'Small',
-  } as never);
-  const plan = await new MissionCheckpointService(store as never).plan({
-    operationId: 'op-plan', missionId: mission,
-    capabilities: new Set(['mission:context']), name: 'CP-1', description: 'Do the fixture work',
-  } as never);
-  // Recording the contract advances the Mission, so the caller activates
-  // against the version the seeding produced rather than the one before it.
-  return (plan as { value: { version: number } }).value.version;
-}
+
 
 const MISSION = missionId('task-2347.02-fixture');
 const REPOSITORY = repositoryId('parallix');
@@ -121,7 +94,7 @@ async function toIntegration(fixture: Fixture, _intakeVersion: MissionVersion): 
   const lifecycle = new MissionLifecycleService(fixture.store);
   // Intake materializes the mission as `backlog`; activation demands `refined`,
   // and refine demands the contract the draft records.
-  const contractVersion = await seedDraftedContract(fixture.store as never, MISSION as never);
+  const contractVersion = await seedDraftedContract(fixture.store, MISSION);
   const refined = await lifecycle.transition({
     operationId: 'op-refine',
     missionId: MISSION,
@@ -224,7 +197,7 @@ describe("lifecycle event stream gaps", () => {
     // fell inside the same second — these two are 800ms apart.
     const lifecycle = new MissionLifecycleService(fixture.store);
     // Activation demands `refined`, and intake materializes `backlog`.
-    await seedDraftedContract(fixture.store as never, MISSION as never);
+    await seedDraftedContract(fixture.store, MISSION);
     const refined = await lifecycle.transition({
       operationId: 'op-refine',
       missionId: MISSION,

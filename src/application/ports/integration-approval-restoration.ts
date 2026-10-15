@@ -6,5 +6,4 @@ export interface IntegrationApprovalRestorationPort {
   samePatch(_approved: MissionRevision, _candidate: MissionRevision): Promise<boolean>;
   validation(_missionId: string): Promise<RestorationValidation | null>;
   now(): string;
-  clock(): number;
 }

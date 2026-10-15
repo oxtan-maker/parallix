@@ -25,7 +25,7 @@ const { startVibeAgent } = startVibeAgentModule;
 const { ensureVibeHome, vibeConfigPath, vibeSessionLogDir } = ensureVibeHomeModule;
 const { processResult } = processResultModule;
 const { getVibeProviderModel } = getVibeProviderModelModule;
-function withVibeLauncher(run) {
+function withVibeLauncher(run: () => ReturnType<typeof startVibeAgent>) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-test-'));
   const launcher = path.join(tmpRoot, 'vibe');
   fs.writeFileSync(launcher, `#!${process.execPath}\nprocess.exit(0);\n`);
@@ -59,6 +59,7 @@ test('resolveVibeCommand returns bare "vibe"', () => {
 // ---------- extractVibeSessionId ----------
 
 test('extractVibeSessionId returns null for no match', () => {
+  // @ts-expect-error Intentional absent output verifies the parser's null-input contract.
   assert.equal(extractVibeSessionId(null), null);
   assert.equal(extractVibeSessionId(''), null);
   assert.equal(extractVibeSessionId('some random text'), null);
@@ -124,10 +125,8 @@ test('buildVibeInvocation sets cwd to worktree', () => {
 test('buildVibeInvocation merges env', () => {
   const inv = buildVibeInvocation({ configuration: resolveConfiguration(process.env), prompt: 'test', worktree: '/tmp', env: { CUSTOM: 'value' } });
   assert.equal(inv.command, 'vibe');
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   assert.equal(inv.options.env.CUSTOM, 'value');
   assert.equal(inv.options.env.VIBE_HOME, '/tmp/.workflow/vibe-home');
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   assert.equal(inv.options.env.PATH, process.env.PATH);
 });
 
@@ -243,12 +242,12 @@ const ZERO_STATS_META = {
  */
 function makeRecentMeta() {
   const now = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
+  const pad = (n: number) => String(n).padStart(2, '0');
   const iso = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.000Z`;
   return Object.assign({}, SAMPLE_META, { start_time: iso });
 }
 
-function createTempSessionDir(tmpDir, meta, subDirName) {
+function createTempSessionDir(tmpDir: string, meta: unknown, subDirName: string) {
   const dir = path.join(tmpDir, subDirName);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta));
@@ -256,6 +255,7 @@ function createTempSessionDir(tmpDir, meta, subDirName) {
 }
 
 test('processResult returns telemetry null for null input', () => {
+  // @ts-expect-error Intentional absent process output returns empty telemetry.
   const result = processResult(null);
   assert.equal(result.telemetry, null);
   assert.equal(result.sessionId, null);

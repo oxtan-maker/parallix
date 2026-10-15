@@ -1,3 +1,5 @@
+import { missionId as fixtureMissionId } from '../../../src/domain/mission.js';
+import { agentFamily as fixtureAgentFamily } from '../../../src/domain/agents.js';
 // TASK-2322.09 CP 5 — SessionMarker repository and adapter tests.
 //
 // Fast unit tests with mocked provider dependencies and isolated database
@@ -78,14 +80,14 @@ describe('resume — same family matches, different family rejects', () => {
     try {
       const adapter = new SqliteSessionMarkerAdapter(db, TEST_REPOSITORY_ID);
       await adapter.save({
-        missionId: 'task-0001' as any,
+        missionId: fixtureMissionId('task-0001'),
         role: 'execute',
-        agent: 'claude' as any,
+        agent: fixtureAgentFamily('claude'),
         lastLaunched: '2026-07-29T00:00:00Z',
         sessionId: 'sess-abc',
       });
 
-      const resume = await adapter.shouldResume('task-0001' as any, 'execute', 'claude' as any);
+      const resume = await adapter.shouldResume(fixtureMissionId('task-0001'), 'execute', fixtureAgentFamily('claude'));
       assert.equal(resume, true, 'shouldResume should return true for matching family');
     } finally {
       await db.close();
@@ -98,14 +100,14 @@ describe('resume — same family matches, different family rejects', () => {
     try {
       const adapter = new SqliteSessionMarkerAdapter(db, TEST_REPOSITORY_ID);
       await adapter.save({
-        missionId: 'task-0001' as any,
+        missionId: fixtureMissionId('task-0001'),
         role: 'execute',
-        agent: 'claude' as any,
+        agent: fixtureAgentFamily('claude'),
         lastLaunched: '2026-07-29T00:00:00Z',
         sessionId: 'sess-abc',
       });
 
-      const resume = await adapter.shouldResume('task-0001' as any, 'execute', 'pi' as any);
+      const resume = await adapter.shouldResume(fixtureMissionId('task-0001'), 'execute', fixtureAgentFamily('pi'));
       assert.equal(resume, false, 'shouldResume should return false for different family');
     } finally {
       await db.close();
@@ -117,7 +119,7 @@ describe('resume — same family matches, different family rejects', () => {
     const { db, dir } = await createDbWithSchema();
     try {
       const adapter = new SqliteSessionMarkerAdapter(db, TEST_REPOSITORY_ID);
-      const resume = await adapter.shouldResume('task-0001' as any, 'execute', 'claude' as any);
+      const resume = await adapter.shouldResume(fixtureMissionId('task-0001'), 'execute', fixtureAgentFamily('claude'));
       assert.equal(resume, false, 'shouldResume should return false when no marker exists');
     } finally {
       await db.close();
@@ -130,14 +132,14 @@ describe('resume — same family matches, different family rejects', () => {
     try {
       const adapter = new SqliteSessionMarkerAdapter(db, TEST_REPOSITORY_ID);
       await adapter.save({
-        missionId: 'task-0001' as any,
+        missionId: fixtureMissionId('task-0001'),
         role: 'execute',
-        agent: 'claude' as any,
+        agent: fixtureAgentFamily('claude'),
         lastLaunched: '2026-07-29T00:00:00Z',
         sessionId: null,
       });
 
-      const resume = await adapter.shouldResume('task-0001' as any, 'review', 'claude' as any);
+      const resume = await adapter.shouldResume(fixtureMissionId('task-0001'), 'review', fixtureAgentFamily('claude'));
       assert.equal(resume, false, 'shouldResume should return false for different role');
     } finally {
       await db.close();
@@ -428,7 +430,7 @@ describe('database-unavailable — explicit error, no file fallback', () => {
 
       let errorThrown = false;
       try {
-        await adapter.find('task-0001' as any, 'execute');
+        await adapter.find(fixtureMissionId('task-0001'), 'execute');
       } catch (err) {
         errorThrown = true;
         assert.ok(
@@ -454,14 +456,14 @@ describe('session identity round-trips without data loss', () => {
       const adapter = new SqliteSessionMarkerAdapter(db, TEST_REPOSITORY_ID);
 
       await adapter.save({
-        missionId: 'task-2322.09' as any,
+        missionId: fixtureMissionId('task-2322.09'),
         role: 'execute',
-        agent: 'claude' as any,
+        agent: fixtureAgentFamily('claude'),
         lastLaunched: '2026-07-29T14:30:00Z',
         sessionId: 'sess-roundtrip-abc-123',
       });
 
-      const found = await adapter.find('task-2322.09' as any, 'execute');
+      const found = await adapter.find(fixtureMissionId('task-2322.09'), 'execute');
       assert.ok(found !== null, 'marker should exist');
       assert.equal(found!.missionId, 'task-2322.09', 'missionId should match');
       assert.equal(found!.role, 'execute', 'role should match');
@@ -480,14 +482,14 @@ describe('session identity round-trips without data loss', () => {
       const adapter = new SqliteSessionMarkerAdapter(db, TEST_REPOSITORY_ID);
 
       await adapter.save({
-        missionId: 'task-0001' as any,
+        missionId: fixtureMissionId('task-0001'),
         role: 'draft',
-        agent: 'pi' as any,
+        agent: fixtureAgentFamily('pi'),
         lastLaunched: '2026-07-29T00:00:00Z',
         sessionId: null,
       });
 
-      const found = await adapter.find('task-0001' as any, 'draft');
+      const found = await adapter.find(fixtureMissionId('task-0001'), 'draft');
       assert.equal(found!.sessionId, null, 'null sessionId should round-trip');
     } finally {
       await db.close();
@@ -599,7 +601,8 @@ describe('migration 0004 — session_markers table schema', () => {
       try {
         await repo.save({
           missionId: missionId('task-0001'),
-          role: 'unknown' as any,
+          // @ts-expect-error Intentional invalid session role exercises persistence validation.
+          role: 'unknown',
           agent: agentFamily('claude'),
           lastLaunched: '2026-07-29T00:00:00Z',
           sessionId: null,
@@ -774,7 +777,7 @@ describe('runtime launch role mapping — real SQLite adapter', () => {
           }),
         });
 
-        const stored = await adapter.find(launch.missionId as any, launch.expectedRole);
+        const stored = await adapter.find(missionId(launch.missionId), launch.expectedRole);
         assert.equal(stored?.role, launch.expectedRole);
         assert.equal(stored?.sessionId, `session-${launch.expectedRole}`);
       }

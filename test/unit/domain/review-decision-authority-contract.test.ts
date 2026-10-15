@@ -1,3 +1,5 @@
+import { ReviewState } from '../../../src/adapters/review/review-state.js';
+import { reviewStateWriterFixture } from '../../helpers/review-state-writer.js';
 
 // review decision authority contract.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
@@ -46,7 +48,7 @@ const MISSION = missionId('task-2398');
 const CAPABILITIES = new Set(['mission:intake', 'mission:transition', 'checkpoint:record'] as const);
 const reviewer = agentFamily('codex');
 const implementer = agentFamily('custom');
-const eligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer] } as never);
+const eligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' });
 
 const change = {
   kind: 'pull-request' as const,
@@ -55,7 +57,7 @@ const change = {
   url: 'http://localhost:3300/example/parallix/pulls/2398',
   sourceBranch: 'mission/task-2398',
   targetBranch: 'main',
-};
+} satisfies import("../../../src/domain/review.js").ReviewedChange;
 
 const temporaryDirectories: string[] = [];
 
@@ -237,8 +239,8 @@ describe("SC3: review-artifacts.ts approve path (recordLocalReviewVerdict)", () 
       getPrAuthorFn: () => 'codex',
       buildMetadataFooterFn: () => '',
       missionStore: store,
-      worktree,
-      createEventFn: (() => ({ ok: true, path: null })) as any,
+      worktree, revision: 'reviewed-head',
+      createEventFn: (() => ({ ok: true as const, path: null })),
       log: () => {},
       error: () => {},
     } as Parameters<typeof postWorkflowReview>[3];
@@ -283,78 +285,78 @@ describe("SC3: review-commands.ts submitReviewRound approve path", () => {
     return dir;
   }
 
-  const reviewingState = () =>
-    ({ round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl', transitionTo: () => {} }) as never;
+  const reviewingState: NonNullable<NonNullable<Parameters<typeof submitReviewRound>[3]>["readReviewStateFn"]> = () =>
+    new ReviewState('task-2398', { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl' });
 
   it('provider=none: an illegal approve fails loudly with exit(1) and "could not be recorded"', async () => {
-    let exited: number | null = null;
+    let exited: { value: number | null } = { value: null };
     let recordCalled = false;
     await submitReviewRound('task-2398', 'approve', 'LGTM', {
-      worktree: tempWorktree(),
+      worktree: tempWorktree(), revision: 'reviewed-head',
       isForgejoReviewEnabledFn: () => false,
-      missionStore: {} as any,
+      missionStore: inMemoryTransitionStore(fixtureMission('task-2398')),
       recordApprovalFn: (async () => {
         recordCalled = true;
-        return { outcome: 'failed', diagnostic: 'Approve cannot move the round to approved while review is fixing' } as never;
-      }) as any,
+        return { outcome: 'failed', diagnostic: 'Approve cannot move the round to approved while review is fixing' };
+      }),
       readReviewStateFn: () => null,
-      writeReviewStateFn: (() => {}) as any,
-      exit: ((code: number) => { exited = code; }) as any,
+      writeReviewStateFn: reviewStateWriterFixture(() => {}),
+      exit: ((code: number) => { exited.value = code; }),
       log: () => {},
       error: () => {},
     });
     assert.equal(recordCalled, true, 'the review-commands.ts approve block ran recordApproval');
-    assert.equal(exited, 1, 'an illegal approve exits non-zero');
+    assert.equal(exited.value, 1, 'an illegal approve exits non-zero');
   });
 
   it('provider=none: no Mission authority bound logs the WARN and does not exit', async () => {
     const logs: string[] = [];
-    let exited: number | null = null;
+    let exited: { value: number | null } = { value: null };
     await submitReviewRound('task-2398', 'approve', 'LGTM', {
-      worktree: tempWorktree(),
+      worktree: tempWorktree(), revision: 'reviewed-head',
       isForgejoReviewEnabledFn: () => false,
       // deliberately no missionStore
       readReviewStateFn: () => null,
-      writeReviewStateFn: (() => {}) as any,
+      writeReviewStateFn: reviewStateWriterFixture(() => {}),
       log: (m) => logs.push(m),
-      exit: ((code: number) => { exited = code; }) as any,
+      exit: ((code: number) => { exited.value = code; }),
       error: () => {},
     });
     assert.ok(logs.some((l) => /No Mission authority bound/.test(l)), 'warns when no authority is bound');
-    assert.equal(exited, null, 'the WARN path does not exit');
+    assert.equal(exited.value, null, 'the WARN path does not exit');
   });
 
   it('provider-backed: a failed POST leaves NO approve recorded on the aggregate (F1)', async () => {
     let postCalled = false;
     let recordCalled = false;
-    let exited: number | null = null;
+    let exited: { value: number | null } = { value: null };
     await submitReviewRound('task-2398', 'approve', 'LGTM', {
-      worktree: tempWorktree(),
+      worktree: tempWorktree(), revision: 'reviewed-head',
       isForgejoReviewEnabledFn: () => true,
       // bound like the three sibling tests so the recording blocks below are
       // reachable — without it recordCalled === false would be true by
       // construction (F7) and the regression it closes would be invisible.
-      missionStore: {} as any,
+      missionStore: inMemoryTransitionStore(fixtureMission('task-2398')),
       readReviewStateFn: reviewingState,
-      writeReviewStateFn: (() => {}) as any,
+      writeReviewStateFn: reviewStateWriterFixture(() => {}),
       readTokenFn: () => 'token',
       getPrAuthorFn: () => 'someone-else',
       postReviewFn: () => {
         postCalled = true;
-        return { ok: false, status: 500, data: { message: 'boom' } } as never;
+        return { statusCode: null, stderr: null, error: null,  ok: false, status: 500, data: { message: 'boom' } };
       },
       recordApprovalFn: (async () => {
         recordCalled = true;
-        return { outcome: 'recorded' } as never;
-      }) as any,
-      transitionTaskFn: (() => {}) as any,
-      resolveTaskFileFn: () => ({ ok: false }) as any,
+        return { outcome: 'recorded' };
+      }),
+      transitionTaskFn: (async () => true),
+      resolveTaskFileFn: () => ({ matches: [], reason: 'missing',  ok: false }),
       log: () => {},
       error: () => {},
-      exit: ((code: number) => { exited = code; }) as any,
+      exit: ((code: number) => { exited.value = code; }),
     });
     assert.equal(postCalled, true, 'the provider POST was attempted');
-    assert.equal(exited, 1, 'a failed POST exits 1');
+    assert.equal(exited.value, 1, 'a failed POST exits 1');
     assert.equal(recordCalled, false, 'the approve was NOT recorded after a failed POST — the mission stays in review');
   });
 
@@ -363,25 +365,25 @@ describe("SC3: review-commands.ts submitReviewRound approve path", () => {
     let recordCalled = false;
     let order: string[] = [];
     await submitReviewRound('task-2398', 'approve', 'LGTM', {
-      worktree: tempWorktree(),
+      worktree: tempWorktree(), revision: 'reviewed-head',
       isForgejoReviewEnabledFn: () => true,
       readReviewStateFn: reviewingState,
-      writeReviewStateFn: (() => {}) as any,
+      writeReviewStateFn: reviewStateWriterFixture(() => {}),
       readTokenFn: () => 'token',
       getPrAuthorFn: () => 'someone-else',
       postReviewFn: () => {
         postCalled = true;
         order.push('post');
-        return { ok: true } as never;
+        return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true };
       },
-      missionStore: {} as any,
+      missionStore: inMemoryTransitionStore(fixtureMission('task-2398')),
       recordApprovalFn: (async () => {
         recordCalled = true;
         order.push('record');
-        return { outcome: 'recorded' } as never;
-      }) as any,
-      transitionTaskFn: (() => {}) as any,
-      resolveTaskFileFn: () => ({ ok: false }) as any,
+        return { outcome: 'recorded' };
+      }),
+      transitionTaskFn: (async () => true),
+      resolveTaskFileFn: () => ({ matches: [], reason: 'missing',  ok: false }),
       getTaskStatusFn: () => null,
       log: () => {},
       error: () => {},
@@ -395,8 +397,8 @@ describe("SC3: review-commands.ts submitReviewRound approve path", () => {
 it('classifier decision preserves review authority and rejects stale/partial scope (TASK-2658)', async () => {
   const { applyClassifierReview, assertClassifierReviewSource, LEGACY_CLASSIFIER_POLICY_VERSION } = await import('../../../src/domain/classifier-review.js');
   const { repeatReview } = await import('../../fixtures/repeat-review.js');
-  const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'd', attemptId: 'a', provider: 'typesafe', model: 'jev',
-    packetHash: 'c'.repeat(64), priorRevision: 'a'.repeat(40), candidateRevision: 'b'.repeat(40), findingIds: ['F1'], policyVersion: 'jev-three-question-51-80-89-v1', label: 'addresses', score: 0.52 };
+  const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'd', provider: 'typesafe', model: 'jev',
+    packetHash: 'c'.repeat(64), priorRevision: 'a'.repeat(40), candidateRevision: 'b'.repeat(40), findingIds: ['F1'], policyVersion: 'jev-three-question-51-80-89-omissions-v2', label: 'addresses', score: 0.52 } satisfies NonNullable<Parameters<typeof applyClassifierReview>[1]>;
   const review = repeatReview();
   const legacy = { ...source, policyVersion: LEGACY_CLASSIFIER_POLICY_VERSION, score: 0.51 };
   assert.doesNotThrow(() => assertClassifierReviewSource(legacy), 'historical decisions retain their original threshold');
@@ -407,27 +409,28 @@ it('classifier decision preserves review authority and rejects stale/partial sco
   assert.equal(currentReviewRound(approved).reviewer, 'claude', 'classifier never impersonates or replaces the general reviewer');
   assert.equal(currentReviewRound(approved).phase, 'approved');
   assert.throws(() => applyClassifierReview(review, { ...source, findingIds: [] }, 'clear', '2026-10-06T00:00:00Z'), /provenance/);
-  assert.throws(() => applyClassifierReview(review, { ...source, candidateRevision: 'c'.repeat(40) }, 'clear', '2026-10-06T00:00:00Z'), /stale/);
+  assert.throws(() => applyClassifierReview(review, { ...source, priorRevision: 'c'.repeat(40) }, 'clear', '2026-10-06T00:00:00Z'), /stale/);
   assert.throws(() => applyClassifierReview(review, { ...source, score: 0.50 }, 'clear', '2026-10-06T00:00:00Z'), /provenance/);
 });
 
-it('classifier provenance is validated once and the candidate round is pinned by a typed helper (TASK-2675)', async () => {
-  const { applyClassifierReview, reviewAtCandidateRevision } = await import('../../../src/domain/classifier-review.js');
+it('classifier provenance binds a decided head without rewriting the start (TASK-2675, TASK-2752)', async () => {
+  const { applyClassifierReview } = await import('../../../src/domain/classifier-review.js');
   const { repeatReview } = await import('../../fixtures/repeat-review.js');
   const review = repeatReview();
   const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'd', provider: 'typesafe', model: 'jev',
     packetHash: 'c'.repeat(64), priorRevision: 'a'.repeat(40), candidateRevision: 'b'.repeat(40), findingIds: ['F1'],
-    policyVersion: 'jev-three-question-51-80-89-v1', label: 'addresses', score: 0.52 };
+    policyVersion: 'jev-three-question-51-80-89-omissions-v2', label: 'addresses', score: 0.52 };
   // Malformed provenance is rejected by the single assertion before any scope check.
   for (const broken of [{ ...source, identity: 'other' }, { ...source, packetHash: 'short' }, { ...source, score: 1.2 }, { ...source, label: 'insufficient_evidence' }]) {
-    assert.throws(() => applyClassifierReview(review, broken as never, 'clear', '2026-10-06T00:00:00Z'), /provenance/);
+    // @ts-expect-error Deliberately invalid classifier identity must fail provenance validation.
+    assert.throws(() => applyClassifierReview(review, broken, 'clear', '2026-10-06T00:00:00Z'), /provenance/);
   }
   assert.throws(() => applyClassifierReview(review, source, 'clear', 'not a date'), /provenance/);
-  assert.equal(reviewAtCandidateRevision(review, String(currentReviewRound(review).subject.revision)), review);
-  const advanced = reviewAtCandidateRevision(review, 'c'.repeat(40));
-  assert.equal(String(currentReviewRound(advanced).subject.revision), 'c'.repeat(40));
+  const advanced = applyClassifierReview(review, { ...source, candidateRevision: 'c'.repeat(40), responseRevision: 'b'.repeat(40) }, 'clear', '2026-10-06T00:00:00Z', [], 'c'.repeat(40));
+  assert.equal(currentReviewRound(advanced).decision?.revision, 'c'.repeat(40));
   assert.equal(advanced.rounds.length, review.rounds.length);
-  assert.equal(String(currentReviewRound(review).subject.revision), 'b'.repeat(40), 'the stored review is not mutated');
+  assert.equal(currentReviewRound(advanced).subject.revision, 'b'.repeat(40));
+  assert.equal(currentReviewRound(review).decision, null, 'the stored review is not mutated');
 });
 
 it('classifier integration repairs bind the withdrawn gate and retain its complete obligation', async () => {
@@ -439,11 +442,11 @@ it('classifier integration repairs bind the withdrawn gate and retain its comple
     cause: { kind: 'integration-gate-failure' as const, gate: 'output', command: 'node answer.mjs',
       log: 'at file:///repo/answer.mjs:25:14 required output missing' } };
   const review = { ...initial, rounds: [{ ...initial.rounds[0], response: null,
-    decision: { kind: 'approved' as const, decidedAt: '2026-10-01T00:01:00Z', comment: 'Prior approval', source: { kind: 'local' as const }, revocation } }, initial.rounds[1]] } as typeof initial;
+    decision: { kind: 'approved' as const, revision: changeRevision('a'.repeat(40)), decidedAt: '2026-10-01T00:01:00Z', comment: 'Prior approval', source: { kind: 'local' as const }, revocation } }, initial.rounds[1]] } as typeof initial;
   const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'd', provider: 'typesafe', model: 'jev',
     packetHash: 'c'.repeat(64), priorRevision: 'a'.repeat(40), candidateRevision: 'b'.repeat(40), responseRevision: 'b'.repeat(40),
     findingIds: ['integration-gate-repair'], integrationRepair: { revokedAt, gate: 'output' },
-    policyVersion: 'jev-three-question-51-80-89-v1', label: 'addresses', score: 0.52 };
+    policyVersion: 'jev-three-question-51-80-89-omissions-v2', label: 'addresses', score: 0.52 } satisfies NonNullable<Parameters<typeof applyClassifierReview>[1]>;
   const at = '2026-10-06T00:00:00Z';
   const approved = applyClassifierReview(review, source, 'clear', at);
   assert.equal(currentReviewRound(approved).phase, 'approved');
@@ -472,29 +475,41 @@ it('classifier integration repairs bind the withdrawn gate and retain its comple
 });
 
 it('a weakening decision restores the withdrawn approval only with its own provenance and threshold (TASK-2736)', async () => {
-  const { applyClassifierReview, WEAKENING_POLICY_VERSION } = await import('../../../src/domain/classifier-review.js');
+  const { applyClassifierReview, assertClassifierReviewSource, classifierPolicyThresholds, WEAKENING_POLICY_VERSION } = await import('../../../src/domain/classifier-review.js');
   const { repeatReview } = await import('../../fixtures/repeat-review.js');
   const initial = repeatReview();
   const revokedAt = '2026-10-01T00:02:00Z';
   const revocation = { revokedAt, revokedBy: 'workflow', reason: 'Gate failed',
     cause: { kind: 'integration-gate-failure' as const, gate: 'unit', command: 'npm test', log: 'x.java:1 failed' } };
   const review = { ...initial, rounds: [{ ...initial.rounds[0], response: null,
-    decision: { kind: 'approved' as const, decidedAt: '2026-10-01T00:01:00Z', comment: 'Prior approval', source: { kind: 'local' as const }, revocation } }, initial.rounds[1]] } as typeof initial;
+    decision: { kind: 'approved' as const, revision: changeRevision('a'.repeat(40)), decidedAt: '2026-10-01T00:01:00Z', comment: 'Prior approval', source: { kind: 'local' as const }, revocation } }, initial.rounds[1]] } as typeof initial;
   const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'd', provider: 'typesafe', model: 'jev',
     packetHash: 'c'.repeat(64), priorRevision: 'a'.repeat(40), candidateRevision: 'b'.repeat(40), responseRevision: 'b'.repeat(40),
     findingIds: ['integration-gate-repair'], integrationRepair: { revokedAt, gate: 'unit' }, policyVersion: WEAKENING_POLICY_VERSION, label: 'preserves', score: 0.6,
     weakening: { decisionSource: 'integration-repair-weakening' as const, approvedRevision: 'a'.repeat(40), gate: 'unit', validationSha: 'b'.repeat(40),
-      validationRecordedAt: '2026-10-01T00:02:30Z', relation: 'same' as const } };
+      validationRecordedAt: '2026-10-01T00:02:30Z', relation: 'same' as const } } satisfies NonNullable<Parameters<typeof applyClassifierReview>[1]>;
   const at = '2026-10-06T00:00:00Z';
   const approved = applyClassifierReview(review, source, 'clear', at);
   assert.equal(currentReviewRound(approved).decision?.kind, 'approved');
+  assert.doesNotThrow(() => assertClassifierReviewSource({ ...source, policyVersion: 'integration-repair-weakening-v4-preserves-0.60' }));
+  assert.deepEqual(classifierPolicyThresholds('jev-three-question-51-80-89-v1'), { clear: 0.51, unresolved: 0.89 });
   assert.deepEqual(currentReviewRound(approved).decision?.classifier?.weakening, source.weakening);
   for (const clearedBy of ['weakening-v4', 'weakening-v5'] as const) {
-    const question = { clearedBy, preserves: 0.6, versions: ['weakening-v4', 'weakening-v5'] as const };
+    const question = { clearedBy, preserves: 0.6, versions: ['weakening-v4', 'weakening-v5'] as const } satisfies { readonly clearedBy: "weakening-v4" | "weakening-v5"; readonly preserves: number; readonly versions: readonly ["weakening-v4", "weakening-v5"]; };
     const updated = applyClassifierReview(review, { ...source, weakening: { ...source.weakening, question } }, 'clear', at);
     assert.deepEqual(currentReviewRound(updated).decision?.classifier?.weakening?.question, question);
     assert.match(currentReviewRound(updated).decision!.comment!, new RegExp(`cleared by ${clearedBy}, preserves 0.6, questions weakening-v4, weakening-v5`));
     assert.throws(() => applyClassifierReview(review, { ...source, weakening: { ...source.weakening, question: { ...question, preserves: 0.9 } } }, 'clear', at), /provenance/);
+  }
+  const noFact = { ...source, weakening: { decisionSource: source.weakening.decisionSource,
+    approvedRevision: source.priorRevision, gate: 'unit', factAdmitted: false,
+    question: { clearedBy: 'weakening-v4-optional-fact-v1' as const, preserves: 0.6,
+      versions: ['weakening-v4-optional-fact-v1', 'weakening-v5-optional-fact-v1'] as const } } };
+  const noFactApproval = currentReviewRound(applyClassifierReview(review, noFact, 'clear', at)).decision!;
+  assert.match(noFactApproval.comment!, /no admitted re-run fact; mandatory integration gates still apply/);
+  assert.doesNotMatch(noFactApproval.comment!, /green/);
+  for (const fabricated of [{ validationSha: source.weakening.validationSha }, { validationRecordedAt: at }, { relation: 'same' as const }]) {
+    assert.throws(() => assertClassifierReviewSource({ ...noFact, weakening: { ...noFact.weakening, ...fabricated } }), /provenance/);
   }
   assert.throws(() => applyClassifierReview(review, { ...source, score: 0.599 }, 'clear', at), /provenance/);
   assert.throws(() => applyClassifierReview(review, { ...source, weakening: undefined }, 'clear', at), /provenance/);
@@ -513,8 +528,23 @@ it('first-review classifier decisions are rejected while historical provenance r
   const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'd', provider: 'typesafe', model: 'jev',
     packetHash: 'c'.repeat(64), priorRevision: 'b'.repeat(40), candidateRevision: 'b'.repeat(40),
     successCriteria: { baseRef: 'main' }, findingIds: ['success-criterion-1'],
-    policyVersion: 'jev-three-question-51-80-89-v1', label: 'addresses', score: 0.99 };
+    policyVersion: 'jev-three-question-51-80-89-omissions-v2', label: 'addresses', score: 0.99 };
   assert.doesNotThrow(() => assertClassifierReviewSource(source));
   assert.throws(() => applyClassifierReview(first, source, 'clear', '2026-10-06T00:00:00Z', successCriteriaFindings(['Output preserved'])), /First review requires/);
   assert.equal(currentReviewRound(first).decision, null);
+});
+
+it('obligation authority checks the general ancestor and complete obligation set (TASK-2753)', async () => {
+  const { applyClassifierReview, OBLIGATION_POLICY_VERSION } = await import('../../../src/domain/classifier-review.js');
+  const { repeatReview } = await import('../../fixtures/repeat-review.js');
+  const review = repeatReview();
+  const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'd', provider: 'stub', model: 'jev',
+    packetHash: 'c'.repeat(64), priorRevision: 'a'.repeat(40), candidateRevision: 'b'.repeat(40), findingIds: ['F1'],
+    policyVersion: OBLIGATION_POLICY_VERSION, label: 'addresses', score: 0.97, obligations: { generalRound: 1, failingIds: [] as string[] } };
+  assert.equal(applyClassifierReview(review, source, 'clear', '2026-10-06T00:00:00Z').rounds.at(-1)!.decision?.kind, 'approved');
+  for (const patch of [{ score: 0.969999 }, { obligations: undefined }, { obligations: { generalRound: 2, failingIds: [] } },
+    { findingIds: ['H1'] }, { priorRevision: 'd'.repeat(40) }]) {
+    assert.throws(() => applyClassifierReview(review, { ...source, ...patch }, 'clear', '2026-10-06T00:00:00Z'));
+  }
+  assert.throws(() => applyClassifierReview(review, { ...source, label: 'does_not_address' }, 'implementer', '2026-10-06T00:00:00Z'));
 });

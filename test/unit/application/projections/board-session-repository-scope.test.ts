@@ -1,3 +1,4 @@
+import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { MissionId } from '../../../../src/domain/mission.js';
@@ -18,11 +19,10 @@ import type { RunningAgentSession } from '../../../../src/application/projection
 
 const NOW_MS = Date.parse('2026-08-21T12:00:00Z');
 
-// The board repository: its root plus one mission worktree.
+// Mission worktrees belonging to the board repository.
 const BOARD_ROOT = '/home/dev/parallix';
 const BOARD_WORKTREES = new Map<string, MissionId>([
-  [BOARD_ROOT, 'parallix' as MissionId],
-  ['/home/dev/parallix-task-5000', 'task-5000' as MissionId],
+  ['/home/dev/parallix-task-5000', fixtureMissionId('task-5000') as MissionId],
 ]);
 
 // An explicit-slug draft launched from an unrelated checkout that happens to
@@ -77,9 +77,9 @@ test('SC2: a slug-less command from a nested directory under a worktree resolves
 });
 
 test('SC4: a liveSession change repaints the board', () => {
-  const session: RunningAgentSession = { missionId: 'task-5000' as MissionId, family: agentFamily('custom') };
-  const base = makeProjection({ active: [makeCard({ id: 'task-5000' as MissionId, liveSession: null })] });
-  const withSession = makeProjection({ active: [makeCard({ id: 'task-5000' as MissionId, liveSession: session })] });
+  const session: RunningAgentSession = { missionId: fixtureMissionId('task-5000') as MissionId, family: agentFamily('custom') };
+  const base = makeProjection({ active: [makeCard({ id: fixtureMissionId('task-5000') as MissionId, liveSession: null })] });
+  const withSession = makeProjection({ active: [makeCard({ id: fixtureMissionId('task-5000') as MissionId, liveSession: session })] });
 
   assert.notEqual(boardFingerprint(base), boardFingerprint(withSession), 'liveSession must move the fingerprint');
 });

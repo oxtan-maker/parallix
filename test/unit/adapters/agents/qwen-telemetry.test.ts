@@ -36,6 +36,7 @@ test('parseTokenUsageLine extracts all token categories', () => {
   });
 
   const result = parseTokenUsageLine(line);
+  assert.ok(result != null);
   assert.equal(result.sessionId, 'sess-1');
   assert.equal(result.model, 'qwen3.8-max');
   assert.equal(result.authType, 'openai');
@@ -69,6 +70,7 @@ test('parseTokenUsageLine handles zero token counts', () => {
   });
 
   const result = parseTokenUsageLine(line);
+  assert.ok(result != null);
   assert.equal(result.inputTokens, 0);
   assert.equal(result.outputTokens, 0);
   assert.equal(result.totalTokens, 0);
@@ -105,6 +107,7 @@ test('parseUsageRecordLine extracts session summary', () => {
   });
 
   const result = parseUsageRecordLine(line);
+  assert.ok(result != null);
   assert.equal(result.sessionId, 'sess-1');
   assert.equal(result.toolCalls, 10);
   assert.equal(result.toolSuccess, 9);
@@ -290,6 +293,7 @@ test('collectUsageRecord returns most recent session in window', () => {
   fs.writeFileSync(path.join(tmp, 'usage_record.jsonl'), lines);
 
   const record = collectUsageRecord(tmp, { sinceMs: now });
+  assert.ok(record != null);
   assert.equal(record.sessionId, 'new-sess');
   assert.equal(record.toolCalls, 10);
 });
@@ -369,6 +373,7 @@ test('extractQwenTelemetry preserves per-model breakdown', () => {
   fs.writeFileSync(path.join(usageDir, 'token-usage-2026-08.jsonl'), lines);
 
   const t = extractQwenTelemetry(tmp, { sinceMs: now });
+  assert.ok(t != null);
   assert.ok(t.modelBreakdown['qwen3.8-max'], 'qwen3.8-max in breakdown');
   assert.ok(t.modelBreakdown['qwen3.7-plus'], 'qwen3.7-plus in breakdown');
   assert.equal(t.modelBreakdown['qwen3.8-max'].inputTokens, 1000);
@@ -425,6 +430,7 @@ test('extractQwenTelemetry: thoughtsTokens separately tracked (not folded into o
   fs.writeFileSync(path.join(usageDir, 'token-usage-2026-08.jsonl'), lines);
 
   const t = extractQwenTelemetry(tmp, { sinceMs: now });
+  assert.ok(t != null);
   assert.equal(t.thoughtsTokens, 150, 'thoughtsTokens preserved separately');
   assert.equal(t.outputTokens, 200, 'outputTokens not inflated by thoughts');
   assert.notEqual(t.thoughtsTokens, t.outputTokens, 'thoughts and output are distinct');

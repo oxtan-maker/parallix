@@ -17,7 +17,7 @@ import status, { parseWorktreeList, findStaleMissionWorktrees } from '../../../.
 /**
  * Build common mock opts for status command testing.
  */
-function buildCommonOpts(overrides: Record<string, any> = {}) {
+function buildCommonOpts(overrides: Partial<Parameters<typeof status>[1]> = {}) {
   return {
     inferSlugFn: () => 'task-1031',
     getCurrentBranchFn: () => 'mission/task-1031',
@@ -26,8 +26,8 @@ function buildCommonOpts(overrides: Record<string, any> = {}) {
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1031',
     findCheckpointsFn: () => ['/tmp/docs/missions/2026/task-1031/CP-2.md'],
     getFirstLineFn: () => 'Checkpoint 2',
-    getPrStatusFn: () => ({ exists: true, number: 83, state: 'open' }),
-    readAgentConfigOrExitFn: () => ({ reviewers: true }),
+    getPrStatusFn: () => ({ raw: '', title: undefined, merged: false, url: undefined, createdAt: null,  exists: true as const, number: 83, state: 'open' }),
+    readAgentConfigOrExitFn: () => ({ steps: {} }),
     eligibleAgentsForStepFn: (step: string) =>
       step === 'draft' ? ['codex', 'claude'] : ['codex', 'gemini'],
     workflowLauncherStatusFn: (agent: string) => ({ supported: agent !== 'gemini' }),
@@ -50,7 +50,7 @@ function buildCommonOpts(overrides: Record<string, any> = {}) {
  */
 function captureOutput(
   args: string[],
-  opts: Record<string, any>,
+  opts: Parameters<typeof status>[1],
 ): Promise<string[]> {
   const lines: string[] = [];
   return new Promise((resolve) => {
@@ -235,7 +235,7 @@ test('status output: includes rebase diagnostics for detached HEAD', async () =>
     inferSlugFn: () => 'task-1322',
     getCurrentBranchFn: () => '',
     findMissionDirFn: () => null,
-    getPrStatusFn: () => ({ exists: false }),
+    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
     detectRebaseStateFn: () => ({
       inProgress: true,
       detached: true,
@@ -262,7 +262,7 @@ test('status output: lists stale worktrees when no explicit slug', async () => {
     inferSlugFn: () => null,
     getCurrentBranchFn: () => 'main',
     findStaleMissionWorktreesFn: () => [{
-      path: '/tmp/task-1322',
+      slug: 'task-1322', path: '/tmp/task-1322',
       branch: 'refs/heads/mission/task-1322',
       taskStatus: 'done',
       cleanupCommand: 'cleanup it',

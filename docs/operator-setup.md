@@ -339,8 +339,10 @@ candidate or an equivalent mission patch. The validation must follow the
 withdrawal and precede restoration. Backlog task records and the integrate
 hook's release-version-only bump are excluded from comparison; other manifest,
 configuration and source changes remain substantive. Missing revisions,
-baselines or gate evidence, a failed validation, and Git errors require normal
-review. Change requests return to implementation until review approves the new
+baselines, a failed validation, and Git errors prevent mechanical restoration.
+Substantive repairs can instead reach the weakening questions without an admitted
+gate fact; unavailable required evidence or a non-clearing answer retains general
+review. All approvals still require the mandatory pre-integration gates. Change requests return to implementation until review approves the new
 revision. Both restored and reviewed approvals stop in the integration lane;
 a human runs `px integrate <slug>` to land. An older mission stranded by a gate
 rebound is recovered through the same path.
@@ -357,6 +359,20 @@ approval, run `px integrate <slug>` to continue integration. Repair budgets and
 mandatory gates still apply; a failed gate never counts as approval. An interrupted
 repair resumes the implementer even with unfinished checkpoints. Checkpoint
 evidence is required before leaving active work for reviewer handoff.
+
+Direct operator continuation also acknowledges a retained invalid-contract stop,
+including when the slug is inferred from the current worktree with
+`px review --continue`. Repair the recorded contract first. Continuation retains
+the prior diagnostic and proposed correction with the acknowledgment actor and
+time, and refreshes unfinished repair authorization to the current recorded
+checks and success criteria. Settled repair history stays intact. Automatic or
+nested continuation does not acknowledge these stops.
+
+Acknowledgment supplies no repair evidence, verification or approval. Retained
+failure diagnostics, fresh checkpoint evidence and successful reruns of the
+original required checks are still required; a newly reported blocker stops
+recovery again. Successful repair returns to normal review, and integration
+remains an explicit operator action.
 
 If continuation reports that the mission has no persisted Review, run
 `px review <slug> --start` to begin one. Start performs handoff, creates the

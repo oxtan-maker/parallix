@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 const commit = 'a'.repeat(40);
-const ref = { source: 'backlog-md', id: 'TASK-7', url: `backlog/completed/task-7.md@${commit}` };
+const ref = { source: 'backlog-md', id: 'TASK-7', url: `backlog/completed/task-7.md@${commit}` } satisfies Partial<NonNullable<Parameters<typeof readLegacyTaskContent>[0]>>;
 const result = (stdout: string): GitResult => ({ status: 0, signal: null, stdout, stderr: '' });
 
 test('task-2521.06: px status can read a pinned legacy task body after its current-tree file is gone', () => {

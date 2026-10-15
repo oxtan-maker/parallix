@@ -1,3 +1,5 @@
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import type { MissionLoadResult } from '../../../src/application/domain-ports.js';
 /**
  * Handoff half of fresh repair proof (TASK-2665): after reviewer-requested changes
  * or an integration bounceback, handoff requires rows recorded in the repair round
@@ -8,7 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { HandoffCommandUseCase } from '../../../src/application/handoff-command-use-case.js';
-import { SLUG, ROOT, makeRecorder, makePorts, runOptions } from '../../helpers/handoff-ports.js';
+import { SLUG, ROOT, makeRecorder, makePorts, runOptions, handoffTransitionValue } from '../../helpers/handoff-ports.js';
 import { MissionCheckpointService } from '../../../src/application/mission-checkpoint-service.js';
 import { missionVersion, type MissionStore } from '../../../src/application/domain-ports.js';
 import { missionId, type Mission } from '../../../src/domain/mission.js';
@@ -16,13 +18,13 @@ import { classifyError } from '../../../src/application/failure-classification.j
 import { reviewFindingId, applyImplementerCommand, applyReviewerCommand, changeRevision, ConfiguredReviewerEligibility, revokeApprovedDecision, startReview, type Review } from '../../../src/domain/review.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 
-function contractServices(load: () => Promise<unknown>) {
+function contractServices(load: () => Promise<MissionLoadResult>) {
   return {
     missionServices: async () => ({
-      checkpoints: { record: async () => ({ status: 'completed' }) },
-      lifecycle: { transition: async () => ({ status: 'completed', value: { version: 3 } }) },
+      checkpoints: { record: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
+      lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: handoffTransitionValue() }) },
       store: { load },
-      handoff: { recordNel: async () => ({ status: 'completed' }) },
+      handoff: { recordNel: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
     }),
   };
 }
@@ -42,21 +44,21 @@ async function handOffRepair(
 ) {
   const targetRef = path.join(ROOT, REPAIR_REF);
   const base = {
-    subject: { change: {} as never, revision: 'rev' as never }, reviewer: 'codex' as never,
-    implementer: 'custom' as never, startedAt: '2026-01-01T00:00:00Z',
+    subject: { change: { kind: 'local-branch' as const, sourceBranch: `mission/${SLUG}`, targetBranch: 'main' }, revision: changeRevision('rev') }, reviewer: agentFamily('codex'),
+    implementer: agentFamily('custom'), startedAt: '2026-01-01T00:00:00Z',
     disposition: null, reviewerRetryCount: 0, implementerRetryCount: 0,
   };
   const findingId = kind.startsWith('finding-F4') ? 'F4' : 'success-criterion-1';
-  const rounds = kind.startsWith('bounceback')
+  const rounds: Review['rounds'] = kind.startsWith('bounceback')
     ? [
-      { ...base, number: 1, phase: 'approved' as never, response: null, decision: {
+      { ...base, number: 1, phase: 'approved', response: null, decision: {
         kind: 'approved', decidedAt: '2026-01-01T01:00:00Z', comment: null, source: { kind: 'local' },
         revocation: { revokedAt: '2026-01-01T02:00:00Z', revokedBy: 'px', reason: 'gate', cause: { kind: 'integration-gate-failure', gate: kind === 'bounceback-gate' ? 'unit-first' : 'g' } },
       } },
-      { ...base, number: 2, phase: 'reviewing' as never, response: null, decision: null },
+      { ...base, number: 2, phase: 'reviewing', response: null, decision: null },
     ]
     : [{
-      ...base, number: 1, phase: 'fixing' as never,
+      ...base, number: 1, phase: 'fixing',
       decision: { kind: 'changes-requested', decidedAt: '2026-01-01T01:00:00Z', comment: null, findings: [
         { id: reviewFindingId(findingId), summary: kind === 'finding-F4-criterion-1' ? 'Success criterion 1 has no fix evidence' : 'repair', location: null },
       ] },
@@ -64,30 +66,30 @@ async function handOffRepair(
       // begins the next round.
       response: { kind: 'resolved', respondedAt: '2026-01-01T02:00:00Z', resolutions: [
         { findingId: reviewFindingId(findingId), kind: 'fixed', evidence: REPAIR_REF },
-      ], resultingRevision: 'rev' as never },
+      ], resultingRevision: changeRevision('rev') },
     }];
   const freshRound = rounds.length;
-  const review = { rounds, intervention: null, stageLaunches: [], reviewEvents: [] } as unknown as Review;
+  const review: Review = { rounds, intervention: null, stageLaunches: [], reviewEvents: [] };
   const row = (criterion: string) => ({
     criterion, evidence: criterion === 'first' ? `${REPAIR_REF} via unit-first` : REPAIR_REF, recordedRound: freshCriteria.includes(criterion) ? freshRound : 0,
   });
   const recorder = makeRecorder();
   const ports = makePorts(recorder, {
     ...contractServices(async () => ({
-      kind: 'found',
-      mission: {
+      kind: 'found' as const,
+      mission: fixtureMission(SLUG, {
         // Valid prior A/B proof in CP-1; CP-2 is the repair checkpoint.
         checkpoints: [
-          { name: 'CP-1', goalCheck: [row('first'), row('second')], nextAction: 'review' },
-          { name: 'CP-2', goalCheck: [row('second')] },
+          { missionId: missionId(SLUG), name: 'CP-1', goalCheck: [row('first'), row('second')], nextActionText: 'review' },
+          { missionId: missionId(SLUG), name: 'CP-2', goalCheck: [row('second')], nextActionText: 'review' },
         ],
         brief: DRAFTED_BRIEF,
         successCriteria: ['first', 'second'],
         completedSuccessCriteria: [0, 1],
         declaredGates: ['npm test'],
         review,
-      },
-      version: 4,
+      }),
+      version: missionVersion(4),
     })),
     fileSystem: { existsSync: (target: string) => target === targetRef, readText: () => '', writeText: () => {}, listNames: () => [], listEntries: () => [] },
   });
@@ -162,22 +164,22 @@ test('a repeated bounceback on the same gate keeps only the repaired criterion o
     change: { kind: 'local-branch', sourceBranch: 'mission/task-2665', targetBranch: 'main' }, revision: changeRevision('approved-commit'),
   }, reviewer, implementer, '2026-01-01T00:00:00Z', eligibility)), 'unit-first');
   const id = missionId('task-2665');
-  let mission = {
+  let mission = fixtureMission(id, {
     id, successCriteria: ['first', 'second'], completedSuccessCriteria: [0, 1], brief: DRAFTED_BRIEF, declaredGates: ['npm test'],
     checkpoints: [{ missionId: id, name: 'CP-1', nextActionText: 'review', goalCheck: [
       { criterion: 'first', evidence: `${REPAIR_REF} via unit-first` }, { criterion: 'second', evidence: `${REPAIR_REF} via unit-second`, recordedRound: 1 },
     ] }],
     review,
-  } as unknown as Mission;
+  });
   const store: MissionStore = {
-    load: async () => ({ kind: 'found', mission, version: missionVersion(1) }) as never,
+    load: async () => ({ kind: 'found', mission, version: missionVersion(1) }),
     save: async (next) => { mission = next; return missionVersion(2); },
   };
-  const service = new MissionCheckpointService(store, { fileSystem: fileSystem as never, rootFor: () => ROOT });
+  const service = new MissionCheckpointService(store, { fileSystem: fileSystem, rootFor: () => ROOT });
   const record = (criterion: string, evidence = REPAIR_REF) => service.record({
     operationId: 'op', missionId: id, capabilities: new Set(['checkpoint:record']), expectedVersion: missionVersion(1),
     checkpoint: { missionId: id, name: 'CP-1', nextActionText: 'continue', goalCheck: [{ criterion, evidence }] },
-  } as never);
+  });
   const handoff = async () => {
     const recorder = makeRecorder();
     const ports = makePorts(recorder, {
@@ -187,10 +189,12 @@ test('a repeated bounceback on the same gate keeps only the repaired criterion o
       missionServices: async () => ({
         checkpoints: service,
         store,
-        handoff: { recordNel: async () => ({ status: 'completed' }) },
-        lifecycle: { transition: async (request: { command: { review: Review } }) => {
-          mission = { ...mission, status: 'review', review: request.command.review } as Mission;
-          return { status: 'completed', value: { version: 3 } };
+        handoff: { recordNel: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
+        lifecycle: { transition: async request => {
+          assert.ok('review' in request.command);
+          if (!('review' in request.command)) { throw new Error('Expected review transition'); }
+          mission = fixtureMission(id, { ...mission, status: 'review', review: request.command.review });
+          return { durableEvidence: [],  status: 'completed' as const, value: handoffTransitionValue() };
         } },
       }),
     });

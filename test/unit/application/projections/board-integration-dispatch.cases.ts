@@ -1,3 +1,7 @@
+import { fixtureMission } from '../../../fixtures/mission-builders.js';
+import { integrationServices } from '../../../helpers/stub-integration-services.js';
+import type { MissionStatus } from '../../../../src/domain/mission.js';
+import { missionVersion as fixtureVersion } from '../../../../src/application/domain-ports.js';
 import { resolveConfiguration } from '../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 import test from 'node:test';
@@ -12,7 +16,7 @@ import { makeExecutePorts } from '../../../fixtures/execute-mission-ports.js';
 function request(overrides: Partial<BoardCommandRequest> = {}): BoardCommandRequest {
   return {
     operationId: 'integrate-op',
-    kind: 'integrate:merge',
+    kind: 'integrate:merge' as const,
     missionId: 'task-2429',
     missionStatusAtRequest: 'integration',
     capabilities: new Set(),
@@ -20,21 +24,21 @@ function request(overrides: Partial<BoardCommandRequest> = {}): BoardCommandRequ
   };
 }
 
-function controllerFor(status = 'integration', integrate = async (_slug: string): Promise<void> => {}) {
+function controllerFor(status: MissionStatus = 'integration', integrate = async (_slug: string): Promise<void> => {}) {
   const effects: string[] = [];
   let writes = 0;
   const store = {
     async load() {
       effects.push('load');
-      return { kind: 'found', mission: { status }, version: 1 } as never;
+      return { kind: 'found' as const, mission: fixtureMission('task-2429', { status }), version: fixtureVersion(1) };
     },
-    async save() { writes += 1; return 2 as never; },
+    async save() { writes += 1; return 2; },
   };
   const controller = new BoardCommandController(makeExecutePorts().ports, undefined, {
     integrate: {
       async executeForSlug(slug: string) { effects.push('integrate:' + slug); await integrate(slug); },
     },
-  } as never, undefined, store as never);
+  }, undefined, store);
   return { controller, effects, writes: () => writes };
 }
 
@@ -63,7 +67,7 @@ test('task-2429: a gate failure returns failure with no completed-state transiti
 test('task-2429: unavailable integration rejects before authoritative reads or effects', async () => {
   const effects: string[] = [];
   const controller = new BoardCommandController(makeExecutePorts().ports, undefined, {}, undefined, {
-    async load() { effects.push('load'); return { kind: 'found', mission: { status: 'integration' }, version: 1 } as never; },
+    async load() { effects.push('load'); return { kind: 'found', mission: fixtureMission('task-2429', { status: 'integration' }), version: fixtureVersion(1) }; },
   });
 
   const result = await controller.dispatch(request());
@@ -88,9 +92,9 @@ test('task-2429: integration authorization exit returns a board failure, not com
   environment.WORKFLOW_AGENT = 'gemini';
   try {
     const controller = new BoardCommandController(makeExecutePorts().ports, undefined, {
-      integrate: createBoardIntegrateService({} as never, NO_CURRENT_WORK_PORT),
+      integrate: createBoardIntegrateService(integrationServices(), NO_CURRENT_WORK_PORT, resolveConfiguration(environment)),
     }, undefined, {
-      async load() { return { kind: 'found', mission: { status: 'integration' }, version: 1 } as never; },
+      async load() { return { kind: 'found', mission: fixtureMission('task-2429', { status: 'integration' }), version: fixtureVersion(1) }; },
     });
 
     const result = await controller.dispatch(request());

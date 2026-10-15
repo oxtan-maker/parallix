@@ -277,7 +277,7 @@ function rewriteTaskAssignee(content: string, agentFamily: string, promote: bool
   return undefined;
 }
 
-function setTaskAssignee(taskFilePath: string, agentFamily: string, { promote = true }: { promote?: boolean } = {} as any) {
+function setTaskAssignee(taskFilePath: string, agentFamily: string, { promote = true }: { promote?: boolean } = {}) {
   if (!taskFilePath || !fs.existsSync(taskFilePath)) {return false;}
   let content = fs.readFileSync(taskFilePath, 'utf8');
   const rewritten = rewriteTaskAssignee(content, agentFamily, promote);

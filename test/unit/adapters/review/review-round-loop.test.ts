@@ -1,3 +1,4 @@
+import { reviewFindingId } from '../../../../src/domain/review.js';
 
 /**
  * The request-changes review contract over an injected MissionTransitionStore.
@@ -33,7 +34,7 @@ const MISSION = missionId('task-round-loop');
 const CAPABILITIES = new Set(['mission:intake', 'mission:transition', 'checkpoint:record'] as const);
 const reviewer = agentFamily('codex');
 const implementer = agentFamily('custom');
-const eligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer] } as never);
+const eligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' });
 
 const change = {
   kind: 'pull-request' as const,
@@ -42,7 +43,7 @@ const change = {
   url: 'http://localhost:3300/magnus/parallix/pulls/305',
   sourceBranch: 'mission/task-round-loop',
   targetBranch: 'main',
-};
+} satisfies import("../../../../src/domain/review.js").ReviewedChange;
 
 async function reviewInProgress() {
   const store = inMemoryTransitionStore(fixtureMission('task-round-loop', {
@@ -131,7 +132,7 @@ describe('review round advancement', () => {
     }, { missionStore: store, lifecycleService: lifecycle });
 
     const resolved = await recordImplementerResolution(MISSION, {
-      itemDispositions: [{ kind: 'pushed_back', findingId: 'F2' as never }],
+      itemDispositions: [{ kind: 'pushed_back', findingId: reviewFindingId('F2') }],
       evidence: 'CHANGES_MADE — round summary',
       resultingRevision: 'rev-2',
       respondedAt: '2026-08-16T16:00:00.000Z',
@@ -167,8 +168,8 @@ describe('review round advancement', () => {
       actor: reviewer,
       occurredAt: '2026-08-16T16:05:00.000Z',
       idempotencyKey: 'submit-2',
-    } as never);
-    assert.equal(submitted.status, 'completed', submitted.error?.message);
+    });
+    assert.equal(submitted.status, 'completed', submitted.error?.message ?? '');
 
     const afterSubmit = await store.load(MISSION);
     assert.equal(afterSubmit.kind, 'found');
@@ -190,7 +191,7 @@ describe('review round advancement', () => {
     // new one. Recording it would flip the round to ready-for-next-round on
     // the unchanged tree, letting a later resume approve the finding.
     const unchanged = await recordImplementerResolution(MISSION, {
-      itemDispositions: [{ kind: 'fixed', findingId: 'F1' as never }],
+      itemDispositions: [{ kind: 'fixed', findingId: reviewFindingId('F1') }],
       evidence: 'CHANGES_MADE — round summary (no code change)',
       resultingRevision: 'rev-1',
       respondedAt: '2026-08-16T16:00:00.000Z',
@@ -210,7 +211,7 @@ describe('review round advancement', () => {
     // bounced back to active with its undecided round still recorded.
     const loaded = await store.load(MISSION);
     assert.equal(loaded.kind, 'found');
-    await store.save({ ...loaded.mission, status: 'active' } as never, loaded.version);
+    await store.save({ ...loaded.mission, status: 'active', closedAt: null }, loaded.version);
 
     const resubmitted = await lifecycle.transition({
       operationId: 'op-resubmit',
@@ -225,7 +226,7 @@ describe('review round advancement', () => {
       actor: reviewer,
       occurredAt: '2026-08-16T15:00:00.000Z',
       idempotencyKey: 'resubmit',
-    } as never);
-    assert.equal(resubmitted.status, 'completed', resubmitted.error?.message);
+    });
+    assert.equal(resubmitted.status, 'completed', resubmitted.error?.message ?? '');
   });
 });

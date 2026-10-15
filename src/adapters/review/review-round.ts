@@ -1,3 +1,4 @@
+import { readReviewForDecision, staleWrite } from './review-round-read.js';
 /**
  * Round advancement for the autonomous review loop.
  *
@@ -42,11 +43,6 @@ import {
  * be told. Callers that supply no expected version keep the previous behaviour;
  * the agent-facing verbs always supply one.
  */
-function staleWrite(slug: string, expected: number | undefined, actual: number): string | null {
-  if (expected === undefined) { return null; }
-  if (expected === actual) { return null; }
-  return `stale write for ${slug}: expected version ${expected}, found ${actual}. Re-read \`px status ${slug}\` and retry.`;
-}
 
 export type ReviewRoundResult =
   | { outcome: 'recorded' }
@@ -89,7 +85,7 @@ function diagnosticFrom(error: unknown, fallback: string): string {
 
 export interface ReviewRoundPorts {
   missionStore?: MissionStore | null;
-  lifecycleService?: MissionLifecycleService | null;
+  lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null;
 }
 
 /**
@@ -104,6 +100,7 @@ export async function recordRequestedChanges(
   input: {
     findings: readonly ReviewFinding[];
     comment: string | null;
+    revision?: string | null;
     decidedAt: string;
     disposition?: ReviewDisposition;
     /** Mission version the caller read; a mismatch fails closed. */
@@ -113,18 +110,12 @@ export async function recordRequestedChanges(
 ): Promise<ReviewRoundResult> {
   const store = ports.missionStore ?? null;
   if (!store) { return { outcome: 'failed', diagnostic: `Operator database unavailable for ${slug}` }; }
-  const disposition = input.disposition && CHANGES_REQUESTED_DISPOSITIONS.includes(input.disposition)
-    ? input.disposition
-    : 'REQUEST_CHANGES';
+  const disposition = changesRequestedDisposition(input.disposition);
   try {
-    const loaded = await store.load(missionId(slug));
-    if (loaded.kind !== 'found') { return { outcome: 'failed', diagnostic: `Mission ${slug} is not in the operator database` }; }
+    const loaded = await readReviewForDecision(slug, store, input.expectedVersion, 'decide');
+    if (loaded.kind === 'failed') { return loaded.result; }
     const mission = loaded.mission;
-    const stale = staleWrite(slug, input.expectedVersion, loaded.version);
-    if (stale) { return { outcome: 'failed', diagnostic: stale }; }
-    if (!('review' in mission) || !mission.review) {
-      return { outcome: 'failed', diagnostic: `Mission ${slug} has no review to decide; px review ${slug} --start starts the review` };
-    }
+
     if (reviewStatus(mission.review) !== 'awaiting-review') {
       return { outcome: 'unchanged', reason: `review is ${reviewStatus(mission.review)}` };
     }
@@ -135,9 +126,10 @@ export async function recordRequestedChanges(
     const review = applyReviewerCommand(mission.review, {
       type: 'request-changes',
       decidedAt: input.decidedAt,
+      revision: typeof input.revision === 'string' ? changeRevision(input.revision) : null,
       comment: input.comment,
       findings: input.findings,
-      ...(disposition === 'REQUEST_CHANGES' ? {} : { disposition: disposition as Exclude<ReviewDisposition, 'APPROVED' | 'CHANGES_MADE'> }),
+      ...(disposition === 'REQUEST_CHANGES' ? {} : { disposition: disposition }),
     });
     const version = await store.save({ ...mission, review }, loaded.version);
 
@@ -247,6 +239,7 @@ export async function recordApproval(
   slug: string,
   input: {
     comment: string | null;
+    revision?: string | null;
     decidedAt: string;
     source?: ReviewApprovalSource;
     /** Mission version the caller read; a mismatch fails closed. */
@@ -258,14 +251,9 @@ export async function recordApproval(
   if (!store) { return { outcome: 'failed', diagnostic: `Operator database unavailable for ${slug}` }; }
   const source: ReviewApprovalSource = input.source ?? { kind: 'local' };
   try {
-    const loaded = await store.load(missionId(slug));
-    if (loaded.kind !== 'found') { return { outcome: 'failed', diagnostic: `Mission ${slug} is not in the operator database` }; }
+    const loaded = await readReviewForDecision(slug, store, input.expectedVersion, 'approve');
+    if (loaded.kind === 'failed') { return loaded.result; }
     const mission = loaded.mission;
-    const stale = staleWrite(slug, input.expectedVersion, loaded.version);
-    if (stale) { return { outcome: 'failed', diagnostic: stale }; }
-    if (!('review' in mission) || !mission.review) {
-      return { outcome: 'failed', diagnostic: `Mission ${slug} has no review to approve; px review ${slug} --start starts the review` };
-    }
     const status = reviewStatus(mission.review);
     if (status === 'approved') {
       // The decision is already recorded, but the review → integration boundary
@@ -286,7 +274,7 @@ export async function recordApproval(
         diagnostic: approvalBlockedDiagnostic(status),
       };
     }
-    if (mission.status !== 'review' && mission.status !== 'integration' && mission.status !== 'active') {
+    if (!['review', 'integration', 'active'].includes(mission.status)) {
       // TASK-2582: an approve recorded over a Mission that is not in the review
       // lane is the TASK-2579 mismatch. Fail before writing the decision
       // instead of reporting `recorded` over a Mission the boundary cannot
@@ -299,6 +287,7 @@ export async function recordApproval(
     const review = applyReviewerCommand(mission.review, {
       type: 'approve',
       decidedAt: input.decidedAt,
+      revision: typeof input.revision === 'string' ? changeRevision(input.revision) : null,
       comment: input.comment,
       source,
     });
@@ -485,4 +474,11 @@ export async function recordImplementerResolution(
   } catch (error) {
     return { outcome: 'failed', diagnostic: diagnosticFrom(error, 'Implementer resolution write failed') };
   }
+}
+
+function isChangesRequestedDisposition(value: ReviewDisposition): value is Exclude<ReviewDisposition, 'APPROVED' | 'CHANGES_MADE'> {
+  return CHANGES_REQUESTED_DISPOSITIONS.includes(value);
+}
+function changesRequestedDisposition(value: ReviewDisposition | undefined): Exclude<ReviewDisposition, 'APPROVED' | 'CHANGES_MADE'> {
+  return value && isChangesRequestedDisposition(value) ? value : 'REQUEST_CHANGES';
 }

@@ -11,7 +11,7 @@ import { mkdtemp as registeredMkdtemp } from '../../../../helpers/temp-dir.js';
 const config = mockModule<typeof import('../../../../../src/adapters/cli/commands/config.js')>('../../../../../src/adapters/cli/commands/config.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
-async function withTempDir(fn) {
+async function withTempDir(fn: (_arg0: string) => void | Promise<void>) {
   const root = registeredMkdtemp('workflow-config-command-');
   try {
     await fn(root);
@@ -20,20 +20,20 @@ async function withTempDir(fn) {
   }
 }
 
-function runConfig(root, args: string[] = []) {
-  const logs = [];
-  const errors = [];
-  let exitCode = null;
+function runConfig(root: string, args: string[] = []) {
+  const logs: string[] = [];
+  const errors: string[] = [];
+  let exitCode: { value: number | null } = { value: null };
   return config.default(args, {
     rootDir: root,
     logFn: message => logs.push(message),
     errorFn: message => errors.push(message),
-    exitFn: code => { exitCode = code; },
-  }).then(() => ({ logs, errors, exitCode }));
+    exitFn: code => { exitCode.value = code; },
+  }).then(() => ({ logs, errors, exitCode: exitCode.value }));
 }
 
 test('config reports malformed JSON as fallback defaults and exits non-zero', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), '{ invalid');
     const result = await runConfig(root);
     assert.equal(result.exitCode, 1);
@@ -43,7 +43,7 @@ test('config reports malformed JSON as fallback defaults and exits non-zero', as
 });
 
 test('config reports structurally invalid overrides as fallback defaults and exits non-zero', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: [] }));
     const result = await runConfig(root);
     assert.equal(result.exitCode, 1);
@@ -54,7 +54,7 @@ test('config reports structurally invalid overrides as fallback defaults and exi
 });
 
 test('config rejects an unsupported review provider enum value as fallback defaults and exits non-zero', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { review: { provider: 'unsupported' } } }));
     const result = await runConfig(root);
     assert.equal(result.exitCode, 1);
@@ -77,7 +77,7 @@ test('config --write exits non-zero when the working directory is not a reposito
 });
 
 test('config leaves a non-git standalone directory unchanged', () => {
-  return withTempDir(async root => {
+  return withTempDir(async (root) => {
     fs.mkdirSync(path.join(root, 'workflow'));
     fs.writeFileSync(path.join(root, 'workflow', 'index.js'), '// standalone marker\n');
     fs.writeFileSync(path.join(root, 'workflow.config.json'), '{}\n');
@@ -99,7 +99,7 @@ test('config leaves a non-git standalone directory unchanged', () => {
 // task-2500.01: `integration.mode` is the repository's merge authority, so an
 // unknown value must fail closed on the config surface rather than default away.
 test('config prints the active integration mode and rejects an unknown one with a non-zero exit', async () => {
-  await withTempDir(async root => {
+  await withTempDir(async (root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ integration: { mode: 'github-pr' } }));
     const configured = await runConfig(root);
     assert.equal(configured.exitCode, null);

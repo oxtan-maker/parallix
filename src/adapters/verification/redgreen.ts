@@ -1,3 +1,4 @@
+import type { GitReader } from '../git/worktree.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -16,7 +17,7 @@ function findReproTestPath(_slug: string, _rootDir: string, options: { testPath?
  * Resolve the commit where the mission branch diverged from its base branch.
  * Uses merge-base so a rebased/advanced base still yields the true fork point.
  */
-function resolveMissionParentCommit(slug: string, rootDir: string, options: { gitFn?: Function | null, branch?: string } = {} as any) {
+function resolveMissionParentCommit(slug: string, rootDir: string, options: { gitFn?: GitReader | null, branch?: string } = {}) {
   const { gitFn = null } = options;
   const runner = gitFn || git;
   const branch = options.branch || missionBranchName(slug, rootDir);
@@ -37,7 +38,16 @@ function resolveMissionParentCommit(slug: string, rootDir: string, options: { gi
  * yet authored). Runs inside a throwaway detached worktree so the live
  * worktree is never mutated.
  */
-function runReproAtRef(ref: string, testPath: string, options: { rootDir?: string, headRef?: string, gitFn?: Function | null, runCommandFn?: Function | null } = {} as any) {
+function overlayReproductionTest(rootDir: string, headRef: string, testPath: string, worktreePath: string, gitRunner: GitReader): void {
+    const show = gitRunner(['-C', rootDir, 'show', `${headRef}:${testPath}`]);
+    if (show && show.status === 0) {
+      const dest = path.join(worktreePath, testPath);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, show.stdout);
+    }
+}
+
+function runReproAtRef(ref: string, testPath: string, options: { rootDir?: string, headRef?: string, gitFn?: GitReader | null, runCommandFn?: (...args: Parameters<typeof run>) => { status?: number | null } | null } = {}) {
   const {
     rootDir = process.cwd(),
     headRef = 'HEAD',
@@ -57,12 +67,7 @@ function runReproAtRef(ref: string, testPath: string, options: { rootDir?: strin
 
     // Overlay the reproduction test from the branch HEAD so the parent ref runs
     // the same test against pre-fix source.
-    const show = gitRunner(['-C', rootDir, 'show', `${headRef}:${testPath}`]);
-    if (show && show.status === 0) {
-      const dest = path.join(worktreePath, testPath);
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.writeFileSync(dest, show.stdout);
-    }
+    overlayReproductionTest(rootDir, headRef, testPath, worktreePath, gitRunner);
 
     const result = cmdRunner('node', ['--test', testPath], { cwd: worktreePath });
     return { status: result && typeof result.status === 'number' ? result.status : 1 };
@@ -79,7 +84,7 @@ function runReproAtRef(ref: string, testPath: string, options: { rootDir?: strin
  *   { ok: true, skipped: false } — repro failed at parent and passed at HEAD
  *   { ok: false, ... , error }   — repro missing, passed at parent, or failed at HEAD
  */
-function verifyRedGreenProof(slug: string, options: { rootDir?: string, log?: Function, headRef?: string, findReproTestPathFn?: Function, resolveMissionParentCommitFn?: Function, runReproAtRefFn?: Function, branch?: string, testPath?: string } = {} as any) {
+function verifyRedGreenProof(slug: string, options: { rootDir?: string, log?: (message: string) => void, headRef?: string, findReproTestPathFn?: typeof findReproTestPath, resolveMissionParentCommitFn?: typeof resolveMissionParentCommit, runReproAtRefFn?: typeof runReproAtRef, branch?: string, testPath?: string } = {}) {
   const {
     rootDir = process.cwd(),
     log = fmt.log.plain,
@@ -116,10 +121,8 @@ function verifyRedGreenProof(slug: string, options: { rootDir?: string, log?: Fu
 
   // 3. Red: the reproduction test must FAIL at the parent commit.
   const red = runReproAtRefFn(parentCommit, testPath, { rootDir, headRef, ...childOpts });
-  if (red && red.skipped) {
-    log(fmt.status('WARN', `Red→green gate: no usable test runner for ${slug} (${red.reason || 'unknown'}); skipping.`));
-    return { ok: true, skipped: true, reason: red.reason || 'no-test-runner' };
-  }
+  const redSkipped = skippedRedRepro(red, slug, log);
+  if (redSkipped) { return redSkipped; }
   if (red.status === 0) {
     const errMsg = `Reproduction test ${testPath} PASSED at parent commit ${parentCommit.slice(0, 12)} — it must fail (red) to lock the bug.`;
     log(fmt.status('FAIL', errMsg));
@@ -128,10 +131,8 @@ function verifyRedGreenProof(slug: string, options: { rootDir?: string, log?: Fu
 
   // 4. Green: the reproduction test must PASS at HEAD.
   const green = runReproAtRefFn(headRef, testPath, { rootDir, headRef, ...childOpts });
-  if (green && green.skipped) {
-    log(fmt.status('WARN', `Red→green gate: could not run repro at HEAD for ${slug} (${green.reason || 'unknown'}); skipping.`));
-    return { ok: true, skipped: true, reason: green.reason || 'no-test-runner' };
-  }
+  const greenSkipped = skippedGreenRepro(green, slug, log);
+  if (greenSkipped) { return greenSkipped; }
   if (green.status !== 0) {
     const errMsg = `Reproduction test ${testPath} FAILED at HEAD — the fix must make it pass (green).`;
     log(fmt.status('FAIL', errMsg));
@@ -147,3 +148,19 @@ export { resolveMissionParentCommit };
 export { runReproAtRef };
 export { verifyRedGreenProof };
 ;
+
+function skippedRedRepro(red: ReturnType<typeof runReproAtRef>, slug: string, log: (message: string) => void) {
+  if (red && red.skipped) {
+    log(fmt.status('WARN', `Red→green gate: no usable test runner for ${slug} (${red.reason || 'unknown'}); skipping.`));
+    return { ok: true, skipped: true, reason: red.reason || 'no-test-runner' };
+  }
+  return null;
+}
+
+function skippedGreenRepro(green: ReturnType<typeof runReproAtRef>, slug: string, log: (message: string) => void) {
+  if (green && green.skipped) {
+    log(fmt.status('WARN', `Red→green gate: could not run repro at HEAD for ${slug} (${green.reason || 'unknown'}); skipping.`));
+    return { ok: true, skipped: true, reason: green.reason || 'no-test-runner' };
+  }
+  return null;
+}

@@ -56,7 +56,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // Opens a migrated SQLite operator database to verify cross-repository leases.
   'integration/agents/custom-capacity-cross-repo.integration.test.ts',
   'integration/agents/custom-capacity-multiprocess-repro.test.ts',
-  'integration/verification/documentation-verification.test.ts',
   'integration/cli/draft-command-boundary-contract.test.ts',
   'integration/cli/draft.test.ts',
   'integration/sqlite/durable-state-policy.test.ts',

@@ -9,15 +9,15 @@ import type { ReviewStatistics } from './services/review-statistics.js';
 import { selectStatsReport } from './services/statistics-report-selection.js';
 
 export interface StageTelemetry {
-  readonly provider?: string;
-  readonly model?: string;
+  readonly provider?: string | null;
+  readonly model?: string | null;
   readonly inputTokens?: number;
   readonly outputTokens?: number;
   readonly cachedTokens?: number;
   readonly thoughtsTokens?: number;
   readonly totalTokens?: number;
   readonly toolCalls?: number;
-  readonly usagePercent?: number;
+  readonly usagePercent?: number | null;
   readonly cost_usd?: number;
 }
 
@@ -34,15 +34,8 @@ export interface StageStatsRequest {
 }
 
 /** Telemetry field mapping is pure and shared with compatibility consumers. */
-export function telemetryToStatsFields(
-  telemetry: StageTelemetry | null | undefined,
-  options: { agentFamily?: string; durationMinutes?: number; model?: string | null } = {},
-) {
-  const { agentFamily, durationMinutes = 0, model } = options;
-  const t = telemetry;
+function telemetryUsageFields(t: StageTelemetry | null | undefined) {
   return {
-    provider: t?.provider || model || agentFamily || '',
-    model: t?.model || model || agentFamily || '',
     input_tokens: String(t?.inputTokens || 0),
     output_tokens: String(t?.outputTokens || 0),
     cached_tokens: String(t?.cachedTokens || 0),
@@ -52,6 +45,19 @@ export function telemetryToStatsFields(
     openai_usage_before: '0',
     openai_usage_after: String(typeof t?.usagePercent === 'number' ? Math.round(t.usagePercent) : 0),
     openai_usage_delta: '0',
+  };
+}
+
+export function telemetryToStatsFields(
+  telemetry: StageTelemetry | null | undefined,
+  options: { agentFamily?: string; durationMinutes?: number; model?: string | null } = {},
+) {
+  const { agentFamily, durationMinutes = 0, model } = options;
+  const t = telemetry;
+  return {
+    provider: t?.provider || model || agentFamily || '',
+    model: t?.model || model || agentFamily || '',
+    ...telemetryUsageFields(t),
     duration_minutes: String(Math.max(0, Math.round(durationMinutes) || 0)),
     cost_usd: String(typeof t?.cost_usd === 'number' ? t.cost_usd : 0),
   };

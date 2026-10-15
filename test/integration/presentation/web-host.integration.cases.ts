@@ -78,23 +78,23 @@ async function withHost(
  * the rebuild loop explicitly, so nothing here waits on a real clock.
  */
 function manualTimers() {
-  let pending: (() => void) | null = null;
+  let pending: { value: (() => void) | null } = { value: null };
   let sets = 0;
   let clears = 0;
   return {
     options: {
       intervalMs: 1,
-      setTimer: (callback: () => void) => { sets += 1; pending = callback; return sets; },
-      clearTimer: () => { clears += 1; pending = null; },
+      setTimer: (callback: () => void) => { sets += 1; pending.value = callback; return sets; },
+      clearTimer: () => { clears += 1; pending.value = null; },
     },
     /** Fire the scheduled rebuild and drain the microtasks it queues. */
     async tick(): Promise<void> {
-      const callback = pending;
-      pending = null;
+      const callback = pending.value;
+      pending.value = null;
       callback?.();
       for (let i = 0; i < 8; i += 1) { await new Promise(resolve => setImmediate(resolve)); }
     },
-    get scheduled(): boolean { return pending !== null; },
+    get scheduled(): boolean { return pending.value !== null; },
     get setCount(): number { return sets; },
     get clearCount(): number { return clears; },
   };
@@ -348,7 +348,7 @@ test('web host: rejects a state-changing request with an absent or wrong Origin'
       cookie: sessionCookie(info, value),
       'x-px-csrf': value,
       'content-type': 'application/json',
-    };
+    } satisfies HeadersInit;
     const absent = await fetch(`${info.origin}/`, { method: 'POST', body: '{}', headers: base });
     assert.equal(absent.status, 403, 'an absent Origin must be rejected');
     const wrong = await fetch(`${info.origin}/`, { method: 'POST', body: '{}', headers: { ...base, origin: 'http://evil.example' } });
@@ -400,7 +400,7 @@ test('web host: rejects unsupported methods even with valid Origin, session, and
       cookie: sessionCookie(info, value),
       'x-px-csrf': value,
       'content-type': 'application/json',
-    };
+    } satisfies HeadersInit;
     for (const method of ['POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS']) {
       const res = await fetch(`${info.origin}/`, { method, body: '{}', headers });
       assert.equal(res.status, 405, `${method} must be unsupported before mutation routes exist`);
@@ -417,7 +417,7 @@ test('web host: rejects a body over the configured limit', async () => {
       cookie: sessionCookie(info, value),
       'x-px-csrf': value,
       'content-type': 'application/json',
-    };
+    } satisfies HeadersInit;
     const under = JSON.stringify({ pad: 'x'.repeat(900) });
     const over = JSON.stringify({ pad: 'x'.repeat(2000) });
     assert.ok(under.length <= 1024 && over.length > 1024, 'fixture sizes must straddle the limit');
@@ -610,7 +610,7 @@ test('web host: overlapping snapshot reads share builds and never take a build t
   const gates: Array<() => void> = [];
   const log: string[] = [];
   let builds = 0;
-  const build = async () => {
+  const build: () => Promise<BoardProjection> = async () => {
     const id = ++builds;
     log.push(`start-${id}`);
     await new Promise<void>(resolve => { gates.push(resolve); });
@@ -942,12 +942,12 @@ test('web cli: createBoardSource gets the host sink, its build port serves, clos
   try {
     let stop: () => void = () => {};
     const stopped = new Promise<void>(resolve => { stop = resolve; });
-    let sink: BoardProgressSink | null = null;
+    let sink: { value: BoardProgressSink | null } = { value: null };
     let sourceClosed = false;
     const command = runWebCommand([], {
       assets,
       createBoardSource: (progress) => {
-        sink = progress;
+        sink.value = progress;
         return Promise.resolve({
           buildProjection: async () => makeProjection(),
           close: async () => { sourceClosed = true; },
@@ -969,8 +969,8 @@ test('web cli: createBoardSource gets the host sink, its build port serves, clos
     assert.ok(validateWebBoardSnapshot(await res.json()).ok, 'the wired build port must serve a valid snapshot');
     // The sink handed to the source is the host's SSE sink: publishing on it
     // reaches a fresh client through the replay buffer.
-    assert.ok(sink, 'createBoardSource must receive the host progress sink');
-    sink({ operationId: 'op-cli', sequence: 7, phase: 'implement', message: 'wired', timestamp: '2026-08-28T00:00:00.000Z' });
+    assert.ok(sink.value, 'createBoardSource must receive the host progress sink');
+    sink.value({ operationId: 'op-cli', sequence: 7, phase: 'implement', message: 'wired', timestamp: '2026-08-28T00:00:00.000Z' });
     const client = openSse({ host: '127.0.0.1', port: Number(new URL(origin).port), origin }, '0');
     await client.ready;
     await client.waitFor(1);

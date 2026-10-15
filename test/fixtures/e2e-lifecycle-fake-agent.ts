@@ -53,7 +53,7 @@ async function runFakeLifecycleAgent(prompt: string, worktree?: string) {
     write(path.join(root, 'deliverable.txt'), 'fake execute output\n');
     const missionServices = await services(root);
     for (const [name, criterion, evidence, next] of [['CP-1', 'The lifecycle reaches integration through the real CLI', 'deliverable.txt:1', 'Run review.'], ['CP-2', 'The lifecycle reaches integration through the real CLI', 'deliverable.txt:1', 'Approve the mission in review.']] as const) {
-      let recorded: any;
+      let recorded: Awaited<ReturnType<typeof missionServices.checkpoints.record>> | undefined;
       for (let attempt = 0; attempt < 5; attempt += 1) {
         const loaded = await missionServices.store.load(missionId(slug));
         if (loaded.kind !== 'found') { throw new Error(`fake agent could not read ${slug}`); }
@@ -61,7 +61,7 @@ async function runFakeLifecycleAgent(prompt: string, worktree?: string) {
         if (recorded.status === 'completed') { break; }
         await new Promise(resolve => setImmediate(resolve));
       }
-      if (recorded.status !== 'completed') { throw new Error(`fake checkpoint ${name} failed: ${recorded.error?.message}`); }
+      if (recorded?.status !== 'completed') { throw new Error(`fake checkpoint ${name} failed: ${recorded?.error?.message ?? 'no receipt'}`); }
     }
     const loaded = await missionServices.store.load(missionId(slug));
     if (loaded.kind !== 'found') { throw new Error(`fake agent could not read ${slug}`); }

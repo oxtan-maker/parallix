@@ -129,7 +129,6 @@ export function recoveryEvidenceRoute(slots: Pick<FixPromptSlots, 'recoveryEvide
   return lines;
 }
 
-
 export function promptSlotsFor(reason: ReboundReason, slug: string): Pick<FixPromptSlots, 'area' | 'facts' | 'remedy'> {
   switch (reason.kind) {
     case 'gate-failure':
@@ -148,17 +147,7 @@ export function promptSlotsFor(reason: ReboundReason, slug: string): Pick<FixPro
         ],
         remedy: `Start with the listed gate command in the listed worktree and the captured failure output. Do not substitute a broader verification command or integration suite to rediscover the failure. ${REPAIR_AUTHORITY}`,
       };
-    case 'hook-failure':
-      return {
-        area: reason.hook || 'hook',
-        facts: [
-          ['Hook type', reason.hook || 'unknown'],
-          ...(reason.operation ? [['Git operation', reason.operation] as [string, string]] : []),
-          ['Failed check', `${reason.hook || 'Git'} hook on ${reason.operation || 'a workflow Git operation'}`],
-          missionOutcomeFact(slug),
-        ],
-        remedy: `Make the Git hook pass when Parallix commits or rebases this mission. ${REPAIR_AUTHORITY}`,
-      };
+    case 'hook-failure': return hookFailureSlots(reason, slug);
     case 'artifact-incomplete':
       return {
         area: reason.role,
@@ -189,7 +178,6 @@ export function promptSlotsFor(reason: ReboundReason, slug: string): Pick<FixPro
   // Unreachable for the closed union; kept out of the switch for exhaustiveness.
 }
 
-
 /** Same authority for resumed and fresh sessions; overrides generic launcher instructions. */
 function repairAuthorityRoute(slots: FixPromptSlots): string[] {
   const cp = slots.repairCheckpoint;
@@ -203,4 +191,17 @@ function repairAuthorityRoute(slots: FixPromptSlots): string[] {
       `If the locked contract is invalid, run px checkpoint report-invalid-contract --name ${cp.name} --command "<exact failing command>" --diagnostic "<exact diagnostic>" --authority-reason "<why operator authority is needed>" --proposed-correction "<operator correction>", then stop. The first report stops automatic repair retries and routes the decision to human review.`,
     ] : ['Report an invalid locked contract with command, diagnostic, authorityReason and proposedCorrection, then stop for human review.']),
   ];
+}
+
+function hookFailureSlots(reason: Extract<ReboundReason, { kind: 'hook-failure' }>, slug: string): Pick<FixPromptSlots, 'area' | 'facts' | 'remedy'> {
+  return {
+    area: reason.hook || 'hook',
+    facts: [
+      ['Hook type', reason.hook || 'unknown'],
+      ...(reason.operation ? [['Git operation', reason.operation] as [string, string]] : []),
+      ['Failed check', `${reason.hook || 'Git'} hook on ${reason.operation || 'a workflow Git operation'}`],
+      missionOutcomeFact(slug),
+    ],
+    remedy: `Make the Git hook pass when Parallix commits or rebases this mission. ${REPAIR_AUTHORITY}`,
+  };
 }

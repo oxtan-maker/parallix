@@ -16,7 +16,7 @@ const recordPostIntegrationStatsModule = mockModule<typeof import('../../../src/
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const { recordPostIntegrationStats } = recordPostIntegrationStatsModule;
-function git(args, cwd) {
+function git(args: string[], cwd: string) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
   if (result.status !== 0) {
     throw new Error(`git ${args.join(' ')} failed: ${result.stderr}`);
@@ -129,6 +129,7 @@ test('task-1415: recordPostIntegrationStats counts a closed mission in the curre
     assert.notEqual(csvData.rows[0].date, '2026-06-13',
       'the closed row must not be stamped with the stale base-worktree committer date');
 
+    assert.ok(csvData.rows[0].repo && csvData.rows[0].mission);
     const todayReport = stats.renderWeeklyStatsReport(csvData.rows, {
       today: csvData.rows[0].date,
       missionFlow: [{ repo: csvData.rows[0].repo, mission: csvData.rows[0].mission, closedAt: `${csvData.rows[0].date}T00:00:00Z`, labels: ['ai_sdlc'] }],

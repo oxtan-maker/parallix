@@ -1,3 +1,6 @@
+import type { ReviewStateWriter } from '../../application/ports/review-persistence.js';
+import type { AgentProcessResult } from '../agents/agent-process-types.js';
+import type { resolveTaskFile } from '../backlog/backlog.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 /**
  * Review Agent Fallback Module
@@ -9,18 +12,20 @@ import type { ParallixConfiguration } from '../../application/ports/configuratio
 
 import * as fmt from '../../application/presentation/cli-format.js';
 import { enforceTaskAssignee } from '../backlog/backlog.js';
-import { ReviewState, readReviewState, writeReviewState, VALID_PHASES, persistReviewStateOrThrow } from './review-state.js';
+import { type ReviewStateData, readReviewState, writeReviewState, VALID_PHASES, persistReviewStateOrThrow } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
 import * as statsModule from '../cli/commands/stats.js';
 
+type FallbackReviewState = ReviewStateData;
+
 /** Lazily loaded stats module — loaded on first use to avoid circular dependency. */
-let _stats: any = null;
-export function getStats(): any {
+let _stats: typeof statsModule | null = null;
+export function getStats(): typeof statsModule {
   if (!_stats) {
     _stats = statsModule;
   }
-  return _stats as any;
+  return _stats;
 }
 
 // Stage telemetry recording is best-effort: a failure must never break the
@@ -34,7 +39,7 @@ export function getStats(): any {
 // one launch at a time, de-duped via review-state metadata, so Claude/custom rows
 // are cumulative too. A family switch creates a separate row instead of mixing
 // agents in one record.
-export function stageLaunchFingerprint(agentFamily: string, result: { sessionId?: string; startedAt?: string; endedAt?: string; status?: number } | null): string {
+export function stageLaunchFingerprint(agentFamily: string, result: Pick<AgentProcessResult, 'sessionId' | 'startedAt' | 'endedAt' | 'status'> | null): string {
   return [
     String(agentFamily || '').trim().toLowerCase(),
     result && result.sessionId ? String(result.sessionId) : '',
@@ -44,18 +49,23 @@ export function stageLaunchFingerprint(agentFamily: string, result: { sessionId?
   ].join('|');
 }
 
+function recordedLaunches(state: FallbackReviewState): Record<string, unknown> {
+  const recordedStageLaunches = state.metadata && typeof state.metadata === 'object'
+    ? (state.metadata.recordedStageLaunches as Record<string, unknown> || {})
+    : {};
+  return recordedStageLaunches;
+}
+
 export async function markStageLaunchRecorded(
-  state: Record<string, any> | null,
-  opts: { stage: string; agentFamily: string; result?: Record<string, any>; slug: string; worktree?: string; writeReviewStateFn?: typeof writeReviewState; missionStore?: MissionStore | null }
+  state: FallbackReviewState | null,
+  opts: { stage: string; agentFamily: string; result?: AgentProcessResult; slug: string; worktree?: string; writeReviewStateFn?: ReviewStateWriter; missionStore?: MissionStore | null }
 ): Promise<boolean> {
   const { stage, agentFamily, result, slug, worktree, writeReviewStateFn = writeReviewState, missionStore = null } = opts || {};
   if (!state || !agentFamily) { return true; }
   const key = stageWindowKey(stage, agentFamily);
   const fingerprint = stageLaunchFingerprint(agentFamily, result || null);
-  const recordedStageLaunches = state.metadata && typeof state.metadata === 'object'
-    ? (state.metadata.recordedStageLaunches || {})
-    : {};
-  const recorded: string[] = Array.isArray(recordedStageLaunches[key]) ? recordedStageLaunches[key] : [];
+  const recordedStageLaunches = recordedLaunches(state);
+  const recorded: unknown[] = Array.isArray(recordedStageLaunches[key]) ? recordedStageLaunches[key] : [];
   if (recorded.includes(fingerprint)) {
     return false;
   }
@@ -63,11 +73,20 @@ export async function markStageLaunchRecorded(
     state.metadata = {};
   }
   state.metadata.recordedStageLaunches = {
-    ...(state.metadata.recordedStageLaunches || {}),
+    ...(state.metadata.recordedStageLaunches as Record<string, unknown> || {}),
     [key]: [...recorded, fingerprint].slice(-20),
   };
-  await persistReviewStateOrThrow(writeReviewStateFn, slug, state as ReviewState, worktree || process.cwd(), missionStore);
+  await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree || process.cwd(), missionStore);
   return true;
+}
+
+function stageMeasurements({ result, worktree, sinceMs }: Parameters<typeof recordStageStatsSafe>[1]) {
+  let durationMinutes = 0;
+  if (result && result.startedAt && result.endedAt) {
+    durationMinutes = (Date.parse(result.endedAt) - Date.parse(result.startedAt)) / 60000;
+  }
+  const telemetry = resolveStageTelemetry({ worktree: worktree || '', result: result || {}, sinceMs: sinceMs || 0 });
+  return { durationMinutes, telemetry };
 }
 
 export async function recordStageStatsSafe(
@@ -80,22 +99,18 @@ export async function recordStageStatsSafe(
     worktree?: string;
     implementer?: string;
     reviewer?: string;
-    result?: Record<string, any>;
+    result?: AgentProcessResult;
     sinceMs?: number;
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
-    state?: Record<string, any>;
-    writeReviewStateFn?: typeof writeReviewState;
+    state?: FallbackReviewState;
+    writeReviewStateFn?: ReviewStateWriter;
     model?: string | null;
     missionStore?: MissionStore | null;
   }
 ): Promise<void> {
-  const { stage, slug, rootDir, worktree, implementer, reviewer, result, sinceMs, log, state, writeReviewStateFn = writeReviewState, model = null, missionStore = null } = opts;
-  let durationMinutes = 0;
-  if (result && result.startedAt && result.endedAt) {
-    durationMinutes = (Date.parse(result.endedAt) - Date.parse(result.startedAt)) / 60000;
-  }
-  const telemetry = resolveStageTelemetry({ worktree: worktree || '', result: result || {}, sinceMs: sinceMs || 0 });
+  const { stage, slug, rootDir, worktree, implementer, reviewer, result, log, state, writeReviewStateFn = writeReviewState, model = null, missionStore = null } = opts;
+  const { durationMinutes, telemetry } = stageMeasurements(opts);
   try {
     const actorFamily = kind === 'review' ? reviewer : implementer;
     const currentState = state && await readReviewState(slug, worktree || process.cwd(), missionStore);
@@ -128,13 +143,13 @@ export async function recordStageStatsSafe(
 export async function applyAgentFallback(opts: {
   role: string;
   original: string;
-  launchResult?: Record<string, any>;
-  state?: Record<string, any>;
+  launchResult?: { agent?: string | null } | null;
+  state?: FallbackReviewState;
   slug: string;
   worktree?: string;
-  taskResolution?: Record<string, any>;
+  taskResolution?: ReturnType<typeof resolveTaskFile>;
   log?: (_msg: string) => void;
-  writeReviewStateFn?: typeof writeReviewState;
+  writeReviewStateFn?: ReviewStateWriter;
   enforceTaskAssigneeFn?: typeof enforceTaskAssignee;
   missionStore?: MissionStore | null;
 }): Promise<string> {
@@ -149,7 +164,7 @@ export async function applyAgentFallback(opts: {
   } else {
     state.implementer = fallback;
   }
-  await persistReviewStateOrThrow(writeReviewStateFn, slug, state as ReviewState, worktree || process.cwd(), missionStore);
+  await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree || process.cwd(), missionStore);
   if (role === 'implementer' && taskResolution && taskResolution.ok) {
     if (enforceTaskAssigneeFn && !enforceTaskAssigneeFn(taskResolution.taskFile, fallback)) {
       log(fmt.status('WARN', `Could not enforce fallback implementer ${fallback} in backlog task.`));
@@ -160,9 +175,9 @@ export async function applyAgentFallback(opts: {
 
 export async function persistNormalizedPhaseRepair(
   slug: string,
-  state: ReviewState,
+  state: ReviewStateData & { phase: string; phaseOriginal?: string | null },
   worktree: string,
-  { log = fmt.log.plain, writeReviewStateFn = writeReviewState, missionStore = null }: { log?: (_msg: string) => void; writeReviewStateFn?: typeof writeReviewState; missionStore?: MissionStore | null } = {}
+  { log = fmt.log.plain, writeReviewStateFn = writeReviewState, missionStore = null }: { log?: (_msg: string) => void; writeReviewStateFn?: ReviewStateWriter; missionStore?: MissionStore | null } = {}
 ): Promise<void> {
   if (!state || !state.phaseOriginal || (VALID_PHASES as readonly string[]).includes(state.phaseOriginal)) {
     return;

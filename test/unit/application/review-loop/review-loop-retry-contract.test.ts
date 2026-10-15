@@ -31,7 +31,7 @@ describe("stale blocked relaunch", { concurrency: false }, () => {
       },
       agents: { launch: async () => ({ agent: 'custom' }) },
       artifacts: {
-        consumeImplementer: options.consumeImplementer ?? (async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' })),
+        consumeImplementer: options.consumeImplementer ?? (async () => ({ consumed: true, ok: true as const, disposition: 'CHANGES_MADE' })),
         ...(options.reviewer ? { consumeReviewer: options.reviewer } : {}),
       },
       // No revision is observable, so a reported change is taken at its word.
@@ -43,7 +43,7 @@ describe("stale blocked relaunch", { concurrency: false }, () => {
 
   test('--continue on a round already fixing treats a current human correction as the fixing round (TASK-2675)', async () => {
     const { fake } = continueFixing('task-2675-human-correction', { pollDisposition: () => 'BLOCKED' });
-    fake.ports.humanFeedback.reconcile = async () => ({ source: 'forgejo:review:7', author: 'human', state: 'current', disposition: 'REQUEST_CHANGES', approval: false, reason: 'operator correction', findings: [] });
+    fake.ports.humanFeedback.reconcile = async () => ({ source: 'forgejo:review:7', author: 'human', state: 'current', disposition: 'REQUEST_CHANGES', approval: false, reason: 'operator correction' as const, findings: [] });
     await runReviewLoop({ slug: 'task-2675-human-correction', isContinue: true, maxAttempts: 1 }, fake.ports);
 
     assert.ok(actOnReview(fake).length > 0, `Expected the implementer to act on the correction; got errors: ${fake.errors.join(' | ')}`);
@@ -62,7 +62,7 @@ describe("stale blocked relaunch", { concurrency: false }, () => {
   test('SC2: Re-launched implementer posts CHANGES_MADE → loop continues to next round', async () => {
     const { fake } = continueFixing('task-1221-sc2', {
       pollDisposition: () => 'BLOCKED', // skip-check always finds stale BLOCKED
-      reviewer: async () => ({ consumed: true, ok: true, reviewState: 'REQUEST_CHANGES' }),
+      reviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'REQUEST_CHANGES' }),
     });
     await runReviewLoop({ slug: 'task-1221-sc2', isContinue: true, maxAttempts: 2 }, fake.ports);
 
@@ -74,7 +74,7 @@ describe("stale blocked relaunch", { concurrency: false }, () => {
   test('SC3: Re-launched implementer still BLOCKED → loop stops with handoff', async () => {
     const { fake } = continueFixing('task-1221-sc3', {
       pollDisposition: () => 'BLOCKED',
-      consumeImplementer: async () => ({ consumed: true, ok: true, disposition: 'BLOCKED' }),
+      consumeImplementer: async () => ({ consumed: true, ok: true as const, disposition: 'BLOCKED' }),
     });
     await runReviewLoop({ slug: 'task-1221-sc3', isContinue: true, maxAttempts: 1 }, fake.ports);
 
@@ -135,7 +135,7 @@ describe("reviewer non submission bounce", { concurrency: false }, () => {
       slug: 'task-9001',
       state: new ReviewState('task-9001', { reviewer: 'custom', implementer: 'custom', round: 1, phase: 'reviewing' }),
       routing: { eligibleFamilies: () => ['custom'], nominate: () => 'custom' },
-      handoff: { handoff: async () => ({ ok: true }) },
+      handoff: { handoff: async () => ({ ok: true as const }) },
       provider,
       artifacts: { consumeReviewer: async () => ({ consumed: false }) },
       output: { exit: (code: number) => { throw new Error(`exit(${code})`); } },
@@ -237,7 +237,7 @@ describe("human correction on an approved round", { concurrency: false }, () => 
         fake.current()!.phase = 'fixing';
         return { ok: true as const };
       },
-    };
+    } satisfies import("../../../../src/application/ports/review-round.js").ApprovalRevocationPort;
     await runReviewLoop({ slug: 'task-2679-revoke', isContinue: true, maxAttempts: 1 }, { ...fake.ports, approvalRevocation });
 
     assert.equal(requests.length, 1);
@@ -249,7 +249,7 @@ describe("human correction on an approved round", { concurrency: false }, () => 
 
   test('a failed revocation stops with guidance and the diagnostic, keeping the correction (TASK-2679)', async () => {
     const fake = approvedRound('task-2679-revoke-fail', 'approved', correction);
-    const approvalRevocation = { revoke: async () => ({ ok: false as const, diagnostic: 'version conflict' }) };
+    const approvalRevocation = { revoke: async () => ({ ok: false as const, diagnostic: 'version conflict' }) } satisfies import("../../../../src/application/ports/review-round.js").ApprovalRevocationPort;
     await runReviewLoop({ slug: 'task-2679-revoke-fail', isContinue: true, maxAttempts: 1 }, { ...fake.ports, approvalRevocation });
 
     assert.equal(implementerLaunches(fake).length, 0);
@@ -262,7 +262,7 @@ describe("human correction on an approved round", { concurrency: false }, () => 
   test('a revocation that leaves the round approved restarts only once, then escalates (TASK-2679)', async () => {
     const fake = approvedRound('task-2679-revoke-loop', 'approved', correction);
     let calls = 0;
-    const approvalRevocation = { revoke: async () => { calls++; return { ok: true as const }; } };
+    const approvalRevocation = { revoke: async () => { calls++; return { ok: true as const }; } } satisfies import("../../../../src/application/ports/review-round.js").ApprovalRevocationPort;
     await runReviewLoop({ slug: 'task-2679-revoke-loop', isContinue: true, maxAttempts: 1 }, { ...fake.ports, approvalRevocation });
 
     assert.equal(calls, 2);

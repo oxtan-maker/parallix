@@ -1,3 +1,4 @@
+import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
 // Historical regression provenance: TASK-2322.12.
 // TASK-2322.12 CP 5 (SC7) — SQLite-backed restart recovery for review-loop state.
 //
@@ -66,7 +67,7 @@ async function withHome<T>(root: string, fn: () => Promise<T>): Promise<T> {
 }
 
 function missionWithReview(root: string, review: Partial<Review> = {}): Mission {
-  return {
+  return completeMissionFixture(String(missionId(SLUG)), {
     id: missionId(SLUG),
     repositoryId: repositoryId(root),
     title: `Mission ${SLUG}`,
@@ -78,7 +79,7 @@ function missionWithReview(root: string, review: Partial<Review> = {}): Mission 
     netEngineeringLines: null,
     closedAt: null,
     externalTaskRef: null,
-    intakeTrace: null,
+    
     review: {
       rounds: [{
         number: 1,
@@ -101,7 +102,7 @@ function missionWithReview(root: string, review: Partial<Review> = {}): Mission 
       reviewEvents: [],
       ...review,
     } as Review,
-  } as Mission;
+  }) as Mission;
 }
 
 async function openMigrated(root: string, migrations = loadDefaultMigrations()): Promise<SqliteDatabaseAdapter> {
@@ -289,7 +290,7 @@ describe("review-loop state survives every recovery scenario (SC7)", () => {
     await assert.rejects(
       () => runner.applyPending([
         ...loadDefaultMigrations(),
-        { id: '9999-broken', name: '9999-broken', sql: 'ALTER TABLE mission_reviews ADD COLUMN;' } as never,
+        { id: '9999-broken', checksum: 'broken-fixture', up: 'ALTER TABLE mission_reviews ADD COLUMN;' },
       ]),
       'a malformed migration must fail closed',
     );

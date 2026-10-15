@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 /**
  * Regression test for task-2318: bootstrap temp-directory leaks.
  *
@@ -14,6 +13,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { ChildProcessWithoutNullStreams } from 'node:child_process';
 
 
 // Unique prefix so the test can identify the directories its child created
@@ -32,10 +32,10 @@ function getExistingMarkers() {
     .map(name => path.join(os.tmpdir(), name));
 }
 
-function waitForExit(child, timeoutMs) {
+function waitForExit(child: ChildProcessWithoutNullStreams, timeoutMs: number|undefined) {
   // Generous budget: tsx bootstrap startup plus the child's own cleanup can
   // exceed 10 s when the integration suite contends with host load.
-  return new Promise((resolve, reject) => {
+  return new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
     const timer = setTimeout(() => {
       try { child.kill('SIGKILL'); } catch (_) {}
       reject(new Error(`Child process ${child.pid} did not exit within ${timeoutMs}ms`));
@@ -49,20 +49,20 @@ function waitForExit(child, timeoutMs) {
 
 // Default 30 s: every call site waits for a child tsx bootstrap to start
 // and write a manifest; 5 s expires under integration-suite contention.
-async function waitFor(condition, description, timeoutMs = 30_000) {
+async function waitFor(condition: () => boolean, description: string, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (condition()) return;
     await new Promise(resolve => setTimeout(resolve, 25));
   }
-  assert.fail(`Timed out waiting for ${description}`);
+  return assert.fail(`Timed out waiting for ${description}`);
 }
 
-function manifestEntries(manifestDir) {
+function manifestEntries(manifestDir: fs.PathLike) {
   return fs.readdirSync(manifestDir).filter(entry => entry.endsWith('.json'));
 }
 
-function manifestRoots(manifestDir) {
+function manifestRoots(manifestDir: string) {
   return manifestEntries(manifestDir).flatMap(entry => {
     try {
       const roots = JSON.parse(fs.readFileSync(path.join(manifestDir, entry), 'utf8'));
@@ -187,7 +187,7 @@ test('bootstrap temp directories are cleaned up after SIGKILL termination', asyn
   // directory created alongside many same-prefix siblings can be absent from a
   // readdirSync snapshot on the shared /tmp (task-2500), so existsSync stays
   // correct where readdirSync does not.
-  const leaked = data.dirs.filter((dir) => fs.existsSync(dir));
+  const leaked = data.dirs.filter((dir: fs.PathLike) => fs.existsSync(dir));
 
   assert.ok(
     leaked.length >= data.dirs.length,
@@ -309,11 +309,11 @@ test('runner orphan cleanup is safe with concurrent test runs', async () => {
   );
 
   // Read all manifest files from each directory
-  const readManifestDir = (dir) => {
-    const roots = [];
+  const readManifestDir = (dir: string) => {
+    const roots: string[] = [];
     for (const entry of fs.readdirSync(dir).filter(e => e.endsWith('.json'))) {
       const r = JSON.parse(fs.readFileSync(path.join(dir, entry), 'utf8'));
-      if (Array.isArray(r)) roots.push(...r);
+      if (Array.isArray(r) && r.every((entry: unknown): entry is string => typeof entry === 'string')) roots.push(...r);
     }
     return roots;
   };

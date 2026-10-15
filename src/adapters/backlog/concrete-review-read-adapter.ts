@@ -18,7 +18,8 @@ import {
 } from '../../domain/review.js';
 import type { ReviewProjectionFact, ReviewReadAdapter } from '../../application/projections/board-readers.js';
 import type { MissionStore } from '../../application/domain-ports.js';
-import type { ReviewState } from '../review/review-state.js';
+import type { ReviewStateData } from '../review/review-state.js';
+type ReviewSnapshot = ReviewStateData & { slug: string };
 import { findMissionDir } from '../filesystem/mission-utils.js';
 import { readReviewState } from '../review/review-state.js';
 
@@ -26,7 +27,7 @@ import { readReviewState } from '../review/review-state.js';
 // Parse-primitive types
 // ---------------------------------------------------------------------------
 
-type ReadReviewStateFn = (_slug: string, _rootDir?: string, _missionStore?: MissionStore | null) => ReviewState | null | Promise<ReviewState | null>;
+type ReadReviewStateFn = (_slug: string, _rootDir?: string, _missionStore?: MissionStore | null) => ReviewSnapshot | null | Promise<ReviewSnapshot | null>;
 type FindMissionDirFn = (_slug: string, _rootDir?: string, _options?: { missionPath?: string }) => string | null;
 
 // ---------------------------------------------------------------------------
@@ -34,7 +35,7 @@ type FindMissionDirFn = (_slug: string, _rootDir?: string, _options?: { missionP
 // ---------------------------------------------------------------------------
 
 function defaultReadReviewState(): ReadReviewStateFn {
-  return readReviewState as ReadReviewStateFn;
+  return readReviewState;
 }
 
 /**
@@ -44,7 +45,7 @@ function defaultReadReviewState(): ReadReviewStateFn {
  * subject and the round subject stay the same value — `sameReviewedRevision`
  * compares them, and a card only reports `reviewApproved` when they match.
  */
-function reviewedChangeFrom(state: ReviewState): ReviewedChange {
+function reviewedChangeFrom(state: ReviewSnapshot): ReviewedChange {
   const pullRequest = state.pullRequest;
   if (pullRequest) {
     return { ...pullRequest, kind: 'pull-request' };
@@ -57,7 +58,7 @@ function reviewedChangeFrom(state: ReviewState): ReviewedChange {
 }
 
 function defaultFindMissionDir(): FindMissionDirFn {
-  return findMissionDir as FindMissionDirFn;
+  return findMissionDir;
 }
 
 // ---------------------------------------------------------------------------
@@ -129,7 +130,7 @@ export class ConcreteReviewReadAdapter implements ReviewReadAdapter {
     // when the store is null (e.g. test doubles or bootstrapping) — the default
     // readReviewState() returns null whenever mission.review is null, and
     // reviewFrom() never yields a review with zero rounds.
-    const state = await Promise.resolve(this.readReviewState(_missionId, this.rootDir, this.missionStore)) as ReviewState | null;
+    const state = await Promise.resolve(this.readReviewState(_missionId, this.rootDir, this.missionStore));
     if (!state) {
       return null;
     }
@@ -162,7 +163,7 @@ export class ConcreteReviewReadAdapter implements ReviewReadAdapter {
     }
 
     // Fallback: flat ReviewState (backward compat for zero-round missions)
-    const state = await Promise.resolve(this.readReviewState(_missionId, this.rootDir, this.missionStore)) as ReviewState | null;
+    const state = await Promise.resolve(this.readReviewState(_missionId, this.rootDir, this.missionStore));
     if (!state) {
       return null;
     }
@@ -188,7 +189,7 @@ export class ConcreteReviewReadAdapter implements ReviewReadAdapter {
   // Internal helpers
   // -----------------------------------------------------------------------
 
-  private toDomainReview(state: ReviewState): Review {
+  private toDomainReview(state: ReviewSnapshot): Review {
     const reviewer: AgentFamily = (() => {
       try { return agentFamily(state.reviewer || 'codex'); }
       catch { return agentFamily('codex'); }
@@ -228,10 +229,11 @@ export class ConcreteReviewReadAdapter implements ReviewReadAdapter {
     };
   }
 
-  private decisionFromState(state: ReviewState): ReviewerDecision | null {
+  private decisionFromState(state: ReviewSnapshot): ReviewerDecision | null {
     if (state.phase === 'approved') {
       return {
         kind: 'approved',
+        revision: null,
         decidedAt: state.startedAt || new Date().toISOString(),
         comment: state.disposition || null,
         source: { kind: 'local' },
@@ -241,6 +243,7 @@ export class ConcreteReviewReadAdapter implements ReviewReadAdapter {
     if (state.phase === 'fixing' && state.disposition) {
       return {
         kind: 'changes-requested',
+        revision: null,
         decidedAt: state.startedAt || new Date().toISOString(),
         comment: state.disposition || null,
         findings: [],
