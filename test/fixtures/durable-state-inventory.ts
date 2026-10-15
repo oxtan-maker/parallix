@@ -1193,6 +1193,17 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     classification: 'generated-artifact',
     cutoverTask: null,
   },
+  {
+    // TASK-2764: immutable startup evidence in the host's temporary run directory;
+    // read before transport cleanup, then recorded through the history port.
+    id: 'large-artifacts-tmux-launch-execution-read',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/process/tmux-launch-execution.ts',
+    operation: 'read',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
 ] as const;
 
 // ---------------------------------------------------------------------------

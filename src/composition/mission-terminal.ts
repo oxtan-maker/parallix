@@ -17,6 +17,7 @@ import type { RunCapture } from '../adapters/filesystem/run-history-store.js';
 import { missionTerminalRequest } from '../interfaces/cli/mission-terminal-policy.js';
 import { missionSocketPath, prepareTmuxLaunch, probeTmux, reconcileOrphanSessions, superviseTmuxLaunch } from '../adapters/process/tmux-host.js';
 import type { CliInvocation } from '../adapters/process/cli-invocation.js';
+import { observeTmuxLaunchExecution } from '../adapters/process/tmux-launch-execution.js';
 
 /** The mission and identity of a mission operation command, or `null` when it is not one. */
 function operationIdentity(command: string, args: string[], target: string): { slug: string; worktree: string; identity: OpenRunCaptureInput['identity']; runId: string; terminal: NativeMissionTerminalIdentity & { role: string } } | null {
@@ -79,7 +80,11 @@ export async function hostMissionCommand(command: string, args: string[], target
   // The supervisor records every pane byte of the operation, attached or not.
   const capture = openOperationCapture(worktree, identity, runId, configuration, socketPath, log);
   capture?.addTmuxSession(launch.sessionName);
-  const result = await superviseTmuxLaunch(launch, { onOutput: (stream, chunk) => { try { capture?.write(stream, chunk); } catch { /* keep the command running */ } } });
+  const stopObservation = observeTmuxLaunchExecution(launch, (pid, identity) => capture?.observeExecution(pid, identity));
+  let result: number;
+  try {
+    result = await superviseTmuxLaunch(launch, { onOutput: (stream, chunk) => { try { capture?.write(stream, chunk); } catch { /* keep the command running */ } } });
+  } finally { stopObservation(); }
   finishOperation(capture, result, { kind: 'terminal-bytes', path: 'stdout', covers: `everything the hosted ${command} operation drew in its terminal pane: harness, preflight, gates, agent output, handoff and review messages (stderr merged by the terminal)`, complete: true },
     launch.started() ? [] : ['The operation did not start in the terminal; it may run through the pipe host as a separate operation.']);
   return hostedMissionResult(launch, result, config);

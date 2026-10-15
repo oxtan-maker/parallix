@@ -45,7 +45,10 @@ for that mission instead.
 Explicit terminal-host overrides and unavailable-tool policy remain available
 through `px config` and the workflow configuration schema. A pipe-hosted mission
 has no attachable terminal; its retained output is still searchable. tmux hosting
-requires Linux or macOS with a working tmux binary.
+requires Linux or macOS with a working tmux binary. Only a confirmed missing
+socket or server means the terminal is absent. Permission denial, ambiguous
+connection errors, a failed probe, missing tmux, or a timeout leave its state
+unavailable; retained history stays readable and observation never retires it.
 
 ## Mission history on the board
 
@@ -96,9 +99,12 @@ Coordinator command records are labelled workflow captures, with no agent
 family or attempt. When current work is published, they correlate to its
 existing operation ID; missing publication leaves that correlation unconfirmed. Agent records retain their invocation identity and separate execution
 observation: an open capture alone does not mean the agent is live. A confirmed
-process or matching terminal-run observation can establish execution; missing
-or inconclusive observations remain unconfirmed. This does not change family
-availability or the Mission assignee. Earlier coordinator records remain
+process identity must match the identity recorded for that execution to confirm
+liveness. A reused PID or identity mismatch means that execution is no longer
+live; hosted workflow commands record their process identity before execution.
+A PID without a recorded start identity, or an unreadable current identity,
+leaves execution unconfirmed even when its terminal window still exists. This
+does not change family availability or the Mission assignee. Earlier coordinator records remain
 readable with the same history references. Hyphenated agent family names stay
 canonical in invocation and history metadata; old encoded family tokens are
 decoded when read, without renaming retained records or terminal windows.

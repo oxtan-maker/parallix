@@ -9,7 +9,7 @@
  */
 import childProcess from 'node:child_process';
 import fs from 'node:fs';
-import { processStartIdentity, probeProcessLiveness } from './process-liveness.js';
+import { processStartIdentity } from './process-liveness.js';
 import { isRunHistoryId } from '../../application/run-history-types.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import type { MissionTerminalHostPort, MissionTerminalSessionsResult } from '../../application/ports/mission-terminal.js';
@@ -29,22 +29,35 @@ function failure(result: ReturnType<SpawnSync>): Failure | 'no-server' {
   if (code === 'ETIMEDOUT' || result.signal === 'SIGTERM') { return { ok: false, reason: 'timeout', detail: `tmux did not answer within ${PROBE_TIMEOUT_MS} ms` }; }
   const stderr = String(result.stderr ?? '');
   // A socket file without a server is definitive absence, not a failure.
-  if (/no server running|error connecting|server exited|No such file or directory/i.test(stderr)) { return 'no-server'; }
-  return { ok: false, reason: 'failed', detail: `tmux failed (${result.error ? result.error.message : `exit ${result.status}`})` };
+  if (!result.error && result.status === 1 && /^(?:no server running on [^\n]+|error connecting to [^\n]+ \(No such file or directory\))\n?$/.test(stderr)) { return 'no-server'; }
+  return { ok: false, reason: 'failed', detail: `tmux failed (${result.error ? result.error.message : `exit ${result.status}`}): ${stderr.trim()}` };
 }
 
 function positivePid(value: string | undefined): boolean {
   return /^[1-9][0-9]*$/.test(value ?? '');
 }
 
-export function createTmuxMissionTerminalHost(options: { readonly configuration: ParallixConfiguration; readonly spawnSyncFn?: SpawnSync; readonly repositoryKey: string; readonly executionAlive?: (_pid: number) => boolean | null }): MissionTerminalHostPort {
+/** Compare only with evidence recorded for this execution, never with itself. */
+export function probeMissionExecution(pid: number, recorded: { readonly pid: number; readonly processIdentity: string | null } | null): boolean | null {
+  if (!recorded) { return null; }
+  if (recorded.pid !== pid) { return false; }
+  try { process.kill(pid, 0); } catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH' ? false : null; }
+  if (!recorded.processIdentity) { return null; }
+  const current = processStartIdentity(pid);
+  return current === null ? null : current === recorded.processIdentity;
+}
+
+export function createTmuxMissionTerminalHost(options: { readonly configuration: ParallixConfiguration; readonly spawnSyncFn?: SpawnSync; readonly repositoryKey: string; readonly recordedExecution?: (_identity: MissionTerminalScope, _runId: string) => { readonly pid: number; readonly processIdentity: string | null } | null }): MissionTerminalHostPort {
   const spawnSyncFn = options.spawnSyncFn ?? childProcess.spawnSync;
   const socketOf = (identity: MissionTerminalScope) => missionSocketPath({ repositoryKey: options.repositoryKey, missionId: identity.missionId }, options.configuration);
   const run = (args: string[]) => spawnSyncFn('tmux', args, { encoding: 'utf8', timeout: PROBE_TIMEOUT_MS });
   return {
     sessions(identity): MissionTerminalSessionsResult {
       const socket = socketOf(identity);
-      if (!fs.existsSync(socket)) { return { ok: true, sessions: null }; }
+      try { fs.statSync(socket); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') { return { ok: true, sessions: null }; }
+        return { ok: false, reason: 'failed', detail: `cannot inspect mission socket: ${(error as Error).message}` };
+      }
       const listed = run(['-S', socket, 'list-sessions', '-F', '#{session_name}']);
       if (listed.error || listed.status !== 0) {
         const failed = failure(listed);
@@ -64,7 +77,7 @@ export function createTmuxMissionTerminalHost(options: { readonly configuration:
         // Finished windows clear both PIDs while their output relay drains.
         .filter(([name, host, command]) => name !== 'console' && (positivePid(host) || positivePid(command)))
         .map(([name, , command, runId]) => ({ name, started: positivePid(command), runId: runId && isRunHistoryId(runId) ? runId : null,
-          ...(runId && isRunHistoryId(runId) ? { execution: positivePid(command) ? (options.executionAlive ?? (pid => probeProcessLiveness(pid, processStartIdentity(pid))))(Number(command)) : false } : {}) }));
+          ...(runId && isRunHistoryId(runId) ? { execution: positivePid(command) ? probeMissionExecution(Number(command), options.recordedExecution?.(identity, runId) ?? null) : false } : {}) }));
       return { ok: true, sessions: { owned, others, operations } };
     },
     capture(identity, session, window) {

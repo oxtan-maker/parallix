@@ -1,8 +1,8 @@
 ---
 id: TASK-2764
 title: tmux observation
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-15 13:42'
 labels: []
 dependencies: []

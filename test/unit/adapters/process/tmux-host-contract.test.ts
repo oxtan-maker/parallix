@@ -1,3 +1,4 @@
+import { readProcessStat, runNativeStartIdentity } from '../../../../src/adapters/process/process-liveness.js';
 import { resolveConfiguration } from '../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 import fs from 'node:fs';
@@ -24,8 +25,53 @@ import {
 import { ensurePrivateDir, terminalStateRoot } from '../../../../src/adapters/process/terminal-state-root.js';
 import { createTmuxMissionTerminalHost } from '../../../../src/adapters/process/tmux-mission-terminal.js';
 import { missionTerminalIdentity } from '../../../../src/adapters/process/mission-terminal-identity.js';
+import { observeTmuxLaunchExecution, readTmuxLaunchExecution } from '../../../../src/adapters/process/tmux-launch-execution.js';
 
 // Doubles only: real tmux runs in test/integration/process/tmux-terminal-host.test.ts.
+
+test('tmux launch identity comes from immutable startup evidence (TASK-2764)', () => {
+  const root = mkdtemp('px-tmux-identity-');
+  const file = path.join(root, 'command.identity');
+  try {
+    assert.equal(readTmuxLaunchExecution(file), null);
+    fs.writeFileSync(file, '123\n');
+    assert.equal(readTmuxLaunchExecution(file), null);
+    if (process.platform === 'linux') {
+      const stat = (pid: number) => `${pid} (shell with ) parentheses) ${['S', ...Array(18).fill('0'), '456'].join(' ')}`;
+      fs.writeFileSync(file, `123\n${stat(124)}\n`);
+      assert.equal(readTmuxLaunchExecution(file), null, 'a different process cannot supply the identity');
+      fs.writeFileSync(file, `123\n${stat(123)}\n`);
+      assert.deepEqual(readTmuxLaunchExecution(file), { pid: 123, processIdentity: '456' });
+    } else {
+      fs.writeFileSync(file, '123\nThu Oct 15 12:00:00 2026\n');
+      assert.deepEqual(readTmuxLaunchExecution(file), { pid: 123, processIdentity: new Date('Thu Oct 15 12:00:00 2026').toISOString() });
+    }
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('tmux launch records startup identity once and stops polling on cleanup (TASK-2764)', context => {
+  context.mock.timers.enable({ apis: ['setInterval'] });
+  const root = mkdtemp('px-tmux-observe-');
+  const file = path.join(root, 'command.identity');
+  const launch = { args: [path.join(root, 'host.sh')] } as TmuxLaunch;
+  const observed: Array<[number, string]> = [];
+  const stop = observeTmuxLaunchExecution(launch, (pid, identity) => observed.push([pid, identity]));
+  try {
+    context.mock.timers.tick(10);
+    assert.deepEqual(observed, [], 'missing evidence stays unknown');
+    const evidence = process.platform === 'linux'
+      ? `123 (shell) ${['S', ...Array(18).fill('0'), '456'].join(' ')}`
+      : 'Thu Oct 15 12:00:00 2026';
+    fs.writeFileSync(file, `123\n${evidence}\n`);
+    context.mock.timers.tick(10);
+    assert.deepEqual(observed, [[123, process.platform === 'linux' ? '456' : new Date(evidence).toISOString()]]);
+    context.mock.timers.tick(100);
+    assert.equal(observed.length, 1, 'later polling cannot replace the recorded identity');
+    const stopPending = observeTmuxLaunchExecution(launch, () => assert.fail('polling survived cleanup'));
+    stopPending();
+    context.mock.timers.tick(10);
+  } finally { stop(); fs.rmSync(root, { recursive: true, force: true }); }
+});
 
 function identity(missionId = 'task-1', role = 'execute') {
   return agentRunIdentity({ repositoryKey: 'abc123', missionId, role, family: 'claude', attempt: 1, startedAtMs: 1_790_000_000_000 });
@@ -95,6 +141,8 @@ test('prepared host runs the confined command in the pane and keeps credentials 
   const paneEnv = fs.readFileSync(path.join(scratch, 'pane.env'), 'utf8');
   assert.ok(pane.includes(`${shellQuote('bwrap')} ${shellQuote('--ro-bind')}`), 'the pane runs the already-confined command');
   assert.ok(pane.includes(shellQuote("it's")));
+  assert.ok(pane.includes("printf '%s\\n'"), 'startup PID and identity use separate lines');
+  assert.ok(pane.indexOf('command.identity.tmp') < pane.indexOf('exec '), 'identity is recorded before command execution');
   assert.match(host, /trap 'cleanup TERM; exit 143' TERM/);
   assert.match(host, /pipe-pane/);
   assert.ok(host.includes('exec "${SHELL:-/bin/sh}" -i'), 'the retained console is the operator\'s interactive shell so their rc environment returns (TASK-2675)');
@@ -383,22 +431,106 @@ function agentRunIdentity(input: Omit<Parameters<typeof logicalRunIdentity>[0], 
 }
 
 
-test('terminal observation exposes the retained run id and an explicit execution probe (TASK-2749)', () => {
+test('terminal observation compares recorded execution identity and keeps missing evidence unknown (TASK-2749, TASK-2764)', t => {
   const root = mkdtemp('px-native-run-observation-');
   const configuration = resolveConfiguration({ PARALLIX_TERMINAL_STATE_DIR: root });
   const owned = identity();
   const socket = missionSocketPath(owned, configuration);
   fs.mkdirSync(path.dirname(socket), { recursive: true });
   fs.writeFileSync(socket, '');
-  let alive: boolean | null = true;
-  const host = createTmuxMissionTerminalHost({ configuration, repositoryKey: 'abc123', executionAlive: () => alive, spawnSyncFn: ((_command: string, args: string[]) => ({ status: 0,
+  let current: string | null = '123';
+  t.mock.method(process, 'kill', () => true);
+  t.mock.method(readProcessStat, 'sync', () => {
+    if (current === null) { throw new Error('unreadable'); }
+    return `12 (command) ${Array(19).fill('0').join(' ')} ${current}`;
+  });
+  t.mock.method(runNativeStartIdentity, 'execFileSync', () => {
+    if (current === null) { throw new Error('unreadable'); }
+    return current === '123' ? '2026-01-01T00:00:00.000Z' : '2026-01-02T00:00:00.000Z';
+  });
+  const startIdentity = process.platform === 'linux' ? '123' : '2026-01-01T00:00:00.000Z';
+  let recorded: { pid: number; processIdentity: string | null } | null = { pid: 12, processIdentity: startIdentity };
+  const host = createTmuxMissionTerminalHost({ configuration, repositoryKey: 'abc123', recordedExecution: (scope, runId) => {
+    assert.equal(scope.missionId, owned.missionId);
+    assert.equal(runId, 'execute-claude-a1-abc');
+    return recorded;
+  }, spawnSyncFn: ((_command: string, args: string[]) => ({ status: 0,
     stdout: args.includes('list-sessions') ? 'task-1\n' : 'native-window\t11\t12\texecute-claude-a1-abc\n',
   })) as never });
-  const observation = () => { const result = host.sessions(owned); assert.equal(result.ok, true); return result.ok ? result.sessions!.operations[0] : null; };
-  assert.equal(observation()!.runId, 'execute-claude-a1-abc');
-  assert.equal(observation()!.execution, true);
-  alive = false;
-  assert.equal(observation()!.execution, false);
-  alive = null;
-  assert.equal(observation()!.execution, null, 'unknown liveness remains unknown');
+  const observation = () => { const result = host.sessions(owned); assert.ok(result.ok && result.sessions); return result.sessions.operations[0]; };
+  assert.equal(observation().runId, 'execute-claude-a1-abc');
+  assert.equal(observation().execution, true);
+  current = '456';
+  assert.equal(observation().execution, false, 'a reused PID cannot match the original execution');
+  current = null;
+  assert.equal(observation().execution, null, 'unreadable current identity cannot prove liveness');
+  recorded = { pid: 13, processIdentity: startIdentity };
+  assert.equal(observation().execution, false, 'another recorded PID is not this execution');
+  recorded = { pid: 12, processIdentity: null };
+  assert.equal(observation().execution, null);
+  recorded = null;
+  assert.equal(observation().execution, null, 'unknown liveness remains unknown');
+});
+
+test('probe failures remain unavailable at session and window boundaries (TASK-2764)', () => {
+  const configuration = resolveConfiguration({ PARALLIX_TERMINAL_STATE_DIR: mkdtemp('px-probe-failure-') });
+  const scope = identity();
+  const socket = missionSocketPath(scope, configuration);
+  fs.mkdirSync(path.dirname(socket), { recursive: true });
+  fs.writeFileSync(socket, '');
+  for (const boundary of ['list-sessions', 'list-windows']) {
+    for (const stderr of ['error connecting to /tmp/x (Permission denied)', 'error connecting to /tmp/x (Connection refused)', 'server exited unexpectedly', 'unrelated No such file or directory']) {
+      const host = createTmuxMissionTerminalHost({ configuration, repositoryKey: 'abc123', spawnSyncFn: ((_cmd: string, args: string[]) =>
+        args.includes(boundary) ? { status: 1, stderr } : { status: 0, stdout: 'task-1\n' }) as never });
+      const result = host.sessions(scope);
+      assert.equal(result.ok, false, `${boundary}: ${stderr}`);
+      if (!result.ok) { assert.equal(result.reason, 'failed'); }
+    }
+  }
+});
+
+test('a reused PID without recorded identity is unknown rather than alive (TASK-2764)', t => {
+  const configuration = resolveConfiguration({ PARALLIX_TERMINAL_STATE_DIR: mkdtemp('px-probe-identity-') });
+  const scope = identity();
+  const socket = missionSocketPath(scope, configuration);
+  fs.mkdirSync(path.dirname(socket), { recursive: true });
+  fs.writeFileSync(socket, '');
+  t.mock.method(process, 'kill', () => true);
+  const host = createTmuxMissionTerminalHost({ configuration, repositoryKey: 'abc123', spawnSyncFn: ((_cmd: string, args: string[]) => ({ status: 0,
+    stdout: args.includes('list-sessions') ? 'task-1\n' : `window\t11\t${process.pid}\texecute-claude-a1-abc\n`,
+  })) as never });
+  const result = host.sessions(scope);
+  assert.ok(result.ok && result.sessions);
+  assert.equal(result.sessions.operations[0].execution, null);
+});
+
+test('session and window probes distinguish confirmed absence from unavailable failures (TASK-2764)', t => {
+  const configuration = resolveConfiguration({ PARALLIX_TERMINAL_STATE_DIR: mkdtemp('px-probe-matrix-') });
+  const scope = identity();
+  const socket = missionSocketPath(scope, configuration);
+  fs.mkdirSync(path.dirname(socket), { recursive: true });
+  fs.writeFileSync(socket, '');
+  const cases = [
+    { reply: { status: 1, stderr: 'no server running on /tmp/x\n' }, reason: null },
+    { reply: { status: 1, stderr: 'error connecting to /tmp/x (No such file or directory)\n' }, reason: null },
+    { reply: { status: 1, stderr: 'unexpected failure' }, reason: 'failed' },
+    { reply: { status: null, error: Object.assign(new Error('missing'), { code: 'ENOENT' }) }, reason: 'host-missing' },
+    { reply: { status: null, error: Object.assign(new Error('slow'), { code: 'ETIMEDOUT' }) }, reason: 'timeout' },
+    { reply: { status: null, signal: 'SIGTERM' }, reason: 'timeout' },
+    { reply: { status: 1, stderr: 'no server running on /tmp/x\npermission denied' }, reason: 'failed' },
+    { reply: { status: 2, stderr: 'no server running on /tmp/x' }, reason: 'failed' },
+    { reply: { status: 1, error: new Error('probe failed'), stderr: 'no server running on /tmp/x' }, reason: 'failed' },
+  ];
+  for (const boundary of ['list-sessions', 'list-windows']) {
+    for (const { reply, reason } of cases) {
+      const host = createTmuxMissionTerminalHost({ configuration, repositoryKey: 'abc123', spawnSyncFn: ((_cmd: string, args: string[]) =>
+        args.includes(boundary) ? reply : { status: 0, stdout: 'task-1\n' }) as never });
+      const result = host.sessions(scope);
+      if (reason === null) { assert.deepEqual(result, { ok: true, sessions: null }); }
+      else { assert.ok(!result.ok); assert.equal(result.reason, reason); }
+    }
+  }
+  const host = createTmuxMissionTerminalHost({ configuration, repositoryKey: 'abc123', spawnSyncFn: (() => { throw new Error('unexpected probe'); }) as never });
+  t.mock.method(fs, 'statSync', () => { throw Object.assign(new Error('permission denied'), { code: 'EACCES' }); });
+  assert.equal(host.sessions(scope).ok, false, 'an inaccessible socket is not a missing socket');
 });

@@ -1,5 +1,9 @@
 # Repository instructions
 
+## graphify
+
+If `graphify-out/graph.json` exists, query from the active worktree with `graphify query "<question>" --graph "$(pwd)/graphify-out/graph.json"`; use the same path for `path` and `explain`. If absent, run `/graphify .` to build it or read source directly. Parallix updates existing graphs after successful squash integration on the receiving base worktree; edits, review and checkpoints do not trigger updates.
+
 ## Documentation
 
 Read `docs/doc-standards.md` before editing root or `docs/` Markdown. Update live documentation for changed user-facing behavior, constraints, or rationale; keep internal documentation to a minimum. Keep implementation inventories and test evidence out of live docs.

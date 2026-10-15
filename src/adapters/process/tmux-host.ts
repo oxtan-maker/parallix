@@ -124,6 +124,8 @@ function commandScript(socketPath: string, scratch: string, command: string, arg
   const input = shellQuote(path.join(scratch, 'stdin'));
   return [
     '#!/bin/sh',
+    `{ printf '%s\\n' "$$"; if [ -r /proc/$$/stat ]; then cat /proc/$$/stat; else ps -p "$$" -o lstart=; fi; } > ${shellQuote(path.join(scratch, 'command.identity.tmp'))}`,
+    `mv ${shellQuote(path.join(scratch, 'command.identity.tmp'))} ${shellQuote(path.join(scratch, 'command.identity'))}`,
     `printf '%s' "$$" > ${shellQuote(path.join(scratch, 'command.pid'))}`,
     `tmux -S ${shellQuote(socketPath)} set-option -w -t "$TMUX_PANE" @px_command_pid "$$"`,
     ...(hasInput ? [`exec 3< ${input} || exit 66`, `rm -f ${input}`] : []),
