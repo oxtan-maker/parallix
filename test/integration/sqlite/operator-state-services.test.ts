@@ -377,17 +377,11 @@ describe('AgentBlockService: blocked agent projection', () => {
 
 describe('Database failure: explicit unavailable result', () => {
   let db: SqliteDatabaseAdapter;
-  let dir: string;
 
-  beforeEach(async () => {
-    const result = await createDbWithSchema();
-    db = result.db;
-    dir = result.dir;
-  });
-
-  afterEach(async () => {
-    await db.close();
-    cleanupTempDir(dir);
+  beforeEach(() => {
+    // These proxies reject before reaching SQLite. Keep each case isolated
+    // without opening a database or migrating a schema that it never uses.
+    db = new SqliteDatabaseAdapter();
   });
 
   it('KnownRepositoryService propagates database error on loadObservation', async () => {

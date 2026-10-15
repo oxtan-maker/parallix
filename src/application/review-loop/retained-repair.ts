@@ -10,7 +10,7 @@ export function pendingRetainedRepair(mission: Mission) {
 }
 
 /** Continuation is recovery until the original check and checkpoint are verified. */
-export async function resumeRetainedRepair(request: ReviewLoopRequest, mission: Mission, implementer: string, ports: ReviewLoopPorts, reviewer?: string): Promise<void> {
+export async function resumeRetainedRepair(request: ReviewLoopRequest, mission: Mission, implementer: string, ports: ReviewLoopPorts, reviewer?: string): Promise<boolean> {
   try {
     const contractFailure = repairContractFailure(mission.checkpoints, mission.declaredGates, mission.successCriteria);
     if (contractFailure) { throw new Error(contractFailure); }
@@ -24,7 +24,7 @@ export async function resumeRetainedRepair(request: ReviewLoopRequest, mission: 
     }
     if (request.dryRun) {
       ports.output.log(`Retained repair: ${repair.command}\nWorking directory: ${evidence.cwd}\nstdout: ${evidence.stdoutPath}\nstderr: ${evidence.stderrPath}`);
-      return;
+      return false;
     }
     const result = await rebound({ kind: 'gate-failure', area: 'retained verification', command: repair.command,
       exitCode: evidence.exitCode, stdout, stderr }, {
@@ -44,9 +44,11 @@ export async function resumeRetainedRepair(request: ReviewLoopRequest, mission: 
         exclude: [reviewer], recovery: { prompt: options.prompt as (_agent: string) => string, sessionPolicy: options.sessionPolicy } }),
       log: message => ports.output.log(message), error: message => ports.output.error(message),
     });
-    if (result.outcome !== 'fixed') { ports.output.exit(1); }
+    if (result.outcome !== 'fixed') { ports.output.exit(1); return false; }
+    return true;
   } catch (cause) {
     ports.output.error(`Retained verification repair failed: ${String(cause)}`);
     ports.output.exit(1);
+    return false;
   }
 }

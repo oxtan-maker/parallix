@@ -1,8 +1,8 @@
 ---
 id: TASK-2766
 title: Restore review restart by reverting isolated repair-continuation mistakes
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-15 14:44'
 updated_date: '2026-10-15 14:49'
 labels:

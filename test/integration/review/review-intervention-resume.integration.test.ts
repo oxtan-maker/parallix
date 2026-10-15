@@ -438,9 +438,10 @@ import { captureRecoveryEvidence } from '../../../src/application/recovery-evide
 
 // Keep acknowledgment and verified recovery as separate contracts. Each owns a
 // fresh Git/SQLite fixture; neither depends on a preceding test's mutations.
-for (const phase of ['acknowledgment', 'recovery'] as const) {
+for (const phase of ['acknowledgment', 'recovery', 'failed-check'] as const) {
 for (const inferred of [false, true]) {
-it(`running CLI ${phase === 'acknowledgment' ? 'acknowledges a retained invalid-contract stop' : 'verifies retained repair before independent review'} with ${inferred ? 'inferred' : 'explicit'} slug (TASK-2759)`, { timeout: 10000 }, async (t) => {
+it(`running CLI ${phase === 'acknowledgment' ? 'acknowledges a retained invalid-contract stop' : phase === 'failed-check' ? 'stops a failed retained check before handoff (TASK-2766)' : 'verifies retained repair and automatically reviews (TASK-2766)'} with ${inferred ? 'inferred' : 'explicit'} slug (TASK-2759)`, { timeout: 10000 }, async (t) => {
+  const command = phase === 'failed-check' ? 'false' : ':';
   const fixture = await openRepairFixture({ slug: 'task-repair-recovery' });
   const priorConfinement = process.env.PARALLIX_NO_BUBBLEWRAP;
   process.env.PARALLIX_NO_BUBBLEWRAP = '1';
@@ -456,24 +457,24 @@ it(`running CLI ${phase === 'acknowledgment' ? 'acknowledges a retained invalid-
   const original = await fixture.load();
   const bounced = revokeApprovedDecision(original.review!, 1, {
     revokedAt: '2026-10-01T12:00:00Z', revokedBy: 'workflow', reason: 'gate failed',
-    cause: { kind: 'integration-gate-failure', gate: ':' },
+    cause: { kind: 'integration-gate-failure', gate: command },
   });
   const stopped = requestReviewIntervention(bounced, {
     requestedAt: '2026-10-01T13:00:00Z', requestedBy: 'workflow', reason: 'REPAIR_EXHAUSTED',
   });
   await store.save({ ...original, status: 'active', rawStatus: 'active', closedAt: null, review: stopped, declaredGates: ['stale-check'] }, missionVersion(await fixture.version()));
   const repair = new RepairCheckpointService(store);
-  const opened = await repair.open({ slug: fixture.slug, incidentId: 'interrupted-incident', command: ':', attempt: 3 });
+  const opened = await repair.open({ slug: fixture.slug, incidentId: 'interrupted-incident', command, attempt: 3 });
   assert.ok(opened);
   const task = path.join(fixture.worktree, 'backlog', 'tasks', `${fixture.slug} - Fixture.md`);
   fs.writeFileSync(task, fs.readFileSync(task, 'utf8').replace('status: ready-for-integration', 'status: active'));
   fixture.git(fixture.worktree, ['add', '.']);
   fixture.git(fixture.worktree, ['commit', '-m', 'persist interrupted repair fixture']);
-  const blocker = { command: ':', diagnostic: 'historical invalid contract', authorityReason: 'operator owns locked checks', proposedCorrection: 'repair stale check reference' };
+  const blocker = { command, diagnostic: 'historical invalid contract', authorityReason: 'operator owns locked checks', proposedCorrection: 'repair stale check reference' };
   await repair.report({ operationId: 'report', missionId: missionId(fixture.slug), capabilities: new Set(['checkpoint:record']), name: opened.name, blocker });
   const stoppedContract = await fixture.load();
-  await store.save({ ...stoppedContract, declaredGates: [':'] } as Mission, await fixture.version() as never);
-  if (phase === 'recovery') {
+  await store.save({ ...stoppedContract, declaredGates: [command] } as Mission, await fixture.version() as never);
+  if (phase !== 'acknowledgment') {
     await repair.acknowledgeOperatorResume({ operationId: 'seed-acknowledgment', missionId: missionId(fixture.slug),
       capabilities: new Set(['checkpoint:record']), actor: 'px review operator', occurredAt: '2026-10-01T14:00:00Z' });
     const acknowledged = await fixture.load();
@@ -545,32 +546,35 @@ it(`running CLI ${phase === 'acknowledgment' ? 'acknowledges a retained invalid-
   assert.equal(recorded.checkpoints.at(-1)?.repair?.incidentId, 'interrupted-incident');
   t.diagnostic('Real checkpoint record accepted fresh evidence and retained incident authority; it did not synthesize verification or approval.');
   const captured = captureRecoveryEvidence({ missionId: fixture.slug, cwd: fixture.worktree,
-    command: ':', capturedRevision: fixture.approvedRevision, signal: null, exitCode: 1, stdout: 'original interrupted check', stderr: 'original gate failure' });
+    command, capturedRevision: fixture.approvedRevision, signal: null, exitCode: 1, stdout: 'original interrupted check', stderr: 'original gate failure' });
   assert.equal(captured.ok, true);
   // A no-op agent cannot turn even a passing check into checkpoint proof.
   messages.length = 0;
   assert.equal(await invoke(['review', fixture.slug, '--continue']), 1, messages.join('\n'));
+  if (phase === 'failed-check') {
+    const after = await fixture.load();
+    assert.equal(launches.length, 2, 'failed exact check spends only the finite repair budget');
+    assert.equal(after.status, 'active');
+    assert.equal(reviewStatus(after.review!), 'awaiting-review');
+    assert.equal(after.checkpoints.at(-1)?.repair?.verified, false);
+    assert.ok(prompts.every(prompt => prompt.includes('REPAIR AUTHORITY')));
+    t.diagnostic('Exact false check failed despite agent exit 0: two repair launches, active/awaiting-review, no reviewer or approval.');
+    return;
+  }
   assert.deepEqual(launches, ['act-on-review']);
   assert.match(prompts[0], /original gate failure/);
   assert.match(prompts[0], /REPAIR AUTHORITY/);
   assert.match(messages.join('\n'), /fresh authorized evidence/);
   assert.equal((await fixture.load()).checkpoints.at(-1)?.repair?.verified, false);
-  setWorkflowLaunchPort(({ worktree }: { prompt: string; worktree?: string }) => ({
-    invocation: { command: 'fixture-repair', args: [], options: { cwd: worktree } },
-    resultPromise: (async () => {
-      launches.push('repair');
-      assert.equal(await invoke(['checkpoint', 'record', '--slug', fixture.slug, '--name', opened.name,
-        '--criterion', 'feature ships', '--evidence', 'feature.txt', '--next', 'Independent review']), 0);
-      return { status: 0, stdout: '', stderr: '' };
-    })(),
-  }));
-  assert.equal(await invoke(['review', fixture.slug, '--continue']), 0, messages.join('\n'));
-  assert.equal((await fixture.load()).checkpoints.at(-1)?.repair?.verified, true);
-  assert.deepEqual(launches, ['act-on-review', 'repair']);
-  t.diagnostic('Fresh repair evidence plus the exact retained check rerun verified recovery before independent review.');
   setWorkflowLaunchPort(({ prompt, worktree }: { prompt: string; worktree?: string }) => ({
     invocation: { command: 'fixture-reviewer', args: [], options: { cwd: worktree } },
     resultPromise: (async () => {
+      if (prompt.includes('REPAIR AUTHORITY')) {
+        launches.push('repair');
+        assert.equal(await invoke(['checkpoint', 'record', '--slug', fixture.slug, '--name', opened.name,
+          '--criterion', 'feature ships', '--evidence', 'feature.txt', '--next', 'Independent review']), 0);
+        return { status: 0, stdout: '', stderr: '' };
+      }
       assert.match(prompt, /^Mode: review\./m, 'only independent reviewer work is allowed after repaired handoff');
       launches.push('review');
       const mission = await fixture.load();
@@ -580,6 +584,7 @@ it(`running CLI ${phase === 'acknowledgment' ? 'acknowledges a retained invalid-
     })(),
   }));
   assert.equal(await invoke(['review', fixture.slug, '--continue']), 0, messages.join('\n'));
+  assert.equal((await fixture.load()).checkpoints.at(-1)?.repair?.verified, true);
   assert.deepEqual(launches, ['act-on-review', 'repair', 'review']);
   assert.equal(reviewStatus((await fixture.load()).review!), 'approved');
   t.diagnostic('After valid evidence, normal --continue passed handoff and launched the independent reviewer; approval came only from its explicit verdict.');

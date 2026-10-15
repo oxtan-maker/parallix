@@ -13,12 +13,14 @@ import assert from 'node:assert/strict';
 import { runPreReviewGate, gateFailureReason } from '../../../src/adapters/review/review-gate-handling.js';
 import { preReviewRebaseFacts } from '../../../src/adapters/review/review-loop.js';
 import { runReviewLoop } from '../../../src/application/review-loop/review-loop.js';
+import { resumeRetainedRepair } from '../../../src/application/review-loop/retained-repair.js';
 import { repairPreReviewFailure } from '../../../src/application/review-loop/pre-review.js';
 import { fakeLoopContext, fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
 import { HandoffCommandUseCase } from '../../../src/application/handoff-command-use-case.js';
+import { ReviewState } from '../../../src/adapters/review/review-state.js';
 import { rebound } from '../../../src/application/rebound-kernel.js';
 import { submitForReview } from '../../../src/adapters/review/review-commands.js';
 
@@ -638,7 +640,7 @@ describe('retained verification repair continuation', { concurrency: false }, ()
     const mission = { ...fixtureMission('task-2757'), declaredGates: [command], successCriteria: ['original criterion'],
       checkpoints: [{ ...fixtureMission('task-2757').checkpoints[0], name: 'CP-2', repair }] };
     const fake = fakeReviewLoopPorts({
-      worktree,
+      worktree, slug: 'task-2757',
       missionStore: { load: async () => ({ kind: 'found' as const, mission, version: missionVersion(1) }),
         save: async () => assert.fail('retained recovery writes through checkpoint ports') },
       agents: { launch: async launch => ({ agent: launch.agent, result: { status } }) },
@@ -660,6 +662,46 @@ describe('retained verification repair continuation', { concurrency: false }, ()
     const run = (options: Partial<ReviewLoopRequest> = {}) => runReviewLoop({ slug: 'task-2757', isContinue: true, implementer: 'codex', ...options }, ports);
     return { fake: { ...fake, ports }, mission, repair, run, checks, verified, opens, command };
   }
+
+  test('successful exact-check repair resumes handoff and reviewer decision without another resume (TASK-2766)', async () => {
+    const f = fixture({ passing: true });
+    f.mission.review = pendingReview('task-2757');
+    let handoffs = 0;
+    f.fake.ports.handoff = { handoff: async () => {
+      handoffs++;
+      assert.equal(f.repair.verified, true);
+      await f.fake.ports.state.persist(new ReviewState('task-2757', { implementer: 'codex', reviewer: 'claude', round: 2 }));
+      return { ok: true };
+    } };
+    f.fake.ports.retainedRepair.checkpoints.verify = async (...args) => {
+      f.verified.push(args);
+      f.repair.verified = true;
+    };
+    f.fake.ports.artifacts.consumeReviewer = async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' });
+    await f.run();
+    assert.deepEqual(f.checks, [[f.command, f.fake.ports.worktree]]);
+    assert.equal(handoffs, 1, 'verified active/pending repair must automatically reach handoff');
+    assert.deepEqual(f.fake.launches.map(launch => launch.role), ['implementer', 'reviewer']);
+    assert.equal(f.fake.launches[1].prompt?.attempt, 2, 'handoff round state is authoritative');
+    assert.equal(f.fake.current()?.phase, 'approved');
+    assert.deepEqual(f.fake.exits, []);
+  });
+
+  test('retained repair dry run shows diagnostics without certifying recovery (TASK-2766)', async () => {
+    const f = fixture({ passing: true });
+    const resumed = await resumeRetainedRepair({ slug: 'task-2757', isContinue: true, dryRun: true },
+      f.mission, 'codex', f.fake.ports);
+    assert.equal(resumed, false, 'dry run cannot advance review');
+    assert.deepEqual(f.fake.launches, []);
+    assert.deepEqual(f.checks, []);
+    assert.deepEqual(f.verified, []);
+    assert.deepEqual(f.opens, []);
+    assert.equal(f.repair.verified, false);
+    assert.deepEqual(f.fake.exits, []);
+    for (const diagnostic of [f.command, f.fake.ports.worktree, '/retained/stdout', '/retained/stderr']) {
+      assert.ok(f.fake.logs.some(line => line.includes(diagnostic)), diagnostic);
+    }
+  });
 
   test('no-op continuation reruns the retained failed check and stays failed (TASK-2757)', async () => {
     const f = fixture();
@@ -722,11 +764,12 @@ describe('retained verification repair continuation', { concurrency: false }, ()
 
   test('recorded but unverified repair completes only after the exact check passes (TASK-2757)', async () => {
     const f = fixture({ passing: true, recorded: true });
+    f.fake.ports.artifacts.consumeReviewer = async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' });
     await f.run();
     assert.deepEqual(f.checks, [[f.command, f.fake.ports.worktree]]);
     assert.deepEqual(f.verified, [['task-2757', 'CP-2']]);
     assert.deepEqual(f.fake.exits, []);
-    assert.equal(f.fake.launches.length, 1);
+    assert.deepEqual(f.fake.launches.map(launch => launch.role), ['implementer', 'reviewer']);
   });
 
   test('unrelated passing check cannot certify retained recovery (TASK-2757)', async () => {

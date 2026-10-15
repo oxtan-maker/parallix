@@ -220,6 +220,7 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
   const implementer = resolveImplementer(slug, request.implementer, persisted, ports, out);
   if (stopsOnMissingTaskFile(slug, ports, out)) { return; }
   if (await resumePendingRepair(request, start, persisted, implementer, ports)) { return; }
+  persisted = await ports.state.read();
   const prepared = await prepareStart(start, request.skipHandoff ?? false, implementer, ports, out);
   if (!prepared) { return; }
   // A fresh handoff created the authoritative Review with its reviewer and
@@ -320,8 +321,8 @@ async function resumePendingRepair(request: ReviewLoopRequest, start: Start, per
   if (!start.isContinue || !ports.missionStore) { return false; }
   const loaded = await ports.missionStore.load(missionId(start.slug));
   if (loaded.kind !== 'found' || loaded.mission.status !== 'active' || !pendingRetainedRepair(loaded.mission)) { return false; }
-  await resumeRetainedRepair(request, loaded.mission, implementer, ports, persisted?.reviewer);
-  return true;
+  // Successful exact-check recovery rejoins the historical start/handoff path.
+  return !await resumeRetainedRepair(request, loaded.mission, implementer, ports, persisted?.reviewer);
 }
 
 function reviewStart(request: ReviewLoopRequest): Start {

@@ -371,7 +371,8 @@ nested continuation does not acknowledge these stops.
 Acknowledgment supplies no repair evidence, verification or approval. Retained
 failure diagnostics, fresh checkpoint evidence and successful reruns of the
 original required checks are still required; a newly reported blocker stops
-recovery again. Successful repair returns to normal review, and integration
+recovery again. Successful repair automatically performs the required handoff
+and resumes normal review without another continuation command. Integration
 remains an explicit operator action.
 
 If continuation reports that the mission has no persisted Review, run

@@ -123,14 +123,14 @@ test('continue enters interrupted repair work before checkpoint handoff checks (
   Object.assign(fake.ports, { retainedRepair: {
     read: async () => ({ evidence: { incidentId: 'retained', command: 'npm test', cwd: fake.ports.worktree,
       exitCode: 1, captureComplete: true, stdoutPath: '/retained/out', stderrPath: '/retained/err' }, stdout: 'failed', stderr: '' }),
-    verify: async () => ({ ok: true, command: 'npm test' }),
+    verify: async () => ({ ok: false, command: 'npm test', diagnostic: 'AssertionError: still fails' }),
     checkpoints: { open: async () => ({ name: 'CP-6', version: 1 }), readBlocker: async () => undefined, verify: async () => {} },
   } });
   await runReviewLoop({ slug, isContinue: true, implementer: 'claude' }, fake.ports);
   const loaded = await store.load(mission.id);
   assert.equal(loaded.kind, 'found');
   if (loaded.kind === 'found') { assert.deepEqual(loaded.mission, mission); }
-  assert.deepEqual(fake.exits, []);
+  assert.deepEqual(fake.exits, [1]);
 });
 
 import { RepairCheckpointService } from '../../../../src/application/repair-checkpoint-service.js';
