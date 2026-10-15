@@ -25,7 +25,15 @@ const worktree = mockModule<typeof import('../../../src/adapters/git/worktree.js
 await installModuleMocks();
 const { createHandoffPorts, verifyHandoff, performHandoff, _findUnverifiableGoalCheckRow, runDeclaredGates, captureNelAtHandoff, validateDeclaredGates } = handoffModule;
 const { mock } = test;
-test.afterEach(() => mock.restoreAll());
+// Each case owns its files, including when another worktree runs this suite.
+let handoffRoot: string;
+test.beforeEach(() => {
+  handoffRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'handoff-case-'));
+});
+test.afterEach(() => {
+  mock.restoreAll();
+  fs.rmSync(handoffRoot, { recursive: true, force: true });
+});
 
 test('evidence shell commands require an existing file argument', () => {
   const rootDir = '/repo';
@@ -84,11 +92,11 @@ test('verifyHandoff fails when mission directory is not found', () => {
 
 test('performHandoff uses provided worktree and fails hard on Backlog missing', async (t) => {
   const slug = 'task-098';
-  const worktree = '/tmp/fake-worktree';
+  const worktree = `${handoffRoot}/fake-worktree`;
 
   // Mocking
   mock.method(missionUtils, 'findMissionDir', (s: Parameters<(typeof missionUtils)["findMissionDir"]>[0], root: Parameters<(typeof missionUtils)["findMissionDir"]>[1]) => {
-    if (s === slug && root === worktree) return '/tmp/fake-worktree/docs/missions/2026/task-098';
+    if (s === slug && root === worktree) return `${handoffRoot}/fake-worktree/docs/missions/2026/task-098`;
     return null;
   });
   mock.method(missionUtils, 'findMissionArea', () => 'docs');
@@ -114,7 +122,7 @@ test('performHandoff uses provided worktree and fails hard on Backlog missing', 
   });
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
 
-  const missionDir = '/tmp/fake-worktree/docs/missions/2026/task-098';
+  const missionDir = `${handoffRoot}/fake-worktree/docs/missions/2026/task-098`;
   const missionMdPath = path.join(missionDir, 'MISSION.md');
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
@@ -123,7 +131,7 @@ test('performHandoff uses provided worktree and fails hard on Backlog missing', 
     if (s === slug && root === worktree) return { ok: false as const, reason: 'missing' as const };
     return { ok: true as const, taskFile: 'found' };
   });
-  writeReviewState('/tmp/fake-worktree/docs/missions/2026/task-098', 'claude', 'claude');
+  writeReviewState(`${handoffRoot}/fake-worktree/docs/missions/2026/task-098`, 'claude', 'claude');
 
   const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
@@ -135,10 +143,10 @@ test('performHandoff uses provided worktree and fails hard on Backlog missing', 
 
 test('performHandoff skips commit in Step 4 when Backlog transition already committed', async (t) => {
   const slug = 'task-098';
-  const worktree = '/tmp/fake-worktree';
-  const cpPath = '/tmp/fake-worktree/docs/missions/2026/task-098/CP-1.md';
+  const worktree = `${handoffRoot}/fake-worktree`;
+  const cpPath = `${handoffRoot}/fake-worktree/docs/missions/2026/task-098/CP-1.md`;
 
-  mock.method(missionUtils, 'findMissionDir', () => '/tmp/fake-worktree/docs/missions/2026/task-098');
+  mock.method(missionUtils, 'findMissionDir', () => `${handoffRoot}/fake-worktree/docs/missions/2026/task-098`);
   mock.method(missionUtils, 'findMissionArea', () => 'docs');
   mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
   mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
@@ -160,7 +168,7 @@ test('performHandoff skips commit in Step 4 when Backlog transition already comm
   mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true as const, missing: [], skipped: false, posted: false }));
 
   // Provide a valid checkpoint file with Goal Check table for the new integrity gate
-  const missionDir = '/tmp/fake-worktree/docs/missions/2026/task-098';
+  const missionDir = `${handoffRoot}/fake-worktree/docs/missions/2026/task-098`;
   const missionMdPath = path.join(missionDir, 'MISSION.md');
   writeReviewState(missionDir, 'codex', 'codex');
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
@@ -182,11 +190,11 @@ test('performHandoff skips commit in Step 4 when Backlog transition already comm
 
 test('performHandoff refreshes the review tracking ref and lease-updates the rebased PR branch after its Backlog transition', async (t) => {
   const slug = 'task-098';
-  const worktree = '/tmp/fake-worktree';
-  const cpPath = '/tmp/fake-worktree/docs/missions/2026/task-098/CP-1.md';
+  const worktree = `${handoffRoot}/fake-worktree`;
+  const cpPath = `${handoffRoot}/fake-worktree/docs/missions/2026/task-098/CP-1.md`;
   const gitCalls: string[][] = [];
 
-  mock.method(missionUtils, 'findMissionDir', () => '/tmp/fake-worktree/docs/missions/2026/task-098');
+  mock.method(missionUtils, 'findMissionDir', () => `${handoffRoot}/fake-worktree/docs/missions/2026/task-098`);
   mock.method(missionUtils, 'findMissionArea', () => 'docs');
   mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
   mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
@@ -206,7 +214,7 @@ test('performHandoff refreshes the review tracking ref and lease-updates the reb
   mock.method(backlog, 'transitionTask', () => true);
   mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true as const, missing: [], skipped: false, posted: false }));
 
-  const missionDir = '/tmp/fake-worktree/docs/missions/2026/task-098';
+  const missionDir = `${handoffRoot}/fake-worktree/docs/missions/2026/task-098`;
   const missionMdPath = path.join(missionDir, 'MISSION.md');
   // performHandoff refuses to run without a resolvable agent family. Declare
   // this test's own review identity instead of inheriting the previous test's
@@ -314,11 +322,11 @@ test('performHandoff falls back to magnus and persists bootstrap failure summary
 
 test('performHandoff fails hard when git commit fails in Step 4', async (t) => {
     const slug = 'task-098';
-    const worktree = '/tmp/fake-worktree';
-    const cpPath = '/tmp/fake-worktree/docs/missions/2026/task-098/CP-1.md';
+    const worktree = `${handoffRoot}/fake-worktree`;
+    const cpPath = `${handoffRoot}/fake-worktree/docs/missions/2026/task-098/CP-1.md`;
 
     // Mocking
-    mock.method(missionUtils, 'findMissionDir', () => '/tmp/fake-worktree/docs/missions/2026/task-098');
+    mock.method(missionUtils, 'findMissionDir', () => `${handoffRoot}/fake-worktree/docs/missions/2026/task-098`);
     mock.method(missionUtils, 'findMissionArea', () => 'docs');
     mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
     mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
@@ -339,7 +347,7 @@ test('performHandoff fails hard when git commit fails in Step 4', async (t) => {
     mock.method(backlog, 'transitionTask', () => false);
     mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true as const, missing: [], skipped: false, posted: false }));
    // Provide a valid checkpoint file with Goal Check table for the new integrity gate
-    const missionDir = '/tmp/fake-worktree/docs/missions/2026/task-098';
+    const missionDir = `${handoffRoot}/fake-worktree/docs/missions/2026/task-098`;
     const missionMdPath = path.join(missionDir, 'MISSION.md');
     fs.mkdirSync(missionDir, { recursive: true });
     writeReviewState(missionDir, 'claude', 'claude');
@@ -357,8 +365,8 @@ test('performHandoff fails hard when git commit fails in Step 4', async (t) => {
 
 test('verifyHandoff accepts a typed mission without MISSION.md', () => {
   const slug = 'task-098';
-  const worktree = '/tmp/fake-worktree-missing-mm';
-  const missionDir = '/tmp/fake-worktree-missing-mm/docs/missions/2026/task-098';
+  const worktree = `${handoffRoot}/fake-worktree-missing-mm`;
+  const missionDir = `${handoffRoot}/fake-worktree-missing-mm/docs/missions/2026/task-098`;
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);
   mock.method(missionUtils, 'findMissionArea', () => 'docs');
@@ -401,8 +409,8 @@ for (const missing of ['contract', 'checkpoint'] as const) {
 
 test('performHandoff succeeds with ## Goal Check Table heading variant', async (t) => {
   const slug = 'task-098';
-  const worktree = '/tmp/fake-worktree-gct';
-  const missionDir = '/tmp/fake-worktree-gct/docs/missions/2026/task-098';
+  const worktree = `${handoffRoot}/fake-worktree-gct`;
+  const missionDir = `${handoffRoot}/fake-worktree-gct/docs/missions/2026/task-098`;
   const cpPath = `${missionDir}/CP-1.md`;
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);
@@ -438,8 +446,8 @@ test('performHandoff succeeds with ## Goal Check Table heading variant', async (
 
 test('performHandoff fails when MISSION.md is uncommitted', async () => {
   const slug = 'task-098';
-  const worktree = '/tmp/fake-worktree';
-  const missionDir = '/tmp/fake-worktree/docs/missions/2026/task-098';
+  const worktree = `${handoffRoot}/fake-worktree`;
+  const missionDir = `${handoffRoot}/fake-worktree/docs/missions/2026/task-098`;
   const missionMdPath = path.join(missionDir, 'MISSION.md');
   const cpPath = `${missionDir}/CP-1.md`;
 
@@ -466,8 +474,8 @@ test('performHandoff fails when MISSION.md is uncommitted', async () => {
 
 test('performHandoff fails when no checkpoint documents exist', async () => {
   const slug = 'task-098';
-  const worktree = '/tmp/fake-worktree';
-  const missionDir = '/tmp/fake-worktree/docs/missions/2026/task-098';
+  const worktree = `${handoffRoot}/fake-worktree`;
+  const missionDir = `${handoffRoot}/fake-worktree/docs/missions/2026/task-098`;
   const missionMdPath = path.join(missionDir, 'MISSION.md');
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);
@@ -542,8 +550,8 @@ test('legacy handoff fails closed without synthesizing or committing checkpoint 
 
 test('performHandoff fails when the latest checkpoint document is uncommitted', async () => {
   const slug = 'task-098';
-  const worktree = '/tmp/fake-worktree';
-  const missionDir = '/tmp/fake-worktree/docs/missions/2026/task-098';
+  const worktree = `${handoffRoot}/fake-worktree`;
+  const missionDir = `${handoffRoot}/fake-worktree/docs/missions/2026/task-098`;
   const missionMdPath = path.join(missionDir, 'MISSION.md');
   const cp1Path = `${missionDir}/CP-1.md`;
   const cp2Path = `${missionDir}/CP-2.md`;
@@ -573,8 +581,8 @@ test('performHandoff fails when the latest checkpoint document is uncommitted', 
 
 test('performHandoff fails when final checkpoint is missing Goal Check section', async () => {
   const slug = 'task-098';
-  const worktree = '/tmp/fake-worktree';
-  const missionDir = '/tmp/fake-worktree/docs/missions/2026/task-098';
+  const worktree = `${handoffRoot}/fake-worktree`;
+  const missionDir = `${handoffRoot}/fake-worktree/docs/missions/2026/task-098`;
   const missionMdPath = path.join(missionDir, 'MISSION.md');
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);
@@ -603,8 +611,8 @@ test('performHandoff fails when final checkpoint is missing Goal Check section',
 
 test('performHandoff fails when final checkpoint has Goal Check section but no evidence rows', async () => {
   const slug = 'task-098';
-  const worktree = '/tmp/fake-worktree';
-  const missionDir = '/tmp/fake-worktree/docs/missions/2026/task-098';
+  const worktree = `${handoffRoot}/fake-worktree`;
+  const missionDir = `${handoffRoot}/fake-worktree/docs/missions/2026/task-098`;
   const missionMdPath = path.join(missionDir, 'MISSION.md');
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);
@@ -633,8 +641,8 @@ test('performHandoff fails when final checkpoint has Goal Check section but no e
 
 test('performHandoff fails when final checkpoint has header-only goal-check table (no evidence rows)', async () => {
   const slug = 'task-098';
-  const worktree = '/tmp/fake-worktree';
-  const missionDir = '/tmp/fake-worktree/docs/missions/2026/task-098';
+  const worktree = `${handoffRoot}/fake-worktree`;
+  const missionDir = `${handoffRoot}/fake-worktree/docs/missions/2026/task-098`;
   const missionMdPath = path.join(missionDir, 'MISSION.md');
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);
@@ -663,8 +671,8 @@ test('performHandoff fails when final checkpoint has header-only goal-check tabl
 
 test('performHandoff fails when final checkpoint has separator-only goal-check table', async () => {
   const slug = 'task-098';
-  const worktree = '/tmp/fake-worktree';
-  const missionDir = '/tmp/fake-worktree/docs/missions/2026/task-098';
+  const worktree = `${handoffRoot}/fake-worktree`;
+  const missionDir = `${handoffRoot}/fake-worktree/docs/missions/2026/task-098`;
   const missionMdPath = path.join(missionDir, 'MISSION.md');
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);
@@ -693,8 +701,8 @@ test('performHandoff fails when final checkpoint has separator-only goal-check t
 
 test('performHandoff fails when final checkpoint evidence row is placeholder prose only', async () => {
   const slug = 'task-098';
-  const worktree = '/tmp/fake-worktree';
-  const missionDir = '/tmp/fake-worktree/docs/missions/2026/task-098';
+  const worktree = `${handoffRoot}/fake-worktree`;
+  const missionDir = `${handoffRoot}/fake-worktree/docs/missions/2026/task-098`;
   const missionMdPath = path.join(missionDir, 'MISSION.md');
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);
@@ -722,8 +730,8 @@ test('performHandoff fails when final checkpoint evidence row is placeholder pro
 
 test('performHandoff fails when final checkpoint evidence row is shell output only', async () => {
   const slug = 'task-098';
-  const worktree = '/tmp/fake-worktree-shell-only';
-  const missionDir = '/tmp/fake-worktree-shell-only/docs/missions/2026/task-098';
+  const worktree = `${handoffRoot}/fake-worktree-shell-only`;
+  const missionDir = `${handoffRoot}/fake-worktree-shell-only/docs/missions/2026/task-098`;
   const missionMdPath = path.join(missionDir, 'MISSION.md');
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);

@@ -1,3 +1,4 @@
+import { spawnAndTee } from '../../../src/adapters/process/spawn-tee.js';
 import { missionId as fixtureMissionId } from '../../../src/domain/mission.js';
 import { agentFamily as fixtureAgentFamily } from '../../../src/domain/agents.js';
 import type { AgentLauncherInput, AgentProcessResult } from '../../../src/adapters/agents/agent-process-types.js';
@@ -1030,9 +1031,9 @@ test('buildClaudeInvocation uses --dangerously-skip-permissions -p in the worktr
     'stream-json',
     '--verbose',
     '--include-partial-messages',
-    '-p',
-    'Execute the mission.'
+    '-p'
   ]);
+  assert.equal(invocation.options.input, 'Execute the mission.');
   assert.equal(invocation.options.cwd, '/tmp/mission-task-088');
   assert.equal(invocation.options.stdio, 'inherit');
 });
@@ -1051,9 +1052,9 @@ test('buildClaudeInvocation inserts --continue before -p when resume is true', (
     'stream-json',
     '--verbose',
     '--include-partial-messages',
-    '-p',
-    'Continue the mission.'
+    '-p'
   ]);
+  assert.equal(invocation.options.input, 'Continue the mission.');
 });
 
 test('buildClaudeInvocation uses --resume <id> when resume is true and sessionId is provided', () => {
@@ -1072,9 +1073,9 @@ test('buildClaudeInvocation uses --resume <id> when resume is true and sessionId
     'stream-json',
     '--verbose',
     '--include-partial-messages',
-    '-p',
-    'Resume the mission.'
+    '-p'
   ]);
+  assert.equal(invocation.options.input, 'Resume the mission.');
 });
 
 test('buildClaudeInvocation ignores sessionId when resume is false (cross-family isolation)', () => {
@@ -1091,9 +1092,9 @@ test('buildClaudeInvocation ignores sessionId when resume is false (cross-family
     'stream-json',
     '--verbose',
     '--include-partial-messages',
-    '-p',
-    'Fresh launch.'
+    '-p'
   ]);
+  assert.equal(invocation.options.input, 'Fresh launch.');
 });
 
 test('resolveClaudeCommand returns bare claude', () => {
@@ -1247,9 +1248,8 @@ test('startAgent logs no-output diagnostics with agent, step, and child pid', as
   }
 });
 
-test('startAgent summarizes the prompt in the launch echo and restores it under DEBUG', async () => {
-  // The prompt is one of the launcher args and runs to hundreds of lines, so the
-  // verbatim echo buried the whole run in harness text nobody reads.
+test('startAgent keeps stdin prompt bodies out of launch echoes including DEBUG', async () => {
+  // Stdin prompts are absent from the command line in both logging modes.
   const previousDebug = process.env.DEBUG;
   delete process.env.DEBUG;
   try {
@@ -1261,7 +1261,7 @@ test('startAgent summarizes the prompt in the launch echo and restores it under 
     });
     const launchLine = log.find(msg => msg.includes('Launching:'));
     assert.ok(launchLine, `expected a launch echo in logs: ${log.join(' | ')}`);
-    assert.match(launchLine, /<prompt: \d+ chars>/);
+    assert.match(launchLine, /claude .* -p$/);
     assert.ok(!launchLine.includes('Secret harness paragraph'), 'the prompt body must not be echoed by default');
 
     process.env.DEBUG = '1';
@@ -1272,8 +1272,8 @@ test('startAgent summarizes the prompt in the launch echo and restores it under 
       log: msg => debugLog.push(msg)
     });
     assert.ok(
-      debugLog.some(msg => msg.includes('Launching:') && msg.includes('Secret harness paragraph')),
-      'DEBUG=1 must restore the verbatim command'
+      debugLog.some(msg => msg.includes('Launching:')) && !debugLog.some(msg => msg.includes('Secret harness paragraph')),
+      'DEBUG=1 prints the command without the stdin body'
     );
   } finally {
     if (previousDebug === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = previousDebug; }
@@ -1319,7 +1319,8 @@ test('buildVibeInvocation uses --prompt --trust --output text in the worktree', 
   });
 
   assert.ok(invocation.args.includes('--prompt'));
-  assert.ok(invocation.args.includes('Execute the mission.'));
+  assert.equal(invocation.options.input, 'Execute the mission.');
+  assert.ok(!invocation.args.includes('Execute the mission.'));
   assert.ok(invocation.args.includes('--trust'));
   assert.ok(invocation.args.includes('--output'));
   assert.ok(invocation.args.includes('text'));
@@ -1652,9 +1653,9 @@ test('buildOpencodeInvocation omits --continue when resume is false', () => {
     '--pure',
     '--dangerously-skip-permissions',
     '--format',
-    'json',
-    'Execute the mission.'
+    'json'
   ]);
+  assert.equal(invocation.options.input, 'Execute the mission.');
   assert.equal(invocation.options.cwd, '/tmp/visualBoard-task-1010');
   assert.equal(invocation.options.stdio, 'inherit');
 });
@@ -1673,9 +1674,9 @@ test('buildOpencodeInvocation uses --continue when resume is true and no session
     '--dangerously-skip-permissions',
     '--format',
     'json',
-    '--continue',
-    'Continue the mission.'
+    '--continue'
   ]);
+  assert.equal(invocation.options.input, 'Continue the mission.');
 });
 
 test('buildOpencodeInvocation uses -s <sessionId> when resume is true and sessionId is provided', () => {
@@ -1694,9 +1695,9 @@ test('buildOpencodeInvocation uses -s <sessionId> when resume is true and sessio
     '--format',
     'json',
     '-s',
-    'ses_abc123',
-    'Resume the mission.'
+    'ses_abc123'
   ]);
+  assert.equal(invocation.options.input, 'Resume the mission.');
 });
 
 test('buildOpencodeInvocation ignores sessionId when resume is false (cross-family isolation)', () => {
@@ -1713,9 +1714,9 @@ test('buildOpencodeInvocation ignores sessionId when resume is false (cross-fami
     '--pure',
     '--dangerously-skip-permissions',
     '--format',
-    'json',
-    'Fresh launch.'
+    'json'
   ]);
+  assert.equal(invocation.options.input, 'Fresh launch.');
 });
 
 test('resolveOpencodeCommand returns bare opencode', () => {
@@ -1759,9 +1760,12 @@ test('startAgent passes resume:false to claude on the first launch and writes a 
       'stream-json',
       '--verbose',
       '--include-partial-messages',
-      '-p',
-      'Execute the mission.'
+      '-p'
     ]);
+    const prompt = result.invocation.options?.input;
+    assert.equal(typeof prompt, 'string');
+    assert.ok(typeof prompt === 'string');
+    assert.equal(prompt, 'Execute the mission.');
     assert.equal(writes, 1);
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -1829,9 +1833,12 @@ test('startAgent passes resume:true to claude when a matching marker exists', as
       'stream-json',
       '--verbose',
       '--include-partial-messages',
-      '-p',
-      'Address review.'
+      '-p'
     ]);
+    const prompt = result.invocation.options?.input;
+    assert.equal(typeof prompt, 'string');
+    assert.ok(typeof prompt === 'string');
+    assert.equal(prompt, 'Address review.');
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
@@ -2781,7 +2788,7 @@ test('Vibe fresh repairs ignore historical conversation markers (TASK-2700)', ()
 const OVERSIZED_RECOVERY_PROMPT = (() => {
   const lines: string[] = [];
   for (let index = 0; Buffer.byteLength(lines.join('')) <= 200_000; index++) {
-    lines.push(`Recovery evidence ${index}: räksmörgås — 修复 🚀 "quoted" $HOME \\ -- --last\n`);
+    lines.push(`Recovery evidence ${index}: räksmörgås — réparation 🚀 "quoted" $HOME \\ -- --last\n`);
   }
   return lines.join('');
 })();
@@ -2862,6 +2869,11 @@ test('an argv launcher that hits E2BIG reports the spawn code and message once i
   let launches = 0;
   const result = await withPathLaunchers({ claude: 'process.exit(0);' }, () => startAgent('active', { configuration: resolveConfiguration(process.env),
     prompt: OVERSIZED_RECOVERY_PROMPT, agent: 'claude', pinnedAgent: true,
+    launchAgentFn: (opts) => {
+      // Exercise the argv failure boundary explicitly: built-in launchers use stdin.
+      const invocation = { command: 'claude', args: [opts.prompt], options: {} };
+      return { invocation, resultPromise: spawnAndTee(invocation.command, invocation.args, { configuration: opts.configuration }) };
+    },
     selectAgentFn: () => { launches++; return 'claude'; },
     detectLimitHitFn: () => null, updateAgentBlockFn: async () => ({}), log: (line) => lines.push(line),
   }));

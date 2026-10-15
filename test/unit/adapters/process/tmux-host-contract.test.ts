@@ -160,7 +160,7 @@ test('prepared host runs the confined command in the pane and keeps credentials 
 test('a hosted prompt rides in an owner-only stdin file the pane opens, unlinks and redirects, never in argv (TASK-2760)', () => {
   const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-stdin-'), 'state') };
   const { fn } = fakeSpawnSync('');
-  const prompt = Buffer.from('recover — 修复\n');
+  const prompt = Buffer.from('recover — réparation\n');
   const launch = prepareTmuxLaunch({ identity: identity(), spawnIndex: 0, command: 'codex', args: ['exec', '-'], cwd: '/w', env: {}, input: prompt }, { configuration: resolveConfiguration({ ...environment, ...env }), spawnSyncFn: fn });
   const scratch = path.dirname(launch.args[0]);
   const stdinFile = path.join(scratch, 'stdin');
@@ -169,7 +169,7 @@ test('a hosted prompt rides in an owner-only stdin file the pane opens, unlinks 
   const pane = fs.readFileSync(path.join(scratch, 'command.sh'), 'utf8');
   assert.ok(pane.includes(`exec 3< ${shellQuote(stdinFile)} || exit 66\nrm -f ${shellQuote(stdinFile)}\n`));
   assert.ok(pane.includes(`exec ${shellQuote('codex')} ${shellQuote('exec')} ${shellQuote('-')} <&3 3<&-`));
-  assert.equal(pane.includes('修复'), false, 'the prompt is not interpolated into the command script');
+  assert.equal(pane.includes('réparation'), false, 'the prompt is not interpolated into the command script');
   launch.cleanup();
   assert.equal(fs.existsSync(scratch), false, 'cleanup removes an unread prompt file');
   const plain = prepareTmuxLaunch({ identity: identity(), spawnIndex: 1, command: 'codex', args: ['exec'], cwd: '/w', env: {} }, { configuration: resolveConfiguration({ ...environment, ...env }), spawnSyncFn: fn });

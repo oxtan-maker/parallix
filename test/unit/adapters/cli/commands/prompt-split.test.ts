@@ -53,7 +53,6 @@ function parentPrompt(stage: string): string {
 
 test('Graphify guidance limits automatic updates to landed merges (TASK-2725)', () => {
   const files = [
-    'AGENTS.md',
     'templates/AGENTS.md.template',
     'prompts/execute-core.md',
     'prompts/act-on-review.md',

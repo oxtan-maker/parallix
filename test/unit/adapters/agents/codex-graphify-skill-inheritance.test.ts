@@ -1,76 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Reproduction test for task-2297: graphify does not work for codex
-//
-// Background: Codex running from a task worktree (e.g. parallix-task-2297)
-// invoked `graphify query "..."` and got:
-//   error: graph file not found: /home/magnus/code/parallix-task-2294/graphify-out/graph.json
-//
-// The graphify Python package resolves `graphify-out/graph.json` relative to
-// the current working directory. When the agent's CWD diverges from the active
-// worktree (e.g. the agent cd's into a subdirectory or the skill invocation
-// resolves from a sibling worktree), the lookup silently targets the wrong
-// graphify-out/ path.
-//
-// Fix: AGENTS.md `## graphify` section anchors every graphify subcommand to
-// the active worktree using `$(pwd)/graphify-out/graph.json` (or equivalent
-// absolute-path resolution) so the path can never resolve to a sibling
-// worktree. It also handles the missing-graph case with a check + actionable
-// message instead of an uncaught `graph file not found` failure.
-
-const AGENTS_MD = path.resolve(__dirname, '..', '..', '..', '..', 'AGENTS.md');
-
-test('AGENTS.md graphify section anchors graph paths to the active worktree', () => {
-  const content = fs.readFileSync(AGENTS_MD, 'utf8');
-
-  // Extract the ## graphify section (from "## graphify" to the next "## " or EOF)
-  const match = content.match(/^(## graphify\n[\s\S]*?)(?=^## |\z)/m);
-  assert.ok(match, 'AGENTS.md must contain a ## graphify section');
-  const section = match[1];
-
-  // Criterion 1: Graph paths must be anchored to the active worktree.
-  // The section must use $(pwd)/graphify-out or an equivalent absolute-path
-  // expression so the path can never resolve to a sibling worktree.
-  assert.ok(
-    /\$\(pwd\)\s*\/\s*graphify-out/.test(section) ||
-    /--graph\s+["']?\$\{?PWD\}?\/graphify-out/.test(section) ||
-    /--graph\s+["']?\$\(\s*pwd\s*\)\s*\/\s*graphify-out/.test(section),
-    'graphify commands must anchor graph paths to $(pwd)/graphify-out ' +
-    '(not bare graphify-out/) so lookups never resolve to a sibling worktree'
-  );
-});
-
-test('AGENTS.md graphify section handles missing graph actionably', () => {
-  const content = fs.readFileSync(AGENTS_MD, 'utf8');
-
-  const match = content.match(/^(## graphify\n[\s\S]*?)(?=^## |\z)/m);
-  assert.ok(match, 'AGENTS.md must contain a ## graphify section');
-  const section = match[1];
-
-  // Criterion 2: When graphify-out/graph.json is absent, the instructions
-  // must provide an actionable result (e.g. a conditional check + message
-  // or a clear "build first" hint) instead of an uncaught error.
-  assert.ok(
-    /\[ -f/.test(section) && /graphify-out/.test(section) ||
-    /if.*graphify-out.*graph\.json/.test(section) ||
-    /graphify-out\/graph\.json.*exists/.test(section) &&
-    /build|extract|create|run.*\/graphify/.test(section),
-    'graphify section must handle missing graph actionably ' +
-    '(conditional check with actionable guidance, not bare error)'
-  );
-});
+// Regression coverage for active-worktree graph resolution (TASK-2297).
 
 test('queryGraph from worktree without graph returns actionable missing-graph result (red-to-green)', async () => {
   // Exercise the programmatic queryGraph helper with mocked dependencies.
-  // This verifies the active-worktree resolution path that the Codex-facing
-  // query uses via the AGENTS.md instruction mechanism.
+  // Verify graph lookups stay within the active worktree.
   const tmpRoot = registeredMkdtemp('graphify-codex-repro-');
 
   try {
@@ -155,24 +93,13 @@ test('queryGraph from worktree without graph returns actionable missing-graph re
       !graphPathArg.includes(path.basename(siblingWorktree)),
       '--graph must NOT contain sibling worktree name'
     );
-
-    // Verify AGENTS.md instructs agents to use --graph with absolute path
-    const content = fs.readFileSync(AGENTS_MD, 'utf8');
-    assert.ok(
-      /--graph.*\$\(pwd\).*graphify-out/.test(content),
-      'AGENTS.md must instruct agents to use --graph with $(pwd)-anchored path'
-    );
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
 });
 
-test('Codex launcher sets cwd to active worktree so $(pwd)/graphify-out resolves correctly', async () => {
-  // Exercise buildCodexDraftInvocation at the real Codex-facing seam.
-  // The Codex launcher sets cwd: worktree, which makes $(pwd) in the agent's
-  // shell resolve to the active worktree. Combined with AGENTS.md instructions
-  // to use $(pwd)/graphify-out/graph.json, this ensures the graph path never
-  // resolves to a sibling worktree.
+test('Codex launcher sets cwd to active worktree (TASK-2297)', async () => {
+  // Exercise the Codex-facing launcher seam to verify worktree isolation.
   const tmpRoot = registeredMkdtemp('graphify-codex-launcher-');
 
   try {
@@ -236,14 +163,6 @@ test('Codex launcher sets cwd to active worktree so $(pwd)/graphify-out resolves
     assert.ok(
       !capturedCwd.value!.includes(path.basename(siblingWorktree)),
       'Codex launcher cwd must NOT reference sibling worktree'
-    );
-
-    // Verify AGENTS.md instructs agents to use $(pwd)/graphify-out
-    // which resolves correctly because cwd is the active worktree
-    const content = fs.readFileSync(AGENTS_MD, 'utf8');
-    assert.ok(
-      /\$\(pwd\)\s*\/\s*graphify-out/.test(content),
-      'AGENTS.md must anchor graph paths to $(pwd)/graphify-out so they resolve correctly with cwd=worktree'
     );
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });

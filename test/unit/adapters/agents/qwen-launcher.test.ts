@@ -9,6 +9,8 @@ import { mkdtemp } from '../../../helpers/temp-dir.js';
 
 import {
   buildQwenInvocation,
+  startQwenAgent,
+  __setSpawnAndTeeForTest,
   ensureQwenHome,
   extractQwenSessionId,
   isQwenQuotaExhausted,
@@ -25,10 +27,11 @@ test('resolveQwenCommand returns "qwen"', () => {
   assert.equal(resolveQwenCommand(), 'qwen');
 });
 
-test('buildQwenInvocation: basic args with -p prompt and text output', () => {
+test('buildQwenInvocation: stdin prompt and text output (TASK-2761)', () => {
   const inv = buildQwenInvocation({ prompt: 'hello', worktree: '/tmp/wt' });
   assert.equal(inv.command, 'qwen');
-  assert.deepStrictEqual(inv.args.slice(0, 4), ['-p', 'hello', '--output-format', 'text']);
+  assert.deepStrictEqual(inv.args, ['--output-format', 'text']);
+  assert.equal(inv.options.input, 'hello');
   assert.equal(inv.options.cwd, '/tmp/wt');
 });
 
@@ -159,7 +162,7 @@ test('qwen approval bypass: tool-call prompt completes without approval block (r
   // No blocklist entry should be written for tool-call prompts
   // (verified by the fact that the invocation is correctly shaped;
   //  the actual blocklist write happens in the launcher retry loop)
-  assert.ok(inv.args.includes('-p'), 'prompt passed via -p for non-interactive mode');
+  assert.ok(typeof inv.options.input === 'string', 'piped stdin selects non-interactive mode');
 });
 
 test('qwen home: QWEN_HOME resolves to .workflow/qwen-home', () => {
@@ -289,4 +292,30 @@ test('first and later fresh repair ignore historical session IDs (TASK-2700)', (
       assert.ok(!invocation.args.includes(flag), `unexpected history flag ${flag}`);
     }
   }
+});
+
+
+test('oversized Qwen stdin survives every session policy and stale fallback (TASK-2761)', async () => {
+  const prompt = 'café contract 🌍\n'.repeat(12000);
+  const worktree = mkdtemp('qwen-oversized-');
+  const calls: string[][] = [];
+  __setSpawnAndTeeForTest(async (_command, args, options) => {
+    assert.ok(options);
+    assert.equal(options.input, prompt);
+    assert.ok(!JSON.stringify({ args, env: options.env }).includes(prompt));
+    calls.push(args);
+    return { status: args.includes('-r') ? 1 : 0, stdout: '', stderr: args.includes('-r') ? 'Session not found' : '' };
+  });
+  try {
+    for (const sessionId of [null, 'old-session']) {
+      await startQwenAgent({ prompt, worktree, resume: true, sessionId }).resultPromise;
+    }
+    assert.equal(calls.length, 3);
+    assert.ok(calls[0].includes('-c'));
+    assert.ok(calls[1].includes('-r'));
+    for (const index of [2]) { assert.deepEqual(calls[index], ['--output-format', 'text']); }
+    const fresh = buildQwenInvocation({ prompt, worktree: '/tmp', resume: false, sessionId: 'ignored' });
+    assert.equal(fresh.options.input, prompt);
+    assert.ok(!fresh.args.includes('ignored'));
+  } finally { __setSpawnAndTeeForTest(null); fs.rmSync(worktree, { recursive: true, force: true }); }
 });

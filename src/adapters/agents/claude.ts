@@ -94,11 +94,13 @@ function buildClaudeInvocation({ configuration = DEFAULT_CONFIGURATION, prompt, 
   // --include-partial-messages is required: without it, the assistant event
   // contains the full response at once and no intermediate progress is emitted.
   args.push('--output-format', 'stream-json', '--verbose', '--include-partial-messages');
-  args.push('-p', prompt);
+  // Claude Code 2.1.300: --print with default --input-format text reads stdin.
+  args.push('-p');
   return {
     command: resolveClaudeCommand(),
     args,
     options: {
+      input: prompt,
       stdio: 'inherit',
       cwd: worktree,
       env: { ...configuration.forwardedEnvironment, ...env }

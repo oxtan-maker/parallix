@@ -3,8 +3,8 @@ id: TASK-2761
 title: >-
   Deliver large agent prompts to claude, opencode, qwen and vibe without argv
   size limits, and bound prompt growth
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-15 10:50'
 labels:
   - bug

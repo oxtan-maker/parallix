@@ -66,7 +66,9 @@ export function buildFreshDiagnosticRepairPrompt(slots: FixPromptSlots): string 
     '---',
     'Latest failure evidence (this is not necessarily the root cause):',
     '---',
-    elideBounceOutput(diagnostic || '(no output)'),
+    originalDiagnostic && originalDiagnostic === diagnostic
+      ? '(identical to original failure evidence above; no additional output)'
+      : elideBounceOutput(diagnostic || '(no output)'),
     '---',
     '',
     `Classification: ${classification.failureClass} — ${classification.dispatchAction}`,

@@ -1,3 +1,4 @@
+import { promptArtifacts } from '../../../src/adapters/agents/prompt-artifacts.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 /**
  * Real tmux terminal-host contract (TASK-2643).
@@ -18,6 +19,7 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import assert from 'node:assert/strict';
 import { mkdtempAt } from '../../helpers/temp-dir.js';
+import { registerFixtureCleanup } from '../../helpers/fixture-cleanup.js';
 import { openRunSession } from '../../../src/adapters/agents/run-session.js';
 import { spawnAndTee } from '../../../src/adapters/process/spawn-tee.js';
 import { listTmuxSessions, missionSocketPath, missionTerminalCapturePath, prepareTmuxLaunch, reconcileOrphanSessions, tmuxAttachArgs, shellQuote, closeMissionTerminal, retireMissionTerminal, superviseTmuxLaunch } from '../../../src/adapters/process/tmux-host.js';
@@ -28,9 +30,13 @@ import { buildBubblewrapArgs, resolveSandboxProfile } from '../../../src/adapter
 import { missionRunsDir, runHistoryFileSystem } from '../../../src/adapters/filesystem/run-history-store.js';
 import { listRuns, searchRuns } from '../../../src/application/run-history.js';
 import { attachRun } from '../../../src/adapters/cli/commands/run-history.js';
-import { startClaudeAgent } from '../../../src/adapters/agents/claude.js';
+import { buildClaudeInvocation, startClaudeAgent } from '../../../src/adapters/agents/claude.js';
 import { CLAUDE_STREAM_FIXTURE } from '../../fixtures/claude-stream-json.js';
 import { createMissionTerminalResources } from '../../../src/adapters/cli/commands/mission-terminal-resources.js';
+
+import { buildOpencodeInvocation } from '../../../src/adapters/agents/opencode.js';
+import { buildQwenInvocation } from '../../../src/adapters/agents/qwen.js';
+import { buildVibeInvocation } from '../../../src/adapters/agents/vibe.js';
 
 const sink = { write: () => true } satisfies import("../../../src/adapters/process/spawn-tee.js").TeeSink;
 const REPO_ROOT = path.join(import.meta.dirname, '..', '..', '..');
@@ -169,8 +175,8 @@ test('cancellation by signal kills the owned agent and preserves the mission ter
     const run = session(fx, worktree, 'task-c');
     const pidFile = path.join(fx.root, 'agent.pid');
     let hostPid = 0;
-    const launch = spawnAndTee('sh', ['-c', `echo $$ > ${pidFile}; exec sleep 30`], {
-      cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions,
+    const launch = spawnAndTee('sh', ['-c', `cat >/dev/null; echo $$ > ${pidFile}; exec sleep 30`], {
+      cwd: worktree, input: 'oversized 修复 🌍\n'.repeat(20000), stdoutSink: sink, stderrSink: sink, ...run.teeOptions,
       onSpawn: (child: { pid?: number }) => { hostPid = child.pid ?? 0; },
     });
     waitFor(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() !== '');
@@ -942,4 +948,47 @@ test('retained mission history keeps first, middle and last output of two operat
 
 function agentRunIdentity(input: Omit<Parameters<typeof logicalRunIdentity>[0], 'repositoryId'> & { repositoryKey: string }) {
   return { ...logicalRunIdentity({ ...input, repositoryId: input.repositoryKey }), repositoryKey: input.repositoryKey };
+}
+
+// Exercise actual command.sh exec, not a spawn double: Linux limits each argv
+// element even when the shell script itself was successfully written to disk.
+for (const [family, build] of [
+  ['claude', buildClaudeInvocation], ['opencode', buildOpencodeInvocation],
+  ['qwen', buildQwenInvocation], ['vibe', buildVibeInvocation],
+] as const) {
+  for (const policy of ['fresh', 'session', 'continue'] as const) {
+    test(`oversized UTF-8 prompt reaches ${family} with EOF through bwrap and tmux (${policy}, TASK-2761)`, { timeout: 3500 }, async context => {
+      const fx = fixture();
+      registerFixtureCleanup(context, () => fx.cleanup());
+      try {
+        const worktree = fx.worktree('oversized');
+        const prompt = 'café contract 🌍\n'.repeat(12000);
+        assert.ok(Buffer.byteLength(prompt) > 188583);
+        const artifactDir = path.join(worktree, '.workflow', 'review');
+        fs.mkdirSync(artifactDir, { recursive: true });
+        const retained = await promptArtifacts(worktree).retain('Complete prior history: unresolved obligation 🌍');
+        const receipt = path.join(artifactDir, 'receipt');
+        const provider = path.join(worktree, family);
+        // cat writes receipt only after reading stdin to EOF. No model calls.
+        fs.writeFileSync(provider, `#!/bin/sh\ncat ${shellQuote(retained)} || exit 1\ncat > ${shellQuote(receipt)}\nprintf 'EOF\\n'\n`, { mode: 0o700 });
+        const invocation = build({ prompt, worktree, resume: policy !== 'fresh',
+          sessionId: policy === 'session' ? 'isolated-session' : null,
+          ...(family === 'opencode' ? { preferJson: false } : {}),
+          configuration: resolveConfiguration(fx.env) });
+        const run = session(fx, worktree, 'task-oversized', family);
+        const confinedArgs = buildBubblewrapArgs(resolveSandboxProfile(policy === 'session' ? 'review' : 'active', worktree, artifactDir, null, resolveConfiguration(fx.env)), worktree);
+        const result = await spawnAndTee('bwrap', [...confinedArgs, provider, ...invocation.args], {
+          ...invocation.options, ...run.teeOptions, stdoutSink: sink, stderrSink: sink,
+        });
+        run.finish(result);
+        assert.equal(result.status, 0, result.stderr);
+        assert.match(result.stdout, /EOF/);
+        assert.match(result.stdout, /Complete prior history: unresolved obligation 🌍/);
+        assert.equal(fs.readFileSync(receipt, 'utf8'), prompt);
+      } finally {
+        fx.cleanup();
+        assert.equal(fs.existsSync(fx.root), false);
+      }
+    });
+  }
 }

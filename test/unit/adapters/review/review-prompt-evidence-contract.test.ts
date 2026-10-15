@@ -1,3 +1,9 @@
+import { promptArtifacts } from '../../../../src/adapters/agents/prompt-artifacts.js';
+import { readAgentLaunchContext } from '../../../../src/application/agent-launch-context.js';
+import { promptSectionBytes } from '../../../helpers/prompt-section-metrics.js';
+import { buildFreshDiagnosticRepairPrompt } from '../../../../src/application/rebound-prompts.js';
+import { fixtureMission, approvedReview } from '../../../fixtures/mission-builders.js';
+import { createHash } from 'node:crypto';
 import type { getComments } from '../../../../src/adapters/forgejo/forgejo.js';
 import type { MissionStore, MissionTransitionStore } from '../../../../src/application/domain-ports.js';
 import { missionVersion } from '../../../../src/application/domain-ports.js';
@@ -214,18 +220,23 @@ describe('human review reconciliation', { concurrency: false }, () => {
       'a human correction must not launch a no-findings reviewer before the repair');
   });
 
-  test('task-2641: only a dismissed approval cannot continue or create no-findings repair', async () => {
+  test('dismissed approval relaunches review on continue instead of stopping (TASK-2761)', async () => {
+    let probes = 0;
     const fake = fakeReviewLoopPorts({
+      slug: 'task-2641-dismissed',
+      state: new ReviewState('task-2641-dismissed', { reviewer: 'codex', implementer: 'claude' }),
+      provider: { pollReview: async () => { probes++; return 'APPROVED'; } },
       humanFeedback: { reconcile: async () => ({
         source: 'forgejo-review:92', author: 'operator', state: 'dismissed',
         disposition: null, approval: true, reason: 'Withdrawn approval.' as const, findings: [],
       }) },
       artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
     });
-    await runReviewLoop({ slug: 'task-2641-dismissed', implementer: 'claude', reviewer: 'codex', maxAttempts: 1, skipHandoff: true }, fake.ports);
-    assert.equal(fake.launches.length, 0);
-    assert.ok(!fake.mirrors.includes('approved'));
-    assert.deepEqual(fake.stops, ['DISMISSED_PROVIDER_APPROVAL']);
+    await runReviewLoop({ slug: 'task-2641-dismissed', implementer: 'claude', reviewer: 'codex', maxAttempts: 1, skipHandoff: true, isContinue: true }, fake.ports);
+    assert.equal(fake.launches.filter(launch => launch.role === 'reviewer').length, 1);
+    assert.equal(probes, 0, 'continuation must not reuse an existing provider decision');
+    assert.ok(fake.mirrors.includes('approved'), 'only the newly launched reviewer supplies approval');
+    assert.deepEqual(fake.stops, []);
   });
 
   test('task-2641: adapter reconciles only new human review decisions and preserves edited provider feedback', async () => {
@@ -338,7 +349,7 @@ describe('human review reconciliation', { concurrency: false }, () => {
     });
   });
 
-  test('task-2641: a consumed dismissed human approval still stops the real adapter path', async () => {
+  test('task-2641: a consumed dismissed human approval still requests fresh review through the adapter', async () => {
     const events: unknown[] = [];
     const comments: NonNullable<Awaited<ReturnType<typeof getComments>>> = [{
       kind: 'review', id: 'dismissed-approval', user: 'operator', isBot: false,
@@ -360,7 +371,7 @@ describe('human review reconciliation', { concurrency: false }, () => {
     assert.equal(events.length, 1, 'the human review is recorded once as an audit note');
 
     const repeated = await ports.humanFeedback.reconcile(state);
-    assert.equal(repeated?.state, 'dismissed', 'consuming the audit note must not allow the stale approval to continue');
+    assert.equal(repeated?.state, 'dismissed', 'consuming the audit note must not hide the need for fresh review');
     assert.equal(events.length, 1, 'the repeated reconciliation does not duplicate its audit note');
   });
 
@@ -765,4 +776,112 @@ test('self-development and shipped templates inherit the consumer default-on pro
   checkTemplates(path.join(root, 'templates'));
   assert.match(buildExecutePrompt('task-2737', '', { rootDir: root }), /compact (?:your working|the prior-round working|the implementation) context/i);
   assert.match(buildCompactActOnReviewPrompt({ implementer: 'codex', branch: 'mission/task-2737', attempt: 2, repoRoot: root }), /compact (?:your working|the prior-round working|the implementation) context/i);
+});
+
+test('TASK-2746-shaped review and act-on-review history has bounded inline UTF-8 growth (TASK-2761)', async context => {
+  const root = registeredMkdtemp('prompt-growth-');
+  try {
+    const contract = 'Complete contract 完整 🌍\n'.repeat(9000);
+    const findings = 'F1: preserve this current finding and outstanding obligation';
+    const dossier = 'Retained incident: command failed; all repair obligations remain';
+    const verification = 'npm test: exact receipt assertion failed on parent';
+    const obligation = 'Human: retain the unfulfilled security check';
+    const review = approvedReview('task-2761');
+    const current = { ...review.rounds[0], number: 1001, decision: null, phase: 'reviewing' as const,
+      disposition: null, implementerResponseContent: findings + '\n' + dossier + '\n' + verification };
+    const artifacts = new Map<string, string>();
+    const retained = { async retain(content: string) {
+      const reference = '/worktree/.workflow/agent-context/' + createHash('sha256').update(content).digest('hex') + '.json';
+      artifacts.set(reference, content);
+      return reference;
+    } };
+    const sizes: Record<string, number[]> = { review: [], actOnReview: [] };
+    const measured: unknown[] = [];
+    for (const count of [1, 10, 100]) {
+      const history = Array.from({ length: count }, (_, number) => ({ ...review.rounds[0], number: number + 1,
+        implementerResponseContent: findings.repeat(200) }));
+      const mission = fixtureMission('task-2761', {
+        brief: { goal: 'Deliver the complete contract', why: 'Oversized launches', scope: 'Transport and compaction', outOfScope: ['No truncation'] },
+        successCriteria: ['Transport exact bytes', obligation], declaredGates: ['npm test'],
+        checkpoints: [{ missionId: missionId('task-2761'), name: 'CP-1', firstLine: 'Retained proof',
+          goalCheck: [{ criterion: 'Transport exact bytes', evidence: contract.repeat(3) }], nextActionText: 'Retain all proof' }],
+        review: { ...review, rounds: [history[0]!, ...history.slice(1), current], reviewEvents: [{
+          position: 1, eventType: 'human_note', roundNumber: 1, phase: null, actor: 'operator',
+          content: obligation, disposition: null, verdict: null, itemDispositions: null,
+          blockedReason: null, followUpReference: null, createdAt: '2026-08-04T10:31:00Z',
+        }] },
+      });
+      const snapshot = await readAgentLaunchContext({ async load() { return { kind: 'found', mission, version: missionVersion(1) }; } }, 'task-2761', retained);
+      const value = JSON.parse(snapshot.slice(snapshot.indexOf('{')));
+      assert.deepEqual(value.brief, mission.brief);
+      assert.deepEqual(value.successCriteria, mission.successCriteria);
+      assert.deepEqual(value.declaredGates, mission.declaredGates);
+      assert.deepEqual(value.checkpoints, mission.checkpoints);
+      assert.deepEqual(value.review.currentRound, current);
+      assert.ok(value.review.inheritedObligations.findings.some((finding: { summary: string }) => finding.summary === obligation));
+      const archived = JSON.parse(artifacts.get(value.review.fullReviewArtifact)!);
+      assert.deepEqual(archived, mission.review, 'full history, human obligations and metadata remain readable');
+      assert.match(artifacts.get(value.review.fullReviewArtifact)!, /unfulfilled security check/);
+      assert.match(snapshot, /Read fullReviewArtifact before/);
+      for (const [role, stage] of Object.entries({
+        review: buildCompactReviewPrompt({ reviewer: 'claude', implementer: 'codex', branch: 'mission/task-2761', attempt: count, repoRoot: root }),
+        actOnReview: buildCompactActOnReviewPrompt({ implementer: 'codex', branch: 'mission/task-2761', attempt: count, repoRoot: root }),
+      })) {
+        // Diff and verification are reload instructions here, never inline artifacts.
+        // Include every byte of references, metadata, framing and stage instructions.
+        const priorRoundHistory = JSON.stringify(value.review).replace(dossier, '').replace(verification, '');
+        const sections = { contract: JSON.stringify({ ...value, review: undefined }), priorRoundHistory,
+          diff: (stage.match(/git diff[^`\n]+/g) ?? []).join('\n'), incidentOrRecoveryDossier: dossier, verificationOutput: verification,
+          framing: stage + snapshot.slice(0, snapshot.indexOf('{')) };
+        const bytes = promptSectionBytes(sections);
+        const rendered = snapshot + '\n\n' + stage;
+        const total = Buffer.byteLength(rendered);
+        // JSON indentation, braces and separators are framing too.
+        bytes.framing += total - bytes.total;
+        bytes.total = total;
+        assert.equal(Object.entries(bytes).filter(([key]) => key !== 'total').reduce((sum, [, n]) => sum + n, 0), total);
+        assert.ok(bytes.contract > 188583, 'mandatory contract is never capped');
+        sizes[role].push(total);
+        measured.push({ role, rounds: count, ...bytes });
+      }
+    }
+    for (const values of Object.values(sizes)) {
+      assert.ok(Math.max(...values) - Math.min(...values) <= 8, 'fixed required inputs: history references, metadata and framing grow by at most eight UTF-8 bytes across 1/10/100 rounds');
+    }
+    // Older references remain available after subsequent rounds publish new ones.
+    assert.equal(artifacts.size, 3);
+    context.diagnostic(JSON.stringify(measured));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('identical recovery evidence is delivered once while changed diagnostics remain complete (TASK-2761)', () => {
+  const originalDiagnostic = 'retained evidence 完整 🌍\n'.repeat(100);
+  const slots = { label: 'FAILURE', slug: 'task-2761', area: 'review', facts: [] as Array<[string, string]>,
+    diagnostic: originalDiagnostic, originalDiagnostic,
+    classification: { failureClass: 'IncompleteEvidence', dispatchAction: 'AutoSendBack', isRelaunchable: true, label: 'evidence' } as const,
+    attempt: 1, maxAttempts: 2, remedy: 'Preserve all obligations' };
+  const compact = buildFreshDiagnosticRepairPrompt(slots);
+  assert.equal(compact.split('retained evidence 完整 🌍').length - 1, 100);
+  assert.match(compact, /identical to original failure evidence/);
+  const changed = buildFreshDiagnosticRepairPrompt({ ...slots, diagnostic: 'new outstanding obligation' });
+  assert.match(changed, /new outstanding obligation/);
+  assert.match(changed, /Preserve all obligations/);
+});
+
+
+test('prompt history artifacts are private, immutable and survive subsequent rounds (TASK-2761)', async () => {
+  const root = registeredMkdtemp('prompt-artifacts-');
+  try {
+    const artifacts = promptArtifacts(root);
+    const first = await artifacts.retain('first complete review 🌍');
+    const second = await artifacts.retain('second review: unresolved F1');
+    assert.notEqual(first, second);
+    assert.equal(await artifacts.retain('first complete review 🌍'), first);
+    assert.equal(fs.readFileSync(first, 'utf8'), 'first complete review 🌍');
+    assert.equal(fs.readFileSync(second, 'utf8'), 'second review: unresolved F1');
+    assert.equal(fs.statSync(first).mode & 0o777, 0o600);
+    assert.ok(first.startsWith(path.join(root, '.workflow', 'agent-context')));
+    fs.writeFileSync(first, 'corrupted');
+    await assert.rejects(artifacts.retain('first complete review 🌍'));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

@@ -164,7 +164,8 @@ function resolveQwenCommand() {
 
 function buildQwenInvocation({ configuration = DEFAULT_CONFIGURATION, prompt, worktree, env, resume = false, sessionId = null, model = null, sandbox = false }: QwenInvocationOptions) {
   const rootDir = resolveQwenWorktree(worktree);
-  const args: string[] = ['-p', prompt, '--output-format', 'text'];
+  // Qwen Code 0.21.9 --help: prompt is appended to stdin, which selects headless mode.
+  const args: string[] = ['--output-format', 'text'];
   // Native sandbox fallback (task-2513): qwen ships a real `-s/--sandbox`
   // flag. Enable it so a mutating launch stays confined when Bubblewrap is
   // missing. No-op for read-only launches, which never set `sandbox`.
@@ -188,6 +189,7 @@ function buildQwenInvocation({ configuration = DEFAULT_CONFIGURATION, prompt, wo
     command: resolveQwenCommand(),
     args,
     options: {
+      input: prompt,
       stdio: 'inherit',
       cwd: rootDir,
       env: { ...configuration.forwardedEnvironment, ...env, QWEN_HOME: qwenHomeRoot(rootDir) }

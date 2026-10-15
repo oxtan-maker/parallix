@@ -669,7 +669,7 @@ describe("Bubblewrap guard", () => {
       return child;
     });
     try {
-      const prompt = 'confined prompt — 修复';
+      const prompt = 'confined prompt — réparation';
       const result = await withSandboxProfile(
         resolveSandboxProfile('active', worktree, undefined, undefined, resolveConfiguration(environment)),
         () => spawnAndTee('codex', ['exec', '-'], { cwd: worktree, stdoutSink: nullSink(), stderrSink: nullSink(), input: prompt })

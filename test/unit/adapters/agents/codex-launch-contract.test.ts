@@ -220,7 +220,7 @@ describe("Codex launcher basics ,", () => {
   });
 
   test('headless fresh, resumed and --last launches pass the prompt on stdin, never as argv (TASK-2760)', () => {
-    const prompt = 'repair — 修复\n'.repeat(4);
+    const prompt = 'repair — réparation\n'.repeat(4);
     for (const options of [{}, { resume: true, sessionId: 'abc123' }, { resume: true, sessionId: null }]) {
       const inv = buildCodexDraftInvocation({ configuration: resolveConfiguration(environment), prompt, worktree: '/tmp', interactive: false, model: 'gpt-5.4-mini', ...options });
       assert.equal(inv.args.at(-1), '-', 'codex exec and exec resume read `-` from stdin');

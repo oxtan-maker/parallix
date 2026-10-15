@@ -14,6 +14,7 @@ const environment: NodeJS.ProcessEnv = { ...process.env };
 //   OpenCode provider-failure retry: no task ID in the legacy file
 
 import test, { describe, mock } from 'node:test';
+import { buildSubagentLimitPrefix } from '../../../../src/adapters/agents/subagent-limit.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -165,12 +166,13 @@ describe("OpenCode launcher ,", () => {
     assert.ok(!inv.args.includes('-s'));
   });
 
-  test('buildOpencodeInvocation passes prompt as last arg', () => {
+  test('buildOpencodeInvocation passes prompt via stdin (TASK-2761)', () => {
     opencode.__setJsonFormatSupportForTest(true);
     const { buildOpencodeInvocation, resolveOpencodeCommand } = opencode;
     const inv = buildOpencodeInvocation({ configuration: resolveConfiguration(environment), prompt: 'hello world', worktree: '/tmp' });
     assert.equal(inv.command, resolveOpencodeCommand(resolveConfiguration(environment)));
-    assert.ok(inv.args.includes('hello world'));
+    assert.equal(inv.options.input, 'hello world');
+    assert.ok(!inv.args.includes('hello world'));
   });
 
   test('buildOpencodeInvocation sets cwd to worktree', () => {
@@ -817,5 +819,43 @@ test('first and later fresh repair ignore historical session IDs (TASK-2700)', (
     for (const flag of ['resume', '--resume', '--continue', '--last', '-r', '-c', '-s']) {
       assert.ok(!invocation.args.includes(flag), `unexpected history flag ${flag}`);
     }
+  }
+});
+
+
+test('oversized OpenCode stdin survives transient, format and stale-session retries (TASK-2761)', async () => {
+  const prompt = 'café contract 🌍\n'.repeat(12000);
+  const calls: string[][] = [];
+  // Each branch receives the complete provider input, including any advisory.
+  const failures = ['Session not found', 'unrecognized option: --format', 'fetch failed', ''];
+  opencodeModule.__setJsonFormatSupportForTest(true);
+  opencodeModule.__setExportCaptureForTest(async () => null);
+  opencodeModule.__setSpawnAndTeeForTest(async (command, args, options) => {
+    assert.ok(options);
+    assert.equal(options.input, buildSubagentLimitPrefix(undefined) + prompt, 'provider advisory is accounted for explicitly');
+    assert.ok(!JSON.stringify({ args, env: options.env }).includes(prompt));
+    calls.push(args);
+    const stderr = failures.shift();
+    return { status: stderr ? 1 : 0, stdout: '', stderr };
+  });
+  try {
+    const result = await opencodeModule.startOpencodeAgent({ prompt, worktree: '/tmp', resume: true,
+      sessionId: 'old-session', slug: fixtureMissionId('task-2761'), role: 'review',
+      sessionMarkerPort: { find: async () => null, save: async () => {}, shouldResume: async () => false, async delete() {} }, maxTransientRetries: 1 }).resultPromise;
+    assert.equal(result.status, 0);
+    assert.equal(calls.length, 4);
+    assert.ok(calls[0].includes('-s'));
+    assert.ok(!calls[1].includes('-s'));
+    assert.ok(!calls[2].includes('--format'));
+    assert.deepEqual(calls[2], calls[3]);
+    for (const resume of [false, true]) {
+      const invocation = opencodeModule.buildOpencodeInvocation({ prompt, worktree: '/tmp', resume });
+      assert.equal(invocation.options.input, prompt);
+      assert.equal(invocation.args.includes('--continue'), resume);
+    }
+  } finally {
+    opencodeModule.__setSpawnAndTeeForTest(null);
+    opencodeModule.__setExportCaptureForTest(null);
+    opencodeModule.__setJsonFormatSupportForTest(null);
   }
 });

@@ -202,11 +202,12 @@ function buildOpencodeInvocation({ configuration = DEFAULT_CONFIGURATION, prompt
   } else if (resume) {
     args.push('--continue');
   }
-  args.push(prompt);
+  // Installed 0.0.0-dev-202605131349 run reads non-TTY Bun.stdin.text().
   return {
     command: resolveOpencodeCommand(configuration),
     args,
     options: {
+      input: prompt,
       stdio: 'inherit',
       cwd: worktree,
       env: { ...configuration.forwardedEnvironment, ...env }

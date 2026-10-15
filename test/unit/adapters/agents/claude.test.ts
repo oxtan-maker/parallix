@@ -75,11 +75,12 @@ test('buildClaudeInvocation omits resume flags when resume is false', () => {
   assert.ok(!inv.args.includes('--continue'));
 });
 
-test('buildClaudeInvocation passes prompt via -p flag', () => {
+test('buildClaudeInvocation passes prompt via stdin with -p (TASK-2761)', () => {
   const inv = buildClaudeInvocation({ prompt: 'hello world', worktree: '/tmp' });
   assert.equal(inv.command, 'claude');
   assert.ok(inv.args.includes('-p'));
-  assert.ok(inv.args.includes('hello world'));
+  assert.equal(inv.options.input, 'hello world');
+  assert.ok(!inv.args.includes('hello world'));
 });
 
 test('buildClaudeInvocation includes --output-format stream-json --verbose --include-partial-messages for streaming progress', () => {
@@ -418,4 +419,31 @@ test('startClaudeAgent asks the terminal host for readable presentation unless r
     claude.__setSpawnAndTeeForTest(null);
   }
   assert.deepEqual(seen, ['claude-stream', undefined]);
+});
+
+
+test('oversized stdin survives every Claude session policy and stale fallback (TASK-2761)', async () => {
+  const prompt = 'café contract 🌍\n'.repeat(12000);
+  const calls: string[][] = [];
+  const port: SessionMarkerPort = { find: async () => null, save: async () => {}, shouldResume: async () => false, async delete() {} };
+  claude.__setSpawnAndTeeForTest(async (command, args, options) => {
+    assert.ok(options);
+    assert.equal(options.input, prompt);
+    assert.ok(!JSON.stringify({ args, env: options.env }).includes(prompt));
+    calls.push(args);
+    return { status: calls.length % 2 ? 1 : 0, stdout: '', stderr: calls.length % 2 ? 'Session not found' : '' };
+  });
+  try {
+    for (const sessionId of [null, 'old-session']) {
+      await claude.startClaudeAgent({ prompt, worktree: '/tmp', resume: true, sessionId,
+        slug: fixtureMissionId('task-2761'), role: 'review', sessionMarkerPort: port }).resultPromise;
+    }
+    assert.equal(calls.length, 4);
+    assert.ok(calls[0].includes('--continue'));
+    assert.ok(calls[2].includes('--resume'));
+    for (const index of [1, 3]) { assert.ok(!calls[index].includes('--resume') && !calls[index].includes('--continue')); }
+    const fresh = claude.buildClaudeInvocation({ prompt, worktree: '/tmp', resume: false, sessionId: 'ignored' });
+    assert.equal(fresh.options.input, prompt);
+    assert.ok(!fresh.args.includes('ignored'));
+  } finally { claude.__setSpawnAndTeeForTest(null); }
 });

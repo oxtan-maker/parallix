@@ -225,7 +225,7 @@ async function resumeFixingPhaseReview(context: LoopContext, round: ReviewRound)
 }
 
 /** Run the reviewing half; the outcome the implementer answers, or 'stop'. */
-export async function runReviewerPhase(context: LoopContext, round: ReviewRound): Promise<ReviewOutcome> {
+export async function runReviewerPhase(context: LoopContext, round: ReviewRound, dismissedApproval = false): Promise<ReviewOutcome> {
   const { state } = context;
   round.integrationRepair = await integrationRepairBrief(context);
   if (state.phase !== 'reviewing') { return { reviewState: await resumeFixingPhaseReview(context, round) }; }
@@ -235,7 +235,8 @@ export async function runReviewerPhase(context: LoopContext, round: ReviewRound)
     context.exit(1);
     return { outcome: 'stop' };
   }
-  let reviewState = await existingReviewOnContinue(context, round);
+  // A dismissed approval requires a fresh reviewer, never the continuation skip-check.
+  let reviewState = dismissedApproval ? null : await existingReviewOnContinue(context, round);
   if (context.dryRun) {
     if (!reviewState) { dryRunReviewerPrompt(context, round); }
     return { outcome: 'stop' };

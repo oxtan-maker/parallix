@@ -273,7 +273,9 @@ function buildVibeInvocation({ configuration = DEFAULT_CONFIGURATION, prompt, wo
   // error, which then gets misread as a real launch failure and persisted
   // to the blocklist (claude/opencode/codex all pass their own equivalent
   // non-interactive bypass already).
-  const args = ['--prompt', prompt, '--trust', '--yolo', '--output', 'text', '--workdir', rootDir, '--add-dir', '/tmp'];
+  // Vibe 2.24.0 cli.py: bare --prompt selects programmatic stdin input.
+  // The provider strips boundary whitespace after receipt; transport preserves all bytes.
+  const args = ['--prompt', '--trust', '--yolo', '--output', 'text', '--workdir', rootDir, '--add-dir', '/tmp'];
 
   // Vibe programmatic mode does not support --resume flag in the same way
   // as other agents. The --resume flag exists but requires interactive selection
@@ -290,6 +292,7 @@ function buildVibeInvocation({ configuration = DEFAULT_CONFIGURATION, prompt, wo
     command: resolveVibeCommand(),
     args,
     options: {
+      input: prompt,
       stdio: 'inherit',
       cwd: rootDir,
       env: childEnv

@@ -81,6 +81,24 @@ export type ADR0053ConceptName =
  * any new durable file read or write must be registered here or the build fails.
  */
 export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
+  {
+    id: 'prompt-artifacts-read',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/agents/prompt-artifacts.ts',
+    operation: 'read',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
+    id: 'prompt-artifacts-write',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/agents/prompt-artifacts.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
   // Release-normalized manifest snapshots are generated comparison inputs in
   // an isolated temporary directory, removed in finally; never review authority.
   {

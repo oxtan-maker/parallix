@@ -186,13 +186,6 @@ async function runRound(context: LoopContext, attempt: number): Promise<'stop' |
   if (attempt > context.state.round) { context.state.advanceRound(); }
   const round = new ReviewRound(attempt, context);
   const humanFeedback = await context.ports.humanFeedback.reconcile(context.state);
-  if (humanFeedback?.state === 'dismissed' && humanFeedback.approval) {
-    // A dismissed provider decision is not approval evidence.  Stop before a
-    // reviewer can turn the stale provider result into a no-findings approval;
-    // a human must provide a current decision or correction.
-    await context.escalateToHumanReview('DISMISSED_PROVIDER_APPROVAL');
-    return 'stop';
-  }
   if (humanFeedback?.disposition === 'REQUEST_CHANGES' && humanFeedback.state === 'current') {
     // An explicit human correction is newer authority than a stored provider
     // approval.  Enter the existing fixing path directly, rather than launch a
@@ -205,7 +198,7 @@ async function runRound(context: LoopContext, attempt: number): Promise<'stop' |
     context.state.disposition = 'REQUEST_CHANGES';
     return await runImplementerPhase(context, round, 'REQUEST_CHANGES');
   }
-  const reviewed = await runReviewerPhase(context, round);
+  const reviewed = await runReviewerPhase(context, round, humanFeedback?.state === 'dismissed' && humanFeedback.approval);
   if ('outcome' in reviewed) { return reviewed.outcome; }
   return await runImplementerPhase(context, round, reviewed.reviewState);
 }

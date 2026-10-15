@@ -567,7 +567,7 @@ test('spawnAndTee passes the requested host presentation to the terminal host an
 });
 
 test('spawnAndTee writes supplied input to a piped stdin and ends it; a closed stdin pipe stays the exit status (TASK-2760)', async () => {
-  const input = Buffer.from('prompt — 修复 🚀\n'.repeat(3));
+  const input = Buffer.from('prompt — réparation 🚀\n'.repeat(3));
   for (const failWrite of [false, true]) {
     const received: Buffer[] = [];
     let ended = false;

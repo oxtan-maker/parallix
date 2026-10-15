@@ -78,7 +78,8 @@ test('buildVibeInvocation includes --prompt flag', () => {
   const inv = buildVibeInvocation({ configuration: resolveConfiguration(process.env), prompt: 'test', worktree: '/tmp' });
   assert.equal(inv.command, 'vibe');
   assert.ok(inv.args.includes('--prompt'));
-  assert.ok(inv.args.includes('test'));
+  assert.equal(inv.options.input, 'test');
+  assert.ok(!inv.args.includes('test'));
 });
 
 test('buildVibeInvocation includes --trust flag', () => {

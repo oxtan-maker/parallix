@@ -1,3 +1,5 @@
+import { readAgentLaunchContext } from '../../application/agent-launch-context.js';
+import { promptArtifacts } from '../agents/prompt-artifacts.js';
 import { retainedRepairPort } from './retained-repair.js';
 import { composeHumanFeedback } from './review-loop-human-feedback.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
@@ -178,9 +180,12 @@ function providerPort(slug: string, branch: string, worktree: string, target: Re
 function agentPort(slug: string, branch: string, worktree: string, missionPath: string | undefined, target: ReviewLoopTarget, bindings: ReviewLoopBindings, writeState: typeof writeReviewState, log: (_msg: string) => void, error: (_msg: string) => void): ReviewAgentPort {
   const focus = target.focus ?? 'all';
   const rolePrompt = async (role: ReviewAgentLaunch['role'], facts: ReviewPromptFacts, actual: string): Promise<string> => {
-    return role === 'reviewer'
+    const snapshot = bindings.missionStore
+      ? await readAgentLaunchContext(bindings.missionStore, slug, promptArtifacts(worktree)) : '';
+    const stage = role === 'reviewer'
     ? `${buildCompactReviewPrompt({ reviewer: facts.reviewer, branch, implementer: facts.implementer, focus, attempt: facts.attempt, repoRoot: worktree, missionPath, actualReviewer: actual, reviewBaseline: facts.reviewBaseline, integrationRepair: typeof facts.integrationRepair === 'string' ? facts.integrationRepair : undefined })}${facts.humanFeedback ? `\n\nHuman review correction (authoritative): ${facts.humanFeedback}` : ''}`
     : `${buildCompactActOnReviewPrompt({ implementer: facts.implementer, branch, attempt: facts.attempt, reviewOutcome: facts.reviewOutcome === undefined ? undefined : `${facts.reviewOutcome}`, repoRoot: worktree, missionPath, actualImplementer: actual, reviewBaseline: facts.reviewBaseline })}${facts.humanFeedback ? `\n\nHuman review correction (authoritative): ${facts.humanFeedback}` : ''}`;
+    return [snapshot, stage].filter(Boolean).join('\n\n');
   };
   return {
     async launch({ role, agent, exclude, prompt, recovery }) {
