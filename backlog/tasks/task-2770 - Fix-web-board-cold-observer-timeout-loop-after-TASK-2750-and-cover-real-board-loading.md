@@ -55,6 +55,8 @@ Separate from TASK-2769, which concerns execution counts and card activity seman
 
 <!-- SECTION:NOTES:BEGIN -->
 Operator clarification: first-load latency of 10 seconds is unacceptable. Performance restoration must cover regressions introduced since 2026-10-13, not only TASK-2750. Baseline measurement was requested, then deferred to this task by the operator; no historical baseline timing has yet been measured.
+
+Historical baseline candidate resolved from git: 26e2adac23702dafd3e1389fb3aba070b06780cb (2026-10-13 18:30 +0200, Render Claude output inside hosted mission terminals), the last commit before 2026-10-13 23:59:59 +0200. Verify main ancestry before using it for the comparison.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
