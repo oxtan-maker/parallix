@@ -6,6 +6,7 @@ title: >-
 status: backlog
 assignee: []
 created_date: '2026-10-16 08:20'
+updated_date: '2026-10-16 08:21'
 labels:
   - bug
 dependencies: []
@@ -46,7 +47,10 @@ Separate from TASK-2769, which concerns execution counts and card activity seman
 - [ ] #2 Extend the existing packaged web smoke owner to request /api/board through the real built CLI with an isolated representative repository and operator state; assert a valid snapshot and expected mission data, plus a subsequent successful refresh. Shell-only success must not satisfy the smoke.
 - [ ] #3 Manually verify the rebuilt CLI with representative populated isolated state: URL is announced, browser board cards load, refresh succeeds, and shutdown cleans up owned observers. Record actual evidence and avoid mutating live mission state.
 - [ ] #4 Preserve observer isolation, finite deadlines and cleanup, and operator-owned gate configuration. Keep any added or modified integration test within 3.5 seconds; use deterministic boundary control rather than a real 10-second sleep.
+- [ ] #5 After the first successful load, board reloads must complete within 400 ms end to end, from browser reload initiation to mission cards rendered with a successful board snapshot, on representative populated isolated state. Measure repeated warm reloads through the real rebuilt CLI and browser, including HTTP, serialization and rendering; report first-load timing separately. The observed 395 ms projection alone does not establish compliance with this limit.
 <!-- AC:END -->
+
+
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
