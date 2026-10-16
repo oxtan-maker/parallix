@@ -171,10 +171,9 @@ the same state, with repair commit subjects and no commit bodies. V5 permits a
 finite resource limit at most about twice a measured overrun in the failure lines,
 only for the check that failed. Implementer claims cannot replace that measurement,
 and removing limits or lowering quality bars remains weakening. Restored approvals
-record the clearing question, probability and both question versions. Statistics
-report V5 calls, clears and its preserves distribution alongside historical
-single-question rounds. Display only re-review
-statistics; keep historical measurements and their collection intact.
+record the clearing question, probability and both question versions. Statistics show
+only the classifier share of decided re-reviews; historical measurements stay
+readable.
 
 The research found useful first-review decisions alongside unsafe clears.
 Satisfying every mission criterion did not establish complete PR approval:
@@ -215,6 +214,64 @@ source-supported correctness, retaining ambiguous cases and preparation failures
 An unsafe clear concerns unresolved prior obligations or repair regressions;
 unrelated new findings do not alone invalidate a scoped clear. Future sample
 collection is not claimed complete and does not block this implementation.
+
+## Re-review packet and question experiments
+
+Offline replays of historical re-reviews (research mission px-0010, Jev only,
+labelled by the general reviewer's decision) set the current re-review design.
+
+A classifier clear on a round the general reviewer sent back is a wrong approval
+when the reviewer found a prior obligation unfixed or a new problem inside the
+latest changes. A new finding outside the latest changes is an acceptable pass.
+Returns of rounds the reviewer approved are tolerated as repair cost.
+
+Decisions:
+
+- Every packet is fitted to the decision budget by one repository-neutral
+  omission order, and every omission is stated (TASK-2751). Size alone no
+  longer sends a round to the general reviewer.
+- Each decided round stores its decided revision (TASK-2752), so a re-review
+  diff runs from the head the reviewer judged.
+- Integration repairs use the weakening question at preserves >= 0.60 with or
+  without a recorded gate re-run (TASK-2754). Without one, the question states
+  that Parallix re-runs every integration gate before integrating. On 100
+  repair rounds this cleared 35 of 81 approved rounds. All 4 cleared send-backs
+  were new findings in old code, or the repair checkpoint dropping Goal Check
+  rows. TASK-2755 removed that cause by carrying accepted rows into a new repair
+  checkpoint.
+- Re-reviews after a general-reviewer decision ask one question per
+  obligation: the prior findings plus human notes since that decision
+  (TASK-2753). The route clears at addresses >= 0.97 on every obligation and
+  returns at does_not_address >= 0.97 on any. On 158 rounds it cleared 12
+  rounds correctly and 1 wrongly. In task-2717 r3, the latest changes orphaned a
+  fixture that reached the branch through a rebase. The route stays in shadow
+  until 50 qualifying shadow rounds show no wrong approval and no return of an
+  approved round.
+- The classifier model is pinned to typesafe/jev-1.13-20260917 (TASK-2763).
+  The provider moved the `jev-latest` alias to 1.14 on 2026-10-15. Pinned on
+  identical packets, 1.14 cleared 12 of 43 gate-fact repairs against 24 for
+  1.13. The best 1.14 threshold reached 19, and it gave no safety gain on any
+  dataset. A new version is adopted only after the same pinned comparison.
+- `px stats` counts classifier share from decided rounds and shows no
+  per-question sections (TASK-2758).
+
+Rejected:
+
+- A general new-defect question to Jev blocked every send-back but dropped more
+  than half of the correct clears, because its score follows diff size.
+- A mechanical orphan-file guard was fitted to the single wrong clear. A guard
+  needs a recurring class of failures, not one case.
+- Cleaner commit subjects and relaxed resource-limit wording gave no gain.
+- Reviewer-authored per-finding templates, repair interdiff with gate-failure
+  extraction, and checkpoint-state evidence gave no routing gain.
+
+Expected effect and test: the classifier should decide about 16% of decided
+re-reviews while the per-obligation route is in shadow, and about 20% after it
+acts. The current measured share is 2–7%. About 120 decided re-reviews, roughly
+40 to 50 missions, separate the hypotheses: 14 or more classifier decisions
+support at least 17%, and fewer support no change from about 7%. Each
+conclusion has about a 4% error rate. All thresholds were
+chosen on these historical rounds, so the live count is the validation.
 
 ## Reconsideration triggers
 

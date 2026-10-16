@@ -306,7 +306,7 @@ test (TASK-2201) adds explicit validation of:
 - **Reviewer forcing (and cost containment)**: The harness writes an
   `agents.local.json` blocklist into the isolated `PARALLIX_HOME` that blocks
   every agent family except `custom` (the product's supported local-blocklist
-  mechanism, see `docs/agents.md`). Reviewer selection in `startReviewLoop`
+  mechanism). Reviewer selection in `startReviewLoop`
   therefore finds no different-family candidate and takes its single-family
   fallback: `custom` reviews its own PR. The test asserts
   `review-state.json.reviewer === "custom"` strictly. This both encodes the

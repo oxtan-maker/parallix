@@ -27,6 +27,7 @@ import type { AgentRunMeasurement, MissionOutcome } from '../domain/usage.js';
  * here, so the mapping cannot name a concept the domain does not have.
  */
 interface DomainConceptTypes {
+  readonly WorkflowOperation: import('../domain/workflow-operation.js').WorkflowOperation;
   readonly Mission: Mission;
   readonly CheckpointData: CheckpointData;
   readonly Review: Review;
@@ -57,6 +58,7 @@ export const DOMAIN_CONCEPT_NAMES = [
   'SessionMarker',
   'LaneTransitionEvent',
   'AgentBlock',
+  'WorkflowOperation',
 ] as const satisfies readonly DomainConceptName[];
 
 /** The six consumer families covered by the domain requirement map. */
@@ -110,6 +112,7 @@ export interface ConsumerRequirement {
   readonly requirement: string;
   /** Whether the consumer needs to tell one launch from another, and how far. */
   readonly perLaunchIdentity: PerLaunchIdentityUse;
+  readonly perWorkflowIdentity?: 'durable-command';
 }
 
 /**
@@ -119,6 +122,14 @@ export interface ConsumerRequirement {
  * removed?" — not as a list of every call site.
  */
 export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
+  {
+    id: 'workflow-admission-owner', family: 'launch',
+    fileLocation: 'src/application/workflow-operation-service.ts',
+    line: 83, anchor: 'async admit(request: BoardCommandRequest)',
+    reads: ['WorkflowOperation', 'Mission'],
+    requirement: 'One durable command identity spans admission, exclusive fenced ownership, recovery, phases and outcomes; provider launches remain attributed evidence beneath it.',
+    perLaunchIdentity: 'none', perWorkflowIdentity: 'durable-command',
+  },
   // -----------------------------------------------------------------------
   // launch — choosing an agent family and deciding fresh-vs-resume
   // -----------------------------------------------------------------------
@@ -148,7 +159,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-session-resume',
     family: 'launch',
     fileLocation: 'src/adapters/agents/agent-launch-preparation.ts',
-    line: 113,
+    line: 114,
     anchor: 'await launchSessionMarkerPort.shouldResume(',
     reads: ['SessionMarker', 'Mission'],
     requirement:
@@ -296,7 +307,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'review-loop-round-progression',
     family: 'review',
     fileLocation: 'src/application/review-loop/review-loop.ts',
-    line: 206,
+    line: 217,
     anchor: 'function runOwnedReviewLoop',
     reads: ['Review', 'Mission'],
     requirement:
@@ -322,11 +333,11 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'ui-board-card',
     family: 'ui-board',
     fileLocation: 'src/application/projections/mission-board.ts',
-    line: 276,
+    line: 277,
     anchor: 'function projectMissionCard',
     reads: ['Mission', 'CheckpointData', 'Review'],
     requirement:
-      'Mission lane, status, labels, assignee, latest checkpoint and its next-action text, and whether the approval names the currently reviewed revision. Live work is ephemeral operation progress, never durable state.',
+      'Mission lane, status, labels, assignee, latest checkpoint and its next-action text, and whether the approval names the currently reviewed revision. Live work is observed progress; workflow admission and exclusive ownership have the separate WorkflowOperation authority.',
     perLaunchIdentity: 'none',
   },
   {
@@ -422,3 +433,12 @@ export function conceptsReadByConsumers(): readonly DomainConceptName[] {
   }
   return [...seen];
 }
+
+
+/** Operator decision for TASK-2750: command ownership is distinct from provider attempts. */
+export const WORKFLOW_OPERATION_IDENTITY_DECISION = {
+  required: true,
+  concept: 'WorkflowOperation',
+  evidence: ['workflow-admission-owner'],
+  rationale: 'Restart-surviving admission, deduplication and fenced ownership require durable command identity. One operation encompasses zero or more provider launches and uses existing Mission, Repository and run-history attribution. It does not introduce provider Attempt identity.',
+} as const;

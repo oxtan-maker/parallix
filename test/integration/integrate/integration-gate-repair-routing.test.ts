@@ -118,7 +118,7 @@ async function runIntegrate(scenario: Scenario) {
     if (args.includes('--format=%cI')) { return ok('2026-09-26T10:00:00Z\n'); }
     if (joined.includes('branch --show-current')) { return ok('main\n'); }
     if (joined.includes('status --porcelain')) { return ok(''); }
-    if (args.includes('rev-parse')) { return ok(`${LANDED_SHA}\n`); }
+    if (args.includes('rev-parse') || args.includes('merge-base')) { return ok(`${LANDED_SHA}\n`); }
     if (joined.includes('merge') && joined.includes('--no-commit')) { return ok(''); }
     if (joined.includes('merge') && joined.includes('--abort')) { return ok(''); }
     if (joined.includes('merge') && joined.includes('--squash')) { return ok(''); }

@@ -122,7 +122,7 @@ describe("integrate orchestration and gates", () => {
     mock.method(composition, 'createMissionApplicationServices', async () => ({
       store: {
         _repoId: 'default',
-        load: async () => ({ kind: 'found' as const, mission: { status: 'review', review: { rounds: [{ decision: { kind: 'approved', decidedAt: '2026-01-01T10:30:00Z' } }] } }, version: 1 }),
+        load: async () => ({ kind: 'found' as const, mission: { status: 'integration', review: { rounds: [{ decision: { kind: 'approved', decidedAt: '2026-01-01T10:30:00Z' } }] } }, version: 1 }),
       },
       lifecycle: {
         transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: { to: 'review', version: 2 } }),
@@ -503,13 +503,14 @@ describe("probe abort without promotion", () => {
       mock.method(missionUtils, 'updateGraphifyKnowledgeGraph', () => false);
       mock.method(git, 'getCurrentBranch', () => `mission/${TEST_SLUG}`);
       mock.method(git, 'git', (args: string[]) => {
-        if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
-        if (args.includes('branch') && args.includes('--show-current')) return { signal: null,  status: 0, stdout: 'main', stderr: '' };
-        if (args.includes('status')) return { signal: null,  status: 0, stdout: '', stderr: '' };
-        if (args.includes('merge') && args.includes('--no-commit')) return { signal: null,  status: 0, stdout: '', stderr: '' };
-        if (args.includes('merge') && args.includes('--abort')) return { signal: null,  status: 1, stdout: '', stderr: 'fatal: abort failed' };
-        if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'deadbeef', stderr: '' };
-        return { signal: null,  status: 0, stdout: '', stderr: '' };
+        if (args.includes('branch') && args.includes('--list')) return { signal: null, status: 0, stdout: 'main\n', stderr: '' };
+        if (args.includes('branch') && args.includes('--show-current')) return { signal: null, status: 0, stdout: 'main', stderr: '' };
+        if (args.includes('status')) return { signal: null, status: 0, stdout: '', stderr: '' };
+        if (args.includes('merge') && args.includes('--no-commit')) return { signal: null, status: 0, stdout: '', stderr: '' };
+        if (args.includes('merge') && args.includes('--abort')) return { signal: null, status: 1, stdout: '', stderr: 'fatal: abort failed' };
+        if (args.includes('merge-base')) return { signal: null, status: 0, stdout: 'deadbeef', stderr: '' };
+        if (args.includes('rev-parse')) return { signal: null, status: 0, stdout: 'deadbeef', stderr: '' };
+        return { signal: null, status: 0, stdout: '', stderr: '' };
       });
       mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
       mock.method(backlog, 'getTaskStatus', () => 'review');
@@ -537,7 +538,7 @@ describe("probe abort without promotion", () => {
       mock.method(composition, 'createMissionApplicationServices', async () => ({
         store: {
           _repoId: 'default',
-          load: async () => ({ kind: 'found' as const, mission: { status: 'review', review: { rounds: [{ decision: { kind: 'approved', decidedAt: '2026-01-01T10:30:00Z' } }] } }, version: 1 }),
+          load: async () => ({ kind: 'found' as const, mission: { status: 'integration', review: { rounds: [{ decision: { kind: 'approved', decidedAt: '2026-01-01T10:30:00Z' } }] } }, version: 1 }),
         },
         lifecycle: {
           transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: { to: 'review', version: 2 } }),
@@ -609,9 +610,10 @@ describe("resume landing closeout", () => {
       if (args.includes('rebase') && !args.includes('--show-current') && !args.includes('--continue')) {
         rebaseStarted = true;
       }
-      if (joined.includes('rev-parse') && joined.includes('main')) { return { signal: null,  status: 0, stdout: 'basesha', stderr: '' }; }
-      if (joined.includes('rev-parse')) { return { signal: null,  status: 0, stdout: BRANCH, stderr: '' }; }
-      if (joined.includes('merge-base') && joined.includes('--is-ancestor')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
+      if (joined.includes('rev-parse') && joined.includes('main')) { return { signal: null, status: 0, stdout: 'basesha', stderr: '' }; }
+      if (joined.includes('rev-parse')) { return { signal: null, status: 0, stdout: BRANCH, stderr: '' }; }
+      if (joined.includes('merge-base') && joined.includes('--is-ancestor')) { return { signal: null, status: 0, stdout: '', stderr: '' }; }
+      if (joined.includes('merge-base')) { return { signal: null, status: 0, stdout: 'basesha', stderr: '' }; }
       // The resume closeout resolves the landed squash commit timestamp via `show`.
       if (joined.includes('show') && joined.includes('--format')) { return { signal: null,  status: 0, stdout: '2026-09-15T12:00:00+00:00', stderr: '' }; }
       if (joined.includes('branch')) { return { signal: null,  status: 0, stdout: 'main\n', stderr: '' }; }
@@ -840,29 +842,32 @@ describe("behind-primary integrate", () => {
     }
   });
 
-  test('integration re-runs rebase and gates when main advances during the first gate run (TASK-2630)', async () => {
-    const state = { baseAdvanced: false, rebaseRuns: 0, gateRuns: 0 };
+  for (const movement of ['during gates', 'before landing'] as const) {
+  test(`integration reconciles base movement ${movement} without operator retry (TASK-2630, TASK-2750 F6)`, async () => {
+    const state = { baseAdvanced: false, rebaseRuns: 0, gateRuns: 0, postGatePredictions: 0 };
     mock.method(git, 'getCurrentBranch', () => `mission/${SLUG}`);
     mock.method(git, 'git', (args: string[]) => {
       const joined = args.join(' ');
       if (args.includes('show') && args.includes('--format=%cI')) {
         return { signal: null,  status: 0, stdout: '2026-10-09T09:07:00+02:00\n', stderr: '' };
       }
-      if (args.includes('rebase') && !args.includes('--show-current')) { state.rebaseRuns++; return { signal: null,  status: 0, stdout: '', stderr: '' }; }
-      if (args.includes('rebase')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
-      if (joined.includes('merge-base') && joined.includes('--is-ancestor')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
-      if (joined.includes('merge-base')) { return { signal: null,  status: 0, stdout: state.baseAdvanced ? 'base-before-gates' : 'base-current', stderr: '' }; }
-      if (args.includes('rev-parse') && args.includes(BRANCH)) { return { signal: null,  status: 0, stdout: state.baseAdvanced ? 'mission-before-rerebase' : 'mission-current', stderr: '' }; }
-      if (args.includes('rev-parse')) { return { signal: null,  status: 0, stdout: state.baseAdvanced ? 'base-after-gates' : 'base-current', stderr: '' }; }
-      if (joined.includes('merge') || joined.includes('commit') || joined.includes('diff') || joined.includes('ls-files') || joined.includes('status')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
-      return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
+      if (args.includes('rebase') && !args.includes('--show-current')) { state.rebaseRuns++; return { signal: null, status: 0, stdout: '', stderr: '' }; }
+      if (args.includes('rebase')) { return { signal: null, status: 0, stdout: '', stderr: '' }; }
+      if (joined.includes('merge-base') && joined.includes('--is-ancestor')) { return { signal: null, status: 0, stdout: '', stderr: '' }; }
+      if (joined.includes('merge-base')) {
+        if (movement === 'before landing' && state.gateRuns === 1 && ++state.postGatePredictions === 2) { state.baseAdvanced = true; }
+        return { signal: null, status: 0, stdout: state.baseAdvanced ? (state.rebaseRuns >= 2 ? 'base-after-gates' : 'base-before-gates') : 'base-current', stderr: '' }; }
+      if (args.includes('rev-parse') && args.includes(BRANCH)) { return { signal: null, status: 0, stdout: state.baseAdvanced ? 'mission-before-rerebase' : 'mission-current', stderr: '' }; }
+      if (args.includes('rev-parse')) { return { signal: null, status: 0, stdout: state.baseAdvanced ? 'base-after-gates' : 'base-current', stderr: '' }; }
+      if (joined.includes('merge') || joined.includes('commit') || joined.includes('diff') || joined.includes('ls-files') || joined.includes('status')) { return { signal: null, status: 0, stdout: '', stderr: '' }; }
+      return { signal: null, status: 0, stdout: 'main\n', stderr: '' };
     });
     fs.mkdirSync(path.join(ROOT, 'backlog', 'tasks'), { recursive: true });
     fs.writeFileSync(path.join(ROOT, 'workflow.config.json'), JSON.stringify({ adapters: { verification: { command: 'true' }, gates: { preIntegration: [{ key: 'gate', order: 0, command: 'true' }] } } }));
     const { getStatus, logs } = installHarness();
     mock.method(repositoryGates, 'runPhaseGates', async () => {
       state.gateRuns++;
-      if (state.gateRuns === 1) { state.baseAdvanced = true; }
+      if (state.gateRuns === 1 && movement === 'during gates') { state.baseAdvanced = true; }
       return { ok: true, executed: 1, skipped: false, failedGate: null, error: null };
     });
     try {
@@ -875,6 +880,8 @@ describe("behind-primary integrate", () => {
       fs.rmSync(ROOT, { recursive: true, force: true });
     }
   });
+
+  }
 
   test('integration refuses an unreadable approved revision with recovery guidance (TASK-2630)', async () => {
     installGitDoubles({ value: false }, true);

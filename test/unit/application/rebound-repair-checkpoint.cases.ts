@@ -81,6 +81,41 @@ export function repairCheckpointCases(): void {
     assert.match(result.diagnostic, /CAS conflict/);
   });
 
+  test('repair checkpoint and certification follow the newly failed gate within the same budget (TASK-2750)', async () => {
+    const next: ReboundReason = { ...reason, command: 'npm run test:integration:ci:prebuilt', area: 'integration-ci', stdout: 'integration failed' };
+    const commands: string[] = [];
+    const incidents: string[] = [];
+    const prompts: string[] = [];
+    let certified = 0;
+    const result = await rebound(reason, context({
+      repairCheckpoints: port({
+        open: async input => { commands.push(input.command); incidents.push(input.incidentId); return { name: 'CP-2', version: input.attempt }; },
+        verify: async () => { certified++; },
+      }),
+      startAgent: async (_step, options) => { prompts.push((options.prompt as (_agent: string) => string)('codex')); return { result: { status: 0 } }; },
+      verify: attempt => attempt === 1
+        ? { ok: false as const, reason: next }
+        : { ok: true as const, command: next.command },
+    }));
+    assert.equal(result.outcome, 'fixed');
+    assert.equal(result.attempts, 2);
+    assert.deepEqual(commands, [reason.command, next.command]);
+    assert.equal(incidents[0], incidents[1], 'changing the failed gate must not reset the repair budget');
+    assert.match(prompts[1], /integration failed/);
+    assert.equal(certified, 1, 'only the full green rerun certifies the current repair');
+  });
+
+  test('the original green command cannot certify a later integration repair (TASK-2750)', async () => {
+    const result = await rebound(reason, context({
+      repairCheckpoints: port({ verify: async () => { assert.fail('must not certify the superseded command'); } }),
+      verify: attempt => attempt === 1
+        ? { ok: false as const, reason: { ...reason, command: 'npm run test:integration:ci:prebuilt' } }
+        : { ok: true as const, command: reason.command },
+    }));
+    assert.equal(result.outcome, 'human-only');
+    assert.match(result.diagnostic, /Unrelated check.*cannot certify npm run test:integration:ci:prebuilt/);
+  });
+
   test('first durable agent contract blocker stops retries before verification (TASK-2695)', async () => {
     let launched = 0;
     const blocker = { command: reason.command, diagnostic: 'support module rejected', authorityReason: 'locked command', proposedCorrection: 'operator selects owner' };

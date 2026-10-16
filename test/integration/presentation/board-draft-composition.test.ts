@@ -104,7 +104,7 @@ test('wired production controller dispatches mission intake and factory agrees',
     assert.equal(result.status, 'completed');
     assert.equal((await store.load(missionId('task-2426-fixture'))).kind, 'found');
     const factoryController = capabilities.tui.commandControllerFactory(() => {});
-    for (const kind of ['active:execute', 'mission:intake', 'checkpoint:record', 'handoff:record'] as const) {
+    for (const kind of ['active:execute', 'mission:intake', 'checkpoint:record', 'handoff:record', 'review:submit'] as const) {
       assert.equal(capabilities.commandController.canExecute(kind), true);
       assert.equal(factoryController.canExecute(kind), true);
     }
@@ -118,7 +118,7 @@ test('wired production controller dispatches mission intake and factory agrees',
 });
 
 const remainingUnavailableKinds: readonly BoardCommandKind[] = [
-  'review:submit', 'review:act-on-findings', 'approve:review', 'integrate:merge',
+  'review:act-on-findings', 'approve:review', 'integrate:merge',
 ];
 
 /** In-memory draft workflow port: records the steps it reaches, opens nothing. */
@@ -266,7 +266,7 @@ test('read-only production controller does not advertise Mission commands', asyn
   const factoryController = capabilities.tui.commandControllerFactory(() => {});
   for (const controller of [capabilities.commandController, factoryController]) {
     assert.equal(controller.canExecute('active:execute'), true);
-    for (const kind of ['mission:intake', 'checkpoint:record', 'handoff:record', ...remainingUnavailableKinds] as const) {
+    for (const kind of ['mission:intake', 'checkpoint:record', 'handoff:record', 'review:submit', ...remainingUnavailableKinds] as const) {
       assert.equal(controller.canExecute(kind), false);
     }
     assert.equal(controller.canExecute('draft:create'), false, 'read-only graph has no draft service');
@@ -296,7 +296,7 @@ test('production application services wire Mission commands through their shared
   try {
     services = await createProductionApplicationServices(process.cwd(), undefined, { configuration: resolveConfiguration(process.env) });
     const controller = services.presentationCapabilities!.commandController;
-    for (const kind of ['active:execute', 'mission:intake', 'checkpoint:record', 'handoff:record'] as const) {
+    for (const kind of ['active:execute', 'mission:intake', 'checkpoint:record', 'handoff:record', 'review:submit', 'integrate:merge'] as const) {
       assert.equal(controller.canExecute(kind), true);
     }
     const id = missionId('task-2426-production-fixture');

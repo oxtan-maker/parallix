@@ -1,8 +1,8 @@
 ---
 id: TASK-2750
 title: Immediate authoritative board actions with independent workflow ownership
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-14 18:17'
 labels: []
 dependencies: []
@@ -54,3 +54,91 @@ Deliver the API, application admission/ownership, process runner and browser con
 - [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+
+## Execution investigation
+
+CP-1 is incomplete; no implementation checkpoint or success criterion is claimed complete.
+
+The retained barrier case in test/unit/application/mission-execute-service-contract.test.ts,
+activation and preparing work precede held preflight (TASK-2750), is red against the
+unchanged production source: npm test -- test/unit/application/mission-execute-service-contract.test.ts
+reports 16 passing cases and this one failure, authoritative activation must commit
+before preflight. The failing case took 5.807 ms; it uses a causal barrier and releases
+and drains execution in finally. This does not measure the reported two-minute pause.
+
+The execution service resolves preflight and prepares the full prompt before activation.
+The production web host rebuilds the board before dispatch and awaits its complete
+outcome. The Git adapter uses spawnSync. These are separate coupling points; no
+SQLite-lock latency or browser-render latency has yet been measured.
+
+An architectural decision is requested before dependent ownership implementation.
+src/application/consumer-domain-requirements.ts records that no consumer requires
+durable per-launch identity or lifecycle. The owning architecture guard in
+test/unit/domain/domain-architecture-guards.test.ts permits only the existing stats
+deduplication consumer and explicitly requires re-deciding that branch for a new
+durable consumer. All 25 architecture cases currently pass. ADR 0064 supplies
+terminal/run-capture identity, but does not decide durable workflow ownership.
+
+Proposed decision: recognize a checked workflow-operation coordination contract,
+separate from provider attempts, with persisted admission, owner fencing, recovery
+and outcomes; revise the consumer decision narrowly while retaining Mission lifecycle
+authority, OS liveness authority and the existing terminal/history mechanism.
+Alternatives are to classify the same bounded operation state as technical metadata
+under ADR 0053 with an explicit clarified guard, or retain ephemeral coordination,
+which cannot satisfy this mission's restart-survival and queryable-status criteria.
+Risks requiring the contract are duplicate external launches, stale-owner writes,
+unsafe replacement and lifecycle compensation; naming a record differently does not
+resolve those invariants. Repository instructions require an explicit subsequent
+operator decision for architectural-principle changes. No production source or
+architecture guard has been changed pending that decision.
+
+
+## Dependency adoption and operator decision (2026-10-15)
+
+Operator approved durable workflow ownership when required by the behavioral
+contract and modeled with explicit domain identity, lifecycle and invariants.
+The instruction is to reuse TASK-2749 and avoid parallel objects for the same
+responsibility. Operator subsequently authorized adaptation against TASK-2749
+before its integration defences finish. The Mission scope records this decision
+at version 9; its dependency on task-2749 was recorded at version 8.
+
+Merged mission/task-2749 at ab0ae96d2c into this worktree as the development
+baseline. Reconcile with its eventual integrated main revision before final
+validation. Its published MissionTerminalCapability owns terminal resolution
+and retained history; AgentRunIdentity remains the provider-run evidence
+identity. Its coordinator captures already correlate to application operation
+IDs through composition. Reuse these contracts rather than introducing a
+terminal identity, capture store, or logger here.
+
+TASK-2749 deliberately excludes the async command runner and does not implement
+persisted request admission, exclusive fenced ownership or restart recovery.
+Those remain TASK-2750 responsibilities under the operator decision. The old
+CP-7 report predates that decision; it must not be treated as a request for
+another approval, nor cleared with fabricated completion evidence.
+
+Dependency-focused contracts pass (30 cases). The retained held-preflight
+regression remains red (16 pass, 1 fail), confirming that adopting terminal/history
+alone does not fix activation ordering. No implementation completion is claimed.
+
+
+## Delivery evidence (2026-10-15)
+
+Reconciled TASK-2749 through its ready-for-integration revision 9ba33796c.
+One WorkflowOperation coordinates commands; terminal identity, provider invocation
+identity and retained history continue to use TASK-2749's published capability.
+The operator's architectural approval is recorded in the Mission brief at version 9.
+
+Implementation commits real activation, lane evidence and preparing work with
+admission; independent supervisors/executors preserve workflow and capture across
+web-host lifetime. CLI children inherit the fencing generation. Uncertain process
+or provider execution retains ownership and refuses replacement. Stop confirmation
+uses Linux process-tree observation; other platforms report pending termination
+when that proof is unavailable. No exactly-once external-effect claim is made.
+
+The retained preflight reproduction is green after its recorded parent failure.
+The isolated ten-workflow Chromium check observed all acknowledgements, persisted
+activation and visible preparing state below one second, including reload, host
+restart, stop/replacement and retained review output. Measurements, event ordering
+and focused check results are recorded in the Mission's CP-6 checkpoint evidence.
+No operator database or paid/model-backed agent was used for these fixture checks.
+Normal workflow automatic full gates remain required and are not claimed passed.

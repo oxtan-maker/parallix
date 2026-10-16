@@ -1,3 +1,4 @@
+import { registerWorkflowReads } from './workflow-route.js';
 /**
  * host.ts — the loopback-only local web host (ADR 0054).
  *
@@ -203,7 +204,8 @@ export function createWebHost(options: WebHostOptions): WebHost {
       // Terminal polls reuse the displayed board; commands still rebuild below.
       registerTerminalRoute(app, { ...options, buildProjection: sharedBuild === undefined
         ? undefined : async () => displayedProjection ?? sharedBuild() });
-      registerCommandRoute(app, options, sharedBuild);
+      registerWorkflowReads(app, () => options.commandDispatcher?.() ?? null);
+      registerCommandRoute(app, options, sharedBuild, () => stream.publishInvalidation());
 
       registerAssetRoutes(app, options.assets, shell, () => binding);
 

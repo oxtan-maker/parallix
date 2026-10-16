@@ -11,13 +11,13 @@ export type { CustomCapacityReservation } from '../../application/ports/custom-a
 /** Wait for admission without changing the selected agent or consuming a retry. */
 export async function waitForCustomCapacity(
   rootDir?: string,
-  onWaiting: () => void = () => {},
+  onWaiting: () => void | Promise<void> = () => {},
   acquire = tryAcquireCustomCapacity,
   pause: () => Promise<void> = () => new Promise(resolve => setTimeout(resolve, 1000)),
 ): Promise<CustomCapacityReservation> {
   let reservation = await acquire(rootDir);
   if (reservation) { return reservation; }
-  onWaiting();
+  await onWaiting();
   do {
     await pause();
     reservation = await acquire(rootDir);

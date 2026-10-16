@@ -1,3 +1,4 @@
+import { verificationEnvironment } from '../config/verification-environment.js';
 import { verificationDigest as digest, readVerificationInputs } from './verification-proof-inputs.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import { git, run } from '../git/git.js';
@@ -28,7 +29,8 @@ interface GitResult {
 }
 
 export type VerificationGateResult = Pick<GitResult, 'status'> & Partial<Omit<GitResult, 'status'>>;
-type VerificationRunOptions = import('../../application/ports/handoff-workflow.js').HandoffGitOptions;
+type VerificationRunOptions = import('../../application/ports/handoff-workflow.js').HandoffGitOptions
+  & Pick<GitOptions, 'cwd' | 'env' | 'encoding' | 'maxBuffer'>;
 export type VerificationRunner = (_command: string, _args: string[], _options?: VerificationRunOptions) => VerificationGateResult;
 
 export type GitFn = (_args: string[], _options?: GitOptions) => GitResult;
@@ -179,26 +181,25 @@ export function formatVerificationCommand(area: string | undefined, rootDir: str
 }
 
 /** @param {string} [area] @param {{rootDir?: string, log?: (_message: string) => void, stdio?: SpawnSyncOptions['stdio'], runFn?: VerificationRunner}} [options] */
-export function runVerificationGate(area: string | undefined, options: { rootDir?: string; log?: (_message: string) => void; stdio?: VerificationRunOptions['stdio']; runFn?: VerificationRunner; maxBuffer?: number } = {}): VerificationGateResult {
-  const opts = options;
-  const rootDir = opts.rootDir || process.cwd();
+export function runVerificationGate(area: string | undefined, options: { rootDir?: string; log?: (_message: string) => void; stdio?: VerificationRunOptions['stdio']; runFn?: VerificationRunner; maxBuffer?: number; env?: NodeJS.ProcessEnv } = {}): VerificationGateResult {
+  const rootDir = options.rootDir || process.cwd();
   const { command, defaultArea } = resolveVerificationAdapter(rootDir);
   const effectiveArea = area || defaultArea;
 
   if (!command) {
-    const info = opts.log || log.info;
+    const info = options.log || log.info;
     info(`No verification gate configured for area: ${effectiveArea}; default is no validation. `
       + 'Set adapters.verification.command in workflow.config.json to enforce one.');
     return { status: 0 };
   }
 
-  const stdio = opts.stdio || 'inherit';
-  const runFn = opts.runFn || run;
+  const { stdio = 'inherit', runFn = run } = options;
   return runFn('bash', ['-c', command.replaceAll('{{area}}', effectiveArea)], {
     progressLabel: `Repository verification (${effectiveArea})`,
+    env: verificationEnvironment(options.env ?? { ...process.env }),
     cwd: rootDir,
     stdio,
-    ...(stdio === 'pipe' ? { encoding: 'utf8', maxBuffer: opts.maxBuffer ?? 10 * 1024 * 1024 } : {}),
+    ...(stdio === 'pipe' ? { encoding: 'utf8', maxBuffer: options.maxBuffer ?? 10 * 1024 * 1024 } : {}),
   });
 }
 

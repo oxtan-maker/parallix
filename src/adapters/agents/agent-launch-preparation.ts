@@ -1,3 +1,4 @@
+import { reportAuthorizedProgress } from '../../application/ports/mission-write-authorization.js';
 import * as fmt from "../../application/presentation/cli-format.js";
 import { resolveReviewArtifactDir } from "../config/product-config.js";
 import { RESUME_CAPABLE, LAUNCHERS, resolveNoOutputWatchdogConfig, resolveCustomLauncher } from "./launcher-selection.js";
@@ -235,8 +236,12 @@ export async function prepareLaunch(state: StartAgentLoopState, deps: StartAgent
   // context reaches the shared process seam through every family launcher.
   const { effectiveProfile, nativeSandbox } = launchConfinement(state, deps);
 
+  if (deps.configuration.runtime.workflowOperation) {
+    Object.assign(agentEnv, { PARALLIX_WORKFLOW_OPERATION: deps.configuration.runtime.workflowOperation, PARALLIX_WORKFLOW_GENERATION: String(deps.configuration.runtime.workflowGeneration) });
+  }
   const customReservation = chosen === 'custom'
-    ? await waitForCustomCapacity(worktree, () => {
+    ? await waitForCustomCapacity(worktree, async () => {
+      await reportAuthorizedProgress('waiting', 'waiting for provider capacity');
       log(fmt.status('INFO', 'Custom-agent capacity is saturated; waiting for an available slot.'));
     }, root => tryAcquireCustomCapacity(root, deps.configuration))
     : null;

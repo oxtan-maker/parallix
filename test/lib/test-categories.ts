@@ -203,6 +203,11 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // this CLI-composition test runs in the integration layer rather than the
   // CPU-budgeted unit tier.
   'integration/sqlite/mission-classification-update.test.ts',
+  'integration/process/workflow-admission-ordering.test.ts',
+  'integration/process/workflow-cli-exclusion.test.ts',
+  'integration/process/workflow-owner-host-restart.test.ts',
+  'integration/process/workflow-stop-attribution.test.ts',
+  'integration/process/workflow-observation-isolation.test.ts',
   // TASK-2599 spawns the dev entry in a child process and materialises a
   // temporary SQLite Mission store, so it crosses the process and SQLite
   // boundaries and runs only in the integration layer (clean runner is enough).

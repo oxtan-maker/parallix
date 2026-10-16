@@ -99,6 +99,7 @@ export interface CommandAvailability {
 }
 
 export interface MissionCard {
+  readonly workflowOperation?: import('../../domain/workflow-operation.js').WorkflowOperation;
   readonly id: MissionId;
   readonly repositoryId: RepositoryId;
   readonly title: string;

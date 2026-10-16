@@ -25,6 +25,7 @@ export const KNOWN_COMMANDS: string[] = [
   'setup-review',
   'draft',
   'active',
+  'stop',
   'recover',
   'status',
   'lead',
@@ -284,6 +285,7 @@ ${fmt.bold('Advanced Commands:')}
   verify [<area>]       Run the configured repository verification gate.
   setup                 Interactive setup wizard: writes config, optionally bootstraps Forgejo, and verifies the install.
   setup-review          Legacy Forgejo-only bootstrap for tokens, repo creation, and git review remote.
+  stop [<slug>]        Stop the owned workflow; keep its Mission and retained history.
   recover <slug>        Reconcile an interrupted active task with its closed durable aggregate.
   status [<slug>] [--json]  Complete recorded Mission state — lane, brief, declared gates, latest checkpoint evidence, review round and the write version — plus the repository overview. --json emits the recorded Mission fields for agents.
   goal set --goal <t> --why <t>       Record the Mission's goal and why; the first brief write.

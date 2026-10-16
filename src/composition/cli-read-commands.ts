@@ -1,6 +1,7 @@
+import { attachWorkflowOperations } from './workflow-operations.js';
 
 
-import { createMissionTerminalCapability } from './mission-terminal-capability.js';
+import { workflowObservationCapabilities } from './workflow-observation.js';
 
 import { createRunHistoryPort } from '../adapters/cli/commands/run-history.js';
 import { createAttachCommand, createHistoryCommand } from '../interfaces/cli/run-history.js';
@@ -71,16 +72,17 @@ export function createReadCommands(context: CliCommandContext): Record<string, C
       // becomes the host's injected build port. The command stays read-only:
       // nothing here dispatches a mutation.
       createBoardSource: async (progress) => {
-        const services = await openServices(rootDir, progress);
+        const services = await attachWorkflowOperations(rootDir, configuration, await openServices(rootDir, progress), true);
         const capabilities = services.presentationCapabilities;
         const builder = capabilities?.boardProjection;
         if (!builder) {
           await services.operatorState.close();
           throw new Error('board projection is unavailable for px web');
         }
-        const missionTerminal = createMissionTerminalCapability(rootDir, configuration);
+        const observation = workflowObservationCapabilities(rootDir, configuration);
+        const missionTerminal = observation.terminal;
         return {
-          buildProjection: () => builder.build(),
+          buildProjection: observation.board,
           // The same guarded BoardCommandController instance the TUI dispatches
           // through (built by composition from the production execute ports,
           // Mission services, current-work port, and Mission store). The web
@@ -88,13 +90,13 @@ export function createReadCommands(context: CliCommandContext): Record<string, C
           // progress sink is this host's SSE sink.
           commandDispatcher: capabilities.commandController,
           missionTerminal,
-          close: () => services.operatorState.close(),
+          close: async () => { await observation.close(); await services.operatorState.close(); },
         };
       },
     }),
     ui: async (args: string[]) => {
       const { runUiCommand } = await import('../interfaces/tui/ui-command.js');
-      const services = await openServices(rootDir);
+      const services = await attachWorkflowOperations(rootDir, configuration, await openServices(rootDir), true);
       const capabilities = services.presentationCapabilities?.tui;
       if (!capabilities) { throw new Error('operator-state capabilities are unavailable'); }
       return runUiCommand(capabilities, args);

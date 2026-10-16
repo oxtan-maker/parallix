@@ -12,15 +12,32 @@ import type { ExecuteMissionRequest } from '../../../../src/application/execute-
 //   Execute Mission adapters: no task ID in the legacy file
 //   Execute Mission characterization: no task ID in the legacy file
 
+import fs from 'node:fs';
+import { mkdtemp } from '../../../helpers/temp-dir.js';
+import path from 'node:path';
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { setCommandPathProbe, setLauncherHealthProbe } from '../../../../src/adapters/agents/agents.js';
-import { createExecuteMissionPorts, MissionWorkspaceAdapter, AgentExecutionAdapter, ExecuteTelemetryAdapter } from '../../../../src/adapters/mission/execute-mission-adapters.js';
+import { createDefaultExecuteMissionRuntime, createExecuteMissionPorts, MissionWorkspaceAdapter, AgentExecutionAdapter, ExecuteTelemetryAdapter } from '../../../../src/adapters/mission/execute-mission-adapters.js';
 import { ExecuteMissionService } from '../../../../src/application/execute-mission-service.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 
 // no task ID in the legacy file (was test/execute-mission-adapters.test.ts)
 describe('Execute Mission adapters', () => {
+
+  test('malformed agent configuration rejects admission without exiting its host (TASK-2750)', t => {
+    const root = mkdtemp('workflow-config-');
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const file = path.join(root, 'agents.json');
+    fs.writeFileSync(file, '{invalid');
+    const exit = t.mock.method(process, 'exit', () => { throw new Error('host exited'); });
+    const runtime = createDefaultExecuteMissionRuntime();
+    assert.throws(() => runtime.readAgentConfig(file, { mergeLocal: false }), {
+      code: 'WORKFLOW_AGENT_CONFIG_INVALID',
+    });
+    assert.equal(exit.mock.callCount(), 0);
+  });
+
 
   // Adapter-level contract for the execute mechanism set. The workflow ordering
   // itself is covered by the Execute Mission characterization section of this suite, which
@@ -373,7 +390,7 @@ describe('Execute Mission characterization', () => {
     assert.equal(outcome.status, 'completed');
     assert.deepEqual(outcome.value, { agent: 'codex' });
     assert.deepEqual(calls, [
-      'preflight', 'worktree', 'task', 'load', 'checkpoint', 'config', 'prompt', 'load', 'synchronize',
+      'load', 'load', 'synchronize', 'preflight', 'worktree', 'task', 'checkpoint', 'config', 'prompt',
       'launch-record:codex', 'load', 'safety',
       'model', 'telemetry', 'stats:codex',
       'handoff:task-1:/worktree:codex',
@@ -539,7 +556,7 @@ describe('Execute Mission characterization', () => {
     assert.equal(outcome.error.kind, 'execution');
     assert.equal(outcome.error.message, 'Execute agent (codex) exited with status 23.');
     assert.deepEqual(calls, [
-      'preflight', 'worktree', 'task', 'load', 'checkpoint', 'config', 'prompt', 'load', 'synchronize', 'launch-record:codex', 'load', 'load', 'synchronize',
+      'load', 'load', 'synchronize', 'preflight', 'worktree', 'task', 'checkpoint', 'config', 'prompt', 'launch-record:codex', 'load', 'load', 'synchronize',
     ]);
   });
 
@@ -605,7 +622,7 @@ describe('Execute Mission characterization', () => {
     assert.ok(outcome.error != null);
     assert.equal(outcome.error.kind, 'validation');
     assert.equal(outcome.error.message, 'execute preflight failed');
-    assert.deepEqual(calls, ['preflight']);
+    assert.deepEqual(calls, ['load', 'load', 'synchronize', 'preflight', 'load', 'synchronize']);
   });
 
   // ---------------------------------------------------------------------------
@@ -621,7 +638,7 @@ describe('Execute Mission characterization', () => {
     assert.ok(outcome.error != null);
     assert.equal(outcome.error.kind, 'validation');
     assert.equal(outcome.error.message, 'dedicated execute worktree is required');
-    assert.deepEqual(calls, ['preflight', 'worktree']);
+    assert.deepEqual(calls, ['load', 'load', 'synchronize', 'preflight', 'worktree', 'load', 'synchronize']);
   });
 
   // ---------------------------------------------------------------------------

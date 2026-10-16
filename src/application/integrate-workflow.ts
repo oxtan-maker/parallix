@@ -2,6 +2,7 @@ import { runIntegrateEntry } from './integrate-entry.js';
 import type { MissionLoadResult } from './domain-ports.js';
 import type { IntegrationMissionServices, IntegrationMissionServicesFactory } from './ports/integration-records.js';
 import type { IntegrationContext } from './integrate/context.js';
+import { withBaseMutation } from './integrate/base-mutation.js';
 import { prepareBacklogPayload } from './integrate/backlog-payload.js';
 import type { ParallixConfiguration } from "./ports/configuration.js";
 /**
@@ -285,6 +286,12 @@ class IntegrateWorkflow {
     return null;
   }
 
+  private resolveMissionHead(slug: string, context: IntegrationContext): void {
+    const integrationCheckout = this.dependencies.ports.gates.resolveIntegrationVerificationWorktree(slug, { baseWorktree: context.baseWorktree });
+    const headResolution = this.dependencies.ports.git.git(['-C', integrationCheckout, 'rev-parse', 'HEAD']);
+    context.missionHeadSha = headResolution.status === 0 ? String(headResolution.stdout || '').trim() : null;
+  }
+
   async runIntegration(slug: string, request: IntegrateRequest, options: IntegrateOptions, seams: IntegrateSeams, state: IntegrateRunState): Promise<0 | 1> {
     const { dryRun } = request;
     const { missionServicesFn } = options;
@@ -317,9 +324,7 @@ class IntegrateWorkflow {
     // and a later integrate looks it up against the post-rebase finalized
     // commit, which may differ from it only in backlog bookkeeping
     // (TASK-2646). Absent, no marker is recorded and the full suite runs.
-    const integrationCheckout = this.dependencies.ports.gates.resolveIntegrationVerificationWorktree(slug, { baseWorktree: context.baseWorktree });
-    const headResolution = this.dependencies.ports.git.git(['-C', integrationCheckout, 'rev-parse', 'HEAD']);
-    context.missionHeadSha = headResolution.status === 0 ? String(headResolution.stdout || '').trim() : null;
+    this.resolveMissionHead(slug, context);
 
     await this.rebaseForIntegration(slug, context, dryRun, missionServicesFn);
 
@@ -330,8 +335,8 @@ class IntegrateWorkflow {
     // mode refuses the local primary merge / unimplemented steps instead of
     // silently performing them (SC4 / SC6).
     const strategy = createIntegrationStrategy(this.dependencies.ports.productConfig.resolveIntegrationMode(context.baseWorktree ?? this.dependencies.ports.process.cwd()));
-    let verificationEvidence = await strategy.run('run-required-local-gates', () =>
-      this.dependencies.runRequiredLocalGates({ slug, context, missionLoad, missionServices, ...request, seams, configuration: options.configuration }));
+    const gateRequest = { slug, context, missionLoad, missionServices, ...request, seams, configuration: options.configuration };
+    let verificationEvidence = await strategy.run('run-required-local-gates', () => this.dependencies.runRequiredLocalGates(gateRequest));
     // Gates certify a particular landing candidate.  If the primary advanced
     // while they ran, rebase again and run the complete configured set against
     // that new candidate; never squash a comparison tree the gates did not see.
@@ -343,7 +348,7 @@ class IntegrateWorkflow {
       fmt.log.info(`${context.baseBranch} advanced while integration gates ran; rebasing and re-running gates on the updated landing candidate.`);
       await this.rebaseForIntegration(slug, context, false, missionServicesFn);
       verificationEvidence = await strategy.run('run-required-local-gates', () =>
-        this.dependencies.runRequiredLocalGates({ slug, context, missionLoad, missionServices, ...request, seams }));
+        this.dependencies.runRequiredLocalGates(gateRequest));
     }
     printIntegrationReadiness(buildIntegrationReadiness(context, { verification: verificationEvidence }, this.dependencies.missionPaths.getPrimaryBranch));
 
@@ -364,11 +369,26 @@ class IntegrateWorkflow {
     if (strategy.mode === 'github-pr') {
       return (await this.dependencies.landThroughGithubPr({ slug, context, missionServices, strategy })) ? 0 : 1;
     }
-    await strategy.run('publish', () => this.dependencies.publishMission({
-      slug, context, missionServices, missionServicesFn,
-      baseWorktree: context.baseWorktree, baseBranch: context.baseBranch, seams, state, configuration: options.configuration,
-    }));
-    return 0;
+    const landingBase = { baseWorktree: String(context.baseWorktree), baseBranch: String(context.baseBranch) };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const landed = await withBaseMutation(this.dependencies.ports.process, landingBase.baseWorktree, landingBase.baseBranch, async () => {
+        if (this.dependencies.predictIntegrationRebase(slug, { baseWorktree: String(context.baseWorktree), baseBranch: String(context.baseBranch), git: this.dependencies.ports.git.git }).needed) { return false; }
+        await strategy.run('publish', () => this.dependencies.publishMission({
+          slug, context, missionServices, missionServicesFn,
+          ...landingBase, seams, state, configuration: options.configuration,
+        }));
+        return true;
+      });
+      if (landed) { return 0; }
+      // Release base exclusion before preparing and verifying the changed tree.
+      // A concurrent landing never forces an operator to restart the command.
+      fmt.log.info('The base advanced before landing; reconciling and validating the updated candidate.');
+      await this.rebaseForIntegration(slug, context, false, missionServicesFn);
+      await strategy.run('run-required-local-gates', () =>
+        this.dependencies.runRequiredLocalGates(gateRequest));
+      await this.dependencies.recoverMissionForIntegration(context, { missionServices });
+    }
+    throw abortWith(this.dependencies.landing, 'The base kept advancing during three landing attempts; retry when concurrent integration settles.');
   }
 
   async integrate(args: string[], options: IntegrateOptions = {}) {

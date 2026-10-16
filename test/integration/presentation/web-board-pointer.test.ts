@@ -51,73 +51,87 @@ async function clickCommand(control: Locator) {
   ));
 }
 
-test('board coordinate control matrix across lanes and work states (TASK-2705)', { timeout: 45_000 }, async (context) => {
-  const fixture = await pointerBoard();
-  context.after(fixture.close);
-  const { page, requests } = fixture;
-  page.setDefaultTimeout(3000);
-  try {
-    for (const lane of ['backlog', 'refined', 'active', 'review', 'integration'] as const) {
-      await fixture.render(compactPointerSnapshot(lane));
-      assert.equal(await page.locator('[data-board-card] button').count(), 3, `${lane}: normal projection includes Edit and stays compact`);
-      for (const work of ['idle', 'running', 'unverified', 'stale', 'stopped'] as const) {
-        await fixture.render(pointerSnapshot(lane, undefined, work));
-        const before = requests.length;
-        const card = page.locator('[data-board-card]');
-        assert.equal(await card.locator('button:not([data-action-kind="mission:edit"])').count(), 5, `${lane}/${work} enabled projected controls`);
-        assert.equal(await card.locator('button[aria-label^="px review"]').count(), 0);
-        await clickAt(card.locator('button[aria-label^="px cancel"]'));
-        assert.equal(await card.getAttribute('aria-selected'), 'false');
-        const dialog = page.getByRole('dialog', { name: 'Confirm cancelling task-pointer-disposable' });
-        await dialog.waitFor();
-        assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'keep mission');
-        const box = await dialog.boundingBox();
-        assert.ok(box && box.y >= 0 && box.y + box.height <= 700);
-        await page.keyboard.press('Tab');
-        assert.match(await page.evaluate(() => document.activeElement?.textContent ?? ''), /delete task-pointer-disposable/);
-        await page.keyboard.press('Shift+Tab');
-        assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'keep mission');
-        // The backdrop covers the card: this coordinate cannot activate a terminal.
-        const underlying = await card.boundingBox(); assert.ok(underlying);
-        await page.mouse.click(underlying.x + 8, underlying.y + 8);
-        assert.equal(await dialog.count(), 1);
-        assert.equal(await page.getByRole('dialog', { name: /Mission progress/ }).count(), 0);
-        await page.keyboard.press('Escape');
-        assert.equal(await dialog.count(), 0);
-        assert.equal(requests.length, before);
-        for (const [command, kind] of [['active', 'active:execute'], ['draft', 'draft:create'], ['handoff', 'handoff:record'], ['integrate', 'integrate:merge']] as const) {
-          await clickCommand(card.locator(`button[aria-label^="px ${command}"]`));
-          assert.deepEqual(requests.at(-1), { missionId: 'task-pointer-disposable', kind, missionStatusAtRequest: lane });
+function commandFields(request: unknown) {
+  const { requestKey, ...fields } = request as { requestKey: string; [key: string]: unknown };
+  assert.match(requestKey, /^[0-9a-f]{8}-[0-9a-f-]{27}$/);
+  return fields;
+}
+
+for (const lane of ['backlog', 'refined', 'active', 'review', 'integration'] as const) {
+  for (const work of ['idle', 'running', 'unverified', 'stale', 'stopped'] as const) {
+    for (const contract of ['commands', 'confirmation'] as const) {
+      test(`board coordinate control ${contract} ${lane}/${work} (TASK-2705, TASK-2750)`, { timeout: 10_000 }, async context => {
+        const fixture = await pointerBoard();
+        context.after(fixture.close);
+        const { page, requests } = fixture;
+        try {
+          if (work === 'idle') {
+            await fixture.render(compactPointerSnapshot(lane));
+            assert.equal(await page.locator('[data-board-card] button').count(), 3, `${lane}: normal projection includes Edit and stays compact`);
+          }
+          await fixture.render(pointerSnapshot(lane, undefined, work));
+          const before = requests.length;
+          const card = page.locator('[data-board-card]');
+          assert.equal(await card.locator('button:not([data-action-kind="mission:edit"])').count(), 6, `${lane}/${work} enabled projected controls`);
+          assert.equal(await card.locator('button[aria-label^="px review"]').count(), 1);
+          if (contract === 'commands') {
+            for (const [command, kind] of [['active', 'active:execute'], ['draft', 'draft:create'], ['handoff', 'handoff:record'], ['review', 'review:submit'], ['integrate', 'integrate:merge']] as const) {
+              await clickCommand(card.locator(`button[aria-label^="px ${command}"]`));
+              assert.deepEqual(commandFields(requests.at(-1)), { missionId: 'task-pointer-disposable', kind, missionStatusAtRequest: lane });
+              assert.equal(await card.getAttribute('aria-selected'), 'false');
+              assert.equal(await page.getByRole('dialog', { name: /Mission progress/ }).count(), 0);
+            }
+            const keys = requests.map(request => (request as { requestKey: string }).requestKey);
+            assert.equal(new Set(keys).size, keys.length, 'distinct coordinate commands have distinct request keys');
+            return;
+          }
+          await clickAt(card.locator('button[aria-label^="px cancel"]'));
           assert.equal(await card.getAttribute('aria-selected'), 'false');
+          const dialog = page.getByRole('dialog', { name: 'Confirm cancelling task-pointer-disposable' });
+          await dialog.waitFor();
+          assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'keep mission');
+          const box = await dialog.boundingBox();
+          assert.ok(box && box.y >= 0 && box.y + box.height <= 700);
+          // Work freshness does not change dialog controls; exercise the full
+          // keyboard cycle once per lane while retaining initial focus in every case.
+          if (work === 'idle') {
+            await page.keyboard.press('Tab');
+            assert.match(await page.evaluate(() => document.activeElement?.textContent ?? ''), /delete task-pointer-disposable/);
+            await page.keyboard.press('Shift+Tab');
+            assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'keep mission');
+          }
+          // The backdrop covers the card: this coordinate cannot activate a terminal.
+          const underlying = await card.boundingBox(); assert.ok(underlying);
+          await page.mouse.click(underlying.x + 8, underlying.y + 8);
+          assert.equal(await dialog.count(), 1);
           assert.equal(await page.getByRole('dialog', { name: /Mission progress/ }).count(), 0);
-        }
-        await clickAt(card.locator('button[aria-label^="px cancel"]'));
-        // Confirmation closes the dialog before the POST reaches the server.
-        // Await delivery and pending cleanup before inspecting requests or rerendering.
-        await clickCommand(page.getByRole('button', { name: 'delete task-pointer-disposable lifecycle rows' }));
-        await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
-        assert.equal(requests.length, before + 5);
-        assert.deepEqual(requests.at(-1), { missionId: 'task-pointer-disposable', kind: 'mission:cancel', missionStatusAtRequest: lane });
-        // A blocked card retains one explanatory control, without unrelated buttons.
-        await fixture.render(pointerSnapshot(lane, ['review', 'cancel'], work));
-        assert.equal(await page.locator('[data-board-card] button:not([data-action-kind="mission:edit"])').count(), 2);
-        await clickAt(page.locator('button[aria-label^="px review"]'));
-        assert.equal(requests.length, before + 5);
-        assert.match(await page.getByRole('status').first().textContent() ?? '', /Review submission is not available/);
-        console.log(`matrix ${lane}/${work}: PASS enabled, unavailable, cancel, keep, focus, overlay; asset=${fixture.assetHash}`);
-      }
+          await page.keyboard.press('Escape');
+          assert.equal(await dialog.count(), 0);
+          assert.equal(requests.length, before);
+          await clickAt(card.locator('button[aria-label^="px cancel"]'));
+          // Confirmation closes the dialog before the POST reaches the server.
+          // Await delivery and pending cleanup before inspecting requests or rerendering.
+          await clickCommand(page.getByRole('button', { name: 'delete task-pointer-disposable lifecycle rows' }));
+          await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
+          assert.equal(requests.length, before + 1);
+          assert.deepEqual(commandFields(requests.at(-1)), { missionId: 'task-pointer-disposable', kind: 'mission:cancel', missionStatusAtRequest: lane });
+          // A blocked card retains one explanatory control, without unrelated buttons.
+          const blocked = pointerSnapshot(lane, ['review', 'cancel'], work);
+          await fixture.render({ ...blocked, stages: blocked.stages.map(stage => ({ ...stage, cards: stage.cards.map(card => ({
+            ...card, actions: card.actions.map(action => action.kind === 'review:submit'
+              ? { ...action, state: 'unavailable' as const, reason: 'Review submission is not available in this fixture' } : action),
+          })) })) });
+          assert.equal(await page.locator('[data-board-card] button:not([data-action-kind="mission:edit"])').count(), 2);
+          await clickAt(page.locator('button[aria-label^="px review"]'));
+          assert.equal(requests.length, before + 1);
+          assert.match(await page.getByRole('status').first().textContent() ?? '', /Review submission is not available/);
+          const keys = requests.map(request => (request as { requestKey: string }).requestKey);
+          assert.equal(new Set(keys).size, keys.length, 'distinct coordinate commands have distinct request keys');
+        } finally { await fixture.close(); }
+      });
     }
-    // Browser contract also accepts all four actions if the server supplies them enabled.
-    const simultaneous = pointerSnapshot('active');
-    const supplied = { ...simultaneous, stages: simultaneous.stages.map((stage) => ({...stage, cards: stage.cards.map((card) => ({...card, actions: card.actions.map((action) => action.kind === 'review:submit' ? {...action, state: 'enabled' as const, reason: null} : action)}))})) } satisfies NonNullable<Parameters<typeof fixture.render>[0]>;
-    await fixture.render(supplied);
-    const before = requests.length;
-    for (const command of ['active', 'handoff', 'review', 'integrate']) {
-      await clickCommand(page.locator(`[data-board-card] button[aria-label^="px ${command}"]`));
-    }
-    assert.deepEqual(requests.slice(before).map((request) => (request as {kind: string}).kind), ['active:execute', 'handoff:record', 'review:submit', 'integrate:merge']);
-  } finally { await fixture.close(); }
-});
+  }
+}
 
 test('SSE refresh during coordinate press cannot invoke another action or fall through (TASK-2705)', { timeout: 20_000 }, async (context) => {
   const fixture = await pointerBoard();

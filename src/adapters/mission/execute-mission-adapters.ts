@@ -1,7 +1,7 @@
 import { commandErrorMessage } from '../cli/commands/agent-result.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
-import { readAgentConfigOrExit } from '../agents/agents.js';
+import { readAgentConfig } from '../agents/agents.js';
 import { selectAgent } from '../agents/agents.js';
 import { resolveWorktree } from '../filesystem/mission-utils.js';
 import startupPreflight from '../cli/startup-preflight.js';
@@ -68,7 +68,7 @@ export interface ExecuteMissionRuntime {
    * null when neither exists. The checkpoint keeps the file-backed resume signal
    * alive even when the agent starts from persisted facts. */
   readonly resolveExecutionContext: (_slug: string) => Promise<MissionLaunchContext | null>;
-  readonly readAgentConfig: typeof readAgentConfigOrExit;
+  readonly readAgentConfig: typeof readAgentConfig;
   readonly buildExecutePrompt: typeof buildExecutePrompt;
   readonly selectLaunchAndRecord: (...args: Parameters<typeof selectLaunchAndRecord>) => Promise<Pick<Awaited<ReturnType<typeof selectLaunchAndRecord>>, 'agent' | 'result' | 'rebaseDeferred'>>;
   readonly enforceExecuteCommitSafety: (...args: Parameters<typeof enforceExecuteCommitSafety>) => void;
@@ -144,6 +144,10 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
     private readonly _sessionMarkerPort: SessionMarkerPort | null = null,
     private readonly _configuration: ParallixConfiguration = DEFAULT_CONFIGURATION,
   ) {}
+
+  async select(_slug: string): Promise<string | null> {
+    return selectAgent('active', { config: this.resolveAgentConfig(), checkAvailability: false, configuration: this._configuration });
+  }
 
   async prepare(request: { readonly slug: string; readonly worktree: string }): Promise<AgentLaunchPlan> {
     // The recorded brief is the authoritative launch context; the file-backed
@@ -337,7 +341,7 @@ export function createDefaultExecuteMissionRuntime(configuration: ParallixConfig
     resolveWorktree,
     resolveTaskFile,
     buildCheckpointContext,
-    readAgentConfig: (file, options) => readAgentConfigOrExit(file, { ...options, configuration }),
+    readAgentConfig: (file, options) => readAgentConfig(file, { ...options, configuration }),
     buildExecutePrompt,
     selectLaunchAndRecord: options => selectLaunchAndRecord({ ...options, configuration }),
     enforceExecuteCommitSafety,

@@ -79,6 +79,8 @@ export interface DecisionConfiguration {
 }
 
 export interface RuntimeConfiguration {
+  readonly workflowOperation?: string;
+  readonly workflowGeneration?: number | null;
   readonly gitIdentity: { readonly authorName: string; readonly authorEmail: string; readonly committerName: string; readonly committerEmail: string };
   readonly ci: boolean;
   readonly noTui: boolean;

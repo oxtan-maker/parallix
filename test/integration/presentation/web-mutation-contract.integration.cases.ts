@@ -1,3 +1,4 @@
+import { isWorkflowCommand } from '../../../src/application/workflow-operation-service.js';
 import { missionId as fixtureMissionId } from '../../../src/domain/mission.js';
 // task-2433-web-mutation — real-socket proof of the guarded mutation route
 // (TASK-2433, ADR 0055).
@@ -147,9 +148,14 @@ async function postCommand(
     'content-type': 'application/json',
   };
   mutate?.(headers);
+  const command = body !== null && typeof body === 'object' && !Array.isArray(body)
+    ? body as Record<string, unknown> : null;
+  const payload = command && typeof command.kind === 'string' && isWorkflowCommand(command.kind)
+    && !Object.prototype.hasOwnProperty.call(command, 'requestKey')
+    ? { ...command, requestKey: crypto.randomUUID() } : body;
   return fetch(`${info.origin}${WEB_COMMANDS_PATH}`, {
     method: 'POST',
-    body: typeof body === 'string' ? body : JSON.stringify(body),
+    body: typeof payload === 'string' ? payload : JSON.stringify(payload),
     headers,
   });
 }
@@ -368,6 +374,7 @@ test('web mutation: rejects an action not currently enabled for the mission with
 
 test('web mutation: rejects an unavailable capability with 409 even when the domain availability is enabled', async () => {
   const spy = makeDispatcherSpy();
+  spy.dispatcher.canExecute = () => false;
   const card = commandCard([{ command: 'review', enabled: true, reason: null }]);
   await withHost({
     buildProjection: async () => makeProjection({ active: [card] }),

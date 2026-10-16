@@ -358,7 +358,11 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
       'utf8',
     );
     // One SQLite store construction, and no CompatibilityMissionStore in the graph.
-    assert.ok(compositionSource.includes('new SqliteMissionStore('));
+    const persistenceSource = fs.readFileSync(
+      path.join(process.cwd(), 'src/composition/mission-persistence.ts'), 'utf8',
+    );
+    assert.ok(compositionSource.includes('const store = createMissionStore(db)'));
+    assert.equal(persistenceSource.match(/new SqliteMissionStore\(/g)?.length, 1);
     assert.ok(!compositionSource.includes('new CompatibilityMissionStore('));
     assert.equal(services.intake.constructor.name, 'MissionIntakeService');
     assert.equal(services.lifecycle.constructor.name, 'MissionLifecycleService');

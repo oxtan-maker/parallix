@@ -1,3 +1,4 @@
+import { verificationEnvironment } from '../../config/verification-environment.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 /**
  * Handoff command adapter (TASK-2332.09).
@@ -110,7 +111,7 @@ export function createHandoffPorts(configuration?: ParallixConfiguration): Hando
       createVerificationProofIdentity: (command, rootDir) => createVerificationProofIdentity(command, rootDir, { configuration }),
       readReusableVerificationProof: (command, rootDir) => readReusableVerificationProof(command, rootDir, { configuration }),
       writeReusableVerificationProof: (command, rootDir, options) => writeReusableVerificationProof(command, rootDir, { ...options, configuration }),
-      runVerificationGate: (area, options) => runVerificationGate(area, options),
+      runVerificationGate: (area, options) => runVerificationGate(area, { ...options, env: configuration?.forwardedEnvironment }),
       isTransientVerificationFailure: (output) => isTransientVerificationFailure(output),
     },
     nel: {
@@ -130,7 +131,9 @@ export function createHandoffPorts(configuration?: ParallixConfiguration): Hando
       selectAgent: (step, options) => selectAgent(step, { ...options, configuration }),
     },
     process: {
-      spawnSync: (command, args, options) => git.run(command, args, options),
+      spawnSync: (command, args, options) => git.run(command, args, { ...options,
+        env: verificationEnvironment(configuration?.forwardedEnvironment ?? { ...process.env }),
+      }),
     },
   };
 }

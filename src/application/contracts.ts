@@ -42,6 +42,9 @@ export interface Cancellation {
 
 export type Capability =
   | 'stats:apply'
+  | 'workflow:stop'
+  | 'draft:create'
+  | 'integrate:merge'
   | 'active:execute'
   | 'mission:intake'
   | 'mission:transition'

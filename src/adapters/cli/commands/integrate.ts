@@ -142,6 +142,10 @@ function composeIntegrationProcess(configuration: ParallixConfiguration | undefi
     terminate: code => process.exit(code),
     cwd: () => process.cwd(),
     chdir: directory => process.chdir(directory),
+    claimBaseMutation: async (base, branch) => {
+      const key = crypto.createHash('sha256').update(`${base}\0${branch}`).digest('hex');
+      return claimRecoveryLock(`integration-base-${key}`);
+    },
     claimIntegration: async slug => {
       const rootKey = crypto.createHash('sha256').update(getPrimaryWorktree(configuration)).digest('hex').slice(0, 16);
       return claimRecoveryLock(`integrate-${rootKey}-${slug}`);

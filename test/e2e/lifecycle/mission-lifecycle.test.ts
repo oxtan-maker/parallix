@@ -12,6 +12,7 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { run } from '../../../src/composition/create-cli.js';
+import { configureMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
 import '../../fixtures/e2e-lifecycle-fake-agent-preload.js';
 
 function runCommand(command: string, args: readonly string[], options: Omit<childProcess.SpawnSyncOptionsWithStringEncoding, 'encoding'> = {}) {
@@ -334,6 +335,19 @@ async function runWorkflow(repoRoot: string, env: NodeJS.ProcessEnv, args: strin
   const previousStderrWrite = process.stderr.write;
   let stdout = '';
   let stderr = '';
+  // This fixture executes the worker body with an in-process fake agent.
+  // Keep writes scoped to its explicit mission, without spawning an owner
+  // process that cannot inherit the fake launcher port.
+  // Free-text drafts allocate their px identity during intake. Bind that
+  // identity on the first write, then keep the same single-mission fence.
+  let authorizedSlug = args[0] === 'draft' && !/^(?:task-[a-z0-9-]+|px-\d+)$/.test(args[1]) ? null : args[1];
+  configureMissionWriteAuthorization({ operationId: `lifecycle-fixture:${args[1]}`, async assert(id) {
+    if (authorizedSlug === null) {
+      assert.match(id, /^px-\d+$/, 'free-text intake must allocate a DB-owned mission identity');
+      authorizedSlug = id;
+    }
+    assert.equal(id, authorizedSlug, 'the fixture worker may write only its invoked mission');
+  } });
   try {
     if (invokeFromTarget) { process.chdir(repoRoot); }
     for (const key of Object.keys(process.env)) {
@@ -360,6 +374,7 @@ async function runWorkflow(repoRoot: string, env: NodeJS.ProcessEnv, args: strin
     }
     return { status, stdout, stderr };
   } finally {
+    configureMissionWriteAuthorization(null);
     if (invokeFromTarget) { process.chdir(previousCwd); }
     process.stdout.write = previousStdoutWrite;
     process.stderr.write = previousStderrWrite;

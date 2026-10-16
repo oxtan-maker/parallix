@@ -71,7 +71,8 @@ test('board click and keyboard activation send one projected typed request', asy
     const button = page.mount.querySelector<DomButton>('button[aria-label^="px "][aria-label*=" — enabled"]')!;
     await act(async () => { button.click(); });
     assert.equal(page.calls.length, 1);
-    assert.deepEqual(payload(page.calls), request);
+    assert.equal(typeof payload(page.calls).requestKey, 'string');
+    assert.deepEqual({ ...payload(page.calls), requestKey: undefined }, { ...request, requestKey: undefined });
   } finally {
     await page.close();
   }
@@ -86,7 +87,8 @@ test('board keyboard activation sends the same projected typed request', async (
       button.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 }));
     });
     assert.equal(page.calls.length, 1);
-    assert.deepEqual(payload(page.calls), request);
+    assert.equal(typeof payload(page.calls).requestKey, 'string');
+    assert.deepEqual({ ...payload(page.calls), requestKey: undefined }, { ...request, requestKey: undefined });
   } finally { await page.close(); }
 });
 
@@ -381,7 +383,8 @@ test('board drag dispatches the projected target action and rejects other target
     await act(async () => { card.dispatchEvent(drag); });
     await act(async () => { page.mount.querySelector<DomHtmlElement>('section[aria-label="review stage"] > div:last-child')!.dispatchEvent(new page.window.Event('drop', { bubbles: true })); });
     assert.equal(page.calls.length, 1);
-    assert.deepEqual(payload(page.calls), request);
+    assert.equal(typeof payload(page.calls).requestKey, 'string');
+    assert.deepEqual({ ...payload(page.calls), requestKey: undefined }, { ...request, requestKey: undefined });
 
     await act(async () => { card.dispatchEvent(drag); });
     await act(async () => { page.mount.querySelector<DomHtmlElement>('section[aria-label="integration stage"] > div:last-child')!.dispatchEvent(new page.window.Event('drop', { bubbles: true })); });
@@ -768,4 +771,44 @@ test('current checkpoint blink follows projected working-to-idle transitions (TA
       assert.equal(page.mount.querySelectorAll('[aria-label="Checkpoint plan"] > span').length, 3);
     }
   } finally { await page.close(); }
+});
+
+
+test('accepted command waits for authoritative preparing snapshot and exposes server-owned stop after reload (TASK-2750)', async () => {
+  const { projectWorkflowBoard } = await import('../../../../src/application/projections/workflow-board.js');
+  const { workflowOperation } = await import('../../../../src/domain/workflow-operation.js');
+  const card = makeCard({ id: missionId('task-2436-interaction'), status: 'refined', lane: 'refined', commands: [{ command: 'active', enabled: true, reason: null }] });
+  const initial = toWebBoardSnapshot(makeProjection({ refined: [card] }));
+  const page = await renderBoard({ board: initial, result: { ...commandResult('accepted'), value: { operationId: 'durable-operation', phase: 'accepted', statusUrl: '/api/operations/durable-operation' } } });
+  try {
+    await act(async () => { page.mount.querySelector<DomButton>('[data-action-kind="active:execute"]')!.click(); });
+    assert.match(page.mount.textContent ?? '', /accepted; follow server progress/);
+    assert.doesNotMatch(page.mount.textContent ?? '', /preparing workflow/);
+    const operation = workflowOperation({ id: 'durable-operation', repositoryId: card.repositoryId, missionId: card.id, command: 'active:execute', requestKey: 'delivery',
+      generation: 0, phase: 'accepted', providerStarted: false, agent: 'codex', reviewer: null, originalStatus: 'refined', previousAssignee: null, owner: null,
+      createdAt: '2026-10-15T00:00:00Z', updatedAt: '2026-10-15T00:00:00Z', reason: null });
+    const server = toWebBoardSnapshot(projectWorkflowBoard(makeProjection({ active: [{ ...card, status: 'active', lane: 'active' }] }), [operation]));
+    await page.rerender(server);
+    assert.match(page.mount.textContent ?? '', /preparing workflow/);
+    const stop = page.mount.querySelector<DomButton>('[data-action-kind="workflow:stop"]');
+    assert.ok(stop); assert.equal(stop.getAttribute('aria-disabled'), 'false');
+    assert.equal(page.mount.querySelector('[data-action-kind="active:execute"]'), null);
+    assert.equal(page.calls.length, 1);
+  } finally { await page.close(); }
+});
+
+test('settled workflow retries show their terminal result without restarting (TASK-2750)', async () => {
+  for (const status of ['completed', 'failed', 'cancelled']) {
+    const card = makeCard({ id: missionId('task-2436-interaction'), status: 'refined', lane: 'refined', commands: [{ command: 'active', enabled: true, reason: null }] });
+    const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ refined: [card] })), result: {
+      ...commandResult(status, status === 'completed' ? null : { kind: status === 'cancelled' ? 'cancelled' : 'execution', message: 'Retained terminal result' }),
+      value: status === 'completed' ? { operationId: 'retained', phase: 'completed' } : null,
+    } });
+    try {
+      await act(async () => { page.mount.querySelector<DomButton>('[data-action-kind="active:execute"]')!.click(); });
+      assert.match(page.mount.textContent ?? '', status === 'completed' ? /completed\./ : /Retained terminal result/);
+      assert.doesNotMatch(page.mount.textContent ?? '', /accepted; follow server progress/);
+      assert.equal(page.calls.length, 1);
+    } finally { await page.close(); }
+  }
 });

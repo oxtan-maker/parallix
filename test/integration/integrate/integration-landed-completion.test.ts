@@ -185,7 +185,7 @@ async function runIntegrate(scenario: Scenario) {
       order.push('landed');
       return ok('');
     }
-    if (args.includes('rev-parse')) { return ok(`${LANDED_SHA}\n`); }
+    if (args.includes('rev-parse') || args.includes('merge-base')) { return ok(`${LANDED_SHA}\n`); }
     return ok('');
   });
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));

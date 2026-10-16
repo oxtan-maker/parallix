@@ -1,3 +1,4 @@
+import { verificationEnvironment } from '../../config/verification-environment.js';
 // Integration gate planning and execution support for `px integrate`.
 //
 // Owns changed-area detection, integration configuration access, gate
@@ -249,7 +250,7 @@ export function buildIntegrationGateEnv(slug: string, opts: {dryRun?: boolean, p
     // Integration gates need the invoking process environment (especially
     // PATH and HOME) to find the selected Node runtime on macOS and Linux.
     // Tests can still pass an isolated environment explicitly.
-    ...(opts.processEnv || process.env),
+    ...verificationEnvironment(opts.processEnv || { ...process.env }),
     INTEGRATE_DRY_RUN: opts.dryRun ? 'true' : 'false',
     PARALLIX_EXECUTION_ROOT: opts.baseWorktree ? path.resolve(opts.baseWorktree) : undefined,
     INTEGRATE_CHANGED_AREAS: detectChangedAreas(slug, {
@@ -354,6 +355,7 @@ export async function executeIntegrationGates(gates: readonly IntegrationPipelin
   const runner = (opts.commandRunner || ((/** @type{string} */ cmd: string) => child_process.spawnSync(cmd, {
       shell: true,
       cwd: opts.rootDir,
+      env: verificationEnvironment({ ...process.env }),
       stdio: 'inherit'
     })));
   

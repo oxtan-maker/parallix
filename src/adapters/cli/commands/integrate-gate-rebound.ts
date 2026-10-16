@@ -22,7 +22,7 @@ import * as fmt from '../../../application/presentation/cli-format.js';
 import type { IntegrationApproval } from '../../../application/ports/integration-records.js';
 import { missionId } from '../../../domain/mission.js';
 import { rebound, type GateFailureReason, type ReboundContext, type ReboundOutcome } from '../../../application/rebound-kernel.js';
-import { runPhaseGates, type GateRunOutcome, type RepositoryGate } from '../../config/repository-gates.js';
+import { runPhaseGates, type GateRunOutcome, type PhaseGateRunResult, type RepositoryGate } from '../../config/repository-gates.js';
 import { captureFinalIntegrationTree } from './integrate-gates.js';
 
 import { dismissStandingApprovals, readToken } from '../../forgejo/forgejo.js';
@@ -100,6 +100,14 @@ export function integrationGateFailureReason(
     reason.environment = true;
   }
   return reason;
+}
+
+function integrationGateRerunFailure(result: PhaseGateRunResult, verificationCommand: string | null | undefined, approvedRevision: string | null) {
+  return {
+    ok: false as const,
+    diagnostic: result.error ?? 'integration gates failed again',
+    ...(result.failedGate ? { reason: integrationGateFailureReason(result.failedGate, { gateError: result.error, verificationCommand, approvedRevision }) } : {}),
+  };
 }
 
 // ── Stale-approval dismissal (TASK-2528, TASK-2620) ─────────────────────────
@@ -315,6 +323,7 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
   // The revision the reviewer approved (A); HEAD may already carry bookkeeping after it.
   const approvedRevision = opts.approvedRevision ?? preRepairRevision;
   let initialInvalidation: ApprovalInvalidation | null = null;
+  let requiredCommand = failedGate.command;
 
   const outcome = await reboundFn(
     integrationGateFailureReason(failedGate, { gateError: opts.gateError, verificationCommand: opts.verificationCommand, approvedRevision }),
@@ -370,18 +379,13 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
               log(`Could not record integration-validation marker for ${slug}: ${(recordError as Error)?.message ?? String(recordError)}. The full suite runs next time.`);
             }
           }
-          return { ok: true, command: failedGate.command, diagnostic: '' };
+          return { ok: true, command: requiredCommand, diagnostic: '' };
         }
         if (opts.recordIntegrationValidationFailureFn && tree.commit) {
           try { await opts.recordIntegrationValidationFailureFn({ missionId: missionId(slug), sha: tree.commit, hooks: [rerun.failedGate?.key ?? failedGate.key] }); } catch { /* missing failure history never proves green */ }
         }
-        return {
-          ok: false,
-          diagnostic: rerun.error ?? 'integration gates failed again',
-          ...(rerun.failedGate
-            ? { reason: integrationGateFailureReason(rerun.failedGate, { gateError: rerun.error, verificationCommand: opts.verificationCommand, approvedRevision }) }
-            : {}),
-        };
+        if (rerun.failedGate) { requiredCommand = rerun.failedGate.command; }
+        return integrationGateRerunFailure(rerun, opts.verificationCommand, approvedRevision);
       },
       log,
       error,

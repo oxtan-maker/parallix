@@ -1,18 +1,30 @@
 #!/usr/bin/env node
 
-import { run } from '../composition/create-cli.js';
 import { cliInvocation, pinChildCli } from '../composition/child-cli.js';
 import { resolveProcessConfiguration } from '../composition/config.js';
-import { runPiWorker } from '../composition/pi-worker.js';
-import { runClaudeStreamPresenter, CLAUDE_STREAM_PRESENTER_FLAG } from '../composition/claude-presenter.js';
 
-export * from '../composition/create-cli.js';
+// Load only the composition needed by this process role. Independent workers
+// must not initialize the interactive CLI and its presentation dependencies.
 
-if (process.argv[2] === '--pi-session-worker') {
+if (process.argv[2] === '--workflow-recover') {
+  const { runWorkflowRecovery } = await import('../composition/workflow-recovery.js');
+  runWorkflowRecovery(process.argv[3], resolveProcessConfiguration())
+    .then(() => process.exit(0), error => { console.error(error); process.exit(1); });
+} else if (process.argv[2] === '--workflow-observe') {
+  const { runWorkflowObservation } = await import('../composition/workflow-observation.js');
+  void runWorkflowObservation(process.argv[3], resolveProcessConfiguration());
+} else if (process.argv[2] === '--workflow-worker' || process.argv[2] === '--workflow-execute') {
+  const { runWorkflowWorker } = await import('../composition/workflow-operations.js');
+  runWorkflowWorker(process.argv[3], process.argv[4], resolveProcessConfiguration(), process.argv[2] === '--workflow-execute')
+    .then(code => process.exit(code), error => { console.error(error); process.exit(1); });
+} else if (process.argv[2] === '--pi-session-worker') {
+  const { runPiWorker } = await import('../composition/pi-worker.js');
   runPiWorker();
-} else if (process.argv[2] === CLAUDE_STREAM_PRESENTER_FLAG) {
+} else if (process.argv[2] === '--claude-stream-presenter') {
+  const { runClaudeStreamPresenter } = await import('../composition/claude-presenter.js');
   runClaudeStreamPresenter();
 } else {
+  const { run } = await import('../composition/create-cli.js');
   const configuration = resolveProcessConfiguration();
   const childEnvironment = { ...configuration.forwardedEnvironment };
   pinChildCli(process.argv[1], { configuration, env: childEnvironment });

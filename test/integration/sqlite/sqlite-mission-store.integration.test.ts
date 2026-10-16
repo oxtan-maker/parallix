@@ -759,11 +759,11 @@ describe('SQLite Mission aggregate integration', () => {
       }
     };
     collect(sourceRoot);
-    // The composition root is the one place allowed to name the concrete
-    // adapter: after the TASK-2322.07 cutover it constructs SqliteMissionStore
-    // as the sole production authority. Everything else stays behind the ports.
+    // The shared composition factory is the one place allowed to construct
+    // Mission persistence, for application graphs and independent owners.
+    // SqliteMissionStore remains the sole production authority.
     const compositionRoot = path.join(
-      sourceRoot, 'composition', 'application-services.ts',
+      sourceRoot, 'composition', 'mission-persistence.ts',
     );
     const statisticsCompositionRoot = path.join(sourceRoot, 'composition', 'stats.ts');
     const forbidden = files

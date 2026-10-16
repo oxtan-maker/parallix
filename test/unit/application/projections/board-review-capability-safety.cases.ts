@@ -20,8 +20,8 @@ test('task-2428: persisted-artifact consumer can synthesize review identity, so 
   assert.match(unavailableReason('review:act-on-findings') ?? '', /synthesize review state or reviewer identity/);
 });
 
-test('task-2428: all review board commands remain typed capability rejections', () => {
-  for (const kind of ['review:submit', 'review:act-on-findings', 'approve:review'] as const) {
+test('task-2428: review judgement commands remain typed capability rejections', () => {
+  for (const kind of ['review:act-on-findings', 'approve:review'] as const) {
     assert.equal(isIntegratedCapability(kind), false, `${kind} must not reach a workflow from board state`);
     assert.ok(unavailableReason(kind));
   }
@@ -42,4 +42,16 @@ test('task-2428: approve:review cannot reach authority or fabricate approval fro
   assert.equal(result.status, 'rejected');
   assert.equal(result.error?.kind, 'capability');
   assert.equal(loads, 0, 'approval state is never read or written by the board path');
+});
+
+test('review continuation requires the configured evidence-owning handoff workflow (TASK-2750)', async () => {
+  const controller = new BoardCommandController(makeExecutePorts().ports);
+  assert.equal(isIntegratedCapability('review:submit'), true);
+  assert.equal(controller.canExecute('review:submit'), false);
+  const result = await controller.dispatch({
+    operationId: 'continue', kind: 'review:submit', missionId: 'task-2428',
+    capabilities: new Set(['review:submit']),
+  });
+  assert.equal(result.status, 'rejected');
+  assert.equal(result.error?.kind, 'capability');
 });

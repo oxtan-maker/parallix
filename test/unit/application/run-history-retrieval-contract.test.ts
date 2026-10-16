@@ -358,6 +358,10 @@ test('agent execution observation correlates to its run, independently of coordi
   assert.equal(probedPid, process.pid);
   assert.equal(observed(false).execution, 'stopped', 'dead or reused child pid does not inherit its live supervisor');
   assert.equal(observed(null).execution, 'unknown', 'an inconclusive process probe is not absence');
+  const interrupted = (alive: boolean) => ok(service(repository, { isAlive: () => false, executionAlive: () => alive }).overview('task-9')).operations[0];
+  assert.equal(interrupted(true).state, 'interrupted');
+  assert.equal(interrupted(true).execution, 'live', 'an orphan capture cannot conceal its live execution (TASK-2750 F9)');
+  assert.equal(interrupted(false).execution, 'stopped', 'confirmed dead interrupted execution permits stop settlement');
   capture.finish({ exitCode: 0, signal: null });
   assert.equal(observed(true).execution, 'stopped', 'recorded completion wins over process liveness');
 });

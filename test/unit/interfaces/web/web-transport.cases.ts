@@ -315,11 +315,8 @@ test('action DTO distinguishes an unavailable action from an ineligible action',
 
   const review = actions.get('review:submit');
   assert.ok(review !== undefined);
-  assert.equal(review.state, 'unavailable');
-  assert.equal(typeof review.reason, 'string');
-  assert.ok(review.reason != null);
-  assert.ok(review.reason.length > 0, 'unavailable carries the server-owned reason');
-  assert.notEqual(review.reason, 'Review is available only while the mission is in review');
+  assert.equal(review.state, 'enabled');
+  assert.equal(review.reason, null);
 
   const active = actions.get('active:execute');
   assert.ok(active !== undefined);
@@ -361,8 +358,8 @@ test('attention action keeps the server-owned display text and state', () => {
   assert.equal(item.reason.detail, 'Awaiting review decision');
   assert.equal(item.action.kind, 'review:submit');
   assert.equal(item.action.display, `px review ${card.id}`);
-  assert.equal(item.action.state, 'unavailable');
-  assert.ok(typeof item.action.reason === 'string' && item.action.reason.length > 0);
+  assert.equal(item.action.state, 'enabled');
+  assert.equal(item.action.reason, null);
   assert.deepStrictEqual(item.dependsOnSources, ['task-markdown']);
 });
 

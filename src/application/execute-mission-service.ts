@@ -1,4 +1,5 @@
 import { MissionCheckpointService } from './mission-checkpoint-service.js';
+import { reportWorkflowProviderStarted } from './ports/mission-write-authorization.js';
 import type { ApplicationOutcome, Cancellation, Capability, DurableEvidence } from './contracts.js';
 import { failure, rejected } from './contracts.js';
 import { MissionLifecycleService, type MissionTransitionResult } from './mission-lifecycle-service.js';
@@ -59,13 +60,11 @@ interface ExecuteWorkspace {
  *
  * This use case owns, in this order:
  *
- *   1. request guards and the pre-launch cancellation boundary
- *   2. workspace resolution (preflight, worktree, task file)
- *   3. agent preparation and launch
- *   4. the durable launch record (commit safety + evidence)
- *   5. lifecycle synchronization through the checked Mission authority
- *   6. best-effort telemetry
- *   7. the post-record cancellation boundary, then handoff and review
+ *   1. request guards and cheap configured agent selection
+ *   2. checked activation and attributable preparing work
+ *   3. workspace preflight, prompt preparation and agent launch
+ *   4. durable launch evidence and best-effort telemetry
+ *   5. the post-record cancellation boundary, then handoff and review
  *
  * It also owns the partial-failure policy: a launcher error or a non-zero agent
  * status stops the run before any durable record; a telemetry failure never
@@ -83,30 +82,22 @@ export class ExecuteMissionService {
   ) { }
 
   async execute(request: ExecuteMissionRequest): Promise<ApplicationOutcome<ExecuteMissionResult>> {
-    if (!request.operationId || !request.slug) { return rejected('validation', 'operationId and slug are required'); }
-    if (!request.capabilities.has('active:execute')) { return rejected('capability', 'active:execute capability is required'); }
-    if (request.cancellation?.requested) { return failure('cancelled', 'cancelled before launch'); }
-
-    const prepared = await this.resolveWorkspace(request.slug);
-    if (typeof prepared === 'string') { return rejected('validation', prepared); }
-
-    this.emit(request, 1, 'launch', 'launching execute agent');
-    await this.publishWork(request, 'execute', 'launching execute agent', null);
+    const refusal = this.validateRequest(request);
+    if (refusal) { return refusal; }
     let activation: MissionTransitionResult | null = null;
     let activationAgent: string | null = null;
     let agentStarted = false;
     try {
       await this.prepareOperatorResume(request);
-      const plan = await this._ports.agentExecution.prepare({
-        slug: request.slug,
-        worktree: prepared.worktree,
-      });
-      const selectedAgent = request.agent || plan.agent;
+      const selectedAgent = request.agent || await this._ports.agentExecution.select?.(request.slug);
       if (!selectedAgent) { throw new Error('Could not select an execute agent.'); }
-      // Persist before provider startup. A launch callback updates this only
-      // when a usage fallback actually chooses another family.
-      activation = await this.synchronizeLifecycle(request.slug, selectedAgent);
+      activation = await this.synchronizeLifecycle(request.slug, selectedAgent, request.operationId);
       activationAgent = selectedAgent;
+      this.emit(request, 1, 'launch', 'preparing execute agent');
+      await this.publishWork(request, 'execute', 'preparing execute agent', selectedAgent);
+      const prepared = await this.resolveWorkspace(request.slug);
+      if (typeof prepared === 'string') { throw new WorkspaceRefusal(prepared); }
+      const plan = await this._ports.agentExecution.prepare({ slug: request.slug, worktree: prepared.worktree });
       const launch = await this.launchAgent(request, prepared, plan, selectedAgent, () => { agentStarted = true; });
       const evidence: DurableEvidence[] = [
         { id: `${request.slug}:agent`, source: 'task-markdown', detail: 'execute agent launch completed' },
@@ -153,6 +144,15 @@ export class ExecuteMissionService {
     }
   }
 
+  private validateRequest(request: ExecuteMissionRequest): ApplicationOutcome<ExecuteMissionResult> | null {
+    if (!request.operationId || !request.slug) { return rejected('validation', 'operationId and slug are required'); }
+    if (!request.capabilities.has('active:execute')) { return rejected('capability', 'active:execute capability is required'); }
+    if (request.cancellation?.requested) { return failure('cancelled', 'cancelled before launch'); }
+
+    if (!isMissionSlugCandidate(request.slug)) { return rejected('validation', 'slug is not a recognized mission identity'); }
+    return null;
+  }
+
   private async prepareOperatorResume(request: ExecuteMissionRequest): Promise<void> {
     if (request.operatorInvocation) {
       await new MissionCheckpointService(this._ports.missionTransitions).acknowledgeOperatorResume({
@@ -188,7 +188,7 @@ export class ExecuteMissionService {
     // it still could not finish, the run is not "running slowly" — the board
     // must stop showing it as working and say why an operator is needed.
     await this.blockWork(request, message);
-    return failure('execution', message);
+    return error instanceof WorkspaceRefusal ? rejected('validation', message) : failure('execution', message);
   }
 
   /**
@@ -234,7 +234,8 @@ export class ExecuteMissionService {
       // state. A dropped promise here reorders the board behind reality.
       onAgentChanged: async (agent) => {
         onStarted();
-        if (agent !== selectedAgent) { await this.synchronizeLifecycle(request.slug, agent); }
+        await reportWorkflowProviderStarted(agent);
+        if (agent !== selectedAgent) { await this.synchronizeLifecycle(request.slug, agent, request.operationId); }
         await this.publishWork(request, 'execute', `running execute agent (${agent})`, agent);
       },
     });
@@ -279,9 +280,9 @@ export class ExecuteMissionService {
    * The failure keeps its existing operator prefix and carries the Mission
    * authority's reason (for example, which contract parts are missing).
    */
-  private async synchronizeLifecycle(slug: string, agent: string): Promise<MissionTransitionResult> {
+  private async synchronizeLifecycle(slug: string, agent: string, operationId?: string): Promise<MissionTransitionResult> {
     const outcome = await new MissionLifecycleService(this._ports.missionTransitions).activate({
-      operationId: `active-${slug}`,
+      operationId: operationId ?? `active-${slug}`,
       missionId: missionId(slug),
       capabilities: new Set(['mission:transition']),
       agent: agentFamily(agent),
@@ -354,3 +355,5 @@ async function bestEffort(publish: () => Promise<void>): Promise<void> {
     await publish();
   } catch { }
 }
+
+class WorkspaceRefusal extends Error {}

@@ -110,7 +110,7 @@ Pi uses `~/.pi/agent/models.json` to configure local providers like vLLM. Point 
 }
 ```
 
-To avoid pinning a model string in `workflow.config.json` (see "Model selection" in `docs/agents.md` — pinning is a footgun that goes stale whenever the served model changes), also set a default in `~/.pi/agent/settings.json` so `pi` works with no `--model` flag, matching how opencode already remembers its own default local model:
+To avoid pinning a model string in `workflow.config.json` (a pinned model goes stale whenever the served model changes), also set a default in `~/.pi/agent/settings.json` so `pi` works with no `--model` flag, matching how opencode already remembers its own default local model:
 
 ```json
 {

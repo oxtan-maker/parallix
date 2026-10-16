@@ -292,6 +292,12 @@ describe the current accepted architecture; a generated ADR index is unnecessary
     `Attempt` remains excluded until the domain has actual identity, lifecycle,
     invariants, and consumers for it.
 
+Accepted commands persist a `WorkflowOperation` identity for admission,
+request deduplication and exclusive ownership across preparation and execution.
+Admission atomically commits activation and initial work before preparation; no transaction
+spans execution. Stale writers are fenced and uncertain termination excludes
+replacement. This is not the per-provider-launch `Attempt` excluded below.
+
 ### Excluded concepts
 
 This ADR does not introduce `Attempt` or any other entity whose only

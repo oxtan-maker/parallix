@@ -15,6 +15,7 @@ export const SUPPORTED_WEB_TRANSPORT_VERSIONS: readonly number[] = [WEB_TRANSPOR
 
 export type WebBoardLane = 'backlog' | 'refined' | 'active' | 'review' | 'integration' | 'done';
 export type WebBoardCommandKind =
+  | 'workflow:stop'
   | 'active:execute'
   | 'mission:intake'
   | 'mission:create'
@@ -39,7 +40,7 @@ export type WebAttentionReasonKind =
   | 'stale-work'
   | 'orphaned-active'
   | 'none';
-export type WebTerminalStatus = 'completed' | 'rejected' | 'failed' | 'cancelled';
+export type WebTerminalStatus = 'accepted' | 'completed' | 'rejected' | 'failed' | 'cancelled';
 export type WebErrorKind = 'validation' | 'capability' | 'conflict' | 'unavailable' | 'execution' | 'cancelled';
 export type WebEvidenceSource = 'task-markdown' | 'git' | 'stats' | 'mission-store';
 
@@ -295,6 +296,7 @@ export interface WebProgressEvent {
  * card-advertised and are rejected as unsupported request kinds.
  */
 export type WebCommandRequestKind =
+  | 'workflow:stop'
   | 'active:execute'
   | 'draft:create'
   | 'integrate:merge'
@@ -334,6 +336,8 @@ export interface WebHandoffPayload {
  * itself.
  */
 export interface WebCommandRequest {
+  /** Required and nonblank for workflow commands; optional for stop and cancellation. */
+  readonly requestKey?: string;
   readonly missionId: string;
   readonly kind: WebCommandRequestKind;
   /**

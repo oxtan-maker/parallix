@@ -1,3 +1,7 @@
+import type { BoardProjection } from '../../application/projections/board.js';
+import type { BoardCommandRequest } from '../../application/controller/board-command.js';
+import type { WebCommandRequest, WebBoardSnapshot, WebCommandResult } from './transport.js';
+import { toWebBoardSnapshot } from './transport.js';
 import { validateWebEditMissionRequest } from './transport-edit-mission.js';
 import { missionVersion } from '../../application/domain-ports.js';
 import type { FastifyReply } from 'fastify';
@@ -66,4 +70,72 @@ export async function dispatchEditMission(reply: FastifyReply, dispatcher: Board
       missionId: request.missionId, capabilities: new Set<Capability>(['mission:context']), payload });
     sendCommandResult(reply, 200, outcome);
   } catch (error) { sendCommandResult(reply, 500, failure('execution', errorMessage(error))); }
+}
+
+/** Synchronous card actions retain projection eligibility and guarded dispatch. */
+export async function dispatchProjectedCommand(reply: FastifyReply, dispatcher: BoardCommandDispatcher, command: WebCommandRequest, buildProjection?: () => Promise<BoardProjection>): Promise<void> {
+  const build = buildProjection;
+  if (build === undefined) {
+    return sendCommandResult(reply, 503, failure('unavailable', 'board projection port is not wired'));
+  }
+  let projection: BoardProjection;
+  try {
+    projection = await build();
+  } catch (error) {
+    // A failed rebuild is transient, exactly as on the snapshot route:
+    // "unavailable, try again", never a dispatch on a stale board.
+    return sendCommandResult(reply, 503, failure('unavailable', errorMessage(error)));
+  }
+  let snapshot: WebBoardSnapshot;
+  try {
+    // Gating on the wire card reuses the server-owned action states
+    // (`enabled`/`ineligible`/`unavailable`) rather than re-deriving
+    // them: one definition of "currently advertised".
+    snapshot = toWebBoardSnapshot(projection);
+  } catch (error) {
+    return sendCommandResult(reply, 500, failure('execution', errorMessage(error)));
+  }
+  const card = snapshot.stages
+    .flatMap((stage) => stage.cards)
+    .find((candidate) => candidate.id === command.missionId);
+  if (card === undefined) {
+    return sendCommandResult(reply, 409, failure('conflict', `mission ${command.missionId} is not on the board`));
+  }
+  const action = card.actions.find((candidate) => candidate.kind === command.kind);
+  if (action === undefined || action.state !== 'enabled') {
+    const detail = action?.reason !== null && action?.reason !== undefined ? `: ${action.reason}` : '';
+    return sendCommandResult(reply, 409, failure('conflict',
+      `action ${command.kind} is not enabled for mission ${command.missionId}${detail}`));
+  }
+  // Identity is host-owned (fresh operation ID, single-kind capability set).
+  const boardRequest: BoardCommandRequest = {
+    operationId: crypto.randomUUID(),
+    kind: command.kind,
+    missionId: command.missionId,
+    missionStatusAtRequest: command.missionStatusAtRequest,
+    capabilities: new Set([command.kind as Capability] as const),
+    ...(command.payload !== undefined
+      ? { payload: { kind: 'handoff:record' as const, ...command.payload } }
+      : {}),
+  };
+  let outcome: ApplicationOutcome<unknown>;
+  try {
+    outcome = await dispatcher.dispatch(boardRequest);
+  } catch (error) {
+    // A dispatcher that throws is an execution failure; only its
+    // message may cross the wire.
+    outcome = failure('execution', errorMessage(error));
+  }
+  let result: WebCommandResult;
+  try {
+    result = toWebCommandResult(outcome);
+  } catch (error) {
+    // An outcome the transport refuses to project is a contract
+    // failure, not a dispatched outcome.
+    return sendCommandResult(reply, 500, failure('execution', errorMessage(error)));
+  }
+  // Every dispatched outcome — completed, conflict, failed, cancelled —
+  // answers 200 inside the envelope; the wire status carries the
+  // meaning and no server-side retry happens.
+  reply.code(200).type('application/json; charset=utf-8').send(result);
 }

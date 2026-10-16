@@ -236,7 +236,7 @@ export function reboundExhaustion(classification: ReboundClassification, attempt
   return attempts >= maximum ? 'repair-budget' : 'launcher-budget';
 }
 
-/** A different successful check cannot certify the original failing gate. */
+/** A different successful check cannot certify the required failing gate. */
 export function differentGateVerification(original: ReboundReason, verified: { ok: boolean; command?: string }, hasRepairCheckpoint: boolean): { originalCommand: string } | null {
   if (verified.ok && original.kind === 'gate-failure' && (hasRepairCheckpoint || verified.command) && verified.command !== original.command) { return { originalCommand: original.command }; }
   return null;

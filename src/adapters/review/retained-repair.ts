@@ -5,9 +5,11 @@ import { RepairCheckpointService } from '../../application/repair-checkpoint-ser
 import { failureIncidentFingerprint, lookupRecoveryEvidence } from '../../application/recovery-evidence.js';
 import { gateFailureReason } from './review-gate-handling.js';
 import { run } from '../git/git.js';
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
+import { verificationEnvironment } from '../config/verification-environment.js';
 
 /** Read both streams before launching; missing or unreadable evidence fails closed. */
-export function retainedRepairPort(slug: string, worktree: string, store: MissionStore): RetainedRepairPort {
+export function retainedRepairPort(slug: string, worktree: string, store: MissionStore, configuration?: ParallixConfiguration): RetainedRepairPort {
   return {
     checkpoints: new RepairCheckpointService(store),
     async read(command) {
@@ -18,7 +20,8 @@ export function retainedRepairPort(slug: string, worktree: string, store: Missio
       return { evidence, stdout: fs.readFileSync(evidence.stdoutPath, 'utf8'), stderr: fs.readFileSync(evidence.stderrPath, 'utf8') };
     },
     async verify(command, cwd) {
-      const result = run('bash', ['-lc', command], { cwd, stdio: 'pipe', maxBuffer: 10 * 1024 * 1024 });
+      const result = run('bash', ['-lc', command], { cwd, stdio: 'pipe', maxBuffer: 10 * 1024 * 1024,
+        env: verificationEnvironment(configuration?.forwardedEnvironment ?? {}) });
       const stdout = result.stdout ?? '';
       const stderr = result.stderr ?? '';
       return result.status === 0 ? { ok: true, command } : { ok: false, command, diagnostic: `${stdout}\n${stderr}`,

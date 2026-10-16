@@ -84,6 +84,10 @@ function toWebCoordinatorEvidence(evidence: CoordinatorEvidence): WebCoordinator
 
 function toCardActions(card: MissionCard): WebCommandAction[] {
   const editing: WebCommandAction = { kind: 'mission:edit', display: 'Edit', state: card.closed || card.status === 'done' ? 'ineligible' : 'enabled', reason: card.closed || card.status === 'done' ? 'Finished missions cannot be edited.' : null, targetLane: null };
+  if (card.workflowOperation) {
+    return [{ kind: 'workflow:stop', display: 'Stop run', label: 'Stop run', state: 'enabled', reason: null, targetLane: null },
+      { ...editing, state: 'ineligible', reason: 'Stop the workflow before editing' }];
+  }
   return [...card.commands.map((command) => {
     const kind = BOARD_COMMAND_KINDS[command.command];
     return toCommandAction(kind, `px ${command.command} ${card.id}`, command);

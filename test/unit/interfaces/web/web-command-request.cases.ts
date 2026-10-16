@@ -9,6 +9,7 @@ import type { WebCommandRequest } from '../../../../src/interfaces/web/transport
 
 function identityRequest(kind: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
+    requestKey: 'delivery',
     missionId: 'task-2433',
     kind,
     missionStatusAtRequest: 'active',
@@ -35,7 +36,8 @@ test('web command request: accepts a well-formed identity-only request for each 
     assert.equal(result.ok, true, `${kind} must be accepted: ${JSON.stringify(result)}`);
     assert.ok(result.ok);
     assert.deepEqual(result.value, {
-      missionId: 'task-2433',
+      requestKey: 'delivery',
+    missionId: 'task-2433',
       kind,
       missionStatusAtRequest: 'active',
     });
@@ -57,6 +59,7 @@ test('web command request: accepts a well-formed handoff:record request with the
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.ok(result.ok);
   assert.deepEqual(result.value, {
+    requestKey: 'delivery',
     missionId: 'task-2433',
     kind: 'handoff:record',
     missionStatusAtRequest: 'active',
@@ -190,5 +193,16 @@ test('web edit request accepts opaque identity and complete removals, rejects li
   assert.equal(validateWebEditMissionRequest({ kind: 'mission:edit-read', missionId: 'px-1234' }).ok, true);
   for (const patch of [{ expectedVersion: undefined }, { expectedVersion: 0 }, { expectedVersion: 1.5 }, { status: 'active' }, { assignee: 'codex' }, { dependencies: 'x' }, { description: null }]) {
     assert.equal(validateWebEditMissionRequest({ ...body, ...patch }).ok, false);
+  }
+});
+
+test('workflow command requests require a nonblank retry key (TASK-2750)', () => {
+  for (const kind of ['active:execute', 'draft:create', 'integrate:merge', 'handoff:record', 'review:submit']) {
+    for (const requestKey of [undefined, '', '   ', '\t']) {
+      assert.equal(validateWebCommandRequest(identityRequest(kind, { requestKey })).ok, false, `${kind}: ${String(requestKey)}`);
+    }
+  }
+  for (const kind of ['workflow:stop', 'mission:cancel']) {
+    assert.equal(validateWebCommandRequest(identityRequest(kind, { requestKey: undefined })).ok, true);
   }
 });

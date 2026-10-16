@@ -150,6 +150,9 @@ const bundleResult = esbuild.buildSync({
   format: 'esm',
   platform: 'node',
   target: 'node22.23',
+  // Ship production dependency code; development-only React/Ink diagnostics
+  // otherwise add compilation and initialization work to every CLI child.
+  define: { 'process.env.NODE_ENV': '"production"' },
   outfile: output,
   // Minified so the ADR 0054 Fastify adapter fits the unchanged 5 MB stop
   // rule: with fastify in the graph the unminified bundle measured 5,152 KB

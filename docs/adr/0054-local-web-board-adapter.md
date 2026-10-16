@@ -36,6 +36,9 @@ refresh path, so an older response never replaces a newer one, and mark the
 shown snapshot stale while disconnected or after a failed refresh. Browser
 memory and events never prove a lifecycle transition.
 
+Accepted workflows survive browser disconnect and web-host shutdown through
+independent owners, reusing ADR 0064 terminal identity and retained history.
+
 Bind an ephemeral loopback port. Serve one origin and require a per-launch
 capability plus strict Origin validation for mutations. The browser never
 accesses Git, SQLite, files, agents, or subprocesses directly. This ADR adds

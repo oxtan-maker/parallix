@@ -23,8 +23,15 @@ export const DEFAULT_MAX_ATTEMPTS = 5;
 type Output = Pick<LoopContext, 'emit' | 'exit'>;
 type Start = Required<Pick<ReviewLoopRequest, 'dryRun' | 'isContinue' | 'verbose'>> & { slug: string };
 
-/** Persisted implementer first, then the Backlog assignee, then "autonomous". */
-function resolveImplementer(slug: string, requested: string | undefined, persisted: ReviewLoopState | null, ports: ReviewLoopPorts, out: Output): string {
+/** The Mission record's assignee, for work that has no Backlog task file or persisted Review. */
+async function missionAssignee(slug: string, ports: ReviewLoopPorts): Promise<string | undefined> {
+  if (!ports.missionStore) { return undefined; }
+  const loaded = await ports.missionStore.load(missionId(slug)).catch(() => null);
+  return loaded?.kind === 'found' ? loaded.mission.assignee ?? undefined : undefined;
+}
+
+/** Persisted implementer first, then the Backlog assignee, then the Mission assignee, then "autonomous". */
+async function resolveImplementer(slug: string, requested: string | undefined, persisted: ReviewLoopState | null, ports: ReviewLoopPorts, out: Output): Promise<string> {
   let implementer = requested;
   if (!implementer && persisted?.implementer) {
     implementer = persisted.implementer;
@@ -32,6 +39,10 @@ function resolveImplementer(slug: string, requested: string | undefined, persist
   }
   if (!implementer && ports.task.task.ok) {
     implementer = ports.task.implementer() || undefined;
+    if (implementer) { out.emit({ kind: 'implementer-derived', implementer: implementer }); }
+  }
+  if (!implementer) {
+    implementer = await missionAssignee(slug, ports);
     if (implementer) { out.emit({ kind: 'implementer-derived', implementer: implementer }); }
   }
   if (!implementer) {
@@ -210,7 +221,7 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
   const maxAttempts = request.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   if (request.reset && await ports.state.reset()) { out.emit({ kind: 'review-reset', slug: slug }); }
   let persisted = await ports.state.read();
-  const implementer = resolveImplementer(slug, request.implementer, persisted, ports, out);
+  const implementer = await resolveImplementer(slug, request.implementer, persisted, ports, out);
   if (stopsOnMissingTaskFile(slug, ports, out)) { return; }
   if (await resumePendingRepair(request, start, persisted, implementer, ports)) { return; }
   persisted = await ports.state.read();

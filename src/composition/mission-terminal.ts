@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process';
+import type { WorkflowOperation } from '../domain/workflow-operation.js';
 import type { ParallixConfiguration } from "../application/ports/configuration.js";
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -152,4 +154,44 @@ export function correlateMissionCapture(checkout: string, configuration: Paralli
   else if (configuration.terminal.operationCapture) {
     correlateRunOperation(checkout, work.missionId, configuration.terminal.operationCapture, work.operationId);
   }
+}
+
+/** Headless hosting uses the same native resolver and capture machinery as CLI. */
+export async function hostWorkflowExecutor(cli: CliInvocation, operation: WorkflowOperation, root: string, runId: string,
+  capture: RunCapture, configuration: ParallixConfiguration): Promise<WorkflowExecutorExit> {
+  const args = [...cli.args, '--workflow-execute', operation.id, root];
+  const hosted = await hostWorkflowTerminal(cli, args, operation, root, runId, capture, configuration);
+  if (hosted) { return hosted; }
+  capture.setTerminalHost?.('pipe', null);
+  const child = spawn(cli.command, args, { cwd: root, env: { ...configuration.forwardedEnvironment }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  child.stdout.on('data', chunk => capture.write('stdout', chunk));
+  child.stderr.on('data', chunk => capture.write('stderr', chunk));
+  return new Promise((resolve, reject) => { child.once('error', reject); child.once('close', (exitCode, signal) => resolve({ exitCode, signal })); });
+}
+
+interface WorkflowExecutorExit { readonly exitCode: number | null; readonly signal: string | null; }
+
+async function hostWorkflowTerminal(cli: CliInvocation, args: readonly string[], operation: WorkflowOperation, root: string,
+  runId: string, capture: RunCapture, configuration: ParallixConfiguration): Promise<WorkflowExecutorExit | null> {
+  const policy = terminalHostConfig(loadAdapterConfig(root));
+  if (policy.host === 'pipe') { return null; }
+  const required = policy.host === 'tmux' && policy.whenUnavailable === 'fail';
+  const probe = probeTmux();
+  if (!probe.available) {
+    if (required) { throw new Error(`Terminal host unavailable: ${probe.reason}`); }
+    return null;
+  }
+  const identity = { repositoryKey: missionRepositoryKey(root), missionId: operation.missionId, role: operation.command.split(':')[0] };
+  const socket = missionSocketPath(identity, configuration);
+  let launch;
+  try {
+    launch = prepareTmuxLaunch({ identity, runId, spawnIndex: 0, command: cli.command, args, cwd: root,
+      env: { ...configuration.forwardedEnvironment, PARALLIX_MISSION_TERMINAL: operation.missionId, PARALLIX_MISSION_SOCKET: socket, PARALLIX_OPERATION_CAPTURE: runId } }, { configuration });
+  } catch (error) { if (required) { throw error; } return null; }
+  capture.setTerminalHost?.('tmux', socket);
+  capture.addTmuxSession(launch.sessionName);
+  const exitCode = await superviseTmuxLaunch(launch, { onOutput: (stream, chunk) => capture.write(stream, chunk) });
+  if (launch.started() || exitCode !== 70) { return { exitCode, signal: null }; }
+  if (required) { throw new Error('Terminal host failed before the workflow started'); }
+  return null;
 }

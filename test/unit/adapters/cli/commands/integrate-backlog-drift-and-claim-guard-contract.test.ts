@@ -380,7 +380,7 @@ describe("backlog drift retry", () => {
     if (args.includes('branch') && args.includes('--show-current')) return { status: 0, stdout: 'main', stderr: '' };
     if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
     if (args.includes('status')) return { status: 0, stdout: '', stderr: '' };
-    if (args.includes('rev-parse')) return { status: 0, stdout: 'deadbeef', stderr: '' };
+    if (args.includes('rev-parse') || args.includes('merge-base')) return { status: 0, stdout: 'deadbeef', stderr: '' };
     if (args.includes('diff')) return { status: 0, stdout: '', stderr: '' };
     if (args.includes('log')) return { status: 0, stdout: '', stderr: '' };
     return { status: 0, stdout: '', stderr: '' };
@@ -423,11 +423,11 @@ describe("backlog drift retry", () => {
     mock.method(runtimeMatrixCjs, 'buildAutonomousReviewMatrix', () => ({}));
     mock.method(runtimeMatrixCjs, 'formatMatrixSummary', () => ['matrix-line']);
     // The mission carries an authoritative approved Review so integrate's
-    // lifecycle recovery reaches the probe-merge flow these tests exercise.
+    // integration lane prerequisite is satisfied before the probe-merge flow these tests exercise.
     mock.method(compositionCjs, 'createMissionApplicationServices', async () => ({
       store: {
         _repoId: 'default',
-        load: async () => ({ kind: 'found' as const, mission: { status: 'review', review: { rounds: [{ decision: { kind: 'approved', decidedAt: '2026-01-01T10:30:00Z' } }] } }, version: 1 }),
+        load: async () => ({ kind: 'found' as const, mission: { status: 'integration', review: { rounds: [{ decision: { kind: 'approved', decidedAt: '2026-01-01T10:30:00Z' } }] } }, version: 1 }),
       },
       lifecycle: {
         transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: { to: 'review', version: 2 } }),
@@ -462,7 +462,7 @@ describe("backlog drift retry", () => {
     console.log = originalLog;
     mock.reset();
     const conflictLog = logs.find(l => typeof l === 'string' && l.includes('Conflicting files'));
-    assert.ok(conflictLog, 'conflicting files info was logged');
+    assert.ok(conflictLog, `conflicting files info was logged: ${JSON.stringify(logs)}`);
     const helperLog = logs.find(l => typeof l === 'string' && l.includes('Conflict helper'));
     assert.ok(helperLog, 'conflict helper path was logged');
   });
@@ -889,4 +889,28 @@ describe("integrate work detection", () => {
     );
     assert.doesNotMatch(output, /task-2411/);
   });
+});
+
+
+test('base mutation claim excludes conflicting integrations without holding unrelated workflow work (TASK-2750)', async () => {
+  const { withBaseMutation } = await import('../../../../../src/application/integrate/base-mutation.js');
+  const held = new Set<string>();
+  const port = {
+    async claimBaseMutation(base: string, branch: string) {
+      const key = `${base}:${branch}`;
+      if (held.has(key)) { return null; }
+      held.add(key); return async () => { held.delete(key); };
+    },
+  } as never;
+  let release!: () => void;
+  const barrier = new Promise<void>(resolve => { release = resolve; });
+  const first = withBaseMutation(port, '/base', 'main', async () => { await barrier; });
+  try {
+    await Promise.resolve();
+    await assert.rejects(() => withBaseMutation(port, '/base', 'main', async () => {}), /Another integration/);
+    await withBaseMutation(port, '/other', 'main', async () => {});
+  } finally { release(); await first; }
+  assert.equal(held.size, 0);
+  await assert.rejects(() => withBaseMutation(port, '/base', 'main', async () => { throw new Error('landing failed'); }), /landing failed/);
+  assert.equal(held.size, 0);
 });

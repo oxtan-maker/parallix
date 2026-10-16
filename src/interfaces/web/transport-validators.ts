@@ -1,3 +1,4 @@
+import { isWorkflowCommand } from '../../domain/workflow-operation.js';
 /**
  * Web transport validators: the version-aware entry points that turn a parsed
  * payload into a DTO or an explicit failure state.
@@ -121,8 +122,8 @@ export function validateWebCommandResult(payload: unknown): WebTransportValidati
       ['kind', 'transportVersion', 'status', 'error', 'durableEvidence'], 'result', problems);
     checkEnum(p, 'status', TERMINAL_STATUSES, 'result', problems);
     if (p.error === null) {
-      if (p.status !== 'completed') { problems.push('result.error must be present when status is not "completed"'); }
-    } else if (p.status === 'completed') {
+      if (p.status !== 'completed' && p.status !== 'accepted') { problems.push('result.error must be present when status is not "completed"'); }
+    } else if (p.status === 'completed' || p.status === 'accepted') {
       problems.push('result.error must be null when status is "completed"');
     } else if (isPlainObject(p.error)) {
       checkKeys(p.error, ['kind', 'message'], ['kind', 'message'], 'result.error', problems);
@@ -162,9 +163,14 @@ export function validateWebCommandRequest(payload: unknown): WebCommandRequestVa
   }
   const problems: string[] = [];
   checkKeys(payload,
-    ['missionId', 'kind', 'missionStatusAtRequest', 'payload'],
+    ['missionId', 'kind', 'missionStatusAtRequest', 'payload', 'requestKey'],
     ['missionId', 'kind', 'missionStatusAtRequest'],
     'request', problems);
+  checkRequestKey(payload, problems);
+  if (typeof payload.kind === 'string' && isWorkflowCommand(payload.kind)
+    && (typeof payload.requestKey !== 'string' || !payload.requestKey.trim())) {
+    problems.push('request.requestKey is required for workflow commands and must be nonblank');
+  }
   const missionId = checkString(payload, 'missionId', 'request', problems);
   if (missionId !== null && missionId.length === 0) {
     problems.push('request.missionId must be a non-empty string');
@@ -188,6 +194,7 @@ export function validateWebCommandRequest(payload: unknown): WebCommandRequestVa
   return {
     ok: true,
     value: {
+      ...(typeof payload.requestKey === 'string' ? { requestKey: payload.requestKey } : {}),
       missionId: payload.missionId as string,
       kind: payload.kind as WebCommandRequestKind,
       missionStatusAtRequest: payload.missionStatusAtRequest as string,
@@ -258,4 +265,8 @@ export function validateWebStreamError(payload: unknown): WebTransportValidation
     checkEnum(p.error, 'kind', ERROR_KINDS, 'stream.error', problems);
     checkString(p.error, 'message', 'stream.error', problems);
   });
+}
+
+function checkRequestKey(payload: Record<string, unknown>, problems: string[]): void {
+  if (payload.requestKey !== undefined && (typeof payload.requestKey !== 'string' || payload.requestKey.length < 1 || payload.requestKey.length > 128)) { problems.push('request.requestKey must contain 1–128 characters'); }
 }

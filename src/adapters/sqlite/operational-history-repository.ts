@@ -1,3 +1,5 @@
+import { authorizedOperationId } from '../../application/ports/mission-write-authorization.js';
+import { authorizeSqliteMissionWrite } from './workflow-write-guard.js';
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
 import type { OperationLogSummary, OperationalHistoryEntry, OperationalHistoryRepository } from '../../application/ports/operation-history.js';
 
@@ -125,10 +127,23 @@ export class SqliteOperationalHistoryRepository implements OperationalHistoryRep
   }
 
   async append(entry: OperationalHistoryEntry): Promise<void> {
-    await this.db.execute(
-      'INSERT INTO operational_history (event_type, event_data, created_at) VALUES (?, ?, ?);',
-      [entry.eventType, entry.eventData, entry.createdAt],
-    );
+    if (!authorizedOperationId()) {
+      await this.db.execute(
+        'INSERT INTO operational_history (event_type, event_data, created_at) VALUES (?, ?, ?);',
+        [entry.eventType, entry.eventData, entry.createdAt],
+      );
+      return;
+    }
+    const data = JSON.parse(entry.eventData) as { missionId?: string };
+    await this.db.beginWriteTransaction();
+    try {
+      if (data.missionId) { await authorizeSqliteMissionWrite(this.db, data.missionId); }
+      await this.db.execute(
+        'INSERT INTO operational_history (event_type, event_data, created_at) VALUES (?, ?, ?);',
+        [entry.eventType, entry.eventData, entry.createdAt],
+      );
+      await this.db.commitTransaction();
+    } catch (error) { await this.db.rollbackTransaction(); throw error; }
   }
 
   async clear(): Promise<void> {

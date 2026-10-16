@@ -344,6 +344,7 @@ describe("squash hook bounce", () => {
         return { signal: null,  status: r.status, stdout: '', stderr: r.stderr };
       }
       if (args.includes('rev-parse')) { return ok(`${LANDED_SHA}\n`); }
+      if (args.includes('merge-base')) { return ok(`${LANDED_SHA}\n`); }
       return ok('');
     });
     mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));

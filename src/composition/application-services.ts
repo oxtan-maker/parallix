@@ -1,3 +1,4 @@
+import { bindInheritedWorkflowAuthorization } from './workflow-authorization.js';
 import { correlateMissionCapture } from './mission-terminal.js';
 import type { SqliteMigrationRunner } from '../adapters/sqlite/migration-runner.js';
 import { configureRepairCheckpoints } from '../application/ports/repair-checkpoint.js';
@@ -22,7 +23,8 @@ import { UIPreferencesService } from '../application/services/ui-preferences-ser
 import { OperationalHistoryService } from '../application/services/operational-history-service.js';
 import { CurrentWorkRecorder, NO_CURRENT_WORK_PORT, type CurrentWorkPort } from '../application/recording/current-work-recorder.js';
 import { processStartIdentity } from '../adapters/process/process-liveness.js';
-import { SqliteMissionStore } from '../adapters/sqlite/mission-store.js';
+import { createMissionStore } from './mission-persistence.js';
+export { createMissionStore } from './mission-persistence.js';
 import { SqliteSessionMarkerAdapter } from '../adapters/sqlite/session-marker-adapter.js';
 import { SqliteSessionMarkerRepository } from '../adapters/sqlite/session-marker-repository.js';
 import type { SessionMarkerRepository } from '../application/ports/mission-store.js';
@@ -180,6 +182,7 @@ export interface OperatorApplicationServices {
 }
 
 export interface ProductionApplicationServiceOptions {
+  readonly inheritWorkflowAuthorization?: boolean;
   readonly includeOperatorState?: boolean;
   /** Typed operator configuration resolved once at the composition root. */
   readonly configuration: ParallixConfiguration;
@@ -232,6 +235,7 @@ export async function createProductionApplicationServices(
   const mission = options.includeOperatorState === false
     ? null
     : await createMissionApplicationServices(rootDir, { configuration: options.configuration });
+  bindInheritedWorkflowAuthorization(options.configuration, options.inheritWorkflowAuthorization, mission, operatorState.db);
   // Shared Mission-authority injection used by both the handoff and the review
   const defaultExecuteRuntime = createDefaultExecuteMissionRuntime(options.configuration);
   const handoffWithMissionServices = mission && performHandoffWithMissionServices(mission, options.configuration);
@@ -373,7 +377,7 @@ export async function createMissionApplicationServices(
   });
 
   const { SqliteOperationalHistoryRepository } = await import('../adapters/sqlite/operational-history-repository.js');
-  const store = new SqliteMissionStore(db);
+  const store = createMissionStore(db);
   const { SqliteBoardLaneEventRepository } = await import('../adapters/sqlite/board-lane-event-repository.js');
   const { SqliteUsageRepository } = await import('../adapters/sqlite/usage-repository.js');
   const readStatsMissionFlow = createStatsMissionFlowReader({

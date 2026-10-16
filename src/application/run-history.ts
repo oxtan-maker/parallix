@@ -92,7 +92,7 @@ function readRecord(scope: RunHistoryScope, runId: string): RunLookup {
   catch { return { ok: false, error: 'malformed', detail: `run record ${runId} has an invalid agent family` }; }
   const state = effectiveState(record, scope.isAlive);
   const observed = record.execution ? scope.executionAlive?.(record.execution) : null;
-  const execution = state !== 'running' ? 'stopped' : observed === true ? 'live' : observed === false ? 'stopped' : 'unknown';
+  const execution = state === 'exited' ? 'stopped' : observed === true ? 'live' : observed === false ? 'stopped' : 'unknown';
   return { ok: true, run: { record, state, execution, coverage: coverageOf(record, state) } };
 }
 

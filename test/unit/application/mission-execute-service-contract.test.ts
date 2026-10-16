@@ -75,6 +75,29 @@ function request(overrides: Record<string, unknown> = {}) {
   };
 }
 
+test('activation and preparing work precede held preflight (TASK-2750)', async () => {
+  let release!: () => void;
+  let entered!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const boundary = new Promise<void>(resolve => { entered = resolve; });
+  const { ports, calls } = strictPorts();
+  ports.workspace.preflight = async () => { calls.push('held-preflight'); entered(); await held; return true; };
+  const work: string[] = [];
+  const run = new ExecuteMissionService(ports, undefined, {
+    async running(publication) { work.push(publication.summary); },
+    async ended() {}, async blocked() {},
+  }).execute(request());
+  try {
+    await boundary;
+    assert.ok(calls.includes('synchronize'), 'authoritative activation must commit before preflight');
+    assert.ok(work.some(summary => summary.includes('preparing')), 'preparing work must be published before preflight');
+    assert.equal(calls.includes('prepare'), false, 'complete prompt preparation must remain behind the barrier');
+  } finally {
+    release();
+    await run;
+  }
+});
+
 test('execute mission use case activates before launch, then records telemetry and handoff', async () => {
   const { ports, calls } = strictPorts();
   const events: Array<{ sequence: number; phase: string }> = [];
@@ -88,7 +111,7 @@ test('execute mission use case activates before launch, then records telemetry a
     .execute(request());
   assert.equal(outcome.status, 'completed');
   assert.deepEqual(calls, [
-    'preflight:task-1', 'worktree:task-1', 'task:task-1', 'load', 'prepare', 'load', 'synchronize',
+    'load', 'load', 'synchronize', 'preflight:task-1', 'worktree:task-1', 'task:task-1', 'prepare',
     'launch:codex', 'load', 'safety', 'telemetry:codex', 'checkpoints', 'handoff:codex',
   ]);
   assert.deepEqual(events.map((event) => event.sequence), [1, 2, 3]);

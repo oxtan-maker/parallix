@@ -22,14 +22,11 @@ import * as path from 'node:path';
 const ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
 
 let work: string;
-let home: string;
 let packageDir: string;
 let tarball: string;
 
 test.before(() => {
   work = fs.mkdtempSync(path.join(os.tmpdir(), 'px-web-package-'));
-  home = path.join(work, 'home');
-  fs.mkdirSync(home, { recursive: true });
   // `npm pack` runs prepack, so this packs freshly built web + canonical
   // bundles.
   const packArgs = ['pack', '--pack-destination', work];
@@ -53,51 +50,67 @@ interface RunningHost {
   origin: string;
 }
 
-function startPackagedWeb(): Promise<RunningHost> {
+function startPackagedWeb(context: test.TestContext): Promise<RunningHost> {
+  const home = fs.mkdtempSync(path.join(work, 'home-'));
+  // ADR 0062: native coverage cannot attribute this source-free bundle to src/.
+  // Keep coverage on the owning suite, but avoid collecting and serializing
+  // discarded bundle ranges in the host and its independent recovery process.
+  const env: NodeJS.ProcessEnv = { ...process.env, PARALLIX_HOME: home, FORCE_COLOR: '0', NO_COLOR: '1' };
+  delete env.NODE_V8_COVERAGE;
   const child = spawn(process.execPath, [path.join(packageDir, 'build', 'px.mjs'), 'web'], {
     cwd: packageDir,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      PARALLIX_HOME: home,
-      FORCE_COLOR: '0',
-      NO_COLOR: '1',
-    },
+    env,
   });
-  let output = '';
-  let rejectError: { value: ((error: Error) => void) | null } = { value: null };
-  child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString(); });
-  child.stderr.on('data', (chunk: Buffer) => { output += chunk.toString(); });
-  child.on('error', err => rejectError.value?.(err));
-  child.on('exit', code => {
-    if (code !== null && code !== 0 && rejectError.value) {
-      rejectError.value(new Error(`packaged px web exited ${code}: ${output}`));
-    }
+  const host = { child, origin: '' };
+  context.after(async () => {
+    try { await stopHost(host); }
+    finally { fs.rmSync(home, { recursive: true, force: true }); }
   });
   return new Promise((resolve, reject) => {
-    rejectError.value = reject;
-    const poll = setInterval(() => {
+    let output = '';
+    const cleanup = () => {
+      clearTimeout(startupTimeout);
+      child.stdout.removeListener('data', onOutput);
+      child.stderr.removeListener('data', onOutput);
+      child.removeListener('error', onError);
+      child.removeListener('exit', onExit);
+    };
+    const onError = (error: Error) => { cleanup(); reject(error); };
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      onError(new Error(`packaged px web exited before announcing its URL (${signal ?? code}): ${output}`));
+    };
+    const onOutput = (chunk: Buffer) => {
+      output += chunk.toString();
       const match = output.match(/listening on (http:\/\/127\.0\.0\.1:\d+)\/ /);
       if (match) {
-        clearInterval(poll);
-        clearTimeout(startupTimeout);
-        resolve({ child, origin: match[1] });
+        host.origin = match[1];
+        cleanup();
+        // Keep draining both pipes after startup so diagnostics cannot block exit.
+        child.stdout.resume();
+        child.stderr.resume();
+        resolve(host);
       }
-    }, 100);
+    };
     const startupTimeout = setTimeout(() => {
-      clearInterval(poll);
-      child.kill('SIGTERM');
-      reject(new Error(`packaged px web did not announce a loopback URL in time: ${output}`));
+      onError(new Error(`packaged px web did not announce a loopback URL in time: ${output}`));
     }, 60_000);
     startupTimeout.unref();
+    child.stdout.on('data', onOutput);
+    child.stderr.on('data', onOutput);
+    child.once('error', onError);
+    child.once('exit', onExit);
   });
 }
 
 async function stopHost(host: RunningHost): Promise<void> {
-  host.child.kill('SIGTERM');
+  const child = host.child;
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) { return; }
   await new Promise<void>(resolve => {
-    host.child.once('exit', () => resolve());
-    setTimeout(() => { host.child.kill('SIGKILL'); }, 5_000).unref();
+    const force = setTimeout(() => { child.kill('SIGKILL'); }, 5_000);
+    force.unref();
+    child.once('exit', () => { clearTimeout(force); resolve(); });
+    child.kill('SIGTERM');
   });
 }
 
@@ -121,8 +134,8 @@ test('web package smoke: the tarball ships the built web assets and nothing else
   }
 });
 
-test('web package smoke: the packaged tarball serves the shell from built assets without src, CDN, or a dev server', { timeout: 120_000 }, async () => {
-  const host = await startPackagedWeb();
+test('web package smoke: the packaged tarball serves the shell from built assets without src, CDN, or a dev server', { timeout: 120_000 }, async t => {
+  const host = await startPackagedWeb(t);
   try {
     // The serving process is the packaged px.mjs itself (one process, no
     // Vite dev server): its argv is node + build/px.mjs + web.
@@ -164,8 +177,8 @@ test('web package smoke: the packaged tarball serves the shell from built assets
   }
 });
 
-test('web package smoke: the per-launch session is unavailable after the process exits', { timeout: 120_000 }, async () => {
-  const host = await startPackagedWeb();
+test('web package smoke: the per-launch session is unavailable after the process exits', { timeout: 120_000 }, async t => {
+  const host = await startPackagedWeb(t);
   const origin = host.origin;
   const res = await fetch(`${origin}/`);
   assert.equal(res.status, 200);

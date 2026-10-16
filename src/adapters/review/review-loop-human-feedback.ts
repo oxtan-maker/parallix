@@ -32,6 +32,11 @@ function feedbackSource(comment: ForgejoFeedbackComment, index: number): string 
   return `forgejo:${comment.kind ?? 'comment'}:${id}:${revision}:${bodyHash}:${comment.location ?? ''}`;
 }
 
+/** Compare feedback content while preserving provider timestamps for audit. */
+function feedbackContentIdentity(source: string): string {
+  return source.replace(/^(forgejo:[^:]+:[^:]+):.*:([a-f0-9]{16}):/, '$1:$2:');
+}
+
 function isRequestChanges(comment: ForgejoFeedbackComment): boolean {
   return (comment.state ?? '').trim().toUpperCase() === 'REQUEST_CHANGES';
 }
@@ -73,7 +78,8 @@ export function composeHumanFeedback(dependencies: HumanFeedbackDependencies): H
             findings: requested ? [{ id: `human-${comment.id || index + 1}`, summary: comment.body || 'Operator requested changes' }] : [],
           };
         });
-      const unseen = feedback.filter(item => !seen.has(item.source));
+      const seenContent = new Set([...seen].filter((source): source is string => typeof source === 'string').map(feedbackContentIdentity));
+      const unseen = feedback.filter(item => !seenContent.has(feedbackContentIdentity(item.source)));
       // A current correction on an approved round is not handled yet (the
       // loop stops for `px revoke-review`), so neither its audit note nor its
       // source is recorded: both are durable and would hide it from a retry.

@@ -52,6 +52,7 @@ export interface ADR0053BoundaryEntry {
 
 /** The 15 ADR 0053 durable-state concepts listed in the persistence ADR. */
 export type ADR0053ConceptName =
+  | 'WorkflowOperation'
   | 'Mission'
   | 'CheckpointData'
   | 'Review'
@@ -99,6 +100,9 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     classification: 'generated-artifact',
     cutoverTask: null,
   },
+  { id: 'workflow-owner-os-read', concept: 'GitObservations', pathType: 'default', fileLocation: 'src/adapters/process/workflow-process.ts', operation: 'read', classification: 'external-fact-or-intake', cutoverTask: null },
+  { id: 'workflow-operation-read', concept: 'WorkflowOperation', pathType: 'default', fileLocation: 'src/adapters/sqlite/workflow-operation-store.ts', operation: 'read', classification: 'database-owned-domain-state', cutoverTask: null },
+  { id: 'workflow-operation-write', concept: 'WorkflowOperation', pathType: 'default', fileLocation: 'src/adapters/sqlite/workflow-operation-store.ts', operation: 'write', classification: 'database-owned-domain-state', cutoverTask: null },
   // Release-normalized manifest snapshots are generated comparison inputs in
   // an isolated temporary directory, removed in finally; never review authority.
   {

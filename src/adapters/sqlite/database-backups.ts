@@ -36,3 +36,11 @@ export function pruneOlderBackups(dbPath: string): void {
     }
   }
 }
+
+/** Locate the newest snapshot, including legacy backup sidecars for recovery. */
+export function findLatestBackup(dbPath: string): string | null {
+  const directory = path.dirname(dbPath);
+  const prefix = `${path.basename(dbPath)}.bak.`;
+  const backups = fs.readdirSync(directory).filter(file => file.startsWith(prefix)).sort(compareCodeUnits);
+  return backups.length === 0 ? null : path.join(directory, backups[backups.length - 1]);
+}

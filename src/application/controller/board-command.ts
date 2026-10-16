@@ -13,6 +13,7 @@ import type { RepositoryId } from '../../domain/repository.js';
 // ---------------------------------------------------------------------------
 
 export type BoardCommandKind =
+  | 'workflow:stop'
   | 'active:execute'
   | 'mission:intake'
   | 'mission:create'
@@ -78,6 +79,9 @@ export type BoardCommandPayload =
 
 export interface BoardCommandRequest {
   readonly operationId: string;
+  readonly requestKey?: string;
+  /** Trusted CLI input, never exposed by the web request schema. */
+  readonly invocation?: import('../ports/workflow-operation.js').WorkflowInvocation;
   readonly kind: BoardCommandKind;
   readonly missionId: string;
   /** Present for board actions, which capture a status before confirmation. */
@@ -148,6 +152,9 @@ export type BoardProgressSink = (_event: BoardProgressEvent) => void;
 
 export interface BoardCommandDispatcher {
   canExecute(_kind: BoardCommandKind): boolean;
+  admit?(_request: BoardCommandRequest): Promise<import('../workflow-operation-service.js').WorkflowAdmission>;
+  operation?(_id: string): Promise<import('../../domain/workflow-operation.js').WorkflowOperation | null>;
+  current?(_mission: string): Promise<import('../../domain/workflow-operation.js').WorkflowOperation | null>;
   dispatch<T = unknown>(_request: BoardCommandRequest): Promise<BoardCommandResult<T>>;
 }
 
@@ -160,6 +167,8 @@ export interface BoardCommandDispatcher {
  * Commands not in this set return `unavailable` capability results.
  */
 export const INTEGRATED_CAPABILITIES = new Set<BoardCommandKind>([
+  'workflow:stop',
+  'review:submit',
   'active:execute',
   'mission:intake',
   'mission:create',
@@ -177,7 +186,6 @@ export const INTEGRATED_CAPABILITIES = new Set<BoardCommandKind>([
  * the board but cannot be executed until separate bounded extraction missions land.
  */
 export const UNAVAILABLE_CAPABILITIES: ReadonlyMap<BoardCommandKind, string> = new Map([
-  ['review:submit', 'Review submission is not available from the board'],
   ['review:act-on-findings', 'Existing artifact consumption can synthesize review state or reviewer identity'],
   ['approve:review', 'Review approval is not available from the board'],
 ]);

@@ -45,6 +45,7 @@ export interface DomainConceptInvariant {
 export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
   Record<DomainConceptName, DomainConceptInvariant>
 > = {
+  WorkflowOperation: { concept: 'WorkflowOperation', invariant: 'Only an open operation with the current fencing generation can authorize workflow writes.', fileLocation: 'src/domain/workflow-operation.ts', line: 33, anchor: 'export function requireWorkflowOwner' },
   Mission: {
     concept: 'Mission',
     invariant:

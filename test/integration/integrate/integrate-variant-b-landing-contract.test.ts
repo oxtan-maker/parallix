@@ -100,7 +100,7 @@ describe("Variant B landing", () => {
       if (args.includes('branch') && args.includes('--show-current')) return { signal: null,  status: 0, stdout: 'main', stderr: '' };
       if (args.includes('status')) return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('merge')) return { signal: null,  status: 0, stdout: '', stderr: '' };
-      if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'deadbeef', stderr: '' };
+      if (args.includes('rev-parse') || args.includes('merge-base')) return { signal: null,  status: 0, stdout: 'deadbeef', stderr: '' };
       if (args.includes('show')) return { signal: null,  status: 0, stdout: '2026-05-15T12:00:00+02:00\n', stderr: '' };
       return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
@@ -246,7 +246,7 @@ describe("Variant B landing", () => {
         return { signal: null,  status: 0, stdout: '', stderr: '' };
       }
       if (args.includes('merge')) return { signal: null,  status: 0, stdout: '', stderr: '' };
-      if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'deadbeef', stderr: '' };
+      if (args.includes('rev-parse') || args.includes('merge-base')) return { signal: null,  status: 0, stdout: 'deadbeef', stderr: '' };
       if (args.includes('show')) return { signal: null,  status: 0, stdout: '2026-05-15T12:00:00+02:00\n', stderr: '' };
       return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
@@ -275,7 +275,7 @@ describe("Variant B landing", () => {
       if (args.includes('reset') && args.includes('--hard')) return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('merge')) return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('apply') && args.includes('--index')) return { signal: null,  status: 0, stdout: '', stderr: '' };
-      if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'deadbeef', stderr: '' };
+      if (args.includes('rev-parse') || args.includes('merge-base')) return { signal: null,  status: 0, stdout: 'deadbeef', stderr: '' };
       if (args.includes('show')) return { signal: null,  status: 0, stdout: '2026-05-15T12:00:00+02:00\n', stderr: '' };
       return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
@@ -508,7 +508,7 @@ describe("Variant B landing", () => {
       if (args.includes('status')) return { signal: null,  status: 0, stdout: '', stderr: '' };
       // F1 confirms the integration rebase by rev-parse-ing the primary and the
       // mission HEAD, then checking `--is-ancestor`; the rebase step needs these.
-      if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'deadbeef', stderr: '' };
+      if (args.includes('rev-parse') || args.includes('merge-base')) return { signal: null,  status: 0, stdout: 'deadbeef', stderr: '' };
       if (args.includes('merge') && args.includes('--no-commit')) return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('merge') && args.includes('--abort')) return { signal: null,  status: 1, stdout: '', stderr: 'fatal: abort failed' };
       return { signal: null,  status: 0, stdout: '', stderr: '' };
@@ -540,7 +540,7 @@ describe("Variant B landing", () => {
       if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
       if (args.includes('branch') && args.includes('--show-current')) return { signal: null,  status: 0, stdout: 'main', stderr: '' };
       if (args.includes('status')) return { signal: null,  status: 0, stdout: '', stderr: '' };
-      if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'deadbeef', stderr: '' };
+      if (args.includes('rev-parse') || args.includes('merge-base')) return { signal: null,  status: 0, stdout: 'deadbeef', stderr: '' };
       if (args.includes('merge') && args.includes('--no-commit')) return { signal: null,  status: 1, stdout: 'conflict', stderr: 'conflict' };
       if (args.includes('merge') && args.includes('--abort')) return { signal: null,  status: 1, stdout: '', stderr: 'There is no merge to abort' };
       if (args.includes('log') && args.includes('--format=%x00%H%x00%B')) return { signal: null,  status: 0, stdout: `\0deadbeef\0mission/${TEST_SLUG}: Test Mission\n`, stderr: '' };
@@ -720,7 +720,7 @@ describe("integration completion order", () => {
       if (args.includes('branch') && args.includes('--show-current')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
       if (args.includes('diff') && args.includes('--cached')) return { signal: null,  status: 0, stdout: 'fixture.ts\n', stderr: '' };
       if (args.includes('commit')) calls.push('landed');
-      if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'landed-sha\n', stderr: '' };
+      if (args.includes('rev-parse') || args.includes('merge-base')) return { signal: null,  status: 0, stdout: 'landed-sha\n', stderr: '' };
       if (args.includes('show')) return { signal: null,  status: 0, stdout: '2026-05-15T12:00:00+02:00\n', stderr: '' };
       return { signal: null,  status: 0, stdout: '', stderr: '' };
     });

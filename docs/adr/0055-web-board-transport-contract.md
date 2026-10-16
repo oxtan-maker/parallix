@@ -83,7 +83,7 @@ session / CSRF capability of ADR 0054. The request envelope is the fourth
 validated shape in this contract.
 
 - The top-level keys are exactly `missionId`, `kind`,
-  `missionStatusAtRequest`, and `payload` (present only for
+  `missionStatusAtRequest`, optional `requestKey`, and `payload` (present only for
   `handoff:record`). Every other key is rejected: there is no key through
   which a client can supply an operation ID, a capability set, an agent, an
   environment, argv, a path, a version, or a "current" status. Validation is
@@ -94,9 +94,9 @@ validated shape in this contract.
   remaining board command kinds (`mission:intake`, `checkpoint:record`,
   `approve:review`, `review:act-on-findings`) are not card-advertised and are
   rejected as unsupported. Whether the action is currently enabled for that
-  mission is decided by the server against a fresh projection, not by the
-  client; a request for a kind the projection does not advertise as enabled
-  is rejected before dispatch.
+  mission is decided by shared application eligibility checks, not by the
+  client; unavailable or stale requests are rejected before admission.
+  `workflow:stop` requests termination of owned execution.
 - `missionStatusAtRequest` is required and is the status the browser rendered
   on the card — the observed precondition the controller's authoritative
   stale guard compares against the status it reads immediately before
@@ -118,14 +118,17 @@ validated shape in this contract.
   returns the first created mission, recovered from its recorded entry event.
 - Operation identity is host-owned: the host generates the operation ID and
   the single-kind capability set itself, mirroring the TUI, and dispatches
-  through the shared controller. No retry is performed server-side on any
-  outcome.
+  through the shared controller. Workflow commands require a nonblank request
+  key; repeating it for the same command returns the same operation, while
+  competing ownership conflicts.
 - Status-code policy: 400 for schema violations — unknown keys, kinds that
   are not card-advertised, and mistyped or out-of-range handoff fields (zero
   dispatch), 403 from the security boundary (zero dispatch), 409 when the
-  fresh projection does not advertise the action as enabled for the mission
-  or the mission is absent from the projection (zero dispatch), and 200 for
-  every dispatched outcome — including the wire statuses
+  authoritative eligibility or ownership check rejects the request (zero
+  dispatch). Long-running commands return 202 after durable acceptance with
+  stable operation identity
+  and queryable status. Settled retries return the recorded outcome with 200;
+  synchronous dispatched outcomes also return 200, including the wire statuses
   `conflict`, `failed`, and `cancelled`, which travel inside the
   `command-result` envelope rather than as new HTTP statuses. A conflict
   reuses the existing `failed` + `conflict` wire status so clients keep one
@@ -138,6 +141,9 @@ validated shape in this contract.
 
 ## Consequences
 
+- An acceptance acknowledges durable intent, not successful execution,
+  verification or approval. Clients observe the operation until it settles;
+  disconnecting does not cancel it (ADR 0054).
 - The transport mission (TASK-2429) implements routes and SSE against this
   contract; the client can never drift from the server on special values or
   action states.

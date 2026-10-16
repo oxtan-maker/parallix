@@ -271,7 +271,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
     restoration: bindings.restoration,
     polling: { intervalMs: resolvePollIntervalMs(bindings.configuration), timeoutMs: resolvePollTimeoutMs(target.pollTimeoutSeconds || 0, bindings.configuration) },
     missionStore,
-    retainedRepair: missionStore ? retainedRepairPort(slug, worktree, missionStore) : undefined,
+    retainedRepair: missionStore ? retainedRepairPort(slug, worktree, missionStore, bindings.configuration) : undefined,
     lifecycle: lifecycleService,
     state: {
       read: async () => await Promise.resolve(readState(slug, worktree, missionStore)),

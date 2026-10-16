@@ -513,6 +513,26 @@ test('spawnAndTee spawns the terminal host command and cleans it up once (TASK-2
   assert.equal(cleanups, 1);
 });
 
+test('file stdin reaches terminal hosting as literal arguments without changing exit handling (TASK-2750)', async () => {
+  const stdinPath = '/state/prompt $(literal).txt';
+  let hosted: { command: string; args: string[] } | undefined;
+  await withMockSpawn({ status: 7, stdoutChunks: ['diagnostic'] }, async () => {
+    const result = await spawnAndTee('codex', ['exec', '-'], {
+      stdinPath, stdoutSink: noopSink(), stderrSink: noopSink(),
+      terminalHost: { host: launch => {
+        hosted = launch;
+        return { ...launch, cleanup() {} };
+      } },
+    });
+    assert.equal(result.status, 7);
+    assert.equal(result.stdout, 'diagnostic');
+  });
+  assert.ok(hosted);
+  assert.equal(hosted.command, 'bash');
+  assert.deepEqual(hosted.args.slice(0, 3), ['-c', 'exec "$@" < "$0"', stdinPath]);
+  assert.deepEqual(hosted.args.slice(-2), ['exec', '-']);
+});
+
 test('a launched agent is hosted without decision-provider credentials (TASK-2704)', async () => {
   const names = ['TYPESAFE_API_KEY', 'OPENROUTER_API_KEY', 'AI_GATEWAY_API_KEY'];
   const hostedEnv: NodeJS.ProcessEnv[] = [];

@@ -1,3 +1,4 @@
+import { authorizeMissionWrite } from '../../application/ports/mission-write-authorization.js';
 import type { AgentFamily } from '../../domain/agents.js';
 import type { MissionId } from '../../domain/mission.js';
 import type { RepositoryId } from '../../domain/repository.js';
@@ -38,6 +39,7 @@ export class SqliteSessionMarkerAdapter implements SessionMarkerPort {
   }
 
   async save(marker: SessionMarker): Promise<void> {
+    await authorizeMissionWrite(marker.missionId);
     await this.repo.save({
       missionId: marker.missionId,
       role: marker.role,
@@ -48,6 +50,7 @@ export class SqliteSessionMarkerAdapter implements SessionMarkerPort {
   }
 
   async delete(missionId: MissionId, role: SessionRole): Promise<void> {
+    await authorizeMissionWrite(missionId);
     await this.repo.deleteByMissionAndRole(missionId, role);
   }
 

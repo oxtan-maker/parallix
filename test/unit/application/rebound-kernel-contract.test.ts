@@ -15,7 +15,7 @@ import { transientRetryAllowed, reboundRequiresHuman, repairStrategy, launchReco
 //   Integration gate rebound: TASK-2492
 
 import assert from 'node:assert/strict';
-import test, { describe, it, type TestContext } from 'node:test';
+import test, { afterEach, describe, it, type TestContext } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { mkdtemp } from '../../helpers/temp-dir.js';
@@ -865,13 +865,20 @@ describe("Integration gate rebound —", () => {
     launches: number;
     transitions: string[];
     messages: string[];
+    /** Mission worktree owned by the case; the rebound retains recovery evidence under it. */
+    root: string;
   }
+
+  const harnessRoots: string[] = [];
+  afterEach(() => {
+    for (const root of harnessRoots.splice(0)) { fs.rmSync(root, { recursive: true, force: true }); }
+  });
 
   function routeArgs(over: Partial<IntegrationGateRouteOptions> & { rerunOk?: boolean }, harness: Harness): IntegrationGateRouteOptions {
     const { rerunOk = true, ...rest } = over;
     return {
       slug: SLUG,
-      missionWorktree: '/tmp/mission',
+      missionWorktree: harness.root,
       baseWorktree: '/tmp/base',
       baseBranch: 'main',
       verificationCommand: VERIFY_COMMAND,
@@ -882,7 +889,7 @@ describe("Integration gate rebound —", () => {
       repositoryId: 'parallix',
       startAgentFn: (async () => { harness.launches += 1; return { agent: 'codex', result: { status: 0 } }; }),
       transitionTaskFn: async (slug: string) => { harness.transitions.push(slug); return true; },
-      captureFinalTreeFn: (() => ({ ok: true as const, rootDir: '/tmp/mission', commit: 'c', tree: 't' })),
+      captureFinalTreeFn: (() => ({ ok: true as const, rootDir: harness.root, commit: 'c', tree: 't' })),
       runPhaseGatesFn: (async (_p: string, o) => (rerunOk
         ? { ok: true, phase: 'integration', gates: o.gates, executed: 1, skipped: false, dryRun: false, failedGate: null, error: null }
         : { ok: false, phase: 'integration', gates: o.gates, executed: 1, skipped: false, dryRun: false, failedGate: failedGate(), error: 'still red' })),
@@ -895,7 +902,9 @@ describe("Integration gate rebound —", () => {
   }
 
   function harness(): Harness {
-    return { launches: 0, transitions: [], messages: [] };
+    const root = mkdtemp('parallix-rebound-route-');
+    harnessRoots.push(root);
+    return { launches: 0, transitions: [], messages: [], root };
   }
 
   test('TASK-2492: a mission regression inside budget re-runs the gates and reports fixed', async () => {

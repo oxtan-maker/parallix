@@ -17,7 +17,8 @@ export const WEB_TERMINAL_SEARCH_PATH = '/api/terminal/:missionId/search';
 export const WEB_TERMINAL_LIVE_PATH = '/api/terminal/:missionId/live';
 
 /** The read-only part of the capability the web host uses; composition supplies it. */
-export type WebMissionTerminal = Pick<MissionTerminalCapability, 'overview' | 'page' | 'search' | 'live'>;
+type TerminalReads = Pick<MissionTerminalCapability, 'overview' | 'page' | 'search' | 'live'>;
+export type WebMissionTerminal = { [K in keyof TerminalReads]: (..._args: Parameters<TerminalReads[K]>) => ReturnType<TerminalReads[K]> | Promise<ReturnType<TerminalReads[K]>> };
 
 const RUN_ID = /^[a-z0-9_-]{1,128}$/;
 const OFFSET = /^(?:0|[1-9][0-9]{0,14})$/;
@@ -82,14 +83,14 @@ export function registerTerminalRoute(app: FastifyInstance, options: {
 
   app.get(WEB_TERMINAL_PATH, guarded(async (request, reply) => {
     const resolved = await resolve(request, reply);
-    return resolved ? send(reply, resolved.terminal.overview(resolved.missionId)) : undefined;
+    return resolved ? send(reply, await resolved.terminal.overview(resolved.missionId)) : undefined;
   }));
 
   app.get(WEB_TERMINAL_HISTORY_PATH, guarded(async (request, reply) => {
     const parsed = pageRequest((request.query ?? {}) as Query);
     if (typeof parsed === 'string') { return invalid(reply, parsed); }
     const resolved = await resolve(request, reply);
-    return resolved ? send(reply, resolved.terminal.page(resolved.missionId, parsed)) : undefined;
+    return resolved ? send(reply, await resolved.terminal.page(resolved.missionId, parsed)) : undefined;
   }));
 
   app.get(WEB_TERMINAL_SEARCH_PATH, guarded(async (request, reply) => {
@@ -101,11 +102,11 @@ export function registerTerminalRoute(app: FastifyInstance, options: {
     const resolved = await resolve(request, reply);
     if (!resolved) { return undefined; }
     // Literal search only: the browser never supplies a regular expression.
-    return send(reply, resolved.terminal.search(resolved.missionId, { pattern, ...(typeof run === 'string' ? { runId: run } : {}) }));
+    return send(reply, await resolved.terminal.search(resolved.missionId, { pattern, ...(typeof run === 'string' ? { runId: run } : {}) }));
   }));
 
   app.get(WEB_TERMINAL_LIVE_PATH, guarded(async (request, reply) => {
     const resolved = await resolve(request, reply);
-    return resolved ? send(reply, resolved.terminal.live(resolved.missionId)) : undefined;
+    return resolved ? send(reply, await resolved.terminal.live(resolved.missionId)) : undefined;
   }));
 }

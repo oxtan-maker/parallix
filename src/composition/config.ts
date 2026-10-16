@@ -12,7 +12,7 @@ function milliseconds(value: string | undefined): number | null {
 
 /** Positive integer, or null when unset or invalid (callers apply their default). */
 function positiveInteger(value: string | undefined): number | null {
-  const parsed = value ? parseInt(value, 10) : NaN;
+  const parsed = value ? Number.parseInt(value, 10) : Number.NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
@@ -80,6 +80,7 @@ export function resolveConfiguration(source: Source): ParallixConfiguration {
       reviewMode: e('PARALLIX_JEV_REVIEW')?.trim().toLowerCase(),
     }),
     runtime: Object.freeze({
+      workflowOperation: e('PARALLIX_WORKFLOW_OPERATION'), workflowGeneration: positiveInteger(e('PARALLIX_WORKFLOW_GENERATION')),
       gitIdentity: resolveGitIdentity(source),
       ci: Boolean(e('CI')), noTui: e('PARALLIX_NO_TUI') === '1', debug: Boolean(e('DEBUG')),
       noColor: e('NO_COLOR'), forceColor: e('FORCE_COLOR'), term: e('TERM'),

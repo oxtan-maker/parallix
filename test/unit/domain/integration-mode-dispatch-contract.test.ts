@@ -500,6 +500,7 @@ describe("integrate mode dispatch", () => {
       if (joined.includes('merge') && joined.includes('--squash')) { return ok(''); }
       if (args.includes('diff') && args.includes('--cached')) { return ok('fixture.ts\n'); }
       if (args.includes('commit')) { return ok(''); }
+      if (args.includes('merge-base')) { return ok(`${LANDED_SHA}\n`); }
       if (args.includes('rev-parse')) { return ok(`${LANDED_SHA}\n`); }
       return ok('');
     });

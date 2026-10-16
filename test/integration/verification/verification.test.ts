@@ -104,6 +104,7 @@ test('runVerificationGate executes the configured command via bash', () => {
     const calls: { command: string; args: string[]; options: HandoffGitOptions | undefined; }[] = [];
     const result = runVerificationGate('docs', {
       rootDir: root,
+      env: { PATH: '/bin', PARALLIX_WORKFLOW_OPERATION: 'parent', PARALLIX_WORKFLOW_GENERATION: '1' },
       runFn(command, args, options) {
         calls.push({ command, args, options });
         return { signal: null, stdout: '', stderr: '',  status: 0 };
@@ -114,7 +115,7 @@ test('runVerificationGate executes the configured command via bash', () => {
     assert.deepEqual(calls, [{
       command: 'bash',
       args: ['-c', 'npm test'],
-      options: { cwd: root, stdio: 'inherit', progressLabel: 'Repository verification (docs)' },
+      options: { cwd: root, stdio: 'inherit', progressLabel: 'Repository verification (docs)', env: { PATH: '/bin' } },
     }]);
   });
 });

@@ -1,5 +1,6 @@
 import { SqliteMissionValueWriter } from './mission-value-writer.js';
 import { readMissionAggregates } from './mission-load-reader.js';
+import { authorizeSqliteMissionWrite } from './workflow-write-guard.js';
 import { SqliteCheckpointHistory } from './checkpoint-history.js';
 import type {
   MissionLoadResult,
@@ -195,7 +196,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     if (pragma[0]?.foreign_keys !== 1) {
       throw new Error(`Refusing to cancel ${id}: PRAGMA foreign_keys is not enabled on this connection`);
     }
-    await this.db.beginTransaction();
+    await this.db.beginWriteTransaction();
     try {
       const current = await this.db.query<{ status: string }>('SELECT status FROM missions WHERE id = ?', [id]);
       if (current[0]?.status === 'done') {
@@ -219,7 +220,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     mission: Mission,
     expectedVersion: MissionVersion | null,
   ): Promise<MissionVersion> {
-    await this.db.beginTransaction();
+    await this.db.beginWriteTransaction();
     try {
       const version = await this.persistAggregate(mission, expectedVersion);
       await this.db.commitTransaction();
@@ -238,7 +239,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     if (event.missionId !== mission.id || event.repositoryId !== mission.repositoryId) {
       throw new Error('LaneTransitionEvent does not identify the Mission being saved');
     }
-    await this.db.beginTransaction();
+    await this.db.beginWriteTransaction();
     try {
       const version = await this.persistAggregate(mission, expectedVersion);
       const appended = await this.eventRepo.append({
@@ -317,10 +318,15 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
    * This method persists the NEL measurement and returns a row reference.
    */
   async recordNel(record: MissionNelRecord): Promise<MissionNelRecordReceipt> {
-    await this.db.execute(
-      'UPDATE missions SET net_engineering_lines = ? WHERE id = ?',
-      [record.netEngineeringLines, record.missionId],
-    );
+    await this.db.beginWriteTransaction();
+    try {
+      await authorizeSqliteMissionWrite(this.db, record.missionId);
+      await this.db.execute(
+        'UPDATE missions SET net_engineering_lines = ? WHERE id = ?',
+        [record.netEngineeringLines, record.missionId],
+      );
+      await this.db.commitTransaction();
+    } catch (error) { await this.db.rollbackTransaction(); throw error; }
     return {
       reference: `missions:${record.missionId}`,
     };
@@ -330,6 +336,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     mission: Mission,
     expectedVersion: MissionVersion | null,
   ): Promise<MissionVersion> {
+    await authorizeSqliteMissionWrite(this.db, mission.id);
     // MissionStore is a public persistence port: callers other than the brief
     // service may save an aggregate, so reject an invalid brief or gate list
     // before any relational row can make a Mission unloadable on restart.

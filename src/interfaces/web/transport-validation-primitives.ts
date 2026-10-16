@@ -25,17 +25,17 @@ export const GATES: readonly string[] = ['passed', 'failed', 'running', 'unknown
 export const ACTION_STATES: readonly string[] = ['enabled', 'ineligible', 'unavailable'];
 export const CERTAINTIES: readonly string[] = ['live', 'unknown', 'stale'];
 export const ATTENTION_REASONS: readonly string[] = ['blocking', 'gate-failed', 'review-lane', 'integrate-lane', 'stale-work', 'orphaned-active', 'none'];
-export const TERMINAL_STATUSES: readonly string[] = ['completed', 'rejected', 'failed', 'cancelled'];
+export const TERMINAL_STATUSES: readonly string[] = ['accepted', 'completed', 'rejected', 'failed', 'cancelled'];
 export const ERROR_KINDS: readonly string[] = ['validation', 'capability', 'conflict', 'unavailable', 'execution', 'cancelled'];
 export const EVIDENCE_SOURCES: readonly string[] = ['task-markdown', 'git', 'stats', 'mission-store'];
 export const COMMAND_KINDS: readonly string[] = [
-  'active:execute', 'mission:intake', 'mission:create', 'mission:edit-read', 'mission:edit', 'draft:create', 'checkpoint:record',
+  'workflow:stop', 'active:execute', 'mission:intake', 'mission:create', 'mission:edit-read', 'mission:edit', 'draft:create', 'checkpoint:record',
   'handoff:record', 'review:submit', 'review:act-on-findings', 'approve:review',
   'integrate:merge', 'mission:cancel',
 ];
 /** The card-advertised kinds a mutation request may name (TASK-2433). */
 export const COMMAND_REQUEST_KINDS: readonly string[] = [
-  'active:execute', 'draft:create', 'integrate:merge', 'handoff:record', 'review:submit',
+  'workflow:stop', 'active:execute', 'draft:create', 'integrate:merge', 'handoff:record', 'review:submit',
   'mission:cancel',
 ];
 export const BUCKET_LABELS: readonly string[] = ['Small', 'Medium', 'Large'];

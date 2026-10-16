@@ -30,6 +30,7 @@ import { SqliteMissionStore } from '../../src/adapters/sqlite/mission-store.js';
 import { resolveDatabasePath } from '../../src/adapters/sqlite/database-path-resolver.js';
 import { resolveCanonicalRepositoryId } from '../../src/adapters/git/repository-identity.js';
 import { clearOperatorStateCache } from '../../src/adapters/sqlite/adapter-factory.js';
+import { configureMissionWriteAuthorization } from '../../src/application/ports/mission-write-authorization.js';
 
 export const REVIEWER = agentFamily('codex');
 export const IMPLEMENTER = agentFamily('custom');
@@ -138,6 +139,11 @@ export async function openRepairFixture(options: {
   // repository and its unrelated worktrees (TASK-2712 repair).
   const previousCwd = process.cwd();
   process.chdir(worktree);
+  // Exercise the worker's repair/review body with the in-process agent port.
+  // Independent hosting is covered by the workflow-owner process contracts.
+  configureMissionWriteAuthorization({ operationId: `fixture:${slug}`, async assert(id) {
+    assert.equal(id, slug, 'the fixture worker may write only its own mission');
+  } });
 
   return {
     root, repo, worktree, slug, approvedRevision, database,
@@ -154,6 +160,7 @@ export async function openRepairFixture(options: {
     },
     laneEvents: () => database.query('SELECT from_status, to_status, trigger FROM board_lane_events WHERE mission_id = ? ORDER BY id', [slug]),
     async close() {
+      configureMissionWriteAuthorization(null);
       try {
         await database.close();
         await clearOperatorStateCache();

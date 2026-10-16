@@ -36,6 +36,19 @@ test('bootstrap forces a temp PARALLIX_HOME with an isolated agents.local.json',
   assert.ok(fs.existsSync(path.join(process.env.PARALLIX_HOME, 'agents.local.json')));
 });
 
+test('bootstrap removes invoking workflow authority and live terminal identity (TASK-2750)', () => {
+  const keys = ['PARALLIX_WORKFLOW_OPERATION', 'PARALLIX_WORKFLOW_GENERATION', 'PARALLIX_MISSION_TERMINAL', 'PARALLIX_MISSION_SOCKET', 'PARALLIX_OPERATION_CAPTURE'];
+  const result = spawnSync(process.execPath, [
+    '--import', 'tsx', '--import', path.resolve('test/bootstrap-parallix-home.ts'),
+    '-e', `process.stdout.write(JSON.stringify(${JSON.stringify(keys)}.filter(key => process.env[key] !== undefined)))`,
+  ], {
+    encoding: 'utf8', timeout: 2_000,
+    env: { ...process.env, ...Object.fromEntries(keys.map(key => [key, 'operator-owned'])) },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), []);
+});
+
 test('bootstrap pins dummy agent launchers so tests do not hit real workstation CLIs', () => {
   assert.match(process.env.PATH || '', /parallix-test-launchers-/);
   assert.match(process.env.PI_BIN || '', /parallix-test-launchers-/);

@@ -31,6 +31,8 @@ export interface TeeSink {
 }
 
 export interface SpawnTeeOptions {
+  /** Private input file, owned and cleaned up by the calling adapter. */
+  stdinPath?: string;
   configuration?: ParallixConfiguration;
   stdoutSink?: TeeSink;
   stderrSink?: TeeSink;
@@ -209,6 +211,12 @@ function spawnCapturedChild(launch: { command: string; args: string[] }, spawnOp
   return child;
 }
 
+function routeStdin(launch: { command: string; args: string[] }, stdinPath?: string) {
+  return stdinPath
+    ? { command: 'bash', args: ['-c', 'exec "$@" < "$0"', stdinPath, launch.command, ...launch.args] }
+    : launch;
+}
+
 export function spawnAndTee(command: string, args: string[], options: SpawnTeeOptions = {}): Promise<SpawnTeeResult> {
   const {
     configuration = DEFAULT_CONFIGURATION,
@@ -222,6 +230,7 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     capture,
     hostPresentation,
     input,
+    stdinPath,
     ...spawnOptions
   } = options;
 
@@ -241,16 +250,19 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     // Guard construction errors deliberately reject this launch. An available
     // but broken Bubblewrap guard must never retry the child unsandboxed.
     const confined = wrapWithBubblewrap(command, args, resolvedCwd, configuration);
+    // Open stdin outside confinement, preserving the already-selected guard
+    // and making input available inside tmux as well as pipe hosting.
+    const withInput = routeStdin(confined, stdinPath);
     const inputBytes = input === undefined ? null : Buffer.from(input);
     let hosted: ReturnType<TerminalHost['host']> | null = null;
     try {
-      hosted = terminalHost ? terminalHost.host({ ...confined, ...(inputBytes ? { input: inputBytes } : {}) }, { cwd: resolvedCwd, env, ...(hostPresentation ? { presentation: hostPresentation } : {}) }) : null;
+      hosted = terminalHost ? terminalHost.host({ ...withInput, ...(inputBytes ? { input: inputBytes } : {}) }, { cwd: resolvedCwd, env, ...(hostPresentation ? { presentation: hostPresentation } : {}) }) : null;
     } catch (err) {
       const now = new Date().toISOString();
       resolve({ status: null, signal: null, stdout: '', stderr: '', error: err, startedAt: now, endedAt: now });
       return;
     }
-    const launch = hosted ?? confined;
+    const launch = hosted ?? withInput;
 
     const hasNoOutputDeadline = outputDeadlineEnabled(noOutputWatchdog);
     let child: ChildProcess;

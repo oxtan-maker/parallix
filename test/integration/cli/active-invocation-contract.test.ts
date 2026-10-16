@@ -125,6 +125,7 @@ describe("active invocation overlap", () => {
         enforceCommitSafety: async () => {},
       },
       agentExecution: {
+        select: async () => 'claude',
         prepare: async () => ({ prompt: 'execute', agent: 'claude', agentConfig: {} }),
         launch,
       },
@@ -321,6 +322,7 @@ describe("active persisted Mission", () => {
         async readTaskStatus() { return 'active'; }, async enforceCommitSafety() {},
       },
       agentExecution: {
+        async select() { return 'codex'; },
         async prepare() { return { prompt: 'p', agent: 'codex', agentConfig: {} }; },
         async launch(request: { onAgentChanged?: (_agent: string) => Promise<void> }) {
           await request.onAgentChanged?.('claude');
@@ -358,7 +360,10 @@ describe("active persisted Mission", () => {
       service: new ExecuteMissionService(ports), rootDir: '/worktree', exitFn: () => {}, logFn: () => {}, errorFn: () => {},
     });
     try {
-      await started.promise;
+      await Promise.race([
+        started.promise,
+        execution.then(() => { throw new Error('active returned before reaching the held launch'); }),
+      ]);
       const snapshot = await fetch(`${web.origin}${WEB_SNAPSHOT_PATH}`);
       const wire = validateWebBoardSnapshot(await snapshot.json());
       assert.ok(wire.ok, 'the delivered snapshot must validate');
@@ -542,6 +547,7 @@ describe('active operator resume', () => {
         async resolveTaskFile() { return { ok: false }; }, async readTaskStatus() { return 'active'; }, async enforceCommitSafety() {},
       },
       agentExecution: {
+        async select() { return 'claude'; },
         async prepare() { return { prompt: 'execute', agent: 'claude', agentConfig: {} }; },
         async launch() {
           launches.push(1);

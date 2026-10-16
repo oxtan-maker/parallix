@@ -87,6 +87,14 @@ function fixture(): Fixture {
   };
 }
 
+function fixtureTest(name: string, options: { timeout: number }, body: (fx: Fixture) => Promise<void>) {
+  test(name, options, async context => {
+    const fx = fixture();
+    registerFixtureCleanup(context, () => fx.cleanup());
+    try { await body(fx); } finally { fx.cleanup(); }
+  });
+}
+
 function session(fx: Fixture, worktree: string, slug: string, family = 'codex', role = 'execute') {
   const run = openRunSession(
     { worktree, slug, role, family, attempt: 1, log: () => {} },
@@ -107,197 +115,170 @@ function waitFor(predicate: () => boolean, timeoutMs = 3000): void {
   }
 }
 
-test('the mission terminal capability captures live pane output and reports a missing session (TASK-2661, TASK-2749)', { timeout: 20000 }, async () => {
-  const fx = fixture();
-  try {
-    const worktree = fx.worktree('task-web');
-    const run = session(fx, worktree, 'task-web.1');
-    const release = path.join(fx.root, 'release');
-    const launch = spawnAndTee('sh', ['-c', `sleep 0.2; echo web-terminal-marker; while [ ! -e ${release} ]; do sleep 0.05; done`], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions });
-    waitFor(() => listTmuxSessions(missionSocketPath(run.identity, resolveConfiguration(fx.env))).length === 1);
-    const terminal = createMissionTerminalResources(worktree, { configuration: resolveConfiguration(fx.env), repositoryKeyFn: () => 'itrepo', resolveWorktreeFn: () => null });
-    // Session/window creation precedes command exec and its first rendered
-    // bytes. Wait for observable output, not merely the tmux server existing.
-    waitFor(() => {
-      const current = terminal.live('task-web.1');
-      return 'kind' in current && current.kind === 'live' && current.output.includes('web-terminal-marker');
-    });
-    assert.equal((terminal.overview('task-web.1') as { state: string }).state, 'live');
-    assert.deepEqual(terminal.live('task-absent'), { kind: 'not-live', probe: { kind: 'absent' } });
-    fs.writeFileSync(release, '');
-    run.finish(await launch);
-  } finally { fx.cleanup(); }
+fixtureTest('the mission terminal capability captures live pane output and reports a missing session (TASK-2661, TASK-2749)', { timeout: 20000 }, async fx => {
+  const worktree = fx.worktree('task-web');
+  const run = session(fx, worktree, 'task-web.1');
+  const release = path.join(fx.root, 'release');
+  const launch = spawnAndTee('sh', ['-c', `sleep 0.2; echo web-terminal-marker; while [ ! -e ${release} ]; do sleep 0.05; done`], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions });
+  waitFor(() => listTmuxSessions(missionSocketPath(run.identity, resolveConfiguration(fx.env))).length === 1);
+  const terminal = createMissionTerminalResources(worktree, { configuration: resolveConfiguration(fx.env), repositoryKeyFn: () => 'itrepo', resolveWorktreeFn: () => null });
+  // Session/window creation precedes command exec and its first rendered
+  // bytes. Wait for observable output, not merely the tmux server existing.
+  waitFor(() => {
+    const current = terminal.live('task-web.1');
+    return 'kind' in current && current.kind === 'live' && current.output.includes('web-terminal-marker');
+  });
+  assert.equal((terminal.overview('task-web.1') as { state: string }).state, 'live');
+  assert.deepEqual(terminal.live('task-absent'), { kind: 'not-live', probe: { kind: 'absent' } });
+  fs.writeFileSync(release, '');
+  run.finish(await launch);
 });
 
-test('hosted launch returns the agent exit status and keeps history beyond scrollback and the alternate screen', { timeout: 20000 }, async () => {
-  const fx = fixture();
-  try {
-    const worktree = fx.worktree('task-a');
-    const run = session(fx, worktree, 'task-a');
-    const script = 'echo first-line; i=0; while [ $i -lt 30000 ]; do echo "row $i"; i=$((i+1)); done; printf "\\033[?1049hALT-SCREEN-FAILURE E401\\033[?1049l\\n"; exit 4';
-    const result = await spawnAndTee('sh', ['-c', script], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions });
-    run.finish(result);
-    assert.equal(result.status, 4);
-    assert.equal(result.stdout.includes('first-line'), false, 'the in-memory tail has lost the start');
-    const found = searchRuns(scope(worktree, 'task-a'), { pattern: 'first-line' });
-    assert.equal(found.totalHits, 1, 'durable capture kept output tmux scrollback (history-limit 2000) drops');
-    assert.equal(searchRuns(scope(worktree, 'task-a'), { pattern: 'ALT-SCREEN-FAILURE' }).totalHits, 1);
-    assert.deepEqual(listTmuxSessions(missionSocketPath(run.identity, resolveConfiguration(fx.env))).map(s => s.name), ['task-a'], 'the mission terminal persists after exit');
-    assert.equal(fs.existsSync(missionSocketPath(run.identity, resolveConfiguration(fx.env))), true);
-  } finally { fx.cleanup(); }
+fixtureTest('hosted launch returns the agent exit status and keeps history beyond scrollback and the alternate screen', { timeout: 20000 }, async fx => {
+  const worktree = fx.worktree('task-a');
+  const run = session(fx, worktree, 'task-a');
+  const script = 'echo first-line; i=0; while [ $i -lt 30000 ]; do echo "row $i"; i=$((i+1)); done; printf "\\033[?1049hALT-SCREEN-FAILURE E401\\033[?1049l\\n"; exit 4';
+  const result = await spawnAndTee('sh', ['-c', script], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions });
+  run.finish(result);
+  assert.equal(result.status, 4);
+  assert.equal(result.stdout.includes('first-line'), false, 'the in-memory tail has lost the start');
+  const found = searchRuns(scope(worktree, 'task-a'), { pattern: 'first-line' });
+  assert.equal(found.totalHits, 1, 'durable capture kept output tmux scrollback (history-limit 2000) drops');
+  assert.equal(searchRuns(scope(worktree, 'task-a'), { pattern: 'ALT-SCREEN-FAILURE' }).totalHits, 1);
+  assert.deepEqual(listTmuxSessions(missionSocketPath(run.identity, resolveConfiguration(fx.env))).map(s => s.name), ['task-a'], 'the mission terminal persists after exit');
+  assert.equal(fs.existsSync(missionSocketPath(run.identity, resolveConfiguration(fx.env))), true);
 });
 
-test('concurrent Missions get separate servers and separate searchable history', { timeout: 20000 }, async () => {
-  const fx = fixture();
-  try {
-    const [a, b] = [fx.worktree('task-a'), fx.worktree('task-b')];
-    const runA = session(fx, a, 'task-a');
-    const runB = session(fx, b, 'task-b');
-    const launchA = spawnAndTee('sh', ['-c', 'echo MARK-A; sleep 0.4'], { cwd: a, stdoutSink: sink, stderrSink: sink, ...runA.teeOptions });
-    const launchB = spawnAndTee('sh', ['-c', 'echo MARK-B; sleep 0.4'], { cwd: b, stdoutSink: sink, stderrSink: sink, ...runB.teeOptions });
-    const socketA = missionSocketPath(runA.identity, resolveConfiguration(fx.env));
-    const socketB = missionSocketPath(runB.identity, resolveConfiguration(fx.env));
-    waitFor(() => listTmuxSessions(socketA).length === 1 && listTmuxSessions(socketB).length === 1);
-    assert.notEqual(socketA, socketB);
-    assert.deepEqual(listTmuxSessions(socketA).map(s => s.name), ['task-a']);
-    const [resultA, resultB] = await Promise.all([launchA, launchB]);
-    runA.finish(resultA);
-    runB.finish(resultB);
-    assert.equal(searchRuns(scope(a, 'task-a'), { pattern: 'MARK-B' }).totalHits, 0, 'Mission A cannot find Mission B output');
-    assert.equal(searchRuns(scope(b, 'task-b'), { pattern: 'MARK-B' }).totalHits, 1);
-  } finally { fx.cleanup(); }
+fixtureTest('concurrent Missions get separate servers and separate searchable history', { timeout: 20000 }, async fx => {
+  const [a, b] = [fx.worktree('task-a'), fx.worktree('task-b')];
+  const runA = session(fx, a, 'task-a');
+  const runB = session(fx, b, 'task-b');
+  const launchA = spawnAndTee('sh', ['-c', 'echo MARK-A; sleep 0.4'], { cwd: a, stdoutSink: sink, stderrSink: sink, ...runA.teeOptions });
+  const launchB = spawnAndTee('sh', ['-c', 'echo MARK-B; sleep 0.4'], { cwd: b, stdoutSink: sink, stderrSink: sink, ...runB.teeOptions });
+  const socketA = missionSocketPath(runA.identity, resolveConfiguration(fx.env));
+  const socketB = missionSocketPath(runB.identity, resolveConfiguration(fx.env));
+  waitFor(() => listTmuxSessions(socketA).length === 1 && listTmuxSessions(socketB).length === 1);
+  assert.notEqual(socketA, socketB);
+  assert.deepEqual(listTmuxSessions(socketA).map(s => s.name), ['task-a']);
+  const [resultA, resultB] = await Promise.all([launchA, launchB]);
+  runA.finish(resultA);
+  runB.finish(resultB);
+  assert.equal(searchRuns(scope(a, 'task-a'), { pattern: 'MARK-B' }).totalHits, 0, 'Mission A cannot find Mission B output');
+  assert.equal(searchRuns(scope(b, 'task-b'), { pattern: 'MARK-B' }).totalHits, 1);
 });
 
-test('cancellation by signal kills the owned agent and preserves the mission terminal', { timeout: 20000 }, async () => {
-  const fx = fixture();
-  try {
-    const worktree = fx.worktree('task-c');
-    const run = session(fx, worktree, 'task-c');
-    const pidFile = path.join(fx.root, 'agent.pid');
-    let hostPid = 0;
-    const launch = spawnAndTee('sh', ['-c', `cat >/dev/null; echo $$ > ${pidFile}; exec sleep 30`], {
-      cwd: worktree, input: 'oversized 修复 🌍\n'.repeat(20000), stdoutSink: sink, stderrSink: sink, ...run.teeOptions,
-      onSpawn: (child: { pid?: number }) => { hostPid = child.pid ?? 0; },
-    });
-    waitFor(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() !== '');
-    const agentPid = Number(fs.readFileSync(pidFile, 'utf8'));
-    process.kill(hostPid, 'SIGTERM');
-    const result = await launch;
-    run.finish(result);
-    assert.equal(result.status, 143);
-    waitFor(() => { try { process.kill(agentPid, 0); return false; } catch { return true; } });
-    assert.deepEqual(listTmuxSessions(missionSocketPath(run.identity, resolveConfiguration(fx.env))).map(s => s.name), [run.identity.missionId]);
-  } finally { fx.cleanup(); }
+fixtureTest('cancellation by signal kills the owned agent and preserves the mission terminal', { timeout: 20000 }, async fx => {
+  const worktree = fx.worktree('task-c');
+  const run = session(fx, worktree, 'task-c');
+  const pidFile = path.join(fx.root, 'agent.pid');
+  let hostPid = 0;
+  const launch = spawnAndTee('sh', ['-c', `cat >/dev/null; echo $$ > ${pidFile}; exec sleep 30`], {
+    cwd: worktree, input: 'oversized 修复 🌍\n'.repeat(20000), stdoutSink: sink, stderrSink: sink, ...run.teeOptions,
+    onSpawn: (child: { pid?: number }) => { hostPid = child.pid ?? 0; },
+  });
+  waitFor(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() !== '');
+  const agentPid = Number(fs.readFileSync(pidFile, 'utf8'));
+  process.kill(hostPid, 'SIGTERM');
+  const result = await launch;
+  run.finish(result);
+  assert.equal(result.status, 143);
+  waitFor(() => { try { process.kill(agentPid, 0); return false; } catch { return true; } });
+  assert.deepEqual(listTmuxSessions(missionSocketPath(run.identity, resolveConfiguration(fx.env))).map(s => s.name), [run.identity.missionId]);
 });
 
-test('a hosted launch reads an oversized prompt byte-for-byte from stdin and leaves no prompt file behind (TASK-2760)', { timeout: 20000 }, async () => {
-  const fx = fixture();
-  try {
-    const worktree = fx.worktree('task-in');
-    const run = session(fx, worktree, 'task-in');
-    const receipt = path.join(fx.root, 'receipt');
-    const prompt = 'hosted recovery — 修复 🚀\n'.repeat(8000);
-    assert.ok(Buffer.byteLength(prompt) > 188_583);
-    const result = await spawnAndTee('sh', ['-c', `cat > ${receipt}; echo hosted-stdin-done`], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions, input: prompt });
-    run.finish(result);
-    assert.equal(result.status, 0);
-    assert.ok(fs.readFileSync(receipt).equals(Buffer.from(prompt)), 'the pane command reads the exact prompt and EOF');
-    assert.match(result.stdout, /hosted-stdin-done/);
-    const state = fx.env.PARALLIX_TERMINAL_STATE_DIR!;
-    const leftovers = fs.readdirSync(state, { recursive: true }).map(String).filter(name => path.basename(name) === 'stdin');
-    assert.deepEqual(leftovers, [], 'the private prompt file is removed');
-  } finally { fx.cleanup(); }
+fixtureTest('a hosted launch reads an oversized prompt byte-for-byte from stdin and leaves no prompt file behind (TASK-2760)', { timeout: 20000 }, async fx => {
+  const worktree = fx.worktree('task-in');
+  const run = session(fx, worktree, 'task-in');
+  const receipt = path.join(fx.root, 'receipt');
+  const prompt = 'hosted recovery — 修复 🚀\n'.repeat(8000);
+  assert.ok(Buffer.byteLength(prompt) > 188_583);
+  const result = await spawnAndTee('sh', ['-c', `cat > ${receipt}; echo hosted-stdin-done`], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions, input: prompt });
+  run.finish(result);
+  assert.equal(result.status, 0);
+  assert.ok(fs.readFileSync(receipt).equals(Buffer.from(prompt)), 'the pane command reads the exact prompt and EOF');
+  assert.match(result.stdout, /hosted-stdin-done/);
+  const state = fx.env.PARALLIX_TERMINAL_STATE_DIR!;
+  const leftovers = fs.readdirSync(state, { recursive: true }).map(String).filter(name => path.basename(name) === 'stdin');
+  assert.deepEqual(leftovers, [], 'the private prompt file is removed');
 });
 
-test('a launch the pane cannot start reports the failure and cleans up', { timeout: 20000 }, async () => {
-  const fx = fixture();
-  try {
-    const worktree = fx.worktree('task-f');
-    const run = session(fx, worktree, 'task-f');
-    const result = await spawnAndTee('/nonexistent/agent-cli', ['--x'], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions });
-    run.finish(result);
-    assert.equal(result.status, 127, 'command-not-found propagates as the launch status');
-    assert.deepEqual(listTmuxSessions(missionSocketPath(run.identity, resolveConfiguration(fx.env))).map(s => s.name), [run.identity.missionId]);
-    assert.equal(listRuns(scope(worktree, 'task-f'))[0].record.exitCode, 127);
-  } finally { fx.cleanup(); }
+fixtureTest('a launch the pane cannot start reports the failure and cleans up', { timeout: 20000 }, async fx => {
+  const worktree = fx.worktree('task-f');
+  const run = session(fx, worktree, 'task-f');
+  const result = await spawnAndTee('/nonexistent/agent-cli', ['--x'], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions });
+  run.finish(result);
+  assert.equal(result.status, 127, 'command-not-found propagates as the launch status');
+  assert.deepEqual(listTmuxSessions(missionSocketPath(run.identity, resolveConfiguration(fx.env))).map(s => s.name), [run.identity.missionId]);
+  assert.equal(listRuns(scope(worktree, 'task-f'))[0].record.exitCode, 127);
 });
 
-test('after a harness crash the orphaned session is adopted, stopped, and its history reads interrupted', { timeout: 20000 }, async () => {
-  const fx = fixture();
-  try {
-    const worktree = fx.worktree('task-r');
-    // A child "harness" opens the run session and launches, then is SIGKILLed.
-    const harness = `
-      import { resolveConfiguration } from ${JSON.stringify(path.join(REPO_ROOT, 'src/composition/config.ts'))};
-      import { openRunSession } from ${JSON.stringify(path.join(REPO_ROOT, 'src/adapters/agents/run-session.ts'))};
-      import { spawnAndTee } from ${JSON.stringify(path.join(REPO_ROOT, 'src/adapters/process/spawn-tee.ts'))};
-      const run = openRunSession({ worktree: ${JSON.stringify(worktree)}, slug: 'task-r', role: 'execute', family: 'codex', attempt: 1, log: () => {} },
-        { configuration: resolveConfiguration(process.env), interactive: true, config: () => ({ host: 'tmux', whenUnavailable: 'fail' }), repositoryKey: () => 'itrepo' });
-      spawnAndTee('sh', ['-c', 'echo crash-marker; sleep 30'], { cwd: ${JSON.stringify(worktree)}, stdoutSink: { write: () => true }, stderrSink: { write: () => true }, ...run.teeOptions });
-      setInterval(() => {}, 1000);
-    `;
-    const child = childProcess.spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', harness], { env: fx.env, stdio: 'ignore', cwd: REPO_ROOT });
-    fx.own(child);
-    const socket = missionSocketPath({ repositoryKey: 'itrepo', missionId: 'task-r' }, resolveConfiguration(fx.env));
-    waitFor(() => listTmuxSessions(socket).length === 1, 10000);
-    waitFor(() => searchRuns(scope(worktree, 'task-r'), { pattern: 'crash-marker' }).totalHits === 1, 5000);
-    // Only the harness dies; its host script and the pane keep running.
-    const exited = new Promise(resolve => child.on('exit', resolve));
-    process.kill(child.pid!, 'SIGKILL');
-    await exited;
-    const orphan = listTmuxSessions(socket);
-    assert.equal(orphan.length, 1, 'the session outlived its supervisor');
-    const killed = reconcileOrphanSessions({ repositoryKey: 'itrepo', missionId: 'task-r', role: 'execute' }, { configuration: resolveConfiguration(fx.env) });
-    assert.equal(killed.length, 1);
-    assert.match(killed[0], /^execute-codex-/);
-    assert.deepEqual(listTmuxSessions(socket).map(s => s.name), ['task-r']);
-    const [record] = listRuns(scope(worktree, 'task-r'));
-    assert.equal(record.state, 'interrupted');
-    assert.ok(record.coverage.some(line => /interrupted/.test(line)));
-  } finally { fx.cleanup(); }
+fixtureTest('after a harness crash the orphaned session is adopted, stopped, and its history reads interrupted', { timeout: 20000 }, async fx => {
+  const worktree = fx.worktree('task-r');
+  // A child "harness" opens the run session and launches, then is SIGKILLed.
+  const harness = `
+    import { resolveConfiguration } from ${JSON.stringify(path.join(REPO_ROOT, 'src/composition/config.ts'))};
+    import { openRunSession } from ${JSON.stringify(path.join(REPO_ROOT, 'src/adapters/agents/run-session.ts'))};
+    import { spawnAndTee } from ${JSON.stringify(path.join(REPO_ROOT, 'src/adapters/process/spawn-tee.ts'))};
+    const run = openRunSession({ worktree: ${JSON.stringify(worktree)}, slug: 'task-r', role: 'execute', family: 'codex', attempt: 1, log: () => {} },
+      { configuration: resolveConfiguration(process.env), interactive: true, config: () => ({ host: 'tmux', whenUnavailable: 'fail' }), repositoryKey: () => 'itrepo' });
+    spawnAndTee('sh', ['-c', 'echo crash-marker; sleep 30'], { cwd: ${JSON.stringify(worktree)}, stdoutSink: { write: () => true }, stderrSink: { write: () => true }, ...run.teeOptions });
+    setInterval(() => {}, 1000);
+  `;
+  const child = childProcess.spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', harness], { env: fx.env, stdio: 'ignore', cwd: REPO_ROOT });
+  fx.own(child);
+  const socket = missionSocketPath({ repositoryKey: 'itrepo', missionId: 'task-r' }, resolveConfiguration(fx.env));
+  waitFor(() => listTmuxSessions(socket).length === 1, 10000);
+  waitFor(() => searchRuns(scope(worktree, 'task-r'), { pattern: 'crash-marker' }).totalHits === 1, 5000);
+  // Only the harness dies; its host script and the pane keep running.
+  const exited = new Promise(resolve => child.on('exit', resolve));
+  process.kill(child.pid!, 'SIGKILL');
+  await exited;
+  const orphan = listTmuxSessions(socket);
+  assert.equal(orphan.length, 1, 'the session outlived its supervisor');
+  const killed = reconcileOrphanSessions({ repositoryKey: 'itrepo', missionId: 'task-r', role: 'execute' }, { configuration: resolveConfiguration(fx.env) });
+  assert.equal(killed.length, 1);
+  assert.match(killed[0], /^execute-codex-/);
+  assert.deepEqual(listTmuxSessions(socket).map(s => s.name), ['task-r']);
+  const [record] = listRuns(scope(worktree, 'task-r'));
+  assert.equal(record.state, 'interrupted');
+  assert.ok(record.coverage.some(line => /interrupted/.test(line)));
 });
 
-test('an operator can attach, detach without stopping the run, and reconnect', { timeout: 20000 }, async () => {
-  const fx = fixture();
-  try {
-    const worktree = fx.worktree('task-t');
-    const run = session(fx, worktree, 'task-t');
-    const release = path.join(fx.root, 'release');
-    const launch = spawnAndTee('sh', ['-c', `echo attach-me; while [ ! -e ${release} ]; do sleep 0.05; done; echo released`], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions });
-    const socket = missionSocketPath(run.identity, resolveConfiguration(fx.env));
-    waitFor(() => listTmuxSessions(socket).length === 1);
-    const name = listTmuxSessions(socket)[0].name;
-    for (const round of [1, 2]) {
-      // `script` gives the attaching client the terminal tmux requires.
-      const client = childProcess.spawn('script', ['-qfc', ['tmux', ...tmuxAttachArgs(socket, name, true)].join(' '), '/dev/null'], { env: { ...fx.env, TERM: 'xterm' }, stdio: 'ignore' });
-      fx.own(client);
-      waitFor(() => listTmuxSessions(socket).some(s => s.attached));
-      childProcess.spawnSync('tmux', ['-S', socket, 'detach-client', '-s', name]);
-      await new Promise(resolve => client.on('exit', resolve));
-      assert.equal(listTmuxSessions(socket).length, 1, `round ${round}: detaching leaves the run alive`);
-    }
-    fs.writeFileSync(release, '');
-    const result = await launch;
-    run.finish(result);
-    assert.equal(result.status, 0);
-    assert.equal(searchRuns(scope(worktree, 'task-t'), { pattern: 'released' }).totalHits, 1);
-  } finally { fx.cleanup(); }
+fixtureTest('an operator can attach, detach without stopping the run, and reconnect', { timeout: 20000 }, async fx => {
+  const worktree = fx.worktree('task-t');
+  const run = session(fx, worktree, 'task-t');
+  const release = path.join(fx.root, 'release');
+  const launch = spawnAndTee('sh', ['-c', `echo attach-me; while [ ! -e ${release} ]; do sleep 0.05; done; echo released`], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions });
+  const socket = missionSocketPath(run.identity, resolveConfiguration(fx.env));
+  waitFor(() => listTmuxSessions(socket).length === 1);
+  const name = listTmuxSessions(socket)[0].name;
+  for (const round of [1, 2]) {
+    // `script` gives the attaching client the terminal tmux requires.
+    const client = childProcess.spawn('script', ['-qfc', ['tmux', ...tmuxAttachArgs(socket, name, true)].join(' '), '/dev/null'], { env: { ...fx.env, TERM: 'xterm' }, stdio: 'ignore' });
+    fx.own(client);
+    waitFor(() => listTmuxSessions(socket).some(s => s.attached));
+    childProcess.spawnSync('tmux', ['-S', socket, 'detach-client', '-s', name]);
+    await new Promise(resolve => client.on('exit', resolve));
+    assert.equal(listTmuxSessions(socket).length, 1, `round ${round}: detaching leaves the run alive`);
+  }
+  fs.writeFileSync(release, '');
+  const result = await launch;
+  run.finish(result);
+  assert.equal(result.status, 0);
+  assert.equal(searchRuns(scope(worktree, 'task-t'), { pattern: 'released' }).totalHits, 1);
 });
 
-test('a Bubblewrap-confined agent cannot reach the Mission tmux socket', { timeout: 20000 }, async () => {
-  const fx = fixture();
-  try {
-    const worktree = fx.worktree('task-s');
-    const run = session(fx, worktree, 'task-s');
-    const launch = spawnAndTee('sh', ['-c', 'sleep 1'], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions });
-    const socket = missionSocketPath(run.identity, resolveConfiguration(fx.env));
-    waitFor(() => listTmuxSessions(socket).length === 1);
-    const args = buildBubblewrapArgs(resolveSandboxProfile('active', worktree, null, null, resolveConfiguration(fx.env)), worktree);
-    const probe = childProcess.spawnSync('bwrap', [...args, 'tmux', '-S', socket, 'list-sessions'], { encoding: 'utf8' });
-    assert.notEqual(probe.status, 0, 'the confined process must not list sessions');
-    assert.match(probe.stderr, /No such file|error connecting/);
-    run.finish(await launch);
-  } finally { fx.cleanup(); }
+fixtureTest('a Bubblewrap-confined agent cannot reach the Mission tmux socket', { timeout: 20000 }, async fx => {
+  const worktree = fx.worktree('task-s');
+  const run = session(fx, worktree, 'task-s');
+  const launch = spawnAndTee('sh', ['-c', 'sleep 1'], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions });
+  const socket = missionSocketPath(run.identity, resolveConfiguration(fx.env));
+  waitFor(() => listTmuxSessions(socket).length === 1);
+  const args = buildBubblewrapArgs(resolveSandboxProfile('active', worktree, null, null, resolveConfiguration(fx.env)), worktree);
+  const probe = childProcess.spawnSync('bwrap', [...args, 'tmux', '-S', socket, 'list-sessions'], { encoding: 'utf8' });
+  assert.notEqual(probe.status, 0, 'the confined process must not list sessions');
+  assert.match(probe.stderr, /No such file|error connecting/);
+  run.finish(await launch);
 });
 
 
@@ -349,29 +330,26 @@ test('automatic command hosting includes harness and agent output in one persist
   }
 });
 
-test('roles and fallback attempts share a mission session and keep independent operation windows (TASK-2643)', { timeout: 20000 }, async () => {
-  const fx = fixture();
-  try {
-    const worktree = fx.worktree('roles');
-    const execute = session(fx, worktree, 'adhoc-roles');
-    const review = session(fx, worktree, 'adhoc-roles', 'claude', 'review');
-    const release = path.join(fx.root, 'release');
-    const launches = [execute, review].map(run => spawnAndTee('sh', ['-c', `echo ${run.identity.role}; while [ ! -e ${shellQuote(release)} ]; do sleep 0.05; done`], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions }));
-    const socket = missionSocketPath(execute.identity, resolveConfiguration(fx.env));
-    waitFor(() => childProcess.spawnSync('tmux', ['-S', socket, 'list-windows', '-F', '#{window_name}'], { encoding: 'utf8' }).stdout.trim().split('\n').length === 3);
-    assert.deepEqual(listTmuxSessions(socket).map(s => s.name), ['adhoc-roles']);
-    assert.throws(() => closeMissionTerminal(socket, 'adhoc-roles'), /owned operation/);
-    fs.writeFileSync(release, '');
-    const results = await Promise.all(launches);
-    results.forEach((result, index) => { [execute, review][index].finish(result); assert.equal(result.status, 0); });
-    const fallback = session(fx, worktree, 'adhoc-roles', 'qwen');
-    const result = await spawnAndTee('sh', ['-c', 'echo FALLBACK'], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...fallback.teeOptions });
-    fallback.finish(result);
-    assert.equal(result.status, 0);
-    assert.deepEqual(listTmuxSessions(socket).map(s => s.name), ['adhoc-roles']);
-    assert.deepEqual(reconcileOrphanSessions(execute.identity, { configuration: resolveConfiguration(fx.env) }), [], 'idle windows survive reconciliation');
-    closeMissionTerminal(socket, 'adhoc-roles');
-  } finally { fx.cleanup(); }
+fixtureTest('roles and fallback attempts share a mission session and keep independent operation windows (TASK-2643)', { timeout: 20000 }, async fx => {
+  const worktree = fx.worktree('roles');
+  const execute = session(fx, worktree, 'adhoc-roles');
+  const review = session(fx, worktree, 'adhoc-roles', 'claude', 'review');
+  const release = path.join(fx.root, 'release');
+  const launches = [execute, review].map(run => spawnAndTee('sh', ['-c', `echo ${run.identity.role}; while [ ! -e ${shellQuote(release)} ]; do sleep 0.05; done`], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions }));
+  const socket = missionSocketPath(execute.identity, resolveConfiguration(fx.env));
+  waitFor(() => childProcess.spawnSync('tmux', ['-S', socket, 'list-windows', '-F', '#{window_name}'], { encoding: 'utf8' }).stdout.trim().split('\n').length === 3);
+  assert.deepEqual(listTmuxSessions(socket).map(s => s.name), ['adhoc-roles']);
+  assert.throws(() => closeMissionTerminal(socket, 'adhoc-roles'), /owned operation/);
+  fs.writeFileSync(release, '');
+  const results = await Promise.all(launches);
+  results.forEach((result, index) => { [execute, review][index].finish(result); assert.equal(result.status, 0); });
+  const fallback = session(fx, worktree, 'adhoc-roles', 'qwen');
+  const result = await spawnAndTee('sh', ['-c', 'echo FALLBACK'], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...fallback.teeOptions });
+  fallback.finish(result);
+  assert.equal(result.status, 0);
+  assert.deepEqual(listTmuxSessions(socket).map(s => s.name), ['adhoc-roles']);
+  assert.deepEqual(reconcileOrphanSessions(execute.identity, { configuration: resolveConfiguration(fx.env) }), [], 'idle windows survive reconciliation');
+  closeMissionTerminal(socket, 'adhoc-roles');
 });
 
 test('automatic command hosting returns the pipe path when tmux is missing (TASK-2643)', { timeout: 20000 }, async () => {
@@ -493,60 +471,54 @@ test('successful review completion leaves the operator attached to the retained 
   } finally { fx.cleanup(); }
 });
 
-test('a failed integration gate remains recoverable with its output and exit code after terminal cleanup (TASK-2670)', { timeout: 20000 }, async () => {
-  const fx = fixture();
+fixtureTest('a failed integration gate remains recoverable with its output and exit code after terminal cleanup (TASK-2670)', { timeout: 20000 }, async fx => {
+  const worktree = fx.worktree('integration-gate-retained');
+  const identity = agentRunIdentity({ repositoryKey: 'itrepo', missionId: 'task-integration-gate-retained', role: 'integrate', family: 'parallix', attempt: 1, startedAtMs: Date.now() });
+  const launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: 'sh', args: ['-c', 'echo "Integration gate static-analysis failed"; echo GATE-OUTPUT >&2; exit 42'], cwd: worktree, env: fx.env }, { configuration: resolveConfiguration(fx.env) });
   try {
-    const worktree = fx.worktree('integration-gate-retained');
-    const identity = agentRunIdentity({ repositoryKey: 'itrepo', missionId: 'task-integration-gate-retained', role: 'integrate', family: 'parallix', attempt: 1, startedAtMs: Date.now() });
-    const launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: 'sh', args: ['-c', 'echo "Integration gate static-analysis failed"; echo GATE-OUTPUT >&2; exit 42'], cwd: worktree, env: fx.env }, { configuration: resolveConfiguration(fx.env) });
-    try {
-      assert.equal(await superviseTmuxLaunch(launch), 42);
-    } finally { launch.cleanup(); }
-    closeMissionTerminal(launch.socketPath, identity.missionId);
-    const capture = fs.readFileSync(missionTerminalCapturePath(identity, resolveConfiguration(fx.env)), 'utf8');
-    assert.match(capture, /Integration gate static-analysis failed/);
-    assert.match(capture, /GATE-OUTPUT/);
-    assert.match(capture, /exit code: 42/);
-    const output: string[] = [];
-    attachRun({ slug: identity.missionId, list: true, readOnly: false }, {
-      inferSlugFn: () => null, resolveWorktreeFn: () => null, repositoryKeyFn: () => identity.repositoryKey, checkout: worktree,
-      configuration: resolveConfiguration(fx.env), log: line => output.push(line),
-    });
-    assert.match(output.join('\n'), /task-integration-gate-retained {2}terminal=no live terminal/, 'operator discovery survives mission-worktree cleanup');
-    assert.doesNotMatch(output.join('\n'), /\.log|\.sock/, 'the private unredacted transcript is never pointed to');
-  } finally { fx.cleanup(); }
+    assert.equal(await superviseTmuxLaunch(launch), 42);
+  } finally { launch.cleanup(); }
+  closeMissionTerminal(launch.socketPath, identity.missionId);
+  const capture = fs.readFileSync(missionTerminalCapturePath(identity, resolveConfiguration(fx.env)), 'utf8');
+  assert.match(capture, /Integration gate static-analysis failed/);
+  assert.match(capture, /GATE-OUTPUT/);
+  assert.match(capture, /exit code: 42/);
+  const output: string[] = [];
+  attachRun({ slug: identity.missionId, list: true, readOnly: false }, {
+    inferSlugFn: () => null, resolveWorktreeFn: () => null, repositoryKeyFn: () => identity.repositoryKey, checkout: worktree,
+    configuration: resolveConfiguration(fx.env), log: line => output.push(line),
+  });
+  assert.match(output.join('\n'), /task-integration-gate-retained {2}terminal=no live terminal/, 'operator discovery survives mission-worktree cleanup');
+  assert.doesNotMatch(output.join('\n'), /\.log|\.sock/, 'the private unredacted transcript is never pointed to');
 });
 
-test('a landed integration retains its final result and application statistics after terminal retirement (TASK-2670)', { timeout: 20000 }, async () => {
-  const fx = fixture();
+fixtureTest('a landed integration retains its final result and application statistics after terminal retirement (TASK-2670)', { timeout: 20000 }, async fx => {
+  const worktree = fx.worktree('integration-result-retained');
+  const identity = agentRunIdentity({ repositoryKey: 'itrepo', missionId: 'task-integration-result-retained', role: 'integrate', family: 'parallix', attempt: 1, startedAtMs: Date.now() });
+  const closeout = path.join(fx.root, 'closeout.mjs');
+  fs.writeFileSync(closeout, `
+    import { recordPostIntegrationStats } from ${JSON.stringify(path.join(REPO_ROOT, 'src/adapters/cli/commands/integrate-post.ts'))};
+    await recordPostIntegrationStats('task-result', { rootDir: ${JSON.stringify(worktree)}, missionStore: null, recordIntegrationStatsFn: async () => ({
+      row: { mission: 'task-result', implementer: 'codex', pr_fix_rounds: '2', classification: 'ai_sdlc', date: '2026-10-06' },
+      report: 'weekly report: PR decisions unavailable'
+    }) });
+    const row = Object.freeze({ mission: 'task-result', implementer: null, classification: null, date: null });
+    const outcome = await recordPostIntegrationStats('task-result', { rootDir: ${JSON.stringify(worktree)}, missionStore: null, recordIntegrationStatsFn: async () => ({ row, report: 'weekly report' }) });
+    if (outcome.row !== row || 'pr_fix_rounds' in row) throw new Error('stored row changed');
+    console.log('Integration complete: local main updated');
+  `);
+  const launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: process.execPath, args: ['--import', path.join(REPO_ROOT, 'node_modules/tsx/dist/loader.mjs'), closeout], cwd: worktree, env: fx.env }, { configuration: resolveConfiguration(fx.env) });
   try {
-    const worktree = fx.worktree('integration-result-retained');
-    const identity = agentRunIdentity({ repositoryKey: 'itrepo', missionId: 'task-integration-result-retained', role: 'integrate', family: 'parallix', attempt: 1, startedAtMs: Date.now() });
-    const closeout = path.join(fx.root, 'closeout.mjs');
-    fs.writeFileSync(closeout, `
-      import { recordPostIntegrationStats } from ${JSON.stringify(path.join(REPO_ROOT, 'src/adapters/cli/commands/integrate-post.ts'))};
-      await recordPostIntegrationStats('task-result', { rootDir: ${JSON.stringify(worktree)}, missionStore: null, recordIntegrationStatsFn: async () => ({
-        row: { mission: 'task-result', implementer: 'codex', pr_fix_rounds: '2', classification: 'ai_sdlc', date: '2026-10-06' },
-        report: 'weekly report: PR decisions unavailable'
-      }) });
-      const row = Object.freeze({ mission: 'task-result', implementer: null, classification: null, date: null });
-      const outcome = await recordPostIntegrationStats('task-result', { rootDir: ${JSON.stringify(worktree)}, missionStore: null, recordIntegrationStatsFn: async () => ({ row, report: 'weekly report' }) });
-      if (outcome.row !== row || 'pr_fix_rounds' in row) throw new Error('stored row changed');
-      console.log('Integration complete: local main updated');
-    `);
-    const launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: process.execPath, args: ['--import', path.join(REPO_ROOT, 'node_modules/tsx/dist/loader.mjs'), closeout], cwd: worktree, env: fx.env }, { configuration: resolveConfiguration(fx.env) });
-    try {
-      assert.equal(await superviseTmuxLaunch(launch), 0);
-      retireMissionTerminal(launch.socketPath, identity.missionId);
-    } finally { launch.cleanup(); }
-    const capture = fs.readFileSync(missionTerminalCapturePath(identity, resolveConfiguration(fx.env)), 'utf8');
-    assert.match(capture, /Integration complete: local main updated/);
-    assert.match(capture, /Workflow stats recorded: task-result: implementer=codex, pr_fix_rounds=2, classification=ai_sdlc/);
-    assert.match(capture, /Workflow stats recorded: task-result: implementer=n\/a, pr_fix_rounds=n\/a, classification=n\/a, date=n\/a/);
-    assert.doesNotMatch(capture, /undefined/);
-    assert.match(capture, /PR decisions unavailable/);
-    assert.match(capture, /exit code: 0/);
-  } finally { fx.cleanup(); }
+    assert.equal(await superviseTmuxLaunch(launch), 0);
+    retireMissionTerminal(launch.socketPath, identity.missionId);
+  } finally { launch.cleanup(); }
+  const capture = fs.readFileSync(missionTerminalCapturePath(identity, resolveConfiguration(fx.env)), 'utf8');
+  assert.match(capture, /Integration complete: local main updated/);
+  assert.match(capture, /Workflow stats recorded: task-result: implementer=codex, pr_fix_rounds=2, classification=ai_sdlc/);
+  assert.match(capture, /Workflow stats recorded: task-result: implementer=n\/a, pr_fix_rounds=n\/a, classification=n\/a, date=n\/a/);
+  assert.doesNotMatch(capture, /undefined/);
+  assert.match(capture, /PR decisions unavailable/);
+  assert.match(capture, /exit code: 0/);
 });
 
 
@@ -806,76 +778,70 @@ test('a host whose harness pipe is gone still stops its command when the termina
   } finally { fx.cleanup(); }
 });
 
-test('hosted Claude launch shows readable presentation in the live pane and transcript while the raw stream stays intact (TASK-2735)', { timeout: 30000 }, async () => {
-  const fx = fixture();
-  try {
-    const worktree = fx.worktree('task-claude');
-    const run = session(fx, worktree, 'task-claude', 'claude');
-    const bin = path.join(fx.root, 'bin');
-    fs.mkdirSync(bin);
-    const stream = path.join(fx.root, 'stream.jsonl');
-    const release = path.join(fx.root, 'release');
-    fs.writeFileSync(stream, CLAUDE_STREAM_FIXTURE);
-    fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/sh\ncat ${shellQuote(stream)}\nwhile [ ! -e ${shellQuote(release)} ]; do sleep 0.05; done\n`, { mode: 0o700 });
-    const { resultPromise } = startClaudeAgent({
-      prompt: 'p', worktree, configuration: resolveConfiguration(fx.env),
-      env: { PATH: `${bin}${path.delimiter}${process.env.PATH}` },
-      teeOptions: { ...run.teeOptions, stdoutSink: sink, stderrSink: sink },
-    });
-    const terminal = createMissionTerminalResources(worktree, { configuration: resolveConfiguration(fx.env), repositoryKeyFn: () => 'itrepo', resolveWorktreeFn: () => null });
-    const paneText = () => { const live = terminal.live('task-claude'); return 'kind' in live && live.kind === 'live' ? live.output : ''; };
-    // Presenter cold starts measured up to 5.6 s under workstation load;
-    // retain the 12 s hang bound and 250 ms polling to limit tmux CPU cost.
-    // Yield to the host's pipe handlers and wait for both rendered records.
-    const deadline = Date.now() + 12_000;
-    let pane = paneText();
-    while ((!pane.includes('Checking the launcher wiring') || !pane.includes('ls src/adapters')) && Date.now() < deadline) {
-      await delay(250);
-      pane = paneText();
-    }
-    fs.writeFileSync(release, '');
-    const result = await resultPromise;
-    run.finish(result);
-    assert.match(pane, /Checking the launcher wiring/, 'live pane shows assistant text');
-    assert.match(pane, /ls src\/adapters/, 'live pane shows tool activity');
-    assert.doesNotMatch(pane, /stream_event|"type":"assistant"/, 'live pane carries no JSON envelopes');
-    const transcript = fs.readFileSync(missionTerminalCapturePath({ ...run.identity, repositoryKey: 'itrepo' }, resolveConfiguration(fx.env)), 'utf8');
-    assert.match(transcript, /Checking the launcher wiring/);
-    assert.doesNotMatch(transcript, /stream_event/);
-    assert.equal(result.sessionId, 'sess-2461', 'session id is extracted from the raw stream');
-    assert.ok(result.stdout);
-    assert.ok(result.stdout.includes('"type":"stream_event"'), 'telemetry tail keeps the raw JSONL');
-    for (const line of CLAUDE_STREAM_FIXTURE.split('\n').filter(l => l.startsWith('{'))) { assert.ok(result.stdout.includes(line), 'raw record intact'); }
-  } finally { fx.cleanup(); }
+fixtureTest('hosted Claude launch shows readable presentation in the live pane and transcript while the raw stream stays intact (TASK-2735)', { timeout: 30000 }, async fx => {
+  const worktree = fx.worktree('task-claude');
+  const run = session(fx, worktree, 'task-claude', 'claude');
+  const bin = path.join(fx.root, 'bin');
+  fs.mkdirSync(bin);
+  const stream = path.join(fx.root, 'stream.jsonl');
+  const release = path.join(fx.root, 'release');
+  fs.writeFileSync(stream, CLAUDE_STREAM_FIXTURE);
+  fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/sh\ncat ${shellQuote(stream)}\nwhile [ ! -e ${shellQuote(release)} ]; do sleep 0.05; done\n`, { mode: 0o700 });
+  const { resultPromise } = startClaudeAgent({
+    prompt: 'p', worktree, configuration: resolveConfiguration(fx.env),
+    env: { PATH: `${bin}${path.delimiter}${process.env.PATH}` },
+    teeOptions: { ...run.teeOptions, stdoutSink: sink, stderrSink: sink },
+  });
+  const terminal = createMissionTerminalResources(worktree, { configuration: resolveConfiguration(fx.env), repositoryKeyFn: () => 'itrepo', resolveWorktreeFn: () => null });
+  const paneText = () => { const live = terminal.live('task-claude'); return 'kind' in live && live.kind === 'live' ? live.output : ''; };
+  // Presenter cold starts measured up to 5.6 s under workstation load;
+  // retain the 12 s hang bound and 250 ms polling to limit tmux CPU cost.
+  // Yield to the host's pipe handlers and wait for both rendered records.
+  const deadline = Date.now() + 12_000;
+  let pane = paneText();
+  while ((!pane.includes('Checking the launcher wiring') || !pane.includes('ls src/adapters')) && Date.now() < deadline) {
+    await delay(250);
+    pane = paneText();
+  }
+  fs.writeFileSync(release, '');
+  const result = await resultPromise;
+  run.finish(result);
+  assert.match(pane, /Checking the launcher wiring/, 'live pane shows assistant text');
+  assert.match(pane, /ls src\/adapters/, 'live pane shows tool activity');
+  assert.doesNotMatch(pane, /stream_event|"type":"assistant"/, 'live pane carries no JSON envelopes');
+  const transcript = fs.readFileSync(missionTerminalCapturePath({ ...run.identity, repositoryKey: 'itrepo' }, resolveConfiguration(fx.env)), 'utf8');
+  assert.match(transcript, /Checking the launcher wiring/);
+  assert.doesNotMatch(transcript, /stream_event/);
+  assert.equal(result.sessionId, 'sess-2461', 'session id is extracted from the raw stream');
+  assert.ok(result.stdout);
+  assert.ok(result.stdout.includes('"type":"stream_event"'), 'telemetry tail keeps the raw JSONL');
+  for (const line of CLAUDE_STREAM_FIXTURE.split('\n').filter(l => l.startsWith('{'))) { assert.ok(result.stdout.includes(line), 'raw record intact'); }
 });
 
-test('presented Claude launch keeps the agent exit status and stops the agent on cancellation (TASK-2735)', { timeout: 20000 }, async () => {
-  const fx = fixture();
-  try {
-    const worktree = fx.worktree('task-claude-x');
-    const bin = path.join(fx.root, 'bin');
-    fs.mkdirSync(bin);
-    const pidFile = path.join(fx.root, 'agent.pid');
-    const failing = session(fx, worktree, 'task-claude-x', 'claude');
-    fs.writeFileSync(path.join(bin, 'claude'), '#!/bin/sh\necho plain-diagnostic\nexit 7\n', { mode: 0o700 });
-    const env = { PATH: `${bin}${path.delimiter}${process.env.PATH}` };
-    const exited = await startClaudeAgent({ prompt: 'p', worktree, configuration: resolveConfiguration(fx.env), env, teeOptions: { ...failing.teeOptions, stdoutSink: sink, stderrSink: sink } }).resultPromise;
-    failing.finish(exited);
-    assert.equal(exited.status, 7);
-    assert.match(exited.stdout ?? '', /plain-diagnostic/, 'non-JSON output still reaches the raw stream');
-    const cancelled = session(fx, worktree, 'task-claude-x', 'claude');
-    fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/sh\necho $$ > ${shellQuote(pidFile)}\nexec sleep 30\n`, { mode: 0o700 });
-    let hostPid = 0;
-    const { resultPromise } = startClaudeAgent({ prompt: 'p', worktree, configuration: resolveConfiguration(fx.env), env,
-      teeOptions: { ...cancelled.teeOptions, stdoutSink: sink, stderrSink: sink, onSpawn: (child: { pid?: number }) => { hostPid = child.pid ?? 0; } } });
-    waitFor(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() !== '', 8000);
-    const agentPid = Number(fs.readFileSync(pidFile, 'utf8'));
-    process.kill(hostPid, 'SIGTERM');
-    const result = await resultPromise;
-    cancelled.finish(result);
-    assert.equal(result.status, 143);
-    waitFor(() => { try { process.kill(agentPid, 0); return false; } catch { return true; } });
-  } finally { fx.cleanup(); }
+fixtureTest('presented Claude launch keeps the agent exit status and stops the agent on cancellation (TASK-2735)', { timeout: 20000 }, async fx => {
+  const worktree = fx.worktree('task-claude-x');
+  const bin = path.join(fx.root, 'bin');
+  fs.mkdirSync(bin);
+  const pidFile = path.join(fx.root, 'agent.pid');
+  const failing = session(fx, worktree, 'task-claude-x', 'claude');
+  fs.writeFileSync(path.join(bin, 'claude'), '#!/bin/sh\necho plain-diagnostic\nexit 7\n', { mode: 0o700 });
+  const env = { PATH: `${bin}${path.delimiter}${process.env.PATH}` };
+  const exited = await startClaudeAgent({ prompt: 'p', worktree, configuration: resolveConfiguration(fx.env), env, teeOptions: { ...failing.teeOptions, stdoutSink: sink, stderrSink: sink } }).resultPromise;
+  failing.finish(exited);
+  assert.equal(exited.status, 7);
+  assert.match(exited.stdout ?? '', /plain-diagnostic/, 'non-JSON output still reaches the raw stream');
+  const cancelled = session(fx, worktree, 'task-claude-x', 'claude');
+  fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/sh\necho $$ > ${shellQuote(pidFile)}\nexec sleep 30\n`, { mode: 0o700 });
+  let hostPid = 0;
+  const { resultPromise } = startClaudeAgent({ prompt: 'p', worktree, configuration: resolveConfiguration(fx.env), env,
+    teeOptions: { ...cancelled.teeOptions, stdoutSink: sink, stderrSink: sink, onSpawn: (child: { pid?: number }) => { hostPid = child.pid ?? 0; } } });
+  waitFor(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() !== '', 8000);
+  const agentPid = Number(fs.readFileSync(pidFile, 'utf8'));
+  process.kill(hostPid, 'SIGTERM');
+  const result = await resultPromise;
+  cancelled.finish(result);
+  assert.equal(result.status, 143);
+  waitFor(() => { try { process.kill(agentPid, 0); return false; } catch { return true; } });
 });
 
 test('retained mission history keeps first, middle and last output of two operations after session and worktree loss (TASK-2749)', { timeout: 40000 }, async () => {
@@ -992,3 +958,27 @@ for (const [family, build] of [
     });
   }
 }
+
+test('headless owned workflow reuses the Mission terminal and retains full gated output (TASK-2750)', { timeout: 30_000 }, async t => {
+  const { workflowBoard, until } = await import('../../fixtures/workflow-board.js');
+  const fixture = await workflowBoard(1); t.after(() => fixture.close());
+  fs.writeFileSync(path.join(fixture.root, 'workflow.config.json'), JSON.stringify({ adapters: { terminal: { host: 'tmux', whenUnavailable: 'fail' } } }));
+  const accepted = await fixture.service.admit({ operationId: 'headless-tmux', kind: 'active:execute', missionId: fixture.slugs[0], capabilities: new Set(['active:execute']) });
+  assert.equal(accepted.status, 'accepted');
+  await until(() => fixture.entered(fixture.slugs[0]), 'headless tmux preflight');
+  const live = fixture.terminal.probe(fixture.slugs[0]);
+  assert.ok('kind' in live && live.kind === 'live');
+  const owner = (await fixture.service.operation('headless-tmux'))?.owner;
+  assert.ok(owner && owner.identity);
+  fixture.release(fixture.slugs[0]);
+  await until(async () => (await fixture.service.operation('headless-tmux'))?.phase === 'completed', 'headless tmux complete workflow');
+  await until(() => {
+    const history = fixture.terminal.history(fixture.slugs[0]);
+    return history.ok && history.runs.some(run => run.record.operationId === 'headless-tmux' && run.state === 'exited');
+  }, 'tmux coordinator retained');
+  const history = fixture.terminal.history(fixture.slugs[0]); assert.ok(history.ok);
+  const coordinator = history.runs.find(run => run.record.operationId === 'headless-tmux');
+  assert.equal(coordinator?.record.terminalHost, 'tmux');
+  const output = fixture.terminal.search(fixture.slugs[0], { pattern: 'REVIEW-OUTPUT' });
+  assert.ok('totalHits' in output && output.totalHits > 0);
+});

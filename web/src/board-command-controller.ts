@@ -21,8 +21,8 @@ export function restoreActionFocus(control: HTMLButtonElement, root: HTMLDivElem
   });
 }
 
-function isRequestKind(kind: WebCommandAction['kind']): kind is 'active:execute' | 'draft:create' | 'handoff:record' | 'integrate:merge' | 'review:submit' | 'mission:cancel' {
-  return kind === 'active:execute' || kind === 'draft:create' || kind === 'handoff:record'
+function isRequestKind(kind: WebCommandAction['kind']): kind is 'workflow:stop' | 'active:execute' | 'draft:create' | 'handoff:record' | 'integrate:merge' | 'review:submit' | 'mission:cancel' {
+  return kind === 'workflow:stop' || kind === 'active:execute' || kind === 'draft:create' || kind === 'handoff:record'
     || kind === 'integrate:merge' || kind === 'review:submit' || kind === 'mission:cancel';
 }
 
@@ -33,11 +33,17 @@ async function publishCommandResult(result: Awaited<ReturnType<typeof sendComman
     publishOutcome(card.id, `${result.error.message} Select the refreshed action to try again.`);
     return;
   }
+  if (result.status === 'accepted') {
+    await onRefresh();
+    publishOutcome(card.id, `${action.display} accepted; follow server progress.`);
+    return;
+  }
   if (result.status !== 'completed') { publishOutcome(card.id, result.error?.message ?? result.status); return; }
   await onRefresh();
   publishOutcome(card.id, action.kind === 'mission:cancel'
     ? `Cancelled ${card.id}: its lifecycle rows are gone and its card has left the board.`
-    : `${action.display} started.`);
+    : action.kind === 'workflow:stop' ? `Stopped run for ${card.id}; mission retained.`
+    : `${action.display} ${result.value !== null && typeof result.value === 'object' && 'phase' in result.value && result.value.phase === 'completed' ? 'completed' : 'started'}.`);
 }
 
 export async function dispatchBoardCommand(card: WebMissionCard, action: WebCommandAction, control: HTMLButtonElement | undefined, context: BoardCommandContext) {
@@ -56,6 +62,7 @@ export async function dispatchBoardCommand(card: WebMissionCard, action: WebComm
   publishOutcome(card.id, `Starting ${action.display}…`);
   try {
     const result = await sendCommand({
+      requestKey: crypto.randomUUID(),
       missionId: card.id,
       kind: action.kind,
       missionStatusAtRequest: card.status,

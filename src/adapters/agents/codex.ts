@@ -142,6 +142,19 @@ function startCodexDraftAgent({ configuration = DEFAULT_CONFIGURATION, prompt, w
 
   const invocationStartMs = Date.now();
 
+  async function spawnInvocation(invocation: ReturnType<typeof buildCodexDraftInvocation>) {
+    const options = { ...invocation.options, ...teeOptions, configuration };
+    // Linux bounds each argv string, regardless of the overall argument budget.
+    // Keep the complete prompt and read it through stdin for large launches.
+    if (Buffer.byteLength(prompt) < 64 * 1024) { return await _spawnAndTee(invocation.command, invocation.args, options); }
+    const directory = fs.mkdtempSync(path.join(codexHomeRoot(worktree), '.prompt-'));
+    const stdinPath = path.join(directory, 'stdin');
+    try {
+      fs.writeFileSync(stdinPath, prompt, { mode: 0o600 });
+      return await _spawnAndTee(invocation.command, [...invocation.args.slice(0, -1), '-'], { ...options, stdinPath });
+    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  }
+
   function isStaleSessionResult(result: AgentProcessResult) {
     // Adapter-owned parsing of Codex CLI diagnostics; never exposed as a workflow signal.
     if (!result) {return false;}
@@ -173,7 +186,7 @@ function startCodexDraftAgent({ configuration = DEFAULT_CONFIGURATION, prompt, w
   }
 
   function staleSessionHandler(invocation: ReturnType<typeof buildCodexDraftInvocation>) {
-    return _spawnAndTee(invocation.command, invocation.args, { ...invocation.options, ...teeOptions, configuration })
+    return spawnInvocation(invocation)
       .then(async (result: AgentProcessResult) => {
         if (isStaleSessionResult(result) && worktree && resume) {
           try {
@@ -184,7 +197,7 @@ function startCodexDraftAgent({ configuration = DEFAULT_CONFIGURATION, prompt, w
             await port.delete(slug, role);
           } catch (error) { throw error; }
           const freshInv = buildCodexDraftInvocation({ configuration, prompt, worktree, interactive: false, env, resume: false, sessionId: null, model, sandbox });
-          return _spawnAndTee(freshInv.command, freshInv.args, { ...freshInv.options, ...teeOptions, configuration });
+          return spawnInvocation(freshInv);
         }
         return result;
       })

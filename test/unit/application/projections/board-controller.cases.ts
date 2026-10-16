@@ -42,7 +42,7 @@ test('controller dispatches active:execute through ExecuteMissionService', async
   const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest());
   assert.equal(result.status, 'completed');
-  assert.deepEqual(calls, ['validate:task-0001', 'synchronize', 'launch:task-0001:codex', 'record:task-0001:codex', 'handoff:task-0001:codex']);
+  assert.deepEqual(calls, ['synchronize', 'validate:task-0001', 'launch:task-0001:codex', 'record:task-0001:codex', 'handoff:task-0001:codex']);
 });
 
 test('controller honors attached CLI launches while defaulting board launches to detached', async () => {
@@ -252,22 +252,22 @@ test('isIntegratedCapability covers the Mission commands extracted so far', () =
   assert.equal(isIntegratedCapability('draft:create'), true);
   assert.equal(isIntegratedCapability('checkpoint:record'), true);
   assert.equal(isIntegratedCapability('handoff:record'), true);
-  assert.equal(isIntegratedCapability('review:submit'), false);
+  assert.equal(isIntegratedCapability('review:submit'), true);
   assert.equal(isIntegratedCapability('review:act-on-findings'), false);
   assert.equal(isIntegratedCapability('approve:review'), false);
   assert.equal(isIntegratedCapability('integrate:merge'), true);
 });
 
 test('INTEGRATED_CAPABILITIES contains active:execute and the Mission commands', () => {
-  assert.equal(INTEGRATED_CAPABILITIES.size, 10);
-  for (const kind of ['active:execute', 'mission:intake', 'mission:create', 'mission:edit-read', 'mission:edit', 'draft:create', 'checkpoint:record', 'handoff:record', 'integrate:merge', 'mission:cancel'] as const) {
+  assert.equal(INTEGRATED_CAPABILITIES.size, 12);
+  for (const kind of ['active:execute', 'mission:intake', 'mission:create', 'mission:edit-read', 'mission:edit', 'draft:create', 'checkpoint:record', 'handoff:record', 'integrate:merge', 'mission:cancel', 'review:submit', 'workflow:stop'] as const) {
     assert.ok(INTEGRATED_CAPABILITIES.has(kind), `${kind} should be integrated`);
   }
 });
 
 test('UNAVAILABLE_CAPABILITIES has reasons for all unextracted commands', () => {
-  assert.equal(UNAVAILABLE_CAPABILITIES.size, 3);
-  for (const kind of ['review:submit', 'review:act-on-findings', 'approve:review'] as const) {
+  assert.equal(UNAVAILABLE_CAPABILITIES.size, 2);
+  for (const kind of ['review:act-on-findings', 'approve:review'] as const) {
     const reason = unavailableReason(kind);
     assert.ok(reason, `Missing reason for ${kind}`);
     assert.ok(reason.length > 0);

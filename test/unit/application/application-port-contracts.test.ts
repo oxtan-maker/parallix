@@ -177,6 +177,7 @@ describe("Command dispatch convergence", () => {
         enforceCommitSafety: async () => {},
       },
       agentExecution: {
+        select: async () => 'codex',
         prepare: async () => ({
           prompt: 'test',
           agent: 'codex',

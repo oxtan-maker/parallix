@@ -1,5 +1,6 @@
 import { normalizeGates, validateRepositoryGates, type RepositoryGate, type RepositoryGates } from './repository-gate-schema.js';
 export { validateRepositoryGates, type RepositoryGate, type RepositoryGates } from './repository-gate-schema.js';
+import { verificationEnvironment } from './verification-environment.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 // Repository-configured lifecycle gates.
 //
@@ -156,7 +157,7 @@ function inheritedGateEnvironment(): NodeJS.ProcessEnv { return { ...process.env
 /** @param {GatePhase} phase @param {string} slug @param {string} checkoutPath */
 export function buildGateEnv(phase: GatePhase, slug: string, checkoutPath: string, inheritEnv: NodeJS.ProcessEnv = inheritedGateEnvironment(), extraEnv: { realAgent?: string | null, realAgentModel?: string | null } = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
-    ...inheritEnv,
+    ...verificationEnvironment(inheritEnv),
     [GATE_ENV.SLUG]: slug,
     [GATE_ENV.CHECKOUT]: path.resolve(checkoutPath),
     [GATE_ENV.PHASE]: phase,

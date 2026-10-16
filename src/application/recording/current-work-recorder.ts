@@ -1,3 +1,4 @@
+import { authorizeMissionWrite, reportAuthorizedProgress, authorizedOperationId } from '../ports/mission-write-authorization.js';
 import { agentFamily, type AgentFamily } from '../../domain/agents.js';
 import { missionId, type MissionId } from '../../domain/mission.js';
 import type { OperationalHistoryEntry, OperationalHistoryRepository } from '../ports/operation-history.js';
@@ -410,6 +411,8 @@ export class CurrentWorkRecorder implements CurrentWorkPort {
     state: CurrentWorkState,
     blockedReason: string | null,
   ): Promise<void> {
+    publication = { ...publication, operationId: authorizedOperationId() ?? publication.operationId };
+    await authorizeMissionWrite(publication.missionId);
     await this._historyRepo.append(currentWorkEventToEntry({
       missionId: publication.missionId,
       operationId: publication.operationId,
@@ -422,6 +425,7 @@ export class CurrentWorkRecorder implements CurrentWorkPort {
       blockedReason,
       occurredAt: this.now().toISOString(),
     }));
+    await reportAuthorizedProgress(publication.phase, publication.summary, publication.agent ?? null);
     try { this.onPublication?.(publication); } catch { /* Capture cannot block current-work publication. */ }
   }
 }

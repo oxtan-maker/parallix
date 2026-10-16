@@ -615,6 +615,7 @@ describe("stage/commit race", () => {
         return { signal: null,  status: boardCommitPaths.length ? 1 : 0, stdout: '', stderr: boardCommitPaths.length ? 'nothing to commit' : '' };
       }
       if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'deadbeef', stderr: '' };
+      if (args.includes('merge-base')) return { signal: null, status: 0, stdout: 'deadbeef', stderr: '' };
       return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
 
@@ -645,6 +646,7 @@ describe("stage/commit race", () => {
       if (args.includes('diff') && args.includes('--quiet')) return { signal: null,  status: !args.includes('HEAD') || payloadAtHead ? 0 : 1, stdout: '', stderr: '' };
       if (args.includes('commit')) return { signal: null,  status: 1, stdout: '', stderr: 'hook rejected the commit' };
       if (args.includes('rev-parse')) return { signal: null,  status: 0, stdout: 'carrying-commit', stderr: '' };
+      if (args.includes('merge-base')) return { signal: null, status: 0, stdout: 'carrying-commit', stderr: '' };
       return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
     try {

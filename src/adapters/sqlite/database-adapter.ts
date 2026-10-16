@@ -1,10 +1,9 @@
-import { pruneOlderBackups } from './database-backups.js';
+import { findLatestBackup, pruneOlderBackups } from './database-backups.js';
 export { MAX_RETAINED_BACKUPS } from './database-backups.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import fs from 'node:fs';
-import { compareCodeUnits } from '../../domain/comparators.js';
 import path from 'node:path';
 
 /** Configuration for a SQLite database connection. */
@@ -319,6 +318,12 @@ export class SqliteDatabaseAdapter {
     this.transactionDepth = 1;
   }
 
+  /** Join an existing write unit, otherwise reserve the writer before guard reads. */
+  async beginWriteTransaction(): Promise<void> {
+    if (this.inTransaction) { await this.beginTransaction(); }
+    else { await this.beginImmediateTransaction(); }
+  }
+
   /** Acquire SQLite's writer lock before a read/count/write admission decision. */
   async beginImmediateTransaction(): Promise<void> {
     this.assertOpen();
@@ -462,16 +467,8 @@ export class SqliteDatabaseAdapter {
       throw new Error('Cannot recover: database path is unknown (never opened).');
     }
     const dbPath = config.path;
-    const dir = path.dirname(dbPath);
-    const base = path.basename(dbPath);
-    const backups = fs
-      .readdirSync(dir)
-      .filter((f) => f.startsWith(`${base}.bak.`))
-      .sort(compareCodeUnits); // fixed-width millisecond suffixes sort lexically == chronologically
-    if (backups.length === 0) {
-      return false;
-    }
-    const latest = path.join(dir, backups[backups.length - 1]);
+    const latest = findLatestBackup(dbPath);
+    if (!latest) { return false; }
 
     // Drop the corrupt connection before touching files on disk.
     try {

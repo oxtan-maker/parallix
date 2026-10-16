@@ -126,6 +126,8 @@ export interface AgentLaunchOutcome {
 
 /** The agent process mechanism: configuration, prompt delivery, and launch. */
 export interface AgentExecutionPort {
+  /** Cheap configured selection: no prompt, health probe, preflight or provider start. */
+  select?(_slug: string): Promise<string | null>;
   /** Resolve the agent configuration and the execute prompt for this worktree. */
   prepare(_request: { readonly slug: string; readonly worktree: string }): Promise<AgentLaunchPlan>;
   launch(_request: AgentLaunchRequest): Promise<AgentLaunchOutcome>;

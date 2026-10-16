@@ -99,6 +99,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
     if (kind === 'mission:edit' || kind === 'mission:edit-read') { return Boolean(this.missionServices.editing); }
     if (kind === 'mission:create') { return Boolean(this.missionServices.creation); }
     if (kind === 'checkpoint:record') { return Boolean(this.missionServices.checkpoints); }
+    if (kind === 'review:submit') { return Boolean(this.missionServices.handoffWorkflow); }
     if (kind === 'handoff:record') { return Boolean(this.missionServices.handoffWorkflow); }
     if (kind === 'draft:create') { return Boolean(this.missionServices.draft); }
     if (kind === 'integrate:merge') { return Boolean(this.missionServices.integrate); }
@@ -145,7 +146,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
     if (kind === 'checkpoint:record') {
       return (await this.dispatchCheckpoint(request)) as BoardCommandResult<T>;
     }
-    if (kind === 'handoff:record') {
+    if (['handoff:record', 'review:submit'].includes(kind)) {
       return (await this.dispatchHandoff(request)) as BoardCommandResult<T>;
     }
     if (kind === 'integrate:merge') {

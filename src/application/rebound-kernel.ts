@@ -338,7 +338,7 @@ async function runRepairAttempts(state: ReboundState, options: RepairOptions): P
     if (launchResult === 'skip') { await recordSpentLaunch(state, context, [attempt, maxAttempts], { strategy, headBefore, fingerprintBefore }, startedAt, launch); continue; }
     if (launchResult === 'stop') { break; }
     const verified = await verify(attempt);
-    const mismatch = differentGateVerification(state.originalReason, verified, Boolean(repairCheckpoint));
+    const mismatch = differentGateVerification(state.reason, verified, Boolean(repairCheckpoint));
     if (mismatch) {
       return stopRepair(state, context, `Unrelated check ${verified.command} cannot certify ${mismatch.originalCommand}`);
     }

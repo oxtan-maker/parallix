@@ -122,7 +122,7 @@
       "integration/packaging/post-integrate-global-install-contract.test.ts": 6409,
       "integration/presentation/presentation-board.integration.test.ts": 200,
       "integration/presentation/presentation-tui.integration.test.ts": 750,
-      "integration/presentation/presentation-web.integration.test.ts": 500,
+      "integration/presentation/presentation-web.integration.test.ts": 800,
       "integration/config/product-config-cp.test.ts": 100,
       "integration/config/product-config-validation.test.ts": 100,
       "integration/config/product-config.test.ts": 100,
@@ -199,7 +199,12 @@
       "integration/test-harness/runner-memory-containment.test.ts": 2000,
       "integration/agents/pi-worker-process-contract.test.ts": 1100,
       "integration/presentation/web-board-pointer.test.ts": 24000,
-      "e2e/agents/real-agent-smoke.test.ts": 50000
+      "e2e/agents/real-agent-smoke.test.ts": 50000,
+      "integration/process/workflow-admission-ordering.test.ts": 1800,
+      "integration/process/workflow-owner-host-restart.test.ts": 3300,
+      "integration/process/workflow-stop-attribution.test.ts": 3500,
+      "integration/process/workflow-observation-isolation.test.ts": 3500,
+      "integration/process/workflow-cli-exclusion.test.ts": 3500
     },
     "covered": {
       "integration/process/tmux-terminal-host.test.ts": 2500,
@@ -290,7 +295,7 @@
       "integration/sqlite/mission-store-drain.test.ts": 125,
       "integration/sqlite/mission-use-case-persistence-contract.test.ts": 225,
       "integration/mission/mission-utils-worktree.test.ts": 100,
-      "integration/agents/mistral.test.ts": 150,
+      "integration/agents/mistral.test.ts": 250,
       "integration/integrate/nels.test.ts": 100,
       "integration/packaging/npm-pack-install-smoke.test.ts": 1000,
       "integration/agents/opencode-export.test.ts": 150,
@@ -302,7 +307,7 @@
       "integration/packaging/post-integrate-global-install-contract.test.ts": 7357,
       "integration/presentation/presentation-board.integration.test.ts": 300,
       "integration/presentation/presentation-tui.integration.test.ts": 1450,
-      "integration/presentation/presentation-web.integration.test.ts": 950,
+      "integration/presentation/presentation-web.integration.test.ts": 2000,
       "integration/config/product-config-cp.test.ts": 100,
       "integration/config/product-config-validation.test.ts": 100,
       "integration/config/product-config.test.ts": 100,
@@ -362,7 +367,7 @@
       "integration/stats/stats-current-week-completion.test.ts": 300,
       "integration/stats/stats-custom-agent-model.test.ts": 250,
       "integration/stats/stats-internals.test.ts": 200,
-      "integration/stats/stats-population.test.ts": 250,
+      "integration/stats/stats-population.test.ts": 350,
       "integration/stats/stats.test.ts": 250,
       "integration/storage/storage-bootstrap-isolation.test.ts": 465,
       "integration/backlog/task-label-persistence.test.ts": 100,
@@ -377,7 +382,12 @@
       "integration/test-harness/runner-memory-containment.test.ts": 1500,
       "integration/agents/pi-worker-process-contract.test.ts": 1100,
       "integration/presentation/web-board-pointer.test.ts": 13000,
-      "e2e/agents/real-agent-smoke.test.ts": 50000
+      "e2e/agents/real-agent-smoke.test.ts": 50000,
+      "integration/process/workflow-admission-ordering.test.ts": 1800,
+      "integration/process/workflow-owner-host-restart.test.ts": 3300,
+      "integration/process/workflow-stop-attribution.test.ts": 3500,
+      "integration/process/workflow-observation-isolation.test.ts": 3500,
+      "integration/process/workflow-cli-exclusion.test.ts": 3500
     }
   }
 }

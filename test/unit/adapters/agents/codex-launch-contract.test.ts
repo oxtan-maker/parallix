@@ -501,3 +501,28 @@ test('first and later fresh repair ignore historical session IDs (TASK-2700)', (
     }
   }
 });
+
+test('large repair prompts use retained stdin without exceeding argv limits and clean up after failure (TASK-2750)', async () => {
+  const worktree = registeredMkdtemp('codex-large-prompt-');
+  const prompt = 'repair evidence\n'.repeat(15000);
+  let inputPath: string | undefined;
+  try {
+    codexModule.__setSpawnAndTeeForTest(async (command, args, options) => {
+      assert.equal(command, 'codex');
+      assert.equal(args.at(-1), '-');
+      assert.ok(args.every(arg => Buffer.byteLength(arg) < 65536));
+      assert.ok(options?.stdinPath);
+      inputPath = options.stdinPath;
+      assert.equal(fs.readFileSync(inputPath, 'utf8'), prompt);
+      assert.equal(fs.statSync(inputPath).mode & 0o777, 0o600);
+      throw new Error('injected launch failure');
+    });
+    const launch = codexModule.startCodexDraftAgent({ configuration: resolveConfiguration(environment), prompt, worktree });
+    await assert.rejects(launch.resultPromise, /injected launch failure/);
+    assert.ok(inputPath);
+    assert.equal(fs.existsSync(inputPath), false);
+  } finally {
+    codexModule.__setSpawnAndTeeForTest(null);
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});

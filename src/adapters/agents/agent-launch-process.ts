@@ -1,3 +1,4 @@
+import { authorizeMissionWrite } from '../../application/ports/mission-write-authorization.js';
 import type { AgentProcessResult, AgentInvocation } from "./agent-process-types.js";
 import { monotonicNowMs } from "../../application/lifecycle-timing.js";
 import * as fmt from "../../application/presentation/cli-format.js";
@@ -66,6 +67,7 @@ export async function launchPrepared(prepared: PreparedLaunch, deps: StartAgentL
   // Durable run history and the optional tmux terminal host (TASK-2643).
   const runSession = openRunSession({ worktree: deps.worktree, slug, role: sessionRole ?? deps.role ?? step, family: chosen, attempt, log: (line) => log(line) }, { configuration: deps.configuration });
   try {
+    await authorizeMissionWrite(slug ?? '');
     const launchResult = withSandboxProfile(effectiveProfile, () => launcher({
       configuration: deps.configuration,
       prompt: actualPrompt,

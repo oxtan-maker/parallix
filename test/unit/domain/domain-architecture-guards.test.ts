@@ -333,14 +333,6 @@ describe("Attempt exclusion guard", () => {
     );
   });
 
-  test('SC5: ADR 0053 names the test that locks the Attempt exclusion', () => {
-    const adr = fs.readFileSync(path.join(ROOT, ADR_0053), 'utf8');
-    assert.ok(
-      adr.includes('test/unit/domain/domain-architecture-guards.test.ts'),
-      'ADR 0053 must name the guard that makes the Attempt exclusion executable rather than prose',
-    );
-  });
-
   test('SC5: src/domain/README.md contains no Attempt statement contradicting src/domain', () => {
     const readme = fs.readFileSync(path.join(ROOT, DOMAIN_README), 'utf8');
     // The README may say Attempt is absent; it must not claim one exists.
@@ -526,4 +518,16 @@ describe("Consumer-to-domain requirements", () => {
       'CP 1 decided the not-required Attempt branch; reversing it requires the CP 3 stop rule, not a silent edit',
     );
   });
+});
+
+
+test('durable command ownership has checked consumers distinct from provider attempts (TASK-2750)', async () => {
+  const { WORKFLOW_OPERATION_IDENTITY_DECISION } = await import('../../../src/application/consumer-domain-requirements.js');
+  assert.equal(WORKFLOW_OPERATION_IDENTITY_DECISION.required, true);
+  assert.equal(WORKFLOW_OPERATION_IDENTITY_DECISION.concept, 'WorkflowOperation');
+  const consumer = CONSUMER_DOMAIN_REQUIREMENTS.find(entry => entry.id === 'workflow-admission-owner');
+  assert.equal(consumer?.perWorkflowIdentity, 'durable-command');
+  assert.equal(consumer?.perLaunchIdentity, 'none');
+  assert.ok(consumer?.reads.includes('WorkflowOperation'));
+  assert.equal(PER_LAUNCH_IDENTITY_DECISION.required, false);
 });

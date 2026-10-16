@@ -621,7 +621,9 @@ describe('Cancel surfaces', () => {
         await act(async () => { cancelButton(page).click(); });
         await act(async () => { buttonLabelled(page, `delete ${SLUG} lifecycle rows`).click(); });
         assert.equal(page.calls.length, 1);
-        assert.deepEqual(JSON.parse(String(page.calls[0].body)), {
+        const { requestKey, ...payload } = JSON.parse(String(page.calls[0].body));
+        assert.match(requestKey, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+        assert.deepEqual(payload, {
           missionId: SLUG,
           kind: 'mission:cancel',
           missionStatusAtRequest: 'active',

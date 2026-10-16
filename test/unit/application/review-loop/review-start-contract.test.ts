@@ -179,3 +179,31 @@ for (const failure of ['original check', 'new blocker'] as const) {
     if (failure === 'new blocker') { assert.deepEqual(checkpoint.repair?.blocker, newBlocker); }
   });
 }
+
+test('start derives the implementer from the Mission assignee when no task file or persisted Review names one (TASK-2737)', async () => {
+  const fake = fakeReviewLoopPorts({
+    slug,
+    task: { implementer: () => null },
+    handoff: { handoff: async () => ({ ok: true }) },
+    missionStore: { load: async () => ({ kind: 'found', mission: { assignee: 'claude' } }) } as never,
+    routing: { eligibleFamilies: () => ['claude', 'codex'], nominate: () => 'codex' },
+    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) },
+  });
+  await runReviewLoop({ slug, maxAttempts: 1 }, fake.ports);
+  assert.ok(fake.writes.some(write => write.implementer === 'claude'));
+  assert.ok(!fake.writes.some(write => write.implementer === 'autonomous'));
+});
+
+test('start falls back to autonomous when the Mission store cannot load the assignee (TASK-2737)', async () => {
+  let loads = 0;
+  const fake = fakeReviewLoopPorts({
+    slug,
+    task: { implementer: () => null },
+    handoff: { handoff: async () => ({ ok: true }) },
+    missionStore: { load: async () => { if (!loads++) { throw new Error('store unavailable'); } return { kind: 'missing' }; } } as never,
+    routing: { eligibleFamilies: () => ['claude', 'codex'], nominate: () => 'codex' },
+    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) },
+  });
+  await runReviewLoop({ slug, maxAttempts: 1 }, fake.ports);
+  assert.ok(fake.writes.some(write => write.implementer === 'autonomous'));
+});

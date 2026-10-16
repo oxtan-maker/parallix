@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { attachWorkflowOperations } from './workflow-operations.js';
 import { withinCliInvocation } from './review-operator-resume.js';
 import { createCliServiceScope, type CliCommandContext } from './cli-service-scope.js';
 import { createAuthoringCommands } from './cli-authoring-commands.js';
@@ -6,6 +7,7 @@ import { createLegacyCommands } from './cli-legacy-commands.js';
 import { createReadCommands } from './cli-read-commands.js';
 import { createLifecycleCommands } from './cli-lifecycle-commands.js';
 import { createLeadSupervisorPort, leadRecoveryWorkspace } from './lead-supervisor.js';
+import { ownWorkflowCli } from './workflow-cli.js';
 import { commandInvocation } from './command-invocation.js';
 
 import { resolveConfiguration, resolveProcessConfiguration } from './config.js';
@@ -108,7 +110,7 @@ interface RunOptions {
 
 function createCommandRegistry(rootDir: string, configuration: ParallixConfiguration, operatorReview = false): Record<string, Command> {
   const scope = createCliServiceScope(rootDir, configuration);
-  const { withGraph } = scope;
+  const { withGraph, openServices } = scope;
   const active = createActiveCommand((request, options) => activeWorkflow([...request.args], options));
   const config = createConfigCommand((request, options) => configWorkflow([...request.args], options));
   const diff = createDiffCommand((request, options) => diffWorkflow([...request.args], options));
@@ -184,6 +186,7 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
     try { return await createLeadCommand(createLeadSupervisorPort(services, forwards, { rootDir, scope, active, registry, runPublicCli: run, launchRecovery }))(args); }
     finally { await Promise.allSettled(forwards); }
   });
+  ownWorkflowCli(registry, async () => attachWorkflowOperations(rootDir, configuration, await openServices(rootDir)));
   return registry;
 }
 

@@ -64,34 +64,19 @@ function px(args) {
   const run = childProcess.spawnSync(process.execPath, (loader ? ['--import', loader] : []).concat([entry], args), { cwd: process.cwd(), encoding: 'utf8' });
   return run.status === 0 ? (run.stdout || '') : null;
 }
-function missionVersion(slug) {
-  const out = px(['status', slug, '--json']);
-  if (!out) { return null; }
-  try { return String(JSON.parse(out).version); } catch (_) { return null; }
-}
-// Each write prints the Mission's new version, so the stub chains writes from
-// that instead of re-reading \`px status\` between them: every \`px\` spawn
-// costs a full CLI start-up.
-function writeChain(slug, writes) {
-  let v = missionVersion(slug);
-  for (const args of writes) {
-    if (v === null) { return; }
-    const out = px(args.concat(['--slug', slug, '--expected-version', v]));
-    try { v = out ? String(JSON.parse(out).version) : null; } catch (_) { v = null; }
-  }
-}
+// Author the same complete contract atomically: this sandbox-state contract
+// needs real CLI writes, not seven independent CLI startup costs.
 function recordContract(slug) {
-  writeChain(slug, [
-    ['goal', 'set', '--goal', 'Exercise the sandbox px-write path with a deterministic stub agent',
-      '--why', 'Protect the sandbox Parallix state-home bind from regression'],
-    ['scope', 'set', '--scope', 'Run draft through the real CLI inside bubblewrap',
-      '--out-of-scope', 'Real model execution'],
-    ['gate', 'add', '--command', 'node -e ""'],
-    ['criterion', 'add', '--text', 'Sandboxed px writes Parallix mission state'],
-    ['checkpoint', 'plan', '--name', 'CP-1', '--text', 'Draft and execute'],
-    ['checkpoint', 'plan', '--name', 'CP-2', '--text', 'Review and integrate'],
-    ['nel', 'set', '--predicted', 'Small'],
-  ]);
+  const out = px(['mission', 'author', '--slug', slug,
+    '--goal', 'Exercise the sandbox px-write path with a deterministic stub agent',
+    '--why', 'Protect the sandbox Parallix state-home bind from regression',
+    '--scope', 'Run draft through the real CLI inside bubblewrap',
+    '--out-of-scope', 'Real model execution', '--gate', 'node -e ""',
+    '--criterion', 'Sandboxed px writes Parallix mission state',
+    '--checkpoint', 'CP-1', '--checkpoint-text', 'Draft and execute',
+    '--checkpoint', 'CP-2', '--checkpoint-text', 'Review and integrate',
+    '--predicted', 'Small', '--classification', 'ai_sdlc']);
+  if (!out) { throw new Error('Cannot author sandbox Mission contract'); }
 }
 // OpenCode consumes the prompt through stdin, including EOF (TASK-2761).
 const prompt = fs.readFileSync(0, 'utf8');

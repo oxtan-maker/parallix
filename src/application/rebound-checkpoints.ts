@@ -29,7 +29,9 @@ export async function prepareRepairPrompt(
   }
   const { slug, worktree } = context;
   const repairPort = context.repairCheckpoints ?? repairCheckpointPort();
-  const required = state.originalReason;
+  // A phase rerun can expose a different failed gate. Authorize the check
+  // named by this launch, while retaining the original diagnostic for history.
+  const required = state.reason;
   const command = required.kind === 'gate-failure' || required.kind === 'declared-gate-validation'
     ? required.command : NON_GATE_COMMANDS[required.kind];
   const repairCheckpoint = await repairPort?.open({ slug, incidentId: state.occurrenceId, command, attempt }) ?? null;

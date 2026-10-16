@@ -1,3 +1,5 @@
+import { workflowAdmissionPersistenceCases } from './workflow-admission.cases.js';
+workflowAdmissionPersistenceCases();
 import { repairCheckpointFlowCases } from './repair-checkpoint-flow.cases.js';
 repairCheckpointFlowCases();
 // Mission use-case persistence contract: Mission use cases over SQLite and lifecycle write ordering.

@@ -54,6 +54,8 @@ export interface IntegrateProcessPort {
   chdir(_directory: string): void;
   /** Cross-process exclusive claim held through gates, landing, and closeout. */
   claimIntegration(_slug: string): Promise<(() => Promise<void>) | null>;
+  /** Narrow base-checkout claim; never held during preparation or integration gates. */
+  claimBaseMutation?(_base: string, _branch: string): Promise<(() => Promise<void>) | null>;
 }
 
 export interface IntegrateFileSystemPort {

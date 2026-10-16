@@ -67,6 +67,7 @@ export interface FinishRunInput {
 }
 
 export interface RunCapture {
+  setTerminalHost?(_host: RunTerminalHost, _socket: string | null): void;
   readonly dir: string;
   readonly runId: string;
   correlateOperation(_operationId: string): void;
@@ -300,24 +301,17 @@ export function openRunCapture(input: OpenRunCaptureInput): RunCapture {
   const sessions: string[] = [];
   const startedAt = now().toISOString();
   let operationId: string | null = null;
+  let terminalHost = input.terminalHost;
+  let tmuxSocketPath = input.tmuxSocketPath ?? null;
   let execution: RunRecord['execution'] = null;
   // A hosted child's CurrentWork publisher may correlate this supervisor-owned capture.
   const correlation = () => captureOperationId(recordPath) ?? operationId;
   const record = (patch: Partial<RunRecord>): RunRecord => ({
-    version: RUN_HISTORY_VERSION,
-    runId: input.runId,
-    missionId: input.identity.missionId,
-    repositoryId: input.identity.repositoryId,
-    captureKind: input.captureKind ?? 'agent',
+    ...captureIdentity(input),
     operationId: correlation(),
     execution,
-    role: input.identity.role,
-    family: input.identity.family,
-    attempt: input.identity.attempt,
-    terminalHost: input.terminalHost,
-    hostFallbackReason: input.hostFallbackReason ?? null,
-    tmux: input.tmuxSocketPath ? { socketPath: input.tmuxSocketPath, sessions: [...sessions] } : null,
-    supervisorPid: input.supervisorPid ?? process.pid,
+    terminalHost,
+    tmux: tmuxSocketPath ? { socketPath: tmuxSocketPath, sessions: [...sessions] } : null,
     state: 'running',
     startedAt,
     endedAt: null,
@@ -337,6 +331,10 @@ export function openRunCapture(input: OpenRunCaptureInput): RunCapture {
   return {
     dir,
     runId: input.runId,
+    setTerminalHost(host, socket) {
+      terminalHost = host; tmuxSocketPath = socket;
+      writeAtomic(recordPath, JSON.stringify(record({}), null, 2));
+    },
     correlateOperation(id) {
       if (finished || correlation()) { return; }
       operationId = id;
@@ -421,4 +419,20 @@ export function correlateRunOperation(checkout: string, mission: string, runId: 
     if (record.runId !== runId || record.missionId !== mission || runCaptureKind(record) !== 'coordinator') { return; }
     if (record.operationId === null || record.operationId === undefined) { writeAtomic(file, JSON.stringify({ ...record, operationId }, null, 2)); }
   } catch { /* Correlation cannot block workflow publication. */ }
+}
+
+/** Immutable attribution shared by every snapshot of one capture. */
+function captureIdentity(input: OpenRunCaptureInput) {
+  return {
+    version: RUN_HISTORY_VERSION,
+    runId: input.runId,
+    missionId: input.identity.missionId,
+    repositoryId: input.identity.repositoryId,
+    captureKind: input.captureKind ?? 'agent',
+    role: input.identity.role,
+    family: input.identity.family,
+    attempt: input.identity.attempt,
+    hostFallbackReason: input.hostFallbackReason ?? null,
+    supervisorPid: input.supervisorPid ?? process.pid,
+  } as const;
 }

@@ -1,3 +1,4 @@
+import { authorizedOperationId } from '../../application/ports/mission-write-authorization.js';
 import { processStartIdentity } from '../process/process-liveness.js';
 import { resolveCanonicalRepositoryId } from '../git/repository-identity.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
@@ -195,6 +196,9 @@ function captureRunSession(input: RunSessionInput, worktree: string, identity: A
   } catch (err) {
     input.log(fmt.status('WARN', `Run history capture is unavailable for this launch: ${(err as Error).message}`));
   }
+  const workflow = authorizedOperationId();
+  if (workflow) { capture?.correlateOperation(workflow); }
+  if (workflow && IN_PROCESS_FAMILIES.has(input.family)) { capture?.observeExecution(process.pid, processStartIdentity(process.pid)); }
   return capture;
 }
 

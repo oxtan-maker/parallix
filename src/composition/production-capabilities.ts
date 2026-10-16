@@ -1,5 +1,7 @@
 import type { DraftAdapterDependencies } from '../adapters/cli/commands/draft-adapter-types.js';
 import type { GitReader } from '../adapters/git/worktree.js';
+import { randomUUID } from 'node:crypto';
+import { authorizedOperationId } from '../application/ports/mission-write-authorization.js';
 import { MissionEditService } from '../application/mission-edit-service.js';
 import { createReviewClassification, createIntegrationApprovalRestoration } from './review-classification.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
@@ -62,7 +64,7 @@ export interface ProductionBoardRepositories {
 /** Shared presentation capabilities from one production composition graph. */
 export interface ProductionCapabilities {
   readonly tui: TuiCapabilities;
-  readonly boardProjection: BoardProjectionBuilder;
+  readonly boardProjection: Pick<BoardProjectionBuilder, 'build' | 'buildMissionCard'>;
   readonly missionDetails: MissionProjectionQuery;
   readonly executePorts: ExecuteMissionPorts;
   /** Single dispatcher instance shared by CLI and TUI. */
@@ -111,14 +113,16 @@ function createBoardDraftService(deps: {
   readonly configuration?: ParallixConfiguration;
 }): DraftCommandUseCase {
   let sequence = 0;
+  const fallbackOperationId = `board-draft:${randomUUID()}`;
   const emit = (phase: 'draft-log' | 'draft-error', message: string): void => {
     deps.progress?.({
-      operationId: 'board-draft',
+      operationId: authorizedOperationId() ?? fallbackOperationId,
       sequence: sequence++,
       phase,
       message,
       timestamp: new Date().toISOString(),
     });
+    if (!deps.progress) { console.log(message); }
   };
   const exitFn = (code?: number): never => { throw new Error(`draft workflow aborted (exit ${code ?? 0})`); };
   const gitFn = deps.workflowDeps?.gitFn;

@@ -277,6 +277,13 @@ describe('human review reconciliation', { concurrency: false }, () => {
     }));
     assert.equal(await ports.humanFeedback.reconcile(reloaded), null, 'consumed sources survive a Review aggregate state reload');
 
+    // Forgejo invalidates inline comments after a push and updates their
+    // timestamps without editing their content (TASK-2750).
+    comments[4] = { ...comments[4], updated: '2026-10-05T10:04:00Z' };
+    assert.equal(await ports.humanFeedback.reconcile(state), null, 'timestamp-only updates do not replay human corrections');
+    assert.equal(await ports.humanFeedback.reconcile(reloaded), null, 'historical source identities also suppress timestamp-only updates after reload');
+    assert.equal(events.length, 2);
+
     comments[3] = { ...comments[3], updated: '2026-10-05T10:05:00Z', body: 'Preserve the corrected implementation.' };
     const edited = await ports.humanFeedback.reconcile(state);
     assert.equal(edited?.reason, 'Preserve the corrected implementation.');

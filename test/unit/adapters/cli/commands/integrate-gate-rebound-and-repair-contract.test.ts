@@ -16,6 +16,7 @@ import { forgejoApiFixture, forgejoAsyncApiFixture } from '../../../../fixtures/
 // (task-2369.05), relaunchable repair (task-1124), push-gate/handoff regressions (task-2561), integration
 // repair approval invalidation (task-2543), and diff-scoped gate areas (task-1268). Legacy case names unchanged.
 import test, { mock, describe } from 'node:test';
+import { integrationGateCheckpointCases } from './integration-gate-repair-checkpoint.cases.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -40,6 +41,7 @@ mockModule('../../../../../src/adapters/verification/verification.js', import.me
 mockModule('../../../../../src/adapters/review/review-gate-handling.js', import.meta.url);
 await installModuleMocks();
 const { routeIntegrationGateFailure } = await import('../../../../../src/adapters/cli/commands/integrate-gate-rebound.js');
+integrationGateCheckpointCases(routeIntegrationGateFailure);
 const { createIntegrationGateStep } = await import('../../../../../src/application/integrate/gates.js');
 const { createSquashLanding } = await import('../../../../../src/application/integrate/squash.js');
 const gates = await import('../../../../../src/adapters/cli/commands/integrate-gates.js');
