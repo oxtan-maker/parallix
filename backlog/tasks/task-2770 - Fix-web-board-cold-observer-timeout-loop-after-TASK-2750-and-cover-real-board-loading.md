@@ -6,7 +6,7 @@ title: >-
 status: backlog
 assignee: []
 created_date: '2026-10-16 08:20'
-updated_date: '2026-10-16 08:21'
+updated_date: '2026-10-16 08:23'
 labels:
   - bug
 dependencies: []
@@ -48,9 +48,14 @@ Separate from TASK-2769, which concerns execution counts and card activity seman
 - [ ] #3 Manually verify the rebuilt CLI with representative populated isolated state: URL is announced, browser board cards load, refresh succeeds, and shutdown cleans up owned observers. Record actual evidence and avoid mutating live mission state.
 - [ ] #4 Preserve observer isolation, finite deadlines and cleanup, and operator-owned gate configuration. Keep any added or modified integration test within 3.5 seconds; use deterministic boundary control rather than a real 10-second sleep.
 - [ ] #5 After the first successful load, board reloads must complete within 400 ms end to end, from browser reload initiation to mission cards rendered with a successful board snapshot, on representative populated isolated state. Measure repeated warm reloads through the real rebuilt CLI and browser, including HTTP, serialization and rendering; report first-load timing separately. The observed 395 ms projection alone does not establish compliance with this limit.
+- [ ] #6 Restore first-load and subsequent board performance to at least the level of the last main commit on or before 2026-10-13 (three days before this report), while also meeting the explicit 400 ms end-to-end warm reload maximum. Compare that baseline, the parent of TASK-2750, and the fixed tree using identical representative isolated database snapshots, repository inputs, agent probe conditions and hardware; record cold startup-to-render and repeated warm reload-to-render measurements. Identify and fix intervening performance regressions regardless of which mission introduced them. A timeout increase alone is insufficient.
 <!-- AC:END -->
 
+## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
+Operator clarification: first-load latency of 10 seconds is unacceptable. Performance restoration must cover regressions introduced since 2026-10-13, not only TASK-2750. Baseline measurement was requested, then deferred to this task by the operator; no historical baseline timing has yet been measured.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
