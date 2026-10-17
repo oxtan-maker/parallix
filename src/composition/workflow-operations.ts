@@ -46,7 +46,7 @@ export async function composeWorkflowOperations(root: string, configuration: Par
   // reconcile. An empty intent store must not initialize provider rendering.
   const terminalFactory = observe === false ? undefined : (await import('./mission-terminal-capability.js')).createMissionTerminalCapability;
   const observedTerminal = () => terminal ??= terminalFactory!(root, configuration);
-  const processes = new WorkflowProcessAdapter(cli, root, configuration, async operation => {
+  const processes: WorkflowProcessAdapter = new WorkflowProcessAdapter(cli, root, configuration, async operation => {
     const history = (await loadTerminal()).history(operation.missionId);
     if (!history.ok) { return false; }
     return history.runs.filter(run => run.record.operationId === operation.id && run.record.captureKind === 'agent')
@@ -54,12 +54,12 @@ export async function composeWorkflowOperations(root: string, configuration: Par
   }, async operation => {
     const history = (await loadTerminal()).history(operation.missionId);
     if (!history.ok) { return false; }
-    for (const run of history.runs) {
-      if (run.record.operationId !== operation.id || run.record.captureKind !== 'agent' || run.execution === 'stopped') { continue; }
+    const settled = await Promise.all(history.runs.filter(run => run.record.operationId === operation.id
+      && run.record.captureKind === 'agent' && run.execution !== 'stopped').map(async run => {
       const execution = run.record.execution;
-      if (!execution?.processIdentity || !await processes.stop({ pid: execution.pid, identity: execution.processIdentity })) { return false; }
-    }
-    return true;
+      return Boolean(execution?.processIdentity && await processes.stop({ pid: execution.pid, identity: execution.processIdentity }));
+    }));
+    return settled.every(Boolean);
   });
   const operations = new SqliteWorkflowOperationStore(db, repository);
   const work = new CurrentWorkRecorder(new SqliteOperationalHistoryRepository(db), {

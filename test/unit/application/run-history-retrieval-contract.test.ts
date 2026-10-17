@@ -426,3 +426,24 @@ test('terminal sequences preserve text around CSI, OSC and incomplete escapes (T
   ];
   for (const [input, expected] of fixtures) { assert.equal(stripTerminalControl(input), expected); }
 });
+
+
+test('coordinator terminal pages preserve controls and incremental offsets while history stays plain (TASK-2771)', () => {
+  const root = mkdtemp('px-coordinator-pages-');
+  const capture = open(root, { runId: 'workflow-22222222-2222-4222-8222-222222222222', captureKind: 'coordinator' });
+  const terminal = service(root);
+  try {
+    const first = '\r⠋ checking\r⠙ checking';
+    capture.write('stdout', Buffer.from(first));
+    const page = ok(terminal.page('task-9', { runId: capture.runId, stream: 'stdout', after: 0, presentation: 'terminal' }));
+    assert.equal(page.text, first);
+    const last = '\r\x1b[2KPASS gate\n';
+    capture.write('stdout', Buffer.from(last));
+    capture.finish({ exitCode: 0, signal: null });
+    const next = ok(terminal.page('task-9', { runId: capture.runId, stream: 'stdout', after: page.to, presentation: 'terminal' }));
+    assert.equal(next.text, last);
+    assert.equal(next.running, false);
+    assert.equal(ok(terminal.page('task-9', { runId: capture.runId, stream: 'stdout', after: next.to, presentation: 'terminal' })).text, '');
+    assert.doesNotMatch(ok(terminal.page('task-9', { runId: capture.runId, stream: 'stdout', after: 0 })).text, /[\r\x1b]/);
+  } finally { capture.finish({ exitCode: 1, signal: null }); fs.rmSync(root, { recursive: true, force: true }); }
+});

@@ -143,7 +143,7 @@ function pageOf(deps: MissionTerminalServiceDeps, identity: MissionTerminalScope
   const raw = Buffer.from(read.page.bytes.buffer, read.page.bytes.byteOffset, read.page.bytes.byteLength).toString('utf8');
   const record = read.run.record;
   // Claude stdout is its stream-json; pages are line-aligned, so the provider renderer frames whole records.
-  const text = deps.renderer && record.family === 'claude' && request.stream === 'stdout' ? deps.renderer.render(record.family, raw) : stripTerminalControl(raw);
+  const text = request.presentation === 'terminal' && record.captureKind === 'coordinator' ? raw : deps.renderer && record.family === 'claude' && request.stream === 'stdout' ? deps.renderer.render(record.family, raw) : stripTerminalControl(raw);
   return { ok: true, runId: request.runId, stream: request.stream, from: read.page.from, to: read.page.to, text,
     hasEarlier: read.page.hasEarlier, atEnd: read.page.atEnd, running: read.run.state === 'running', gaps: read.page.gaps };
 }

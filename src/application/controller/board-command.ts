@@ -105,6 +105,8 @@ export interface BoardCommandRequest {
 // ---------------------------------------------------------------------------
 
 export interface BoardCancellation {
+  /** Foreground invocation owns cancellation of its admitted operation. */
+  readonly stopOwnedWorkflow?: boolean;
   readonly requested: boolean;
   /** If cancellation is requested after a safe boundary, return durable partial state. */
   readonly safeBoundaryCrossed?: boolean;

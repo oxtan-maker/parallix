@@ -1,3 +1,6 @@
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { EventEmitter } from 'node:events';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import fs from 'node:fs';
@@ -5,7 +8,7 @@ import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp } from '../../helpers/temp-dir.js';
-import { captureMissionCommand, hostMissionCommand, correlateMissionCapture } from '../../../src/composition/mission-terminal.js';
+import { captureMissionCommand, hostMissionCommand, correlateMissionCapture, hostWorkflowExecutor } from '../../../src/composition/mission-terminal.js';
 import { CurrentWorkRecorder, currentWorkPublication } from '../../../src/application/recording/current-work-recorder.js';
 import { createMissionTerminalResources } from '../../../src/adapters/cli/commands/mission-terminal-resources.js';
 import { missionSocketPath } from '../../../src/adapters/process/tmux-host.js';
@@ -132,4 +135,31 @@ test('terminal resources use only attributed recorded execution identity (TASK-2
   assert.equal(execution(), null, 'foreign identity does not establish liveness');
   fs.writeFileSync(file, JSON.stringify({ ...record, execution: null }));
   assert.equal(execution(), null, 'legacy records without identity remain unknown');
+});
+
+
+test('pipe workflow executor inherits one capture and combines observed stream order (TASK-2771)', async t => {
+  const root = mkdtemp('px-workflow-pipe-');
+  fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { terminal: { host: 'pipe' } } }));
+  const original = childProcess.spawn;
+  t.after(() => { childProcess.spawn = original; syncBuiltinESMExports(); fs.rmSync(root, { recursive: true, force: true }); });
+  let environment: NodeJS.ProcessEnv | undefined;
+  const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter() });
+  childProcess.spawn = ((_command: string, _args: string[], options: { env: NodeJS.ProcessEnv }) => {
+    environment = options.env;
+    queueMicrotask(() => {
+      child.stdout.emit('data', Buffer.from('first\n'));
+      child.stderr.emit('data', Buffer.from('second\n'));
+      child.stdout.emit('data', Buffer.from('third\n'));
+      child.emit('close', 0, null);
+    });
+    return child;
+  }) as unknown as typeof childProcess.spawn;
+  syncBuiltinESMExports();
+  const output: Array<[string, string]> = [];
+  const capture = { setTerminalHost() {}, write: (stream: string, bytes: Buffer) => output.push([stream, bytes.toString()]) } as unknown as import('../../../src/adapters/filesystem/run-history-store.js').RunCapture;
+  const operation = { id: 'owned', missionId: 'task-one' } as import('../../../src/domain/workflow-operation.js').WorkflowOperation;
+  assert.deepEqual(await hostWorkflowExecutor(cli, operation, root, 'workflow-capture', capture, resolveConfiguration({})), { exitCode: 0, signal: null });
+  assert.equal(environment?.PARALLIX_OPERATION_CAPTURE, 'workflow-capture', 'executor cannot create a duplicate coordinator capture');
+  assert.deepEqual(output, [['stdout', 'first\n'], ['stdout', 'second\n'], ['stdout', 'third\n']]);
 });

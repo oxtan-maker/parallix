@@ -114,6 +114,8 @@ export interface MissionHistoryOverview {
 }
 
 export interface MissionHistoryPageRequest {
+  /** CLI coordinator replay only; history and web remain plain text. */
+  readonly presentation?: 'terminal';
   readonly runId: string;
   readonly stream: RunStreamName;
   /** Return bytes ending at this offset (earlier history). */

@@ -1,6 +1,6 @@
 import type { WorkflowOperation } from '../../domain/workflow-operation.js';
 
-export interface WorkflowInvocation { readonly command: 'draft' | 'review' | 'integrate'; readonly args: readonly string[]; }
+export interface WorkflowInvocation { readonly command: 'draft' | 'review' | 'integrate'; readonly args: readonly string[]; readonly interactive?: boolean; }
 /** Transport details remain application state, outside the domain operation. */
 export interface WorkflowOperationRecord extends WorkflowOperation {
   readonly requestedAgent?: string | null;

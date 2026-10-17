@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import type { WorkflowOperation } from '../domain/workflow-operation.js';
+import type { WorkflowOperationRecord as WorkflowOperation } from '../application/ports/workflow-operation.js';
 import type { ParallixConfiguration } from "../application/ports/configuration.js";
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -57,8 +57,10 @@ function finishOperation(capture: RunCapture | null, exitCode: number | null, so
 
 /** Composition supplies the process host; workflow policy stays in the child CLI. */
 export async function hostMissionCommand(command: string, args: string[], target: string, log: (_line: string) => void, cli: CliInvocation, options: { interactive?: boolean; configuration: ParallixConfiguration }): Promise<number | null> {
+  // Owned workflows host their executor, while this foreground process
+  // remains the signal and replay boundary.
+  if (!shouldHostForeground(command, args, options.interactive)) { return null; }
   const configuration = options.configuration;
-  if (!(options.interactive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY))) { return null; }
   const operation = operationIdentity(command, args, target);
   if (!operation || configuration.terminal.missionTerminal === operation.slug) { return null; }
   const { slug, worktree, identity, terminal, runId } = operation;
@@ -90,6 +92,12 @@ export async function hostMissionCommand(command: string, args: string[], target
   finishOperation(capture, result, { kind: 'terminal-bytes', path: 'stdout', covers: `everything the hosted ${command} operation drew in its terminal pane: harness, preflight, gates, agent output, handoff and review messages (stderr merged by the terminal)`, complete: true },
     launch.started() ? [] : ['The operation did not start in the terminal; it may run through the pipe host as a separate operation.']);
   return hostedMissionResult(launch, result, config);
+}
+
+function shouldHostForeground(command: string, args: readonly string[], interactive?: boolean): boolean {
+  const owned = command === 'draft' || command === 'integrate'
+    || command === 'review' && args.some(arg => ['--start', '--continue', '--submit'].includes(arg));
+  return !owned && (interactive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY));
 }
 
 function terminalHostReady(config: ReturnType<typeof terminalHostConfig>, probe: ReturnType<typeof probeTmux>, log: (_line: string) => void): boolean {
@@ -163,9 +171,10 @@ export async function hostWorkflowExecutor(cli: CliInvocation, operation: Workfl
   const hosted = await hostWorkflowTerminal(cli, args, operation, root, runId, capture, configuration);
   if (hosted) { return hosted; }
   capture.setTerminalHost?.('pipe', null);
-  const child = spawn(cli.command, args, { cwd: root, env: { ...configuration.forwardedEnvironment }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(cli.command, args, { cwd: root, env: { ...configuration.forwardedEnvironment, PARALLIX_OPERATION_CAPTURE: runId }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', chunk => capture.write('stdout', chunk));
-  child.stderr.on('data', chunk => capture.write('stderr', chunk));
+  // One coordinator transcript preserves the observed order of both pipes.
+  child.stderr.on('data', chunk => capture.write('stdout', chunk));
   return new Promise((resolve, reject) => { child.once('error', reject); child.once('close', (exitCode, signal) => resolve({ exitCode, signal })); });
 }
 
@@ -174,7 +183,7 @@ interface WorkflowExecutorExit { readonly exitCode: number | null; readonly sign
 async function hostWorkflowTerminal(cli: CliInvocation, args: readonly string[], operation: WorkflowOperation, root: string,
   runId: string, capture: RunCapture, configuration: ParallixConfiguration): Promise<WorkflowExecutorExit | null> {
   const policy = terminalHostConfig(loadAdapterConfig(root));
-  if (policy.host === 'pipe') { return null; }
+  if (policy.host === 'pipe' || operation.invocation?.interactive === false) { return null; }
   const required = policy.host === 'tmux' && policy.whenUnavailable === 'fail';
   const probe = probeTmux();
   if (!probe.available) {

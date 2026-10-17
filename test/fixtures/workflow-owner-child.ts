@@ -46,7 +46,22 @@ const createGraph: typeof createProductionApplicationServices = async (root, pro
   return { ...graph, executePorts, presentationCapabilities: { ...graph.presentationCapabilities, commandController: raw } };
 };
 
-if (process.argv[2] === '--workflow-http-host') {
+if (process.argv[2] === '--workflow-foreground') {
+  const { ownWorkflowCli } = await import('../../src/composition/workflow-cli.js');
+  const root = process.argv[3];
+  const configuration = resolveProcessConfiguration();
+  const graph = await createGraph(root, undefined, { configuration });
+  const owned = await composeWorkflowOperations(root, configuration, graph.presentationCapabilities!.commandController,
+    path.join(root, 'parallix.db'), async () => 'codex', { command: process.execPath, args: [...process.execArgv, import.meta.filename] });
+  // Keep the real foreground wrapper, admission, workers and process boundaries;
+  // substitute only the command body with the fixture's held preflight.
+  const controller = { dispatch: (request: import('../../src/application/controller/board-command.js').BoardCommandRequest) =>
+    owned.service.dispatch(request.kind === 'workflow:stop' ? request : { ...request, kind: 'active:execute', capabilities: new Set(['active:execute']), invocation: undefined }) };
+  const registry = { review: async () => {} } as Record<string, import('../../src/interfaces/cli/runtime.js').Command>;
+  ownWorkflowCli(registry, async () => ({ ...graph, presentationCapabilities: { ...graph.presentationCapabilities!, commandController: controller as never },
+    operatorState: { ...graph.operatorState, close: async () => { await owned.close(); await graph.operatorState.close(); } } }));
+  Promise.resolve().then(() => registry.review([process.argv[4], '--submit'])).then(() => process.exit(0), error => { console.error(error.message); process.exit(1); });
+} else if (process.argv[2] === '--workflow-http-host') {
   const { createWebHost } = await import('../../src/interfaces/web/host.js');
   const { loadWebAssets } = await import('../../src/adapters/web/asset-store.js');
   const root = process.argv[3];

@@ -1,14 +1,30 @@
 # Agent terminal sessions and run history
 
 Interactive mission operations automatically use tmux when it is installed
-and runnable. Headless callers keep pipes, preserving stdin and separate
-stdout/stderr. Each mission has a persistent terminal keyed by its Mission ID
+and runnable. Headless callers keep pipes. Owned workflow output combines stdout and
+stderr in one coordinator transcript in the order observed. Each mission has a persistent terminal keyed by its Mission ID
 (`task-1234`, `task-2622.18`, `px-0042`, …), kept exactly as recorded; an
 uppercase alias such as `TASK-2622.18` is accepted on the command line. Parallix
 commands and their agents share that terminal across roles, retries and
 provider changes. No configuration is needed.
-Interactive active, review, integrate, recover and verify operations enter it
-automatically. Queries and structured writes keep their caller-side output.
+Interactive draft, review and integrate commands keep the foreground CLI
+connected to their owned executor, preserving terminal progress updates.
+Redirected output uses plain messages. Interactive active, recover and verify
+operations enter the mission terminal automatically. Queries and structured
+writes keep their caller-side output.
+
+For foreground draft, review/handoff and integration, Ctrl+C stops the invoked
+workflow and its owned children before returning a non-success result. Repeated
+Ctrl+C keeps the same cleanup running. After cleanup succeeds, retry the same
+command immediately; the Mission and recorded evidence remain available.
+A CLI interrupt does not stop an independently started web workflow or another
+Mission. Use `px stop <slug>` to explicitly settle that Mission's workflow.
+Cleanup escalates to forced termination when needed, with two confirmation
+stages of up to two seconds of polling per owned process tree, plus process
+inspection time. Attributed detached executions are also settled. If termination
+cannot be confirmed, Parallix reports a pending stop and refuses replacement;
+inspect the retained history and retry `px stop` after resolving the surviving
+execution.
 
 ## Attach to a mission
 
@@ -89,11 +105,11 @@ Each mission operation (`active`, `review`, `integrate`, `recover`) is retained
 as its own record next to the agent runs it launched, with its exit status, so
 harness messages, preflight, gates, handoff, review and retries are searchable
 too. A terminal-hosted operation records everything its pane drew, with stderr
-merged by the terminal. An operation without a terminal records what Parallix
-printed, keeping stdout and stderr apart; output a child process wrote straight
-to the terminal (for example a gate with inherited stdio) is not captured, and
-the record says so. Commands dispatched from the board's own buttons run inside
-the web host and record only their agent runs.
+merged by the terminal. An owned workflow without a terminal captures both executor pipes into its
+ordered coordinator transcript, including inherited child output. Other
+in-process operations keep stdout and stderr apart; child output that bypasses
+that process is not captured, and the record says so. Commands dispatched from
+the board share workflow ownership and retain their coordinator and agent runs.
 
 Coordinator command records are labelled workflow captures, with no agent
 family or attempt. When current work is published, they correlate to its

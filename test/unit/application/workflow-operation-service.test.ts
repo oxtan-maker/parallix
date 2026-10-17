@@ -405,3 +405,50 @@ test('activation refusal preserves its validation error and admits no owner (TAS
   assert.equal(await f.service.current('task-one'), null);
   assert.equal(f.events.length, 0);
 });
+
+
+for (const phase of ['preparing', 'checking', 'running'] as const) {
+  test(`foreground cancellation settles ${phase} before retry and fences late completion (TASK-2771)`, async () => {
+    const f = fixture();
+    const cancellation = { requested: false, stopOwnedWorkflow: true };
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    let running: Promise<void> | undefined;
+    f.processes.launch = async id => {
+      running = f.service.run(id, async () => {
+        await f.service.progress(id, 1, phase === 'checking' ? 'handoff' : 'execute', phase, undefined, phase === 'running');
+        cancellation.requested = true;
+        await held;
+        return completed({});
+      });
+      await f.operations.transaction(async () => {});
+    };
+    const stopped: number[] = [];
+    f.processes.stop = async owner => { stopped.push(owner.pid); return true; };
+    const evidence = f.missions.get('task-one')!.checkpoints;
+    try {
+      const result = await f.service.dispatch({ ...request(), cancellation });
+      assert.equal(result.status, 'cancelled');
+      assert.equal((await f.service.operation('request-one'))?.phase, 'stopped');
+      assert.equal(stopped.length, 1);
+      assert.deepEqual(f.missions.get('task-one')!.checkpoints, evidence);
+      f.processes.launch = async () => {};
+      assert.equal((await f.service.admit({ ...request('replacement'), missionStatusAtRequest: 'active' })).status, 'accepted');
+      await assert.rejects(() => f.service.progress('request-one', 1, 'execute', 'late'), /fenced|stopped/);
+    } finally { release(); await running; }
+    assert.equal((await f.service.operation('request-one'))?.phase, 'stopped');
+    assert.equal((await f.service.current('task-one'))?.id, 'replacement');
+  });
+}
+
+test('foreground cancellation cannot stop a replacement or an independent workflow (TASK-2771)', async () => {
+  const f = fixture();
+  await f.service.admit(request()); await f.service.admit(request('independent', 'task-two'));
+  await f.service.stop('task-one');
+  await f.service.admit({ ...request('replacement'), missionStatusAtRequest: 'active' });
+  let stops = 0; f.processes.stop = async () => { stops++; return true; };
+  assert.equal((await f.service.stop('task-one', 'request-one')).status, 'completed');
+  assert.equal((await f.service.current('task-one'))?.id, 'replacement');
+  assert.equal((await f.service.current('task-two'))?.id, 'independent');
+  assert.equal(stops, 0);
+});

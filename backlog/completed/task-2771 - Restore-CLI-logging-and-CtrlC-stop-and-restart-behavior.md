@@ -1,8 +1,8 @@
 ---
 id: TASK-2771
 title: Restore CLI logging and Ctrl+C stop-and-restart behavior
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-16 12:09'
 labels:
   - bug

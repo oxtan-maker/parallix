@@ -66,6 +66,8 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
       const operation = await this.operation(id);
       if (!operation) { return failure('execution', 'Accepted operation is unavailable'); }
       const observed = await this._observe?.(operation);
+      const interrupted = await this.settleForegroundStop(operation, request);
+      if (interrupted) { return interrupted as BoardCommandResult<T>; }
       if (operation.phase === 'stopping') { return failure('conflict', `Stop is pending for ${operation.id}; use px stop ${operation.missionId} to confirm settlement`); }
       if (!isOpenWorkflow(operation)) {
         settledAt ??= this._wait.now();
@@ -78,6 +80,13 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
       }
       await this._pause();
     }
+  }
+
+  private async settleForegroundStop(operation: WorkflowOperation, request: BoardCommandRequest): Promise<ApplicationOutcome<unknown> | null> {
+    if (!request.cancellation?.stopOwnedWorkflow || !request.cancellation.requested && operation.phase !== 'stopping') { return null; }
+    const stopped = await this.stop(operation.missionId, operation.id);
+    return stopped.status === 'completed'
+      ? failure('cancelled', 'Workflow interrupted; owned work stopped and mission retained') : stopped;
   }
 
   async admit(request: BoardCommandRequest): Promise<WorkflowAdmission> {
@@ -336,10 +345,10 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     }
   }
 
-  async stop(mission: string): Promise<ApplicationOutcome<unknown>> {
+  async stop(mission: string, operationId?: string): Promise<ApplicationOutcome<unknown>> {
     const stopping = await this._operations.transaction(async () => {
       const current = await this._operations.current(mission);
-      if (!current) { return null; }
+      if (!current || operationId && current.id !== operationId) { return null; }
       const next: WorkflowOperation = { ...current, phase: 'stopping', updatedAt: new Date().toISOString() };
       await this._operations.replace(next, current.generation);
       await this.publish(next, 'running', 'waiting for owned workflow to stop');
@@ -347,7 +356,10 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     });
     if (!stopping) { return completed({ stopped: true }); }
     const pendingGuidance = `Inspect px history ${mission} for surviving executions. Manually terminate a surviving process only after verifying its current start identity matches the retained workflow or run identity, then rerun px stop ${mission}.`;
-    const ownerStopped = !stopping.owner || await this._processes.stop(stopping.owner);
+    const [ownerStopped, launcherStopped] = await Promise.all([
+      stopping.owner ? this._processes.stop(stopping.owner) : true,
+      stopping.launcher ? this._processes.stop(stopping.launcher) : true,
+    ]);
     if (this._processes.stopEffects && !await this._processes.stopEffects(stopping)) {
       return failure('conflict', `Stop is pending: attributed execution termination is unconfirmed. ${pendingGuidance}`);
     }
@@ -357,8 +369,10 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     if (!ownerStopped && stopping.owner && await this._processes.alive(stopping.owner) !== false) {
       return failure('conflict', `Stop is pending: termination is unconfirmed; replacement is refused. ${pendingGuidance}`);
     }
+    if (!launcherStopped) { return failure('conflict', `Stop is pending: launcher termination is unconfirmed. ${pendingGuidance}`); }
     await this._operations.transaction(async () => {
       const current = await this._operations.get(stopping.id);
+      if (current?.phase === 'stopped') { return; }
       if (!current || current.generation !== stopping.generation || current.phase !== 'stopping') { throw new Error('Stop ownership changed'); }
       const stopped = { ...current, ...settleWorkflowStop(current, new Date().toISOString()) };
       await this._operations.replace(stopped, current.generation);
