@@ -145,6 +145,10 @@ test('prepared host runs the confined command in the pane and keeps credentials 
   assert.ok(pane.indexOf('command.identity.tmp') < pane.indexOf('exec '), 'identity is recorded before command execution');
   assert.match(host, /trap 'cleanup TERM; exit 143' TERM/);
   assert.match(host, /pipe-pane/);
+  const creation = host.split('\n').find(line => line.includes(' new-window '))!;
+  assert.ok(creation.includes('\\; set-option -w'), 'creation and ownership share one tmux command queue');
+  assert.ok(creation.includes('@px_host_pid "$$"'), 'ownership is published before another client can inspect the window');
+  assert.ok(creation.includes('@px_supervisor_pid'), 'reconciliation sees the supervisor with the new window');
   assert.ok(host.includes('exec "${SHELL:-/bin/sh}" -i'), 'the retained console is the operator\'s interactive shell so their rc environment returns (TASK-2675)');
   assert.equal(host.includes('exec /bin/sh -i'), false);
   assert.match(host, /env -i /, 'the tmux server itself stays credential-free');

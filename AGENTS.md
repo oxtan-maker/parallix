@@ -21,8 +21,12 @@ Push mission branches only to `review` (Forgejo), never to `origin` (GitHub). On
   own file membership; do not copy inventories into guidance. Task IDs belong in
   case names/comments, not suite names. Example: add `rejects invalid checkpoint
   evidence (TASK-2622.19)` to the existing checkpoint-validation suite.
-- Create a cohesive, contract-named suite only when no owner exists; explain its
-  boundary. Example: a new webhook-signature contract warrants its own suite.
+- Create a cohesive, contract-named suite only when no owner exists, or split an
+  existing suite along cohesive contract boundaries to meet execution-time
+  limits; explain its boundary. Such splits do not require separate operator
+  approval. Preserve assertions, isolation, cleanup, verification-tier membership
+  and finite CPU budgets; do not weaken operator-owned gates. Example: a new
+  webhook-signature contract warrants its own suite.
   Reject numeric task-ID filenames for executable suites, case modules and
   helpers; preserve legitimate task-domain names and regression IDs in cases
   or comments. Do not force unrelated behaviors into giant suites.

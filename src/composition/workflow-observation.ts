@@ -20,7 +20,7 @@ function observer(root: string, configuration: ParallixConfiguration, cli: CliIn
   let child: ReturnType<typeof spawn> | null = null;
   let sequence = 0;
   let closed = false;
-  const pending = new Map<number, { finish(_error?: Error, _value?: unknown): void }>();
+  const pending = new Map<number, { owner: ReturnType<typeof spawn>; finish(_error?: Error, _value?: unknown): void }>();
   const start = () => {
     if (child) { return child; }
     const launched = workflowObservationSystem.spawn(cli.command, [...cli.args, '--workflow-observe', root], {
@@ -29,7 +29,7 @@ function observer(root: string, configuration: ParallixConfiguration, cli: CliIn
     child = launched;
     const fail = (error: Error) => {
       if (child === launched) { child = null; }
-      for (const call of pending.values()) { call.finish(error); }
+      for (const call of pending.values()) { if (call.owner === launched) { call.finish(error); } }
     };
     launched.on('error', fail);
     launched.on('exit', code => fail(new Error(`Workflow observer exited (${code})`)));
@@ -46,9 +46,10 @@ function observer(root: string, configuration: ParallixConfiguration, cli: CliIn
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           pending.get(id)?.finish(new Error('Workflow observation timed out'));
-          current.kill('SIGTERM');
+          // The deadline belongs to this caller. Keep finite cold work and its
+          // warm graph alive for later requests; close owns child termination.
         }, 10_000);
-        pending.set(id, { finish(error, value) {
+        pending.set(id, { owner: current, finish(error, value) {
           if (!pending.delete(id)) { return; } clearTimeout(timer);
           if (error) { reject(error); } else { resolve(value as T); }
         } });
@@ -61,7 +62,7 @@ function observer(root: string, configuration: ParallixConfiguration, cli: CliIn
       const current = child; child = null;
       if (!current) { return; }
       await new Promise<void>(resolve => {
-        const timer = setTimeout(() => { current.kill('SIGTERM'); resolve(); }, 2000);
+        const timer = setTimeout(() => { current.kill('SIGKILL'); resolve(); }, 2000);
         current.once('exit', () => { clearTimeout(timer); resolve(); });
         if (current.connected) { current.disconnect(); } else { current.kill('SIGTERM'); }
       });

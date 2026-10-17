@@ -274,8 +274,11 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
   // TASK-2288: the source-runtime-alias.js shim is retired. TASK-2328 removed the
   // transpiled compatibility tree as well. Test files now name modules under
   // src/ directly instead of relying on a runtime resolver hook.
+  // Unit sources and module doubles use native ESM. Installing tsx's CJS
+  // hooks as well repeats unnecessary loader initialization in every worker.
+  // Boundary suites retain the full loader for their child-process fixtures.
   const typeScriptLoaderArgs = testFiles.some(file => file.endsWith('.ts'))
-    ? ['--import', 'tsx']
+    ? ['--import', runsIntegrationSuite ? 'tsx' : 'tsx/esm']
     : [];
   // TASK-2328: mock.module() requires the experimental flag in Node 22+
   const moduleMockArgs = ['--experimental-test-module-mocks'];

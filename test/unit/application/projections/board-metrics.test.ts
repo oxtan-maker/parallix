@@ -39,6 +39,50 @@ const now = '2026-07-22T10:00:00Z';
 const earlier = '2026-07-22T08:00:00Z';
 const later = '2026-07-22T12:00:00Z';
 
+test('state flow preserves unordered and duplicate instants without reparsing history per point (TASK-2770)', t => {
+  const transitions = Array.from({ length: 120 }, (_, index) => ({
+    missionId: missionId(`task-flow-${index % 10}`), from: 'backlog' as const,
+    to: index % 2 === 0 ? 'active' as const : 'done' as const,
+    trigger: 'activate' as const, actor: 'codex',
+    occurredAt: new Date(Date.parse(earlier) + index * 60_000).toISOString(),
+  }));
+  const instants = [later, earlier, now, earlier];
+  const initial = new Map([[id1, 'backlog' as const]]);
+  const parse = Date.parse;
+  const parsing = t.mock.method(Date, 'parse', parse);
+  const result = cumulativeFlowByStateSeries(initial, transitions, instants);
+  assert.ok(parsing.mock.callCount() <= transitions.length + instants.length,
+    'parse each transition and requested instant once rather than once per point');
+  for (let index = 0; index < instants.length; index++) {
+    const state = new Map<MissionId, MissionStatus>(initial);
+    for (const transition of transitions) {
+      if (parse(transition.occurredAt) <= parse(instants[index]!)) { state.set(transition.missionId, transition.to); }
+    }
+    const expected = { backlog: 0, refined: 0, active: 0, review: 0, integration: 0, done: 0 };
+    for (const lane of state.values()) { expected[lane]++; }
+    assert.deepEqual(result.series[index], { at: instants[index], counts: expected, observationCount: state.size });
+  }
+});
+
+test('legacy lifecycle entries parse history once and retain earliest repository-owned evidence (TASK-2770)', async t => {
+  const history = [
+    { eventData: JSON.stringify({ missionId: id1, repositoryId: 'parallix' }), createdAt: now },
+    { eventData: JSON.stringify({ missionId: id1, repositoryId: 'parallix' }), createdAt: earlier },
+    { eventData: JSON.stringify({ missionId: id2, repositoryId: 'other' }), createdAt: earlier },
+    { eventData: 'null', createdAt: earlier },
+    { eventData: 'broken JSON', createdAt: earlier },
+  ].map((entry, id) => ({ ...entry, id, eventType: 'fixture' }));
+  const parse = t.mock.method(JSON, 'parse');
+  const adapter = new ConcreteMetricsReadAdapter({
+    ...emptyBoardRepositories(), repositoryId: repositoryId('parallix'), clock: () => later,
+    historyRepo: { ...emptyBoardRepositories().historyRepo, findAll: async () => history },
+  });
+  const metrics = await adapter.buildMetrics(new Map([[id1, 'active'], [id2, 'refined']]));
+  assert.equal(parse.mock.callCount(), history.length);
+  assert.equal(metrics.medianAgeByLane.series.find(point => point.lane === 'active')?.value, 240);
+  assert.equal(metrics.medianAgeByLane.series.find(point => point.lane === 'refined')?.value, null);
+});
+
 // ---------------------------------------------------------------------------
 // SC3: Cumulative-flow with missingHistoryFallback
 // ---------------------------------------------------------------------------

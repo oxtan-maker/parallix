@@ -287,6 +287,11 @@ variable in your shell environment to keep usage help as the no-command default.
 
 ## Browser freshness and operation history
 
+The web host stays responsive while a separate process builds board data. A read
+that exceeds its deadline fails individually; it does not discard work already
+loading or fail other pending reads. A later refresh reuses the loaded state.
+Closing `px web` also stops its board readers.
+
 If a projection refresh fails, the browser keeps the last validated board visible
 with a stale warning and the server's failure message. Stream errors request a
 coordinated refresh; only a successful read begun after the latest failure can

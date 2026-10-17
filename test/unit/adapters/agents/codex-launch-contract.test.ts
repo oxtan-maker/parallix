@@ -67,13 +67,25 @@ describe("Codex launcher basics ,", () => {
 
   // ---------- buildCodexDraftInvocation ----------
 
-  test('Codex template keeps approval policy at top level and project trust intact', () => {
+  test('Codex template keeps approval policy at top level and project trust intact (TASK-2570)', () => {
     const template = fs.readFileSync(new URL('../../../../templates/codex/config.toml', import.meta.url), 'utf8');
-    const firstTable = template.indexOf('[');
-    assert.ok(firstTable >= 0);
-    assert.match(template.slice(0, firstTable), /^approval_policy = "never"$/m);
-    assert.match(template.slice(firstTable), /^\[projects\."\.\."\]\s*\ntrust_level = "trusted"$/m);
-    assert.doesNotMatch(template.slice(firstTable), /approval_policy/);
+    const operatorHome = registeredMkdtemp('codex-policy-home-');
+    const worktree = registeredMkdtemp('codex-policy-worktree-');
+    try {
+      fs.writeFileSync(path.join(operatorHome, 'config.toml'), template);
+      ensureCodexHome(worktree, resolveConfiguration({ CODEX_HOME: operatorHome }));
+      assert.equal(fs.readlinkSync(codexConfigPath(worktree)), path.join(operatorHome, 'config.toml'));
+      const linked = fs.readFileSync(codexConfigPath(worktree), 'utf8');
+      assert.equal(linked, template);
+      const firstTable = linked.indexOf('[');
+      assert.ok(firstTable >= 0);
+      assert.match(linked.slice(0, firstTable), /^approval_policy = "never"$/m);
+      assert.match(linked.slice(firstTable), /^\[projects\."\.\."\]\s*\ntrust_level = "trusted"$/m);
+      assert.doesNotMatch(linked.slice(firstTable), /approval_policy/);
+    } finally {
+      fs.rmSync(operatorHome, { recursive: true, force: true });
+      fs.rmSync(worktree, { recursive: true, force: true });
+    }
   });
 
   test('headless Codex launches and resumes use top-level approval and project trust overrides', () => {

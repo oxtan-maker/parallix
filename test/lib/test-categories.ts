@@ -182,6 +182,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/integrate/integration-provider-approval-recovery.test.ts',
   'integration/presentation/board-shell-subscription-lifetime.test.ts',
   'integration/presentation/presentation-web.integration.test.ts',
+  'integration/presentation/web-package-smoke.integration.test.ts',
   'integration/presentation/board-worktree-mission-scope.test.ts',
   'integration/presentation/board-task-update-authority.test.ts',
   'integration/sandbox/agent-sandbox-state-bindings.test.ts',
@@ -360,7 +361,6 @@ export const INTEGRATION_LOCAL_TESTS: readonly string[] = [
   'integration/sandbox/codex-sandbox-mission-state-write.test.ts',
   'integration/sandbox/claude-credential-refresh-isolation.test.ts',
   'integration/sandbox/claude-sandbox-credential-persistence.test.ts',
-  'integration/agents/codex-approval-policy-config.test.ts',
   'integration/test-harness/unit-test-timeout-guard.test.ts',
   'integration/process/tmux-terminal-host.test.ts',
   'integration/test-harness/runner-memory-containment.test.ts',
@@ -388,8 +388,6 @@ export const INTEGRATION_LOCAL_REASONS: Readonly<Record<string, string>> = {
     'Spawns the real `bwrap` binary to run every Claude lifecycle sandbox profile against a stand-in CLI; bubblewrap is not part of the GitHub-hosted runner image.',
   'integration/sandbox/claude-sandbox-credential-persistence.test.ts':
     'Spawns the real `bwrap` binary to refresh Claude credentials inside the claude sandbox profile; bubblewrap is not part of the GitHub-hosted runner image.',
-  'integration/agents/codex-approval-policy-config.test.ts':
-    'Downloads and launches the pinned Codex v0.156.1 CLI to verify its real configuration parser; that versioned CLI and registry access are not clean-runner dependencies.',
   'integration/test-harness/unit-test-timeout-guard.test.ts':
     'Proves local CPU/timing guards through real runner fixtures; integration descendant accounting needs a C compiler and Node N-API headers. Hosted timing enforcement is disabled, so this proof remains required local verification.',
 };

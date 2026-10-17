@@ -3,8 +3,8 @@ id: TASK-2770
 title: >-
   Fix web board cold observer timeout loop after TASK-2750 and cover real board
   loading
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-16 08:20'
 updated_date: '2026-10-16 08:23'
 labels:

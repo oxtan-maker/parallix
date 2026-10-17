@@ -1,4 +1,8 @@
 import { renderReviewLoopEvent } from '../../src/adapters/review/review-loop-presentation.js';
+import fs from 'node:fs';
+import { afterEach } from 'node:test';
+import { mkdtemp } from './temp-dir.js';
+
 /**
  * Fake review-loop mechanism ports for application review-loop tests.
  *
@@ -13,6 +17,20 @@ import type {
   ReviewLoopOutput, ReviewLoopPorts, ReviewLoopState, ReviewProviderPort, ReviewStatePort, ReviewTaskMirrorPort, PreReviewPort, HumanFeedbackPort,
 } from '../../src/application/ports/review-round.js';
 import type { LoopContext } from '../../src/application/review-loop/round.js';
+
+const ownedWorktrees = new Set<string>();
+afterEach(() => {
+  for (const worktree of ownedWorktrees) {
+    fs.rmSync(worktree, { recursive: true, force: true });
+    ownedWorktrees.delete(worktree);
+  }
+});
+
+function isolatedWorktree(): string {
+  const worktree = mkdtemp('review-loop-worktree-');
+  ownedWorktrees.add(worktree);
+  return worktree;
+}
 
 export interface ReviewLoopFakeOverrides {
   readonly slug?: string;
@@ -85,7 +103,7 @@ export function fakeReviewLoopPorts(overrides: ReviewLoopFakeOverrides = {}): Re
   };
   const ports: ReviewLoopPorts = {
     branch: overrides.branch ?? `mission/${slug}`,
-    worktree: overrides.worktree ?? '/tmp/fake-worktree',
+    worktree: overrides.worktree ?? isolatedWorktree(),
     polling: { intervalMs: 10_000, timeoutMs: 600_000 },
     state,
     task: {

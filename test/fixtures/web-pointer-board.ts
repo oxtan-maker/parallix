@@ -26,8 +26,12 @@ export function compactPointerSnapshot(lane: 'backlog' | 'refined' | 'active' | 
   return toWebBoardSnapshot(makeProjection({ [lane]: [card] }));
 }
 
-export async function pointerBoard(onCommand?: (request: WebCommandRequest) => Promise<void>) {
-  const bundled = await build({
+// Only immutable browser assets are shared. Each case still owns its browser,
+// server, page and command state, including teardown and waited-child CPU.
+let assets: Promise<{ js: string; css: string }> | undefined;
+
+function pointerAssets() {
+  return assets ??= build({
     stdin: { contents: `
       import React from 'react';
       import {createRoot} from 'react-dom/client';
@@ -59,10 +63,15 @@ export async function pointerBoard(onCommand?: (request: WebCommandRequest) => P
       const events = new EventSource('/events');
       events.onmessage = (event) => window.renderBoard(JSON.parse(event.data));
     `, resolveDir: process.cwd(), loader: 'tsx' },
-    bundle: true, write: false, outdir: 'assets', define: { 'process.env.NODE_ENV': '"production"' },
-  });
-  const js = bundled.outputFiles.find((file) => file.path.endsWith('.js'))!.text;
-  const css = bundled.outputFiles.find((file) => file.path.endsWith('.css'))!.text;
+    bundle: true, minify: true, write: false, outdir: 'assets', define: { 'process.env.NODE_ENV': '"production"' },
+  }).then(bundled => ({
+    js: bundled.outputFiles.find((file) => file.path.endsWith('.js'))!.text,
+    css: bundled.outputFiles.find((file) => file.path.endsWith('.css'))!.text,
+  }));
+}
+
+export async function pointerBoard(onCommand?: (request: WebCommandRequest) => Promise<void>) {
+  const { js, css } = await pointerAssets();
   const requests: unknown[] = [];
   let release: (() => void) | undefined;
   let responseDelay: Promise<void> | undefined;

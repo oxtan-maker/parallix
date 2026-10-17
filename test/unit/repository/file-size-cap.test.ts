@@ -43,7 +43,6 @@ const EXCEPTIONS: readonly string[] = [
   'src/adapters/forgejo/forgejo-git.ts',
   'src/adapters/forgejo/forgejo-pr.ts',
   'src/adapters/sqlite/mission-serialization.ts',
-  'src/application/projections/metrics.ts',
   'src/application/rebase-workflow.ts',
   'src/application/recovery-supervisor.ts',
   'src/domain/review.ts',

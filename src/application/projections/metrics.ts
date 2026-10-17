@@ -1,3 +1,8 @@
+import { outcomesCompletedInWindow, medianStateTimes, medianAgentRuntime, agentRuntimeMinutes, throughputSeries } from './metrics-completion.js';
+export { outcomesCompletedInWindow, medianStateTimes, medianAgentRuntime, agentRuntimeMinutes, throughputSeries } from './metrics-completion.js';
+import { cumulativeFlowSeries, cumulativeFlowByStateSeries, weeklyCumulativeFlowByStateSeries } from './metrics-flow.js';
+export { wipAtTime, wipSeries, cumulativeFlowSeries, cumulativeFlowByStateSeries, weeklyCumulativeFlowByStateSeries } from './metrics-flow.js';
+export type { WipSnapshot, FlowPoint, ThroughputPoint } from './metrics-flow.js';
 import type { MissionId, MissionStatus } from '../../domain/mission.js';
 import type { MissionTransition } from '../../domain/mission-workflow.js';
 import type { MissionOutcome } from '../../domain/usage.js';
@@ -10,33 +15,22 @@ import type {
   DecisionWindowMetrics,
   LaneMetricSeries,
   MetricSeries,
-  StateFlowSeries,
-  WeeklyStateFlowSeries,
 } from './board.js';
 import { buildBoardMetrics } from './board.js';
 import type { DecisionWindow, DecisionWindows } from '../../domain/decision-window.js';
-import { decisionWindowContains, decisionWindowDays, decisionWindowDay, decisionWindowDayEnd } from '../../domain/decision-window.js';
+import { decisionWindowDayEnd } from '../../domain/decision-window.js';
 
 // ---------------------------------------------------------------------------
 // Time-based metrics — derived from recorded events
 // ---------------------------------------------------------------------------
 
-/** WIP count at a point in time. */
-export interface WipSnapshot {
-  readonly at: string;
-  readonly counts: Readonly<Record<MissionStatus, number>>;
-}
-
-/** Cumulative completed-mission data point. */
-export interface FlowPoint {
-  readonly at: string;
-  readonly counts: Readonly<Record<MissionStatus, number>>;
-}
-
-/** Throughput: completed missions per time period. */
-export interface ThroughputPoint {
-  readonly at: string;
-  readonly completedCount: number;
+function median(values: readonly number[]): number | null {
+  if (values.length === 0) { return null; }
+  const ordered = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(ordered.length / 2);
+  return ordered.length % 2 === 0
+    ? (ordered[middle - 1]! + ordered[middle]!) / 2
+    : ordered[middle]!;
 }
 
 /** Review loop rate: average review-fix rounds per completed mission. */
@@ -68,19 +62,6 @@ export function formatDuration(minutes: number): string {
   return `${(minutes / 1440).toFixed(1)}d`;
 }
 
-function emptyCounts(): Record<BoardLane, number> {
-  return { backlog: 0, refined: 0, active: 0, review: 0, integration: 0, done: 0 };
-}
-
-function median(values: readonly number[]): number | null {
-  if (values.length === 0) { return null; }
-  const ordered = [...values].sort((left, right) => left - right);
-  const middle = Math.floor(ordered.length / 2);
-  return ordered.length % 2 === 0
-    ? (ordered[middle - 1]! + ordered[middle]!) / 2
-    : ordered[middle]!;
-}
-
 // ---------------------------------------------------------------------------
 // The decision cohort — completed missions selected by a rolling window
 //
@@ -89,16 +70,6 @@ function median(values: readonly number[]): number | null {
 // mission that entered backlog in July and completed on August 6 contributes
 // its whole dwell, and an agent run it made eight days ago is still its run.
 // ---------------------------------------------------------------------------
-
-/** Outcomes whose lifecycle completed inside the window. */
-export function outcomesCompletedInWindow(
-  outcomes: readonly MissionOutcome[],
-  window: DecisionWindow | undefined,
-): readonly MissionOutcome[] {
-  return window === undefined
-    ? outcomes
-    : outcomes.filter((outcome) => decisionWindowContains(window, outcome.closedAt));
-}
 
 /** The missions a window selects; `undefined` means every mission is in scope. */
 export function missionsCompletedInWindow(
@@ -118,285 +89,6 @@ function transitionsOf(
   return missions === undefined
     ? transitions
     : transitions.filter((transition) => missions.has(transition.missionId));
-}
-
-// ---------------------------------------------------------------------------
-// WIP counts — current state snapshot
-// ---------------------------------------------------------------------------
-
-/**
- * Compute WIP counts at a point in time from the initial state and transitions.
- *
- * missingHistoryFallback: 'null' — when no transitions are available,
- * returns the initial state counts as-is (they represent the known baseline).
- */
-export function wipAtTime(
-  initial: ReadonlyMap<MissionId, MissionStatus>,
-  transitions: readonly MissionTransition[],
-  at: string,
-): WipSnapshot {
-  const ordered = [...transitions].sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
-  const state = new Map(initial);
-  for (const transition of ordered) {
-    if (Date.parse(transition.occurredAt) <= Date.parse(at)) { state.set(transition.missionId, transition.to); }
-  }
-
-  const statusList = ['backlog', 'refined', 'active', 'review', 'integration', 'done'] as const;
-  const counts = Object.fromEntries(statusList.map((status) => [status, 0])) as Record<MissionStatus, number>;
-  for (const status of state.values()) { counts[status] += 1; }
-  return { at, counts };
-}
-
-/**
- * Compute WIP series over multiple time instants.
- *
- * missingHistoryFallback: 'null' — returns initial state when no transitions exist.
- */
-export function wipSeries(
-  initial: ReadonlyMap<MissionId, MissionStatus>,
-  transitions: readonly MissionTransition[],
-  instants: readonly string[],
-): MetricSeries {
-  return {
-    series: instants.map((at) => {
-      const snapshot = wipAtTime(initial, transitions, at);
-      const totalWip = Object.values(snapshot.counts).reduce((sum, count) => sum + count, 0);
-      return { at, value: totalWip };
-    }),
-    missingHistoryFallback: 'null',
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Median state times — lifecycle cycle time from outcomes
-// ---------------------------------------------------------------------------
-
-/**
- * Compute the median lifecycle cycle time of completed missions.
- *
- * `MissionOutcome.cycleTimeMinutes` is the mission's wall-clock lifetime,
- * derived from its lane events. It is not the agents' execution time — that is
- * `medianAgentRuntime`, which reads `outcome.runs`.
- *
- * When a decision `window` is supplied, only missions that completed inside it
- * are measured, so the reported median and `observationCount` describe the
- * weekly decision population rather than every mission ever completed.
- *
- * missingHistoryFallback: 'null' — returns null when no outcomes are available.
- */
-export function medianStateTimes(
-  outcomes: readonly MissionOutcome[],
-  instants: readonly string[],
-  window?: DecisionWindow,
-): MetricSeries {
-  const ordered = [...outcomesCompletedInWindow(outcomes, window)]
-    .sort((a, b) => a.closedAt.localeCompare(b.closedAt));
-  const values: number[] = [];
-  let index = 0;
-  return {
-    // instants is readonly string[] (ISO-8601); default order == chronological, left implicit per SC6.
-    series: [...instants].sort((left, right) => left.localeCompare(right)).map((through) => {
-      while (index < ordered.length && ordered[index]!.closedAt <= through) {
-        const value = ordered[index++]!.cycleTimeMinutes;
-        const insertion = values.findIndex((existing) => existing > value);
-        values.splice(insertion === -1 ? values.length : insertion, 0, value);
-      }
-      if (values.length === 0) { return { at: through, value: null, observationCount: 0 }; }
-      const middle = Math.floor(values.length / 2);
-      const median = values.length % 2 === 0
-        ? (values[middle - 1] + values[middle]) / 2
-        : values[middle];
-      return { at: through, value: median, observationCount: values.length };
-    }),
-    missingHistoryFallback: 'null',
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Median agent runtime — execution minutes from the runs on each outcome
-// ---------------------------------------------------------------------------
-
-/** Total measured execution minutes an outcome's agents spent. */
-export function agentRuntimeMinutes(outcome: MissionOutcome): number | null {
-  const measured = outcome.runs
-    .map((run) => run.durationMinutes)
-    .filter((duration): duration is { readonly kind: 'measured'; readonly value: number } => duration.kind === 'measured');
-  return measured.length === 0 ? null : measured.reduce((sum, duration) => sum + duration.value, 0);
-}
-
-/**
- * Compute the median agent runtime of completed missions — how long the agents
- * actually ran, with queueing and review waits excluded. Its counterpart is
- * `medianStateTimes`, which measures the lifecycle those runs sit inside.
- *
- * A decision `window` selects the missions, never the individual runs: a
- * mission completed today keeps the runtime of a run it made eight days ago,
- * because that work is part of the outcome the window selected.
- *
- * missingHistoryFallback: 'null' — returns null when no outcome has a measured
- * run duration, so an unmeasured mission never reads as zero minutes of work.
- */
-export function medianAgentRuntime(
-  outcomes: readonly MissionOutcome[],
-  instants: readonly string[],
-  window?: DecisionWindow,
-): MetricSeries {
-  const selected = outcomesCompletedInWindow(outcomes, window);
-  return {
-    series: instants.map((through) => {
-      const measured = selected
-        .filter((outcome) => outcome.closedAt <= through)
-        .map((outcome) => agentRuntimeMinutes(outcome))
-        .filter((minutes): minutes is number => minutes !== null);
-      return { at: through, value: median(measured), observationCount: measured.length };
-    }),
-    missingHistoryFallback: 'null',
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Cumulative flow — state distribution over time
-// ---------------------------------------------------------------------------
-
-/**
- * Compute cumulative completed-mission counts from initial state and transitions.
- *
- * missingHistoryFallback: 'estimate' — when transitions are missing,
- * returns initial state as the best estimate of current distribution.
- */
-export function cumulativeFlowSeries(
-  initial: ReadonlyMap<MissionId, MissionStatus>,
-  transitions: readonly MissionTransition[],
-  instants: readonly string[],
-): MetricSeries {
-  const ordered = [...transitions].sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
-  const state = new Map(initial);
-  let completed = [...state.values()].filter((status) => status === 'done').length;
-  let index = 0;
-  return {
-    // instants is readonly string[] (ISO-8601); default order == chronological, left implicit per SC6.
-    series: [...instants].sort((left, right) => left.localeCompare(right)).map((at) => {
-      while (index < ordered.length && ordered[index]!.occurredAt <= at) {
-        const transition = ordered[index++]!;
-        const previous = state.get(transition.missionId);
-        if (previous === 'done') { completed -= 1; }
-        if (transition.to === 'done') { completed += 1; }
-        state.set(transition.missionId, transition.to);
-      }
-      return { at, value: completed, observationCount: state.size };
-    }),
-    missingHistoryFallback: 'estimate',
-  };
-}
-
-/** Cumulative flow distribution by state; `estimate` means the initial snapshot is all that is known. */
-export function cumulativeFlowByStateSeries(
-  initial: ReadonlyMap<MissionId, MissionStatus>,
-  transitions: readonly MissionTransition[],
-  instants: readonly string[],
-): StateFlowSeries {
-  const ordered = [...transitions].sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
-  return {
-    series: instants.map((at) => {
-      const state = new Map(initial);
-      for (const transition of ordered) {
-        if (Date.parse(transition.occurredAt) <= Date.parse(at)) { state.set(transition.missionId, transition.to); }
-      }
-      const counts = emptyCounts();
-      for (const lane of state.values()) { counts[lane] += 1; }
-      return { at, counts, observationCount: state.size };
-    }),
-    missingHistoryFallback: 'estimate',
-  };
-}
-
-/**
- * Cumulative flow by lane across the reporting window's local calendar days.
- *
- * The all-history series above answers "what does the board hold now"; this one
- * answers "what moved during the week the operator is reading". The difference
- * is what the week starts from: a mission that was already `done` when the
- * window opened is finished work from an earlier week, so it is left behind
- * rather than carried into every point of this week's `done` band. Open work is
- * carried in at the lane it held on the boundary, and only transitions recorded
- * inside the window move it.
- *
- * Nothing is invented: the boundary state is folded from the same recorded
- * transitions the historical series uses, and a mission with no recorded
- * lifecycle keeps the `estimate` contract — the initial snapshot is all that is
- * known. With no lifecycle facts at all the series is empty and `skip`, so a
- * week with no evidence is reported as unavailable rather than as zeroes.
- */
-export function weeklyCumulativeFlowByStateSeries(
-  initial: ReadonlyMap<MissionId, MissionStatus>,
-  transitions: readonly MissionTransition[],
-  window: DecisionWindow,
-): WeeklyStateFlowSeries {
-  const scopedWindow = { startDate: window.startDate, endDate: window.endDate, label: window.label };
-  if (transitions.length === 0 && initial.size === 0) {
-    return { series: [], missingHistoryFallback: 'skip', window: scopedWindow };
-  }
-  const ordered = [...transitions].sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
-  const firstDeliveries = new Map<MissionId, string>();
-  for (const transition of ordered) {
-    if (transition.to === 'done' && transition.from !== 'done' && !firstDeliveries.has(transition.missionId)) {
-      firstDeliveries.set(transition.missionId, transition.occurredAt);
-    }
-  }
-  // State as the window opened: every transition recorded before its first day.
-  const boundary = new Map(initial);
-  for (const transition of ordered) {
-    if (decisionWindowDay(transition.occurredAt, window.timeZone) < window.startDate) { boundary.set(transition.missionId, transition.to); }
-  }
-  const carried = new Map([...boundary].filter(([, lane]) => lane !== 'done'));
-  const inWindow = ordered.filter((transition) => decisionWindowContains(window, transition.occurredAt));
-  return {
-    series: decisionWindowDays(window).map((day) => {
-      const at = decisionWindowDayEnd(day, window.timeZone);
-      const state = new Map(carried);
-      for (const transition of inWindow) {
-        // A mission that opened inside the window has no boundary lane; its
-        // intake transition is what puts it on the board.
-        if (Date.parse(transition.occurredAt) <= Date.parse(at)) {
-          const deliveredAt = firstDeliveries.get(transition.missionId);
-          if (transition.to === 'done' && (deliveredAt === undefined || !decisionWindowContains(window, deliveredAt))) {
-            state.delete(transition.missionId);
-          } else { state.set(transition.missionId, transition.to); }
-        }
-      }
-      const counts = emptyCounts();
-      for (const lane of state.values()) { counts[lane] += 1; }
-      return { at, counts, observationCount: state.size };
-    }),
-    missingHistoryFallback: 'estimate',
-    window: scopedWindow,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Throughput — completed missions per period
-// ---------------------------------------------------------------------------
-
-/**
- * Compute throughput (completed missions) over time.
- *
- * missingHistoryFallback: 'skip' — when no outcomes are available,
- * returns empty series (cannot estimate throughput from zero data).
- */
-export function throughputSeries(
-  outcomes: readonly MissionOutcome[],
-  instants: readonly string[],
-): MetricSeries {
-  if (outcomes.length === 0) {
-    return { series: [], missingHistoryFallback: 'skip' };
-  }
-  return {
-    series: instants.map((at) => {
-      const completed = outcomes.filter((outcome) => outcome.closedAt <= at).length;
-      return { at, value: completed, observationCount: completed };
-    }),
-    missingHistoryFallback: 'skip',
-  };
 }
 
 // ---------------------------------------------------------------------------

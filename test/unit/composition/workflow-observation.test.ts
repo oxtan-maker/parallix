@@ -4,6 +4,42 @@ import { EventEmitter } from 'node:events';
 import { workflowObservationCapabilities, workflowObservationSystem } from '../../../src/composition/workflow-observation.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 
+test('finite slow cold projection retains its observer and subsequent warm reads succeed (TASK-2770)', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.after(() => mock.restoreAll());
+  let starts = 0;
+  let kills = 0;
+  let warm = false;
+  mock.method(workflowObservationSystem, 'spawn', () => {
+    starts++;
+    const child = Object.assign(new EventEmitter(), { connected: true,
+      send(request: { id: number }) {
+        setTimeout(() => {
+          warm = true;
+          child.emit('message', { id: request.id, value: 'snapshot' });
+        }, warm ? 1 : 10_500);
+      },
+      kill() { kills++; queueMicrotask(() => child.emit('exit', 1)); return true; },
+      disconnect() { queueMicrotask(() => child.emit('exit', 0)); },
+    });
+    return child;
+  });
+  const observe = workflowObservationCapabilities('/unused', resolveConfiguration({}), { command: 'unused', args: [] });
+  t.after(() => observe.close());
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const expired = assert.rejects(observe.board(), /timed out/);
+    t.mock.timers.tick(10_000);
+    await expired;
+    assert.equal(kills, 0, 'a request deadline must preserve finite cold work');
+    t.mock.timers.tick(500);
+    const reading = observe.board();
+    t.mock.timers.tick(1);
+    assert.equal(await reading, 'snapshot');
+    warm = false;
+  }
+  assert.equal(starts, 1, 'cold deadlines must not cause repeated observer startup');
+});
+
 test('observation shares persistent readers, routes responses and rejects reads on close (TASK-2750 F7)', async t => {
   t.after(() => mock.restoreAll());
   const children: EventEmitter[] = [];
@@ -51,9 +87,60 @@ for (const failure of ['response', 'send', 'exit', 'error', 'timeout', 'close'] 
     if (failure === 'close') { await observe.close(); }
     await reading;
     await observe.close();
-    if (failure === 'timeout' || failure === 'close') { assert.ok(signals.includes('SIGTERM')); }
+    if (failure === 'close') { assert.ok(signals.includes('SIGTERM')); }
   });
 }
+
+test('request expiry leaves unrelated reads and the independent terminal observer alive (TASK-2770)', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.after(() => mock.restoreAll());
+  const children: Array<EventEmitter & { requests: number[] }> = [];
+  mock.method(workflowObservationSystem, 'spawn', () => {
+    const child = Object.assign(new EventEmitter(), { connected: true, requests: [] as number[],
+      send(request: { id: number }) { child.requests.push(request.id); },
+      disconnect() { queueMicrotask(() => child.emit('exit', 0)); },
+      kill() { assert.fail('request expiration must not kill the observer'); },
+    });
+    children.push(child); return child;
+  });
+  const observe = workflowObservationCapabilities('/unused', resolveConfiguration({}), { command: 'unused', args: [] });
+  t.after(() => observe.close());
+  const expired = assert.rejects(observe.board(), /timed out/);
+  t.mock.timers.tick(5000);
+  const pending = observe.board();
+  const terminal = observe.terminal.overview('task-test');
+  t.mock.timers.tick(5000);
+  await expired;
+  children[0]!.emit('message', { id: children[0]!.requests[1], value: 'fresh board' });
+  children[1]!.emit('message', { id: children[1]!.requests[0], value: 'terminal' });
+  assert.deepEqual(await Promise.all([pending, terminal]), ['fresh board', 'terminal']);
+  const exitRead = assert.rejects(observe.board(), /exited/);
+  children[0]!.emit('exit', 7);
+  await exitRead;
+  const replacement = observe.board();
+  children[0]!.emit('exit', 7); // A late event from the old generation.
+  children[2]!.emit('message', { id: children[2]!.requests[0], value: 'replacement' });
+  assert.equal(await replacement, 'replacement');
+});
+
+test('observer close bounds an unresponsive child and forcefully releases ownership (TASK-2770)', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.after(() => mock.restoreAll());
+  const signals: string[] = [];
+  const child = Object.assign(new EventEmitter(), { connected: true,
+    send() {}, disconnect() {}, kill(signal: string) { signals.push(signal); return true; },
+  });
+  mock.method(workflowObservationSystem, 'spawn', () => child);
+  const observe = workflowObservationCapabilities('/unused', resolveConfiguration({}), { command: 'unused', args: [] });
+  const reading = assert.rejects(observe.board(), /closed/);
+  const closing = observe.close();
+  await reading;
+  t.mock.timers.tick(2000);
+  await closing;
+  assert.deepEqual(signals, ['SIGKILL']);
+  await assert.rejects(observe.board(), /closed/);
+  await observe.close();
+});
 
 test('terminal observation preserves page and search requests and correlates concurrent replies (TASK-2750)', async t => {
   t.after(() => mock.restoreAll());

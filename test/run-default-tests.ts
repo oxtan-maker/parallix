@@ -176,6 +176,13 @@ const child = spawn(launch.command, launch.args, {
     // Coverage scratch already lives below the checkout's temporary root.
     // Use it directly to keep tsx IPC paths within Unix socket limits.
     TMPDIR: coverageScratchDir ?? checkoutTestTmpdir(executionRoot),
+    // Reuse V8 bytecode across isolated workers without sharing module
+    // state. tsx's transform cache avoids transpilation, but each new worker
+    // otherwise compiles the same dependency graph again. Keep coverage out:
+    // deserialized bytecode can make V8's source coverage less precise.
+    ...(coverageEnabled ? { NODE_DISABLE_COMPILE_CACHE: '1' }
+      : fastUnit || runsIntegrationSuite ? { NODE_COMPILE_CACHE: path.join(checkoutTestTmpdir(executionRoot), 'node-compile-cache') }
+        : {}),
     ...(fastUnitScratchDir ? { PARALLIX_FAST_UNIT_SCRATCH_DIR: fastUnitScratchDir } : {}),
     // The profile belongs to this invocation only: runners that tests spawn as
     // fixtures keep their unprofiled argv and write no profile of their own.

@@ -23,6 +23,17 @@ import { HandoffCommandUseCase } from '../../../src/application/handoff-command-
 import { ReviewState } from '../../../src/adapters/review/review-state.js';
 import { rebound } from '../../../src/application/rebound-kernel.js';
 import { submitForReview } from '../../../src/adapters/review/review-commands.js';
+import { listRecoveryEvidence } from '../../../src/application/recovery-evidence.js';
+
+test('review repair fixtures isolate retained evidence across occurrences (TASK-2770)', async () => {
+  const first = fakeReviewLoopPorts({ slug: 'task-1385' });
+  await repairPreReviewFailure(fakeLoopContext(first, { slug: 'task-1385' }),
+    gateFailureReason({ ok: false, area: 'docs', command: 'exit 1', exitCode: 1, stdout: 'first fixture', stderr: '' }), 2);
+  assert.ok(listRecoveryEvidence({ cwd: first.ports.worktree, missionId: 'task-1385' }).length > 0);
+  const second = fakeReviewLoopPorts({ slug: 'task-1385' });
+  assert.notEqual(second.ports.worktree, first.ports.worktree);
+  assert.deepEqual(listRecoveryEvidence({ cwd: second.ports.worktree, missionId: 'task-1385' }), []);
+});
 
 // Regression provenance: TASK-1268.
 describe("pre review gate per round", { concurrency: false }, () => {
@@ -428,9 +439,10 @@ describe("pre review gate repair continues", { concurrency: false }, () => {
   // `if (rebaseResult.hookFailure)` then calls `exit(1)` and abandons the round
   // before the reviewer launches. A verified gate repair must continue the same
   // review round instead of exiting.
-  test('task-2415 repro: repaired pre-review gate continues the review round instead of exiting', async () => {
+  test('task-2415 repro: repaired pre-review gate continues the review round instead of exiting', async t => {
     const slug = 'task-2415-gate-repair-repro';
-    const worktree = '/tmp/task-2415-gate-repair-repro';
+    const worktree = registeredMkdtemp('gate-repair-continues-');
+    t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
     const logs: string[] = [];
     const transitions: string[] = [];
     const prompts: string[] = [];

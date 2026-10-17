@@ -283,26 +283,18 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
     const historyEntries = await this.historyRepo.findAll();
     const entries = new Map<MissionId, string>();
 
-    for (const missionId of missionsWithoutTransitions) {
-      // Find the earliest history entry this repository can claim. A row that
-      // names another repository belongs to a different mission that happens to
-      // share the id, and a row that names none cannot be attributed at all —
-      // both are skipped, so the lane age stays unavailable rather than
-      // becoming another repository's timestamp.
-      const missionEntries = historyEntries
-        .filter((entry) => {
-          try {
-            const data = JSON.parse(entry.eventData) as { missionId?: unknown; repositoryId?: unknown };
-            return data.missionId === missionId && data.repositoryId === this.repositoryId;
-          } catch {
-            return false;
-          }
-        })
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-
-      if (missionEntries.length > 0) {
-        entries.set(missionId, missionEntries[0]!.createdAt);
-      }
+    const wanted = new Set(missionsWithoutTransitions);
+    // Index once: parsing every history row again for every legacy mission
+    // makes a cold board proportional to missions times all operational events.
+    for (const entry of historyEntries) {
+      try {
+        const data = JSON.parse(entry.eventData) as { missionId?: MissionId; repositoryId?: string };
+        if (data.repositoryId !== this.repositoryId || !data.missionId || !wanted.has(data.missionId)) { continue; }
+        const earliest = entries.get(data.missionId);
+        if (earliest === undefined || entry.createdAt.localeCompare(earliest) < 0) {
+          entries.set(data.missionId, entry.createdAt);
+        }
+      } catch { /* Malformed history cannot establish a lifecycle entry. */ }
     }
 
     return entries;

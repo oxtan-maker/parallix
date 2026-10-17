@@ -221,10 +221,9 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
     // The private transcript keeps the operator console too (TASK-2670); it is
     // never history: retained, redacted history is the run-history store.
     `${t} pipe-pane -t ${consoleTarget} -o ${shellQuote(`cat >> ${capture}`)} || exit 70`,
-    `${t} new-window -d -t ${name} -n ${shellQuote(windowName)} -c ${shellQuote(cwd)} ${shellQuote(`sh ${shellQuote(path.join(scratch, 'pane.sh'))}`)} || exit 70`,
-    `${t} set-option -w -t ${target} @px_run_id ${shellQuote(runId)} >/dev/null`,
-    `${t} set-option -w -t ${target} @px_host_pid "$$" >/dev/null`,
-    `${t} set-option -w -t ${target} @px_supervisor_pid ${supervisorPid} >/dev/null`,
+    // Publish ownership in the same tmux queue as creation: another client
+    // must never observe an operation window as an idle, closable console.
+    `${t} new-window -d -t ${name} -n ${shellQuote(windowName)} -c ${shellQuote(cwd)} ${shellQuote(`sh ${shellQuote(path.join(scratch, 'pane.sh'))}`)} \\; set-option -w -t ${target} @px_run_id ${shellQuote(runId)} \\; set-option -w -t ${target} @px_host_pid "$$" \\; set-option -w -t ${target} @px_supervisor_pid ${supervisorPid} >/dev/null || exit 70`,
     `${t} pipe-pane -t ${target} -o ${shellQuote(`cat > ${fifo}`)} || { cleanup; exit 70; }`,
     presented ? `cat ${fifo} >> ${capture} &` : `cat ${fifo} | tee -a ${capture} &`,
     'relay=$!',

@@ -15,6 +15,23 @@ import { mkdtemp } from '../../../helpers/temp-dir.js';
 
 const REPO_ROOT = path.join(import.meta.dirname, '..', '..', '..', '..');
 
+test('unit workers load ESM TypeScript while boundary fixtures retain the full loader (TASK-2770)', () => {
+  for (const coverage of [false, true]) {
+    const plan = (requestedArgs: string[]) => buildTestRunPlan({
+      executionRoot: REPO_ROOT, requestedArgs, coverage,
+      probeNodeVersion: () => 'v26.10.0', probeTestConcurrency: () => true,
+    });
+    const unit = plan(['test/unit/test/lib/default-test-suite.test.ts']);
+    const boundary = plan(['--integration-ci-all', `test/${INTEGRATION_CI_TESTS[0]}`]);
+    assert.equal(unit.nodeArgs[unit.nodeArgs.indexOf('--import') + 1], 'tsx/esm');
+    assert.equal(boundary.nodeArgs[boundary.nodeArgs.indexOf('--import') + 1], 'tsx');
+    for (const candidate of [unit, boundary]) {
+      assert.ok(candidate.nodeArgs.some(arg => arg.endsWith('/bootstrap-parallix-home.ts')));
+      assert.ok(candidate.nodeArgs.includes('--experimental-test-module-mocks'));
+    }
+  }
+});
+
 function withGitHubActions<T>(github: boolean, callback: () => T): T {
   const previous = process.env.GITHUB_ACTIONS;
   if (github) process.env.GITHUB_ACTIONS = 'true'; else delete process.env.GITHUB_ACTIONS;

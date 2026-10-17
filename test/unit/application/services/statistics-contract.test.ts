@@ -120,7 +120,7 @@ test('task-2347.08: board metrics accept named input without positional overload
 });
 
 test('task-2347.08: cumulative flow evaluates ordered transitions once', () => {
-  const source = fs.readFileSync(path.join(root, 'src/application/projections/metrics.ts'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'src/application/projections/metrics-flow.ts'), 'utf8');
   const body = source.slice(source.indexOf('export function cumulativeFlowSeries'), source.indexOf('export function cumulativeFlowByStateSeries'));
   assert.match(body, /let index = 0/);
   assert.match(body, /while \(index < ordered\.length/);
