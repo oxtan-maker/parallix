@@ -55,7 +55,7 @@ const CUTOVER_FILE = path.join('test', 'unit', 'adapters', 'sqlite', 'measuremen
 const DRAIN_FILE = path.join('test', 'integration', 'sqlite', 'mission-store-drain.test.ts');
 const TASK_2521_04_FILES = [
   path.join('test', 'unit', 'adapters', 'backlog', 'legacy-mission-import.test.ts'),
-  path.join('test', 'task-2521.04-imported-mission-board-path.test.ts'),
+  path.join('test', 'unit', 'application', 'projections', 'board-imported-mission-lifecycle.cases.ts'),
   path.join('test', 'integration', 'backlog', 'legacy-import-trace.integration.test.ts'),
 ] as const;
 
@@ -178,22 +178,26 @@ test('repeat focused runs of the measurement store family leave zero new px-meas
   }
 });
 
-test('a focused run of the task-2521.04 family leaves no task-2521.04-* dirs', async () => {
-  const privateTmp = mkdtemp('task-2577-private-');
-  try {
-    const { code, stderr } = await runChild(['--import', 'tsx', '--test', ...TASK_2521_04_FILES], { TMPDIR: privateTmp });
-    assert.equal(code, 0, `focused task-2521.04 family run must pass: ${stderr.slice(-500)}`);
+// Each creator owns a private run, so cleanup is attributed to that creator
+// and real child CPU stays within the existing per-case budget.
+for (const file of TASK_2521_04_FILES) {
+  test(`a focused run of ${file} leaves no task-2521.04-* dirs`, async () => {
+    const privateTmp = mkdtemp('task-2577-private-');
+    try {
+      const { code, stderr } = await runChild(['--import', 'tsx', '--test', file], { TMPDIR: privateTmp });
+      assert.equal(code, 0, `focused ${file} run must pass: ${stderr.slice(-500)}`);
 
-    const leaked = fixtureDirsIn(privateTmp, ['task-2521.04-']);
-    assert.equal(
-      leaked.length,
-      0,
-      `task-2521.04-* fixture directories left behind after the focused run: ${leaked.join(', ')}`,
-    );
-  } finally {
-    fs.rmSync(privateTmp, { recursive: true, force: true });
-  }
-});
+      const leaked = fixtureDirsIn(privateTmp, ['task-2521.04-']);
+      assert.equal(
+        leaked.length,
+        0,
+        `task-2521.04-* fixture directories left behind after the focused run: ${leaked.join(', ')}`,
+      );
+    } finally {
+      fs.rmSync(privateTmp, { recursive: true, force: true });
+    }
+  });
+}
 
 test('an interrupted child running the task-2339 drain scenario leaves no orphaned fixture dirs', async () => {
   const manifestDir = mkdtemp('task-2577-manifest-');

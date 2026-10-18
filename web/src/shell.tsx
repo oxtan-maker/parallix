@@ -17,9 +17,9 @@ const page: React.CSSProperties = {
   color: C.text,
   fontFamily: MONO,
   fontSize: 12,
-  // The page is viewport-height; a board taller than the viewport scrolls
-  // vertically inside it instead of being clipped (TASK-2574). Horizontal
-  // lane scrolling stays on the inner lane row.
+  // The Board fills this flex column and scrolls cards inside each lane.
+  // Keep page overflow reachable for content beyond the available height
+  // (TASK-2574); horizontal lane scrolling stays on the inner lane row.
   overflowY: 'auto',
 };
 

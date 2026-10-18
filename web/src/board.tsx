@@ -194,6 +194,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
 
   return (
     <div ref={root} tabIndex={-1} onKeyDown={moveSelection} onClick={selectTerminal}
+      style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
       onPointerDownCapture={(event) => {
         const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-action-kind]');
         const card = button?.closest<HTMLElement>('[data-board-card]');

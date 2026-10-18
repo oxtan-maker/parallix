@@ -590,6 +590,21 @@ test('the rendered board exposes drag only through server-projected target lanes
   assert.ok(browserSources.find((file) => file.name === 'board.tsx')?.text.includes('setDragImage'), 'drag uses a compact custom preview rather than a cloned card');
 });
 
+test('the board root fills the viewport flex chain for empty and populated lanes (TASK-2773.01)', () => {
+  const shell = renderToStaticMarkup(React.createElement(Shell));
+  const page = shell.match(/<main style="([^"]*)"/)?.[1] ?? '';
+  assert.match(page, /height:100vh/);
+  assert.match(page, /display:flex/);
+  assert.match(page, /flex-direction:column/);
+  for (const active of [[], makeCards(1, 'active'), makeCards(40, 'active')]) {
+    const html = render(toWebBoardSnapshot(makeProjection({ active })));
+    const root = html.match(/^<div\b[^>]*style="([^"]*)"/)?.[1] ?? '';
+    for (const style of ['flex:1', 'display:flex', 'flex-direction:column', 'min-height:0']) {
+      assert.ok(root.split(';').includes(style), `Board root carries ${style} with ${active.length} active cards`);
+    }
+  }
+});
+
 test('narrow viewports scroll the board horizontally instead of dropping lanes', () => {
   const html = render(populated());
   assert.match(html, /overflow-x:auto/, 'the lane row scrolls horizontally like the reference');

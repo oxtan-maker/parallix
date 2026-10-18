@@ -19,8 +19,9 @@ const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..');
         ...invalidAnalysis.filter(scenario => scenario.name !== 'focused test')];
       const result = childProcess.spawnSync(process.execPath,
         // This short batch pays more CPU for background compilation than it
-        // saves in elapsed time. Keep V8 work on one thread, including GC/JIT.
-        ['--single-threaded', '--v8-pool-size=1', '--max-semi-space-size=64', path.join(repoRoot, 'test/fixtures/standard-analysis-batch.mjs'), root,
+        // saves in elapsed time. Keep V8 work on one thread and disable
+        // optimizing JIT: this one-shot batch cannot amortize that compilation.
+        ['--single-threaded', '--no-opt', '--v8-pool-size=1', '--max-semi-space-size=64', path.join(repoRoot, 'test/fixtures/standard-analysis-batch.mjs'), root,
           path.join(repoRoot, 'eslint.config.mjs'), JSON.stringify(scenarios)], {
           encoding: 'utf8', timeout: 3000,
           // Tool dependencies supply diagnostics, not product coverage.

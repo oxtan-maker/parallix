@@ -11,8 +11,8 @@ let bundle: Awaited<ReturnType<typeof bundleWorkflowChild>>;
 before(async () => { bundle = await bundleWorkflowChild(); });
 after(() => bundle?.close());
 
-test('held synchronous terminal probe cannot block board snapshots or independent admission and observes provider execution (TASK-2750, TASK-2769)', { timeout: 3500 }, async t => {
-  const fixture = await workflowBoard(2, { cli: bundle.cli, providers: true }); t.after(() => fixture.close());
+test('held synchronous terminal probe cannot block board snapshots or independent admission (TASK-2750)', { timeout: 3500 }, async t => {
+  const fixture = await workflowBoard(2, { cli: bundle.cli }); t.after(() => fixture.close());
   const host = await fixture.start();
   const http = await workflowHttp(host);
   let settled = false;
@@ -25,7 +25,17 @@ test('held synchronous terminal probe cannot block board snapshots or independen
   assert.equal(settled, false, 'admission and worker entry finish while terminal remains held');
   assert.equal((await fetch(`${host.origin}/api/board`)).status, 200, 'snapshot also completes while synchronous worker preflight remains held');
   fixture.releaseProbe(); assert.equal((await probe).status, 200);
-  const slug = fixture.slugs[1];
+  fixture.release(fixture.slugs[1]);
+  await until(async () => (await fixture.service.current(fixture.slugs[1])) === null, 'worker completes');
+});
+
+test('board observes provider execution separately from held workflow preparation and gates (TASK-2769)', { timeout: 3500 }, async t => {
+  const fixture = await workflowBoard(1, { cli: bundle.cli, providers: true }); t.after(() => fixture.close());
+  const host = await fixture.start();
+  const http = await workflowHttp(host);
+  const slug = fixture.slugs[0];
+  assert.equal((await http.post(slug, 'provider')).status, 202);
+  await until(() => fixture.entered(slug), 'synchronous worker preflight');
   const preparation = await fixture.observation.board();
   assert.equal(preparation.metrics.agentAvailability.find(agent => agent.family === 'codex')?.runningSessions, 0);
   fixture.release(slug);
@@ -44,5 +54,5 @@ test('held synchronous terminal probe cannot block board snapshots or independen
   assert.ok(await fixture.service.current(slug), 'workflow still owns held gate');
   fs.writeFileSync(path.join(fixture.root, 'post-agent-gate.release'), 'release');
 
-  await until(async () => (await fixture.service.current(fixture.slugs[1])) === null, 'worker completes');
+  await until(async () => (await fixture.service.current(slug)) === null, 'worker completes');
 });
