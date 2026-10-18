@@ -227,7 +227,7 @@ test('checkpoint indicators stay below terminal and edit dialogs with usable evi
   const show = async (partial: boolean, working: boolean, sse = false) => {
     const checkpoints = partial ? [{ ...planned[0], goalCheck: [{ criterion: 'visible', evidence: 'npm test' }], nextActionText: 'CP-2' }, ...planned.slice(1)] : planned;
     const card = projectMissionCard({ ...mission, checkpoints }, {
-      latestGate: 'unknown', reviewApproval: null, flags: [], blockingReason: null,
+      latestGate: 'not-run', reviewApproval: null, flags: [], blockingReason: null,
       currentWork: working ? { operationId: 'execute', phase: 'execute', summary: 'Implement', agent: null, updatedAt: 'now', freshness: 'live' } : null,
     });
     await fixture.render(toWebBoardSnapshot(makeProjection({ active: [card] })), sse);

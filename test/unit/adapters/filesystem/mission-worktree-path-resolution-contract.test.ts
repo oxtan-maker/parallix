@@ -18,7 +18,6 @@ import { checkBacklogIntegrity, pruneStaleBacklogDuplicates, resolveTaskFile } f
 mockModule('../../../../src/adapters/backlog/backlog.js', import.meta.url);
 mockModule('../../../../src/adapters/filesystem/mission-utils.js', import.meta.url);
 await installModuleMocks();
-const { ConcreteGateReadAdapter } = await import('../../../../src/adapters/backlog/concrete-gate-read-adapter.js');
 const { ConcreteMissionReadAdapter } = await import('../../../../src/adapters/backlog/concrete-mission-read-adapter.js');
 const { BoardProjectionBuilder } = await import('../../../../src/application/projections/board-readers.js');
 const { snapshotWorktreeTopology } = await import('../../../../src/adapters/git/worktree.js');
@@ -462,11 +461,10 @@ describe("board readers worktree amplification", () => {
         resolveTaskFile,
         resolveWorktree,
       });
-      const gates = new ConcreteGateReadAdapter({ rootDir, resolveWorktree });
       await new BoardProjectionBuilder(
         missions,
         { async loadReviews(ids) { return new Map(ids.map((id) => [id, { review: null, approval: null }])); } },
-        gates,
+        { async observeGate() { return 'not-run' as const; } },
         { async loadAgentAvailability() { return []; }, async loadAssignedAgent() { return null; } },
         { async loadRepositoryId() { return repositoryId('test-repo'); }, async loadHeadCommit() { return 'head'; } },
         { async loadOperationLog() { return []; } },
@@ -478,7 +476,6 @@ describe("board readers worktree amplification", () => {
               currentBranch: () => '',
             });
             missions.useWorktreeTopology(topology);
-            gates.useWorktreeTopology(topology);
           },
         },
       ).build();

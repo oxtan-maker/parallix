@@ -33,7 +33,7 @@ const REPOSITORY = repositoryId('parallix');
 
 /** The operational facts a board read supplies when nothing else is observed. */
 const NO_FACTS: MissionOperationalFacts = {
-  latestGate: 'unknown',
+  latestGate: 'not-run',
   liveSession: null,
   reviewApproval: null,
   currentWork: null,

@@ -21,6 +21,8 @@ export async function bundleWorkflowChild() {
       fs.symlinkSync(path.resolve(name), path.join(owned.root, name));
     }
     fs.symlinkSync(path.resolve('src/adapters/sqlite/migrations'), path.join(owned.root, 'migrations'), 'dir');
-    return { cli: { command: process.execPath, args: [entry] }, close: () => owned.dispose() };
+    // Each owner/observer is already isolated in its own process; match the
+    // runner's finite compiler pool rather than multiplying host-sized pools.
+    return { cli: { command: process.execPath, args: ['--v8-pool-size=1', entry] }, close: () => owned.dispose() };
   } catch (error) { owned.dispose(); throw error; }
 }

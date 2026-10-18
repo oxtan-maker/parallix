@@ -1,3 +1,4 @@
+import type { GateState } from '../../../../src/application/projections/gate-observation.js';
 import { fixtureMission as completeMissionFixture } from '../../../fixtures/mission-builders.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -31,7 +32,7 @@ const id5 = missionId('task-0005');
 function makeCard(
   id: typeof id1,
   lane: BoardLane,
-  opts: { blockingReason?: string | null; gate?: 'passed' | 'failed' | 'running' | 'unknown' } = {},
+  opts: { blockingReason?: string | null; gate?: GateState } = {},
 ): MissionCard {
   return {
     id,

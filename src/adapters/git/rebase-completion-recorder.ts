@@ -10,24 +10,24 @@ export interface RebaseCompletion {
   mappings: Array<[string, string]>;
 }
 
-function gitText(root: string, args: string[]): string {
-  const result = git(['-C', root, ...args]);
+function gitText(root: string, args: string[], gitRunner = git): string {
+  const result = gitRunner(['-C', root, ...args]);
   if (result.status !== 0) { throw new Error(`Git metadata unavailable (${args[0]})`); }
   return result.stdout.trim();
 }
 
-function stateDirectory(root: string): string {
-  return path.join(gitText(root, ['rev-parse', '--absolute-git-dir']), 'parallix');
+function stateDirectory(root: string, gitRunner = git): string {
+  return path.join(gitText(root, ['rev-parse', '--absolute-git-dir'], gitRunner), 'parallix');
 }
 
-export function rebaseInProgress(root: string): boolean {
-  const gitDirectory = path.dirname(stateDirectory(root));
+export function rebaseInProgress(root: string, gitRunner = git): boolean {
+  const gitDirectory = path.dirname(stateDirectory(root, gitRunner));
   return ['rebase-merge', 'rebase-apply'].some(name => fs.existsSync(path.join(gitDirectory, name)));
 }
 
-export function readRebaseCompletions(root: string): RebaseCompletion[] {
+export function readRebaseCompletions(root: string, gitRunner = git): RebaseCompletion[] {
   try {
-    return fs.readFileSync(path.join(stateDirectory(root), 'rebase-completions.jsonl'), 'utf8')
+    return fs.readFileSync(path.join(stateDirectory(root, gitRunner), 'rebase-completions.jsonl'), 'utf8')
       .split('\n').filter(Boolean).map(line => JSON.parse(line) as RebaseCompletion);
   } catch { return []; }
 }

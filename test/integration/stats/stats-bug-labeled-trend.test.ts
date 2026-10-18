@@ -135,7 +135,7 @@ test('stats and DONE rail share persisted delivery days despite later closure (T
     for (const instant of ['2026-10-08T00:00:00+02:00', '2026-10-08T23:59:59+02:00']) {
       const builder = new BoardProjectionBuilder(
         { loadAllMissions: async () => missions, loadMission: async id => missions.find(m => m.id === id) ?? null, getSourceFacts: () => [] },
-        { loadReviews: async () => new Map() }, { loadGateStatus: async () => 'unknown' },
+        { loadReviews: async () => new Map() }, { observeGate: async () => 'not-run' },
         { loadAgentAvailability: async () => [], loadAssignedAgent: async () => null },
         { loadRepositoryId: async () => repo, loadHeadCommit: async () => '' }, { loadOperationLog: async () => [] },
         { now: () => Date.parse(instant), metricsAdapter: new ConcreteMetricsReadAdapter({ laneEventRepo, usageRepo, repositoryId: repo, clock: () => instant }) },
@@ -173,7 +173,7 @@ test('local CLI and board refresh include a new delivery immediately with stable
     let now = '2026-10-08T08:00:00+02:00';
     const builder = new BoardProjectionBuilder(
       { loadAllMissions: () => store.loadByRepository(repo), loadMission: async id => { const result = await store.load(id); return result.kind === 'found' ? result.mission : null; }, getSourceFacts: () => [] },
-      { loadReviews: async () => new Map() }, { loadGateStatus: async () => 'unknown' },
+      { loadReviews: async () => new Map() }, { observeGate: async () => 'not-run' },
       { loadAgentAvailability: async () => [], loadAssignedAgent: async () => null },
       { loadRepositoryId: async () => repo, loadHeadCommit: async () => '' }, { loadOperationLog: async () => [] },
       { now: () => Date.parse(now), metricsAdapter: new ConcreteMetricsReadAdapter({ laneEventRepo, usageRepo, repositoryId: repo, clock: () => now }) },

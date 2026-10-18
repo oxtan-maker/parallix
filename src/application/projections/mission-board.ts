@@ -1,3 +1,4 @@
+import type { GateState } from './gate-observation.js';
 import type { ProviderExecutionFacts } from './provider-execution.js';
 import { projectReviewHistory } from './review-history.js';
 export { projectReviewHistory } from './review-history.js';
@@ -66,7 +67,7 @@ export interface LiveMissionWork {
 }
 
 export interface MissionOperationalFacts {
-  readonly latestGate: 'passed' | 'failed' | 'running' | 'unknown';
+  readonly latestGate: GateState;
   /**
    * The live agent session working this mission right now, or `null` when none
    * was observed. Absent means liveness was not observed at all, which is not

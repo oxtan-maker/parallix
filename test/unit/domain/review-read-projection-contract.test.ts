@@ -525,7 +525,7 @@ describe("review projection queries", { concurrency: false }, () => {
     const builder = new BoardProjectionBuilder(
       { async loadAllMissions() { return [{ id, repositoryId: repositoryId('repo'), title: 'board', labels: missionLabels([]), status: 'review' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null }]; }, async loadMission() { return null; }, getSourceFacts() { return []; } },
       adapter,
-      { async loadGateStatus() { return 'passed' as const; } },
+      { async observeGate() { return 'passed' as const; } },
       { async loadAgentAvailability() { return []; }, async loadAssignedAgent() { return null; } },
       { async loadRepositoryId() { return repositoryId('repo'); }, async loadHeadCommit() { return 'head'; } },
       { async loadOperationLog() { return []; } },

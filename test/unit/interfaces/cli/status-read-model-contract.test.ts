@@ -197,7 +197,7 @@ describe("focused Mission status reads only the selected Mission", () => {
     };
 
     const gates: GateReadAdapter = {
-      async loadGateStatus(id) { ledger.gateRequests.push(id); return 'passed'; },
+      async observeGate(mission) { ledger.gateRequests.push(mission.id); return 'passed'; },
     };
 
     const agents: AgentReadAdapter = {

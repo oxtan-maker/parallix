@@ -5,6 +5,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { VerificationGateObserver } from '../src/application/projections/gate-observation.js';
+import { VerificationGateEvidenceReader } from '../src/adapters/verification/gate-evidence-reader.js';
+import { git } from '../src/adapters/git/git.js';
+import { resolveConfiguration } from '../src/composition/config.js';
 import { BoardProjectionBuilder } from '../src/application/projections/board-readers.js';
 import { intakeMission, missionId } from '../src/domain/mission.js';
 
@@ -51,8 +55,8 @@ function makeCliFixture(root: string) {
 }
 
 function gitWrapper(root: string) {
-  const bin = path.join(root, 'bin');
-  const log = path.join(root, 'git.log');
+  const bin = path.join(root, '.git', 'benchmark-bin');
+  const log = path.join(root, '.git', 'benchmark-git.log');
   fs.mkdirSync(bin, { recursive: true });
   const realGit = process.env.PARALLIX_REAL_GIT || childProcess.execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
   fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"${log}\"\nexec \"${realGit}\" \"$@\"\n`);
@@ -65,17 +69,26 @@ function counted(log: string): Pick<Counters, 'gitSubprocesses' | 'gitWorktreeLi
   return { gitSubprocesses: lines.length, gitWorktreeList: lines.filter(line => line.startsWith('worktree list')).length };
 }
 
-async function boardBuild(count: number) {
-  const missions = Array.from({ length: count }, (_, index) => intakeMission({ id: missionId(`task-${String(index + 1).padStart(4, '0')}`), repositoryId: repositoryId('benchmark'), title: `Fixture ${index + 1}` }));
+export async function boardBuild(count: number, root: string) {
+  let gitSubprocesses = 0;
+  const evidence = new VerificationGateEvidenceReader({
+    configuration: resolveConfiguration(process.env),
+    resolveWorktree: () => root,
+    integrationValidation: async () => null,
+    gitRunner: (args, options) => { gitSubprocesses++; return git(args, options); },
+  });
+  const missions = Array.from({ length: count }, (_, index) => intakeMission({ id: missionId(`task-${String(index + 1).padStart(4, '0')}`), repositoryId: repositoryId('benchmark'), title: `Fixture ${index + 1}` })).map(mission => ({ ...mission, status: 'active' as const, declaredGates: ['true', 'false'] }));
   const builder = new BoardProjectionBuilder(
     { loadAllMissions: async () => missions, loadMission: async id => missions.find(mission => mission.id === id) ?? null, getSourceFacts: () => [] },
     { loadReviews: async ids => new Map(ids.map(id => [id, { review: null, approval: null }])) },
-    { loadGateStatus: async () => 'unknown' },
+    new VerificationGateObserver(evidence),
     { loadAgentAvailability: async () => [], loadAssignedAgent: async () => null },
     { loadRepositoryId: async () => repositoryId('benchmark'), loadHeadCommit: async () => 'fixture' },
     { loadOperationLog: async () => [] },
+    { prepareReads: () => evidence.beginRead() },
   );
   await builder.build();
+  return gitSubprocesses;
 }
 
 async function samples(warmups: number, sampleCount: number, operation: () => void | Promise<void>) {
@@ -103,7 +116,7 @@ export async function runBenchmark(argv = process.argv.slice(2)) {
   run('npm', ['run', 'build'], process.cwd(), process.env); // Never inside a timed region.
   const compositionModule = buildCompositionProbe(process.cwd()); // Also outside timed regions.
   const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-runtime-benchmark-'));
-  const home = path.join(fixture, 'home');
+  const home = path.join(fixture, '.git', 'home');
   makeCliFixture(fixture);
   const wrapper = gitWrapper(fixture);
   const env = { ...process.env, PARALLIX_HOME: home, PARALLIX_TEST_NO_FORGEJO: '1', PATH: `${wrapper.bin}:${process.env.PATH}` };
@@ -124,7 +137,13 @@ export async function runBenchmark(argv = process.argv.slice(2)) {
     return { name, command: `px ${args.join(' ')}`, fixture: { missions: 1 }, summary: summarize(timings), counters, counterSamples };
   };
   const composition = await samples(options.warmups, options.samples, () => { run(process.execPath, ['--input-type=module', '--eval', `await import(${JSON.stringify(compositionModule)})`], fixture, env); });
-  const board = async (count: number) => ({ name: 'BoardProjection build', module: 'BoardProjectionBuilder', fixture: { missions: count }, summary: await samples(options.warmups, options.samples, () => boardBuild(count)), counters: { gitSubprocesses: 0, gitWorktreeList: 0, sqliteQueries: 0, taskDocumentReads: 0 } satisfies Counters });
+  const board = async (count: number) => {
+    let gitSubprocesses = 0;
+    const summary = await samples(options.warmups, options.samples, async () => { gitSubprocesses = await boardBuild(count, fixture); });
+    return { name: 'BoardProjection build', module: 'BoardProjectionBuilder + VerificationGateEvidenceReader',
+      fixture: { missions: count, worktrees: 1, declaredGateCommands: 2 }, summary,
+      counters: { gitSubprocesses, gitWorktreeList: 0, sqliteQueries: 0, taskDocumentReads: 0 } satisfies Counters };
+  };
   const output = {
     schemaVersion: 1, generatedAt: new Date().toISOString(), coldRunProcedure: 'Each CLI sample is a new Node process; filesystem cache is not flushed.',
     environment: { os: `${process.platform} ${os.release()}`, cpu: os.cpus()[0]?.model ?? 'unavailable', node: process.version, revision: childProcess.execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), samples: options.samples, warmups: options.warmups },

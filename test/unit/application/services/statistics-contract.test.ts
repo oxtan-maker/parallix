@@ -225,7 +225,7 @@ function reviewAdapter(): ReviewReadAdapter {
 }
 
 function gateAdapter(): GateReadAdapter {
-  return { async loadGateStatus() { return 'unknown' as const; } };
+  return { async observeGate() { return 'not-run' as const; } };
 }
 
 function agentAdapter(): AgentReadAdapter {

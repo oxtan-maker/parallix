@@ -7,7 +7,6 @@ import os from 'node:os';
 
 import { ConcreteMissionReadAdapter } from '../../../../src/adapters/backlog/concrete-mission-read-adapter.js';
 import { ConcreteGitReadAdapter } from '../../../../src/adapters/backlog/concrete-git-read-adapter.js';
-import { ConcreteGateReadAdapter } from '../../../../src/adapters/backlog/concrete-gate-read-adapter.js';
 import { ConcreteReviewReadAdapter } from '../../../../src/adapters/backlog/concrete-review-read-adapter.js';
 import { repositoryId } from '../../../../src/domain/repository.js';
 import type { MissionId } from '../../../../src/domain/mission.js';
@@ -114,20 +113,6 @@ test('SC11: ConcreteGitReadAdapter reads from Git config (repository authority)'
     // When repositoryId is explicitly provided, it wins over Git config
     const repoId = await adapter.loadRepositoryId();
     assert.strictEqual(repoId, 'explicit-repo', 'Explicit repositoryId wins');
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test('SC11: ConcreteGateReadAdapter returns unknown when no gate artifacts exist (repository authority)', async () => {
-  const tmp = registeredMkdtemp('px-gate-wins-');
-  try {
-    const adapter = new ConcreteGateReadAdapter({
-      rootDir: tmp,
-    });
-
-    const status = await adapter.loadGateStatus(fixtureMissionId('task-999'));
-    assert.strictEqual(status, 'unknown', 'Gate status is unknown when no artifacts exist');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

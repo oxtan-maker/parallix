@@ -119,13 +119,13 @@ describe('MissionCard renders projection facts', () => {
 
   it('renders "unavailable" for every absent projection fact', async () => {
     const output = await renderMissionCard({
-      card: makeCard({ title: '', gate: 'unknown' }),
+      card: makeCard({ title: '', gate: 'unavailable' }),
       width: 60,
     });
 
     assert.ok(output.includes('task-9999'), `Card must still render the slug. Got: ${output}`);
     assert.ok(output.includes('unavailable'), `Absent checkpoint must render "unavailable". Got: ${output}`);
-    assert.ok(output.includes('\u00b7'), `Absent gate must render the "gate · no-op" treatment. Got: ${output}`);
+    assert.ok(output.includes('\u00b7'), `Unobserved gate must render the "gate · unavailable" treatment. Got: ${output}`);
     assert.ok(output.includes('next: unavailable'), `Absent next step must render "unavailable". Got: ${output}`);
     assert.ok(output.includes('PR unavailable'), `Absent pull request must render "unavailable". Got: ${output}`);
 
@@ -145,7 +145,10 @@ describe('MissionCard renders projection facts', () => {
       ['passed', '\u2713'],
       ['failed', '\u2717 FAIL'],
       ['running', 'gate · running'],
-      ['unknown', 'gate · no-op'],
+      ['stale', 'gate · stale'],
+      ['not-run', 'gate · not run'],
+      ['unconfigured', 'gate · none configured'],
+      ['unavailable', 'gate · unavailable'],
     ] as const) {
       const output = await renderMissionCard({ card: makeCard({ gate }), width: 60 });
       assert.ok(output.includes(expected), `Gate "${gate}" must render "${expected}". Got: ${output}`);

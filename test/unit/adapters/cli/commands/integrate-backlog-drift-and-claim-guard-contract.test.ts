@@ -841,7 +841,7 @@ describe("integrate work detection", () => {
         getSourceFacts() { return []; },
       },
       { async loadReviews() { return new Map([[id, { review: null, approval: null }]]); } },
-      { async loadGateStatus() { return 'passed' as const; } },
+      { async observeGate() { return 'passed' as const; } },
       {
         async loadAgentAvailability() { return []; },
         async loadAssignedAgent() { return agentFamily('codex'); },

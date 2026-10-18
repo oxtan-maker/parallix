@@ -74,7 +74,7 @@ describe('BoardShell component renders with mocked BoardProjection', () => {
     checkpointDescription: null,
     checkpointEvidence: [],
     nextActionText: null,
-    gate: 'unknown',
+    gate: 'not-run',
     pullRequest: null,
     reviewApproved: false,
     reviewRound: null,

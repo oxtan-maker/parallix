@@ -54,14 +54,16 @@ export function truncate(text: string, max: number): string {
   return `${text.slice(0, max - 1)}\u2026`;
 }
 
-/** Human-readable gate text per design: "gate ✓", "gate ✗ FAIL", "gate · no-op". */
+/** Human-readable gate text per design: "gate ✓", "gate ✗ FAIL", "gate · not run". */
 function gateText(gate: MissionCardFacts['gate'] | null | undefined): string {
   switch (gate) {
     case 'passed': return 'gate \u2713';
     case 'failed': return 'gate \u2717 FAIL';
     case 'running': return 'gate · running';
-    case 'unknown': return 'gate · no-op';
-    default: return 'gate · no-op';
+    case 'stale': return 'gate · stale';
+    case 'not-run': return 'gate · not run';
+    case 'unconfigured': return 'gate · none configured';
+    default: return 'gate · unavailable';
   }
 }
 
@@ -69,7 +71,8 @@ function gateColor(gate: MissionCardFacts['gate'] | null | undefined): 'green' |
   switch (gate) {
     case 'passed': return 'green';
     case 'failed': return 'red';
-    case 'running': return 'yellow';
+    case 'running':
+    case 'stale': return 'yellow';
     default: return 'gray';
   }
 }

@@ -359,8 +359,13 @@ class PhaseGateExecution {
     this.state.dashboard?.close();
     this.reportDashboard();
     if (this.state.cancellation.operatorCancelled) { this.state.failure.errorText = `Repository gates (${this.state.phase}) cancelled.`; }
-    if (this.state.coverage && this.state.failure.failedGate === null && !this.state.controller.signal.aborted) {
-      this.state.coverage.complete(this.state.outcomes);
+    if (this.state.coverage) {
+      // The executor reports how the phase settled, so a failed or cancelled run
+      // is observable evidence too instead of an absent result.
+      this.state.coverage.complete(this.state.outcomes,
+        this.state.cancellation.operatorCancelled ? 'cancelled'
+          : this.state.failure.failedGate !== null ? 'failed'
+            : this.state.controller.signal.aborted ? 'cancelled' : 'passed');
     }
     return {
       ok: this.state.failure.failedGate === null && !this.state.controller.signal.aborted,

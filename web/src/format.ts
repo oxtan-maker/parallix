@@ -30,14 +30,20 @@ export const GATE_TEXT: Record<WebMissionCard['gate'], string> = {
   passed: 'gate ✓',
   failed: 'gate ✗ FAIL',
   running: 'gate · running',
-  unknown: 'gate · unknown',
+  stale: 'gate · stale',
+  'not-run': 'gate · not run',
+  unconfigured: 'gate · none configured',
+  unavailable: 'gate · unavailable',
 };
 
 export const GATE_COLOR: Record<WebMissionCard['gate'], string> = {
   passed: C.green,
   failed: C.red,
   running: C.amber,
-  unknown: C.faint,
+  stale: C.amber,
+  'not-run': C.faint,
+  unconfigured: C.faint,
+  unavailable: C.faint,
 };
 
 /** The card's own work state, shown verbatim; `unknown` certainty stays unknown. */

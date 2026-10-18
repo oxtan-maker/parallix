@@ -313,15 +313,6 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     classification: 'database-owned-domain-state',
     cutoverTask: null,
   },
-  {
-    id: 'mission-gate-adapter-read',
-    concept: 'Mission',
-    pathType: 'default',
-    fileLocation: 'src/adapters/backlog/concrete-gate-read-adapter.ts',
-    operation: 'read',
-    classification: 'database-owned-domain-state',
-    cutoverTask: null,
-  },
   // persistent-data-migration: still used for data migration (not subsumed by SQLite).
   {
     id: 'mission-migration-read',

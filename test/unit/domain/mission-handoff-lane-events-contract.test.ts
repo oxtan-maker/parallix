@@ -687,7 +687,7 @@ describe('Active lane projection', () => {
       assert.equal(materialized.status, 'active');
 
       const card = projectMissionCard(materialized, {
-        latestGate: 'unknown', reviewApproval: null, currentWork: null, blockingReason: null, flags: [],
+        latestGate: 'not-run', reviewApproval: null, currentWork: null, blockingReason: null, flags: [],
       });
       const projection = buildBoardProjection(
         repo, [card], [], [],

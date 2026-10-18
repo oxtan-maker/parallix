@@ -92,7 +92,7 @@ test('mission card contains the board decision inputs without changing lifecycle
     id, repositoryId: repo, title: 'x', labels: missionLabels(['unknown']),
     status: 'active' as const, rawStatus: 'active', closedAt: null, assignee: null,
     checkpoints: [], review: null, netEngineeringLines: null,
-  }, { latestGate: 'unknown', reviewApproval: null, currentWork: null, blockingReason: null, flags: [] });
+  }, { latestGate: 'not-run', reviewApproval: null, currentWork: null, blockingReason: null, flags: [] });
   assert.deepEqual(bare.checkpointEvidence, []);
   assert.equal(card.pullRequest?.id, '152');
   assert.equal(card.currentWork?.phase, 'gates');
@@ -310,7 +310,7 @@ test('mission card preserves planned-only, partial and empty checkpoint plans (T
     status: 'active' as const, closedAt: null, assignee: null,
     checkpoints, review: null, netEngineeringLines: null,
   } satisfies Partial<NonNullable<Parameters<typeof projectMissionCard>[0]>>;
-  const facts = { latestGate: 'unknown' as const, reviewApproval: null, currentWork: null, blockingReason: null, flags: [] };
+  const facts = { latestGate: 'not-run' as const, reviewApproval: null, currentWork: null, blockingReason: null, flags: [] };
   const planned = projectMissionCard(mission, facts);
   assert.equal(planned.checkpoint, null);
   assert.deepEqual(planned.checkpointEvidence.map(cp => cp.state), ['current', 'future', 'future']);

@@ -65,8 +65,8 @@ function makeReviewAdapter(): ReviewReadAdapter {
   };
 }
 
-function makeGateAdapter(status: 'passed' | 'failed' | 'running' | 'unknown' = 'passed'): GateReadAdapter {
-  return { async loadGateStatus() { return status; } };
+function makeGateAdapter(status: import('../../../src/application/projections/gate-observation.js').GateState = 'passed'): GateReadAdapter {
+  return { async observeGate() { return status; } };
 }
 
 function makeAgentAdapter(): AgentReadAdapter {

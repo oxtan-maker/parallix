@@ -78,7 +78,7 @@ function makeBuilder(runningSessions: readonly RunningAgentSession[] | null): Bo
   const reviews: ReviewReadAdapter = {
     async loadReviews(ids) { return new Map(ids.map((id) => [id, { review: pendingReview(), approval: null }])); },
   };
-  const gates: GateReadAdapter = { async loadGateStatus() { return 'passed'; } };
+  const gates: GateReadAdapter = { async observeGate() { return 'passed'; } };
   const agents: AgentReadAdapter = {
     async loadAgentAvailability() {
       return [{ family: agentFamily('claude'), launcherAvailable: true, launcherDetail: null, block: { kind: 'none' } }];

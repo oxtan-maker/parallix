@@ -457,7 +457,7 @@ export function listRecoveryEvidence(options?: { missionId?: string; cwd: string
   const dirs = listIncidentDirs(options?.cwd ?? process.cwd(), options?.missionId, fsMod);
   const refs: RecoveryEvidenceRef[] = [];
   for (const dir of dirs) {
-    const files = safeReaddir(dir).filter((f) => /^attempt-\d+\.json$/.test(f));
+    const files = safeReaddir(dir, fsMod).filter((f) => /^attempt-\d+\.json$/.test(f));
     for (const file of files.sort((a, b) => a.localeCompare(b))) {
       const parsed = readOneMetadata(path.join(dir, file), fsMod);
       if (parsed) { refs.push(parsed); }
@@ -473,8 +473,8 @@ function listRecentIncidents(cwd: string, missionId: string | undefined, fsMod: 
   return listRecoveryEvidence({ cwd, missionId, fs: fsMod });
 }
 
-function safeReaddir(dir: string): string[] {
-  try { return requireFileSystem().readdirSync(dir, { withFileTypes: true }).map((entry) => entry.name); } catch { return []; }
+function safeReaddir(dir: string, fsMod: RecoveryFileSystem): string[] {
+  try { return fsMod.readdirSync(dir, { withFileTypes: true }).map((entry) => entry.name); } catch { return []; }
 }
 
 function readOneMetadata(file: string, fsMod: RecoveryFileSystem): RecoveryEvidenceRef | null {

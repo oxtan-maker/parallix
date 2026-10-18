@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { ConcreteGateReadAdapter } from '../../../src/adapters/backlog/concrete-gate-read-adapter.js';
 import { ConcreteGitReadAdapter } from '../../../src/adapters/backlog/concrete-git-read-adapter.js';
 import { createRepositoryMissionCatalog } from '../../../src/composition/board-projection.js';
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
@@ -136,7 +135,7 @@ describe("production certification: persisted weekly FLOW decision surface", () 
         const projection = await new BoardProjectionBuilder(
           missionReader,
           new ConcreteReviewReadAdapter({ rootDir: checkouts.primary, missionStore: null }),
-          new ConcreteGateReadAdapter({ rootDir: checkouts.primary }),
+          { observeGate: async () => 'not-run' as const },
           {
             loadAgentAvailability: async () => [],
             loadAssignedAgent: async () => null,

@@ -1,5 +1,7 @@
 import { projectWorkflowBoard, projectWorkflowCard } from './workflow-board.js';
 import type { WorkflowOperationStore } from '../ports/workflow-operation.js';
+import type { WorkflowOperation } from '../../domain/workflow-operation.js';
+import type { GateState } from './gate-observation.js';
 import { projectProviderExecution, readProviderExecution, type ProviderExecutionReader } from './provider-execution.js';
 import { alignDoneCohort } from './done-cohort.js';
 import { decisionRetentionBoundary, decisionWindowDay, localReportingTimeZone } from '../../domain/decision-window.js';
@@ -55,10 +57,10 @@ export interface ReviewProjectionFact {
   readonly approval: { subject: ReviewedRevision; approvedAt: string | null } | null;
 }
 
-/** Read adapter for gate state from integration pipeline results. */
+/** Read port for the gate that applies to a mission, from the verification authority. */
 export interface GateReadAdapter {
-  /** Load the latest gate status for a mission. */
-  loadGateStatus(_missionId: MissionId): Promise<'passed' | 'failed' | 'running' | 'unknown'>;
+  /** Observe the mission's gate, given the workflow that currently owns it. */
+  observeGate(_mission: Mission, _operation: WorkflowOperation | null): Promise<GateState>;
 }
 
 export type { RunningAgentSession } from './agent-status.js';
@@ -176,13 +178,14 @@ export class BoardProjectionBuilder {
   async build(): Promise<BoardProjection> {
     this._options?.prepareReads?.();
     const nowMs = this.now();
-    const [repositoryId, missions, operationLog, agentAvailability, runningSessions, currentWorkEvents] = await Promise.all([
+    const [repositoryId, missions, operationLog, agentAvailability, runningSessions, currentWorkEvents, operations] = await Promise.all([
       this._git.loadRepositoryId(),
       this._missions.loadAllMissions(),
       this._operationLog.loadOperationLog(),
       this._agents.loadAgentAvailability(),
       this.runningSessions(),
       this.currentWorkEvents(),
+      this.openOperations(),
     ]);
 
     const sourceFacts = this._missions.getSourceFacts();
@@ -217,7 +220,7 @@ export class BoardProjectionBuilder {
     const cards = await Promise.all(visibleMissions.map(async (mission) => this.composeCard(
       mission,
       reviews.get(mission.id) ?? { review: null, approval: null },
-      await this._gates.loadGateStatus(mission.id),
+      await this._gates.observeGate(mission, operations.find(operation => operation.repositoryId === mission.repositoryId && operation.missionId === mission.id) ?? null),
       currentWorkByMission.get(mission.id) ?? NO_CURRENT_WORK,
       runningSessions === null ? undefined : sessionByMission.get(mission.id) ?? null,
     )));
@@ -245,7 +248,7 @@ export class BoardProjectionBuilder {
       metrics,
       sourceFacts,
     ), deliveries);
-    return this.observeExecution(board);
+    return this.observeExecution(board, operations);
   }
 
   /**
@@ -268,9 +271,10 @@ export class BoardProjectionBuilder {
     const mission = await this._missions.loadMission(missionId);
     if (mission === null) { return null; }
 
+    const owner = await this._options?.workflowOperations?.current(mission.id) ?? null;
     const [reviews, gateStatus, runningSessions, currentWorkEvents] = await Promise.all([
       this._reviews.loadReviews([mission.id]),
-      this._gates.loadGateStatus(mission.id),
+      this._gates.observeGate(mission, owner),
       this.runningSessions(),
       this.missionCurrentWorkEvents(mission.id),
     ]);
@@ -292,22 +296,21 @@ export class BoardProjectionBuilder {
       work,
       liveSession,
     );
-    return this.observeCardExecution(card);
+    return this.observeCardExecution(card, owner);
   }
 
-  private async observeCardExecution(card: MissionCard): Promise<MissionCard> {
-    const owner = await this._options?.workflowOperations?.current(card.id) ?? null;
+  private observeCardExecution(card: MissionCard, owner: WorkflowOperation | null): MissionCard {
     const observed = this._options?.providerExecution ? { ...card, execution: readProviderExecution(this._options.providerExecution, { repositoryId: card.repositoryId, missionId: card.id }, owner?.id) } : card;
     return projectWorkflowCard(observed, owner);
   }
 
-  private async observeExecution(board: BoardProjection): Promise<BoardProjection> {
-    const operations = await this._options?.workflowOperations?.open() ?? [];
+  private observeExecution(board: BoardProjection, operations: readonly WorkflowOperation[]): BoardProjection {
     const observed = this._options?.providerExecution ? projectProviderExecution(board, this._options.providerExecution, operations) : board;
     return projectWorkflowBoard(observed, operations);
   }
 
   private now(): number { return (this._options?.now ?? Date.now)(); }
+  private openOperations() { return this._options?.workflowOperations?.open() ?? Promise.resolve([]); }
   private runningSessions() { return this._agents.loadRunningSessions?.() ?? Promise.resolve(null); }
   private currentWorkEvents() { return this._options?.currentWork?.loadCurrentWork() ?? Promise.resolve([]); }
   private missionCurrentWorkEvents(id: MissionId) { return this._options?.currentWork?.loadMissionCurrentWork?.(id) ?? Promise.resolve([]); }
@@ -316,7 +319,7 @@ export class BoardProjectionBuilder {
   private composeCard(
     mission: Mission,
     reviewFact: ReviewProjectionFact,
-    latestGate: 'passed' | 'failed' | 'running' | 'unknown',
+    latestGate: GateState,
     work: CurrentWorkFacts,
     // `undefined` when the process scan itself could not run: that is
     // "liveness unknown", which must not collapse into the observed

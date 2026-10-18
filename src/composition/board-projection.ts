@@ -15,7 +15,6 @@ import type { UsageRepository } from '../application/ports/mission-measurements.
 import { createLauncherProbe, type LauncherProbeResult } from '../adapters/agents/launcher-availability.js';
 import { detectRunningMissionSessions, startProcessTableRead, type ProcessEntry, type RunningMissionSession } from '../adapters/agents/running-sessions.js';
 import { ConcreteAgentReadAdapter } from '../adapters/backlog/concrete-agent-read-adapter.js';
-import { ConcreteGateReadAdapter } from '../adapters/backlog/concrete-gate-read-adapter.js';
 import { ConcreteGitReadAdapter } from '../adapters/backlog/concrete-git-read-adapter.js';
 import { readBacklogInputs } from '../adapters/backlog/backlog-input-reader.js';
 import { ConcreteOperationLogReadAdapter } from '../adapters/backlog/concrete-operation-log-read-adapter.js';
@@ -37,6 +36,10 @@ import type { CurrentWorkPort } from '../application/recording/current-work-reco
 import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
 import { SqliteReviewProjectionReader } from '../adapters/sqlite/review-projection-reader.js';
 import { loadEffectiveConfig } from '../adapters/config/product-config.js';
+import { SqliteIntegrationValidationReader } from '../adapters/sqlite/integration-validation-reader.js';
+import { VerificationGateEvidenceReader } from '../adapters/verification/gate-evidence-reader.js';
+import { VerificationGateObserver } from '../application/projections/gate-observation.js';
+import type { GateEvidenceReader } from '../application/ports/gate-evidence.js';
 
 export interface BoardProjectionCompositionDeps {
   readonly configuration?: ParallixConfiguration;
@@ -66,6 +69,8 @@ export interface BoardProjectionCompositionDeps {
   readonly detectRunningSessions?: () => readonly import('../adapters/agents/running-sessions.js').RunningMissionSession[] | null;
   /** Provider observation boundary; defaults to the repository's retained execution evidence. */
   readonly providerExecution?: ProviderExecutionReader;
+  /** Verification evidence boundary; defaults to proofs, failure evidence and validation history. */
+  readonly gateEvidence?: GateEvidenceReader;
 }
 
 /**
@@ -142,8 +147,14 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
   const runningSessions = createRunningSessionScan(deps);
   const changeIdentity = createGitChangeIdentity(deps.rootDir, deps.gitFn ?? undefined, { snapshotBranchHeads: true });
   const completedMissionRetentionDays = loadEffectiveConfig(deps.rootDir).adapters.web.completedMissionRetentionDays;
-  const gates = new ConcreteGateReadAdapter({ rootDir: deps.rootDir });
   let topology: ReturnType<typeof snapshotWorktreeTopology> | null = null;
+  const validations = deps.database ? new SqliteIntegrationValidationReader(deps.database) : null;
+  const gateEvidence = deps.gateEvidence ?? new VerificationGateEvidenceReader({
+    configuration: deps.configuration,
+    resolveWorktree: mission => topology?.resolveWorktree(mission, { cwd: deps.rootDir }) ?? null,
+    integrationValidation: validations ? mission => validations.read(mission) : null,
+  });
+  const gates = new VerificationGateObserver(gateEvidence);
   let terminal: ReturnType<typeof createMissionTerminalCapability> | undefined;
   const builder = new BoardProjectionBuilder(
     missions,
@@ -184,9 +195,9 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
           currentBranch: deps.gitFn ? () => '' : undefined,
         });
         cachedMissions = null;
+        gateEvidence.beginRead?.();
         changeIdentity.beginRead();
         runningSessions.beginRead();
-        gates.useWorktreeTopology(topology);
       },
       // The authoritative answer to "which mission is being worked on right
       // now", published by the operations themselves. The OS-process scan in

@@ -402,7 +402,7 @@ describe("stand down", { concurrency: false }, () => {
     return new BoardProjectionBuilder(
       { async loadAllMissions() { return [record]; }, async loadMission() { return record; }, getSourceFacts: () => [] },
       { async loadReviews(ids) { return new Map(ids.map((m) => [m, fact])); } },
-      { async loadGateStatus() { return 'passed'; } },
+      { async observeGate() { return 'passed'; } },
       { async loadAgentAvailability() { return []; }, async loadAssignedAgent() { return null; } },
       { async loadRepositoryId() { return repositoryId('parallix'); }, async loadHeadCommit() { return 'x'; } },
       { async loadOperationLog() { return []; } },

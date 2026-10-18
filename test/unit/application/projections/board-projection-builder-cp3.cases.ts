@@ -8,7 +8,6 @@ import { composeBoardProjection } from '../../../../src/composition/board-projec
 import { BoardProjectionBuilder } from '../../../../src/application/projections/board-readers.js';
 import { ConcreteMissionReadAdapter } from '../../../../src/adapters/backlog/concrete-mission-read-adapter.js';
 import { ConcreteReviewReadAdapter } from '../../../../src/adapters/backlog/concrete-review-read-adapter.js';
-import { ConcreteGateReadAdapter } from '../../../../src/adapters/backlog/concrete-gate-read-adapter.js';
 import { ConcreteAgentReadAdapter } from '../../../../src/adapters/backlog/concrete-agent-read-adapter.js';
 import { ConcreteOperationLogReadAdapter } from '../../../../src/adapters/backlog/concrete-operation-log-read-adapter.js';
 import { ConcreteGitReadAdapter } from '../../../../src/adapters/backlog/concrete-git-read-adapter.js';

@@ -8,6 +8,7 @@ import { agentFamily as fixtureAgentFamily } from '../../../../src/domain/agents
 
 import assert from 'node:assert/strict';
 import test, { describe } from 'node:test';
+import type { GateState } from '../../../../src/application/projections/gate-observation.js';
 import type { SourceFact } from '../../../../src/application/contracts.js';
 import { BoardProjectionBuilder, checkProjectionStaleness, filterCompletedMissions, type AgentReadAdapter, type GateReadAdapter, type GitReadAdapter, type MissionReadAdapter, type OperationLogReadAdapter, type ReviewReadAdapter } from '../../../../src/application/projections/board-readers.js';
 import type { BoardProjectionOptions } from '../../../../src/application/projections/board-readers.js';
@@ -51,9 +52,9 @@ function makeReviewAdapter(review: Review | null = null): ReviewReadAdapter {
   };
 }
 
-function makeGateAdapter(status: 'passed' | 'failed' | 'running' | 'unknown' = 'passed'): GateReadAdapter {
+function makeGateAdapter(status: GateState = 'passed'): GateReadAdapter {
   return {
-    async loadGateStatus() { return status; },
+    async observeGate() { return status; },
   };
 }
 
@@ -357,8 +358,8 @@ test('BoardProjectionBuilder queues a gate-failed mission behind its runnable re
     fixtureMission(String(id2), { id: id2, repositoryId: repo, title: 'Active 2', labels: missionLabels(['a']), status: 'active' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null }),
   ];
   const gateAdapter: GateReadAdapter = {
-    async loadGateStatus(missionId: typeof id1) {
-      return missionId === id1 ? 'failed' : 'passed';
+    async observeGate(mission) {
+      return mission.id === id1 ? 'failed' : 'passed';
     },
   };
   const builder = new BoardProjectionBuilder(
@@ -485,7 +486,7 @@ function createCardHelpers() {
     lane: 'backlog' | 'refined' | 'active' | 'review' | 'integration' | 'done',
     opts: {
       blockingReason?: string | null;
-      gate?: 'passed' | 'failed' | 'running' | 'unknown';
+      gate?: GateState;
       currentWork?: MissionCard['currentWork'];
     } = {},
   ) {
@@ -548,7 +549,7 @@ describe("Slow metrics cache reuse — SC4", () => {
         loadReviews: async (ids) => new Map(ids.map((id) => [id, { review: null, approval: null }])),
       },
       gates: {
-        loadGateStatus: async () => 'unknown',
+        observeGate: async () => 'not-run',
       },
       agents: {
         loadAgentAvailability: async () => [] as readonly AgentAvailability[],
@@ -803,4 +804,28 @@ test('board and focused reads pass the current owner into execution while done h
   calls.length = 0;
   assert.equal((await builder.buildMissionCard(id1))?.execution?.invocations.length, 1);
   assert.deepEqual(calls, ['owner', `observe:${id1}`]);
+});
+
+test('board and focused reads observe the gate with the owning workflow (TASK-2775)', async () => {
+  const { VerificationGateObserver } = await import('../../../../src/application/projections/gate-observation.js');
+  const checking = { id: 'checking-owner', repositoryId: repo, missionId: id1, requestKey: 'request', command: 'active:execute' as const,
+    generation: 1, phase: 'checking' as const, providerStarted: true, agent: 'codex', reviewer: null, originalStatus: 'active' as const, previousAssignee: null,
+    owner: { pid: 1, identity: 'owner' }, createdAt: '2026-10-18T10:00:00Z', updatedAt: '2026-10-18T10:00:00Z', reason: 'handoff checks' };
+  const foreign = { ...checking, id: 'foreign-owner', repositoryId: repositoryId('task-2775-foreign'), missionId: id2 };
+  const reads: string[] = [];
+  const gates = new VerificationGateObserver({
+    async readDeclaredGates(scope) { reads.push(scope.missionId); return { checkout: { kind: 'present', revision: 'a'.repeat(40), clean: true }, gates: [] }; },
+    async readIntegrationGates() { throw new Error('not applicable'); },
+  });
+  const builder = new BoardProjectionBuilder(
+    makeMissionAdapter([fixtureMission(id1, { repositoryId: repo, status: 'active', declaredGates: ['npm test'] }), fixtureMission(id2, { repositoryId: repo, status: 'active', declaredGates: ['npm test'] })]),
+    makeReviewAdapter(), gates, makeAgentAdapter(), makeGitAdapter(), makeOperationLogAdapter(), {
+      workflowOperations: { async open() { return [checking, foreign]; }, async current(id) { return id === id1 ? checking : null; } },
+    },
+  );
+  const cards = (await builder.build()).stages.flatMap(stage => stage.cards);
+  assert.deepEqual(cards.map(card => [card.id, card.gate]).sort(), [[id1, 'not-run'], [id2, 'not-run']]);
+  assert.deepEqual(reads.sort(), [id1, id2].sort(), 'checking alone never replaces evidence reads');
+  assert.equal((await builder.buildMissionCard(id1))?.gate, 'not-run');
+  assert.equal((await builder.buildMissionCard(id2))?.gate, 'not-run');
 });

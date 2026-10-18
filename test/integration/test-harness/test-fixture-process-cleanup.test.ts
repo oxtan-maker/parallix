@@ -76,7 +76,9 @@ function runChild(args: string[], env: NodeJS.ProcessEnv = {}): Promise<{ code: 
   for (const key of Object.keys(childEnv)) {
     if (key.startsWith('NODE_TEST_')) { delete childEnv[key]; }
   }
-  const child = spawn(process.execPath, args, {
+  // Nested file workers already provide concurrency, just like the main runner.
+  // Avoid multiplying V8 compiler pools for each focused fixture process.
+  const child = spawn(process.execPath, ['--v8-pool-size=1', ...args], {
     cwd: REPO_ROOT,
     env: childEnv,
     stdio: ['ignore', 'pipe', 'pipe'],

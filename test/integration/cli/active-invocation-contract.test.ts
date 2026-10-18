@@ -347,7 +347,7 @@ describe("active persisted Mission", () => {
     const host = createWebHost({
       assets: { manifest: { 'index.html': { size: 0, contentType: 'text/html' } }, assets: new Map(), shellHtml: '<head></head>' },
       buildProjection: async () => makeProjection({ active: [projectMissionCard(mission, {
-        latestGate: 'unknown', reviewApproval: null, currentWork: null, blockingReason: null, flags: [],
+        latestGate: 'not-run', reviewApproval: null, currentWork: null, blockingReason: null, flags: [],
       })] }),
     });
     const web = await host.start();

@@ -31,7 +31,7 @@ export type WebBoardCommandKind =
   | 'integrate:merge'
   | 'mission:cancel';
 export type WebCommandActionState = 'enabled' | 'ineligible' | 'unavailable';
-export type WebGateState = 'passed' | 'failed' | 'running' | 'unknown';
+export type WebGateState = 'unconfigured' | 'not-run' | 'running' | 'passed' | 'failed' | 'stale' | 'unavailable';
 export type WebWorkCertainty = 'live' | 'unknown' | 'stale';
 export type WebAttentionReasonKind =
   | 'blocking'

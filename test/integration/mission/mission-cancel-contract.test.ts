@@ -286,7 +286,7 @@ describe('Mission cancel', () => {
         getSourceFacts() { return [{ source: 'mission-store' as const, status: 'fresh' as const, value: repository }]; },
       },
       { async loadReviews(ids) { return new Map(ids.map((id) => [id, { review: null, approval: null }])); } },
-      { async loadGateStatus() { return 'unknown' as const; } },
+      { async observeGate() { return 'not-run' as const; } },
       { async loadAgentAvailability() { return []; }, async loadAssignedAgent() { return null; } },
       { async loadRepositoryId() { return repository; }, async loadHeadCommit() { return 'abc123'; } },
       { async loadOperationLog() { return []; } },

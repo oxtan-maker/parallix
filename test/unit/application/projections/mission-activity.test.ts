@@ -132,7 +132,7 @@ test('projectMissionCard preserves unobserved coordinator liveness for mission a
     review: null,
     netEngineeringLines: null,
   }), {
-    latestGate: 'unknown',
+    latestGate: 'not-run',
     liveSession: undefined,
     reviewApproval: null,
     currentWork: null,

@@ -21,7 +21,7 @@ export type WebTransportValidation<T> =
   | { readonly ok: false; readonly code: 'invalid-payload'; readonly problems: readonly string[] };
 
 export const LANES: readonly string[] = ['backlog', 'refined', 'active', 'review', 'integration', 'done'];
-export const GATES: readonly string[] = ['passed', 'failed', 'running', 'unknown'];
+export const GATES: readonly string[] = ['unconfigured', 'not-run', 'running', 'passed', 'failed', 'stale', 'unavailable'];
 export const ACTION_STATES: readonly string[] = ['enabled', 'ineligible', 'unavailable'];
 export const CERTAINTIES: readonly string[] = ['live', 'unknown', 'stale'];
 export const ATTENTION_REASONS: readonly string[] = ['blocking', 'gate-failed', 'review-lane', 'integrate-lane', 'stale-work', 'orphaned-active', 'none'];

@@ -408,12 +408,17 @@ test('an empty snapshot states each region is empty and never shows a zero metri
   assert.ok(!html.includes('running'), 'no agent session count is invented for an empty snapshot');
 });
 
-test('an unknown gate renders as unknown, never as a pass', () => {
-  const html = render(snapshotOf({
-    stages: makeProjection({ active: [makeCard({ checkpoint: 'CP-1.md', gate: 'unknown' })] }).stages,
-  }));
-  assert.match(html, /gate · unknown/);
-  assert.ok(!html.includes('gate ✓'), 'unknown never renders as passed');
+test('each observed non-passing gate state renders distinctly, never as a pass (TASK-2775)', () => {
+  for (const [gate, text] of [
+    ['unavailable', 'gate · unavailable'], ['not-run', 'gate · not run'], ['unconfigured', 'gate · none configured'],
+    ['stale', 'gate · stale'], ['running', 'gate · running'], ['failed', 'gate ✗ FAIL'],
+  ] as const) {
+    const html = render(snapshotOf({
+      stages: makeProjection({ active: [makeCard({ checkpoint: 'CP-1.md', gate })] }).stages,
+    }));
+    assert.ok(html.includes(text), `${gate} renders ${text}`);
+    assert.ok(!html.includes('gate ✓'), `${gate} never renders as passed`);
+  }
 });
 
 test('an unidentified agent omits the implementer label and its activity dot', () => {

@@ -5,7 +5,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 
 import { ConcreteReviewReadAdapter } from '../../../../src/adapters/backlog/concrete-review-read-adapter.js';
-import { ConcreteGateReadAdapter } from '../../../../src/adapters/backlog/concrete-gate-read-adapter.js';
 import { ConcreteAgentReadAdapter } from '../../../../src/adapters/backlog/concrete-agent-read-adapter.js';
 import { BOARD_OPERATION_LOG_LIMIT, ConcreteOperationLogReadAdapter } from '../../../../src/adapters/backlog/concrete-operation-log-read-adapter.js';
 import { ConcreteGitReadAdapter } from '../../../../src/adapters/backlog/concrete-git-read-adapter.js';
@@ -195,64 +194,6 @@ test('ReviewReadAdapter loadReview returns null when no mission dir exists', asy
 
   const review = await adapter.loadReview(missionId('task-9999'));
   assert.equal(review, null);
-});
-
-// ---------------------------------------------------------------------------
-// GateReadAdapter tests
-// ---------------------------------------------------------------------------
-
-test('GateReadAdapter loadGateStatus returns unknown when no mission dir', async () => {
-  const adapter = new ConcreteGateReadAdapter({
-    rootDir: '/tmp',
-    findMissionDir: () => null,
-  });
-
-  const status = await adapter.loadGateStatus(missionId('task-9999'));
-  assert.equal(status, 'unknown');
-});
-
-test('GateReadAdapter loadGateStatus returns unknown when no gate file exists', async () => {
-  const adapter = new ConcreteGateReadAdapter({
-    rootDir: '/tmp',
-    findMissionDir: () => '/tmp/missions/task-1001',
-    readGateFile: () => null,
-  });
-
-  const status = await adapter.loadGateStatus(missionId('task-1001'));
-  assert.equal(status, 'unknown');
-});
-
-test('GateReadAdapter loadGateStatus returns passed from gate content', async () => {
-  const adapter = new ConcreteGateReadAdapter({
-    rootDir: '/tmp',
-    findMissionDir: () => '/tmp/missions/task-1001',
-    readGateFile: () => JSON.stringify({ status: 'passed' }),
-  });
-
-  const status = await adapter.loadGateStatus(missionId('task-1001'));
-  assert.equal(status, 'passed');
-});
-
-test('GateReadAdapter loadGateStatus returns failed from gate content', async () => {
-  const adapter = new ConcreteGateReadAdapter({
-    rootDir: '/tmp',
-    findMissionDir: () => '/tmp/missions/task-1001',
-    readGateFile: () => 'FAILED: lint errors',
-  });
-
-  const status = await adapter.loadGateStatus(missionId('task-1001'));
-  assert.equal(status, 'failed');
-});
-
-test('GateReadAdapter loadGateStatus returns running from gate content', async () => {
-  const adapter = new ConcreteGateReadAdapter({
-    rootDir: '/tmp',
-    findMissionDir: () => '/tmp/missions/task-1001',
-    readGateFile: () => 'in-progress',
-  });
-
-  const status = await adapter.loadGateStatus(missionId('task-1001'));
-  assert.equal(status, 'running');
 });
 
 // ---------------------------------------------------------------------------
@@ -499,16 +440,6 @@ test('GitReadAdapter loadHeadCommit returns empty string on git error', async ()
 
   const sha = await adapter.loadHeadCommit();
   assert.equal(sha, '');
-});
-
-test('GateReadAdapter handles missing gate artifacts gracefully (R2)', async () => {
-  const adapter = new ConcreteGateReadAdapter({
-    rootDir: '/tmp',
-    findMissionDir: () => null,
-  });
-
-  const status = await adapter.loadGateStatus(missionId('task-new'));
-  assert.equal(status, 'unknown');
 });
 
 test('OperationLogReadAdapter preserves only explicit producer progress identities (TASK-2719)', async () => {

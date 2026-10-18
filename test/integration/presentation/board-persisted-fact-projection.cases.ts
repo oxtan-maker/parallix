@@ -14,14 +14,12 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { ConcreteAgentReadAdapter } from '../../../src/adapters/backlog/concrete-agent-read-adapter.js';
-import { ConcreteGateReadAdapter } from '../../../src/adapters/backlog/concrete-gate-read-adapter.js';
 import { ConcreteGitReadAdapter } from '../../../src/adapters/backlog/concrete-git-read-adapter.js';
 import { ConcreteMissionReadAdapter } from '../../../src/adapters/backlog/concrete-mission-read-adapter.js';
 import { ConcreteOperationLogReadAdapter } from '../../../src/adapters/backlog/concrete-operation-log-read-adapter.js';
 import { ConcreteReviewReadAdapter } from '../../../src/adapters/backlog/concrete-review-read-adapter.js';
 import { BoardProjectionBuilder } from '../../../src/application/projections/board-readers.js';
 import { ConcreteMetricsReadAdapter } from '../../../src/application/projections/metrics-read-adapter.js';
-import { recordGateResult } from '../../../src/adapters/verification/verification.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { missionId } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
@@ -34,6 +32,11 @@ import type {
 } from '../../../src/application/ports/operation-history.js';
 import type { UsageRecord, UsageRepository } from '../../../src/application/ports/mission-measurements.js';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
+import { emptyBoardRepositories } from '../../helpers/empty-board-repositories.js';
+import { composeBoardProjection } from '../../../src/composition/board-projection.js';
+import { missionVersion, type MissionStore } from '../../../src/application/domain-ports.js';
+import type { Mission } from '../../../src/domain/mission.js';
+import type { DeclaredGateEvidence, GateEvidenceReader, MissionGateEvidence } from '../../../src/application/ports/gate-evidence.js';
 
 const SLUG = 'task-2343';
 const MISSION = missionId(SLUG);
@@ -190,7 +193,7 @@ function composeBoard(fixture: Fixture): BuiltBoard {
       readReviewState: () => reviewStateWithPullRequest(),
       findMissionDir: () => fixture.missionDir,
     }),
-    new ConcreteGateReadAdapter({ rootDir: fixture.rootDir, findMissionDir: () => fixture.missionDir }),
+    { observeGate: async () => 'not-run' as const },
     new ConcreteAgentReadAdapter({
       rootDir: fixture.rootDir,
       blocklistRepo: blocklist,
@@ -269,28 +272,6 @@ test('task-2343 repro: mission adapter parses the checkpoint Goal Check table', 
 });
 
 // ---------------------------------------------------------------------------
-// SC3 — gate status derives from the recorded verifier exit code
-// ---------------------------------------------------------------------------
-
-test('task-2343 repro: gate status comes from the recorded verifier exit code', async () => {
-  const fixture = makeFixture();
-  try {
-    const gates = new ConcreteGateReadAdapter({
-      rootDir: fixture.rootDir,
-      findMissionDir: () => fixture.missionDir,
-      resolveWorktree: () => null,
-    });
-    recordGateResult(fixture.missionDir, { area: 'all', command: './scripts/verify-local.sh all', exitCode: 0 });
-    assert.equal(await gates.loadGateStatus(MISSION), 'passed');
-
-    recordGateResult(fixture.missionDir, { area: 'all', command: './scripts/verify-local.sh all', exitCode: 1 });
-    assert.equal(await gates.loadGateStatus(MISSION), 'failed');
-  } finally {
-    cleanup(fixture);
-  }
-});
-
-// ---------------------------------------------------------------------------
 // SC4/SC5/SC6 read paths — already correct, pinned so the repairs cannot regress
 // ---------------------------------------------------------------------------
 
@@ -325,4 +306,118 @@ test('task-2343 repro: operation log returns the recorded lifecycle events', asy
   } finally {
     cleanup(fixture);
   }
+});
+
+// ---------------------------------------------------------------------------
+// TASK-2775 — the production board reads the current verification authority
+// ---------------------------------------------------------------------------
+
+const GATE_MISSION = missionId('task-2775-gate');
+const GATE_COMMAND = './scripts/verify-local.sh all';
+
+function gateMission(status: Mission['status'], declaredGates: readonly string[] = [GATE_COMMAND]): Mission {
+  return {
+    id: GATE_MISSION, repositoryId: GATE_REPOSITORY, title: 'Gate authority fixture', labels: [], assignee: null,
+    checkpoints: [], review: null, netEngineeringLines: null, status, closedAt: null, declaredGates,
+  };
+}
+
+const GATE_REPOSITORY = repositoryId('task-2775-repository');
+const CURRENT_CHECKOUT = { kind: 'present', revision: 'a'.repeat(40), clean: true } as const;
+
+/** Hermetic production composition: git, launchers and the process scan are doubles. */
+function composeGateBoard(rootDir: string, mission: Mission, gateEvidence: GateEvidenceReader) {
+  const store: MissionStore = {
+    async load(id) { return id === mission.id ? { kind: 'found' as const, mission, version: missionVersion(1) } : { kind: 'missing' as const }; },
+    async save() { return missionVersion(1); },
+    async loadByRepository() { return [mission]; },
+  };
+  return composeBoardProjection({
+    rootDir,
+    missionStore: store,
+    repositoryId: GATE_REPOSITORY,
+    ...emptyBoardRepositories(),
+    knownAgentFamilies: [],
+    launcherProbe: () => ({ available: true, detail: null }),
+    readAgentConfig: () => null,
+    detectRunningSessions: () => null,
+    providerExecution: { observe: () => ({ observedAt: new Date().toISOString(), complete: true, invocations: [], limitations: [] }) },
+    gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
+    gateEvidence,
+  });
+}
+
+async function boardGate(mission: Mission, gateEvidence: GateEvidenceReader): Promise<string | undefined> {
+  const rootDir = registeredMkdtemp('px-2775-');
+  try {
+    const board = composeGateBoard(rootDir, mission, gateEvidence);
+    const card = (await board.builder.build()).stages.flatMap(stage => stage.cards).find(candidate => candidate.id === GATE_MISSION);
+    assert.equal((await board.builder.buildMissionCard(GATE_MISSION))?.gate, card?.gate, 'board and focused status agree');
+    return card?.gate;
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+}
+
+function declaredEvidence(checkout: MissionGateEvidence['checkout'], gate: Partial<Omit<DeclaredGateEvidence, 'command'>> = {}): GateEvidenceReader {
+  return {
+    async readDeclaredGates(_scope, commands) {
+      return { checkout, gates: commands.map(command => ({ command, proof: { state: 'absent' as const }, failure: null, ...gate })) };
+    },
+    async readIntegrationGates() { throw new Error('integration evidence is not applicable'); },
+  };
+}
+
+test('reports current durable verification evidence without a legacy gate-result file (TASK-2775)', async () => {
+  const rootDir = registeredMkdtemp('px-2775-');
+  try {
+    const evidence = declaredEvidence(CURRENT_CHECKOUT, { proof: { state: 'current', revision: 'a'.repeat(40), observedAt: '2026-10-18T08:00:00.000Z' } });
+    const board = composeGateBoard(rootDir, gateMission('active'), evidence);
+    assert.equal(fs.existsSync(path.join(rootDir, 'missions')), false, 'fixture must carry no legacy gate-result file');
+    const card = (await board.builder.build()).stages.flatMap(stage => stage.cards).find(candidate => candidate.id === GATE_MISSION);
+    assert.equal(card?.gate, 'passed');
+    assert.equal((await board.builder.buildMissionCard(GATE_MISSION))?.gate, 'passed');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('board gate follows a mission from start to result without fabricating one (TASK-2775)', async () => {
+  assert.equal(await boardGate(gateMission('refined'), declaredEvidence({ kind: 'absent' })), 'not-run', 'just started: no checkout, no result');
+  assert.equal(await boardGate(gateMission('active'), declaredEvidence(CURRENT_CHECKOUT)), 'not-run', 'before gates run');
+  assert.equal(await boardGate(gateMission('active'), declaredEvidence(CURRENT_CHECKOUT, {
+    failure: { state: 'current', revision: 'a'.repeat(40), observedAt: '2026-10-18T08:00:00.000Z', exitCode: 1 },
+  })), 'failed', 'execution failure on the current revision');
+  assert.equal(await boardGate(gateMission('review'), declaredEvidence(CURRENT_CHECKOUT, {
+    proof: { state: 'stale', revision: 'b'.repeat(40), observedAt: '2026-10-18T08:00:00.000Z' },
+  })), 'stale', 'a prior success after the inputs changed');
+});
+
+test('board gate distinguishes unconfigured gates from unobservable evidence (TASK-2775)', async () => {
+  assert.equal(await boardGate(gateMission('active', []), declaredEvidence(CURRENT_CHECKOUT)), 'unconfigured');
+  assert.equal(await boardGate(gateMission('active'), declaredEvidence({ kind: 'absent' })), 'unavailable', 'in-flight mission without a readable checkout');
+  const failing: GateEvidenceReader = {
+    async readDeclaredGates() { throw new Error('verification evidence unreadable'); },
+    async readIntegrationGates() { throw new Error('validation history unreadable'); },
+  };
+  assert.equal(await boardGate(gateMission('active'), failing), 'unavailable');
+  assert.equal(await boardGate(gateMission('integration'), failing), 'unavailable');
+});
+
+test('production composition starts a fresh gate evidence view on each build (TASK-2775)', async () => {
+  const root = registeredMkdtemp('px-gate-read-build-');
+  let reads = 0;
+  const evidence: GateEvidenceReader = {
+    beginRead: () => { reads++; },
+    readDeclaredGates: async () => ({ checkout: CURRENT_CHECKOUT, gates: [] }),
+    readIntegrationGates: async () => ({ checkout: CURRENT_CHECKOUT, configured: [], gates: [], running: null }),
+  };
+  try {
+    const mission = gateMission('active', ['true']);
+    const { builder } = composeGateBoard(root, mission, evidence);
+    await builder.build();
+    assert.equal(reads, 1);
+    await builder.build();
+    assert.equal(reads, 2, 'refresh cannot reuse the previous build snapshot');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

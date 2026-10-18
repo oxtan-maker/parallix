@@ -34,7 +34,12 @@ export function verificationToolchainIdentity(searchPath = ''): string {
     npm, npmDigest: npm ? npmSignature(npm) : null });
 }
 
-export function readVerificationInputs(rootDir: string, gitRunner: GitFn, searchPath = ''):
+function isVerificationHeadIdentity(oid: string): boolean {
+  return oid === '(initial)' || /^[a-f0-9]{40,64}$/.test(oid);
+}
+
+export function readVerificationInputs(rootDir: string, gitRunner: GitFn, searchPath = '',
+  toolchainIdentity = () => verificationToolchainIdentity(searchPath)):
   { ok: true; root: string; trackedOutput: string; branch: string; commit: string | null; toolchain: string } | { ok: false; error: string } {
   let root: string;
   try { root = fs.realpathSync(rootDir); } catch { return { ok: false, error: 'verification proof root is unreadable' }; }
@@ -50,7 +55,7 @@ export function readVerificationInputs(rootDir: string, gitRunner: GitFn, search
   if (!branchLine || !oidLine) { return { ok: false, error: 'verification branch identity is unreadable' }; }
   const branch = branchLine.slice('# branch.head '.length);
   const oid = oidLine.slice('# branch.oid '.length);
-  if (oid !== '(initial)' && !/^[a-f0-9]{40,64}$/.test(oid)) {
+  if (!isVerificationHeadIdentity(oid)) {
     return { ok: false, error: 'verification HEAD identity is unreadable' };
   }
   const tracked = gitRunner(['-C', root, 'ls-files', '-s']);
@@ -59,7 +64,7 @@ export function readVerificationInputs(rootDir: string, gitRunner: GitFn, search
     return { ok: false, error: 'verification proof input manifest is unreadable' };
   }
   return { ok: true, root, trackedOutput, branch: branch === '(detached)' ? '' : branch,
-    commit: oid === '(initial)' ? null : oid, toolchain: verificationToolchainIdentity(searchPath) };
+    commit: oid === '(initial)' ? null : oid, toolchain: toolchainIdentity() };
 }
 
 /** External task catalog paths excluded from active candidate inputs. */

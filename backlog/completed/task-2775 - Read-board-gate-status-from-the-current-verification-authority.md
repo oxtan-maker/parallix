@@ -1,8 +1,8 @@
 ---
 id: TASK-2775
 title: Read board gate status from the current verification authority
-status: ready-for-integration
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-18 06:02'
 labels:
   - bug

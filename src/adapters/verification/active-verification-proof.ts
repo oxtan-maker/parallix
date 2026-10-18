@@ -1,11 +1,13 @@
+import type { VerificationReadSnapshot } from './verification-read-snapshot.js';
 import path from 'node:path';
 import { readIntegrationVerificationProof } from './integration-verification-proof.js';
-import { createActiveVerificationIdentity, type ActiveVerificationOptions as Options } from './active-verification-identity.js';
+import fs from 'node:fs';
+import { activeVerificationScope, createActiveVerificationIdentity, type ActiveVerificationOptions as Options } from './active-verification-identity.js';
 export { createActiveVerificationIdentity } from './active-verification-identity.js';
 import { git } from '../git/git.js';
 import { ensureRebaseCompletionRecorder, readRebaseCompletions } from '../git/rebase-completion-recorder.js';
 import { readJson, resolveParallixHome, writeJson } from '../storage/storage.js';
-import { isVerificationBookkeeping } from './verification-proof-inputs.js';
+import { isVerificationBookkeeping, verificationToolchainIdentity } from './verification-proof-inputs.js';
 
 interface ActiveProof {
   policy: 'active-review-v1';
@@ -31,20 +33,20 @@ function matchesProof(proof: ActiveProof | null, scope: string, toolchain: strin
     && revision(proof.verifiedCommit) && typeof proof.inputFingerprint === 'string');
 }
 
-function onlyBookkeeping(root: string, from: string, to: string): boolean {
-  const result = git(['-C', root, 'diff', '--name-only', '-z', from, to, '--']);
+function onlyBookkeeping(root: string, from: string, to: string, gitRunner = git): boolean {
+  const result = gitRunner(['-C', root, 'diff', '--name-only', '-z', from, to, '--']);
   return result.status === 0 && result.stdout.split('\0').filter(Boolean).every(isVerificationBookkeeping);
 }
 
-function completedRebaseCovers(root: string, branch: string, from: string, to: string): boolean {
+function completedRebaseCovers(root: string, branch: string, from: string, to: string, gitRunner = git): boolean {
   let covered = from;
-  for (const record of readRebaseCompletions(root)) {
+  for (const record of readRebaseCompletions(root, gitRunner)) {
     if (!record || !revision(record.from) || !revision(record.to) || record.branch !== branch || !Array.isArray(record.mappings)
-      || !onlyBookkeeping(root, covered, record.from)) { continue; }
+      || !onlyBookkeeping(root, covered, record.from, gitRunner)) { continue; }
     // Git invokes post-rewrite only after completion. It may drop already
     // upstream commits, so the covered HEAD need not occur in its mapping list.
     covered = record.to;
-    if (onlyBookkeeping(root, covered, to)) { return true; }
+    if (onlyBookkeeping(root, covered, to, gitRunner)) { return true; }
   }
   return false;
 }
@@ -89,4 +91,46 @@ export function writeActiveVerificationProof(command: string, root: string, opti
     writeJson(proofPath(current.scope, options), proof, { mode: 0o600 });
     return { ok: true as const, identity: current.identity, proof };
   } catch { return { ok: false as const, error: 'Active verification proof or rebase recorder could not be written' }; }
+}
+
+export type ActiveProofInspection =
+  | { readonly state: 'absent' }
+  | { readonly state: 'current' | 'stale'; readonly revision: string; readonly observedAt: string };
+
+function inspectionSlot(command: string, root: string, options: Options, readSnapshot?: VerificationReadSnapshot) {
+  const branch = (readSnapshot?.git ?? git)(['-C', root, 'branch', '--show-current']);
+  if (branch.status !== 0) { throw new Error('Mission checkout branch is unreadable'); }
+  const searchPath = options.configuration?.agents.searchPath ?? '';
+  const toolchain = readSnapshot?.toolchain(searchPath) ?? verificationToolchainIdentity(searchPath);
+  const scope = activeVerificationScope(fs.realpathSync(root), branch.stdout.trim(), command, toolchain, options.context);
+  return { scope, toolchain };
+}
+
+/**
+ * Read-only classification of the proof a handoff would consult for this
+ * command: `current` when it would be reused for the checkout as it stands,
+ * `stale` when it covers earlier inputs (including uncommitted changes), and
+ * `absent` when no proof was ever written. Unreadable state throws.
+ */
+export function inspectActiveVerificationProof(command: string, root: string, options: Options = {}, readSnapshot?: VerificationReadSnapshot): ActiveProofInspection {
+  return readSnapshot
+    ? readSnapshot.memo(JSON.stringify(['inspection', root, command, options.context, options.proofPath, options.configuration?.agents.searchPath]),
+      () => inspectProof(command, root, options, readSnapshot))
+    : inspectProof(command, root, options);
+}
+
+function inspectProof(command: string, root: string, options: Options, readSnapshot?: VerificationReadSnapshot): ActiveProofInspection {
+  const current = createActiveVerificationIdentity(command, root, options, readSnapshot);
+  if (current.ok) {
+    const integration = readIntegrationVerificationProof(command, root, current, readSnapshot);
+    if (integration.ok) { return { state: 'current', revision: integration.proof.verifiedCommit, observedAt: integration.proof.verifiedAt }; }
+  }
+  const { scope, toolchain } = current.ok ? current : inspectionSlot(command, root, options, readSnapshot);
+  const cached = readJson<ActiveProof>(proofPath(scope, options));
+  if (!cached.ok && cached.error === null) { return { state: 'absent' }; }
+  const proof = cached.data;
+  if (!matchesProof(proof, scope, toolchain)) { throw new Error('Active verification proof is malformed'); }
+  const reusable = current.ok && (proof.inputFingerprint === current.inputFingerprint
+    || completedRebaseCovers(root, current.branch, proof.coveredCommit, current.commit, readSnapshot?.git));
+  return { state: reusable ? 'current' : 'stale', revision: proof.verifiedCommit, observedAt: proof.verifiedAt };
 }

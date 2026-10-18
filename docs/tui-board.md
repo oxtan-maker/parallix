@@ -61,7 +61,7 @@ Each mission card renders the facts the projection supplies:
 ```text
 ▍task-2304 · custom
 Ink TUI wave 2: lane columns and responsive layout
-cp CP-2.md · gate passed ✓
+cp CP-2.md · gate ✓
 next: run the verification gate
 PR 42 · review approved
 ▲ waiting on upstream fix
@@ -69,8 +69,8 @@ PR 42 · review approved
 
 - **slug and agent** — the mission id and the assigned agent family.
 - **title** — truncated with `…` when it does not fit the column.
-- **checkpoint and gate** — the latest checkpoint file and the latest gate result
-  (`passed`, `failed`, `running`, or `unknown`).
+- **checkpoint and gate** — the latest checkpoint file and the state of the gate
+  that applies now (see [Gate states](#gate-states)).
 - **next step** — the `Next action:` line from that checkpoint.
 - **pull request and review** — the PR number when one exists, and whether the
   current revision is approved.
@@ -150,18 +150,42 @@ until the step that produces it has run.
 | Field | Source | Appears after |
 |---|---|---|
 | checkpoint, next step, Goal Check | the latest `CP-N.md` in the mission directory | the executing agent commits checkpoint evidence |
-| gate | the verifier exit code recorded in `<mission>/.workflow/gate-result.json`, read from the mission's own worktree | a lifecycle transition runs the verifier |
+| gate | executor observations and verification evidence for the mission worktree's current inputs (see [Gate states](#gate-states)) | the mission declares a gate, or integration gates are configured |
 | pull request | the pull-request reference the review loop records on the round once it confirms an open PR | `px review` with a review provider configured |
 | agent availability | the `agent_blocklist` table | an agent hits a provider usage limit |
 | cycle time | the `board_lane_events` table | any lifecycle step: mission intake (entry into `backlog`), every lane transition, `integration → done`, and closure |
 | agent runtime | the `duration_minutes` column of the `usage_statistics` table, summed per mission over its recorded runs | an agent finishes a run and its measurement is written |
 | operations | the `operational_history` table | `px active`, `px review`, or `px integrate` |
 
-The gate cell reports an exit code and nothing else. An agent's own account of a
-gate run — including a `PASS` row in its Goal Check table — is never promoted to
-gate state; ADR 0048 classifies that as an unverifiable claim. `.workflow/` is
-ignored by Git, so the recorded result describes the local run that produced it
-rather than travelling with the branch as a committed assertion.
+### Gate states
+
+Before integration, the gate is the set of gates the mission declares; from
+integration on, it is the repository's configured pre-integration plan. The
+cell shows one state:
+
+| State | Meaning |
+|---|---|
+| `running` | the integration gate executor is observed running for the owning workflow attempt |
+| `✓` passed | every applicable gate has a passing result that covers the worktree's current inputs |
+| `✗ FAIL` | a gate failed on the current revision, and no later pass covers the same inputs |
+| `stale` | the only results cover an earlier revision, earlier inputs or uncommitted changes |
+| `not run` | gates apply but none has a result yet, including a mission that has not started |
+| `none configured` | the mission declares no gate, or no pre-integration gate is configured, so none will run |
+| `unavailable` | the worktree or verification evidence could not be read |
+
+Passing results are the verification proofs the gate executor writes after an
+exit code of 0. Failures are the recovery evidence captured before a repair
+starts. Integration results come from the executor's verification evidence and the
+per-hook validation records that `px integrate` keeps for each commit. A record
+covering only part of the configured plan cannot pass the whole plan. The lifecycle
+lane, an agent's prose and a `PASS` row in a Goal Check table never produce a gate
+result; ADR 0048 classifies such reports as unverifiable claims. Workflow checking
+alone does not show a running gate. A cancelled integration run supersedes prior
+success and contributes no passing evidence.
+
+Gate observations share one view of each worktree’s inputs during a board refresh.
+The next refresh reads those inputs again, so checkout, branch and toolchain
+changes cannot retain an earlier refresh’s passing state.
 
 Missions whose lifecycle steps predate this wiring are not backfilled. Their
 fields stay `unavailable` until the next step of that kind runs.
