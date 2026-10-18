@@ -1,8 +1,8 @@
 ---
 id: TASK-2777
 title: Resolve mission integration context for web commands in the backend
-status: ready-for-integration
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-18 06:02'
 labels:
   - bug

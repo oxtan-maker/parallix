@@ -25,6 +25,8 @@ test('unit workers load ESM TypeScript while boundary fixtures retain the full l
     const boundary = plan(['--integration-ci-all', `test/${INTEGRATION_CI_TESTS[0]}`]);
     assert.equal(unit.nodeArgs[unit.nodeArgs.indexOf('--import') + 1], 'tsx/esm');
     assert.equal(boundary.nodeArgs[boundary.nodeArgs.indexOf('--import') + 1], 'tsx');
+    assert.ok(unit.nodeArgs.includes('--max-semi-space-size=16'));
+    assert.ok(!boundary.nodeArgs.some(arg => arg.startsWith('--max-semi-space-size=')));
     for (const candidate of [unit, boundary]) {
       assert.ok(candidate.nodeArgs.some(arg => arg.endsWith('/bootstrap-parallix-home.ts')));
       assert.ok(candidate.nodeArgs.includes('--experimental-test-module-mocks'));

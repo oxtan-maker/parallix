@@ -209,6 +209,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/process/workflow-owner-host-restart.test.ts',
   'integration/process/workflow-stop-attribution.test.ts',
   'integration/process/workflow-observation-isolation.test.ts',
+  // TASK-2777: disposable git repositories and worktrees only; git is on every runner.
+  'integration/process/workflow-execution-context.test.ts',
   // TASK-2599 spawns the dev entry in a child process and materialises a
   // temporary SQLite Mission store, so it crosses the process and SQLite
   // boundaries and runs only in the integration layer (clean runner is enough).

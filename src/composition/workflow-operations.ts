@@ -20,6 +20,7 @@ import { WorkflowProcessAdapter } from '../adapters/process/workflow-process.js'
 import { cliInvocation, type CliInvocation } from '../adapters/process/cli-invocation.js';
 import { resolveCanonicalRepositoryId } from '../adapters/git/repository-identity.js';
 import { resolveWorktree } from '../adapters/git/worktree.js';
+import { resolveMissionExecutionContext } from '../adapters/git/mission-execution-context.js';
 import { openRunCapture } from '../adapters/filesystem/run-history-store.js';
 import { resolveConfiguredCredentialRedactor } from '../application/recovery-evidence.js';
 import type { createProductionApplicationServices } from './application-services.js';
@@ -86,6 +87,7 @@ interface WorkerDependencies {
   readonly compose?: typeof composeWorkflowOperations;
   readonly capture?: typeof openRunCapture;
   readonly host?: typeof hostWorkflowExecutor;
+  readonly context?: typeof resolveMissionExecutionContext;
 }
 export async function runWorkflowWorker(id: string, root: string, configuration: ParallixConfiguration, execute = false, createGraph: typeof createProductionApplicationServices = async (...args) => {
     const { createProductionApplicationServices } = await import('./application-services.js');
@@ -123,9 +125,17 @@ async function superviseWorkflow(id: string, operation: import('../application/p
     redactor: resolveConfiguredCredentialRedactor(configuration.runtime.credentialRedactor),
   });
   capture.correlateOperation(operation.id);
+  const checkout = executionCheckout(operation, root, configuration, dependencies);
+  if (!checkout.ok) {
+    // Settle before any merge or push: the executor never starts against a guessed checkout.
+    capture.write('stdout', Buffer.from(`${checkout.reason}\n`));
+    await service.startupFailed(id, checkout.reason);
+    capture.finish({ exitCode: 1, signal: null, omissions: ['Mission execution context was unresolved; no executor started'] });
+    return 1;
+  }
   const cli = cliInvocation(process.argv[1]);
   let result: Awaited<ReturnType<typeof hostWorkflowExecutor>>;
-  try { result = await (dependencies.host ?? hostWorkflowExecutor)(cli, operation, root, runId, capture, configuration); }
+  try { result = await (dependencies.host ?? hostWorkflowExecutor)(cli, operation, checkout.root, runId, capture, configuration); }
   catch (error) {
     await service.startupFailed(id, error instanceof Error ? error.message : String(error));
     capture.finish({ exitCode: 1, signal: null, omissions: ['Workflow host failed before execution'] });
@@ -135,6 +145,20 @@ async function superviseWorkflow(id: string, operation: import('../application/p
   await service.recover(id);
   capture.finish({ ...result, sources: [{ kind: 'terminal-bytes', path: 'stdout', covers: 'complete workflow process output, including inherited child stdio', complete: true }], omissions: [] });
   return result.exitCode ?? 1;
+}
+
+
+/**
+ * A board-admitted integration executes in the mission worktree resolved from
+ * its identity, as a terminal run inside that worktree does; the admitting
+ * host's checkout and working directory decide nothing. A terminal invocation
+ * keeps the checkout it was typed in.
+ */
+function executionCheckout(operation: import('../application/ports/workflow-operation.js').WorkflowOperationRecord, root: string,
+  configuration: ParallixConfiguration, dependencies: WorkerDependencies): { ok: true; root: string } | { ok: false; reason: string } {
+  if (operation.command !== 'integrate:merge' || operation.invocation) { return { ok: true, root }; }
+  const resolved = (dependencies.context ?? resolveMissionExecutionContext)(operation.missionId, root, configuration);
+  return resolved.ok ? { ok: true, root: resolved.context.missionWorktree } : resolved;
 }
 
 

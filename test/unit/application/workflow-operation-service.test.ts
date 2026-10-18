@@ -270,6 +270,17 @@ test('startup and prelaunch failure safely compensate; later failures retain act
 });
 
 
+test('a supervisor startup reason is the board command outcome, naming the mission and unresolved fact (TASK-2777)', async () => {
+  const f = fixture();
+  const reason = 'Mission task-one: mission worktree /work/repo-task-one is on main, expected mission/task-one.';
+  f.processes.launch = async id => { void Promise.resolve().then(() => f.service.startupFailed(id, reason)); };
+  const outcome = await f.service.dispatch(request());
+  assert.equal(outcome.status, 'failed');
+  assert.equal(outcome.error?.message, reason);
+  assert.equal((await f.service.operation('request-one'))?.reason, reason);
+  assert.equal(f.missions.get('task-one')?.status, 'refined');
+});
+
 test('backlog draft intake and ownership are admitted together before preparation (TASK-2750)', async () => {
   const f = fixture(true);
   const outcome = await f.service.admit({ operationId: 'draft-key', missionId: 'task-new', kind: 'draft:create', missionStatusAtRequest: 'backlog', capabilities: new Set(['draft:create' as never]) });

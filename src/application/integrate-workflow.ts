@@ -5,6 +5,7 @@ import type { IntegrationContext } from './integrate/context.js';
 import { withBaseMutation } from './integrate/base-mutation.js';
 import { prepareBacklogPayload } from './integrate/backlog-payload.js';
 import type { ParallixConfiguration } from "./ports/configuration.js";
+import type { MissionExecutionContext } from './ports/mission-execution-context.js';
 /**
  * Integrate workflow use case — the `px integrate` sequence (TASK-2512).
  *
@@ -50,6 +51,11 @@ export interface IntegrateOptions extends Partial<IntegrateSeams> {
   exitFn?: (_code: number) => void;
   /** The outer `px integrate` publication nested repair and review report into (TASK-2620). */
   nestedWork?: unknown;
+  /**
+   * Checkouts resolved from the Mission identity by a board-admitted operation.
+   * Absent, a terminal run keeps reading them from its working directory.
+   */
+  executionContext?: MissionExecutionContext;
 }
 
 function composeIntegrateWorkflowDependencies(ports: IntegrateWorkflowPorts) {
@@ -292,6 +298,17 @@ class IntegrateWorkflow {
     context.missionHeadSha = headResolution.status === 0 ? String(headResolution.stdout || '').trim() : null;
   }
 
+  /** Explicit checkouts replace every working-directory read of the context builder. */
+  private executionCheckouts(slug: string, execution: MissionExecutionContext | undefined) {
+    if (!execution) { return {}; }
+    if (execution.missionId !== slug) {
+      throw abortWith(this.dependencies.landing, `Execution context for ${execution.missionId} cannot integrate mission ${slug}.`);
+    }
+    const { missionWorktree, baseWorktree, baseBranch } = execution;
+    return { missionWorktree, baseWorktree, baseBranch,
+      getCurrentBranchFn: () => this.dependencies.ports.git.git(['-C', missionWorktree, 'branch', '--show-current']).stdout.trim() };
+  }
+
   async runIntegration(slug: string, request: IntegrateRequest, options: IntegrateOptions, seams: IntegrateSeams, state: IntegrateRunState): Promise<0 | 1> {
     const { dryRun } = request;
     const { missionServicesFn } = options;
@@ -302,7 +319,7 @@ class IntegrateWorkflow {
     const missionServices = await missionServicesFn(this.dependencies.ports.process.cwd());
     const resumed = await this.tryResumeIntegration(slug, request, missionServices, seams, state);
     if (resumed !== null) { return resumed; }
-    const context: IntegrationContext = await this.dependencies.buildIntegrationContext(slug, { missionStore: missionServices.store });
+    const context: IntegrationContext = await this.dependencies.buildIntegrationContext(slug, { missionStore: missionServices.store, ...this.executionCheckouts(slug, options.executionContext) });
     const missionLoad = await this.loadMissionAuthority(slug, context, missionServices);
     this.requireReadableApprovedRevision(context, missionLoad);
 

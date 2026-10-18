@@ -345,3 +345,36 @@ for (const hostFailure of [false, true]) {
     assert.match(events[0], hostFailure ? /host unavailable/ : /Unknown workflow operation/);
   });
 }
+
+for (const [label, patch, expected] of [
+  ['board integration runs in the resolved mission worktree', { command: 'integrate:merge' }, '/missions/task-test'],
+  ['terminal integration keeps the checkout it was typed in', { command: 'integrate:merge', invocation: { command: 'integrate', args: ['task-test'] } }, '/host'],
+  ['other workflow commands keep the admitting checkout', { command: 'active:execute' }, '/host'],
+] as const) {
+  test(`${label} (TASK-2777)`, async () => {
+    const f = fixture();
+    Object.assign(await f.service.operation(), patch);
+    const roots: string[] = [];
+    const resolved: string[] = [];
+    await runWorkflowWorker('operation', '/host', resolveConfiguration({}), false, undefined, { ...f.dependencies,
+      context: (slug, root) => { resolved.push(`${slug}@${root}`); return { ok: true, context: { missionId: slug, missionWorktree: `/missions/${slug}`, missionBranch: `mission/${slug}`, baseWorktree: '/host', baseBranch: 'main' } }; },
+      host: async (_cli, _operation, root) => { roots.push(root); return { exitCode: 0, signal: null }; } });
+    assert.deepEqual(roots, [expected]);
+    assert.deepEqual(resolved, expected === '/host' ? [] : ['task-test@/host']);
+  });
+}
+
+test('unresolved board integration context blocks with its reason before any executor (TASK-2777)', async () => {
+  const f = fixture();
+  Object.assign(await f.service.operation(), { command: 'integrate:merge' });
+  const written: string[] = [];
+  const code = await runWorkflowWorker('operation', '/host', resolveConfiguration({}), false, undefined, { ...f.dependencies,
+    capture: (() => ({ correlateOperation: () => {}, write: (_stream: string, chunk: Buffer) => { written.push(String(chunk)); }, finish: () => { f.events.push('capture-ended'); } })) as never,
+    context: () => ({ ok: false, reason: 'Mission task-test: no worktree is checked out on mission/task-test (expected /missions/task-test).' }),
+    host: async () => { throw new Error('No executor for an unresolved context'); } });
+  assert.equal(code, 1);
+  assert.equal((await f.service.operation()).phase, 'blocked');
+  assert.match((await f.service.operation()).reason!, /^Mission task-test: no worktree is checked out on mission\/task-test/);
+  assert.match(written.join(''), /Mission task-test: no worktree/);
+  assert.deepEqual(f.events, ['blocked', 'capture-ended', 'closed']);
+});

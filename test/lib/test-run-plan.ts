@@ -332,6 +332,10 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     // (reproduced on Node 24 and 26). Hang protection (a leaked test handle)
     // is provided by the runner's process-group watchdog instead.
     nodeArgs: [
+      // Import-heavy isolated units otherwise repeatedly collect V8's small
+      // default young generation. Bound each semi-space at 16 MiB; the outer
+      // runner still enforces the process tree's aggregate memory limit.
+      ...(!runsIntegrationSuite ? ['--max-semi-space-size=16'] : []),
       // tsx must be registered before the bootstrap preload so the TypeScript
       // bootstrap module resolves (--import entries load in argv order).
       ...typeScriptLoaderArgs,

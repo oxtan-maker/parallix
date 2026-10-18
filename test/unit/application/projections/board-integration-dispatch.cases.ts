@@ -1,3 +1,4 @@
+import { setLogger } from '../../../../src/application/presentation/cli-format.js';
 import { fixtureMission } from '../../../fixtures/mission-builders.js';
 import { integrationServices } from '../../../helpers/stub-integration-services.js';
 import type { MissionStatus } from '../../../../src/domain/mission.js';
@@ -87,23 +88,32 @@ test('task-2429: stale integrate:merge is rejected before the integration workfl
   assert.deepEqual(effects, ['load']);
 });
 
-test('task-2429: integration authorization exit returns a board failure, not completed', async () => {
-  const prior = environment.WORKFLOW_AGENT;
-  environment.WORKFLOW_AGENT = 'gemini';
-  try {
-    const controller = new BoardCommandController(makeExecutePorts().ports, undefined, {
-      integrate: createBoardIntegrateService(integrationServices(), NO_CURRENT_WORK_PORT, resolveConfiguration(environment)),
-    }, undefined, {
-      async load() { return { kind: 'found', mission: fixtureMission('task-2429', { status: 'integration' }), version: fixtureVersion(1) }; },
-    });
+test('task-2429: integration authorization exit returns a board failure, not completed', async t => {
+  const lines: string[] = [];
+  const previousLogger = setLogger({ log: message => { lines.push(String(message)); }, error: message => { lines.push(String(message)); } });
+  t.after(() => { setLogger(previousLogger); });
+  const configuration = resolveConfiguration({ ...environment, WORKFLOW_AGENT: 'gemini' });
+  const root = '/isolated/board-host';
+  const resolved: string[] = [];
+  const controller = new BoardCommandController(makeExecutePorts().ports, undefined, {
+    integrate: createBoardIntegrateService(integrationServices(), NO_CURRENT_WORK_PORT, configuration, root,
+      (slug, hostRoot, receivedConfiguration) => {
+        resolved.push(slug);
+        assert.equal(hostRoot, root);
+        assert.equal(receivedConfiguration, configuration);
+        return { ok: true, context: { missionId: slug, missionBranch: `mission/${slug}`,
+          missionWorktree: '/isolated/mission', baseWorktree: root, baseBranch: 'main' } };
+      }),
+  }, undefined, {
+    async load() { return { kind: 'found', mission: fixtureMission('task-2429', { status: 'integration' }), version: fixtureVersion(1) }; },
+  });
 
-    const result = await controller.dispatch(request());
+  const result = await controller.dispatch(request());
 
-    assert.equal(result.status, 'failed');
-    assert.equal(result.error?.kind, 'execution');
-    assert.notEqual(result.status, 'completed');
-  } finally {
-    if (prior === undefined) { delete environment.WORKFLOW_AGENT; }
-    else { environment.WORKFLOW_AGENT = prior; }
-  }
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.kind, 'execution');
+  assert.notEqual(result.status, 'completed');
+  assert.deepEqual(resolved, ['task-2429'], 'use the supplied resolver instead of real Git (TASK-2777 F1)');
+  assert.equal(result.error?.message, 'integrate:merge for task-2429 failed: integration workflow exited with code 1');
+  assert.match(lines.join('\n'), /Gemini is not authorized to run integrate/, 'reach the authorization guard (TASK-2777 F1)');
 });

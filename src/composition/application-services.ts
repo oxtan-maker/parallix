@@ -23,6 +23,7 @@ import { UIPreferencesService } from '../application/services/ui-preferences-ser
 import { OperationalHistoryService } from '../application/services/operational-history-service.js';
 import { CurrentWorkRecorder, NO_CURRENT_WORK_PORT, type CurrentWorkPort } from '../application/recording/current-work-recorder.js';
 import { processStartIdentity } from '../adapters/process/process-liveness.js';
+import { resolveMissionExecutionContext } from '../adapters/git/mission-execution-context.js';
 import { createMissionStore } from './mission-persistence.js';
 export { createMissionStore } from './mission-persistence.js';
 import { SqliteSessionMarkerAdapter } from '../adapters/sqlite/session-marker-adapter.js';
@@ -155,16 +156,16 @@ export interface ProductionApplicationServices {
   readonly currentWork: CurrentWorkPort;
 }
 
-/** Board integration keeps the CLI workflow but turns every non-zero exit into a typed failure. */
-export function createBoardIntegrateService(mission: import('../application/ports/integration-records.js').IntegrationMissionServices, currentWork: CurrentWorkPort, configuration?: ParallixConfiguration): IntegrateCommandUseCase {
+/** Board integration resolves checkouts from the mission identity, not this process's directory; every non-zero exit is a typed failure. */
+export function createBoardIntegrateService(mission: import('../application/ports/integration-records.js').IntegrationMissionServices, currentWork: CurrentWorkPort, configuration?: ParallixConfiguration, rootDir = process.cwd(), resolveContext: typeof resolveMissionExecutionContext = resolveMissionExecutionContext): IntegrateCommandUseCase {
   return new IntegrateCommandUseCase({
     async execute(args) {
+      const execution = resolveContext(args[0], rootDir, configuration ?? resolveProcessConfiguration());
+      if (!execution.ok) { throw new Error(execution.reason); }
       await integrate(args, {
-        configuration,
+        configuration, executionContext: execution.context,
         missionServicesFn: async () => mission,
-        exitFn: (code) => {
-          if (code !== 0) { throw new Error(`integration workflow exited with code ${code}`); }
-        },
+        exitFn: (code) => { if (code !== 0) { throw new Error(`integration workflow exited with code ${code}`); } },
       });
     },
   }, currentWork);
@@ -288,7 +289,7 @@ export async function createProductionApplicationServices(
       activeProgress,
       operatorState.db,
       { configuration: options.configuration },
-      mission ? createBoardIntegrateService(mission, currentWork) : undefined,
+      mission ? createBoardIntegrateService(mission, currentWork, options.configuration, rootDir) : undefined,
     )
     : null;
   return {

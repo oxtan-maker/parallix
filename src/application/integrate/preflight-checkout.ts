@@ -148,7 +148,7 @@ export function checkIntegrationCheckout(report: PreflightReport, context: Integ
   checkRebaseAndIndex(report, context, target);
   checkDirtyEntries(report, context, target);
 
-  const cwd = process.cwd();
+  const cwd = context.executionCheckout ?? process.cwd();
   const gitDir = path.join(cwd, '.git');
   const isMainRepo = ports.fileSystem.existsSync(gitDir) && !ports.fileSystem.isSymbolicLink(gitDir);
   // Running `px integrate` from the mission's own worktree is the documented

@@ -84,6 +84,13 @@ Web cards show the available commands alongside Cancel. When no command can
 run, one unavailable control explains why. Commands that can run together remain
 individually accessible.
 
+Integrate started from the web or terminal board runs in the mission's own
+worktree and lands on its recorded base, wherever `px web` or `px ui` was
+started; the host never changes directory and needs no restart per mission. If
+the mission worktree is missing, is on another branch, or the base cannot be
+resolved, the command stops before any merge or push and its outcome names the
+mission and the missing fact.
+
 Web cards show the entire checkpoint plan in order, including checkpoints with
 no evidence yet. Completed checkpoints are green; future checkpoints are dim.
 On an active mission, the first checkpoint without recorded evidence is green,
