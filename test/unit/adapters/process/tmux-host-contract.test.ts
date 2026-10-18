@@ -27,7 +27,7 @@ import { createTmuxMissionTerminalHost } from '../../../../src/adapters/process/
 import { missionTerminalIdentity } from '../../../../src/adapters/process/mission-terminal-identity.js';
 import { observeTmuxLaunchExecution, readTmuxLaunchExecution } from '../../../../src/adapters/process/tmux-launch-execution.js';
 
-// Doubles only: real tmux runs in test/integration/process/tmux-terminal-host.test.ts.
+// Doubles cover terminal policy and launch construction without a real tmux server.
 
 test('tmux launch identity comes from immutable startup evidence (TASK-2764)', () => {
   const root = mkdtemp('px-tmux-identity-');

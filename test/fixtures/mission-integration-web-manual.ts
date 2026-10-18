@@ -84,7 +84,7 @@ if (process.argv[2]?.startsWith('--workflow-')) {
     child.stdout?.on('data', chunk => process.stdout.write(chunk)); child.stderr?.on('data', chunk => process.stderr.write(chunk));
     const info = await new Promise<{ origin: string; cwd: string }>((resolve, reject) => { child!.once('message', message => resolve(message as never)); child!.once('exit', code => reject(new Error(`Host exited ${code}`))); });
     assert.equal(info.cwd, root); assert.equal(git(root, 'branch', '--show-current'), 'main');
-    browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true });
+    browser = await chromium.launch({ args: ['--disable-extensions'], executablePath: '/usr/bin/chromium', headless: true });
     const page = await browser.newPage(); await page.goto(info.origin);
     const admitted = await page.evaluate(async missionId => {
       const csrf = document.querySelector<HTMLMetaElement>('meta[name="px-csrf"]')!.content;

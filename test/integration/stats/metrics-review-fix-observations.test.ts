@@ -1,6 +1,8 @@
 // Regression provenance: TASK-2357.c.
 // Historical regression provenance: TASK-2357, task-201, task-202, task-203, task-204.
-import { describe, it } from 'node:test';
+import { before, describe, it } from 'node:test';
+import { prepareMigratedSchema } from '../../fixtures/migrated-database.js';
+before(prepareMigratedSchema);
 import assert from 'node:assert/strict';
 import { SqliteReviewClassificationStore } from '../../../src/adapters/sqlite/review-classification-store.js';
 import { weeklyDecisionWindows } from '../../../src/application/services/decision-window.js';

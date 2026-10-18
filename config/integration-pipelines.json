@@ -47,6 +47,12 @@
       "order": 50,
       "run_last": true
     },
+    "browser-e2e": {
+      "command": "npm run test:browser-e2e",
+      "order": 52,
+      "run_last": true,
+      "always": true
+    },
     "custom-agent-smoke": {
       "command": "node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/agents/real-agent-smoke.test.ts",
       "order": 51,

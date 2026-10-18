@@ -21,6 +21,16 @@ test('real CLI refuses a held owner and stopped generation cannot write after re
     }), (error: Error & { stdout?: string; stderr?: string }) => /workflow.*owns|owns.*mission/i.test(`${error.stdout} ${error.stderr}`));
   const old = (await fixture.service.operation('first'))!;
   assert.equal((await fixture.service.stop(slug)).status, 'completed');
+  // Lightweight writers must inherit the fence in a fresh CLI process too
+  // (TASK-2762); checking the parent store alone misses composition regressions.
+  const beforeCheckpoint = await fixture.store.load(slug as never);
+  await assert.rejects(() => promisify(execFile)(process.execPath,
+    pxNodeArgs(resolvePxEntryLoader(), ['checkpoint', 'record', '--slug', slug, '--name', 'CP-1',
+      '--next', 'stale agent', '--criterion', 'criterion', '--evidence', 'npm test']), {
+      cwd: fixture.root, env: { ...fixture.configuration.forwardedEnvironment,
+        PARALLIX_WORKFLOW_OPERATION: old.id, PARALLIX_WORKFLOW_GENERATION: String(old.generation) }, timeout: 10_000,
+    }), (error: Error & { stdout?: string; stderr?: string }) => /fenced|stopped/i.test(`${error.stdout} ${error.stderr}`));
+  assert.deepEqual(await fixture.store.load(slug as never), beforeCheckpoint);
   const loaded = await fixture.store.load(slug as never); assert.equal(loaded.kind, 'found');
   if (loaded.kind !== 'found') { throw new Error('Mission missing'); }
   // Settle the old in-process execution before launching a replacement with its own barrier.

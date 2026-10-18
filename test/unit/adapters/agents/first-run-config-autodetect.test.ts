@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 
 import {
   ensureFirstRunAgentConfig,
@@ -282,6 +284,31 @@ test('supplied runner configuration controls partial, empty and preserved detect
       assert.equal(fs.existsSync(result.configPath), false);
     } finally {
       clearSeams();
+    }
+  });
+});
+
+
+test('operator-local blocklist skips legacy Git discovery and retains malformed-file rejection (TASK-2762)', t => {
+  withTempDir(root => {
+    const configPath = path.join(root, 'agents.json');
+    const targetPath = path.join(root, 'agents.local.json');
+    fs.writeFileSync(configPath, JSON.stringify({ steps: { review: { eligible: ['codex'] } } }));
+    fs.writeFileSync(targetPath, JSON.stringify({ blocklist: { codex: true } }));
+    const spawn = t.mock.method(childProcess, 'spawnSync', () => { throw new Error('unexpected legacy Git discovery'); });
+    syncBuiltinESMExports();
+    try {
+      const options = { configuration: resolveConfiguration(process.env), mergeLocal: true, targetPath };
+      const config = readAgentConfig(configPath, options);
+      assert.equal(config.blocklist?.codex, true);
+      assert.deepEqual(config.steps?.review?.eligible, ['codex']);
+      assert.equal(spawn.mock.callCount(), 0, 'an existing authoritative file needs no legacy worktree probe');
+      fs.writeFileSync(targetPath, '{broken');
+      assert.throws(() => readAgentConfig(configPath, options), /Invalid local agent config/);
+      assert.equal(spawn.mock.callCount(), 0);
+    } finally {
+      spawn.mock.restore();
+      syncBuiltinESMExports();
     }
   });
 });

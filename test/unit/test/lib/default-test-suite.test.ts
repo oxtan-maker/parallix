@@ -28,6 +28,7 @@ test('unit workers load ESM TypeScript while boundary fixtures retain the full l
     assert.ok(unit.nodeArgs.includes('--max-semi-space-size=16'));
     assert.ok(!boundary.nodeArgs.some(arg => arg.startsWith('--max-semi-space-size=')));
     for (const candidate of [unit, boundary]) {
+      assert.ok(candidate.nodeArgs.includes('--v8-pool-size=1'), 'bounded compiler pool per concurrent worker (TASK-2762)');
       assert.ok(candidate.nodeArgs.some(arg => arg.endsWith('/bootstrap-parallix-home.ts')));
       assert.ok(candidate.nodeArgs.includes('--experimental-test-module-mocks'));
     }
@@ -426,6 +427,21 @@ function syntheticCheckout(): { root: string; dispose: () => void } {
 }
 
 const relativeTo = (root: string) => (files: string[]) => files.map(file => path.relative(path.join(root, 'test'), file).split(path.sep).join('/'));
+
+test('CPU cutoff shifts expensive suites without requiring expensive repository members (TASK-2762)', () => {
+  const checkout = syntheticCheckout();
+  try {
+    const expensive = SYNTHETIC_REGISTRY.ci[0];
+    fs.writeFileSync(path.join(checkout.root, 'test/lib/test-cpu-budgets.json'), JSON.stringify({
+      integrationCases: { defaultMs: 1000, plain: { [expensive]: 3501 }, covered: {} },
+    }));
+    const tiers = selectTierFiles(checkout.root, SYNTHETIC_REGISTRY);
+    const rel = relativeTo(checkout.root);
+    assert.ok(rel(tiers.integrationCi).includes(expensive));
+    assert.ok(!rel(tiers.integrationCiEarly).includes(expensive));
+    assert.ok(rel(tiers.integrationCiEarly).includes(SYNTHETIC_REGISTRY.ci[1]));
+  } finally { checkout.dispose(); }
+});
 
 test('nested suites below each level root are discovered exactly once and support files never run (TASK-2638)', () => {
   const checkout = syntheticCheckout();

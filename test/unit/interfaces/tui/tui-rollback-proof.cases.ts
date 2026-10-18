@@ -18,7 +18,7 @@ const indexPath = path.join(root, 'src', 'composition', 'cli-read-commands.ts');
 const indexSource = fs.readFileSync(indexPath, 'utf8');
 
 test('rollback-proof: ui command uses dynamic import (not static require)', () => {
-  assert.match(fs.readFileSync(path.join(root, 'src/composition/create-cli.ts'), 'utf8'), /\.\.\.createReadCommands\(context\)/);
+  assert.match(fs.readFileSync(path.join(root, 'src/composition/cli-command-registry.ts'), 'utf8'), /\.\.\.createReadCommands\(context\)/);
   // The 'ui' command must use import() or a lazy wrapper so that removing
   // src/interfaces/tui/ does not break the headless entry module graph.
   const hasDynamicImport = /await\s+import\s*\(\s*['"]\.\.\/interfaces\/tui\/ui-command\.js['"]\s*\)/.test(indexSource);
@@ -32,7 +32,7 @@ test('rollback-proof: COMMANDS map structure is valid without ui entry', () => {
   // Extract the COMMANDS map and verify it can function without 'ui'.
   // The map is an object with command keys and function values.
   const commandsMatch = indexSource.match(/return\s+\{[\s\S]*?\n  \};/);
-  assert.ok(commandsMatch, 'composed command registry must be present in create-cli.ts');
+  assert.ok(commandsMatch, 'read-command composition must return the command registry');
 
   const commandsBlock = commandsMatch[0];
 

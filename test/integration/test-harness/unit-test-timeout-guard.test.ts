@@ -9,19 +9,69 @@
  * recursive test runner calls and skips). Instead, we verify the guard
  * through the runner configuration and a plain Node.js timeout check.
  */
-import test from 'node:test';
+import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { build } from 'esbuild';
+import { spawn, type SpawnOptions } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { mkdtemp } from '../../helpers/temp-dir.js';
 import { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS, onGitHubActions } from '../../lib/unit-test-budget-reporter.mjs';
 import { buildTestRunPlan } from '../../lib/test-run-plan.js';
 import { childCpuUsageModule } from '../../lib/child-cpu-usage.js';
 import { cpuSupervisor, readCpuReport } from '../../lib/cpu-supervisor.js';
 
+interface ProbeResult {
+  readonly status: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly error?: Error;
+}
+
+function runProcess(command: string, args: string[], options: SpawnOptions & { encoding?: string } = {}): Promise<ProbeResult> {
+  return new Promise(resolve => {
+    const env = options.env ?? process.env;
+    // Concurrent tiny probes need no host-sized V8 worker pools. Inherit this
+    // bound through wrappers, supervisors and test workers as well; the real
+    // hooks, CPU charges and process isolation remain unchanged (TASK-2762).
+    const child = spawn(command, args, {
+      timeout: 20_000, ...options,
+      // Nested fixtures measure enforcement, not source coverage. The outer
+      // worker remains instrumented and charges every waited descendant.
+      env: { ...env, PARALLIX_TEST_COVERAGE: '', NODE_OPTIONS: `${env.NODE_OPTIONS ?? ''} --v8-pool-size=1`.trim() },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '', stderr = '';
+    child.stdout!.on('data', data => { stdout += data; });
+    child.stderr!.on('data', data => { stderr += data; });
+    child.on('error', error => resolve({ status: null, signal: null, stdout, stderr, error }));
+    child.on('close', (status, signal) => resolve({ status, signal, stdout, stderr }));
+  });
+}
+
+// Each probe owns its processes, temporary state and CPU charge. Running the
+// work in a parent and reporting empty subtests aggregates unrelated contracts
+// into one budget and hides their actual cost (TASK-2762).
+function probe(name: string, run: () => void | Promise<void>) {
+  test(name, run);
+}
+
 const ROOT = process.cwd();
 const RUNNER_PATH = path.join(ROOT, 'test', 'run-default-tests.ts');
+let runnerDirectory: string;
+let runnerBundle: string;
+let bootstrapBundle: string;
+before(async () => {
+  runnerDirectory = mkdtemp('cpu-runner-bundle-');
+  runnerBundle = path.join(runnerDirectory, 'runner.mjs');
+  await build({ entryPoints: [RUNNER_PATH], outfile: runnerBundle, bundle: true,
+    minify: true, platform: 'node', format: 'esm', packages: 'external' });
+  bootstrapBundle = path.join(runnerDirectory, 'bootstrap.mjs');
+  await build({ entryPoints: [path.join(ROOT, 'test/bootstrap-parallix-home.ts')], outfile: bootstrapBundle,
+    bundle: true, minify: true, platform: 'node', format: 'esm', packages: 'external' });
+});
+after(() => { if (runnerDirectory) fs.rmSync(runnerDirectory, { recursive: true, force: true }); });
 
 function withLocalGitHubActions<T>(callback: () => T): T {
   const previous = process.env.GITHUB_ACTIONS;
@@ -34,7 +84,7 @@ function withLocalGitHubActions<T>(callback: () => T): T {
   }
 }
 
-test('unit-test timeout guard: runner enforces the reporter budget for the default suite', () => {
+probe('unit-test timeout guard: runner enforces the reporter budget for the default suite', async () => {
   const planContent = fs.readFileSync(path.join(ROOT, 'test', 'lib', 'test-run-plan.ts'), 'utf8');
 
   // Must define a numeric timeout constant
@@ -60,7 +110,7 @@ test('unit-test timeout guard: runner enforces the reporter budget for the defau
   );
 });
 
-test('unit-test timeout guard: default plan keeps the reporter while headroom mode is opt-in', () => {
+probe('unit-test timeout guard: default plan keeps the reporter while headroom mode is opt-in', async () => {
   const { defaultPlan, headroomPlan } = withLocalGitHubActions(() => {
     const options = { executionRoot: ROOT, probeNodeVersion: () => 'v24.15.0' } satisfies Partial<NonNullable<Parameters<typeof buildTestRunPlan>[0]>>;
     return {
@@ -76,7 +126,7 @@ test('unit-test timeout guard: default plan keeps the reporter while headroom mo
   assert.ok(headroomPlan.nodeArgs.some(arg => arg.includes('cpu-test-hook.mjs')));
 });
 
-test('unit-test timeout guard: suite-level budget is configurable and documented', () => {
+probe('unit-test timeout guard: suite-level budget is configurable and documented', async () => {
   const runnerContent = fs.readFileSync(RUNNER_PATH, 'utf8');
   const planContent = fs.readFileSync(path.join(ROOT, 'test', 'lib', 'test-run-plan.ts'), 'utf8');
 
@@ -91,15 +141,40 @@ test('unit-test timeout guard: suite-level budget is configurable and documented
   );
 });
 
-function runCpuFixture(source: string, extraEnv: Record<string, string> = {}) {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cpu-guard-probe-'));
-  const file = path.join(directory, 'probe.test.ts');
+// Runner cost proofs need the real runner, hooks and supervisor, but no
+// unrelated repository catalog. A minimal checkout keeps catalog linting out
+// of the timed child while preserving the normal memory and CPU boundaries.
+function runnerProofRoot(directory: string): string {
+  const root = path.join(directory, 'checkout');
+  const lib = path.join(root, 'test', 'lib');
+  fs.mkdirSync(lib, { recursive: true });
+  fs.writeFileSync(path.join(root, 'package.json'), '{"type":"module"}');
+  fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(root, 'node_modules'));
+  for (const file of fs.readdirSync(path.join(ROOT, 'test', 'lib'), { withFileTypes: true })) {
+    if (file.isFile() && file.name !== 'test-categories.ts') {
+      fs.symlinkSync(path.join(ROOT, 'test', 'lib', file.name), path.join(lib, file.name));
+    }
+  }
+  fs.symlinkSync(bootstrapBundle, path.join(root, 'test', 'bootstrap-parallix-home.ts'));
+  fs.mkdirSync(path.join(root, 'tmp'));
+  fs.symlinkSync(path.join(ROOT, 'tmp', 'cpu-supervisor'), path.join(root, 'tmp', 'cpu-supervisor'));
+  return root;
+}
+
+async function runCpuFixture(source: string, extraEnv: Record<string, string> = {}) {
+  const directory = mkdtemp('cpu-guard-probe-');
+  const throughRunner = Boolean(extraEnv.PARALLIX_SUITE_HANG_TIMEOUT_MS || source.includes("test('wait'"));
+  const file = path.join(directory, throughRunner ? 'probe.test.js' : 'probe.test.mjs');
   fs.writeFileSync(file, `import test from 'node:test';\n${source}\n`);
-  const env: NodeJS.ProcessEnv = { ...process.env, NODE_NO_WARNINGS: '1', ...extraEnv };
+  const env: NodeJS.ProcessEnv = { ...process.env, NODE_NO_WARNINGS: '1', ...extraEnv,
+    ...(throughRunner ? { PARALLIX_EXECUTION_ROOT: runnerProofRoot(directory) } : {}),
+  };
   delete env.NODE_TEST_CONTEXT;
   delete env.NODE_V8_COVERAGE;
   try {
-    return spawnSync(process.execPath, ['--import', 'tsx', RUNNER_PATH, file], {
+    return await runProcess(process.execPath, throughRunner
+      ? [runnerBundle, file]
+      : ['--import', path.join(ROOT, 'test/lib/cpu-test-hook.mjs'), '--test', file], {
       encoding: 'utf8', timeout: 20_000, env,
     });
   } finally {
@@ -111,49 +186,49 @@ function burnCpuSource(targetUs: number): string {
   return `const cpuStart=process.cpuUsage();for(;;){const used=process.cpuUsage(cpuStart);if(used.user+used.system>=${targetUs})break;}`;
 }
 
-test('worker CPU guard lets a completed low-CPU wait exceed the old wall cap', () => {
-  const result = runCpuFixture("test('wait', async () => { await new Promise(resolve => setTimeout(resolve, 1200)); });");
+probe('worker CPU guard lets a completed low-CPU wait exceed the old wall cap', async () => {
+  const result = await runCpuFixture("test('wait', async () => { await new Promise(resolve => setTimeout(resolve, 1200)); });");
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stderr, /\[unit-test-cpu\].*elapsed=/);
 });
 
-test('worker CPU guard rejects a burner even when its assertion passes', () => {
-  const result = runCpuFixture(`test('burn', () => { ${burnCpuSource(150_000)} });`, {
+probe('worker CPU guard rejects a burner even when its assertion passes', async () => {
+  const result = await runCpuFixture(`test('burn', async () => { ${burnCpuSource(150_000)} });`, {
     PARALLIX_UNIT_TEST_CPU_BUDGET_US: '100000',
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stdout, /\[unit-test-cpu:exceeded\] burn/);
 });
 
-test('nested tests receive exclusive CPU charges', () => {
+probe('nested tests receive exclusive CPU charges', async () => {
   const burn = burnCpuSource(35_000);
-  const source = `test('outer', async t => { ${burn} await t.test('inner', () => { ${burn} }); });`;
-  const result = runCpuFixture(source, { PARALLIX_UNIT_TEST_CPU_BUDGET_US: '70000' });
+  const source = `test('outer', async t => { ${burn} await t.test('inner', async () => { ${burn} }); });`;
+  const result = await runCpuFixture(source, { PARALLIX_UNIT_TEST_CPU_BUDGET_US: '70000' });
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
 
-test('overlapping sibling tests fail closed instead of sharing a CPU sample', () => {
+probe('overlapping sibling tests fail closed instead of sharing a CPU sample', async () => {
   const source = "test('parent', { concurrency: 2 }, async t => { await Promise.all([t.test('a', async () => { await new Promise(r => setTimeout(r, 100)); }), t.test('b', async () => { await new Promise(r => setTimeout(r, 100)); })]); });";
-  const result = runCpuFixture(source);
+  const result = await runCpuFixture(source);
   assert.notEqual(result.status, 0);
   assert.match(result.stdout, /overlapping unit tests cannot share one process CPU counter/);
 });
 
-test('suite watchdog still terminates a low-CPU hang', () => {
-  const result = runCpuFixture("test('hang', async () => { await new Promise(() => {}); });", {
+probe('suite watchdog still terminates a low-CPU hang', async () => {
+  const result = await runCpuFixture("test('hang', async () => { await new Promise(() => {}); });", {
     PARALLIX_SUITE_HANG_TIMEOUT_MS: '1200',
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /\[suite-watchdog\]/);
 });
 
-test('suite CPU meter includes a waited grandchild once', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cpu-tree-probe-'));
+probe('suite CPU meter includes a waited grandchild once', async () => {
+  const directory = mkdtemp('cpu-tree-probe-');
   const report = path.join(directory, 'cpu.json');
   const burner = `${burnCpuSource(250_000)}const used=process.cpuUsage(cpuStart);process.stdout.write(String(used.user+used.system));`;
   const script = `const {spawnSync}=require("node:child_process");const child=spawnSync(process.execPath,["-e",${JSON.stringify(burner)}],{encoding:"utf8"});if(child.status!==0)process.exit(child.status||1);process.stdout.write(child.stdout);`;
   try {
-    const result = spawnSync(cpuSupervisor(ROOT), ['--cpu-report', report, process.execPath, '-e', script], { encoding: 'utf8' });
+    const result = await runProcess(cpuSupervisor(ROOT), ['--cpu-report', report, process.execPath, '-e', script], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     const cpu = readCpuReport(report);
     const burnedMs = Number(result.stdout) / 1_000;
@@ -166,11 +241,11 @@ test('suite CPU meter includes a waited grandchild once', () => {
   }
 });
 
-test('unit-test timeout guard: --test-timeout terminates a test exceeding the bound', () => {
+probe('unit-test timeout guard: --test-timeout terminates a test exceeding the bound', async () => {
   // Use a plain Node.js script (not node --test) to avoid the recursive
   // test runner detection. We verify --test-timeout by checking that a
   // script sleeping past the bound produces the expected timeout output.
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'timeout-guard-proof-'));
+  const tmpDir = mkdtemp('timeout-guard-proof-');
   const timeoutMs = 200;
 
   // Write a test file that deliberately exceeds the timeout
@@ -179,7 +254,7 @@ test('unit-test timeout guard: --test-timeout terminates a test exceeding the bo
     testFile,
     `'use strict';\n` +
     `const test = require('node:test');\n` +
-    `test('slow', async () => { await new Promise(r => setTimeout(r, 5000)); });\n`,
+    `test('slow', async t => { await new Promise(r => { const timer = setTimeout(r, 5000); t.signal.addEventListener('abort', () => clearTimeout(timer), { once: true }); }); });\n`,
   );
 
   // Write a wrapper script that runs node --test and captures output
@@ -208,7 +283,7 @@ test('unit-test timeout guard: --test-timeout terminates a test exceeding the bo
     const childEnv: NodeJS.ProcessEnv = { ...process.env, NODE_NO_WARNINGS: '1' };
     delete childEnv.NODE_TEST_CONTEXT;
     delete childEnv.NODE_V8_COVERAGE;
-    const result = spawnSync(
+    const result = await runProcess(
       process.execPath,
       [wrapperFile],
       { encoding: 'utf8', timeout: 15_000, env: childEnv },
@@ -232,8 +307,8 @@ test('unit-test timeout guard: --test-timeout terminates a test exceeding the bo
   }
 });
 
-test('unit-test timeout guard: fast test passes within the bound', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'timeout-guard-fast-'));
+probe('unit-test timeout guard: fast test passes within the bound', async () => {
+  const tmpDir = mkdtemp('timeout-guard-fast-');
   const timeoutMs = 5000;
 
   const testFile = path.join(tmpDir, 'fast-test.test.js');
@@ -242,7 +317,7 @@ test('unit-test timeout guard: fast test passes within the bound', () => {
     `'use strict';\n` +
     `const test = require('node:test');\n` +
     `const assert = require('node:assert/strict');\n` +
-    `test('fast', () => { assert.ok(true); });\n`,
+    `test('fast', async () => { assert.ok(true); });\n`,
   );
 
   const wrapperFile = path.join(tmpDir, 'wrapper.js');
@@ -263,7 +338,7 @@ test('unit-test timeout guard: fast test passes within the bound', () => {
     const childEnv: NodeJS.ProcessEnv = { ...process.env, NODE_NO_WARNINGS: '1' };
     delete childEnv.NODE_TEST_CONTEXT;
     delete childEnv.NODE_V8_COVERAGE;
-    const result = spawnSync(
+    const result = await runProcess(
       process.execPath,
       [wrapperFile],
       { encoding: 'utf8', timeout: 15_000, env: childEnv },
@@ -280,19 +355,20 @@ test('unit-test timeout guard: fast test passes within the bound', () => {
   }
 });
 
-test('unit-test CPU guard: suite budget enforcement fails when exceeded', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'budget-guard-proof-'));
+probe('unit-test CPU guard: suite budget enforcement fails when exceeded', async () => {
+  const tmpDir = mkdtemp('budget-guard-proof-');
   // This is a suite-budget proof, not a throughput benchmark.  A narrow
   // ceiling makes the runner's normal startup cost sufficient evidence and
   // avoids burning 1.55 CPU seconds just to cross an arbitrary large limit.
   const budgetMs = 20;
 
-  // Write a test file that deliberately uses more CPU than the budget.
-  const testFile = path.join(tmpDir, 'slow-suite.test.ts');
+  // A passing fixture lets the suite meter reject startup cost independently
+  // of worker assertion failures.
+  const testFile = path.join(tmpDir, 'slow-suite.test.js');
   fs.writeFileSync(
     testFile,
     `import test from 'node:test';\n` +
-    `test('CPU burner', () => { ${burnCpuSource(50_000)} });\n`,
+    `test('passing assertion', async () => { if (1 + 1 !== 2) throw new Error('unexpected arithmetic'); });\n`,
   );
 
   // Spawn the runner with the tight budget and this single test file.
@@ -301,47 +377,51 @@ test('unit-test CPU guard: suite budget enforcement fails when exceeded', () => 
     ...process.env,
     NODE_NO_WARNINGS: '1',
     PARALLIX_UNIT_TEST_CPU_BUDGET_MS: String(budgetMs),
+    PARALLIX_EXECUTION_ROOT: runnerProofRoot(tmpDir),
   };
   delete runnerEnv.NODE_TEST_CONTEXT;
   delete runnerEnv.NODE_V8_COVERAGE;
 
-  const result = spawnSync(
-    process.execPath,
-    ['--import', 'tsx', RUNNER_PATH, testFile],
-    { encoding: 'utf8', timeout: 60_000, env: runnerEnv },
-  );
-
-  // Output should mention the budget exceeded message
-  const combinedOutput = (result.stdout || '') + (result.stderr || '');
-
-  // GitHub-hosted runs retain the existing policy of suspending local cost
-  // budgets. The separate timeout probes above cover wall liveness.
-  if (onGitHubActions()) {
-    assert.equal(result.status, 0);
-    assert.ok(
-      !combinedOutput.includes('SUITE CPU BUDGET EXCEEDED')
-        && !combinedOutput.includes('unit-test-cpu'),
-      `GitHub disables the suite budget; no budget message expected in: ${combinedOutput.slice(-500)}`,
-    );
-  } else {
-    // The suite reports CPU cost independently of elapsed time.
-    assert.notEqual(
-      result.status,
-      0,
-      `Expected non-zero exit when suite exceeds CPU budget ${budgetMs}ms (got status=${result.status})`,
+  try {
+    const result = await runProcess(
+      process.execPath,
+      [runnerBundle, testFile],
+      { encoding: 'utf8', timeout: 60_000, env: runnerEnv },
     );
 
+    assert.match(result.stdout, /(?:ℹ|#) fail 0/, 'the fixture passes before the aggregate CPU meter rejects its startup');
     // Output should mention the budget exceeded message
-    assert.ok(
-      combinedOutput.includes('SUITE CPU BUDGET EXCEEDED'),
-      `Expected budget output in: ${combinedOutput.slice(-500)}`,
-    );
-  }
+    const combinedOutput = (result.stdout || '') + (result.stderr || '');
+
+    // GitHub-hosted runs retain the existing policy of suspending local cost
+    // budgets. The separate timeout probes above cover wall liveness.
+    if (onGitHubActions()) {
+      assert.equal(result.status, 0);
+      assert.ok(
+        !combinedOutput.includes('SUITE CPU BUDGET EXCEEDED')
+          && !combinedOutput.includes('unit-test-cpu'),
+        `GitHub disables the suite budget; no budget message expected in: ${combinedOutput.slice(-500)}`,
+      );
+    } else {
+      // The suite reports CPU cost independently of elapsed time.
+      assert.notEqual(
+        result.status,
+        0,
+        `Expected non-zero exit when suite exceeds CPU budget ${budgetMs}ms (got status=${result.status})`,
+      );
+
+      // Output should mention the budget exceeded message
+      assert.ok(
+        combinedOutput.includes('SUITE CPU BUDGET EXCEEDED'),
+        `Expected budget output in: ${combinedOutput.slice(-500)}`,
+      );
+    }
+  } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); }
 });
 
 // Integration CPU limits include waited command trees, unlike process.cpuUsage().
-function runIntegrationCpuFixture(source: string, extraEnv: Record<string, string> = {}) {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'integration-cpu-proof-'));
+async function runIntegrationCpuFixture(source: string, extraEnv: Record<string, string> = {}) {
+  const directory = mkdtemp('integration-cpu-proof-');
   // These probes contain only JavaScript. Loading tsx adds background loader
   // CPU during the timed wait and can make an idle probe exceed its budget
   // (TASK-2677); exercise the real CPU hook without that unrelated work.
@@ -356,7 +436,7 @@ function runIntegrationCpuFixture(source: string, extraEnv: Record<string, strin
   delete env.NODE_V8_COVERAGE;
   delete env.PARALLIX_TEST_CPU_PROFILE_DIR;
   try {
-    return spawnSync(process.execPath, [
+    return await runProcess(process.execPath, [
       '--import', path.join(ROOT, 'test/lib/integration-cpu-hook.mjs'), '--test', file,
     ], { encoding: 'utf8', timeout: 20_000, env });
   } finally {
@@ -364,10 +444,10 @@ function runIntegrationCpuFixture(source: string, extraEnv: Record<string, strin
   }
 }
 
-test('integration hook CPU guard rejects CPU burned by a waited grandchild (TASK-2622.20)', () => {
+probe('integration hook CPU guard rejects CPU burned by a waited grandchild (TASK-2622.20)', async () => {
   const burner = burnCpuSource(200_000);
   const child = `require('node:child_process').spawnSync(process.execPath, ['-e', ${JSON.stringify(burner)}]);`;
-  const result = runIntegrationCpuFixture(`test('hook command tree', () => {
+  const result = await runIntegrationCpuFixture(`test('hook command tree', () => {
     const result = spawnSync(process.execPath, ['-e', ${JSON.stringify(child)}]);
     if (result.status !== 0) throw new Error('child failed');
   });`, { PARALLIX_INTEGRATION_TEST_CPU_BUDGET_MS: '100' });
@@ -375,44 +455,58 @@ test('integration hook CPU guard rejects CPU burned by a waited grandchild (TASK
   assert.match(result.stdout, /\[integration-test-cpu:exceeded\] hook command tree/);
 });
 
-test('integration hook CPU guard accepts low-CPU waits beyond the CPU limit (TASK-2622.20)', () => {
-  const result = runIntegrationCpuFixture("test('slow wait', async () => { await new Promise(r => setTimeout(r, 350)); });", {
+probe('integration hook CPU guard accepts low-CPU waits beyond the CPU limit (TASK-2622.20)', async () => {
+  const result = await runIntegrationCpuFixture("test('slow wait', async () => { await new Promise(r => setTimeout(r, 350)); });", {
     PARALLIX_INTEGRATION_TEST_CPU_BUDGET_MS: '100',
   });
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
 
-test('integration hook CPU guard counts teardown and nested cases without double charging (TASK-2622.20)', () => {
-  const teardown = runIntegrationCpuFixture(`test('teardown burner', t => { t.after(() => { ${burnCpuSource(150_000)} }); });`, {
+probe('integration hook CPU guard counts teardown CPU (TASK-2622.20)', async () => {
+  const teardown = await runIntegrationCpuFixture(`test('teardown burner', t => { t.after(() => { ${burnCpuSource(150_000)} }); });`, {
     PARALLIX_INTEGRATION_TEST_CPU_BUDGET_MS: '100',
   });
   assert.notEqual(teardown.status, 0);
   assert.match(teardown.stdout, /\[integration-test-cpu:exceeded\] teardown burner/);
+});
+
+probe('integration hook CPU guard charges nested cases without double counting (TASK-2622.20)', async () => {
   const burn = burnCpuSource(40_000);
-  const nested = runIntegrationCpuFixture(`test('outer', async t => { ${burn} await t.test('inner', () => { ${burn} }); });`, {
+  const nested = await runIntegrationCpuFixture(`test('outer', async t => { ${burn} await t.test('inner', async () => { ${burn} }); });`, {
     PARALLIX_INTEGRATION_TEST_CPU_BUDGET_MS: '75',
   });
   assert.equal(nested.status, 0, `${nested.stdout}\n${nested.stderr}`);
 });
 
-test('integration suite CPU budget rejects a passing hook suite (TASK-2622.20)', () => {
-  const env: NodeJS.ProcessEnv = { ...process.env, PARALLIX_INTEGRATION_SUITE_CPU_BUDGET_MS: '1', NODE_NO_WARNINGS: '1' };
-  delete env.NODE_TEST_CONTEXT;
-  delete env.NODE_V8_COVERAGE;
-  delete env.PARALLIX_TEST_CPU_PROFILE_DIR;
-  const result = spawnSync(process.execPath, ['--import', 'tsx', RUNNER_PATH, 'test/integration/verification/repository-gates.integration.test.ts'], {
-    encoding: 'utf8', timeout: 20_000, env,
-  });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stdout, /(?:ℹ|#) fail 0/);
-  assert.match(result.stderr, /\[integration-test-cpu\] SUITE CPU BUDGET EXCEEDED:/);
+probe('integration suite CPU budget rejects a passing hook suite (TASK-2622.20)', async () => {
+  // Exercise the real runner, supervisor and hook with a private passing
+  // fixture. Unrelated sandbox assertions remain in their owning suite.
+  const directory = mkdtemp('integration-suite-meter-');
+  try {
+    const root = runnerProofRoot(directory);
+    const relative = 'test/integration/test-harness/unit-test-timeout-guard.test.ts';
+    const file = path.join(root, relative);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, "import test from 'node:test'; test('passing hook fixture', () => {});\n");
+    const env: NodeJS.ProcessEnv = { ...process.env, PARALLIX_EXECUTION_ROOT: root,
+      PARALLIX_INTEGRATION_SUITE_CPU_BUDGET_MS: '1', NODE_NO_WARNINGS: '1' };
+    delete env.NODE_TEST_CONTEXT;
+    delete env.NODE_V8_COVERAGE;
+    delete env.PARALLIX_TEST_CPU_PROFILE_DIR;
+    const result = await runProcess(process.execPath, [runnerBundle, relative], {
+      encoding: 'utf8', timeout: 20_000, env,
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stdout, /(?:ℹ|#) fail 0/);
+    assert.match(result.stderr, /\[integration-test-cpu\] SUITE CPU BUDGET EXCEEDED:/);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('CPU accounting fails closed for missing modules and missing or malformed reports (TASK-2622.20)', () => {
-  const result = runIntegrationCpuFixture("test('passes', () => {});", { PARALLIX_CHILD_CPU_USAGE_MODULE: '' });
+probe('CPU accounting fails closed for missing modules and missing or malformed reports (TASK-2622.20)', async () => {
+  const result = await runIntegrationCpuFixture("test('passes', async () => {});", { PARALLIX_CHILD_CPU_USAGE_MODULE: '' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr + result.stdout, /integration CPU accounting module is missing/);
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cpu-report-proof-'));
+  const directory = mkdtemp('cpu-report-proof-');
   const report = path.join(directory, 'report.json');
   try {
     assert.throws(() => readCpuReport(report), /ENOENT/);

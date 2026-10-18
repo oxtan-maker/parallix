@@ -197,3 +197,12 @@ test('workflow footer rejects malformed telemetry and preserves human-only inter
   assert.equal(facts.recovery, undefined);
   assert.match(facts.next!, /human-only blocker/);
 });
+
+test('invalid integrate flags fail before workflow admission opens state (TASK-2762)', async () => {
+  let opened = false;
+  const registry: Record<string, Command> = { draft: async () => {}, integrate: async () => {}, review: async () => {} };
+  ownWorkflowCli(registry, async () => { opened = true; throw new Error('must not open state'); });
+  await assert.rejects(async () => registry.integrate(['task-does-not-exist', '--invalid-option']),
+    /Unknown integrate option: --invalid-option/);
+  assert.equal(opened, false);
+});

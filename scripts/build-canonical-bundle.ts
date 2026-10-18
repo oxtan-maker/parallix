@@ -6,6 +6,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import * as esbuild from 'esbuild';
 import { generateReleaseMetadata } from './release-metadata.ts';
 import { isBuildLockAbandoned } from './build-lock.ts';
@@ -14,6 +15,9 @@ import { writeWebManifest } from './web-manifest.mjs';
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, '..');
 const publishedBuildDir = path.join(root, 'build');
+const buildRequire = createRequire(import.meta.url);
+const tokenizerAssetKey = 'decision/tokenizer-data.gz';
+let tokenizerAsset: Buffer | undefined;
 
 // Build into private staging directory and swap into place at the end.
 // `npm pack` collects files *after* prepack returns, so a concurrent build that
@@ -58,8 +62,8 @@ function acquireBuildLock(): void {
       if (Date.now() > deadline) {
         throw new Error(`Timed out after ${LOCK_WAIT_MS / 1000}s waiting for the canonical-bundle build lock at ${lockDir}`);
       }
-      // esbuild.buildSync makes this script synchronous end to end, so sleep
-      // without yielding to an event loop that has nothing to run.
+      // Acquire the lock before starting asynchronous build work, so there is
+      // no pending build callback to service while another builder owns it.
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
     }
   }
@@ -139,7 +143,7 @@ const webBuild = spawnSync(
 if (webBuild.error) { throw webBuild.error; }
 if (webBuild.status !== 0) { process.exit(webBuild.status ?? 1); }
 
-const bundleResult = esbuild.buildSync({
+const bundleResult = await esbuild.build({
   absWorkingDir: root,
   // Not bundler configuration: the metafile is a build report. It is the
   // authoritative list of third-party modules inlined into build/px.mjs and
@@ -175,6 +179,23 @@ const bundleResult = esbuild.buildSync({
   loader: {
     '.tsx': 'tsx',
   },
+  plugins: [{
+    name: 'tokenizer-data-asset',
+    setup(builder) {
+      builder.onLoad({ filter: /[\\/]jevtok-ts[\\/]dist[\\/]data\.cjs$/ }, args => {
+        // jevtok already stores a gzipped table as base64. Preserve its bytes
+        // while avoiding a multi-megabyte JS literal and its source-map copy.
+        const { DATA } = buildRequire(args.path) as { DATA: string };
+        tokenizerAsset = Buffer.from(DATA, 'base64');
+        return {
+          contents: `import { runtimeAssetStore } from ${JSON.stringify(path.join(root, 'src/adapters/assets/runtime-assets.ts'))};
+export const DATA = Buffer.from(runtimeAssetStore.readBytes(${JSON.stringify(tokenizerAssetKey)})).toString('base64');`,
+          loader: 'js',
+          resolveDir: root,
+        };
+      });
+    },
+  }],
   banner: {
     // SQLite is a startup requirement of the distributable CLI. Keep its
     // builtin import explicit even when all production references currently
@@ -237,6 +258,12 @@ assets.assets = RUNTIME_ASSET_KEYS.map((key): AssetEntry => {
   fs.writeFileSync(stagedPath, contents);
   return { key, sha256: crypto.createHash('sha256').update(contents).digest('hex') };
 });
+if (tokenizerAsset) {
+  const target = path.join(buildDir, tokenizerAssetKey);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, tokenizerAsset);
+  assets.assets.push({ key: tokenizerAssetKey, sha256: crypto.createHash('sha256').update(tokenizerAsset).digest('hex') });
+}
 fs.writeFileSync(path.join(buildDir, 'asset-manifest.json'), `${JSON.stringify(assets, null, 2)}\n`);
 
 // TASK-2431 (ADR 0054): the Vite-built browser shell lives in this staging

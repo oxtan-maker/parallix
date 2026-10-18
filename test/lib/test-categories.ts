@@ -44,6 +44,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // Review contracts exercising SQLite backfill and durable CLI recovery.
   'integration/review/review-status-backfill.integration.test.ts',
   'integration/review/review-intervention-resume.integration.test.ts',
+  'integration/review/review-repair-recovery.test.ts',
   'integration/cli/active.test.ts',
   'integration/agents/agents-limit-hit.test.ts',
   'integration/agents/agents.test.ts',
@@ -85,7 +86,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/agents/mistral.test.ts',
   'integration/integrate/nels.test.ts',
   'integration/agents/opencode-export.test.ts',
-  'integration/packaging/package-persistent-data.test.ts',
   'integration/config/product-config-cp.test.ts',
   'integration/config/product-config-validation.test.ts',
   'integration/config/product-config.test.ts',
@@ -182,7 +182,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/integrate/integration-provider-approval-recovery.test.ts',
   'integration/presentation/board-shell-subscription-lifetime.test.ts',
   'integration/presentation/presentation-web.integration.test.ts',
-  'integration/presentation/web-package-smoke.integration.test.ts',
+  'integration/presentation/web-bundle-shell.integration.test.ts',
+  'integration/presentation/web-bundle-board.integration.test.ts',
   'integration/presentation/board-worktree-mission-scope.test.ts',
   'integration/presentation/board-task-update-authority.test.ts',
   'integration/sandbox/agent-sandbox-state-bindings.test.ts',
@@ -208,6 +209,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/process/workflow-cli-exclusion.test.ts',
   'integration/process/workflow-owner-host-restart.test.ts',
   'integration/process/workflow-stop-attribution.test.ts',
+  'integration/process/workflow-interrupt-retry.test.ts',
   'integration/process/workflow-observation-isolation.test.ts',
   // TASK-2777: disposable git repositories and worktrees only; git is on every runner.
   'integration/process/workflow-execution-context.test.ts',
@@ -242,6 +244,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // is CI-safe. It is a full CLI composition (real git + SQLite), so it runs in
   // the integration layer rather than the CPU-budgeted unit tier.
   'integration/integrate/integration-repair-review-loop.test.ts',
+  'integration/integrate/lead-review-forwarding.test.ts',
+  'integration/integrate/integration-approval-restoration.test.ts',
   // TASK-2525.03: reads repository configuration and creates a temporary Git
   // repository to prove local branch discovery. A clean GitHub runner provides
   // every dependency, so it is CI-safe.
@@ -339,8 +343,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/rebase/rebase-before-review-contract.test.ts',
   'integration/rebase/pre-review-launcher-configuration.test.ts',
   'integration/forgejo/forgejo-sync-merged-force-push-contract.test.ts',
-  'integration/packaging/post-integrate-global-install-contract.test.ts',
   'integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts',
+  'integration/test-harness/standard-analysis-tools.test.ts',
   // TASK-2625: exercises the sha-keyed integration-validation skip. The
   // real-SQLite round-trip test opens a migrated SQLite operator database in a
   // temporary directory and writes an operational_history row; git and SQLite
@@ -355,16 +359,12 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
  * they need workstation tooling. These remain required by local verification.
  */
 export const INTEGRATION_LOCAL_TESTS: readonly string[] = [
-  'integration/presentation/web-board-pointer.test.ts',
   'integration/sandbox/bubblewrap-worktree-git.test.ts',
   'integration/sandbox/bubblewrap-symlink-mount.test.ts',
   'integration/agents/graphify-mission-document-exclusion.test.ts',
-  'integration/packaging/native-sea-executable-smoke.test.ts',
-  'integration/sandbox/codex-sandbox-mission-state-write.test.ts',
   'integration/sandbox/claude-credential-refresh-isolation.test.ts',
   'integration/sandbox/claude-sandbox-credential-persistence.test.ts',
   'integration/test-harness/unit-test-timeout-guard.test.ts',
-  'integration/process/tmux-terminal-host.test.ts',
   'integration/test-harness/runner-memory-containment.test.ts',
 ];
 
@@ -372,20 +372,12 @@ export const INTEGRATION_LOCAL_TESTS: readonly string[] = [
 export const INTEGRATION_LOCAL_REASONS: Readonly<Record<string, string>> = {
   'integration/test-harness/runner-memory-containment.test.ts':
     'Creates real memory-limited cgroup scopes through `systemd-run --user`, which needs cgroup v2 with the memory controller delegated to the user systemd manager; a clean GitHub-hosted runner has no such user manager.',
-  'integration/presentation/web-board-pointer.test.ts':
-    'Real coordinate pointer coverage requires a provisioned Chromium executable (PARALLIX_CHROMIUM or /usr/bin/chromium), absent from the clean runner contract.',
-  'integration/process/tmux-terminal-host.test.ts':
-    'Spawns the real `tmux` binary (and `bwrap` for the socket-mask case) to certify the optional terminal host; neither is part of the GitHub-hosted runner image.',
   'integration/sandbox/bubblewrap-worktree-git.test.ts':
     'Spawns the real `bwrap` binary to certify sandbox profiles; bubblewrap is not part of the GitHub-hosted runner image.',
   'integration/sandbox/bubblewrap-symlink-mount.test.ts':
     'Spawns the real `bwrap` binary to certify symlinked destination mounts; bubblewrap is not part of the GitHub-hosted runner image.',
   'integration/agents/graphify-mission-document-exclusion.test.ts':
     'Spawns the uv-installed `graphify` CLI; neither uv nor graphify exists on a clean GitHub-hosted runner.',
-  'integration/packaging/native-sea-executable-smoke.test.ts':
-    'Builds and runs the native single-executable artifact, which needs a Node >= MINIMUM_SEA_NODE_MAJOR SEA toolchain and per-OS packaging; the portable npm package and bundle checks cover packaging in the CI lane instead.',
-  'integration/sandbox/codex-sandbox-mission-state-write.test.ts':
-    'Spawns the real `bwrap` binary to run `px` inside the codex sandbox profile; bubblewrap is not part of the GitHub-hosted runner image.',
   'integration/sandbox/claude-credential-refresh-isolation.test.ts':
     'Spawns the real `bwrap` binary to run every Claude lifecycle sandbox profile against a stand-in CLI; bubblewrap is not part of the GitHub-hosted runner image.',
   'integration/sandbox/claude-sandbox-credential-persistence.test.ts':
@@ -395,10 +387,12 @@ export const INTEGRATION_LOCAL_REASONS: Readonly<Record<string, string>> = {
 };
 
 /**
- * Real-agent / lifecycle suites. They run in neither `npm test` nor
+ * Dedicated local E2E suites (browser, lifecycle and real agents). They run in neither the default `npm test` nor
  * `npm run test:integration`; each has its own command and its own local gate.
  */
 export const AGENT_E2E_TESTS: readonly string[] = [
+  // Local Chromium E2E: dedicated browser gate, no model backend required.
+  'e2e/presentation/web-board-pointer.test.ts',
   'e2e/lifecycle/mission-lifecycle.test.ts',
   // Live Jev backend and a disposable Docker Forgejo instance are required.
   'e2e/lifecycle/repeat-review-classification.test.ts',

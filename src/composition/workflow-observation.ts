@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { flushCompileCache } from 'node:module';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import type { BoardProjection } from '../application/projections/board.js';
 import type { MissionHistoryPageRequest, MissionHistorySearchQuery } from '../application/ports/mission-terminal.js';
@@ -20,6 +21,9 @@ function observer(root: string, configuration: ParallixConfiguration, cli: CliIn
   const pending = new Map<number, { owner: ReturnType<typeof spawn>; finish(_error?: Error, _value?: unknown): void }>();
   const start = () => {
     if (child) { return child; }
+    // The host stays alive while the observer starts. Publish its compiled
+    // modules now so the child can reuse them before the host eventually exits.
+    flushCompileCache();
     const launched = workflowObservationSystem.spawn(cli.command, [...cli.args, '--workflow-observe', root], {
       cwd: root, env: { ...configuration.forwardedEnvironment }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], serialization: 'advanced',
     });

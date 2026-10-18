@@ -1,7 +1,9 @@
 import { isWorkflowCommand } from '../domain/workflow-operation.js';
 import { workflowFailureSummary, type WorkflowFailureFacts } from '../application/presentation/workflow-failure.js';
 import { stripTerminalControl } from '../application/run-history.js';
+import { parseIntegrateCliRequest } from '../interfaces/cli/integrate.js';
 import { randomUUID } from 'node:crypto';
+import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import type { Command } from '../interfaces/cli/runtime.js';
 import type { ProductionApplicationServices } from './application-services.js';
 import { hasMissionWriteAuthorization } from '../application/ports/mission-write-authorization.js';
@@ -13,6 +15,7 @@ export function ownWorkflowCli(registry: Record<string, Command>, open: () => Pr
   for (const command of ['draft', 'review', 'integrate'] as const) {
     const original = registry[command];
     registry[command] = async (args: string[], options: Record<string, unknown> = {}) => {
+      if (command === 'integrate') { parseIntegrateCliRequest(args, options.configuration as ParallixConfiguration | undefined); }
       if (bypassOwnership(command, args)) {
         return original(args, options);
       }

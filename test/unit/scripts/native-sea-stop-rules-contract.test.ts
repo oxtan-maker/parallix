@@ -2,8 +2,7 @@
 //
 // These cover SC1's runtime gate and SC7's stop-and-reassess behavior without
 // building or running an executable, so they belong in the fast default suite.
-// The native proof that consumes this contract lives in
-// test/integration/packaging/native-sea-executable-smoke.test.ts.
+// Native executable runtime smoke coverage was removed by operator decision.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';

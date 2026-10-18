@@ -21,12 +21,12 @@ export function checkoutTestTmpdir(executionRoot: string, base: string = os.tmpd
   // scratch below it. Start at the original base rather than nesting again.
   const resolvedBase = path.resolve(base);
   const parts = resolvedBase.split(path.sep);
-  const managed = /^parallix-test-tmp-[a-f0-9]{12}$/;
+  const managed = /^(?:parallix-test-tmp-|px-tmp-)[a-f0-9]{12}$/;
   const managedRoot = parts.findIndex((part, index) => managed.test(part)
     && parts.slice(index + 1).every(child => managed.test(child) || /^coverage-scratch-[a-zA-Z0-9]+$/.test(child)));
   const root = managedRoot < 0 ? resolvedBase
     : parts.slice(0, managedRoot).join(path.sep) || path.parse(resolvedBase).root;
-  const dir = path.join(root, `parallix-test-tmp-${id}`);
+  const dir = path.join(root, `px-tmp-${id}`);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   return dir;
 }

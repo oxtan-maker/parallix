@@ -81,7 +81,7 @@ export function writeActiveVerificationProof(command: string, root: string, opti
     return { ok: false as const, error: 'Active verification inputs changed while the command ran' };
   }
   try {
-    ensureRebaseCompletionRecorder(root);
+    ensureRebaseCompletionRecorder(root, { writeJson });
     const proof: ActiveProof = { policy: 'active-review-v1', scope: current.scope,
       inputFingerprint: current.inputFingerprint, toolchain: current.toolchain,
       coveredCommit: current.commit, verifiedCommit: current.commit,

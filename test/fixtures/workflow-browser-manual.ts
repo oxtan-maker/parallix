@@ -7,7 +7,7 @@ import { workflowBoard, until } from './workflow-board.js';
 import { WEB_CSRF_META_NAME } from '../../src/interfaces/web/host.js';
 
 const fixture = await workflowBoard(10);
-const browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true });
+const browser = await chromium.launch({ args: ['--disable-extensions'], executablePath: '/usr/bin/chromium', headless: true });
 try {
   let host = await fixture.start(true);
   const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });

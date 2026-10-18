@@ -129,7 +129,11 @@ lifecycle, or agent/model connectivity.
 
 A green local integration and lifecycle run additionally proves the declared
 workstation-dependent boundaries and a complete mission lifecycle with a stubbed
-agent. Only the real-agent lane proves that Parallix can launch a configured agent
+agent. Browser end-to-end verification runs in a separate local gate alongside lifecycle
+and agent checks, with provisioned Chromium. It is excluded from the regular
+integration lanes and GitHub verification.
+
+Only the real-agent lane proves that Parallix can launch a configured agent
 against a reachable model and consume its output.
 
 Therefore a green hosted check is necessary but not sufficient for merge. The

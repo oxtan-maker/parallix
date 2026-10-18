@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import {
   ALLOWED_LICENSES,
   bundledPackages,
@@ -85,6 +86,21 @@ describe("release metadata for the canonical ESM bundle", () => {
     assert.deepEqual(packageJson.files, ['NOTICES', 'build/', '!build/sea', 'LICENSE', 'README.md']);
   });
 
+  test('built web manifest retains shell, hashed assets and exact file sizes (TASK-2762)', () => {
+    const webDir = path.join(ROOT, 'build', 'web');
+    const manifest = JSON.parse(fs.readFileSync(path.join(webDir, 'manifest.json'), 'utf8')) as {
+      version: number;
+      files: Record<string, { size: number; sha256: string; contentType: string }>;
+    };
+    assert.equal(manifest.version, 1);
+    assert.ok(manifest.files['index.html'], 'manifest must allowlist the shell');
+    assert.ok(Object.keys(manifest.files).some(key => key.startsWith('assets/')), 'manifest must allowlist the bundled assets');
+    for (const [relativeFile, entry] of Object.entries(manifest.files)) {
+      const file = fs.readFileSync(path.join(webDir, relativeFile));
+      assert.equal(file.length, entry.size, `${relativeFile} size must match the manifest`);
+    }
+  });
+
   test('task-2285 bin path is the bundler entry point reused as SEA input', () => {
     const bundler = fs.readFileSync(path.join(ROOT, 'scripts', 'build-canonical-bundle.ts'), 'utf8');
     assert.match(bundler, /const output = path\.join\(buildDir, 'px\.mjs'\)/);
@@ -97,7 +113,7 @@ describe("release metadata for the canonical ESM bundle", () => {
     const marker = JSON.parse(fs.readFileSync(path.join(ROOT, 'build', 'package.json'), 'utf8'));
     assert.equal(marker.name, packageJson.name, 'packageRoot() anchors asset resolution on this name');
     assert.equal(marker.type, 'module');
-    const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'build', 'asset-manifest.json'), 'utf8'));
+    const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'build', 'asset-manifest.json'), 'utf8')) as { assets: { key: string; sha256: string }[] };
     for (const asset of manifest.assets) {
       const staged = path.join(ROOT, 'build', asset.key);
       assert.ok(fs.existsSync(staged), `${asset.key} must be staged under build/`);
@@ -107,6 +123,20 @@ describe("release metadata for the canonical ESM bundle", () => {
         `${asset.key} staged copy must match the manifest digest`,
       );
     }
+  });
+
+  test('tokenizer runtime asset preserves the pinned data without embedding it in JavaScript (TASK-2762)', () => {
+    const require = createRequire(import.meta.url);
+    const source = fs.readFileSync(path.join(path.dirname(require.resolve('jevtok-ts')), '..', 'data.cjs'), 'utf8');
+    const serialized = /^exports\.DATA = ("[^"]+");/m.exec(source)?.[1];
+    assert.ok(serialized, 'the pinned dependency supplies its encoded tokenizer table');
+    const encoded = JSON.parse(serialized) as string;
+    const key = 'decision/tokenizer-data.gz';
+    const binary = fs.readFileSync(path.join(ROOT, 'build', key));
+    assert.deepEqual(binary, Buffer.from(encoded, 'base64'));
+    const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'build', 'asset-manifest.json'), 'utf8')) as { assets: { key: string; sha256: string }[] };
+    assert.equal(manifest.assets.find(asset => asset.key === key)?.sha256, crypto.createHash('sha256').update(binary).digest('hex'));
+    assert.equal(fs.readFileSync(path.join(ROOT, 'build', 'px.mjs'), 'utf8').includes(encoded), false);
   });
 
   test('task-2285 build/ stages every canonical SQLite migration byte-for-byte', () => {
@@ -294,6 +324,9 @@ describe("SEA payload never reaches the npm tarball", () => {
     'build/migrations/x',
     'build/prompts/x',
     'build/templates/x',
+    'build/web/index.html',
+    'build/web/manifest.json',
+    'build/web/assets/index.js',
     'package.json',
     'README.md',
     'LICENSE',

@@ -105,8 +105,8 @@ test('headless-isolation: headless entry module graph contains no react or ink',
   assert.deepEqual(violations, [], `Headless entry module graph must not import UI packages. Violations: ${violations.join('\n')}`);
 });
 
-test('headless-isolation: ui command is composed lazily in create-cli.ts', () => {
-  assert.match(fs.readFileSync(path.join(root, 'src/composition/create-cli.ts'), 'utf8'), /\.\.\.createReadCommands\(context\)/);
+test('headless-isolation: ui command is composed lazily in the command registry', () => {
+  assert.match(fs.readFileSync(path.join(root, 'src/composition/cli-command-registry.ts'), 'utf8'), /\.\.\.createReadCommands\(context\)/);
   const indexSource = fs.readFileSync(
     path.join(root, 'src', 'composition', 'cli-read-commands.ts'),
     'utf8',
@@ -115,7 +115,7 @@ test('headless-isolation: ui command is composed lazily in create-cli.ts', () =>
   // The ui command is imported from the TUI module
   assert.ok(
     /runUiCommand/.test(indexSource),
-    'create-cli.ts must load runUiCommand from the TUI module',
+    'read-command composition must load runUiCommand from the TUI module',
   );
 });
 
@@ -151,7 +151,7 @@ test('headless-isolation: static import graph of the headless entry never reache
 });
 
 test('headless-isolation: ui command is in the composed command registry', () => {
-  assert.match(fs.readFileSync(path.join(root, 'src/composition/create-cli.ts'), 'utf8'), /\.\.\.createReadCommands\(context\)/);
+  assert.match(fs.readFileSync(path.join(root, 'src/composition/cli-command-registry.ts'), 'utf8'), /\.\.\.createReadCommands\(context\)/);
   const indexSource = fs.readFileSync(
     path.join(root, 'src', 'composition', 'cli-read-commands.ts'),
     'utf8',
@@ -159,7 +159,7 @@ test('headless-isolation: ui command is in the composed command registry', () =>
 
   // The COMMANDS map includes 'ui'
   const commandsBlockMatch = indexSource.match(/return\s+\{[\s\S]*?\n  \};/);
-  assert.ok(commandsBlockMatch, 'composed command registry should be present in create-cli.ts');
+  assert.ok(commandsBlockMatch, 'read-command composition should return the command registry');
   assert.ok(
     commandsBlockMatch[0].includes('ui'),
     'ui must be in the COMMANDS map',

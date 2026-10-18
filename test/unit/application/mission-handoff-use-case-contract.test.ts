@@ -702,7 +702,7 @@ describe('Handoff composition', () => {
   const root = path.join(import.meta.dirname, '..', '..', '..');
 
   test('task-2332.09: every composed review loop injects mission services into automatic handoff', () => {
-    const cli = fs.readFileSync(path.join(root, 'src/composition/create-cli.ts'), 'utf8');
+    const cli = fs.readFileSync(path.join(root, 'src/composition/cli-command-registry.ts'), 'utf8');
     assert.match(cli, /\.\.\.createLifecycleCommands\(context\)/, 'CLI must register the Mission-backed lifecycle commands');
     const compositionFiles = [
       'src/composition/application-services.ts',

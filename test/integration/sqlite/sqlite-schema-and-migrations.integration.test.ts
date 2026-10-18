@@ -624,10 +624,16 @@ describe("SQLite schema and migration runner", () => {
     const homeB = createTempDir('home-b');
     try {
       const adapterA = await initOperatorState({ homeDir: homeA });
+      // Cache identity needs two real databases, not two full schema builds.
+      // Back up the freshly migrated first database into the second home;
+      // initialization still opens and validates that independent database.
+      const snapshot = await adapterA.db.backup();
+      fs.copyFileSync(snapshot, resolveDatabasePath({ home: homeB }));
       const adapterB = await initOperatorState({ homeDir: homeB });
       assert.notStrictEqual(adapterA, adapterB, 'Different home dirs must yield different adapters');
       assert.notStrictEqual(adapterA.db.getPath(), adapterB.db.getPath(), 'Different home dirs must have different database paths');
     } finally {
+      await clearOperatorStateCache();
       cleanupTempDir(homeA);
       cleanupTempDir(homeB);
     }

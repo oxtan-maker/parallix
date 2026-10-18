@@ -2,7 +2,8 @@ import type { ReviewRound } from '../../../src/domain/review.js';
 import type { StatsRow } from "../../../src/application/services/statistics-row.js";
 
 import { resolveConfiguration } from '../../../src/composition/config.js';
-import test, { mock } from 'node:test';
+import test, { before, mock } from 'node:test';
+import { copyMigratedSchema, prepareMigratedSchema } from '../../fixtures/migrated-database.js';
 import assert from 'node:assert/strict';
 import fs from 'fs';
 import os from 'os';
@@ -27,6 +28,7 @@ const __mm2 = mockModule<typeof import('../../../src/application/presentation/cl
 const __mm3 = mockModule<typeof import('../../../src/domain/review.js')>('../../../src/domain/review.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
+before(prepareMigratedSchema);
 const { agentFamily } = __mm1;
 
 function createRepoFixture() {
@@ -369,6 +371,7 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
   fs.mkdirSync(repoTwo);
   fs.mkdirSync(home);
   const dbFile = path.join(home, 'parallix.db');
+  copyMigratedSchema(dbFile);
   stats.upsertMeasurementRow(
     { date: '2026-05-18', mission: 'task-shared', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '1' },
     { configuration: resolveConfiguration(process.env), dbPath: dbFile, rootDir: repoOne }

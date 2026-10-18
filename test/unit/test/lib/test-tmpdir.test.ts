@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { checkoutTestTmpdir } from '../../../lib/test-tmpdir.js';
-import { mkdtemp } from '../../../helpers/temp-dir.js';
+import { mkdtemp, mkdtempAt } from '../../../helpers/temp-dir.js';
 
 test('each checkout gets one stable private temporary directory outside the repository', () => {
   const base = mkdtemp('test-tmpdir-');
@@ -31,6 +31,21 @@ test('nested coverage roots reuse the checkout directory without repeating path 
       assert.equal(path.dirname(other), base);
       assert.notEqual(other, first);
     }
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('nested coverage scratch leaves room for the tsx build socket (TASK-2762)', () => {
+  const base = mkdtemp('test-tmpdir-socket-');
+  try {
+    const checkout = checkoutTestTmpdir('/work/repo-a', base);
+    const scratch = mkdtempAt(checkout, 'coverage-scratch-');
+    const nested = checkoutTestTmpdir('/work/repo-a', scratch);
+    // Model the runner's /tmp base independently of this case's private root.
+    // npm prepack launches tsx here, including its UID and build process PID.
+    const socket = path.join('/tmp', path.relative(base, nested), 'tsx-1000', '9999999.pipe');
+    assert.ok(Buffer.byteLength(socket) < 108, `tsx socket exceeds Linux sun_path: ${socket}`);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }

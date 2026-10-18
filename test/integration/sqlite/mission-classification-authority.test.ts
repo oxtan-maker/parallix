@@ -8,7 +8,8 @@ import { integrationContext } from '../../fixtures/integration-context.js';
 // startup preflight refused to launch the implementer. Classification is
 // Mission state after TASK-2521.03; the Backlog label must not gate it.
 import { resolveConfiguration } from '../../../src/composition/config.js';
-import test from 'node:test';
+import test, { before } from 'node:test';
+import { copyMigratedSchema, prepareMigratedSchema } from '../../fixtures/migrated-database.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -34,6 +35,7 @@ const slug = 'task-2599';
  * aggregate when `labels` is null) and a repository whose Backlog task carries
  * `taskLabels`.
  */
+before(prepareMigratedSchema);
 async function withStoredMission(labels: readonly string[] | null, taskLabels: string, run: (_root: string) => Promise<void> | void) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2601-home-'));
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2601-repo-'));
@@ -41,6 +43,7 @@ async function withStoredMission(labels: readonly string[] | null, taskLabels: s
   process.env.PARALLIX_HOME = home;
   try {
     const db = new SqliteDatabaseAdapter();
+    copyMigratedSchema(path.join(home, 'parallix.db'));
     await db.open({ path: path.join(home, 'parallix.db') });
     await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
     if (labels) {

@@ -3,7 +3,7 @@
 // Boundary: scripts/dependency-identity.mjs decides whether a worktree's
 // dependencies must be reconciled, and publishes the identity of a successful
 // install. The installer itself is a double here — the real `pnpm install`
-// boundary is exercised by test/integration/packaging/post-integrate-global-install-contract.test.ts.
+// boundary is intentionally replaced by in-process installer doubles (TASK-2762).
 // ADR 0063 owns the install command and pnpm-lock.yaml authority; this suite
 // pins that the wrapper does not change them.
 

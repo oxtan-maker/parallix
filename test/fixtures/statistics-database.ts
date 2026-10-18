@@ -1,13 +1,11 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { mkdtemp } from '../helpers/temp-dir.js';
 import { spawnSync } from 'node:child_process';
 
 import { SqliteDatabaseAdapter } from '../../src/adapters/sqlite/database-adapter.js';
-import {
-  SqliteMigrationRunner,
-  loadDefaultMigrations,
-} from '../../src/adapters/sqlite/migration-runner.js';
+import { copyMigratedSchema, prepareMigratedSchema } from './migrated-database.js';
 import { SqliteBoardLaneEventRepository } from '../../src/adapters/sqlite/board-lane-event-repository.js';
 import { SqliteUsageRepository } from '../../src/adapters/sqlite/usage-repository.js';
 import { SqliteOperationalHistoryRepository } from '../../src/adapters/sqlite/operational-history-repository.js';
@@ -36,12 +34,13 @@ export interface StatisticsFixture {
 export async function withStatisticsDatabase(
   run: (_fixture: StatisticsFixture) => Promise<void>,
 ): Promise<void> {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-task-2357-'));
+  const dir = mkdtemp('parallix-task-2357-');
   const databasePath = path.join(dir, 'parallix.db');
   const db = new SqliteDatabaseAdapter();
-  await db.open({ path: databasePath });
   try {
-    await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
+    await prepareMigratedSchema();
+    copyMigratedSchema(databasePath);
+    await db.open({ path: databasePath });
     await run({
       dir,
       databasePath,

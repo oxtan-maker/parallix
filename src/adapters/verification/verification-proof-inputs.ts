@@ -35,21 +35,31 @@ export function verificationToolchainIdentity(searchPath = ''): string {
 }
 
 export function readVerificationInputs(rootDir: string, gitRunner: GitFn, searchPath = ''):
-  { ok: true; root: string; trackedOutput: string; branch: string; toolchain: string } | { ok: false; error: string } {
+  { ok: true; root: string; trackedOutput: string; branch: string; commit: string | null; toolchain: string } | { ok: false; error: string } {
   let root: string;
   try { root = fs.realpathSync(rootDir); } catch { return { ok: false, error: 'verification proof root is unreadable' }; }
-  const dirty = gitRunner(['-C', root, 'status', '--porcelain']);
-  if (dirty.status !== 0 || (dirty.stdout || '').trim()) {
+  // Porcelain v2 reports cleanliness, branch and HEAD together. Repeated
+  // active/review checks need no separate branch and revision subprocesses.
+  const status = gitRunner(['-C', root, 'status', '--porcelain=v2', '--branch']);
+  const lines = (status.stdout || '').split('\n').filter(Boolean);
+  if (status.status !== 0 || lines.some(line => !line.startsWith('# '))) {
     return { ok: false, error: 'verification proof cannot reuse a dirty worktree' };
+  }
+  const branchLine = lines.find(line => line.startsWith('# branch.head '));
+  const oidLine = lines.find(line => line.startsWith('# branch.oid '));
+  if (!branchLine || !oidLine) { return { ok: false, error: 'verification branch identity is unreadable' }; }
+  const branch = branchLine.slice('# branch.head '.length);
+  const oid = oidLine.slice('# branch.oid '.length);
+  if (oid !== '(initial)' && !/^[a-f0-9]{40,64}$/.test(oid)) {
+    return { ok: false, error: 'verification HEAD identity is unreadable' };
   }
   const tracked = gitRunner(['-C', root, 'ls-files', '-s']);
   const trackedOutput = tracked.stdout || '';
   if (tracked.status !== 0 || !trackedOutput.trim()) {
     return { ok: false, error: 'verification proof input manifest is unreadable' };
   }
-  const branch = gitRunner(['-C', root, 'branch', '--show-current']);
-  if (branch.status !== 0) { return { ok: false, error: 'verification branch identity is unreadable' }; }
-  return { ok: true, root, trackedOutput, branch: branch.stdout.trim(), toolchain: verificationToolchainIdentity(searchPath) };
+  return { ok: true, root, trackedOutput, branch: branch === '(detached)' ? '' : branch,
+    commit: oid === '(initial)' ? null : oid, toolchain: verificationToolchainIdentity(searchPath) };
 }
 
 /** External task catalog paths excluded from active candidate inputs. */

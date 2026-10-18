@@ -82,6 +82,28 @@ export type ADR0053ConceptName =
  * any new durable file read or write must be registered here or the build fails.
  */
 export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
+  // The typed write port exposes generated metadata snapshots, never Mission
+  // authority. The concrete snapshot writers retain their own entries below.
+  {
+    id: 'repository-metadata-write-port',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/application/ports/repository-metadata.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  // Evidence resolution observes files in the Mission checkout; it does not
+  // persist checkpoints outside the authoritative SQLite store.
+  {
+    id: 'checkpoint-checkout-evidence-read',
+    concept: 'GitObservations',
+    pathType: 'default',
+    fileLocation: 'src/composition/mission-services.ts',
+    operation: 'read',
+    classification: 'external-fact-or-intake',
+    cutoverTask: null,
+  },
   {
     id: 'prompt-artifacts-read',
     concept: 'LargeArtifacts',
@@ -1550,7 +1572,7 @@ export const MACHINE_WRITTEN_PATH_INVENTORY: readonly MachineWrittenPathInventor
     pathPattern: '<git-worktree-state>/hook-overlay.json',
     writer: 'src/adapters/git/rebase-completion-recorder.ts#ensureRebaseCompletionRecorder',
     classification: 'secrets-configuration',
-    persistencePolicy: 'Worktree-local original Git hook path retained across recorder installation; existing 0o600 direct-write exception.',
+    persistencePolicy: 'Worktree-local original Git hook path retained across recorder installation through the composed RepositoryMetadataWriter with mode 0o600.',
   },
   {
     id: 'coverage-manifest',

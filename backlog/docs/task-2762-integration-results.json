@@ -1,0 +1,652 @@
+{
+  "task": "TASK-2762",
+  "archive": {
+    "revision": "f29808d58742fa8d31e00a17ea88dbdcef154a30",
+    "path": "backlog/docs/task-2762-integration-results.json",
+    "gitBlob": "618a1e19b0f6ea0800b47c36367027deb31a9a9b",
+    "sha256": "94be43b6ec9e726bf7e3a663bc341b78df2660473d9c86ff16728c717ec3b8a3",
+    "readCommand": "git show f29808d58742fa8d31e00a17ea88dbdcef154a30:backlog/docs/task-2762-integration-results.json",
+    "contents": "Complete original snapshots, per-suite CPU headroom and wall profiles, source hashes and failed-run history. Measurements below retain their original revisions; they are not proof of the current tree."
+  },
+  "status": "implementation complete; ready for independent-review handoff",
+  "operatorDecision": "Raise profiled small startup CPU budgets: covered source loader 100 to 1000 ms and CLI exit/output 2500 to 3400 ms. Keep the real source assertions and suite; no consolidation. The 3500 ms integration cutoff, aggregate budgets and operator gates are unchanged.",
+  "sourceBase": "10a1366ce206e765f0d0a4f432fba6fbdce0bb33",
+  "integrationCaseLimits": {
+    "plain": {
+      "defaultMs": 500,
+      "maximumDeclaredMs": 3400,
+      "atOrAbove3500": []
+    },
+    "covered": {
+      "defaultMs": 500,
+      "maximumDeclaredMs": 3400,
+      "atOrAbove3500": []
+    }
+  },
+  "gateExitCodes": "plain=0 covered=0",
+  "focusedUnit": {
+    "log": "/tmp/task-2762-complete-unit.log",
+    "counts": {
+      "tests": 62,
+      "pass": 62,
+      "fail": 0,
+      "skipped": 0
+    },
+    "headroomMs": 500
+  },
+  "manualBuiltCli": {
+    "log": "/tmp/task-2762-batched-manual-cli.log",
+    "passed": true,
+    "observations": [
+      "checkpoint plan/record/read persist",
+      "missing evidence and unapproved review/integration rejected",
+      "clean verification proof reused; dirty tracked input reruns",
+      "disposable Git and operator homes removed"
+    ]
+  },
+  "manualPlanner": {
+    "log": "/tmp/task-2762-batched-manual-planner.log",
+    "passed": true,
+    "observations": [
+      "ordered dry-run plan preserved",
+      "unsupported real-agent options rejected",
+      "missing configuration rejected",
+      "disposable configuration removed"
+    ]
+  },
+  "otherChecks": [
+    {
+      "command": "npm run typecheck",
+      "log": "/tmp/task-2762-complete-types.log",
+      "passed": true
+    },
+    {
+      "command": "npm run build",
+      "log": "/tmp/task-2762-final-batch-build.log",
+      "passed": true
+    },
+    {
+      "command": "git diff --check",
+      "passed": true
+    }
+  ],
+  "strict3500msSuiteWallAcceptance": true,
+  "followupReason": "After complete lanes passed, strengthen the isolated shell probes to require hygiene and test-compiler failures at their own stages. Both focused profiles pass; no production code or other suite changes followed the complete runs.",
+  "plain": {
+    "command": "npm test -- --integration",
+    "concurrency": 2,
+    "log": "/tmp/task-2762-completion-plainlog-wuaa4v0e/task-2762-complete-plain.log",
+    "profile": "/tmp/task-2762-completion-plainprofile-brvem9_j/task-2762-complete-plain.jsonl",
+    "counts": {
+      "tests": 2792,
+      "pass": 2764,
+      "fail": 0,
+      "skipped": 28
+    },
+    "modifiedSuiteWalls": [
+      {
+        "type": "file",
+        "tier": "integration",
+        "file": "test/integration/agents/session-marker-repository.test.ts",
+        "durationMs": 445.8,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration",
+        "file": "test/integration/cli/first-run-configuration.test.ts",
+        "durationMs": 817.9,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration",
+        "file": "test/integration/cli/mission-context-cli-contract.test.ts",
+        "durationMs": 2032.9,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration",
+        "file": "test/integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+        "durationMs": 2249.5,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration",
+        "file": "test/integration/integrate/workflow-repair-lane-boundaries.test.ts",
+        "durationMs": 2450.2,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration",
+        "file": "test/integration/mission/recovery-supervisor.test.ts",
+        "durationMs": 289.8,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration",
+        "file": "test/integration/review/review-intervention-resume.integration.test.ts",
+        "durationMs": 1448.1,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration",
+        "file": "test/integration/review/review-repair-recovery.test.ts",
+        "durationMs": 2774.1,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration",
+        "file": "test/integration/sqlite/durable-state-policy.test.ts",
+        "durationMs": 766.9,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration",
+        "file": "test/integration/sqlite/mission-sqlite-use-cases.test.ts",
+        "durationMs": 1080.8,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration",
+        "file": "test/integration/sqlite/sqlite-mission-store.integration.test.ts",
+        "durationMs": 503,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration",
+        "file": "test/integration/stats/metrics-review-fix-observations.test.ts",
+        "durationMs": 304.3,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration",
+        "file": "test/integration/test-harness/standard-analysis-tools.test.ts",
+        "durationMs": 1250,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration",
+        "file": "test/integration/test-harness/test-hygiene.test.ts",
+        "durationMs": 263.4,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration",
+        "file": "test/integration/test-harness/unit-test-timeout-guard.test.ts",
+        "durationMs": 2405.5,
+        "passed": true
+      }
+    ],
+    "minimumCaseHeadroomMs": 24.652,
+    "shellStageFollowup": {
+      "log": "/tmp/task-2762-completion-plainshell-log-tyxjd0vd/task-2762-final-stage-plain.log",
+      "counts": {
+        "tests": 18,
+        "pass": 18,
+        "fail": 0,
+        "skipped": 0
+      },
+      "suiteWalls": [
+        {
+          "type": "file",
+          "tier": "unit",
+          "file": "test/integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "durationMs": 2184.3,
+          "passed": true
+        }
+      ]
+    }
+  },
+  "covered": {
+    "command": "PARALLIX_TEST_COVERAGE=1 npm test -- --integration-ci",
+    "concurrency": 1,
+    "log": "/tmp/task-2762-completion-coveredlog-jkdi3ea5/task-2762-final-covered.log",
+    "profile": "/tmp/task-2762-completion-coveredprofile-x7biloca/task-2762-final-covered.jsonl",
+    "counts": {
+      "tests": 2738,
+      "pass": 2714,
+      "fail": 0,
+      "skipped": 24
+    },
+    "modifiedSuiteWalls": [
+      {
+        "type": "file",
+        "tier": "integration-ci",
+        "file": "test/integration/agents/session-marker-repository.test.ts",
+        "durationMs": 590.6,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration-ci",
+        "file": "test/integration/cli/first-run-configuration.test.ts",
+        "durationMs": 1063.4,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration-ci",
+        "file": "test/integration/cli/mission-context-cli-contract.test.ts",
+        "durationMs": 2505.2,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration-ci",
+        "file": "test/integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+        "durationMs": 2601.6,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration-ci",
+        "file": "test/integration/integrate/workflow-repair-lane-boundaries.test.ts",
+        "durationMs": 3128.2,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration-ci",
+        "file": "test/integration/mission/recovery-supervisor.test.ts",
+        "durationMs": 417.9,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration-ci",
+        "file": "test/integration/review/review-intervention-resume.integration.test.ts",
+        "durationMs": 1848.7,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration-ci",
+        "file": "test/integration/review/review-repair-recovery.test.ts",
+        "durationMs": 3170,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration-ci",
+        "file": "test/integration/sqlite/durable-state-policy.test.ts",
+        "durationMs": 865.5,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration-ci",
+        "file": "test/integration/sqlite/mission-sqlite-use-cases.test.ts",
+        "durationMs": 1298,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration-ci",
+        "file": "test/integration/sqlite/sqlite-mission-store.integration.test.ts",
+        "durationMs": 668.9,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration-ci",
+        "file": "test/integration/stats/metrics-review-fix-observations.test.ts",
+        "durationMs": 460.8,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration-ci",
+        "file": "test/integration/test-harness/standard-analysis-tools.test.ts",
+        "durationMs": 1318.9,
+        "passed": true
+      },
+      {
+        "type": "file",
+        "tier": "integration-ci",
+        "file": "test/integration/test-harness/test-hygiene.test.ts",
+        "durationMs": 369.9,
+        "passed": true
+      }
+    ],
+    "minimumCaseHeadroomMs": 42.28,
+    "shellStageFollowup": {
+      "log": "/tmp/task-2762-completion-coveredshell-log-743gzb2x/task-2762-final-stage-covered.log",
+      "counts": {
+        "tests": 18,
+        "pass": 18,
+        "fail": 0,
+        "skipped": 0
+      },
+      "suiteWalls": [
+        {
+          "type": "file",
+          "tier": "unit",
+          "file": "test/integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "durationMs": 3411.9,
+          "passed": true
+        }
+      ]
+    }
+  },
+  "budgetCalibration": {
+    "coldSourceSample": [
+      {
+        "file": "integration/cli/px-runtime-smoke.test.ts",
+        "name": "px runtime smoke test verifies the source entrypoint executes without module resolution errors",
+        "profile": "covered",
+        "cpuMs": 548.363,
+        "limitMs": 1000,
+        "headroomMs": 451.637
+      }
+    ],
+    "cliExitPriorSample": [
+      {
+        "file": "integration/cli/cli-command-exit-and-output.test.ts",
+        "name": "SC3: a missing-classification integrate failure returns control with a non-zero status even with a loop anchor present",
+        "profile": "covered",
+        "cpuMs": 2807.658,
+        "limitMs": 2500,
+        "headroomMs": -307.658
+      }
+    ],
+    "childWorkerFollowup": [
+      {
+        "file": "integration/integrate/workflow-repair-lane-boundaries.test.ts",
+        "name": "production CLI autonomous re-review and child verdict/resolve keep authoritative lanes correct",
+        "profile": "covered",
+        "cpuMs": 2747.688,
+        "limitMs": 3400,
+        "headroomMs": 652.312
+      }
+    ]
+  },
+  "checkpointReadiness": {
+    "slug": "task-2762",
+    "version": 69,
+    "ready": true,
+    "source": "recorded",
+    "findings": [],
+    "primaryStopReason": null,
+    "command": "npm run dev -- checkpoint check --slug task-2762 --json",
+    "log": "/tmp/task-2762-completion-readiness.json"
+  },
+  "checkpoint": {
+    "name": "CP-11",
+    "allSuccessCriteriaComplete": true,
+    "recordLog": "/tmp/task-2762-completion-checkpoint.log",
+    "markCompleteLog": "/tmp/task-2762-completion-criteria.log",
+    "contractAcknowledgmentLog": "/tmp/task-2762-completion-acknowledge.log",
+    "note": "The existing application checkpoint authority refreshed retained repair authorization after the explicit operator budget decision; no repair verification or independent approval was synthesized."
+  },
+  "reviewRound1F1": {
+    "baseRevision": "f4f8fa149b1582da56e985959856033ae9c83879",
+    "change": "Runtime fast paths and authoring registry delegate to the same brief-write and review-verb factories. Removed duplicate reviewVerbPorts and all as-never casts from review composition; expected versions cross the typed MissionVersion constructor.",
+    "checks": [
+      {
+        "command": "npm run typecheck",
+        "result": "pass"
+      },
+      {
+        "command": "npm run build",
+        "result": "pass"
+      },
+      {
+        "command": "npm test -- --unit-test-headroom test/unit/composition/mission-terminal.test.ts test/unit/interfaces/cli/review-commands.test.ts",
+        "result": "44 pass, 0 failures"
+      },
+      {
+        "command": "npm test -- --unit-test-headroom test/unit/interfaces/cli/review-cli-dispatch-contract.test.ts test/unit/scripts/architecture/dependency-graph.test.ts test/unit/repository/file-size-cap.test.ts",
+        "result": "79 pass, 0 failures"
+      },
+      {
+        "command": "npm test -- test/integration/cli/mission-context-cli-contract.test.ts",
+        "result": "7 pass, 0 failures; runner duration 2553.735606 ms"
+      },
+      {
+        "command": "PARALLIX_TEST_COVERAGE=1 npm test -- test/integration/cli/mission-context-cli-contract.test.ts",
+        "result": "7 pass, 0 failures; runner duration 4110.613139 ms; no integration suite modified in this review fix"
+      },
+      {
+        "command": "npx eslint src/composition/cli-authoring-commands.ts src/composition/cli-brief-writes.ts src/composition/cli-review-verbs.ts --max-warnings 0",
+        "result": "pass; broader lint of create-cli.ts reports existing any, curly and complexity errors also present in HEAD baseline"
+      }
+    ],
+    "manual": "Built node build/px.mjs goal/classification/checkpoint/verdict/resolve --help each exited 0 with Usage. Goal and classification set with a disposable slug but missing required values exited 1 with --goal and --value diagnostics. Commands ran in TemporaryDirectory Git checkout with private HOME/PARALLIX_HOME/FORGEJO_HOME and no operator data. Temporary state removed.",
+    "preservation": "No tests, integration assertions, gates, registries, CPU limits or memory limits modified. Earlier full-lane evidence is retained as historical proof; this round runs affected contracts."
+  },
+  "staticAnalysisRecovery": {
+    "revision": "6434cf0f9",
+    "result": "./scripts/verify-local.sh static-analysis exited 0: ESLint, production/script TypeScript, test hygiene/layout and test TypeScript all passed.",
+    "changes": "Typed integration gate configuration; removed unused imports; extracted presentation binding and terminal hosting helpers; corrected test fixture types and explicit gate existence assertions. No gate configuration, CPU limits, integration membership or architectural principles changed.",
+    "focusedChecks": [
+      {
+        "command": "npm test -- --unit-test-headroom test/unit/adapters/cli/commands/integrate-gate-rebound-and-repair-contract.test.ts test/unit/interfaces/cli/index.test.ts",
+        "passed": 76
+      },
+      {
+        "command": "npm test -- test/unit/interfaces/cli/index.test.ts test/integration/composition/application-boundaries.test.ts",
+        "passed": 54
+      },
+      {
+        "command": "npm test -- test/integration/test-harness/test-hygiene.test.ts test/unit/adapters/verification/verification-helpers.test.ts test/unit/scripts/post-integrate-refresh-contract.test.ts test/unit/test/lib/test-categories.test.ts",
+        "passed": 42
+      },
+      {
+        "command": "npm test -- test/unit/scripts/npm-package-bundle-and-release-contract.test.ts",
+        "passed": 32
+      },
+      {
+        "command": "npm test -- --unit-test-headroom test/unit/test/lib/test-categories.test.ts",
+        "passed": 11
+      }
+    ],
+    "manualChecks": {
+      "entry": "node --import tsx src/entry/px.ts",
+      "commands": [
+        "--version",
+        "help",
+        "aliases",
+        "config"
+      ],
+      "result": "All exited 0 with expected version, usage, alias table and effective configuration output. Read-only source CLI checks; built-CLI/full-lane evidence remains historical."
+    },
+    "dependencies": "pnpm install --frozen-lockfile --offline restored already-declared @types/react-dom; no manifest or lockfile change.",
+    "checkpointBlocker": "Existing CP-13 human-only contract blocker retained: required command artifact-incomplete needs operator reconciliation."
+  },
+  "manualReviewWorkflowFenceRepair": {
+    "baselineRevision": "1ffc6cb63",
+    "review": "Claude manual reviews 3171 and 3173; shared Mission composition now binds inherited write authorization and threads the explicit workflow-operations opt-out.",
+    "reproduction": "New stopped-generation checkpoint CLI assertion fails on the parent with Missing expected rejection; fixed tree passes.",
+    "focusedIntegration": {
+      "passedPerRun": 18,
+      "plainRuns": 3,
+      "coveredRuns": 3
+    },
+    "manual": "Built checkpoint CLI accepts the live generation, rejects the stopped generation without changing Mission/version, and fails closed without a generation. All state is disposable.",
+    "timingMethod": "Alternating parent/fixed worktrees, three runs per profile. Warm medians below use runs 2 and 3. Exclusion adds a child-process regression only on fixed; it is not an equal-work timing comparison. Separate same-fixture authorized checkpoint CLI comparison uses five warm alternating pairs.",
+    "authorizedCheckpointCliMedianWallMs": {
+      "parent": 158.37,
+      "fixed": 156.92
+    },
+    "warmSuiteProfiles": {
+      "plain": {
+        "parent": {
+          "workflow-repair-lane-boundaries.test.ts": {
+            "suiteWallMedianMs": 3220.4,
+            "largestCaseCpuMedianMs": 2565.2,
+            "caseCpuLimitMs": 3100
+          },
+          "integration-repair-review-loop.test.ts": {
+            "suiteWallMedianMs": 1812.7,
+            "largestCaseCpuMedianMs": 1775.9,
+            "caseCpuLimitMs": 2200
+          },
+          "workflow-cli-exclusion.test.ts": {
+            "suiteWallMedianMs": 1108.4,
+            "largestCaseCpuMedianMs": 649.3,
+            "caseCpuLimitMs": 3400
+          }
+        },
+        "fixed": {
+          "workflow-repair-lane-boundaries.test.ts": {
+            "suiteWallMedianMs": 2297.3,
+            "largestCaseCpuMedianMs": 1976.8,
+            "caseCpuLimitMs": 3100
+          },
+          "integration-repair-review-loop.test.ts": {
+            "suiteWallMedianMs": 1825.0,
+            "largestCaseCpuMedianMs": 1778.6,
+            "caseCpuLimitMs": 2200
+          },
+          "workflow-cli-exclusion.test.ts": {
+            "suiteWallMedianMs": 1256.2,
+            "largestCaseCpuMedianMs": 778.5,
+            "caseCpuLimitMs": 3400
+          }
+        }
+      },
+      "covered": {
+        "parent": {
+          "workflow-repair-lane-boundaries.test.ts": {
+            "suiteWallMedianMs": 3967.1,
+            "largestCaseCpuMedianMs": 2670.9,
+            "caseCpuLimitMs": 3400
+          },
+          "integration-repair-review-loop.test.ts": {
+            "suiteWallMedianMs": 3040.4,
+            "largestCaseCpuMedianMs": 2387.5,
+            "caseCpuLimitMs": 3300
+          },
+          "workflow-cli-exclusion.test.ts": {
+            "suiteWallMedianMs": 2501.6,
+            "largestCaseCpuMedianMs": 1059.6,
+            "caseCpuLimitMs": 3400
+          }
+        },
+        "fixed": {
+          "workflow-repair-lane-boundaries.test.ts": {
+            "suiteWallMedianMs": 3961.8,
+            "largestCaseCpuMedianMs": 2670.7,
+            "caseCpuLimitMs": 3400
+          },
+          "integration-repair-review-loop.test.ts": {
+            "suiteWallMedianMs": 3067.4,
+            "largestCaseCpuMedianMs": 2413.6,
+            "caseCpuLimitMs": 3300
+          },
+          "workflow-cli-exclusion.test.ts": {
+            "suiteWallMedianMs": 2803.5,
+            "largestCaseCpuMedianMs": 1402.4,
+            "caseCpuLimitMs": 3400
+          }
+        }
+      }
+    },
+    "coldParentFailure": "First parent plain repair-loop case exceeded unchanged 2200 ms CPU budget at 2593 ms. Later parent runs and all fixed runs passed.",
+    "remainingTimingLimitation": "Unmodified workflow-repair-lane-boundaries covered suite wall time is about 3960 ms on both parent and fixed, above the mission 3500 ms suite wall target; case CPU remains below its unchanged 3400 ms cap.",
+    "rawEvidence": ".workflow/recovery-evidence/task-2762/workflow-fence",
+    "limitsAndGates": "No CPU limit, cutoff, gate, assertion, isolation or cleanup defense was raised or weakened."
+  },
+  "githubPortabilityAndRecovery": {
+    "sourceRevision": "cd3a7431c",
+    "operatorInstruction": "Correct tests take priority over speed; CI-bound suites must run on GitHub without workstation-only infrastructure. Operator accepts the existing CPU-budget selector after its distinction from observed wall time was explained.",
+    "selection": "Unchanged: largest declared per-case CPU limit determines early vs full integration-ci. Observed suite wall time does not automatically shift membership. GitHub test:ci runs --integration-ci-all.",
+    "audit": {
+      "suites": [
+        "integration/integrate/workflow-repair-lane-boundaries.test.ts",
+        "integration/integrate/integration-repair-review-loop.test.ts",
+        "integration/process/workflow-cli-exclusion.test.ts"
+      ],
+      "scope": "Every case and shared fixture in these three suites. Node built-ins, installed checkout dependencies, Git and standard shell tools; disposable Git/SQLite state; provider disabled and agent launches injected. No live Forgejo, model backend, Docker, tmux, user-systemd service or installed agent CLI is required by these cases."
+    },
+    "offlineHostedModeProof": {
+      "node": "26.10.0",
+      "command": "node --import tsx test/run-default-tests.ts --integration-ci-all <three audited suite paths>",
+      "environment": "Fresh temporary HOME, minimal PATH, CI=true, GITHUB_ACTIONS=true, PARALLIX_NO_BUBBLEWRAP=1, PARALLIX_PREBUILT_PACK=1, PARALLIX_TEST_COVERAGE=1; isolated user/network namespaces with no access to host loopback or external network. GitHub mode uses the repository existing suspended local timing/memory policy.",
+      "passed": 18,
+      "failed": 0,
+      "skipped": 0,
+      "log": ".workflow/recovery-evidence/task-2762/github-portability/offline-covered.log",
+      "limitation": "Local hosted-mode portability proof; not an actual GitHub Actions result."
+    },
+    "freshCoveredIntegration": {
+      "command": "PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt",
+      "exitCode": 0,
+      "tests": 2759,
+      "passed": 2735,
+      "failed": 0,
+      "skipped": 24,
+      "suites": 186,
+      "profiledCpuCases": 2735,
+      "caseCpuOverruns": 0,
+      "suiteCpuMs": 296182,
+      "suiteCpuLimitMs": 552000,
+      "memoryPeakMiB": 2240,
+      "memoryLimitMiB": 6144,
+      "elapsedMs": 82121,
+      "log": ".workflow/recovery-evidence/task-2762/github-portability/full-covered.log"
+    },
+    "recovery": "Fresh proof replaces the non-executable artifact-incomplete stop under operator instruction via px checkpoint record --force. No gate, budget, selector, assertion or production source is changed by this evidence update. The independent harness verification flag is not set by a manual run."
+  },
+  "nestedReviewAdmissionRepair": {
+    "parentRevision": "5cb7bbfd7",
+    "finding": "Claude manual review 3173 low-risk note: nested re-review bypassed admission for an unowned internal integration invocation.",
+    "change": "cli-lifecycle-commands.ts reuses runReview and the borrowed graph only with Mission write authority. Otherwise it calls the registered review command, retaining ownWorkflowCli admission and conflict handling.",
+    "regression": "New cli-lifecycle-commands unit suite owns composition routing. Admission and refused-admission tests fail on parent; owned graph-reuse test passes on parent. All three pass with the fix. Doubles replace execution/persistence; the actual public ownership wrapper is retained.",
+    "unit": {
+      "passed": 86,
+      "failed": 0,
+      "headroomMs": 500
+    },
+    "staticAnalysis": "All four stages pass, including production and test typechecks. Build and git diff --check pass.",
+    "focusedIntegration": {
+      "passed": 18,
+      "failed": 0,
+      "skipped": 0,
+      "profiles": [
+        "plain",
+        "covered"
+      ],
+      "largestCaseCpuMs": {
+        "plain": {
+          "repairLoop": 1727.7,
+          "laneBoundaries": 1925.4,
+          "exclusion": 832.4
+        },
+        "covered": {
+          "repairLoop": 2405.7,
+          "laneBoundaries": 2708.4,
+          "exclusion": 1488.4
+        }
+      },
+      "suiteWallMs": {
+        "plain": {
+          "repairLoop": 1807,
+          "laneBoundaries": 2296,
+          "exclusion": 1300
+        },
+        "covered": {
+          "repairLoop": 3045,
+          "laneBoundaries": 3938,
+          "exclusion": 2854
+        }
+      }
+    },
+    "manual": "Disposable real workflow service holds an owner. Triggering the unowned internal nested callback routes through real admission and rejects the conflict; Mission/version and the single workflow remain unchanged. Built public review CLI rejects the same conflict. Only gate-repair execution is replaced to trigger the internal callback; admission, Git/SQLite state, composition and controller are real. No model service or operator state is used.",
+    "evidence": ".workflow/recovery-evidence/task-2762/nested-review-admission/",
+    "constraints": "No integration suite, registry, CPU budget, cutoff, gate, memory limit or cleanup defense changed. The existing covered lane-boundaries suite wall-time limitation remains documented. Prior full-lane and offline-hosted results identify their earlier source revisions; this change has fresh focused checks, not a new full-lane run."
+  }
+}

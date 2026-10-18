@@ -1,3 +1,6 @@
+import { SqliteWorkflowOperationStore } from '../../../src/adapters/sqlite/workflow-operation-store.js';
+import { inheritWorkflowAuthorization } from '../../../src/composition/workflow-authorization.js';
+import { configureMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
 import { phaseGateResult } from '../../helpers/phase-gate-result.js';
 import { integrationServices } from '../../helpers/stub-integration-services.js';
 import { integrationContext } from '../../fixtures/integration-context.js';
@@ -71,6 +74,11 @@ import { RevokeReviewDecisionUseCase } from '../../../src/application/revoke-rev
 import { createRebaseWorkflowPort } from '../../../src/adapters/rebase/rebase-workflow-adapter.js';
 import { runRebaseWorkflow } from '../../../src/application/rebase-workflow.js';
 import { SOURCE_PX } from '../../lib/px-entry.js';
+import { run } from '../../../src/composition/create-cli.js';
+import { resolveConfiguration } from '../../../src/composition/config.js';
+import { installReviewRepairAgent } from '../../fixtures/review-repair-agent-preload.js';
+import { setWorkflowLaunchPort, setCommandPathProbe, setLauncherHealthProbe } from '../../../src/adapters/agents/agents.js';
+import { clearOperatorStateCache } from '../../../src/adapters/sqlite/adapter-factory.js';
 
 const SLUG = 'task-2582-repro';
 const REVIEWER = agentFamily('configured-reviewer');
@@ -354,13 +362,22 @@ test('operator correction of a stranded active approval preserves history and op
   } finally { await closeFixture(fixture); }
 });
 
-test('production CLI autonomous re-review and child verdict/resolve keep authoritative lanes correct', async () => {
+test('production CLI autonomous re-review and child verdict/resolve keep authoritative lanes correct', async (t) => {
   const slug = 'task-2582';
   const reviewer = agentFamily('codex');
   const implementer = agentFamily('custom');
   const eligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' });
   const review = startReview({ change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' }, revision: changeRevision('rev-1') }, reviewer, implementer, HANDOFF_AT, eligibility);
   const root = makeTempRoot();
+  const database = new SqliteDatabaseAdapter();
+  t.after(async () => {
+    configureMissionWriteAuthorization(null);
+    setWorkflowLaunchPort(null); setCommandPathProbe(null); setLauncherHealthProbe(null);
+    try {
+      await database.close();
+      await clearOperatorStateCache();
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
   const repo = path.join(root, 'repo');
   const stateHome = path.join(root, 'state');
   fs.mkdirSync(path.join(repo, 'backlog', 'tasks'), { recursive: true });
@@ -380,33 +397,45 @@ test('production CLI autonomous re-review and child verdict/resolve keep authori
   git(['init', '-b', 'main']); git(['config', 'user.name', 'Fixture']); git(['config', 'user.email', 'fixture@example.com']);
   git(['add', '.']); git(['commit', '-m', 'fixture']); git(['checkout', '-b', `mission/${slug}`]);
   fs.mkdirSync(stateHome, { recursive: true });
-  const database = new SqliteDatabaseAdapter();
-  await database.open({ path: path.join(stateHome, 'parallix.db') });
-  await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
+  // Eligibility is neutral; legacy blocklist discovery is a separate contract.
+  fs.writeFileSync(path.join(stateHome, 'agents.local.json'), '{"blocklist":{}}\n');
+  const databasePath = path.join(stateHome, 'parallix.db');
+  fs.copyFileSync(fixtureDatabaseTemplate, databasePath);
+  await database.open({ path: databasePath });
   const store = new SqliteMissionStore(database);
   const seed = seedMission('review', review);
-  await store.save({ ...seed, id: missionId(slug), checkpoints: seed.checkpoints.map(checkpoint => ({ ...checkpoint, missionId: missionId(slug) })), assignee: implementer }, null);
-  // Stays on source: the preload swaps agent ports through setters on the
-  // source `src/adapters/agents/agents.ts` module, which the bundle's inlined
-  // copy never sees, and the trace asserts the pinned child CLI entry.
+  await store.save({ ...seed, repositoryId: repositoryId('repo'), id: missionId(slug), checkpoints: seed.checkpoints.map(checkpoint => ({ ...checkpoint, missionId: missionId(slug) })), assignee: implementer }, null);
+  // The review executor uses the production registry in-process. Verdict/resolve
+  // still cross real pinned source CLI processes; avoid a fourth loader startup.
   const { entry, loader } = SOURCE_PX;
   const trace = path.join(root, 'trace.jsonl');
-  try {
-    const result = spawnSync(process.execPath, ['--import', loader, '--import', path.resolve('test/fixtures/review-repair-agent-preload.ts'), entry,
-      'review', slug, '--continue', '--reviewer', 'codex', '--implementer', 'custom', '--max-attempts', '3'], {
-      cwd: repo, encoding: 'utf8', timeout: 90_000,
-      env: { ...process.env, PARALLIX_HOME: stateHome, PRIMARY_WORKTREE: repo, PARALLIX_NO_BUBBLEWRAP: '1', TASK_2582_SLUG: slug, TASK_2582_TRACE: trace, TASK_2582_REVIEWED: path.join(root, 'reviewed') },
-    });
-    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-    const loaded = await store.load(missionId(slug));
-    assert.equal(loaded.kind === 'found' && loaded.mission.status, 'integration', `${result.stdout}\n${result.stderr}`);
-    const events = await database.query<LaneEventRow>('SELECT from_status, to_status, trigger FROM board_lane_events WHERE mission_id = ? ORDER BY id', [slug]);
-    assert.deepEqual(events.map(e => [e.from_status, e.to_status]), [['review', 'active'], ['active', 'review'], ['review', 'integration']]);
-    const observations = fs.readFileSync(trace, 'utf8').trim().split('\n').map(line => JSON.parse(line));
-    assert.deepEqual(observations.map(o => [o.phase, o.status]), [['review', 'review'], ['review-complete', 'active'], ['repair', 'active'], ['repair-complete', 'active'], ['review', 'review'], ['review-complete', 'integration']]);
-    assert.ok(observations.filter(o => o.entry).every(o => o.entry === entry && o.cli.startsWith(path.join(stateHome, 'cli'))));
-    console.log('[task-2582-cli-proof]', JSON.stringify({ entry, observations, events: events.map(event => ({ ...event })) }));
-  } finally { await database.close(); }
+  // This in-process executor holds a real persisted workflow generation; child
+  // writers inherit the same fence, as they do under the production supervisor.
+  const operations = new SqliteWorkflowOperationStore(database, repositoryId('repo'));
+  await operations.insert({ id: 'fixture-review', repositoryId: repositoryId('repo'), missionId: missionId(slug),
+    requestKey: 'fixture-review', command: 'review:submit', generation: 1, phase: 'running', providerStarted: false,
+    agent: null, reviewer: 'codex', originalStatus: 'review', previousAssignee: 'custom',
+    owner: { pid: process.pid, identity: 'fixture-executor' }, createdAt: HANDOFF_AT, updatedAt: HANDOFF_AT, reason: null });
+  const environment = { ...process.env, PARALLIX_WORKFLOW_OPERATION: 'fixture-review', PARALLIX_WORKFLOW_GENERATION: '1', PARALLIX_HOME: stateHome, PRIMARY_WORKTREE: repo, PARALLIX_NO_BUBBLEWRAP: '1', TASK_2582_SLUG: slug, TASK_2582_TRACE: trace, TASK_2582_REVIEWED: path.join(root, 'reviewed') };
+  pinChildCli(entry, { nodeArgs: ['--v8-pool-size=1', '--import', loader,
+    '--import', path.resolve('test/fixtures/review-repair-agent-preload.ts')],
+  stateHome, env: environment, configuration: resolveConfiguration(environment) });
+  inheritWorkflowAuthorization(resolveConfiguration(environment), operations);
+  await installReviewRepairAgent();
+  const output: string[] = [];
+  const code = await run(['review', slug, '--continue', '--reviewer', 'codex', '--implementer', 'custom', '--max-attempts', '3'], {
+    baseCwd: repo, environment, log: line => { output.push(String(line)); return null; }, error: line => { output.push(String(line)); return null; },
+  });
+  assert.equal(code, 0, output.join('\n'));
+  const loaded = await store.load(missionId(slug));
+  assert.equal(loaded.kind === 'found' && loaded.mission.status, 'integration', output.join('\n'));
+  const events = await database.query<LaneEventRow>('SELECT from_status, to_status, trigger FROM board_lane_events WHERE mission_id = ? ORDER BY id', [slug]);
+  assert.deepEqual(events.map(e => [e.from_status, e.to_status]), [['review', 'active'], ['active', 'review'], ['review', 'integration']]);
+  const observations = fs.readFileSync(trace, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.deepEqual(observations.map(o => [o.phase, o.status]), [['review', 'review'], ['review-complete', 'active'], ['repair', 'active'], ['repair-complete', 'active'], ['review', 'review'], ['review-complete', 'integration']]);
+  assert.ok(observations.filter(o => o.entry).every(o => o.entry === entry && o.cli.startsWith(path.join(stateHome, 'cli'))));
+  console.log('[task-2582-cli-proof]', JSON.stringify({ entry, observations, events: events.map(event => ({ ...event })) }));
+
 });
 
 const tempDirs: string[] = [];

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as v from '../../../../src/adapters/verification/verification.js';
+import { readVerificationInputs } from '../../../../src/adapters/verification/verification-proof-inputs.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 
 function tempDir(prefix = 'verification-') {
@@ -114,4 +115,44 @@ test('recordGateResult coerces a non-number exit code to a failed status', () =>
     assert.equal(rec.status, 'failed');
     assert.equal(rec.exitCode, 1);
   } finally { cleanup(dir); }
+});
+
+
+test('verification inputs read clean branch and HEAD together and fail closed for dirty or malformed status (TASK-2762)', () => {
+  const root = tempDir();
+  const commit = 'a'.repeat(40);
+  const header = `# branch.oid ${commit}\n# branch.head mission/example\n`;
+  try {
+    for (const scenario of [
+      { status: header, ok: true, calls: 2 },
+      { status: header.replace(commit, '(initial)'), ok: true, calls: 2, unborn: true },
+      { status: header.replace('mission/example', '(detached)'), ok: true, calls: 2, detached: true },
+      { status: header + '1 .M N... 100644 100644 100644 abc abc source.ts\n', ok: false, calls: 1 },
+      { status: header + '? untracked.txt\n', ok: false, calls: 1 },
+      { status: header + 'u UU conflict.txt\n', ok: false, calls: 1 },
+      { status: '# branch.head mission/example\n', ok: false, calls: 1 },
+      { status: header.replace(commit, 'malformed'), ok: false, calls: 1 },
+      { status: header, ok: false, calls: 1, exitCode: 1 },
+      { status: header, ok: false, calls: 2, trackedExitCode: 1 },
+      { status: header, ok: false, calls: 2, tracked: '' },
+    ]) {
+      const calls: string[][] = [];
+      const result = readVerificationInputs(root, args => {
+        calls.push(args);
+        assert.deepEqual(args.slice(0, 2), ['-C', fs.realpathSync(root)]);
+        if (args[2] === 'status') {
+          assert.deepEqual(args.slice(2), ['status', '--porcelain=v2', '--branch']);
+          return { status: scenario.exitCode ?? 0, stdout: scenario.status, stderr: '', signal: null };
+        }
+        assert.deepEqual(args.slice(2), ['ls-files', '-s']);
+        return { status: scenario.trackedExitCode ?? 0, stdout: scenario.tracked ?? '100644 abc 0\tsource.ts\n', stderr: '', signal: null };
+      });
+      assert.equal(result.ok, scenario.ok, JSON.stringify(scenario));
+      assert.equal(calls.length, scenario.calls);
+      if (result.ok) {
+        assert.equal(result.commit, scenario.unborn ? null : commit);
+        assert.equal(result.branch, scenario.detached ? '' : 'mission/example');
+      }
+    }
+  } finally { cleanup(root); }
 });

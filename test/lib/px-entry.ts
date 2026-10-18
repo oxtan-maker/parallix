@@ -45,5 +45,7 @@ export function resolvePxEntryLoader({ env = process.env, exists = fs.existsSync
 
 /** Node arguments that run px with `args` from the resolved entry. */
 export function pxNodeArgs(px: PxEntryLoader, args: readonly string[]): string[] {
-  return [...(px.loader ? ['--import', px.loader] : []), px.entry, ...args];
+  // These short fixture commands need one compiler worker. Node 26 otherwise
+  // starts a host-sized V8 pool before a case can do its actual CLI work.
+  return ['--v8-pool-size=1', ...(px.loader ? ['--import', px.loader] : []), px.entry, ...args];
 }

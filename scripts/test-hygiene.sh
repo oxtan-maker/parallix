@@ -8,21 +8,26 @@ test_dir="test"
 errors=0
 
 # Check for .only patterns: it.only, describe.only, test.only
-while IFS= read -r -d '' file; do
-  while IFS= read -r -d '' line_match; do
-    lineno=$(echo "$line_match" | cut -d: -f1)
-    content=$(echo "$line_match" | cut -d: -f2-)
+while IFS= read -r -d '' match; do
+    # Match the test-file suffix before splitting, so colons in directory
+    # names do not become part of the diagnostic's line number or source.
+    [[ "$match" =~ ^(.*\.test\.(js|ts)):([0-9]+):(.*)$ ]]
+    file=${BASH_REMATCH[1]}
+    lineno=${BASH_REMATCH[3]}
+    content=${BASH_REMATCH[4]}
     echo "VIOLATION: .only found in $(basename "$file"):$lineno"
     echo "  $content"
     errors=$((errors + 1))
-  done < <(grep -n -E '(it|describe|test)\.only\s*\(' "$file" 2>/dev/null | tr '\n' '\0' || true)
-done < <(find "$test_dir" \( -name '*.test.js' -o -name '*.test.ts' \) -print0 2>/dev/null)
+done < <(find "$test_dir" \( -name '*.test.js' -o -name '*.test.ts' \) -exec grep -nHE '(it|describe|test)\.only\s*\(' {} + 2>/dev/null | tr '\n' '\0' || true)
 
 # Check for .skip, xit, fit without inline annotated reason
-while IFS= read -r -d '' file; do
-  while IFS= read -r -d '' line_match; do
-    lineno=$(echo "$line_match" | cut -d: -f1)
-    content=$(echo "$line_match" | cut -d: -f2-)
+while IFS= read -r -d '' match; do
+    # Match the test-file suffix before splitting, so colons in directory
+    # names do not become part of the diagnostic's line number or source.
+    [[ "$match" =~ ^(.*\.test\.(js|ts)):([0-9]+):(.*)$ ]]
+    file=${BASH_REMATCH[1]}
+    lineno=${BASH_REMATCH[3]}
+    content=${BASH_REMATCH[4]}
     # Skip lines that have skip-reason: or reason: in an inline comment
     if [[ "$content" =~ (skip-reason:|reason:) ]]; then
       continue
@@ -30,8 +35,7 @@ while IFS= read -r -d '' file; do
     echo "VIOLATION: unannotated skip/xit/fit found in $(basename "$file"):$lineno"
     echo "  $content"
     errors=$((errors + 1))
-  done < <(grep -n -E '(it|describe|test)\.(skip)\s*\(|\bxit\s*\(|\bfit\s*\(' "$file" 2>/dev/null | tr '\n' '\0' || true)
-done < <(find "$test_dir" \( -name '*.test.js' -o -name '*.test.ts' \) -print0 2>/dev/null)
+done < <(find "$test_dir" \( -name '*.test.js' -o -name '*.test.ts' \) -exec grep -nHE '(it|describe|test)\.(skip)\s*\(|\bxit\s*\(|\bfit\s*\(' {} + 2>/dev/null | tr '\n' '\0' || true)
 
 # Inode usage guard: fail if /tmp inode usage is at or above 80%.
 # This catches temp-directory leaks that exhaust the tmpfs inode table.

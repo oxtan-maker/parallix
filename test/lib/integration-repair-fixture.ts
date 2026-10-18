@@ -8,10 +8,11 @@ import { fixtureMission as typedMissionFixture } from '../fixtures/mission-build
 // HTTP is reachable). Gates run through the real gate runner with cheap shell
 // commands whose outcome the fixture controls through files in the worktree.
 import assert from 'node:assert/strict';
+import { before, after } from 'node:test';
+import { mkdtemp } from '../helpers/temp-dir.js';
 import { resolveConfiguration } from '../../src/composition/config.js';
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { agentFamily } from '../../src/domain/agents.js';
@@ -31,6 +32,27 @@ import { resolveDatabasePath } from '../../src/adapters/sqlite/database-path-res
 import { resolveCanonicalRepositoryId } from '../../src/adapters/git/repository-identity.js';
 import { clearOperatorStateCache } from '../../src/adapters/sqlite/adapter-factory.js';
 import { configureMissionWriteAuthorization } from '../../src/application/ports/mission-write-authorization.js';
+
+// Cases share only the immutable, closed schema. Every Mission, repository and
+// writable connection remains private, including cases that abort in setup.
+let schemaRoot: string;
+let schemaPath: string;
+before(async () => {
+  schemaRoot = mkdtemp('repair-schema-');
+  schemaPath = path.join(schemaRoot, 'template.db');
+  const database = new SqliteDatabaseAdapter();
+  try {
+    await database.open({ path: schemaPath });
+    await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
+  } finally { await database.close(); }
+});
+after(() => { if (schemaRoot) fs.rmSync(schemaRoot, { recursive: true, force: true }); });
+
+/** Copy only closed, empty schema state; never share a writable case database. */
+export function copyRepairSchema(databasePath: string): void {
+  fs.mkdirSync(path.dirname(databasePath), { recursive: true });
+  fs.copyFileSync(schemaPath, databasePath);
+}
 
 export const REVIEWER = agentFamily('codex');
 export const IMPLEMENTER = agentFamily('custom');
@@ -73,11 +95,14 @@ export async function openRepairFixture(options: {
   state?: 'approved-integration' | 'undecided-review';
 }): Promise<RepairFixture> {
   const { slug } = options;
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-task-2620-')));
+  const root = fs.realpathSync(mkdtemp('parallix-task-2620-'));
   const repo = path.join(root, 'repo');
   const worktree = path.join(root, `repo-${slug}`);
   fs.mkdirSync(path.join(repo, 'backlog', 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(repo, 'config'), { recursive: true });
+  // Match the product checkout: retained runtime output is not mission input.
+  // The feature and repaired files remain tracked verification inputs.
+  fs.writeFileSync(path.join(repo, '.gitignore'), '.workflow/\n');
   fs.writeFileSync(path.join(repo, 'workflow.config.json'), JSON.stringify({
     product: { name: 'parallix' },
     adapters: {
@@ -114,63 +139,78 @@ export async function openRepairFixture(options: {
   // PARALLIX_HOME made a direct `npx tsx --test` run write to (and collide
   // with) whatever missions the operator database already held.
   const previousHome = process.env.PARALLIX_HOME;
-  process.env.PARALLIX_HOME = path.join(root, 'parallix-home');
-  const database = new SqliteDatabaseAdapter();
-  await database.open({ path: resolveDatabasePath({ configuration: resolveConfiguration(process.env) }) });
-  await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
-  const store = new SqliteMissionStore(database);
-  const undecided = options.state === 'undecided-review';
-  let seeded = seedMission(slug, undecided ? pendingReview(slug, approvedRevision) : approvedReview(slug, approvedRevision));
-  if (options.recordBaseline) {
-    const baseline = changeRevision(git(repo, ['rev-parse', 'main']));
-    assert.ok(seeded.review);
-    const [first, ...rest] = seeded.review.rounds;
-    const withBaseline = (round: Review['rounds'][number]) => ({ ...round, subject: { ...round.subject, baseline } });
-    seeded = { ...seeded, review: { ...seeded.review, rounds: [withBaseline(first), ...rest.map(withBaseline)] } };
-  }
-  // The board lists the missions of the repository it runs in, so a mission
-  // the board must see carries that repository's canonical identity.
-  await store.save(undecided
-    ? { ...seeded, status: 'review', rawStatus: 'review', repositoryId: resolveCanonicalRepositoryId(repo) } as Mission
-    : { ...seeded, repositoryId: resolveCanonicalRepositoryId(repo) }, null);
-
-  // Some composed adapters resolve the primary checkout from process.cwd().
-  // Keep those real Git reads inside the fixture, rather than the operator's
-  // repository and its unrelated worktrees (TASK-2712 repair).
+  const previousPrimary = process.env.PRIMARY_WORKTREE;
+  const previousConfinement = process.env.PARALLIX_NO_BUBBLEWRAP;
   const previousCwd = process.cwd();
-  process.chdir(worktree);
-  // Exercise the worker's repair/review body with the in-process agent port.
-  // Independent hosting is covered by the workflow-owner process contracts.
-  configureMissionWriteAuthorization({ operationId: `fixture:${slug}`, async assert(id) {
-    assert.equal(id, slug, 'the fixture worker may write only its own mission');
-  } });
-
-  return {
-    root, repo, worktree, slug, approvedRevision, database,
-    git,
-    async load() {
-      const loaded = await store.load(missionId(slug));
-      assert.equal(loaded.kind, 'found');
-      return (loaded as { mission: Mission }).mission;
-    },
-    async version() {
-      const loaded = await store.load(missionId(slug));
-      assert.equal(loaded.kind, 'found');
-      return Number((loaded as { version: unknown }).version);
-    },
-    laneEvents: () => database.query('SELECT from_status, to_status, trigger FROM board_lane_events WHERE mission_id = ? ORDER BY id', [slug]),
-    async close() {
-      configureMissionWriteAuthorization(null);
-      try {
-        await database.close();
-        await clearOperatorStateCache();
-      } finally {
-        if (previousHome === undefined) { delete process.env.PARALLIX_HOME; } else { process.env.PARALLIX_HOME = previousHome; }
-        process.chdir(previousCwd);
-        fs.rmSync(root, { recursive: true, force: true });
-      }
-    },
+  const database = new SqliteDatabaseAdapter();
+  const close = async () => {
+    configureMissionWriteAuthorization(null);
+    try {
+      await database.close();
+      await clearOperatorStateCache();
+    } finally {
+      if (previousHome === undefined) { delete process.env.PARALLIX_HOME; } else { process.env.PARALLIX_HOME = previousHome; }
+      if (previousPrimary === undefined) { delete process.env.PRIMARY_WORKTREE; } else { process.env.PRIMARY_WORKTREE = previousPrimary; }
+      if (previousConfinement === undefined) { delete process.env.PARALLIX_NO_BUBBLEWRAP; } else { process.env.PARALLIX_NO_BUBBLEWRAP = previousConfinement; }
+      process.chdir(previousCwd);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   };
+  try {
+    // This fixture owns the primary checkout; pin the supported override so
+    // recovery exercises the repair contract rather than repeatedly discovering it.
+    process.env.PRIMARY_WORKTREE = repo;
+    // Agents are injected in-process. Sandbox discovery cannot confine those
+    // doubles and belongs to the launcher contracts, not this repair workflow.
+    process.env.PARALLIX_NO_BUBBLEWRAP = '1';
+    process.env.PARALLIX_HOME = path.join(root, 'parallix-home');
+    // Repair fixtures have no blocked agents or legacy operator configuration.
+    // Seed that explicit neutral state so every eligibility read need not scan
+    // old worktree locations for a migration these contracts do not exercise.
+    fs.mkdirSync(process.env.PARALLIX_HOME, { recursive: true });
+    fs.writeFileSync(path.join(process.env.PARALLIX_HOME, 'agents.local.json'), '{"blocklist":{}}\n');
+    const databasePath = resolveDatabasePath({ configuration: resolveConfiguration(process.env) });
+    copyRepairSchema(databasePath);
+    await database.open({ path: databasePath });
+    const store = new SqliteMissionStore(database);
+    const undecided = options.state === 'undecided-review';
+    let seeded = seedMission(slug, undecided ? pendingReview(slug, approvedRevision) : approvedReview(slug, approvedRevision));
+    if (options.recordBaseline) {
+      const baseline = changeRevision(git(repo, ['rev-parse', 'main']));
+      seeded = { ...seeded, review: { ...seeded.review!, rounds: seeded.review!.rounds.map(r => ({ ...r, subject: { ...r.subject, baseline } })) as unknown as Review['rounds'] } } as Mission;
+    }
+    // The board lists the missions of the repository it runs in, so a mission
+    // the board must see carries that repository's canonical identity.
+    await store.save(undecided
+      ? { ...seeded, status: 'review', rawStatus: 'review', repositoryId: resolveCanonicalRepositoryId(repo) } as Mission
+      : { ...seeded, repositoryId: resolveCanonicalRepositoryId(repo) }, null);
+
+    // Some composed adapters resolve the primary checkout from process.cwd().
+    // Keep those real Git reads inside the fixture, rather than the operator's
+    // repository and its unrelated worktrees (TASK-2712 repair).
+    process.chdir(worktree);
+    // Preserve the worker authorization; independent hosting has its own contracts.
+    configureMissionWriteAuthorization({ operationId: `fixture:${slug}`, async assert(id) {
+      assert.equal(id, slug, 'the fixture worker may write only its own mission');
+    } });
+
+    return {
+      root, repo, worktree, slug, approvedRevision, database,
+      git,
+      async load() {
+        const loaded = await store.load(missionId(slug));
+        assert.equal(loaded.kind, 'found');
+        return (loaded as { mission: Mission }).mission;
+      },
+      async version() {
+        const loaded = await store.load(missionId(slug));
+        assert.equal(loaded.kind, 'found');
+        return Number((loaded as { version: unknown }).version);
+      },
+      laneEvents: () => database.query('SELECT from_status, to_status, trigger FROM board_lane_events WHERE mission_id = ? ORDER BY id', [slug]),
+      close,
+    };
+  } catch (error) { await close(); throw error; }
 }
 
 function pendingReview(slug: string, revision: string): Review {

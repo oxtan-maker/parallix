@@ -56,7 +56,7 @@ const ALLOWED: Record<string, string> = {
     'port wiring that hands `startAgent` to the use case for the kernel to drive',
   'src/adapters/cli/commands/integrate.ts::createIntegratePorts':
     'port wiring that hands `startAgent` to the integrate workflow for the kernel to drive (TASK-2512)',
-  'src/composition/create-cli.ts::createCommandRegistry':
+  'src/composition/cli-command-registry.ts::createCommandRegistry':
     'the fleet recovery supervisor\'s recovery worker (ADR 0059): a fresh agent context in the '
     + 'mission worktree for a mission that stopped progressing between commands. It is not a '
     + 'failure-repair bounce — there is no classified failure to repair, the supervisor supplies '

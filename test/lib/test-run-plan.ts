@@ -336,6 +336,9 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
       // default young generation. Bound each semi-space at 16 MiB; the outer
       // runner still enforces the process tree's aggregate memory limit.
       ...(!runsIntegrationSuite ? ['--max-semi-space-size=16'] : []),
+      // File workers already run concurrently. Host-sized V8 pools multiply
+      // compiler threads per worker and inflate CPU cost (TASK-2762).
+      '--v8-pool-size=1',
       // tsx must be registered before the bootstrap preload so the TypeScript
       // bootstrap module resolves (--import entries load in argv order).
       ...typeScriptLoaderArgs,

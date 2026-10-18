@@ -10,10 +10,32 @@ import { createStatusBoardAdapter } from '../adapters/cli/commands/status-adapte
 import { missionId } from '../domain/mission.js';
 import type { MissionStore } from '../application/domain-ports.js';
 import type { BoardProjectionBuilder } from '../application/projections/board-readers.js';
+import type { ProductionApplicationServices } from './application-services.js';
+import type { ParallixConfiguration } from '../application/ports/configuration.js';
 
 interface StatusBoardServices {
   presentationCapabilities?: { boardProjection: Pick<BoardProjectionBuilder, 'buildMissionCard'> } | null;
   mission?: { store: Pick<MissionStore, 'load'> } | null;
+}
+
+/** Status needs the shared board reader, without constructing mutation services. */
+export async function createStatusReadBoard(
+  services: ProductionApplicationServices, rootDir: string, configuration: ParallixConfiguration,
+): Promise<StatusBoardPort> {
+  const { repositories, db } = services.operatorState;
+  const mission = services.mission;
+  if (!repositories || !db || !mission) { return createStatusBoardFor(services); }
+  const [{ composeBoardProjection }, { resolveKnownAgentFamilies }, { SqliteSessionMarkerRepository }] = await Promise.all([
+    import('./board-projection.js'), import('../adapters/agents/known-agent-families.js'),
+    import('../adapters/sqlite/session-marker-repository.js'),
+  ]);
+  const { builder } = composeBoardProjection({
+    configuration, rootDir, missionStore: mission.store, database: db, repositoryId: mission.repositoryId,
+    blocklistRepo: repositories.agentBlocklist, historyRepo: repositories.operationalHistory,
+    laneEventRepo: repositories.boardLaneEvents, usageRepo: repositories.usage,
+    knownAgentFamilies: resolveKnownAgentFamilies(rootDir), sessionMarkers: new SqliteSessionMarkerRepository(db, mission.repositoryId),
+  });
+  return createStatusBoardFor({ mission, presentationCapabilities: { boardProjection: builder } });
 }
 
 /** Build the StatusBoardPort `px status` reads a Mission through. */

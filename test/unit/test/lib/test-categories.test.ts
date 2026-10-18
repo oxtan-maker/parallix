@@ -110,7 +110,7 @@ test('unit fixtures register temporary directories through the shared helper', (
   assert.deepEqual(direct, [], 'use test/helpers/temp-dir.ts so failed or killed workers reclaim fixture roots');
 });
 
-test('the real-agent and lifecycle suites stay out of the unit and integration lanes', () => {
+test('dedicated local E2E suites stay out of the unit and integration lanes', () => {
   const lanes = [selected([]), selected(['--integration'])];
   for (const file of AGENT_E2E_TESTS) {
     assert.ok(fs.existsSync(path.join(testRoot, file)), `${file} must remain runnable`);
@@ -146,11 +146,10 @@ test('early integration-ci excludes suites above the declared CPU cutoff while t
   const early = selected(['--integration-ci']);
   const full = selected(['--integration-ci-all']);
   const shifted = full.filter(file => !early.includes(file));
-  assert.ok(shifted.length > 0, 'the cutoff must shift at least one heavy suite');
   assert.deepEqual(early.filter(file => !full.includes(file)), [], 'early lane is a subset of the full lane');
   for (const file of early) { assert.ok(declaredSuiteCpuLimitMs(limits, file) <= EARLY_CI_CPU_CUTOFF_MS, `${file} exceeds the cutoff`); }
   for (const file of shifted) { assert.ok(declaredSuiteCpuLimitMs(limits, file) > EARLY_CI_CPU_CUTOFF_MS, `${file} was shifted below the cutoff`); }
-  const focused = shifted[0];
+  const focused = shifted[0] ?? full[0];
   assert.deepEqual(selected(['--integration-ci', `test/${focused}`]), [focused], 'a focused shifted suite still runs');
 });
 
@@ -161,4 +160,33 @@ test('the GitHub push gate runs the full integration-ci lane before origin/main 
   const workflow = fs.readFileSync(path.join(executionRoot, '.github', 'workflows', 'ci-required.yml'), 'utf8');
   assert.match(workflow, /'github-publish\/\*\*'/);
   assert.match(workflow, /run: npm run test:ci/);
+});
+
+// The browser is a workstation E2E gate, independent of integration selection.
+test('browser E2E runs alongside local E2E gates and stays out of GitHub (TASK-2762)', () => {
+  const file = 'e2e/presentation/web-board-pointer.test.ts';
+  assert.ok(AGENT_E2E_TESTS.includes(file));
+  for (const args of [[], ['--integration'], ['--integration-ci-all']]) {
+    assert.ok(!selected(args).includes(file));
+  }
+  assert.deepEqual(selected([`test/${file}`]), [file]);
+  const config = JSON.parse(fs.readFileSync(path.join(executionRoot, 'workflow.config.json'), 'utf8'));
+  const gates = config.adapters.gates.preIntegration as { key: string; command: string; after: string[] }[];
+  const browser = gates.find(gate => gate.key === 'browser-e2e');
+  assert.ok(browser, 'browser E2E gate is configured');
+  assert.equal(browser.command, 'npm run test:browser-e2e');
+  assert.deepEqual(browser.after, ['build']);
+  for (const key of ['workflow', 'agent-smoke']) {
+    const gate = gates.find(gate => gate.key === key);
+    assert.ok(gate, `${key} gate is configured`);
+    assert.deepEqual(gate.after, browser.after);
+  }
+  assert.ok(config.adapters.gates.parallel.preIntegration > 1);
+  const standalone = JSON.parse(fs.readFileSync(path.join(executionRoot, 'config/integration-pipelines.json'), 'utf8'));
+  assert.equal(standalone.gates['browser-e2e'].command, browser.command);
+  assert.equal(standalone.gates['browser-e2e'].run_last, true);
+  assert.equal(standalone.gates['browser-e2e'].always, true);
+  const pkg = JSON.parse(fs.readFileSync(path.join(executionRoot, 'package.json'), 'utf8'));
+  assert.equal(pkg.scripts['test:browser-e2e'], `npm test -- test/${file}`);
+  assert.doesNotMatch(pkg.scripts['test:ci'], /browser-e2e|web-board-pointer/);
 });

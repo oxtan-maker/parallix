@@ -157,16 +157,17 @@ test('SC22: SIGTERM terminates the real interactive board cleanly', async () => 
   }
 });
 
-test('SC26: ten real start-and-quit cycles leave every spawned board PID gone', async () => {
-  for (let index = 0; index < 10; index += 1) {
+// Keep all ten real launches, each with its own fixture and measured budget.
+for (let index = 0; index < 10; index += 1) {
+  test(`SC26: real start-and-quit cycle ${index + 1} leaves its spawned board PID gone`, async () => {
     const fixture = await launchBoard();
     try {
       await assertTerminates(fixture, 'q', `cycle ${index + 1}`);
     } finally {
       await fixture.dispose();
     }
-  }
-});
+  });
+}
 
 // ---------------------------------------------------------------------------
 // TASK-2377 — SIGINT is a board exit path, on both sides of Ink's raw-mode

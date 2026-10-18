@@ -1,6 +1,5 @@
 import { resolveProcessConfiguration } from './config.js';
 import type { PiWorkerMessage } from '../adapters/agents/pi-worker-protocol.js';
-import { runPiSdk } from '../adapters/agents/pi-session-runtime.js';
 
 /** Private child entry: the SDK and its tools inherit only this process's environment. */
 export function runPiWorker(): void {
@@ -19,6 +18,7 @@ export function runPiWorker(): void {
   });
   async function execute(message: PiWorkerMessage) {
     if (message?.kind !== 'run') { process.exit(1); }
+    const { runPiSdk } = await import('../adapters/agents/pi-session-runtime.js');
     const result = await runPiSdk({ ...message.request, configuration: resolveProcessConfiguration(),
       clearStaleMarker: () => new Promise<void>((resolve, reject) => {
         process.once('message', (reply: PiWorkerMessage) => {

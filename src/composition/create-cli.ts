@@ -1,68 +1,19 @@
 #!/usr/bin/env node
-import { attachWorkflowOperations } from './workflow-operations.js';
-import { withinCliInvocation } from './review-operator-resume.js';
-import { createCliServiceScope, type CliCommandContext } from './cli-service-scope.js';
-import { createAuthoringCommands } from './cli-authoring-commands.js';
-import { createLegacyCommands } from './cli-legacy-commands.js';
-import { createReadCommands } from './cli-read-commands.js';
-import { createLifecycleCommands } from './cli-lifecycle-commands.js';
-import { createLeadSupervisorPort, leadRecoveryWorkspace } from './lead-supervisor.js';
-import { ownWorkflowCli } from './workflow-cli.js';
-import { commandInvocation } from './command-invocation.js';
-
-import { resolveConfiguration, resolveProcessConfiguration } from './config.js';
-import type { ParallixConfiguration } from '../application/ports/configuration.js';
-
 import fs from 'node:fs';
-import { captureMissionCommand, hostMissionCommand } from './mission-terminal.js';
-import { cliInvocation, type CliInvocation } from '../adapters/process/cli-invocation.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import * as fmt from '../application/presentation/cli-format.js';
-
-import { packageRoot } from '../adapters/filesystem/package-root.js';
 import packageJson from '../../package.json' with { type: 'json' };
-import { ensureStandaloneGitRepo, hasGitRepository } from '../adapters/config/product-config.js';
+import { resolveConfiguration, resolveProcessConfiguration } from './config.js';
+import type { ParallixConfiguration } from '../application/ports/configuration.js';
+import * as fmt from '../application/presentation/cli-format.js';
+import { withinCliInvocation } from './review-operator-resume.js';
+import { commandInvocation } from './command-invocation.js';
+import { cliInvocation, type CliInvocation } from '../adapters/process/cli-invocation.js';
+import { packageRoot } from '../adapters/filesystem/package-root.js';
+import { hasGitRepository, ensureStandaloneGitRepo } from '../adapters/config/product-config.js';
 import { loadStateMap } from '../adapters/config/state-map.js';
-import activeWorkflow from '../adapters/cli/commands/active.js';
-import { createActiveCommand } from '../interfaces/cli/active.js';
-
-import { ensureFirstRunAgentConfig } from '../adapters/agents/first-run-config.js';
-
-import configWorkflow from '../adapters/cli/commands/config.js';
-import { createConfigCommand } from '../interfaces/cli/config.js';
-import diffWorkflow from '../adapters/cli/commands/diff.js';
-import { createDiffCommand } from '../interfaces/cli/diff.js';
-
-import { createLeadCommand } from '../interfaces/cli/lead.js';
-
-import { currentWorkPublication } from '../application/recording/current-work-recorder.js';
-
-import { FRESH_SESSION_MARKER_PORT } from '../application/recovery-supervisor.js';
-import type { SupervisorPort } from '../application/recovery-supervisor.js';
-
-import { missionId } from '../domain/mission.js';
-
-import * as agents from '../adapters/agents/agents.js';
-import { recordStageStatsSafe, stageLaunchSinceMs } from '../adapters/review/review-agent-fallback.js';
-import { resolveAgentModel } from '../adapters/config/product-config.js';
-
-import startupPreflight from '../adapters/cli/startup-preflight.js';
-
-import resolveConflictWorkflow from '../adapters/cli/commands/resolve-conflict.js';
-import { createResolveConflictCommand } from '../interfaces/cli/resolve-conflict.js';
-
-import { setupWizard } from '../adapters/review/setup-review.js';
-import { createSetupCommand } from '../interfaces/cli/setup.js';
-import setupReview from '../adapters/cli/commands/setup-review.js';
-
-import verifyWorkflow from '../adapters/verification/verification.js';
-import { createVerifyCommand } from '../interfaces/cli/verify.js';
-
-import { deriveAliases, type Command, type MainOptions } from '../interfaces/cli/runtime.js';
-import { createProductionApplicationServices } from './application-services.js';
-
-import { bindReviewPersistence } from './review-persistence.js';
+import { deriveAliases, shouldLaunchDefaultUi, type MainOptions } from '../interfaces/cli/runtime.js';
+import { missionTerminalRequest } from '../interfaces/cli/mission-terminal-policy.js';
 
 function resolveRuntimePath(): string {
   return fileURLToPath(import.meta.url);
@@ -99,6 +50,7 @@ interface ReviewEventParsed {
 }
 
 interface RunOptions {
+  /** Internal forwarded invocations carry no direct operator authority. */
   operatorInvocation?: boolean;
   cliInvocation?: CliInvocation;
   log?: typeof fmt.log.plain;
@@ -108,103 +60,32 @@ interface RunOptions {
   environment?: NodeJS.ProcessEnv;
 }
 
-function createCommandRegistry(rootDir: string, configuration: ParallixConfiguration, operatorReview = false): Record<string, Command> {
-  const scope = createCliServiceScope(rootDir, configuration);
-  const { withGraph, openServices } = scope;
-  const active = createActiveCommand((request, options) => activeWorkflow([...request.args], options));
-  const config = createConfigCommand((request, options) => configWorkflow([...request.args], options));
-  const diff = createDiffCommand((request, options) => diffWorkflow([...request.args], options));
-  const resolveConflict = createResolveConflictCommand((request, options) => resolveConflictWorkflow([...request.args], options));
-  const setup = createSetupCommand((request, options) => setupWizard([...request.args], options));
-  const verify = createVerifyCommand((request, options) => verifyWorkflow([...request.args], options));
-  const context: CliCommandContext = { rootDir, configuration, packageDir, scope, active, operatorReview, commands: () => registry };
-  const configuredCommands: Record<string, Command> = {
-    config,
-    diff,
-    'verify-env': startupPreflight,
-    'resolve-conflict': resolveConflict,
-    setup,
-    'setup-review': setupReview,
-    verify,
-    ...createAuthoringCommands(context), ...createLegacyCommands(context), ...createReadCommands(context), ...createLifecycleCommands(context),
-  };
-  const registry: Record<string, Command> = Object.fromEntries(["active", "recover", "config", "goal", "repro", "classification", "scope", "gate", "criterion", "mission", "depends", "nel", "checkpoint", "assign", "verdict", "resolve", "revoke-review", "revoke", "unassign", "diff", "history", "attach", "draft", "integrate", "cancel", "import-legacy", "migrate-legacy-adhoc-ids", "audit-legacy", "verify-env", "rebase", "resolve-conflict", "review", "setup", "setup-review", "stats", "github-publish-status", "status", "verify", "web", "ui"].map(name => [name, configuredCommands[name]]));
-  registry.lead = (args: string[]) => withGraph(async services => {
-    const forwards = new Set<Promise<unknown>>();
-    const currentWork = services.currentWork;
-    const launchRecovery: SupervisorPort['launchRecovery'] = async (request) => {
-      fmt.log.info(`[lead] Starting fresh recovery agent for ${fmt.slug(request.missionId)} with a general diagnostic prompt`);
-      let publication: ReturnType<typeof currentWorkPublication> = null;
-      try {
-        const { worktree, prompt } = leadRecoveryWorkspace(request);
-        fmt.log.info(`[lead] Recovery prompt for ${fmt.slug(request.missionId)}:\n---\n${prompt}\n---`);
-        const assigned = await services.mission?.store.load(missionId(request.missionId));
-        const assignedAgent = assigned?.kind === 'found' ? assigned.mission.assignee ?? undefined : undefined;
-        publication = currentWorkPublication({
-          slug: request.missionId,
-          operationId: `recovery-${Date.now()}`,
-          phase: 'recovery',
-          summary: `recovery agent working ${request.missionId} after ${request.attemptedOperation}`,
-        });
-        if (publication) { await currentWork.running(publication); }
-        const launched = await agents.startAgent('execute', {
-          configuration,
-          prompt,
-          worktree,
-          agent: assignedAgent,
-          slug: request.missionId,
-          role: 'implementer',
-          // Without this the launcher would resume the implementer session
-          // that got stuck. Recovery is a new context by definition.
-          sessionMarkerPort: FRESH_SESSION_MARKER_PORT,
-        });
-        const agent = launched?.agent;
-        // A recovery agent spends tokens like any other launch. Recording it
-        // on the mission's execute stage is what keeps the mission's usage
-        // from under-reporting the work the supervisor caused.
-        if (agent) {
-          await recordStageStatsSafe('active', {
-            stage: 'recovery',
-            slug: request.missionId,
-            rootDir: worktree,
-            worktree,
-            implementer: agent,
-            result: launched?.result,
-            sinceMs: stageLaunchSinceMs(launched?.result),
-            model: resolveAgentModel(agent, worktree),
-          });
-        }
-        fmt.log.info(`[lead] Recovery agent ${agent ?? 'with no reported family'} finished for ${fmt.slug(request.missionId)}; rechecking the board`);
-        return `${agent ?? 'agent with no reported family'} ran in ${worktree}`;
-      } catch (error) {
-        fmt.log.fail(`[lead] Recovery agent for ${fmt.slug(request.missionId)} failed: ${error instanceof Error ? error.message : String(error)}`);
-        throw error;
-      } finally {
-        if (publication) { await currentWork.ended(publication); }
-      }
-    };
-    try { return await createLeadCommand(createLeadSupervisorPort(services, forwards, { rootDir, scope, active, registry, runPublicCli: run, launchRecovery }))(args); }
-    finally { await Promise.allSettled(forwards); }
-  });
-  ownWorkflowCli(registry, async () => attachWorkflowOperations(rootDir, configuration, await openServices(rootDir)));
-  return registry;
-}
-
-/**
- * Bind the review verbs to the existing recorders. Composition owns the adapter
- * imports so the interface module stays free of them.
- */
-
-/** Mission write services, or a clear error when the operator DB is unavailable. */
-
-function createRuntimeOptions(rootDir: string, configuration: ParallixConfiguration, operatorReview = false): Pick<MainOptions, 'commandFns' | 'ensureStandaloneGitRepoFn' | 'loadAliasesFn' | 'product' | 'runtime'> {
-  return {
-    commandFns: Object.fromEntries(Object.entries(createCommandRegistry(rootDir, configuration, operatorReview)).map(([name, command]) => [name, (args: string[], options: Record<string, unknown> = {}) => command(args, { ...options, configuration })])),
+async function runtimeOptions(rootDir: string, configuration: ParallixConfiguration, operatorReview = false, command = ''): Promise<Pick<MainOptions, 'commandFns' | 'ensureStandaloneGitRepoFn' | 'loadAliasesFn' | 'product' | 'runtime'>> {
+  const base = {
     runtime: configuration.runtime,
     ensureStandaloneGitRepoFn: ensureStandaloneGitRepo,
-    loadAliasesFn: options => deriveAliases(loadStateMap(options)),
+    loadAliasesFn: (options: { readonly rootDir?: string }) => deriveAliases(loadStateMap(options)),
     product: { name: packageJson.name, version: packageJson.version },
   };
+  if (command === 'verdict' || command === 'resolve') {
+    const { createReviewVerbCommands } = await import('./cli-review-verbs.js');
+    return { ...base, commandFns: createReviewVerbCommands(rootDir, configuration) };
+  }
+  // Brief writes need the Mission authority without loading execute or presentation composition.
+  if (command === 'classification' || command === 'goal' || command === 'checkpoint') {
+    const { createBriefWriteCommands } = await import('./cli-brief-writes.js');
+    return { ...base, commandFns: createBriefWriteCommands(rootDir, configuration) };
+  }
+  if (command === 'config') {
+    const [{ default: config }, { createConfigCommand }] = await Promise.all([
+      import('../adapters/cli/commands/config.js'), import('../interfaces/cli/config.js'),
+    ]);
+    const invoke = createConfigCommand((request, options) => config([...request.args], options));
+    return { ...base, commandFns: { config: (args: string[], options: Record<string, unknown> = {}) => invoke(args, { ...options, configuration }) } };
+  }
+  if (!command && !shouldLaunchDefaultUi({ runtime: configuration.runtime })) { return { ...base, commandFns: {} }; }
+  const { createRuntimeOptions } = await import('./cli-command-registry.js');
+  return createRuntimeOptions(rootDir, configuration, operatorReview);
 }
 
 export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedArgs {
@@ -305,7 +186,7 @@ export function parseReviewEventArgs(args: string[]): ReviewEventParsed {
     skipGit: false,
   };
 
-  for (let i = 1;i < args.length;i += 1) {
+  for (let i = 1; i < args.length; i += 1) {
     const arg = args[i];
     if (arg === '--skip-git') {
       parsed.skipGit = true;
@@ -321,12 +202,12 @@ export function parseReviewEventArgs(args: string[]): ReviewEventParsed {
     }
     i += 1;
 
-    if (key === 'type') { parsed.type = value; }
-    else if (key === 'actor') { parsed.actor = value; }
-    else if (key === 'content') { parsed.content = value; }
-    else if (key === 'disposition') { parsed.disposition = value; }
-    else if (key === 'timestamp') { parsed.timestamp = value; }
-    else { throw new Error(`Unknown review-event option: ${arg}`); }
+    if (key === 'type') {parsed.type = value;}
+    else if (key === 'actor') {parsed.actor = value;}
+    else if (key === 'content') {parsed.content = value;}
+    else if (key === 'disposition') {parsed.disposition = value;}
+    else if (key === 'timestamp') {parsed.timestamp = value;}
+    else {throw new Error(`Unknown review-event option: ${arg}`);}
   }
 
   if (!parsed.type) {
@@ -338,8 +219,9 @@ export function parseReviewEventArgs(args: string[]): ReviewEventParsed {
 
 async function runBareCommand(parsed: ParsedArgs, configuration: ParallixConfiguration, log: typeof fmt.log.plain, error: typeof fmt.log.plainError): Promise<number> {
   const { main } = await import('../interfaces/cli/runtime.js');
+  const options = await runtimeOptions(parsed.target, configuration, false, parsed.command);
   return commandInvocation(exitFn => main([], {
-    ...createRuntimeOptions(parsed.target, configuration),
+    ...options,
     cwdFn: () => parsed.target,
     exitFn,
     logFn: log,
@@ -349,10 +231,10 @@ async function runBareCommand(parsed: ParsedArgs, configuration: ParallixConfigu
 
 async function runReviewEventCommand(parsed: ParsedArgs, configuration: ParallixConfiguration, log: typeof fmt.log.plain, error: typeof fmt.log.plainError): Promise<number> {
   const eventArgs = parseReviewEventArgs(parsed.args);
-  const services = await createProductionApplicationServices(parsed.target, undefined, { configuration });
+  const [{ createMissionApplicationServices }, { bindReviewPersistence }] = await Promise.all([import('./mission-services.js'), import('./review-persistence.js')]);
+  const mission = await createMissionApplicationServices(parsed.target, { configuration });
   try {
-    if (!services.mission) { throw new Error('mission services are unavailable'); }
-    const result = await bindReviewPersistence(services.mission.store, services.mission.lifecycle).createEvent(
+    const result = await bindReviewPersistence(mission.store, mission.lifecycle).createEvent(
       eventArgs.slug,
       eventArgs.type || '',
       { actor: eventArgs.actor || '', content: eventArgs.content, disposition: eventArgs.disposition || undefined, timestamp: eventArgs.timestamp || undefined },
@@ -361,39 +243,45 @@ async function runReviewEventCommand(parsed: ParsedArgs, configuration: Parallix
     if (result.ok && result.path) { log(fmt.status('PASS', `Review event path: ${path.relative(parsed.target, result.path)}`)); }
     return result.ok ? 0 : 1;
   } finally {
-    await services.operatorState.close();
+    await mission.store.drain?.();
   }
 }
 
-function ensureWorkflowAgentConfig(command: string, target: string, configuration: ParallixConfiguration) {
+async function ensureWorkflowAgentConfig(command: string, target: string, configuration: ParallixConfiguration) {
   if (!['draft', 'active', 'review'].includes(command) || !hasGitRepository(target)) { return; }
+  const { ensureFirstRunAgentConfig } = await import('../adapters/agents/first-run-config.js');
   try { ensureFirstRunAgentConfig({ rootDir: target, worktree: target, configuration }); } catch { /* Best-effort first-run detection. */ }
+}
+
+async function hostTargetCommand(parsed: ParsedArgs, configuration: ParallixConfiguration, log: typeof fmt.log.plain, cli?: CliInvocation) {
+  const terminal = missionTerminalRequest(parsed.command, parsed.args) ? await import('./mission-terminal.js') : null;
+  const hosted = cli && terminal ? await terminal.hostMissionCommand(parsed.command, parsed.args, parsed.target, log, cli, { configuration }) : null;
+  return { terminal, hosted };
 }
 
 async function runTargetCommand(parsed: ParsedArgs, configuration: ParallixConfiguration, log: typeof fmt.log.plain, error: typeof fmt.log.plainError, cli?: CliInvocation, operatorInvocation = true): Promise<number> {
   const previousCwd = process.cwd();
   try {
-    const [startupPreflightModule, workflow] = await Promise.all([
-      import('../adapters/cli/startup-preflight.js'),
-      import('../interfaces/cli/runtime.js'),
-    ]);
+    const workflow = await import('../interfaces/cli/runtime.js');
     process.chdir(parsed.target);
-    const hosted = cli ? await hostMissionCommand(parsed.command, parsed.args, parsed.target, log, cli, { configuration }) : null;
+    const { terminal, hosted } = await hostTargetCommand(parsed, configuration, log, cli);
     if (hosted !== null) { return hosted; }
     if (parsed.command === 'review-event') { return await runReviewEventCommand(parsed, configuration, log, error); }
     if (parsed.command === 'verify-env') {
+      const startupPreflightModule = await import('../adapters/cli/startup-preflight.js');
       return startupPreflightModule.default([], { command: 'verify-env', returnResult: true, log, error })?.pass ? 0 : 1;
     }
-    ensureWorkflowAgentConfig(parsed.command || '', parsed.target, configuration);
+    await ensureWorkflowAgentConfig(parsed.command || '', parsed.target, configuration);
+    const options = await runtimeOptions(parsed.target, configuration, operatorInvocation && parsed.command === 'review', parsed.command);
     const invoke = () => commandInvocation(exitFn => workflow.main([parsed.command, ...parsed.args], {
-      ...createRuntimeOptions(parsed.target, configuration, operatorInvocation && parsed.command === 'review'),
+      ...options,
       cwdFn: () => parsed.target,
       exitFn,
       logFn: log,
       errorFn: error,
     }));
     // A mission operation run in this process is retained as mission history too.
-    return await (hasGitRepository(parsed.target) ? captureMissionCommand(parsed.command || '', parsed.args, parsed.target, configuration, invoke) : invoke());
+    return await (terminal && hasGitRepository(parsed.target) ? terminal.captureMissionCommand(parsed.command || '', parsed.args, parsed.target, configuration, invoke) : invoke());
   } catch (err) {
     error(fmt.status('FAIL', (err as Error).message));
     return 1;

@@ -354,16 +354,22 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
     assert.equal(services.store.constructor.name, 'SqliteMissionStore');
 
     const compositionSource = fs.readFileSync(
-      path.join(process.cwd(), 'src/composition/application-services.ts'),
+      path.join(process.cwd(), 'src/composition/mission-services.ts'),
       'utf8',
     );
     // One SQLite store construction, and no CompatibilityMissionStore in the graph.
     const persistenceSource = fs.readFileSync(
       path.join(process.cwd(), 'src/composition/mission-persistence.ts'), 'utf8',
     );
-    assert.ok(compositionSource.includes('const store = createMissionStore(db)'));
+    const authoritySource = fs.readFileSync(
+      path.join(process.cwd(), 'src/composition/mission-authority.ts'), 'utf8',
+    );
+    assert.ok(compositionSource.includes('const { db, repositoryId: repoId, store, lifecycle } = await createMissionAuthority(rootDir, overrides)'));
+    assert.equal(authoritySource.match(/createMissionStore\(db\)/g)?.length, 1);
+    assert.ok(!compositionSource.includes('createMissionStore('));
     assert.equal(persistenceSource.match(/new SqliteMissionStore\(/g)?.length, 1);
     assert.ok(!compositionSource.includes('new CompatibilityMissionStore('));
+    assert.ok(!authoritySource.includes('new CompatibilityMissionStore('));
     assert.equal(services.intake.constructor.name, 'MissionIntakeService');
     assert.equal(services.lifecycle.constructor.name, 'MissionLifecycleService');
     assert.equal(services.integration.constructor.name, 'MissionIntegrationService');

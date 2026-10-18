@@ -118,27 +118,6 @@
           ]
         },
         {
-          "ruleId": "js/incomplete-sanitization",
-          "suppressions": [
-            {
-              "justification": "Escapes the pinned version dots for the RegExp; the pattern feeds an assert.match, not a shell or browser. Test-only, no sink."
-            }
-          ],
-          "locations": [
-            {
-              "physicalLocation": {
-                "artifactLocation": {
-                  "uri": "test/integration/packaging/native-sea-executable-smoke.test.ts"
-                },
-                "region": {
-                  "startLine": 162,
-                  "startColumn": 1
-                }
-              }
-            }
-          ]
-        },
-        {
           "ruleId": "js/missing-rate-limiting",
           "suppressions": [
             {
@@ -195,48 +174,6 @@
                 },
                 "region": {
                   "startLine": 82,
-                  "startColumn": 1
-                }
-              }
-            }
-          ]
-        },
-        {
-          "ruleId": "js/shell-command-injection-from-environment",
-          "suppressions": [
-            {
-              "justification": "Test-only: `gone` is a fresh mkdtempSync path created in-process (not attacker input) and the executable is the pinned build artifact. Script forces a deterministic crash to exercise source maps. Array-form spawnSync with no shell."
-            }
-          ],
-          "locations": [
-            {
-              "physicalLocation": {
-                "artifactLocation": {
-                  "uri": "test/integration/packaging/native-sea-executable-smoke.test.ts"
-                },
-                "region": {
-                  "startLine": 371,
-                  "startColumn": 1
-                }
-              }
-            }
-          ]
-        },
-        {
-          "ruleId": "js/shell-command-injection-from-environment",
-          "suppressions": [
-            {
-              "justification": "Test-only: `gone` is a fresh mkdtempSync path created in-process (not attacker input); the bundle path is the pinned build artifact. Script forces a deterministic crash to exercise source maps. Array-form spawnSync with no shell."
-            }
-          ],
-          "locations": [
-            {
-              "physicalLocation": {
-                "artifactLocation": {
-                  "uri": "test/integration/packaging/native-sea-executable-smoke.test.ts"
-                },
-                "region": {
-                  "startLine": 522,
                   "startColumn": 1
                 }
               }

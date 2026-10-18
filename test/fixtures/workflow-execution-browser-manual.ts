@@ -15,7 +15,7 @@ const retainedHistory = process.argv.includes('--retained-history');
 const screenshotPath = process.argv.includes('--screenshot') ? process.argv[process.argv.indexOf('--screenshot') + 1] : undefined;
 const bundle = await bundleWorkflowChild();
 const fixture = await workflowBoard(2, { providers: true, cli: bundle.cli });
-const browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true });
+const browser = await chromium.launch({ args: ['--disable-extensions'], executablePath: '/usr/bin/chromium', headless: true });
 let cli: ReturnType<typeof spawn> | null = null;
 let cliIdentity: string | null = null;
 const closeCli = () => { if (cli?.pid && cliIdentity && processStartIdentity(cli.pid) === cliIdentity) { cli.kill('SIGTERM'); } };

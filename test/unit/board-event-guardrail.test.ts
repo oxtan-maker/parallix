@@ -59,6 +59,8 @@ const INDEX_MODULE = 'src/adapters/sqlite/index.ts';
 const APPLICATION_PORTS_MODULE = 'src/application/ports.ts';
 const OPERATION_HISTORY_PORT_MODULE = 'src/application/ports/operation-history.ts';
 const COMPOSITION_ROOT_MODULE = 'src/composition/application-services.ts';
+/** Wires the read-only stats lane-history repository; never appends events. */
+const MISSION_COMPOSITION_MODULE = 'src/composition/mission-services.ts';
 const BOARD_COMPOSITION_MODULE = 'src/composition/board-projection.ts';
 const PRODUCTION_CAPABILITIES_MODULE = 'src/composition/production-capabilities.ts';
 /** Reads the schema of every mission_id table (incl. board_lane_events); never appends. */
@@ -79,6 +81,7 @@ const CONTRACT_MODULES = new Set([
   APPLICATION_PORTS_MODULE,
   OPERATION_HISTORY_PORT_MODULE,
   COMPOSITION_ROOT_MODULE,
+  MISSION_COMPOSITION_MODULE,
   BOARD_COMPOSITION_MODULE,
   PRODUCTION_CAPABILITIES_MODULE,
   LEGACY_ADHOC_MIGRATION_MODULE,

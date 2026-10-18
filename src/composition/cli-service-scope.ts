@@ -16,11 +16,12 @@ export function createCliServiceScope(rootDir: string, configuration: ParallixCo
     const services = await openServices(rootDir, undefined, options);
     try { return await invoke(services); } finally { await services.operatorState.close(); }
   };
-  const withMissionFactories = async (invoke: (_missionServicesFn: (rootDir: string) => Promise<import('./application-services.js').MissionApplicationServices>) => unknown) => {
+  const withMissionFactories = async (invoke: (_missionServicesFn: (rootDir: string) => Promise<import('./application-services.js').MissionApplicationServices>) => unknown, borrowed?: Awaited<ReturnType<typeof createProductionApplicationServices>>) => {
     const opened: Awaited<ReturnType<typeof createProductionApplicationServices>>[] = [];
     const missionServicesFn = async (requestedRoot: string) => {
-      const services = await openServices(requestedRoot);
-      opened.push(services);
+      const existing = requestedRoot === rootDir ? borrowed : undefined;
+      const services = existing ?? await openServices(requestedRoot);
+      if (!existing) { opened.push(services); }
       if (!services.mission) { throw new Error('mission services are unavailable'); }
       return services.mission;
     };
@@ -30,7 +31,12 @@ export function createCliServiceScope(rootDir: string, configuration: ParallixCo
   };
   const withMissionAndGraph = (
     run: (_missionServicesFn: (rootDir: string) => Promise<import('./application-services.js').MissionApplicationServices>, _services: Awaited<ReturnType<typeof createProductionApplicationServices>>) => unknown,
-  ) => withMissionFactories(missionServicesFn => withGraph(services => run(missionServicesFn, services)));
+    options: Omit<ProductionApplicationServiceOptions, 'configuration'> = {},
+    borrowed?: Awaited<ReturnType<typeof createProductionApplicationServices>>,
+  ) => {
+    const invoke = (services: Awaited<ReturnType<typeof createProductionApplicationServices>>) => withMissionFactories(missionServicesFn => run(missionServicesFn, services), services);
+    return borrowed ? invoke(borrowed) : withGraph(invoke, options);
+  };
   return { openServices, withGraph, withMissionFactories, withMissionAndGraph };
 }
 export type CliServiceScope = ReturnType<typeof createCliServiceScope>;

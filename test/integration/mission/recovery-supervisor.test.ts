@@ -668,7 +668,7 @@ test('a recovery launch is attributed, so mission usage does not under-report it
 
   // And the launch site records them: the wiring reads the launcher result and
   // hands it to the same stats recorder every other stage launch uses.
-  const composition = fs.readFileSync('src/composition/create-cli.ts', 'utf8');
+  const composition = fs.readFileSync('src/composition/cli-command-registry.ts', 'utf8');
   const launchRecovery = composition.slice(composition.indexOf('const launchRecovery:'), composition.indexOf('try { return await createLeadCommand'));
   const supervisor = fs.readFileSync('src/composition/lead-supervisor.ts', 'utf8');
   assert.match(launchRecovery, /const \{ worktree, prompt \} = leadRecoveryWorkspace\(request\)/, 'the guarded launch uses the composed workspace and prompt');
@@ -699,7 +699,7 @@ test('a recovery launch is attributed, so mission usage does not under-report it
 });
 
 test('lead starts long forward workflows without blocking fleet supervision', () => {
-  const composition = fs.readFileSync('src/composition/create-cli.ts', 'utf8');
+  const composition = fs.readFileSync('src/composition/cli-command-registry.ts', 'utf8');
   const supervisor = fs.readFileSync('src/composition/lead-supervisor.ts', 'utf8');
   const runAction = supervisor.slice(supervisor.indexOf('runAction: async'));
   assert.match(

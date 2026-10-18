@@ -4,6 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { run } from '../../../src/composition/create-cli.js';
+// This in-process fixture historically loaded the command composition before
+// measuring autodetection. Keep that immutable setup outside individual cases;
+// cold subprocess startup is covered by the CLI exit/output contracts.
+import '../../../src/composition/cli-command-registry.js';
 import { setCommandPathProbe, setLauncherHealthProbe } from '../../../src/adapters/agents/launcher-probes.js';
 import { mkdtemp } from '../../helpers/temp-dir.js';
 

@@ -8,7 +8,7 @@ import { repositoryId } from '../../src/domain/repository.js';
 import { fixtureMission } from './mission-builders.js';
 
 /** Fresh populated operator state, never copied from an operator or a running workflow. */
-export async function seedBoardLoading(input: string, count = 120) {
+export async function seedBoardLoading(input: string, count = 120, options: { telemetry?: boolean } = {}) {
   const root = path.join(input, 'repository');
   const home = path.join(input, 'home');
   fs.mkdirSync(root, { recursive: true });
@@ -29,6 +29,9 @@ export async function seedBoardLoading(input: string, count = 120) {
         title: `Board loading fixture ${index}`,
       }), null);
     }
+    // The loading benchmark needs dense telemetry; HTTP smoke contracts only
+    // need persisted Missions. Leave that stress workload with its owner.
+    if (options.telemetry === false) { return { root, home }; }
     await database.execute('BEGIN');
     for (let index = 0; index < count * 20; index++) {
       await database.execute(`INSERT INTO board_lane_events

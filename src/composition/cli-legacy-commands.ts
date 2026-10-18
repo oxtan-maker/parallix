@@ -1,12 +1,3 @@
-
-
-import { migrateLegacyAdhocIdsMissions } from '../application/legacy-adhoc-migration.js';
-
-import { createImportLegacyCommand } from '../interfaces/cli/import-legacy.js';
-import { createMigrateLegacyAdhocIdsCommand } from '../interfaces/cli/migrate-legacy-adhoc-ids.js';
-import { importLegacyMissions } from '../adapters/backlog/legacy-mission-import.js';
-import { auditLegacyFiles } from '../adapters/backlog/legacy-mission-audit.js';
-
 import { type Command } from '../interfaces/cli/runtime.js';
 
 import type { CliCommandContext } from './cli-service-scope.js';
@@ -15,7 +6,10 @@ export function createLegacyCommands(context: CliCommandContext): Record<string,
   const { rootDir, scope } = context;
   const { withGraph } = scope;
   return {
-    'import-legacy': (args) => withGraph(services => {
+    'import-legacy': (args) => withGraph(async services => {
+      const [{ createImportLegacyCommand }, { importLegacyMissions }] = await Promise.all([
+        import('../interfaces/cli/import-legacy.js'), import('../adapters/backlog/legacy-mission-import.js'),
+      ]);
       if (!services.mission) { throw new Error('mission services are unavailable'); }
       const mission = services.mission;
       return createImportLegacyCommand(
@@ -31,6 +25,9 @@ export function createLegacyCommands(context: CliCommandContext): Record<string,
       )(args);
     }),
     'migrate-legacy-adhoc-ids': (args) => withGraph(async services => {
+      const [{ createMigrateLegacyAdhocIdsCommand }, { migrateLegacyAdhocIdsMissions }] = await Promise.all([
+        import('../interfaces/cli/migrate-legacy-adhoc-ids.js'), import('../application/legacy-adhoc-migration.js'),
+      ]);
       if (args.length > 0) {
         throw new Error('Usage: px migrate-legacy-adhoc-ids');
       }
@@ -39,6 +36,7 @@ export function createLegacyCommands(context: CliCommandContext): Record<string,
       return createMigrateLegacyAdhocIdsCommand(() => migrateLegacyAdhocIdsMissions(mission.store))(args);
     }),
     'audit-legacy': (args) => withGraph(async services => {
+      const { auditLegacyFiles } = await import('../adapters/backlog/legacy-mission-audit.js');
       if (args.length > 1 || (args.length === 1 && args[0] !== '--json')) {
         throw new Error('Usage: px audit-legacy [--json]');
       }

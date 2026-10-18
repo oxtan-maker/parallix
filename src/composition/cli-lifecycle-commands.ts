@@ -1,6 +1,7 @@
 import { attachWorkflowOperations } from './workflow-operations.js';
 import { bindReviewOperatorResume } from './review-operator-resume.js';
 import { commandInvocation } from './command-invocation.js';
+import { hasMissionWriteAuthorization } from '../application/ports/mission-write-authorization.js';
 import { createReviewClassification, createIntegrationApprovalRestoration } from './review-classification.js';
 
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
@@ -59,48 +60,7 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
   const { rootDir, configuration, scope } = context;
   const { withGraph, withMissionFactories, withMissionAndGraph } = scope;
   const withActiveService = createActiveService(context);
-  const runIntegrated = createIntegrationRunner(context);
-  return {
-    active: withActiveService,
-    recover: (args) => withGraph(services => {
-      if (!services.mission) { throw new Error('mission services are unavailable'); }
-      return recoverMissionCommand(args, {
-        taskStatus: (slug) => {
-          const task = findTaskFile(slug, rootDir);
-          return task ? getTaskStatus(task) : null;
-        },
-        // Authoritative payload containment: `px integrate` lands with
-        // `git merge --squash`, so a landed mission branch tip is *not*
-        // reachable from `main`. Detect the squash commit by subject in the
-        // primary branch log instead of branch ancestry (TASK-2492). A branch
-        // with no committed payload produces no squash commit, so it is never
-        // misreported as landed and never deleted (F2). See landed-squash.findLandedSquashOnBaseBranch.
-        alreadyMerged: async (slug) => findLandedSquashOnBaseBranch(rootDir, slug) !== null,
-        // Absent-aggregate recovery only: local Git evidence that the payload
-        // was squash-landed on the mission's recorded base branch (TASK-2516).
-        landedIntake: async (slug) => landedMissionIntake(slug, rootDir),
-        cleanup: (slug) => cleanupMissionWorktree(slug, { rootDir }),
-        store: services.mission.store,
-      });
-    }),
-    draft: (args, options) => withMissionAndGraph((missionServicesFn, services) => {
-      // Create adapter with missionServicesFn injected via withMissionFactories
-      const adapter = createDraftWorkflowAdapter({ missionServicesFn, configuration });
-      const useCase = new DraftCommandUseCase(adapter, services.currentWork);
-      const cmd = createDraftCommand(useCase);
-      return cmd(args, { ...options, missionServicesFn });
-    }),
-    integrate: (args, options) => withGraph(services =>
-      createIntegrateCommand(new IntegrateCommandUseCase({
-        execute: runIntegrated,
-      }, services.currentWork, () => inferSlug(undefined)))(args, options)),
-    cancel: (args) => withGraph(services => {
-      const controller = services.presentationCapabilities?.commandController;
-      if (!controller) { throw new Error('cancel requires BoardCommandController from presentation capabilities'); }
-      return createCancelCommand(controller)(args);
-    }),
-    rebase: createRebaseCommand((args, options) => withMissionFactories(missionServicesFn => rebase(args, { ...options, missionServicesFn }))),
-    review: (args, options) => withMissionAndGraph(async (missionServicesFn, services) => {
+  const runReview = (args: string[], options: Record<string, unknown> = {}, borrowed?: Awaited<ReturnType<typeof createProductionApplicationServices>>) => withMissionAndGraph(async (missionServicesFn, services) => {
       if (!services.mission) { throw new Error('mission services are unavailable'); }
       const mission = services.mission;
       const reviewerSessionPort = services.operatorState.db
@@ -146,7 +106,49 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
       // lane for the human to read the fresh PR and integrate; no path
       // auto-restarts integration or merges.
       return result;
-    })
+    }, { includePresentationCapabilities: false }, borrowed);
+  const runIntegrated = createIntegrationRunner(context, runReview);
+  return {
+    active: withActiveService,
+    recover: (args) => withGraph(services => {
+      if (!services.mission) { throw new Error('mission services are unavailable'); }
+      return recoverMissionCommand(args, {
+        taskStatus: (slug) => {
+          const task = findTaskFile(slug, rootDir);
+          return task ? getTaskStatus(task) : null;
+        },
+        // Authoritative payload containment: `px integrate` lands with
+        // `git merge --squash`, so a landed mission branch tip is *not*
+        // reachable from `main`. Detect the squash commit by subject in the
+        // primary branch log instead of branch ancestry (TASK-2492). A branch
+        // with no committed payload produces no squash commit, so it is never
+        // misreported as landed and never deleted (F2). See landed-squash.findLandedSquashOnBaseBranch.
+        alreadyMerged: async (slug) => findLandedSquashOnBaseBranch(rootDir, slug) !== null,
+        // Absent-aggregate recovery only: local Git evidence that the payload
+        // was squash-landed on the mission's recorded base branch (TASK-2516).
+        landedIntake: async (slug) => landedMissionIntake(slug, rootDir),
+        cleanup: (slug) => cleanupMissionWorktree(slug, { rootDir }),
+        store: services.mission.store,
+      });
+    }),
+    draft: (args, options) => withMissionAndGraph((missionServicesFn, services) => {
+      // Create adapter with missionServicesFn injected via withMissionFactories
+      const adapter = createDraftWorkflowAdapter({ missionServicesFn, configuration });
+      const useCase = new DraftCommandUseCase(adapter, services.currentWork);
+      const cmd = createDraftCommand(useCase);
+      return cmd(args, { ...options, missionServicesFn });
+    }),
+    integrate: (args, options) => withGraph(services =>
+      createIntegrateCommand(new IntegrateCommandUseCase({
+        execute: (innerArgs, innerOptions) => runIntegrated(innerArgs, innerOptions ?? {}, services),
+      }, services.currentWork, () => inferSlug(undefined)))(args, options), { includePresentationCapabilities: false }),
+    cancel: (args) => withGraph(services => {
+      const controller = services.presentationCapabilities?.commandController;
+      if (!controller) { throw new Error('cancel requires BoardCommandController from presentation capabilities'); }
+      return createCancelCommand(controller)(args);
+    }),
+    rebase: createRebaseCommand((args, options) => withMissionFactories(missionServicesFn => rebase(args, { ...options, missionServicesFn }))),
+    review: runReview
   };
 }
 
@@ -177,11 +179,11 @@ function createActiveService(context: CliCommandContext): Command {
   return withActiveService;
 }
 
-function createIntegrationRunner(context: CliCommandContext) {
+function createIntegrationRunner(context: CliCommandContext, runReview: (args: string[], options: Record<string, unknown>, borrowed?: Awaited<ReturnType<typeof createProductionApplicationServices>>) => Promise<unknown>) {
   const { rootDir, scope } = context;
-  const { withMissionAndGraph } = scope;
-  const runIntegrated = (innerArgs: string[], innerOptions: Record<string, unknown>) =>
-    withMissionAndGraph((missionServicesFn, services) => integrate(innerArgs, {
+  const { withMissionFactories } = scope;
+  const runIntegrated = (innerArgs: string[], innerOptions: Record<string, unknown>, services: Awaited<ReturnType<typeof createProductionApplicationServices>>) =>
+    withMissionFactories((missionServicesFn) => integrate(innerArgs, {
       ...innerOptions,
       // In-process CLI and board workflows must return through their owners:
       // process.exit skips current-work cleanup and caller verification.
@@ -190,18 +192,19 @@ function createIntegrationRunner(context: CliCommandContext) {
       }),
       missionServicesFn,
       reReviewFn: (slug: string) => reReviewRepairedRevision(slug, services, innerOptions.nestedWork),
-    }));
+    }), services);
   const reReviewRepairedRevision = async (slug: string, services: Awaited<ReturnType<typeof createProductionApplicationServices>>, nestedWork?: unknown) => {
     if (!services.mission) { throw new Error('mission services are unavailable'); }
     const before = await services.mission.store.load(missionId(slug));
     const roundBefore = before.kind === 'found' ? before.mission.review?.rounds.at(-1) : null;
-    const status = await commandInvocation(exit => context.commands().review([slug, '--continue'], {
-      integrationOwnsReview: true,
-      // The re-review runs inside `px integrate`: it publishes under that
-      // operation and hands the board back to it when it ends (TASK-2620).
-      nestedWork,
-      exit,
-    }));
+    const owned = hasMissionWriteAuthorization();
+    const status = await commandInvocation(exit => {
+      const options = { integrationOwnsReview: owned, nestedWork, exit };
+      // Reuse the owner's graph only inside an admitted integration. Internal
+      // callers without authority must enter through the public review wrapper.
+      return owned ? runReview([slug, '--continue'], options, services)
+        : context.commands().review([slug, '--continue'], options);
+    });
     if (status !== 0) { return false; }
     const after = await services.mission.store.load(missionId(slug));
     if (after.kind !== 'found' || after.mission.status !== 'integration' || !after.mission.review) { return false; }

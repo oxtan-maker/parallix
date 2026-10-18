@@ -31,6 +31,7 @@ import { SqliteMigrationRunner, loadDefaultMigrations } from '../../../src/adapt
 import { composeBoardProjection } from '../../../src/composition/board-projection.js';
 import { MissionEditService } from '../../../src/application/mission-edit-service.js';
 import { MissionCard } from '../../../src/interfaces/tui/mission-card.js';
+import { initCommittedRepository } from '../../fixtures/git-repository.js';
 
 
 // TASK-2521.03 (was test/task-2521-03-context-cli.integration.test.ts)
@@ -77,13 +78,8 @@ describe('Context CLI', () => {
     process.env.PARALLIX_HOME = home;
 
     try {
-      // Review verdicts require an actual implementer revision.
-      for (const args of [
-        ['init', '-b', 'main'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '--allow-empty', '-m', 'Seed review revision'],
-      ]) {
-        const result = childProcess.spawnSync('git', args, { cwd: repo, encoding: 'utf8' });
-        assert.equal(result.status, 0, result.stderr);
-      }
+      // Verdict recording pins the implementer revision to a real Git HEAD.
+      initCommittedRepository(repo);
       const { db } = await initOperatorState({ homeDir: home });
       const store = new SqliteMissionStore(db);
       const mission: Mission = {

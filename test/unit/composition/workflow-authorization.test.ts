@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { inheritWorkflowAuthorization } from '../../../src/composition/workflow-authorization.js';
+import { bindInheritedWorkflowAuthorization, inheritWorkflowAuthorization } from '../../../src/composition/workflow-authorization.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
-import { authorizeMissionWrite, authorizedOperationId, configureMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
+import { authorizeMissionWrite, authorizedOperationId, configureMissionWriteAuthorization, hasMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
 import type { WorkflowOperation } from '../../../src/domain/workflow-operation.js';
 
@@ -25,5 +25,14 @@ test('inherited CLI authority keeps the workflow fence and refuses writes after 
 test('an inherited command fails closed without its ownership authority (TASK-2750)', () => {
   try {
     assert.throws(() => inheritWorkflowAuthorization(resolveConfiguration({ PARALLIX_WORKFLOW_OPERATION: 'missing' }), null), /unavailable/);
+  } finally { configureMissionWriteAuthorization(null); }
+});
+
+test('workflow operations can explicitly opt out of inherited authority (TASK-2762)', () => {
+  try {
+    const configuration = resolveConfiguration({ PARALLIX_WORKFLOW_OPERATION: 'parent' });
+    bindInheritedWorkflowAuthorization(configuration, false, null, null);
+    assert.equal(hasMissionWriteAuthorization(), false);
+    assert.throws(() => bindInheritedWorkflowAuthorization(configuration, undefined, null, null), /unavailable/);
   } finally { configureMissionWriteAuthorization(null); }
 });

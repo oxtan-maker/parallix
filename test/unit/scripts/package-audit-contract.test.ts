@@ -28,6 +28,9 @@ const VALID_PACKAGE_FILES = [
   'build/px.mjs.map',
   'build/sbom.json',
   'build/templates/mission-scaffold.md',
+  'build/web/index.html',
+  'build/web/manifest.json',
+  'build/web/assets/index-hash.js',
   'package.json',
   'README.md',
   'LICENSE',
@@ -77,6 +80,15 @@ test('package-content audit rejects payload files outside build/ and the metadat
     violationsFor([...VALID_PACKAGE_FILES, 'stats.csv']).join('\n'),
     /unexpected package file outside build\/: stats\.csv/,
   );
+});
+
+test('package-content audit rejects omitted web payloads (TASK-2762)', () => {
+  for (const required of ['build/web/index.html', 'build/web/manifest.json']) {
+    assert.ok(violationsFor(VALID_PACKAGE_FILES.filter(file => file !== required))
+      .includes(`missing required package file: ${required}`));
+  }
+  assert.ok(violationsFor(VALID_PACKAGE_FILES.filter(file => !file.startsWith('build/web/assets/')))
+    .includes('missing required package asset directory: build/web/assets/'));
 });
 
 test('pack report parses past prepack build output on stdout', () => {

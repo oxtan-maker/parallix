@@ -141,6 +141,10 @@ the authoritative record of what is inlined into the bundle:
   number, sorted components);
 - `build/manifest.sha256` — SHA-256 of every other file under `build/`.
 
+Tokenizer tables ship as a checksummed runtime asset to reduce CLI startup and
+packaging cost. Distribute the complete `build/` directory so token accounting
+uses the same pinned data as source development.
+
 The same step runs a license audit and fails the build on any dependency license
 outside the approved set (`scripts/release-metadata.js`).
 

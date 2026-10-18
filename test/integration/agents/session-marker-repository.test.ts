@@ -8,11 +8,10 @@ import { agentFamily as fixtureAgentFamily } from '../../../src/domain/agents.js
 // Covers: resume, failover, duplicate marker, stale update, restart,
 // and database-unavailable scenarios (SC9).
 
-import { describe, it } from 'node:test';
+import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../../../src/adapters/sqlite/migration-runner.js';
@@ -25,18 +24,33 @@ import { missionId } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import { startAgent } from '../../../src/adapters/agents/agents.js';
+import { mkdtemp } from '../../helpers/temp-dir.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function createTempDir(name: string): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `session-marker-test-${name}-`));
+  return mkdtemp(`session-marker-test-${name}-`);
 }
 
 function cleanupTempDir(dir: string): void {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
 }
+
+let schemaTemplate: string | undefined;
+let schemaRoot: string | undefined;
+
+// Marker cases exercise real SQLite writes, not migration throughput. Build
+// an immutable empty schema once and give every case a private file/connection.
+// The migration-specific cases below still apply their migrations themselves.
+before(async () => {
+  const fixture = await createDbWithSchema();
+  schemaRoot = fixture.dir;
+  try { schemaTemplate = await fixture.db.backup(); }
+  finally { await fixture.db.close(); }
+});
+after(() => { if (schemaRoot) cleanupTempDir(schemaRoot); });
 
 async function createDbWithSchema(): Promise<{
   db: SqliteDatabaseAdapter;
@@ -46,10 +60,17 @@ async function createDbWithSchema(): Promise<{
   const dir = createTempDir('db');
   const dbPath = path.join(dir, 'test.db');
   const db = new SqliteDatabaseAdapter();
-  await db.open({ path: dbPath });
-  const runner = new SqliteMigrationRunner(db);
-  await runner.applyPending(loadDefaultMigrations());
-  return { db, dir, dbPath };
+  try {
+    if (schemaTemplate) fs.copyFileSync(schemaTemplate, dbPath);
+    await db.open({ path: dbPath });
+    const runner = new SqliteMigrationRunner(db);
+    await runner.applyPending(loadDefaultMigrations());
+    return { db, dir, dbPath };
+  } catch (error) {
+    await db.close().catch(() => {});
+    cleanupTempDir(dir);
+    throw error;
+  }
 }
 
 const TEST_REPOSITORY_ID = repositoryId('session-marker-test-repository');

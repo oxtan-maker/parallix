@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import test from 'node:test';
+import test, { before } from 'node:test';
+import { prepareMigratedSchema, migratedSchemaPath } from '../../fixtures/migrated-database.js';
 import { openMigratedMissionStore } from '../../fixtures/mission-sqlite-store.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
 import { makePorts, makeRecorder, SLUG } from '../../helpers/handoff-ports.js';
@@ -27,7 +28,7 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' | 'forc
     brief: { goal: 'repair', why: 'proof', scope: null, outOfScope: [] },
     successCriteria: ['repair works', 'prior proof retained'], completedSuccessCriteria: [0, 1],
     declaredGates: [command], checkpoints: [prior, { missionId: id, name: 'CP-2', firstLine: 'remaining work', goalCheck: [], nextActionText: '' }],
-  })]);
+  })], migratedSchemaPath());
   try {
     const { store, root } = fixture;
     const initial = await store.load(id);
@@ -118,6 +119,8 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' | 'forc
 }
 
 export function repairCheckpointFlowCases(): void {
+  // Share only the closed empty schema; every case retains its own writable DB.
+  before(prepareMigratedSchema);
   test('forced CLI evidence clears a persisted blocker and reruns handoff gate', async () => { await runRepairCheckpointFlow('force'); });
   test('isolated repair persists before launch, reruns exact gate and hands off with retained proof (TASK-2695)', async () => { await runRepairCheckpointFlow(); });
   test('isolated first contract report persists across reload and stops retries and handoff (TASK-2695)', async () => { await runRepairCheckpointFlow('blocker'); });

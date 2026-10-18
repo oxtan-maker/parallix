@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { git } from './git.js';
+import type { RepositoryMetadataWriter } from '../../application/ports/repository-metadata.js';
 
 export interface RebaseCompletion {
   from: string;
@@ -46,7 +47,7 @@ const quote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
  * The generated recorder is plain Node ESM, so npm installations need no tsx
  * loader, source checkout, globally installed px, or human-readable Git output.
  */
-export function ensureRebaseCompletionRecorder(root: string): void {
+export function ensureRebaseCompletionRecorder(root: string, metadata: RepositoryMetadataWriter): void {
   const state = stateDirectory(root);
   const hooks = path.join(state, 'hooks');
   const metadataPath = path.join(state, 'hook-overlay.json');
@@ -100,7 +101,8 @@ process.exitCode = status;
 `;
   fs.writeFileSync(recorder, source, { mode: 0o600 });
   fs.writeFileSync(path.join(hooks, 'post-rewrite'), `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(recorder)} "$@"\n`, { mode: 0o700 });
-  fs.writeFileSync(metadataPath, JSON.stringify({ previous }), { mode: 0o600 });
+  // Preserve the original hook path across interrupted overlay refreshes.
+  metadata.writeJson(metadataPath, { previous }, { mode: 0o600 });
   gitText(root, ['config', '--local', 'extensions.worktreeConfig', 'true']);
   gitText(root, ['config', '--worktree', 'core.hooksPath', hooks]);
 }

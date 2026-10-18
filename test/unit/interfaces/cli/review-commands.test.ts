@@ -702,3 +702,19 @@ test('composition grants review acknowledgment only to a direct operator invocat
   });
   withinCliInvocation(false, direct => assert.equal(direct, false, 'forwarded supervisor invocation'));
 });
+
+
+test('composition grants review acknowledgment only to a direct operator invocation (TASK-2759)', async () => {
+  const { bindReviewOperatorResume, withinCliInvocation } = await import('../../../../src/composition/review-operator-resume.js');
+  const store = inMemoryTransitionStore(fixtureMission('task-2759'));
+  assert.equal(bindReviewOperatorResume(store, false, {}), undefined, 'automatic and borrowed registries have no authority');
+  assert.equal(bindReviewOperatorResume(store, true, { nestedWork: {} }), undefined);
+  assert.equal(bindReviewOperatorResume(store, true, { integrationOwnsReview: true }), undefined);
+  await withinCliInvocation(true, async direct => {
+    assert.ok(bindReviewOperatorResume(store, direct, {}));
+    await withinCliInvocation(true, async nested => {
+      assert.equal(bindReviewOperatorResume(store, nested, {}), undefined, 'reentrant public CLI has no authority');
+    });
+  });
+  withinCliInvocation(false, direct => assert.equal(direct, false, 'forwarded supervisor invocation'));
+});

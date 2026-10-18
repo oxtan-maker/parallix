@@ -27,6 +27,6 @@ test('resolvePxEntryLoader runs the source entry through tsx outside a prebuilt 
 });
 
 test('pxNodeArgs adds --import only when the entry needs a loader', () => {
-  assert.deepEqual(pxNodeArgs({ entry: '/b/px.mjs', loader: '' }, ['status']), ['/b/px.mjs', 'status']);
-  assert.deepEqual(pxNodeArgs({ entry: '/s/px.ts', loader: '/tsx.mjs' }, ['status']), ['--import', '/tsx.mjs', '/s/px.ts', 'status']);
+  assert.deepEqual(pxNodeArgs({ entry: '/b/px.mjs', loader: '' }, ['status']), ['--v8-pool-size=1', '/b/px.mjs', 'status']);
+  assert.deepEqual(pxNodeArgs({ entry: '/s/px.ts', loader: '/tsx.mjs' }, ['status']), ['--v8-pool-size=1', '--import', '/tsx.mjs', '/s/px.ts', 'status']);
 });

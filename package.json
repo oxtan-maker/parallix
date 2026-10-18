@@ -1,6 +1,6 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.5.395",
+  "version": "1.5.396",
   "description": "Local-first workflow and trust layer for AI coding agents — isolated Git worktree missions, separate code review, repository-owned verification, Linux confinement, and human-owned merges",
   "license": "AGPL-3.0-or-later",
   "private": false,
@@ -64,6 +64,7 @@
     "test:integration:ci:all:prebuilt": "PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-ci-all",
     "test:integration:local": "FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-local",
     "test:integration:local:prebuilt": "PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-local",
+    "test:browser-e2e": "npm test -- test/e2e/presentation/web-board-pointer.test.ts",
     "test:agent-e2e": "node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/agents/real-agent-smoke.test.ts",
     "test:lifecycle-e2e": "node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/lifecycle/mission-lifecycle.test.ts",
     "test:jev-lifecycle-e2e": "node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/lifecycle/repeat-review-classification.test.ts",

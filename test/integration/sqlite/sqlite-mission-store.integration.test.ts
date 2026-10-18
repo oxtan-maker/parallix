@@ -1,10 +1,11 @@
 import { missionId as fixtureMissionId } from '../../../src/domain/mission.js';
+import { copyMigratedSchema, prepareMigratedSchema } from '../../fixtures/migrated-database.js';
+import { mkdtemp } from '../../helpers/temp-dir.js';
 import { auditMissionTimestamps, applyMissionTimestampMigration } from '../../../scripts/mission-timestamp-migration.js';
 import { decisionWindowContains, weeklyDecisionWindows } from '../../../src/domain/decision-window.js';
-import { afterEach, describe, it } from 'node:test';
+import { before, afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { missionVersion } from '../../../src/application/domain-ports.js';
 import { RevokeReviewDecisionUseCase } from '../../../src/application/revoke-review-decision-use-case.js';
@@ -33,8 +34,9 @@ import {
 } from '../../../src/adapters/sqlite/mission-store.js';
 import { SqliteBoardLaneEventRepository } from '../../../src/adapters/sqlite/board-lane-event-repository.js';
 const tempDirs: string[] = [];
+before(prepareMigratedSchema);
 function tempDatabasePath(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-mission-store-'));
+  const dir = mkdtemp('parallix-mission-store-');
   tempDirs.push(dir);
   return path.join(dir, 'operator.db');
 }
@@ -46,9 +48,8 @@ async function openDatabase(databasePath = tempDatabasePath()): Promise<SqliteDa
 async function migratedDatabase(
   databasePath = tempDatabasePath(),
 ): Promise<SqliteDatabaseAdapter> {
-  const database = await openDatabase(databasePath);
-  await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
-  return database;
+  if (!fs.existsSync(databasePath)) { copyMigratedSchema(databasePath); }
+  return openDatabase(databasePath);
 }
 const testMissionId = missionId('task-mission-store');
 const testRepositoryId = repositoryId('repo-parallix');

@@ -168,7 +168,7 @@ test('SC10: status-projection.ts removed (dead code eliminated)', () => {
   );
 
   // Composition should register the canonical status command.
-  const indexPath = path.join(repoRoot, 'src/composition/create-cli.ts');
+  const indexPath = path.join(repoRoot, 'src/composition/cli-command-registry.ts');
   const indexContent = fs.readFileSync(indexPath, 'utf8');
   assert.match(indexContent, /\.\.\.createReadCommands\(context\)/, 'CLI must register its canonical read commands');
   const readCommands = fs.readFileSync(path.join(repoRoot, 'src/composition/cli-read-commands.ts'), 'utf8');

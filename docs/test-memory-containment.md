@@ -73,6 +73,7 @@ The boundary belongs to the runner. Invoking Node's test runner directly
 bypasses it, and so does the opt-out above. Those invocations are unbounded and
 are not supported for agent use; go through `npm test`. The dedicated agent and
 lifecycle end-to-end commands also start Node directly and are not contained.
+The local browser end-to-end command uses `npm test` and retains this boundary.
 
 ## Proving the breach path
 

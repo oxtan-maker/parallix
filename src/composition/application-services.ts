@@ -1,17 +1,16 @@
 import { bindInheritedWorkflowAuthorization } from './workflow-authorization.js';
+import { resolveProcessConfiguration } from './config.js';
+import { createMissionApplicationServices } from './mission-services.js';
+import { bindRecoveryPorts, unavailableMissionTransitionStore } from './recovery-ports.js';
 import { correlateMissionCapture } from './mission-terminal.js';
 import type { SqliteMigrationRunner } from '../adapters/sqlite/migration-runner.js';
-import { configureRepairCheckpoints } from '../application/ports/repair-checkpoint.js';
-import { RepairCheckpointService } from '../application/repair-checkpoint-service.js';
-import { resolveProcessConfiguration } from './config.js';
 import { createReviewClassification, createIntegrationApprovalRestoration } from './review-classification.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
-import * as path from 'node:path';
 
 import { ExecuteMissionService } from '../application/execute-mission-service.js';
 import { IntegrateCommandUseCase } from '../application/integrate-command-use-case.js';
 import { StatsBackfillService } from '../application/stats-backfill-service.js';
-import { MissionCheckpointService, type CheckpointEvidenceReferences } from '../application/mission-checkpoint-service.js';
+import { MissionCheckpointService } from '../application/mission-checkpoint-service.js';
 import { MissionBriefService } from '../application/mission-brief-service.js';
 import { MissionAssignmentService } from '../application/mission-assignment-service.js';
 import { MissionHandoffService } from '../application/mission-handoff-service.js';
@@ -24,24 +23,18 @@ import { OperationalHistoryService } from '../application/services/operational-h
 import { CurrentWorkRecorder, NO_CURRENT_WORK_PORT, type CurrentWorkPort } from '../application/recording/current-work-recorder.js';
 import { processStartIdentity } from '../adapters/process/process-liveness.js';
 import { resolveMissionExecutionContext } from '../adapters/git/mission-execution-context.js';
-import { createMissionStore } from './mission-persistence.js';
 export { createMissionStore } from './mission-persistence.js';
 import { SqliteSessionMarkerAdapter } from '../adapters/sqlite/session-marker-adapter.js';
 import { SqliteSessionMarkerRepository } from '../adapters/sqlite/session-marker-repository.js';
 import type { SessionMarkerRepository } from '../application/ports/mission-store.js';
-import { repositoryId, type RepositoryId } from '../domain/repository.js';
-import { createStatsMissionFlowReader } from './stats.js';
+import { type RepositoryId } from '../domain/repository.js';
 import { missionId } from '../domain/mission.js';
-import { configureReboundTelemetry } from '../application/rebound-telemetry.js';
 import { resolveCanonicalRepositoryId } from '../adapters/git/repository-identity.js';
 import { createDefaultExecuteMissionRuntime, createExecuteMissionPorts } from '../adapters/mission/execute-mission-adapters.js';
-import { createHandoffPorts, performHandoff } from '../adapters/cli/commands/handoff.js';
-import { resolveWorktree } from '../adapters/git/worktree.js';
+import { performHandoff } from '../adapters/cli/commands/handoff.js';
 import integrate from '../adapters/cli/commands/integrate.js';
 import { createReviewLoopPorts, type ReviewLoopBindings, type ReviewLoopTarget } from '../adapters/review/review-loop.js';
 import { reviewLoopBindings } from './review-persistence.js';
-import { recoveryEvidenceFileSystem } from '../adapters/filesystem/recovery-evidence-fs.js';
-import { setRecoveryEvidenceFileSystem } from '../application/recovery-evidence.js';
 import { LegacyStatsBackfillAdapter } from '../adapters/mission/stats-backfill-adapter.js';
 import type { ProgressPort } from '../application/ports.js';
 import type { MissionNelRecorder, MissionStore, MissionTransitionStore } from '../application/domain-ports.js';
@@ -185,6 +178,8 @@ export interface OperatorApplicationServices {
 export interface ProductionApplicationServiceOptions {
   readonly inheritWorkflowAuthorization?: boolean;
   readonly includeOperatorState?: boolean;
+  /** Headless workflows retain execute and Mission ports without composing the board. */
+  readonly includePresentationCapabilities?: boolean;
   /** Typed operator configuration resolved once at the composition root. */
   readonly configuration: ParallixConfiguration;
 }
@@ -216,6 +211,27 @@ function bindOperatorServices(repositories: OperatorStateRepositories | null) {
   };
 }
 
+async function bindPresentationCapabilities(
+  rootDir: string, options: ProductionApplicationServiceOptions, operatorState: OperatorStateServices,
+  mission: MissionApplicationServices | null, sessionMarkers: SessionMarkerRepository | null,
+  executePorts: ExecuteMissionPorts, currentWork: CurrentWorkPort, activeProgress: ProgressPort | undefined,
+) {
+  return operatorState.repositories && options.includePresentationCapabilities !== false
+    ? (await import('./production-capabilities.js')).composeProductionCapabilities(
+      rootDir,
+      mission?.repositoryId ?? resolveCanonicalRepositoryId(rootDir),
+      { ...operatorState.repositories, sessionMarkers },
+      executePorts,
+      mission?.store ?? null,
+      currentWork,
+      activeProgress,
+      operatorState.db,
+      { configuration: options.configuration },
+      mission ? createBoardIntegrateService(mission, currentWork, options.configuration, rootDir) : undefined,
+    )
+    : null;
+}
+
 export async function createProductionApplicationServices(
   rootDir: string,
   activeProgress: ProgressPort | undefined,
@@ -227,15 +243,18 @@ export async function createProductionApplicationServices(
 
   const operatorServices = bindOperatorServices(operatorState.repositories);
 
+  const mission = options.includeOperatorState === false
+    ? null
+    : await createMissionApplicationServices(rootDir, {
+      configuration: options.configuration, inheritWorkflowAuthorization: options.inheritWorkflowAuthorization,
+    });
+
   // Build a SessionMarkerPort from the shared database connection so that
   // startAgent reuses the composition root's SQLite handle instead of opening
   // a second independent connection (avoids "database is locked" contention
   // between DatabaseSync handles on the same file).
-  const { sessionMarkerPort, sessionMarkers } = bindSessionMarkers(operatorState, rootDir);
+  const { sessionMarkerPort, sessionMarkers } = bindSessionMarkers(operatorState, rootDir, mission?.repositoryId);
 
-  const mission = options.includeOperatorState === false
-    ? null
-    : await createMissionApplicationServices(rootDir, { configuration: options.configuration });
   bindInheritedWorkflowAuthorization(options.configuration, options.inheritWorkflowAuthorization, mission, operatorState.db);
   // Shared Mission-authority injection used by both the handoff and the review
   const defaultExecuteRuntime = createDefaultExecuteMissionRuntime(options.configuration);
@@ -278,20 +297,7 @@ export async function createProductionApplicationServices(
   // layer cannot import `node:fs`, so composition binds the `filesystem`
   // adapter here for every process (TASK-2642 boundary decision).
   bindRecoveryPorts(operatorState.repositories, mission, rootDir);
-  const presentationCapabilities = operatorState.repositories
-    ? (await import('./production-capabilities.js')).composeProductionCapabilities(
-      rootDir,
-      mission?.repositoryId ?? resolveCanonicalRepositoryId(rootDir),
-      { ...operatorState.repositories, sessionMarkers },
-      executePorts,
-      mission?.store ?? null,
-      currentWork,
-      activeProgress,
-      operatorState.db,
-      { configuration: options.configuration },
-      mission ? createBoardIntegrateService(mission, currentWork, options.configuration, rootDir) : undefined,
-    )
-    : null;
+  const presentationCapabilities = await bindPresentationCapabilities(rootDir, options, operatorState, mission, sessionMarkers, executePorts, currentWork, activeProgress);
   return {
     currentWork,
     executeMission: new ExecuteMissionService(executePorts, activeProgress, currentWork),
@@ -317,11 +323,6 @@ export async function createProductionApplicationServices(
   };
 }
 
-function unavailableMissionTransitionStore(): import('../application/domain-ports.js').MissionTransitionStore {
-  const unavailable = async () => ({ kind: 'missing' as const });
-  return { load: unavailable, save: async () => { throw new Error('Mission authority is unavailable'); }, saveWithTransition: async () => { throw new Error('Mission authority is unavailable'); } };
-}
-
 /**
  * Build the Mission use cases over the single selected SQLite authority.
  *
@@ -334,73 +335,7 @@ function unavailableMissionTransitionStore(): import('../application/domain-port
  * Fail-closed: if the database cannot be opened or migrations fail, the
  * returned store will fail on operations rather than falling back to files.
  */
-export interface MissionApplicationServiceOverrides {
-  readonly configuration?: ParallixConfiguration;
-  /** Repository ID override (for test fixtures). */
-  readonly repositoryId?: string;
-  /** Database path override (for test fixtures). */
-  readonly databasePath?: string;
-}
-
-/** Recording resolves evidence references in the Mission's checkout, as handoff does. */
-export function checkpointEvidenceReferences(): CheckpointEvidenceReferences {
-  return { fileSystem: createHandoffPorts().fileSystem, rootFor: (id) => resolveWorktree(id) };
-}
-
-export async function createMissionApplicationServices(
-  rootDir: string,
-  overrides: MissionApplicationServiceOverrides = {},
-): Promise<MissionApplicationServices> {
-  // A mission worktree and the checkout it was branched from are the same
-  // repository: the Mission row a handoff writes from `<repo>-<slug>` is the
-  // one integrate reads from `<repo>`. Anchor the repository identity to the
-  // primary worktree so callers key consistent rows.
-  const repoId = overrides.repositoryId
-    ? repositoryId(overrides.repositoryId)
-    : resolveCanonicalRepositoryId(rootDir);
-
-  // Dynamic imports keep the built-in SQLite module out of the statically
-  // loaded runtime graph so the CJS rollback bundle degrades gracefully.
-  const { initOperatorState } = await import('../adapters/sqlite/adapter-factory.js');
-  const { resolveDatabasePath } = await import('../adapters/sqlite/database-path-resolver.js');
-
-  // Use the shared singleton connection from initOperatorState so that the
-  // mission store, session markers, and blocklist all converge on the same
-  // DatabaseSync handle. This avoids "database is locked" contention between
-  // independent connections on the same file.
-  const configuration = overrides.configuration ?? resolveProcessConfiguration();
-  const dbPath = overrides.databasePath ?? resolveDatabasePath({ configuration });
-  const { db } = await initOperatorState({
-    configuration,
-    homeDir: overrides.databasePath
-      ? path.dirname(dbPath)
-      : undefined,
-  });
-
-  const { SqliteOperationalHistoryRepository } = await import('../adapters/sqlite/operational-history-repository.js');
-  const store = createMissionStore(db);
-  const { SqliteBoardLaneEventRepository } = await import('../adapters/sqlite/board-lane-event-repository.js');
-  const { SqliteUsageRepository } = await import('../adapters/sqlite/usage-repository.js');
-  const readStatsMissionFlow = createStatsMissionFlowReader({
-    rootDir, missionStore: store, repositoryId: repoId,
-    laneEventRepo: new SqliteBoardLaneEventRepository(db), usageRepo: new SqliteUsageRepository(db),
-  });
-  const lifecycle = new MissionLifecycleService(store);
-  const operationalHistory = new (await import('../application/services/operational-history-service.js')).OperationalHistoryService(new SqliteOperationalHistoryRepository(db));
-  return {
-    store,
-    operationalHistory,
-    readStatsMissionFlow,
-    repositoryId: repoId,
-    intake: new MissionIntakeService(store),
-    lifecycle,
-    integration: new MissionIntegrationService(store),
-    checkpoints: new MissionCheckpointService(store, checkpointEvidenceReferences()),
-    brief: new MissionBriefService(store, new SqliteOperationalHistoryRepository(db)),
-    assignment: new MissionAssignmentService(store),
-    handoff: new MissionHandoffService(store, store),
-  };
-}
+export { createMissionApplicationServices, checkpointEvidenceReferences, type MissionApplicationServiceOverrides } from './mission-services.js';
 
 async function materializeOperatorState(configuration: ParallixConfiguration): Promise<OperatorStateServices> {
   try {
@@ -454,23 +389,13 @@ async function materializeOperatorState(configuration: ParallixConfiguration): P
  * for every rebound consumer so each completed repair attempt lands in the
  * operational history the board already reads (TASK-2653).
  */
-function bindRecoveryPorts(
-  repositories: { operationalHistory: OperationalHistoryRepository } | null | undefined,
-  mission: { repositoryId: string; store: MissionStore } | null | undefined,
-  rootDir: string,
-): void {
-  setRecoveryEvidenceFileSystem(recoveryEvidenceFileSystem);
-  configureRepairCheckpoints(new RepairCheckpointService(mission?.store ?? unavailableMissionTransitionStore()));
-  configureReboundTelemetry(repositories ? { repositoryId: mission?.repositoryId ?? resolveCanonicalRepositoryId(rootDir), history: repositories.operationalHistory } : null);
-}
-
-function bindSessionMarkers(operatorState: OperatorStateServices, rootDir: string) {
+function bindSessionMarkers(operatorState: OperatorStateServices, rootDir: string, repository?: RepositoryId) {
   let sessionMarkerPort: import('../application/domain-ports.js').SessionMarkerPort | null = null;
   // The board reads the same markers to attribute a running mission to the
   // family that launched it.
   let sessionMarkers: SessionMarkerRepository | null = null;
   if (operatorState.repositories) {
-    const repoId = resolveCanonicalRepositoryId(rootDir);
+    const repoId = repository ?? resolveCanonicalRepositoryId(rootDir);
     sessionMarkerPort = new SqliteSessionMarkerAdapter(
       operatorState.db,
       repoId,

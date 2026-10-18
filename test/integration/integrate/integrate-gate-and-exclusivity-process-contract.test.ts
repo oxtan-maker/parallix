@@ -1,10 +1,11 @@
+import { invalidAnalysis } from '../../fixtures/standard-analysis-scenarios.js';
 import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflow-ports.js';
 // Behavior-owned suite (TASK-2622.09, integration-ci): integration-time gate scripting and cross-process
 // exclusivity — verify-local integrate, workflow gate recursion, and the exclusive Mission claim across
 // two processes. Legacy case names unchanged.
-import { checkoutTestTmpdir } from '../../lib/test-tmpdir.js';
-import { mkdtemp, mkdtempAt } from '../../helpers/temp-dir.js';
-import test, { describe } from 'node:test';
+import test, { describe, type TestContext } from 'node:test';
+import { registerFixtureCleanup } from '../../helpers/fixture-cleanup.js';
+import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -20,7 +21,7 @@ describe("verify-local integrate gate", () => {
   const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..');
   const scriptPath = path.join(repoRoot, 'scripts', 'verify-local.sh');
 
-  function runScript(args: readonly string[], env = {}, timeout = 30_000) {
+  function runScript(args: readonly string[], env = {}) {
     // These dry-run and stubbed-gate contracts keep output small. Capture it
     // directly instead of writing, reopening, reading, and deleting two files
     // for every invoked gate plan.
@@ -28,12 +29,46 @@ describe("verify-local integrate gate", () => {
       cwd: repoRoot,
       env: { ...process.env, ...env },
       encoding: 'utf8',
-      timeout,
+      timeout: 30_000,
     });
     if (result.error && result.status === null) {
       throw result.error;
     }
     return result;
+  }
+
+  function scriptJobs(context: TestContext) {
+    const children = new Set<childProcess.ChildProcess>();
+    const stop = (child: childProcess.ChildProcess) => {
+      if (!child.pid) return;
+      try { process.kill(process.platform === 'win32' ? child.pid : -child.pid, 'SIGKILL'); }
+      catch { /* Already reaped. */ }
+    };
+    registerFixtureCleanup(context, () => { for (const child of children) stop(child); });
+    const run = (args: readonly string[], env: NodeJS.ProcessEnv) =>
+      new Promise<{ status: number; stdout: string; stderr: string }>((resolve, reject) => {
+        const child = childProcess.spawn(scriptPath, [...args], {
+          cwd: repoRoot, env: { ...process.env, ...env },
+          detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        children.add(child);
+        let stdout = '', stderr = '';
+        const timeout = setTimeout(() => stop(child), 3000);
+        child.stdout.on('data', chunk => { stdout += String(chunk); });
+        child.stderr.on('data', chunk => { stderr += String(chunk); });
+        child.once('error', reject);
+        child.once('close', status => {
+          clearTimeout(timeout); children.delete(child);
+          resolve({ status: status ?? 1, stdout, stderr });
+        });
+      });
+    const settle = async (jobs: Promise<void>[]) => {
+      // Assertion failure in one private probe still waits for its siblings.
+      for (const result of await Promise.allSettled(jobs)) {
+        if (result.status === 'rejected') throw result.reason;
+      }
+    };
+    return { run, settle };
   }
 
   function staticAnalysisStubEnv(tmpDir: string, npxStatus = 0, npmStatus = 0, compilerDiagnostic = '') {
@@ -49,63 +84,27 @@ describe("verify-local integrate gate", () => {
     return { PARALLIX_NODE: nodePath, PATH: `${binDir}:${process.env.PATH}` };
   }
 
-  // Owns the real shell/tool boundary: tiny isolated projects use the repository
-  // ESLint configuration, compiler commands and hygiene scanner without a model,
-  // database, network request or change to the operator checkout.
-  function analysisProject(root: string) {
-    fs.mkdirSync(path.join(root, 'bin'));
-    // Resolve installed tools directly: npx package discovery is not this
-    // contract and adds avoidable startup/network variability to each case.
-    fs.writeFileSync(path.join(root, 'bin', 'npx'), `#!/bin/sh\n[ "$1" != --yes ] || shift\ntool=$1; shift\nexec '${repoRoot}/node_modules/.bin/'"$tool" "$@"\n`, { mode: 0o755 });
-    fs.mkdirSync(path.join(root, 'scripts'));
-    fs.mkdirSync(path.join(root, 'src'));
-    fs.mkdirSync(path.join(root, 'web'));
-    fs.mkdirSync(path.join(root, 'test', 'lib'), { recursive: true });
-    fs.mkdirSync(path.join(root, 'test', 'unit'));
-    fs.symlinkSync(path.join(repoRoot, 'node_modules'), path.join(root, 'node_modules'), 'dir');
-    fs.copyFileSync(path.join(repoRoot, 'eslint.config.mjs'), path.join(root, 'eslint.config.mjs'));
-    fs.copyFileSync(path.join(repoRoot, 'scripts', 'test-hygiene.sh'), path.join(root, 'scripts', 'test-hygiene.sh'));
-    fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ type: 'module', scripts: {
-      typecheck: 'tsc --noEmit && tsc --noEmit --project tsconfig.scripts.json',
-    } }));
-    fs.writeFileSync(path.join(root, 'tsconfig.json'), JSON.stringify({ compilerOptions: {
-      strict: true, noEmit: true, skipLibCheck: true, module: 'NodeNext', moduleResolution: 'NodeNext', target: 'ES2024', lib: ['ES2024'], types: [],
-    }, include: ['src/**/*.ts', 'web/**/*.ts'] }));
-    fs.writeFileSync(path.join(root, 'tsconfig.scripts.json'), JSON.stringify({ extends: './tsconfig.json', include: ['scripts/fixture.ts'] }));
-    fs.writeFileSync(path.join(root, 'tsconfig.test.json'), JSON.stringify({ extends: './tsconfig.json', include: ['test/unit/analysis-contract.test.ts'] }));
-    for (const file of ['src/fixture.ts', 'web/fixture.ts', 'scripts/fixture.ts', 'test/unit/analysis-contract.test.ts', 'test/lib/test-layout-validation.ts']) {
-      fs.writeFileSync(path.join(root, file), 'export const fixtureValue = 1;\n');
-    }
-  }
 
-  const invalidAnalysis = [
-    { name: 'explicit any', file: 'src/fixture.ts', source: 'export const invalidValue: any = 1;', diagnostic: /no-explicit-any/ },
-    { name: 'unsafe assignment', file: 'src/fixture.ts', source: 'export const invalidValue = JSON.parse("1");', diagnostic: /no-unsafe-assignment/ },
-    { name: 'floating promise', file: 'src/fixture.ts', source: 'Promise.resolve(1);', diagnostic: /no-floating-promises/ },
-    { name: 'misused promise', file: 'src/fixture.ts', source: '[1].forEach(async () => {});', diagnostic: /no-misused-promises/ },
-    { name: 'complexity limit', file: 'src/fixture.ts', source: `export function complex(value: number) { ${Array.from({ length: 16 }, (_, i) => `if (value === ${i}) { return ${i}; }`).join(' ')} return value; }`, diagnostic: /complexity/ },
-    { name: 'function length', file: 'src/fixture.ts', source: `export function longFunction() {\nlet value = 0;\n${'value += 1;\n'.repeat(100)}return value;\n}`, diagnostic: /max-lines-per-function/ },
-    { name: 'inline lint exception', file: 'src/fixture.ts', source: '/* eslint-disable @typescript-eslint/no-explicit-any */\nexport const invalidValue: any = 1;', diagnostic: /no-explicit-any/ },
-    { name: 'production compiler error', file: 'src/fixture.ts', source: 'export const invalidValue: string = 1;', diagnostic: /TS2322/ },
-    { name: 'script compiler error', file: 'scripts/fixture.ts', source: 'export const invalidValue: string = 1;', diagnostic: /TS2322/ },
-    { name: 'test compiler error', file: 'test/unit/analysis-contract.test.ts', source: 'export const invalidValue: string = 1;', diagnostic: /TS2322/ },
-    { name: 'focused test', file: 'test/unit/analysis-contract.test.ts', source: ['test', 'only'].join('.') + '("focused", () => {});', diagnostic: /test-hygiene scanner found violations/ },
-  ];
 
-  for (const scenario of [{ name: 'clean project', file: 'src/fixture.ts', source: 'export const validValue = 1;', diagnostic: null }, ...invalidAnalysis]) {
-    test(`static analysis enforces standard tools: ${scenario.name} (TASK-2746)`, { timeout: 3500 }, () => {
-      const root = mkdtemp('standard-analysis-contract-');
-      const coverageScratch = mkdtempAt(checkoutTestTmpdir(repoRoot), 'coverage-scratch-');
+  test('static analysis preserves every isolated shell status and diagnostic (TASK-2746)', async (t) => {
+    const jobs = scriptJobs(t);
+    await jobs.settle([{ name: 'clean project', diagnostic: null }, ...invalidAnalysis].map(async scenario => {
+      const root = registeredMkdtemp('standard-analysis-shell-');
       try {
-        analysisProject(root);
-        fs.writeFileSync(path.join(root, scenario.file), scenario.source + '\n');
-        const result = runScript(['static-analysis'], {
-          PARALLIX_EXECUTION_ROOT: root,
-          TMPDIR: checkoutTestTmpdir(repoRoot, coverageScratch),
-          PATH: `${path.join(root, 'bin')}:${process.env.PATH}`,
-        }, 3400);
+        const diagnostic = scenario.diagnostic?.source ?? '';
+        const compiler = scenario.name.includes('compiler');
+        const testCompiler = scenario.name === 'test compiler error';
+        const hygiene = scenario.name === 'focused test';
+        const env = staticAnalysisStubEnv(root, diagnostic && !compiler && !hygiene ? 1 : 0, compiler && !testCompiler ? 1 : 0, diagnostic);
+        // A private executable per case keeps the shell's real stage selection,
+        // diagnostic forwarding and exit status observable without rerunning tools.
+        fs.writeFileSync(path.join(root, 'bin/npx'), `#!/bin/sh\ncase "$*" in\n*eslint*) printf '%s\\n' '${diagnostic}'; exit ${diagnostic && !compiler && !hygiene ? 1 : 0} ;;\n*tsc*) printf '%s\\n' '${diagnostic}'; exit ${testCompiler ? 1 : 0} ;;\nesac\nexit 0\n`);
+        if (hygiene) {
+          fs.writeFileSync(path.join(root, 'bin/bash'), `#!/bin/sh\nif [ "$1" = scripts/test-hygiene.sh ]; then printf '%s\\n' '${diagnostic}'; exit 1; fi\nexec /bin/bash "$@"\n`);
+          fs.chmodSync(path.join(root, 'bin/bash'), 0o755);
+        }
+        const result = await jobs.run(['static-analysis'], env);
         const output = result.stdout + result.stderr;
-        assert.doesNotMatch(output, /listen EINVAL/);
         if (scenario.diagnostic === null) {
           assert.equal(result.status, 0, output);
           assert.match(output, /ALL STAGES PASSED/);
@@ -113,17 +112,19 @@ describe("verify-local integrate gate", () => {
           assert.notEqual(result.status, 0, output);
           assert.match(output, scenario.diagnostic);
           assert.doesNotMatch(output, /ALL STAGES PASSED/);
+          const stageFailure = testCompiler ? /FAIL: test typecheck failed/
+            : compiler ? /FAIL: tsc typecheck failed/
+            : hygiene ? /FAIL: test-hygiene scanner found violations/
+            : /FAIL: ESLint rejected source diagnostics/;
+          assert.match(output, stageFailure, scenario.name);
         }
-      } finally {
-        fs.rmSync(root, { recursive: true, force: true });
-        fs.rmSync(coverageScratch, { recursive: true, force: true });
-      }
-    });
-  }
+      } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    }));
+  });
 
   for (const diagnostic of ['', 'error TS18003: No inputs were found in config file.']) {
     test(`static analysis rejects a compiler failure regardless of diagnostic text: ${diagnostic || 'empty output'} (TASK-2746)`, () => {
-      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'compiler-status-contract-'));
+      const root = registeredMkdtemp('compiler-status-contract-');
       try {
         const result = runScript(['static-analysis'], staticAnalysisStubEnv(root, 0, 2, diagnostic));
         assert.notEqual(result.status, 0, result.stdout + result.stderr);
@@ -134,7 +135,7 @@ describe("verify-local integrate gate", () => {
   }
 
   test('verify-local Git shim handles init flags without mistaking them for the target directory', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-git-shim-'));
+    const root = registeredMkdtemp('verify-local-git-shim-');
     const shim = path.join(repoRoot, 'scripts', 'git');
     const env = { ...process.env, PARALLIX_REAL_GIT: '/usr/bin/git' };
     try {
@@ -150,7 +151,7 @@ describe("verify-local integrate gate", () => {
   });
 
   test('verify-local integrate fails closed when integration config is missing (task-2300)', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-missing-'));
+    const tmpDir = registeredMkdtemp('verify-local-missing-');
     try {
       const result = runScript(['integrate'], {
         INTEGRATE_DRY_RUN: 'true',
@@ -167,11 +168,11 @@ describe("verify-local integrate gate", () => {
 
   test('verify-local integrate runs static analysis before configured integration gates (task-2414)', () => {
     const source = fs.readFileSync(scriptPath, 'utf8');
-    assert.match(source, /gate_static_analysis \|\| return 1[\s\S]*node --input-type=module --import tsx/);
+    assert.match(source, /gate_static_analysis \|\| return 1[\s\S]*node (?:--v8-pool-size=1 )?--input-type=module/);
   });
 
   test('verify-local integrate stops before configured gates when static analysis fails (task-2414)', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-static-failure-'));
+    const tmpDir = registeredMkdtemp('verify-local-static-failure-');
     const configPath = path.join(tmpDir, 'integration-pipelines.json');
     const marker = path.join(tmpDir, 'configured-gate-ran');
     try {
@@ -189,7 +190,7 @@ describe("verify-local integrate gate", () => {
   });
 
   test('verify-local integrate prints the resolved dry-run plan for workflow gates', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-dry-run-'));
+    const tmpDir = registeredMkdtemp('verify-local-dry-run-');
     const configPath = path.join(tmpDir, 'integration-pipelines.json');
     try {
       fs.writeFileSync(configPath, JSON.stringify({
@@ -216,7 +217,7 @@ describe("verify-local integrate gate", () => {
   });
 
   test('verify-local integrate fails closed when no mandatory gate applies (task-2300)', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-no-match-'));
+    const tmpDir = registeredMkdtemp('verify-local-no-match-');
     const configPath = path.join(tmpDir, 'integration-pipelines.json');
     try {
       fs.writeFileSync(configPath, JSON.stringify({
@@ -240,8 +241,9 @@ describe("verify-local integrate gate", () => {
     }
   });
 
-  test('verify-local integrate resolves the unconditional integration suite for every required area class (task-2292)', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-always-gate-'));
+  test('verify-local integrate resolves the unconditional integration suite for every required area class (task-2292)', async (t) => {
+    const jobs = scriptJobs(t);
+    const tmpDir = registeredMkdtemp('verify-local-always-gate-');
     const configPath = path.join(tmpDir, 'integration-pipelines.json');
     try {
       fs.writeFileSync(configPath, JSON.stringify({
@@ -252,7 +254,7 @@ describe("verify-local integrate gate", () => {
         }
       }, null, 2));
 
-      for (const [label, changedAreas, expectsE2E] of [
+      await jobs.settle([
         ['lib', 'lib', true],
         ['workflow', 'workflow', true],
         ['docs', 'docs', false],
@@ -260,11 +262,11 @@ describe("verify-local integrate gate", () => {
         ['mission-artifact-only', 'missions', false],
         ['unknown-path', 'unrecognized-boundary', false],
         ['no-area', '', false]
-      ]) {
-        const result = runScript(['integrate'], {
+      ].map(async ([label, changedAreas, expectsE2E]) => {
+        const result = await jobs.run(['integrate'], {
           INTEGRATE_DRY_RUN: 'true',
           INTEGRATION_CONFIG_PATH: configPath,
-          INTEGRATE_CHANGED_AREAS: changedAreas
+          INTEGRATE_CHANGED_AREAS: String(changedAreas)
         });
         const output = `${result.stdout}${result.stderr}`;
         assert.equal(result.status, 0, `${label}: ${output}`);
@@ -278,14 +280,14 @@ describe("verify-local integrate gate", () => {
           assert.ok(suiteIndex < workflowIndex, `${label} suite must run before workflow E2E`);
           assert.ok(workflowIndex < smokeIndex, `${label} workflow E2E must run before smoke`);
         }
-      }
+      }));
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
   test('verify-local integrate aborts after an integration-suite failure before a later command (task-2292)', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-suite-failure-'));
+    const tmpDir = registeredMkdtemp('verify-local-suite-failure-');
     const configPath = path.join(tmpDir, 'integration-pipelines.json');
     const laterCommandMarker = path.join(tmpDir, 'later-command-ran');
     try {
@@ -310,7 +312,7 @@ describe("verify-local integrate gate", () => {
   });
 
   test('verify-local integrate forwards the Codex override only to custom-agent-smoke', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-real-agent-'));
+    const tmpDir = registeredMkdtemp('verify-local-real-agent-');
     const configPath = path.join(tmpDir, 'integration-pipelines.json');
     const libOutput = path.join(tmpDir, 'lib-env.txt');
     const smokeOutput = path.join(tmpDir, 'smoke-env.txt');
@@ -347,7 +349,7 @@ describe("verify-local integrate gate", () => {
   });
 
   test('verify-local integrate does not source login-shell startup files for gates', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-non-login-'));
+    const tmpDir = registeredMkdtemp('verify-local-non-login-');
     const configPath = path.join(tmpDir, 'integration-pipelines.json');
     const outputPath = path.join(tmpDir, 'gate-output.txt');
     const bashEnvPath = path.join(tmpDir, 'bash-env');
@@ -452,7 +454,7 @@ describe("integrate workflow gate", () => {
 
   test('integrate-workflow-gate: workflow changed + direct run => workflow suite is enforced', () => {
     installSpawnMock();
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-wf-gate-'));
+    const tmpDir = registeredMkdtemp('test-wf-gate-');
     const env = makeEnv(tmpDir, { changedAreas: 'workflow' });
     const result = runIntegrate(env);
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -465,7 +467,7 @@ describe("integrate workflow gate", () => {
 
   test('integrate-workflow-gate: workflow changed + suite context => nested gate skips recursion', () => {
     installSpawnMock();
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-wf-gate-'));
+    const tmpDir = registeredMkdtemp('test-wf-gate-');
     const env = makeEnv(tmpDir, { changedAreas: 'workflow', suiteContext: true });
     const result = runIntegrate(env);
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -478,7 +480,7 @@ describe("integrate workflow gate", () => {
 
   test('integrate-workflow-gate: no workflow change => gate skipped (exit 0)', () => {
     installSpawnMock();
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-wf-gate-'));
+    const tmpDir = registeredMkdtemp('test-wf-gate-');
     const env = makeEnv(tmpDir, { changedAreas: 'docs' });
     const result = runIntegrate(env);
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -517,7 +519,7 @@ describe("exclusive integrate process claim", () => {
 
   test('two integrate processes cannot both read one Mission', async (t) => {
     const slug = `task-${Date.now()}-${process.pid}`;
-    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', firstRun], {
+    const child = spawn(process.execPath, ['--v8-pool-size=1', '--import', 'tsx', '--input-type=module', '-e', firstRun], {
       cwd: repoRoot,
       env: { ...process.env, PARALLIX_CLAIM_TEST_SLUG: slug },
       stdio: ['pipe', 'pipe', 'pipe'],

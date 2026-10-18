@@ -96,15 +96,19 @@ function mergeLocalAgentConfig(
   warn: ConfigWarning,
   configuration?: ParallixConfiguration,
 ): AgentConfig {
-  const projectRoot = configPath === CONFIG_PATH ? process.cwd() : path.resolve(path.dirname(configPath), '..', '..');
-  const mainWorktree = mainWorktreePath ?? getMainWorktreePath({ cwd: projectRoot, warn });
-  const sourcePaths = [
-    path.join(path.dirname(configPath), 'agents.local.json'),
-    path.join(projectRoot, 'agents.local.json'),
-    mainWorktree ? path.join(mainWorktree, 'agents.local.json') : '',
-  ].filter((candidate): candidate is string => Boolean(candidate));
   const targetPath = targetPathOption || storage.resolveAgentsLocalPath({ ensureDir: true, configuration });
-  migrateLocalBlocklist(sourcePaths, targetPath, warn);
+  // The operator-local file is authoritative after migration. Discover legacy
+  // worktree locations only while it is absent, as migrateLocalBlocklist does.
+  if (!fs.existsSync(targetPath)) {
+    const projectRoot = configPath === CONFIG_PATH ? process.cwd() : path.resolve(path.dirname(configPath), '..', '..');
+    const mainWorktree = mainWorktreePath ?? getMainWorktreePath({ cwd: projectRoot, warn });
+    const sourcePaths = [
+      path.join(path.dirname(configPath), 'agents.local.json'),
+      path.join(projectRoot, 'agents.local.json'),
+      mainWorktree ? path.join(mainWorktree, 'agents.local.json') : '',
+    ].filter((candidate): candidate is string => Boolean(candidate));
+    migrateLocalBlocklist(sourcePaths, targetPath, warn);
+  }
   if (!fs.existsSync(targetPath)) { return config; }
   const localConfig = parseAgentConfigFile(targetPath, 'local');
   if (!localConfig?.blocklist) { return config; }

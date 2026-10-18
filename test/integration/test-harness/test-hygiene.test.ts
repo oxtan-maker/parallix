@@ -8,11 +8,16 @@ import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 
 const HYGIENE_SCRIPT = path.join(import.meta.dirname, '..', '..', '..', 'scripts', 'test-hygiene.sh');
 
-function withFixture(source: string, assertion: (_result: SpawnSyncReturns<string>) => void) {
+function withFixture(source: string | Record<string, string>, assertion: (_result: SpawnSyncReturns<string>) => void) {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'test-hygiene-'));
   try {
     fs.mkdirSync(path.join(repoRoot, 'test'));
-    fs.writeFileSync(path.join(repoRoot, 'test', 'fixture.test.ts'), source);
+    const files = typeof source === 'string' ? { 'fixture.test.ts': source } : source;
+    for (const [name, contents] of Object.entries(files)) {
+      const file = path.join(repoRoot, 'test', name);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, contents);
+    }
     // The hygiene script also checks /tmp inode usage. Stub df here so these
     // source-scanning fixtures do not inherit the host's transient disk state.
     const binDir = path.join(repoRoot, 'bin');
@@ -135,5 +140,24 @@ test('inode guard passes the real script on BSD layout below 80%', () => {
   withMockedDfBsd('/dev/disk1s1  488281264  244140632  244140632  50%  61035158  183105474  45%  /tmp', result => {
     assert.equal(result.status, 0, 'inode guard should pass at 45% usage (BSD)');
     assert.match(result.stdout, /PASS: no test-hygiene violations/);
+  });
+});
+
+
+test('test hygiene retains all diagnostics across batched nested JS and TS files (TASK-2762)', () => {
+  const only = ['test', 'only'].join('.');
+  const skip = ['test', 'skip'].join('.');
+  withFixture({
+    'nested:fixture/first.test.ts': `${only}('one', () => {}); // reason: still forbidden\n${skip}('two', () => {});\n`,
+    'with spaces/second.test.js': `${skip}('allowed', () => {}); // reason: documented\n${only}('three', () => {});\nfit('four', () => {});\n`,
+    'ignored.ts': `${only}('helper', () => {});\n`,
+  }, result => {
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /first\.test\.ts:1/);
+    assert.match(result.stdout, /first\.test\.ts:2/);
+    assert.match(result.stdout, /second\.test\.js:2/);
+    assert.match(result.stdout, /second\.test\.js:3/);
+    assert.match(result.stdout, /FAIL: 4 test-hygiene violation/);
+    assert.doesNotMatch(result.stdout, /ignored\.ts|second\.test\.js:1/);
   });
 });

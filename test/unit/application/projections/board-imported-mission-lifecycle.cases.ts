@@ -174,9 +174,9 @@ describe('imported Missions use the existing board and lifecycle path', () => {
     // And inside the registration it is bound to `import-legacy` alone: no
     // draft, active, board, review, or integrate path can reach it.
     const registry = fs.readFileSync(path.join(repoRoot, 'src', 'composition', 'cli-legacy-commands.ts'), 'utf8');
-    const cli = fs.readFileSync(path.join(repoRoot, 'src', 'composition', 'create-cli.ts'), 'utf8');
+    const cli = fs.readFileSync(path.join(repoRoot, 'src', 'composition', 'cli-command-registry.ts'), 'utf8');
     assert.match(cli, /\.\.\.createLegacyCommands\(context\)/, 'CLI registers the explicit legacy command group');
-    const binding = /'import-legacy': \(args\) => withGraph\(services => \{[\s\S]*?\n {4}\}\),/.exec(registry);
+    const binding = /'import-legacy': \(args\) => withGraph\((?:async\s+)?services => \{[\s\S]*?\n {4}\}\),/.exec(registry);
     assert.ok(binding, 'the import-legacy registry entry exists');
     assert.equal(
       (registry.match(/importLegacyMissions\(/g) ?? []).length,

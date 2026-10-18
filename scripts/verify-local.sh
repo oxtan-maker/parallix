@@ -45,7 +45,7 @@ cd "$REPO_ROOT"
 # launched with a supported runtime. The default suite uses `node --test`, so
 # ensure npm resolves a Node version that satisfies package.json's >=20 engine.
 node_major() {
-  "$1" -p 'process.versions.node.split(".")[0]' 2>/dev/null || true
+  "$1" --v8-pool-size=1 -p 'process.versions.node.split(".")[0]' 2>/dev/null || true
 }
 
 select_supported_node() {
@@ -188,21 +188,28 @@ gate_integrate() {
     gate_static_analysis || return 1
   fi
 
-  PARALLIX_REAL_AGENT="$real_agent" PARALLIX_REAL_AGENT_MODEL="$real_agent_model" node --input-type=module --import tsx <<'NODE'
+  PARALLIX_REAL_AGENT="$real_agent" PARALLIX_REAL_AGENT_MODEL="$real_agent_model" node --v8-pool-size=1 --input-type=module <<'NODE'
 import fs from 'node:fs';
 import path from 'node:path';
 import childProcess from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
+// The planner has only erasable types and builtin imports. Older supported
+// verification runtimes retain the same tsx loader used before this fast path.
+if (!process.features.typescript) {
+  const { register } = await import('tsx/esm/api');
+  register();
+}
+
 const repoRoot = process.cwd();
 const realAgent = String(process.env.PARALLIX_REAL_AGENT || '');
 const realAgentModel = String(process.env.PARALLIX_REAL_AGENT_MODEL || '');
 const {
-  loadIntegrationConfig,
+  readIntegrationConfig,
   parseFilesToAreas,
   orderIntegrationGates,
   gateMatchesChangedAreas,
-} = await import(pathToFileURL(path.join(repoRoot, 'src/adapters/cli/commands/integrate.ts')).href);
+} = await import(pathToFileURL(path.join(repoRoot, 'src/adapters/cli/commands/integrate-gate-plan.ts')).href);
 
 function log(message = '') {
   process.stdout.write(`${message}\n`);
@@ -252,7 +259,7 @@ function resolveChangedAreas() {
 }
 
 const configPath = process.env.INTEGRATION_CONFIG_PATH || path.join(repoRoot, 'config', 'integration-pipelines.json');
-const configResult = loadIntegrationConfig({ configPath });
+const configResult = readIntegrationConfig(configPath);
 if (!configResult.ok) {
   fail(`integration-gates: ${configResult.error}; mandatory integration gate plan is unavailable`);
   process.exit(1);

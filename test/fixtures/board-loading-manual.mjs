@@ -20,7 +20,7 @@ let origin = '';
 try {
   if (snapshot) { fs.cpSync(snapshot, root, { recursive: true }); }
   else { await seedBoardLoading(root); }
-  browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true });
+  browser = await chromium.launch({ args: ['--disable-extensions'], executablePath: '/usr/bin/chromium', headless: true });
   const environment = { ...process.env, PATH: '/usr/bin:/bin', PARALLIX_HOME: path.join(root, 'home'),
     PARALLIX_TEST_NO_FORGEJO: '1', NO_COLOR: '1' };
   for (const key of Object.keys(environment)) {
