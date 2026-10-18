@@ -1,3 +1,6 @@
+import { retainedRecoveryOutcome, workflowFailureEvidence } from './workflow-failure-evidence.js';
+import { listRecoveryEvidence } from '../application/recovery-evidence.js';
+import { REBOUND_OUTCOME_EVENT, type ReboundOutcomeRecord } from '../application/rebound-telemetry.js';
 import { requireWorkflowOwner } from '../domain/workflow-operation.js';
 import { resolveDatabasePath } from '../adapters/sqlite/database-path-resolver.js';
 import type { workflowCliObserver } from './workflow-cli.js';
@@ -78,7 +81,18 @@ export async function composeWorkflowOperations(root: string, configuration: Par
       history: mission => observedTerminal().history(mission),
       page: (mission, request) => observedTerminal().page(mission, request),
     }, observe));
-  return { service, close: () => db.close(), operations };
+  const failureEvidence = async (operation: import('../application/ports/workflow-operation.js').WorkflowOperationRecord) => {
+    const history = (await loadTerminal()).history(operation.missionId);
+    let gates: ReturnType<typeof listRecoveryEvidence> = [];
+    let outcomes: ReboundOutcomeRecord[] = [];
+    try { gates = listRecoveryEvidence({ cwd: resolveWorktree(operation.missionId) ?? root, missionId: operation.missionId }); } catch { /* Evidence may be unavailable. */ }
+    try {
+      const entries = await new SqliteOperationalHistoryRepository(db).findByTypeForMission(REBOUND_OUTCOME_EVENT, operation.missionId);
+      outcomes = entries.flatMap(entry => retainedRecoveryOutcome(entry.eventData, repository));
+    } catch { /* Missing telemetry must not imply recovery exhaustion. */ }
+    return workflowFailureEvidence(operation, history.ok ? history.runs.map(run => run.record) : [], gates, outcomes);
+  };
+  return { service, close: () => db.close(), operations, failureEvidence };
 }
 
 /** The independent supervisor owns capture; executor stdio never uses HTTP IPC. */
@@ -221,7 +235,8 @@ export async function attachWorkflowOperations(root: string, configuration: Para
     const selected = await graph.executePorts.agentExecution.select?.('');
     if (!selected) { throw new Error('No configured execute agent'); } return selected;
   }, undefined, progress);
-  const controller = owned.service;
+  const { workflowFailureController } = await import('./workflow-cli.js');
+  const controller = workflowFailureController(owned.service, id => owned.service.operation(id), owned.failureEvidence, mission => owned.service.current(mission));
   const recovery = recover ? startWorkflowRecovery(root, configuration) : null;
   const projection = { buildMissionCard: capabilities.boardProjection.buildMissionCard.bind(capabilities.boardProjection), build: async () => projectWorkflowBoard(await capabilities.boardProjection.build(), await owned.operations.readOnly(() => owned.operations.open())) };
   return { ...graph,

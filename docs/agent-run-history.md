@@ -26,6 +26,22 @@ cannot be confirmed, Parallix reports a pending stop and refuses replacement;
 inspect the retained history and retry `px stop` after resolving the surviving
 execution.
 
+When an owned draft, active, review, integrate or stop command fails, its final
+summary follows the streamed output. It names the workflow stage and command,
+the observed coordinator exit code or signal, recorded diagnostics, and the
+next operator action. A cause that the recorded evidence does not establish is
+shown as unknown. A failed verification command is listed separately with its
+own exit code when that evidence was retained.
+
+The summary includes a command such as
+`px history task-1234 show run:<run-id>:stdout@<offset>+<length>` to inspect a
+retained output slice. It says plainly when no output was retained. Recovery
+is reported separately: no recorded attempt, attempted and resolved, or budget
+exhausted with its attempt count. Incomplete recovery evidence is reported as
+unresolved; a nonzero command exit alone never establishes recovery-budget
+exhaustion. Inspect the cited output and `px status <slug>`, address the recorded
+failure, then explicitly retry as directed.
+
 ## Attach to a mission
 
 From the mission worktree, or with an explicit mission slug:

@@ -91,3 +91,25 @@ test('TASK-2653: a launch that exits non-zero still spends an attempt and record
   assert.equal(data[0].fingerprintBefore, data[0].fingerprintAfter);
   assert.deepEqual(data.map((row) => [row.provider, row.model]), [['openai', 'gpt-x'], ['openai', 'gpt-x']], 'a completed non-zero run keeps its reported provider and model');
 });
+
+test('owned workflow records final recovery accounting without inferring exhaustion from escalation (TASK-2772)', async () => {
+  const { configureMissionWriteAuthorization } = await import('../../../src/application/ports/mission-write-authorization.js');
+  const { REBOUND_OUTCOME_EVENT } = await import('../../../src/application/rebound-telemetry.js');
+  const rows: OperationalHistoryEntry[] = [];
+  bind(async entry => { rows.push(entry); });
+  configureMissionWriteAuthorization({ operationId: 'owned', assert: async () => {} });
+  try {
+    for (const [expected, verify, reason] of [
+      ['fixed', () => ({ ok: true }), gateReason],
+      ['exhausted', () => ({ ok: false, diagnostic: 'still failing' }), gateReason],
+      ['human-only', () => ({ ok: false }), { ...gateReason, invalidContract: { command: 'verify', diagnostic: 'invalid contract', authorityReason: 'locked gate', proposedCorrection: 'operator decision' } }],
+    ] as const) {
+      const result = await rebound(reason, contextFor(verify));
+      assert.equal(result.outcome, expected);
+      const event = JSON.parse(rows.filter(row => row.eventType === REBOUND_OUTCOME_EVENT).at(-1)!.eventData);
+      assert.equal(event.outcome, result.outcome);
+      assert.equal(event.attempts, result.attempts);
+      assert.equal(event.operationId, 'owned');
+    }
+  } finally { configureMissionWriteAuthorization(null); }
+});

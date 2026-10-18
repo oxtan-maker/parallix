@@ -1,3 +1,4 @@
+import { authorizedOperationId } from './ports/mission-write-authorization.js';
 /**
  * Durable rebound repair telemetry (TASK-2653).
  *
@@ -65,4 +66,23 @@ export async function recordReboundRepair(record: ReboundRepairRecord, log?: (_m
   } catch (err: unknown) {
     log?.(`RECOVERY_TELEMETRY could not be recorded: ${(err as Error)?.message ?? String(err)}`);
   }
+}
+
+/** Final kernel accounting, kept separate from individual repair attempts. */
+export interface ReboundOutcomeRecord {
+  readonly operationId: string | null;
+  readonly missionId: string;
+  readonly outcome: 'fixed' | 'exhausted' | 'human-only';
+  readonly attempts: number;
+  readonly diagnostic: string;
+}
+export const REBOUND_OUTCOME_EVENT = 'rebound.outcome';
+export async function recordReboundOutcome(record: Omit<ReboundOutcomeRecord, 'operationId'>, log?: (_msg: string) => void): Promise<void> {
+  const bound = sink;
+  const operationId = authorizedOperationId();
+  if (!bound || !operationId) { return; }
+  try {
+    await bound.history.append({ eventType: REBOUND_OUTCOME_EVENT,
+      eventData: JSON.stringify({ ...record, diagnostic: record.diagnostic.slice(0, 3000), operationId, repositoryId: bound.repositoryId }), createdAt: new Date().toISOString() });
+  } catch { log?.('RECOVERY_TELEMETRY outcome could not be recorded'); }
 }

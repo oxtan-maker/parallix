@@ -45,7 +45,7 @@ import * as fmt from './presentation/cli-format.js';
 
 import type { RecoveryEvidenceRef } from './recovery-evidence.js';
 import { captureOriginalFailureEvidence, captureRetryEvidence } from './rebound-evidence.js';
-import { recordReboundRepair, type ReboundRepairOutcome } from './rebound-telemetry.js';
+import { recordReboundOutcome, recordReboundRepair, type ReboundRepairOutcome } from './rebound-telemetry.js';
 import { launchStatus, type FixLaunch } from './rebound-launch-result.js';
 import { describeLaunchFailure, type LaunchFailure } from '../domain/launch-failure.js';
 
@@ -269,7 +269,9 @@ async function reboundImpl(reason: ReboundReason, context: ReboundContext): Prom
 }
 
 export async function rebound(reason: ReboundReason, context: ReboundContext): Promise<ReboundOutcome> {
-  return await reboundImpl(reason, context);
+  const outcome = await reboundImpl(reason, context);
+  await recordReboundOutcome({ missionId: context.slug, outcome: outcome.outcome, attempts: outcome.attempts, diagnostic: outcome.diagnostic }, context.log);
+  return outcome;
 }
 
 interface ReboundState { occurrenceId: string; slug: string; implementer: string; reason: ReboundReason; originalReason: ReboundReason; classification: ReboundClassification; diagnostic: string; originalDiagnostic: string; history: string[]; launchFailures: number; attempts: number; attemptsDetail: RepairEvidence[]; /** Retained evidence of the original failed command, persisted before the first repair launch. */ capturedEvidence?: RecoveryEvidenceRef | null; launchFailure?: LaunchFailure; }

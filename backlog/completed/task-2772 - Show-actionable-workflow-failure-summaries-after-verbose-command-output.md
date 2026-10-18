@@ -1,8 +1,8 @@
 ---
 id: TASK-2772
 title: Show actionable workflow failure summaries after verbose command output
-status: ready-for-integration
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-18 05:01'
 labels:
   - enhancement

@@ -1,3 +1,5 @@
+import { isWorkflowCommand } from '../domain/workflow-operation.js';
+import { workflowFailureSummary, type WorkflowFailureFacts } from '../application/presentation/workflow-failure.js';
 import { stripTerminalControl } from '../application/run-history.js';
 import { randomUUID } from 'node:crypto';
 import type { Command } from '../interfaces/cli/runtime.js';
@@ -128,4 +130,39 @@ function workflowReplay(write: (_text: string) => void, interactive: boolean) {
     if (complete) { write(complete); }
     pending.set(key, text.slice(cut).slice(-65536));
   };
+}
+
+/** Decorate only CLI outcomes, after the owner's waiter has replayed output. */
+export function workflowFailureController(
+  controller: import('../application/controller/board-command.js').BoardCommandDispatcher,
+  read: (_id: string) => Promise<import('../application/ports/workflow-operation.js').WorkflowOperationRecord | null>,
+  evidence: (_operation: import('../application/ports/workflow-operation.js').WorkflowOperationRecord) => Promise<Partial<WorkflowFailureFacts>> = async () => ({}),
+  current?: (_mission: string) => Promise<import('../application/ports/workflow-operation.js').WorkflowOperationRecord | null>,
+): import('../application/controller/board-command.js').BoardCommandDispatcher {
+  return {
+    canExecute: kind => controller.canExecute(kind),
+    async dispatch<T>(request: BoardCommandRequest) {
+      if (!isWorkflowCommand(request.kind) && request.kind !== 'workflow:stop') { return controller.dispatch<T>(request); }
+      const stopping = await stoppingWorkflow(request, current);
+      const result = await controller.dispatch<T>(request);
+      if (result.status === 'completed' || !result.error) { return result; }
+      let operation: Awaited<ReturnType<typeof read>> = null;
+      let recorded: Partial<WorkflowFailureFacts> = {};
+      try {
+        operation = stopping ?? await read(request.operationId);
+        if (operation) { recorded = await evidence(operation); }
+      } catch { /* Presentation must not replace the original failure. */ }
+      const message = workflowFailureSummary({ mission: request.missionId,
+        stage: operation ? `${operation.command} / ${operation.phase}` : `${request.kind} / admission`,
+        command: operation?.invocation ? `px ${operation.invocation.command} ${operation.invocation.args.join(' ')}` : `px ${request.kind.split(':')[0]} ${request.missionId}`,
+        output: [], ...recorded, diagnostics: [result.error.message, ...(recorded.diagnostics ?? [])] });
+      return { ...result, error: { ...result.error, message } };
+    },
+  };
+}
+
+async function stoppingWorkflow(request: BoardCommandRequest,
+  current?: (_mission: string) => Promise<import('../application/ports/workflow-operation.js').WorkflowOperationRecord | null>) {
+  try { return request.kind === 'workflow:stop' ? await current?.(request.missionId) ?? null : null; }
+  catch { return null; } // Observation must not prevent stop dispatch.
 }
