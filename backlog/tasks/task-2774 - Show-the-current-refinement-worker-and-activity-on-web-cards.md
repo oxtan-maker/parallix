@@ -1,7 +1,7 @@
 ---
 id: TASK-2774
 title: Show the current refinement worker and activity on web cards
-status: backlog
+status: ready-for-integration
 assignee: []
 created_date: '2026-10-18 06:02'
 labels:
