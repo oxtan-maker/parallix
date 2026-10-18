@@ -8,6 +8,6 @@ import { createMissionTerminalResources } from '../adapters/cli/commands/mission
  * The web host, the CLI and board actions resolve a Mission's terminal and
  * retained history through this one binding; none derives native handles.
  */
-export function createMissionTerminalCapability(rootDir: string, configuration: ParallixConfiguration): MissionTerminalCapability {
-  return createMissionTerminalResources(rootDir, { configuration, renderer: createRecordedOutputRenderer() });
+export function createMissionTerminalCapability(rootDir: string, configuration: ParallixConfiguration, resolveWorktree?: (_missionId: string) => string | null): MissionTerminalCapability {
+  return createMissionTerminalResources(rootDir, { configuration, ...(resolveWorktree ? { resolveWorktreeFn: resolveWorktree } : {}), renderer: createRecordedOutputRenderer() });
 }

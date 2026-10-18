@@ -37,6 +37,8 @@ export interface RunHistoryScope {
   readonly fs: RunHistoryFileSystem;
   /** Supervisor liveness, used to report an abandoned `running` record as interrupted. */
   readonly isAlive: (_pid: number) => boolean;
+  /** Scope ownership must be established before probing any recorded process. */
+  readonly acceptRecord?: (_record: RunRecord) => boolean;
   readonly executionAlive?: (_execution: { readonly pid: number; readonly processIdentity: string | null }) => boolean | null;
 }
 
@@ -81,6 +83,13 @@ function coverageOf(record: RunRecord, state: RunState): string[] {
   return lines;
 }
 
+/** Reusable process evidence check after metadata ownership and candidate selection. */
+export function observeRunExecution(record: RunRecord, state: RunState, scope: Pick<RunHistoryScope, 'executionAlive'>): RunSummary['execution'] {
+  const confirmedExit = state === 'exited' && (typeof record.exitCode === 'number' || typeof record.signal === 'string');
+  const observed = !confirmedExit && record.execution ? scope.executionAlive?.(record.execution) : null;
+  return confirmedExit ? 'stopped' : observed === true ? 'live' : observed === false ? 'stopped' : 'unknown';
+}
+
 function readRecord(scope: RunHistoryScope, runId: string): RunLookup {
   if (!isRunHistoryId(runId)) { return { ok: false, error: 'access-denied', detail: `not a run id of this Mission: ${runId}` }; }
   const raw = scope.fs.readText(join(scope.runsDir, runId, RUN_RECORD_FILE));
@@ -90,9 +99,9 @@ function readRecord(scope: RunHistoryScope, runId: string): RunLookup {
   if (record.runId !== runId) { return { ok: false, error: 'malformed', detail: `run record ${runId} names another run` }; }
   try { record = { ...record, family: retainedRunFamily(record), captureKind: runCaptureKind(record) }; }
   catch { return { ok: false, error: 'malformed', detail: `run record ${runId} has an invalid agent family` }; }
+  if (scope.acceptRecord && !scope.acceptRecord(record)) { return { ok: false, error: 'malformed', detail: `run record ${runId} is not attributed to this scope` }; }
   const state = effectiveState(record, scope.isAlive);
-  const observed = record.execution ? scope.executionAlive?.(record.execution) : null;
-  const execution = state === 'exited' ? 'stopped' : observed === true ? 'live' : observed === false ? 'stopped' : 'unknown';
+  const execution = observeRunExecution(record, state, scope);
   return { ok: true, run: { record, state, execution, coverage: coverageOf(record, state) } };
 }
 

@@ -100,3 +100,13 @@ test('SC4: an unattributedRunningSessions change repaints the board', () => {
     'unattributedRunningSessions must move the fingerprint',
   );
 });
+
+test('provider identity and uncertainty repaint while observation timestamps alone do not (TASK-2769)', () => {
+  const projection = (runId: string | null, complete: boolean, observedAt = '2026-10-16T10:00:00Z') => makeProjection({ active: [makeCard({
+    execution: { observedAt, complete, limitations: complete ? [] : ['probe failed'],
+      invocations: runId ? [{ runId, operationId: 'owned', family: agentFamily('codex') }] : [] },
+  })] });
+  assert.equal(boardFingerprint(projection('run-one', true)), boardFingerprint(projection('run-one', true, '2026-10-16T10:00:01Z')));
+  assert.notEqual(boardFingerprint(projection('run-one', true)), boardFingerprint(projection('run-two', true)));
+  assert.notEqual(boardFingerprint(projection('run-one', true)), boardFingerprint(projection(null, false)));
+});

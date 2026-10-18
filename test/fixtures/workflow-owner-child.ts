@@ -5,12 +5,21 @@ import { createMissionTerminalCapability } from '../../src/composition/mission-t
 /** Real worker entry with deterministic mechanism doubles; never uses a model. */
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { runWorkflowWorker } from '../../src/composition/workflow-operations.js';
 import { createProductionApplicationServices } from '../../src/composition/application-services.js';
 import { resolveProcessConfiguration } from '../../src/composition/config.js';
 import { BoardCommandController } from '../../src/application/controller/board-controller.js';
 import { runWorkflowObservation } from '../../src/composition/workflow-observation.js';
+
+/** Block this executor/observer itself without paying for a polling subprocess. */
+function synchronousBarrier(release: string): void {
+  const deadline = Date.now() + 20_000;
+  const sleeper = new Int32Array(new SharedArrayBuffer(4));
+  while (!fs.existsSync(release)) {
+    if (Date.now() >= deadline) { throw new Error(`Fixture barrier expired: ${release}`); }
+    Atomics.wait(sleeper, 0, 0, 10);
+  }
+}
 
 const createGraph: typeof createProductionApplicationServices = async (root, progress, options) => {
   const graph = await createProductionApplicationServices(root, progress, options);
@@ -22,7 +31,7 @@ const createGraph: typeof createProductionApplicationServices = async (root, pro
       console.log(`PREFLIGHT-ENTER:${slug}`);
       fs.writeFileSync(path.join(root, `${slug}.entered`), 'entered');
       // Synchronous work in the real executor must not stall HTTP or SSE.
-      execFileSync(process.execPath, ['-e', `const fs=require('fs'); const deadline=Date.now()+20000; while(!fs.existsSync(process.argv[1])) { if(Date.now()>deadline)process.exit(9); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10); }`, path.join(root, `${slug}.release`)], { stdio: 'inherit' });
+      synchronousBarrier(path.join(root, `${slug}.release`));
       console.log(`PREFLIGHT-EXIT:${slug}`); return true;
     },
     async resolveWorktree() { return root; },
@@ -34,10 +43,20 @@ const createGraph: typeof createProductionApplicationServices = async (root, pro
     agentExecution: { async select() { return 'codex'; }, async prepare() { return { prompt: 'fixture', agent: 'codex', agentConfig: {} }; },
       async launch(request: { onAgentChanged?: (_agent: string) => Promise<void>; slug: string }) {
         await request.onAgentChanged?.('codex'); console.log(`AGENT-OUTPUT:${request.slug}`);
+        if (fs.existsSync(path.join(root, 'provider-fixture'))) {
+          const { fixtureProvider, barrier } = await import('./workflow-provider.js');
+          if (fs.existsSync(path.join(root, 'capacity.hold'))) { await barrier(root, `${request.slug}.capacity`); }
+          const familyFile = path.join(root, `${request.slug}.families`);
+          const families: string[] = fs.existsSync(familyFile) ? JSON.parse(fs.readFileSync(familyFile, 'utf8')) : ['codex'];
+          for (const [index, family] of families.entries()) {
+            await request.onAgentChanged?.(family);
+            await fixtureProvider(root, request.slug, options!.configuration!, family, index + 1);
+          }
+        }
         return { agent: 'codex', rebaseDeferred: true, errored: false, errorMessage: null, exitStatus: 0, detail: {} };
       } },
     telemetry: { async recordLaunchTelemetry() {} },
-    checkpointValidation: { async validateBeforeHandoff() { console.log('CHECKPOINT-GATE'); return { ok: true }; } },
+    checkpointValidation: { async validateBeforeHandoff() { if (fs.existsSync(path.join(root, 'provider-fixture'))) { const { barrier } = await import('./workflow-provider.js'); await barrier(root, 'post-agent-gate'); } console.log('CHECKPOINT-GATE'); return { ok: true }; } },
     handoffExecution: { async run() { console.log('HANDOFF-OUTPUT'); return { ok: true }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } },
     autonomousReview: { async start() { console.log('REVIEW-OUTPUT'); } },
   };
@@ -86,12 +105,21 @@ if (process.argv[2] === '--workflow-foreground') {
   process.once('disconnect', () => { void (async () => {
     await host.close(); await observation.close(); await owned.close(); await graph.operatorState.close();
   })().finally(() => process.exit(0)); });
+} else if (process.argv[2] === '--fixture-cli-execute') {
+  const root = process.argv[3]; const slug = process.argv[4]; const configuration = resolveProcessConfiguration();
+  const graph = await createGraph(root, undefined, { configuration });
+  const owned = await composeWorkflowOperations(root, configuration, graph.presentationCapabilities!.commandController,
+    path.join(root, 'parallix.db'), async () => 'codex', { command: process.execPath, args: [...process.execArgv, import.meta.filename] });
+  try {
+    const { default: active } = await import('../../src/adapters/cli/commands/active.js');
+    await active([slug, '--implementer', 'codex'], { controller: owned.service, rootDir: root, missionTitleFn: async () => 'fixture mission', exitFn: code => { throw new Error(`CLI exited ${code}`); } });
+  } finally { await owned.close(); await graph.operatorState.close(); }
 } else if (process.argv[2] === '--workflow-observe') {
   runWorkflowObservation(process.argv[3], resolveProcessConfiguration(), (root, configuration) => {
     const terminal = createMissionTerminalCapability(root, configuration);
     return { ...terminal, live: mission => {
       fs.writeFileSync(path.join(root, 'terminal-probe.entered'), 'entered');
-      execFileSync(process.execPath, ['-e', `const fs=require('fs'); const deadline=Date.now()+20000; while(!fs.existsSync(process.argv[1])) { if(Date.now()>deadline)process.exit(9); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10); }`, path.join(root, 'terminal-probe.release')], { stdio: 'inherit' });
+      synchronousBarrier(path.join(root, 'terminal-probe.release'));
       return terminal.live(mission);
     } };
   });

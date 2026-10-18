@@ -140,6 +140,7 @@ function toWebMissionCard(card: MissionCard): WebMissionCard {
     })),
     blockingReason: card.blockingReason,
     flags: [...card.flags],
+    ...(card.execution ? { execution: card.execution } : {}),
     activity: {
       work: toWebMissionWork(activity.work),
       coordinator: toWebCoordinatorEvidence(activity.coordinator),
@@ -180,6 +181,7 @@ function toAgentAvailability(metric: AgentAvailabilityMetric): WebAgentAvailabil
     available: metric.available,
     blockedFor: toWireDuration(metric.blockedForMs, `agentAvailability[${metric.family}]`),
     reason: metric.reason ?? null,
+    ...(metric.executionComplete !== undefined ? { executionComplete: metric.executionComplete } : {}),
     ...(metric.runningSessions !== undefined ? { runningSessions: metric.runningSessions } : {}),
   };
 }

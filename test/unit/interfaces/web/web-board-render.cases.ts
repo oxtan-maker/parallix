@@ -448,7 +448,7 @@ test('the audited reference treatment omits non-reference source and attribution
 });
 
 test('activity, coordinator recovery evidence, and reduced motion stay truthful', () => {
-  const live = makeCard({ id: fixtureMissionId('task-1111') as MissionCard['id'], currentWork: { operationId: 'op', phase: 'implement', summary: 'live work', agent: agentFamily('codex'), updatedAt: '2026-08-30T00:00:00.000Z', freshness: 'live' }, liveSession: { missionId: fixtureMissionId('task-1111') as MissionCard['id'], family: agentFamily('codex') } });
+  const live = makeCard({ execution: { observedAt: '2026-10-16T10:00:00Z', complete: true, limitations: [], invocations: [{ runId: 'execute-codex-a1-test', operationId: 'op', family: agentFamily('codex') }] }, id: fixtureMissionId('task-1111') as MissionCard['id'], currentWork: { operationId: 'op', phase: 'implement', summary: 'live work', agent: agentFamily('codex'), updatedAt: '2026-08-30T00:00:00.000Z', freshness: 'live' }, liveSession: { missionId: fixtureMissionId('task-1111') as MissionCard['id'], family: agentFamily('codex') } });
   const uncertain = makeCard({ id: fixtureMissionId('task-1112') as MissionCard['id'], currentWork: { ...live.currentWork!, freshness: 'unverified' } });
   const stale = makeCard({ id: fixtureMissionId('task-1113') as MissionCard['id'], currentWork: { ...live.currentWork!, freshness: 'stale' }, liveSession: { missionId: fixtureMissionId('task-1113') as MissionCard['id'], family: agentFamily('codex') } });
   const blocked = makeCard({ id: fixtureMissionId('task-1114') as MissionCard['id'], blockingReason: 'waiting' });
@@ -471,7 +471,7 @@ test('fans retain the pre-TASK-2576 work behavior independently of agent identit
   for (const freshness of ['live', 'unverified', 'stale'] as const) {
     for (const agent of [null, agentFamily('codex')]) {
       for (const liveSession of [undefined, null, { missionId: fixtureMissionId('task-9999') as MissionCard['id'], family: agentFamily('codex') }]) {
-        const card = makeCard({ currentWork: { operationId: 'op', phase: 'integrate', summary: 'work in progress', agent, updatedAt: '2026-08-30T00:00:00.000Z', freshness }, liveSession });
+        const card = makeCard({ execution: freshness !== 'stale' && agent !== null ? { observedAt: '2026-10-16T10:00:00Z', complete: true, limitations: [], invocations: [{ runId: 'execute-codex-a1-test', operationId: 'op', family: agent }] } : undefined, currentWork: { operationId: 'op', phase: 'integrate', summary: 'work in progress', agent, updatedAt: '2026-08-30T00:00:00.000Z', freshness }, liveSession });
         const snapshot = snapshotOf({ stages: makeProjection({ active: [card] }).stages });
         const webCard = snapshot.stages.flatMap(stage => stage.cards)[0];
         const html = render(snapshot);
@@ -509,6 +509,7 @@ test('flight headers omit work badges and agent dots in every flight lane (TASK-
       for (const agent of [null, agentFamily('codex')]) {
         const card = makeCard({
           lane, status: lane, agent,
+          execution: (state === 'live' || state === 'unverified') && agent !== null ? { observedAt: '2026-10-16T10:00:00Z', complete: true, limitations: [], invocations: [{ runId: 'execute-codex-a1-test', operationId: 'op', family: agent }] } : undefined,
           blockingReason: state === 'blocked' ? 'waiting' : null,
           currentWork: state === 'idle' || state === 'blocked' ? null : {
             operationId: 'op', phase: 'integrate', summary: 'work in progress',

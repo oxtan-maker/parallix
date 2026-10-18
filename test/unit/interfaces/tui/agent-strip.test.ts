@@ -422,3 +422,14 @@ test('shipped config/agents.json declares no top-level families key', () => {
   );
 });
 }
+
+test('AgentStrip distinguishes provider counts and partial lower bounds from coordinator evidence (TASK-2769)', () => {
+  const rows: AgentAvailabilityMetric[] = [
+    { family: agentFamily('codex'), available: true, blockedForMs: 0, runningSessions: 1, executionComplete: false },
+    { family: agentFamily('claude'), available: true, blockedForMs: 0, runningSessions: null, executionComplete: false },
+  ];
+  const frame = renderToString(React.createElement(AgentStrip, { agentAvailability: rows }), { columns: 160 });
+  assert.match(frame, /1\+ providers executing/);
+  assert.match(frame, /provider execution unknown/);
+  assert.doesNotMatch(frame, /px cmd live/);
+});

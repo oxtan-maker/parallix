@@ -64,6 +64,7 @@ function board(rootDir: string) {
     launcherProbe: () => ({ available: true, detail: null }),
     readAgentConfig: () => null,
     detectRunningSessions: () => null,
+    providerExecution: { observe: () => ({ observedAt: new Date().toISOString(), complete: true, invocations: [], limitations: [] }) },
     gitFn: gitDouble,
   });
 }

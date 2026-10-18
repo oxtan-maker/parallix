@@ -333,7 +333,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'ui-board-card',
     family: 'ui-board',
     fileLocation: 'src/application/projections/mission-board.ts',
-    line: 277,
+    line: 279,
     anchor: 'function projectMissionCard',
     reads: ['Mission', 'CheckpointData', 'Review'],
     requirement:
@@ -355,7 +355,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'ui-agent-status',
     family: 'ui-board',
     fileLocation: 'src/application/projections/agent-status.ts',
-    line: 25,
+    line: 26,
     anchor: 'function projectAgentAvailability',
     reads: ['AgentBlock'],
     requirement:

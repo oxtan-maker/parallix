@@ -184,3 +184,34 @@ Bubblewrap confinement boundary remains responsible for agent filesystem
 isolation and masks terminal-host state from confined agents. tmux does not
 grant an agent cross-Mission access, does not replace that boundary, and does
 not hold lifecycle, verification-gate, or review authority.
+
+## Execution counts and workflow activity
+
+The board header counts confirmed executing provider invocations by their actual
+family. Mission cards use the same observation. One invocation counts once;
+wrappers, retained consoles, workflow owners and assignees add no providers.
+Provider-internal subagents are not individually observable and add no inferred
+counts. In-process providers without invocation-level liveness evidence, including
+Pi, remain unconfirmed while their capture is open.
+
+Preparation, capacity waits, post-agent gates and pending stop remain workflow
+activity. Spinning card fans describe that activity, independently of execution.
+A selected or previous family does not establish that a provider is executing.
+Pending stop alone does not establish exit.
+
+Historical crashes and legacy captures do not make today's execution counts
+incomplete after their supervisor is gone. Uncertainty remains relevant to the
+currently admitted operation or a capture whose supervisor is still live.
+Independent confirmation of a provider still counts even if its capture
+supervisor has exited. Coordinator history does not consume provider checks;
+recent provider invocations are checked first.
+
+A complete observation can report zero. When only part of the execution evidence
+can be checked, confirmed positive counts show a `+` lower bound; a family with
+no confirmed positives reads `unknown`. Cards likewise show confirmed invocations
+with their limitation, or `execution unknown`. Failed or interrupted observation
+of current execution never establishes zero. Closing capture without an exit
+result does not confirm provider exit either. A missing terminal host does not
+establish provider death; process identity and retained invocation evidence are
+checked independently. Browser reload and web-host restart rediscover existing
+invocations without launching replacements.

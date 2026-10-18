@@ -47,7 +47,7 @@ export async function stopLaunchedChild(child: { pid?: number } | null): Promise
 
 
 /** Run the launcher, announce the invocation, and await the result. */
-export async function launchPrepared(prepared: PreparedLaunch, deps: StartAgentLoopDeps, chosen: string, attempt: number): Promise<{ invocation: AgentInvocation | null | undefined; result: AgentProcessResult }> {
+export async function launchPrepared(prepared: PreparedLaunch, deps: Pick<StartAgentLoopDeps, 'step' | 'log' | 'slug' | 'unrefChild' | 'configuration' | 'worktree' | 'role' | 'onLaunch'>, chosen: string, attempt: number): Promise<{ invocation: AgentInvocation | null | undefined; result: AgentProcessResult }> {
   const { step, log, slug, unrefChild } = deps;
   const { launcher, agentEnv, resume, sessionId, model, watchdogConfig, customReservation, effectiveProfile, nativeSandbox, launchSessionMarkerPort, sessionRole, actualPrompt } = prepared;
   let invocation: AgentInvocation | null | undefined;

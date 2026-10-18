@@ -3,6 +3,7 @@ import { Box, Text } from 'ink';
 import type { AgentAvailabilityMetric } from '../../application/projections/board.js';
 import {
   describeFamilyCoordinatorEvidence,
+  describeFamilyProviderExecution,
   describeMissionActivityTotals,
   summarizeMissionActivity,
   type MissionActivity,
@@ -100,7 +101,7 @@ export function AgentStrip({ agentAvailability, unattributedRunningSessions, mis
             <Text color={dotColor}>{'●'}</Text>
             <Text color="gray">{` ${agent.family}`}</Text>
             {countdown && <Text dimColor color="yellow">{` ${countdown} ·`}</Text>}
-            <Text dimColor>{` ${describeFamilyCoordinatorEvidence(agent.runningSessions)}`}</Text>
+            <Text dimColor>{` ${agent.executionComplete === undefined ? describeFamilyCoordinatorEvidence(agent.runningSessions) : describeFamilyProviderExecution(agent.runningSessions, agent.executionComplete)}`}</Text>
             {reason && <Text dimColor color="red">{` ${reason}`}</Text>}
           </Box>
         );

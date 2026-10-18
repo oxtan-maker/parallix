@@ -185,3 +185,8 @@ export function describeMissionActivityTotals(totals: MissionActivityTotals): st
   ].filter((segment): segment is string => segment !== null);
   return segments.length === 0 ? null : `work: ${segments.join(' · ')}`;
 }
+
+/** Confirmed provider invocations; incomplete observations give lower bounds. */
+export function describeFamilyProviderExecution(count: number | null | undefined, complete: boolean): string {
+  return typeof count === 'number' ? `${count}${complete ? '' : '+'} providers executing` : 'provider execution unknown';
+}

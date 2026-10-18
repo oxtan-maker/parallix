@@ -185,3 +185,14 @@ test('automatic headless launches keep attributable pipe capture without probing
   session.finish({ status: 0 });
   assert.equal(record(worktree, session.runId).terminalHost, 'pipe');
 });
+
+test('in-process preparation never records its workflow owner as provider execution (TASK-2769)', async t => {
+  const { configureMissionWriteAuthorization } = await import('../../../../src/application/ports/mission-write-authorization.js');
+  configureMissionWriteAuthorization({ operationId: 'workflow-owner', async assert() {} });
+  t.after(() => configureMissionWriteAuthorization(null));
+  const { worktree, deps, input } = setup('pipe');
+  const session = openRunSession({ ...input, family: 'pi' }, deps)!;
+  try {
+    assert.equal(record(worktree, session.runId).execution, null, 'SDK preparation and workflow ownership do not confirm a provider invocation');
+  } finally { session.finish({ status: 0 }); }
+});

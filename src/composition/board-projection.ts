@@ -1,3 +1,7 @@
+import { SqliteWorkflowOperationStore } from '../adapters/sqlite/workflow-operation-store.js';
+import { createMissionTerminalCapability } from './mission-terminal-capability.js';
+import { unknownExecution, type ProviderExecutionReader } from '../application/projections/provider-execution.js';
+import { DEFAULT_CONFIGURATION } from '../application/ports/configuration.js';
 import type { AgentFamily } from '../domain/agents.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import { createGitChangeIdentity } from '../adapters/git/change-identity.js';
@@ -60,6 +64,8 @@ export interface BoardProjectionCompositionDeps {
   readonly readAgentConfig?: () => import('../adapters/agents/agent-config.js').AgentConfig | null;
   /** Running-session detection for the agent strip; defaults to the live process scan. */
   readonly detectRunningSessions?: () => readonly import('../adapters/agents/running-sessions.js').RunningMissionSession[] | null;
+  /** Provider observation boundary; defaults to the repository's retained execution evidence. */
+  readonly providerExecution?: ProviderExecutionReader;
 }
 
 /**
@@ -137,6 +143,8 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
   const changeIdentity = createGitChangeIdentity(deps.rootDir, deps.gitFn ?? undefined, { snapshotBranchHeads: true });
   const completedMissionRetentionDays = loadEffectiveConfig(deps.rootDir).adapters.web.completedMissionRetentionDays;
   const gates = new ConcreteGateReadAdapter({ rootDir: deps.rootDir });
+  let topology: ReturnType<typeof snapshotWorktreeTopology> | null = null;
+  let terminal: ReturnType<typeof createMissionTerminalCapability> | undefined;
   const builder = new BoardProjectionBuilder(
     missions,
     new ConcreteReviewReadAdapter({
@@ -163,8 +171,14 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
     new ConcreteGitReadAdapter({ rootDir: deps.rootDir, repositoryId: deps.repositoryId, gitRunner: deps.gitFn ?? undefined }),
     new ConcreteOperationLogReadAdapter({ historyRepo: deps.historyRepo }),
     {
+      workflowOperations: deps.database ? new SqliteWorkflowOperationStore(deps.database, deps.repositoryId) : undefined,
+      providerExecution: deps.providerExecution ?? { observe: (scope, currentOperationId) => {
+        terminal ??= createMissionTerminalCapability(deps.rootDir, deps.configuration ?? DEFAULT_CONFIGURATION, mission => topology?.resolveWorktree(mission) ?? null);
+        const result = terminal.execution?.(scope.missionId, currentOperationId);
+        return result && 'invocations' in result ? result : unknownExecution();
+      } },
       prepareReads: () => {
-        const topology = snapshotWorktreeTopology({
+        topology = snapshotWorktreeTopology({
           cwd: deps.rootDir,
           gitFn: deps.gitFn ?? null,
           currentBranch: deps.gitFn ? () => '' : undefined,

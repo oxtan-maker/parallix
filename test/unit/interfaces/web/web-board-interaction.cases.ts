@@ -1,3 +1,4 @@
+import { agentFamily } from '../../../../src/domain/agents.js';
 const reactGlobal: typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean } = globalThis;
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -811,4 +812,35 @@ test('settled workflow retries show their terminal result without restarting (TA
       assert.equal(page.calls.length, 1);
     } finally { await page.close(); }
   }
+});
+
+test('mounted header and card execution transition together while workflow fans persist (TASK-2769)', async () => {
+  const { projectProviderExecution } = await import('../../../../src/application/projections/provider-execution.js');
+  const card = makeCard({ currentWork: { operationId: 'held-workflow', phase: 'execute', summary: 'workflow active',
+    agent: agentFamily('codex'), updatedAt: new Date().toISOString(), freshness: 'live' } });
+  const board = makeProjection({ active: [card] });
+  const availability = ['codex', 'claude'].map(family => ({ family: agentFamily(family), available: true, blockedForMs: 0 }));
+  const observation = (family: string | null, complete = true) => toWebBoardSnapshot(projectProviderExecution(
+    { ...board, metrics: { ...board.metrics, agentAvailability: availability } }, {
+      observe: () => ({ observedAt: new Date().toISOString(), complete, limitations: complete ? [] : ['probe unavailable'],
+        invocations: family ? [{ runId: `execute-${family}-a1-test`, operationId: 'held-workflow', family: agentFamily(family) }] : [] }),
+    }));
+  const page = await renderBoard({ board: observation(null) });
+  try {
+    for (const [family, complete, expected] of [[null, true, '0 executing'], ['codex', true, 'codex · 1 executing'],
+      ['claude', false, 'claude · 1+ executing'], [null, false, 'execution unknown'], [null, true, '0 executing']] as const) {
+      await page.rerender(observation(family, complete));
+      const article = page.mount.querySelector('[data-board-card]')!;
+      assert.equal(article.querySelector('[data-provider-execution]')?.textContent, expected);
+      assert.equal(article.querySelectorAll('.fan.spin').length, 2);
+      const header = page.mount.querySelector('[aria-label="Agent availability"]')!;
+      if (family) {
+        assert.ok(header.textContent?.includes(`${family}1${complete ? '' : '+'}`));
+        assert.equal(article.querySelector('[title*="active worker"]')?.textContent, family);
+      } else {
+        assert.equal(article.querySelector('[title*="active worker"]'), null);
+        assert.ok(header.textContent?.includes(complete ? 'codex0' : 'codexunknown'));
+      }
+    }
+  } finally { await page.close(); }
 });

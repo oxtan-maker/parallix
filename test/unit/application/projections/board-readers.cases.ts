@@ -773,3 +773,34 @@ test('DONE cards remain visible when canonical delivery history is unavailable (
   assert.deepEqual(board.stages.find(stage => stage.lane === 'done')?.cards.map(card => card.id), [mission.id]);
   assert.equal(board.metrics.health.state, 'unavailable');
 });
+
+test('board and focused reads pass the current owner into execution while done history stays complete (TASK-2769 F1)', async () => {
+  const { workflowOperation } = await import('../../../../src/domain/workflow-operation.js');
+  const owner = workflowOperation({ id: 'current-owner', repositoryId: repo, missionId: id1, requestKey: 'request', command: 'active:execute',
+    generation: 0, phase: 'accepted', providerStarted: false, agent: 'codex', reviewer: null, originalStatus: 'active', previousAssignee: null,
+    owner: null, createdAt: '2026-10-16T10:00:00Z', updatedAt: '2026-10-16T10:00:00Z', reason: null });
+  const calls: string[] = [];
+  const builder = new BoardProjectionBuilder(
+    makeMissionAdapter([fixtureMission(id1, { repositoryId: repo, status: 'active' }), fixtureMission(id2, { repositoryId: repo, status: 'done' })]),
+    makeReviewAdapter(), makeGateAdapter(), makeAgentAdapter(), makeGitAdapter(), makeOperationLogAdapter(), {
+      workflowOperations: {
+        async open() { calls.push('owners'); return [owner]; },
+        async current() { calls.push('owner'); return owner; },
+      },
+      providerExecution: { observe(scope, currentOperationId) {
+        calls.push(`observe:${scope.missionId}`);
+        assert.equal(currentOperationId, scope.missionId === id1 ? owner.id : undefined);
+        return { observedAt: new Date().toISOString(), complete: true, limitations: [], recordedOperationIds: [owner.id],
+          invocations: scope.missionId === id1 ? [{ runId: 'execute-codex-a1-current', family: agentFamily('codex'), operationId: owner.id }] : [] };
+      } },
+    },
+  );
+  const board = await builder.build();
+  assert.equal(board.metrics.agentAvailability[0].runningSessions, 1);
+  assert.equal(board.metrics.agentAvailability[0].executionComplete, true);
+  assert.equal(board.stages.flatMap(stage => stage.cards).find(card => card.id === id2)?.execution?.complete, true);
+  assert.equal(calls[0], 'owners');
+  calls.length = 0;
+  assert.equal((await builder.buildMissionCard(id1))?.execution?.invocations.length, 1);
+  assert.deepEqual(calls, ['owner', `observe:${id1}`]);
+});

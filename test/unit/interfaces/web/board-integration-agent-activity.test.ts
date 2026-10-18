@@ -14,6 +14,7 @@ function render(agent: string | null, phase = 'integrate'): string {
     lane: 'integration',
     status: 'integration',
     agent: null,
+    execution: agent === null ? undefined : { observedAt: new Date().toISOString(), complete: true, limitations: [], invocations: [{ runId: `execute-${agent}-a1-test`, operationId: `${phase}:task-2576`, family: agentFamily(agent) }] },
     currentWork: {
       operationId: `${phase}:task-2576`, phase, summary: `${phase} in progress`,
       agent: agent === null ? null : agentFamily(agent), updatedAt: new Date().toISOString(), freshness: 'live',

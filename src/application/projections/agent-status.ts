@@ -9,10 +9,11 @@ export interface AgentAvailabilityRow {
   readonly expiresAtMs?: number | null;
   readonly limit?: string | null;
   /**
-   * Missions this family is running right now, or `null` when liveness could
-   * not be observed. Null means unknown and must not be shown as zero.
+   * Confirmed provider invocations for this family, or `null` when execution
+   * could not be observed. executionComplete=false makes positives lower bounds. Null means unknown and must not be shown as zero.
    */
   readonly runningSessions?: number | null;
+  readonly executionComplete?: boolean;
 }
 
 /** One mission whose agent is running right now, and the family running it. */

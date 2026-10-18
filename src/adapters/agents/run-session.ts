@@ -198,7 +198,6 @@ function captureRunSession(input: RunSessionInput, worktree: string, identity: A
   }
   const workflow = authorizedOperationId();
   if (workflow) { capture?.correlateOperation(workflow); }
-  if (workflow && IN_PROCESS_FAMILIES.has(input.family)) { capture?.observeExecution(process.pid, processStartIdentity(process.pid)); }
   return capture;
 }
 

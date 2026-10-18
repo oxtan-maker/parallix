@@ -1,3 +1,4 @@
+import type { ProviderExecutionFacts } from '../projections/provider-execution.js';
 /**
  * Mission terminal and retained-history capability (TASK-2749).
  *
@@ -180,6 +181,7 @@ export type MissionLiveView =
 /** The published capability. Every method takes a Mission ID as given by an input boundary. */
 export interface MissionTerminalCapability {
   /** Canonical identity for this repository, or a typed `invalid` error. */
+  execution?(_mission: string, _currentOperationId?: string): ProviderExecutionFacts | MissionHistoryError;
   identify(_mission: string): { readonly ok: true; readonly identity: MissionTerminalScope } | MissionHistoryError;
   probe(_mission: string): MissionTerminalProbe | MissionHistoryError;
   overview(_mission: string): MissionHistoryOverview | MissionHistoryError;

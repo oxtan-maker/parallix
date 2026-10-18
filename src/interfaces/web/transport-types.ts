@@ -1,3 +1,4 @@
+import type { ProviderExecutionFacts } from '../../application/projections/provider-execution.js';
 /**
  * Web transport wire vocabulary: the versioned DTO types, request kinds, and
  * the `WebTransportError` raised when a value cannot cross the JSON wire.
@@ -141,6 +142,7 @@ export interface WebCheckpointEvidence {
 }
 
 export interface WebMissionCard {
+  readonly execution?: ProviderExecutionFacts;
   readonly id: string;
   readonly title: string;
   readonly lane: WebBoardLane;
@@ -206,6 +208,7 @@ export interface WebAgentAvailability {
    * observed, `0` when the probe ran and nothing was running.
    */
   readonly runningSessions?: number | null;
+  readonly executionComplete?: boolean;
 }
 
 export interface WebSourceFact {

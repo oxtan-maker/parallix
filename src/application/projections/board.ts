@@ -153,10 +153,11 @@ export interface AgentAvailabilityMetric {
   /** Why the family is blocked, when the block carries a reason. */
   readonly reason?: string | null;
   /**
-   * Missions this family is running right now, or `null` when liveness could
-   * not be observed. Null is unknown and must not be rendered as zero.
+   * Confirmed provider invocations for this family, or `null` when execution
+   * could not be observed. executionComplete=false makes positives lower bounds. Null is unknown and must not be rendered as zero.
    */
   readonly runningSessions?: number | null;
+  readonly executionComplete?: boolean;
 }
 
 /** A fixed, projection-owned explanation of the constraint identified by FLOW. */

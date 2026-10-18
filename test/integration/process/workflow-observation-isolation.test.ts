@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { validateWebBoardSnapshot } from '../../../src/interfaces/web/transport.js';
 // Synchronous terminal work must stay in its own persistent observation process.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,8 +11,8 @@ let bundle: Awaited<ReturnType<typeof bundleWorkflowChild>>;
 before(async () => { bundle = await bundleWorkflowChild(); });
 after(() => bundle?.close());
 
-test('held synchronous terminal probe cannot block board snapshots or independent admission (TASK-2750)', { timeout: 15_000 }, async t => {
-  const fixture = await workflowBoard(2, { cli: bundle.cli }); t.after(() => fixture.close());
+test('held synchronous terminal probe cannot block board snapshots or independent admission and observes provider execution (TASK-2750, TASK-2769)', { timeout: 3500 }, async t => {
+  const fixture = await workflowBoard(2, { cli: bundle.cli, providers: true }); t.after(() => fixture.close());
   const host = await fixture.start();
   const http = await workflowHttp(host);
   let settled = false;
@@ -22,6 +25,24 @@ test('held synchronous terminal probe cannot block board snapshots or independen
   assert.equal(settled, false, 'admission and worker entry finish while terminal remains held');
   assert.equal((await fetch(`${host.origin}/api/board`)).status, 200, 'snapshot also completes while synchronous worker preflight remains held');
   fixture.releaseProbe(); assert.equal((await probe).status, 200);
-  fixture.release(fixture.slugs[1]);
+  const slug = fixture.slugs[1];
+  const preparation = await fixture.observation.board();
+  assert.equal(preparation.metrics.agentAvailability.find(agent => agent.family === 'codex')?.runningSessions, 0);
+  fixture.release(slug);
+  await until(() => fs.existsSync(path.join(fixture.root, `${slug}.provider-1.entered`)), 'provider barrier');
+  const active = await http.snapshot();
+  assert.equal(validateWebBoardSnapshot(active).ok, true);
+  assert.equal(active.agentAvailability.find((agent: { family: string }) => agent.family === 'codex').runningSessions, 1);
+  const card = active.stages.flatMap((stage: { cards: unknown[] }) => stage.cards).find((card: { id: string }) => card.id === slug);
+  assert.equal(card.execution.invocations.length, 1);
+  assert.equal(card.execution.invocations[0].operationId, (await fixture.service.current(slug))?.id);
+  fs.writeFileSync(path.join(fixture.root, `${slug}.provider-1.release`), 'release');
+  await until(() => fs.existsSync(path.join(fixture.root, 'post-agent-gate.entered')), 'post-agent gate');
+  const ended = await fixture.observation.board();
+  assert.equal(ended.metrics.agentAvailability.find(agent => agent.family === 'codex')?.runningSessions, 0);
+  assert.equal(ended.stages.flatMap(stage => stage.cards).find(card => card.id === slug)?.execution?.invocations.length, 0);
+  assert.ok(await fixture.service.current(slug), 'workflow still owns held gate');
+  fs.writeFileSync(path.join(fixture.root, 'post-agent-gate.release'), 'release');
+
   await until(async () => (await fixture.service.current(fixture.slugs[1])) === null, 'worker completes');
 });

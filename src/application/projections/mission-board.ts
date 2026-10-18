@@ -1,3 +1,4 @@
+import type { ProviderExecutionFacts } from './provider-execution.js';
 import { projectReviewHistory } from './review-history.js';
 export { projectReviewHistory } from './review-history.js';
 import type { AgentFamily } from '../../domain/agents.js';
@@ -99,6 +100,7 @@ export interface CommandAvailability {
 }
 
 export interface MissionCard {
+  readonly execution?: ProviderExecutionFacts;
   readonly workflowOperation?: import('../../domain/workflow-operation.js').WorkflowOperation;
   readonly id: MissionId;
   readonly repositoryId: RepositoryId;

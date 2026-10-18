@@ -5,9 +5,6 @@ import type { MissionHistoryPageRequest, MissionHistorySearchQuery } from '../ap
 import { cliInvocation, type CliInvocation } from '../adapters/process/cli-invocation.js';
 import { createProductionApplicationServices } from './application-services.js';
 import { createMissionTerminalCapability } from './mission-terminal-capability.js';
-import { SqliteWorkflowOperationStore } from '../adapters/sqlite/workflow-operation-store.js';
-import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
-import { projectWorkflowBoard } from '../application/projections/workflow-board.js';
 
 export const workflowObservationSystem = { spawn };
 
@@ -86,8 +83,7 @@ export function runWorkflowObservation(root: string, configuration: ParallixConf
       let value: unknown;
       if (observation.kind === 'board') {
         if (!graph.presentationCapabilities || !graph.mission) { throw new Error('Board authority unavailable'); }
-        const operations = new SqliteWorkflowOperationStore(graph.operatorState.db as SqliteDatabaseAdapter, graph.mission.repositoryId);
-        value = projectWorkflowBoard(await graph.presentationCapabilities.boardProjection.build(), await operations.open());
+        value = await graph.presentationCapabilities.boardProjection.build();
       } else {
         const terminal = terminalFactory(root, configuration);
         value = observation.kind === 'overview' ? terminal.overview(observation.mission)

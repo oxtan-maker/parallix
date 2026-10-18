@@ -160,3 +160,74 @@ test('a non-review null-agent session does NOT fall back to the assignee (F1)', 
   });
   assert.deepEqual(await adapter.loadRunningSessions(), [{ missionId, family: null as AgentFamily | null }]);
 });
+
+// TASK-2769: the workflow family is selection/activity, never execution evidence.
+for (const path of ['CLI', 'board'] as const) {
+  test(`${path} held preparation excludes selected family from execution indicator (TASK-2769)`, () => {
+    const card = makeCard({ id: missionId, agent: agentFamily('custom'), currentWork: {
+      operationId: 'workflow:preparing', phase: 'execute', summary: 'preparing workflow',
+      agent: agentFamily('codex'), updatedAt: new Date().toISOString(), freshness: 'unverified',
+    } });
+    const snapshot = toWebBoardSnapshot(makeProjection({ active: [card] }));
+    const html = render(snapshot);
+    assert.doesNotMatch(html, /title="active worker family: (codex|custom)"/, 'held preparation has no confirmed provider');
+    assert.match(html, /fan spin/, 'workflow activity remains visible');
+  });
+}
+
+test('CLI pinned wrapper during preparation contributes no provider (TASK-2769)', async () => {
+  const { projectProviderExecution, unknownExecution } = await import('../../../../src/application/projections/provider-execution.js');
+  const adapter = new ConcreteAgentReadAdapter({
+    rootDir: '/fixture', blocklistRepo: new EmptyBlocklistRepo(), knownAgentFamilies: [agentFamily('codex')],
+    detectRunningSessions: () => [{ missionId, role: 'execute', startedAtMs: Date.now(), worktree: '/fixture', pinnedAgent: agentFamily('codex') }],
+    currentWork: currentWork(nullAgentWork({ agent: agentFamily('codex'), summary: 'preparing workflow' })),
+  });
+  const wrappers = await adapter.loadRunningSessions();
+  const board = makeProjection({ active: [makeCard({ id: missionId })] });
+  const observed = projectProviderExecution({ ...board, metrics: { ...board.metrics, agentAvailability: [{ family: agentFamily('codex'), available: true, blockedForMs: 0, runningSessions: wrappers?.length }] } },
+    { observe: () => ({ ...unknownExecution(), complete: true, limitations: [] }) });
+  assert.equal(observed.metrics.agentAvailability[0].runningSessions, 0, 'wrapper liveness is not provider execution');
+});
+
+test('header and cards share invocation counts, uncertainty and actual fallback family (TASK-2769)', async () => {
+  const { projectProviderExecution } = await import('../../../../src/application/projections/provider-execution.js');
+  const board = makeProjection({ active: [makeCard({ id: missionId, currentWork: {
+    operationId: 'old', phase: 'execute', summary: 'selected codex', agent: agentFamily('codex'),
+    updatedAt: new Date().toISOString(), freshness: 'live',
+  } }), makeCard({ id: fixtureMissionId('task-second') })] });
+  const availability = ['codex', 'claude'].map(family => ({ family: agentFamily(family), available: true, blockedForMs: 0 }));
+  const projected = projectProviderExecution({ ...board, metrics: { ...board.metrics, agentAvailability: availability } }, {
+    observe: scope => ({ observedAt: new Date().toISOString(), complete: scope.missionId === missionId,
+      limitations: scope.missionId === missionId ? [] : ['probe timed out'],
+      invocations: scope.missionId === missionId ? [{ runId: 'execute-claude-a2-test', operationId: 'current', family: agentFamily('claude') }] : [] }),
+  });
+  assert.deepEqual(projected.metrics.agentAvailability.map(agent => [agent.family, agent.runningSessions, agent.executionComplete]), [['codex', null, false], ['claude', 1, false]]);
+  const snapshot = toWebBoardSnapshot(projected);
+  const html = render(snapshot);
+  assert.match(html, /claude · 1 executing/);
+  assert.match(html, /execution unknown/);
+  assert.doesNotMatch(html, /title="active worker family: codex"/);
+});
+
+test('pending stop preserves execution and missing run evidence makes both surfaces uncertain (TASK-2769)', async () => {
+  const { projectProviderExecution } = await import('../../../../src/application/projections/provider-execution.js');
+  const { projectWorkflowBoard } = await import('../../../../src/application/projections/workflow-board.js');
+  const { workflowOperation } = await import('../../../../src/domain/workflow-operation.js');
+  const board = makeProjection({ active: [makeCard({ id: missionId })] });
+  const owned = workflowOperation({ id: 'owned', repositoryId: board.repositoryId, missionId, requestKey: 'test', command: 'active:execute',
+    generation: 0, phase: 'accepted', providerStarted: false, agent: 'custom', reviewer: null, originalStatus: 'active', previousAssignee: null,
+    owner: null, createdAt: '2026-10-16T10:00:00Z', updatedAt: '2026-10-16T10:00:00Z', reason: null });
+  const observed = projectProviderExecution({ ...board, metrics: { ...board.metrics, agentAvailability: [{ family: agentFamily('codex'), available: true, blockedForMs: 0 }] } }, {
+    observe: () => ({ observedAt: new Date().toISOString(), complete: true, limitations: [], recordedOperationIds: ['owned'],
+      invocations: [{ runId: 'execute-codex-a1-test', family: agentFamily('codex'), operationId: 'owned' }] }),
+  });
+  const stopping = projectWorkflowBoard(observed, [{ ...owned, phase: 'stopping', providerStarted: true }]);
+  assert.equal(stopping.metrics.agentAvailability[0].runningSessions, 1, 'stop request alone is not provider exit');
+  assert.equal(stopping.stages.flatMap(stage => stage.cards)[0].execution?.invocations[0].family, 'codex');
+  const missing = projectWorkflowBoard(projectProviderExecution(observed, { observe: () => ({ observedAt: new Date().toISOString(), complete: true, limitations: [], invocations: [], recordedOperationIds: [] }) }), [{ ...owned, providerStarted: true }]);
+  assert.equal(missing.metrics.agentAvailability[0].runningSessions, null);
+  assert.equal(missing.stages.flatMap(stage => stage.cards)[0].execution?.complete, false);
+  const foreign = projectWorkflowBoard(observed, [{ ...owned, repositoryId: 'other' as typeof owned.repositoryId, providerStarted: true }]);
+  assert.equal(foreign.stages.flatMap(stage => stage.cards)[0].currentWork, null, 'same MissionId in another repository cannot own this card');
+  assert.equal(foreign.metrics.agentAvailability[0].runningSessions, 1);
+});

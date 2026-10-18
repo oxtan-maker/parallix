@@ -1,3 +1,4 @@
+import { checkExecution } from './transport-execution.js';
 /**
  * Web transport shape checks: validate each nested wire DTO (cards, work,
  * metrics, evidence) and accumulate its problems.
@@ -115,7 +116,7 @@ export function checkMissionCard(object: unknown, path: string, problems: string
   checkKeys(object,
     ['id', 'title', 'lane', 'status', 'closed', 'agent', 'checkpoint', 'checkpointDescription',
       'checkpointEvidence', 'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
-      'reviewDisposition', 'reviewHistory', 'blockingReason', 'flags', 'activity', 'actions'],
+      'reviewDisposition', 'reviewHistory', 'blockingReason', 'flags', 'activity', 'actions', 'execution'],
     ['id', 'title', 'lane', 'status', 'closed', 'agent', 'checkpoint', 'checkpointDescription',
       'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
       'reviewDisposition', 'reviewHistory', 'blockingReason', 'flags', 'activity', 'actions'], path, problems);
@@ -146,6 +147,7 @@ export function checkMissionCard(object: unknown, path: string, problems: string
   }
   checkNullableString(object, 'blockingReason', path, problems);
   checkStringArray(object, 'flags', path, problems);
+  if (object.execution !== undefined) { checkExecution(object.execution, `${path}.execution`, problems); }
   if (isPlainObject(object.activity)) {
     checkKeys(object.activity, ['work', 'coordinator'], ['work', 'coordinator'], `${path}.activity`, problems);
     checkWork(object.activity.work, `${path}.activity.work`, problems);
@@ -191,13 +193,14 @@ export function checkLogEntry(object: unknown, path: string, problems: string[])
 
 export function checkAgentAvailability(object: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
-  checkKeys(object, ['family', 'available', 'blockedFor', 'reason', 'runningSessions'],
+  checkKeys(object, ['family', 'available', 'blockedFor', 'reason', 'runningSessions', 'executionComplete'],
     ['family', 'available', 'blockedFor', 'reason'], path, problems);
   checkString(object, 'family', path, problems);
   checkBoolean(object, 'available', path, problems);
   checkDuration(object.blockedFor, `${path}.blockedFor`, problems);
   checkNullableString(object, 'reason', path, problems);
   checkOptionalNullableNumber(object, 'runningSessions', path, problems);
+  if (object.executionComplete !== undefined) { checkBoolean(object, 'executionComplete', path, problems); }
 }
 
 export function checkSourceFact(object: unknown, path: string, problems: string[]): void {

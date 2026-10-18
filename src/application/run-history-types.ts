@@ -119,6 +119,8 @@ export interface RunHistoryFileSystem {
   readBytes(_path: string, _offset: number, _length: number): Uint8Array | null;
   size(_path: string): number | null;
   listDirs(_path: string): string[];
+  /** Execution observation must distinguish unreadable directories from absence. */
+  inspectDirs?(_path: string): { readonly ok: true; readonly names: string[] } | { readonly ok: false };
   listFiles(_path: string): string[];
 }
 

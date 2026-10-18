@@ -1,3 +1,4 @@
+import { observeProviderExecution, providerFamilyCount } from '../../../src/application/projections/provider-execution.js';
 /**
  * Agent-run history capture and bounded retrieval contract (TASK-2643).
  *
@@ -446,4 +447,179 @@ test('coordinator terminal pages preserve controls and incremental offsets while
     assert.equal(ok(terminal.page('task-9', { runId: capture.runId, stream: 'stdout', after: next.to, presentation: 'terminal' })).text, '');
     assert.doesNotMatch(ok(terminal.page('task-9', { runId: capture.runId, stream: 'stdout', after: 0 })).text, /[\r\x1b]/);
   } finally { capture.finish({ exitCode: 1, signal: null }); fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+// TASK-2769: execution shares attributed retained metadata, not capture liveness.
+test('provider observation deduplicates owned invocation metadata and keeps partial uncertainty (TASK-2769)', () => {
+  const root = mkdtemp('px-execution-observation-');
+  const first = open(root); first.correlateOperation('owned-operation'); first.observeExecution(123, 'start-1');
+  const second = open(root); second.observeExecution(456, 'start-2');
+  const coordinator = open(root, { captureKind: 'coordinator' }); coordinator.observeExecution(789, 'wrapper');
+  const pending = open(root);
+  let alive: boolean | null = true;
+  const store = createRunHistoryStore({ repositoryRoot: root, repositoryKey: 'abc123', executionAlive: execution => execution.pid === 456 ? alive : true });
+  const identity = agentRunIdentity({ repositoryId: 'abc123', missionId: 'task-9', role: 'execute', family: 'codex', attempt: 1, startedAtMs: clock });
+  const duplicateStore = { ...store, fs: { ...store.fs, readBytes: () => { throw new Error('Execution must not read transcript bytes'); } }, locations: () => [...store.locations(identity), ...store.locations(identity)] };
+  let observed = observeProviderExecution(duplicateStore, identity);
+  assert.equal(observed.complete, true);
+  assert.deepEqual(observed.invocations.map(run => run.runId).sort(), [first.runId, second.runId].sort());
+  assert.equal(observed.invocations.find(run => run.runId === first.runId)?.operationId, 'owned-operation');
+  alive = null;
+  observed = observeProviderExecution(duplicateStore, identity);
+  assert.equal(observed.complete, false);
+  assert.equal(providerFamilyCount(observed, 'codex'), 1);
+  assert.equal(providerFamilyCount(observed, 'claude'), null);
+  alive = false;
+  observed = observeProviderExecution(duplicateStore, identity);
+  assert.equal(observed.complete, true);
+  assert.equal(observed.invocations.length, 1, 'confirmed exit independent of coordinator');
+  first.finish({ exitCode: 0, signal: null });
+  assert.equal(observeProviderExecution(store, identity).invocations.length, 0);
+  let foreignProbes = 0;
+  const foreign = observeProviderExecution({ ...store, executionAlive: () => { foreignProbes++; return true; } }, { ...identity, repositoryId: 'other' as typeof identity.repositoryId });
+  assert.equal(foreign.invocations.length, 0);
+  assert.equal(foreignProbes, 0, 'foreign metadata is rejected before process probes');
+  pending.finish({ exitCode: 0, signal: null }); coordinator.finish({ exitCode: 0, signal: null }); second.finish({ exitCode: 0, signal: null });
+});
+
+test('interrupted capture, unreadable metadata and failed probes never establish zero execution (TASK-2769)', () => {
+  const root = mkdtemp('px-execution-unknown-');
+  const capture = open(root, { supervisorPid: 999999 }); capture.observeExecution(123, null);
+  capture.correlateOperation('current');
+  const store = createRunHistoryStore({ repositoryRoot: root, repositoryKey: 'abc123', executionAlive: () => null });
+  const identity = agentRunIdentity({ repositoryId: 'abc123', missionId: 'task-9', role: 'execute', family: 'codex', attempt: 1, startedAtMs: clock });
+  assert.equal(observeProviderExecution(store, identity, 'current').complete, false);
+  const unreadable = { ...store, fs: { ...store.fs, inspectDirs: () => ({ ok: false as const }) } };
+  assert.equal(providerFamilyCount(observeProviderExecution(unreadable, identity), 'codex'), null);
+  const failed = { ...store, executionAlive: () => { throw new Error('timeout'); } };
+  assert.equal(observeProviderExecution(failed, identity).complete, false);
+  // Supervisor loss alone does not invalidate a still-confirmed provider process.
+  const live = { ...store, executionAlive: () => true };
+  assert.equal(observeProviderExecution(live, identity).invocations.length, 1);
+  capture.finish({ exitCode: 0, signal: null });
+});
+
+test('same mission id in two repositories has isolated provider observations without terminal probes (TASK-2769)', () => {
+  const first = mkdtemp('px-execution-repo-one-'); const second = mkdtemp('px-execution-repo-two-');
+  const one = open(first); one.observeExecution(123, 'one');
+  const two = open(second, { identity: { repositoryId: 'other', missionId: 'task-9', role: 'execute', family: agentRunIdentity({ repositoryId: 'other', missionId: 'task-9', role: 'execute', family: 'claude', attempt: 1, startedAtMs: clock }).family, attempt: 1 } }); two.observeExecution(456, 'two');
+  const host = { sessions() { throw new Error('tmux missing must not affect process observation'); } } as unknown as MissionTerminalHostPort;
+  const terminal = (root: string, repositoryId: string) => createMissionTerminalService({ repositoryId: repositoryId as never,
+    store: createRunHistoryStore({ repositoryRoot: root, executionAlive: () => true }), host });
+  const a = terminal(first, 'abc123').execution!('task-9'); const b = terminal(second, 'other').execution!('task-9');
+  assert.ok('invocations' in a && 'invocations' in b);
+  assert.deepEqual(a.invocations.map(run => run.family), ['codex']); assert.deepEqual(b.invocations.map(run => run.family), ['claude']);
+  one.finish({ exitCode: 0, signal: null }); two.finish({ exitCode: 0, signal: null });
+});
+
+test('capture finalization without an exit result does not establish provider death (TASK-2769)', () => {
+  const root = mkdtemp('px-capture-without-exit-');
+  const capture = open(root); capture.observeExecution(123, 'captured-start');
+  capture.finish({ exitCode: null, signal: null });
+  const identity = agentRunIdentity({ repositoryId: 'abc123', missionId: 'task-9', role: 'execute', family: 'codex', attempt: 1, startedAtMs: clock });
+  const store = createRunHistoryStore({ repositoryRoot: root, executionAlive: () => true });
+  assert.equal(observeProviderExecution(store, identity).invocations.length, 1);
+  assert.equal(observeProviderExecution({ ...store, executionAlive: () => null }, identity).complete, false);
+});
+
+function retainedObservationFixture() {
+  const root = mkdtemp('px-retained-observation-');
+  const capture = open(root);
+  const template = capture.finish({ exitCode: 0, signal: null });
+  const records = new Map<string, typeof template>();
+  const store = createRunHistoryStore({ repositoryRoot: root, repositoryKey: 'abc123' });
+  return {
+    identity: agentRunIdentity({ repositoryId: 'abc123', missionId: 'task-9', role: 'execute', family: 'codex', attempt: 1, startedAtMs: clock }),
+    records,
+    store: { ...store, locations: () => [{ runsDir: '/retained', legacy: false }], isAlive: (pid: number) => pid === 123,
+      executionAlive: () => true,
+      fs: { ...store.fs, inspectDirs: () => ({ ok: true as const, names: [...records.keys()] }),
+        readText: (file: string) => { const record = records.get(file.split('/').at(-2)!); return record ? JSON.stringify(record) : null; },
+        readBytes: () => { throw new Error('Execution observation must not read transcript bytes'); } },
+    },
+    add(runId: string, fields: Partial<typeof template> = {}) {
+      records.set(runId, { ...template, runId, ...(fields.state === 'running' ? { exitCode: null, endedAt: null } : {}), ...fields });
+    },
+  };
+}
+
+test('historical interrupted and legacy captures do not poison a current provider observation (TASK-2769 F1)', () => {
+  const f = retainedObservationFixture();
+  for (const [index, fields] of [
+    { state: 'running' as const, captureKind: undefined, execution: undefined, repositoryId: undefined, repositoryKey: 'abc123' },
+    { state: 'running' as const, execution: null },
+    { state: 'exited' as const, exitCode: null, signal: null, execution: null },
+  ].entries()) {
+    f.add(`execute-codex-a1-${index + 1}`, { ...fields, supervisorPid: 999, operationId: 'historical', startedAt: '2026-10-12T00:00:00Z' });
+  }
+  f.add('execute-codex-a1-zzzz', { state: 'running', exitCode: null, supervisorPid: 123, execution: { pid: 456, processIdentity: 'live' }, operationId: 'current' });
+  const observation = observeProviderExecution(f.store, f.identity);
+  assert.equal(observation.complete, true);
+  assert.equal(providerFamilyCount(observation, 'codex'), 1);
+  assert.equal(providerFamilyCount(observation, 'claude'), 0);
+  f.records.delete('execute-codex-a1-zzzz');
+  const idle = observeProviderExecution(f.store, f.identity);
+  assert.equal(idle.complete, true, 'retained completed missions can report a complete zero');
+  assert.equal(idle.invocations.length, 0);
+});
+
+test('coordinator-heavy unordered retained history cannot hide the newest provider (TASK-2769 F2)', () => {
+  const f = retainedObservationFixture();
+  for (let index = 0; index < 58; index++) {
+    const id = `workflow-00000000-0000-0000-0000-${String(index).padStart(12, '0')}`;
+    f.add(id, { captureKind: 'coordinator', family: null, supervisorPid: 999 });
+    f.add(`draft-codex-a1-${(index + 100).toString(36)}`, { captureKind: 'coordinator', state: 'running', exitCode: null, supervisorPid: 999, execution: { pid: 789, processIdentity: 'wrapper' } });
+  }
+  for (let index = 0; index < 58; index++) {
+    f.add(`execute-codex-a1-${(index + 1).toString(36)}`, { supervisorPid: 999 });
+  }
+  f.add('execute-codex-a1-zzzz', { state: 'running', exitCode: null, supervisorPid: 123, execution: { pid: 456, processIdentity: 'live' }, operationId: 'current' });
+  const probes: number[] = [];
+  const observed = observeProviderExecution({ ...f.store, executionAlive: execution => { probes.push(execution.pid); return true; } }, f.identity);
+  assert.equal(observed.complete, true);
+  assert.deepEqual(observed.invocations.map(run => run.runId), ['execute-codex-a1-zzzz']);
+  assert.deepEqual(probes, [456], 'only current provider process evidence consumes probes');
+});
+
+test('current-operation and live-supervisor uncertainty survive historical filtering (TASK-2769 F1)', () => {
+  const f = retainedObservationFixture();
+  const id = 'execute-codex-a1-zzzz';
+  f.add(id, { state: 'running', exitCode: null, supervisorPid: 999, execution: undefined, operationId: 'open-operation' });
+  const unknown = observeProviderExecution(f.store, f.identity, 'open-operation');
+  assert.equal(unknown.complete, false, 'current owner with interrupted legacy capture remains unknown');
+  assert.equal(providerFamilyCount(unknown, 'codex'), null);
+  assert.equal(observeProviderExecution(f.store, f.identity, 'replacement').complete, true, 'superseded legacy capture cannot poison replacement');
+  f.add(id, { state: 'running', exitCode: null, supervisorPid: 123, execution: undefined });
+  assert.equal(observeProviderExecution(f.store, f.identity).complete, false, 'live legacy supervisor remains potentially current');
+  f.add(id, { state: 'running', exitCode: null, supervisorPid: 999, execution: { pid: 456, processIdentity: 'orphan-live' } });
+  assert.equal(observeProviderExecution(f.store, f.identity).invocations.length, 1, 'confirmed orphan provider survives lost capture supervisor');
+});
+
+test('provider probe limit is finite and admits newest candidates across locations first (TASK-2769 F2)', () => {
+  const f = retainedObservationFixture();
+  for (let index = 1; index <= MAX_RUNS_PER_MISSION + 1; index++) {
+    f.add(`execute-codex-a1-${index.toString(36)}`, { state: 'running', exitCode: null, supervisorPid: 123, execution: { pid: index, processIdentity: `start-${index}` } });
+  }
+  let probes = 0;
+  const result = observeProviderExecution({ ...f.store, locations: () => [{ runsDir: '/legacy', legacy: true }, { runsDir: '/canonical', legacy: false }],
+    executionAlive: () => { probes++; return true; } }, f.identity);
+  assert.equal(probes, MAX_RUNS_PER_MISSION);
+  assert.equal(result.invocations[0].runId, `execute-codex-a1-${(MAX_RUNS_PER_MISSION + 1).toString(36)}`);
+  assert.equal(result.invocations.length, MAX_RUNS_PER_MISSION, 'locations deduplicate invocation identities before probing');
+  assert.equal(result.complete, false, 'a genuine excess of undecidable/live candidates reports a lower bound');
+  assert.ok(result.limitations.some(note => note.includes('probe budget reached')));
+  assert.equal(providerFamilyCount(result, 'codex'), MAX_RUNS_PER_MISSION);
+});
+
+test('historical undecidable identities cannot exhaust the current operation probe (TASK-2769 F1 F2)', () => {
+  const f = retainedObservationFixture();
+  for (let index = 100; index < 160; index++) {
+    f.add(`execute-codex-a1-${index.toString(36)}`, { state: 'running', exitCode: null, supervisorPid: 999, execution: { pid: 789, processIdentity: 'historical' }, operationId: 'old' });
+  }
+  f.add('execute-codex-a1-1', { state: 'running', exitCode: null, supervisorPid: 123, execution: { pid: 456, processIdentity: 'current' }, operationId: 'current' });
+  const probes: number[] = [];
+  const result = observeProviderExecution({ ...f.store, executionAlive: execution => { probes.push(execution.pid); return execution.pid === 456 ? true : null; } }, f.identity, 'current');
+  assert.equal(probes[0], 456, 'an existing long-lived owner takes priority over newer historical crashes');
+  assert.equal(result.invocations.length, 1);
+  assert.equal(result.complete, true, 'unprobeable historical identities stay outside current uncertainty');
 });

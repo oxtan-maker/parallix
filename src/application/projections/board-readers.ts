@@ -1,3 +1,6 @@
+import { projectWorkflowBoard, projectWorkflowCard } from './workflow-board.js';
+import type { WorkflowOperationStore } from '../ports/workflow-operation.js';
+import { projectProviderExecution, readProviderExecution, type ProviderExecutionReader } from './provider-execution.js';
 import { alignDoneCohort } from './done-cohort.js';
 import { decisionRetentionBoundary, decisionWindowDay, localReportingTimeZone } from '../../domain/decision-window.js';
 import type { MissionOutcome } from '../../domain/usage.js';
@@ -96,6 +99,8 @@ export type { MetricsReadAdapter } from './metrics-read-adapter.js';
 // ---------------------------------------------------------------------------
 
 export interface BoardProjectionOptions {
+  readonly providerExecution?: ProviderExecutionReader;
+  readonly workflowOperations?: Pick<WorkflowOperationStore, 'open' | 'current'>;
   /** Creates the ephemeral shared read snapshot immediately before each build. */
   prepareReads?: () => void;
   /** Time-based metrics. Prefer MetricsReadAdapter for production use. */
@@ -232,7 +237,7 @@ export class BoardProjectionBuilder {
       unattributedRunningSessions: countUnattributedSessions(runningSessions),
     };
 
-    return alignDoneCohort(buildBoardProjection(
+    const board = alignDoneCohort(buildBoardProjection(
       repositoryId,
       cards,
       availableActions,
@@ -240,6 +245,7 @@ export class BoardProjectionBuilder {
       metrics,
       sourceFacts,
     ), deliveries);
+    return this.observeExecution(board);
   }
 
   /**
@@ -279,13 +285,26 @@ export class BoardProjectionBuilder {
       ? undefined
       : (runningSessions ?? []).find((session) => session.missionId === mission.id) ?? null;
 
-    return this.composeCard(
+    const card = this.composeCard(
       mission,
       reviews.get(mission.id) ?? { review: null, approval: null },
       gateStatus,
       work,
       liveSession,
     );
+    return this.observeCardExecution(card);
+  }
+
+  private async observeCardExecution(card: MissionCard): Promise<MissionCard> {
+    const owner = await this._options?.workflowOperations?.current(card.id) ?? null;
+    const observed = this._options?.providerExecution ? { ...card, execution: readProviderExecution(this._options.providerExecution, { repositoryId: card.repositoryId, missionId: card.id }, owner?.id) } : card;
+    return projectWorkflowCard(observed, owner);
+  }
+
+  private async observeExecution(board: BoardProjection): Promise<BoardProjection> {
+    const operations = await this._options?.workflowOperations?.open() ?? [];
+    const observed = this._options?.providerExecution ? projectProviderExecution(board, this._options.providerExecution, operations) : board;
+    return projectWorkflowBoard(observed, operations);
   }
 
   private now(): number { return (this._options?.now ?? Date.now)(); }

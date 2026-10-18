@@ -375,6 +375,10 @@ export function openRunCapture(input: OpenRunCaptureInput): RunCapture {
 
 /** The `node:fs` surface the application-side run-history reader needs. */
 export const runHistoryFileSystem: RunHistoryFileSystem = {
+  inspectDirs: target => {
+    try { return { ok: true, names: fs.readdirSync(target, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name) }; }
+    catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT' ? { ok: true, names: [] } : { ok: false }; }
+  },
   readText: (target) => { try { return fs.readFileSync(target, 'utf8'); } catch { return null; } },
   readBytes: (target, offset, length) => {
     try {

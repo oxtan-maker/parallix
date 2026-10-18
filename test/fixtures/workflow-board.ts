@@ -22,7 +22,7 @@ import { loadWebAssets } from '../../src/adapters/web/asset-store.js';
 import { processStartIdentity } from '../../src/adapters/process/process-liveness.js';
 
 /** Isolated real store/host/process fixture shared by retained and manual checks. */
-export async function workflowBoard(count = 2, options: { cli?: CliInvocation; inProcess?: boolean } = {}) {
+export async function workflowBoard(count = 2, options: { cli?: CliInvocation; inProcess?: boolean; providers?: boolean } = {}) {
   const fixture = await openMigratedMissionStore();
   const root = fixture.root;
   const hosts = new Map<number, string>();
@@ -46,6 +46,11 @@ export async function workflowBoard(count = 2, options: { cli?: CliInvocation; i
   process.prependListener('exit', emergencyCleanup);
   execFileSync('git', ['init', '--quiet', root]);
   fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { terminal: { host: 'pipe', whenUnavailable: 'fallback' } } }));
+  if (options.providers) {
+    fs.writeFileSync(path.join(root, 'provider-fixture'), 'enabled');
+    fs.mkdirSync(path.join(root, 'config'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'config/agents.json'), JSON.stringify({ families: ['codex', 'claude'] }));
+  }
   const repository = resolveCanonicalRepositoryId(root);
   const slugs = Array.from({ length: count }, (_, index) => `task-worker-${index + 1}`);
   for (const slug of slugs) { await fixture.store.save(fixtureMission(slug, { status: 'refined', repositoryId: repository }), null); }
@@ -120,6 +125,11 @@ export async function workflowBoard(count = 2, options: { cli?: CliInvocation; i
       if (closed) { return; } closed = true;
       try {
         fs.writeFileSync(path.join(root, 'terminal-probe.release'), 'release');
+        // Release every entered provider/gate before awaiting HTTP or owner shutdown.
+        // Failed assertions must not leave cleanup waiting on fixture deadlines.
+        for (const name of fs.readdirSync(root)) {
+          if (name.endsWith('.entered')) { fs.writeFileSync(path.join(root, name.replace(/\.entered$/, '.release')), 'release'); }
+        }
         await host?.close();
         for (const slug of slugs) { fs.writeFileSync(path.join(root, `${slug}.release`), 'release'); }
         for (const slug of slugs) { await service.stop(slug).catch(() => {}); held.get(slug)?.(); }

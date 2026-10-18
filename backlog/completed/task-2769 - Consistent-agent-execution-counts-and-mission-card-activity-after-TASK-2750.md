@@ -1,8 +1,8 @@
 ---
 id: TASK-2769
 title: Consistent agent execution counts and mission-card activity after TASK-2750
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-16 07:38'
 labels:
   - bug

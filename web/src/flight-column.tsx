@@ -231,14 +231,24 @@ function FlightCardCheckpoint({ card, openCheckpointDetail }: { card: WebMission
   );
 }
 
+function executingFamily(card: WebMissionCard) { return card.execution?.invocations[0]?.family ?? null; }
+
+function ProviderExecution({ execution }: { execution: WebMissionCard['execution'] }) {
+  if (!execution) { return null; }
+  const text = execution.invocations.length > 0
+    ? `${execution.invocations.map(run => run.family).join(', ')} · ${execution.invocations.length}${execution.complete ? '' : '+'} executing`
+    : execution.complete ? '0 executing' : 'execution unknown';
+  return <div data-provider-execution title={execution.limitations.join('; ')} style={{ color: C.faint, fontSize: 10, padding: '3px 10px' }}>{text}</div>;
+}
+
 function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCommands }: { card: WebMissionCard; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingCommands: PendingCommands }) {
   const [openCheckpoint, setOpenCheckpoint] = useState<string | null>(null);
   const openCheckpointDetail = () => setOpenCheckpoint(openCheckpoint === card.checkpoint ? null : (card.checkpoint ?? null));
   const spinning = isSpinning(card);
   // The work publication names the worker; a px process alone does not.
   const working = card.activity.work.kind === 'working';
-  const liveAgent = spinning && working ? card.activity.work.agent : null;
-  const agent = working ? liveAgent : card.agent;
+  const liveAgent = executingFamily(card);
+  const agent = liveAgent ?? (working ? null : card.agent);
   const accent = card.gate === 'failed' ? C.red : familyAccent(agent);
   const actor = actorLine(card);
   const actions = cardCommands(card.actions);
@@ -272,6 +282,7 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
         boxShadow: '0 6px 18px rgba(0,0,0,.55)',
       }}
     >
+      <ProviderExecution execution={card.execution} />
       <FlightCardHeader card={card} agent={agent} liveAgent={liveAgent} accent={accent} spinning={spinning} />
 
       <div style={{ padding: '8px 10px' }}>
