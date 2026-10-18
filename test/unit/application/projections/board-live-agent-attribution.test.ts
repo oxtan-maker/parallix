@@ -189,7 +189,7 @@ test('CLI pinned wrapper during preparation contributes no provider (TASK-2769)'
   assert.equal(observed.metrics.agentAvailability[0].runningSessions, 0, 'wrapper liveness is not provider execution');
 });
 
-test('header and cards share invocation counts, uncertainty and actual fallback family (TASK-2769)', async () => {
+test('header keeps invocation counts and uncertainty while cards keep actual fallback family (TASK-2769, px-0013)', async () => {
   const { projectProviderExecution } = await import('../../../../src/application/projections/provider-execution.js');
   const board = makeProjection({ active: [makeCard({ id: missionId, currentWork: {
     operationId: 'old', phase: 'execute', summary: 'selected codex', agent: agentFamily('codex'),
@@ -204,8 +204,10 @@ test('header and cards share invocation counts, uncertainty and actual fallback 
   assert.deepEqual(projected.metrics.agentAvailability.map(agent => [agent.family, agent.runningSessions, agent.executionComplete]), [['codex', null, false], ['claude', 1, false]]);
   const snapshot = toWebBoardSnapshot(projected);
   const html = render(snapshot);
-  assert.match(html, /claude · 1 executing/);
-  assert.match(html, /execution unknown/);
+  assert.doesNotMatch(html, /data-provider-execution|executing|execution unknown/);
+  assert.match(html, /title="active worker family: claude"/);
+  assert.match(html, />claude<\/span><span[^>]*>1\+<\/span>/);
+  assert.match(html, />codex<\/span><span[^>]*>unknown<\/span>/);
   assert.doesNotMatch(html, /title="active worker family: codex"/);
 });
 

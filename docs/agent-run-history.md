@@ -188,7 +188,9 @@ not hold lifecycle, verification-gate, or review authority.
 ## Execution counts and workflow activity
 
 The board header counts confirmed executing provider invocations by their actual
-family. Mission cards use the same observation. One invocation counts once;
+family. Web mission cards use that observation for worker identity while keeping
+their fan, mission ID, agent and title header first, without a separate execution
+count row. One invocation counts once;
 wrappers, retained consoles, workflow owners and assignees add no providers.
 Provider-internal subagents are not individually observable and add no inferred
 counts. In-process providers without invocation-level liveness evidence, including

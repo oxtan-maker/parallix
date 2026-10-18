@@ -827,11 +827,16 @@ test('mounted header and card execution transition together while workflow fans 
     }));
   const page = await renderBoard({ board: observation(null) });
   try {
-    for (const [family, complete, expected] of [[null, true, '0 executing'], ['codex', true, 'codex · 1 executing'],
-      ['claude', false, 'claude · 1+ executing'], [null, false, 'execution unknown'], [null, true, '0 executing']] as const) {
+    for (const [family, complete] of [[null, true], ['codex', true],
+      ['claude', false], [null, false], [null, true]] as const) {
       await page.rerender(observation(family, complete));
       const article = page.mount.querySelector('[data-board-card]')!;
-      assert.equal(article.querySelector('[data-provider-execution]')?.textContent, expected);
+      // px-0013: execution observations must never add a row above the established header.
+      assert.equal(article.querySelector('[data-provider-execution]') !== null, false);
+      assert.ok(article.firstElementChild?.querySelector('.fan'));
+      assert.ok(article.firstElementChild?.textContent?.includes(card.id));
+      assert.ok(article.firstElementChild?.textContent?.includes(card.title));
+      assert.doesNotMatch(article.textContent ?? '', /executing|execution unknown/);
       assert.equal(article.querySelectorAll('.fan.spin').length, 2);
       const header = page.mount.querySelector('[aria-label="Agent availability"]')!;
       if (family) {
@@ -842,5 +847,12 @@ test('mounted header and card execution transition together while workflow fans 
         assert.ok(header.textContent?.includes(complete ? 'codex0' : 'codexunknown'));
       }
     }
+    await page.rerender(toWebBoardSnapshot(board));
+    const absent = page.mount.querySelector('[data-board-card]')!;
+    assert.equal(absent.querySelector('[data-provider-execution]') !== null, false);
+    assert.ok(absent.firstElementChild?.querySelector('.fan'));
+    assert.ok(absent.firstElementChild?.textContent?.includes(card.id));
+    assert.ok(absent.firstElementChild?.textContent?.includes(card.title));
+    assert.doesNotMatch(absent.textContent ?? '', /executing|execution unknown/);
   } finally { await page.close(); }
 });

@@ -233,14 +233,6 @@ function FlightCardCheckpoint({ card, openCheckpointDetail }: { card: WebMission
 
 function executingFamily(card: WebMissionCard) { return card.execution?.invocations[0]?.family ?? null; }
 
-function ProviderExecution({ execution }: { execution: WebMissionCard['execution'] }) {
-  if (!execution) { return null; }
-  const text = execution.invocations.length > 0
-    ? `${execution.invocations.map(run => run.family).join(', ')} · ${execution.invocations.length}${execution.complete ? '' : '+'} executing`
-    : execution.complete ? '0 executing' : 'execution unknown';
-  return <div data-provider-execution title={execution.limitations.join('; ')} style={{ color: C.faint, fontSize: 10, padding: '3px 10px' }}>{text}</div>;
-}
-
 function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCommands }: { card: WebMissionCard; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingCommands: PendingCommands }) {
   const [openCheckpoint, setOpenCheckpoint] = useState<string | null>(null);
   const openCheckpointDetail = () => setOpenCheckpoint(openCheckpoint === card.checkpoint ? null : (card.checkpoint ?? null));
@@ -282,7 +274,6 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
         boxShadow: '0 6px 18px rgba(0,0,0,.55)',
       }}
     >
-      <ProviderExecution execution={card.execution} />
       <FlightCardHeader card={card} agent={agent} liveAgent={liveAgent} accent={accent} spinning={spinning} />
 
       <div style={{ padding: '8px 10px' }}>
