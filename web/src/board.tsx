@@ -11,6 +11,7 @@ import { MissionEditor } from './mission-editor.js';
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react';
 import type { DragEvent } from 'react';
 import type { WebBoardSnapshot, WebCommandAction, WebMissionCard } from '../../src/interfaces/web/transport.js';
+import { VisibleCommandOutcomes } from './command-outcome.js';
 import { dispatchBoardCommand } from './board-command-controller.js';
 export { restoreActionFocus } from './board-command-controller.js';
 import { CancelConfirmation } from './cancel-confirmation.js';
@@ -113,10 +114,6 @@ function useBoardModel(snapshot: WebBoardSnapshot, onRefresh: () => Promise<void
   const clearOutcome = (missionId: string) => {
     if (mounted.current) { setOutcomes((current) => { const next = new Map(current); next.delete(missionId); return next; }); }
   };
-  useEffect(() => {
-    const present = new Set(snapshot.stages.flatMap((stage) => stage.cards).map((card) => card.id));
-    setOutcomes((current) => new Map([...current].filter(([missionId]) => present.has(missionId))));
-  }, [snapshot]);
   const moveSelection = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') { return; }
     const cards = [...(root.current?.querySelectorAll<HTMLElement>('[data-board-card]') ?? [])];
@@ -209,6 +206,13 @@ cancelPrompt !== null && (
 
 export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onRefresh: () => Promise<void> }) {
   const { root, moveSelection, selectTerminal, pressedAction, publishOutcome, flowOpen, setFlowOpen, setCreateFrom, selectedId, pendingCommands, setSelectedId, open, startDrag, dropAction, canDrop, cancelPrompt, setCancelPrompt, outcomes, pendingRef, dispatch, editRequest, setEditRequest, createFrom, closeCreate, terminalMission, closeTerminal } = useBoardModel(snapshot, onRefresh);
+  const [doneDisclosure, setDoneDisclosure] = useState({ rail: false, history: false });
+  const onDoneDisclosure = (level: 'rail' | 'history', open: boolean) => {
+    setDoneDisclosure(current => current[level] === open ? current : { ...current, [level]: open });
+  };
+  const visibleIds = new Set(snapshot.stages.flatMap(stage => stage.lane !== SHIPPED_LANE ? stage.cards
+    : doneDisclosure.rail ? [...stage.cards, ...(doneDisclosure.history ? stage.historyCards ?? [] : [])] : []).map(card => card.id));
+  const visibleOutcomes = new Map([...outcomes].filter(([id]) => visibleIds.has(id)));
   // The intake bucket stacks in the reference's order; every other lane keeps
   // the order the server sent.
   const intake = snapshot.stages
@@ -218,6 +222,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
   const shipped = snapshot.stages.filter((stage) => stage.lane === SHIPPED_LANE);
 
   return (
+    <VisibleCommandOutcomes.Provider value={visibleOutcomes}>
     <div ref={root} tabIndex={-1} onKeyDown={moveSelection} onClick={selectTerminal}
       style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
       onPointerDownCapture={(event) => {
@@ -267,7 +272,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
               <FlightColumn stage={stage} onAction={open} onSelect={setSelectedId} onDragStart={startDrag} onDrop={dropAction} selectedId={selectedId} pendingCommands={pendingCommands} draggable={canDrop(stage.lane) === true} style={{ height: '100%' }} />
             </div>
           ))}
-          {shipped.map((stage) => <DoneRail key={stage.lane} stage={stage} />)}
+          {shipped.map((stage) => <DoneRail key={stage.lane} stage={stage} disclosure={doneDisclosure} onDisclosureChange={onDoneDisclosure} />)}
         </div>
       </div>
       <BoardCancellation cancelPrompt={cancelPrompt} setCancelPrompt={setCancelPrompt} snapshot={snapshot} outcomes={outcomes} pendingRef={pendingRef} publishOutcome={publishOutcome} dispatch={dispatch} />
@@ -285,8 +290,9 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
         />
       )}
       {terminalMission !== null && <MissionHistory missionId={terminalMission} onClose={closeTerminal} />}
-      {[...outcomes.entries()].map(([missionId, outcome]) => <p key={missionId} role="status" aria-live="polite" style={{ margin: `0 ${SPACE.xl}px ${SPACE.lg}px`, color: MODAL.muted }}>{outcome}</p>)}
+      {[...outcomes.entries()].filter(([missionId]) => !visibleIds.has(missionId)).map(([missionId, outcome]) => <p key={missionId} data-command-fallback={missionId} role="status" aria-live="polite" style={{ margin: `0 ${SPACE.xl}px ${SPACE.lg}px`, color: MODAL.muted, overflowWrap: 'anywhere' }}>{missionId}: {outcome}</p>)}
       <OperationLog snapshot={snapshot} />
     </div>
+    </VisibleCommandOutcomes.Provider>
   );
 }

@@ -1,3 +1,4 @@
+import { CommandOutcome } from './command-outcome.js';
 /**
  * The in-flight stages, rendered as the reference's three-band card: a
  * gradient head carrying the fans, id and implementer; a body
@@ -247,6 +248,7 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
           ))}
         </div>
       )}
+      <CommandOutcome missionId={card.id} />
       <Grille />
     </article>
   );

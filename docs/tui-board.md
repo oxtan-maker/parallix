@@ -335,6 +335,13 @@ including unavailable actions and unknown states. Secondary text colors meet
 4.5:1 contrast on their rendered surfaces, including faded shipped cards.
 Decorative strokes and hidden glyphs use separate treatments.
 
+Command feedback appears in the initiating mission card's footer and is
+announced as a polite status update. It follows the mission between lanes.
+When the card is absent or hidden by the done or history disclosure, feedback
+appears below the board with the mission ID; revealing the card moves it back
+into its footer. Refreshing the board retains this feedback until another
+action for that mission clears or replaces it.
+
 The web host stays responsive while a separate process builds board data. A read
 that exceeds its deadline fails individually; it does not discard work already
 loading or fail other pending reads. A later refresh reuses the loaded state.

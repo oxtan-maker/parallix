@@ -1,3 +1,4 @@
+import { CommandOutcome } from './command-outcome.js';
 /**
  * The intake stages: compact rows with a fan, the mission id and the observed
  * worker in the same header label the flight cards use, the published activity
@@ -67,6 +68,7 @@ function IntakeCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
           ))}
         </div>
       )}
+      <CommandOutcome missionId={card.id} />
     </article>
   );
 }

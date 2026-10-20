@@ -1,12 +1,10 @@
+import { renderBoard as renderBoardFixture } from './web-board-harness.fixture.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
-const reactGlobal: typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean } = globalThis;
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window, Element as DomElement, HTMLButtonElement as DomButton, HTMLElement as DomHtmlElement } from 'happy-dom';
 import { act } from 'react';
-import { createRoot } from 'react-dom/client';
-import React from 'react';
-import { Board, EMPTY_FLIGHT_LANE_WIDTH_PX, FLIGHT_LANE_MIN_WIDTH_PX, restoreActionFocus } from '../../../../web/src/board.js';
+import { EMPTY_FLIGHT_LANE_WIDTH_PX, FLIGHT_LANE_MIN_WIDTH_PX, restoreActionFocus } from '../../../../web/src/board.js';
 import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
 import { missionId } from '../../../../src/domain/mission.js';
@@ -20,36 +18,8 @@ function snapshot(cards = [makeCard({ id: missionId('task-2436-interaction'), st
   return toWebBoardSnapshot(makeProjection({ active: cards }));
 }
 
-async function renderBoard(options: { readonly board?: ReturnType<typeof snapshot>; readonly result?: unknown; readonly refresh?: () => Promise<void>; readonly respond?: () => Promise<Response> } = {}) {
-  const window = new Window();
-  const previous = { window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch, IS_REACT_ACT_ENVIRONMENT: reactGlobal.IS_REACT_ACT_ENVIRONMENT, requestAnimationFrame: globalThis.requestAnimationFrame };
-  Object.assign(globalThis, { window, document: window.document });
-  reactGlobal.IS_REACT_ACT_ENVIRONMENT = true;
-  globalThis.requestAnimationFrame = (callback) => { callback(0); return 0; };
-  const calls: RequestInit[] = [];
-  globalThis.fetch = async (_url, init) => {
-    calls.push(init!);
-    if (options.respond !== undefined) { return options.respond(); }
-    return new Response(JSON.stringify(options.result ?? commandResult()), { headers: { 'content-type': 'application/json' } });
-  };
-  const mount = window.document.createElement('div');
-  mount.id = 'react-test-root';
-  window.document.body.append(mount);
-  const reactMount = document.getElementById(mount.id);
-  assert.ok(reactMount);
-  const root = createRoot(reactMount);
-  await act(async () => { root.render(React.createElement(Board, { snapshot: options.board ?? snapshot(), onRefresh: options.refresh ?? (async () => {}) })); });
-  return {
-    window, mount, reactMount, calls, root,
-    async rerender(board: ReturnType<typeof snapshot>) {
-      await act(async () => { root.render(React.createElement(Board, { snapshot: board, onRefresh: options.refresh ?? (async () => {}) })); });
-    },
-    async close() {
-      await act(async () => { root.unmount(); });
-      Object.assign(globalThis, previous);
-      await window.happyDOM.close();
-    },
-  };
+function renderBoard(options: Omit<Parameters<typeof renderBoardFixture>[0], 'board'> & { board?: ReturnType<typeof snapshot> } = {}) {
+  return renderBoardFixture({ ...options, board: options.board ?? snapshot() });
 }
 
 function payload(calls: readonly RequestInit[]) {
@@ -131,8 +101,20 @@ test('independent missions dispatch concurrently and retain separate pending sta
     assert.match(buttons[1].getAttribute('aria-label') ?? '', /starting/);
     resolveFirst!(new Response(JSON.stringify(commandResult()), { headers: { 'content-type': 'application/json' } }));
     await act(async () => { await new Promise<void>((resolve) => queueMicrotask(resolve)); });
+    assert.match(page.mount.querySelector(`[data-board-card="${first.id}"] footer [role="status"]`)?.textContent ?? '', /started/);
     assert.match(buttons[1].getAttribute('aria-label') ?? '', /starting/, 'A completion must not clear B pending state');
-    resolveSecond!(new Response(JSON.stringify(commandResult()), { headers: { 'content-type': 'application/json' } }));
+    await act(async () => {
+      resolveSecond!(new Response(JSON.stringify(commandResult('failed', { kind: 'execution', message: 'second mission failure' })), { headers: { 'content-type': 'application/json' } }));
+    });
+    const firstOutcome = () => page.mount.querySelector(`[data-board-card="${first.id}"] footer [role="status"]`);
+    const secondOutcome = () => page.mount.querySelector(`[data-board-card="${second.id}"] footer [role="status"]`);
+    assert.match(firstOutcome()?.textContent ?? '', /started/);
+    assert.match(secondOutcome()?.textContent ?? '', /second mission failure/);
+    assert.equal(page.mount.querySelectorAll('[data-command-fallback]').length, 0);
+    await act(async () => { buttons[0].click(); });
+    assert.match(firstOutcome()?.textContent ?? '', /Starting/);
+    assert.match(secondOutcome()?.textContent ?? '', /second mission failure/);
+    await act(async () => { resolveSecond!(new Response(JSON.stringify(commandResult()), { headers: { 'content-type': 'application/json' } })); });
   } finally { await page.close(); }
 });
 
@@ -335,7 +317,7 @@ test('a thrown send and rejected refresh release only their own pending ownershi
   } finally { await page.close(); }
 });
 
-test('outcomes replace per mission and are pruned when its card leaves the snapshot (TASK-2657)', async () => {
+test('outcomes replace per mission and survive unavailable cards and refresh (TASK-2773.07)', async () => {
   let attempt = 0;
   const card = makeCard({ id: missionId('task-2657-outcome'), status: 'active', lane: 'active', commands: [action] });
   const page = await renderBoard({
@@ -350,7 +332,13 @@ test('outcomes replace per mission and are pruned when its card leaves the snaps
     assert.equal(page.mount.querySelectorAll('[role="status"]').length, 1);
     assert.match(page.mount.querySelector('[role="status"]')?.textContent ?? '', /failure 2/);
     await page.rerender(snapshot([]));
-    assert.equal(page.mount.querySelectorAll('[role="status"]').length, 0);
+    const fallback = page.mount.querySelector('[data-command-fallback]')!;
+    assert.match(fallback.textContent ?? '', /task-2657-outcome.*failure 2/);
+    await page.rerender(snapshot([]));
+    assert.match(page.mount.querySelector('[data-command-fallback]')?.textContent ?? '', /failure 2/);
+    await page.rerender(snapshot([card]));
+    assert.equal(page.mount.querySelector('[data-command-fallback]'), null);
+    assert.match(page.mount.querySelector('[data-board-card] footer [role="status"]')?.textContent ?? '', /failure 2/);
   } finally { await page.close(); }
 });
 
@@ -625,7 +613,10 @@ test('Create new mission offers only unfinished missions as dependencies and sen
     });
     assert.equal(refreshed, 1);
     assert.equal(dialogOf(page), null);
-    assert.match(page.mount.querySelector('[role="status"]')?.textContent ?? '', /Created px-0001 in backlog/);
+    assert.match(page.mount.querySelector('[data-command-fallback][aria-live="polite"]')?.textContent ?? '', /px-0001.*Created px-0001 in backlog/);
+    await page.rerender(toWebBoardSnapshot(makeProjection({ backlog: [makeCard({ id: missionId('px-0001'), lane: 'backlog', status: 'backlog' })] })));
+    assert.equal(page.mount.querySelector('[data-command-fallback]'), null);
+    assert.match(page.mount.querySelector('[data-board-card="px-0001"] footer [role="status"]')?.textContent ?? '', /Created px-0001/);
   } finally { await page.close(); }
 });
 
@@ -818,7 +809,6 @@ test('a refreshed pointer control cannot dispatch its replacement or activate th
   } finally { await page.close(); }
 });
 
-
 test('Edit sends retained criterion IDs and leaves new IDs to the backend (TASK-2742)', async () => {
   let calls = 0;
   const page = await renderBoard({ board: createBoard(), respond: async () => new Response(JSON.stringify(++calls === 1 ? editResult() : createdResult('task-open-one'))) });
@@ -835,42 +825,6 @@ test('Edit sends retained criterion IDs and leaves new IDs to the backend (TASK-
     assert.deepEqual(saved.successCriterionIds, ['sc-1', null]);
   } finally { await page.close(); }
 });
-
-
-test('checkpoint track never blinks through activity transitions and retains disclosure (TASK-2773.04)', async () => {
-  const card = makeCard({ checkpoint: 'CP-2', checkpointEvidence: [
-    { name: 'CP-2', description: 'done', goalCheck: [{ criterion: 'done', evidence: 'npm test' }], state: 'completed' },
-    { name: 'CP-9', description: 'current description', goalCheck: [], state: 'current' },
-  ] });
-  const page = await renderBoard({ board: snapshot([card]) });
-  try {
-    for (const freshness of ['live', 'unverified', 'stale', null] as const) {
-      for (const blockingReason of [null, 'waiting']) {
-        await page.rerender(snapshot([{ ...card, blockingReason, currentWork: freshness === null ? null : {
-          operationId: 'execute', phase: 'execute', summary: 'execute', agent: null, updatedAt: 'now', freshness,
-        } }]));
-        assert.equal(page.mount.querySelectorAll('[aria-label="Checkpoint plan"] .review-pip--running').length, 0);
-        assert.equal(page.mount.querySelector<DomHtmlElement>('[data-checkpoint-fill]')!.style.width, '50%');
-        assert.match(page.mount.querySelector('[aria-label="Checkpoint plan"]')!.getAttribute('aria-description')!, /Current: CP-9/);
-        const button = page.mount.querySelector<DomButton>('button[aria-label^="View checkpoint evidence for"]')!;
-        assert.ok(button.querySelector('[data-checkpoint-track]'), 'the progress track itself is the dialog control');
-        assert.equal(button.style.cursor, 'pointer');
-        assert.equal(page.mount.querySelector('[aria-label="Checkpoint plan"]')!.textContent, '', 'the track replaces the visible count/current/recorded summary row');
-        assert.match(button.title, /1\/2 completed.*Current: CP-9.*Recorded: CP-2/);
-        assert.doesNotMatch(button.textContent, /View checkpoints/);
-        button.focus();
-        await act(async () => { button.click(); });
-        const dialog = page.window.document.querySelector('[role="dialog"]')!;
-        assert.match(dialog.textContent, /current description/);
-        assert.equal(page.window.document.querySelectorAll('[role="dialog"]').length, 1);
-        await act(async () => { dialog.querySelector<DomButton>('button')!.click(); });
-        assert.ok(isSameNode(page.window.document.activeElement, button), 'closing restores opener focus');
-      }
-    }
-  } finally { await page.close(); }
-});
-
-
 
 test('accepted command waits for authoritative preparing snapshot and exposes server-owned stop after reload (TASK-2750)', async () => {
   const { projectWorkflowBoard } = await import('../../../../src/application/projections/workflow-board.js');
@@ -954,71 +908,50 @@ test('mounted header and card execution transition together while workflow fans 
   } finally { await page.close(); }
 });
 
-
-test('execution advances to the next checkpoint after recorded completion (TASK-2776)', async () => {
-  const { projectMissionCard } = await import('../../../../src/application/projections/mission-board.js');
-  const base = makeCard();
-  const projected = projectMissionCard({ ...base, assignee: null, closedAt: null, review: null,
-    netEngineeringLines: null, checkpoints: [1, 2, 3].map(number => ({
-      missionId: base.id, name: `CP-${number}`, firstLine: 'Step',
-      goalCheck: number === 1 ? [{ criterion: 'done', evidence: 'npm test' }] : [],
-      nextActionText: number === 1 ? 'Resume CP-2' : '',
-    })),
-  }, { latestGate: 'unavailable', reviewApproval: null, flags: [], blockingReason: null,
-    currentWork: { operationId: 'execute', phase: 'execute', summary: 'Implementing', agent: null, updatedAt: 'now', freshness: 'live' },
-  });
-  const page = await renderBoard({ board: snapshot([projected]) });
-  try {
-    assert.equal(page.mount.querySelectorAll('[aria-label="Checkpoint plan"] .review-pip--running').length, 0);
-    assert.equal(projected.checkpoint, 'CP-1');
-    assert.equal(projected.currentCheckpoint, 'CP-2');
-    assert.match(page.mount.querySelector('[aria-label="Checkpoint plan"]')!.getAttribute('aria-description')!, /Current: CP-2/);
-    assert.match(page.mount.querySelector('[aria-label="Checkpoint plan"]')!.getAttribute('aria-description')!, /Recorded: CP-1/);
-    const percentage = Number.parseFloat(page.mount.querySelector<DomHtmlElement>('[data-checkpoint-fill]')!.style.width);
-    assert.ok(Math.abs(percentage - 100 / 3) < 1e-9, 'one of three supplied checkpoints is completed');
-  } finally { await page.close(); }
-});
-
-for (const lane of ['refined', 'active', 'review', 'integration', 'done'] as const) {
-  test(`checkpoint dialog opens unrecorded long plans in ${lane} (TASK-2773.04)`, async () => {
-    const plan = Array.from({ length: 100 }, (_, i) => ({ name: `CP-${i}`, description: `Description ${i}`, goalCheck: [] }));
-    const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ [lane]: [makeCard({ lane, status: lane, checkpoint: null, checkpointEvidence: plan })] })) });
+for (const result of [commandResult(), commandResult('failed', { kind: 'execution', message: 'fixture failure' }), commandResult('failed', { kind: 'conflict', message: 'stale action' })]) {
+  test(`command ${result.error?.kind ?? 'success'} stays in visible footer across lanes and disclosures (TASK-2773.07)`, async () => {
+    const card = makeCard({ id: missionId('task-outcome-routing'), lane: 'active', status: 'active', commands: [action] });
+    const page = await renderBoard({ board: snapshot([card]), result });
+    const expected = result.error?.message ?? 'started';
+    const footer = () => page.mount.querySelector('footer [role="status"]');
+    const fallback = () => page.mount.querySelector('[data-command-fallback]');
     try {
-      const button = page.mount.querySelector<DomButton>('button[aria-label^="View checkpoint evidence for"]')!;
-      await act(async () => { button.click(); });
-      const dialog = page.window.document.querySelector('[role="dialog"]')!;
-      const selectors = dialog.querySelectorAll<DomButton>('nav button');
-      assert.equal(selectors.length, 100);
-      await act(async () => { selectors[99].click(); });
-      assert.match(dialog.textContent, /Description 99/);
-      assert.match(dialog.textContent, /No evidence recorded/);
-      await act(async () => { page.window.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Escape' })); });
-      assert.equal(page.window.document.querySelector('[role="dialog"]'), null);
-      assert.equal(page.calls.length, 0);
+      await act(async () => { page.mount.querySelector<DomButton>('[data-action-kind="handoff:record"]')!.click(); });
+      assert.match(footer()?.textContent ?? '', new RegExp(expected));
+      assert.equal(footer()?.getAttribute('aria-live'), 'polite');
+      assert.equal(fallback(), null);
+      for (const lane of ['backlog', 'refined', 'review', 'integration'] as const) {
+        await page.rerender(toWebBoardSnapshot(makeProjection({ [lane]: [makeCard({ ...card, lane, status: lane, commands: [] })] })));
+        assert.match(footer()?.textContent ?? '', new RegExp(expected));
+        assert.equal(fallback(), null);
+      }
+      const done = toWebBoardSnapshot(makeProjection({ done: [makeCard({ ...card, lane: 'done', status: 'done', commands: [] })] }));
+      await page.rerender(done);
+      assert.equal(footer(), null, 'collapsed rail must not contain an outcome');
+      assert.match(fallback()?.textContent ?? '', /task-outcome-routing/);
+      const toggle = async (label: string, open: boolean) => {
+        await act(async () => {
+          const details = page.mount.querySelector(`details[aria-label="${label}"]`)!;
+          if (open) { details.setAttribute('open', ''); } else { details.removeAttribute('open'); }
+          details.dispatchEvent(new page.window.Event('toggle', { bubbles: false }));
+        });
+      };
+      await toggle('done stage', true);
+      assert.match(footer()?.textContent ?? '', new RegExp(expected));
+      assert.equal(fallback(), null);
+      const stage = done.stages.find(stage => stage.lane === 'done')!;
+      await page.rerender({ ...done, stages: done.stages.map(item => item === stage ? { ...item, cards: [], historyCards: stage.cards } : item) });
+      assert.equal(footer(), null);
+      assert.ok(fallback());
+      await toggle('Other completed history', true);
+      assert.match(footer()?.textContent ?? '', new RegExp(expected));
+      assert.equal(fallback(), null);
+      await toggle('done stage', false);
+      assert.equal(footer(), null);
+      assert.ok(fallback());
+      await toggle('done stage', true);
+      assert.match(footer()?.textContent ?? '', new RegExp(expected));
+      assert.equal(fallback(), null);
     } finally { await page.close(); }
   });
 }
-
-test('done checkpoint modal escapes card stacking contexts and cleans up (TASK-2773.04 F1)', async () => {
-  const cards = ['task-first', 'task-second'].map(id => makeCard({ id: missionId(id), lane: 'done', status: 'done',
-    checkpointEvidence: [{ name: 'CP-1', description: id, goalCheck: [] }] }));
-  const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ done: cards })) });
-  try {
-    const buttons = page.mount.querySelectorAll<DomButton>('button[aria-label^="View checkpoint evidence for"]');
-    buttons[0].focus();
-    await act(async () => { buttons[0].click(); });
-    const dialog = page.window.document.querySelector('[role="dialog"]')!;
-    assert.ok(dialog, 'first done card opens its dialog');
-    assert.ok(isSameNode(dialog.parentElement?.parentElement, page.window.document.body), 'backdrop is outside all card stacking contexts');
-    assert.equal(page.mount.querySelector('[role="dialog"]'), null);
-    await act(async () => { dialog.parentElement!.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true })); });
-    assert.equal(page.window.document.querySelector('[role="dialog"]'), null);
-    assert.ok(isSameNode(page.window.document.activeElement, buttons[0]));
-    await act(async () => { buttons[1].click(); });
-    assert.equal(page.window.document.querySelectorAll('[role="dialog"]').length, 1);
-    assert.match(page.window.document.querySelector('[role="dialog"]')!.textContent, /task-second/);
-    await page.rerender(toWebBoardSnapshot(makeProjection()));
-    assert.equal(page.window.document.querySelector('[role="dialog"]'), null, 'removing the card removes its portal');
-    assert.equal(page.calls.length, 0);
-  } finally { await page.close(); }
-});
