@@ -149,7 +149,7 @@ export async function rebaseBeforeReviewRound(slug: string, options: PreReviewRe
 
   // Every observation below is a structural seam on the port, not a text match.
   const observed: PreReviewRebaseObservations = {
-    exitCode: null, hookEvidence: null, hookBounceRequests: 0, pushFailureOutput: null,
+    failureOutput: null, exitCode: null, hookEvidence: null, hookBounceRequests: 0, pushFailureOutput: null,
     publicationAttempted: false, pushGate: null, credentialFailure: null, conflictClassification: null,
   };
 
@@ -223,11 +223,12 @@ function preReviewRebaseOutcome(slug: string, observed: PreReviewRebaseObservati
   error(fmt.status('FAIL', `Rebase failed before launching reviewer for ${fmt.branch(`mission/${slug}`)}.`));
   return {
     ok: false, sharedFileConflicts: false, hookFailure: false,
-    failure: { kind: 'other', operation: 'rebase', output: `rebase workflow exited with status ${finalExitCode}` },
+    failure: { kind: 'other', operation: 'rebase', output: observed.failureOutput ?? `rebase workflow exited with status ${finalExitCode}` },
   };
 }
 
 interface PreReviewRebaseObservations {
+  failureOutput: string | null;
   exitCode: number | null; hookEvidence: PreReviewRebaseHookEvidence | null; hookBounceRequests: number;
   pushFailureOutput: string | null; publicationAttempted: boolean; pushGate: PreReviewRebaseGateEvidence | null;
   credentialFailure: string | null; conflictClassification: MissionConflictClassification | null;
@@ -235,6 +236,11 @@ interface PreReviewRebaseObservations {
 function observePreReviewRebase(port: RebaseWorkflowPort, observed: PreReviewRebaseObservations, worktree: string, forgejoEnabledFn: (_wt: string) => boolean): void {
   // The seams below are installed on the port itself rather than passed to the
   // factory, so they hold for any port implementation the caller supplies.
+  const innerOnFailure = port.onFailure;
+  port.onFailure = failure => {
+    observed.failureOutput = failure.output;
+    innerOnFailure?.(failure);
+  };
   port.cwd = () => worktree;
   port.isForgejoReviewEnabled = (root: string) => forgejoEnabledFn(root);
   // Exit-capturing seam: `runRebaseWorkflow` signals every outcome through

@@ -284,10 +284,12 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
   const moduleMockArgs = ['--experimental-test-module-mocks'];
   // Integration files spawn real children; task-2318/2327/2212 showed that
   // unrestricted concurrency can starve their startup past internal deadlines.
-  const INTEGRATION_TEST_CONCURRENCY = 4;
+  // Coverage instruments every worker and its real children. Serialize those
+  // files so concurrent cold CLI graphs do not consume each other's startup
+  // deadlines; selection, CPU accounting and per-case limits stay identical.
+  const INTEGRATION_TEST_CONCURRENCY = options.coverage ? 1 : 4;
   // Profiling may opt into a bounded worker-count matrix without changing the
-  // repository default. Invalid values deliberately retain the defended four
-  // workers rather than weakening the suite with an unbounded setting.
+  // repository default. Invalid values retain the bounded profile default.
   const requestedIntegrationConcurrency = Number(process.env.PARALLIX_INTEGRATION_TEST_CONCURRENCY);
   const integrationTestConcurrency = Number.isInteger(requestedIntegrationConcurrency)
     && requestedIntegrationConcurrency >= 1

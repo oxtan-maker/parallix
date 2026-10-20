@@ -28,9 +28,8 @@ const codeOnly = (source: string): string => source.replace(/\/\/[^\n]*|\/\*[\s\
  * analysis: names passed through unrelated objects or higher-order functions
  * are outside its claim. Chained defaults remain control operations.
  */
-function controlAliases(code: string, imported: string): string[] {
+function controlAliases(bindings: readonly RegExpMatchArray[], imported: string): string[] {
   const names = new Set([imported.replace(/\\s\*/g, '').replace(/\\\./g, '.')]);
-  const bindings = [...code.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\s*=\s*(?:([\w$]+(?:\s*\.\s*[\w$]+)*)\s*(?:\?\?|\|\|)\s*)?([\w$]+(?:\s*\.\s*[\w$]+)*)(?=\s*[,;)}\n])/g)];
   let changed = true;
   while (changed) {
     changed = false;
@@ -71,7 +70,11 @@ function branchSelected(code: string, at: number, ports: ReadonlySet<string>): b
   const statement = code.slice(Math.max(code.lastIndexOf(';', at), code.lastIndexOf('{', at), code.lastIndexOf('}', at)) + 1, at);
   const inlineBranch = /\b(?:if|else|while|for)\b|&&|\?/.test(statement.replace(/\?\?|\?\./g, ''));
   const enclosing: number[] = [];
-  for (let index = 0; index < at; index += 1) { if (code[index] === '{') {enclosing.push(index);} else if (code[index] === '}') {enclosing.pop();} }
+  // Only braces change nesting. Avoid visiting every intervening character for
+  // each call, especially when coverage instruments the scan's loop body.
+  for (const brace of code.slice(0, at).matchAll(/[{}]/g)) {
+    if (brace[0] === '{') {enclosing.push(brace.index);} else {enclosing.pop();}
+  }
   const kinds = enclosing.map(open => blockKind(code, open, ports));
   return !kinds.includes('port') && (inlineBranch || kinds.includes('branch'));
 }
@@ -96,6 +99,7 @@ export function workflowOwnershipViolations(files: readonly string[], root: stri
     const ports = new Set(clauses.filter(({ target }) => inside(target, path.join(application, 'ports')))
       .flatMap(({ clause }) => [...clause.matchAll(/(?:\bas\s+)?([A-Za-z_$][\w$]*)\s*(?=,|}|$)/g)].map(match => match[1])));
     let code: string | undefined;
+    let bindings: RegExpMatchArray[] | undefined;
     return clauses.flatMap(({ clause, target, typeOnly }) => {
       const operations = !typeOnly && target ? workflowControlOperations[`${path.relative(root, target).split(path.sep).join('/')}.ts`] : undefined;
       if (!operations) {return [];}
@@ -105,7 +109,10 @@ export function workflowOwnershipViolations(files: readonly string[], root: stri
         const callee = namespace ? `${namespace}\\s*\\.\\s*${name}` : local ? (local[1] ?? name) : null;
         if (!callee) {return [];}
         const masked = (code ??= codeOnly(source));
-        return controlAliases(masked, callee).flatMap(alias => [...masked.matchAll(new RegExp(`(?<![\\w$.])${alias}\\s*\\)?\\s*\\(`, 'g'))])
+        // Bindings depend on the file, not on the imported operation. Parse once
+        // while still resolving each operation's transitive aliases separately.
+        bindings ??= [...masked.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\s*=\s*(?:([\w$]+(?:\s*\.\s*[\w$]+)*)\s*(?:\?\?|\|\|)\s*)?([\w$]+(?:\s*\.\s*[\w$]+)*)(?=\s*[,;)}\n])/g)];
+        return controlAliases(bindings, callee).flatMap(alias => [...masked.matchAll(new RegExp(`(?<![\\w$.])${alias}\\s*\\)?\\s*\\(`, 'g'))])
           .filter(call => branchSelected(masked, call.index ?? 0, ports))
           .map(call => ({ file: path.relative(root, file), rule: 'adapter-owned-workflow-control' as const, expectedOwner: 'application' as const, actualOwner: 'adapters' as const,
             detail: `line ${masked.slice(0, call.index).split('\n').length} selects ${control} operation "${name}" under a branch outside a typed port binding; move that follow-on decision into the application entry` }));

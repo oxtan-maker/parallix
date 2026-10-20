@@ -82,6 +82,15 @@ record is missing, truncated, expired, oversized, interrupted, or
 access-denied, the route states it and points at related incidents rather than
 claiming completeness.
 
+A pre-review rebase refusal carries its current diagnostic into handoff repair,
+including the resolved local base and mission HEAD when ancestry verification
+refuses the result. A non-gate rebase failure may have no retained command
+capture; the repair prompt says so explicitly. Prior records are labeled as
+historical related context, not instructions to repair an earlier incident.
+Recency alone does not make a retained record evidence of the current failure.
+When a current capture is available, its incident, attempt and completeness
+remain attached to that capture.
+
 Every agent-fixable automatic repair, including the first, starts a new ephemeral
 conversation with the exact diagnostic and retained evidence. It reloads the
 locked mission authority, applicable repository rules, current revision and
@@ -115,4 +124,4 @@ The interface reports each failure mode explicitly instead of implying success:
 - **access-denied** — the store or a file could not be read or written
 
 Every non-success report carries a bounded fallback of related incidents so the
-next agent still has something to act on.
+next agent can inspect historical context without treating it as the current failure.

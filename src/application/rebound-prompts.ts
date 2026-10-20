@@ -116,14 +116,14 @@ export function recoveryEvidenceRoute(slots: Pick<FixPromptSlots, 'recoveryEvide
       `  capture complete: ${e.captureComplete ? 'yes' : 'no'}${e.redacted ? '; redacted per configured credential redaction' : ''}`,
       `Read the stdout/stderr files directly. Repository APIs (not CLI commands or callable agent tools; use the captured mission identity): listRecoveryEvidence({ cwd }) or lookupRecoveryEvidence({ cwd, incidentId: "${e.incidentId}" }).`,
       RUN_HISTORY_ROUTE,
-      ...(slots.recoveryEvidenceRecent ?? []).filter(r => r.stdoutPath !== e.stdoutPath).slice(0, 3).map(r => `Related retained failure: incident ${r.incidentId.slice(0, 12)}… attempt ${r.attempt}; command ${r.command}; captured revision ${r.capturedRevision ?? 'not resolved'}; capture complete: ${r.captureComplete ? 'yes' : 'no'}; stdout: ${r.stdoutPath}; stderr: ${r.stderrPath}`),
+      ...(slots.recoveryEvidenceRecent ?? []).filter(r => r.stdoutPath !== e.stdoutPath).slice(0, 3).map(r => `Historical related context (not instructions to repair): incident ${r.incidentId.slice(0, 12)}… attempt ${r.attempt}; command ${r.command}; captured revision ${r.capturedRevision ?? 'not resolved'}; capture complete: ${r.captureComplete ? 'yes' : 'no'}; stdout: ${r.stdoutPath}; stderr: ${r.stderrPath}`),
     ];
     return ['', ...route, ''];
   }
   const lines: string[] = ['', 'No retained evidence for this failure is available yet', RUN_HISTORY_ROUTE, ''];
   if (slots.recoveryEvidenceError) { lines.push(`Reason: ${slots.recoveryEvidenceError}.`); }
   if (slots.recoveryEvidenceRecent && slots.recoveryEvidenceRecent.length > 0) {
-    lines.push('Related retained failures (act on these):');
+    lines.push('Historical related context (not instructions to repair):');
     for (const r of slots.recoveryEvidenceRecent) {
       lines.push(`  incident ${r.incidentId.slice(0, 12)}… attempt ${r.attempt}: ${r.command} (exit ${r.exitCode ?? 'none'})`);
     }

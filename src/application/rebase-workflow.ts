@@ -310,11 +310,15 @@ function verifyBaseAncestry(ctx: RebaseContext): boolean {
   const { gitFn, executionRoot, baseBranch, port } = ctx;
   if (gitFn(['-C', executionRoot, 'merge-base', '--is-ancestor', baseBranch, 'HEAD']).status === 0) { return true; }
   const headSha = (gitFn(['-C', executionRoot, 'rev-parse', 'HEAD']).stdout || '').trim() || '(unknown)';
-  fmt.log.fail('Rebase postcondition failed: the local base branch is not an ancestor of the mission HEAD.');
-  fmt.log.fail(`Resolved local base branch: ${baseBranch}`);
-  fmt.log.fail(`Mission HEAD: ${headSha}`);
-  fmt.log.fail('This is local-base ancestry, not origin/mission/* tracking divergence.');
-  fmt.log.fail(`Recovery: ${fmt.command('git rebase --abort')}`);
+  const output = [
+    'Rebase postcondition failed: the local base branch is not an ancestor of the mission HEAD.',
+    `Resolved local base branch: ${baseBranch}`,
+    `Mission HEAD: ${headSha}`,
+    'This is local-base ancestry, not origin/mission/* tracking divergence.',
+    'Recovery: git rebase --abort',
+  ].join('\n');
+  port.onFailure?.({ kind: 'other', operation: 'rebase', output });
+  fmt.log.fail(output);
   port.exit(1);
   return false;
 }
@@ -429,6 +433,7 @@ async function reboundHookFailure(
  */
 async function handleNonConflictRebaseFailure(ctx: RebaseContext, rebaseResult: GitCommandResult, rebaseOutput: string): Promise<void> {
   const { port } = ctx;
+  port.onFailure?.({ kind: 'other', operation: 'rebase', output: rebaseOutput || 'Rebase failed with a non-conflict error.' });
   fmt.log.fail('Rebase failed with a non-conflict error.');
   if (rebaseOutput) {
     fmt.log.fail('--- Git Output ---');

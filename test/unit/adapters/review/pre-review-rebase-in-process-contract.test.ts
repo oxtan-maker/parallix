@@ -1,3 +1,8 @@
+import { HandoffCommandUseCase } from '../../../../src/application/handoff-command-use-case.js';
+import { makeRecorder, makePorts, runOptions } from '../../../helpers/handoff-ports.js';
+import { rebound } from '../../../../src/application/rebound-kernel.js';
+import { mkdtemp } from '../../../helpers/temp-dir.js';
+import { captureRecoveryEvidence } from '../../../../src/application/recovery-evidence.js';
 import { rebaseWorkflowFixture } from '../../../helpers/rebase-workflow-fixture.js';
 // Historical regression provenance: TASK-2377.
 // Behavior-owned suite (TASK-2622.09): the pre-review rebase runs in-process through the rebase workflow
@@ -134,6 +139,60 @@ describe("02 pre-review rebase in-process", () => {
     assert.equal(portsCreated, 1, 'exactly one rebase workflow port per pre-review rebase');
     assert.equal(workflowRuns, 1, 'exactly one in-process workflow run per pre-review rebase');
     assert.deepEqual(workflowArgs, [SLUG, '--push'], 'the workflow runs the mission with --push');
+  });
+
+  test('completed rebase ancestry refusal reaches fresh repair without old gate attribution (TASK-2796)', async (t) => {
+    const root = mkdtemp('rebase-diagnostic-');
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const old = captureRecoveryEvidence({ command: 'npm test -- old-unit', cwd: root, capturedRevision: 'old-head', signal: null, missionId: SLUG, exitCode: 1, stdout: 'historical authorship failure', stderr: '', diagnostic: 'old unit failure' });
+    assert.equal(old.ok, true);
+    const previousLogger = setLogger({ log: () => {} });
+    let result;
+    try {
+      result = await rebaseBeforeReviewRound(SLUG, preReviewOptions(stubPort({
+        git: args => args.includes('--is-ancestor')
+          ? { ...OK, status: 1 }
+          : args.includes('rev-parse') ? { ...OK, stdout: 'current-head' } : OK,
+      })));
+    } finally { setLogger(previousLogger); }
+    assert.equal(result.ok, false);
+    const facts = preReviewRebaseFacts(result);
+    assert.equal(facts.ok, false);
+    if (facts.ok) { return; }
+    assert.match(facts.diagnostic ?? '', /local base branch is not an ancestor/);
+    assert.match(facts.diagnostic ?? '', /Mission HEAD: current-head/);
+    const recorder = makeRecorder();
+    const ports = makePorts(recorder, { rebase: { rebaseBeforeReviewRound: async () => result! } });
+    const handoff = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+    assert.ok(handoff.recoveryFailure);
+    const prompts: string[] = [];
+    await rebound(handoff.recoveryFailure, {
+      slug: SLUG, worktree: root, implementer: 'codex', maxAttempts: 1,
+      startAgent: async (_step, options) => {
+        prompts.push(typeof options.prompt === 'function' ? options.prompt('codex') : String(options.prompt));
+        return { agent: 'codex', result: { status: 0 } };
+      },
+      verify: () => ({ ok: true }), log: () => {}, error: () => {},
+    });
+    assert.equal(prompts.length, 1);
+    const prompt = prompts[0];
+    assert.match(prompt, /local base branch is not an ancestor/);
+    assert.match(prompt, /No retained evidence for this failure/);
+    assert.match(prompt, /Historical related context/);
+    assert.doesNotMatch(prompt, /act on these|Retained evidence for this failure/);
+  });
+
+  test('non-conflict rebase failure preserves current Git output (TASK-2796)', async () => {
+    const previousLogger = setLogger({ log: () => {} });
+    try {
+      const result = await rebaseBeforeReviewRound(SLUG, preReviewOptions(stubPort({
+        git: args => args.includes('rebase')
+          ? { ...OK, status: 1, stderr: 'fatal: invalid upstream latest-local-base' } : OK,
+      })));
+      assert.equal(result.ok, false);
+      assert.equal(result.failure?.kind, 'other');
+      assert.equal(result.failure?.kind === 'other' && result.failure.output, 'fatal: invalid upstream latest-local-base');
+    } finally { setLogger(previousLogger); }
   });
 
   test('push-time gate failure whose output contains pre-push classifies as a gate failure', async () => {

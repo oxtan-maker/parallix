@@ -523,6 +523,32 @@ test('an e2e workflow keeps its integration-ci assignment and real-agent suites 
   } finally { checkout.dispose(); }
 });
 
+test('covered integration scheduling preserves population and budgets (TASK-2796)', () => {
+  const previous = process.env.PARALLIX_INTEGRATION_TEST_CONCURRENCY;
+  const tierFiles = selectTierFiles(REPO_ROOT);
+  try {
+    for (const [override, expected] of [[undefined, 1], ['2', 2], ['0', 1]] as const) {
+      if (override === undefined) delete process.env.PARALLIX_INTEGRATION_TEST_CONCURRENCY;
+      else process.env.PARALLIX_INTEGRATION_TEST_CONCURRENCY = override;
+      const plan = (coverage: boolean) => buildTestRunPlan({
+        executionRoot: REPO_ROOT, requestedArgs: ['--integration-ci'], coverage, tierFiles,
+        probeNodeVersion: () => 'v26.10.0', probeTestConcurrency: () => true,
+      });
+      const ordinary = plan(false);
+      const covered = plan(true);
+      assert.ok(covered.nodeArgs.includes(`--test-concurrency=${expected}`));
+      assert.ok(ordinary.nodeArgs.includes(`--test-concurrency=${override === '2' ? 2 : 4}`));
+      assert.deepEqual(covered.testFiles, ordinary.testFiles);
+      assert.equal(covered.unitTestCpuBudgetMs, ordinary.unitTestCpuBudgetMs);
+      assert.deepEqual(covered.nodeArgs.filter(arg => arg.endsWith('/integration-cpu-hook.mjs')),
+        ordinary.nodeArgs.filter(arg => arg.endsWith('/integration-cpu-hook.mjs')));
+    }
+  } finally {
+    if (previous === undefined) delete process.env.PARALLIX_INTEGRATION_TEST_CONCURRENCY;
+    else process.env.PARALLIX_INTEGRATION_TEST_CONCURRENCY = previous;
+  }
+});
+
 test('ordinary and covered plans select the same population (TASK-2638)', () => {
   const tierFiles = selectTierFiles(REPO_ROOT);
   for (const args of [[], ['--integration-ci']]) {

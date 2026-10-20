@@ -430,7 +430,7 @@ function handoffRebaseFailure(rebaseResult: Awaited<ReturnType<HandoffWorkflowPo
       const failure = rebaseResult.failure;
       return { ok: false, error: msg, recoveryFailure: failure?.kind === 'hook'
         ? { kind: 'hook-failure', hook: failure.hook.hook, operation: `git ${failure.operation}`, output: failure.hook.output }
-        : { kind: 'handoff-verification', error: failure?.kind === 'other' ? failure.output : msg } };
+        : { kind: 'handoff-verification', error: failure?.kind === 'other' ? `${msg}\n${failure.output}` : msg } };
     }
   }
 

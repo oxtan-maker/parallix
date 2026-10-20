@@ -13,9 +13,11 @@ export function recoveryEvidenceForPrompt(worktree: string, missionId: string): 
   // Use the same mission identity as capture, including custom worktree names.
   const recent = listRecoveryEvidence({ cwd: worktree, missionId });
   return {
-    recoveryEvidence: recent[0] ?? null,
+    // Recency proves only history. The kernel supplies the current capture
+    // explicitly; a non-gate failure has no command capture to match here.
+    recoveryEvidence: null,
     recoveryEvidenceRecent: recent,
-    recoveryEvidenceError: recent.length === 0 ? 'no retained evidence for this mission' : null,
+    recoveryEvidenceError: recent.length === 0 ? 'no retained evidence for this mission' : 'current retained capture unavailable; prior records are historical context',
   };
 }
 

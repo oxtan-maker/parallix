@@ -1,3 +1,4 @@
+import { captureRecoveryEvidence, lookupRecoveryEvidence, listRecoveryEvidence } from '../../../src/application/recovery-evidence.js';
 /**
  * TASK-2575 — rebound prompts are repair-capable across repositories.
  *
@@ -186,3 +187,73 @@ test('repair guidance checks readiness and stops on recorded human-only blockers
   assert.match(prompt, /do not fabricate proof, start repeated evidence-only repair/);
   assert.match(prompt, /Only an explicit operator decision can clear the recorded blocker/);
 });
+
+
+test('current capture identity wins over newer unrelated history and retains completeness (TASK-2796)', async t => {
+  const worktree = mkdtemp('current-repair-capture-');
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+  const input = {
+    command: 'npm test -- current', cwd: worktree, missionId: SLUG,
+    capturedRevision: 'current-head', exitCode: 1, signal: null,
+    stdout: 'secret-2796', stderr: 'current failure', attempt: 3,
+    redactor: (text: string) => text.replaceAll('secret-2796', '[REDACTED]'),
+  };
+  const current = captureRecoveryEvidence(input);
+  assert.equal(current.ok, true);
+  assert.ok(current.ref);
+  const old = captureRecoveryEvidence({
+    command: 'npm test -- unrelated', cwd: worktree, missionId: SLUG,
+    capturedRevision: 'old-head', exitCode: 1, signal: null,
+    stdout: 'unrelated failure', stderr: '',
+  });
+  assert.equal(old.ok, true);
+  const prompts: string[] = [];
+  await rebound({ kind: 'handoff-verification', error: 'Rebase failed before handoff. CURRENT_DIAGNOSTIC' }, {
+    slug: SLUG, worktree, implementer: 'codex', maxAttempts: 1,
+    retainedFailure: { ...current.ref, captureComplete: false, truncatedFrom: 'stdout' },
+    startAgent: async (_step, options) => {
+      prompts.push(typeof options.prompt === 'function' ? options.prompt('codex') : options.prompt);
+      return { agent: 'codex', result: { status: 0 } };
+    },
+    verify: () => ({ ok: true }), log: () => {}, error: () => {},
+  });
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /CURRENT_DIAGNOSTIC/);
+  assert.match(prompts[0], /command: npm test -- current/);
+  assert.match(prompts[0], /attempt 3 of the retained series/);
+  assert.ok(prompts[0].includes(current.ref.incidentId));
+  assert.match(prompts[0], /capture complete: no; redacted per configured credential redaction/);
+  assert.doesNotMatch(prompts[0], /secret-2796/);
+  const lookup = lookupRecoveryEvidence({ cwd: worktree, missionId: SLUG, incidentId: current.ref.incidentId, attempt: 3 });
+  assert.equal(lookup.ok, true);
+  assert.equal(lookup.evidence?.attempt, 3);
+  assert.equal(fs.readFileSync(current.ref.stdoutPath, 'utf8'), '[REDACTED]');
+  assert.equal(listRecoveryEvidence({ cwd: worktree, missionId: SLUG }).length, 2);
+});
+
+for (const history of [false, true]) {
+  test(`non-gate repair discloses missing current capture with history=${history} (TASK-2796)`, async t => {
+    const worktree = mkdtemp('missing-current-capture-');
+    t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+    if (history) {
+      captureRecoveryEvidence({ command: 'npm test -- historical-unit', cwd: worktree,
+        missionId: SLUG, capturedRevision: 'old-head', exitCode: 1, signal: null,
+        stdout: 'unrelated old failure', stderr: '' });
+    }
+    const prompts: string[] = [];
+    await rebound({ kind: 'handoff-verification', error: 'Rebase failed before handoff. CURRENT_ANCESTRY' }, {
+      slug: SLUG, worktree, implementer: 'codex', maxAttempts: 1,
+      startAgent: async (_step, options) => {
+        prompts.push(typeof options.prompt === 'function' ? options.prompt('codex') : options.prompt);
+        return { agent: 'codex', result: { status: 0 } };
+      },
+      verify: () => ({ ok: true }), log: () => {}, error: () => {},
+    });
+    assert.equal(prompts.length, 1);
+    assert.match(prompts[0], /CURRENT_ANCESTRY/);
+    assert.match(prompts[0], /No retained evidence for this failure/);
+    assert.doesNotMatch(prompts[0], /Retained evidence for this failure|act on these|capture complete: yes/);
+    if (history) { assert.match(prompts[0], /Historical related context/); }
+    else { assert.match(prompts[0], /no retained evidence for this mission/); }
+  });
+}

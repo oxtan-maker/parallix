@@ -90,6 +90,11 @@ line-attribution findings on a four-file fixture.
   The runner selects a Node 26.7+ executable for coverage runs and fails with
   an explicit message when none is available. GitHub `ci-required` installs
   Node 26.
+- Covered integration runs default to one file worker to limit contention
+  between instrumented child-process startups. Ordinary integration runs keep
+  four workers; `PARALLIX_INTEGRATION_TEST_CONCURRENCY` can override either
+  profile within the runner's existing bounds. Suite selection, per-case
+  deadlines and CPU limits are unchanged.
 - No c8 machinery is retained. The one gap, attributing bundled-subprocess
   execution to sources, is not closed correctly by c8: it credits unexecuted
   code. Keeping c8 would preserve inflated numbers, not a coverage guarantee.

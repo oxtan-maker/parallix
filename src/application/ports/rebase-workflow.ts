@@ -182,6 +182,8 @@ export interface RebaseWorkflowPort {
     _classification: { hookType: string | null },
     _output: string,
   ) => Promise<boolean> | boolean;
+  /** Current non-gate failure facts for in-process workflow callers. */
+  onFailure?: (_failure: Extract<PreReviewRebaseFailure, { kind: 'other' }>) => void;
   exit(_code: number): void;
 }
 
