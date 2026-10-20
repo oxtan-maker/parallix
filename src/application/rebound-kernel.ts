@@ -37,8 +37,6 @@ export { buildFreshDiagnosticRepairPrompt } from './rebound-prompts.js';
  * evidence, never a shared retry counter, so concurrent processes cannot
  * consume one attempt budget (the task-2369.13 split-brain bug).
  *
- * Application layer: imports `cli-format`, `output-elision`, and
- * `failure-classification` only; all I/O arrives through the context callbacks.
  */
 
 import * as fmt from './presentation/cli-format.js';
@@ -155,6 +153,7 @@ function refreshedReason(previous: ReboundReason, result: VerifyResult): Rebound
   if (previous.kind === 'artifact-incomplete') {
     return { ...previous, diagnostic: result.diagnostic || previous.diagnostic };
   }
+  if (previous.kind === 'rebase-conflict') { return { ...previous, diagnostic: result.diagnostic || previous.diagnostic }; }
   if (previous.kind === 'agent-timeout') {
     return { ...previous, diagnostic: result.diagnostic || previous.diagnostic };
   }
@@ -172,6 +171,7 @@ function failureFingerprint(reason: ReboundReason): string {
 
 function recoveryManualNextAction(reason: ReboundReason, context: ReboundContext): string {
   switch (reason.kind) {
+    case 'rebase-conflict': return `Resolve and stage the current conflicts in ${context.worktree}, then git rebase --continue; rerun px review ${context.slug} --submit after Git completes.`;
     case 'gate-failure': return `Repair the reported failure, then rerun ${reason.command} from ${context.worktree}.`;
     case 'hook-failure': return hookRecoveryAction(reason);
     case 'artifact-incomplete': return `Create the missing artifacts named above, then rerun px review ${context.slug} --continue.`;
@@ -198,7 +198,7 @@ function recoveryDossier(reason: ReboundReason, context: ReboundContext, history
     ...attempts.map((attempt, index) => `Attempt ${index + 1}: ${attempt.strategy}; agent=${attempt.agent}; context=${attempt.context}; HEAD ${attempt.headBefore || 'not captured'} -> ${attempt.headAfter || 'not captured'}; fingerprint ${attempt.fingerprintBefore} -> ${attempt.fingerprintAfter}`),
     ...(launchFailure ? [`Launch failure: ${describeLaunchFailure(launchFailure)}`] : []),
     `Last diagnostic: ${elideBounceOutput(diagnostic || '(no output)')}`,
-    `Successful checks: none recorded before exhaustion`,
+    reason.kind === 'gate-failure' ? 'Successful checks: none recorded before exhaustion' : 'Successful checks: see verification evidence; the last failure above is the current stop',
     `Stopped because: ${why}`,
     `Manual next action: ${manualNextAction}`,
   ];
@@ -347,6 +347,9 @@ async function runRepairAttempts(state: ReboundState, options: RepairOptions): P
     // Contract escalation is immediate; other fresh human-only failures retain
     // the existing exhaustion path and its attempted-repair evidence.
     if (repairVerificationRequiresHuman(verified.reason)) {
+      const detail: RepairEvidence = { strategy, agent: state.implementer, context: 'fresh', headBefore, headAfter: await currentHead(context), fingerprintBefore, fingerprintAfter: failureFingerprint(refreshedReason(state.reason, verified)) };
+      state.attemptsDetail.push(detail);
+      await recordAttemptTelemetry(state, context, [attempt, maxAttempts], detail, startedAt, launch, verified);
       refreshReboundState(state, verified, log);
       return humanOnlyOutcome(state, context, error);
     }

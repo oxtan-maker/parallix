@@ -73,7 +73,7 @@ import { createIntegrationGateStep } from '../../../src/application/integrate/ga
 import { RevokeReviewDecisionUseCase } from '../../../src/application/revoke-review-decision-use-case.js';
 import { createRebaseWorkflowPort } from '../../../src/adapters/rebase/rebase-workflow-adapter.js';
 import { runRebaseWorkflow } from '../../../src/application/rebase-workflow.js';
-import { SOURCE_PX } from '../../lib/px-entry.js';
+import { resolvePxEntryLoader } from '../../lib/px-entry.js';
 import { run } from '../../../src/composition/create-cli.js';
 // CLI cold-loading is shared immutable setup; case budgets cover the workflow
 // and its real pinned children, including their source-loader startup.
@@ -293,17 +293,19 @@ test('composed rebase conflict repair commits active before its agent and review
     ]) { assert.equal(spawnSync('git', args, { cwd: fixture.root }).status, 0); }
     let exitCode: { value: number | null } = { value: null };
     let launches = 0;
+    let rebaseStarted = false;
     const port = createRebaseWorkflowPort({
       missionServicesFn: async () => ({ store: fixture.store, lifecycle: fixture.lifecycle }),
       inferSlugFn: () => slug, resolveWorktreeFn: () => fixture.root,
       findMissionDirFn: () => fixture.root, findMissionAreaFn: () => 'docs',
       getCurrentBranchFn: () => `mission/${slug}`,
       resolveTaskFileFn: () => ({ matches: [],  ok: true as const, taskFile }), getTaskImplementerFn: () => IMPLEMENTER,
-      detectRebaseStateFn: () => ({ inProgress: false, unmergedFiles: [] }),
+      detectRebaseStateFn: () => ({ inProgress: rebaseStarted && launches === 0, unmergedFiles: rebaseStarted && launches === 0 ? ['src/shared.ts'] : [] }),
       resolveMissionBaseBranchFn: () => 'main', isForgejoReviewEnabledFn: () => false,
       resolveConflictsFn: () => ({ ok: false as const, error: 'merge-failed', conflictFiles: ['src/shared.ts'], missionSpecificFiles: [], sharedFiles: ['src/shared.ts'] }),
       gitFn: (args: string[]) => {
         if (args.includes('rebase') && args.includes('main')) {
+          rebaseStarted = true;
           return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in src/shared.ts' };
         }
         if (args.includes('status') && args.includes('--porcelain')) {
@@ -409,8 +411,8 @@ test('production CLI autonomous re-review and child verdict/resolve keep authori
   const seed = seedMission('review', review);
   await store.save({ ...seed, repositoryId: repositoryId('repo'), id: missionId(slug), checkpoints: seed.checkpoints.map(checkpoint => ({ ...checkpoint, missionId: missionId(slug) })), assignee: implementer }, null);
   // The review executor uses the production registry in-process. Verdict/resolve
-  // still cross real pinned source CLI processes; avoid a fourth loader startup.
-  const { entry, loader } = SOURCE_PX;
+  // still cross real pinned CLI processes, using the canonical bundle in prebuilt lanes.
+  const { entry, loader } = resolvePxEntryLoader();
   const trace = path.join(root, 'trace.jsonl');
   // This in-process executor holds a real persisted workflow generation; child
   // writers inherit the same fence, as they do under the production supervisor.
@@ -420,8 +422,8 @@ test('production CLI autonomous re-review and child verdict/resolve keep authori
     agent: null, reviewer: 'codex', originalStatus: 'review', previousAssignee: 'custom',
     owner: { pid: process.pid, identity: 'fixture-executor' }, createdAt: HANDOFF_AT, updatedAt: HANDOFF_AT, reason: null });
   const environment = { ...process.env, PARALLIX_WORKFLOW_OPERATION: 'fixture-review', PARALLIX_WORKFLOW_GENERATION: '1', PARALLIX_HOME: stateHome, PRIMARY_WORKTREE: repo, PARALLIX_NO_BUBBLEWRAP: '1', TASK_2582_SLUG: slug, TASK_2582_TRACE: trace, TASK_2582_REVIEWED: path.join(root, 'reviewed') };
-  pinChildCli(entry, { nodeArgs: ['--v8-pool-size=1', '--import', loader,
-    '--import', path.resolve('test/fixtures/review-repair-agent-preload.ts')],
+  pinChildCli(entry, { nodeArgs: ['--v8-pool-size=1', ...(loader ? ['--import', loader,
+    '--import', path.resolve('test/fixtures/review-repair-agent-preload.ts')] : [])],
   stateHome, env: environment, configuration: resolveConfiguration(environment) });
   inheritWorkflowAuthorization(resolveConfiguration(environment), operations);
   await installReviewRepairAgent();

@@ -44,15 +44,20 @@ export async function workflowBoard(count = 2, options: { cli?: CliInvocation; i
   };
   // Run before bootstrap removes case roots, including its SIGTERM -> exit path.
   process.prependListener('exit', emergencyCleanup);
-  execFileSync('git', ['init', '--quiet', root]);
+  execFileSync('git', ['init', '--quiet', '-b', 'main', root]);
   fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { terminal: { host: 'pipe', whenUnavailable: 'fallback' } } }));
   if (options.providers) {
     fs.writeFileSync(path.join(root, 'provider-fixture'), 'enabled');
     fs.mkdirSync(path.join(root, 'config'), { recursive: true });
     fs.writeFileSync(path.join(root, 'config/agents.json'), JSON.stringify({ families: ['codex', 'claude'] }));
   }
+  execFileSync('git', ['-C', root, 'add', 'workflow.config.json', ...(options.providers ? ['config/agents.json'] : [])]);
+  execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixture base']);
   const repository = resolveCanonicalRepositoryId(root);
   const slugs = Array.from({ length: count }, (_, index) => `task-worker-${index + 1}`);
+  for (const slug of slugs) {
+    execFileSync('git', ['-C', root, 'worktree', 'add', '--quiet', '-b', `mission/${slug}`, path.join(root, 'worktrees', slug)]);
+  }
   for (const slug of slugs) { await fixture.store.save(fixtureMission(slug, { status: 'refined', repositoryId: repository }), null); }
   const configuration = resolveConfiguration({ ...process.env, PARALLIX_HOME: root, PARALLIX_TERMINAL_STATE_DIR: path.join(root, 'terminal-state'), PARALLIX_TEST_NO_FORGEJO: '1', PARALLIX_NO_TUI: '1' });
   const cli = options.cli ?? { command: process.execPath, args: ['--import', createRequire(import.meta.url).resolve('tsx'), path.resolve('test/fixtures/workflow-owner-child.ts')] };

@@ -95,7 +95,7 @@ async function recordRequestChangesDecision(slug: string, outcome: string, messa
 }
 
 /** Record the authoritative approve on the Review aggregate. Returns true when the outcome must stop. */
-async function recordApprovalDecision(slug: string, outcome: string, message: string, options: SubmitReviewOptions, log: (_msg: string) => void, error: (_msg: string) => void): Promise<boolean> {
+async function recordApprovalDecision(slug: string, outcome: string, message: string, options: SubmitReviewOptions, log: (_msg: string) => void, error: (_msg: string) => void, providerBacked = false): Promise<boolean> {
   if (!options.missionStore) {
     log(fmt.status('WARN', `No Mission authority bound for ${slug}; the approve decision was not recorded on the Review aggregate.`));
     return false;
@@ -105,7 +105,7 @@ async function recordApprovalDecision(slug: string, outcome: string, message: st
     comment: message || null,
     decidedAt: new Date().toISOString(),
     revision: options.revision ?? headRevision(options.worktree || resolveWorktree(slug) || process.cwd()),
-    source: { kind: 'local' },
+    source: providerBacked ? { kind: 'provider', provider: 'forgejo' } : { kind: 'local' },
   }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
   if (decision.outcome === 'failed') {
     error(fmt.status('FAIL', `Review outcome "${outcome}" could not be recorded for ${slug}: ${decision.diagnostic}`));
@@ -230,7 +230,7 @@ async function finalizeProviderReviewState(slug: string, outcome: string, worktr
       return false;
     }),
   };
-  void mirrorReviewOutcome(outcome, true, currentStatus, mirror);
+  await mirrorReviewOutcome(outcome, true, currentStatus, mirror);
   return false;
 }
 
@@ -315,7 +315,7 @@ function providerReviewBindings(options: SubmitReviewOptions) {
 }
 
 async function submitProviderReview(slug: string, outcome: string, message: string, worktree: string, options: SubmitReviewOptions, log: (_msg: string) => void, error: (_msg: string) => void, exit: (_code: number) => void): Promise<void> {
-  const { transitionTaskFn, readReviewStateFn, resolveReviewUserFn, resolveTaskFileFn, getTaskStatusFn } = providerReviewBindings(options);
+  const { readReviewStateFn, resolveReviewUserFn } = providerReviewBindings(options);
   // For provider-backed reviews, post through the adapter. Review-state is the normal source.
   let reviewIdentity = (await resolveReviewIdentity(slug, worktree, {
     readReviewStateFn,
@@ -353,19 +353,16 @@ async function submitProviderReview(slug: string, outcome: string, message: stri
     missionStore: options.missionStore,
   });
 
-  // Self-author skip: postWorkflowReview intentionally did not POST to the provider
-  // (reviewer == PR author) and already persisted the verdict locally. This is
-  // a legitimate same-agent-reviewer fallback, not a failure — do NOT exit(1).
-  if (result.ok && result.skipped) {
+  if (result.skipped && result.reason === 'self-author') {
+    if (!result.ok) {
+      error(fmt.status('WARN', result.error || 'Independent review is required before approval or integration.'));
+      exit(1);
+      return;
+    }
+    const { resolveTaskFileFn, getTaskStatusFn, transitionTaskFn } = providerReviewBindings(options);
     await repairStaleActiveTaskAfterReview(slug, {
-      rootDir: worktree,
-      resolveTaskFileFn,
-      getTaskStatusFn,
-      transitionTaskFn,
-      log,
-      error
+      rootDir: worktree, resolveTaskFileFn, getTaskStatusFn, transitionTaskFn, log, error,
     });
-    log(fmt.status('WARN', `Review outcome "${outcome}" recorded locally for ${slug} (self-approval POST skipped). A different agent or a human must post the formal provider approval.`));
     return;
   }
 
@@ -381,7 +378,7 @@ async function submitProviderReview(slug: string, outcome: string, message: stri
   // went out. Without a bound Mission authority there is nothing to record on
   // the aggregate (the flat review-state write below still mirrors the
   // disposition), matching the no-store WARN taken before the POST.
-  if (outcome === 'approve' && options.missionStore && await recordApprovalDecision(slug, outcome, message, options, log, error)) {
+  if (outcome === 'approve' && options.missionStore && await recordApprovalDecision(slug, outcome, message, options, log, error, true)) {
     exit(1);
     return;
   }

@@ -343,6 +343,7 @@ test('submitReviewRound does not exit when reviewer is the PR author (self-autho
   // locally and warn, NOT exit(1).
   let exited = false;
   let postCalled = false;
+  const transitions: string[] = [];
   let recordedDisposition = null;
   let recordedVerdict: { value: string | undefined | null } = { value: null };
   const warnings: string[] = [];
@@ -360,6 +361,9 @@ test('submitReviewRound does not exit when reviewer is the PR author (self-autho
       createEventFn: async (slug, type, params) => { recordedVerdict.value = params.verdict; return { ok: true as const, path: '/mock' }; },
       readTokenFn: () => 'token',
       getPrAuthorFn: () => 'custom', // reviewer == PR author
+      resolveTaskFileFn: () => ({ ok: true, taskFile: '/mock/backlog/tasks/test-slug.md', matches: [] }),
+      getTaskStatusFn: () => 'active',
+      transitionTaskFn: async (_slug, status) => { transitions.push(status); return true; },
       postReviewFn: () => { postCalled = true; return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
       log: (msg) => { if (/WARN/.test(msg)) warnings.push(msg); },
       error: () => {},
@@ -371,6 +375,7 @@ test('submitReviewRound does not exit when reviewer is the PR author (self-autho
   }
   assert.equal(exited, false, 'self-author skip must NOT exit(1)');
   assert.equal(postCalled, false, 'must NOT POST a self-approval to Forgejo');
+  assert.deepEqual(transitions, ['review'], 'successful self-author verdict repairs the Backlog intake mirror (H17)');
   assert.equal(recordedDisposition, 'APPROVED', 'verdict recorded to local review-state');
   assert.equal(recordedVerdict.value, 'approve', 'reviewer_outcome event recorded locally');
   assert.ok(warnings.some(w => /self-approval POST skipped|different agent or a human/.test(w)), 'must warn that a different agent/human posts the formal approval');

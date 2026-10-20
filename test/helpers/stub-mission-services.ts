@@ -1,3 +1,4 @@
+import { agentFamily } from '../../src/domain/agents.js';
 import { missionVersion } from '../../src/application/domain-ports.js';
 /**
  * In-memory Mission services for tests that replace filesystem/module seams.
@@ -14,7 +15,7 @@ export function stubMissionServices(overrides: Partial<HandoffMissionServices> =
     store: {
       async load(id) {
         return { kind: 'found' as const, mission: fixtureMission(id, {
-          repositoryId: repositoryId('test-repo'), status: 'review', checkpoints: [],
+          assignee: agentFamily('claude'), repositoryId: repositoryId('test-repo'), status: 'review', checkpoints: [],
         }), version: missionVersion(1) };
       },
     },
@@ -34,7 +35,7 @@ export function stubRecordedMissionServices(): HandoffMissionServicesPort {
         return {
           kind: 'found' as const,
           mission: fixtureMission(id, {
-            repositoryId: repositoryId('test-repo'), status: 'review',
+            assignee: agentFamily('claude'), repositoryId: repositoryId('test-repo'), status: 'review',
               checkpoints: [{ missionId: id, name: 'CP-1',
               goalCheck: [{ criterion: 'handoff coverage', evidence: '`npm run typecheck`' }], nextActionText: 'review' }],
             brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },

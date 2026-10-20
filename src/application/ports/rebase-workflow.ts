@@ -133,6 +133,8 @@ export interface RebaseWorkflowPort {
   // --- forgejo adapter ---------------------------------------------------
   createPr(_branch: string, _user: string, _token: string, _options: Record<string, unknown>): { ok: boolean; error?: string | null; gateFailure?: Omit<PreReviewRebaseGateEvidence, 'exitCode'> & { exitCode: number | null } };
   readToken(_user: string): string | null;
+  /** Publication credentials may differ from the authoritative implementer. */
+  publicationCredentials?(_user: string, _root: string): { user: string; token: string | null };
   resolveForgejoUser(_user: string | null): string | null;
   fetchReviewBranch(_branch: string, _root?: string, _options?: { token?: string | null }): unknown;
 
@@ -167,7 +169,7 @@ export interface RebaseWorkflowPort {
 
   // --- runtime seams -----------------------------------------------------
   /** Mission persistence services for the selected root; absent for callers that did not compose them. */
-  missionServices?: ((_root: string) => Promise<{ store: MissionStore | null }>) | null;
+  missionServices?: ((_root: string) => Promise<{ store: Pick<MissionStore, 'load'> | null; lifecycle?: Pick<import('../mission-lifecycle-service.js').MissionLifecycleService, 'transition'> | null }>) | null;
   /**
    * Hook-failure interception seam (TASK-2377.05). Return `false` to decline the
    * in-child rebound-kernel bounce; the pre-review path installs a recorder that

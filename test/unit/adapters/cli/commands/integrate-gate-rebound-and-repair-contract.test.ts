@@ -613,7 +613,7 @@ describe("handoff and push-gate regressions", () => {
         store: {
           load: async () => ({
             kind: 'found' as const,
-            mission: fixtureMission(SLUG, {
+            mission: fixtureMission(SLUG, { assignee: agentFamily('claude'),
               checkpoints: [{ missionId: handoffTransitionValue().mission.id, name: 'CP-1', goalCheck: [{ criterion: 'works', evidence: 'src/application/handoff-command-use-case.ts:1' }], nextActionText: 'review' }],
               brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
               successCriteria: ['works'],

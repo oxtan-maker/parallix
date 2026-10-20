@@ -8,7 +8,7 @@ import * as fmt from './presentation/cli-format.js';
 import type { HandoffLog, HandoffMissionServicesPort, HandoffResult, HandoffWorkflowPorts, PerformHandoffOptions, ProofResult } from './ports/handoff-workflow.js';
 import type { RecordedContract } from './handoff-contract.js';
 import type { DeclaredGateRunner } from './handoff-declared-gates.js';
-import { rebound } from './rebound-kernel.js';
+import { rebound, type ReboundReason } from './rebound-kernel.js';
 import { transitionReviewRepair } from './review-repair-lifecycle.js';
 
 /** Facts both gate stages share with the surrounding handoff run. */
@@ -105,15 +105,13 @@ export class HandoffGateRecovery {
                 ok: Boolean(retried.ok),
                 command: verificationCommand,
                 diagnostic: retried.error || '',
-                reason: retried.gateFailure ? { kind: 'gate-failure', ...retried.gateFailure } : undefined,
+                reason: retriedReason(retried),
               };
             },
             log,
             error,
           });
-          return outcome.outcome === 'fixed' && retried
-            ? retried
-            : { ...failure, error: outcome.dossier || outcome.diagnostic || failure.error };
+          return gateRepairResult(outcome, retried, failure);
         }
         const proofResult = beforeGateProof.ok
           ? ports.verification.writeReusableVerificationProof(verificationCommand, rootDir, { expectedIdentity: beforeGateProof.identity })
@@ -196,6 +194,17 @@ export class HandoffGateRecovery {
 }
 
 /** Preserve producer attribution while supporting older proof-port adapters. */
+function gateRepairResult(outcome: Awaited<ReturnType<typeof rebound>>, retried: HandoffResult | null, failure: HandoffResult): HandoffResult {
+  if (outcome.outcome === 'fixed' && retried) { return retried; }
+  return { ...(retried ?? failure), error: outcome.dossier || outcome.diagnostic || failure.error };
+}
+
+function retriedReason(retried: HandoffResult): ReboundReason {
+  if (retried.recoveryFailure) { return retried.recoveryFailure; }
+  if (retried.gateFailure) { return { kind: 'gate-failure', ...retried.gateFailure }; }
+  return { kind: 'handoff-verification', error: retried.error || 'Handoff failed after gate repair' };
+}
+
 function proofReuseMessage(proof: ProofResult): string {
   return proof.diagnostic ?? 'Repository verification passed by reuse of successful active/review proof.';
 }

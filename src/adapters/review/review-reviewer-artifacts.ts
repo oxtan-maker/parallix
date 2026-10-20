@@ -11,7 +11,7 @@ import type { MissionStore } from '../../application/domain-ports.js';
 import { type ReviewFinding } from '../../domain/review.js';
 import { isEnabled } from './review-adapter.js';
 import { createEvent, consumeHumanNotes, VALID_EVENT_TYPES, CreateEventParams, CreateEventOptions, CreateEventResult } from './review-events.js';
-import { parseReviewFindings, recordRequestedChanges, recordApproval } from './review-round.js';
+import { parseReviewFindings, recordRequestedChanges, recordApproval, approvalLegalDiagnostic } from './review-round.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import { reviewArtifactPath, staleReviewWrite, renderFindings, resolveArtifactRead, resolveArtifactDir, readArtifactFile, deleteArtifactFile, normalizeReviewVerdict, headRevision, type ReviewStateReader } from './review-artifact-files.js';
 import { postWorkflowComment, postWorkflowReview } from './review-workflow-posting.js';
@@ -244,6 +244,41 @@ function prepareReviewerArtifacts(slug: string, options: ReviewerArtifactOptions
   return { log, error, deleteArtifactFn, worktree, providerEnabled, reviewStatePath, artifacts, verdict };
 }
 
+type AdmittedReviewerArtifacts =
+  | { ok: false; failure: { consumed: boolean; ok?: boolean; diagnostic?: string | null; reviewState?: string | null } }
+  | { ok: true; reviewFindings: string; reviewOutcome: string; reviewVerdict: string; typedFindings: readonly ReviewFinding[]; options: ReviewerArtifactOptions };
+
+/** Completeness, parsing, staleness and revision-pin checks that precede any decision. */
+async function admitReviewerArtifacts(
+  ctx: { slug: string; artifacts: ReturnType<typeof prepareReviewerArtifacts>['artifacts']; verdict: string | null; reviewStatePath: string | null; providerEnabled: unknown; worktree: string; error: (message: string) => void },
+  options: ReviewerArtifactOptions,
+): Promise<AdmittedReviewerArtifacts> {
+  const { slug, artifacts, verdict, reviewStatePath, providerEnabled, worktree, error } = ctx;
+  const incomplete = reportIncompleteReviewerArtifacts({
+    slug, findings: artifacts.findings, outcomeMessage: artifacts.outcomeMessage, verdict,
+    findingsPath: artifacts.findingsPath, outcomePath: artifacts.outcomePath, verdictPath: artifacts.verdictPath,
+    reviewStatePath, providerEnabled: Boolean(providerEnabled), error,
+  });
+  if (incomplete) { return { ok: false, failure: incomplete }; }
+  // Past the completeness guard all three artifacts are present.
+  const reviewFindings: string = artifacts.findings!;
+  const reviewOutcome: string = artifacts.outcomeMessage!;
+  const reviewVerdict: string = verdict!;
+  // `px verdict` already names each finding; only a file transport needs parsing.
+  const parsed = parseReviewerArtifactFindings(reviewFindings, reviewVerdict, options);
+  if (!parsed.ok) { return { ok: false, failure: parsed.failure }; }
+
+  const stale = await staleReviewWrite(slug, options.expectedVersion, options.missionStore);
+  if (stale) {
+    error(fmt.status('FAIL', stale));
+    return { ok: false, failure: { consumed: true, ok: false, diagnostic: stale } };
+  }
+
+  const pinned = pinReviewerRevision(options, worktree);
+  if (!pinned.ok) { return { ok: false, failure: { consumed: true, ok: false, diagnostic: pinned.diagnostic } }; }
+  return { ok: true, reviewFindings, reviewOutcome, reviewVerdict, typedFindings: parsed.findings, options: { ...pinned.options, providerEnabled: Boolean(providerEnabled) } };
+}
+
 export async function consumeReviewerArtifacts(
   slug: string,
   reviewer: string,
@@ -254,56 +289,13 @@ export async function consumeReviewerArtifacts(
   if ([artifacts.findings, artifacts.outcomeMessage, artifacts.verdictRaw].every(value => value === null)) {
     return { consumed: false };
   }
-  const incomplete = reportIncompleteReviewerArtifacts({
-    slug, findings: artifacts.findings, outcomeMessage: artifacts.outcomeMessage, verdict,
-    findingsPath: artifacts.findingsPath, outcomePath: artifacts.outcomePath, verdictPath: artifacts.verdictPath,
-    reviewStatePath, providerEnabled: Boolean(providerEnabled), error,
-  });
-  if (incomplete) { return incomplete; }
-  // Past the completeness guard all three artifacts are present.
-  const reviewFindings: string = artifacts.findings!;
-  const reviewOutcome: string = artifacts.outcomeMessage!;
-  const reviewVerdict: string = verdict!;
-  // `px verdict` already names each finding; only a file transport needs parsing.
-  const parsed = parseReviewerArtifactFindings(reviewFindings, reviewVerdict, options);
-  if (!parsed.ok) { return parsed.failure; }
-  const typedFindings = parsed.findings;
-
-  const stale = await staleReviewWrite(slug, options.expectedVersion, options.missionStore);
-  if (stale) {
-    error(fmt.status('FAIL', stale));
-    return { consumed: true, ok: false, diagnostic: stale };
-  }
-
-  const pinned = pinReviewerRevision(options, worktree);
-  if (!pinned.ok) { return { consumed: true, ok: false, diagnostic: pinned.diagnostic }; }
-  options = pinned.options;
+  const prepared = await admitReviewerArtifacts({ slug, artifacts, verdict, reviewStatePath, providerEnabled, worktree, error }, options);
+  if (!prepared.ok) { return prepared.failure; }
+  const { reviewFindings, reviewOutcome, reviewVerdict, typedFindings } = prepared;
+  options = prepared.options;
   const { round, phase, readReviewStateFn } = await reviewerArtifactRound(slug, worktree, options);
 
-  // The decision itself, not just its prose. Without it the round keeps
-  // `decision: null`, the Mission never leaves `review` through
-  // `request-changes`, and the next handoff cannot open round N+1.
-  //
-  // Committed first, pinned to the version the caller read. It cannot go after
-  // the review events: those advance the Mission, so the caller's version would
-  // be stale by the time the decision compared it, and a concurrent write
-  // landing between the events and the decision would be overwritten silently.
-  // The recorders save with a compare-and-swap on the same version they check,
-  // so pinning it here is what makes the submission atomic rather than merely
-  // pre-checked. It also fails in the safer direction: a decision without its
-  // event export is a missing log entry, while an event export without the
-  // decision leaves the Mission unapproved and unintegratable.
-  const decisionFailure = await recordReviewerArtifactDecision(slug, reviewVerdict, typedFindings, reviewOutcome, options, log, error);
-  if (decisionFailure) { return decisionFailure; }
-
-  const persisted = await persistReviewerEvents({
-    slug, reviewer, round, phase, reviewFindings, reviewOutcome, reviewVerdict,
-    createEventFn: options.createEventFn || createEvent, worktree, log, error, verbose: Boolean(options.verbose),
-  });
-  if (!persisted.ok) { return { consumed: true, ok: false, diagnostic: persisted.diagnostic }; }
-
-  if (providerEnabled) {
-    const diagnostic = await postReviewerToProvider(slug, reviewer, reviewVerdict, reviewFindings, reviewOutcome, {
+  const mirror = () => postReviewerToProvider(slug, reviewer, reviewVerdict, reviewFindings, reviewOutcome, {
       worktree, log, error, readReviewStateFn,
       readTokenFn: options.readTokenFn,
       getCommentsFn: options.getCommentsFn,
@@ -319,15 +311,39 @@ export async function consumeReviewerArtifacts(
       recordApprovalFn: options.recordApprovalFn,
       revision: options.revision,
     });
-    if (diagnostic) { return { consumed: true, ok: false, diagnostic }; }
-  } else if (options.verbose) {
+
+
+  const persistEvents = async () => {
+    const persisted = await persistReviewerEvents({
+      slug, reviewer, round, phase, reviewFindings, reviewOutcome, reviewVerdict,
+      createEventFn: options.createEventFn || createEvent, worktree, log, error, verbose: Boolean(options.verbose),
+    });
+    return persisted.ok ? null : { consumed: true as const, ok: false as const, diagnostic: persisted.diagnostic };
+  };
+  // Legacy exports have no aggregate decision; persist their audit before mirroring.
+  if (!options.missionStore) { const failed = await persistEvents(); if (failed) { return failed; } }
+  // Provider approval must succeed before any local authority is granted.
+  // Version and legality checks precede that external effect; the decision's
+  // compare-and-swap still precedes the audit events below.
+  const mirrorStage = async (leadingStage: boolean): Promise<string | null> => {
+    if (!providerEnabled || (reviewVerdict === 'approve') !== leadingStage) { return null; }
+    return (leadingStage && await approvalLegalDiagnostic(slug, { missionStore: options.missionStore })) || await mirror();
+  };
+  const leading = await mirrorStage(true);
+  if (leading) { return { consumed: true, ok: false, diagnostic: leading }; }
+  const decisionFailure = await recordReviewerArtifactDecision(slug, reviewVerdict, typedFindings, reviewOutcome, options, log, error);
+  if (decisionFailure) { return decisionFailure; }
+
+
+  if (options.missionStore) { const failed = await persistEvents(); if (failed) { return failed; } }
+
+  const trailing = await mirrorStage(false);
+  if (trailing) { return { consumed: true, ok: false, diagnostic: trailing }; }
+  if (!providerEnabled && options.verbose) {
     log(fmt.status('INFO', `Review provider disabled; skipping PR mirroring for ${slug}`));
   }
-
   if (!options.output) {
-    deleteArtifactFn(artifacts.findingsPath);
-    deleteArtifactFn(artifacts.outcomePath);
-    deleteArtifactFn(artifacts.verdictPath);
+    for (const artifactPath of [artifacts.findingsPath, artifacts.outcomePath, artifacts.verdictPath]) { deleteArtifactFn(artifactPath); }
   }
 
   return reviewerConsumeOutcome(reviewVerdict, typedFindings, reviewer, Boolean(providerEnabled), Boolean(options.verbose), log);
@@ -404,7 +420,7 @@ async function recordReviewerApproval(slug: string, outcomeMessage: string, opti
     comment: outcomeMessage,
     decidedAt: new Date().toISOString(),
     revision: options.revision,
-    source: { kind: 'local' },
+    source: options.providerEnabled ? { kind: 'provider', provider: 'forgejo' } : { kind: 'local' },
     ...(options.expectedVersion === undefined ? {} : { expectedVersion: options.expectedVersion }),
   }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
   if (decision.outcome === 'failed') {
@@ -438,16 +454,6 @@ async function recordReviewerArtifactDecision(slug: string, reviewVerdict: strin
     const recorded = await recordReviewerChangeRequest(slug, typedFindings, reviewOutcome, options, log, error);
     if (recorded) { return recorded; }
   } else if (reviewVerdict === 'approve' && options.missionStore) {
-    // An approve is a domain decision, recorded here for the same reason
-    // request-changes is: the aggregate is what `px integrate` gates on, and
-    // what the next agent reads back. It used to be persisted only inside the
-    // self-authored-PR branch of the provider mirroring below, so a review with
-    // the provider disabled, or any ordinary provider review, returned APPROVED
-    // while the mission stayed unapproved and unintegratable.
-    //
-    // Recorded before mirroring, so a round that cannot legally reach
-    // `approved` fails here instead of after a provider POST that cannot be
-    // taken back.
     const recorded = await recordReviewerApproval(slug, reviewOutcome, options, log, error);
     if (recorded) { return recorded; }
   }

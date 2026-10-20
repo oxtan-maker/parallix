@@ -1,4 +1,5 @@
 import { MissionCheckpointService } from './mission-checkpoint-service.js';
+import { recordImplementerLaunch } from './rebase-identity.js';
 import { reportWorkflowProviderStarted } from './ports/mission-write-authorization.js';
 import type { ApplicationOutcome, Cancellation, Capability, DurableEvidence } from './contracts.js';
 import { failure, rejected } from './contracts.js';
@@ -98,7 +99,7 @@ export class ExecuteMissionService {
       const prepared = await this.resolveWorkspace(request.slug);
       if (typeof prepared === 'string') { throw new WorkspaceRefusal(prepared); }
       const plan = await this._ports.agentExecution.prepare({ slug: request.slug, worktree: prepared.worktree });
-      const launch = await this.launchAgent(request, prepared, plan, selectedAgent, () => { agentStarted = true; });
+      const launch = await this.launchAgent(request, prepared, plan, selectedAgent, () => { agentStarted = true; }, activation.mission.review?.rounds.at(-1)?.implementer);
       const evidence: DurableEvidence[] = [
         { id: `${request.slug}:agent`, source: 'task-markdown', detail: 'execute agent launch completed' },
       ];
@@ -119,6 +120,9 @@ export class ExecuteMissionService {
         agent: launch.agent,
         reviewer: request.reviewer,
         taskFile: prepared.taskResolution.ok ? prepared.taskResolution.taskFile ?? null : null,
+        onImplementerLaunched: async (agent: string) => {
+          await recordImplementerLaunch(request.slug, agent, this._ports.missionTransitions, new MissionLifecycleService(this._ports.missionTransitions));
+        },
         // Autonomous review is real work by other families on this same
         // mission. It publishes through the same seam `px review` uses, so the
         // board follows the reviewer and the implementer answering findings
@@ -217,6 +221,7 @@ export class ExecuteMissionService {
     plan: AgentLaunchPlan,
     selectedAgent: string,
     onStarted: () => void,
+    recordedReviewImplementer?: string,
   ): Promise<AgentLaunchOutcome> {
     const launch = await this._ports.agentExecution.launch({
       slug: request.slug,
@@ -235,7 +240,7 @@ export class ExecuteMissionService {
       onAgentChanged: async (agent) => {
         onStarted();
         await reportWorkflowProviderStarted(agent);
-        if (agent !== selectedAgent) { await this.synchronizeLifecycle(request.slug, agent, request.operationId); }
+        await recordImplementerLaunch(request.slug, agent, this._ports.missionTransitions, new MissionLifecycleService(this._ports.missionTransitions));
         await this.publishWork(request, 'execute', `running execute agent (${agent})`, agent);
       },
     });
@@ -245,6 +250,10 @@ export class ExecuteMissionService {
     }
     if (typeof launch.exitStatus === 'number' && launch.exitStatus !== 0) {
       throw new Error(`Execute agent (${launch.agent}) exited with status ${launch.exitStatus}.`);
+    }
+    // A launcher may report its actual fallback only in its result.
+    if (launch.agent !== selectedAgent || (recordedReviewImplementer && recordedReviewImplementer !== launch.agent)) {
+      await recordImplementerLaunch(request.slug, launch.agent, this._ports.missionTransitions, new MissionLifecycleService(this._ports.missionTransitions));
     }
     return launch;
   }

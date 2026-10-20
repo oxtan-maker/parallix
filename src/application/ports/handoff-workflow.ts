@@ -153,6 +153,7 @@ export interface HandoffSetupReviewPort {
 }
 
 export interface HandoffRebaseOptions {
+  readonly missionIdentityServices?: NonNullable<import('./rebase-workflow.js').RebaseWorkflowPort['missionServices']>;
   readonly worktree?: string;
   readonly log: HandoffLog;
   readonly error: HandoffLog;
@@ -352,6 +353,7 @@ export interface PerformHandoffOptions {
 }
 
 export interface HandoffResult {
+  readonly recoveryFailure?: import('../../domain/rebound-policy.js').ReboundReason;
   readonly ok: boolean;
   readonly error?: string;
   /** Set when the failure is a CLI usage error the interface layer should render. */

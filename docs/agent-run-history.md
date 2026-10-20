@@ -55,6 +55,10 @@ Use `Ctrl-b d` to detach; it does not stop work. `--read-only` opens a watching
 client. When work finishes, its operation window closes and one console shell remains
 for inspection and later commands, showing the last 50 lines of command output
 and its exit code. Commands started from that console also retain their output.
+Mission commands resolve their worktree from the Mission identity even when the
+console or shell startup files leave the shell in the base checkout. Execute,
+review and recovery retries retain the mission branch preflight; the console
+location does not authorize work in the base checkout.
 Removing the mission worktree retires the terminal after any owned operation
 drains and the operator detaches; an attached result view remains available. Attach does not require a live agent or retained
 run record. Concurrent operations use separate windows in the same mission

@@ -11,6 +11,7 @@ import {
 import {
   assertReviewedChange,
   currentReviewRound,
+  replaceCurrentRound,
   reviewStatus,
   revokeApprovedDecision,
   sameReviewedChange,
@@ -33,6 +34,7 @@ const REBOUND_REASONS: Record<ReboundCause['kind'], string> = {
 export type MissionCommand =
   | { readonly type: 'refine' }
   | { readonly type: 'activate'; readonly agent: AgentFamily }
+  | { readonly type: 'record-implementer'; readonly agent: AgentFamily }
   | { readonly type: 'abort-activation'; readonly assignee: AgentFamily | null }
   | { readonly type: 'rebound-to-active'; readonly agent: AgentFamily; readonly cause: ReboundCause; readonly occurredAt?: string }
   | {
@@ -255,6 +257,17 @@ function reboundMission(mission: Mission, command: Extract<MissionCommand, { typ
   };
 }
 
+/** Approval retains the implementer selected by the Mission authority.
+ * Reviewer separation (including the single-family exception) is checked when
+ * the round is created, through ConfiguredReviewerEligibility.
+ */
+export function requireReviewIdentity(mission: Pick<Mission, 'assignee'>, review: Review): void {
+  const round = currentReviewRound(review);
+  if (mission.assignee && round.implementer !== mission.assignee) {
+    throw new MissionRuleViolation(`Mission implementer identity mismatch: assignee ${mission.assignee}, review implementer ${round.implementer}`);
+  }
+}
+
 function approveMission(mission: Mission, command: Extract<MissionCommand, { type: 'approve' }>): Mission {
   requireStatus(mission, ['review', 'active'], command);
   if (mission.status === 'active' && !approvableFromActiveLane(mission.review)) {
@@ -264,6 +277,7 @@ function approveMission(mission: Mission, command: Extract<MissionCommand, { typ
   if (reviewStatus(command.review) !== 'approved') {
     throw new MissionRuleViolation('Approval requires an approved review');
   }
+  requireReviewIdentity(mission, command.review);
   return { ...mission, status: 'integration', review: command.review };
 }
 
@@ -277,6 +291,21 @@ function revokeMissionApproval(mission: Mission, command: Extract<MissionCommand
     throw new MissionRuleViolation('Revocation must open an awaiting-review round');
   }
   return { ...mission, status: 'review', review: command.review };
+}
+
+function recordImplementer(mission: Mission, command: Extract<MissionCommand, { type: 'record-implementer' }>): Mission {
+  requireStatus(mission, ['active', 'review'], command);
+  if (mission.review && reviewStatus(mission.review) === 'approved') {
+    throw new MissionRuleViolation('Revoke the approved review before recording a different implementer');
+  }
+  const previous = mission.review ? currentReviewRound(mission.review) : null;
+  const changed = previous && previous.implementer !== command.agent;
+  return { ...mission, assignee: command.agent, review: mission.review && previous ? {
+    ...mission.review, rounds: replaceCurrentRound(mission.review, { ...previous, implementer: command.agent,
+      response: changed ? null : previous.response,
+      disposition: changed && previous.decision?.kind === 'changes-requested' ? 'REQUEST_CHANGES' : previous.disposition,
+    }),
+  } : null };
 }
 
 export function decideMission(mission: Mission, command: MissionCommand): Mission {
@@ -302,6 +331,7 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
       requireStatus(mission, ['refined', 'active'], command);
       if (mission.status === 'refined') { return mission; }
       return { ...mission, status: 'refined', assignee: command.assignee };
+    case 'record-implementer': return recordImplementer(mission, command);
     case 'rebound-to-active': return reboundMission(mission, command);
     case 'submit-for-review':
       // A handoff that relaunches (gatekeeper pushback, crashed agent, retried

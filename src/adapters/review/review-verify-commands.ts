@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import type { ReviewStateReader } from './review-state.js';
 /**
  * Review verification and submission commands: verify a mission is ready
@@ -207,6 +208,7 @@ export async function submitForReview(
   slug: string,
   skipGate: boolean,
   options: {
+    configuration?: ParallixConfiguration;
     exit?: (_code: number) => void;
     resolveTaskFileFn?: typeof resolveTaskFile;
     getTaskImplementerFn?: typeof getTaskImplementer;
@@ -255,7 +257,7 @@ export async function submitForReview(
     }
   }
 
-  const result = await performHandoffFn(slug, { skipGate, reviewIdentity, forgejoUser: reviewIdentity, worktree, missionServicesFn: options.missionServicesFn, occurredAt: options.occurredAt, recoverGateFailure: true });
+  const result = await performHandoffFn(slug, { configuration: options.configuration, skipGate, reviewIdentity, forgejoUser: reviewIdentity, worktree, missionServicesFn: options.missionServicesFn, occurredAt: options.occurredAt, recoverGateFailure: true });
   if (!result.ok) {
     const failurePort: ReviewHandoffFailurePort = {
       repairMission: async () => {

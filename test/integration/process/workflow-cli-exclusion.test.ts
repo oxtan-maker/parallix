@@ -26,7 +26,7 @@ test('real CLI refuses a held owner and stopped generation cannot write after re
   const beforeCheckpoint = await fixture.store.load(slug as never);
   await assert.rejects(() => promisify(execFile)(process.execPath,
     pxNodeArgs(resolvePxEntryLoader(), ['checkpoint', 'record', '--slug', slug, '--name', 'CP-1',
-      '--next', 'stale agent', '--criterion', 'criterion', '--evidence', 'npm test']), {
+      '--next', 'stale agent', '--criterion', 'criterion', '--evidence', '`npm test`']), {
       cwd: fixture.root, env: { ...fixture.configuration.forwardedEnvironment,
         PARALLIX_WORKFLOW_OPERATION: old.id, PARALLIX_WORKFLOW_GENERATION: String(old.generation) }, timeout: 10_000,
     }), (error: Error & { stdout?: string; stderr?: string }) => /fenced|stopped/i.test(`${error.stdout} ${error.stderr}`));

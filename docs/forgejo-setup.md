@@ -63,4 +63,6 @@ If the human who may approve integration uses a Forgejo login other than `human`
 - Re-running `px setup` lets you change config and rotate the local token files.
 - `px setup-review` still exists as a narrower Forgejo-only repair path if you only need to refresh token or remote wiring.
 
+Publication prefers the actual implementer’s credentials and can fall back to the Parallix repository account after bootstrap fails. The Mission keeps the actual implementer identity regardless of the publication account. Review prefers another runnable agent family; when only one family can run, self-author review can approve locally while formal provider approval remains owed.
+
 When pre-review rebase finishes but publication fails, Parallix reports the publication error or missing token. Repair the reported credentials, remote or provider problem before retrying review. A failed verification gate remains a gate failure; resolved Git conflicts are not reported as still outstanding.

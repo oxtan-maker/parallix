@@ -1,4 +1,3 @@
-import { headRevision } from './review-artifact-files.js';
 /**
  * Workflow comment and review posting to the provider, with local
  * review-verdict recording.
@@ -88,7 +87,7 @@ async function recordLocalReviewVerdict(
     error?: (_msg: string) => void;
     missionStore?: MissionStore | null;
   } = {}
-): Promise<void> {
+): Promise<boolean> {
   const { missionStore, worktree, writeReviewStateFn, createEventFn, readReviewStateFn, log, error } = recordLocalReviewVerdictBindings(options, slug);
   const existing = await Promise.resolve(readReviewStateFn(slug, worktree, missionStore));
   // TASK-2385: a read miss must not fabricate a round-1 verdict. The old
@@ -100,26 +99,25 @@ async function recordLocalReviewVerdict(
       `Cannot record review verdict for ${slug}: no review state found. A review must be started with \`px review ${slug} --start\` before recording a verdict; refusing to fabricate round 1`,
     );
   }
+  const selfReviewAllowed = Boolean(existing.reviewer && existing.reviewer === existing.implementer);
   const state = existing instanceof ReviewState
     ? existing
     : new ReviewState(slug, existing);
-  if (outcome === 'approve') {
-    state.disposition = 'APPROVED';
-    state.metadata = { ...state.metadata, approvalOwed: true };
-    try { state.transitionTo('approved'); } catch { /* ignore */ }
-  } else if (outcome === 'request-changes') {
-    state.disposition = 'REQUEST_CHANGES';
-    try { state.transitionTo('fixing'); } catch { /* ignore */ }
+  state.metadata = { ...state.metadata, approvalOwed: outcome === 'approve' };
+  if (selfReviewAllowed) {
+    state.disposition = outcome === 'approve' ? 'APPROVED' : outcome === 'request-changes' ? 'REQUEST_CHANGES' : 'COMMENT';
+    if (outcome === 'approve') { state.transitionTo('approved'); }
   }
   await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
   const outcomeResult = await createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_OUTCOME, {
-    verdict: outcome,
-    content: `Review verdict: ${outcome}`,
+    verdict: selfReviewAllowed ? outcome : 'comment',
+    content: selfReviewAllowed ? `Single-family self-author verdict: ${outcome}` : `Advisory self-author verdict: ${outcome}`,
     ...(outcome === 'approve' ? { blockedReason: 'external-formal-approval-owed' } : {}),
   }, { worktree, log: log, error, missionStore });
   if (!outcomeResult.ok) {
     throw new Error(`Cannot store review event for "${slug}": the operator database rejected the write.`);
   }
+  return selfReviewAllowed;
 }
 
 /**
@@ -171,17 +169,9 @@ export async function postWorkflowReview(
     prAuthor = null;
   }
   if (prAuthor && prAuthor === reviewIdentity) {
-    log(fmt.status('WARN', `Reviewer "${reviewIdentity}" is the PR author for ${branch}; skipping the provider review POST to avoid a self-approval (Forgejo rejects "approve your own pull is not allowed" with HTTP 422). Attempting to record the "${outcome}" verdict locally in the SQLite Review aggregate; a different agent or a human must post the formal approval.`));
-    // An approve is a domain decision, not only a provider comment: it is what
-    // leaves review through the approval boundary `px integrate` gates on. Record
-    // it on the aggregate before the flat loop-state write so a round that cannot
-    // legally reach `approved` (for example still in `fixing` after a
-    // request-changes) fails loudly here instead of reporting a skipped POST and
-    // leaving the mission unintegratable. A read miss below still surfaces as a
-    // rejection rather than a swallowed failure.
-    const decisionFailure = await recordSelfAuthorApproval(slug, outcome, missionStore, { ...options, worktree }, log);
-    if (decisionFailure) { return decisionFailure; }
-    await recordLocalReviewVerdict(slug, outcome, {
+    const diagnostic = `Reviewer "${reviewIdentity}" is the PR author for ${branch}; independent review is required. Self-author verdict "${outcome}" is advisory and cannot approve the Mission or advance integration.`;
+    log(fmt.status('WARN', `Provider self-approval POST skipped; single-family review may be recorded locally. A different agent or a human can supply formal approval.`));
+    const allowed = await recordLocalReviewVerdict(slug, outcome, {
       worktree,
       writeReviewStateFn: options.writeReviewStateFn,
       createEventFn: options.createEventFn,
@@ -190,7 +180,7 @@ export async function postWorkflowReview(
       error,
       missionStore,
     });
-    return { ok: true, skipped: true, reason: 'self-author', prAuthor };
+    return { ok: allowed, skipped: true, reason: 'self-author', prAuthor, ...(allowed ? {} : { error: diagnostic }) };
   }
 
   const taggedMessage = message + await Promise.resolve(buildMetadataFooterFn(slug, worktree, missionStore));
@@ -256,23 +246,4 @@ function providerFailureBody(r: Record<string, unknown>): string | null {
     body = r.data as string;
   }
   return body;
-}
-
-async function recordSelfAuthorApproval(slug: string, outcome: string, missionStore: MissionStore | null, options: NonNullable<Parameters<typeof postWorkflowReview>[3]> & { worktree: string }, log: (_message: string) => void): Promise<{ ok: false; error: string } | null> {
-    if (outcome === 'approve' && missionStore) {
-      const recordApprovalFn = options.recordApprovalFn || recordApproval;
-      const decision = await recordApprovalFn(slug, {
-        comment: null,
-        decidedAt: new Date().toISOString(),
-        revision: options.revision ?? headRevision(options.worktree),
-        source: { kind: 'local' },
-      }, { missionStore, lifecycleService: options.lifecycleService ?? null });
-      if (decision.outcome === 'failed') {
-        return { ok: false, error: `Could not record the approve decision for ${slug}: ${decision.diagnostic}` };
-      }
-      if (decision.outcome === 'unchanged') {
-        log(`Review outcome "approve" for ${slug} already recorded (${decision.reason}).`);
-      }
-    }
-  return null;
 }

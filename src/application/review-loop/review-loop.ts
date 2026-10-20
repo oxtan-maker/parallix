@@ -11,6 +11,7 @@
 import { isDbAdhocIdentity, missionId } from '../../domain/mission.js';
 import { reviewStatus, type PullRequestReference } from '../../domain/review.js';
 import { transitionReviewRepair } from '../review-repair-lifecycle.js';
+import { rebaseImplementer } from '../rebase-identity.js';
 import type { HandoffFacts, HumanReviewFeedback, ReviewLoopPorts, ReviewLoopRequest, ReviewLoopState } from '../ports/review-round.js';
 import { pendingRetainedRepair, resumeRetainedRepair } from './retained-repair.js';
 import { selectReviewer } from './reviewer-selection.js';
@@ -23,15 +24,15 @@ export const DEFAULT_MAX_ATTEMPTS = 5;
 type Output = Pick<LoopContext, 'emit' | 'exit'>;
 type Start = Required<Pick<ReviewLoopRequest, 'dryRun' | 'isContinue' | 'verbose'>> & { slug: string };
 
-/** The Mission record's assignee, for work that has no Backlog task file or persisted Review. */
-async function missionAssignee(slug: string, ports: ReviewLoopPorts): Promise<string | undefined> {
-  if (!ports.missionStore) { return undefined; }
-  const loaded = await ports.missionStore.load(missionId(slug)).catch(() => null);
-  return loaded?.kind === 'found' ? loaded.mission.assignee ?? undefined : undefined;
-}
-
-/** Persisted implementer first, then the Backlog assignee, then the Mission assignee, then "autonomous". */
+/** Database assignment owns composed identity; legacy-only callers retain their recorded identity. */
 async function resolveImplementer(slug: string, requested: string | undefined, persisted: ReviewLoopState | null, ports: ReviewLoopPorts, out: Output): Promise<string> {
+  if (ports.missionStore) {
+    const actual = await rebaseImplementer(ports.missionStore, slug);
+    if (!actual) { throw new Error(`Mission ${slug} has no database-assigned implementer`); }
+    if (requested && requested !== actual) { throw new Error(`Mission ${slug} implementer identity mismatch: requested ${requested}, database ${actual}`); }
+    out.emit({ kind: 'implementer-derived', implementer: actual });
+    return actual;
+  }
   let implementer = requested;
   if (!implementer && persisted?.implementer) {
     implementer = persisted.implementer;
@@ -39,10 +40,6 @@ async function resolveImplementer(slug: string, requested: string | undefined, p
   }
   if (!implementer && ports.task.task.ok) {
     implementer = ports.task.implementer() || undefined;
-    if (implementer) { out.emit({ kind: 'implementer-derived', implementer: implementer }); }
-  }
-  if (!implementer) {
-    implementer = await missionAssignee(slug, ports);
     if (implementer) { out.emit({ kind: 'implementer-derived', implementer: implementer }); }
   }
   if (!implementer) {

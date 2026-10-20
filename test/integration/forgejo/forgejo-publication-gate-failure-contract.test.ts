@@ -43,3 +43,29 @@ test('PR publication mirrors baseline without running implicit verification (TAS
     assert.ok(pushes.some(args => args.includes('mission/task-9999')));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+for (const author of ['codex', 'claude', 'test-org']) {
+  test(`existing PR author ${author} must be implementer codex or Parallix publication account (TASK-2778)`, t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'px-pr-author-'));
+    try {
+      initCommittedRepository(root, { 'workflow.config.json': JSON.stringify({ adapters: {
+        review: { provider: 'forgejo', baseUrl: 'http://localhost:3300', remote: 'review', repo: 'test-org/test-repo' },
+      } }) });
+      t.mock.method(git, 'git', (args: string[]) => {
+        if (args.includes('push')) { return { status: 0, signal: null, stdout: '', stderr: '' }; }
+        const result = spawnSync('git', args, { encoding: 'utf8' });
+        return { ...result, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+      });
+      const existing = { number: 739, html_url: 'http://fixture/pulls/739', user: { login: author },
+        head: { ref: 'mission/task-9999' }, base: { ref: 'main' } };
+      const result = pr.createPr('mission/task-9999', 'codex', 'codex-token', {
+        rootDir: root, log: () => {}, apiCall: forgejoApiFixture((method, endpoint) => {
+          assert.equal(method, 'GET', 'do not create duplicate PRs');
+          return { ok: true, data: endpoint === '/pulls/739' ? existing : [existing] };
+        }),
+      });
+      assert.equal(result.ok, author !== 'claude', result.error ?? 'publication result');
+      if (author === 'claude') { assert.match(result.error ?? '', /author claude differs from implementer codex.*immutable/); }
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+}

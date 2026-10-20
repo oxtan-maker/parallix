@@ -1,3 +1,5 @@
+import { fixtureMission, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
+import { agentFamily } from '../../../src/domain/agents.js';
 // TASK-2709: the composed review loop hands its resolved configuration to the pre-review
 // rebase's conflict-resolution launcher. Kept apart from rebase-before-review-contract.test.ts,
 // whose module facades route the rebase to the ambient working tree instead of the disposable repo.
@@ -254,4 +256,77 @@ describe("pre-review rebase launcher configuration", () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+});
+
+test('database-only replay preserves squashed work, relocation and completed tasks (TASK-2778)', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'px-replay-history-'));
+  const repo = path.join(root, 'repo');
+  fs.mkdirSync(repo);
+  const git = (...args: string[]) => {
+    const result = childProcess.spawnSync('git', ['-C', repo, ...args], {
+      encoding: 'utf8', env: { ...process.env, GIT_EDITOR: 'true' },
+    });
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  };
+  const ok = (...args: string[]) => { const result = git(...args); assert.equal(result.status, 0, result.stderr); return result.stdout; };
+  const write = (file: string, body: string) => {
+    fs.mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
+    fs.writeFileSync(path.join(repo, file), body);
+  };
+  try {
+    ok('init', '-b', 'main'); ok('config', 'user.email', 'test@example.com'); ok('config', 'user.name', 'Fixture');
+    write('old.txt', 'base\n'); write('shared.txt', 'base\n'); ok('add', '.'); ok('commit', '-m', 'base');
+    ok('checkout', '-b', 'mission/task-replay');
+    write('shared.txt', 'squashed\n'); write('backlog/tasks/completed.md', 'old creation\n');
+    ok('add', '.'); ok('commit', '-m', 'already landed work');
+    ok('checkout', 'main'); ok('merge', '--squash', 'mission/task-replay'); ok('commit', '-m', 'landed squash');
+    ok('mv', 'old.txt', 'new.txt'); write('new.txt', 'new main behavior\n');
+    ok('mv', 'backlog/tasks/completed.md', 'backlog/completed.md');
+    write('backlog/completed.md', 'completed on main\n'); write('shared.txt', 'newer main\n');
+    ok('add', '.'); ok('commit', '-m', 'main relocation and completion');
+    const baseHead = ok('rev-parse', 'main').trim();
+    ok('checkout', 'mission/task-replay');
+    write('old.txt', 'unique mission intent\n'); write('shared.txt', 'mission intent\n');
+    write('backlog/tasks/completed.md', 'stale duplicate\n'); write('unique.txt', 'unique change\n');
+    ok('add', '.'); ok('commit', '-m', 'unique work plus stale paths');
+    const store = inMemoryTransitionStore(fixtureMission('task-replay', { assignee: agentFamily('codex'), review: null }));
+    let launches = 0;
+    const exits: number[] = [];
+    await rebase(['task-replay'], {
+      resolveWorktreeFn: () => repo, gitFn: args => {
+        assert.equal(args.includes('merge-tree'), false, 'paused path never predicts a merge');
+        return git(...args.slice(args[0] === '-C' ? 2 : 0));
+      }, missionServicesFn: async () => ({ store }), exitFn: code => { exits.push(code); },
+      startAgentFn: async (_step, options) => {
+        launches++;
+        assert.equal(options.agent, 'codex');
+        assert.match(String(options.prompt), /Review shared conflicts semantically/);
+        // Explicit semantic review: carry unique intent to the relocated file;
+        // keep newer main state and completed work, removing only stale paths.
+        for (let pauses = 0; pauses < 5; pauses++) {
+          const files = ok('diff', '--name-only', '--diff-filter=U').trim().split('\n').filter(Boolean);
+          for (const file of files) {
+            if (file === 'old.txt' || file === 'backlog/tasks/completed.md') { ok('rm', '-f', '--', file); }
+            else if (file === 'shared.txt') { write(file, 'newer main\nmission intent\n'); ok('add', '--', file); }
+            else { assert.fail(`unexpected conflict ${file}`); }
+          }
+          write('new.txt', 'new main behavior\nunique mission intent\n'); ok('add', 'new.txt');
+          const continued = git('rebase', '--continue');
+          if (continued.status === 0) { break; }
+          assert.match(continued.stdout + continued.stderr, /CONFLICT/);
+        }
+        return { agent: 'codex', result: { status: 0 } };
+      },
+    });
+    assert.deepEqual(exits, [0]); assert.equal(launches, 1);
+    assert.equal(ok('rev-parse', 'main').trim(), baseHead);
+    assert.equal(ok('status', '--porcelain').trim(), '');
+    assert.equal(fs.existsSync(path.join(repo, '.git/rebase-merge')), false);
+    assert.equal(fs.existsSync(path.join(repo, 'old.txt')), false);
+    assert.equal(fs.existsSync(path.join(repo, 'backlog/tasks/completed.md')), false);
+    assert.equal(fs.readFileSync(path.join(repo, 'backlog/completed.md'), 'utf8'), 'completed on main\n');
+    assert.equal(fs.readFileSync(path.join(repo, 'unique.txt'), 'utf8'), 'unique change\n');
+    assert.equal(fs.readFileSync(path.join(repo, 'new.txt'), 'utf8'), 'new main behavior\nunique mission intent\n');
+    assert.equal(fs.readFileSync(path.join(repo, 'shared.txt'), 'utf8'), 'newer main\nmission intent\n');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

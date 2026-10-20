@@ -310,13 +310,7 @@ describe('Execute Mission characterization', () => {
 
   function executeFixture(overrides: Partial<ExecuteMissionRuntime> = {}) {
     const calls: string[] = [];
-    const transitionStore: MissionTransitionStore = {
-      async load() {
-        calls.push('load');
-        return {
-          kind: 'found' as const,
-          version: missionVersion(3),
-          mission: fixtureMission('task-1', {
+    let recordedMission = fixtureMission('task-1', {
             id: missionId('task-1'), repositoryId: repositoryId('repo'), title: 'Fixture', labels: [],
             assignee: null, checkpoints: [{ missionId: missionId('task-1'), name: 'CP-1', firstLine: 'Do the work', goalCheck: [], nextActionText: '' }], review: null, netEngineeringLines: null,
             // Activation refuses an incomplete contract, so a refined fixture
@@ -326,11 +320,18 @@ describe('Execute Mission characterization', () => {
             successCriteria: ['The mission is done'],
             predictedNelBucket: 'Small',
             status: 'refined', closedAt: null,
-          }),
+          });
+    const transitionStore: MissionTransitionStore = {
+      async load() {
+        calls.push('load');
+        return {
+          kind: 'found' as const,
+          version: missionVersion(3),
+          mission: recordedMission,
         };
       },
-      async save(_mission, expectedVersion) { calls.push('synchronize'); return missionVersion((expectedVersion ?? 0) + 1); },
-      async saveWithTransition(_mission, expectedVersion) { calls.push('synchronize'); return missionVersion((expectedVersion ?? 0) + 1); },
+      async save(_mission, expectedVersion) { recordedMission = _mission; calls.push('synchronize'); return missionVersion((expectedVersion ?? 0) + 1); },
+      async saveWithTransition(_mission, expectedVersion) { recordedMission = _mission; calls.push('synchronize'); return missionVersion((expectedVersion ?? 0) + 1); },
     };
     const runtime: ExecuteMissionRuntime = {
       preflight() { calls.push('preflight'); return { pass: true }; },

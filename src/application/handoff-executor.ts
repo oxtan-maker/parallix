@@ -19,7 +19,7 @@ import { isDbAdhocIdentity } from '../domain/mission.js';
 import { DeclaredGateRunner } from './handoff-declared-gates.js';
 import { HandoffContractVerifier, loadRecordedContract } from './handoff-contract.js';
 import { GatekeeperRemediation, gatekeeperOutcome } from './handoff-gatekeeper-remediation.js';
-import { HandoffForgejoPublisher } from './handoff-forgejo-publication.js';
+import { type HandoffFallbackWriter, HandoffForgejoPublisher } from './handoff-forgejo-publication.js';
 import { HandoffGateRecovery } from './handoff-gate-recovery.js';
 import { HandoffReviewSubmission } from './handoff-review-submission.js';
 import { HandoffNelCapture } from './handoff-nel-capture.js';
@@ -42,7 +42,7 @@ export class HandoffExecutor {
   private readonly submission: HandoffReviewSubmission;
   private readonly gates: DeclaredGateRunner;
 
-  constructor(ports: HandoffWorkflowPorts, writeFallbackSummary: HandoffForgejoPublisher['writeFallbackSummary']) {
+  constructor(ports: HandoffWorkflowPorts, writeFallbackSummary: HandoffFallbackWriter) {
     this.ports = ports;
     this.nel = new HandoffNelCapture(ports);
     this.gates = new DeclaredGateRunner(ports);
@@ -82,24 +82,20 @@ export class HandoffExecutor {
     // Load it before location verification, and fail closed on missing DB state.
     const prepared = await this.prepareCommittedStart(slug, bindings, opts);
     if (!('contract' in prepared)) { return prepared; }
-    const { contract, verification, forgejoUser, forgejoEnabled, isForgejoReviewEnabledFn, missionServicesFn } = prepared;
+    const { contract, verification, forgejoEnabled, isForgejoReviewEnabledFn, missionServicesFn } = prepared;
     const { area, branch, rootDir, missionDir: missionDirPath } = verification;
 
     const gateStage = {
-      rootDir, forgejoUser, log, error, startAgentFn, recoverGateFailure, options: opts,
+      rootDir, forgejoUser: prepared.forgejoUser, log, error, startAgentFn, recoverGateFailure, options: opts,
       retryHandoff: (retrySlug: string, retryOptions: PerformHandoffOptions) => this.performHandoff(retrySlug, retryOptions),
     };
     const verificationOutcome = await this.gateRecovery.verifyRepository(slug, { ...gateStage, skipGate, area, runVerificationGateFn });
     if (verificationOutcome) { return verificationOutcome; }
 
-    const rebaseResult = await rebaseFn(slug, {
-      worktree: worktree || undefined,
-      log: internalLog,
-      error,
-      isForgejoReviewEnabledFn: isForgejoReviewEnabledFn,
-    });
-    const rebaseFailure = handoffRebaseFailure(rebaseResult, rootDir, ports, error);
-    if (rebaseFailure) { return rebaseFailure; }
+    const rebased = await this.rebaseForHandoff(slug, bindings, prepared, internalLog);
+    if ('ok' in rebased) { return rebased; }
+    const { forgejoUser } = rebased;
+    prepared.forgejoUser = forgejoUser;
 
     // architecture invariant: NEL is persisted through SqliteMissionStore.recordNel() via the Mission
     // use case; nel-record.json is no longer staged or committed because the SQLite
@@ -160,6 +156,32 @@ export class HandoffExecutor {
     // The durable Mission state must commit before any external Backlog effect.
     // Database unavailability fails the operation (architecture invariant: fail-closed).
     return this.completeReview(slug, prepared, published, bindings, internalLog, gatekeeperPushedBack);
+  }
+
+  /** Rebase onto the base branch, then re-read the implementer a repair may have replaced. */
+  private async rebaseForHandoff(slug: string, bindings: HandoffBindings, prepared: HandoffStart, internalLog: HandoffBindings['log']): Promise<HandoffResult | { forgejoUser: string }> {
+    const { rebaseFn, worktree, error } = bindings;
+    const { verification, isForgejoReviewEnabledFn, missionServicesFn } = prepared;
+    const { rootDir, missionDir: missionDirPath } = verification;
+    const rebaseResult = await rebaseFn(slug, {
+      missionIdentityServices: async root => {
+        const services = await missionServicesFn(root, { missionDir: missionDirPath });
+        return { store: services.store, lifecycle: services.lifecycle };
+      },
+      worktree: worktree || undefined,
+      log: internalLog,
+      error,
+      isForgejoReviewEnabledFn,
+    });
+    const rebaseFailure = handoffRebaseFailure(rebaseResult, rootDir, this.ports, error);
+    if (rebaseFailure) { return rebaseFailure; }
+    // A repair can launch a replacement implementer. Publication must use the
+    // identity committed by that launch, not the pre-repair credential choice.
+    const current = await loadRecordedContract(missionServicesFn, rootDir, missionDirPath, slug);
+    if (!current.ok) { return { ok: false, error: current.error }; }
+    const drift = implementerIdentityFailure(slug, current);
+    if (drift) { error(drift); return { ok: false, error: drift }; }
+    return { forgejoUser: current.implementer! };
   }
 
   private async completeReview(slug: string, prepared: HandoffStart, published: import('./handoff-forgejo-publication.js').HandoffPublication, bindings: HandoffBindings, internalLog: HandoffBindings['log'], gatekeeperPushedBack: boolean): Promise<HandoffResult> {
@@ -273,17 +295,13 @@ export class HandoffExecutor {
     const isForgejoReviewEnabledFn = opts.isForgejoReviewEnabledFn || ports.productConfig.isForgejoReviewEnabled;
     const forgejoEnabled = isForgejoReviewEnabledFn(rootDir);
 
-    const { forgejoUser: reviewStateUser } = await ports.reviewIdentity.resolveReviewIdentity(slug, rootDir);
-    // Implementer derivation: prefer the review state, then the Backlog mirror
-    // (Backlog-backed missions), then the DB-authoritative mission store's
-    // assignee (DB-owned adhoc identities whose mirror was deleted).
-    const forgejoUser = reviewStateUser
-      || (taskResolution.taskFile ? ports.backlog.getTaskImplementer(taskResolution.taskFile) : null)
-      || (await this.contract.deriveImplementerFromMissionStore(slug, missionServicesFn, rootDir, missionDirPath));
+    const forgejoUser = contract.implementer;
 
-    if (!forgejoUser) {
-      error('forgejoUser is required for performHandoff. Ensure the mission Review or the Backlog task has an agent family assigned.');
-      return { ok: false, error: 'forgejoUser is required' };
+    const identityDrift = implementerIdentityFailure(slug, contract);
+    if (identityDrift || !forgejoUser) {
+      const msg = identityDrift ?? '';
+      error(msg);
+      return { ok: false, error: msg };
     }
 
     return { contract, verification, evidence, forgejoUser, forgejoEnabled, isForgejoReviewEnabledFn, missionServicesFn };
@@ -363,6 +381,17 @@ function handoffBindings(ports: HandoffWorkflowPorts, opts: PerformHandoffOption
   return { skipGate, worktree, force, forceWithLease, log, error, rebaseFn, runVerificationGateFn, maxAttempts, startAgentFn, remainingRetries, runGatekeeperFn, occurredAt, missionServicesFn, eligibleAgentsForStepFn, selectAgentFn, recoverGateFailure, captureNel };
 }
 
+/** Publication credentials come from the database implementer, which must agree with the current review round. */
+function implementerIdentityFailure(slug: string, contract: { implementer?: string | null; review?: { rounds: readonly { implementer: string }[] } | null }): string | null {
+  const implementer = contract.implementer;
+  if (!implementer) { return `Mission ${slug} has no database-assigned implementer; handoff cannot choose publication credentials.`; }
+  const recordedImplementer = contract.review?.rounds.at(-1)?.implementer;
+  if (recordedImplementer && recordedImplementer !== implementer) {
+    return `Mission ${slug} implementer identity mismatch: database assignee ${implementer}, review implementer ${recordedImplementer}. Record the actual execute/repair launch before handoff; reviewer identity cannot authorize publication.`;
+  }
+  return null;
+}
+
 type HandoffBindings = ReturnType<typeof handoffBindings>;
 interface HandoffStart {
   contract: import('./handoff-contract.js').RecordedContract;
@@ -377,7 +406,8 @@ function handoffRebaseFailure(rebaseResult: Awaited<ReturnType<HandoffWorkflowPo
     if (rebaseResult.sharedFileConflicts) {
       const msg = `Rebase encountered shared-file conflicts. ${AGENT_COMMAND_COMPLETION_CONTRACT} Resolve the conflicts in the worktree, then re-run handoff.`;
       error(msg);
-      return { ok: false, error: msg };
+      return { ok: false, error: msg, recoveryFailure: { kind: 'rebase-conflict',
+        files: rebaseResult.failure?.kind === 'conflict' ? rebaseResult.failure.sharedFiles : [], diagnostic: msg } };
     } else if (rebaseResult.failure?.kind === 'gate') {
       // The rebase succeeded; the push-time verification gate did not. Keep
       // its process evidence so the rebound kernel classifies it as a gate
@@ -399,7 +429,10 @@ function handoffRebaseFailure(rebaseResult: Awaited<ReturnType<HandoffWorkflowPo
     } else {
       const msg = 'Rebase failed before handoff. Ensure the mission branch can be rebased onto the latest primary branch.';
       error(msg);
-      return { ok: false, error: msg };
+      const failure = rebaseResult.failure;
+      return { ok: false, error: msg, recoveryFailure: failure?.kind === 'hook'
+        ? { kind: 'hook-failure', hook: failure.hook.hook, operation: `git ${failure.operation}`, output: failure.hook.output }
+        : { kind: 'handoff-verification', error: failure?.kind === 'other' ? failure.output : msg } };
     }
   }
 

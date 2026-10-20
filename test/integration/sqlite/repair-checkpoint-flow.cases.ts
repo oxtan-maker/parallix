@@ -1,3 +1,4 @@
+import { agentFamily } from '../../../src/domain/agents.js';
 import { handoffTransitionValue } from '../../helpers/handoff-ports.js';
 import { missionVersion } from '../../../src/application/domain-ports.js';
 import assert from 'node:assert/strict';
@@ -25,6 +26,7 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' | 'forc
     { criterion: 'repair works', evidence }, { criterion: 'prior proof retained', evidence },
   ], nextActionText: 'continue' };
   const fixture = await openMigratedMissionStore([fixtureMission(SLUG, {
+    assignee: agentFamily('codex'),
     brief: { goal: 'repair', why: 'proof', scope: null, outOfScope: [] },
     successCriteria: ['repair works', 'prior proof retained'], completedSuccessCriteria: [0, 1],
     declaredGates: [command], checkpoints: [prior, { missionId: id, name: 'CP-2', firstLine: 'remaining work', goalCheck: [], nextActionText: '' }],
@@ -49,6 +51,7 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' | 'forc
     let launches = 0;
     let gateRuns = 0;
     const ports = makePorts(recorder, {
+      agentSelection: { eligibleAgentsForStep: () => ['claude', 'codex'], selectAgent: () => 'claude' },
       missionServices: async () => ({ store, checkpoints,
         lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: handoffTransitionValue(missionVersion(10)) }) },
         handoff: { recordNel: async () => ({ durableEvidence: [],  status: 'completed' as const }) },

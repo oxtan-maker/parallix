@@ -1,4 +1,4 @@
-import { rebound, DEFAULT_REBOUND_ATTEMPTS, type ReboundReason, type VerifyResult } from './rebound-kernel.js';
+import { rebound, classifyReboundReason, type ReboundOutcome, type ReboundReason, type VerifyResult } from './rebound-kernel.js';
 import { buildTypedMissionRecoveryAdvice, isTypedCheckpointEvidenceFailure } from './typed-mission-recovery-advice.js';
 import type {
   AutonomousReviewPort,
@@ -28,6 +28,7 @@ export interface ExecuteHandoffRequest {
   readonly taskFile: string | null;
   readonly onAgentLaunched?: (_agent: string, _phase: AgentLaunchPhase) => Promise<void>;
   readonly onAutonomousStop?: (_reason: string) => Promise<void>;
+  readonly onImplementerLaunched?: (_agent: string) => Promise<void>;
 }
 
 /** Application-owned post-execute ordering: evidence, handoff, then review. */
@@ -35,6 +36,14 @@ export class ExecuteHandoffService {
   constructor(private readonly _ports: ExecuteHandoffPorts) { }
 
   async run(request: ExecuteHandoffRequest): Promise<boolean> {
+    const original = request;
+    const actual = { agent: request.agent };
+    request = { ...request, get agent() { return actual.agent; },
+      onImplementerLaunched: async agent => {
+        await original.onImplementerLaunched?.(agent);
+        actual.agent = agent;
+      },
+    };
     let validation = await this.validate(request);
     if (!validation.ok) {
       if (validation.humanOnlyContractBlocker) {
@@ -80,7 +89,7 @@ export class ExecuteHandoffService {
       const verdict = await this.validate(request);
       return { ok: verdict.ok, diagnostic: verdict.error ?? '', ...(verdict.humanOnlyContractBlocker ? { reason: { kind: 'declared-gate-validation' as const, command: verdict.humanOnlyContractBlocker.command, diagnostic: verdict.error ?? 'Recorded contract requires operator decision' } } : {}) };
     });
-    if (repaired) { return true; }
+    if (repaired.outcome === 'fixed') { return true; }
     const finalValidation = await this.validate(request);
     if (finalValidation.ok) { return true; }
     this.manualCheckpointAction(request, finalValidation.error ?? diagnostic);
@@ -98,19 +107,19 @@ export class ExecuteHandoffService {
     if (await this.stopForContract(request, holder.result)) { return; }
     const error = holder.result.error ?? 'unknown';
     const diagnostic = handoffFailureDiagnostic(holder.result, error);
-    const classification = this._ports.handoff.classifyFailure(error);
-    if (classification?.failureClass === 'GitBlockers' || classification?.dispatchAction === 'HumanOnly' || !classification) {
+    const classification = holder.result.recoveryFailure ? classifyReboundReason(holder.result.recoveryFailure) : this._ports.handoff.classifyFailure(error);
+    if (!classification || classification.dispatchAction === 'HumanOnly' || (!holder.result.recoveryFailure && classification.failureClass === 'GitBlockers')) {
       await this.repairHygieneFailure(request, holder, error);
       return;
     }
     this._ports.output.log(`\nRelaunchable error detected (${classification.failureClass}). Bouncing to the implementer...`);
-    const reason: ReboundReason = holder.result.gateFailure ?? { kind: 'handoff-verification', error, gateOutput: diagnostic };
-    await this.rebound(request, reason, async () => {
+    const reason: ReboundReason = holder.result.recoveryFailure ?? holder.result.gateFailure ?? { kind: 'handoff-verification', error, gateOutput: diagnostic };
+    const outcome = await this.rebound(request, reason, async () => {
       holder.result = await this._ports.handoff.run({ ...request, force: true });
       return this.handoffVerification(holder.result);
     });
     if (await this.stopForContract(request, holder.result)) { return; }
-    if (!holder.result.ok) { holder.result = { ...holder.result, error: `Gate failure persisting after ${DEFAULT_REBOUND_ATTEMPTS} relaunch attempts. Manual intervention required.` }; }
+    if (!holder.result.ok) { holder.result = { ...holder.result, error: `Recovery stopped after ${outcome.attempts} relaunch attempt(s): ${outcome.dossier || outcome.diagnostic || holder.result.error}` }; }
   }
 
   private async repairHygieneFailure(request: ExecuteHandoffRequest, holder: { result: HandoffRunResult }, error: string): Promise<void> {
@@ -142,11 +151,11 @@ export class ExecuteHandoffService {
     const diagnostic = result.error ?? '';
     const reason = result.reason === 'human-only-contract-blocker' || result.reason === 'repair-contract-changed'
       ? { kind: 'declared-gate-validation' as const, command: 'px checkpoint check', diagnostic }
-      : result.gateFailure;
+      : result.recoveryFailure ?? result.gateFailure ?? (result.ok ? undefined : { kind: 'handoff-verification' as const, error: diagnostic });
     return { ok: result.ok, diagnostic, reason };
   }
 
-  private async rebound(request: ExecuteHandoffRequest, reason: ReboundReason | string, verify: () => Promise<VerifyResult>): Promise<boolean> {
+  private async rebound(request: ExecuteHandoffRequest, reason: ReboundReason | string, verify: () => Promise<VerifyResult>): Promise<ReboundOutcome> {
     const reboundReason: ReboundReason = typeof reason === 'string'
       ? { kind: 'handoff-verification', error: reason }
       : reason;
@@ -161,10 +170,16 @@ export class ExecuteHandoffService {
         slug: request.slug, worktree: request.worktree, agent: request.agent,
         prompt: typeof options.prompt === 'function' ? options.prompt(request.agent) : String(options.prompt ?? ''),
         sessionPolicy: options.sessionPolicy,
+        onAgentChanged: request.onImplementerLaunched,
       }),
+      applyAgentFallback: async ({ launchResult, original }) => {
+        const actual = launchResult?.agent || original;
+        if (launchResult?.agent) { await request.onImplementerLaunched?.(actual); }
+        return actual;
+      },
       log: this._ports.output.log, error: this._ports.output.error,
     });
-    return result.outcome === 'fixed';
+    return result;
   }
 
   private fileCheckpointContinuation(request: ExecuteHandoffRequest, checkpoint: string): string {

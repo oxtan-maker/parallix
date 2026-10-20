@@ -1,5 +1,6 @@
 // Review start owns the handoff prerequisite, its failure boundaries, and dry-run.
 import test from 'node:test';
+import { agentFamily } from '../../../../src/domain/agents.js';
 import assert from 'node:assert/strict';
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
 import { ReviewState } from '../../../../src/adapters/review/review-state.js';
@@ -105,7 +106,7 @@ test('continue enters interrupted repair work before checkpoint handoff checks (
     revokedAt: '2026-10-01T12:00:00Z', revokedBy: 'workflow', reason: 'gate failed',
     cause: { kind: 'integration-gate-failure', gate: 'npm test' },
   });
-  const mission = fixtureMission(slug, { review, declaredGates: ['npm test'], successCriteria: ['repair works'], checkpoints: [{
+  const mission = fixtureMission(slug, { assignee: agentFamily('claude'), review, declaredGates: ['npm test'], successCriteria: ['repair works'], checkpoints: [{
     missionId: fixtureMission(slug).id, name: 'CP-6', goalCheck: [], nextActionText: 'repair',
     repair: { incidentId: 'incident-6', command: 'npm test', attempt: 3,
       authorizedGates: ['npm test'], authorizedCriteria: ['repair works'], evidenceRecorded: false, verified: false },
@@ -142,7 +143,7 @@ for (const failure of ['original check', 'new blocker'] as const) {
       cause: { kind: 'integration-gate-failure', gate: 'npm test' },
     });
     const blocker = { command: 'npm test', diagnostic: 'old invalid contract', authorityReason: 'operator decision', proposedCorrection: 'correct contract' };
-    const mission = fixtureMission(slug, { brief: {} as never, review, declaredGates: ['npm test'], successCriteria: ['repair works'], checkpoints: [{
+    const mission = fixtureMission(slug, { assignee: agentFamily('claude'), brief: {} as never, review, declaredGates: ['npm test'], successCriteria: ['repair works'], checkpoints: [{
       missionId: fixtureMission(slug).id, name: 'CP-6', goalCheck: [], nextActionText: 'repair',
       repair: { incidentId: 'incident-6', command: 'npm test', attempt: 1, blocker,
         authorizedGates: ['npm test'], authorizedCriteria: ['repair works'], evidenceRecorded: false, verified: false },
@@ -194,7 +195,7 @@ test('start derives the implementer from the Mission assignee when no task file 
   assert.ok(!fake.writes.some(write => write.implementer === 'autonomous'));
 });
 
-test('start falls back to autonomous when the Mission store cannot load the assignee (TASK-2737)', async () => {
+test('start fails closed when the Mission store cannot load the assignee (TASK-2737, TASK-2778 F1)', async () => {
   let loads = 0;
   const fake = fakeReviewLoopPorts({
     slug,
@@ -204,6 +205,7 @@ test('start falls back to autonomous when the Mission store cannot load the assi
     routing: { eligibleFamilies: () => ['claude', 'codex'], nominate: () => 'codex' },
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) },
   });
-  await runReviewLoop({ slug, maxAttempts: 1 }, fake.ports);
-  assert.ok(fake.writes.some(write => write.implementer === 'autonomous'));
+  await assert.rejects(runReviewLoop({ slug, maxAttempts: 1 }, fake.ports), /store unavailable/);
+  assert.deepEqual(fake.launches, []);
+  assert.deepEqual(fake.writes, []);
 });

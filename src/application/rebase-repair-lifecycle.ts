@@ -25,6 +25,8 @@ export async function transitionRebaseRepair(slug: string, status: string, trans
     const implementer = loaded.mission.assignee ?? loaded.mission.review?.rounds.at(-1)?.implementer;
     if (!implementer) { throw new Error(`Mission ${slug} has no implementer for rebase repair`); }
     await transitionReviewRepair(slug, 'active', implementer, services.store, services.lifecycle, undefined, { kind: 'rebase-repair' });
+    await bindings.transitionTask(slug, 'active', transitionOptions);
+    return; // Project the committed lane through the existing optional Backlog adapter.
   }
   return bindings.transitionTask(slug, status, transitionOptions);
 

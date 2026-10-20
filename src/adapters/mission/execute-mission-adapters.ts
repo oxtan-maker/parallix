@@ -289,7 +289,10 @@ class RepairLaunchAdapter implements ExecuteRepairLaunchPort {
     if (!status.supported) { throw new Error(`Agent ${request.agent} is not available for relaunch: ${status.detail || status.reason || 'unknown'}`); }
     return agents.startAgent('active', { configuration: this._configuration,
       prompt: request.prompt, worktree: request.worktree, agent: request.agent, slug: request.slug, role: 'implementer', sessionPolicy: request.sessionPolicy,
-      onLaunch: ({ agent }: { agent: string }) => fmt.log.plain(`Relaunched ${fmt.agent(agent)} for repair. Session persistence will be used if available.`),
+      onLaunch: async ({ agent }: { agent: string }) => {
+        await request.onAgentChanged?.(agent);
+        fmt.log.plain(`Relaunched ${fmt.agent(agent)} for repair. Session persistence will be used if available.`);
+      },
     });
   }
 }

@@ -1,4 +1,5 @@
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
+import { recordImplementerLaunch } from '../../application/rebase-identity.js';
 /**
  * Concrete `RebaseWorkflowPort` implementation (TASK-2332.12).
  *
@@ -20,7 +21,7 @@ import {
 } from '../filesystem/mission-utils.js';
 import { startAgent, selectAgent, workflowLauncherStatus, eligibleAgentsForStep } from '../agents/agents.js';
 import { applyAgentFallback } from '../review/review-agent-fallback.js';
-import { createPr, readToken, resolveForgejoUser, fetchReviewBranch } from '../forgejo/forgejo.js';
+import { createPr, readToken, resolveForgejoUser, fetchReviewBranch, resolveForgejoSettings } from '../forgejo/forgejo.js';
 import { resolveTaskFile, getTaskImplementer, transitionTask } from '../backlog/backlog.js';
 import { resolveReviewIdentity, readReviewState, writeReviewState, persistReviewStateOrThrow } from '../review/review-state.js';
 import { isForgejoReviewEnabled } from '../config/product-config.js';
@@ -57,6 +58,7 @@ export interface RebaseCommandOptions {
   isForgejoReviewEnabledFn?: typeof isForgejoReviewEnabled;
   fetchReviewBranchFn?: typeof fetchReviewBranch;
   missionServicesFn?: (_root: string) => Promise<import('../../application/ports/rebase-workflow.js').RebaseMissionServices>;
+  missionIdentityServices?: NonNullable<RebaseWorkflowPort['missionServices']>;
 }
 
 const defaultExit = (code: number) => process.exit(code);
@@ -105,6 +107,17 @@ function missionConflictPathPrefix(slug: string, worktreePath: string): string {
 }
 
 /** Bind the rebase workflow to the concrete adapters, honoring the legacy seams. */
+function launchIdentityOptions(options: RebaseCommandOptions, launch: NonNullable<Parameters<typeof startAgent>[1]>) {
+  return { ...launch, configuration: options.configuration, onLaunch: async (event: { agent: string; invocation: import('../agents/agent-process-types.js').AgentInvocation | null | undefined; startedAtMs: number }) => {
+    const services = options.missionIdentityServices ?? options.missionServicesFn;
+    if (services) {
+      const authority = await services(launch.worktree || process.cwd());
+      await recordImplementerLaunch(String(launch.slug), event.agent, authority.store, authority.lifecycle);
+    }
+    await launch.onLaunch?.(event);
+  } };
+}
+
 function rebaseWorkspaceBindings(options: RebaseCommandOptions) {
   const {
     inferSlugFn = inferSlug,
@@ -112,7 +125,7 @@ function rebaseWorkspaceBindings(options: RebaseCommandOptions) {
     findMissionAreaFn = findMissionArea,
     getCurrentBranchFn = getCurrentBranch,
     resolveConflictsFn = integrate.resolveConflictsForMission,
-    startAgentFn = (step: string, launch: NonNullable<Parameters<typeof startAgent>[1]>) => startAgent(step, { ...launch, configuration: options.configuration }),
+    startAgentFn = (step: string, launch: NonNullable<Parameters<typeof startAgent>[1]>) => startAgent(step, launchIdentityOptions(options, launch)),
     createPrFn = (branch: string, user: string, token: string, opts: Record<string, unknown> = {}) => createPr(branch, user, token, { ...opts, configuration: options.configuration }),
     readTokenFn = (user: string) => readToken(user, undefined, options.configuration),
     resolveForgejoUserFn = (user?: string | null) => resolveForgejoUser(user, options.configuration),
@@ -173,6 +186,12 @@ export function createRebaseWorkflowPort(options: RebaseCommandOptions = {}): Re
 
     createPr: createPrFn,
     readToken: readTokenFn,
+    publicationCredentials: (user, root) => {
+      const preferred = readTokenFn(user, root, options.configuration);
+      if (preferred) { return { user, token: preferred }; }
+      const owner = resolveForgejoSettings(root, options.configuration).repo.split('/')[0];
+      return { user: owner || user, token: owner ? readTokenFn(owner, root, options.configuration) : null };
+    },
     resolveForgejoUser: resolveForgejoUserFn,
     fetchReviewBranch: fetchReviewBranchFn,
 

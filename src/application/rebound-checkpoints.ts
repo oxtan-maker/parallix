@@ -7,6 +7,7 @@ import { buildFreshDiagnosticRepairPrompt, promptSlotsFor } from './rebound-prom
 // Non-gate checkpoints store workflow labels, not executable checks. Keep the
 // encoding shared with continuation so legacy interrupted repairs stay resumable.
 const NON_GATE_COMMANDS = {
+  'rebase-conflict': 'rebase-conflict',
   'handoff-verification': 'px handoff',
   'hook-failure': 'hook-failure',
   'artifact-incomplete': 'artifact-incomplete',

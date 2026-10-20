@@ -2172,7 +2172,7 @@ test('runHandoffAndReview limits gate-failure relaunches to 2 attempts (SC4)', a
   assert.equal(result, false, 'should return false after exhausting relaunch attempts');
   assert.equal(handoffAttempts, 3, 'performHandoff: initial + 2 post-relaunch retries');
   assert.equal(relaunchAttempts, 2, 'the kernel spends exactly its per-occurrence budget of two');
-  assert.ok(relaunchErrors.some(e => e.includes('Gate failure persisting after 2 relaunch attempts')),
+  assert.ok(relaunchErrors.some(e => e.includes('Recovery stopped after 2 relaunch attempt(s)')),
     'should report the 2-attempt limit in the error message');
 });
 

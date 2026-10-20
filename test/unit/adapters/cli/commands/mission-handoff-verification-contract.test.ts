@@ -1,3 +1,4 @@
+import { agentFamily } from '../../../../../src/domain/agents.js';
 import { fixtureMission } from '../../../../fixtures/mission-builders.js';
 import { missionId } from '../../../../../src/domain/mission.js';
 import { missionVersion as fixtureVersion } from '../../../../../src/application/domain-ports.js';
@@ -73,9 +74,11 @@ const mockRebase = async () => ({ ok: true as const, sharedFileConflicts: false 
 function recordedMissionServices({
   criteria = ['handoff coverage'],
   completed = criteria.map((_, index) => index),
+  assignee = 'claude',
   goalCheck = [{ criterion: 'handoff coverage', evidence: '`npm run typecheck`' }],
 }: {
   criteria?: string[];
+  assignee?: string | null;
   completed?: number[];
   goalCheck?: { criterion: string; evidence: string }[];
 } = {}) {
@@ -84,7 +87,7 @@ function recordedMissionServices({
       async load() {
         return {
           kind: 'found' as const,
-          mission: fixtureMission(TEST_SLUG, {
+          mission: fixtureMission(TEST_SLUG, { assignee: assignee ? agentFamily(assignee) : null,
             status: 'review', review: null,
             checkpoints: [{ missionId: missionId(TEST_SLUG), name: 'CP-1', goalCheck, nextActionText: 'review' }],
             brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
@@ -156,9 +159,9 @@ test('performHandoff fails when forgejoUser is missing', async (t) => {
   mock.method(backlog, 'getTaskImplementer', () => null);
   const originalEnv = environment.FORGEJO_USER;
   delete environment.FORGEJO_USER;
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: recordedMissionServices({ assignee: null }) });
   assert.strictEqual(result.ok, false);
-  assert.strictEqual(result.error, 'forgejoUser is required');
+  assert.match(result.error ?? '', /no database-assigned implementer/);
   environment.FORGEJO_USER = originalEnv;
   cleanup();
 });

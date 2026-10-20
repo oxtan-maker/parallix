@@ -28,7 +28,7 @@ export async function loadRecordedContract(
   missionDirPath: string,
   slug: string,
 ): Promise<
-  | { ok: true; draftedInDb: boolean; checkpoints: readonly CheckpointData[]; successCriteria: readonly string[]; successCriterionIds?: readonly string[]; completedSuccessCriteria: readonly number[]; gates: readonly string[]; review: Review | null }
+  | { ok: true; implementer?: AgentFamily | null; draftedInDb: boolean; checkpoints: readonly CheckpointData[]; successCriteria: readonly string[]; successCriterionIds?: readonly string[]; completedSuccessCriteria: readonly number[]; gates: readonly string[]; review: Review | null }
   | { ok: false; error: string }
 > {
   try {
@@ -42,6 +42,7 @@ export async function loadRecordedContract(
     // pre-handoff checkpoint validation, which names the next one to resume.
     return {
       ok: true,
+      implementer: mission.assignee,
       draftedInDb: Boolean(mission.brief),
       checkpoints: mission.checkpoints,
       successCriteria: mission.successCriteria ?? [],
@@ -74,39 +75,6 @@ export class HandoffContractVerifier {
 
   constructor(ports: HandoffWorkflowPorts) {
     this.ports = ports;
-  }
-
-  /**
-   * Performs the handoff process for a mission:
-   * 1. Runs the verification gate.
-   * 2. Syncs primary branch and pushes the mission branch to Forgejo, creating or updating the PR.
-   * 3. Transitions Backlog task to 'review'.
-   * 4. Commits and pushes the Backlog state change to Forgejo.
-   */
-  /**
-   * Derive the implementer agent family for a DB-owned adhoc identity from the
-   * operator database. The Backlog task file is a best-effort one-way mirror
-   * only; a deleted mirror must not strand handoff. The mission store's
-   * `assignee` is set to the active-launch agent by the authoritative lifecycle
-   * transition (decideMission), so this resolves once `px active` has run.
-   */
-  async deriveImplementerFromMissionStore(
-    slug: string,
-    missionServicesFn: HandoffMissionServicesPort,
-    rootDir: string,
-    missionDirPath: string,
-  ): Promise<AgentFamily | null> {
-    try {
-      const missionServices = await missionServicesFn(rootDir, { missionDir: missionDirPath });
-      const missionLoad = await missionServices.store.load(missionId(slug));
-      if (missionLoad.kind === 'found' && missionLoad.mission.assignee) {
-        return missionLoad.mission.assignee;
-      }
-    } catch (_) {
-      // A store read failure must not strand handoff; the caller's later
-      // identity checks remain authoritative.
-    }
-    return null;
   }
 
   /**

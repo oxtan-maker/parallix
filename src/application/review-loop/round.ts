@@ -8,6 +8,7 @@
  * resets each round.
  */
 import type { ReviewLoopEvent } from '../ports/review-loop-output.js';
+import { recordImplementerLaunch } from '../rebase-identity.js';
 import { ConfiguredReviewerEligibility } from '../../domain/review.js';
 import { agentFamily } from '../../domain/agents.js';
 import { DEFAULT_REBOUND_ATTEMPTS, type ReboundContext, type ReboundStartAgent } from '../rebound-kernel.js';
@@ -96,6 +97,9 @@ export class ReviewRound {
  */
 export async function adoptLaunchedAgent(context: LoopContext, role: ReviewRole, original: string, launch: ReviewAgentLaunchResult | null | undefined): Promise<string> {
   const fallback = launch?.agent;
+  if (role === 'implementer' && fallback && fallback !== original && context.ports.missionStore) {
+    await recordImplementerLaunch(context.slug, fallback, context.ports.missionStore, context.ports.lifecycle);
+  }
   if (!fallback || fallback === original) { return original; }
   context.emit({ kind: 'agent-fallback', role: role, original: original, fallback: fallback });
   if (role === 'reviewer') {

@@ -23,15 +23,16 @@ function synchronousBarrier(release: string): void {
 
 const createGraph: typeof createProductionApplicationServices = async (root, progress, options) => {
   const graph = await createProductionApplicationServices(root, progress, options);
+  const fixtureRoot = options!.configuration!.storage.parallixHome!;
   const ports = graph.executePorts;
   const originalWorkspace = ports.workspace;
   const workspace = {
     ...originalWorkspace,
     async preflight(slug: string) {
       console.log(`PREFLIGHT-ENTER:${slug}`);
-      fs.writeFileSync(path.join(root, `${slug}.entered`), 'entered');
+      fs.writeFileSync(path.join(fixtureRoot, `${slug}.entered`), 'entered');
       // Synchronous work in the real executor must not stall HTTP or SSE.
-      synchronousBarrier(path.join(root, `${slug}.release`));
+      synchronousBarrier(path.join(fixtureRoot, `${slug}.release`));
       console.log(`PREFLIGHT-EXIT:${slug}`); return true;
     },
     async resolveWorktree() { return root; },
@@ -43,20 +44,20 @@ const createGraph: typeof createProductionApplicationServices = async (root, pro
     agentExecution: { async select() { return 'codex'; }, async prepare() { return { prompt: 'fixture', agent: 'codex', agentConfig: {} }; },
       async launch(request: { onAgentChanged?: (_agent: string) => Promise<void>; slug: string }) {
         await request.onAgentChanged?.('codex'); console.log(`AGENT-OUTPUT:${request.slug}`);
-        if (fs.existsSync(path.join(root, 'provider-fixture'))) {
+        if (fs.existsSync(path.join(fixtureRoot, 'provider-fixture'))) {
           const { fixtureProvider, barrier } = await import('./workflow-provider.js');
-          if (fs.existsSync(path.join(root, 'capacity.hold'))) { await barrier(root, `${request.slug}.capacity`); }
-          const familyFile = path.join(root, `${request.slug}.families`);
+          if (fs.existsSync(path.join(fixtureRoot, 'capacity.hold'))) { await barrier(fixtureRoot, `${request.slug}.capacity`); }
+          const familyFile = path.join(fixtureRoot, `${request.slug}.families`);
           const families: string[] = fs.existsSync(familyFile) ? JSON.parse(fs.readFileSync(familyFile, 'utf8')) : ['codex'];
           for (const [index, family] of families.entries()) {
             await request.onAgentChanged?.(family);
-            await fixtureProvider(root, request.slug, options!.configuration!, family, index + 1);
+            await fixtureProvider(fixtureRoot, request.slug, options!.configuration!, family, index + 1);
           }
         }
         return { agent: 'codex', rebaseDeferred: true, errored: false, errorMessage: null, exitStatus: 0, detail: {} };
       } },
     telemetry: { async recordLaunchTelemetry() {} },
-    checkpointValidation: { async validateBeforeHandoff() { if (fs.existsSync(path.join(root, 'provider-fixture'))) { const { barrier } = await import('./workflow-provider.js'); await barrier(root, 'post-agent-gate'); } console.log('CHECKPOINT-GATE'); return { ok: true }; } },
+    checkpointValidation: { async validateBeforeHandoff() { if (fs.existsSync(path.join(fixtureRoot, 'provider-fixture'))) { const { barrier } = await import('./workflow-provider.js'); await barrier(fixtureRoot, 'post-agent-gate'); } console.log('CHECKPOINT-GATE'); return { ok: true }; } },
     handoffExecution: { async run() { console.log('HANDOFF-OUTPUT'); return { ok: true }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } },
     autonomousReview: { async start() { console.log('REVIEW-OUTPUT'); } },
   };

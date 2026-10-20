@@ -302,6 +302,17 @@ a stale approval as soon as the branch moves. `px rebase` also records the move
 against the approval, naming the revision that superseded it. If an integration
 gate later refuses the merge, the refusal names the staleness already reported.
 
+Rebase recovery uses the database-assigned Mission implementer even before a
+review round exists. Missing identity or an unreadable database stops recovery;
+replayed task files cannot replace that identity.
+
+Handoff publishes with the actual implementer's credentials and stops if the
+Mission and review disagree about that identity. Missing implementer credentials
+cannot be replaced with reviewer or owner credentials. An existing PR with a
+different author must be replaced under the implementer's identity because PR
+authorship cannot change. A PR author's review remains advisory: independent
+review is required before local approval or integration.
+
 When a rebase pauses on shared conflicts, the implementer completes the Git
 rebase and runs the repository's verification against the final repaired tree.
 A failed repository check stops completion and automatic push. After an agent
@@ -314,6 +325,11 @@ the remaining Git state and recovery instructions, then stops without automatic
 push or workflow advancement. Resolve and stage the remaining conflicts, continue
 the rebase, and restore the mission checkout before retrying; use
 `git rebase --abort` to abandon the rebase.
+Current conflicts come from the paused Git index. Review shared conflicts
+semantically, preserving unique mission changes and newer base behavior, including
+file moves and completed tasks. Do not revive retired metadata or use blanket
+ours/theirs resolution. A new ordinary conflict pause can be continued; an
+ambiguous decision or failed hook, command or verifier needs its own diagnosis.
 Repair verification can succeed while the mission is active and awaiting review.
 Integration preflight, including a dry run, still requires the appropriate lane
 and current approval; it is not a required check for completing conflict repair.
@@ -335,6 +351,11 @@ Integration accepts a mission contract recorded in the operator database;
 it does not require a `MISSION.md` file for those missions. Use `px status
 <slug> --json` to inspect the recorded brief. Historical missions without a
 recorded brief still require their mission document.
+
+Backlog intake tasks continue to reflect workflow status even when the Mission
+contract lives in the database. A successful single-family self-author review
+also repairs a stale `active` Backlog task to `review`; advisory reviews that
+require another reviewer do not advance it.
 
 An integration-gate failure follows a separate, automatic repair path. Before
 launching the implementer, Parallix withdraws the old approval and preserves it

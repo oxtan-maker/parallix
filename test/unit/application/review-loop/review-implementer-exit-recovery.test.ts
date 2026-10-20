@@ -9,7 +9,7 @@ import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 
 function storedResolution(resolved: boolean, overrides: { number?: number; implementer?: string; resultingRevision?: string } = {}) {
   const review = requestedChangesReview('task-2623', { startedAt: '2026-08-04T10:00:00Z', decidedAt: '2026-08-04T10:10:00Z' });
-  return fixtureMission('task-2623', {
+  return fixtureMission('task-2623', { assignee: agentFamily('claude'),
     review: { ...review, rounds: [{ ...review.rounds[0],
       number: overrides.number ?? 1, reviewer: agentFamily('codex'), implementer: agentFamily(overrides.implementer ?? 'claude'),
       disposition: resolved ? 'CHANGES_MADE' : null,

@@ -1,14 +1,15 @@
+import { agentFamily } from '../../../src/domain/agents.js';
 import { transitionRebaseRepair } from '../../../src/application/rebase-repair-lifecycle.js';
 import type { StartAgentOptions } from '../../../src/adapters/agents/agent-launch-context.js';
 import { fixtureMission, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
+import { startReview, changeRevision, ConfiguredReviewerEligibility, applyReviewerCommand, applyImplementerCommand, reviewFindingId } from '../../../src/domain/review.js';
+import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 import { rebaseWorkflowFixture } from '../../helpers/rebase-workflow-fixture.js';
 import { rebaseHookRecoveryEligible, replacementImplementer, preContinueAction, postContinueAction, continueBudgetExceeded } from '../../../src/domain/rebase-policy.js';
 // Historical regression provenance: TASK-2294.01, TASK-2503, TASK-2506, TASK-2494.
 // Behavior-owned suite (TASK-2622.09): `px rebase`/`px resolve-conflict` conflict recovery over injected
 // workflow ports — pinned implementer dispatch (task-2294.01, task-2503), usage-blocked implementer
 // handling (task-2494), and integration rebase prediction (task-2506). Legacy case names unchanged.
-// No module mocks here: the rebase-workflow module mock lives in rebase-in-progress-state-contract so
-// its relinked copy cannot hide this suite's coverage of the same module.
 import test, { describe } from 'node:test';
 import { prepareRepairPrompt } from '../../../src/application/rebound-checkpoints.js';
 import assert from 'node:assert/strict';
@@ -21,8 +22,6 @@ import { runRebaseWorkflow } from '../../../src/application/rebase-workflow.js';
 import { classifyError, hasExplicitHumanOnlyDiagnostic, FailureClass, DispatchAction } from '../../../src/application/failure-classification.js';
 // ---- task-2294.01 pinned conflict agent (consolidated from test/task-2294.01-repro.test.ts, TASK-2622.09) ----
 describe("pinned conflict agent", () => {
-  // Pinned conflict-agent contract: both entrypoints use the recorded implementer;
-  // never select a pool family or substitute a fallback for an unavailable owner.
   const OK: GitCommandResult = { status: 0, stdout: '', stderr: '' };
   /** Strip the leading `-C <root>` / `-c <key=value>` globals so index 0 is the subcommand. */
   function subcommand(args: string[]): string[] {
@@ -145,22 +144,6 @@ describe("pinned conflict agent", () => {
 });
 // ---- task-2503 recorded implementer dispatch (consolidated from test/task-2503-repro.test.ts, TASK-2622.09) ----
 describe("recorded implementer dispatch", () => {
-  /**
-   * TASK-2503 reproduction test.
-   *
-   * Bug: shared-file conflict recovery during `px rebase` resolves the mission
-   * implementer from the Backlog task file in the worktree. That file is part of
-   * the history being replayed, so a stale mission branch exposes an older
-   * assignee (implementer B) while the mission record — the review state, which
-   * lives outside the replayed history — still names the implementer the mission
-   * was dispatched with (implementer A). Recovery therefore launched B.
-   *
-   * The first assertion fails at the mission parent commit (recovery launches the
-   * replayed assignee) and passes once the pre-replay mission record is the
-   * capture source. The second test guards the classification of unavailable
-   * local mission metadata: it is a local workflow condition, never a Forgejo or
-   * network blocker.
-   */
   const OK: GitCommandResult = { status: 0, stdout: '', stderr: '' };
   const SHARED_FILE = 'src/adapters/git/git.ts';
   /** Strip the leading `-C <root>` / `-c <key=value>` globals so index 0 is the subcommand. */
@@ -175,11 +158,6 @@ describe("recorded implementer dispatch", () => {
     exitCodes: number[];
     agentLaunches: Array<{ step: string; options: Record<string, unknown> }>;
   }
-  /**
-   * Fully mocked `RebaseWorkflowPort` that pauses the rebase on a shared-file
-   * conflict, so the run always reaches agent-assisted recovery. No real git,
-   * Forgejo, agent, backlog, or filesystem access.
-   */
   function sharedConflictHarness(overrides: Partial<RebaseWorkflowPort> = {}): Harness {
     const lines: string[] = [];
     const exitCodes: number[] = [];
@@ -245,6 +223,81 @@ describe("recorded implementer dispatch", () => {
       setLogger(previous);
     }
   }
+  test('database-only pre-review Mission launches codex and recovers a shared conflict (TASK-2778)', async () => {
+    const store = inMemoryTransitionStore(fixtureMission('task-2503', {
+      assignee: agentFamily('codex'), review: null,
+    }));
+    const h = sharedConflictHarness({
+      missionServices: async () => ({ store }),
+      findMissionDir: () => null,
+      readReviewState: async () => null,
+      resolveTaskFile: () => ({ ok: false }),
+      getTaskImplementer: () => assert.fail('no legacy identity exists'),
+    });
+    await run(h);
+    assert.equal(h.agentLaunches.length, 1, h.lines.join('\n'));
+    assert.equal(h.agentLaunches[0].options.agent, 'codex');
+    assert.equal(h.agentLaunches[0].options.role, 'implementer');
+    assert.deepEqual(h.exitCodes, [0], h.lines.join('\n'));
+  });
+  for (const family of ['codex', 'claude', 'custom']) {
+    test(`database assignee ${family} overrides stale identity (TASK-2778)`, async () => {
+      const store = inMemoryTransitionStore(fixtureMission('task-2503', { assignee: agentFamily(family) }));
+      const h = sharedConflictHarness({ missionServices: async () => ({ store }),
+        readReviewState: async () => assert.fail('review is not the identity authority'),
+        resolveTaskFile: () => assert.fail('legacy file is not the identity authority') });
+      await run(h);
+      assert.equal(h.agentLaunches[0].options.agent, family);
+      assert.deepEqual(h.exitCodes, [0]);
+    });
+  }
+  test('missing database identity cannot use stale files (TASK-2778)', async () => {
+    const store = inMemoryTransitionStore(fixtureMission('task-2503'));
+    const h = sharedConflictHarness({ missionServices: async () => ({ store }),
+      getTaskImplementer: () => 'claude' });
+    await run(h);
+    assert.equal(h.agentLaunches.length, 0);
+    assert.deepEqual(h.exitCodes, [1]);
+  });
+  for (const failure of ['unavailable', 'throw'] as const) {
+    test(`database read ${failure} stops before replay (TASK-2778)`, async () => {
+      const store = inMemoryTransitionStore(fixtureMission('task-2503'));
+      const h = sharedConflictHarness({ missionServices: async () => ({ store: { ...store,
+        load: async () => { if (failure === 'throw') { throw new Error('database offline'); }
+          return { kind: 'unavailable', reason: 'database offline' }; } } }),
+        git: () => assert.fail('must not start replay'), getTaskImplementer: () => 'claude' });
+      await assert.rejects(run(h), /database offline/);
+      assert.equal(h.agentLaunches.length, 0);
+    });
+  }
+  test('composed null store fails before replay or stale-agent launch (TASK-2778 F3)', async () => {
+    const h = sharedConflictHarness({ missionServices: async () => ({ store: null }),
+      git: () => assert.fail('must not start replay'), getTaskImplementer: () => 'claude' });
+    await assert.rejects(run(h), /Mission persistence is unavailable/);
+    assert.equal(h.agentLaunches.length, 0);
+  });
+  test('actual rebase fallback updates Mission/review identity and push credentials (TASK-2778 F1)', async () => {
+    const review = startReview({ change: { kind: 'local-branch', sourceBranch: 'mission/task-2503', targetBranch: 'main' }, revision: changeRevision('head') },
+      agentFamily('claude'), agentFamily('codex'), '2026-10-19T10:00:00Z',
+      ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily('claude')], strategy: 'random' }));
+    const changed = applyReviewerCommand(review, { type: 'request-changes', decidedAt: '2026-10-19T10:01:00Z', comment: null, findings: [{ id: reviewFindingId('F1'), summary: 'fix shared file', location: null }] });
+    const resolved = applyImplementerCommand(changed, { type: 'submit-resolution', respondedAt: '2026-10-19T10:02:00Z', resultingRevision: changeRevision('old-fix'), resolutions: [{ findingId: reviewFindingId('F1'), kind: 'fixed', evidence: 'old agent evidence' }] });
+    const store = inMemoryTransitionStore(fixtureMission('task-2503', { assignee: agentFamily('codex'), review: resolved }));
+    const published: string[] = [];
+    const h = sharedConflictHarness({ missionServices: async () => ({ store, lifecycle: new MissionLifecycleService(store) }),
+      startAgent: async () => ({ agent: 'custom', result: { status: 0 } }),
+      isForgejoReviewEnabled: () => true, resolveReviewIdentity: () => ({ forgejoUser: 'claude' }),
+      readToken: user => `${user}-token`, createPr: (_branch, user, token) => { published.push(`${user}:${token}`); return { ok: true }; },
+    });
+    await run(h, ['task-2503', '--push']);
+    assert.deepEqual(h.exitCodes, [0], h.lines.join('\n'));
+    assert.equal(store.mission().assignee, 'custom');
+    assert.equal(store.mission().review!.rounds.at(-1)!.implementer, 'custom');
+    assert.equal(store.mission().review!.rounds.at(-1)!.reviewer, 'claude');
+    assert.equal(store.mission().review!.rounds.at(-1)!.response, null, 'a replacement cannot inherit another implementer resolution');
+    assert.equal(store.mission().review!.rounds.at(-1)!.decision?.kind, 'changes-requested');
+    assert.deepEqual(published, ['custom:custom-token']);
+  });
   for (const failure of ['active', 'unmerged', 'wrong-branch', 'valid'] as const) {
     test(`rebounces unfinished agent checkout with stable exact target (${failure}, TASK-2728)`, async () => {
       let launches = 0;
@@ -364,7 +417,6 @@ describe("recorded implementer dispatch", () => {
         launched = true;
         return { agent: 'codex', result: { status: 0 } };
       },
-      // No unmerged paths remain, but Git is still replaying an empty pick.
       detectRebaseState: () => ({ inProgress: launched, unmergedFiles: [] }),
       isForgejoReviewEnabled: () => true,
       createPr: () => { pushes += 1; return { ok: true as const }; },
@@ -391,8 +443,6 @@ describe("recorded implementer dispatch", () => {
           if (tail[0] === 'rebase' && tail[1] === 'main') { rebased = true; }
           return OK;
         },
-        // The command reports success and --show-current is empty, but the
-        // authoritative final Git-state probe still rejects completion.
         detectRebaseState: () => rebased ? remaining : { inProgress: false, unmergedFiles: [] },
         isForgejoReviewEnabled: () => true,
         createPr: () => { pushes += 1; return { ok: true as const }; },
@@ -411,10 +461,6 @@ describe("recorded implementer dispatch", () => {
     });
   }
   test('shared-file rebase recovery dispatches the implementer recorded before commit replay', async () => {
-    // Implementer A: what the mission was dispatched with, recorded in the
-    // mission's review state (outside the replayed Git history).
-    // Implementer B: what the replayed Backlog task file exposes while the stale
-    // mission branch is being rebased.
     let replayed = false;
     const h = sharedConflictHarness({
       readReviewState: async () => ({ implementer: 'claude', metadata: {} }),
@@ -426,8 +472,6 @@ describe("recorded implementer dispatch", () => {
         }
         return OK;
       },
-      // Metadata changes during the rebase: stale before replay, different again
-      // after it. Neither may replace the recorded implementer.
       getTaskImplementer: () => (replayed ? 'vibe' : 'qwen'),
     });
     await run(h);
@@ -449,7 +493,7 @@ describe("recorded implementer dispatch", () => {
     assert.equal(h.agentLaunches.length, 0);
     assert.deepEqual(h.exitCodes, [1]);
     assert.match(output, /No recorded implementer for .*task-2503/);
-    assert.match(output, /Set the task assignee to a supported agent family/);
+    assert.match(output, /Assign the Mission to a configured agent/);
     assert.doesNotMatch(output, /forgejo|network|unreachable|connection refused/i,
       'a missing local mission record must never be attributed to Forgejo or the network');
   });
@@ -457,10 +501,6 @@ describe("recorded implementer dispatch", () => {
 // ---- task-2506 dry-run rebase prediction (consolidated from test/task-2506-dry-run-rebase.test.ts, TASK-2622.09) ----
 describe("dry-run rebase prediction", () => {
   // TASK-2506: `px integrate --dry-run` must report whether a rebase is needed
-  // and whether it would conflict, without mutating the mission branch. These
-  // drive `predictIntegrationRebase` with an injected git runner so the decision
-  // logic (ancestor check and the virtual 3-way merge exit-code interpretation)
-  // is covered hermetically. Red-to-green: the export is new, so it is absent.
   const SLUG = 'task-2506-dry';
   const BRANCH = `mission/${SLUG}`;
   const ROOT = '/tmp/base';
@@ -515,27 +555,11 @@ describe("dry-run rebase prediction", () => {
       baseBranch: '',
       git: makeGit(CASES[1] as Case),
     });
-    // Empty baseBranch -> target 'main'; merge-base ('base') != 'main' -> needed.
     assert.deepEqual(prediction, { needed: true, wouldConflict: false });
   });
 });
 // ---- task-2494 usage-blocked implementer (consolidated from test/task-2494-repro.test.ts, TASK-2622.09) ----
 describe("usage-blocked implementer", () => {
-  /**
-   * TASK-2494 reproduction tests.
-   *
-   * Bug: when a pinned implementer hits an agent usage limit during the `px
- * rebase` shared-file conflict path, `startAgent` records the AgentBlock and
-   * refuses a family fallback (pinned work has no fallback), so `rebase-workflow`
-   * hard-refused with "Parallix does not substitute another agent family" and the
-   * resulting pinned-agent error fell through `classifyError`'s catch-all default
-   * to `InfraBlocker`/`HumanOnly` — mislabeling an agent-capacity event as an
-   * infra/Forgejo failure.
-   *
-   * These assertions fail on the parent commit and pass once the rebase-handoff
-   * fallback and the ADR 0048 classifier are fixed. All ports are in-memory fakes;
-   * no real Git/Forgejo/launcher is touched.
-   */
   const OK: GitCommandResult = { status: 0, stdout: '', stderr: '' };
   /** Strip the leading `-C <root>` / `-c <key=value>` globals so index 0 is the subcommand. */
   function subcommand(args: string[]): string[] {
@@ -638,11 +662,8 @@ describe("usage-blocked implementer", () => {
     await captured(async () => {
       await runRebaseWorkflow(['task-2494'], port);
     }).then((lines) => { output = lines.join('\n'); });
-    // The usage block is named with its reset time...
     assert.match(output, /usage limit/i);
     assert.match(output, /2026-09-12 13:00/);
-    // ...and the diagnostic never mislabels it as infra / Forgejo / credential,
-    // and never repeats the old hard-refusal phrase.
     const lowered = output.toLowerCase();
     assert.ok(!/forgejo/.test(lowered), 'diagnostic must not mention forgejo');
     assert.ok(!/infrastructure/.test(lowered), 'diagnostic must not mention infrastructure');
@@ -660,9 +681,6 @@ describe("usage-blocked implementer", () => {
         replacement: 'mistral',
         onReplacement: () => ({ agent: 'mistral' }),
       }),
-      // Honors the production `selectAgent(step, { exclude })` contract: must be
-      // invoked with the real workflow step and an exclusion set. Returns the
-      // replacement only when it is not the excluded (blocked) implementer.
       selectAgent: (step: string, options: { exclude?: Set<string> } = {}) => {
         selectionCalls.push({ step, exclude: options.exclude ?? new Set() });
         return options.exclude?.has('mistral') ? null : 'mistral';
@@ -673,16 +691,10 @@ describe("usage-blocked implementer", () => {
     await captured(async () => {
       await runRebaseWorkflow(['task-2494'], port);
     });
-    // The pinned codex hit a usage limit; the replacement family ran the
-    // conflict-resolution step unpinned instead of being refused.
     const replacementLaunch = launches.find((l) => l.options.agent === 'mistral');
     assert.ok(replacementLaunch, 'a replacement-family launch must occur');
     assert.equal(replacementLaunch?.step, 'conflict-resolution');
     assert.equal(replacementLaunch?.options.pinnedAgent, undefined, 'substitution launches unpinned');
-    // Contract exercised: selector called with policy key `active` (the
-    // config/agents.json key that owns implementation work) and the pinned
-    // implementer excluded from eligibility (F1). An unknown key would fall back
-    // to every workflow family, bypassing configured eligibility.
     assert.equal(selectionCalls.length, 1);
     assert.equal(selectionCalls[0]?.step, 'active');
     assert.ok(selectionCalls[0]?.exclude.has('codex'), 'blocked implementer must be excluded from selection');
@@ -696,8 +708,6 @@ describe("usage-blocked implementer", () => {
       startAgent: usageBlockStartAgent(launches, { replacement: null }),
       selectAgent: (step: string, options: { exclude?: Set<string> } = {}) => {
         selectionCalls.push({ step, exclude: options.exclude ?? new Set() });
-        // Even a selector that would otherwise pick the pinned family must not
-        // return it once it is excluded (F1 policy-gated replacement).
         return 'codex';
       },
       workflowLauncherStatus: (_agent: string) => ({ supported: true, agent: _agent }),
@@ -713,9 +723,6 @@ describe("usage-blocked implementer", () => {
     const launches: Array<{ step: string; options: Record<string, unknown> }> = [];
     const exited: number[] = [];
     let output = '';
-    // No non-pinned family is eligible: the selector throws (pool exhaustion /
-    // all blocked). That must be treated as no replacement so the workflow
-    // reaches the reset-time diagnostic (F2, SC2) instead of escaping the catch.
     const port = makePort({
       startAgent: usageBlockStartAgent(launches, { replacement: null }),
       selectAgent: () => { throw new Error('No agents are eligible for workflow step: active'); },
@@ -736,8 +743,6 @@ describe("usage-blocked implementer", () => {
     const launches: Array<{ step: string; options: Record<string, unknown> }> = [];
     const exited: number[] = [];
     let output = '';
-    // The selector returns a replacement, but no launcher can run it. That is a
-    // no-replacement state: emit the reset-time diagnostic (F2, SC2).
     const port = makePort({
       startAgent: usageBlockStartAgent(launches, { replacement: null }),
       selectAgent: () => 'qwen',
@@ -763,8 +768,6 @@ describe("usage-blocked implementer", () => {
     assert.equal(hasExplicitHumanOnlyDiagnostic(diagnostic), false);
   });
   test('TASK-2494 repro: classifier must not widen the HumanOnly catch-all to generic limit / infra markers', () => {
-    // A genuine infra failure that mentions a token/forgejo/network limit is still
-    // an infrastructure blocker, not an agent-capacity event.
     const infra = 'Forgejo token expired; network error pushing the review branch';
     const { failureClass, dispatchAction } = classifyError(infra);
     assert.equal(failureClass, FailureClass.InfraBlocker);
@@ -894,12 +897,8 @@ describe("rebase through successive conflict stops", () => {
       readReviewState: async () => ({ implementer: 'codex', status: 'active', metadata: {} }),
       writeReviewState: async () => ({ outcome: 'committed' as const }), persistReviewState: async () => ({ outcome: 'committed' as const }),
       isForgejoReviewEnabled: () => true, formatVerificationCommand: () => 'npm test',
-      resolveConflictsForMission: () => {
-        state.classifyCall += 1;
-        const files = [...state.unmerged];
-        return { ok: true as const, conflictFiles: files, missionSpecificFiles: files.filter(f => f === HANDOFF), sharedFiles: files.filter(f => f !== HANDOFF) };
-      },
-      missionServices: () => Promise.resolve({ store: inMemoryTransitionStore(fixtureMission('task-2672')) }),
+      resolveConflictsForMission: () => assert.fail('paused recovery must not dry merge an unmerged index (TASK-2778)'),
+      missionServices: null,
       exit: (code: number) => { exitCodes.push(code); },
     });
     return { port, lines, exitCodes, agentLaunches, state };
@@ -922,17 +921,18 @@ describe("rebase through successive conflict stops", () => {
   test('TASK-2672: successive-conflict recovery still fails closed when the continue budget is exhausted (TASK-2668.02)', async () => {
     const h = successiveConflictHarness();
     let continueCalls = 0;
+    let staged = false;
     h.port.git = (args: string[]) => {
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') { h.state.inProgress = true; return { status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${HANDOFF}\n` }; }
       if (tail[0] === 'rebase' && tail[1] === '--continue') { continueCalls += 1; return { status: 1, stdout: '', stderr: 'pre-commit hook failed' }; }
       if (tail[0] === 'rebase' && tail[1] === '--show-current') { return { status: 0, stdout: 'mission/task-2672', stderr: '' }; }
-      if (tail[0] === 'checkout' || tail[0] === 'add') { return OK; }
+      if (tail[0] === 'checkout' || tail[0] === 'add') { staged = true; return OK; }
       if (tail[0] === 'status' && tail[1] === '--porcelain') { return { status: 0, stdout: '', stderr: '' }; }
       return OK;
     };
     h.port.missionServices = null;
-    h.port.detectRebaseState = () => ({ inProgress: h.state.inProgress, unmergedFiles: [] });
+    h.port.detectRebaseState = () => ({ inProgress: h.state.inProgress, unmergedFiles: h.state.inProgress && !staged ? [HANDOFF] : [] });
     h.port.resolveConflictsForMission = () => ({ ok: true as const, conflictFiles: [HANDOFF], missionSpecificFiles: [HANDOFF], sharedFiles: [] });
     await runSuccessive(h);
     assert.equal(continueCalls, 3, 'the finite continue budget is preserved across successive conflicts');

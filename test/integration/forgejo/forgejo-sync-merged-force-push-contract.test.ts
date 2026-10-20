@@ -254,9 +254,9 @@ describe("review ref force push", () => {
           if (args.includes('main')) {
             if (!firstRebaseStarted) {
               firstRebaseStarted = true;
-              unmergedFiles = ['file.md'];
+              unmergedFiles = ['missions/task-1049/file.md'];
               // First call starts rebase and hits conflict
-              return { signal: null,  status: 1, stdout: 'CONFLICT (content): Merge conflict in file.md', stderr: '' };
+              return { signal: null,  status: 1, stdout: 'CONFLICT (content): Merge conflict in missions/task-1049/file.md', stderr: '' };
             }
             // Recursive call: git rebase main reports "already in progress"
             return { signal: null,  status: 1, stdout: 'CONFLICT', stderr: '' };
@@ -270,9 +270,9 @@ describe("review ref force push", () => {
              assert.deepEqual(unmergedFiles, [], 'stage the entire conflict set before continuing');
              rebaseAttempts++;
              if (rebaseAttempts === 1) {
-               unmergedFiles = ['some-file.js'];
+               unmergedFiles = ['missions/task-1049/some-file.js'];
                // First continue: report another conflict to trigger recursion
-               return { signal: null,  status: 1, stdout: 'CONFLICT (content): Merge conflict in some-file.js', stderr: '' };
+               return { signal: null,  status: 1, stdout: 'CONFLICT (content): Merge conflict in missions/task-1049/some-file.js', stderr: '' };
              }
              // Second continue: success
              return { signal: null,  status: 0, stdout: '', stderr: '' };
@@ -301,7 +301,7 @@ describe("review ref force push", () => {
     await rebase(['task-1049', '--push'], options);
 
     assert.strictEqual(rebaseAttempts, 2, 'Should have attempted rebase continue twice');
-    assert.deepEqual(stagedSets, [['file.md'], ['some-file.js']]);
+    assert.deepEqual(stagedSets, [['missions/task-1049/file.md'], ['missions/task-1049/some-file.js']]);
     assert.ok(createPrOptions.value, 'createPrFn should have been called');
     assert.strictEqual(createPrOptions.value.forceWithLease, true, 'Should have preserved forceWithLease');
   });

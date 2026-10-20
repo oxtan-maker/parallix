@@ -20,6 +20,7 @@ import { readReviewForDecision, staleWrite } from './review-round-read.js';
 import type { MissionStore, MissionVersion } from '../../application/domain-ports.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import { missionId, type Mission } from '../../domain/mission.js';
+import { requireReviewIdentity } from '../../domain/mission-workflow.js';
 import {
   applyImplementerCommand,
   applyReviewerCommand,
@@ -206,13 +207,14 @@ export async function approvalLegalDiagnostic(
     if (loaded.kind !== 'found') { return null; }
     const mission = loaded.mission;
     if (!('review' in mission) || !mission.review) { return null; }
+    requireReviewIdentity(mission, mission.review);
     const status = reviewStatus(mission.review);
     if (status !== 'awaiting-review' && status !== 'approved') {
       return approvalBlockedDiagnostic(status);
     }
     return null;
-  } catch {
-    return null; // a read miss surfaces as a rejection at record time, not here
+  } catch (error) {
+    return diagnosticFrom(error, 'Cannot verify independent approval');
   }
 }
 /**
@@ -255,6 +257,7 @@ export async function recordApproval(
     if (loaded.kind === 'failed') { return loaded.result; }
     const mission = loaded.mission;
     const status = reviewStatus(mission.review);
+    if (mission.review) { requireReviewIdentity(mission, mission.review); }
     if (status === 'approved') {
       // The decision is already recorded, but the review → integration boundary
       // may have failed after it was saved. Replaying the approve finishes that

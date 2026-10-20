@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { missionCommandTarget } from './mission-command-context.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -263,6 +264,8 @@ async function runTargetCommand(parsed: ParsedArgs, configuration: ParallixConfi
   const previousCwd = process.cwd();
   try {
     const workflow = await import('../interfaces/cli/runtime.js');
+    process.chdir(parsed.target);
+    parsed = { ...parsed, target: missionCommandTarget(parsed.command, parsed.args, parsed.target, configuration) };
     process.chdir(parsed.target);
     const { terminal, hosted } = await hostTargetCommand(parsed, configuration, log, cli);
     if (hosted !== null) { return hosted; }

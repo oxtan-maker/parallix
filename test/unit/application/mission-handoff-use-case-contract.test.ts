@@ -15,6 +15,7 @@ import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { agentFamily } from '../../../src/domain/agents.js';
 import { HandoffCommandUseCase } from '../../../src/application/handoff-command-use-case.js';
 import {
   SLUG, ROOT, BRANCH, MISSION_DIR, RECORDED_MISSION_LOAD, LEGACY_MISSION_LOAD,
@@ -612,7 +613,7 @@ test('a Mission drafted through the typed verbs never falls back to checkpoint d
   // be allowed to hand off on it, nor have one generated for it.
   const recorder = makeRecorder();
   const ports = makePorts(recorder, contractServices(async () => ({
-    kind: 'found' as const, mission: fixtureMission(SLUG, { checkpoints: [], brief: DRAFTED_BRIEF, declaredGates: ['npm test'] }), version: missionVersion(4),
+    kind: 'found' as const, mission: fixtureMission(SLUG, { assignee: agentFamily('claude'), checkpoints: [], brief: DRAFTED_BRIEF, declaredGates: ['npm test'] }), version: missionVersion(4),
   })));
   const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
   assert.equal(result.ok, false);
@@ -625,7 +626,7 @@ test('a Mission drafted through the typed verbs with no recorded gate fails hand
   const recorder = makeRecorder();
   const ports = makePorts(recorder, contractServices(async () => ({
     kind: 'found' as const,
-    mission: fixtureMission(SLUG, {
+    mission: fixtureMission(SLUG, { assignee: agentFamily('claude'),
       checkpoints: [{ missionId: missionId(SLUG),  name: 'CP-1', goalCheck: [{ criterion: 'works', evidence: '`test/unit/application/mission-handoff-use-case-contract.test.ts`' }], nextActionText: 'review' }],
       brief: DRAFTED_BRIEF,
       declaredGates: [],
@@ -645,7 +646,7 @@ test('a Mission drafted through the typed verbs with no recorded gate fails hand
 test('a typed-verb Mission requires completion and one verifiable row per distinct success criterion (TASK-2631)', async () => {
   const load = (criteria: readonly string[], goalCheck = [{ criterion: 'The greeting is fixed', evidence: '`test/unit/application/mission-handoff-use-case-contract.test.ts`' }]) => async () => ({
     kind: 'found' as const,
-    mission: fixtureMission(SLUG, {
+    mission: fixtureMission(SLUG, { assignee: agentFamily('claude'),
       checkpoints: [{ missionId: missionId(SLUG), name: 'CP-1', goalCheck, nextActionText: 'review' }],
       brief: DRAFTED_BRIEF,
       successCriteria: criteria,
@@ -679,7 +680,7 @@ test('a typed-verb Mission whose recorded evidence cites nothing verifiable is s
   const recorder = makeRecorder();
   const ports = makePorts(recorder, contractServices(async () => ({
     kind: 'found' as const,
-    mission: fixtureMission(SLUG, {
+    mission: fixtureMission(SLUG, { assignee: agentFamily('claude'),
       checkpoints: [{ missionId: missionId(SLUG),  name: 'CP-1', goalCheck: [{ criterion: 'works', evidence: 'it works, trust me' }], nextActionText: 'review' }],
       brief: DRAFTED_BRIEF,
       successCriteria: ['works'],
@@ -757,7 +758,7 @@ test('handoff rejects basename-only recorded evidence with the recording diagnos
   const ports = makePorts(recorder, {
     ...contractServices(async () => ({
       kind: 'found' as const,
-      mission: fixtureMission(SLUG, {
+      mission: fixtureMission(SLUG, { assignee: agentFamily('claude'),
         checkpoints: [{ missionId: missionId(SLUG),  name: 'CP-5', goalCheck: [{ criterion: 'board interaction', evidence: 'web-board-interaction.cases.ts' }], nextActionText: 'review' }],
         brief: DRAFTED_BRIEF,
         successCriteria: ['board interaction'],
@@ -787,7 +788,7 @@ test('handoff rejects an invalid retained row in an earlier checkpoint even when
   const ports = makePorts(recorder, {
     ...contractServices(async () => ({
       kind: 'found' as const,
-      mission: fixtureMission(SLUG, {
+      mission: fixtureMission(SLUG, { assignee: agentFamily('claude'),
         checkpoints: [
           { missionId: missionId(SLUG),  name: 'CP-1', goalCheck: [{ criterion: 'board interaction', evidence: 'handoff-use-case.test.ts' }], nextActionText: 'review' },
           { nextActionText: 'review',  missionId: missionId(SLUG),  name: 'CP-2', goalCheck: [{ criterion: 'mission handoff', evidence: validRef }] },
@@ -819,7 +820,7 @@ test('handoff rejects a repair that leaves a completed criterion without a row (
   const ports = makePorts(recorder, {
     ...contractServices(async () => ({
       kind: 'found' as const,
-      mission: fixtureMission(SLUG, {
+      mission: fixtureMission(SLUG, { assignee: agentFamily('claude'),
         checkpoints: [
           { nextActionText: 'review',  missionId: missionId(SLUG),  name: 'CP-1', goalCheck: [{ criterion: 'board interaction', evidence: ref }] },
           { nextActionText: 'review',  missionId: missionId(SLUG),  name: 'CP-2', goalCheck: [{ criterion: 'board interaction', evidence: ref }] },
@@ -968,4 +969,31 @@ test('handoff commits mission changes through its port before fresh proof lookup
     runVerificationGateFn: () => { verified = true; return { status: 0, stdout: '', stderr: '' }; },
   }));
   assert.equal(result.ok, true, result.error ?? "handoff failed");
+});
+
+test('handoff gate repair retains a new shared conflict for semantic recovery (TASK-2778)', async () => {
+  const recorder = makeRecorder();
+  let rebases = 0;
+  let gates = 0;
+  const prompts: string[] = [];
+  const ports = makePorts(recorder, {
+    rebase: { rebaseBeforeReviewRound: async () => ++rebases === 1
+      ? { ok: false, sharedFileConflicts: true, hookFailure: false,
+        failure: { kind: 'conflict', operation: 'rebase', sharedFiles: ['src/shared.ts'] } }
+      : { ok: true } },
+    agents: { startAgent: async (_step, options) => {
+      const prompt = options.prompt;
+      prompts.push(typeof prompt === 'function' ? prompt('codex') : String(prompt));
+      return { agent: 'codex', result: { status: 0 } };
+    } },
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder, {
+    recoverGateFailure: true,
+    runVerificationGateFn: () => ++gates === 1 ? { status: 1, stdout: 'first gate failed', stderr: '' } : { status: 0 },
+  }));
+  assert.equal(result.ok, true, result.error ?? 'handoff failed');
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1], /REBASE CONFLICT/);
+  assert.match(prompts[1], /src\/shared.ts|shared-file conflicts/);
+  assert.equal(rebases, 2);
 });

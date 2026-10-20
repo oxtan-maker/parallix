@@ -33,6 +33,7 @@ import { missionId } from '../../domain/mission.js';
 import { applyReviewStateToReview, reviewStateDataFrom } from './review-state-mapping.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import type { MissionStore } from '../../application/domain-ports.js';
+import { requireReviewIdentity } from '../../domain/mission-workflow.js';
 import type { PullRequestReference } from '../../domain/review.js';
 
 interface ReviewStatePersistenceContext {
@@ -375,6 +376,7 @@ export class ReviewState {
     }
 
     const review = applyReviewStateToReview(mission.review, this.toJSON());
+    if (this.phase === 'approved') { requireReviewIdentity(mission, review); }
     const nextVersion = await store.save({ ...mission, review }, result.version);
     return await this.approveLifecycle(review, mission, nextVersion, lifecycleService) || { outcome: 'committed' };
   }

@@ -1,4 +1,5 @@
 import type { RebaseWorkflowPort } from './ports/rebase-workflow.js';
+import { recordImplementerLaunch } from './rebase-identity.js';
 import { rebound } from './rebound-kernel.js';
 import * as fmt from './presentation/cli-format.js';
 
@@ -6,6 +7,14 @@ import * as fmt from './presentation/cli-format.js';
 export async function recoverAgentRebaseCompletion(
   port: RebaseWorkflowPort, slug: string, worktree: string, expectedBranch: string, implementer: string,
 ): Promise<{ implementer: string; repaired: boolean } | null> {
+  const adopt = async (actual: string) => {
+    if (port.missionServices) {
+      const services = await port.missionServices(worktree);
+      await recordImplementerLaunch(slug, actual, services.store, services.lifecycle);
+    }
+    return actual;
+  };
+  await adopt(implementer);
   const verify = () => {
     const state = port.detectRebaseState(worktree);
     const branch = port.getCurrentBranch(worktree);
@@ -30,8 +39,7 @@ export async function recoverAgentRebaseCompletion(
         ? bounceSlug => port.transitionTask(bounceSlug, 'active', { rootDir: worktree, log: fmt.log.plain })
         : undefined,
       applyAgentFallback: async ({ launchResult, original }) =>
-        await port.applyAgentFallback({ role: 'implementer', original, launchResult, state: {}, slug,
-          worktree, log: fmt.log.plain, writeReviewStateFn: port.writeReviewState }) || original,
+        await adopt(launchResult?.agent || original),
     },
   );
   if (outcome.outcome === 'fixed') { return { implementer: outcome.implementer, repaired: true }; }

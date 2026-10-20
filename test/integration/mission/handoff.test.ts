@@ -1,3 +1,5 @@
+import { agentFamily } from '../../../src/domain/agents.js';
+import { missionVersion } from '../../../src/application/domain-ports.js';
 import { fixtureMission, pendingReview } from '../../fixtures/mission-builders.js';
 import { missionVersion as fixtureVersion } from '../../../src/application/domain-ports.js';
 import type { RecordHandoffNelRequest } from "../../../src/application/mission-handoff-service.js";
@@ -302,7 +304,7 @@ test('performHandoff falls back to magnus and persists bootstrap failure summary
   try {
     const mockRebase = async () => ({ ok: true as const, sharedFileConflicts: false });
     const result = await performHandoff(slug, {
-      missionServicesFn: stubMissionServices(),
+      missionServicesFn: stubMissionServices({ store: { load: async id => ({ kind: 'found' as const, mission: fixtureMission(id, { assignee: agentFamily('custom'), checkpoints: [] }), version: missionVersion(1) }) } }),
       worktree,
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,

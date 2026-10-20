@@ -1,4 +1,5 @@
 import { readAgentLaunchContext } from '../../application/agent-launch-context.js';
+import { recordImplementerLaunch } from '../../application/rebase-identity.js';
 import { promptArtifacts } from '../agents/prompt-artifacts.js';
 import { retainedRepairPort } from './retained-repair.js';
 import { composeHumanFeedback } from './review-loop-human-feedback.js';
@@ -44,6 +45,7 @@ import { buildMetadataFooter, resolveArtifactDir, consumeReviewerArtifacts, cons
 import { pushReviewRef, isStaleInfoPushRejection, fetchReviewBranch } from '../forgejo/forgejo.js';
 import { CONTINUE_SKIP_CHECK_TIMEOUT_MS, runPreReviewGate, gateFailureReason, hookFailureReason } from './review-gate-handling.js';
 import { persistNormalizedPhaseRepair, recordStageStatsSafe, stageLaunchSinceMs } from './review-agent-fallback.js';
+import type { ReboundReason } from '../../application/rebound-kernel.js';
 import { openReviewRound } from './review-round-open.js';
 import { createEvent } from './review-events.js';
 import { RevokeReviewDecisionUseCase } from '../../application/revoke-review-decision-use-case.js';
@@ -197,7 +199,12 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
         worktree, slug, role, exclude: exclude.filter((family): family is string => family !== undefined),
         ...(recovery?.sessionPolicy === undefined ? {} : { sessionPolicy: recovery.sessionPolicy }),
         // A bare repair launch is not review work the board reports.
-        ...(prompt ? { onLaunch: ({ agent: launched }: { agent: string }) => bindings.onAgentLaunched?.(launched, phase) } : {}),
+        onLaunch: async ({ agent: launched }: { agent: string }) => {
+          if (role === 'implementer' && bindings.missionStore) {
+            await recordImplementerLaunch(slug, launched, bindings.missionStore, bindings.lifecycleService);
+          }
+          if (prompt) { await bindings.onAgentLaunched?.(launched, phase); }
+        },
       });
     },
     dryRunPrompt(role, facts) {
@@ -244,8 +251,15 @@ export function preReviewRebaseFacts(result: Awaited<ReturnType<typeof rebaseBef
   return {
     ok: false, gate, hook,
     diagnostic: rebaseDiagnostic(result),
-    verifyReason: failure?.kind === 'hook' ? hookFailureReason(failure.hook.output, `git ${failure.operation}`) : undefined,
+    verifyReason: gate?.reason ?? hook ?? unclassifiedRebaseReason(result),
   };
+}
+
+function unclassifiedRebaseReason(result: Awaited<ReturnType<typeof rebaseBeforeReviewRound>>): ReboundReason {
+  const failure = result.failure;
+  if (failure?.kind === 'conflict') { return { kind: 'rebase-conflict', files: failure.sharedFiles, diagnostic: rebaseDiagnostic(result) }; }
+  if (failure?.kind === 'hook') { return hookFailureReason(failure.hook.output, `git ${failure.operation}`); }
+  return { kind: 'handoff-verification', error: rebaseDiagnostic(result) || 'Pre-review rebase command failed' };
 }
 
 function gateFacts(result: Awaited<ReturnType<typeof runPreReviewGate>>): PreReviewGateFacts {

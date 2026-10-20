@@ -64,7 +64,7 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
   const active = createActiveCommand((request, options) => activeWorkflow([...request.args], options));
   const config = createConfigCommand((request, options) => configWorkflow([...request.args], options));
   const diff = createDiffCommand((request, options) => diffWorkflow([...request.args], options));
-  const resolveConflict = createResolveConflictCommand((request, options) => resolveConflictWorkflow([...request.args], options));
+  const resolveConflict = createResolveConflictCommand(async (request, options) => { await scope.withMissionFactories(missionServicesFn => resolveConflictWorkflow([...request.args], { ...options, missionServicesFn })); });
   const setup = createSetupCommand(async (request, options) => {
     const { setupWizard } = await import('../adapters/review/setup-review.js');
     return setupWizard([...request.args], options);

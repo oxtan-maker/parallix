@@ -246,14 +246,14 @@ describe("SC3: review-artifacts.ts approve path (recordLocalReviewVerdict)", () 
     } as Parameters<typeof postWorkflowReview>[3];
   }
 
-  it('records an authoritative approval on an awaiting-review round', async () => {
+  it('retains self-author review as advisory without approving (TASK-2778 F2)', async () => {
     const { store } = await awaitingReview();
     const result = await postWorkflowReview('task-2398', 'approve', 'LGTM', selfAuthorOpts(store));
-    assert.equal(result.ok, true);
+    assert.equal(result.ok, false);
     assert.equal(result.skipped, true);
     const loaded = await store.load(MISSION);
     assert.equal(loaded.kind, 'found');
-    assert.equal(currentReviewRound(loaded.mission.review!).decision?.kind, 'approved');
+    assert.equal(currentReviewRound(loaded.mission.review!).decision, null);
   });
 
   it('fails loudly on a fixing round and leaves the changes-requested decision', async () => {
@@ -265,7 +265,7 @@ describe("SC3: review-artifacts.ts approve path (recordLocalReviewVerdict)", () 
     );
     const result = await postWorkflowReview('task-2398', 'approve', 'APPROVED', selfAuthorOpts(store));
     assert.equal(result.ok, false, 'a fixing round cannot legally approve; the path fails loudly');
-    assert.match(result.error ?? '', /could not record the approve decision/i);
+    assert.match(result.error ?? '', /independent review is required/i);
     const loaded = await store.load(MISSION);
     assert.equal(loaded.kind, 'found');
     assert.equal(currentReviewRound(loaded.mission.review!).decision?.kind, 'changes-requested');

@@ -1,8 +1,8 @@
 ---
 id: TASK-2778
 title: 'Fix database-backed rebase identity, recovery and mission command routing'
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-19 06:56'
 labels:
   - bug

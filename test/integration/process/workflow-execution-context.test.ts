@@ -13,7 +13,7 @@ import { runWorkflowWorker, type composeWorkflowOperations } from '../../../src/
 import { createBoardIntegrateService } from '../../../src/composition/application-services.js';
 import { NO_CURRENT_WORK_PORT } from '../../../src/application/recording/current-work-recorder.js';
 import { setLogger } from '../../../src/application/presentation/cli-format.js';
-import type { WorkflowOperation } from '../../../src/domain/workflow-operation.js';
+import type { WorkflowOperationRecord as WorkflowOperation } from '../../../src/application/ports/workflow-operation.js';
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
@@ -35,8 +35,8 @@ function repository(t: test.TestContext, slugs: readonly string[]) {
 }
 
 /** Supervise one board-admitted operation; the injected host records where the executor would run. */
-async function supervise(slug: string, root: string, configuration: ReturnType<typeof resolveConfiguration>) {
-  let operation = { id: `operation-${slug}`, missionId: slug, repositoryId: 'repo', command: 'integrate:merge', phase: 'accepted', owner: null, generation: 0 } as WorkflowOperation;
+async function supervise(slug: string, root: string, configuration: ReturnType<typeof resolveConfiguration>, command: WorkflowOperation['command'] = 'integrate:merge', invocation?: WorkflowOperation['invocation']) {
+  let operation = { id: `operation-${slug}`, missionId: slug, repositoryId: 'repo', command, invocation, phase: 'accepted', owner: null, generation: 0 } as unknown as WorkflowOperation;
   const service = {
     operation: async () => operation,
     reserveLaunch: async () => true,
@@ -166,4 +166,18 @@ test('board integration with a resolved context keeps every preflight safeguard 
   lines.length = 0;
   await assert.rejects(service.execute([slug, '--dry-run']), /exited with code 1/);
   assert.match(lines.join('\n'), new RegExp(`Integration of ${slug} is already running in another process`));
+});
+
+test('base-started console execute, handoff, review and retry resolve Mission context (TASK-2778)', async t => {
+  const fixture = repository(t, ['task-97778']);
+  const before = git(fixture.primary, 'status', '--porcelain');
+  for (const command of ['active:execute', 'handoff:record', 'review:submit', 'integrate:merge'] as const) {
+    const result = await supervise('task-97778', fixture.primary, fixture.configuration, command,
+      command === 'active:execute' ? undefined : {
+        command: command === 'integrate:merge' ? 'integrate' : 'review', args: ['task-97778'], interactive: true,
+      });
+    assert.deepEqual(result.executed, [fixture.worktrees['task-97778']]);
+  }
+  assert.equal(git(fixture.primary, 'status', '--porcelain'), before);
+  assert.equal(git(fixture.primary, 'branch', '--show-current').trim(), 'main');
 });

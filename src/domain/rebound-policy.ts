@@ -88,6 +88,7 @@ export interface DeclaredGateValidationReason {
  * the contract and are migrated to real consumers by TASK-2377.04/.05.
  */
 export type ReboundReason =
+  | { kind: 'rebase-conflict'; files: readonly string[]; diagnostic: string }
   | GateFailureReason
   | HookFailureReason
   | ArtifactIncompleteReason
@@ -106,6 +107,7 @@ export interface ReboundClassification {
 /** Flatten a structured reason into the diagnostic text the classifier reads. */
 export function reboundDiagnostic(reason: ReboundReason): string {
   switch (reason.kind) {
+    case 'rebase-conflict': return reason.diagnostic;
     case 'gate-failure':
       return [reason.stdout, reason.stderr, reason.error, ...(reason.invalidContract ? [reason.invalidContract.command, reason.invalidContract.diagnostic, reason.invalidContract.authorityReason, reason.invalidContract.proposedCorrection] : [])].filter(Boolean).join('\n');
     case 'hook-failure':
@@ -124,6 +126,7 @@ export function reboundDiagnostic(reason: ReboundReason): string {
 /** Failure banner per reason kind. */
 function reasonLabel(reason: ReboundReason): string {
   switch (reason.kind) {
+    case 'rebase-conflict': return 'REBASE CONFLICT';
     case 'gate-failure': return 'PRE-REVIEW GATE FAILURE';
     case 'hook-failure': return 'GIT HOOK FAILURE';
     case 'artifact-incomplete': return 'INCOMPLETE ARTIFACTS';
@@ -161,6 +164,10 @@ export function classifyReboundReason(reason: ReboundReason): ReboundClassificat
     isRelaunchable: dispatchAction !== DispatchAction.HumanOnly,
     label,
   });
+
+  if (reason.kind === 'rebase-conflict') {
+    return classified(FailureClass.GitBlockers, DispatchAction.AutoRepair);
+  }
 
   if (reason.kind === 'gate-failure' && reason.invalidContract) {
     return classified(FailureClass.MalformedGates, DispatchAction.HumanOnly);

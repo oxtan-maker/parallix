@@ -187,7 +187,7 @@ test('performHandoff follows the sequence: createPr -> gatekeeper -> transitionT
       // The blanket readFileSync mock above supplies checkpoint content. Keep
       // agent selection independent of filesystem-backed configuration.
       eligibleAgentsForStepFn: () => ['codex', 'claude'],
-      selectAgentFn: () => 'claude',
+      selectAgentFn: () => 'codex',
     });
 
     const relevantEvents = events.filter(e => e.type === 'createPr' || e.type === 'gatekeeper' || e.type === 'transition' || e.type === 'push');

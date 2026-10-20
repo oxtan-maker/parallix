@@ -3,7 +3,7 @@ import { AGENT_COMMAND_COMPLETION_CONTRACT } from '../../../application/agent-co
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { git } from '../../git/git.js';
+import { detectRebaseState, git } from '../../git/git.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import { resolveWorktree, getConflictFiles, getPrimaryWorktree, getPrimaryBranch, conventionalWorktreePath, missionBranchName, isMissionArtifact, resolveMissionBaseBranch } from '../../filesystem/mission-utils.js';
 import * as verification from '../../verification/verification.js';
@@ -297,6 +297,12 @@ export function maybeDropStashAfterCollision(
  * @param {{ getConflictFilesFn?: Function }} [options] - Overrides for testing
  * @returns {{ ok: boolean, conflictFiles: string[], sharedFiles: string[], missionSpecificFiles: string[], error?: string, worktreePath?: string }}
  */
+/** Unmerged files of a paused rebase, or null when Git state has none to report. */
+function pausedRebaseConflicts(worktreePath: string, overridden: boolean): string[] | null {
+  const paused = overridden ? null : detectRebaseState(worktreePath);
+  return paused?.inProgress || paused?.unmergedFiles.length ? paused.unmergedFiles : null;
+}
+
 /**
  * @param {string} slug
  * @param {string} area
@@ -329,7 +335,7 @@ export function resolveConflictsForMission(slug: string, area: string, { getConf
   fmt.log.info(`Detecting conflicts in ${worktreePath} against ${targetBranch}...`);
   let conflictFiles;
   try {
-    conflictFiles = detectFn(worktreePath, targetBranch);
+    conflictFiles = pausedRebaseConflicts(worktreePath, Boolean(getConflictFilesFn)) ?? detectFn(worktreePath, targetBranch);
   } catch (err) {
     fmt.log.fail('Merge check failed with a non-conflict error:');
     fmt.log.fail((err as Error).message);

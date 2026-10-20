@@ -164,7 +164,7 @@ function paneScript(socketPath: string, windowName: string, scratch: string, pre
   ].join('\n');
 }
 
-function consolePxScript(command: string | undefined): string {
+function consolePxScript(command: string | undefined, mission: string): string {
   if (!command) { return '#!/bin/sh\nexit 127\n'; }
   // A px child starts an interactive Bash that reads the operator's rc files
   // before exec. Those files may run px themselves (`eval "$(px shell-init)"`),
@@ -172,6 +172,7 @@ function consolePxScript(command: string | undefined): string {
   // call exec the CLI directly, and is dropped before the real command runs.
   const quoted = shellQuote(command);
   return ['#!/bin/sh',
+    `export PARALLIX_MISSION_TERMINAL=${shellQuote(mission)}`,
     `if [ -n "$PARALLIX_CONSOLE_PX" ]; then exec ${quoted} "$@"; fi`,
     `PARALLIX_CONSOLE_PX=1 exec /bin/bash -ic 'unset PARALLIX_CONSOLE_PX; exec "$@"' bash ${quoted} "$@"`, ''].join('\n');
 }
@@ -280,7 +281,7 @@ export function prepareTmuxLaunch(input: TmuxLaunchInput, options: { configurati
   const commandPath = configuration.agents.searchPath.split(path.delimiter).map(dir => path.join(dir, 'px')).find(candidate => {
     try { return fs.statSync(candidate).isFile(); } catch { return false; }
   });
-  fs.writeFileSync(path.join(consoleBin, 'px'), consolePxScript(commandPath), { mode: 0o700 });
+  fs.writeFileSync(path.join(consoleBin, 'px'), consolePxScript(commandPath, input.identity.missionId), { mode: 0o700 });
   writeEnvFile(path.join(scratch, 'pane.env'), { ...input.env, PWD: input.cwd, PARALLIX_MISSION_TERMINAL: input.identity.missionId, PARALLIX_MISSION_SOCKET: socketPath });
   if (input.input) { fs.writeFileSync(path.join(scratch, 'stdin'), input.input, { mode: 0o600 }); }
   fs.writeFileSync(path.join(scratch, 'command.sh'), commandScript(socketPath, scratch, input.command, input.args, Boolean(input.input)), { mode: 0o700 });

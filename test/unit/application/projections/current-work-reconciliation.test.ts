@@ -269,6 +269,7 @@ describe("Publish-then-reconcile defects —", () => {
   }
 
   function strictPorts(overrides: Record<string, unknown> = {}) {
+  let recordedMission = completeMission(String('task-2373'), {repositoryId: completeRepositoryId('repo'),title: 'Fixture',labels: [],assignee: null,checkpoints: [{ missionId: completeMissionId('task-2373'), name: 'CP-1', firstLine: 'work', goalCheck: [], nextActionText: '' }],review: null,netEngineeringLines: null,brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },declaredGates: ['npm test'],successCriteria: ['done'],predictedNelBucket: 'Small',status: 'refined' as const,closedAt: null});
     const parts = completeExecuteFixture({
       ...makeExecutePorts().ports,
       workspace: {
@@ -285,9 +286,9 @@ describe("Publish-then-reconcile defects —", () => {
         },
       },
       missionTransitions: {
-        async load() { return { kind: 'found' as const, version: completeVersion(1), mission: completeMission(String('task-2373'), {repositoryId: completeRepositoryId('repo'),title: 'Fixture',labels: [],assignee: null,checkpoints: [{ missionId: completeMissionId('task-2373'), name: 'CP-1', firstLine: 'work', goalCheck: [], nextActionText: '' }],review: null,netEngineeringLines: null,brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },declaredGates: ['npm test'],successCriteria: ['done'],predictedNelBucket: 'Small',status: 'refined' as const,closedAt: null}) }; },
-        async save() { return completeVersion(2); },
-        async saveWithTransition() { return completeVersion(2); },
+        async load() { return { kind: 'found' as const, version: completeVersion(1), mission: recordedMission }; },
+        async save(next) { recordedMission = next; return completeVersion(2); },
+        async saveWithTransition(next) { recordedMission = next; return completeVersion(2); },
       },
       telemetry: { async recordLaunchTelemetry() {} },
       autonomousReview: { async start() {} },

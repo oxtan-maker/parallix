@@ -162,15 +162,10 @@ async function superviseWorkflow(id: string, operation: import('../application/p
 }
 
 
-/**
- * A board-admitted integration executes in the mission worktree resolved from
- * its identity, as a terminal run inside that worktree does; the admitting
- * host's checkout and working directory decide nothing. A terminal invocation
- * keeps the checkout it was typed in.
- */
+/** Mission execution context is independent of the admitting console checkout. */
 function executionCheckout(operation: import('../application/ports/workflow-operation.js').WorkflowOperationRecord, root: string,
   configuration: ParallixConfiguration, dependencies: WorkerDependencies): { ok: true; root: string } | { ok: false; reason: string } {
-  if (operation.command !== 'integrate:merge' || operation.invocation) { return { ok: true, root }; }
+  if (operation.command === 'draft:create') { return { ok: true, root }; }
   const resolved = (dependencies.context ?? resolveMissionExecutionContext)(operation.missionId, root, configuration);
   return resolved.ok ? { ok: true, root: resolved.context.missionWorktree } : resolved;
 }

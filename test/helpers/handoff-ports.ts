@@ -2,6 +2,7 @@ import { mergeFixturePort } from './merge-fixture-port.js';
 import { fixtureMission } from '../fixtures/mission-builders.js';
 import { missionVersion } from '../../src/application/domain-ports.js';
 import { missionId } from '../../src/domain/mission.js';
+import { agentFamily } from '../../src/domain/agents.js';
 import { phaseGateResult } from './phase-gate-result.js';
 /**
  * Fully stubbed `HandoffWorkflowPorts` for hermetic handoff tests (TASK-2332.09).
@@ -22,10 +23,11 @@ export const BRANCH = 'mission/task-2332.09';
  * or checkpoints, so handoff takes its document path. A Mission the store does
  * not hold fails handoff closed instead.
  */
-export const LEGACY_MISSION_LOAD = { kind: 'found', mission: fixtureMission(SLUG, { checkpoints: [], brief: null, declaredGates: [] }), version: missionVersion(1) } as const;
+export const LEGACY_MISSION_LOAD = { kind: 'found', mission: fixtureMission(SLUG, { assignee: agentFamily('claude'), checkpoints: [], brief: null, declaredGates: [] }), version: missionVersion(1) } as const;
 export const RECORDED_MISSION_LOAD = {
   kind: 'found',
   mission: fixtureMission(SLUG, {
+    assignee: agentFamily('claude'),
     checkpoints: [{ missionId: missionId(SLUG), name: 'CP-1', goalCheck: [{ criterion: 'Workflow re-homed', evidence: 'src/application/handoff-command-use-case.ts' }], nextActionText: 'review' }],
     brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
     successCriteria: ['Workflow re-homed'],

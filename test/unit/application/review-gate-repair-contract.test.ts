@@ -1,3 +1,4 @@
+import { agentFamily } from '../../../src/domain/agents.js';
 import type { RepairCheckpointPort } from '../../../src/application/ports/repair-checkpoint.js';
 import type { RetainedRepairPort, ReviewLoopRequest } from '../../../src/application/ports/review-round.js';
 import type { ReviewLoopFakeOverrides } from '../../helpers/review-loop-ports.js';
@@ -453,7 +454,7 @@ describe("pre review gate repair continues", { concurrency: false }, () => {
 
     const lifecycleCommands: Parameters<MissionLifecycleService['transition']>[0][] = [];
     const missionStore = {
-      load: async () => ({ kind: 'found' as const, version: missionVersion(1), mission: fixtureMission(slug, { status: lifecycleCommands.at(-1)?.command.type === 'rebound-to-active' ? 'active' : 'review', review: pendingReview(slug) }) }),
+      load: async () => ({ kind: 'found' as const, version: missionVersion(1), mission: fixtureMission(slug, { assignee: agentFamily('codex'), status: lifecycleCommands.at(-1)?.command.type === 'rebound-to-active' ? 'active' : 'review', review: pendingReview(slug) }) }),
       save: async () => { throw new Error('Unexpected fixture save'); },
     };
     const lifecycle = { transition: async (request: Parameters<MissionLifecycleService['transition']>[0]) => { lifecycleCommands.push(request); return { durableEvidence: [],  status: 'completed' as const }; } };
@@ -649,7 +650,7 @@ describe('retained verification repair continuation', { concurrency: false }, ()
     const command = 'npm run original-check';
     const repair = { command, incidentId: 'incident', attempt: 1, evidenceRecorded: recorded, verified: false,
       authorizedGates: [command], authorizedCriteria: ['original criterion'] };
-    const mission = { ...fixtureMission('task-2757'), declaredGates: [command], successCriteria: ['original criterion'],
+    const mission = { ...fixtureMission('task-2757', { assignee: agentFamily('codex') }), declaredGates: [command], successCriteria: ['original criterion'],
       checkpoints: [{ ...fixtureMission('task-2757').checkpoints[0], name: 'CP-2', repair }] };
     const fake = fakeReviewLoopPorts({
       worktree, slug: 'task-2757',

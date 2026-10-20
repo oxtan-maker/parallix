@@ -336,6 +336,30 @@ test('execute mission use case carries run state per call instead of holding it 
 import { ExecuteHandoffService } from '../../../src/application/execute-handoff-service.js';
 import { validateCheckpointsBeforeHandoff } from '../../../src/adapters/mission/checkpoint-validation.js';
 
+for (const callback of [true, false]) {
+  test(`checkpoint repair fallback retains actual identity through handoff/review, callback=${callback} (TASK-2778 F1)`, async () => {
+    const { ports } = strictPorts();
+    let checks = 0;
+    let actual = 'codex';
+    const service = new ExecuteHandoffService({
+      checkpoints: { validateBeforeHandoff: async () => ++checks === 1
+        ? { ok: false, error: 'Planned checkpoint evidence is missing before handoff: CP-2.', nextCheckpoint: 'CP-2' }
+        : { ok: actual === 'custom', error: 'actual repair identity was not recorded' } },
+      repairLaunch: { ...ports.repairLaunch, launch: async request => {
+        if (callback) { await request.onAgentChanged?.('custom'); assert.equal(actual, 'custom'); }
+        return { agent: 'custom', result: { status: 0 } };
+      } },
+      handoff: { ...ports.handoffExecution, run: async request => { assert.equal(request.agent, 'custom'); return { ok: true }; } },
+      review: { start: async request => { assert.equal(request.implementer, 'custom'); } },
+      output: ports.output,
+    });
+    assert.equal(await service.run({ slug: 'task-1', worktree: '/worktree', agent: 'codex', taskFile: null,
+      onImplementerLaunched: async agent => { actual = agent; },
+    }), true);
+    assert.equal(actual, 'custom');
+  });
+}
+
 test('recorded contract blocker stops checkpoint repair despite missing CP-5 and CP-6 (TASK-2713)', async () => {
   const blocker = { command: 'npm test', diagnostic: 'requires operator decision', authorityReason: 'locked contract', proposedCorrection: 'operator choice' };
   const verdict = await validateCheckpointsBeforeHandoff('task-1', '/worktree', { loadRecordedCheckpointsFn: async () => ({
@@ -387,4 +411,33 @@ test('a contract blocker discovered during handoff retry stops further evidence 
   assert.deepEqual(stops, ['Recorded contract requires operator decision']);
   assert.equal(launches, 1);
   assert.equal(handoffs, 2);
+});
+
+test('execute handoff preserves gate-to-conflict cause and actual early stop count (TASK-2778)', async () => {
+  const { ports } = strictPorts();
+  const errors: string[] = [];
+  const prompts: string[] = [];
+  let calls = 0;
+  const service = new ExecuteHandoffService({ checkpoints: ports.checkpointValidation,
+    handoff: { ...ports.handoffExecution,
+      run: async () => {
+        calls++;
+        if (calls === 1) { return { ok: false, error: 'gate failed', gateFailure: {
+          kind: 'gate-failure', area: 'unit', command: 'npm test', exitCode: 1, stdout: 'original assertion', stderr: '' } }; }
+        if (calls === 2) { return { ok: false, error: 'shared conflict', recoveryFailure: {
+          kind: 'rebase-conflict', files: ['shared.ts'], diagnostic: 'shared conflict after repaired gate' } }; }
+        return { ok: false, recoveryFailure: { kind: 'handoff-verification', error: 'connection refused' }, error: 'connection refused' };
+      }, classifyFailure: () => ({ failureClass: 'GateFailure', dispatchAction: 'AutoSendBack' }),
+      repairHygiene: async () => assert.fail('structured conflicts use semantic resolver') },
+    review: ports.autonomousReview,
+    repairLaunch: { ...ports.repairLaunch, launch: async request => {
+      prompts.push(request.prompt); return { agent: 'codex', result: { status: 0 } };
+    } }, output: { ...ports.output, error: text => { errors.push(text); } },
+  });
+  assert.equal(await service.run({ slug: 'task-1', worktree: '', agent: 'codex', taskFile: null }), false);
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1], /REBASE CONFLICT/);
+  assert.match(errors.join('\n'), /Recovery stopped after 2 relaunch attempt/);
+  assert.match(errors.join('\n'), /Last diagnostic: connection refused/);
+  assert.doesNotMatch(errors.join('\n'), /Gate failure persisting/);
 });

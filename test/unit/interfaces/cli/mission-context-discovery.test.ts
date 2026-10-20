@@ -126,3 +126,17 @@ test('checkpoint history and round reads expose immutable evidence without write
     assert.equal(versions[0]?.checkpoint.goalCheck[0]?.evidence, 'original');
   } finally { process.stdout.write = original; }
 });
+
+test('mission-bound recovery commands restore worktree after base-started console (TASK-2778)', async () => {
+  const { missionCommandTarget } = await import('../../../../src/composition/mission-command-context.js');
+  const { resolveConfiguration } = await import('../../../../src/composition/config.js');
+  const configuration = resolveConfiguration({ PARALLIX_MISSION_TERMINAL: 'task-2778' });
+  for (const command of ['active', 'review', 'recover', 'integrate', 'rebase', 'resolve-conflict', 'verify']) {
+    assert.equal(missionCommandTarget(command, [], '/base', configuration, (slug, options) => {
+      assert.equal(slug, 'task-2778'); assert.equal(options?.cwd, '/base'); return '/mission';
+    }), '/mission');
+  }
+  assert.equal(missionCommandTarget('review', ['task-2', '--submit'], '/base', configuration,
+    slug => { assert.equal(slug, 'task-2'); return '/other'; }), '/other');
+  assert.equal(missionCommandTarget('review', ['--help'], '/base', configuration, () => assert.fail()), '/base');
+});

@@ -38,7 +38,18 @@ import {
   collectGoalCheckEvidenceRows,
   findUnverifiableGoalCheckRow as findUnverifiableGoalCheckRowWithPort,
 } from '../../review/review-static-evidence.js';
-import type { CaptureNelOptions, HandoffWorkflowPorts, PerformHandoffOptions } from '../../../application/ports/handoff-workflow.js';
+import type { CaptureNelOptions, HandoffWorkflowPorts, PerformHandoffOptions, HandoffMissionServicesPort } from '../../../application/ports/handoff-workflow.js';
+import { recordImplementerLaunch } from '../../../application/rebase-identity.js';
+
+function createHandoffFileSystemPorts(): HandoffWorkflowPorts['fileSystem'] {
+  return {
+    existsSync: (target) => fs.existsSync(target),
+    readText: (target) => fs.readFileSync(target, 'utf8'),
+    writeText: (target, content) => fs.writeFileSync(target, content, 'utf8'),
+    listNames: (target) => fs.readdirSync(target),
+    listEntries: (target) => fs.readdirSync(target, { withFileTypes: true }),
+  };
+}
 
 /**
  * Bind the concrete infrastructure modules to the handoff workflow ports.
@@ -47,15 +58,9 @@ import type { CaptureNelOptions, HandoffWorkflowPorts, PerformHandoffOptions } f
  * time*, so a test that swaps a dependency module (see `test/lib/module-mock.ts`)
  * is still observed by the use case.
  */
-export function createHandoffPorts(configuration?: ParallixConfiguration): HandoffWorkflowPorts {
+export function createHandoffPorts(configuration?: ParallixConfiguration, missionServices?: HandoffMissionServicesPort): HandoffWorkflowPorts {
   return {
-    fileSystem: {
-      existsSync: (target) => fs.existsSync(target),
-      readText: (target) => fs.readFileSync(target, 'utf8'),
-      writeText: (target, content) => fs.writeFileSync(target, content, 'utf8'),
-      listNames: (target) => fs.readdirSync(target),
-      listEntries: (target) => fs.readdirSync(target, { withFileTypes: true }),
-    },
+    fileSystem: createHandoffFileSystemPorts(),
     git: {
       commitMissionChanges: (rootDir, slug, log, error) => commitDirtyFiles(rootDir, slug, args => git.git(args), log, error),
       git: (args, options) => (options === undefined ? git.git(args) : git.git(args, options)),
@@ -126,7 +131,16 @@ export function createHandoffPorts(configuration?: ParallixConfiguration): Hando
       isForgejoReviewEnabled: (rootDir) => isForgejoReviewEnabled(rootDir),
     },
     agents: {
-      startAgent: (step, options) => startAgent(step, { ...options, configuration }),
+      startAgent: (step, options) => startAgent(step, { ...options, configuration,
+        onLaunch: async event => {
+          if (missionServices) {
+            const root = String(options.worktree || process.cwd());
+            const services = await missionServices(root, { missionDir: root });
+            await recordImplementerLaunch(String(options.slug), event.agent, services.store, services.lifecycle);
+          }
+          if (typeof options.onLaunch === 'function') { await options.onLaunch(event); }
+        },
+      }),
     },
     agentSelection: {
       eligibleAgentsForStep: (step, options) => eligibleAgentsForStep(step, { ...options, configuration }),
@@ -162,7 +176,7 @@ type HandoffAdapterOptions = PerformHandoffOptions & {
   reviewIdentity?: string | null;
 };
 function performHandoff(slug: string, options: HandoffAdapterOptions = {}) {
-  return new HandoffCommandUseCase(createHandoffPorts(options.configuration)).performHandoff(slug, options);
+  return new HandoffCommandUseCase(createHandoffPorts(options.configuration, options.missionServicesFn)).performHandoff(slug, options);
 }
 
 /** @see HandoffCommandUseCase.resolveHandoffReviewAssignment */

@@ -1,3 +1,4 @@
+import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 import { fixtureMission, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
 import { reviewStateWriterFixture } from '../../helpers/review-state-writer.js';
 import { rebaseWorkflowFixture } from '../../helpers/rebase-workflow-fixture.js';
@@ -288,7 +289,10 @@ test('rebase use case bounces a hook failure through the kernel and completes wh
       }
       return OK;
     },
-    missionServices: async () => ({ store: inMemoryTransitionStore(fixtureMission('task-2332.12')) }),
+    missionServices: (() => {
+      const store = inMemoryTransitionStore(fixtureMission('task-2332.12'));
+      return async () => ({ store, lifecycle: new MissionLifecycleService(store) });
+    })(),
   });
   await run(h);
   assert.equal(h.agentLaunches.length, 1, 'exactly one bounce launch');
@@ -315,7 +319,10 @@ test('rebase use case strands a hook failure after two failed rebase --continue 
       }
       return OK;
     },
-    missionServices: async () => ({ store: inMemoryTransitionStore(fixtureMission('task-2332.12')) }),
+    missionServices: (() => {
+      const store = inMemoryTransitionStore(fixtureMission('task-2332.12'));
+      return async () => ({ store, lifecycle: new MissionLifecycleService(store) });
+    })(),
   });
   await run(h);
   assert.equal(h.agentLaunches.length, 2, 'the per-occurrence budget is exactly two attempts');
@@ -350,7 +357,10 @@ test('rebase use case bounces a hook failure with no recorded implementer via a 
       }
       return OK;
     },
-    missionServices: async () => ({ store: inMemoryTransitionStore(fixtureMission('task-2332.12')) }),
+    missionServices: (() => {
+      const store = inMemoryTransitionStore(fixtureMission('task-2332.12'));
+      return async () => ({ store, lifecycle: new MissionLifecycleService(store) });
+    })(),
   });
   await run(h);
   assert.equal(h.agentLaunches.length, 1, 'one bounce for the no-recorded-implementer hook failure');
@@ -375,7 +385,10 @@ test('rebase use case strands a hook failure when no implementer is recorded and
       }
       return OK;
     },
-    missionServices: async () => ({ store: inMemoryTransitionStore(fixtureMission('task-2332.12')) }),
+    missionServices: (() => {
+      const store = inMemoryTransitionStore(fixtureMission('task-2332.12'));
+      return async () => ({ store, lifecycle: new MissionLifecycleService(store) });
+    })(),
   });
   await run(h);
   assert.equal(h.agentLaunches.length, 0, 'no launch when the selected launcher is unsupported');
@@ -406,7 +419,10 @@ test('rebase use case bounces a hook failure raised by rebase --continue and res
     resolveConflictsForMission: () => ({
       ok: true as const, conflictFiles: [conflicted], missionSpecificFiles: [conflicted], sharedFiles: [],
     }),
-    missionServices: async () => ({ store: inMemoryTransitionStore(fixtureMission('task-2332.12')) }),
+    missionServices: (() => {
+      const store = inMemoryTransitionStore(fixtureMission('task-2332.12'));
+      return async () => ({ store, lifecycle: new MissionLifecycleService(store) });
+    })(),
   });
   await run(h);
   assert.equal(h.agentLaunches.length, 1, 'one bounce for the --continue hook failure');
@@ -432,7 +448,10 @@ test('rebase use case starts a second hook occurrence with a full budget of two'
         }
         return OK;
       },
-      missionServices: async () => ({ store: inMemoryTransitionStore(fixtureMission('task-2332.12')) }),
+      missionServices: (() => {
+      const store = inMemoryTransitionStore(fixtureMission('task-2332.12'));
+      return async () => ({ store, lifecycle: new MissionLifecycleService(store) });
+    })(),
     });
     await run(h);
     return { launches: h.agentLaunches.length, continues };

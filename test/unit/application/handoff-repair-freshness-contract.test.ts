@@ -77,7 +77,7 @@ async function handOffRepair(
   const ports = makePorts(recorder, {
     ...contractServices(async () => ({
       kind: 'found' as const,
-      mission: fixtureMission(SLUG, {
+      mission: fixtureMission(SLUG, { assignee: agentFamily('custom'),
         // Valid prior A/B proof in CP-1; CP-2 is the repair checkpoint.
         checkpoints: [
           { missionId: missionId(SLUG), name: 'CP-1', goalCheck: [row('first'), row('second')], nextActionText: 'review' },
@@ -164,7 +164,7 @@ test('a repeated bounceback on the same gate keeps only the repaired criterion o
     change: { kind: 'local-branch', sourceBranch: 'mission/task-2665', targetBranch: 'main' }, revision: changeRevision('approved-commit'),
   }, reviewer, implementer, '2026-01-01T00:00:00Z', eligibility)), 'unit-first');
   const id = missionId('task-2665');
-  let mission = fixtureMission(id, {
+  let mission = fixtureMission(id, { assignee: implementer,
     id, successCriteria: ['first', 'second'], completedSuccessCriteria: [0, 1], brief: DRAFTED_BRIEF, declaredGates: ['npm test'],
     checkpoints: [{ missionId: id, name: 'CP-1', nextActionText: 'review', goalCheck: [
       { criterion: 'first', evidence: `${REPAIR_REF} via unit-first` }, { criterion: 'second', evidence: `${REPAIR_REF} via unit-second`, recordedRound: 1 },

@@ -226,6 +226,6 @@ function createIntegrationRunner(context: CliCommandContext, runReview: (args: s
 }
 function performHandoffWithMissionServices(missionServicesFn: HandoffMissionServicesPort, configuration: ParallixConfiguration) {
   return (slug: string, options: Record<string, unknown>) => new HandoffCommandUseCase({
-    ...createHandoffPorts(configuration), missionServices: missionServicesFn,
+    ...createHandoffPorts(configuration, missionServicesFn), missionServices: missionServicesFn,
   }).performHandoff(slug, { ...options, missionServicesFn });
 }

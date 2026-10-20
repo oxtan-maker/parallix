@@ -211,6 +211,7 @@ test('the console px wrapper cannot re-enter itself from an operator rc file (TA
     const { fn } = fakeSpawnSync('');
     const launch = prepareTmuxLaunch({ identity: identity(), spawnIndex: 1, command: 'sh', args: [], cwd: '/work', env: {} }, { configuration: resolveConfiguration({ ...environment, ...env }), spawnSyncFn: fn });
     const wrapper = fs.readFileSync(path.join(path.dirname(missionSocketPath(identity(), resolveConfiguration(env))), 'task-1', 'console-bin', 'px'), 'utf8');
+    assert.match(wrapper, /export PARALLIX_MISSION_TERMINAL='task-1'/);
     // `eval "$(px shell-init bash)"` in an rc file runs this wrapper again from inside its own Bash child.
     assert.match(wrapper, /if \[ -n "\$PARALLIX_CONSOLE_PX" \]; then exec '[^']*px' "\$@"; fi/);
     assert.match(wrapper, /PARALLIX_CONSOLE_PX=1 exec \/bin\/bash -ic 'unset PARALLIX_CONSOLE_PX; exec "\$@"'/);

@@ -38,7 +38,7 @@ export class HandoffCommandUseCase {
 
   constructor(ports: HandoffWorkflowPorts) {
     this.ports = ports;
-    this.executor = new HandoffExecutor(ports, (fallbackSlug, summary, options) => this.writeFallbackSummary(fallbackSlug, summary, options));
+    this.executor = new HandoffExecutor(ports, (slug, summary, options) => this.writeFallbackSummary(slug, summary, options));
   }
 
   /**

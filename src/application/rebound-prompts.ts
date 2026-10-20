@@ -133,6 +133,8 @@ export function recoveryEvidenceRoute(slots: Pick<FixPromptSlots, 'recoveryEvide
 
 export function promptSlotsFor(reason: ReboundReason, slug: string): Pick<FixPromptSlots, 'area' | 'facts' | 'remedy'> {
   switch (reason.kind) {
+    case 'rebase-conflict': return { area: 'rebase', facts: [['Conflicts', reason.files.join(', ')]],
+      remedy: 'Review shared conflicts semantically in the mission worktree. Preserve newer base behavior, completed work and unique mission intent; do not resurrect retired metadata or use blanket ours/theirs. Stage every resolved path and continue through successive pauses until Git reports no rebase and no unmerged paths. Stop on ambiguous intent or a human-only decision.' };
     case 'gate-failure':
       return {
         area: reason.area,

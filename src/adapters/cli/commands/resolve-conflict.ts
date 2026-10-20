@@ -1,3 +1,5 @@
+import { rebaseImplementer } from '../../../application/rebase-identity.js';
+import type { MissionStore } from '../../../application/domain-ports.js';
 import integrate from './integrate.js';
 import { findMissionDir, findMissionArea, inferSlug, getPrimaryBranch } from '../../filesystem/mission-utils.js';
 import { startAgent } from '../../agents/agents.js';
@@ -66,6 +68,7 @@ type ResolveConflictOptions = {
   exitFn?: (_code: number) => void,
   resolveTaskFileFn?: typeof resolveTaskFile,
   getTaskImplementerFn?: typeof getTaskImplementer,
+  missionServicesFn?: (_root: string) => Promise<{ store: MissionStore | null }>,
   rootDir?: string,
 };
 
@@ -121,10 +124,12 @@ async function resolveConflict(args: string[], options: ResolveConflictOptions =
   // Conflict resolution is implementation work owned by the mission's recorded
   // implementer (TASK-2294.01). Resolve that family before launching; there is
   // no separate conflict-resolution pool to fall back on.
-  const implementer = recordedConflictImplementer(slug, rootDir, resolveTaskFileFn, getTaskImplementerFn);
+  const implementer = options.missionServicesFn
+    ? await rebaseImplementer((await options.missionServicesFn(result.worktreePath)).store, slug)
+    : recordedConflictImplementer(slug, rootDir, resolveTaskFileFn, getTaskImplementerFn);
   if (!implementer) {
     fmt.log.fail(`No recorded implementer for ${fmt.slug(slug)}; cannot launch conflict resolution.`);
-    fmt.log.info('Conflict resolution runs as the mission implementer. Set the task assignee to a supported agent family, then re-run.');
+    fmt.log.info('Conflict resolution runs as the mission implementer. Assign the Mission to a configured agent, then re-run.');
     fmt.log.info(`Recovery: ${fmt.command(`px resolve-conflict ${slug}`)}`);
     exitFn(1);
     return;

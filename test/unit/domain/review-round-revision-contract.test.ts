@@ -174,14 +174,13 @@ describe("stale review round repro", { concurrency: false }, () => {
         providerEnabled: true,
         readTokenFn: () => 'mock-token',
         postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
-        // Self-author: claude is the reviewer AND the PR author, so the provider
-        // review POST is skipped and the verdict must persist locally on round 2.
-        getPrAuthorFn: () => 'claude',
+        // Independent reviewer approval persists on the same round after the provider POST.
+        getPrAuthorFn: () => 'codex',
         postReviewFn: () => { providerReviewCalled = true; return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
       });
 
       assert.equal(result.ok, true, 'the bound verdict writer consumes the artifacts');
-      assert.equal(providerReviewCalled, false, 'a self-author verdict skips the provider review POST');
+      assert.equal(providerReviewCalled, true, 'independent approval reaches the provider before local authority');
       const output = await reviewLoopBindings(store).consumeReviewerArtifacts('task-2385', 'claude', { worktree: tmpDir });
       assert.equal(output.consumed, true, 'the review loop reads the persisted verdict output');
       // The persisted verdict survives on round 2, not a fabricated round 1, and
@@ -225,7 +224,7 @@ describe("stale review round repro", { concurrency: false }, () => {
   });
 
   describe("verdict persistence to the Review aggregate", () => {
-    it('records an approve verdict onto the current round without renumbering it', async () => {
+    it('retains advisory self-review on the current round without approving (TASK-2778 F2)', async () => {
       let captured: unknown;
       const result = await postWorkflowReview(
         'task-2385-persist',
@@ -247,13 +246,13 @@ describe("stale review round repro", { concurrency: false }, () => {
         },
       );
 
-      assert.equal(result.ok, true, 'the self-author local verdict path records and returns ok');
+      assert.equal(result.ok, false, 'self-author review cannot grant approval');
       assert.equal(result.skipped, true, 'the provider POST is skipped on self-approval');
       assert.ok(captured instanceof ReviewState, 'the persisted verdict is a ReviewState aggregate');
       const capturedState = captured as ReviewState;
       assert.equal(capturedState.round, 2, 'the verdict attaches to the current round 2, not a fabricated round 1');
-      assert.equal(capturedState.disposition, 'APPROVED', 'the approve verdict is recorded as APPROVED on the round');
-      assert.equal(capturedState.phase, 'approved', 'the round transitions to the approved phase');
+      assert.notEqual(capturedState.disposition, 'APPROVED', 'advisory review does not approve');
+      assert.equal(capturedState.phase, 'reviewing', 'the round still awaits independent approval');
     });
   });
 });

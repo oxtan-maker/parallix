@@ -16,6 +16,10 @@ import { resolveHandoffReviewAssignment } from '../../../../src/adapters/cli/com
 import { selectReviewer } from '../../../../src/application/review-loop/reviewer-selection.js';
 import { postWorkflowReview } from '../../../../src/adapters/review/review-artifacts.js';
 import { renderStatus } from '../../../../src/interfaces/cli/status.js';
+import { fixtureMission, inMemoryTransitionStore } from '../../../fixtures/mission-builders.js';
+import { MissionLifecycleService } from '../../../../src/application/mission-lifecycle-service.js';
+import { ReviewState } from '../../../../src/adapters/review/review-state.js';
+import { consumeReviewerArtifacts } from '../../../../src/adapters/review/review-artifacts.js';
 
 // Regression provenance: TASK-2339.
 describe("self review forbidden", { concurrency: false }, () => {
@@ -186,11 +190,12 @@ describe("reviewer self review approval owed", { concurrency: false }, () => {
 
     assert.equal(outcome.skipped, true);
     assert.ok(writtenState.value);
-    assert.equal(writtenState.value.disposition, 'APPROVED', 'the local self-review verdict must remain recorded');
+    assert.equal(outcome.ok, true);
+    assert.equal(writtenState.value.disposition, 'APPROVED', 'single-family local approval is allowed by corrected SC9 (TASK-2778)');
     assert.equal(writtenState.value.metadata?.approvalOwed, true, 'self-review must persist that external formal approval is owed');
     assert.deepEqual(events, [{
       type: 'reviewer_outcome',
-      params: { verdict: 'approve', content: 'Review verdict: approve', blockedReason: 'external-formal-approval-owed' },
+      params: { verdict: 'approve', content: 'Single-family self-author verdict: approve', blockedReason: 'external-formal-approval-owed' },
     }], 'the local aggregate event must durably identify the approval-owed outcome');
 
     const statusLines: string[] = [];
@@ -210,3 +215,58 @@ describe("reviewer self review approval owed", { concurrency: false }, () => {
     );
   });
 });
+
+test('PR 739 drift cannot grant a self-author local Mission approval (TASK-2778 F2)', async () => {
+  const slug = 'task-2778';
+  const review = startReview({ change: { kind: 'pull-request', provider: 'forgejo', id: '739', url: null,
+    sourceBranch: `mission/${slug}`, targetBranch: 'main' }, revision: changeRevision('head') },
+  fixtureAgentFamily('claude'), fixtureAgentFamily('codex'), '2026-10-19T10:00:00Z',
+  ConfiguredReviewerEligibility.fromReviewStep({ eligible: [fixtureAgentFamily('claude')], strategy: 'random' }));
+  const store = inMemoryTransitionStore(fixtureMission(slug, { status: 'review', assignee: fixtureAgentFamily('claude'), review }));
+  const lifecycle = new MissionLifecycleService(store);
+  const result = await postWorkflowReview(slug, 'approve', 'looks good', {
+    worktree: '/fixture', revision: 'head', reviewIdentity: 'claude', missionStore: store, lifecycleService: lifecycle,
+    readTokenFn: () => 'claude-token', getPrAuthorFn: () => 'claude',
+    postReviewFn: () => assert.fail('self approval must not reach provider'),
+    readReviewStateFn: async () => ReviewState.from(slug, { reviewer: 'claude', implementer: 'codex', round: 1, phase: 'reviewing' }),
+    writeReviewStateFn: async (_slug, state) => new ReviewState(_slug, state).save('/fixture', { missionStore: store, lifecycleService: lifecycle }),
+    createEventFn: () => ({ ok: true, path: null }), log: () => {}, error: () => {},
+  });
+  assert.equal(result.skipped, true);
+  assert.equal(store.mission().status, 'review');
+  assert.equal(store.mission().review!.rounds.at(-1)!.decision, null);
+  assert.equal(store.events.length, 0, 'no integration transition');
+});
+
+for (const author of ['claude', 'codex']) {
+  test(`provider verdict by claude with PR author ${author} requires independent approval before local authority (TASK-2778 F2)`, async () => {
+    const slug = 'task-2778';
+    const review = startReview({ change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' }, revision: changeRevision('head') },
+      fixtureAgentFamily('claude'), fixtureAgentFamily('codex'), '2026-10-19T10:00:00Z',
+      ConfiguredReviewerEligibility.fromReviewStep({ eligible: [fixtureAgentFamily('claude')], strategy: 'random' }));
+    const store = inMemoryTransitionStore(fixtureMission(slug, { status: 'review', assignee: fixtureAgentFamily('codex'), review }));
+    const lifecycle = new MissionLifecycleService(store);
+    let posts = 0;
+    const result = await consumeReviewerArtifacts(slug, 'claude', {
+      worktree: '/fixture', revision: 'head', expectedVersion: 1, providerEnabled: true,
+      output: { verdict: 'approve', findings: [], comment: 'looks good' }, missionStore: store, lifecycleService: lifecycle,
+      readTokenFn: () => 'claude-token', getPrAuthorFn: () => author, getCommentsFn: async () => [],
+      postCommentFn: () => ({ ok: true, status: 0, statusCode: 200, stderr: null, data: null, error: null }), postReviewFn: () => {
+        assert.equal(store.mission().review!.rounds.at(-1)!.decision, null, 'POST precedes approval');
+        posts++; return { ok: true, status: 0, statusCode: 200, stderr: null, data: null, error: null };
+      },
+      readReviewStateFn: async () => new ReviewState(slug, { reviewer: 'claude', implementer: 'codex', round: 1, phase: 'reviewing' }),
+      writeReviewStateFn: async (_slug, state) => new ReviewState(_slug, state).save('/fixture', { missionStore: store, lifecycleService: lifecycle }),
+      createEventFn: () => ({ ok: true, path: null }), buildMetadataFooterFn: () => '', log: () => {}, error: () => {},
+    });
+    assert.equal(result.ok, author !== 'claude', result.diagnostic ?? '');
+    assert.equal(posts, author === 'claude' ? 0 : 1);
+    assert.equal(store.mission().status, author === 'claude' ? 'review' : 'integration');
+    assert.equal(store.mission().review!.rounds.at(-1)!.decision?.kind ?? null, author === 'claude' ? null : 'approved');
+    if (author !== 'claude') {
+      const decision = store.mission().review!.rounds.at(-1)!.decision;
+      assert.ok(decision?.kind === 'approved');
+      assert.equal(decision.source.kind, 'provider');
+    }
+  });
+}

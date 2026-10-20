@@ -1,12 +1,14 @@
 /**
- * Forgejo publication for handoff: resolve the PR token, write the fallback
- * summary, and push the Backlog transition under a lease.
+ * Forgejo publication for handoff: resolve implementer credentials and push the
+ * Backlog transition under a lease.
  */
 
 import * as fmt from './presentation/cli-format.js';
 import type { CommandResult, HandoffLog, HandoffResult, HandoffWorkflowPorts } from './ports/handoff-workflow.js';
 
-/** Credentials the Forgejo PR push uses after bootstrap and owner fallback. */
+export type HandoffFallbackWriter = (_slug: string, _summary: string, _options: { rootDir: string; log: HandoffLog }) => boolean;
+
+/** Credentials the Forgejo PR push uses after implementer bootstrap. */
 interface HandoffForgejoCredentials {
   token: string;
   fallbackUser: string | null;
@@ -63,17 +65,12 @@ export class HandoffForgejoPublisher {
   }
 
   private readonly ports: HandoffWorkflowPorts;
-  private readonly writeFallbackSummary: (_slug: string, _summary: string, _options: { rootDir?: string; log?: HandoffLog }) => boolean;
 
-  constructor(ports: HandoffWorkflowPorts, writeFallbackSummary: HandoffForgejoPublisher['writeFallbackSummary']) {
-    this.ports = ports;
-    this.writeFallbackSummary = writeFallbackSummary;
-  }
+  constructor(ports: HandoffWorkflowPorts, private readonly writeFallbackSummary: HandoffFallbackWriter) { this.ports = ports; }
 
   /**
    * The token the PR is pushed with. A missing agent token is bootstrapped
-   * non-interactively, then falls back to the repo owner; only when the owner
-   * has no token either does handoff stop for manual action.
+   * non-interactively; Parallix credentials may publish when bootstrap fails.
    */
   async resolveHandoffForgejoToken(slug: string, forgejoUser: string, context: {
     rootDir: string; log: HandoffLog; error: HandoffLog; internalLog: HandoffLog;
@@ -100,29 +97,27 @@ export class HandoffForgejoPublisher {
       token = ports.forgejo.readToken(forgejoUser);
       if (!token) {
         bootstrapFailureReason = 'bootstrap completed but token file for the agent user was not found';
-        error('Bootstrap completed but token file for the agent user was not found. Falling back to default user.');
+        error('Bootstrap completed but token file for the agent user was not found. Publication remains blocked.');
       }
     } else {
       bootstrapFailureReason = bootstrapResult.error || 'unknown';
-      error(`Bootstrap for ${fmt.agent(forgejoUser)} failed: ${bootstrapFailureReason}. Falling back to default user.`);
+      error(`Bootstrap for ${fmt.agent(forgejoUser)} failed: ${bootstrapFailureReason}. Publication remains blocked.`);
     }
     if (token) { return { token, fallbackUser: null }; }
 
-    token = ports.forgejo.readToken('human');
-    if (!token) {
-      const msg = `No Forgejo token found for user "${fmt.agent(forgejoUser)}", bootstrap failed (${bootstrapResult.error || 'unknown'}), and no fallback token available for "${fmt.agent('human')}". Manual action required: create a token manually or run \`node parallix setup-review\` first.`;
-      error(msg);
-      return { ok: false, error: msg };
+    const fallbackUser = reviewSettings.repo?.split('/')[0] || 'human';
+    const fallbackToken = ports.forgejo.readToken(fallbackUser);
+    if (fallbackToken) {
+      error(`Using Parallix publication credentials (${fallbackUser}); implementer remains ${forgejoUser}. Bootstrap failure: ${bootstrapFailureReason || 'token unavailable'}`);
+      this.writeFallbackSummary(slug, `## Fallback: PR submitted as ${fallbackUser}
+
+Original user: ${forgejoUser}
+Bootstrap failure reason: ${bootstrapFailureReason || 'token unavailable'}`, { rootDir, log });
+      return { token: fallbackToken, fallbackUser };
     }
-    log(`Review submission fell back from ${fmt.agent(forgejoUser)} to ${fmt.agent('human')}.`);
-    // Durable record of why the PR carries the owner's identity rather than the
-    // implementer's, so a reviewer is not left guessing.
-    const reason = bootstrapFailureReason || 'agent token was missing and bootstrap did not provide a replacement token';
-    const fallbackSummary = `## Fallback: PR submitted as ${fmt.agent('human')}\n\nOriginal user: ${fmt.agent(forgejoUser)}\nBootstrap failure reason: ${reason}`;
-    if (!this.writeFallbackSummary(slug, fallbackSummary, { rootDir, log: internalLog })) {
-      log(fmt.status('WARN', `Could not persist fallback summary for ${fmt.slug(slug)}`));
-    }
-    return { token, fallbackUser: 'human' };
+    const msg = `No Forgejo token found for implementer "${forgejoUser}" after bootstrap (${bootstrapFailureReason || 'token unavailable'}). Publication for ${slug} stopped; configure that implementer's credentials with px setup-review. Parallix publication credentials are also unavailable.`;
+    error(msg);
+    return { ok: false, error: msg };
   }
 
   /**

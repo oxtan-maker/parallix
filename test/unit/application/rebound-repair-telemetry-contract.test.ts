@@ -113,3 +113,39 @@ test('owned workflow records final recovery accounting without inferring exhaust
     }
   } finally { configureMissionWriteAuthorization(null); }
 });
+
+test('fresh human stop after one launch retains one attempt in dossier and telemetry (TASK-2778)', async () => {
+  const rows: OperationalHistoryEntry[] = [];
+  bind(async entry => { rows.push(entry); });
+  let launches = 0;
+  const outcome = await rebound(gateReason, contextFor(() => ({ ok: false, diagnostic: 'operator decision',
+    reason: { kind: 'declared-gate-validation', command: 'verify', diagnostic: 'operator decision' } }), {
+    startAgent: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
+  }));
+  assert.equal(launches, 1);
+  assert.equal(outcome.attempts, 1);
+  assert.equal(outcome.outcome, 'human-only');
+  assert.equal(outcome.attemptsDetail?.length, 1);
+  assert.match(outcome.dossier!, /Stage: declared-gate-validation/);
+  assert.match(outcome.dossier!, /Attempt 1:/);
+  assert.doesNotMatch(outcome.dossier!, /Attempt 2:/);
+  const data = JSON.parse(rows[0].eventData);
+  assert.equal(data.attempt, 1);
+  assert.equal(data.outcome, 'escalate');
+});
+
+test('repaired gate followed by structured conflict routes semantic resolver and reports current stop (TASK-2778)', async () => {
+  const prompts: string[] = [];
+  let checks = 0;
+  const conflict: ReboundReason = { kind: 'rebase-conflict', files: ['shared.ts'], diagnostic: 'shared.ts needs semantic resolution' };
+  const result = await rebound(gateReason, contextFor(() => ++checks === 1
+    ? { ok: false, reason: conflict, diagnostic: conflict.diagnostic }
+    : { ok: true }, {
+    startAgent: async (_step, options) => { prompts.push(typeof options.prompt === 'function' ? options.prompt('codex') : String(options.prompt)); return { agent: 'codex', result: { status: 0 } }; },
+  }));
+  assert.equal(result.outcome, 'fixed');
+  assert.equal(result.attempts, 2);
+  assert.match(prompts[1], /REBASE CONFLICT/);
+  assert.match(prompts[1], /Review shared conflicts semantically/);
+  assert.notEqual(result.classification.failureClass, 'InfraBlocker');
+});

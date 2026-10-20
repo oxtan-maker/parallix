@@ -63,6 +63,7 @@ function published(appended: readonly OperationalHistoryEntry[]) {
 }
 
 function strictPorts(overrides: Record<string, unknown> = {}) {
+  let recordedMission = completeMission(String('task-2370'), {repositoryId: completeRepositoryId('repo'),title: 'Fixture',labels: [],assignee: null,checkpoints: [{ missionId: completeMissionId('task-2370'), name: 'CP-1', firstLine: 'work', goalCheck: [], nextActionText: '' }],review: null,netEngineeringLines: null,brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },declaredGates: ['npm test'],successCriteria: ['done'],predictedNelBucket: 'Small',status: 'refined' as const,closedAt: null});
   const calls: string[] = [];
   const parts = completeExecuteFixture({
     ...makeExecutePorts().ports,
@@ -81,9 +82,9 @@ function strictPorts(overrides: Record<string, unknown> = {}) {
       },
     },
     missionTransitions: {
-      async load() { return { kind: 'found' as const, version: completeVersion(1), mission: completeMission(String('task-2370'), {repositoryId: completeRepositoryId('repo'),title: 'Fixture',labels: [],assignee: null,checkpoints: [{ missionId: completeMissionId('task-2370'), name: 'CP-1', firstLine: 'work', goalCheck: [], nextActionText: '' }],review: null,netEngineeringLines: null,brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },declaredGates: ['npm test'],successCriteria: ['done'],predictedNelBucket: 'Small',status: 'refined' as const,closedAt: null}) }; },
-      async save() { calls.push('lifecycle'); return completeVersion(2); },
-      async saveWithTransition() { calls.push('lifecycle'); return completeVersion(2); },
+      async load() { return { kind: 'found' as const, version: completeVersion(1), mission: recordedMission }; },
+      async save(next) { recordedMission = next; calls.push('lifecycle'); return completeVersion(2); },
+      async saveWithTransition(next) { recordedMission = next; calls.push('lifecycle'); return completeVersion(2); },
     },
     telemetry: { async recordLaunchTelemetry() { calls.push('telemetry'); } },
     handoffExecution: { ...makeExecutePorts().ports.handoffExecution, async run() { calls.push('handoff'); return { ok: true as const }; } },
@@ -180,7 +181,7 @@ test('an execute run publishes execute work, then handoff work, then clears it',
   const outcome = await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 }))
     .execute(executeRequest());
 
-  assert.equal(outcome.status, 'completed');
+  assert.equal(outcome.status, 'completed', JSON.stringify(outcome));
   const facts = published(appended);
   assert.deepEqual(facts.map((fact) => [fact.phase, fact.state]), [
     ['execute', 'running'],
@@ -209,7 +210,7 @@ test('an automatic family handoff updates the same mission current work and crea
   const outcome = await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 }))
     .execute(executeRequest());
 
-  assert.equal(outcome.status, 'completed');
+  assert.equal(outcome.status, 'completed', JSON.stringify(outcome));
   const running = published(appended).filter((fact) => fact.state === 'running');
   assert.deepEqual(running.map((fact) => fact.agent), ['claude', 'claude', 'qwen', null]);
   assert.equal(new Set(published(appended).map((fact) => fact.missionId)).size, 1);
@@ -248,7 +249,7 @@ test('a recorder outage never turns a completed execute run into a failure', asy
   } satisfies NonNullable<ConstructorParameters<typeof ExecuteMissionService>[2]>;
 
   const outcome = await new ExecuteMissionService(ports, undefined, brokenRecorder).execute(executeRequest());
-  assert.equal(outcome.status, 'completed');
+  assert.equal(outcome.status, 'completed', JSON.stringify(outcome));
 });
 
 // ---------------------------------------------------------------------------
@@ -261,7 +262,7 @@ test('publishing current work remains isolated from the activation write', async
   await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 })).execute(executeRequest());
 
   assert.ok(appended.every((entry) => entry.eventType === CURRENT_WORK_EVENT_TYPE));
-  assert.deepEqual(calls, ['lifecycle', 'launch', 'safety', 'telemetry', 'handoff']);
+  assert.deepEqual(calls, ['lifecycle', 'launch', 'lifecycle', 'safety', 'telemetry', 'handoff']);
 });
 
 // ---------------------------------------------------------------------------
@@ -418,6 +419,7 @@ describe("Workflow current work follows launches —", () => {
   }
 
   function strictPorts(overrides: Record<string, unknown> = {}) {
+    let recordedMission = completeMission(String(SLUG), {repositoryId: completeRepositoryId('repo'),title: 'Fixture',labels: [],assignee: null,checkpoints: [{ missionId: completeMissionId(SLUG), name: 'CP-1', firstLine: 'work', goalCheck: [], nextActionText: '' }],review: null,netEngineeringLines: null,brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },declaredGates: ['npm test'],successCriteria: ['done'],predictedNelBucket: 'Small',status: 'refined' as const,closedAt: null});
     const parts = completeExecuteFixture({
       ...makeExecutePorts().ports,
       workspace: {
@@ -434,9 +436,9 @@ describe("Workflow current work follows launches —", () => {
         },
       },
       missionTransitions: {
-        async load() { return { kind: 'found' as const, version: completeVersion(1), mission: completeMission(String(SLUG), {repositoryId: completeRepositoryId('repo'),title: 'Fixture',labels: [],assignee: null,checkpoints: [{ missionId: completeMissionId(SLUG), name: 'CP-1', firstLine: 'work', goalCheck: [], nextActionText: '' }],review: null,netEngineeringLines: null,brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },declaredGates: ['npm test'],successCriteria: ['done'],predictedNelBucket: 'Small',status: 'refined' as const,closedAt: null}) }; },
-        async save() { return completeVersion(2); },
-        async saveWithTransition() { return completeVersion(2); },
+        async load() { return { kind: 'found' as const, version: completeVersion(1), mission: recordedMission }; },
+        async save(next) { recordedMission = next; return completeVersion(2); },
+        async saveWithTransition(next) { recordedMission = next; return completeVersion(2); },
       },
       telemetry: { async recordLaunchTelemetry() {} },
       autonomousReview: { async start() {} },
@@ -486,7 +488,7 @@ describe("Workflow current work follows launches —", () => {
     const outcome = await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 }))
       .execute(executeRequest());
 
-    assert.equal(outcome.status, 'completed');
+    assert.equal(outcome.status, 'completed', JSON.stringify(outcome));
     assert.deepEqual(observed, [
       { agent: 'qwen', phase: 'review', working: true },
       { agent: 'claude', phase: 'review-response', working: true },
@@ -615,7 +617,7 @@ describe("Workflow current work follows launches —", () => {
     const outcome = await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 }))
       .execute(executeRequest());
 
-    assert.equal(outcome.status, 'completed');
+    assert.equal(outcome.status, 'completed', JSON.stringify(outcome));
     assert.deepEqual(timeline.map((state) => state.agent), ['claude', 'qwen', 'qwen']);
     assert.ok(timeline.every((state) => state.working), 'a recoverable family failover never leaves WORKING');
     assert.ok(timeline.every((state) => state.attention === 'none'), 'a recoverable family failover creates no attention');

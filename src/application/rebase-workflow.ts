@@ -1,3 +1,4 @@
+import { rebaseImplementer, recordImplementerLaunch } from './rebase-identity.js';
 import { rebaseHookRecoveryEligible, replacementImplementer, preContinueAction, postContinueAction, continueBudgetExceeded } from '../domain/rebase-policy.js';
 /**
  * Rebase workflow policy (TASK-2332.12).
@@ -196,6 +197,10 @@ export function buildRebasePrompt({
     AGENT_COMMAND_COMPLETION_CONTRACT,
     '- Take --theirs for every mission-specific file listed above.',
     '- For shared files, inspect the conflict markers and resolve sensibly.',
+    '- Review shared conflicts semantically; never apply blanket ours/theirs.',
+    '- Inspect already-squashed changes and newer base behavior before replaying stale commits. Preserve unique mission changes.',
+    '- Respect main-side file relocation and completed tasks: do not resurrect retired mission metadata or duplicate completed work.',
+    '- If intent is ambiguous or requires a human decision, stop with the current paths and evidence.',
     '- Stage every resolved file with git add before each git rebase --continue.',
     '- A rebase pause on a new conflict is an expected stop: resolve and stage it, then continue. This is not a command failure.',
     '- Only a failed command (hook, verification, infrastructure) is a stop-and-report failure.',
@@ -231,15 +236,12 @@ const continueSucceeded = (result: GitCommandResult) =>
   result.status === 0 || /up to date|Already up to date/i.test((result.stdout || '') + (result.stderr || ''));
 const hasConflictMarkers = (output: string) => /CONFLICT|KONFLIKT/i.test(output);
 
-/**
- * The implementer identity, captured before Git rewrites history. The mission
- * record is the pre-replay authority — it lives outside the history being
- * replayed, so a stale mission branch cannot expose an older assignee through
- * it (TASK-2503). The Backlog task file, which is replayed content, is only the
- * fallback. Both are local mission metadata: when neither resolves, the
- * condition is a local workflow one, never a Forgejo or network blocker.
- */
+/** Capture database identity before replay; uncomposed legacy seams support older callers. */
 async function resolveRecordedImplementer(slug: string, executionRoot: string, port: RebaseWorkflowPort): Promise<string | null> {
+  if (port.missionServices) {
+    const { store } = await port.missionServices(executionRoot);
+    return rebaseImplementer(store, slug);
+  }
   let missionRecord: { implementer?: string | null } | null = null;
   try {
     missionRecord = await Promise.resolve(port.readReviewState(slug, executionRoot)) as { implementer?: string | null } | null;
@@ -276,9 +278,10 @@ async function performPush(ctx: RebaseContext): Promise<boolean> {
     return true;
   }
   fmt.log.info(`--push detected. Updating Forgejo PR for ${fmt.branch(branch)}...`);
-  const reviewIdentity = port.resolveReviewIdentity(slug, executionRoot);
-  const forgejoUser = port.resolveForgejoUser(('forgejoUser' in reviewIdentity ? reviewIdentity.forgejoUser : undefined) || recordedImplementer || null);
-  const token = port.readToken(forgejoUser || 'default');
+  const actual = port.missionServices ? await resolveRecordedImplementer(slug, executionRoot, port) : recordedImplementer;
+  const preferredUser = port.resolveForgejoUser(actual) || 'default';
+  const { user: forgejoUser, token } = port.publicationCredentials?.(preferredUser, executionRoot)
+    ?? { user: preferredUser, token: port.readToken(preferredUser) };
   if (!token) {
     fmt.log.fail(`No Forgejo token found for user "${fmt.agent(forgejoUser || 'default')}". Push failed.`);
     port.exit(1);
@@ -336,7 +339,7 @@ async function finishRebase(ctx: RebaseContext, message: string): Promise<void> 
   fmt.log.pass(message);
   if (!await performPush(ctx)) { return; }
   fmt.log.info('Verification: the workflow handles integration checks.');
-  fmt.log.info('Integration eligibility requires the lifecycle-authorized lane and current independent approval.');
+  fmt.log.info('Integration eligibility requires the lifecycle-authorized lane and current policy-authorized approval.');
   ctx.port.exit(0);
 }
 
@@ -396,11 +399,18 @@ async function reboundHookFailure(
       },
       transitionToImplementer: (bounceSlug: string) =>
         port.transitionTask(bounceSlug, 'active', { rootDir: executionRoot, log: fmt.log.plain }),
-      applyAgentFallback: async ({ launchResult, original }) =>
-        await port.applyAgentFallback({
+      applyAgentFallback: async ({ launchResult, original }) => {
+        if (port.missionServices) {
+          const services = await port.missionServices(executionRoot);
+          const actual = launchResult?.agent || original;
+          await recordImplementerLaunch(slug, actual, services.store, services.lifecycle);
+          return actual;
+        }
+        return await port.applyAgentFallback({
           role: 'implementer', original, launchResult, state: {}, slug, worktree: executionRoot,
           log: fmt.log.plain, writeReviewStateFn: port.writeReviewState,
-        }) || original,
+        }) || original;
+      },
       verify: () => {
         gitFn(['-C', executionRoot, 'add', '-A']);
         lastResult = retryContinue();
@@ -433,7 +443,7 @@ async function handleNonConflictRebaseFailure(ctx: RebaseContext, rebaseResult: 
   }
 
   const classification = classifyHookFailure(rebaseOutput);
-  if (classification.isHookFailure && typeof port.missionServices === 'function') {
+  if (classification.isHookFailure && (typeof port.missionServices === 'function' || Boolean(port.onHookFailure))) {
     const bounce = await reboundHookFailure(ctx, rebaseOutput, classification, () => continueRebaseCommand(ctx));
     if (bounce.outcome === 'fixed') {
       await finishRebase(ctx, 'Rebase completed after hook fix.');
@@ -461,7 +471,15 @@ function continueRebaseCommand(ctx: RebaseContext, opts: { stdio?: string } = {}
  */
 function classifyRebaseConflicts(ctx: RebaseContext, rebaseOutput: string): MissionConflictClassification | null {
   const { port, gitFn, slug, area, branch, executionRoot } = ctx;
-  const conflictResult = port.resolveConflictsForMission(slug, area, { worktreePathOverride: executionRoot }) as MissionConflictClassification;
+  const current = port.detectRebaseState(executionRoot);
+  const currentFiles = current.unmergedFiles;
+  const prefix = port.missionConflictPathPrefix(slug, executionRoot);
+  // A paused index is the current conflict set; predictive merge is unsafe here.
+  const owned = currentFiles.filter(file => !port.missionServices && file.startsWith(prefix));
+  const conflictResult: MissionConflictClassification = current.inProgress || currentFiles.length > 0
+    ? { ok: true, conflictFiles: currentFiles, missionSpecificFiles: owned,
+      sharedFiles: currentFiles.filter(file => !owned.includes(file)) }
+    : port.resolveConflictsForMission(slug, area, { worktreePathOverride: executionRoot });
 
   // When rebase is in progress in the worktree, dry merge may fail. Fall back to
   // parsing the rebase output directly.
@@ -550,7 +568,7 @@ async function recoverHookFailureFromContinue(ctx: RebaseContext, driver: Contin
   if (result.status === 0) { return { result, stranded: false }; }
   const output = combineOutput(result);
   const classification = classifyHookFailure(output);
-  if (!rebaseHookRecoveryEligible(result.status, classification.isHookFailure, typeof ctx.port.missionServices === 'function')) { return { result, stranded: false }; }
+  if (!rebaseHookRecoveryEligible(result.status, classification.isHookFailure, typeof ctx.port.missionServices === 'function' || Boolean(ctx.port.onHookFailure))) { return { result, stranded: false }; }
   // Direct callers without composed mission services retain the legacy
   // hint-and-exit path; the production CLI always supplies this seam.
   const bounce = await reboundHookFailure(ctx, output, classification, () => driver.run());
@@ -712,7 +730,14 @@ function selectReplacementFamily(ctx: RebaseContext, implementer: string): strin
  */
 async function launchConflictResolver(ctx: RebaseContext, implementer: string, prompt: string): Promise<import('./ports/rebase-workflow.js').AgentLaunchResult | null> {
   const { port, executionRoot, slug } = ctx;
-  const launchOptions = { prompt, worktree: executionRoot, slug, role: 'implementer' };
+  const launchOptions = { prompt, worktree: executionRoot, slug, role: 'implementer',
+    onLaunch: async ({ agent }: { agent: string }) => {
+      if (port.missionServices) {
+        const services = await port.missionServices(executionRoot);
+        await recordImplementerLaunch(slug, agent, services.store, services.lifecycle);
+      }
+    },
+  };
   try {
     if (typeof port.missionServices === 'function') {
       await port.transitionTask(slug, 'active', { rootDir: executionRoot, log: fmt.log.plain });
@@ -763,7 +788,7 @@ async function resolveSharedConflicts(ctx: RebaseContext, conflictResult: Missio
 
   if (!recordedImplementer) {
     fmt.log.fail(`No recorded implementer for ${fmt.slug(slug)}; cannot launch conflict resolution.`);
-    fmt.log.info('Conflict resolution runs as the mission implementer. Set the task assignee to a supported agent family, then re-run.');
+    fmt.log.info('Conflict resolution runs as the mission implementer. Assign the Mission to a configured agent, then re-run.');
     fmt.log.info(`Recovery: ${fmt.command('git rebase --abort')}`);
     port.exit(1);
     return;

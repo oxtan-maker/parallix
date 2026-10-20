@@ -187,6 +187,7 @@ export interface HandoffRunRequest {
 }
 
 export interface HandoffRunResult {
+  readonly recoveryFailure?: import('../../domain/rebound-policy.js').ReboundReason;
   readonly ok: boolean;
   readonly reason?: string;
   readonly error?: string;
@@ -240,6 +241,7 @@ export interface ExecuteRepairLaunchPort {
     readonly agent: string;
     readonly prompt: string;
     readonly sessionPolicy?: import('../../domain/session.js').SessionLaunchPolicy;
+    readonly onAgentChanged?: (_agent: string) => Promise<void>;
   }): ReturnType<import('../rebound-kernel.js').ReboundStartAgent>;
   available(_agent: string): { readonly supported: boolean; readonly detail?: string; readonly reason?: string };
   readHead(_worktree: string): string | null;

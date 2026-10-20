@@ -113,6 +113,7 @@ type PreReviewRebaseOptions = {
   legacyIsForgejoReviewEnabledFn?: ((_wt: string) => boolean) | null;
   isForgejoReviewEnabledFn?: ((_wt: string) => boolean) | null;
   rebaseWorkflowOptions?: RebaseCommandOptions;
+  missionIdentityServices?: NonNullable<RebaseWorkflowPort['missionServices']>;
   runRebaseWorkflowFn?: RunRebaseWorkflowFn | null;
   createRebaseWorkflowPortFn?: CreateRebaseWorkflowPortFn | null;
 };
@@ -152,7 +153,8 @@ export async function rebaseBeforeReviewRound(slug: string, options: PreReviewRe
     publicationAttempted: false, pushGate: null, credentialFailure: null, conflictClassification: null,
   };
 
-  const port = createPort({ ...rebaseWorkflowOptions, gitFn });
+  const port = createPort({ ...rebaseWorkflowOptions, missionIdentityServices: options.missionIdentityServices, gitFn });
+  if (options.missionIdentityServices) { port.missionServices = options.missionIdentityServices; }
 
   observePreReviewRebase(port, observed, worktree, forgejoEnabledFn);
 
@@ -247,9 +249,6 @@ function observePreReviewRebase(port: RebaseWorkflowPort, observed: PreReviewReb
     observed.hookEvidence = { hook: classification?.hookType || 'hook', output: hookOutput || '' };
     return false;
   };
-  // Present so the workflow routes hook failures into the seam above rather
-  // than the legacy hint-and-exit path; the recording seam ignores the store.
-  port.missionServices = async () => ({ store: null });
   const innerReadToken = port.readToken;
   port.readToken = (user) => {
     observed.publicationAttempted = true;
@@ -257,6 +256,17 @@ function observePreReviewRebase(port: RebaseWorkflowPort, observed: PreReviewReb
     if (!token) { observed.credentialFailure = `No Forgejo token found for user "${user}". Push failed.`; }
     return token;
   };
+  const innerPublicationCredentials = port.publicationCredentials;
+  if (innerPublicationCredentials) {
+    port.publicationCredentials = (user, root) => {
+      observed.publicationAttempted = true;
+      const credentials = innerPublicationCredentials(user, root);
+      if (!credentials.token) {
+        observed.credentialFailure = `No Forgejo token found for user "${credentials.user}". Push failed.`;
+      }
+      return credentials;
+    };
+  }
   const innerCreatePr = port.createPr;
   port.createPr = (branch, user, token, options) => {
     observed.publicationAttempted = true;

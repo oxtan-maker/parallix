@@ -25,7 +25,7 @@ function fixture(reserved = true, claimed = false, settled = true) {
     },
   };
   const compose = async () => ({ service, close: async () => { events.push('closed'); } }) as unknown as Awaited<ReturnType<typeof composeWorkflowOperations>>;
-  const dependencies = { compose, worktree: () => null,
+  const dependencies = { compose, context: () => ({ ok: true as const, context: { missionId: 'task-test', missionWorktree: '/unused', missionBranch: 'mission/task-test', baseWorktree: '/base', baseBranch: 'main' } }), worktree: () => null,
     capture: (() => ({ correlateOperation: () => {}, finish: () => { events.push('capture-ended'); } })) as never,
     host: async () => {
       if (claimed) { operation = { ...operation, phase: 'preparing', owner: { pid: 99, identity: 'executor' } }; }
@@ -338,6 +338,7 @@ for (const hostFailure of [false, true]) {
     await assert.rejects(runWorkflowWorker('operation', '/unused', resolveConfiguration({}), false, undefined, {
       compose, worktree: () => '/worktree',
       capture: (() => ({ correlateOperation: () => {}, finish: () => { events.push('capture ended'); } })) as never,
+      context: () => ({ ok: true as const, context: { missionId: 'task-test', missionWorktree: '/unused', missionBranch: 'mission/task-test', baseWorktree: '/base', baseBranch: 'main' } }),
       host: async () => { throw new Error('host unavailable'); },
     }), hostFailure ? /host unavailable/ : /Unknown workflow operation/);
     assert.equal(events.at(-1), 'closed');
@@ -348,8 +349,8 @@ for (const hostFailure of [false, true]) {
 
 for (const [label, patch, expected] of [
   ['board integration runs in the resolved mission worktree', { command: 'integrate:merge' }, '/missions/task-test'],
-  ['terminal integration keeps the checkout it was typed in', { command: 'integrate:merge', invocation: { command: 'integrate', args: ['task-test'] } }, '/host'],
-  ['other workflow commands keep the admitting checkout', { command: 'active:execute' }, '/host'],
+  ['terminal integration resolves the Mission checkout', { command: 'integrate:merge', invocation: { command: 'integrate', args: ['task-test'] } }, '/missions/task-test'],
+  ['execute resolves the Mission checkout', { command: 'active:execute' }, '/missions/task-test'],
 ] as const) {
   test(`${label} (TASK-2777)`, async () => {
     const f = fixture();
@@ -360,7 +361,7 @@ for (const [label, patch, expected] of [
       context: (slug, root) => { resolved.push(`${slug}@${root}`); return { ok: true, context: { missionId: slug, missionWorktree: `/missions/${slug}`, missionBranch: `mission/${slug}`, baseWorktree: '/host', baseBranch: 'main' } }; },
       host: async (_cli, _operation, root) => { roots.push(root); return { exitCode: 0, signal: null }; } });
     assert.deepEqual(roots, [expected]);
-    assert.deepEqual(resolved, expected === '/host' ? [] : ['task-test@/host']);
+    assert.deepEqual(resolved, ['task-test@/host']);
   });
 }
 
