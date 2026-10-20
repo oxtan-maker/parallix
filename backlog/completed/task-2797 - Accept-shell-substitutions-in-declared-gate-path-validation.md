@@ -1,7 +1,7 @@
 ---
 id: TASK-2797
 title: Accept shell substitutions in declared-gate path validation
-status: ready-for-integration
+status: done
 assignee: []
 created_date: '2026-10-20 10:34'
 updated_date: '2026-10-20 10:40'
@@ -33,6 +33,8 @@ The px-0017 real-agent smoke rerun failed when a valid declared shell gate conta
 Implementation is underway in px-0017 retained integration repair. Link final commit and verification evidence here after review/integration; do not duplicate that work.
 
 Recovery complete: px-0017 is approved in integration with clean worktree; approval covers 2b040996579267d03cb401e873c184d67293d4c9 (rebased validator fix from bf31426fa). Independent disposable-tree owning-suite verification: parent plus regression 14 pass/1 fail precisely on substitution; fixed tree 15 pass/0 fail, new case 0.408 ms. Missing scripts inside substitutions and after && remain rejected. Exact real-agent smoke passed on repair (131 s), then automatic harness rerun passed (140.3 s); declared verification passed. Gate commands, selection and budgets unchanged. Fix is reviewed in PR #748, not on main until operator integration; avoid duplicate implementation.
+
+Mission task-2797 carries that reviewed repair rather than a competing one: regression bf9d761b1 (reused PR #748 case, red on the unrepaired parent at test/unit/application/gate-validation-refactor.test.ts:109) then validator commit 93d635026 whose gateCommandMissingFile hunk is byte-identical to PR #748 commit 2b040996579267d03cb401e873c184d67293d4c9. PR #748 stays unmerged on review/mission/px-0017; main ffd582bba is still unrepaired, so mission/task-2797 delivers the fix. Verification on 93d635026: owning suite 15 pass/0 fail; gate contract suites (gate-validation-refactor, mission-handoff-use-case-contract, review-gate-repair-contract) 113 pass/0 fail under --unit-test-headroom; unchanged real-agent smoke command node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/agents/real-agent-smoke.test.ts gave 1 pass/0 fail/2 pre-existing conditional codex skips in 216 s; disposable-repo public px exercise accepted and executed gate test "$(./hello.sh)" = "Hello, World!" and rejected test "$(./missing-greeting.sh)" = "Hello, World!" with Gate command references non-existent file, blocking handoff; ./scripts/verify-local.sh all passed on 8c47e398d (the existing verifier reused its successful uncovered unit proof). ./scripts/verify-local.sh static-analysis passed with zero ESLint warnings, production/script/test typechecks and test hygiene clean; npm run lint is not a repository script. Retained smoke/manual execution evidence: run:workflow-0303bae8-955c-4900-b713-a6eae4ab33d4:stdout@116000+11597, with acceptance at stdout@101050+550 and rejection at stdout@112812+300. The disposable fixtures were removed. PR #748 repair 2b040996579267d03cb401e873c184d67293d4c9 is not an ancestor of local main; this mission carries its reused fix as 93d635026, pending integration.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
