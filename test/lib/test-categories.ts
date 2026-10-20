@@ -258,6 +258,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/rebase/rebase-approval-coverage.test.ts',
   // TASK-2582 / TASK-2322.05: real migrated SQLite lifecycle boundaries; CI-safe.
   'integration/sqlite/mission-use-case-persistence-contract.test.ts',
+  'integration/sqlite/mission-handoff-lane-events-contract.test.ts',
   'integration/integrate/workflow-repair-lane-boundaries.test.ts',
   // TASK-2514: real migrated SQLite lifecycle boundary for the human approve
   // after an active-state repair; CI-safe.

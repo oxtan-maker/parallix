@@ -1,8 +1,8 @@
 ---
 id: TASK-2783
 title: Complete the three overlapping lifecycle test consolidations
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-19 09:54'
 labels: []
 dependencies: []

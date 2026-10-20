@@ -75,6 +75,9 @@ import { createRebaseWorkflowPort } from '../../../src/adapters/rebase/rebase-wo
 import { runRebaseWorkflow } from '../../../src/application/rebase-workflow.js';
 import { SOURCE_PX } from '../../lib/px-entry.js';
 import { run } from '../../../src/composition/create-cli.js';
+// CLI cold-loading is shared immutable setup; case budgets cover the workflow
+// and its real pinned children, including their source-loader startup.
+import '../../../src/composition/cli-command-registry.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import { installReviewRepairAgent } from '../../fixtures/review-repair-agent-preload.js';
 import { setWorkflowLaunchPort, setCommandPathProbe, setLauncherHealthProbe } from '../../../src/adapters/agents/agents.js';

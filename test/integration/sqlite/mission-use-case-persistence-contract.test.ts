@@ -727,7 +727,7 @@ describe('Lifecycle ordering', () => {
   //   - multi-round review: test/integration/integrate/workflow-repair-lane-boundaries.test.ts
   //   - approval replay without duplicate lane events:
   //     test/integration/integrate/workflow-repair-lane-boundaries.test.ts 'approval replay emits no duplicate lane event',
-  //     test/unit/domain/mission-handoff-lane-events-contract.test.ts
+  //     test/integration/sqlite/mission-handoff-lane-events-contract.test.ts
   //   - stale versions never overwriting state:
   //     this suite (Mission use cases section) 'SC2: a stale expected
   //     version is refused before the domain decides' and 'SC2: a stale write
@@ -793,8 +793,10 @@ describe('Lifecycle ordering', () => {
       },
       autonomousReview: { async start() {} },
       repairLaunch: {
-        async launch() { return {}; },
-        available() { return { supported: true }; },
+        // No repair path is reachable: checkpoint and handoff ports pass.
+        // Unsupported matches the former launch-order fixture; fail on misuse.
+        async launch() { throw new Error('Unexpected activation repair launch'); },
+        available() { return { supported: false }; },
         readHead() { return null; },
       },
       output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
@@ -822,9 +824,10 @@ describe('Lifecycle ordering', () => {
       await agentGate;
       return { agent: AGENT, rebaseDeferred: false, errored: false, errorMessage: null, exitStatus: 0, detail: null };
     });
+    let pending: ReturnType<ExecuteMissionService['execute']> | undefined;
     try {
       const service = new ExecuteMissionService(ports);
-      const pending = service.execute({
+      pending = service.execute({
         operationId: `active:${SLUG}:ordering`,
         slug: SLUG,
         agent: 'claude',
@@ -845,6 +848,7 @@ describe('Lifecycle ordering', () => {
       assert.equal(outcome.status, 'completed');
     } finally {
       releaseAgent();
+      await pending;
       await close();
     }
   });

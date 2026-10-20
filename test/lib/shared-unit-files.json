@@ -54,8 +54,6 @@
     "unit/application/controller/board-command-stale-status.test.ts",
     "unit/application/gate-validation-refactor.test.ts",
     "unit/application/github-publish/github-publish.test.ts",
-    "unit/application/handoff-transition-idempotency.test.ts",
-    "unit/application/handoff-use-case.test.ts",
     "unit/application/lifecycle-timing.test.ts",
     "unit/application/persistence-domain-mapping.test.ts",
     "unit/application/pre-review-rebound-contract.test.ts",

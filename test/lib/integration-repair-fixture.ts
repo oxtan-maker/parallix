@@ -1,4 +1,7 @@
 import { fixtureMission as typedMissionFixture } from '../fixtures/mission-builders.js';
+// Load the immutable CLI composition with the fixture modules. These cases
+// measure workflow execution, not the first tsx compilation of the registry.
+import '../../src/composition/cli-command-registry.js';
 // Composed fixture for the integration repair loop (TASK-2620).
 //
 // A real Git repository with a mission worktree, the production SQLite Mission
