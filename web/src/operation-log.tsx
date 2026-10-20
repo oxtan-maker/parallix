@@ -1,6 +1,6 @@
 /**
  * The operation log strip: the server's own entries, printed in the order
- * received. Nothing is reconstructed, timestamped or reformatted here.
+ * received. Display formatting never changes producer timestamps or identities.
  *
  * Live progress is kept beside snapshots. Supported (operationId, sequence)
  * identities absorb persisted/replayed events. Unmatched live entries are
@@ -56,6 +56,31 @@ export function withLiveProgress(snapshot: WebBoardSnapshot, live: LiveProgress)
   return { ...snapshot, operationLog: merged.slice(-OPERATION_LOG_LIMIT) };
 }
 
+/** Native disclosure keeps the complete instant available to keyboard and AT users. */
+function Timestamp({ source }: { source: string }) {
+  // Date-only and timezone-less strings do not identify an instant honestly.
+  const instant = typeof source === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(source)
+    ? new Date(source) : new Date(Number.NaN);
+  const year = Number(source?.slice(0, 4));
+  const month = Number(source?.slice(5, 7));
+  const day = Number(source?.slice(8, 10));
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] ?? 0;
+  // Date.parse normalizes impossible calendar dates such as February 30.
+  const valid = Number.isFinite(instant.getTime()) && day >= 1 && day <= daysInMonth;
+  const short = valid ? new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).format(instant) : 'Time unavailable';
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const detail = valid ? `${new Intl.DateTimeFormat('en-GB', {
+    dateStyle: 'full', timeStyle: 'long', hourCycle: 'h23',
+  }).format(instant)} (${zone}); source: ${source}` : source || 'No timestamp supplied';
+  return <details style={{ display: 'inline-block', verticalAlign: 'top' }}>
+    <summary aria-label={`${short} — full timestamp details`} style={{ cursor: 'pointer' }}>{short}</summary>
+    <span>{detail}</span>
+  </details>;
+}
+
 export function OperationLog({ snapshot }: { snapshot: WebBoardSnapshot }) {
   return (
     <section
@@ -68,7 +93,7 @@ export function OperationLog({ snapshot }: { snapshot: WebBoardSnapshot }) {
       {snapshot.operationLog.length === 0 && <div style={{ color: C.faint }}>no operations recorded</div>}
       {snapshot.operationLog.map((entry, index) => (
         <div key={`${index}:${entry.operationId}:${entry.sequence ?? ''}`} style={{ color: C.dim, whiteSpace: 'pre-wrap' }}>
-          {entry.timestamp}  {entry.phase}  {entry.message}{'agent' in entry ? `  (${entry.agent})` : ''}
+          <Timestamp source={entry.timestamp} />{'  '}{entry.phase}{entry.message === entry.phase ? '' : `  ${entry.message}`}{'agent' in entry ? `  (${entry.agent})` : ''}
         </div>
       ))}
     </section>

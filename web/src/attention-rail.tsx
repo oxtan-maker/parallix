@@ -33,13 +33,13 @@ const headingStyle = {
   ...laneHeading, color: C.amber,
 } as const;
 
-function AttentionEntry({ item, onAction, onSelect, selected, pendingCommands, repeated }: { repeated: boolean; item: WebAttentionItem; onAction: (item: WebAttentionItem, control: HTMLButtonElement) => void; onSelect: (id: string) => void; selected: boolean; pendingCommands: PendingCommands }) {
+function AttentionEntry({ item, onAction, onSelect, selected, pendingCommands, repeated }: { repeated: boolean; item: WebAttentionItem; onAction: (item: WebAttentionItem, control: HTMLButtonElement, agent?: string) => void; onSelect: (id: string) => void; selected: boolean; pendingCommands: PendingCommands }) {
   const accent = REASON_ACCENT[item.reason.kind];
   return (
     <article
       data-board-card={item.missionId}
       tabIndex={0}
-      aria-selected={selected}
+      aria-current={selected}
       onFocus={() => onSelect(item.missionId)}
       style={{
         ...laneCard(selected), background: C.card,
@@ -72,13 +72,13 @@ function AttentionEntry({ item, onAction, onSelect, selected, pendingCommands, r
         >
           $ {item.action.display}
         </span>
-        <ActionButton action={item.action} label="run ▸" pending={pendingCommands.get(item.missionId)} onInvoke={(_action, control) => onAction(item, control)} />
+        <ActionButton action={item.action} label="run ▸" pending={pendingCommands.get(item.missionId)} onInvoke={(_action, control, agent) => onAction(item, control, agent)} />
       </div>
     </article>
   );
 }
 
-export function AttentionRail({ snapshot, onAction, onSelect, selectedId, pendingCommands, reasonCards = [] }: { reasonCards?: readonly WebMissionCard[]; snapshot: WebBoardSnapshot; onAction: (item: WebAttentionItem, control: HTMLButtonElement) => void; onSelect: (id: string) => void; selectedId: string | null; pendingCommands: PendingCommands }) {
+export function AttentionRail({ snapshot, onAction, onSelect, selectedId, pendingCommands, reasonCards = [] }: { reasonCards?: readonly WebMissionCard[]; snapshot: WebBoardSnapshot; onAction: (item: WebAttentionItem, control: HTMLButtonElement, agent?: string) => void; onSelect: (id: string) => void; selectedId: string | null; pendingCommands: PendingCommands }) {
   return (
     <section
       aria-labelledby="attention-heading"

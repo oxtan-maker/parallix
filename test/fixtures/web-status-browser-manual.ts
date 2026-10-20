@@ -71,7 +71,8 @@ try {
   const duplicate = first.locator('summary', { hasText: 'Blocking reason' });
   await duplicate.click();
   assert.equal(await first.getByText(reason, { exact: true }).filter({ visible: true }).count(), 2);
-  assert.equal(await page.locator('[style*="repeating-linear-gradient"]').count(), 0);
+  const grilleCount = await page.locator('[style*="repeating-linear-gradient"]').count();
+  assert.ok(grilleCount > 0);
   const done = page.locator('details.shipped');
   await done.locator(':scope > summary').click();
   assert.equal(await done.getAttribute('open'), '');
@@ -93,7 +94,7 @@ try {
   assert.equal((fixture.requests[0] as { missionId: string }).missionId, cards[0].id);
   console.log(JSON.stringify({ compactHeight, expandedHeight, repeatedVisiblePerMission: 1,
     distinctReasons: true, recoveryKeyboardAndTouch: true, accessibleExpandedState: true,
-    unknownAndFailedGates: true, redBorders: true, grilleCount: 0,
+    unknownAndFailedGates: true, redBorders: true, grilleCount,
     doneDisclosure: true, reducedMotion: true, twoStageCancel: true,
     missionLocalOutcome: true, operatorWrites: 0, assetHash: fixture.assetHash }));
 } finally { await fixture.close(); }

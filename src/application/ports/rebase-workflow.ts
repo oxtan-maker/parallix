@@ -51,9 +51,11 @@ export type PreReviewRebaseOperation = 'commit' | 'rebase' | 'push';
  * review loop can consume gate failures from either source unchanged.
  */
 export interface PreReviewRebaseGateEvidence {
+  failureReason?: import('../../domain/failure-reason.js').FailureReason;
+  signal?: string | null;
   area: string;
   command: string;
-  exitCode: number;
+  exitCode: number | null;
   stdout: string;
   stderr: string;
   error?: string;

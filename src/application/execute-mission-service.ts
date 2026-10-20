@@ -40,6 +40,7 @@ export interface ExecuteMissionRequest {
    * rule). CLI callers omit it and await the agent in-process.
    */
   readonly detached?: boolean;
+  readonly pinnedAgent?: boolean;
 }
 
 export interface ExecuteMissionResult {
@@ -237,6 +238,7 @@ export class ExecuteMissionService {
       plan,
       taskResolution: prepared.taskResolution,
       preselectedAgent: selectedAgent,
+      pinnedAgent: request.pinnedAgent,
       detached: request.detached === true,
       authorityAlreadyActive: true,
       // A usage block reroutes the same operation to the next eligible family.

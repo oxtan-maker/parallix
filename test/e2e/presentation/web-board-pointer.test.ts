@@ -78,7 +78,7 @@ for (const lane of ['backlog', 'refined', 'active', 'review', 'integration'] as 
             for (const [command, kind] of [['active', 'active:execute'], ['draft', 'draft:create'], ['handoff', 'handoff:record'], ['review', 'review:submit'], ['integrate', 'integrate:merge']] as const) {
               await clickCommand(card.locator(`button[aria-label^="px ${command}"]`));
               assert.deepEqual(commandFields(requests.at(-1)), { missionId: 'task-pointer-disposable', kind, missionStatusAtRequest: lane });
-              assert.equal(await card.getAttribute('aria-selected'), 'false');
+              assert.equal(await card.getAttribute('aria-current'), 'false');
               assert.equal(await page.getByRole('dialog', { name: /Mission progress/ }).count(), 0);
             }
             const keys = requests.map(request => (request as { requestKey: string }).requestKey);
@@ -86,7 +86,7 @@ for (const lane of ['backlog', 'refined', 'active', 'review', 'integration'] as 
             return;
           }
           await clickAt(card.locator('button[aria-label^="px cancel"]'));
-          assert.equal(await card.getAttribute('aria-selected'), 'false');
+          assert.equal(await card.getAttribute('aria-current'), 'false');
           const dialog = page.getByRole('dialog', { name: 'Confirm cancelling task-pointer-disposable' });
           await dialog.waitFor();
           assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'keep mission');
@@ -152,7 +152,7 @@ test('SSE refresh during coordinate press cannot invoke another action or fall t
       await fixture.render(pointerSnapshot(lane, ['active', 'handoff', 'integrate']), true);
       await fixture.releasePress();
       assert.equal(requests.length, 0);
-      assert.equal(await page.locator('[data-board-card]').getAttribute('aria-selected'), 'false');
+      assert.equal(await page.locator('[data-board-card]').getAttribute('aria-current'), 'false');
       assert.equal(await page.locator('[role="dialog"]').count(), 0);
       assert.equal(await page.getByRole('dialog', { name: /Mission progress/ }).count(), 0);
       await fixture.render(pointerSnapshot(lane));

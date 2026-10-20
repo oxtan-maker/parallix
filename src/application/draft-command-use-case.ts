@@ -33,12 +33,12 @@ export class DraftCommandUseCase {
     await this.run(args, options, false);
   }
 
-  /** Typed board entry point: the mission slug is the only input.
+  /** Typed board entry point: mission identity and optional explicit family.
    * Runs the exact same nine-step sequence through the port; a workflow
    * abort throws instead of returning, so the caller maps it to a typed
    * failure/rejection. */
-  async executeForSlug(slug: string): Promise<void> {
-    await this.run([slug], {}, true);
+  async executeForSlug(slug: string, agent?: import('../domain/agents.js').AgentFamily): Promise<void> {
+    await this.run(agent ? [slug, '--agent', agent] : [slug], agent ? { pinnedAgent: true } : {}, true);
   }
 
   private async run(args: string[], options: Record<string, unknown>, abortOnExit: boolean): Promise<void> {

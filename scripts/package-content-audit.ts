@@ -6,6 +6,11 @@
 // state. TASK-2288 retired the transitional CommonJS dist/ tree entirely; the
 // `dist/` prefix stays in the forbidden list so a reintroduced tree can never
 // slip into a published tarball (see docs/npm-package-major-migration.md).
+//
+// The web shell ships its built assets, and the two intended board faces ship
+// as packaged font subsets with their licence and coverage notices: the
+// packaged host serves only what the tarball carries, so a lost subset or
+// notice would silently fall back to the platform faces (ADR 0054, TASK-2773.11).
 
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
@@ -30,6 +35,14 @@ const REQUIRED_PATHS = [
 // from build/ in the checkout, in an npm install, and from the SEA payload.
 const REQUIRED_PREFIXES = [
   'build/config/', 'build/migrations/', 'build/prompts/', 'build/templates/', 'build/web/assets/',
+];
+// Each intended family must reach the tarball as at least one woff2 subset, and
+// the licence text plus the subset coverage record must travel with them.
+const REQUIRED_FONT_FAMILIES = ['jetbrains-mono', 'barlow-condensed'];
+const REQUIRED_FONT_NOTICES = [
+  'build/web/fonts/FONTS.txt',
+  'build/web/fonts/OFL-JetBrains-Mono.txt',
+  'build/web/fonts/OFL-Barlow-Condensed.txt',
 ];
 const FORBIDDEN_PATHS = new Set([
   'tsconfig.json', 'tsconfig.test.json', 'eslint.config.mjs',
@@ -58,6 +71,14 @@ function violationsFor(files: string[]): string[] {
   }
   for (const prefix of REQUIRED_PREFIXES) {
     if (!files.some(file => file.startsWith(prefix))) {violations.push(`missing required package asset directory: ${prefix}`);}
+  }
+  for (const family of REQUIRED_FONT_FAMILIES) {
+    if (!files.some(file => file.startsWith(`build/web/fonts/${family}-`) && file.endsWith('.woff2'))) {
+      violations.push(`missing required package font subset: build/web/fonts/${family}-*.woff2`);
+    }
+  }
+  for (const notice of REQUIRED_FONT_NOTICES) {
+    if (!names.has(notice)) {violations.push(`missing required package font notice: ${notice}`);}
   }
   for (const file of files) {
     if (FORBIDDEN_PATHS.has(file) || file.endsWith('.ts') || file.endsWith('.tsx') || file.endsWith('.d.ts')

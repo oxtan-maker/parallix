@@ -556,6 +556,8 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     // Process liveness reads one named /proc entry as bounded recovery
     // evidence. It stores nothing and owns no ADR 0053 concept (TASK-2373).
     'src/adapters/process/process-liveness.ts',
+    // Read-only kernel process/group/environment metadata; no durable domain state.
+    'src/adapters/process/process-group-liveness.ts',
     // The test-runner memory boundary reads cgroup accounting files under
     // /proc and /sys/fs/cgroup; it stores nothing (TASK-2722).
     'src/adapters/process/test-memory-cgroup.ts',

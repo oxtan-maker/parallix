@@ -90,3 +90,40 @@ test('disposable repositories and mission worktrees share canonical capacity two
     assert.equal(fs.readFileSync(path.join(client.home, 'credentials.json'), 'utf8'), path.basename(client.home).replace('-home', ''));
   }
 });
+
+
+test('verification leases exclude independently of agent capacity and recover stale owners (TASK-2791)', async t => {
+  const temp = mkdtemp('gate-admission-');
+  fs.writeFileSync(path.join(temp, 'workflow.config.json'), JSON.stringify({ adapters: { gates: { maxConcurrent: 1 } } }));
+  const configuration = resolveConfiguration({ PARALLIX_CUSTOM_ADMISSION_HOME: temp });
+  t.after(async () => { await clearCustomAdmissionStateCache(); fs.rmSync(temp, { recursive: true, force: true }); });
+  const { SqliteCustomAgentLeaseRepository } = await import('../../../src/adapters/sqlite/custom-agent-lease-repository.js');
+  const { processIdentity } = await import('../../../src/adapters/process/process-liveness.js');
+  const { createGateAdmission } = await import('../../../src/composition/gate-admission.js');
+  const { db } = await initCustomAdmissionState(configuration);
+  const gates = new SqliteCustomAgentLeaseRepository(db, 'verification');
+  const agents = new SqliteCustomAgentLeaseRepository(db);
+  const owner = processIdentity(process.pid)!;
+  const first = await gates.acquire('/one', 1, owner);
+  assert.ok(first);
+  assert.equal(await gates.acquire('/two', 1, owner), null);
+  const agent = await agents.acquire('/two', 1, owner);
+  assert.ok(agent, 'gate exclusion consumes no agent capacity');
+  const admission = createGateAdmission(configuration);
+  const controller = new AbortController();
+  let started = false;
+  const waiting = admission.run(temp, async () => { started = true; }, controller.signal);
+  controller.abort();
+  await assert.rejects(waiting, /abort/i);
+  assert.equal(started, false);
+  const progress = admission.run(temp, async () => { started = true; });
+  gates.release(first);
+  await progress;
+  assert.equal(started, true);
+  const stale = await gates.acquire('/one', 1, { pid: 2147483647, startId: 'missing' });
+  assert.ok(stale);
+  const recovered = await gates.acquire('/two', 1, owner);
+  assert.ok(recovered);
+  gates.release(recovered); agents.release(agent);
+  assert.equal((await db.query('SELECT * FROM custom_agent_leases')).length, 0);
+});

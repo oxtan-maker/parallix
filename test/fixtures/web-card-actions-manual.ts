@@ -1,0 +1,114 @@
+/** Isolated running-board walkthrough; only disposable projections and in-memory requests. */
+import assert from 'node:assert/strict';
+import { pointerBoard, compactPointerSnapshot, pointerSnapshot } from './web-pointer-board.js';
+import { makeCard, makeProjection } from './board-projection.js';
+import { toWebBoardSnapshot } from '../../src/interfaces/web/transport.js';
+import { C } from '../../web/src/palette.js';
+const fixture = await pointerBoard();
+try {
+  const { page } = fixture;
+  await page.route('**/api/terminal/**', route => route.fulfill({ json: { state: 'missing', probe: { kind: 'missing' }, operations: [], notices: [], unattributed: [] } }));
+  for (const width of [1200, 1900]) {
+    await page.setViewportSize({ width, height: 1000 });
+    for (const lane of ['refined', 'integration'] as const) {
+      const snapshot = compactPointerSnapshot(lane);
+      const stage = snapshot.stages.find(stage => stage.lane === lane)!;
+      const card = stage.cards[0];
+      const long = { ...snapshot, stages: snapshot.stages.map(item => item === stage ? { ...item, cards: [{ ...card, actions: card.actions.map(action => action.kind === 'mission:edit' || action.kind === 'mission:cancel' ? action : { ...action, label: 'Continue with the projected integration operation and preserve evidence' }) }] } : item) };
+      await fixture.render(long);
+      const article = page.locator(`[data-board-card="${card.id}"]`);
+      const controls = article.locator('.card-actions');
+      assert.equal(await controls.count(), 1);
+      const measure = async () => controls.evaluate(element => {
+        const bounds = element.getBoundingClientRect();
+        const buttons = [...element.querySelectorAll('button')].map(button => {
+          const rect = button.getBoundingClientRect();
+          return { kind: button.dataset.actionKind, x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom, width: rect.width, overflow: button.scrollWidth > button.clientWidth + 1 };
+        });
+        return { width: bounds.width, buttons, fits: buttons.every(button => button.x >= bounds.x && button.right <= bounds.right + 1 && !button.overflow) };
+      });
+      const before = await measure(); assert.ok(before.fits, JSON.stringify(before));
+      const primary = controls.locator('button:not([data-action-kind="mission:edit"]):not([data-action-kind="mission:cancel"])').first();
+      fixture.hold(); await primary.click({ force: true });
+      await page.waitForFunction(() => !!document.querySelector('[aria-label*=" — starting"]'));
+      const pending = await measure(); assert.ok(pending.fits, JSON.stringify(pending));
+      await primary.click({ force: true });
+      assert.equal(fixture.requests.length, 1);
+      assert.equal((fixture.requests[0] as { kind: string }).kind, await primary.getAttribute('data-action-kind'));
+      fixture.release();
+      await page.waitForFunction(() => !document.querySelector('[aria-label*=" — starting"]'));
+      console.log(JSON.stringify({ viewport: width, lane, articleWidth: await article.evaluate(element => element.getBoundingClientRect().width), before, pending }));
+      fixture.requests.length = 0;
+      const cancel = controls.locator('[data-action-kind="mission:cancel"]');
+      await cancel.click();
+      assert.equal(fixture.requests.length, 0);
+      await page.getByRole('dialog', { name: `Confirm cancelling ${card.id}` }).waitFor();
+      await page.keyboard.press('Escape');
+      assert.ok(await cancel.evaluate(element => document.activeElement === element));
+      await cancel.click();
+      await page.getByRole('button', { name: `delete ${card.id} lifecycle rows`, exact: true }).click();
+      await page.waitForFunction(() => !document.querySelector('[aria-label^="Confirm cancelling"]'));
+      assert.equal(fixture.requests.length, 1);
+      assert.equal((fixture.requests[0] as { kind: string }).kind, 'mission:cancel');
+      fixture.requests.length = 0;
+      await article.hover();
+      assert.equal(await article.evaluate(element => getComputedStyle(element).cursor), 'pointer');
+      assert.equal(await article.evaluate(element => getComputedStyle(element).outlineStyle), 'solid');
+      await article.focus();
+      await page.keyboard.press('Enter');
+      await page.getByRole('dialog', { name: `Mission progress for ${card.id}` }).waitFor();
+      assert.equal(await article.getAttribute('aria-current'), 'true');
+      assert.equal(await article.getAttribute('aria-selected'), null);
+      await page.keyboard.press('Escape');
+      assert.ok(await article.evaluate(element => document.activeElement === element));
+      assert.equal(await article.evaluate(element => getComputedStyle(element).outlineWidth), '2px');
+      await page.keyboard.press('Space');
+      await page.getByRole('dialog', { name: `Mission progress for ${card.id}` }).waitFor();
+      await page.keyboard.press('Escape');
+      await article.locator('p').first().click();
+      await page.getByRole('dialog', { name: `Mission progress for ${card.id}` }).waitFor();
+      await page.keyboard.press('Escape');
+      const summary = article.locator('summary').first();
+      if (await summary.count()) { await summary.click(); }
+      await article.evaluate(element => { const link = document.createElement('a'); link.href = '#fixture'; link.textContent = 'Fixture link'; element.append(link); });
+      await article.getByRole('link', { name: 'Fixture link' }).click();
+      await article.dispatchEvent('dragstart', { dataTransfer: await page.evaluateHandle(() => new DataTransfer()) });
+      await article.dispatchEvent('dragend');
+      assert.equal(await page.getByRole('dialog').count(), 0);
+      console.log(JSON.stringify({ lane, viewport: width, mouseKeyboardProgress: true, focusRestored: true, cancellationConfirmedOnce: true, nestedAndDragExcluded: true }));
+    }
+  }
+  const live = pointerSnapshot('active', ['handoff'], 'running');
+  const active = live.stages.find(stage => stage.lane === 'active')!.cards[0];
+  const intake = compactPointerSnapshot('refined').stages.find(stage => stage.lane === 'refined')!.cards[0];
+  const done = toWebBoardSnapshot(makeProjection({ done: [makeCard({ status: 'done', lane: 'done', closed: true })] })).stages.find(stage => stage.lane === 'done')!;
+  await fixture.render({ ...live, attentionQueue: [{ missionId: active.id, rank: 1, reason: { kind: 'gate-failed', detail: 'Fixture failed gate' }, action: active.actions[0], dependsOnSources: [] }], stages: live.stages.map(stage => stage.lane === 'active' ? { ...stage, cards: [{ ...active, gate: 'failed', blockingReason: 'Fixture blocked' }] } : stage.lane === 'refined' ? { ...stage, count: 1, cards: [{ ...intake, id: 'task-fixture-intake' }] } : stage.lane === 'done' ? done : stage) });
+  const attention = page.locator('[aria-labelledby="attention-heading"] article');
+  await attention.focus();
+  assert.equal(await attention.getAttribute('aria-current'), 'true');
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await page.locator('[data-board-card="task-fixture-intake"]').getAttribute('aria-current'), 'true');
+  assert.equal(await attention.getAttribute('aria-current'), 'false');
+  await attention.locator('span').first().click();
+  await page.getByRole('dialog', { name: `Mission progress for ${active.id}` }).waitFor();
+  await page.keyboard.press('Escape');
+  assert.equal(await attention.getAttribute('aria-current'), 'true');
+  assert.equal(await page.locator('article[aria-selected]').count(), 0);
+  const flight = page.locator('section[aria-label="active stage"] article');
+  const red = await page.evaluate(color => { const probe = document.createElement('div'); probe.style.color = color; document.body.append(probe); const result = getComputedStyle(probe).color; probe.remove(); return result; }, C.red);
+  await flight.focus();
+  assert.equal(await flight.evaluate(element => getComputedStyle(element).borderTopColor), red);
+  await attention.focus();
+  assert.equal(await flight.evaluate(element => getComputedStyle(element).borderTopColor), red);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  assert.ok(await flight.locator('.fan.spin').count());
+  assert.equal(await flight.locator('.fan.spin').first().evaluate(element => getComputedStyle(element).animationName), 'none');
+  const rail = page.locator('details[aria-label="done stage"]');
+  assert.equal(await rail.getAttribute('open'), null);
+  await rail.locator(':scope > summary').click();
+  assert.notEqual(await rail.getAttribute('open'), null);
+  await rail.locator(':scope > summary').click();
+  assert.equal(await rail.getAttribute('open'), null);
+  assert.equal(await page.getByRole('dialog').count(), 0);
+  console.log('PASS: attention/intake/flight current semantics; mouse and ArrowDown selection; red blocked/failed edge survives selection; reduced-motion disables fan animation; done disclosure opens/closes. Only disposable in-memory requests.');
+} finally { await fixture.close(); }

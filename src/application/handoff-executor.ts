@@ -1,3 +1,4 @@
+import { gateFailureReasonFromProcess } from '../domain/failure-classification.js';
 
 /**
  * HandoffExecutor — sequences a single handoff invocation (TASK-2332.09).
@@ -69,14 +70,8 @@ export class HandoffExecutor {
     // Recursion guard: prevent infinite retry loops when gatekeeper pushback
     // persists across relaunch attempts. Hard limit of 3 total handoff invocations.
     const { currentAttempt, retriesLeft } = handoffRetryBudget(bindings);
-    if (handoffBudgetExceeded(currentAttempt)) {
-      const msg = `Handoff exceeded maximum attempts (3). Manual intervention required.`;
-      error(msg);
-      return { ok: false, error: msg };
-    }
-
-    // Global retry budget: controls total relaunch attempts across all recursive calls.
-    // Default is 2 (one initial + one retry). Decremented with each relaunch.
+    const requestFailure = validateHandoffRequest(slug, opts, bindings, ports);
+    if (requestFailure) { error(requestFailure.error); return requestFailure; }
 
     // A recorded contract does not need a directory of legacy Markdown inputs.
     // Load it before location verification, and fail closed on missing DB state.
@@ -143,6 +138,7 @@ export class HandoffExecutor {
         runGatekeeperFn,
         missionServicesFn,
         occurredAt,
+        reviewer: options.reviewer,
         retryHandoff: (retrySlug, retryOptions) => this.performHandoff(retrySlug, retryOptions),
       });
     }
@@ -155,7 +151,7 @@ export class HandoffExecutor {
     // architecture invariant: Transition Mission state through SqliteMissionStore FIRST.
     // The durable Mission state must commit before any external Backlog effect.
     // Database unavailability fails the operation (architecture invariant: fail-closed).
-    return this.completeReview(slug, prepared, published, bindings, internalLog, gatekeeperPushedBack);
+    return this.completeReview(slug, prepared, published, bindings, internalLog, gatekeeperPushedBack, options.reviewer);
   }
 
   /** Rebase onto the base branch, then re-read the implementer a repair may have replaced. */
@@ -184,7 +180,7 @@ export class HandoffExecutor {
     return { forgejoUser: current.implementer! };
   }
 
-  private async completeReview(slug: string, prepared: HandoffStart, published: import('./handoff-forgejo-publication.js').HandoffPublication, bindings: HandoffBindings, internalLog: HandoffBindings['log'], gatekeeperPushedBack: boolean): Promise<HandoffResult> {
+  private async completeReview(slug: string, prepared: HandoffStart, published: import('./handoff-forgejo-publication.js').HandoffPublication, bindings: HandoffBindings, internalLog: HandoffBindings['log'], gatekeeperPushedBack: boolean, reviewer?: import('../domain/agents.js').AgentFamily): Promise<HandoffResult> {
     const ports = this.ports;
     const { forgejoUser, forgejoEnabled, missionServicesFn, verification, evidence } = prepared;
     const { rootDir, branch, missionDir: missionDirPath } = verification;
@@ -194,6 +190,7 @@ export class HandoffExecutor {
     const reviewOutcome = await this.submission.submit(slug, {
       rootDir, branch, missionDirPath, forgejoUser, submittedPr, occurredAt, missionServicesFn,
       eligibleAgentsForStepFn, selectAgentFn, log, error,
+      reviewer,
       checkpoint: finalCheckpoint ? { finalCheckpoint, checkpointContent, evidenceRows } : null,
     });
     if (reviewOutcome) { return reviewOutcome; }
@@ -421,7 +418,8 @@ function handoffRebaseFailure(rebaseResult: Awaited<ReturnType<HandoffWorkflowPo
         error: msg,
         gateOutput: { stdout: gate.stdout, stderr: gate.stderr },
         gateFailure: {
-          area: gate.area, command: gate.command, cwd: rootDir, exitCode: gate.exitCode,
+          failureReason: gate.failureReason ?? gateFailureReasonFromProcess({ status: gate.exitCode, signal: gate.signal, stdout: gate.stdout, stderr: gate.stderr }),
+          signal: gate.signal, area: gate.area, command: gate.command, cwd: rootDir, exitCode: gate.exitCode,
           stdout: gate.stdout, stderr: gate.stderr,
           ...(ports.verification.isTransientVerificationFailure({ stdout: gate.stdout, stderr: gate.stderr }) ? { transient: true } : {}),
         },
@@ -478,4 +476,22 @@ function handoffSelectionBindings(ports: HandoffWorkflowPorts, opts: PerformHand
 }
 function handoffRetryBudget(bindings: HandoffBindings) {
   return { currentAttempt: bindings.maxAttempts || 1, retriesLeft: bindings.remainingRetries !== undefined ? bindings.remainingRetries : 2 };
+}
+
+/** Refuse invalid retry budgets or explicit reviewers before handoff effects. */
+function validateHandoffRequest(slug: string, options: PerformHandoffOptions, bindings: HandoffBindings, ports: HandoffWorkflowPorts): { ok: false; error: string } | null {
+  if (handoffBudgetExceeded(handoffRetryBudget(bindings).currentAttempt)) {
+    return { ok: false, error: 'Handoff exceeded maximum attempts (3). Manual intervention required.' };
+  }
+  const reviewer = options.reviewer;
+  if (!reviewer) { return null; }
+  try {
+    const launchRoot = process.cwd();
+    const worktree = bindings.worktree || ports.missionUtils.resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
+    if (bindings.eligibleAgentsForStepFn('review', { worktree }).includes(reviewer)) { return null; }
+    return { ok: false, error: `Reviewer ${reviewer} is not eligible for review. Choose a family configured for the review step.` };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return { ok: false, error: `Cannot validate reviewer ${reviewer}: ${detail}. Check the review agent configuration and retry.` };
+  }
 }

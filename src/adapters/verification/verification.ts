@@ -1,3 +1,5 @@
+import { gateFailureReasonFromProcess } from '../../domain/failure-classification.js';
+import { assertIndependentGateInvocation } from '../../application/ports/gate-admission.js';
 import { verificationEnvironment } from '../config/verification-environment.js';
 import { verificationDigest as digest, readVerificationInputs } from './verification-proof-inputs.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
@@ -28,8 +30,8 @@ interface GitResult {
   error?: Error | null;
 }
 
-export type VerificationGateResult = Pick<GitResult, 'status'> & Partial<Omit<GitResult, 'status'>>;
-type VerificationRunOptions = import('../../application/ports/handoff-workflow.js').HandoffGitOptions
+export type VerificationGateResult = Pick<GitResult, 'status'> & Partial<Omit<GitResult, 'status'>> & { failureReason?: import('../../domain/failure-reason.js').FailureReason };
+type VerificationRunOptions = { progressLabel?: string } & import('../../application/ports/handoff-workflow.js').HandoffGitOptions
   & Pick<GitOptions, 'cwd' | 'env' | 'encoding' | 'maxBuffer'>;
 export type VerificationRunner = (_command: string, _args: string[], _options?: VerificationRunOptions) => VerificationGateResult;
 
@@ -182,6 +184,7 @@ export function formatVerificationCommand(area: string | undefined, rootDir: str
 
 /** @param {string} [area] @param {{rootDir?: string, log?: (_message: string) => void, stdio?: SpawnSyncOptions['stdio'], runFn?: VerificationRunner}} [options] */
 export function runVerificationGate(area: string | undefined, options: { rootDir?: string; log?: (_message: string) => void; stdio?: VerificationRunOptions['stdio']; runFn?: VerificationRunner; maxBuffer?: number; env?: NodeJS.ProcessEnv } = {}): VerificationGateResult {
+  assertIndependentGateInvocation();
   const rootDir = options.rootDir || process.cwd();
   const { command, defaultArea } = resolveVerificationAdapter(rootDir);
   const effectiveArea = area || defaultArea;
@@ -193,14 +196,16 @@ export function runVerificationGate(area: string | undefined, options: { rootDir
     return { status: 0 };
   }
 
-  const { stdio = 'inherit', runFn = run } = options;
-  return runFn('bash', ['-c', command.replaceAll('{{area}}', effectiveArea)], {
+  const { stdio = 'inherit' } = options;
+  const runFn: VerificationRunner = options.runFn ?? run;
+  const result = runFn('bash', ['-c', command.replaceAll('{{area}}', effectiveArea)], {
     progressLabel: `Repository verification (${effectiveArea})`,
     env: verificationEnvironment(options.env ?? { ...process.env }),
     cwd: rootDir,
     stdio,
     ...(stdio === 'pipe' ? { encoding: 'utf8', maxBuffer: options.maxBuffer ?? 10 * 1024 * 1024 } : {}),
   });
+  return { ...result, failureReason: result.failureReason ?? gateFailureReasonFromProcess(result) };
 }
 
 /** The gate-result artifact a lifecycle command leaves for the board to read. */
@@ -362,7 +367,7 @@ function readPublishedVerificationProof(command: string | null, rootDir: string,
   return command ? readReusableVerificationProof(command, rootDir, { gitRunner, proofPath }) : { ok: false };
 }
 
-export function captureVerifiedTreeProof(area: string | undefined, rootDir: string = process.cwd(), options: { gitRunner?: GitFn; runFn?: VerificationRunner; stdio?: VerificationRunOptions['stdio']; maxBuffer?: number; proofPath?: string; missionId?: string } = {}): { ok: boolean; proof?: VerificationProof; error?: string; exitCode?: number | null; command?: string | null; cwd?: string; stdout?: string; stderr?: string; recoveryEvidence?: import('../../application/recovery-evidence.js').RecoveryEvidenceRef; recoveryEvidenceError?: string } {
+export function captureVerifiedTreeProof(area: string | undefined, rootDir: string = process.cwd(), options: { gitRunner?: GitFn; runFn?: VerificationRunner; stdio?: VerificationRunOptions['stdio']; maxBuffer?: number; proofPath?: string; missionId?: string } = {}): { ok: boolean; proof?: VerificationProof; error?: string; exitCode?: number | null; command?: string | null; cwd?: string; stdout?: string; stderr?: string; recoveryEvidence?: import('../../application/recovery-evidence.js').RecoveryEvidenceRef; recoveryEvidenceError?: string; failureReason?: import('../../domain/failure-reason.js').FailureReason; signal?: string | null } {
   const {
     gitRunner = git,
     runFn = run,
@@ -451,7 +456,8 @@ export function assertVerifiedTreeProof(proof: { rootDir?: string; branch?: stri
   return { ok: true, proof: current };
 }
 
-export default function runWorkflow(args: string[], options: { log?: (_message: string) => void; configuration?: ParallixConfiguration } = {}): VerificationGateResult {
+export default async function runWorkflow(args: string[], options: { log?: (_message: string) => void; configuration?: ParallixConfiguration } = {}): Promise<VerificationGateResult> {
+  assertIndependentGateInvocation();
   const logFn = options.log || log.plain;
   const root = process.cwd();
   const area = resolveEffectiveArea(args[0] || options.configuration?.runtime.verifyArea, root);
@@ -464,7 +470,8 @@ export default function runWorkflow(args: string[], options: { log?: (_message: 
     logFn(reusable.diagnostic);
     return { status: 0 };
   }
-  const result = runVerificationGate(area, { stdio: 'inherit' });
+  const { runConfiguredVerification } = await import('./configured-verification.js');
+  const result = await runConfiguredVerification(area, root, options.configuration);
   if (result.status === 0 && before.ok) {
     const written = writeActiveVerificationProof(command, root, { ...options, expectedIdentity: before.identity });
     if (written.ok === false) { logFn(`Active verification proof unavailable (${written.error}).`); }

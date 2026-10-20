@@ -1,3 +1,4 @@
+import './handoff-reviewer-selection.cases.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
 import { missionId } from '../../../src/domain/mission.js';
 import { missionVersion, type MissionStore } from '../../../src/application/domain-ports.js';
@@ -642,7 +643,6 @@ test('a Mission drafted through the typed verbs with no recorded gate fails hand
   assert.deepEqual(recorder.transitions, []);
 });
 
-
 test('a typed-verb Mission requires completion and one verifiable row per distinct success criterion (TASK-2631)', async () => {
   const load = (criteria: readonly string[], goalCheck = [{ criterion: 'The greeting is fixed', evidence: '`test/unit/application/mission-handoff-use-case-contract.test.ts`' }]) => async () => ({
     kind: 'found' as const,
@@ -721,12 +721,12 @@ test('a failing declared gate returns its process evidence and blocks review (TA
   assert.equal(result.reason, 'gate-failed');
   assert.deepEqual(result.gateOutput, { stdout: 'gate stdout', stderr: 'gate stderr' });
   assert.deepEqual(result.gateFailure, {
+    failureReason: { version: 1, code: 'gate-failed' }, signal: null,
     area: 'declared gate', command: recorder.spawned[0], cwd: ROOT, exitCode: 2,
     stdout: 'gate stdout', stderr: 'gate stderr',
   });
   assert.deepEqual(recorder.transitions, []);
 });
-
 
 test('handoff use case source carries no TypeScript suppression directive (TASK-2668.01)', () => {
   const applicationDir = new URL('../../../src/application/', import.meta.url);

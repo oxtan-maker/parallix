@@ -1,8 +1,8 @@
 ---
 id: TASK-2790
 title: implement bug guards
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-19 11:35'
 labels: []
 dependencies: []

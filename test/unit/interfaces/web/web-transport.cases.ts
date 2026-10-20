@@ -1,3 +1,5 @@
+import { fixtureMission } from '../../../fixtures/mission-builders.js';
+import { projectMissionCard } from '../../../../src/application/projections/mission-board.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -792,18 +794,20 @@ test('transport version 2 rejects v1 payloads as incompatible clients, not inval
 });
 
 test('stamped checkpoint repair evidence validates after web projection (TASK-2694)', () => {
-  const card = makeFullCard({ checkpointEvidence: [{
-    name: 'CP-3', description: 'repair', goalCheck: [{
+  const mission = fixtureMission('task-2694', { checkpoints: [{
+    missionId: tid('task-2694'), name: 'CP-3', firstLine: 'repair', nextActionText: 'verify', goalCheck: [{
       criterion: 'repair verified', evidence: 'src/domain/checkpoint.ts',
       recordedRound: 3, repairedGate: 'static-analysis', repairedGates: ['transport', 'static-analysis'],
     }],
   }] });
+  const card = projectMissionCard(mission, { latestGate: 'not-run', reviewApproval: null, currentWork: null, blockingReason: null, flags: [] });
   const snapshot = toWebBoardSnapshot(makeProjection({ active: [card] }));
   assert.equal(validateWebBoardSnapshot(snapshot).ok, true);
   const wireCard = snapshot.stages.flatMap((stage) => stage.cards).find((item) => item.id === card.id)!;
   assert.deepStrictEqual(wireCard.checkpointEvidence, [{
-    name: 'CP-3', description: 'repair', goalCheck: [{
+    name: 'CP-3', description: 'repair', state: 'completed', goalCheck: [{
       criterion: 'repair verified', evidence: 'src/domain/checkpoint.ts',
+      recordedRound: 3, repairedGate: 'static-analysis', repairedGates: ['transport', 'static-analysis'],
     }],
   }]);
   assert.equal(card.checkpointEvidence[0].goalCheck[0].recordedRound, 3);
@@ -814,6 +818,19 @@ test('stamped checkpoint repair evidence validates after web projection (TASK-26
     .find((item: { id: string }) => item.id === card.id)!;
   malformedCard.checkpointEvidence[0].goalCheck[0].unrelatedKey = true;
   assert.equal(validateWebBoardSnapshot(malformed).ok, false);
+  for (const patch of [
+    { recordedRound: -1 }, { recordedRound: 1.5 }, { recordedRound: Infinity },
+    { repairedGate: 42 }, { repairedGates: 'transport' }, { repairedGates: [42] },
+  ]) {
+    const invalid = structuredClone(snapshot);
+    const row = invalid.stages.flatMap(stage => stage.cards).find(item => item.id === card.id)!.checkpointEvidence![0].goalCheck[0];
+    Object.assign(row, patch);
+    assert.equal(validateWebBoardSnapshot(invalid).ok, false, JSON.stringify(patch));
+  }
+  const legacy = toWebBoardSnapshot(makeProjection({ active: [makeFullCard({ checkpointEvidence: [{
+    name: 'CP-1', description: 'original', goalCheck: [{ criterion: 'unchanged', evidence: 'test/unit/interfaces/web/web-transport.cases.ts' }],
+  }] })] }));
+  assert.equal(validateWebBoardSnapshot(legacy).ok, true);
   const empty = toWebBoardSnapshot(makeProjection({ active: [makeFullCard({ checkpointEvidence: [] })] }));
   assert.deepStrictEqual(empty.stages.flatMap((stage) => stage.cards)[0].checkpointEvidence, []);
   assert.equal(validateWebBoardSnapshot(empty).ok, true);

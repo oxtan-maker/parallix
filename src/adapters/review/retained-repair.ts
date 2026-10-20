@@ -25,7 +25,7 @@ export function retainedRepairPort(slug: string, worktree: string, store: Missio
       const stdout = result.stdout ?? '';
       const stderr = result.stderr ?? '';
       return result.status === 0 ? { ok: true, command } : { ok: false, command, diagnostic: `${stdout}\n${stderr}`,
-        reason: gateFailureReason({ ok: false, area: 'retained verification', command, exitCode: result.status, stdout, stderr }) };
+        reason: gateFailureReason({ ok: false, area: 'retained verification', command, exitCode: result.status, signal: result.signal, stdout, stderr }) };
     },
   };
 }

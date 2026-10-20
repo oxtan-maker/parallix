@@ -170,7 +170,7 @@ export function missionCleanupCommand(slug: string, rootDir: string, gitFn?: Git
   return `git worktree remove ${worktree} && git branch -D ${missionBranchName(slug, rootDir)}`;
 }
 
-async function resumeActiveBoardHandoff(existing: Extract<Awaited<ReturnType<MissionStore['load']>>, { kind: 'found' }> & { mission: { review: NonNullable<import('../domain/mission.js').Mission['review']> } }, store: MissionStore & MissionTransitionStore & MissionNelRecorder, lifecycle: MissionLifecycleService, slug: string): Promise<void> {
+async function resumeActiveBoardHandoff(existing: Extract<Awaited<ReturnType<MissionStore['load']>>, { kind: 'found' }> & { mission: { review: NonNullable<import('../domain/mission.js').Mission['review']> } }, store: MissionStore & MissionTransitionStore & MissionNelRecorder, lifecycle: MissionLifecycleService, slug: string, reviewer?: ReturnType<typeof agentFamily>): Promise<void> {
   if (existing.mission.status !== 'active') { return; }
   const previous = existing.mission.review;
   const decision = currentReviewRound(previous).decision;
@@ -187,7 +187,7 @@ async function resumeActiveBoardHandoff(existing: Extract<Awaited<ReturnType<Mis
   const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible, strategy: 'random' });
   const priorReviewer = currentReviewRound(resolved).reviewer;
   const review = reviewStatus(resolved) === 'ready-for-next-round'
-    ? beginNextReviewRound(resolved, resumeReviewer(eligible, priorReviewer), existing.mission.assignee ?? agentFamily('codex'), new Date().toISOString(), reviewerEligibility)
+    ? beginNextReviewRound(resolved, reviewer ?? resumeReviewer(eligible, priorReviewer), existing.mission.assignee ?? agentFamily('codex'), new Date().toISOString(), reviewerEligibility)
     : resolved;
   if (review === previous) { throw new Error('Review is not ready to resume.'); }
   await store.save({ ...existing.mission, review }, existing.version);
@@ -221,22 +221,22 @@ function createBoardHandoffWorkflow(
   const reviewHandoff = async (slug: string, options: Record<string, unknown> = {}): Promise<Record<string, unknown>> =>
     ({ ...await handoff(slug, options) });
   return {
-    async executeForSlug(slug: string): Promise<void> {
+    async executeForSlug(slug: string, agent?: ReturnType<typeof agentFamily>): Promise<void> {
       const existing = await store.load(missionId(slug));
       if (existing.kind === 'found' && existing.mission.review?.rounds?.length) {
         // Handoff already established the review identity. A later board handoff
         // is a resume signal, not a second submission (which would replay the
         // lane-event key and violate the lifecycle idempotency contract).
-        await resumeActiveBoardHandoff({ ...existing, mission: { ...existing.mission, review: existing.mission.review } }, store, lifecycle, slug);
+        await resumeActiveBoardHandoff({ ...existing, mission: { ...existing.mission, review: existing.mission.review } }, store, lifecycle, slug, agent);
         await reviewLoop(
-          { slug, isContinue: true, maxAttempts: existing.mission.review.rounds.length + 1 },
-          createReviewLoopPorts(slug, {}, { configuration, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd(), configuration.decision, configuration), restoration: createIntegrationApprovalRestoration(resolveWorktree(slug) ?? process.cwd(), configuration) }),
+          { slug, reviewer: agent, isContinue: true, maxAttempts: existing.mission.review.rounds.length + 1 },
+          createReviewLoopPorts(slug, {}, { configuration, pinnedReviewer: agent, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd(), configuration.decision, configuration), restoration: createIntegrationApprovalRestoration(resolveWorktree(slug) ?? process.cwd(), configuration) }),
         );
         return;
       }
-      const result = await handoff(slug);
+      const result = await handoff(slug, agent ? { reviewer: agent } : {});
       if (!result.ok) { throw new Error(result.error ?? 'handoff workflow aborted'); }
-      await reviewLoop({ slug }, createReviewLoopPorts(slug, {}, { configuration, performHandoffFn: reviewHandoff, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd(), configuration.decision, configuration), restoration: createIntegrationApprovalRestoration(resolveWorktree(slug) ?? process.cwd(), configuration) }));
+      await reviewLoop({ slug, reviewer: agent }, createReviewLoopPorts(slug, {}, { configuration, pinnedReviewer: agent, performHandoffFn: reviewHandoff, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd(), configuration.decision, configuration), restoration: createIntegrationApprovalRestoration(resolveWorktree(slug) ?? process.cwd(), configuration) }));
     },
   };
 }

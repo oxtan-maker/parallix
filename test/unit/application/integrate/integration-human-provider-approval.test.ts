@@ -82,3 +82,14 @@ test('task-2587: dry-run prediction reports the same missing provider approval t
   assert.equal(check.ok, false);
   assert.match(check.message, /stored approval without the required qualifying provider approval/);
 });
+
+test('integration dry-run rejects active unapproved work and accepts integration without mutation (TASK-2673)', () => {
+  const stateMap = { toVirtual: (value: string) => value, toActual: (value: string) => value };
+  for (const status of ['active', 'integration'] as const) {
+    const context = integrationContext({ missionStatus: status, missionReview: null, approval: decision([]) });
+    const before = structuredClone(context);
+    assert.equal(evaluateTaskStatusForIntegration(context, stateMap).ok, status === 'integration');
+    assert.equal(recoveryEstablishesApproval(context).established, status === 'integration');
+    assert.deepEqual(context, before, 'dry-run authority is read-only');
+  }
+});

@@ -274,7 +274,7 @@ function observePreReviewRebase(port: RebaseWorkflowPort, observed: PreReviewReb
     if (!pushResult.ok) {
       observed.pushFailureOutput = pushResult.error || 'push rejected';
       const gate = pushResult.gateFailure;
-      observed.pushGate = gate ? { ...gate, exitCode: gate.exitCode ?? 1 } : null;
+      observed.pushGate = gate ?? null;
     }
     return pushResult;
   };

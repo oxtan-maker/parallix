@@ -1,3 +1,5 @@
+import { recognizedFailureReason, legacyFailureReason } from '../../domain/failure-reason.js';
+import * as fmt from '../presentation/cli-format.js';
 'use strict';
 
 const DEFAULT_FALLBACK_HOURS = 1;
@@ -211,6 +213,8 @@ export type DetectedLimitHit =
   | { reroute?: false; until: string; source?: string; reason: string; kind?: never };
 
 interface DetectLimitHitOptions {
+  failureReason?: unknown;
+  log?: (_message: string) => void;
   agent: string;
   stdout?: string;
   stderr?: string;
@@ -254,6 +258,14 @@ function failedLauncher({ error, signal, status }: DetectLimitHitOptions) {
     (typeof status === 'number' && status !== 0));
 }
 
+/** A recognized non-capacity code is positive no-block evidence; undefined requests legacy parsing. */
+function typedCapacityDecision(failureReason: unknown, now: Date): DetectedLimitHit | null | undefined {
+  const typed = recognizedFailureReason(failureReason);
+  if (!typed) { return undefined; }
+  if (typed.code !== 'agent-quota') { return null; }
+  return { until: formatBlockUntil(ceilToNextHour(new Date(now.getTime() + DEFAULT_FALLBACK_HOURS * 60 * 60 * 1000))), source: 'fallback', reason: 'typed: agent-quota' };
+}
+
 function detectLimitHit({
   agent,
   stdout = '',
@@ -261,7 +273,7 @@ function detectLimitHit({
   status,
   signal,
   error,
-  now = new Date()
+  now = new Date(), failureReason, log = fmt.log.plain
 }: DetectLimitHitOptions = {} as DetectLimitHitOptions): DetectedLimitHit | null {
   if (!agent) {return null;}
   // Gate detection on a failed launcher invocation. A successful child (exit 0,
@@ -273,6 +285,14 @@ function detectLimitHit({
   // null to avoid false-positive limit-hit blocks from legacy callers.
   const launcherFailed = failedLauncher({ agent, error, signal, status });
   if (!launcherFailed) {return null;}
+  const typed = typedCapacityDecision(failureReason, now);
+  if (typed !== undefined) { return typed; }
+  log(`Agent capacity classification: legacy fallback (${legacyFailureReason(failureReason)})`);
+  return legacyLimitHit(agent, stdout, stderr, signal, now);
+}
+
+function legacyLimitHit(agent: string, stdout: string, stderr: string, signal: string | null | undefined, now: Date): DetectedLimitHit | null {
+
 
   const combined = `${stdout || ''}\n${stderr || ''}`;
   const match = findLimitHitMatch(agent, combined);

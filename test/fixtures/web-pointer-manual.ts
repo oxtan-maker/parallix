@@ -16,7 +16,7 @@ try {
   const {page} = cancellation;
   const button = page.locator('[data-board-card] button:not([data-action-kind="mission:edit"])');
   await press(button);
-  assert.equal(await page.locator('[data-board-card]').getAttribute('aria-selected'), 'false');
+  assert.equal(await page.locator('[data-board-card]').getAttribute('aria-current'), 'false');
   assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'keep mission');
   await page.keyboard.press('Enter');
   assert.equal(cancellation.requests.length, 0);
@@ -72,7 +72,7 @@ try {
   await fixture.render(pointerSnapshot('backlog', ['active', 'handoff']), true);
   await page.mouse.up();
   assert.equal(requests.length, 4);
-  assert.equal(await page.locator('[data-board-card]').getAttribute('aria-selected'), 'false');
+  assert.equal(await page.locator('[data-board-card]').getAttribute('aria-current'), 'false');
   assert.equal(await page.getByRole('dialog').count(), 0);
   console.log('PASS manual simultaneous supplied actions (command boundary doubled), tall board visibility, SSE press/release; asset', fixture.assetHash);
 } finally { await fixture.close(); }

@@ -20,6 +20,7 @@
     "draft": { "preDraftCommand": "./scripts/px-install.sh" },
     "integrate": { "preCommitCommand": "./scripts/bump-version.sh", "postIntegrateCommand": "./scripts/refresh-global-px.sh && npm run sonar:delete-branch" },
     "gates": {
+      "maxConcurrent": 1,
       "requirePreIntegration": true,
       "parallel": { "preIntegration": 6 },
       "preIntegration": [

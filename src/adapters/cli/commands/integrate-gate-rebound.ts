@@ -1,3 +1,4 @@
+import { gateFailureReasonFromProcess } from '../../../domain/failure-classification.js';
 // Integration-gate failure routing for `px integrate` (TASK-2492, TASK-2620).
 //
 // A red integration gate is classified into bounded operator-facing routes;
@@ -82,6 +83,8 @@ export function integrationGateFailureReason(
   const coverageNote = integrationOnlyCoverageNote(failedGate.command, opts.verificationCommand ?? null);
   const reason: GateFailureReason = {
     kind: 'gate-failure',
+    signal: failedGate.signal ?? null,
+    failureReason: failedGate.failureReason ?? gateFailureReasonFromProcess({ status: failedGate.exitCode, signal: failedGate.signal, stdout: failedGate.stdout, stderr: failedGate.stderr }),
     area: `integration gate ${failedGate.key}`,
     command: failedGate.command,
     exitCode: failedGate.exitCode,

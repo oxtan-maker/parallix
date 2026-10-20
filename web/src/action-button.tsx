@@ -1,3 +1,4 @@
+import { useAgentMenu } from './agent-menu.js';
 /**
  * A server-projected action. Only the parent can invoke it, and only when the
  * server's current projection marks it enabled.
@@ -42,14 +43,18 @@ export function ActionButton({ action, style, label, pending, working = false, o
   pending?: PendingCommand | boolean;
   /** Current-work from the refreshed server projection while this request is pending. */
   working?: boolean;
-  onInvoke?: (action: WebCommandAction, control: HTMLButtonElement) => void;
+  onInvoke?: (action: WebCommandAction, control: HTMLButtonElement, agent?: string) => void;
 }) {
   const pendingCommand = pending === true ? { id: -1, kind: action.kind } : pending || undefined;
   const reason = unavailableReason(action, pendingCommand);
   const enabled = reason === null;
   const ownPending = pendingCommand?.kind === action.kind;
+  const agentMenu = useAgentMenu(enabled && ['draft:create', 'active:execute', 'review:submit'].includes(action.kind),
+    (family, control) => onInvoke?.(action, control, family));
   return (
+    <>
     <button
+      {...agentMenu.props}
       type="button"
       data-action-kind={action.kind}
       onDragStart={(event) => event.preventDefault()}
@@ -58,7 +63,7 @@ export function ActionButton({ action, style, label, pending, working = false, o
       // Keep the projected unavailable appearance, but still let the board
       // explain a rejected interaction. A disabled-looking control must not
       // turn a click from another surface into a silent no-op.
-      onClick={(event) => { onInvoke?.(action, event.currentTarget); }}
+      onClick={(event) => { if (agentMenu.consumeClick()) { event.preventDefault(); event.stopPropagation(); return; } onInvoke?.(action, event.currentTarget); }}
       style={{
         ...look(action.state),
         borderRadius: RADIUS.control,
@@ -67,6 +72,8 @@ export function ActionButton({ action, style, label, pending, working = false, o
         letterSpacing: TRACK.tight,
         padding: `${SPACE.sm}px ${SPACE.lg}px`,
         cursor: enabled ? 'pointer' : 'not-allowed',
+        touchAction: 'manipulation',
+        userSelect: 'none',
         whiteSpace: 'nowrap',
         ...style,
       }}
@@ -74,5 +81,7 @@ export function ActionButton({ action, style, label, pending, working = false, o
     >
       {pendingLabel(action, label, ownPending, working)}
     </button>
+    {agentMenu.view}
+    </>
   );
 }

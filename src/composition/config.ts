@@ -85,6 +85,7 @@ export function resolveConfiguration(source: Source): ParallixConfiguration {
       ci: Boolean(e('CI')), noTui: e('PARALLIX_NO_TUI') === '1', debug: Boolean(e('DEBUG')),
       noColor: e('NO_COLOR'), forceColor: e('FORCE_COLOR'), term: e('TERM'),
       integrationGateBypass: e('PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS') === '1',
+      gateOwner: e('PARALLIX_GATE_OWNER'),
       credentialRedactor: e('PARALLIX_CREDENTIAL_REDACTOR'), verifyArea: e('VERIFY_AREA'),
       primaryWorktree: e('PRIMARY_WORKTREE'), missionYearOverride: e('MISSION_YEAR_OVERRIDE'),
       tmpDir: e('WORKFLOW_TMP_DIR'),

@@ -1,3 +1,6 @@
+import { gateFailureReasonFromProcess } from '../../domain/failure-classification.js';
+import { resolveCanonicalMaxConcurrentGates } from '../config/product-config.js';
+import { runConfiguredVerification } from '../verification/configured-verification.js';
 /**
  * Pre-review Gate Handling (ADR 0048 Control C1)
  *
@@ -19,6 +22,8 @@ import { createActiveVerificationIdentity as createVerificationProofIdentity, re
 export const CONTINUE_SKIP_CHECK_TIMEOUT_MS = 10_000;
 
 export interface PreReviewGateResult {
+  failureReason?: import('../../domain/failure-reason.js').FailureReason;
+  signal?: string | null;
   ok: boolean;
   area: string;
   command: string;
@@ -72,12 +77,7 @@ export async function runPreReviewGate(
   const before = createVerificationProofIdentity(command, worktree, { configuration: opts.configuration });
 
   // Run with pipe mode to capture output for auto-bounce fix prompts.
-  const result = runFnOverride('bash', ['-lc', command], {
-    progressLabel: `Pre-review verification (${area})`,
-    cwd: worktree,
-    stdio: 'pipe',
-    maxBuffer: 10 * 1024 * 1024, // 10MB buffer
-  });
+  const result = await executePreReviewGate(area, worktree, command, opts.configuration, runFnOverride);
 
   const stdout = typeof result.stdout === 'string' ? result.stdout : '';
   const stderr = typeof result.stderr === 'string' ? result.stderr : '';
@@ -89,6 +89,8 @@ export async function runPreReviewGate(
     }
     return {
       ok: false,
+      failureReason: gateFailureReasonFromProcess(result),
+      signal: result.signal ?? null,
       area,
       command,
       exitCode: result.status,
@@ -107,10 +109,28 @@ export async function runPreReviewGate(
 }
 
 
+async function executePreReviewGate(
+  area: string,
+  worktree: string,
+  command: string,
+  configuration: ParallixConfiguration | undefined,
+  runFn: typeof run,
+) {
+  return Number.isFinite(resolveCanonicalMaxConcurrentGates(worktree)) ? await runConfiguredVerification(area, worktree, configuration) : runFn('bash', ['-lc', command], {
+    progressLabel: `Pre-review verification (${area})`,
+    cwd: worktree,
+    stdio: 'pipe',
+    maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+  });
+}
+
+
 /** Structured gate-failure reason for the rebound kernel. */
 export function gateFailureReason(gateResult: PreReviewGateResult): GateFailureReason {
   return {
     kind: 'gate-failure',
+    failureReason: gateResult.failureReason ?? gateFailureReasonFromProcess({ status: gateResult.exitCode, signal: gateResult.signal, stdout: gateResult.stdout, stderr: gateResult.stderr }),
+    signal: gateResult.signal ?? null,
     area: gateResult.area,
     command: gateResult.command,
     exitCode: gateResult.exitCode,

@@ -3,8 +3,8 @@ id: TASK-2791
 title: >-
   Serialize verification gates across worktrees with shared leases and enable
   for Parallix
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-20 02:21'
 labels: []
 dependencies: []

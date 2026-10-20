@@ -185,7 +185,7 @@ function FlightCardCheckpoint({ card }: { card: WebMissionCard }) {
   );
 }
 
-function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCommands }: { card: WebMissionCard; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingCommands: PendingCommands }) {
+function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCommands }: { card: WebMissionCard; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement, agent?: string) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingCommands: PendingCommands }) {
   const spinning = isSpinning(card);
   // The work publication names the worker; a px process alone does not.
   const working = card.activity.work.kind === 'working';
@@ -202,12 +202,12 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
       data-board-card={card.id}
       tabIndex={0}
       aria-label={`${card.id}: ${card.title}`}
-      aria-selected={selected}
+      aria-current={selected}
       draggable={card.actions.some((action) => action.state === 'enabled' && action.targetLane !== null)}
       onFocus={(event) => { if (event.target === event.currentTarget) { onSelect(card.id); } }}
       onDragStart={(event) => onDragStart(card, event)}
       style={{
-        ...laneCard(selected), borderTop: `2px solid ${edgeColor(card)}`,
+        ...laneCard(selected), borderTopWidth: 2, borderTopColor: edgeColor(card),
         background: C.card, marginBottom: 22,
         boxShadow: '0 6px 18px rgba(0,0,0,.55)',
       }}
@@ -240,28 +240,46 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
       </div>
 
       {(actions.length > 0 || cancel !== null) && (
-        <div
+        <div className="card-actions"
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: SPACE.md,
-            // The action row fits the narrowest lane with only a few px of slack,
-            // so the footer keeps its horizontal padding at the md step instead
-            // of lg; lg would push three projected actions onto a second row.
-            padding: SPACE.md, borderTop: `1px solid ${C.rule}`, background: C.cardFoot,
             flexWrap: 'wrap',
+            padding: SPACE.md, borderTop: `1px solid ${C.rule}`, background: C.cardFoot,
           }}
         >
           {cancel !== null && (
-            <ActionButton action={cancel} label={cancel.label} style={{ color: C.red, border: `1px solid ${C.red}` }} pending={pendingCommands.get(card.id)} onInvoke={(next, control) => onAction(card, next, control)} />
+            <ActionButton action={cancel} label={cancel.label} style={{ color: C.red, border: `1px solid ${C.red}` }} pending={pendingCommands.get(card.id)} onInvoke={(next, control, agent) => onAction(card, next, control, agent)} />
           )}
           {actions.map((primary) => (
-            <ActionButton key={primary.kind} action={primary} label={primary.label} pending={pendingCommands.get(card.id)} working={primary.kind === 'mission:edit' ? false : spinning} onInvoke={(next, control) => onAction(card, next, control)} />
+            <ActionButton key={primary.kind} action={primary} label={primary.label} pending={pendingCommands.get(card.id)} working={primary.kind === 'mission:edit' ? false : spinning} onInvoke={(next, control, agent) => onAction(card, next, control, agent)} />
           ))}
         </div>
       )}
       <CommandOutcome missionId={card.id} />
+      <Grille />
     </article>
   );
 }
+
+/** The reference's vent grille under each card: decoration, carrying no fact. */
+function Grille() {
+  return (
+    <div aria-hidden="true" style={{ display: 'flex', alignItems: 'flex-start', height: 0, paddingLeft: '10%', overflow: 'visible' }}>
+      <div
+        style={{
+          display: 'flex', alignItems: 'flex-start', gap: SPACE.sm, width: '32%', height: 9,
+          overflow: 'hidden', background: 'linear-gradient(180deg,#1d3325 0%,#16281c 100%)',
+          borderRadius: '0 0 1px 1px', padding: '0 2px 1px', boxShadow: '0 3px 6px rgba(0,0,0,.6)',
+        }}
+      >
+        <div style={{ flex: 11, minWidth: 0, height: 8, background: GRILLE_SLATS }} />
+        <div style={{ flex: 40, minWidth: 0, height: 8, background: GRILLE_SLATS }} />
+      </div>
+    </div>
+  );
+}
+
+const GRILLE_SLATS = 'repeating-linear-gradient(90deg,#dfbc68 0 1px,rgba(0,0,0,0) 1px 3px)';
 
 /**
  * The head's right-hand note: how many of this lane's cards report live work.
@@ -278,7 +296,7 @@ function runNote(stage: WebStage): { readonly text: string; readonly color: stri
   };
 }
 
-export function FlightColumn({ stage, style, onAction, onSelect, onDragStart, onDrop, selectedId, pendingCommands, draggable }: { stage: WebStage; style: CSSProperties; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; onDrop: (lane: WebStage['lane']) => void; selectedId: string | null; pendingCommands: PendingCommands; draggable: boolean }) {
+export function FlightColumn({ stage, style, onAction, onSelect, onDragStart, onDrop, selectedId, pendingCommands, draggable }: { stage: WebStage; style: CSSProperties; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement, agent?: string) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; onDrop: (lane: WebStage['lane']) => void; selectedId: string | null; pendingCommands: PendingCommands; draggable: boolean }) {
   const note = runNote(stage);
   return (
     <section aria-label={`${stage.lane} stage`} style={{ display: 'flex', flexDirection: 'column', ...style }}>

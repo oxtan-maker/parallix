@@ -1,10 +1,11 @@
+import { classifyRecoveryReason as classifyReboundReason } from './rebound-classification.js';
 import type { ReboundStartAgent } from './ports/repair-agent-launch.js';
 export type { ReboundLaunchOptions, ReboundStartAgent } from './ports/repair-agent-launch.js';
 import { prepareRepairPrompt } from './rebound-checkpoints.js';
 import { elideBounceOutput } from './output-elision.js';
 import { type RepairCheckpointPort } from './ports/repair-checkpoint.js';
 import type { InvalidContractBlocker } from '../domain/rebound-policy.js';
-import { DEFAULT_REBOUND_ATTEMPTS, classifyReboundReason, reboundDiagnostic, transientRetryAllowed, reboundRequiresHuman, repairStrategy, differentGateVerification, repairVerificationRequiresHuman, launchRecoveryAction, repairBudgetAllows, reboundExhaustion, type ReboundReason, type ReboundClassification } from '../domain/rebound-policy.js';
+import { DEFAULT_REBOUND_ATTEMPTS, reboundDiagnostic, transientRetryAllowed, reboundRequiresHuman, repairStrategy, differentGateVerification, repairVerificationRequiresHuman, launchRecoveryAction, repairBudgetAllows, reboundExhaustion, type ReboundReason, type ReboundClassification } from '../domain/rebound-policy.js';
 export { classifyReboundReason, reboundDiagnostic, isTransientVerifierFailure } from '../domain/rebound-policy.js';
 export type { ReboundReason, ReboundClassification, GateFailureReason, HookFailureReason, ArtifactIncompleteReason, AgentTimeoutReason, HandoffVerificationReason, DeclaredGateValidationReason } from '../domain/rebound-policy.js';
 import { recoveryEvidenceRoute } from './rebound-prompts.js';
@@ -142,7 +143,7 @@ export interface RepairEvidence { strategy: RepairStrategy; agent: string; conte
 function refreshedReason(previous: ReboundReason, result: VerifyResult): ReboundReason {
   if (result.reason) { return result.reason; }
   if (previous.kind === 'gate-failure') {
-    return { ...previous, stdout: result.diagnostic || previous.stdout, stderr: '', error: undefined };
+    return { ...previous, failureReason: undefined, signal: undefined, stdout: result.diagnostic || previous.stdout, stderr: '', error: undefined };
   }
   if (previous.kind === 'handoff-verification') {
     return { ...previous, gateOutput: result.diagnostic || previous.gateOutput };
@@ -242,7 +243,7 @@ async function reboundImpl(reason: ReboundReason, context: ReboundContext): Prom
   // here, before the transient-verifier loop can refresh `diagnostic`, so the fix
   // prompt can still show what originally failed alongside the latest output.
   const firstDiagnostic = reboundDiagnostic(reason);
-  const state: ReboundState = { implementer: context.implementer, reason, originalReason: reason, classification: classifyReboundReason(reason), diagnostic: firstDiagnostic, originalDiagnostic: firstDiagnostic, history: [failureFingerprint(reason)], launchFailures: 0, attempts: 0, attemptsDetail: [], occurrenceId: context.repairIncidentId ?? globalThis.crypto.randomUUID(), capturedEvidence: context.retainedFailure, slug };
+  const state: ReboundState = { implementer: context.implementer, reason, originalReason: reason, classification: classifyReboundReason(reason, log), diagnostic: firstDiagnostic, originalDiagnostic: firstDiagnostic, history: [failureFingerprint(reason)], launchFailures: 0, attempts: 0, attemptsDetail: [], occurrenceId: context.repairIncidentId ?? globalThis.crypto.randomUUID(), capturedEvidence: context.retainedFailure, slug };
   if (reboundRequiresHuman(state.reason, state.classification)) { return humanOnlyOutcome(state, context, error); }
   const transientOutcome = await retryTransientVerification(state, verify, maxTransientRetries, log);
   if (transientOutcome) { return transientOutcome; }
@@ -303,7 +304,7 @@ function refreshReboundState(state: ReboundState, result: VerifyResult, log: Reb
   const previous = state.history[state.history.length - 1];
   state.reason = refreshedReason(state.reason, result);
   state.diagnostic = reboundDiagnostic(state.reason);
-  state.classification = classifyReboundReason(state.reason);
+  state.classification = classifyReboundReason(state.reason, log);
   const fingerprint = failureFingerprint(state.reason);
   state.history.push(fingerprint);
   if (fingerprint !== previous) { log?.(fmt.status('INFO', `Recovery incident changed; reclassified as ${state.classification.failureClass}.`)); }

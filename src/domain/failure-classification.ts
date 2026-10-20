@@ -1,3 +1,4 @@
+import { recognizedFailureReason, type FailureReason } from './failure-reason.js';
 import { isIncompleteSuccessCriteriaFailure } from './mission-handoff-policy.js';
 /**
  * ADR 0048 failure classification (single dispatch table).
@@ -112,7 +113,14 @@ export function hasExplicitHumanOnlyDiagnostic(diagnostic: string): boolean {
  * @param errorMsg - The error message to classify
  * @returns Object with failureClass, dispatchAction, and (for GitBlockers) reason
  */
-export function classifyError(errorMsg: string): { failureClass: FailureClassType; dispatchAction: DispatchActionType; reason?: GitBlockerReason } {
+export function classifyError(errorMsg: string, failureReason?: unknown): { failureClass: FailureClassType; dispatchAction: DispatchActionType; reason?: GitBlockerReason } {
+  const typed = recognizedFailureReason(failureReason);
+  if (typed) {
+    const failureClass = typed.code === 'infrastructure' ? FailureClass.InfraBlocker
+      : typed.code === 'state-machine' ? FailureClass.StateMachineViolation
+        : typed.code === 'agent-quota' ? FailureClass.AgentCapacity : FailureClass.GateFailure;
+    return { failureClass, dispatchAction: DISPATCH_TABLE[failureClass] };
+  }
   if (!errorMsg || typeof errorMsg !== 'string') {
     return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };
   }
@@ -231,4 +239,18 @@ function classifyGateOrArtifactFailure(errorMsg: string): { failureClass: Failur
   if (/malformed\s+gate|invalid\s+gate\s+config|gate\s+command\s+(not\s+found|syntax\s+error|not\s+runnable)/i.test(errorMsg) || /gate/i.test(errorMsg) && /syntax\s+error|not\s+found|missing\s+(file|command)/i.test(errorMsg)) {return { failureClass: FailureClass.MalformedGates, dispatchAction: DispatchAction.AutoRepair };}
   if (errorMsg.includes('even after auto-remediation') || errorMsg.includes('No checkpoint documents found in ') || /mandatory\s+(artifact|file|document)|missing\s+(mission\s+)?(artifact|file|document)|required\s+(artifact|file|document)\s+(not\s+)?found/i.test(errorMsg) || /gatekeeper/i.test(errorMsg) && /missing\s+(artifact|file|document)/i.test(errorMsg)) {return { failureClass: FailureClass.MissingArtifacts, dispatchAction: DispatchAction.AutoSendBack };}
   return null;
+}
+
+/** Producer-side annotation of a failed process; never certifies capture or success. */
+export function gateFailureReasonFromProcess(input: { status?: number | null; signal?: string | null; stdout?: unknown; stderr?: unknown }): FailureReason | undefined {
+  if (input.status === 0 && !input.signal) { return undefined; }
+  const diagnostic = `${String(input.stdout ?? '')}\n${String(input.stderr ?? '')}`
+    .split('\n').filter(line => !PASSING_TEST_RESULT_LINE_RE.test(line)).join('\n');
+  const classification = classifyError(diagnostic);
+  const code = hasExplicitHumanOnlyDiagnostic(diagnostic)
+    ? classification.failureClass === FailureClass.StateMachineViolation ? 'state-machine' : 'infrastructure'
+    : /\[(?:unit-test-(?:budget|cpu)):exceeded\]|integration-test-cpu:exceeded|\[unit-test-(?:budget|cpu)\]\s+SUITE (?:CPU )?BUDGET EXCEEDED|CPU (?:budget|limit) exceeded/i.test(diagnostic) ? 'cpu-budget-exceeded'
+      : classification.failureClass === FailureClass.AgentCapacity ? 'agent-quota'
+        : input.signal ? 'process-terminated' : 'gate-failed';
+  return { version: 1, code };
 }

@@ -105,6 +105,11 @@
           "description": "Ordered, per-phase lifecycle gate commands. Disabled by default: omit this section (or a phase key) to run no lifecycle gate for that phase. Each phase is an ordered array of gate objects; the array order is the execution order. A gate object has a required string `key`, a required string `command` (a runnable shell command, no trailing prose), an optional numeric `order` (default 0, ascending), and optional `after` gate keys. Each configured command runs in the phase checkout and receives PARALLIX_MISSION_SLUG, PARALLIX_CHECKOUT_PATH, and PARALLIX_PHASE in its environment; a non-zero exit blocks that phase's state transition or merge.",
             "additionalProperties": false,
             "properties": {
+              "maxConcurrent": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Optional maximum simultaneously running independent verification runs across processes and worktrees sharing admission state. Unset means unlimited; positive integers are required. Set 1 to serialize runs. The canonical checkout owns the limit, independently of within-run phase parallelism."
+              },
               "requirePreIntegration": {
                 "type": "boolean",
                 "description": "When true, the integration merge boundary fails closed if no adapters.gates.preIntegration gates are configured. Defaults to false so an unconfigured repository completes the integration path with no lifecycle gate (mission task-2457 success criterion 1). Set true in a repository that wants the TASK-2300 mandatory-gate invariant."

@@ -1,3 +1,4 @@
+import { recognizedFailureReason } from './failure-reason.js';
 export interface InvalidContractBlocker {
   readonly command: string;
   readonly diagnostic: string;
@@ -14,6 +15,8 @@ import { classifyError, hasExplicitHumanOnlyDiagnostic, DispatchAction, FailureC
 /** A declared verification gate ran and exited non-zero. */
 export interface GateFailureReason {
   kind: 'gate-failure';
+  failureReason?: unknown;
+  signal?: string | null;
   /** Agent-discovered locked contract problem, distinct from declaration validation. */
   invalidContract?: InvalidContractBlocker;
   area: string;
@@ -171,6 +174,11 @@ export function classifyReboundReason(reason: ReboundReason): ReboundClassificat
 
   if (reason.kind === 'gate-failure' && reason.invalidContract) {
     return classified(FailureClass.MalformedGates, DispatchAction.HumanOnly);
+  }
+
+  if (reason.kind === 'gate-failure' && recognizedFailureReason(reason.failureReason)) {
+    const { failureClass, dispatchAction } = classifyError(diagnostic, reason.failureReason);
+    return classified(failureClass, dispatchAction);
   }
 
   if (reason.kind === 'gate-failure' || reason.kind === 'hook-failure') {

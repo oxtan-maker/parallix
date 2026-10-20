@@ -8,11 +8,17 @@ export const WEB_CSRF_HEADER = 'x-px-csrf';
  * The protection header set every response from this host carries. No
  * `unsafe-inline`, no remote sources: the shell references only same-origin
  * assets, and the CSRF meta tag is data, not executable script.
+ *
+ * `font-src 'self'` is the one relaxation: the two intended faces ship as
+ * packaged assets the host serves from its own allowlist, so the board renders
+ * them with no network font source (ADR 0054, TASK-2773.11). Every other
+ * directive stays exactly as written, and the packaged-font contract in
+ * test/unit/interfaces/web/web-font-bundle.cases.ts pins the whole string.
  */
 export const PROTECTION_HEADERS = {
   'content-security-policy':
     "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
-    + "connect-src 'self'; font-src 'none'; object-src 'none'; base-uri 'none'; "
+    + "connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; "
     + "frame-ancestors 'none'; form-action 'self'",
   'x-frame-options': 'DENY',
   'x-content-type-options': 'nosniff',

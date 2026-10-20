@@ -90,7 +90,7 @@ const MEASURE = () => {
     rowClientWidth: laneRow.clientWidth,
     rowScrollLeft: laneRow.scrollLeft,
     pageScrollsVertically: document.documentElement.scrollHeight > window.innerHeight + 1,
-    selected: [...document.querySelectorAll('[data-board-card][aria-selected="true"]')].map((element) => element.dataset.boardCard),
+    selected: [...document.querySelectorAll('[data-board-card][aria-current="true"]')].map((element) => element.dataset.boardCard),
     pending: [...document.querySelectorAll('[data-board-card] button[aria-label*="starting"], [data-board-card] button[aria-label*="working"]')].map((element) => element.dataset.actionKind),
     status: [...document.querySelectorAll('[role="status"]')].map((element) => element.textContent.trim()).filter(Boolean),
   };

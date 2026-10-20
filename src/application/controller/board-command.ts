@@ -35,10 +35,9 @@ export type BoardCommandKind =
  * path, a `CP-N.md` filename, or SQL. A board button therefore cannot acquire
  * filesystem or database authority by sending a richer payload.
  *
- * `draft:create` has no payload member: the envelope `missionId` is the entire
- * request. There is no argv array, options bag, path, environment, or
- * agent-launch field for it, so a board request cannot smuggle CLI input
- * through the boundary.
+ * `draft:create` has no payload member. The envelope supplies the mission and
+ * an optional checked launch family; no argv, options bag, path or environment
+ * crosses the board boundary.
  */
 export type BoardCommandPayload =
   | { readonly kind: 'mission:edit-read' }
@@ -87,6 +86,8 @@ export interface BoardCommandRequest {
   /** Present for board actions, which capture a status before confirmation. */
   readonly missionStatusAtRequest?: string;
   readonly agent?: string | null;
+  /** An explicit web selection must never reroute to another family. */
+  readonly pinnedAgent?: boolean;
   /** Explicit automatic-review family for `active:execute`; absent keeps automatic selection. */
   readonly reviewer?: string | null;
   readonly capabilities: ReadonlySet<Capability>;

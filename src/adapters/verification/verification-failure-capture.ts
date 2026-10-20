@@ -1,3 +1,4 @@
+import { gateFailureReasonFromProcess } from '../../domain/failure-classification.js';
 import { captureRecoveryEvidence, resolveConfiguredCredentialRedactor } from '../../application/recovery-evidence.js';
 import type { PublishedTreeStateOk, VerificationGateResult, captureVerifiedTreeProof } from './verification.js';
 
@@ -20,8 +21,10 @@ export function captureFailedVerification(before: PublishedTreeStateOk, verifica
   // it, so a write failure reports honestly on the returned ref rather than
   // hiding the gate failure. Obtain and pass the operator-configured
   // credential redactor so retained streams scrub before write (mission criterion).
+  const failureReason = verification.failureReason ?? gateFailureReasonFromProcess(verification);
   const redactor = resolveConfiguredCredentialRedactor();
   const capture = captureRecoveryEvidence({
+    failureReason,
     command: command ?? '',
     cwd: before.rootDir,
     capturedRevision: before.commit,
@@ -34,6 +37,8 @@ export function captureFailedVerification(before: PublishedTreeStateOk, verifica
   });
   return {
     ok: false,
+    failureReason,
+    signal: verification.signal ?? null,
     exitCode: verification.status,
     command,
     cwd: before.rootDir,

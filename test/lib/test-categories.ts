@@ -95,6 +95,10 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/rebase/rebase-use-case.test.ts',
   'integration/rebase/rebase.test.ts',
   'integration/verification/repository-gates.integration.test.ts',
+  'integration/verification/active-verifier-shell.test.ts',
+  'integration/verification/integration-gate-observation.test.ts',
+  'integration/verification/gate-admission.test.ts',
+
   // TASK-2573: exercises reusable gate proofs against a temporary Git checkout;
   // a clean hosted runner provides Git and the injected command runner.
   'integration/verification/repository-gates.test.ts',
@@ -178,6 +182,10 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/sqlite/current-work-operation-identity.test.ts',
   'integration/lifecycle/lifecycle-approval-dwell.test.ts',
   'integration/verification/verification-proof-reuse.test.ts',
+  'integration/verification/active-verification-reuse.test.ts',
+  'integration/verification/integration-verification-reuse.test.ts',
+  'integration/verification/gate-evidence-reader.test.ts',
+
   'integration/verification/rebound-gate-recovery.test.ts',
   'integration/integrate/integration-provider-approval-recovery.test.ts',
   'integration/presentation/board-shell-subscription-lifetime.test.ts',

@@ -84,9 +84,14 @@ function checkCheckpointEvidence(object: unknown, path: string, problems: string
     rows.forEach((row, rowIndex) => {
       const rowPath = `${checkpointPath}.goalCheck[${rowIndex}]`;
       if (!isPlainObject(row)) { problems.push(`${rowPath} must be an object`); return; }
-      checkKeys(row, ['criterion', 'evidence'], ['criterion', 'evidence'], rowPath, problems);
+      checkKeys(row, ['criterion', 'evidence', 'recordedRound', 'repairedGate', 'repairedGates'], ['criterion', 'evidence'], rowPath, problems);
       checkString(row, 'criterion', rowPath, problems);
       checkString(row, 'evidence', rowPath, problems);
+      if ('recordedRound' in row && (!Number.isSafeInteger(row.recordedRound) || Number(row.recordedRound) < 1)) {
+        problems.push(`${rowPath}.recordedRound must be a positive safe integer`);
+      }
+      if ('repairedGate' in row) { checkString(row, 'repairedGate', rowPath, problems); }
+      if ('repairedGates' in row) { checkStringArray(row, 'repairedGates', rowPath, problems); }
     });
   });
 }

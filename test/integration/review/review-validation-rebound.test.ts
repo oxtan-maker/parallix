@@ -33,7 +33,7 @@ import { HandoffFacts } from '../../../src/application/ports/review-round.js';
 // CP-1: Strict dash-suffix rejection (behavioral, unchanged from round 1)
 // ============================================================================
 
-test('task-2234 repro: runDeclaredGates rejects explanatory em-dash suffix before execution', () => {
+test('task-2234 repro: runDeclaredGates rejects explanatory em-dash suffix before execution', async () => {
   const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2234-gates-dash-'));
   const rootDir = missionDir;
 
@@ -43,7 +43,7 @@ test('task-2234 repro: runDeclaredGates rejects explanatory em-dash suffix befor
   );
 
   try {
-    const result = runDeclaredGates(missionDir, rootDir, {
+    const result = await runDeclaredGates(missionDir, rootDir, {
       log: () => {},
       error: () => {}
     });
@@ -59,7 +59,7 @@ test('task-2234 repro: runDeclaredGates rejects explanatory em-dash suffix befor
   }
 });
 
-test('task-2234 repro: runDeclaredGates rejects explanatory en-dash and double-dash suffixes', () => {
+test('task-2234 repro: runDeclaredGates rejects explanatory en-dash and double-dash suffixes', async () => {
   for (const gateText of ['true – brief note', 'true -– legacy note']) {
     const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2234-gates-dash-'));
     const rootDir = missionDir;
@@ -70,7 +70,7 @@ test('task-2234 repro: runDeclaredGates rejects explanatory en-dash and double-d
     );
 
     try {
-      const result = runDeclaredGates(missionDir, rootDir, {
+      const result = await runDeclaredGates(missionDir, rootDir, {
         log: () => {},
         error: () => {}
       });

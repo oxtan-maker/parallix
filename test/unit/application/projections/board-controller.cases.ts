@@ -343,3 +343,31 @@ test('controller routes edit read and versioned save through the typed planning 
   assert.equal(calls.length, 2);
   assert.deepEqual(calls[1], { operationId: 'op-1', missionId: 'task-0001', capabilities: base.capabilities, ...payload });
 });
+
+
+test('controller forwards an explicit review family and rejects stale requests before launch', async () => {
+  const { ports } = makeExecutePorts();
+  const calls: unknown[] = [];
+  const controller = new BoardCommandController(ports, undefined, {
+    handoffWorkflow: { async executeForSlug(slug, agent) { calls.push({ slug, agent }); } },
+  }, undefined, { async load() { return { kind: 'found', mission: fixtureMission('task-0001', { status: 'active' }), version: fixtureVersion(1) }; } });
+  const selected = makeRequest({ kind: 'review:submit', agent: 'custom-family', pinnedAgent: true, missionStatusAtRequest: 'active', capabilities: new Set(['review:submit']) });
+  assert.equal((await controller.dispatch(selected)).status, 'completed');
+  assert.deepEqual(calls, [{ slug: 'task-0001', agent: 'custom-family' }]);
+  assert.equal((await controller.dispatch({ ...selected, missionStatusAtRequest: 'review' })).error?.kind, 'conflict');
+  assert.equal(calls.length, 1);
+  assert.equal((await controller.dispatch({ ...selected, pinnedAgent: undefined })).status, 'completed');
+  assert.deepEqual(calls[1], { slug: 'task-0001', agent: undefined });
+});
+
+test('controller carries the selected execution family and pin to the launch port', async () => {
+  const launches: { preselectedAgent: string | null; pinnedAgent?: boolean }[] = [];
+  const { ports } = makeExecutePorts({ agentExecution: { async launch(request) {
+    launches.push(request);
+    return { agent: request.preselectedAgent!, rebaseDeferred: false, errored: false, errorMessage: null, exitStatus: 0, detail: null };
+  } } });
+  const controller = new BoardCommandController(ports);
+  assert.equal((await controller.dispatch(makeRequest({ agent: 'custom', pinnedAgent: true }))).status, 'completed');
+  assert.equal(launches[0].preselectedAgent, 'custom');
+  assert.equal(launches[0].pinnedAgent, true);
+});

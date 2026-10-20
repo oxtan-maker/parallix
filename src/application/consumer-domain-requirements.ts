@@ -196,7 +196,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-launch-failure-reselect',
     family: 'retry',
     fileLocation: 'src/adapters/agents/agent-launch-outcome.ts',
-    line: 337,
+    line: 340,
     anchor: 'retrying with next eligible agent',
     reads: ['AgentBlock'],
     requirement:
@@ -222,7 +222,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'failover-limit-hit-block',
     family: 'failover',
     fileLocation: 'src/adapters/agents/agent-launch-outcome.ts',
-    line: 296,
+    line: 299,
     anchor: 'deps.updateAgentBlockFn(chosen, limitHit.until',
     reads: ['AgentBlock'],
     requirement:
@@ -233,7 +233,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'failover-transient-failure-block',
     family: 'failover',
     fileLocation: 'src/adapters/agents/agent-launch-outcome.ts',
-    line: 195,
+    line: 197,
     anchor: 'await updateAgentBlockFn(agent, blockUntil',
     reads: ['AgentBlock'],
     requirement:

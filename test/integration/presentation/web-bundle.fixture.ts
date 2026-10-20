@@ -132,6 +132,25 @@ export async function stopHost(host: RunningHost): Promise<void> {
   });
 }
 
+/** Every file under a directory as POSIX paths relative to that directory. */
+function listFiles(root: string, relative = ''): string[] {
+  return fs.readdirSync(path.join(root, relative), { withFileTypes: true })
+    .flatMap(entry => {
+      const child = relative ? path.posix.join(relative, entry.name) : entry.name;
+      return entry.isDirectory() ? listFiles(root, child) : [child];
+    });
+}
+
+/** The `url(...)` targets inside every `@font-face` block of a stylesheet. */
+function fontFaceUrls(css: string): { family: string; decl: string; urls: string[] }[] {
+  return [...css.matchAll(/@font-face\s*\{([^}]*)\}/g)].map(match => {
+    const decl = match[1];
+    const family = /font-family\s*:\s*['"]?([^;'"]+)['"]?\s*;/.exec(decl)?.[1]?.trim() ?? '';
+    const urls = [...decl.matchAll(/url\(\s*(['"]?)([^)'"]+)\1\s*\)/g)].map(urlMatch => urlMatch[2]);
+    return { family, decl, urls };
+  });
+}
+
 // Use Node's native HTTP client so package startup and projection dominate the
 // case's CPU cost. Each response retains a finite deadline.
 export function get(url: string): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }> {
@@ -186,6 +205,49 @@ export async function assertBundleShell(t: test.TestContext): Promise<void> {
     const assetBody = assetRes.body;
     assert.ok(assetBody.length > 10_000, 'the packaged browser bundle must be substantial');
     assert.match(packagedHtml, /<title>Parallix web board<\/title>/, 'the packaged shell must retain its title');
+
+    // TASK-2773.11: the wave's two intended faces ship as packaged assets, so
+    // the board renders the intended typography with no network font source.
+    const packagedAssets = listFiles(path.join(packageDir, 'build', 'web'));
+    const packagedFonts = packagedAssets.filter(file => file.endsWith('.woff2'));
+    for (const family of ['jetbrains-mono', 'barlow-condensed']) {
+      assert.ok(packagedFonts.some(file => file.includes(family)),
+        `the packaged tree must carry a ${family} woff2 subset, got ${JSON.stringify(packagedFonts)}`);
+    }
+
+    // The served stylesheet declares @font-face for each family from a relative
+    // url only: no scheme, no authority, so the fetch stays on the loopback
+    // origin the host is bound to.
+    const styleHref = html.match(/<link rel="stylesheet"[^>]*href="([^"]+)"/)?.[1];
+    assert.ok(styleHref && styleHref.startsWith('/assets/'), 'the shell must reference a local hashed stylesheet asset');
+    const cssRes = await get(`${host.origin}${styleHref}`);
+    assert.equal(cssRes.status, 200);
+    assert.match(String(cssRes.headers['content-type'] ?? ''), /text\/css/);
+    assert.doesNotMatch(cssRes.body, /https?:\/\//, 'the served stylesheet must reference no remote asset');
+    const faces = fontFaceUrls(cssRes.body);
+    for (const family of ['JetBrains Mono', 'Barlow Condensed']) {
+      const face = faces.find(declared => declared.family === family);
+      assert.ok(face, `the served stylesheet must declare @font-face for ${family}`);
+      assert.match(face.decl, /unicode-range\s*:/, `${family} must declare an explicit unicode-range`);
+      assert.ok(face.urls.length > 0, `${family} @font-face must name a font file`);
+      for (const url of face.urls) {
+        assert.doesNotMatch(url, /^[a-z][a-z0-9+.-]*:/i, `${url} must not name a url scheme`);
+        assert.doesNotMatch(url, /^\/\//, `${url} must not be a protocol-relative url`);
+        assert.match(url, /^\/fonts\/[A-Za-z0-9._-]+\.woff2$/, `${url} must be a same-origin packaged font path`);
+      }
+    }
+
+    // Every declared path resolves from the serving allowlist as a real woff2.
+    const fontUrls = [...new Set(faces.flatMap(face => face.urls))];
+    assert.ok(fontUrls.length >= 2, `each intended family must resolve, got ${JSON.stringify(fontUrls)}`);
+    for (const url of fontUrls) {
+      const fontRes = await get(`${host.origin}${url}`);
+      assert.equal(fontRes.status, 200, `${url} must resolve from the packaged allowlist`);
+      assert.equal(fontRes.headers['content-type'], 'font/woff2', `${url} must be served as font/woff2`);
+      assert.ok(fontRes.body.startsWith('wOF2'), `${url} must carry woff2 bytes`);
+      const packaged = fs.readFileSync(path.join(packageDir, 'build', 'web', url.slice(1)));
+      assert.equal(Number(fontRes.headers['content-length']), packaged.length, `${url} must serve the packaged bytes`);
+    }
   } finally {
     await stopHost(host);
   }

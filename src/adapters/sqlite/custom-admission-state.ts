@@ -27,8 +27,15 @@ async function openAdmissionState(file: string, configuration?: ParallixConfigur
   try {
     await db.open({ path: file });
     await db.execute(schema.up);
+    const resources = loadDefaultMigrations().find(migration => migration.id === '0041-admission-resources');
+    if (!resources) { throw new Error('Admission resource schema is unavailable'); }
+    await db.beginImmediateTransaction();
+    const columns = await db.query<{ name: string }>('PRAGMA table_info(custom_agent_leases)');
+    if (!columns.some(column => column.name === 'resource')) { await db.execute(resources.up); }
+    await db.commitTransaction();
     return { db };
   } catch (error) {
+    await db.rollbackTransaction();
     await db.close();
     throw error;
   }

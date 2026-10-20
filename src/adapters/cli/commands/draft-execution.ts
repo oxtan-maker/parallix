@@ -103,7 +103,8 @@ export async function draftLaunchAgent(environment: DraftWorkflowEnvironment, ct
     prompt,
     slug: ctx.slug,
     worktree: ctx.targetWorktree,
-    agent
+    agent,
+    pinnedAgent: ctx.options.pinnedAgent === true,
   });
   debugFn(`Draft agent family: ${fmt.agent(actualAgent)}`);
 

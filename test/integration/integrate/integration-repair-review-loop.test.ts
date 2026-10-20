@@ -28,6 +28,11 @@ import * as path from 'node:path';
 
 import { setCommandPathProbe, setLauncherHealthProbe, setWorkflowLaunchPort } from '../../../src/adapters/agents/agents.js';
 import { run } from '../../../src/composition/create-cli.js';
+// Load the immutable command graph with the suite, as for the fixture schema.
+// The case budget measures the real repair/re-review workflow, including its
+// private repository, writable state, gate children and cleanup, rather than
+// charging the first invocation for tsx compilation of the lazy CLI registry.
+import '../../../src/composition/cli-command-registry.js';
 import { openRepairFixture } from '../../lib/integration-repair-fixture.js';
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
 import { reviewStatus } from '../../../src/domain/review.js';

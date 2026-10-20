@@ -62,6 +62,7 @@ export type RecoveryEvidenceErrorKind =
 
 /** One retained failed-command invocation. */
 export interface RecoveryEvidenceRef {
+  readonly failureReason?: unknown;
   readonly version: typeof RECOVERY_EVIDENCE_VERSION;
   /** Groups the original failure with its retries; distinct per failing command. */
   readonly incidentId: string;
@@ -109,6 +110,7 @@ export interface RecoveryEvidenceLookup {
 
 /** Inputs persisted for one failed invocation. */
 export interface CaptureInput {
+  readonly failureReason?: unknown;
   /** The exact command line that ran. */
   readonly command: string;
   /** Working directory the command ran in. */

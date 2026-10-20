@@ -6,7 +6,7 @@ import { isOpenWorkflow, type WorkflowOperation } from '../../domain/workflow-op
 import { completed, failure, type Capability } from '../../application/contracts.js';
 import type { WebCommandRequest } from './transport-types.js';
 import { WEB_TRANSPORT_VERSION } from './transport-types.js';
-import { sendCommandResult } from './host-support.js';
+import { sendCommandResult, selectedFamilyFields } from './host-support.js';
 
 const ADMISSION_ERROR_STATUSES: Readonly<Record<string, number>> = { conflict: 409, validation: 400, capability: 403 };
 
@@ -23,7 +23,8 @@ export async function admitWebWorkflow(reply: FastifyReply, dispatcher: BoardCom
   const request: BoardCommandRequest = {
     operationId: randomUUID(), requestKey: command.requestKey, kind: command.kind, missionId: command.missionId,
     ...(command.payload ? { payload: { kind: 'handoff:record' as const, ...command.payload } } : {}),
-    missionStatusAtRequest: command.missionStatusAtRequest, capabilities: new Set([command.kind as Capability]),
+    missionStatusAtRequest: command.missionStatusAtRequest,
+    ...selectedFamilyFields(command.agent), capabilities: new Set([command.kind as Capability]),
   };
   try {
     if (command.kind === 'workflow:stop') {

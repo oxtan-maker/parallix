@@ -10,7 +10,7 @@
 
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { getPatternsForAgent, findLimitHitMatch, clipContext, parseIsoOffset, parseIso, parseTwelveHour, parseTwentyFourHour, parseRelative, parseRetryAfter, parseRetryAtDate, projectClockTime, parseResetTime, formatBlockUntil, ceilToNextHour, detectLimitHit, PATTERN_SETS } from '../../../../src/application/services/agent-limit.js';
+import { getPatternsForAgent, findLimitHitMatch, clipContext, parseIsoOffset, parseRetryAfter, projectClockTime, parseResetTime, formatBlockUntil, ceilToNextHour, detectLimitHit, PATTERN_SETS } from '../../../../src/application/services/agent-limit.js';
 import { shouldPersistLaunchFailureBlock, startAgent } from '../../../../src/adapters/agents/agents.js';
 
 describe('Limit-hit detection', () => {
@@ -125,7 +125,7 @@ describe('Limit-hit detection', () => {
   test('parseRetryAfter parses numeric seconds', () => {
     const now = new Date('2026-05-01T10:00:00Z');
     const result = parseRetryAfter('retry-after: 3600', now);
-    assert.ok(result != null);
+    assert.ok(result !== null && result !== undefined);
     assert.equal(result.getTime(), now.getTime() + 3600 * 1000);
   });
 
@@ -334,7 +334,7 @@ describe('Limit-hit detection', () => {
     });
 
     assert.ok(result);
-    assert.ok(result.until != null);
+    assert.ok(result.until !== null && result.until !== undefined);
     assert.equal(new Date(result.until.replace(' ', 'T') + ':00').getTime(), Date.UTC(2026, 9, 1));
     assert.equal(result.source, 'month-end');
     assert.ok(result.reason.startsWith('month-end:'));
@@ -353,7 +353,7 @@ describe('Limit-hit detection', () => {
     });
 
     assert.ok(result);
-    assert.ok(result.until != null);
+    assert.ok(result.until !== null && result.until !== undefined);
     assert.equal(new Date(result.until.replace(' ', 'T') + ':00').getTime(), Date.UTC(2026, 9, 1));
     assert.equal(result.source, 'month-end');
   });
@@ -370,7 +370,7 @@ describe('Limit-hit detection', () => {
     });
 
     assert.ok(result);
-    assert.ok(result.until != null);
+    assert.ok(result.until !== null && result.until !== undefined);
     assert.equal(new Date(result.until.replace(' ', 'T') + ':00').getTime(), Date.UTC(2026, 8, 20, 13));
     assert.equal(result.source, 'parsed');
   });
@@ -683,4 +683,26 @@ describe("Qwen 403 and Vibe rate limit", () => {
     assert.deepEqual(launched, ['vibe', 'custom']);
     assert.equal(result.agent, 'custom');
   });
+});
+
+test('typed signal and quota reasons control family blocks despite conflicting output (TASK-2729)', () => {
+  const now = new Date('2026-10-20T12:00:00Z');
+  for (const failureReason of [undefined, { version: 1, code: 'process-terminated' }, { version: 99, code: 'agent-quota' }, { version: 1, code: 'future' }]) {
+    const logs: string[] = [];
+    const process = { agent: 'claude', status: null, signal: 'SIGTERM', stdout: '', stderr: '', failureReason, now, log: (line: string) => logs.push(line) };
+    assert.equal(detectLimitHit(process), null);
+    assert.equal(shouldPersistLaunchFailureBlock('claude', process), false);
+    assert.equal(logs.some(line => line.includes('legacy fallback')), failureReason?.version !== 1 || failureReason?.code === 'future');
+  }
+  const typedQuota = { status: null, signal: 'SIGTERM', stdout: 'forbidden connection refused', failureReason: { version: 1, code: 'agent-quota' } };
+  const hit = detectLimitHit({ agent: 'claude', now, ...typedQuota });
+  assert.equal(hit?.reason, 'typed: agent-quota');
+  assert.equal(shouldPersistLaunchFailureBlock('claude', typedQuota), true);
+  const typedSignal = { status: null, signal: 'SIGTERM', stdout: 'Claude usage limit reached', failureReason: { version: 1, code: 'process-terminated' } };
+  assert.equal(detectLimitHit({ agent: 'claude', ...typedSignal }), null);
+  assert.equal(shouldPersistLaunchFailureBlock('claude', typedSignal), false);
+  const legacyQuota = { status: null, signal: 'SIGTERM', stdout: 'Claude usage limit reached' };
+  assert.ok(detectLimitHit({ agent: 'claude', ...legacyQuota }));
+  assert.equal(shouldPersistLaunchFailureBlock('claude', legacyQuota), true);
+  assert.equal(detectLimitHit({ agent: 'claude', status: 0, stdout: '', failureReason: { version: 1, code: 'agent-quota' } }), null);
 });

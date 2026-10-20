@@ -113,6 +113,7 @@ export async function dispatchProjectedCommand(reply: FastifyReply, dispatcher: 
     kind: command.kind,
     missionId: command.missionId,
     missionStatusAtRequest: command.missionStatusAtRequest,
+    ...selectedFamilyFields(command.agent),
     capabilities: new Set([command.kind as Capability] as const),
     ...(command.payload !== undefined
       ? { payload: { kind: 'handoff:record' as const, ...command.payload } }
@@ -138,4 +139,9 @@ export async function dispatchProjectedCommand(reply: FastifyReply, dispatcher: 
   // answers 200 inside the envelope; the wire status carries the
   // meaning and no server-side retry happens.
   reply.code(200).type('application/json; charset=utf-8').send(result);
+}
+
+/** The transport exposes only a validated family, never launcher options. */
+export function selectedFamilyFields(agent?: string): Pick<BoardCommandRequest, 'agent' | 'pinnedAgent'> {
+  return agent === undefined ? {} : { agent, pinnedAgent: true };
 }

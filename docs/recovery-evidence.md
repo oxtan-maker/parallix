@@ -23,16 +23,37 @@ mission worktree:
 
 - the command, its working directory, and the captured revision
 - the exit code and signal
+- a versioned failure reason when the gate writer can identify one
 - incident and attempt identity, so the original failure and its retries group
   into one series without overwriting each other
 - attributable stdout and stderr with byte counts and a capture-completeness
   flag
 - whether the streams were truncated, redacted, or otherwise not whole
 
-The incident is grouped by a fingerprint of the command, working directory,
-captured revision, exit/signal, and diagnostic. A retry reuses the incident and
+The incident is grouped by a fingerprint of the command and working directory.
+Revision, exit/signal, and diagnostics may change between attempts without
+splitting the incident. A retry reuses the incident and
 advances the attempt number. Each record is written atomically, so an
 interrupted write is read as interrupted rather than as a complete record.
+
+## Classification and compatibility
+
+Recognized versioned failure reasons take precedence over diagnostic keywords.
+A typed CPU-budget failure stays repairable even if its output contains an
+infrastructure keyword; a typed infrastructure failure still requires human
+intervention. Passing test titles do not establish a blocker. A process signal
+alone does not establish provider quota: an unaccompanied SIGTERM leaves the
+agent available, while identified quota evidence can justify a family block.
+
+Records without a reason, with an unknown code, or with an unsupported reason
+version remain readable. Classification explicitly logs a legacy fallback and
+uses the existing diagnostic rules. That fallback cannot turn a failed or
+signalled process into success or change the record's capture-completeness flag.
+Inspect the original output and process metadata when diagnosing a fallback;
+a code is a routing fact, not proof that a repair passed.
+
+Checkpoint snapshots also carry the recorded review round and repaired-gate
+metadata when present. Older rows without these fields remain valid.
 
 ## How it is bounded
 

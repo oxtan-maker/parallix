@@ -1061,11 +1061,11 @@ test('performHandoff proceeds normally when rebase is a no-op (branch already up
 
 // ---------- runDeclaredGates (generic ## Gates runner) ----------
 
-test('runDeclaredGates returns skipped when no ## Gates section exists', () => {
+test('runDeclaredGates returns skipped when no ## Gates section exists', async () => {
   const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-test-'));
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\nNo gates here.\n');
   try {
-    const result = runDeclaredGates(missionDir, '/tmp/fake', { log: () => {}, error: () => {} });
+    const result = await runDeclaredGates(missionDir, '/tmp/fake', { log: () => {}, error: () => {} });
     assert.strictEqual(result.ok, true);
     assert.strictEqual(result.skipped, true);
     assert.strictEqual(result.reason, 'no-gates-section');
@@ -1076,12 +1076,12 @@ test('runDeclaredGates returns skipped when no ## Gates section exists', () => {
 
 // TASK-2521.03: gates recorded through `px gate add` are Mission state and are
 // the authority; the mission document is only the legacy fallback.
-test('runDeclaredGates runs recorded gates and never reads the mission document', () => {
+test('runDeclaredGates runs recorded gates and never reads the mission document', async () => {
   const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-test-'));
   // A document whose ## Gates section would fail if it were consulted.
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\n## Gates\n- [ ] exit 1\n');
   try {
-    const result = runDeclaredGates(missionDir, missionDir, {
+    const result = await runDeclaredGates(missionDir, missionDir, {
       log: () => {}, error: () => {},
       recordedGates: ['true'],
     });
@@ -1093,11 +1093,11 @@ test('runDeclaredGates runs recorded gates and never reads the mission document'
   }
 });
 
-test('runDeclaredGates falls back to the mission document when nothing is recorded', () => {
+test('runDeclaredGates falls back to the mission document when nothing is recorded', async () => {
   const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-test-'));
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\n## Gates\n- [ ] true\n');
   try {
-    const result = runDeclaredGates(missionDir, missionDir, {
+    const result = await runDeclaredGates(missionDir, missionDir, {
       log: () => {}, error: () => {},
       recordedGates: [],
     });
@@ -1109,10 +1109,10 @@ test('runDeclaredGates falls back to the mission document when nothing is record
   }
 });
 
-test('a failing recorded gate blocks handoff exactly as a failing document gate does', () => {
+test('a failing recorded gate blocks handoff exactly as a failing document gate does', async () => {
   const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-test-'));
   try {
-    const result = runDeclaredGates(missionDir, missionDir, {
+    const result = await runDeclaredGates(missionDir, missionDir, {
       log: () => {}, error: () => {},
       recordedGates: ['exit 3'],
     });
@@ -1124,11 +1124,11 @@ test('a failing recorded gate blocks handoff exactly as a failing document gate 
   }
 });
 
-test('runDeclaredGates returns skipped when ## Gates section is empty', () => {
+test('runDeclaredGates returns skipped when ## Gates section is empty', async () => {
   const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-test-'));
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\n## Gates\n\n');
   try {
-    const result = runDeclaredGates(missionDir, '/tmp/fake', { log: () => {}, error: () => {} });
+    const result = await runDeclaredGates(missionDir, '/tmp/fake', { log: () => {}, error: () => {} });
     assert.strictEqual(result.ok, true);
     assert.strictEqual(result.skipped, true);
     assert.strictEqual(result.reason, 'no-gates-declared');
@@ -1137,11 +1137,11 @@ test('runDeclaredGates returns skipped when ## Gates section is empty', () => {
   }
 });
 
-test('runDeclaredGates executes passing gates and reports count', () => {
+test('runDeclaredGates executes passing gates and reports count', async () => {
   const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-test-'));
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\n## Gates\n\n- [ ] echo hello\n- [ ] true\n');
   try {
-    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+    const result = await runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
     assert.strictEqual(result.ok, true);
     assert.strictEqual(result.skipped, false);
     assert.strictEqual(result.count, 2);
@@ -1151,11 +1151,11 @@ test('runDeclaredGates executes passing gates and reports count', () => {
   }
 });
 
-test('runDeclaredGates fails when a gate command exits non-zero', () => {
+test('runDeclaredGates fails when a gate command exits non-zero', async () => {
   const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-test-'));
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\n## Gates\n\n- [ ] false\n');
   try {
-    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+    const result = await runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.reason, 'gate-failed');
     assert.strictEqual(result.gate, 'false');
@@ -1164,18 +1164,18 @@ test('runDeclaredGates fails when a gate command exits non-zero', () => {
   }
 });
 
-test('runDeclaredGates skips when mission directory does not exist', () => {
-  const result = runDeclaredGates('/nonexistent/dir', '/tmp/fake', { log: () => {}, error: () => {} });
+test('runDeclaredGates skips when mission directory does not exist', async () => {
+  const result = await runDeclaredGates('/nonexistent/dir', '/tmp/fake', { log: () => {}, error: () => {} });
   assert.strictEqual(result.ok, true);
   assert.strictEqual(result.skipped, true);
   assert.strictEqual(result.reason, 'no-mission-file');
 });
 
-test('runDeclaredGates handles checkbox prefixes [- [ ] and - [x])', () => {
+test('runDeclaredGates handles checkbox prefixes [- [ ] and - [x])', async () => {
   const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-test-'));
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\n## Gates\n\n- [ ] echo step1\n- [x] true\n');
   try {
-    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+    const result = await runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
     assert.strictEqual(result.ok, true);
     assert.strictEqual(result.skipped, false);
     assert.strictEqual(result.count, 2);
@@ -1559,13 +1559,13 @@ test('runDeclaredGates captures stdout and stderr on gate failure (SC2)', async 
 
   // Mock spawnSync to capture the actual gate command
   const origSpawnSync = childProcess.spawnSync;
-  const mockSpawnSync = mock.method(childProcess, 'spawnSync', (...args: Parameters<typeof origSpawnSync>) => {
+  const mockSpawnSync = mock.method(childProcess, 'spawnSync', async (...args: Parameters<typeof origSpawnSync>) => {
     // Let real spawnSync run, we just want to verify the result is captured
     return origSpawnSync.apply(childProcess, args);
   });
 
   try {
-    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+    const result = await runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.reason, 'gate-failed');
     assert.ok(result.stdout !== undefined, 'stdout should be captured');
@@ -1676,11 +1676,11 @@ test('validateDeclaredGates passes for commands with flags', () => {
 
 // ---------- runDeclaredGates integration with validation ----------
 
-test('runDeclaredGates fails with validation-failed before executing invalid file reference', () => {
+test('runDeclaredGates fails with validation-failed before executing invalid file reference', async () => {
   const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-validation-test-'));
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\n## Gates\n\n- [ ] ./scripts/nonexistent.sh\n');
   try {
-    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+    const result = await runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.reason, 'validation-failed');
     assert.strictEqual(result.gate, './scripts/nonexistent.sh');
@@ -1689,11 +1689,11 @@ test('runDeclaredGates fails with validation-failed before executing invalid fil
   }
 });
 
-test('runDeclaredGates fails with validation-failed before executing syntax error', () => {
+test('runDeclaredGates fails with validation-failed before executing syntax error', async () => {
   const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-validation-test-'));
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\n## Gates\n\n- [ ] echo \'unclosed\n');
   try {
-    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+    const result = await runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.reason, 'validation-failed');
   } finally {
@@ -1825,12 +1825,12 @@ test('validateDeclaredGates rejects outcome prose with command-only remediation'
   assert.match(result.error, /Success Criteria or checkpoint documentation/i);
 });
 
-test('runDeclaredGates rejects Markdown command followed by prose', () => {
+test('runDeclaredGates rejects Markdown command followed by prose', async () => {
   const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-backtick-prose-test-'));
   const gate = '`true` passes on the final tree.';
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), `# Mission\n\n## Gates\n\n- [ ] ${gate}\n`);
   try {
-    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+    const result = await runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'validation-failed');
     assert.equal(result.gate, gate);
@@ -1839,12 +1839,12 @@ test('runDeclaredGates rejects Markdown command followed by prose', () => {
   }
 });
 
-test('runDeclaredGates rejects explanatory dash suffixes', () => {
+test('runDeclaredGates rejects explanatory dash suffixes', async () => {
   for (const suffix of ['true — some description', 'true – brief note', 'true -– legacy note']) {
     const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-dash-prose-test-'));
     fs.writeFileSync(path.join(missionDir, 'MISSION.md'), `# Mission\n\n## Gates\n\n- [ ] ${suffix}\n`);
     try {
-      const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+      const result = await runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
       assert.equal(result.ok, false, suffix);
       assert.equal(result.reason, 'validation-failed', suffix);
     } finally {
@@ -1853,7 +1853,7 @@ test('runDeclaredGates rejects explanatory dash suffixes', () => {
   }
 });
 
-test('runDeclaredGates executes bare, backticked, checked, and unchecked command forms', () => {
+test('runDeclaredGates executes bare, backticked, checked, and unchecked command forms', async () => {
   const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-command-forms-test-'));
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), [
     '# Mission',
@@ -1866,7 +1866,7 @@ test('runDeclaredGates executes bare, backticked, checked, and unchecked command
     ''
   ].join('\n'));
   try {
-    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+    const result = await runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
     assert.equal(result.ok, true);
     assert.equal(result.reason, 'all-gates-passed');
     assert.equal(result.count, 3);

@@ -3,7 +3,7 @@ id: TASK-2697
 title: >-
   Build a publication-ready engineering case study from the Parallix recovery
   experiments
-status: backlog
+status: ready-for-integration
 assignee: []
 created_date: '2026-10-09 09:16'
 labels: []

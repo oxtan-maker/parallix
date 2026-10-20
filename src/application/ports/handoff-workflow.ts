@@ -42,6 +42,7 @@ import type { MissionHandoffService } from '../mission-handoff-service.js';
 export type HandoffLog = (_message: string) => void;
 
 export interface CommandResult {
+  signal?: string | null;
   readonly status: number | null;
   readonly stdout?: string;
   readonly stderr?: string;
@@ -199,7 +200,7 @@ export interface HandoffVerificationPort {
   createVerificationProofIdentity(_command: string, _rootDir: string): ProofResult;
   readReusableVerificationProof(_command: string, _rootDir: string): ProofResult;
   writeReusableVerificationProof(_command: string, _rootDir: string, _options?: { expectedIdentity?: string }): ProofResult;
-  runVerificationGate(_area: string, _options: HandoffVerificationGateOptions): CommandResult;
+  runVerificationGate(_area: string, _options: HandoffVerificationGateOptions): CommandResult | Promise<CommandResult>;
   isTransientVerificationFailure(_output: { stdout?: unknown; stderr?: unknown }): boolean;
 }
 
@@ -291,6 +292,11 @@ export type HandoffMissionServicesPort = (
  * the workflow needs appears here; nothing else is reachable from the use case.
  */
 export interface HandoffWorkflowPorts {
+  readonly declaredGateExecution?: {
+    run(_commands: string[], _root: string, _log: HandoffLog): Promise<{
+      ok: boolean; error?: string; gate?: string; stdout?: string; stderr?: string; exitCode?: number | null;
+    }> | null;
+  };
   readonly fileSystem: HandoffFileSystemPort;
   readonly git: HandoffGitPort;
   readonly missionUtils: HandoffMissionUtilsPort;
@@ -330,6 +336,7 @@ export type CaptureNelResult =
  * defaults to the matching port; the rest steer the bounded recovery recursion.
  */
 export interface PerformHandoffOptions {
+  readonly reviewer?: import('../../domain/agents.js').AgentFamily;
   readonly skipGate?: boolean;
   readonly worktree?: string | null;
   readonly force?: boolean;
@@ -365,6 +372,8 @@ export interface HandoffResult {
   readonly gateOutput?: { stdout: string; stderr: string };
   /** Process evidence for a failed final verifier; never reduce this to `error`. */
   readonly gateFailure?: {
+    failureReason?: import('../../domain/failure-reason.js').FailureReason;
+    signal?: string | null;
     area: string;
     command: string;
     cwd: string;

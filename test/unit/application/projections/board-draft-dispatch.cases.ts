@@ -283,3 +283,11 @@ test('DraftWorkflowAbortedError is the typed abort the use case throws', async (
     (error: unknown) => error instanceof DraftWorkflowAbortedError && error.slug === 'task-2427',
   );
 });
+
+
+test('board refinement carries explicit family through typed entry and pins its launch', async () => {
+  const { controller, workflow } = makeController();
+  const result = await controller.dispatch(makeRequest({ agent: 'custom-family', pinnedAgent: true }));
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(workflow.preflightArgs, [{ args: ['task-2427', '--agent', 'custom-family'], options: { pinnedAgent: true } }]);
+});

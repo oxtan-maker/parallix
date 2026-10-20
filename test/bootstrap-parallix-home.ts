@@ -31,11 +31,13 @@ function makeTempDir(prefix: string) {
 // Preserve executable discovery before HOME isolation hides default nvm installs.
 process.env.NVM_DIR ||= path.join(os.homedir(), '.nvm');
 process.env.PARALLIX_HOME = makeTempDir('parallix-test-home-');
+// Synthetic CLI runs share only disposable admission state, never the enclosing gate.
+process.env.PARALLIX_CUSTOM_ADMISSION_HOME = process.env.PARALLIX_HOME;
 process.env.HOME = makeTempDir('parallix-test-user-home-');
 process.env.NPM_CONFIG_CACHE = makeTempDir('parallix-test-npm-cache-');
 // A test graph owns isolated state, never the invoking workflow's write fence
 // or live terminal. Fixtures opt into their own ownership after bootstrap.
-for (const key of ['PARALLIX_WORKFLOW_OPERATION', 'PARALLIX_WORKFLOW_GENERATION', 'PARALLIX_MISSION_TERMINAL', 'PARALLIX_MISSION_SOCKET', 'PARALLIX_OPERATION_CAPTURE']) {
+for (const key of ['PARALLIX_GATE_OWNER', 'PARALLIX_CUSTOM_ADMISSION_REPOSITORY', 'PARALLIX_WORKFLOW_OPERATION', 'PARALLIX_WORKFLOW_GENERATION', 'PARALLIX_MISSION_TERMINAL', 'PARALLIX_MISSION_SOCKET', 'PARALLIX_OPERATION_CAPTURE']) {
   delete process.env[key];
 }
 // Unit tests must never discover an operator's live Forgejo installation or

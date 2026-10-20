@@ -110,7 +110,12 @@ function toWebMissionCard(card: MissionCard): WebMissionCard {
       name,
       description,
       ...(state === undefined ? {} : { state }),
-      goalCheck: goalCheck.map(({ criterion, evidence }) => ({ criterion, evidence })),
+      goalCheck: goalCheck.map(({ criterion, evidence, recordedRound, repairedGate, repairedGates }) => ({
+        criterion, evidence,
+        ...(recordedRound === undefined ? {} : { recordedRound }),
+        ...(repairedGate === undefined ? {} : { repairedGate }),
+        ...(repairedGates === undefined ? {} : { repairedGates: [...repairedGates] }),
+      })),
     })),
     nextActionText: card.nextActionText,
     gate: card.gate,

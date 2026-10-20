@@ -25,6 +25,7 @@ interface GatekeeperRemediationContext {
   runGatekeeperFn: NonNullable<PerformHandoffOptions['runGatekeeperFn']>;
   missionServicesFn: HandoffMissionServicesPort;
   occurredAt: string;
+  reviewer?: PerformHandoffOptions['reviewer'];
   retryHandoff: (_slug: string, _options: PerformHandoffOptions) => Promise<HandoffResult>;
 }
 
@@ -149,6 +150,7 @@ export class GatekeeperRemediation {
             maxAttempts: currentAttempt + 1,
             remainingRetries: Math.max(0, initialBudget - attempt),
             occurredAt,
+            reviewer: context.reviewer,
           });
           repairedResult = retryResult;
           return { ok: Boolean(retryResult.ok), diagnostic: retryResult.error || '' };

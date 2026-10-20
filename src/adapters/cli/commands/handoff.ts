@@ -1,3 +1,6 @@
+import { resolveCanonicalMaxConcurrentGates } from '../../config/product-config.js';
+import { assertIndependentGateInvocation } from '../../../application/ports/gate-admission.js';
+import { runConfiguredVerification } from '../../verification/configured-verification.js';
 import { commitDirtyFiles } from '../../git/commit-dirty-files.js';
 import { verificationEnvironment } from '../../config/verification-environment.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
@@ -26,7 +29,7 @@ import * as gatekeeper from '../../verification/gatekeeper.js';
 import { formatVerificationCommand, isTransientVerificationFailure, resolveEffectiveArea, runVerificationGate } from '../../verification/verification.js';
 import { createActiveVerificationIdentity as createVerificationProofIdentity, readActiveVerificationProof as readReusableVerificationProof, writeActiveVerificationProof as writeReusableVerificationProof } from '../../verification/active-verification-proof.js';
 import { isForgejoReviewEnabled } from '../../config/product-config.js';
-import { loadPhaseGates, runPhaseGates } from '../../config/repository-gates.js';
+import { loadPhaseGates, runPhaseGates, runGateCommand, type GateCommandRunner } from '../../config/repository-gates.js';
 import { rebaseBeforeReviewRound } from '../../review/rebase.js';
 import { computeNELRecord } from '../../git/net-engineering-lines.js';
 import { writeJson } from '../../storage/storage.js';
@@ -58,8 +61,40 @@ function createHandoffFileSystemPorts(): HandoffWorkflowPorts['fileSystem'] {
  * time*, so a test that swaps a dependency module (see `test/lib/module-mock.ts`)
  * is still observed by the use case.
  */
+function declaredCommandRunner(root: string, log: (message: string) => void, configuration?: ParallixConfiguration): GateCommandRunner {
+  return async (command, args, options) => {
+    const reusable = readReusableVerificationProof(command, root, { configuration });
+    if (reusable.ok) {
+      log(`  Gate reused proof ${reusable.identity}: ${command}`);
+      return { status: 0, stdout: '', stderr: '' };
+    }
+    const before = createVerificationProofIdentity(command, root, { configuration });
+    const result = await runGateCommand(command, args, options);
+    if (result.status === 0 && before.ok) {
+      const written = writeReusableVerificationProof(command, root, { configuration, expectedIdentity: before.identity });
+      if (written.ok) { log(`  Gate executed; stored proof ${written.identity}: ${command}`); }
+    }
+    return result;
+  };
+}
+
+function createDeclaredGateExecution(configuration?: ParallixConfiguration): NonNullable<HandoffWorkflowPorts['declaredGateExecution']> {
+  return {
+    run(commands, root, log) {
+      assertIndependentGateInvocation();
+      if (!Number.isFinite(resolveCanonicalMaxConcurrentGates(root))) { return null; }
+      return runPhaseGates('handoff', { configuration, slug: '', checkoutPath: root, log,
+        maxParallel: 1, commandRunner: declaredCommandRunner(root, log, configuration), gates: commands.map((command, order) => ({ key: `declared-${order}`, command, order })),
+      }).then(result => ({ ok: result.ok, error: result.error ?? undefined,
+        gate: result.failedGate?.command ?? commands[0], stdout: result.failedGate?.stdout,
+        stderr: result.failedGate?.stderr, exitCode: result.failedGate?.exitCode ?? null }));
+    },
+  };
+}
+
 export function createHandoffPorts(configuration?: ParallixConfiguration, missionServices?: HandoffMissionServicesPort): HandoffWorkflowPorts {
   return {
+    declaredGateExecution: createDeclaredGateExecution(configuration),
     fileSystem: createHandoffFileSystemPorts(),
     git: {
       commitMissionChanges: (rootDir, slug, log, error) => commitDirtyFiles(rootDir, slug, args => git.git(args), log, error),
@@ -118,7 +153,9 @@ export function createHandoffPorts(configuration?: ParallixConfiguration, missio
       createVerificationProofIdentity: (command, rootDir) => createVerificationProofIdentity(command, rootDir, { configuration }),
       readReusableVerificationProof: (command, rootDir) => readReusableVerificationProof(command, rootDir, { configuration }),
       writeReusableVerificationProof: (command, rootDir, options) => writeReusableVerificationProof(command, rootDir, { ...options, configuration }),
-      runVerificationGate: (area, options) => runVerificationGate(area, { ...options, env: configuration?.forwardedEnvironment }),
+      runVerificationGate: (area, options) => Number.isFinite(resolveCanonicalMaxConcurrentGates(options.rootDir ?? process.cwd()))
+        ? runConfiguredVerification(area, options.rootDir ?? process.cwd(), configuration)
+        : runVerificationGate(area, { ...options, env: configuration?.forwardedEnvironment }),
       isTransientVerificationFailure: (output) => isTransientVerificationFailure(output),
     },
     nel: {

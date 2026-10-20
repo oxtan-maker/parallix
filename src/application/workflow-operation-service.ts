@@ -223,7 +223,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
           requestKey: key, command, generation: 0, phase: 'accepted', providerStarted: false, agent,
           reviewer: request.reviewer ?? null, originalStatus: loaded.mission.status,
           previousAssignee: loaded.mission.assignee, owner: null, createdAt: now, updatedAt: now, reason: null,
-        }), invocation: request.invocation, payload: request.payload, requestedAgent: request.agent };
+        }), invocation: request.invocation, payload: request.payload, requestedAgent: request.agent, pinnedAgent: request.pinnedAgent };
         if (command === 'active:execute' && agent) {
           const activation = await new MissionLifecycleService(this._missions).activate({
             operationId: operation.id, missionId: loaded.mission.id, expectedVersion: loaded.version,
@@ -269,7 +269,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     if (!operation) { return; }
     const request: BoardCommandRequest = {
       operationId: operation.id, missionId: operation.missionId, kind: operation.command,
-      capabilities: new Set([operation.command]), agent: operation.command === 'active:execute' ? operation.agent : operation.requestedAgent ?? null, reviewer: operation.reviewer,
+      capabilities: new Set([operation.command]), agent: operation.command === 'active:execute' ? operation.agent : operation.requestedAgent ?? null, pinnedAgent: operation.pinnedAgent, reviewer: operation.reviewer,
       detached: false, payload: operation.payload,
     };
     let outcome: ApplicationOutcome<unknown>;

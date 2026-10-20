@@ -1,3 +1,4 @@
+import { agentFamily, type AgentFamily } from '../../domain/agents.js';
 import type { MissionEditService } from '../mission-edit-service.js';
 import type { ExecuteMissionPorts } from '../ports/execute-mission.js';
 import {
@@ -51,12 +52,12 @@ export interface BoardMissionServices {
   readonly checkpoints?: MissionCheckpointService;
   readonly handoff?: MissionHandoffService;
   /** The CLI-equivalent handoff workflow derives its own evidence and starts review. */
-  readonly handoffWorkflow?: { executeForSlug(_slug: string): Promise<void> };
+  readonly handoffWorkflow?: { executeForSlug(_slug: string, _agent?: AgentFamily): Promise<void> };
   /**
    * The application-owned draft use case, wired by the composition from the
    * trusted draft workflow adapter. The board reaches it through
-   * `executeForSlug` only — the request's `missionId` (slug) is the sole
-   * value that crosses the boundary.
+   * `executeForSlug` only: mission identity and an optional explicit family.
+   * No CLI options or arguments cross the board boundary.
    */
   readonly draft?: DraftCommandUseCase;
   /** Integration accepts only the mission identity; its workflow owns policy and effects. */
@@ -269,7 +270,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
     });
     if (publication) { await bestEffort(() => this.currentWork.running(publication)); }
     try {
-      await this.missionServices.handoffWorkflow.executeForSlug(request.missionId);
+      await this.missionServices.handoffWorkflow.executeForSlug(request.missionId, request.kind === 'review:submit' && request.pinnedAgent && request.agent ? agentFamily(request.agent) : undefined);
       if (publication) { await bestEffort(() => this.currentWork.ended(publication)); }
       return completed({ slug: request.missionId });
     } catch (error) {
@@ -304,7 +305,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
     }
     this.emit(request.operationId, 1, 'draft', `drafting ${request.missionId}`);
     try {
-      await this.missionServices.draft.executeForSlug(request.missionId);
+      await this.missionServices.draft.executeForSlug(request.missionId, request.pinnedAgent && request.agent ? agentFamily(request.agent) : undefined);
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'draft workflow aborted';
       return failure('execution', `draft:create for ${request.missionId} aborted: ${reason}`);
@@ -355,6 +356,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
       // canonical lowercase so a card such as TASK-2375SHUT can launch.
       slug: request.missionId.toLowerCase(),
       agent: request.agent ?? undefined,
+      pinnedAgent: request.pinnedAgent,
       reviewer: request.reviewer ?? undefined,
       capabilities: request.capabilities,
       cancellation: request.cancellation,

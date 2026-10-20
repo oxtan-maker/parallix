@@ -133,6 +133,7 @@ async function selectLaunchAndRecord(opts: LaunchOptions) {
       prompt,
       worktree,
       agent: preselected,
+      pinnedAgent: opts.pinnedAgent,
       slug: slug,
       role: 'implementer',
       unrefChild,

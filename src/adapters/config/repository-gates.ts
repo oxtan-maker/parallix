@@ -1,3 +1,4 @@
+import { gateFailureReasonFromProcess } from '../../domain/failure-classification.js';
 import { normalizeGates, validateRepositoryGates, type RepositoryGate, type RepositoryGates } from './repository-gate-schema.js';
 export { validateRepositoryGates, type RepositoryGate, type RepositoryGates } from './repository-gate-schema.js';
 import { verificationEnvironment } from './verification-environment.js';
@@ -15,12 +16,13 @@ import type { ParallixConfiguration } from "../../application/ports/configuratio
 // contract. The selection policy ("which gates run") is owned by the
 // repository configuration, never inferred from the repository layout.
 import path from 'node:path';
+import { assertIndependentGateInvocation, gateAdmission, type GateAdmissionPort, type GateAdmissionRun } from '../../application/ports/gate-admission.js';
 import { runGateCommand } from './gate-command-runner.js';
 export { runGateCommand } from './gate-command-runner.js';
 import type { IntegrationVerificationEvidencePort, ReusableVerificationProofPort } from '../../application/ports/integration-verification-evidence.js';
 import { GateDashboard } from './gate-dashboard.js';
 import * as fmt from '../../application/presentation/cli-format.js';
-import { loadEffectiveConfig, loadWorkflowConfig } from './product-config.js';
+import { loadEffectiveConfig, loadWorkflowConfig, resolveCanonicalMaxConcurrentGates } from './product-config.js';
 
 /** Ordered lifecycle phases that may carry configured gates. */
 export const GATE_PHASES = ['handoff', 'review', 'integration'] as const;
@@ -92,6 +94,8 @@ export function loadRepositoryGates(rootDir: string): RepositoryGates {
 
 /** Result of running a configured gate. */
 export interface GateRunOutcome {
+  failureReason?: import('../../domain/failure-reason.js').FailureReason;
+  signal?: string | null;
   key: string;
   command: string;
   exitCode: number | null;
@@ -126,8 +130,8 @@ export interface PhaseGateRunResult {
 export type GateCommandRunner = (
   _command: string,
   _args: string[],
-  _options: { cwd: string, env: NodeJS.ProcessEnv, stdio: string, signal?: globalThis.AbortSignal, onOutput?: (_chunk: string, _stream: 'stdout' | 'stderr') => void, forwardOutput?: boolean },
-) => { status: number | null, stdout: string, stderr: string } | Promise<{ status: number | null, stdout: string, stderr: string }>;
+  _options: { cwd: string, env: NodeJS.ProcessEnv, stdio: string, signal?: globalThis.AbortSignal, onOutput?: (_chunk: string, _stream: 'stdout' | 'stderr') => void, forwardOutput?: boolean, bindProcessGroup?: (_pid: number) => void },
+) => { status: number | null, stdout: string, stderr: string, signal?: string | null } | Promise<{ status: number | null, stdout: string, stderr: string, signal?: string | null }>;
 
 /** Read a phase's opt-in concurrency limit; serial is the default. */
 export function loadPhaseGateParallelism(rootDir: string, phase: 'preHandoff' | 'preReview' | 'preIntegration'): number {
@@ -183,6 +187,9 @@ export function buildGateEnv(phase: GatePhase, slug: string, checkoutPath: strin
  * @param {{slug: string, checkoutPath: string, gates?: RepositoryGate[], commandRunner?: GateCommandRunner, log?: Function, error?: Function}} opts
  */
 export interface PhaseGateOptions {
+  admission?: GateAdmissionPort;
+  admissionRun?: GateAdmissionRun;
+  signal?: AbortSignal;
   configuration?: ParallixConfiguration;
   verificationEvidence?: IntegrationVerificationEvidencePort;
   slug: string;
@@ -210,7 +217,17 @@ export async function runPhaseGates(phase: GatePhase, opts: PhaseGateOptions): P
   const skipped = skippedPhaseGateResult(phase, gates, dryRun, log);
   if (skipped) { return skipped; }
 
-  return new PhaseGateExecution(phase, opts, gates, log, error).execute();
+  const execute = (options: PhaseGateOptions) => new PhaseGateExecution(phase, options, gates, log, error).execute();
+  try {
+    assertIndependentGateInvocation();
+    opts.admission?.assertIndependent();
+    if (!Number.isFinite(resolveCanonicalMaxConcurrentGates(checkoutPath))) { return execute(opts); }
+    return await (opts.admission ?? gateAdmission()).run(checkoutPath,
+      admissionRun => execute({ ...opts, admissionRun, signal: admissionRun.signal }), opts.signal);
+  } catch (cause) {
+    return { ok: false, phase, gates, executed: 0, skipped: false, dryRun: false,
+      cancelled: cause instanceof Error && cause.name === 'AbortError', failedGate: null, error: String(cause) };
+  }
 }
 
 function phaseDashboard(phase: GatePhase, opts: PhaseGateOptions, gates: RepositoryGate[], cancelByOperator: () => void): GateDashboard | null {
@@ -231,9 +248,11 @@ function phaseExecutionState(phase: GatePhase, opts: PhaseGateOptions, gates: Re
   // executables. No new runner or shell language is introduced. The default
   // runner captures each gate's streams so concurrent output can later be
   // rendered as distinct sections instead of interleaving byte-by-byte.
-  const runner = opts.commandRunner || runGateCommand;
+  const runner: GateCommandRunner = opts.commandRunner || runGateCommand;
 
   const env = buildGateEnv(phase, slug, checkoutPath, opts.configuration?.forwardedEnvironment ?? { ...process.env }, { realAgent: opts.realAgent, realAgentModel: opts.realAgentModel });
+
+  Object.assign(env, opts.admissionRun?.environment);
 
   const maxParallel = opts.maxParallel ?? loadPhaseGateParallelism(checkoutPath, toConfigPhase(phase));
 
@@ -244,6 +263,9 @@ function phaseExecutionState(phase: GatePhase, opts: PhaseGateOptions, gates: Re
   const cancellation = { operatorCancelled: false };
 
   const cancelByOperator = () => { cancellation.operatorCancelled = true; controller.abort(); };
+
+  opts.signal?.addEventListener('abort', cancelByOperator, { once: true });
+  if (opts.signal?.aborted) { cancelByOperator(); }
 
   const dashboard = phaseDashboard(phase, opts, gates, cancelByOperator);
 
@@ -298,6 +320,7 @@ class PhaseGateExecution {
     const run = Promise.resolve().then(() => this.state.runner(gate.command, [], {
       cwd: path.resolve(this.state.checkoutPath), env: this.state.env, stdio: 'pipe', signal: this.state.controller.signal,
       forwardOutput: this.state.liveSerial,
+      bindProcessGroup: this.state.opts.admissionRun?.bindProcessGroup,
       onOutput: chunk => this.state.dashboard?.append(gate.key, chunk)
     }))
       .then(result => {
@@ -308,9 +331,9 @@ class PhaseGateExecution {
             : beforeProof;
           return { key: gate.key, command: gate.command, exitCode, stdout: String(result.stdout || ''), stderr: persisted.ok ? String(result.stderr || '') : `${String(result.stderr || '')}\nproof unavailable: ${persisted.error}`, durationMs: Date.now() - started };
         }
-        return { key: gate.key, command: gate.command, exitCode, stdout: String(result.stdout || ''), stderr: String(result.stderr || ''), durationMs: Date.now() - started };
+        return { key: gate.key, command: gate.command, exitCode, signal: result.signal ?? null, failureReason: gateFailureReasonFromProcess(result), stdout: String(result.stdout || ''), stderr: String(result.stderr || ''), durationMs: Date.now() - started };
       })
-      .catch(cause => ({ key: gate.key, command: gate.command, exitCode: null, stdout: '', stderr: String(cause), durationMs: Date.now() - started }));
+      .catch(cause => ({ failureReason: gateFailureReasonFromProcess({ status: null, stderr: String(cause) }), key: gate.key, command: gate.command, exitCode: null, stdout: '', stderr: String(cause), durationMs: Date.now() - started }));
     return run;
   }
 
@@ -342,6 +365,11 @@ class PhaseGateExecution {
     }
   }
 
+  close(): void {
+    this.state.opts.signal?.removeEventListener('abort', this.state.cancelByOperator);
+    this.state.dashboard?.close();
+  }
+
   async execute(): Promise<PhaseGateRunResult> {
     while (this.state.pending.length > 0 || this.state.running.size > 0) {
       await this.startPending();
@@ -356,7 +384,7 @@ class PhaseGateExecution {
       const { run, outcome } = await Promise.race([...this.state.running].map(run => run.then(outcome => ({ run, outcome }))));
       this.settleOutcome(run, outcome);
     }
-    this.state.dashboard?.close();
+    this.close();
     this.reportDashboard();
     if (this.state.cancellation.operatorCancelled) { this.state.failure.errorText = `Repository gates (${this.state.phase}) cancelled.`; }
     if (this.state.coverage) {

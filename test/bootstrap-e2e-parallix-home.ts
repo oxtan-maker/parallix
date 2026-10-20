@@ -25,9 +25,11 @@ startDefaultDbGuard('e2e-test');
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-e2e-home-'));
 process.env.PARALLIX_HOME = tempRoot;
+// Synthetic CLI runs share only disposable admission state, never the enclosing gate.
+process.env.PARALLIX_CUSTOM_ADMISSION_HOME = process.env.PARALLIX_HOME;
 // Isolated fixtures cannot inherit the invoking mission's write fence or
 // terminal capture. Their workers establish ownership within the fixture.
-for (const key of ['PARALLIX_WORKFLOW_OPERATION', 'PARALLIX_WORKFLOW_GENERATION', 'PARALLIX_MISSION_TERMINAL', 'PARALLIX_MISSION_SOCKET', 'PARALLIX_OPERATION_CAPTURE']) {
+for (const key of ['PARALLIX_GATE_OWNER', 'PARALLIX_CUSTOM_ADMISSION_REPOSITORY', 'PARALLIX_WORKFLOW_OPERATION', 'PARALLIX_WORKFLOW_GENERATION', 'PARALLIX_MISSION_TERMINAL', 'PARALLIX_MISSION_SOCKET', 'PARALLIX_OPERATION_CAPTURE']) {
   delete process.env[key];
 }
 fs.mkdirSync(tempRoot, { recursive: true });

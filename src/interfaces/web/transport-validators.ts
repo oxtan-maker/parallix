@@ -163,10 +163,11 @@ export function validateWebCommandRequest(payload: unknown): WebCommandRequestVa
   }
   const problems: string[] = [];
   checkKeys(payload,
-    ['missionId', 'kind', 'missionStatusAtRequest', 'payload', 'requestKey'],
+    ['missionId', 'kind', 'missionStatusAtRequest', 'payload', 'requestKey', 'agent'],
     ['missionId', 'kind', 'missionStatusAtRequest'],
     'request', problems);
   checkRequestKey(payload, problems);
+  checkAgentSelection(payload, problems);
   if (typeof payload.kind === 'string' && isWorkflowCommand(payload.kind)
     && (typeof payload.requestKey !== 'string' || !payload.requestKey.trim())) {
     problems.push('request.requestKey is required for workflow commands and must be nonblank');
@@ -195,6 +196,7 @@ export function validateWebCommandRequest(payload: unknown): WebCommandRequestVa
     ok: true,
     value: {
       ...(typeof payload.requestKey === 'string' ? { requestKey: payload.requestKey } : {}),
+      ...optionalAgent(payload.agent),
       missionId: payload.missionId as string,
       kind: payload.kind as WebCommandRequestKind,
       missionStatusAtRequest: payload.missionStatusAtRequest as string,
@@ -269,4 +271,15 @@ export function validateWebStreamError(payload: unknown): WebTransportValidation
 
 function checkRequestKey(payload: Record<string, unknown>, problems: string[]): void {
   if (payload.requestKey !== undefined && (typeof payload.requestKey !== 'string' || payload.requestKey.length < 1 || payload.requestKey.length > 128)) { problems.push('request.requestKey must contain 1–128 characters'); }
+}
+
+function checkAgentSelection(payload: Record<string, unknown>, problems: string[]): void {
+  if ('agent' in payload && (typeof payload.agent !== 'string' || !/^[a-z][a-z0-9-]*$/.test(payload.agent)
+    || !['draft:create', 'active:execute', 'review:submit'].includes(String(payload.kind)))) {
+    problems.push('request.agent must be an agent family for refinement, execution or review');
+  }
+}
+
+function optionalAgent(agent: unknown): { readonly agent?: string } {
+  return typeof agent === 'string' ? { agent } : {};
 }

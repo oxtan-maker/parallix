@@ -1,9 +1,13 @@
 import { spawn } from 'node:child_process';
 import { retainGateOutput } from './gate-dashboard.js';
 
-export function runGateCommand(command: string, _args: string[], options: { cwd: string, env: NodeJS.ProcessEnv, stdio: string, signal?: globalThis.AbortSignal, onOutput?: (_chunk: string, _stream: 'stdout' | 'stderr') => void, forwardOutput?: boolean, terminationGraceMs?: number }): Promise<{ status: number | null, stdout: string, stderr: string }> {
+export function runGateCommand(command: string, _args: string[], options: { cwd: string, env: NodeJS.ProcessEnv, stdio: string, signal?: globalThis.AbortSignal, onOutput?: (_chunk: string, _stream: 'stdout' | 'stderr') => void, forwardOutput?: boolean, bindProcessGroup?: (_pid: number) => void, terminationGraceMs?: number }): Promise<{ status: number | null, stdout: string, stderr: string, signal: string | null }> {
   return new Promise(resolve => {
-    const child = spawn('bash', ['-c', command], { cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+    if (options.signal?.aborted) { resolve({ status: null, signal: null, stdout: '', stderr: 'Gate cancelled before launch.' }); return; }
+    const guarded = Boolean(options.bindProcessGroup);
+    const child = spawn('bash', guarded ? ['-c', 'read -r admission <&3 && exec bash -c "$1"', 'gate', command] : ['-c', command], {
+      cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe', ...(guarded ? ['pipe' as const] : [])], detached: process.platform !== 'win32',
+    });
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -14,12 +18,12 @@ export function runGateCommand(command: string, _args: string[], options: { cwd:
         else if (child.pid) { process.kill(-child.pid, signal); }
       } catch { /* The child already exited. */ }
     };
-    const finish = (status: number | null) => {
+    const finish = (status: number | null, signal: string | null = null) => {
       if (settled) { return; }
       settled = true;
       if (watchdog) { clearTimeout(watchdog); }
       options.signal?.removeEventListener('abort', stop);
-      resolve({ status, stdout, stderr });
+      resolve({ status, signal, stdout, stderr });
     };
     const stop = () => {
       if (settled || watchdog) { return; }
@@ -29,7 +33,7 @@ export function runGateCommand(command: string, _args: string[], options: { cwd:
         child.stdout?.destroy();
         child.stderr?.destroy();
         stderr = retainGateOutput(stderr, '\nGate cancelled after termination grace period.');
-        finish(null);
+        finish(null, 'SIGKILL');
       }, options.terminationGraceMs ?? 5000);
     };
     options.signal?.addEventListener('abort', stop, { once: true });
@@ -46,5 +50,14 @@ export function runGateCommand(command: string, _args: string[], options: { cwd:
     });
     child.once('error', cause => { stderr = retainGateOutput(stderr, String(cause)); finish(null); });
     child.once('close', finish);
+    if (guarded && child.pid) {
+      try {
+        options.bindProcessGroup!(child.pid);
+        (child.stdio[3] as import('node:stream').Writable).end('admitted\n');
+      } catch (cause) {
+        stderr = retainGateOutput(stderr, String(cause));
+        signalGroup('SIGKILL');
+      }
+    }
   });
 }

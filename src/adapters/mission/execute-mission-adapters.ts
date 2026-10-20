@@ -181,6 +181,7 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
       slug: request.slug,
       worktree: request.worktree,
       preselectedAgent: request.preselectedAgent ?? request.plan.agent ?? null,
+      pinnedAgent: request.pinnedAgent,
       agentConfig: request.plan.agentConfig as object,
       taskResolution: request.taskResolution,
       prompt: request.plan.prompt,

@@ -1,3 +1,4 @@
+import { AgentFamilies } from './agent-menu.js';
 import { MissionEditor } from './mission-editor.js';
 /**
  * The board composition: it groups the received stages into the reference's
@@ -86,7 +87,11 @@ function useBoardModel(snapshot: WebBoardSnapshot, onRefresh: () => Promise<void
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dragged, setDragged] = useState<WebMissionCard | null>(null);
   const [terminalMission, setTerminalMission] = useState<string | null>(null);
-  const closeTerminal = useCallback(() => setTerminalMission(null), []);
+  const terminalOpener = useRef<HTMLElement | null>(null);
+  const closeTerminal = useCallback(() => {
+    setTerminalMission(null);
+    queueMicrotask(() => { if (terminalOpener.current?.isConnected) { terminalOpener.current.focus(); } });
+  }, []);
   /** The opener of the creation dialog, so dismissing it returns focus there. */
   const [createFrom, setCreateFrom] = useState<HTMLButtonElement | null>(null);
   const closeCreate = () => {
@@ -115,6 +120,15 @@ function useBoardModel(snapshot: WebBoardSnapshot, onRefresh: () => Promise<void
     if (mounted.current) { setOutcomes((current) => { const next = new Map(current); next.delete(missionId); return next; }); }
   };
   const moveSelection = (event: KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.matches('[data-board-card]') && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      setSelectedId(target.dataset.boardCard ?? null);
+      terminalOpener.current = target;
+      setTerminalMission(target.dataset.boardCard ?? null);
+      return;
+    }
+    if (target.closest('button,a,summary,details,input,textarea,select,[role="button"]')) { return; }
     if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') { return; }
     const cards = [...(root.current?.querySelectorAll<HTMLElement>('[data-board-card]') ?? [])];
     if (cards.length === 0) { return; }
@@ -131,13 +145,13 @@ function useBoardModel(snapshot: WebBoardSnapshot, onRefresh: () => Promise<void
     setDragPreview(event, card);
     setDragged(card);
   };
-  const dispatch = (card: WebMissionCard, action: WebCommandAction, control?: HTMLButtonElement) => dispatchBoardCommand(card, action, control, { pendingRef, requestSequence, latestInteraction, mounted, root, setEditRequest, publishPending, publishOutcome, onRefresh });
-  const open = (card: WebMissionCard, action: WebCommandAction, control: HTMLButtonElement) => {
+  const dispatch = (card: WebMissionCard, action: WebCommandAction, control?: HTMLButtonElement, agent?: string) => dispatchBoardCommand(card, action, control, { pendingRef, requestSequence, latestInteraction, mounted, root, setEditRequest, publishPending, publishOutcome, onRefresh }, agent);
+  const open = (card: WebMissionCard, action: WebCommandAction, control: HTMLButtonElement, agent?: string) => {
     const unavailable = unavailableReason(action, pendingRef.current.get(card.id));
     if (unavailable !== null) { publishOutcome(card.id, unavailable); return; }
     clearOutcome(card.id);
     if (action.kind === 'mission:cancel') { setCancelPrompt({ card, action, control }); return; }
-    void dispatch(card, action, control);
+    void dispatch(card, action, control, agent);
   };
   const dropAction = (lane: WebMissionCard['lane']) => {
     if (dragged === null) { return; }
@@ -157,7 +171,7 @@ function useBoardModel(snapshot: WebBoardSnapshot, onRefresh: () => Promise<void
   const selectTerminal = (event: MouseEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest('button,a,summary,details,[role="button"]') !== null) { return; }
     const card = (event.target as HTMLElement).closest<HTMLElement>('[data-board-card]');
-    if (card !== null) { setSelectedId(card.dataset.boardCard ?? null); setTerminalMission(card.dataset.boardCard ?? null); }
+    if (card !== null) { terminalOpener.current = card; setSelectedId(card.dataset.boardCard ?? null); setTerminalMission(card.dataset.boardCard ?? null); }
   };
   return { root, moveSelection, selectTerminal, pressedAction, publishOutcome, flowOpen, setFlowOpen, setCreateFrom, selectedId, pendingCommands, setSelectedId, open, startDrag, dropAction, canDrop, cancelPrompt, setCancelPrompt, outcomes, pendingRef, dispatch, editRequest, setEditRequest, createFrom, closeCreate, terminalMission, closeTerminal };
 }
@@ -223,6 +237,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
 
   return (
     <VisibleCommandOutcomes.Provider value={visibleOutcomes}>
+    <AgentFamilies.Provider value={snapshot.agentAvailability}>
     <div ref={root} tabIndex={-1} onKeyDown={moveSelection} onClick={selectTerminal}
       style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
       onPointerDownCapture={(event) => {
@@ -242,9 +257,9 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
       <TopBar snapshot={snapshot} flowOpen={flowOpen} onFlowToggle={() => setFlowOpen((open) => !open)} onCreate={setCreateFrom} />
       {flowOpen && <FlowPanel metrics={snapshot.metrics} />}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <AttentionRail reasonCards={[...intake.flatMap(stage => stage.cards), ...flight.flatMap(stage => stage.cards)]} snapshot={snapshot} selectedId={selectedId} pendingCommands={pendingCommands} onSelect={setSelectedId} onAction={(item, control) => {
+        <AttentionRail reasonCards={[...intake.flatMap(stage => stage.cards), ...flight.flatMap(stage => stage.cards)]} snapshot={snapshot} selectedId={selectedId} pendingCommands={pendingCommands} onSelect={setSelectedId} onAction={(item, control, agent) => {
           const card = snapshot.stages.flatMap((stage) => stage.cards).find((candidate) => candidate.id === item.missionId);
-          if (card !== undefined) { open(card, item.action, control); } else { publishOutcome(item.missionId, `Mission ${item.missionId} is no longer in the current projection.`); }
+          if (card !== undefined) { open(card, item.action, control, agent); } else { publishOutcome(item.missionId, `Mission ${item.missionId} is no longer in the current projection.`); }
         }} />
         <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0, gap: SPACE.xl, padding: SPACE.xl, overflowX: 'auto' }}>
           {intake.length > 0 && (
@@ -293,6 +308,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
       {[...outcomes.entries()].filter(([missionId]) => !visibleIds.has(missionId)).map(([missionId, outcome]) => <p key={missionId} data-command-fallback={missionId} role="status" aria-live="polite" style={{ margin: `0 ${SPACE.xl}px ${SPACE.lg}px`, color: MODAL.muted, overflowWrap: 'anywhere' }}>{missionId}: {outcome}</p>)}
       <OperationLog snapshot={snapshot} />
     </div>
+    </AgentFamilies.Provider>
     </VisibleCommandOutcomes.Provider>
   );
 }

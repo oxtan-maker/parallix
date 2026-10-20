@@ -13,10 +13,15 @@ export type VerifyCliRunner = (_request: VerifyCliRequest, _options: Record<stri
 export function createVerifyCommand(runner: VerifyCliRunner) {
   return (args: string[], options: Record<string, unknown> = {}) => {
     const result = runner(parseVerifyCliRequest(args), options);
-    if (result && typeof result === 'object' && 'status' in result && result.status !== 0
-      && typeof options.exitFn === 'function') {
-      options.exitFn(typeof result.status === 'number' ? result.status : 1);
-    }
-    return result;
+    if (result instanceof Promise) { return result.then(value => finish(value, options)); }
+    return finish(result, options);
   };
+}
+
+function finish(result: unknown, options: Record<string, unknown>) {
+  if (result && typeof result === 'object' && 'status' in result && result.status !== 0
+    && typeof options.exitFn === 'function') {
+    options.exitFn(typeof result.status === 'number' ? result.status : 1);
+  }
+  return result;
 }

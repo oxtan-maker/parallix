@@ -2,7 +2,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import './web-board-drag.cases.js';
+import './web-font-bundle.cases.js';
 import './web-board-interaction.cases.js';
+import './web-agent-menu.cases.js';
 import './web-checkpoint-interaction.cases.js';
 import './web-board-refresh-coordination.cases.js';
 import './web-board-render.cases.js';

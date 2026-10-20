@@ -1,3 +1,4 @@
+import { gateFailureReasonFromProcess } from '../domain/failure-classification.js';
 /**
  * Handoff gate outcomes with rebound recovery: the final repository
  * verification and the Mission's declared gates, each of which may hand a
@@ -52,7 +53,7 @@ export class HandoffGateRecovery {
         // successful process exit alone must not certify a tree changed mid-gate.
         const beforeGateProof = ports.verification.createVerificationProofIdentity(verificationCommand, rootDir);
         log(`Verifying the repository: ${verificationCommand}`);
-        const verifyResult = runVerificationGateFn(area, {
+        const verifyResult = await runVerificationGateFn(area, {
           rootDir,
           stdio: 'pipe',
           runFn: ports.git.run
@@ -68,7 +69,8 @@ export class HandoffGateRecovery {
             gateOutput: { stdout, stderr },
             gateFailure: {
               area, command: verificationCommand, cwd: rootDir,
-              exitCode: verifyResult.status, stdout, stderr,
+              exitCode: verifyResult.status, stdout, stderr, signal: verifyResult.signal,
+              failureReason: gateFailureReasonFromProcess(verifyResult),
               ...(ports.verification.isTransientVerificationFailure({ stdout, stderr }) ? { transient: true } : {}),
             },
           };
@@ -147,7 +149,7 @@ export class HandoffGateRecovery {
       return { ok: false, error: msg };
     }
     log(fmt.status('INFO', `Running mission-declared gates for ${fmt.slug(slug)}.`));
-    const gatesResult = gates.runDeclaredGates(missionDir, rootDir, { log: internalLog, error, recordedGates });
+    const gatesResult = await gates.runDeclaredGates(missionDir, rootDir, { log: internalLog, error, recordedGates });
     if (gatesResult.ok === false) {
       const msg = `Declared gate "${gatesResult.gate}" failed for ${fmt.slug(slug)}: ${gatesResult.error || gatesResult.reason}. Blocking handoff — task remains in active.`;
       error(msg);
@@ -209,7 +211,7 @@ function proofReuseMessage(proof: ProofResult): string {
   return proof.diagnostic ?? 'Repository verification passed by reuse of successful active/review proof.';
 }
 
-function declaredGateFailure(gatesResult: Extract<ReturnType<DeclaredGateRunner['runDeclaredGates']>, { ok: false }>, msg: string, rootDir: string): HandoffResult {
+function declaredGateFailure(gatesResult: Extract<Awaited<ReturnType<DeclaredGateRunner['runDeclaredGates']>>, { ok: false }>, msg: string, rootDir: string): HandoffResult {
   const processFailure = gatesResult.reason === 'gate-failed' ? gatesResult : null;
   return {
     ok: false,
@@ -218,6 +220,7 @@ function declaredGateFailure(gatesResult: Extract<ReturnType<DeclaredGateRunner[
     gateOutput: { stdout: (processFailure?.stdout || ''), stderr: (processFailure?.stderr || '') },
     ...(processFailure ? {
       gateFailure: {
+        failureReason: processFailure.failureReason, signal: processFailure.signal ?? null,
         area: 'declared gate', command: processFailure.gate, cwd: rootDir, exitCode: processFailure.exitCode,
         stdout: processFailure.stdout || '', stderr: processFailure.stderr || processFailure.error || '',
       },

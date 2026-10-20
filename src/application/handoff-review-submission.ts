@@ -35,6 +35,7 @@ export class HandoffReviewSubmission {
     implementerName: string,
     options: {
       worktree?: string;
+      reviewer?: import('../domain/agents.js').AgentFamily;
       eligibleAgentsForStepFn?: HandoffWorkflowPorts['agentSelection']['eligibleAgentsForStep'];
       selectAgentFn?: HandoffWorkflowPorts['agentSelection']['selectAgent'];
       preparedSelection?: { select(_step: string, _opts: Record<string, unknown>): string } | null;
@@ -49,6 +50,10 @@ export class HandoffReviewSubmission {
     const configured = eligibleFn('review', { worktree: options.worktree });
     const configuredFamilies = configured.map((candidate: string) => agentFamily(candidate));
 
+    if (options.reviewer) {
+      if (!configuredFamilies.includes(options.reviewer)) { throw new Error(`Reviewer ${options.reviewer} is not eligible for review`); }
+      return { reviewer: options.reviewer, implementer, reviewerEligibility: ConfiguredReviewerEligibility.fromReviewStep({ eligible: configuredFamilies, strategy: 'random' }) };
+    }
     try {
       const reviewer = agentFamily(options.preparedSelection
         ? options.preparedSelection.select('review', { excluded: new Set([implementer]) })
@@ -105,6 +110,7 @@ export class HandoffReviewSubmission {
     const targetBranch = handoffTargetBranch(ports, rootDir);
     const { reviewer, implementer, reviewerEligibility } = this.resolveHandoffReviewAssignment(forgejoUser, {
       worktree: rootDir,
+      reviewer: context.reviewer,
       eligibleAgentsForStepFn,
       selectAgentFn,
       log,
@@ -174,6 +180,7 @@ export class HandoffReviewSubmission {
 }
 
 type SubmissionContext = {
+  reviewer?: import('../domain/agents.js').AgentFamily;
   rootDir: string;
   branch: string;
   missionDirPath: string;

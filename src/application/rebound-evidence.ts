@@ -44,11 +44,12 @@ export async function captureGateFailureEvidence(
   // honestly reflects whether it ran (mission success criterion).
   const redactor = resolveConfiguredCredentialRedactor();
   const result = captureRecoveryEvidence({
+    failureReason: reason.failureReason,
     command: reason.command,
     cwd: worktree,
     capturedRevision,
     exitCode: reason.exitCode,
-    signal: null,
+    signal: reason.signal ?? null,
     stdout: reason.stdout ?? '',
     stderr: reason.stderr ?? '',
     diagnostic: reason.error ?? reboundDiagnostic(reason),
@@ -108,11 +109,12 @@ export async function captureRetryEvidence(
   // consistent. `redacted` then honestly reflects redaction across the series.
   const redactor = resolveConfiguredCredentialRedactor();
   const result = captureRecoveryEvidence({
+    failureReason: reason.failureReason,
     command: reason.command,
     cwd: worktree,
     capturedRevision,
     exitCode: reason.exitCode,
-    signal: null,
+    signal: reason.signal ?? null,
     stdout: reason.stdout ?? '',
     stderr: reason.stderr ?? '',
     diagnostic,

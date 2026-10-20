@@ -259,7 +259,7 @@ test('web mutation: an enabled action dispatches exactly once with a host-genera
       'the capability set is exactly the requested kind');
     assert.equal(dispatched.missionId, 'task-2433');
     assert.equal(dispatched.missionStatusAtRequest, 'active');
-    assert.equal(dispatched.agent, undefined, 'there is no agent wire key');
+    assert.equal(dispatched.agent, undefined, 'handoff does not select an agent');
     assert.deepEqual(dispatched.payload, {
       kind: 'handoff:record',
       netEngineeringLines: 120,
@@ -312,14 +312,14 @@ test('web mutation: an unknown top-level field is 400 with zero dispatch', async
       missionStatusAtRequest: 'active',
       operationId: 'client-op',
       capabilities: ['active:execute'],
-      agent: 'custom',
+      unsupportedField: 'custom',
     });
     assert.equal(res.status, 400);
     const bodyText = await res.text();
     const validation = validateWebCommandResult(JSON.parse(bodyText));
     assert.ok(validation.ok, `result rejected: ${bodyText}`);
     assert.equal(validation.value.error?.kind, 'validation');
-    assert.ok(bodyText.includes('operationId') && bodyText.includes('agent'),
+    assert.ok(['operationId', 'capabilities', 'unsupportedField'].every(key => bodyText.includes(key)),
       'the rejection must name the unknown keys');
     assert.equal(spy.requests.length, 0, 'a schema violation must dispatch nothing');
   });

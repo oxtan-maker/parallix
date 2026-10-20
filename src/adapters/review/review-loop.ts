@@ -57,6 +57,7 @@ const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 /** The production review authority a composition root binds for one loop. */
 export interface ReviewLoopBindings {
+  readonly pinnedReviewer?: string;
   readonly restoration?: import('../../application/ports/integration-approval-restoration.js').IntegrationApprovalRestorationPort;
   readonly configuration?: ParallixConfiguration;
   readonly rebaseWorkflowOptions?: Pick<import('../rebase/rebase-workflow-adapter.js').RebaseCommandOptions, 'createPrFn' | 'readTokenFn' | 'resolveForgejoUserFn'>;
@@ -191,10 +192,14 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
   };
   return {
     async launch({ role, agent, exclude, prompt, recovery }) {
+      if (role === 'reviewer' && bindings.pinnedReviewer && agent !== bindings.pinnedReviewer) {
+        throw new Error(`Selected reviewer ${bindings.pinnedReviewer} cannot launch; refresh and retry that family explicitly`);
+      }
       const phase = role === 'reviewer' ? 'review' : 'review-response';
       return await startAgent(role === 'reviewer' ? 'review' : 'act-on-review', {
         configuration: bindings.configuration,
         agent,
+        pinnedAgent: role === 'reviewer' && bindings.pinnedReviewer !== undefined,
         prompt: async (actual: string) => [prompt ? await rolePrompt(role, prompt, actual) : null, recovery ? String(recovery.prompt(actual)) : null].filter(part => part !== null).join('\n\n'),
         worktree, slug, role, exclude: exclude.filter((family): family is string => family !== undefined),
         ...(recovery?.sessionPolicy === undefined ? {} : { sessionPolicy: recovery.sessionPolicy }),
@@ -239,7 +244,7 @@ export function preReviewRebaseFacts(result: Awaited<ReturnType<typeof rebaseBef
   if (result.ok) { return { ok: true }; }
   const failure = result.failure;
   const gate = failure?.kind === 'gate'
-    ? { area: failure.gate.area, exitCode: failure.gate.exitCode, command: failure.gate.command, operation: failure.operation, reason: gateFailureReason({ ok: false, area: failure.gate.area, command: failure.gate.command, exitCode: failure.gate.exitCode, stdout: failure.gate.stdout, stderr: failure.gate.stderr, error: failure.gate.error }) }
+    ? { area: failure.gate.area, exitCode: failure.gate.exitCode, command: failure.gate.command, operation: failure.operation, reason: gateFailureReason({ ok: false, area: failure.gate.area, command: failure.gate.command, failureReason: failure.gate.failureReason, signal: failure.gate.signal, exitCode: failure.gate.exitCode, stdout: failure.gate.stdout, stderr: failure.gate.stderr, error: failure.gate.error }) }
     : undefined;
   // Typed hook evidence (TASK-2377.02) is preferred; hookOutput is the fallback.
   const hook = result.hookFailure

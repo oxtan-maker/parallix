@@ -78,7 +78,7 @@ test('web command request: accepts a well-formed handoff:record request with the
 });
 
 test('web command request: rejects every unknown top-level key, including the forbidden client-side controls', () => {
-  for (const key of ['operationId', 'capabilities', 'agent', 'command', 'args', 'env', 'path', 'file', 'sql', 'ref', 'currentStatus', 'expectedVersion']) {
+  for (const key of ['operationId', 'capabilities', 'command', 'args', 'env', 'path', 'file', 'sql', 'ref', 'currentStatus', 'expectedVersion']) {
     const result = validateWebCommandRequest(identityRequest('active:execute', { [key]: 'forged' }));
     assert.ok(!result.ok, `${key} must be rejected as an unknown top-level key`);
     assert.ok(problems(result).some(problem => problem.includes(key)), `${key} rejection must name the key`);
@@ -205,4 +205,56 @@ test('workflow command requests require a nonblank retry key (TASK-2750)', () =>
   for (const kind of ['workflow:stop', 'mission:cancel']) {
     assert.equal(validateWebCommandRequest(identityRequest(kind, { requestKey: undefined })).ok, true);
   }
+});
+
+
+test('web command request: explicit launch families are accepted only on eligible action kinds', () => {
+  for (const kind of ['draft:create', 'active:execute', 'review:submit']) {
+    const result = validateWebCommandRequest(identityRequest(kind, { agent: 'custom-family' }));
+    assert.ok(result.ok);
+    assert.equal(result.value.agent, 'custom-family');
+    assert.equal(validateWebCommandRequest(identityRequest(kind)).ok, true);
+    for (const agent of [null, 5, '', 'Codex', 'codex --unsafe', ' codex']) {
+      assert.equal(validateWebCommandRequest(identityRequest(kind, { agent })).ok, false);
+    }
+  }
+  for (const kind of ['workflow:stop', 'mission:cancel', 'handoff:record', 'integrate:merge']) {
+    assert.equal(validateWebCommandRequest(identityRequest(kind, { agent: 'codex' })).ok, false);
+  }
+});
+
+
+test('web launch route checks server family availability before admitting explicit requests', async () => {
+  const { registerCommandRoute } = await import('../../../../src/interfaces/web/command-route.js');
+  const { makeProjection } = await import('../../../fixtures/board-projection.js');
+  const { agentFamily } = await import('../../../../src/domain/agents.js');
+  type Handler = (request: { body: unknown }, reply: unknown) => Promise<unknown>;
+  let handler: Handler;
+  let available = true;
+  const admitted: import('../../../../src/application/controller/board-command.js').BoardCommandRequest[] = [];
+  const app = { post(_path: string, callback: Handler) { handler = callback; } };
+  const dispatcher = { canExecute: () => true, async dispatch() { throw new Error('unexpected synchronous dispatch'); },
+    async admit(request: typeof admitted[number]) { admitted.push(request); return { status: 'failed' as const, error: { kind: 'unavailable' as const, message: 'fixture accepted input' }, durableEvidence: [] }; } };
+  registerCommandRoute(app as unknown as import('fastify').FastifyInstance, { commandDispatcher: () => dispatcher }, async () => {
+    const projection = makeProjection();
+    return { ...projection, metrics: { ...projection.metrics, agentAvailability: [{ family: agentFamily('custom-family'), available, blockedForMs: 0 }] } };
+  });
+  const reply = { status: 0, body: undefined as unknown, code(status: number) { this.status = status; return this; }, type() { return this; }, send(body: unknown) { this.body = body; return this; } };
+  for (const kind of ['draft:create', 'active:execute', 'review:submit']) {
+    await handler!({ body: identityRequest(kind, { agent: 'custom-family' }) }, reply);
+    assert.equal(admitted.at(-1)?.agent, 'custom-family');
+    assert.equal(admitted.at(-1)?.pinnedAgent, true);
+  }
+  assert.equal(admitted.length, 3);
+  available = false;
+  for (const agent of ['custom-family', 'unknown']) {
+    await handler!({ body: identityRequest('active:execute', { agent }) }, reply);
+    assert.equal(reply.status, 409);
+    assert.match(JSON.stringify(reply.body), /unknown or unavailable/);
+  }
+  assert.equal(admitted.length, 3);
+  await handler!({ body: identityRequest('active:execute') }, reply);
+  assert.equal(admitted.length, 4);
+  assert.equal(admitted.at(-1)?.agent, undefined);
+  assert.equal(admitted.at(-1)?.pinnedAgent, undefined);
 });

@@ -422,7 +422,7 @@ test('CP-3 fresh-context repair receives the bounded route with omitted-middle r
     assert.match(fresh, /Retained evidence for this failure/, `fresh prompt exposes retained evidence`);
     assert.match(fresh, /retrieve the omitted middle/, `fresh prompt includes omitted-middle retrieval`);
     assert.match(fresh, /bash .*verify\.sh docs/, `fresh prompt names the retained command`);
-    assert.ok(captured.ref != null);
+    assert.ok(captured.ref !== null && captured.ref !== undefined);
     assert.match(fresh, new RegExp(`lookupRecoveryEvidence\\(\\{ cwd, incidentId: "${captured.ref.incidentId}" \\}\\)`), `fresh prompt gives a working retrieval route`);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -463,7 +463,7 @@ test('CP-4 truncated, expired, and redacted evidence are reported explicitly wit
       diagnostic: 'unit-test-budget:exceeded',
     });
     assert.equal(truncated.ok, true);
-    assert.ok(truncated.ref != null);
+    assert.ok(truncated.ref !== null && truncated.ref !== undefined);
     assert.equal(truncated.ref.captureComplete, false, 'a record past the byte cap reports capture incomplete');
     assert.equal(truncated.ref.truncatedFrom, 'stdout');
     assert.match(truncated.ref.stdoutPath, /\.stdout\.txt$/);
@@ -486,7 +486,7 @@ test('CP-4 truncated, expired, and redacted evidence are reported explicitly wit
       redacted: true,
     });
     assert.equal(redacted.ok, true);
-    assert.ok(redacted.ref != null);
+    assert.ok(redacted.ref !== null && redacted.ref !== undefined);
     assert.equal(redacted.ref.redacted, true);
     const redactedPrompt = buildFreshDiagnosticRepairPrompt(slots(redacted.ref));
     assert.match(redactedPrompt, /redacted per configured credential redaction/, 'the prompt discloses redaction');
@@ -506,7 +506,7 @@ test('CP-4 truncated, expired, and redacted evidence are reported explicitly wit
       redactor: (value) => value.replace(/SECRET\d+/g, 'REDACTED'),
     });
     assert.equal(scrubbed.ok, true);
-    assert.ok(scrubbed.ref != null);
+    assert.ok(scrubbed.ref !== null && scrubbed.ref !== undefined);
     assert.equal(scrubbed.ref.redacted, true);
     const storedStdout = fs.readFileSync(scrubbed.ref.stdoutPath, 'utf8');
     assert.ok(!/SECRET123/.test(storedStdout), 'the configured redactor scrubbed the credential from the retained stream');
@@ -600,4 +600,69 @@ test('TASK-2760 a spawn failure keeps the retained gate evidence and adds its co
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('typed failure reason round-trips with process and completeness metadata while legacy records remain readable', async () => {
+  const { setRecoveryEvidenceFileSystem } = await import('../../src/application/recovery-evidence.js');
+  const { recoveryEvidenceFileSystem } = await import('../../src/adapters/filesystem/recovery-evidence-fs.js');
+  const { captureFailedVerification } = await import('../../src/adapters/verification/verification-failure-capture.js');
+  const files = new Map<string, string>();
+  const memory: import('../../src/application/recovery-evidence-types.js').RecoveryFileSystem = {
+    realpathSync: target => target,
+    mkdirSync: () => {},
+    writeFileSync: (target, data) => { files.set(target, data); },
+    readFileSync: target => { const data = files.get(target); if (data === undefined) { throw new Error('ENOENT'); } return data; },
+    readdirSync: target => {
+      const children = new Map<string, boolean>();
+      for (const file of files.keys()) {
+        if (file.startsWith(`${target}/`)) {
+          const parts = file.slice(target.length + 1).split('/');
+          children.set(parts[0], parts.length > 1);
+        }
+      }
+      return [...children].map(([name, directory]) => ({ name, isDirectory: () => directory }));
+    },
+    statSync: target => { if (!files.has(target) && ![...files.keys()].some(file => file.startsWith(`${target}/`))) { throw new Error('ENOENT'); } return { mtimeMs: Date.now() }; },
+    rmSync: target => { for (const file of files.keys()) { if (file === target || file.startsWith(`${target}/`)) { files.delete(file); } } },
+    renameSync: (source, target) => { const content = files.get(source); assert.notEqual(content, undefined); files.set(target, content!); files.delete(source); },
+  };
+  setRecoveryEvidenceFileSystem(memory);
+  try {
+    const failure = captureFailedVerification({ ok: true, rootDir: '/isolated-mission', commit: 'revision-a', tree: 'tree-a' }, {
+      status: null, signal: 'SIGTERM', stdout: 'complete stdout', stderr: 'complete stderr',
+      failureReason: { version: 1, code: 'process-terminated' },
+    }, 'npm test');
+    const original = failure.recoveryEvidence!;
+    assert.equal(failure.ok, false);
+    assert.equal(failure.signal, 'SIGTERM');
+    assert.deepEqual(failure.failureReason, { version: 1, code: 'process-terminated' });
+    assert.deepEqual(original.failureReason, failure.failureReason);
+    assert.equal(original.command, 'npm test');
+    assert.equal(original.cwd, '/isolated-mission');
+    assert.equal(original.capturedRevision, 'revision-a');
+    assert.equal(original.exitCode, null);
+    assert.equal(original.signal, 'SIGTERM');
+    assert.equal(original.attempt, 1);
+    assert.equal(original.captureComplete, true);
+    const lookup = lookupRecoveryEvidence({ cwd: original.cwd, incidentId: original.incidentId, attempt: 1, fs: memory });
+    assert.equal(lookup.ok, true);
+    assert.deepEqual(lookup.evidence, original);
+    const retry = captureRecoveryEvidenceRetry({ command: original.command, cwd: original.cwd, incidentId: original.incidentId,
+      capturedRevision: 'revision-b', exitCode: 1, signal: null, stdout: 'next stdout', stderr: '',
+      failureReason: { version: 99, code: 'future' } }, { fs: memory });
+    assert.equal(retry.ref?.attempt, 2);
+    assert.equal(retry.ref?.incidentId, original.incidentId);
+    assert.equal(retry.ref?.capturedRevision, 'revision-b');
+    assert.deepEqual(lookupRecoveryEvidence({ cwd: original.cwd, incidentId: original.incidentId, attempt: 2, fs: memory }).evidence?.failureReason, { version: 99, code: 'future' });
+    const metadata = [...files.keys()].find(file => file.endsWith('attempt-1.json'))!;
+    const legacy = JSON.parse(files.get(metadata)!);
+    delete legacy.failureReason;
+    files.set(metadata, JSON.stringify(legacy));
+    const old = lookupRecoveryEvidence({ cwd: original.cwd, incidentId: original.incidentId, attempt: 1, fs: memory });
+    assert.equal(old.ok, true);
+    assert.equal(old.evidence?.failureReason, undefined);
+    // A typed code cannot turn truncated output into complete capture.
+    files.set(metadata, JSON.stringify({ ...legacy, failureReason: { version: 1, code: 'gate-failed' }, captureComplete: false, truncatedFrom: 'stdout' }));
+    assert.equal(lookupRecoveryEvidence({ cwd: original.cwd, incidentId: original.incidentId, attempt: 1, fs: memory }).evidence?.captureComplete, false);
+  } finally { setRecoveryEvidenceFileSystem(recoveryEvidenceFileSystem); files.clear(); }
 });

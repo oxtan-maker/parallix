@@ -31,6 +31,11 @@ const VALID_PACKAGE_FILES = [
   'build/web/index.html',
   'build/web/manifest.json',
   'build/web/assets/index-hash.js',
+  'build/web/fonts/FONTS.txt',
+  'build/web/fonts/OFL-Barlow-Condensed.txt',
+  'build/web/fonts/OFL-JetBrains-Mono.txt',
+  'build/web/fonts/barlow-condensed-latin-400.woff2',
+  'build/web/fonts/jetbrains-mono-latin-400.woff2',
   'package.json',
   'README.md',
   'LICENSE',
@@ -89,6 +94,25 @@ test('package-content audit rejects omitted web payloads (TASK-2762)', () => {
   }
   assert.ok(violationsFor(VALID_PACKAGE_FILES.filter(file => !file.startsWith('build/web/assets/')))
     .includes('missing required package asset directory: build/web/assets/'));
+});
+
+test('package-content audit rejects a packaged tree missing a bundled font subset or its notices (TASK-2773.11)', () => {
+  // A lost subset renders the platform fallback faces with no signal, and a
+  // lost licence or coverage record ships OFL-licensed binaries with no record
+  // of what they cover. Both fail the package.
+  for (const [font, family] of [
+    ['build/web/fonts/jetbrains-mono-latin-400.woff2', 'jetbrains-mono'],
+    ['build/web/fonts/barlow-condensed-latin-400.woff2', 'barlow-condensed'],
+  ] as const) {
+    assert.ok(violationsFor(VALID_PACKAGE_FILES.filter(file => file !== font))
+      .includes(`missing required package font subset: build/web/fonts/${family}-*.woff2`),
+    `${font} must be required in the packaged tree`);
+  }
+  for (const notice of ['build/web/fonts/FONTS.txt', 'build/web/fonts/OFL-JetBrains-Mono.txt',
+    'build/web/fonts/OFL-Barlow-Condensed.txt']) {
+    assert.ok(violationsFor(VALID_PACKAGE_FILES.filter(file => file !== notice))
+      .includes(`missing required package font notice: ${notice}`), `${notice} must ship with the font assets`);
+  }
 });
 
 test('pack report parses past prepack build output on stdout', () => {

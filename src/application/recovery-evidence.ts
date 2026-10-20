@@ -290,6 +290,7 @@ export function captureRecoveryEvidence(input: CaptureInput, options: { now?: ()
   const oversized = stdoutBytes >= MAX_RECOVERY_EVIDENCE_BYTES || stderrBytes >= MAX_RECOVERY_EVIDENCE_BYTES;
   const ref: RecoveryEvidenceRef = {
     version: RECOVERY_EVIDENCE_VERSION,
+    ...(input.failureReason === undefined ? {} : { failureReason: input.failureReason }),
     incidentId,
     attempt,
     command: input.command,

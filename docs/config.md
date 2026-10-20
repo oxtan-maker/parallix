@@ -499,15 +499,29 @@ prints a readable start and completion line as it runs. A failure stops queued
 gates, terminates active gates, and blocks the phase. Integration then routes
 the original failure through gate rebound; operator cancellation aborts instead.
 
-`adapters.gates` is a closed section: `requirePreIntegration`, `parallel`,
-`preHandoff`, `preReview`, and `preIntegration` are its only permitted keys, so a typo such
-as `requireIntegration` is a configuration error rather than a silently
-ignored setting. `requirePreIntegration` must be a boolean and each phase must
-be an array. The gate object is not closed by the same check: a key beyond
-`key`, `command`, and `order` passes validation and appears in the `px config`
-output, but gate execution reads only those three, so the extra key has no
-effect. The schema does declare the gate object closed, so do not use extra
-keys to carry data.
+Set `adapters.gates.maxConcurrent` to cap independent verification runs across
+processes and worktrees sharing Parallix admission state. Like
+`adapters.agents.maxConcurrentCustom`, it accepts a positive integer; omit it for
+unlimited runs. A value of `1` serializes runs. The canonical checkout owns the
+limit, so a mission worktree cannot raise it locally. This is separate from
+`parallel`, which still controls gates within an admitted phase run.
+
+Admission state normally lives in the operator home selected by `PARALLIX_HOME`;
+processes using different operator homes can share lease-only state through
+`PARALLIX_CUSTOM_ADMISSION_HOME`. Parallix self-development sets the limit to `1`
+in its tracked configuration. It covers configured lifecycle gates and
+mission-declared gates; implementation work and agent capacity remain independent.
+
+A waiting run starts when the previous run and its gate descendants have settled.
+Cancellation while waiting launches no gate children; cancellation while running
+terminates the gate process groups before releasing ownership. Interrupted owners
+are recovered using process identity and liveness, including surviving descendants.
+Nested public gate invocations from a gate are rejected before launching children,
+so a gate cannot wait on its own owner. This policy reduces contention; it does
+not establish the cause of earlier deadline failures or guarantee their absence.
+
+The gate section rejects unknown settings and invalid types; consult the
+[configuration schema](../config/workflow.config.schema.json) for its contract.
 
 ```json
 {

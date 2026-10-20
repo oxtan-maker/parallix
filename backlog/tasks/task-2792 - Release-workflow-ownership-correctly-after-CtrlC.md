@@ -4,6 +4,7 @@ title: Release workflow ownership correctly after Ctrl+C
 status: backlog
 assignee: []
 created_date: '2026-10-20 02:34'
+updated_date: '2026-10-20 12:44'
 labels:
   - bug
 dependencies: []
@@ -25,6 +26,12 @@ Observed on task-2773.06: Ctrl+C during px active returned to the shell, but sub
 - [ ] #4 Cover interruption during admission and execution, including terminal-hosted children and repeated stop or restart attempts, without killing unrelated processes or weakening live ownership checks.
 - [ ] #5 Manually exercise the CLI interruption and restart flow with isolated fixtures; update user-facing interruption guidance if needed, preserve existing gates, and follow ADR 0057 and repository CPU limits.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Lead-round observation, 2026-10-20: continuous px lead PID 1260546 owned forwarded active workers for px-0015/0016/0017/task-2785 and fresh recovery for px-0008. After two active attempts hit the unchanged human-only contract blocker, a first recovery confirmed the blocker and failed review continuation; lead then launched a second fresh recovery. Operator requested stopping futile loops. px stop px-0008 returned exit 0 with no diagnostic; this alone did not establish settlement or target attribution. Sending SIGINT to the identity-checked lead PID did not terminate the supervisor: it remained alive and workers continued emitting output. This is concrete evidence for the lead/borrowed-forward interruption scenario flagged in earlier review. Subsequently captured the exact descendant tree and each process start identity, sent SIGTERM only to that owned tree, and confirmed it settled without requiring SIGKILL (lead exit 143). No unrelated workflow was targeted. Reproduce the public interruption/stop contracts in isolated controlled children before fixing; lead should truthfully stop supervision and settle owned work or explicitly report continuing work. Preserve ownership checks, history and gates.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

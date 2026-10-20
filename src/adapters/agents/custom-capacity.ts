@@ -58,12 +58,12 @@ export async function tryAcquireCustomCapacity(rootDir?: string, configuration?:
 /** Test-only inspection helpers; production admission is the SQLite lease table. */
 export async function resetCustomCapacity(configuration?: ParallixConfiguration): Promise<void> {
   const { db } = await initCustomAdmissionState(configuration);
-  await db.execute('DELETE FROM custom_agent_leases');
+  await db.execute('DELETE FROM custom_agent_leases WHERE resource = ?', ['agents']);
 }
 
 export async function activeCustomCapacityCount(configuration?: ParallixConfiguration): Promise<number> {
   const { db } = await initCustomAdmissionState(configuration);
-  const rows = await db.query<{ count: number }>('SELECT COUNT(*) AS count FROM custom_agent_leases');
+  const rows = await db.query<{ count: number }>('SELECT COUNT(*) AS count FROM custom_agent_leases WHERE resource = ?', ['agents']);
   return Number(rows[0]?.count || 0);
 }
 

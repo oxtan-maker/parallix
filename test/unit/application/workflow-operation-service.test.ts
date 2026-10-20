@@ -517,3 +517,14 @@ test('stop and new invocation retain ownership but override and ineligible owner
   assert.equal(f.missions.get('task-one')?.assignee, 'custom');
   assert.equal(selections, 1);
 });
+
+
+test('explicit web family and pin survive durable admission for the executor', async () => {
+  const f = fixture();
+  const outcome = await f.service.admit({ ...request(), agent: 'custom-family', pinnedAgent: true });
+  assert.equal(outcome.status, 'accepted');
+  const operation = await f.service.operation('request-one');
+  assert.equal(operation?.requestedAgent, 'custom-family');
+  assert.equal(operation?.pinnedAgent, true);
+  assert.equal(operation?.agent, 'custom-family');
+});

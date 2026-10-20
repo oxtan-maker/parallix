@@ -522,7 +522,7 @@ describe("pre review gate repair continues", { concurrency: false }, () => {
 
 // Regression provenance: TASK-2439.
 describe("rebounce review submit repro", { concurrency: false }, () => {
-  test('task-2439 repro: review-submit declared-gate prose is a reboundable validation failure, never a Bash command', () => {
+  test('task-2439 repro: review-submit declared-gate prose is a reboundable validation failure, never a Bash command', async () => {
     const command = './scripts/verify-local.sh all (CP-4: exit 0, 0 test failures)';
     let shellRuns = 0;
     const base = makePorts(makeRecorder());
@@ -541,7 +541,7 @@ describe("rebounce review submit repro", { concurrency: false }, () => {
       },
     });
 
-    const result = useCase.executeGateCommands([command], '/worktree');
+    const result = await useCase.executeGateCommands([command], '/worktree');
 
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'validation-failed');

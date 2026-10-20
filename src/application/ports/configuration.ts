@@ -79,6 +79,7 @@ export interface DecisionConfiguration {
 }
 
 export interface RuntimeConfiguration {
+  readonly gateOwner?: string;
   readonly workflowOperation?: string;
   readonly workflowGeneration?: number | null;
   readonly gitIdentity: { readonly authorName: string; readonly authorEmail: string; readonly committerName: string; readonly committerEmail: string };

@@ -38,5 +38,5 @@ export interface LaunchOptions {
   log?: Log; sessionMarkerPort?: SessionMarkerPort | null;
   onAgentLaunched?: ((_agent: string) => Promise<void>) | null;
   onActivated?: ((_agent: string, _startedAtMs?: number) => Promise<void>) | null;
-  authorityAlreadyActive?: boolean; unrefChild?: boolean;
+  authorityAlreadyActive?: boolean; unrefChild?: boolean; pinnedAgent?: boolean;
 }

@@ -106,7 +106,10 @@ function runDevWithAnchor(
     `process.argv = [process.execPath, ${JSON.stringify(entry)}, ...${JSON.stringify(args)}];`,
     `await import(${JSON.stringify(entry)});`,
   ].filter(Boolean).join(' ');
-  return spawnSync(process.execPath, ['--import', TSX_URL, '-e', script], {
+  // Keep the real source entry: its termination behavior is the contract here.
+  // Like pxNodeArgs, use one compiler worker for this short CLI process rather
+  // than paying for a host-sized V8 pool under coverage.
+  return spawnSync(process.execPath, ['--v8-pool-size=1', '--import', TSX_URL, '-e', script], {
     cwd: cwd ?? repoRoot,
     encoding: 'utf8',
     timeout: timeoutMs,

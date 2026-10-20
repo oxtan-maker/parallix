@@ -75,6 +75,7 @@ export interface AgentLaunchRequest {
    * unref'd so the host can exit on q/Ctrl+C while the action runs on.
    */
   readonly detached?: boolean;
+  readonly pinnedAgent?: boolean;
   /**
    * Called once per family the launcher actually starts, including every
    * automatic failover after a usage block.

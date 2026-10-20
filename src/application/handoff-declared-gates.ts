@@ -1,3 +1,4 @@
+import { gateFailureReasonFromProcess } from '../domain/failure-classification.js';
 /**
  * Declared gate validation and execution: reject prose, unbalanced, or
  * missing-file gate commands, then run recorded or document gates.
@@ -22,7 +23,7 @@ type DeclaredGatesResult =
   | { ok: true; skipped: true; reason: 'no-mission-file' | 'no-gates-section' | 'no-gates-declared' }
   | { ok: true; skipped: false; count: number; reason: 'all-gates-passed' }
   | GateValidationFailure
-  | { ok: false; reason: 'gate-failed'; gate: string; error: string; stdout: string; stderr: string; exitCode: number | null };
+  | { ok: false; reason: 'gate-failed'; gate: string; error: string; stdout: string; stderr: string; exitCode: number | null; signal?: string | null; failureReason?: import('../domain/failure-reason.js').FailureReason };
 
 /** Validates and executes the gates a Mission declares. */
 export class DeclaredGateRunner {
@@ -222,11 +223,11 @@ export class DeclaredGateRunner {
    * Parse and execute declared gates from a mission's MISSION.md `## Gates` section.
    * Each gate line is treated as a shell command executed through the process port.
    */
-  runDeclaredGates(
+  async runDeclaredGates(
     missionDir: string,
     rootDir: string,
     options: { log?: HandoffLog; error?: HandoffLog; recordedGates?: readonly string[] } = {},
-  ): DeclaredGatesResult {
+  ): Promise<DeclaredGatesResult> {
     const { fileSystem } = this.ports;
     const { log = fmt.log.plain } = options;
 
@@ -292,12 +293,11 @@ export class DeclaredGateRunner {
    * validated, proof-reused and executed exactly like one parsed from a
    * mission document.
    */
-  executeGateCommands(
+  async executeGateCommands(
     cleanCommands: string[],
     rootDir: string,
     options: { log?: HandoffLog; source?: string } = {},
-  ): DeclaredGatesResult {
-    const { verification, process: processPort } = this.ports;
+  ): Promise<DeclaredGatesResult> {
     const { log = fmt.log.plain } = options;
 
     if (cleanCommands.length === 0) {
@@ -310,6 +310,21 @@ export class DeclaredGateRunner {
       return validationResult;
     }
 
+    const admitted = this.ports.declaredGateExecution?.run(cleanCommands, rootDir, log);
+    if (admitted) {
+      const result = await admitted;
+      return admittedGateResult(result, cleanCommands);
+    }
+
+    return this.executeUnadmittedGateCommands(cleanCommands, rootDir, log);
+  }
+
+  private executeUnadmittedGateCommands(
+    cleanCommands: string[],
+    rootDir: string,
+    log: HandoffLog,
+  ): DeclaredGatesResult {
+    const { verification, process: processPort } = this.ports;
     // Execute each gate command
     for (const cmd of cleanCommands) {
       const reusableProof = verification.readReusableVerificationProof(cmd, rootDir);
@@ -336,6 +351,8 @@ export class DeclaredGateRunner {
           stdout,
           stderr,
           exitCode: result.status,
+          signal: result.signal ?? null,
+          failureReason: gateFailureReasonFromProcess(result),
         };
       }
       const proofResult = verification.writeReusableVerificationProof(cmd, rootDir);
@@ -349,4 +366,13 @@ export class DeclaredGateRunner {
     return { ok: true, skipped: false, count: cleanCommands.length, reason: 'all-gates-passed' };
   }
 
+}
+
+type AdmittedGateOutcome = NonNullable<Awaited<ReturnType<NonNullable<HandoffWorkflowPorts['declaredGateExecution']>['run']>>>;
+function admittedGateResult(result: AdmittedGateOutcome, cleanCommands: string[]): DeclaredGatesResult {
+  return result.ok
+    ? { ok: true, skipped: false, count: cleanCommands.length, reason: 'all-gates-passed' }
+    : { ok: false, reason: 'gate-failed', gate: result.gate ?? cleanCommands[0],
+      error: result.error ?? 'Declared verification failed', stdout: result.stdout ?? '',
+      stderr: result.stderr ?? '', exitCode: result.exitCode ?? null };
 }

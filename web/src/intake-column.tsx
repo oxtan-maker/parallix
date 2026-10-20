@@ -21,7 +21,7 @@ function cancelAction(actions: readonly WebMissionCard['actions'][number][]) {
     ?? actions.find((action) => action.kind === 'mission:cancel') ?? null;
 }
 
-function IntakeCard({ card, onAction, onSelect, onDragStart, selected, pendingCommands }: { card: WebMissionCard; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingCommands: PendingCommands }) {
+function IntakeCard({ card, onAction, onSelect, onDragStart, selected, pendingCommands }: { card: WebMissionCard; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement, agent?: string) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingCommands: PendingCommands }) {
   const actions = cardCommands(card.actions);
   const cancel = cancelAction(card.actions);
   const work = card.activity.work;
@@ -34,7 +34,7 @@ function IntakeCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
       data-board-card={card.id}
       tabIndex={0}
       aria-label={`${card.id}: ${card.title}`}
-      aria-selected={selected}
+      aria-current={selected}
       draggable={card.actions.some((action) => action.state === 'enabled' && action.targetLane !== null)}
       onFocus={(event) => { if (event.target === event.currentTarget) { onSelect(card.id); } }}
       onDragStart={(event) => onDragStart(card, event)}
@@ -59,12 +59,12 @@ function IntakeCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
       {work.kind !== 'idle' && <ActorLine card={card} style={{ marginTop: SPACE.sm, lineHeight: 1.35 }} />}
       <CheckpointPips card={card} />
       {(actions.length > 0 || cancel !== null) && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: SPACE.sm, marginTop: SPACE.md, flexWrap: 'wrap' }}>
+        <div className="card-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: SPACE.sm, marginTop: SPACE.md, flexWrap: 'wrap' }}>
           {cancel !== null && (
-            <ActionButton action={cancel} label={cancel.label} style={{ color: C.red, border: `1px solid ${C.red}` }} pending={pendingCommands.get(card.id)} onInvoke={(next, control) => onAction(card, next, control)} />
+            <ActionButton action={cancel} label={cancel.label} style={{ color: C.red, border: `1px solid ${C.red}` }} pending={pendingCommands.get(card.id)} onInvoke={(next, control, agent) => onAction(card, next, control, agent)} />
           )}
           {actions.map((primary) => (
-            <ActionButton key={primary.kind} action={primary} label={primary.label} pending={pendingCommands.get(card.id)} working={primary.kind === 'mission:edit' ? false : isSpinning(card)} onInvoke={(next, control) => onAction(card, next, control)} />
+            <ActionButton key={primary.kind} action={primary} label={primary.label} pending={pendingCommands.get(card.id)} working={primary.kind === 'mission:edit' ? false : isSpinning(card)} onInvoke={(next, control, agent) => onAction(card, next, control, agent)} />
           ))}
         </div>
       )}
@@ -73,7 +73,7 @@ function IntakeCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
   );
 }
 
-export function IntakeColumn({ stage, style, onAction, onSelect, onDragStart, onDrop, selectedId, pendingCommands, draggable }: { stage: WebStage; style: CSSProperties; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; onDrop: (lane: WebStage['lane']) => void; selectedId: string | null; pendingCommands: PendingCommands; draggable: boolean }) {
+export function IntakeColumn({ stage, style, onAction, onSelect, onDragStart, onDrop, selectedId, pendingCommands, draggable }: { stage: WebStage; style: CSSProperties; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement, agent?: string) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; onDrop: (lane: WebStage['lane']) => void; selectedId: string | null; pendingCommands: PendingCommands; draggable: boolean }) {
   return (
     <section aria-label={`${stage.lane} stage`} style={{ display: 'flex', flexDirection: 'column', ...style }}>
       <LaneHeader lane={stage.lane} count={stage.count} />

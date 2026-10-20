@@ -16,7 +16,7 @@ export function restoreActionFocus(control: HTMLButtonElement, root: HTMLDivElem
     if (control.isConnected) { control.focus(); return; }
     // `focus()` returns undefined, so the fallback must branch on the element,
     // never on the call's result.
-    const card = root?.querySelector<HTMLElement>('[data-board-card][aria-selected="true"]') ?? null;
+    const card = root?.querySelector<HTMLElement>('[data-board-card][aria-current="true"]') ?? null;
     (card ?? root)?.focus();
   });
 }
@@ -46,7 +46,7 @@ async function publishCommandResult(result: Awaited<ReturnType<typeof sendComman
     : `${action.display} ${result.value !== null && typeof result.value === 'object' && 'phase' in result.value && result.value.phase === 'completed' ? 'completed' : 'started'}.`);
 }
 
-export async function dispatchBoardCommand(card: WebMissionCard, action: WebCommandAction, control: HTMLButtonElement | undefined, context: BoardCommandContext) {
+export async function dispatchBoardCommand(card: WebMissionCard, action: WebCommandAction, control: HTMLButtonElement | undefined, context: BoardCommandContext, agent?: string) {
   const { pendingRef, requestSequence, latestInteraction, mounted, root, setEditRequest, publishPending, publishOutcome } = context;
   if (action.kind === 'mission:edit' && action.state === 'enabled' && control) { setEditRequest({ id: card.id, control }); return; }
   const unavailable = unavailableReason(action, pendingRef.current.get(card.id));
@@ -62,6 +62,7 @@ export async function dispatchBoardCommand(card: WebMissionCard, action: WebComm
   publishOutcome(card.id, `Starting ${action.display}…`);
   try {
     const result = await sendCommand({
+      ...(agent === undefined ? {} : { agent }),
       requestKey: crypto.randomUUID(),
       missionId: card.id,
       kind: action.kind,

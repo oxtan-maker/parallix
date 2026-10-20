@@ -43,7 +43,7 @@ try {
     const box = await header.boundingBox(); const bounds = await article.boundingBox();
     assert.ok(box && bounds && box.y - bounds.y <= 3, 'header starts at card top border');
     await article.focus();
-    assert.equal(await article.getAttribute('aria-selected'), 'true');
+    assert.equal(await article.getAttribute('aria-current'), 'true');
     assert.equal(await article.getAttribute('draggable'), 'true');
     await article.getByRole('button', { name: /View checkpoint evidence/ }).click();
     await page.getByRole('dialog', { name: /Checkpoint evidence/ }).waitFor();

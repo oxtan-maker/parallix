@@ -4,6 +4,7 @@ export interface WorkflowInvocation { readonly command: 'draft' | 'review' | 'in
 /** Transport details remain application state, outside the domain operation. */
 export interface WorkflowOperationRecord extends WorkflowOperation {
   readonly requestedAgent?: string | null;
+  readonly pinnedAgent?: boolean;
   readonly invocation?: WorkflowInvocation;
   readonly payload?: import('../controller/board-command.js').BoardCommandPayload;
 }

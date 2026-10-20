@@ -6,6 +6,7 @@
 // task-2455.01-target-user-repro and task-2455.02-task-provider-config-repro
 // suites (TASK-2622.14).
 import { describe, test } from 'node:test';
+import { resolveMaxConcurrentGates } from '../../../../src/adapters/config/product-config.js';
 import { terminalHostConfig } from '../../../../src/adapters/config/terminal-host-config.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -286,4 +287,39 @@ describe('repository prompt context policy', () => {
     assert.deepEqual(schema.properties.adapters.properties.prompts.properties.contextCompaction.type, 'boolean');
     assert.equal(schema.properties.adapters.properties.prompts.properties.contextCompaction.default, true);
   });
+});
+
+test('gate run capacity defaults to unlimited like custom-agent capacity (H2)', () => {
+  withConfig(null, root => assert.equal(resolveMaxConcurrentGates(root), Infinity));
+  for (const maxConcurrent of [1, 2, 6]) {
+    withConfig({ adapters: { gates: { maxConcurrent } } }, root => {
+      assert.equal(resolveMaxConcurrentGates(root), maxConcurrent);
+    });
+  }
+  assert.ok(validateWorkflowConfig({ adapters: { gates: { serialize: true } } })
+    .some(issue => issue.includes('serialize is not a recognised key')));
+});
+
+test('effective checkout configuration retains gate capacity on inheritance (TASK-2791)', () => {
+  withConfig({ adapters: { gates: { maxConcurrent: 1, parallel: { preIntegration: 6 } } } }, root => {
+    withTempDir(worktree => {
+      fs.copyFileSync(path.join(root, 'workflow.config.json'), path.join(worktree, 'workflow.config.json'));
+      assert.deepEqual(loadEffectiveConfig(worktree), loadEffectiveConfig(root));
+      assert.equal(resolveMaxConcurrentGates(worktree), 1);
+    });
+  });
+});
+
+test('gate run limits use the positive-integer capacity contract (H2)', () => {
+  const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8')).properties.adapters.properties.gates.properties;
+  assert.equal(schema.maxConcurrent.type, 'integer');
+  assert.equal(schema.maxConcurrent.minimum, 1);
+  assert.equal('serialize' in schema, false);
+  for (const maxConcurrent of [1, 2, 6]) {
+    assert.deepEqual(validateWorkflowConfig({ adapters: { gates: { maxConcurrent } } }), []);
+  }
+  for (const maxConcurrent of [true, false, null, 0, -1, 1.5, '1', [], {}]) {
+    assert.ok(validateWorkflowConfig({ adapters: { gates: { maxConcurrent } } })
+      .includes('adapters.gates.maxConcurrent must be a positive integer'));
+  }
 });

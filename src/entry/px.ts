@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
 import { cliInvocation, pinChildCli } from '../composition/child-cli.js';
+import { bindGateAdmission } from '../composition/gate-admission.js';
 import { resolveProcessConfiguration } from '../composition/config.js';
+
+bindGateAdmission(resolveProcessConfiguration());
 
 // Load only the composition needed by this process role. Independent workers
 // must not initialize the interactive CLI and its presentation dependencies.

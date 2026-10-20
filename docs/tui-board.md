@@ -90,6 +90,20 @@ Web cards show the available commands alongside Cancel. When no command can
 run, one unavailable control explains why. Commands that can run together remain
 individually accessible.
 
+On the web board, hold an enabled refinement, execution, or review button with
+mouse or touch to choose an agent family for that launch. A short click keeps
+the usual automatic selection. The menu shows the server's known families and
+availability; unavailable families cannot be selected. Choosing an available
+family sends one launch request. If that family becomes unavailable, the request
+reports the problem instead of silently choosing another family.
+
+With the button focused, press Arrow Down or Shift+F10 to open the menu. Use
+arrow keys, Home or End to move between available families, and Enter or Space
+to choose. Escape closes the menu and returns focus to the button; clicking
+outside also dismisses it. Releasing a hold, cancelling a touch gesture, or
+moving away before the hold completes does not choose a family. Family choice
+is unavailable while a command is pending and does not replace a running worker.
+
 Integrate started from the web or terminal board runs in the mission's own
 worktree and lands on its recorded base, wherever `px web` or `px ui` was
 started; the host never changes directory and needs no restart per mission. If
@@ -335,6 +349,13 @@ including unavailable actions and unknown states. Secondary text colors meet
 4.5:1 contrast on their rendered surfaces, including faded shipped cards.
 Decorative strokes and hidden glyphs use separate treatments.
 
+Focusable mission cards show hover and keyboard focus outlines. Use Up/Down to
+move the current mission selection, then Enter or Space to open its operation
+history; clicking the card body opens the same view. Closing it returns focus
+to the card. Nested actions and disclosures keep their own behavior.
+Cancel and Edit share a compact row above the primary actions, with long action
+labels wrapping inside their controls.
+
 Repeated failure reasons appear once per mission in the normal web board view.
 Other surfaces keep the mission and action visible; expand **Reason** or
 **Blocking reason** to read the duplicate text. Distinct reasons stay separate.
@@ -360,6 +381,12 @@ coordinated refresh; only a successful read begun after the latest failure can
 clear it. Recovery reads are serial and coalesced. A failed recovery waits for
 another stream signal, reconnect or requested refresh rather than retrying in a
 loop.
+
+Operation log times use the viewer’s local timezone in 24-hour HH:mm:ss format.
+Expand a time with a click or keyboard activation to read its full date, time,
+timezone and original timestamp. Missing or malformed times show “Time unavailable”;
+any supplied malformed text remains in the detail. Identical phase and message
+text appears once per row; distinct text and agent attribution remain visible.
 
 The browser keeps at most 256 operation log entries. Unmatched live progress is
 merged with durable history using producer timestamps, so older accumulated

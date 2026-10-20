@@ -414,7 +414,7 @@ test('an empty-to-populated snapshot expands the lane and a populated-to-empty s
 
     const card = page.mount.querySelector<DomHtmlElement>('[data-board-card="task-2773-06-survivor"]')!;
     await act(async () => { card.focus(); });
-    assert.equal(card.getAttribute('aria-selected'), 'true', 'the mission is selected before the transitions');
+    assert.equal(card.getAttribute('aria-current'), 'true', 'the mission is selected before the transitions');
     const button = page.mount.querySelector<DomButton>('button[aria-label^="px "][aria-label*=" — enabled"]')!;
     await act(async () => { button.click(); });
     assert.equal(page.calls.length, 1, 'one command is in flight across both transitions');
@@ -423,14 +423,14 @@ test('an empty-to-populated snapshot expands the lane and a populated-to-empty s
     // Empty to populated: the lane takes the populated allocation.
     await page.rerender(filledReview);
     assert.deepEqual(laneAllocation(page.mount, 'review'), POPULATED_ALLOCATION, 'a populated review lane expands');
-    assert.equal(page.mount.querySelector<DomHtmlElement>('[data-board-card="task-2773-06-survivor"]')?.getAttribute('aria-selected'), 'true', 'selection survives the expansion');
+    assert.equal(page.mount.querySelector<DomHtmlElement>('[data-board-card="task-2773-06-survivor"]')?.getAttribute('aria-current'), 'true', 'selection survives the expansion');
     assert.match(page.mount.querySelector<DomButton>('button[data-action-kind="handoff:record"]')?.getAttribute('aria-label') ?? '', /starting/, 'the pending command survives the expansion');
     assert.equal(page.calls.length, 1, 'the transition dispatches nothing of its own');
 
     // Populated to empty: the lane compacts back with the same state held.
     await page.rerender(emptyReview);
     assert.deepEqual(laneAllocation(page.mount, 'review'), COMPACT_ALLOCATION, 'an emptied review lane compacts');
-    assert.equal(page.mount.querySelector<DomHtmlElement>('[data-board-card="task-2773-06-survivor"]')?.getAttribute('aria-selected'), 'true', 'selection survives the compaction');
+    assert.equal(page.mount.querySelector<DomHtmlElement>('[data-board-card="task-2773-06-survivor"]')?.getAttribute('aria-current'), 'true', 'selection survives the compaction');
     assert.match(page.mount.querySelector<DomButton>('button[data-action-kind="handoff:record"]')?.getAttribute('aria-label') ?? '', /starting/, 'the pending command survives the compaction');
     assert.equal(page.calls.length, 1, 'neither transition resends or drops the command');
 
@@ -446,11 +446,11 @@ test('a populated-to-empty snapshot that removes the selected mission keeps the 
   try {
     const card = page.mount.querySelector<DomHtmlElement>('[data-board-card="task-2773-06-leaving"]')!;
     await act(async () => { card.focus(); });
-    assert.equal(card.getAttribute('aria-selected'), 'true');
+    assert.equal(card.getAttribute('aria-current'), 'true');
     assert.deepEqual(laneAllocation(page.mount, 'review'), POPULATED_ALLOCATION, 'the lane is populated before the removal');
     await page.rerender(toWebBoardSnapshot(makeProjection({})));
     assert.deepEqual(laneAllocation(page.mount, 'review'), COMPACT_ALLOCATION, 'the lane that lost its only card compacts');
-    assert.equal(page.mount.querySelectorAll('[aria-selected="true"]').length, 0, 'no other card takes over the removed mission selection');
+    assert.equal(page.mount.querySelectorAll('[aria-current="true"]').length, 0, 'no other card takes over the removed mission selection');
     assert.equal(page.calls.length, 0, 'removal sends nothing on its own');
   } finally { await page.close(); }
 });
@@ -484,7 +484,7 @@ test('board focus fallback lands on the selected card after refresh removes the 
     root.tabIndex = -1;
     const card = document.createElement('article');
     card.dataset.boardCard = 'task-2436-interaction';
-    card.setAttribute('aria-selected', 'true');
+    card.setAttribute('aria-current', 'true');
     card.tabIndex = 0;
     const button = document.createElement('button');
     root.append(card, button);
@@ -763,7 +763,7 @@ test('backlog Cancel pointer opens confirmation without selecting the card (TASK
       button.click();
     });
     assert.ok(page.mount.querySelector('[aria-label="Confirm cancelling task-2705-backlog"]'));
-    assert.equal(page.mount.querySelector('[data-board-card]')?.getAttribute('aria-selected'), 'false');
+    assert.equal(page.mount.querySelector('[data-board-card]')?.getAttribute('aria-current'), 'false');
     assert.equal(page.calls.length, 0);
   } finally { await page.close(); }
 });
@@ -781,7 +781,7 @@ test('backlog simultaneous projected actions have separate working controls (TAS
       });
     }
     assert.deepEqual(page.calls.map((call) => JSON.parse(String(call.body)).kind), ['handoff:record', 'active:execute']);
-    assert.equal(page.mount.querySelector('[data-board-card]')?.getAttribute('aria-selected'), 'false');
+    assert.equal(page.mount.querySelector('[data-board-card]')?.getAttribute('aria-current'), 'false');
     assert.equal(page.mount.querySelector('[aria-label^="Mission progress"]'), null);
   } finally { await page.close(); }
 });
@@ -796,7 +796,7 @@ test('a refreshed pointer control cannot dispatch its replacement or activate th
     const replacement = page.mount.querySelector<DomButton>('[data-board-card] button')!;
     await act(async () => { replacement.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 1 })); });
     assert.equal(page.calls.length, 0);
-    assert.equal(page.mount.querySelector('[data-board-card]')?.getAttribute('aria-selected'), 'false');
+    assert.equal(page.mount.querySelector('[data-board-card]')?.getAttribute('aria-current'), 'false');
     assert.equal(page.mount.querySelector('[role="dialog"]'), null);
     assert.match(page.mount.querySelector('[role="status"]')?.textContent ?? '', /control changed during the press/);
     await act(async () => {
@@ -955,3 +955,41 @@ for (const result of [commandResult(), commandResult('failed', { kind: 'executio
     } finally { await page.close(); }
   });
 }
+
+test('intake flight and attention articles expose valid current selection (TASK-2773.09)', async () => {
+  const intake = makeCard({ id: missionId('task-current-intake'), lane: 'refined', status: 'refined' });
+  const flight = makeCard({ id: missionId('task-current-flight'), lane: 'active', status: 'active', commands: [action] });
+  const board = toWebBoardSnapshot(makeProjection({ refined: [intake], active: [flight] }));
+  const page = await renderBoard({ board: { ...board, attentionQueue: [{ missionId: flight.id, rank: 1,
+    reason: { kind: 'blocking', detail: 'Fixture reason' }, action: board.stages.find(stage => stage.lane === 'active')!.cards[0].actions[0], dependsOnSources: [] }] } });
+  try {
+    const cards = [...page.mount.querySelectorAll<DomHtmlElement>('article[data-board-card]')];
+    assert.equal(cards.length, 3);
+    for (const card of cards) {
+      await act(async () => { card.focus(); });
+      assert.equal(card.getAttribute('aria-current'), 'true');
+      assert.equal(card.hasAttribute('aria-selected'), false);
+      for (const other of cards.filter(item => item.dataset.boardCard !== card.dataset.boardCard)) {
+        assert.notEqual(other.getAttribute('aria-current'), 'true');
+      }
+    }
+  } finally { await page.close(); }
+});
+
+
+test('selected cards activate progress by keyboard while nested controls retain keys (TASK-2773.09)', async () => {
+  const page = await renderBoard();
+  try {
+    const card = page.mount.querySelector<DomHtmlElement>('[data-board-card]')!;
+    for (const key of ['Enter', ' ']) {
+      await act(async () => { card.focus(); card.dispatchEvent(new page.window.KeyboardEvent('keydown', { key, bubbles: true })); });
+      assert.ok(page.mount.querySelector('[role="dialog"][aria-label="Mission progress for task-2436-interaction"]'));
+      await act(async () => { page.window.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Escape' })); });
+      assert.ok(isSameNode(page.window.document.activeElement, card));
+    }
+    for (const nested of card.querySelectorAll<DomHtmlElement>('button,summary,a')) {
+      await act(async () => { nested.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+      assert.equal(page.mount.querySelector('[aria-label^="Mission progress for"]'), null);
+    }
+  } finally { await page.close(); }
+});

@@ -1,3 +1,4 @@
+import { recognizedFailureReason } from '../../domain/failure-reason.js';
 import { describeLaunchFailure, launchFailureOf } from '../../domain/launch-failure.js';
 import type { AgentProcessResult, AgentInvocation } from "./agent-process-types.js";
 import * as fmt from "../../application/presentation/cli-format.js";
@@ -115,9 +116,10 @@ export function shouldPersistLaunchFailureBlock(agent: string, result: LaunchRes
     (result.error as { message?: string } | null | undefined)?.message || '',
     launchErrorCode(result.error) || ''
   ].join('\n');
-  if (NON_BLOCKING_LAUNCH_ERROR_PATTERNS.some(pattern => pattern.test(combined))) {return false;}
+  if (!recognizedFailureReason(result.failureReason) && NON_BLOCKING_LAUNCH_ERROR_PATTERNS.some(pattern => pattern.test(combined))) {return false;}
   const hit = detectLimitHit({
     agent,
+    failureReason: result.failureReason,
     stdout: result.stdout,
     stderr: result.stderr,
     // detectLimitHit's `status` is number|undefined; normalise the null that a
@@ -236,6 +238,7 @@ export async function classifyLaunchOutcome(state: StartAgentLoopState, deps: St
   // an agent reviewing code or logs that quote those phrases — must not block
   // the healthy agent.
   const limitHit = deps.detectLimitHitFn({
+    failureReason: failureReasonOf(result),
     agent: chosen,
     stdout: result?.stdout,
     stderr: result?.stderr,
@@ -365,3 +368,5 @@ async function handleFailedLaunch(state: StartAgentLoopState, deps: StartAgentLo
 function failedProcess(result: AgentProcessResult): boolean {
   return (result.status !== null && result.status !== 0) || Boolean(result.signal && !result.error);
 }
+
+function failureReasonOf(result: AgentProcessResult | null | undefined): unknown { return result?.failureReason; }

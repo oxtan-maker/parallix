@@ -63,7 +63,7 @@ function pointerAssets() {
       const events = new EventSource('/events');
       events.onmessage = (event) => window.renderBoard(JSON.parse(event.data));
     `, resolveDir: process.cwd(), loader: 'tsx' },
-    bundle: true, minify: true, write: false, outdir: 'assets', define: { 'process.env.NODE_ENV': '"production"' },
+    bundle: true, minify: true, write: false, outdir: 'assets', external: ['/fonts/*'], define: { 'process.env.NODE_ENV': '"production"' },
   }).then(bundled => ({
     js: bundled.outputFiles.find((file) => file.path.endsWith('.js'))!.text,
     css: bundled.outputFiles.find((file) => file.path.endsWith('.css'))!.text,

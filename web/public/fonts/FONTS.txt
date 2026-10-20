@@ -1,0 +1,42 @@
+Bundled web board fonts - coverage and fallback record (TASK-2773.11)
+
+Families and subsets shipped in this directory
+  JetBrains Mono    latin woff2 subset, weights 400, 500 and 700
+                    jetbrains-mono-latin-400.woff2
+                    jetbrains-mono-latin-500.woff2
+                    jetbrains-mono-latin-700.woff2
+                    licence text: OFL-JetBrains-Mono.txt
+  Barlow Condensed  latin woff2 subset, weights 400 and 700
+                    barlow-condensed-latin-400.woff2
+                    barlow-condensed-latin-700.woff2
+                    licence text: OFL-Barlow-Condensed.txt
+
+Provenance and licence
+  Both families are released under the SIL Open Font License, Version 1.1, and
+  the licence text for each family ships unmodified beside it here, as
+  OFL-JetBrains-Mono.txt and OFL-Barlow-Condensed.txt; each file above names the
+  notice that covers it. The subsets are the static latin woff2 cuts of the
+  upstream Google Fonts families; this repository runs no font build step, adds
+  no font package as a runtime dependency, and references no CDN or remote font
+  url at runtime. The packaged px web host serves these files from its own asset
+  allowlist, which is what keeps the board's typography available offline
+  (ADR 0054).
+
+Supported character ranges
+  Each @font-face in web/src/style.css declares the range its subset actually
+  covers, so a code point outside the subset is never drawn from these files:
+  U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD
+  That is the latin and latin-1 supplement range: the board's prose, mission
+  ids, numbers, punctuation and box-drawing-adjacent punctuation in that range.
+  No full-Unicode or variable font distribution is shipped.
+
+Fallback for a glyph outside those ranges, or for a font that fails to load
+  web/src/palette.ts keeps a complete stack in each type token, and the board
+  renders only through those tokens:
+    MONO    'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace
+    DISPLAY 'Barlow Condensed', 'Arial Narrow', ui-sans-serif, system-ui, sans-serif
+  Glyphs outside the declared ranges (for example check marks, disclosure
+  triangles and right arrows) resolve through the platform faces in these
+  stacks. A subset that never loads falls back the same way, and
+  font-display swap keeps the text visible while that happens, instead of
+  leaving invisible text or the browser default face.

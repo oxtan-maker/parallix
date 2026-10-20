@@ -388,6 +388,7 @@ test('this repository starts every independent check while Sonar waits for cover
     slug: 'task-2558', checkoutPath: repoRoot, gates,
     maxParallel: loadPhaseGateParallelism(repoRoot, 'preIntegration'),
     log: () => {}, error: () => {},
+    admission: { assertIndependent: () => {}, run: (_root, action) => action({ signal: new AbortController().signal, environment: {}, bindProcessGroup: () => {} }) },
     commandRunner: command => new Promise(resolve => {
       const key = gates.find(gate => gate.command === command)!.key;
       launched.push(key);

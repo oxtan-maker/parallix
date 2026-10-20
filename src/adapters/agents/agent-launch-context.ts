@@ -10,6 +10,7 @@ import type { SessionLaunchPolicy, SessionRole } from "../../domain/session.js";
 
 
 export interface LaunchResultLike {
+  failureReason?: unknown;
   stdout?: string;
   stderr?: string;
   status?: number | null;

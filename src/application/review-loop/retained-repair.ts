@@ -27,7 +27,7 @@ export async function resumeRetainedRepair(request: ReviewLoopRequest, mission: 
       return false;
     }
     const result = await rebound({ kind: 'gate-failure', area: 'retained verification', command: repair.command,
-      exitCode: evidence.exitCode, stdout, stderr }, {
+      failureReason: evidence.failureReason, signal: evidence.signal, exitCode: evidence.exitCode, stdout, stderr }, {
       slug: request.slug, worktree: ports.worktree, implementer,
       retainedFailure: evidence, repairIncidentId: repair.incidentId, repairCheckpoints: retained.checkpoints,
       maxAttempts: request.reboundsPerRound !== undefined && request.reboundsPerRound >= 0

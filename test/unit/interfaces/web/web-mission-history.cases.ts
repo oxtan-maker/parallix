@@ -282,3 +282,28 @@ for (const stop of ['close', 'mission change', 'unmount'] as const) {
     if (stop !== 'unmount') { await view.poll(); assert.equal(pending.length, 7, 'obsolete interval was cleared'); }
   });
 }
+
+test('nested card interactions do not open mission progress (TASK-2773.09)', async () => {
+  const { renderBoard } = await import('./web-board-harness.fixture.js');
+  const card = makeCard({ gate: 'failed', blockingReason: 'Fixture blocked', commands: [{ command: 'handoff', enabled: true, reason: null, targetLane: 'review' }] });
+  const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ active: [card] })) });
+  try {
+    const article = page.mount.querySelector<DomHtmlElement>('[data-board-card]')!;
+    await act(async () => { article.focus(); });
+    assert.equal(article.style.borderTopColor, C.red);
+    const link = page.window.document.createElement('a');
+    link.href = '#fixture'; link.textContent = 'fixture link'; article.append(link);
+    for (const nested of article.querySelectorAll<DomHtmlElement>('a,summary,button')) {
+      await act(async () => { nested.click(); });
+      assert.equal(page.mount.querySelector('[aria-label^="Mission progress for"]'), null);
+    }
+    assert.deepEqual(page.calls.filter(call => call.method === 'POST').map(call => JSON.parse(String(call.body)).kind), ['handoff:record', 'mission:edit-read']);
+    await act(async () => {
+      const drag = new page.window.Event('dragstart', { bubbles: true });
+      Object.defineProperty(drag, 'dataTransfer', { value: { setData() {}, setDragImage() {}, effectAllowed: '' } });
+      article.dispatchEvent(drag);
+      article.dispatchEvent(new page.window.Event('dragend', { bubbles: true }));
+    });
+    assert.equal(page.mount.querySelector('[aria-label^="Mission progress for"]'), null);
+  } finally { await page.close(); }
+});

@@ -126,6 +126,9 @@ export interface WebReviewRoundSummary {
 export interface WebGoalCheckRow {
   readonly criterion: string;
   readonly evidence: string;
+  readonly recordedRound?: number;
+  readonly repairedGate?: string;
+  readonly repairedGates?: readonly string[];
 }
 
 /**
@@ -334,15 +337,18 @@ export interface WebHandoffPayload {
 
 /**
  * The only mutation envelope the host accepts. Top-level keys are exactly
- * `missionId`, `kind`, `missionStatusAtRequest`, and `payload` (handoff only).
+ * `missionId`, `kind`, `missionStatusAtRequest`, `requestKey`, optional `agent`
+ * (launches only), and `payload` (handoff only).
  * There is no key through which a client can supply an operation ID, a
- * capability set, an agent, an environment, argv, a path, or a version:
+ * capability set, an environment, argv, a path, or a version:
  * the host generates the operation ID and the single-kind capability set
  * itself.
  */
 export interface WebCommandRequest {
   /** Required and nonblank for workflow commands; optional for stop and cancellation. */
   readonly requestKey?: string;
+  /** Explicit launch family; omission preserves automatic selection. */
+  readonly agent?: string;
   readonly missionId: string;
   readonly kind: WebCommandRequestKind;
   /**

@@ -22,7 +22,8 @@ export const laneEmpty: CSSProperties = { color: C.faint, fontSize: TYPE.meta, p
 
 /** The shared card box for a lane row: same edge, radius and selection accent. */
 export function laneCard(selected: boolean): CSSProperties {
-  return { border: `1px solid ${selected ? C.cyan : C.cardEdge}`, borderRadius: RADIUS.card };
+  const edge = selected ? C.cyan : C.cardEdge;
+  return { borderWidth: 1, borderStyle: 'solid', borderTopColor: edge, borderRightColor: edge, borderBottomColor: edge, borderLeftColor: edge, borderRadius: RADIUS.card };
 }
 
 export function LaneHeader({ lane, count, countText, note }: {

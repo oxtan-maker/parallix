@@ -847,13 +847,28 @@ export function resolveCanonicalRepositoryRoot(rootDir: string = process.cwd()):
   return first ? path.resolve(first) : path.resolve(rootDir);
 }
 
+/** Same optional positive-integer capacity contract as custom-agent admission. */
+export function resolveMaxConcurrentGates(rootDir: string = process.cwd()): number {
+  const gates = (loadEffectiveConfig(rootDir).adapters as { gates?: PlainObject }).gates;
+  const max = gates?.maxConcurrent;
+  return Number.isInteger(max) && (max as number) > 0 ? max as number : Infinity;
+}
+
 export function resolveCanonicalMaxConcurrentCustom(rootDir: string = process.cwd()): number {
+  return resolveCanonicalAdmissionLimit(rootDir, 'adapters.agents.maxConcurrentCustom', resolveMaxConcurrentCustom);
+}
+
+export function resolveCanonicalMaxConcurrentGates(rootDir: string = process.cwd()): number {
+  return resolveCanonicalAdmissionLimit(rootDir, 'adapters.gates.maxConcurrent', resolveMaxConcurrentGates);
+}
+
+function resolveCanonicalAdmissionLimit(rootDir: string, setting: string, resolve: (_root: string) => number): number {
   const canonicalRoot = resolveCanonicalRepositoryRoot(rootDir);
   const loaded = loadWorkflowConfig(canonicalRoot);
   if (loaded.found && (loaded.parseError || validateWorkflowConfig(loaded.config).length > 0)) {
-    throw new Error(`Invalid workflow.config.json at ${loaded.configPath}: adapters.agents.maxConcurrentCustom admission fails closed`);
+    throw new Error(`Invalid workflow.config.json at ${loaded.configPath}: ${setting} admission fails closed`);
   }
-  return resolveMaxConcurrentCustom(canonicalRoot);
+  return resolve(canonicalRoot);
 }
 
 interface RepositoryReadinessResult {
