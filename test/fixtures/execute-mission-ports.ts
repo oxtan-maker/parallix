@@ -27,6 +27,7 @@ export function makeExecutePorts(overrides: ExecuteOverrides = {}) {
       async enforceCommitSafety() { /* traced by the adapter suites, not here */ },
     },
     agentExecution: {
+      async eligible() { return true; },
       async select() { return 'codex'; },
       async prepare() { return { prompt: 'execute prompt', agentConfig: {} }; },
       async launch(request: { slug: string; preselectedAgent: string | null }) {

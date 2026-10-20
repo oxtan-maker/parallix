@@ -1,3 +1,5 @@
+import { missionId } from '../../../src/domain/mission.js';
+import { agentFamily } from '../../../src/domain/agents.js';
 import { makeExecutePorts } from '../../fixtures/execute-mission-ports.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
 import { missionVersion } from '../../../src/application/domain-ports.js';
@@ -440,4 +442,44 @@ test('execute handoff preserves gate-to-conflict cause and actual early stop cou
   assert.match(errors.join('\n'), /Recovery stopped after 2 relaunch attempt/);
   assert.match(errors.join('\n'), /Last diagnostic: connection refused/);
   assert.doesNotMatch(errors.join('\n'), /Gate failure persisting/);
+});
+
+test('execute continuation launches the authoritative implementer without reroll (TASK-2793)', async () => {
+  let selections = 0;
+  const { ports, calls } = strictPorts();
+  ports.agentExecution.select = async () => { selections++; return 'custom'; };
+  const originalLoad = ports.missionTransitions.load;
+  ports.missionTransitions.load = async id => {
+    const loaded = await originalLoad(id);
+    return loaded.kind === 'found' ? { ...loaded, mission: { ...loaded.mission, status: 'active', closedAt: null, assignee: agentFamily('codex') } } : loaded;
+  };
+  const result = await new ExecuteMissionService(ports).execute(request({ agent: undefined }));
+  assert.equal(result.status, 'completed');
+  assert.ok(calls.includes('launch:codex'));
+  assert.equal(selections, 0);
+});
+
+
+test('execute persists override and launched fallback for the next invocation (TASK-2793)', async () => {
+  const { ports } = strictPorts();
+  const launched: string[] = [];
+  let blocked = false;
+  ports.agentExecution.eligible = async agent => !(blocked && agent === 'claude');
+  ports.agentExecution.select = async () => 'custom';
+  ports.agentExecution.launch = async r => {
+    launched.push(r.preselectedAgent!);
+    const actual = r.preselectedAgent === 'custom' ? 'codex' : r.preselectedAgent!;
+    await r.onAgentChanged?.(actual);
+    return { agent: actual, rebaseDeferred: true, errored: false, errorMessage: null, exitStatus: 0, detail: null };
+  };
+  const service = new ExecuteMissionService(ports);
+  assert.equal((await service.execute(request({ agent: 'claude' }))).status, 'completed');
+  assert.equal((await ports.missionTransitions.load(missionId('task-1'))).kind, 'found');
+  assert.equal((await service.execute(request({ agent: undefined }))).status, 'completed');
+  blocked = true;
+  assert.equal((await service.execute(request({ agent: undefined }))).status, 'completed');
+  const stored = await ports.missionTransitions.load(missionId('task-1'));
+  assert.equal(stored.kind === 'found' && stored.mission.assignee, 'codex');
+  assert.equal((await service.execute(request({ agent: undefined }))).status, 'completed');
+  assert.deepEqual(launched, ['claude', 'claude', 'custom', 'codex']);
 });

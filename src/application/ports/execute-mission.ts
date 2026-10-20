@@ -67,7 +67,7 @@ export interface AgentLaunchRequest {
   readonly worktree: string;
   readonly plan: AgentLaunchPlan;
   readonly taskResolution: TaskFileResolution;
-  /** Operator-pinned implementer family, or `null` to let selection choose. */
+  /** Selected implementer family, with normal blocked-agent recovery; `null` lets selection choose. */
   readonly preselectedAgent: string | null;
   /**
    * The dispatching host does not keep its process alive for this operation
@@ -126,6 +126,8 @@ export interface AgentLaunchOutcome {
 
 /** The agent process mechanism: configuration, prompt delivery, and launch. */
 export interface AgentExecutionPort {
+  /** Eligibility and configured override policy for retaining an activated owner; no provider probe. */
+  eligible(_agent: string): Promise<boolean>;
   /** Cheap configured selection: no prompt, health probe, preflight or provider start. */
   select?(_slug: string): Promise<string | null>;
   /** Resolve the agent configuration and the execute prompt for this worktree. */

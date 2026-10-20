@@ -37,6 +37,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     private readonly _draftInput?: (_mission: string) => Promise<{ title: string; labels: readonly MissionLabel[]; status: string } | null>,
     private readonly _observe?: (_operation: WorkflowOperation) => Promise<boolean | void> | boolean | void,
     private readonly _wait: { now(): number; timeoutMs: number } = { now: Date.now, timeoutMs: 24 * 60 * 60 * 1000 },
+    private readonly _eligibleAgent: (_agent: string) => Promise<boolean> = async () => false,
   ) {}
 
   canExecute(kind: BoardCommandRequest['kind']): boolean {
@@ -158,8 +159,15 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
       if (refusal) { return refusal; }
     }
     const draft = loaded.kind === 'missing' && request.kind === 'draft:create' ? await this._draftInput?.(request.missionId) ?? null : null;
-    const agent = request.kind === 'active:execute' ? request.agent ?? await this._selectAgent() : null;
+    const agent = request.kind === 'active:execute' ? await this.resolveActiveAgent(request, loaded) : null;
     return { agent, draft };
+  }
+
+  private async resolveActiveAgent(request: BoardCommandRequest, loaded: MissionLoadResult): Promise<string> {
+    if (request.agent) { return request.agent; }
+    const owner = loaded.kind === 'found' && loaded.mission.status === 'active' ? loaded.mission.assignee : null;
+    if (owner && await this._eligibleAgent(owner)) { return owner; }
+    return this._selectAgent();
   }
 
   private boardAvailability(loaded: Extract<MissionLoadResult, { kind: 'found' }>, command: WorkflowCommand) {
@@ -261,7 +269,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     if (!operation) { return; }
     const request: BoardCommandRequest = {
       operationId: operation.id, missionId: operation.missionId, kind: operation.command,
-      capabilities: new Set([operation.command]), agent: operation.requestedAgent ?? null, reviewer: operation.reviewer,
+      capabilities: new Set([operation.command]), agent: operation.command === 'active:execute' ? operation.agent : operation.requestedAgent ?? null, reviewer: operation.reviewer,
       detached: false, payload: operation.payload,
     };
     let outcome: ApplicationOutcome<unknown>;

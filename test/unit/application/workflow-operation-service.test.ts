@@ -1,3 +1,6 @@
+import { agentFamily } from '../../../src/domain/agents.js';
+import { ExecuteMissionService } from '../../../src/application/execute-mission-service.js';
+import { makeExecutePorts } from '../../fixtures/execute-mission-ports.js';
 import { missionBrief } from '../../../src/domain/mission-brief.js';
 import { missionLabels } from '../../../src/domain/mission.js';
 // Admission/owner contract is new: execution-service tests own launch ordering,
@@ -17,6 +20,7 @@ import { repositoryId } from '../../../src/domain/repository.js';
 function fixture(draftInput = false, wait?: { now(): number; timeoutMs: number }, preparation: {
   select?: ConstructorParameters<typeof WorkflowOperationService>[6];
   draft?: ConstructorParameters<typeof WorkflowOperationService>[8];
+  eligible?: (_agent: string) => Promise<boolean>;
 } = {}) {
   const rows = new Map<string, WorkflowOperation>();
   let tail: Promise<unknown> = Promise.resolve();
@@ -57,8 +61,8 @@ function fixture(draftInput = false, wait?: { now(): number; timeoutMs: number }
   const publications: string[] = [];
   const service = new WorkflowOperationService(operations, store, { canExecute: () => true, async dispatch<T>() { return completed({} as T); } }, processes,
     { async running(p) { publications.push(p.summary); }, async ended(p) { publications.push(p.summary); }, async blocked(p) { publications.push(p.summary); } },
-    repositoryId('parallix'), preparation.select ?? (async () => 'codex'), async () => {}, preparation.draft ?? (draftInput ? async () => ({ title: 'Backlog source', labels: [], status: 'backlog' }) : undefined), undefined, wait);
-  return { service, operations, missions, events, launches, publications, processes, isWriting: () => writing, setLaunchFailure: (value: boolean) => { failLaunch = value; }, setEffectsSettled: (value: boolean) => { effectsSettled = value; }, setLive: (value: boolean | null) => { live = value; }, setStopped: (value: boolean) => { stopped = value; } };
+    repositoryId('parallix'), preparation.select ?? (async () => 'codex'), async () => {}, preparation.draft ?? (draftInput ? async () => ({ title: 'Backlog source', labels: [], status: 'backlog' }) : undefined), undefined, wait, preparation.eligible ?? (async () => true));
+  return { service, store, operations, missions, events, launches, publications, processes, isWriting: () => writing, setLaunchFailure: (value: boolean) => { failLaunch = value; }, setEffectsSettled: (value: boolean) => { effectsSettled = value; }, setLive: (value: boolean | null) => { live = value; }, setStopped: (value: boolean) => { stopped = value; } };
 }
 function request(id = 'request-one', mission = 'task-one'): BoardCommandRequest {
   return { operationId: id, requestKey: id, kind: 'active:execute', missionId: mission, missionStatusAtRequest: 'refined', capabilities: new Set(['active:execute']) };
@@ -462,4 +466,54 @@ test('foreground cancellation cannot stop a replacement or an independent workfl
   assert.equal((await f.service.current('task-one'))?.id, 'replacement');
   assert.equal((await f.service.current('task-two'))?.id, 'independent');
   assert.equal(stops, 0);
+});
+
+
+test('normal active continuation retains the authoritative implementer (TASK-2793)', async () => {
+  let selections = 0;
+  const f = fixture(false, undefined, { select: async () => { selections++; return 'custom'; } });
+  f.missions.set('task-one', { ...fixtureMission('task-one', { status: 'active' }), assignee: agentFamily('codex') });
+  const admitted = await f.service.admit({ ...request(), missionStatusAtRequest: 'active' });
+  assert.equal(admitted.status, 'accepted');
+  assert.equal((await f.service.operation('request-one'))?.agent, 'codex');
+  assert.equal(f.missions.get('task-one')?.assignee, 'codex');
+  assert.equal(selections, 0);
+});
+
+
+test('first activation selects once and execution uses the admitted family (TASK-2793)', async () => {
+  let selections = 0;
+  const f = fixture(false, undefined, { select: async () => { selections++; return 'custom'; } });
+  // Draft ownership is not an activated implementer.
+  f.missions.set('task-one', { ...f.missions.get('task-one')!, assignee: agentFamily('claude') });
+  assert.equal((await f.service.admit(request())).status, 'accepted');
+  assert.equal(f.missions.get('task-one')?.assignee, 'custom');
+  const launched: string[] = [];
+  const { ports } = makeExecutePorts({ missionTransitions: f.store, agentExecution: {
+    async select() { selections++; return 'codex'; },
+    async launch(r) { launched.push(r.preselectedAgent!); return { agent: r.preselectedAgent!, rebaseDeferred: true, errored: false, errorMessage: null, exitStatus: 0, detail: null }; },
+  } });
+  await f.service.run('request-one', r => new ExecuteMissionService(ports).execute({ ...r, slug: r.missionId, reviewer: r.reviewer ?? undefined }));
+  assert.deepEqual(launched, ['custom']);
+  assert.equal(selections, 1);
+  assert.equal((await f.service.operation('request-one'))?.phase, 'completed');
+});
+
+test('stop and new invocation retain ownership but override and ineligible owner select replacements (TASK-2793)', async () => {
+  let selections = 0;
+  let eligible = true;
+  const f = fixture(false, undefined, { select: async () => { selections++; return 'custom'; }, eligible: async () => eligible });
+  await f.service.admit({ ...request(), agent: 'codex' });
+  await f.service.stop('task-one');
+  await f.service.admit({ ...request('restart'), missionStatusAtRequest: 'active' });
+  assert.equal((await f.service.operation('restart'))?.agent, 'codex');
+  assert.equal(selections, 0);
+  await f.service.run('restart', async () => completed({}));
+  await f.service.admit({ ...request('override'), missionStatusAtRequest: 'active', agent: 'claude' });
+  assert.equal(f.missions.get('task-one')?.assignee, 'claude');
+  await f.service.run('override', async () => completed({}));
+  eligible = false;
+  await f.service.admit({ ...request('fallback'), missionStatusAtRequest: 'active' });
+  assert.equal(f.missions.get('task-one')?.assignee, 'custom');
+  assert.equal(selections, 1);
 });

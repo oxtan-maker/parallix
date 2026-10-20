@@ -2,7 +2,7 @@ import { commandErrorMessage } from '../cli/commands/agent-result.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import { readAgentConfig } from '../agents/agents.js';
-import { selectAgent } from '../agents/agents.js';
+import { selectAgent, eligibleAgentsForStep } from '../agents/agents.js';
 import { resolveWorktree } from '../filesystem/mission-utils.js';
 import startupPreflight from '../cli/startup-preflight.js';
 import { buildCheckpointContext, buildExecutePrompt, enforceExecuteCommitSafety, selectLaunchAndRecord } from '../cli/commands/active.js';
@@ -145,6 +145,13 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
     private readonly _configuration: ParallixConfiguration = DEFAULT_CONFIGURATION,
   ) {}
 
+  async eligible(agent: string): Promise<boolean> {
+    const eligible = eligibleAgentsForStep('active', { config: this.resolveAgentConfig(), configuration: this._configuration });
+    const override = this._configuration.agents.override;
+    if (override && eligible.includes(override) && override !== agent) { return false; }
+    return eligible.includes(agent);
+  }
+
   async select(_slug: string): Promise<string | null> {
     return selectAgent('active', { config: this.resolveAgentConfig(), checkAvailability: false, configuration: this._configuration });
   }
@@ -165,7 +172,6 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
       agentConfig,
       // `startAgent` checks the selected launcher's health after the Mission
       // transition; do not block the active lifecycle on a CLI probe here.
-      agent: selectAgent('active', { config: agentConfig, checkAvailability: false, configuration: this._configuration }),
       prompt: this._runtime.buildExecutePrompt(request.slug, launchContext, { rootDir: request.worktree }),
     };
   }

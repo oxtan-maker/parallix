@@ -778,6 +778,7 @@ describe('Lifecycle ordering', () => {
         async enforceCommitSafety() {},
       },
       agentExecution: {
+        eligible: async () => true,
         async prepare() { return { prompt: 'execute', agentConfig: {} }; },
         launch,
       },

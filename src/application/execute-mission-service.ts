@@ -90,7 +90,7 @@ export class ExecuteMissionService {
     let agentStarted = false;
     try {
       await this.prepareOperatorResume(request);
-      const selectedAgent = request.agent || await this._ports.agentExecution.select?.(request.slug);
+      const selectedAgent = await this.resolveAgent(request);
       if (!selectedAgent) { throw new Error('Could not select an execute agent.'); }
       activation = await this.synchronizeLifecycle(request.slug, selectedAgent, request.operationId);
       activationAgent = selectedAgent;
@@ -146,6 +146,14 @@ export class ExecuteMissionService {
     } catch (error) {
       return this.failedExecution(request, error, activation, activationAgent, agentStarted);
     }
+  }
+
+  private async resolveAgent(request: ExecuteMissionRequest): Promise<string | null | undefined> {
+    if (request.agent) { return request.agent; }
+    const loaded = await this._ports.missionTransitions.load(missionId(request.slug));
+    const owner = loaded.kind === 'found' && loaded.mission.status === 'active' ? loaded.mission.assignee : null;
+    if (owner && await this._ports.agentExecution.eligible(owner)) { return owner; }
+    return this._ports.agentExecution.select?.(request.slug);
   }
 
   private validateRequest(request: ExecuteMissionRequest): ApplicationOutcome<ExecuteMissionResult> | null {

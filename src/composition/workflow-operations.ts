@@ -33,7 +33,7 @@ import { startWorkflowRecovery } from './workflow-recovery.js';
 
 /** Admission owns a dedicated connection, never the HTTP graph's shared handle. */
 export async function composeWorkflowOperations(root: string, configuration: ParallixConfiguration, dispatcher: BoardCommandDispatcher,
-  dbPath: string, select: () => Promise<string>, cli: CliInvocation = cliInvocation(process.argv[1]), observe?: Parameters<typeof workflowCliObserver>[1] | false) {
+  dbPath: string, select: () => Promise<string>, cli: CliInvocation = cliInvocation(process.argv[1]), observe?: Parameters<typeof workflowCliObserver>[1] | false, eligible?: (_agent: string) => Promise<boolean>) {
   const db = new SqliteDatabaseAdapter(configuration);
   // Do not block the HTTP loop behind a worker's SQLite writer.
   await db.open({ path: dbPath, busyTimeoutMs: 0 });
@@ -80,7 +80,7 @@ export async function composeWorkflowOperations(root: string, configuration: Par
     }, observe === false ? undefined : observer!({
       history: mission => observedTerminal().history(mission),
       page: (mission, request) => observedTerminal().page(mission, request),
-    }, observe));
+    }, observe), undefined, eligible);
   const failureEvidence = async (operation: import('../application/ports/workflow-operation.js').WorkflowOperationRecord) => {
     const history = (await loadTerminal()).history(operation.missionId);
     let gates: ReturnType<typeof listRecoveryEvidence> = [];
@@ -229,7 +229,7 @@ export async function attachWorkflowOperations(root: string, configuration: Para
   const owned = await composeWorkflowOperations(root, configuration, capabilities.commandController, dbPath, async () => {
     const selected = await graph.executePorts.agentExecution.select?.('');
     if (!selected) { throw new Error('No configured execute agent'); } return selected;
-  }, undefined, progress);
+  }, undefined, progress, agent => graph.executePorts.agentExecution.eligible(agent));
   const { workflowFailureController } = await import('./workflow-cli.js');
   const controller = workflowFailureController(owned.service, id => owned.service.operation(id), owned.failureEvidence, mission => owned.service.current(mission));
   const recovery = recover ? startWorkflowRecovery(root, configuration) : null;

@@ -125,6 +125,7 @@ describe("active invocation overlap", () => {
         enforceCommitSafety: async () => {},
       },
       agentExecution: {
+        eligible: async () => true,
         select: async () => 'claude',
         prepare: async () => ({ prompt: 'execute', agent: 'claude', agentConfig: {} }),
         launch,
@@ -322,6 +323,7 @@ describe("active persisted Mission", () => {
         async readTaskStatus() { return 'active'; }, async enforceCommitSafety() {},
       },
       agentExecution: {
+        eligible: async () => true,
         async select() { return 'codex'; },
         async prepare() { return { prompt: 'p', agent: 'codex', agentConfig: {} }; },
         async launch(request: { onAgentChanged?: (_agent: string) => Promise<void> }) {
@@ -416,6 +418,7 @@ describe("active persisted Mission", () => {
         async resolveTaskFile() { return { ok: false as const }; }, async readTaskStatus() { return null; }, async enforceCommitSafety() {},
       },
       agentExecution: {
+        eligible: async () => true,
         async prepare() { return { prompt: 'p', agent: 'codex', agentConfig: {} }; },
         async launch() { launches += 1; throw new Error('must not launch'); },
       },
@@ -446,6 +449,7 @@ describe("active persisted Mission", () => {
         async resolveTaskFile() { return { ok: false as const }; }, async readTaskStatus() { return null; }, async enforceCommitSafety() {},
       },
       agentExecution: {
+        eligible: async () => true,
         async prepare() { return { prompt: 'p', agent: 'codex', agentConfig: {} }; },
         async launch() { return { agent: 'codex', rebaseDeferred: false, errored: true, errorMessage: 'launcher unavailable', exitStatus: null, detail: null }; },
       },
@@ -547,6 +551,7 @@ describe('active operator resume', () => {
         async resolveTaskFile() { return { ok: false }; }, async readTaskStatus() { return 'active'; }, async enforceCommitSafety() {},
       },
       agentExecution: {
+        eligible: async () => true,
         async select() { return 'claude'; },
         async prepare() { return { prompt: 'execute', agent: 'claude', agentConfig: {} }; },
         async launch() {

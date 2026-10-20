@@ -1,3 +1,4 @@
+import { DEFAULT_CONFIGURATION } from '../../../../src/application/ports/configuration.js';
 import { missionId } from '../../../../src/domain/mission.js';
 import { repositoryId } from '../../../../src/domain/repository.js';
 import { fixtureMission } from '../../../fixtures/mission-builders.js';
@@ -140,7 +141,7 @@ describe('Execute Mission adapters', () => {
   });
 
   test('agent execution adapter overlays the operator blocklist onto the file agent config', async () => {
-    const blocklist = { codex: { until: '2026-08-01T00:00:00Z' } } satisfies { codex: { until: string; }; };
+    const blocklist = { codex: { until: '9999-12-31 23' } } satisfies { codex: { until: string; }; };
     const ports = createExecuteMissionPorts(
       '/repo',
       { missionTransitionStore: transitionStore, operatorBlocklist: blocklist },
@@ -153,6 +154,7 @@ describe('Execute Mission adapters', () => {
     const plan = await ports.agentExecution.prepare({ slug: 'task-1', worktree: '/worktree' });
     assert.deepEqual(plan.agentConfig, { steps: { active: { eligible: ['codex'], selection: 'first' } }, blocklist });
     assert.equal(plan.prompt, 'execute prompt');
+    assert.equal(await ports.agentExecution.eligible('codex'), false, 'operator blocks prevent retention');
   });
 
   test('agent execution adapter consumes the recorded brief and gates for launch', async () => {
@@ -212,11 +214,24 @@ describe('Execute Mission adapters', () => {
       const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
         readAgentConfig() { return { steps: { active: { eligible: ['codex'], selection: 'first' } } }; },
       }));
-      assert.equal((await ports.agentExecution.prepare({ slug: 'task-1', worktree: '/worktree' })).agent, 'codex');
+      assert.equal(await ports.agentExecution.select?.('task-1'), 'codex');
+      assert.equal(await ports.agentExecution.eligible('codex'), true);
+      assert.equal(await ports.agentExecution.eligible('custom'), false);
+      assert.equal((await ports.agentExecution.prepare({ slug: 'task-1', worktree: '/worktree' })).agent, undefined);
     } finally {
       setCommandPathProbe(null);
       setLauncherHealthProbe(null);
     }
+  });
+
+  test('active retention honors configured operator override (TASK-2793)', async () => {
+    const ports = createExecuteMissionPorts('/repo', {
+      missionTransitionStore: transitionStore,
+      configuration: { ...DEFAULT_CONFIGURATION, agents: { ...DEFAULT_CONFIGURATION.agents, override: 'custom' } },
+    }, runtimeStub({ readAgentConfig() { return { steps: { active: { eligible: ['codex', 'custom'] } } }; } }));
+    assert.equal(await ports.agentExecution.eligible('codex'), false);
+    assert.equal(await ports.agentExecution.eligible('custom'), true);
+    assert.equal(await ports.agentExecution.select?.('task-1'), 'custom');
   });
 
   test('agent execution adapter reports launcher errors and exit status as raw facts', async () => {

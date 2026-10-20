@@ -9,16 +9,13 @@ import { fixtureMission as typedMissionFixture } from '../../fixtures/mission-bu
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { mkdtemp } from '../../helpers/temp-dir.js';
+import { openMigratedMissionStore, type MigratedMissionStore } from '../../fixtures/mission-sqlite-store.js';
 
 import { missionId, type Mission } from '../../../src/domain/mission.js';
 import { changeRevision, type Review } from '../../../src/domain/review.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { repositoryId } from '../../../src/domain/repository.js';
-import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
-import { loadDefaultMigrations, SqliteMigrationRunner } from '../../../src/adapters/sqlite/migration-runner.js';
+import type { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
 
 const MISSION_ID = missionId('task-9002');
@@ -62,12 +59,20 @@ function missionWith(review: Review, title = 'aggregate read during write'): Mis
     review});
 }
 
+// Only the immutable empty schema is shared; every case owns its copied file,
+// connection and mutable aggregates, and disposes them even after a failure.
+let schemaFixture: MigratedMissionStore;
+let schemaTemplate: string;
+test.before(async () => {
+  schemaFixture = await openMigratedMissionStore();
+  schemaTemplate = await schemaFixture.database.backup();
+  await schemaFixture.database.close();
+});
+test.after(async () => { await schemaFixture?.close(); });
+
 async function openStore() {
-  const dir = mkdtemp('task-2339-aggregate-');
-  const db = new SqliteDatabaseAdapter();
-  await db.open({ path: path.join(dir, 'parallix.db') });
-  await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
-  return { db, store: new SqliteMissionStore(db), dir };
+  const fixture = await openMigratedMissionStore([], schemaTemplate);
+  return { db: fixture.database, store: fixture.store, close: () => fixture.close() };
 }
 
 /**
@@ -110,7 +115,7 @@ function holdReaderUntilReviewCleared(db: SqliteDatabaseAdapter) {
 }
 
 test('a load that races an aggregate write never observes the mission without its Review', async () => {
-  const { db } = await openStore();
+  const { db, close } = await openStore();
   try {
     const store = new SqliteMissionStore(holdReaderUntilReviewCleared(db));
     const version = await store.save(missionWith(reviewWith()), null);
@@ -134,7 +139,7 @@ test('a load that races an aggregate write never observes the mission without it
     );
     assert.equal(observed.kind === 'found' && observed.mission.review?.rounds.length, 1);
   } finally {
-    await db.close();
+    await close();
   }
 });
 
@@ -156,7 +161,7 @@ function recordStatements(db: SqliteDatabaseAdapter, statements: string[]) {
 }
 
 test('a save that keeps the Review never deletes the row its children cascade from', async () => {
-  const { db } = await openStore();
+  const { db, close } = await openStore();
   try {
     const statements: string[] = [];
     const store = new SqliteMissionStore(recordStatements(db, statements));
@@ -195,12 +200,12 @@ test('a save that keeps the Review never deletes the row its children cascade fr
     assert.equal(reloaded.kind, 'found');
     assert.equal(reloaded.kind === 'found' && reloaded.mission.review?.reviewEvents.length, 1);
   } finally {
-    await db.close();
+    await close();
   }
 });
 
 test('a save that drops the Review still clears the review tables', async () => {
-  const { db, store } = await openStore();
+  const { db, store, close } = await openStore();
   try {
     const version = await store.save(missionWith(reviewWith()), null);
     const withoutReview = ({ ...missionWith(reviewWith()), review: null });
@@ -211,6 +216,6 @@ test('a save that drops the Review still clears the review tables', async () => 
     const rounds = await db.query('SELECT mission_id FROM mission_review_rounds WHERE mission_id = ?', [MISSION_ID]);
     assert.equal(rounds.length, 0);
   } finally {
-    await db.close();
+    await close();
   }
 });

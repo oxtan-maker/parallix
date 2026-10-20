@@ -41,7 +41,9 @@ const createGraph: typeof createProductionApplicationServices = async (root, pro
     async enforceCommitSafety() {},
   };
   const executePorts = { ...ports, workspace,
-    agentExecution: { async select() { return 'codex'; }, async prepare() { return { prompt: 'fixture', agent: 'codex', agentConfig: {} }; },
+    agentExecution: {
+      eligible: async () => true,
+      async select() { return 'codex'; }, async prepare() { return { prompt: 'fixture', agent: 'codex', agentConfig: {} }; },
       async launch(request: { onAgentChanged?: (_agent: string) => Promise<void>; slug: string }) {
         await request.onAgentChanged?.('codex'); console.log(`AGENT-OUTPUT:${request.slug}`);
         if (fs.existsSync(path.join(fixtureRoot, 'provider-fixture'))) {

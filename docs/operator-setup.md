@@ -252,6 +252,14 @@ Graphify ships no `mistral` or `vibe` platform. The `graphify install --platform
 
 ## Reading workflow progress
 
+The first activation selects an eligible implementer independently of the agent
+used to draft the mission. Once activated, the recorded implementer continues
+across stop/restart, review responses and integration repair. An explicit
+implementer override takes precedence. If the recorded family becomes ineligible
+or a provider block requires recovery, an eligible replacement can take over;
+the family that actually launches becomes the implementer for subsequent work.
+
+
 Review output distinguishes an initial reviewer selection from a resumed review.
 Round 1 starts with initial-selection wording; continuing an existing round or
 starting a later round retains resume wording. During integration, `Next:` names

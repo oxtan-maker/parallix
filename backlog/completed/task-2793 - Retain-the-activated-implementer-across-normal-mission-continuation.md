@@ -1,8 +1,8 @@
 ---
 id: TASK-2793
 title: Retain the activated implementer across normal mission continuation
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-20 03:20'
 labels:
   - bug
