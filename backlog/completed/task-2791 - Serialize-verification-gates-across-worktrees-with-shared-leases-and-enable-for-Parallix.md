@@ -38,3 +38,11 @@ TASK-2781 integration failed when workflow process cases exceeded their unchange
 - [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-20 admission observation (UTC): task-2792 completed handoff at approximately 16:16 and then waited for its mission-declared gate. Subsequent observed admission holders were task-2796 (~16:16), task-2787 (16:23:42), task-2794 (16:29:12), task-2797 handoff (~16:31), and task-2796 again (16:32:48). At audit, task-2792 owner PID 1928110/start identity 242196758 was live with no children; the verification lease belonged to task-2796 owner 1892397/242191076, created at 16:32:48.751Z. This records approximately 17 minutes of waiting with later admission opportunities; it does not establish permanent starvation.
+
+The inspected implementation is non-FIFO: `src/adapters/process/gate-admission.ts:35-38` retries acquisition every 25 ms; `src/adapters/sqlite/custom-agent-lease-repository.ts:25-34` counts live holders and admits the transaction winner when capacity is available. It persists no waiter order or arrival timestamp and provides no bounded-wait entitlement, so a later poller can acquire before an older waiter. The existing criteria require exclusion, waiting progress and safe cleanup, but promise neither FIFO nor a finite maximum wait. These observations do not prove a contract violation. No gate configuration, budgets, criteria or lifecycle state were changed; any fairness policy needs separately scoped evidence and a decision.
+<!-- SECTION:NOTES:END -->
