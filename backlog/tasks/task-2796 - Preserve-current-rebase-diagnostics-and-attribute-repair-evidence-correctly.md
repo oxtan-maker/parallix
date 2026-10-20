@@ -1,7 +1,7 @@
 ---
 id: TASK-2796
 title: Preserve current rebase diagnostics and attribute repair evidence correctly
-status: backlog
+status: ready-for-integration
 assignee: []
 created_date: '2026-10-20 10:14'
 labels:
