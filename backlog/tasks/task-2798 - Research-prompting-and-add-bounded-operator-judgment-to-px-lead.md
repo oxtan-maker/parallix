@@ -4,7 +4,7 @@ title: Research prompting and add bounded operator judgment to px lead
 status: backlog
 assignee: []
 created_date: '2026-10-20 10:59'
-updated_date: '2026-10-20 18:22'
+updated_date: '2026-10-20 18:54'
 labels:
   - enhancement
   - research
@@ -112,6 +112,8 @@ Acceptance/evidence P1: scripts/evaluate-lead-judgment.ts:65,72-80 substitutes n
 Acceptance/evidence P2: scripts/probe-lead-prompts.ts:11-20 captures intermediate builders and directly calls fresh-marker methods, not final adapter launches, configured CLI substitution, tool/session arguments, resume/fallback. Complete the final delivered prompt/tool/session audit with isolated adapter captures.
 
 Design limitation: live credible work returns before judgment (recovery-supervisor.ts:133-137,178-181); 360000ms isolated live-worker observation makes zero judgment calls and starts no 120s window. This implementation cannot assess/escalate a live unproductive agent or request targeted new evidence; stop/restart/steering remain unavailable. Do not claim that it reproduces the operator session's supervision. Reuse of DecisionPort, typed action admission and preservation of human integration authority are sound pieces; the research accurately avoids Qwen-transfer/superiority claims. No gates, budgets or PR code changed by this review.
+
+PR 768 follow-up: review branch now 0f978cd96. Commit 7fca9f6f8 bounds the entire judgment authority/model/history chain, carries admitted identity to the existing shared launch boundary, and rejects authority changes or expired Mission budgets before provider spawn. Focused parent-red/current-green regressions, owning tests and isolated manual public-CLI qualification passed. ADR 0067 removed; ADR 0059 receives the compact inline change requested by human review 3327/comment 18652. The current probe now records final native adapter arguments/session/fallback/configured CLI substitution, with revision/hash receipt final-native-launches.json. Offline guarded-continuation.json proves one real disposable Git/SQLite continuation using scripted external boundaries and falsified effect graders; it is not a matched live/model comparison. The earlier synthetic outcome columns do not prove recovery quality. CP-7 remains open; SC4 is not established. Broader live-worker judgment design and corresponding comparative study remain awaiting the operator decision already requested. Do not approve/advance this Mission solely because old synthetic results are green.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
