@@ -2,10 +2,13 @@
  * The attention rail: the server's ranked queue.
  */
 import type {
+  WebMissionCard,
   WebAttentionItem,
   WebAttentionReasonKind,
   WebBoardSnapshot,
 } from '../../src/interfaces/web/transport.js';
+import { actorLine } from './format.js';
+import { ReasonDisclosure } from './reason-disclosure.js';
 import { ActionButton } from './action-button.js';
 import { laneCard, laneHeading } from './lane-header.js';
 import { C, RADIUS, SPACE, TRACK, TYPE } from './palette.js';
@@ -30,7 +33,7 @@ const headingStyle = {
   ...laneHeading, color: C.amber,
 } as const;
 
-function AttentionEntry({ item, onAction, onSelect, selected, pendingCommands }: { item: WebAttentionItem; onAction: (item: WebAttentionItem, control: HTMLButtonElement) => void; onSelect: (id: string) => void; selected: boolean; pendingCommands: PendingCommands }) {
+function AttentionEntry({ item, onAction, onSelect, selected, pendingCommands, repeated }: { repeated: boolean; item: WebAttentionItem; onAction: (item: WebAttentionItem, control: HTMLButtonElement) => void; onSelect: (id: string) => void; selected: boolean; pendingCommands: PendingCommands }) {
   const accent = REASON_ACCENT[item.reason.kind];
   return (
     <article
@@ -56,9 +59,9 @@ function AttentionEntry({ item, onAction, onSelect, selected, pendingCommands }:
         </span>
       </div>
       {item.reason.detail !== null && (
-        <p style={{ color: C.muted, fontSize: TYPE.meta, margin: `${SPACE.sm}px 0 ${SPACE.md}px 20px`, lineHeight: 1.45 }}>
-          {item.reason.detail}
-        </p>
+        <div style={{ color: C.muted, fontSize: TYPE.meta, margin: `${SPACE.sm}px 0 ${SPACE.md}px 20px`, lineHeight: 1.45 }}>
+          {repeated ? <ReasonDisclosure label={`Reason · ${item.missionId}`} reason={item.reason.detail} /> : item.reason.detail}
+        </div>
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.md, marginLeft: 20 }}>
         <span
@@ -75,7 +78,7 @@ function AttentionEntry({ item, onAction, onSelect, selected, pendingCommands }:
   );
 }
 
-export function AttentionRail({ snapshot, onAction, onSelect, selectedId, pendingCommands }: { snapshot: WebBoardSnapshot; onAction: (item: WebAttentionItem, control: HTMLButtonElement) => void; onSelect: (id: string) => void; selectedId: string | null; pendingCommands: PendingCommands }) {
+export function AttentionRail({ snapshot, onAction, onSelect, selectedId, pendingCommands, reasonCards = [] }: { reasonCards?: readonly WebMissionCard[]; snapshot: WebBoardSnapshot; onAction: (item: WebAttentionItem, control: HTMLButtonElement) => void; onSelect: (id: string) => void; selectedId: string | null; pendingCommands: PendingCommands }) {
   return (
     <section
       aria-labelledby="attention-heading"
@@ -97,7 +100,9 @@ export function AttentionRail({ snapshot, onAction, onSelect, selectedId, pendin
         {snapshot.attentionQueue.length === 0 && (
           <p style={{ color: C.faint, fontSize: TYPE.meta, padding: SPACE.xs }}>nothing in the attention queue</p>
         )}
-        {snapshot.attentionQueue.map((item) => <AttentionEntry key={item.missionId} item={item} onAction={onAction} onSelect={onSelect} selected={selectedId === item.missionId} pendingCommands={pendingCommands} />)}
+        {snapshot.attentionQueue.map((item) => <AttentionEntry repeated={reasonCards.some(card =>
+          card.id === item.missionId && (card.blockingReason === item.reason.detail ||
+            (card.activity.work.kind !== 'idle' && actorLine(card).text === item.reason.detail)))} key={item.missionId} item={item} onAction={onAction} onSelect={onSelect} selected={selectedId === item.missionId} pendingCommands={pendingCommands} />)}
       </div>
     </section>
   );

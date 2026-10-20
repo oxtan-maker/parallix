@@ -335,6 +335,13 @@ including unavailable actions and unknown states. Secondary text colors meet
 4.5:1 contrast on their rendered surfaces, including faded shipped cards.
 Decorative strokes and hidden glyphs use separate treatments.
 
+Repeated failure reasons appear once per mission in the normal web board view.
+Other surfaces keep the mission and action visible; expand **Reason** or
+**Blocking reason** to read the duplicate text. Distinct reasons stay separate.
+**Recovery** expands coordinator evidence beside the activity line. These
+disclosures support keyboard and touch. An unknown gate stays explicitly
+unknown; expand its detail to read the unavailable observation.
+
 Command feedback appears in the initiating mission card's footer and is
 announced as a polite status update. It follows the mission between lanes.
 When the card is absent or hidden by the done or history disclosure, feedback

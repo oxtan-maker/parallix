@@ -155,7 +155,7 @@ function useBoardModel(snapshot: WebBoardSnapshot, onRefresh: () => Promise<void
   };
   const canDrop = (lane: WebMissionCard['lane']) => dragged !== null && !pendingRef.current.has(dragged.id) && dragActionForTarget(dragged.actions, lane) !== null;
   const selectTerminal = (event: MouseEvent<HTMLDivElement>) => {
-    if ((event.target as HTMLElement).closest('button,a,[role="button"]') !== null) { return; }
+    if ((event.target as HTMLElement).closest('button,a,summary,details,[role="button"]') !== null) { return; }
     const card = (event.target as HTMLElement).closest<HTMLElement>('[data-board-card]');
     if (card !== null) { setSelectedId(card.dataset.boardCard ?? null); setTerminalMission(card.dataset.boardCard ?? null); }
   };
@@ -242,7 +242,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
       <TopBar snapshot={snapshot} flowOpen={flowOpen} onFlowToggle={() => setFlowOpen((open) => !open)} onCreate={setCreateFrom} />
       {flowOpen && <FlowPanel metrics={snapshot.metrics} />}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <AttentionRail snapshot={snapshot} selectedId={selectedId} pendingCommands={pendingCommands} onSelect={setSelectedId} onAction={(item, control) => {
+        <AttentionRail reasonCards={[...intake.flatMap(stage => stage.cards), ...flight.flatMap(stage => stage.cards)]} snapshot={snapshot} selectedId={selectedId} pendingCommands={pendingCommands} onSelect={setSelectedId} onAction={(item, control) => {
           const card = snapshot.stages.flatMap((stage) => stage.cards).find((candidate) => candidate.id === item.missionId);
           if (card !== undefined) { open(card, item.action, control); } else { publishOutcome(item.missionId, `Mission ${item.missionId} is no longer in the current projection.`); }
         }} />

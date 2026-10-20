@@ -13,8 +13,9 @@ import { CheckpointPips } from './checkpoint-pips.js';
 import { LaneHeader, laneCard, laneEmpty } from './lane-header.js';
 import { C, REVIEW, SPACE, TRACK, TYPE } from './palette.js';
 import type { PendingCommands } from './pending-command.js';
+import { ReasonDisclosure } from './reason-disclosure.js';
 import { ActorLine, AgentLabel } from './card-activity.js';
-import { coordinatorText, executingFamily, familyAccent, GATE_COLOR, GATE_TEXT, isSpinning } from './format.js';
+import { actorLine, coordinatorText, executingFamily, familyAccent, GATE_COLOR, GATE_TEXT, isSpinning } from './format.js';
 
 function edgeColor(card: WebMissionCard): string {
   if (card.blockingReason !== null) { return C.red; }
@@ -176,7 +177,9 @@ function FlightCardCheckpoint({ card }: { card: WebMissionCard }) {
     <div>
       <CheckpointPips card={card} />
       <div style={{ marginBottom: SPACE.md, fontSize: TYPE.meta, color: GATE_COLOR[card.gate], fontWeight: card.gate === 'failed' ? 700 : 400 }}>
-        {GATE_TEXT[card.gate]}
+        {card.gate === 'unavailable'
+          ? <details><summary style={{ cursor: 'pointer', fontSize: TYPE.micro }}>gate · unknown</summary><span>{GATE_TEXT[card.gate]}</span></details>
+          : GATE_TEXT[card.gate]}
       </div>
     </div>
   );
@@ -214,8 +217,13 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
       <div style={{ padding: SPACE.lg }}>
         <FlightCardReview card={card} />
         <FlightCardCheckpoint card={card} />
-        <ActorLine card={card} />
-        <p style={{ color: C.faint, fontSize: TYPE.micro, margin: `${SPACE.sm}px 0 0` }}>{coordinatorText(card)}</p>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: SPACE.md, flexWrap: 'wrap' }}>
+          <ActorLine card={card} />
+          <details style={{ color: C.faint, fontSize: TYPE.micro }}>
+            <summary style={{ cursor: 'pointer' }}>Recovery</summary>
+            {coordinatorText(card)}
+          </details>
+        </div>
         {card.nextActionText !== null && (
           <p style={{ color: C.dim, fontSize: TYPE.meta, lineHeight: 1.4, margin: `${SPACE.sm}px 0 0` }}>
             <span style={{ color: C.faint }}>recorded guidance ({card.checkpoint}):</span> {card.nextActionText}
@@ -225,7 +233,9 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
           <p style={{ color: C.amber, fontSize: TYPE.micro, margin: `${SPACE.md}px 0 0`, letterSpacing: TRACK.tight }}>▲ {card.flags.join(' · ')}</p>
         )}
         {card.blockingReason !== null && (
-          <p style={{ color: C.red, fontSize: TYPE.micro, margin: `${SPACE.md}px 0 0`, letterSpacing: TRACK.tight }}>{card.blockingReason}</p>
+          <div style={{ color: C.red, fontSize: TYPE.micro, margin: `${SPACE.md}px 0 0`, letterSpacing: TRACK.tight }}>{actorLine(card).text === card.blockingReason
+              ? <ReasonDisclosure label={`Blocking reason · ${card.id}`} reason={card.blockingReason} />
+              : card.blockingReason}</div>
         )}
       </div>
 
@@ -249,30 +259,9 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
         </div>
       )}
       <CommandOutcome missionId={card.id} />
-      <Grille />
     </article>
   );
 }
-
-/** The reference's vent grille under each card: decoration, carrying no fact. */
-function Grille() {
-  return (
-    <div aria-hidden="true" style={{ display: 'flex', alignItems: 'flex-start', height: 0, paddingLeft: '10%', overflow: 'visible' }}>
-      <div
-        style={{
-          display: 'flex', alignItems: 'flex-start', gap: SPACE.sm, width: '32%', height: 9,
-          overflow: 'hidden', background: 'linear-gradient(180deg,#1d3325 0%,#16281c 100%)',
-          borderRadius: '0 0 1px 1px', padding: '0 2px 1px', boxShadow: '0 3px 6px rgba(0,0,0,.6)',
-        }}
-      >
-        <div style={{ flex: 11, minWidth: 0, height: 8, background: GRILLE_SLATS }} />
-        <div style={{ flex: 40, minWidth: 0, height: 8, background: GRILLE_SLATS }} />
-      </div>
-    </div>
-  );
-}
-
-const GRILLE_SLATS = 'repeating-linear-gradient(90deg,#dfbc68 0 1px,rgba(0,0,0,0) 1px 3px)';
 
 /**
  * The head's right-hand note: how many of this lane's cards report live work.
