@@ -4,6 +4,7 @@ title: Make implementer reassignment recover an existing PR
 status: backlog
 assignee: []
 created_date: '2026-10-20 22:21'
+updated_date: '2026-10-20 22:23'
 labels:
   - bug
   - ai_sdlc
@@ -15,7 +16,7 @@ ordinal: 283008
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-TASK-2784 reproduces a lifecycle dead end. px review task-2784 --continue --implementer claude changes the authoritative assignee, rebases and pushes the existing Codex-authored PR, then refuses review because PR author Codex differs from implementer Claude. Forgejo PR authorship is immutable. docs/operator-setup.md says the PR must be replaced under the implementer identity, but px exposes no safe replacement command or recovery path, so the documented reassignment feature cannot complete once a PR exists. Existing task and documentation searches found no active or completed owner for PR replacement on implementer reassignment. Preserve fail-closed identity checks and review independence; make the supported reassignment path either replace the PR atomically under the newly assigned implementer, or reject reassignment before mutation with an actionable recoverable operation. Cover the public CLI flow with disposable Git, SQLite and Forgejo fixtures, including no orphaned PR/branch state on failure.
+TASK-2784 reproduces an incorrect PR-authorship guard. px review task-2784 --continue changed the authoritative implementer from Codex to Claude, then rebased and pushed the existing Codex-authored PR. The workflow refused to continue because it treated immutable PR authorship as if it had to equal the current implementer. Normal Parallix operation changes implementer and reviewer on an existing PR; the original submitter remains its author. The system must preserve that PR and use the selected independent reviewer rather than blocking on author/implementer mismatch. Existing task and documentation searches found no active or completed owner for this reassignment failure. Preserve the distinct rule that a PR author cannot provide the formal independent approval; do not require PR replacement merely because implementation ownership changes. Cover the public CLI flow with disposable Git, SQLite and Forgejo fixtures.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -23,7 +24,10 @@ TASK-2784 reproduces a lifecycle dead end. px review task-2784 --continue --impl
 - [ ] #1 A mission with an existing PR can change implementer through a supported px workflow and reach review without bypassing PR authorship or review independence
 - [ ] #2 A failed replacement leaves the authoritative assignee, review state, branch and open PR in a recoverable consistent state
 - [ ] #3 The public CLI regression is red on the current TASK-2784-shaped path and green with the fix
+- [ ] #4 A mission with an existing PR can change implementer through supported px workflow while retaining its original PR|A reviewer selected after reassignment can be independent of the original PR author and current implementer|A PR author cannot supply formal independent approval merely because reassignment is allowed|The public CLI regression is red on the current TASK-2784-shaped path and green with the fix
 <!-- AC:END -->
+
+
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
