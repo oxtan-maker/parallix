@@ -8,7 +8,7 @@ import { MissionEditor } from './mission-editor.js';
  * Layout, spacing, palette and typography follow the design authority
  * (`Parallix Board GPU.dc.html` in the reference acceptance artifact).
  */
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react';
 import type { DragEvent } from 'react';
 import type { WebBoardSnapshot, WebCommandAction, WebMissionCard } from '../../src/interfaces/web/transport.js';
 import { dispatchBoardCommand } from './board-command-controller.js';
@@ -30,6 +30,30 @@ import { unavailableReason, type PendingCommands } from './pending-command.js';
 // These are layout buckets, not lifecycle rules.
 const INTAKE_LANES: readonly string[] = ['refined', 'backlog'];
 const SHIPPED_LANE = 'done';
+
+/**
+ * In-flight lane geometry (TASK-2773.06).
+ *
+ * A populated lane keeps the reference minimum its card body and action row
+ * need. An empty lane no longer reserves that same allocation: it claims one
+ * compact column, so the width it used to hold goes to the lanes that carry
+ * cards while its heading, count and drop target stay on screen. The compact
+ * column does not shrink further — a narrow viewport scrolls the lane row
+ * sideways instead of squeezing a heading or hiding a lane.
+ *
+ * Emptiness is the server's card count and nothing else, so this is a layout
+ * fact only: it never adds, removes or re-ranks a command, and the drop
+ * contract stays the server-projected target lanes on the wire.
+ */
+export const FLIGHT_LANE_MIN_WIDTH_PX = 318;
+export const EMPTY_FLIGHT_LANE_WIDTH_PX = 180;
+
+/** The lane wrapper's allocation: compact when the server sent no cards. */
+export function flightLaneStyle(cardCount: number): CSSProperties {
+  return cardCount === 0
+    ? { flex: `0 0 ${EMPTY_FLIGHT_LANE_WIDTH_PX}px`, minWidth: EMPTY_FLIGHT_LANE_WIDTH_PX, minHeight: 0 }
+    : { flex: 1, minWidth: FLIGHT_LANE_MIN_WIDTH_PX, minHeight: 0 };
+}
 
 /** A drop is valid only for one enabled, server-projected target intent. */
 export function dragActionForTarget(actions: readonly WebCommandAction[], lane: WebMissionCard['lane']): WebCommandAction | null {
@@ -239,7 +263,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
             </div>
           )}
           {flight.map((stage) => (
-            <div key={stage.lane} aria-dropeffect={canDrop(stage.lane) ? 'move' : undefined} style={{ flex: 1, minWidth: 318, minHeight: 0 }}>
+            <div key={stage.lane} aria-dropeffect={canDrop(stage.lane) ? 'move' : undefined} style={flightLaneStyle(stage.cards.length)}>
               <FlightColumn stage={stage} onAction={open} onSelect={setSelectedId} onDragStart={startDrag} onDrop={dropAction} selectedId={selectedId} pendingCommands={pendingCommands} draggable={canDrop(stage.lane) === true} style={{ height: '100%' }} />
             </div>
           ))}

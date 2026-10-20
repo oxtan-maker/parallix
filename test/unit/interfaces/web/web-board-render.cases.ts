@@ -19,7 +19,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { Board } from '../../../../web/src/board.js';
+import { Board, EMPTY_FLIGHT_LANE_WIDTH_PX, FLIGHT_LANE_MIN_WIDTH_PX } from '../../../../web/src/board.js';
 import { CheckpointDetail } from '../../../../web/src/checkpoint-detail.js';
 import { CheckpointPips } from '../../../../web/src/checkpoint-pips.js';
 import { FlowPanel } from '../../../../web/src/flow-panel.js';
@@ -666,6 +666,60 @@ test('narrow viewports scroll the board horizontally instead of dropping lanes',
   assert.match(html, /overflow-x:auto/, 'the lane row scrolls horizontally like the reference');
   assert.match(html, /min-width:318px/, 'in-flight lanes keep the reference minimum width');
   assert.ok(!html.includes('display:none'), 'no lane or action is hidden at any width');
+});
+
+/** The style of the lane wrapper the board puts around one flight column. */
+function laneWrapperStyle(html: string, lane: string): string {
+  const wrapper = html.match(new RegExp(`<div([^>]*)><section aria-label="${lane} stage"`))?.[1] ?? '';
+  const style = wrapper.match(/style="([^"]*)"/)?.[1];
+  assert.ok(style !== undefined, `the ${lane} lane carries a wrapper layout style`);
+  return style!;
+}
+
+/** One rendered flight column, header and body together. */
+function flightSection(html: string, lane: string): string {
+  const start = html.indexOf(`<section aria-label="${lane} stage"`);
+  assert.ok(start >= 0, `${lane} renders as a named stage`);
+  return html.slice(start, html.indexOf('</section>', start));
+}
+
+test('an empty in-flight lane claims a compact column instead of the populated allocation (TASK-2773.06)', () => {
+  const compact = `flex:0 0 ${EMPTY_FLIGHT_LANE_WIDTH_PX}px`;
+  const populatedAllocation = `flex:1`;
+
+  // All three in-flight lanes empty: every one is compact, none keeps 318.
+  const empty = render(toWebBoardSnapshot(makeProjection({})));
+  for (const lane of ['active', 'review', 'integration']) {
+    const style = laneWrapperStyle(empty, lane).split(';');
+    assert.ok(style.includes(compact), `${lane}: an empty lane is a fixed compact column`);
+    assert.ok(style.includes(`min-width:${EMPTY_FLIGHT_LANE_WIDTH_PX}px`), `${lane}: the compact column never squeezes further`);
+    assert.ok(style.includes('min-height:0'), `${lane}: the lane keeps its own vertical scrolling`);
+    assert.ok(!style.includes(String(FLIGHT_LANE_MIN_WIDTH_PX)), `${lane}: an empty lane does not claim the populated minimum`);
+    // Discoverability survives compaction: heading, server count, drop body.
+    const section = flightSection(empty, lane);
+    assert.ok(section.includes(`>${lane.toUpperCase()}</h2>`), `${lane}: the heading stays on screen`);
+    assert.ok(section.includes('0 cards'), `${lane}: the server count stays beside the heading`);
+    assert.ok(section.includes('overflow-y:auto'), `${lane}: the drop body stays a scrollable region`);
+    assert.ok(section.includes('no missions in this stage'), `${lane}: emptiness is stated, not hidden`);
+  }
+
+  // Mixed: the empty lanes give their width back to the lane that carries cards.
+  const mixed = render(toWebBoardSnapshot(makeProjection({ active: makeCards(2, 'active') })));
+  assert.ok(laneWrapperStyle(mixed, 'active').split(';').includes(populatedAllocation), 'a populated lane still grows');
+  assert.ok(laneWrapperStyle(mixed, 'active').includes(`min-width:${FLIGHT_LANE_MIN_WIDTH_PX}px`), 'a populated lane keeps the reference minimum');
+  for (const lane of ['review', 'integration']) {
+    assert.ok(laneWrapperStyle(mixed, lane).split(';').includes(compact), `${lane}: an empty neighbour stays compact`);
+  }
+
+  // Fully populated: nothing about the allocation changes for a loaded board.
+  const full = render(toWebBoardSnapshot(makeProjection({
+    active: makeCards(1, 'active'), review: makeCards(1, 'review'), integration: makeCards(1, 'integration'),
+  })));
+  for (const lane of ['active', 'review', 'integration']) {
+    const style = laneWrapperStyle(full, lane).split(';');
+    assert.ok(style.includes(populatedAllocation), `${lane}: a populated lane keeps its share`);
+    assert.ok(style.includes(`min-width:${FLIGHT_LANE_MIN_WIDTH_PX}px`), `${lane}: card width stays usable`);
+  }
 });
 
 test('a board taller than the viewport exposes vertical scrolling without removing horizontal lane scrolling', () => {

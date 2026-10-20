@@ -2,11 +2,11 @@ import { agentFamily } from '../../../../src/domain/agents.js';
 const reactGlobal: typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean } = globalThis;
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Window, HTMLButtonElement as DomButton, HTMLElement as DomHtmlElement } from 'happy-dom';
+import { Window, Element as DomElement, HTMLButtonElement as DomButton, HTMLElement as DomHtmlElement } from 'happy-dom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import React from 'react';
-import { Board, restoreActionFocus } from '../../../../web/src/board.js';
+import { Board, EMPTY_FLIGHT_LANE_WIDTH_PX, FLIGHT_LANE_MIN_WIDTH_PX, restoreActionFocus } from '../../../../web/src/board.js';
 import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
 import { missionId } from '../../../../src/domain/mission.js';
@@ -64,6 +64,25 @@ function payload(calls: readonly RequestInit[]) {
 function isSameNode(actual: unknown, expected: unknown) {
   return actual === expected;
 }
+
+/**
+ * The lane wrapper the board puts around a flight column; its inline style is
+ * the lane's allocation, so a transition is observed where the layout is set.
+ */
+function laneWrapper(mount: DomElement, lane: string): DomHtmlElement {
+  const section = mount.querySelector(`section[aria-label="${lane} stage"]`);
+  assert.ok(section?.parentElement, `${lane} renders inside its lane wrapper`);
+  return section!.parentElement as DomHtmlElement;
+}
+
+/** The allocation a rendered lane carries, as the browser sees it. */
+function laneAllocation(mount: DomElement, lane: string) {
+  const style = laneWrapper(mount, lane).style;
+  return { flexGrow: style.flexGrow, flexShrink: style.flexShrink, flexBasis: style.flexBasis, minWidth: style.minWidth };
+}
+
+const COMPACT_ALLOCATION = { flexGrow: '0', flexShrink: '0', flexBasis: `${EMPTY_FLIGHT_LANE_WIDTH_PX}px`, minWidth: `${EMPTY_FLIGHT_LANE_WIDTH_PX}px` };
+const POPULATED_ALLOCATION = { flexGrow: '1', flexShrink: '1', flexBasis: '0%', minWidth: `${FLIGHT_LANE_MIN_WIDTH_PX}px` };
 
 test('board click and keyboard activation send one projected typed request', async () => {
   const page = await renderBoard();
@@ -390,6 +409,81 @@ test('board drag dispatches the projected target action and rejects other target
     await act(async () => { page.mount.querySelector<DomHtmlElement>('section[aria-label="integration stage"] > div:last-child')!.dispatchEvent(new page.window.Event('drop', { bubbles: true })); });
     assert.equal(page.calls.length, 1);
     assert.match(page.mount.querySelector('[role="status"]')?.textContent ?? '', /Drop unavailable/);
+  } finally { await page.close(); }
+});
+
+test('an empty-to-populated snapshot expands the lane and a populated-to-empty snapshot compacts it without resetting selection or a running command (TASK-2773.06)', async () => {
+  let resolveRequest: ((response: Response) => void) | undefined;
+  const survivor = makeCard({ id: missionId('task-2773-06-survivor'), status: 'active', lane: 'active', commands: [action] });
+  const emptyReview = toWebBoardSnapshot(makeProjection({ active: [survivor] }));
+  const filledReview = toWebBoardSnapshot(makeProjection({
+    active: [survivor],
+    review: [makeCard({ id: missionId('task-2773-06-review'), status: 'review', lane: 'review' })],
+  }));
+  const page = await renderBoard({ board: emptyReview, respond: () => new Promise<Response>((resolve) => { resolveRequest = resolve; }) });
+  try {
+    assert.deepEqual(laneAllocation(page.mount, 'review'), COMPACT_ALLOCATION, 'the empty review lane starts compact');
+
+    const card = page.mount.querySelector<DomHtmlElement>('[data-board-card="task-2773-06-survivor"]')!;
+    await act(async () => { card.focus(); });
+    assert.equal(card.getAttribute('aria-selected'), 'true', 'the mission is selected before the transitions');
+    const button = page.mount.querySelector<DomButton>('button[aria-label^="px "][aria-label*=" — enabled"]')!;
+    await act(async () => { button.click(); });
+    assert.equal(page.calls.length, 1, 'one command is in flight across both transitions');
+    assert.match(button.getAttribute('aria-label') ?? '', /starting/, 'the command is pending before the transitions');
+
+    // Empty to populated: the lane takes the populated allocation.
+    await page.rerender(filledReview);
+    assert.deepEqual(laneAllocation(page.mount, 'review'), POPULATED_ALLOCATION, 'a populated review lane expands');
+    assert.equal(page.mount.querySelector<DomHtmlElement>('[data-board-card="task-2773-06-survivor"]')?.getAttribute('aria-selected'), 'true', 'selection survives the expansion');
+    assert.match(page.mount.querySelector<DomButton>('button[data-action-kind="handoff:record"]')?.getAttribute('aria-label') ?? '', /starting/, 'the pending command survives the expansion');
+    assert.equal(page.calls.length, 1, 'the transition dispatches nothing of its own');
+
+    // Populated to empty: the lane compacts back with the same state held.
+    await page.rerender(emptyReview);
+    assert.deepEqual(laneAllocation(page.mount, 'review'), COMPACT_ALLOCATION, 'an emptied review lane compacts');
+    assert.equal(page.mount.querySelector<DomHtmlElement>('[data-board-card="task-2773-06-survivor"]')?.getAttribute('aria-selected'), 'true', 'selection survives the compaction');
+    assert.match(page.mount.querySelector<DomButton>('button[data-action-kind="handoff:record"]')?.getAttribute('aria-label') ?? '', /starting/, 'the pending command survives the compaction');
+    assert.equal(page.calls.length, 1, 'neither transition resends or drops the command');
+
+    resolveRequest!(new Response(JSON.stringify(commandResult()), { headers: { 'content-type': 'application/json' } }));
+    await act(async () => { await new Promise<void>((resolve) => queueMicrotask(resolve)); });
+    assert.match(page.mount.querySelector<DomButton>('button[data-action-kind="handoff:record"]')?.getAttribute('aria-label') ?? '', / — enabled/, 'the command releases only its own pending state');
+  } finally { await page.close(); }
+});
+
+test('a populated-to-empty snapshot that removes the selected mission keeps the existing selection semantics (TASK-2773.06)', async () => {
+  const leaving = makeCard({ id: missionId('task-2773-06-leaving'), status: 'review', lane: 'review', commands: [action] });
+  const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ review: [leaving] })) });
+  try {
+    const card = page.mount.querySelector<DomHtmlElement>('[data-board-card="task-2773-06-leaving"]')!;
+    await act(async () => { card.focus(); });
+    assert.equal(card.getAttribute('aria-selected'), 'true');
+    assert.deepEqual(laneAllocation(page.mount, 'review'), POPULATED_ALLOCATION, 'the lane is populated before the removal');
+    await page.rerender(toWebBoardSnapshot(makeProjection({})));
+    assert.deepEqual(laneAllocation(page.mount, 'review'), COMPACT_ALLOCATION, 'the lane that lost its only card compacts');
+    assert.equal(page.mount.querySelectorAll('[aria-selected="true"]').length, 0, 'no other card takes over the removed mission selection');
+    assert.equal(page.calls.length, 0, 'removal sends nothing on its own');
+  } finally { await page.close(); }
+});
+
+test('a drop on a compact empty lane reaches its projected target action (TASK-2773.06)', async () => {
+  const page = await renderBoard();
+  try {
+    const wrapper = laneWrapper(page.mount, 'review');
+    assert.deepEqual(laneAllocation(page.mount, 'review'), COMPACT_ALLOCATION, 'the review lane is empty, so it renders compact');
+    const card = page.mount.querySelector<DomHtmlElement>('[data-board-card="task-2436-interaction"]')!;
+    const drag = new page.window.Event('dragstart', { bubbles: true });
+    Object.defineProperty(drag, 'dataTransfer', { value: { setData() {}, setDragImage() {}, effectAllowed: '' } });
+    await act(async () => { card.dispatchEvent(drag); });
+    assert.equal(wrapper.getAttribute('aria-dropeffect'), 'move', 'the compact lane still advertises its drop target while dragging');
+    const body = page.mount.querySelector<DomHtmlElement>('section[aria-label="review stage"] > div:last-child')!;
+    const over = new page.window.Event('dragover', { bubbles: true, cancelable: true });
+    await act(async () => { body.dispatchEvent(over); });
+    assert.equal(over.defaultPrevented, true, 'the compact lane accepts the drag over');
+    await act(async () => { body.dispatchEvent(new page.window.Event('drop', { bubbles: true })); });
+    assert.equal(page.calls.length, 1);
+    assert.deepEqual({ ...payload(page.calls), requestKey: undefined }, { ...request, requestKey: undefined }, 'compaction does not change what the drop dispatches');
   } finally { await page.close(); }
 });
 
