@@ -21,11 +21,13 @@ TASK-2784 reproduces an incorrect PR-authorship guard. px review task-2784 --con
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A mission with an existing PR can change implementer through a supported px workflow and reach review without bypassing PR authorship or review independence
-- [ ] #2 A failed replacement leaves the authoritative assignee, review state, branch and open PR in a recoverable consistent state
-- [ ] #3 The public CLI regression is red on the current TASK-2784-shaped path and green with the fix
-- [ ] #4 A mission with an existing PR can change implementer through supported px workflow while retaining its original PR|A reviewer selected after reassignment can be independent of the original PR author and current implementer|A PR author cannot supply formal independent approval merely because reassignment is allowed|The public CLI regression is red on the current TASK-2784-shaped path and green with the fix
+- [ ] #1 An existing PR remains reviewable after a supported implementer reassignment
+- [ ] #2 The reviewer can differ from both the original PR author and the current implementer
+- [ ] #3 The original PR author still cannot provide formal independent approval
+- [ ] #4 A disposable public CLI regression reproduces the TASK-2784 path red before the fix and green after it
 <!-- AC:END -->
+
+
 
 
 
