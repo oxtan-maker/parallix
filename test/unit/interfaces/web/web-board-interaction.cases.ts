@@ -7,7 +7,6 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import React from 'react';
 import { Board, restoreActionFocus } from '../../../../web/src/board.js';
-import { C } from '../../../../web/src/palette.js';
 import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
 import { missionId } from '../../../../src/domain/mission.js';
@@ -204,15 +203,15 @@ test('checkpoint evidence opens from the label and closes from its dialog (TASK-
   });
   const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ review: [card] })) });
   try {
-    const label = page.mount.querySelector<DomHtmlElement>('[role="button"][aria-label^="View checkpoint evidence for"]')!;
-    assert.equal(page.mount.querySelector('[role="dialog"]'), null, 'no panel before the first click');
+    const label = page.mount.querySelector<DomHtmlElement>('button[aria-label^="View checkpoint evidence for"]')!;
+    assert.equal(page.window.document.querySelector('[role="dialog"]'), null, 'no panel before the first click');
     await act(async () => { label.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 })); });
-    const dialog = page.mount.querySelector('[role="dialog"]');
+    const dialog = page.window.document.querySelector('[role="dialog"]');
     assert.ok(dialog !== null, 'the panel opens on click');
     assert.match(dialog?.textContent ?? '', /CP-2: components extracted/, 'the panel renders the checkpoint description');
     assert.match(dialog?.textContent ?? '', /runs the gate/, 'the panel renders the Goal Check evidence row');
-    await act(async () => { page.mount.querySelector<DomButton>('[role="dialog"] button')!.click(); });
-    assert.equal(page.mount.querySelector('[role="dialog"]'), null, 'the dialog close control closes the panel');
+    await act(async () => { page.window.document.querySelector<DomButton>('[role="dialog"] button')!.click(); });
+    assert.equal(page.window.document.querySelector('[role="dialog"]'), null, 'the dialog close control closes the panel');
   } finally { await page.close(); }
 });
 
@@ -229,11 +228,11 @@ test('the checkpoint evidence panel closes on Escape (TASK-2660)', async () => {
   });
   const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ review: [card] })) });
   try {
-    const label = page.mount.querySelector<DomHtmlElement>('[role="button"][aria-label^="View checkpoint evidence for"]')!;
+    const label = page.mount.querySelector<DomHtmlElement>('button[aria-label^="View checkpoint evidence for"]')!;
     await act(async () => { label.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 })); });
-    assert.ok(page.mount.querySelector('[role="dialog"]'), 'the panel opens on click');
+    assert.ok(page.window.document.querySelector('[role="dialog"]'), 'the panel opens on click');
     await act(async () => { page.window.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
-    assert.equal(page.mount.querySelector('[role="dialog"]'), null, 'Escape closes the panel');
+    assert.equal(page.window.document.querySelector('[role="dialog"]'), null, 'Escape closes the panel');
   } finally { await page.close(); }
 });
 
@@ -251,19 +250,19 @@ test('selecting a different checkpoint keeps the dialog open and shows its rows 
   });
   const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ review: [card] })) });
   try {
-    const label = page.mount.querySelector<DomHtmlElement>('[role="button"][aria-label^="View checkpoint evidence for"]')!;
+    const label = page.mount.querySelector<DomHtmlElement>('button[aria-label^="View checkpoint evidence for"]')!;
     await act(async () => { label.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 })); });
-    const dialog = page.mount.querySelector('[role="dialog"]');
+    const dialog = page.window.document.querySelector('[role="dialog"]');
     assert.ok(dialog !== null, 'the panel opens on click');
     assert.match(dialog?.textContent ?? '', /CP-1: plan/, 'the panel opens on the first active checkpoint');
     // The CP-2 selector button click bubbles up to the backdrop; only a direct
     // backdrop click dismisses the panel, so selecting a checkpoint keeps it open.
-    const selectors = page.mount.querySelectorAll('nav[aria-label="Checkpoints"] button');
+    const selectors = page.window.document.querySelectorAll('nav[aria-label="Checkpoints"] button');
     const cp2 = [...selectors].find((button) => (button.textContent ?? '').trim() === 'CP-2');
     assert.ok(cp2, 'the CP-2 selector button is present');
     await act(async () => { cp2.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 })); });
-    assert.ok(page.mount.querySelector('[role="dialog"]'), 'selecting a checkpoint keeps the dialog open');
-    const reopened = page.mount.querySelector('[role="dialog"]');
+    assert.ok(page.window.document.querySelector('[role="dialog"]'), 'selecting a checkpoint keeps the dialog open');
+    const reopened = page.window.document.querySelector('[role="dialog"]');
     assert.match(reopened?.textContent ?? '', /CP-2: components extracted/, 'the dialog shows the selected checkpoint description');
     assert.match(reopened?.textContent ?? '', /second gate/, 'the dialog shows the selected checkpoint evidence rows');
     assert.doesNotMatch(reopened?.textContent ?? '', /first gate/, 'the dialog dropped the previous checkpoint rows');
@@ -744,35 +743,39 @@ test('Edit sends retained criterion IDs and leaves new IDs to the backend (TASK-
 });
 
 
-test('current checkpoint blink follows projected working-to-idle transitions (TASK-2745)', async () => {
-  const card = makeCard({ checkpoint: 'CP-1', checkpointEvidence: [
-    { name: 'CP-1', description: 'done', goalCheck: [{ criterion: 'done', evidence: 'npm test' }], state: 'completed' },
-    { name: 'CP-2', description: 'current', goalCheck: [], state: 'current' },
-    { name: 'CP-3', description: 'later', goalCheck: [], state: 'future' },
+test('checkpoint track never blinks through activity transitions and retains disclosure (TASK-2773.04)', async () => {
+  const card = makeCard({ checkpoint: 'CP-2', checkpointEvidence: [
+    { name: 'CP-2', description: 'done', goalCheck: [{ criterion: 'done', evidence: 'npm test' }], state: 'completed' },
+    { name: 'CP-9', description: 'current description', goalCheck: [], state: 'current' },
   ] });
   const page = await renderBoard({ board: snapshot([card]) });
   try {
-    const checkpointColor = (name: string) => page.mount.querySelector<DomHtmlElement>(`[aria-label="Checkpoint plan"] > [aria-label="${name}"]`)!.style.background;
-    const green = page.window.document.createElement('span');
-    green.style.background = C.green;
-    assert.equal(checkpointColor('CP-1'), green.style.background);
-    assert.equal(checkpointColor('CP-2'), green.style.background);
-    assert.equal(page.mount.querySelectorAll('.review-pip--running').length, 0);
-    for (const freshness of ['live', 'unverified', 'stale'] as const) {
-      await page.rerender(snapshot([{ ...card, currentWork: { operationId: 'execute', phase: 'execute', summary: 'execute', agent: null, updatedAt: 'now', freshness } }]));
-      const blinking = page.mount.querySelectorAll('.review-pip--running');
-      assert.equal(blinking.length, 1);
-      assert.equal(blinking[0].getAttribute('aria-label'), 'CP-2');
-      assert.equal(checkpointColor('CP-2'), green.style.background);
-    }
-    for (const blockingReason of [null, 'waiting']) {
-      await page.rerender(snapshot([{ ...card, currentWork: null, blockingReason }]));
-      assert.equal(page.mount.querySelectorAll('.review-pip--running').length, 0);
-      assert.equal(checkpointColor('CP-2'), green.style.background);
-      assert.equal(page.mount.querySelectorAll('[aria-label="Checkpoint plan"] > span').length, 3);
+    for (const freshness of ['live', 'unverified', 'stale', null] as const) {
+      for (const blockingReason of [null, 'waiting']) {
+        await page.rerender(snapshot([{ ...card, blockingReason, currentWork: freshness === null ? null : {
+          operationId: 'execute', phase: 'execute', summary: 'execute', agent: null, updatedAt: 'now', freshness,
+        } }]));
+        assert.equal(page.mount.querySelectorAll('[aria-label="Checkpoint plan"] .review-pip--running').length, 0);
+        assert.equal(page.mount.querySelector<DomHtmlElement>('[data-checkpoint-fill]')!.style.width, '50%');
+        assert.match(page.mount.querySelector('[aria-label="Checkpoint plan"]')!.getAttribute('aria-description')!, /Current: CP-9/);
+        const button = page.mount.querySelector<DomButton>('button[aria-label^="View checkpoint evidence for"]')!;
+        assert.ok(button.querySelector('[data-checkpoint-track]'), 'the progress track itself is the dialog control');
+        assert.equal(button.style.cursor, 'pointer');
+        assert.equal(page.mount.querySelector('[aria-label="Checkpoint plan"]')!.textContent, '', 'the track replaces the visible count/current/recorded summary row');
+        assert.match(button.title, /1\/2 completed.*Current: CP-9.*Recorded: CP-2/);
+        assert.doesNotMatch(button.textContent, /View checkpoints/);
+        button.focus();
+        await act(async () => { button.click(); });
+        const dialog = page.window.document.querySelector('[role="dialog"]')!;
+        assert.match(dialog.textContent, /current description/);
+        assert.equal(page.window.document.querySelectorAll('[role="dialog"]').length, 1);
+        await act(async () => { dialog.querySelector<DomButton>('button')!.click(); });
+        assert.ok(isSameNode(page.window.document.activeElement, button), 'closing restores opener focus');
+      }
     }
   } finally { await page.close(); }
 });
+
 
 
 test('accepted command waits for authoritative preparing snapshot and exposes server-owned stop after reload (TASK-2750)', async () => {
@@ -854,5 +857,74 @@ test('mounted header and card execution transition together while workflow fans 
     assert.ok(absent.firstElementChild?.textContent?.includes(card.id));
     assert.ok(absent.firstElementChild?.textContent?.includes(card.title));
     assert.doesNotMatch(absent.textContent ?? '', /executing|execution unknown/);
+  } finally { await page.close(); }
+});
+
+
+test('execution advances to the next checkpoint after recorded completion (TASK-2776)', async () => {
+  const { projectMissionCard } = await import('../../../../src/application/projections/mission-board.js');
+  const base = makeCard();
+  const projected = projectMissionCard({ ...base, assignee: null, closedAt: null, review: null,
+    netEngineeringLines: null, checkpoints: [1, 2, 3].map(number => ({
+      missionId: base.id, name: `CP-${number}`, firstLine: 'Step',
+      goalCheck: number === 1 ? [{ criterion: 'done', evidence: 'npm test' }] : [],
+      nextActionText: number === 1 ? 'Resume CP-2' : '',
+    })),
+  }, { latestGate: 'unavailable', reviewApproval: null, flags: [], blockingReason: null,
+    currentWork: { operationId: 'execute', phase: 'execute', summary: 'Implementing', agent: null, updatedAt: 'now', freshness: 'live' },
+  });
+  const page = await renderBoard({ board: snapshot([projected]) });
+  try {
+    assert.equal(page.mount.querySelectorAll('[aria-label="Checkpoint plan"] .review-pip--running').length, 0);
+    assert.equal(projected.checkpoint, 'CP-1');
+    assert.equal(projected.currentCheckpoint, 'CP-2');
+    assert.match(page.mount.querySelector('[aria-label="Checkpoint plan"]')!.getAttribute('aria-description')!, /Current: CP-2/);
+    assert.match(page.mount.querySelector('[aria-label="Checkpoint plan"]')!.getAttribute('aria-description')!, /Recorded: CP-1/);
+    const percentage = Number.parseFloat(page.mount.querySelector<DomHtmlElement>('[data-checkpoint-fill]')!.style.width);
+    assert.ok(Math.abs(percentage - 100 / 3) < 1e-9, 'one of three supplied checkpoints is completed');
+  } finally { await page.close(); }
+});
+
+for (const lane of ['refined', 'active', 'review', 'integration', 'done'] as const) {
+  test(`checkpoint dialog opens unrecorded long plans in ${lane} (TASK-2773.04)`, async () => {
+    const plan = Array.from({ length: 100 }, (_, i) => ({ name: `CP-${i}`, description: `Description ${i}`, goalCheck: [] }));
+    const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ [lane]: [makeCard({ lane, status: lane, checkpoint: null, checkpointEvidence: plan })] })) });
+    try {
+      const button = page.mount.querySelector<DomButton>('button[aria-label^="View checkpoint evidence for"]')!;
+      await act(async () => { button.click(); });
+      const dialog = page.window.document.querySelector('[role="dialog"]')!;
+      const selectors = dialog.querySelectorAll<DomButton>('nav button');
+      assert.equal(selectors.length, 100);
+      await act(async () => { selectors[99].click(); });
+      assert.match(dialog.textContent, /Description 99/);
+      assert.match(dialog.textContent, /No evidence recorded/);
+      await act(async () => { page.window.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Escape' })); });
+      assert.equal(page.window.document.querySelector('[role="dialog"]'), null);
+      assert.equal(page.calls.length, 0);
+    } finally { await page.close(); }
+  });
+}
+
+test('done checkpoint modal escapes card stacking contexts and cleans up (TASK-2773.04 F1)', async () => {
+  const cards = ['task-first', 'task-second'].map(id => makeCard({ id: missionId(id), lane: 'done', status: 'done',
+    checkpointEvidence: [{ name: 'CP-1', description: id, goalCheck: [] }] }));
+  const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ done: cards })) });
+  try {
+    const buttons = page.mount.querySelectorAll<DomButton>('button[aria-label^="View checkpoint evidence for"]');
+    buttons[0].focus();
+    await act(async () => { buttons[0].click(); });
+    const dialog = page.window.document.querySelector('[role="dialog"]')!;
+    assert.ok(dialog, 'first done card opens its dialog');
+    assert.ok(isSameNode(dialog.parentElement?.parentElement, page.window.document.body), 'backdrop is outside all card stacking contexts');
+    assert.equal(page.mount.querySelector('[role="dialog"]'), null);
+    await act(async () => { dialog.parentElement!.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true })); });
+    assert.equal(page.window.document.querySelector('[role="dialog"]'), null);
+    assert.ok(isSameNode(page.window.document.activeElement, buttons[0]));
+    await act(async () => { buttons[1].click(); });
+    assert.equal(page.window.document.querySelectorAll('[role="dialog"]').length, 1);
+    assert.match(page.window.document.querySelector('[role="dialog"]')!.textContent, /task-second/);
+    await page.rerender(toWebBoardSnapshot(makeProjection()));
+    assert.equal(page.window.document.querySelector('[role="dialog"]'), null, 'removing the card removes its portal');
+    assert.equal(page.calls.length, 0);
   } finally { await page.close(); }
 });

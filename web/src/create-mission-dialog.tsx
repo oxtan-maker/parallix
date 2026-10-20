@@ -12,16 +12,16 @@ import type { MissionEditSnapshot } from '../../src/application/mission-edit-ser
 import { useEffect, useId, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type RefObject } from 'react';
 import type { WebCreateMissionRequest } from '../../src/interfaces/web/transport.js';
 import { sendEditMission, sendCreateMission } from './board-data.js';
-import { C } from './palette.js';
+import { C, MODAL, RADIUS, SPACE, TRACK, TYPE } from './palette.js';
 
 export interface DependencyOption { readonly id: string; readonly title: string }
 
 const FIELD: CSSProperties = {
-  width: '100%', boxSizing: 'border-box', background: C.log, border: `1px solid ${C.cardEdge}`, borderRadius: 4,
-  color: C.text, fontFamily: 'inherit', fontSize: 12, padding: '6px 8px',
+  width: '100%', boxSizing: 'border-box', background: MODAL.field, border: `1px solid ${MODAL.edge}`, borderRadius: RADIUS.control,
+  color: MODAL.text, fontFamily: 'inherit', fontSize: TYPE.body, padding: `${SPACE.sm}px ${SPACE.md}px`,
 };
-const LABEL: CSSProperties = { display: 'block', color: C.muted, fontSize: 10.5, letterSpacing: 0.6, margin: '10px 0 4px' };
-const BUTTON: CSSProperties = { borderRadius: 4, cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5, letterSpacing: 0.5, padding: '5px 12px' };
+const LABEL: CSSProperties = { display: 'block', color: MODAL.muted, fontSize: TYPE.micro, letterSpacing: TRACK.tight, margin: `${SPACE.lg}px 0 ${SPACE.sm}px` };
+const BUTTON: CSSProperties = { borderRadius: RADIUS.control, cursor: 'pointer', fontFamily: 'inherit', fontSize: TYPE.micro, letterSpacing: TRACK.tight, padding: `${SPACE.sm}px ${SPACE.lg}px` };
 
 const FOCUSABLE = 'button:not([disabled]),input:not([disabled]),textarea:not([disabled])';
 
@@ -54,11 +54,11 @@ function DependencyPicker({ options, selected, disabled, onChange }: {
           id={panel}
           aria-label="Unfinished missions"
           onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); } }}
-          style={{ ...FIELD, margin: '4px 0 0', maxHeight: 150, overflowY: 'auto' }}
+          style={{ ...FIELD, margin: `${SPACE.sm}px 0 0`, maxHeight: 150, overflowY: 'auto' }}
         >
           {options.length === 0 && <p style={{ margin: 0, color: C.dim }}>No unfinished missions to depend on.</p>}
           {options.map((option) => (
-            <label key={option.id} style={{ display: 'flex', gap: 7, alignItems: 'baseline', padding: '2px 0', cursor: 'pointer' }}>
+            <label key={option.id} style={{ display: 'flex', gap: SPACE.md, alignItems: 'baseline', padding: `${SPACE.xs}px 0`, cursor: 'pointer' }}>
               <input type="checkbox" disabled={disabled} checked={selected.includes(option.id)} onChange={() => toggle(option.id)} />
               <span style={{ color: C.cyan }}>{option.id}</span>
               <span style={{ color: C.muted }}>{option.title}</span>
@@ -136,12 +136,12 @@ function CriteriaEditor({ id, initial, identities, pending }: { id: string; init
     focusAfterChange.current = remaining[Math.min(index, remaining.length - 1)]?.key ?? 'add';
     setRows(remaining);
   };
-  return <fieldset ref={controls} disabled={pending} style={{ border: 0, padding: 0, margin: '10px 0 0', minWidth: 0 }}>
+  return <fieldset ref={controls} disabled={pending} style={{ border: 0, padding: 0, margin: `${SPACE.lg}px 0 0`, minWidth: 0 }}>
     <legend style={LABEL}>Success criteria</legend>
-    {rows.length === 0 && <p style={{ color: C.dim, fontSize: 11 }}>No success criteria. Add one when you need it.</p>}
-    {rows.map((row, index) => <div key={row.key} style={{ marginBottom: 8 }}>
+    {rows.length === 0 && <p style={{ color: C.dim, fontSize: TYPE.meta }}>No success criteria. Add one when you need it.</p>}
+    {rows.map((row, index) => <div key={row.key} style={{ marginBottom: SPACE.md }}>
       <label style={LABEL} htmlFor={`${id}-criterion-${row.key}`}>Success criterion {index + 1}</label>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+      <div style={{ display: 'flex', gap: SPACE.md, alignItems: 'flex-start' }}>
         <textarea id={`${id}-criterion-${row.key}`} data-criterion-key={row.key} data-criterion-id={row.key < initial.length ? identities?.[row.key] ?? undefined : undefined} name="criteria" defaultValue={row.value} rows={2} style={FIELD} disabled={pending} />
         <button type="button" disabled={pending} aria-label={`Remove criterion ${index + 1}`} onClick={() => remove(row.key)}
           style={{ ...BUTTON, background: 'none', border: `1px solid ${C.cardEdge}`, color: C.muted }}>Remove</button>
@@ -224,7 +224,7 @@ export function CreateMissionDialog({ options, onClose, onCreated, initial }: {
     <div
       role="presentation"
       onClick={(event) => { if (event.target === event.currentTarget && !submitting.current) { onClose(); } }}
-      style={{ position: 'fixed', inset: 0, zIndex: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.6)' }}
+      style={{ position: 'fixed', inset: 0, zIndex: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', background: MODAL.scrim }}
     >
       <section
         ref={dialog}
@@ -232,16 +232,16 @@ export function CreateMissionDialog({ options, onClose, onCreated, initial }: {
         aria-modal="true"
         aria-labelledby={heading}
         onKeyDown={keys}
-        style={{ width: 520, maxWidth: '94vw', maxHeight: '90vh', overflowY: 'auto', padding: 18, background: C.panel, border: `1px solid ${C.headEdge}`, borderRadius: 8, color: C.text, fontFamily: 'inherit' }}
+        style={{ width: 520, maxWidth: '94vw', maxHeight: '90vh', overflowY: 'auto', padding: SPACE.xxl, background: MODAL.surface, border: `1px solid ${MODAL.edge}`, borderRadius: RADIUS.panel, color: MODAL.text, fontFamily: 'inherit', boxShadow: MODAL.shadow }}
       >
-        <h2 id={heading} style={{ margin: 0, fontSize: 15, letterSpacing: 1 }}>{initial ? 'Edit mission' : 'Create new mission'}</h2>
-        <p style={{ margin: '4px 0 0', color: C.dim, fontSize: 11 }}>{initial ? `Planning fields for ${initial.missionId}. Saving preserves its identity and lifecycle.` : 'The mission is added to the backlog. Nothing is drafted or started.'}</p>
+        <h2 id={heading} style={{ margin: 0, fontSize: TYPE.title, letterSpacing: TRACK.normal }}>{initial ? 'Edit mission' : 'Create new mission'}</h2>
+        <p style={{ margin: `${SPACE.sm}px 0 0`, color: C.dim, fontSize: TYPE.meta }}>{initial ? `Planning fields for ${initial.missionId}. Saving preserves its identity and lifecycle.` : 'The mission is added to the backlog. Nothing is drafted or started.'}</p>
         <form onSubmit={(event) => { void submit(event); }} noValidate aria-describedby={error === null ? undefined : errorId}>
           <Fields initial={initial} id={heading} pending={pending} invalidTitle={invalidTitle} titleField={titleField} />
           <span style={LABEL}>Dependencies</span>
           <DependencyPicker options={options} selected={dependencies} disabled={pending} onChange={setDependencies} />
-          {error !== null && <p id={errorId} role="alert" style={{ margin: '12px 0 0', color: C.red, fontSize: 11.5 }}>{error}</p>}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+          {error !== null && <p id={errorId} role="alert" style={{ margin: `${SPACE.lg}px 0 0`, color: C.red, fontSize: TYPE.meta }}>{error}</p>}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: SPACE.md, marginTop: SPACE.xxl }}>
             <button type="button" onClick={onClose} disabled={pending} style={{ ...BUTTON, background: 'none', border: `1px solid ${C.cardEdge}`, color: C.muted }}>Cancel</button>
             <button type="submit" aria-disabled={pending} style={{ ...BUTTON, background: C.greenFill, border: `1px solid ${C.greenEdge}`, color: C.green, cursor: pending ? 'progress' : 'pointer' }}>
               {pending ? (initial ? 'Saving…' : 'Creating…') : (initial ? 'Save changes' : 'Create mission')}

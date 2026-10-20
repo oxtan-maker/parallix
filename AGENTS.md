@@ -11,6 +11,8 @@ Read `docs/doc-standards.md` before editing root or `docs/` Markdown. Update liv
 ## Git
 
 Push mission branches only to `review` (Forgejo), never to `origin` (GitHub). Only `main` may be pushed to `origin`.
+## Implementation
+Before adding an implementation, inspect and reuse the existing owner when its contract matches; when replacing one, verify that production callers use the replacement, preserve distinct behavioral assertions, and remove the superseded implementation and redundant tests.
 
 ## Verification
 

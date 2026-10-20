@@ -1,4 +1,4 @@
-import { makeCard, makeProjection } from '../../fixtures/board-projection.js';
+import { makeCard } from '../../fixtures/board-projection.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -8,7 +8,9 @@ import { spawnSync } from 'node:child_process';
 
 import { recoverMissionCommand } from '../../../src/interfaces/cli/recover.js';
 import { landedMissionIntake } from '../../../src/adapters/cli/commands/recover-landed-intake.js';
-import { status } from '../../../src/adapters/cli/commands/status.js';
+import { createStatusBoardAdapter } from '../../../src/adapters/cli/commands/status-adapter.js';
+import { renderStatus } from '../../../src/interfaces/cli/status.js';
+import { statusResult } from '../../fixtures/status-result.js';
 import { missionId, type Mission } from '../../../src/domain/mission.js';
 import { missionVersion } from '../../../src/application/domain-ports.js';
 
@@ -96,15 +98,11 @@ test('TASK-2516: completed landed mission without an aggregate recovers once, pr
     assert.deepEqual(cleanupOrder, ['cleanup']);
 
     const statusLines: string[] = [];
-    await status([slug], {
-      getCurrentBranchFn: () => 'main',
-      buildProjectionFn: async () => ({ build: async () => makeProjection({ done: [makeCard({ id: missionId(slug), status: stored[0]?.status ?? 'done', rawStatus: 'done' })] }) }),
-      getPrStatusFn: () => ({ raw: '',  exists: false as const }), readAgentConfigOrExitFn: () => ({}),
-      eligibleAgentsForStepFn: () => [], workflowLauncherStatusFn: () => ({ supported: true }),
-      getLastThreeCommitsFn: () => [], getUncommittedCountFn: () => 0,
-      detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
-      log: (line) => statusLines.push(line), exit: () => {},
+    const board = createStatusBoardAdapter({
+      loadMissionFn: async () => ({ mission: stored[0], version: 1 }),
+      buildProjectionFn: async () => ({ buildMissionCard: async () => makeCard({ id: missionId(slug), status: 'done', rawStatus: 'done' }) }),
     });
+    renderStatus(statusResult({ slug, missionData: await board.getMissionData(slug, root) }), line => statusLines.push(line));
     assert.ok(statusLines.includes('Mission status: done'), 'px status projects the recovered aggregate as done');
 
     const repeated = await recoverMissionCommand([slug], {

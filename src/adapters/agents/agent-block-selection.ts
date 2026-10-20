@@ -1,3 +1,4 @@
+import { agentPolicyStep } from '../../domain/agents.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 /**
  * Cohesive runtime-block selection logic for the workflow launch loop.
@@ -82,8 +83,8 @@ export async function defaultBlockContext(
  */
 export function defaultStepEligibleFamilies(step: string, configuration?: ParallixConfiguration): readonly string[] {
   const config = readAgentConfig(CONFIG_PATH, { configuration });
-  if (!config || !config.steps || !config.steps[step]) { return [...WORKFLOW_AGENT_NAMES]; }
-  return config.steps[step].eligible ?? [...WORKFLOW_AGENT_NAMES];
+  if (!config || !config.steps || !config.steps[agentPolicyStep(step)]) { return [...WORKFLOW_AGENT_NAMES]; }
+  return config.steps[agentPolicyStep(step)].eligible ?? [...WORKFLOW_AGENT_NAMES];
 }
 
 /**

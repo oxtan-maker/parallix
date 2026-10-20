@@ -1,8 +1,8 @@
 ---
 id: TASK-2774
 title: Show the current refinement worker and activity on web cards
-status: ready-for-integration
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-10-18 06:02'
 labels:
   - bug

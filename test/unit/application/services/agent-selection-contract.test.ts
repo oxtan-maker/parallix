@@ -12,8 +12,10 @@
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { AgentPoolExhaustedError, blockedForMs, selectAgent, selectableAgents, type AgentSelectionSnapshot, agentFamily } from '../../../../src/domain/agents.js';
+import type { AgentStepConfig } from '../../../../src/adapters/agents/agent-config.js';
+import { selectAgent as selectLauncherAgent } from '../../../../src/adapters/agents/launcher-selection.js';
 import { startAgent } from '../../../../src/adapters/agents/agents.js';
-import { resolveBlockContext } from '../../../../src/adapters/agents/agent-block-selection.js';
+import { defaultStepEligibleFamilies, resolveBlockContext } from '../../../../src/adapters/agents/agent-block-selection.js';
 import { PreparedAgentSelection } from '../../../../src/application/services/agent-selection.js';
 import { SqliteAgentSelectionSnapshotAdapter } from '../../../../src/adapters/agents/agent-selection-snapshot.js';
 import { resolveHandoffReviewAssignment } from '../../../../src/adapters/cli/commands/handoff.js';
@@ -29,6 +31,124 @@ import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 import { resolveConfiguration } from '../../../../src/composition/config.js';
 import { setCommandPathProbe, setLauncherHealthProbe } from '../../../../src/adapters/agents/launcher-probes.js';
 import { projectAgentAvailability } from '../../../../src/application/projections/agent-status.js';
+
+test('act-on-review excludes healthy qwen outside active policy (TASK-2779)', () => {
+  const originalRandom = Math.random;
+  setCommandPathProbe(name => name);
+  setLauncherHealthProbe(() => ({ ok: true as const }));
+  Math.random = () => 0.999;
+  try {
+    const chosen = selectLauncherAgent('act-on-review', {
+      config: { steps: { active: { eligible: ['codex', 'claude', 'custom'], selection: 'random' } } },
+    });
+    assert.notEqual(chosen, 'qwen');
+    assert.equal(chosen, 'custom');
+  } finally {
+    Math.random = originalRandom;
+    setCommandPathProbe(name => name);
+    setLauncherHealthProbe(() => ({ ok: true as const }));
+  }
+});
+
+describe('Act-on-review active policy authority', () => {
+  const families = ['codex', 'claude', 'custom', 'qwen'].map(agentFamily);
+  const blocklistRepo: AgentBlocklistRepository = {
+    async findAll() { return []; }, async findByAgent() { return undefined; },
+    async save() {}, async deleteByAgent() {}, async clear() {},
+  };
+
+  test('shares strategy and weights, ignores conflicting policy and reloads operator changes (TASK-2779)', async () => {
+    const root = registeredMkdtemp('recovery-policy-');
+    const configPath = path.join(root, 'agents.json');
+    const originalRandom = Math.random;
+    let config: { steps: { active: AgentStepConfig; 'act-on-review': AgentStepConfig } } = { steps: {
+      active: { eligible: ['codex', 'claude'], selection: 'weighted', weights: { codex: 9, claude: 1 } },
+      'act-on-review': { eligible: ['qwen'], selection: 'random' },
+    } };
+    const adapter = new SqliteAgentSelectionSnapshotAdapter({
+      knownAgentFamilies: families, blocklistRepo, readConfig: () => config,
+      launcherStatus: () => ({ supported: true }),
+    });
+    try {
+      for (const selection of ['weighted', 'random']) {
+        config.steps.active.selection = selection;
+        fs.writeFileSync(configPath, JSON.stringify(config));
+        Math.random = () => 0.8;
+        const snapshot = await adapter.load();
+        assert.deepEqual(snapshot.steps['act-on-review'], snapshot.steps.active);
+        const expected = selection === 'weighted' ? 'codex' : 'claude';
+        assert.equal(selectLauncherAgent('act-on-review', { configPath, mergeLocal: false, checkAvailability: false }), expected);
+        assert.equal(selectAgent(snapshot, 'act-on-review', { random: () => 0.8, preferred: agentFamily('qwen') }), expected);
+      }
+      config = { ...config, steps: { ...config.steps, active: { eligible: ['custom'], selection: 'random', weights: {} } } };
+      fs.writeFileSync(configPath, JSON.stringify(config));
+      assert.equal(selectLauncherAgent('act-on-review', { configPath, mergeLocal: false, checkAvailability: false,
+        configuration: resolveConfiguration({ WORKFLOW_AGENT: 'qwen' }) }), 'custom');
+      assert.equal(selectAgent(await adapter.load(), 'act-on-review'), 'custom');
+    } finally {
+      Math.random = originalRandom;
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('empty, unavailable, blocked and excluded pools never expand to healthy qwen (TASK-2779)', async () => {
+    for (const kind of ['empty', 'unavailable', 'blocked', 'excluded']) {
+      const config = { steps: { active: { eligible: kind === 'empty' ? [] : ['codex'] } } };
+      const adapter = new SqliteAgentSelectionSnapshotAdapter({
+        knownAgentFamilies: families, readConfig: () => config,
+        blocklistRepo: { ...blocklistRepo, async findAll() {
+          return kind === 'blocked' ? [{ agent: 'codex', blocked: true }] : [];
+        } },
+        launcherStatus: family => ({ supported: kind !== 'unavailable' || family !== 'codex' }),
+      });
+      assert.throws(() => selectLauncherAgent('act-on-review', { config, checkAvailability: false,
+        exclude: new Set(['codex']) }), kind === 'empty' ? /No agents are eligible/ : AgentPoolExhaustedError);
+      const snapshot = await adapter.load();
+      assert.throws(() => selectAgent(snapshot, 'act-on-review', {
+        preferred: agentFamily('qwen'), excluded: kind === 'excluded' ? new Set([agentFamily('codex')]) : undefined,
+      }), AgentPoolExhaustedError);
+    }
+  });
+
+  test('runtime policy uses active and retains missing-config defaults (TASK-2779)', () => {
+    const root = registeredMkdtemp('runtime-recovery-policy-');
+    const previous = process.cwd();
+    try {
+      fs.mkdirSync(path.join(root, 'config'));
+      fs.writeFileSync(path.join(root, 'config/agents.json'), JSON.stringify({ steps: {
+        active: { eligible: ['codex'] }, 'act-on-review': { eligible: ['qwen'] },
+      } }));
+      process.chdir(root);
+      const configuration = resolveConfiguration({ PARALLIX_HOME: root });
+      fs.writeFileSync(path.join(root, 'agents.local.json'), '{}');
+      assert.deepEqual(defaultStepEligibleFamilies('act-on-review', configuration), ['codex']);
+      fs.writeFileSync(path.join(root, 'config/agents.json'), '{}');
+      assert.deepEqual(defaultStepEligibleFamilies('act-on-review', configuration), defaultStepEligibleFamilies('active', configuration));
+    } finally {
+      process.chdir(previous);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('override, retry and last-resort fallback stay in active pool and exhaust (TASK-2779)', async () => {
+    for (const blocked of [false, true]) {
+      const launched: string[] = [];
+      await assert.rejects(startAgent('act-on-review', {
+        agent: 'qwen', exclude: ['qwen', 'codex'], prompt: 'repair',
+        runtimeBlockContextFn: async (_step, tried) => resolveBlockContext(['codex'], tried, new Set(blocked ? ['codex'] : [])),
+        selectAgentFn: step => { throw new AgentPoolExhaustedError(step, 'exhausted'); },
+        assertAgentSupportedFn: () => {}, isAgentBlockedFn: async () => false,
+        launchAgentFn: deps => {
+          launched.push(deps.env!.FORGEJO_USER!);
+          return { invocation: { command: 'fixture', args: [] }, result: { status: 429 } };
+        },
+        detectLimitHitFn: () => ({ reroute: true, kind: 'rate-limit', reason: 'rate limit' }),
+        resolveAgentModelFn: () => null, onLaunch: async () => {}, onLimitHit: async () => {},
+      }), blocked ? /blocked by the runtime blocklist/ : /All eligible agents exhausted/);
+      assert.deepEqual(launched, blocked ? [] : ['codex']);
+    }
+  });
+});
 
 describe('Domain agent selection', () => {
   const codex = agentFamily('codex');

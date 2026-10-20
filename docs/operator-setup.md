@@ -201,6 +201,16 @@ When installed, `~/.agents/skills/graphify/` is also copied to
 `<worktree>/.workflow/codex-home/.agents/skills/graphify/`; it is instruction
 content and not a Codex configuration or credential file.
 
+## Integration repair agent policy
+
+Integration recovery launches as `act-on-review` and inherits the `active`
+agent policy: eligible families, selection strategy and weights. Configure
+`active` in `config/agents.json`; no separate `act-on-review` entry is needed,
+and a conflicting entry cannot override `active`. Normal policy loads pick up
+operator changes. Recovery retries and fallback remain within that eligible
+pool, subject to launcher availability and agent blocks; an exhausted pool
+stops recovery.
+
 ## Claude credentials across missions
 
 A `claude` login stores an OAuth access token that expires after about eight
@@ -374,6 +384,13 @@ original required checks are still required; a newly reported blocker stops
 recovery again. Successful repair automatically performs the required handoff
 and resumes normal review without another continuation command. Integration
 remains an explicit operator action.
+
+Before verification and rebase, handoff automatically commits tracked and
+untracked changes in the selected mission worktree, including edits left by a
+repair agent. A clean worktree creates no commit. Conflicts or Git status,
+staging or commit failures stop handoff; resolve the reported Git error in that
+worktree before retrying. Verification proof must still match the committed
+candidate, and checkpoint evidence and completed criteria remain required.
 
 If continuation reports that the mission has no persisted Review, run
 `px review <slug> --start` to begin one. Start performs handoff, creates the

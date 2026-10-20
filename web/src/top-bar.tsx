@@ -4,7 +4,7 @@
  * number here is the server's; the bar computes no rate and no average.
  */
 import type { WebBoardSnapshot } from '../../src/interfaces/web/transport.js';
-import { C, DISPLAY } from './palette.js';
+import { C, DISPLAY, RADIUS, SPACE, TRACK, TYPE } from './palette.js';
 import { familyAccent, sessionsText } from './format.js';
 
 export function TopBar({ snapshot, flowOpen, onFlowToggle, onCreate }: {
@@ -18,35 +18,35 @@ export function TopBar({ snapshot, flowOpen, onFlowToggle, onCreate }: {
   return (
     <header
       style={{
-        display: 'flex', alignItems: 'center', gap: 18, padding: '10px 18px',
+        display: 'flex', alignItems: 'center', gap: SPACE.xxl, padding: `${SPACE.lg}px ${SPACE.xxl}px`,
         borderBottom: `1px solid ${C.rule}`, flexShrink: 0, overflowX: 'auto',
       }}
     >
       <h1
         style={{
-          fontFamily: DISPLAY, fontWeight: 700, fontSize: 19, letterSpacing: 3,
-          color: C.green, textTransform: 'uppercase', whiteSpace: 'nowrap',
+          fontFamily: DISPLAY, fontWeight: 700, fontSize: TYPE.display, letterSpacing: TRACK.mark,
+          color: C.text, textTransform: 'uppercase', whiteSpace: 'nowrap',
           flexShrink: 0, margin: 0,
         }}
       >
         Parallix
       </h1>
-      <div style={{ color: C.dim, whiteSpace: 'nowrap', flexShrink: 0 }}>
+      <div style={{ color: C.dim, whiteSpace: 'nowrap', flexShrink: 0, fontSize: TYPE.meta, letterSpacing: TRACK.normal }}>
         @ <span style={{ color: C.text }}>{snapshot.repositoryId}</span>
       </div>
-      <div style={{ color: C.dim, whiteSpace: 'nowrap', flexShrink: 0 }}>
+      <div style={{ color: C.dim, whiteSpace: 'nowrap', flexShrink: 0, fontSize: TYPE.meta, letterSpacing: TRACK.normal }}>
         {snapshot.wipCounts.length > 0 && <>wip <span style={{ color: C.text }}>{wip}</span> · </>}
         {throughput === null || throughput === undefined ? 'missions/wk unknown · ' : `${throughput} missions/wk · `}
         attention <span style={{ color: C.amber }}>{snapshot.attentionQueue.length}</span>
       </div>
-      <div style={{ flex: 1, minWidth: 12 }} />
+      <div style={{ flex: 1, minWidth: SPACE.lg }} />
       <button
         type="button"
         aria-haspopup="dialog"
         onClick={(event) => onCreate(event.currentTarget)}
         style={{
-          background: C.greenFill, border: `1px solid ${C.greenEdge}`, borderRadius: 20, color: C.green,
-          fontFamily: 'inherit', fontSize: 10.5, letterSpacing: 1, padding: '4px 11px', cursor: 'pointer',
+          background: C.greenFill, border: `1px solid ${C.greenEdge}`, borderRadius: RADIUS.pill, color: C.green,
+          fontFamily: 'inherit', fontSize: TYPE.micro, letterSpacing: TRACK.normal, padding: `${SPACE.sm}px ${SPACE.lg}px`, cursor: 'pointer',
           flexShrink: 0, whiteSpace: 'nowrap',
         }}
       >
@@ -58,32 +58,32 @@ export function TopBar({ snapshot, flowOpen, onFlowToggle, onCreate }: {
         aria-controls="flow-metrics"
         onClick={onFlowToggle}
         style={{
-          background: flowOpen ? '#141a20' : 'none', border: `1px solid ${flowOpen ? '#33404b' : C.cardEdge}`,
-          borderRadius: 20, color: flowOpen ? C.text : C.dim, fontFamily: 'inherit', fontSize: 10.5,
-          letterSpacing: 1, padding: '4px 11px', cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
+          background: flowOpen ? C.controlOn : 'none', border: `1px solid ${flowOpen ? C.chartLane : C.cardEdge}`,
+          borderRadius: RADIUS.pill, color: flowOpen ? C.text : C.dim, fontFamily: 'inherit', fontSize: TYPE.micro,
+          letterSpacing: TRACK.normal, padding: `${SPACE.sm}px ${SPACE.lg}px`, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
         }}
       >
         ▤ FLOW
       </button>
       <section
         aria-label="Agent availability"
-        style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 1, minWidth: 0, overflowX: 'auto' }}
+        style={{ display: 'flex', alignItems: 'center', gap: SPACE.xl, flexShrink: 1, minWidth: 0, overflowX: 'auto' }}
       >
         {snapshot.agentAvailability.map((metric) => (
           <div
             key={metric.family}
             title={metric.reason ?? undefined}
             style={{
-              display: 'flex', alignItems: 'center', gap: 6, padding: '4px 9px',
-              border: `1px solid ${C.cardEdge}`, borderRadius: 20, background: C.pill,
+              display: 'flex', alignItems: 'center', gap: SPACE.sm, padding: `${SPACE.sm}px ${SPACE.md}px`,
+              border: `1px solid ${C.cardEdge}`, borderRadius: RADIUS.pill, background: C.pill,
               whiteSpace: 'nowrap',
             }}
           >
-            <span aria-hidden="true" style={{ color: metric.available ? C.green : C.red, fontSize: 9 }}>●</span>
-            <span style={{ color: familyAccent(metric.family), fontWeight: 700, fontSize: 11, letterSpacing: 1 }}>
+            <span aria-hidden="true" style={{ color: metric.available ? C.cyan : C.red, fontSize: 9 }}>●</span>
+            <span style={{ color: familyAccent(metric.family), fontWeight: 700, fontSize: TYPE.meta, letterSpacing: TRACK.normal }}>
               {metric.family}
             </span>
-            <span style={{ color: C.dim, fontSize: 11 }}>{sessionsText(metric)}</span>
+            <span style={{ color: C.dim, fontSize: TYPE.meta }}>{sessionsText(metric)}</span>
           </div>
         ))}
       </section>

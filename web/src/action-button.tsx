@@ -4,7 +4,7 @@
  */
 import type { CSSProperties } from 'react';
 import type { WebCommandAction } from '../../src/interfaces/web/transport.js';
-import { C } from './palette.js';
+import { C, RADIUS, SPACE, TRACK, TYPE } from './palette.js';
 import { unavailableReason, type PendingCommand } from './pending-command.js';
 
 export const UNAVAILABLE_HINT = 'action is not available in the current server projection';
@@ -61,11 +61,11 @@ export function ActionButton({ action, style, label, pending, working = false, o
       onClick={(event) => { onInvoke?.(action, event.currentTarget); }}
       style={{
         ...look(action.state),
-        borderRadius: 4,
+        borderRadius: RADIUS.control,
         fontFamily: 'inherit',
-        fontSize: 10.5,
-        letterSpacing: 0.5,
-        padding: '4px 10px',
+        fontSize: TYPE.micro,
+        letterSpacing: TRACK.tight,
+        padding: `${SPACE.sm}px ${SPACE.lg}px`,
         cursor: enabled ? 'pointer' : 'not-allowed',
         whiteSpace: 'nowrap',
         ...style,

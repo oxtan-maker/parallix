@@ -46,16 +46,6 @@ export const GATE_COLOR: Record<WebMissionCard['gate'], string> = {
   unavailable: C.faint,
 };
 
-/** The card's own work state, shown verbatim; `unknown` certainty stays unknown. */
-export function workText(card: WebMissionCard): string {
-  const work = card.activity.work;
-  switch (work.kind) {
-    case 'working': return `working · ${work.certainty}`;
-    case 'blocked': return 'blocked';
-    case 'idle': return 'idle';
-  }
-}
-
 /**
  * The reference's actor line: one sentence about who is acting, taken from
  * the server's own summary rather than composed here.
@@ -64,12 +54,19 @@ export function actorLine(card: WebMissionCard): { readonly text: string; readon
   const work = card.activity.work;
   switch (work.kind) {
     case 'working':
-      return { text: work.summary, color: work.certainty === 'live' ? C.green : C.amber };
+      // Liveness is not success: a working mission is not closer to done than a
+      // waiting one, so the actor line uses the board's information accent.
+      return { text: work.summary, color: work.certainty === 'live' ? C.cyan : C.amber };
     case 'blocked':
       return { text: work.reason, color: C.red };
     case 'idle':
       return { text: 'no work observed', color: C.faint };
   }
+}
+
+/** The worker the provider observation names. Nothing else — not an assignment, not a coordinator — names a worker. */
+export function executingFamily(card: WebMissionCard): string | null {
+  return card.execution?.invocations[0]?.family ?? null;
 }
 
 /** Secondary recovery evidence, deliberately never used to infer current work. */

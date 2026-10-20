@@ -2,7 +2,7 @@ import { parseReviewPhase, parseReviewDisposition } from '../../../src/domain/re
 import { missionId } from '../../../src/domain/mission.js';
 import type { MissionStore } from '../../../src/application/domain-ports.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
-import { makeCard, makeProjection } from '../../fixtures/board-projection.js';
+import { makeCard } from '../../fixtures/board-projection.js';
 import { missionVersion as fixtureVersion } from '../../../src/application/domain-ports.js';
 // Mission handoff reconcile contract: reconciling an interrupted handoff against the recorded Mission
 // review state.
@@ -21,7 +21,9 @@ import { ReviewCommandUseCase } from '../../../src/application/review-command-us
 import { createReviewCommand } from '../../../src/interfaces/cli/review.js';
 import { createReviewWorkflowAdapter } from '../../../src/adapters/review/review-commands.js';
 const review = (args: string[], options: NonNullable<Parameters<typeof createReviewWorkflowAdapter>[0]> = {}) => createReviewCommand(new ReviewCommandUseCase(createReviewWorkflowAdapter(options)))(args, options);
-import { status } from '../../../src/adapters/cli/commands/status.js';
+import { createStatusBoardAdapter } from '../../../src/adapters/cli/commands/status-adapter.js';
+import { renderStatus } from '../../../src/interfaces/cli/status.js';
+import { statusResult } from '../../fixtures/status-result.js';
 import { fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
 
 /** Bound loop mechanisms whose held controller fence declines the run at the reviewer-launch boundary. */
@@ -149,17 +151,13 @@ test('px status reports a started review after reconciliation', async () => {
     assert.equal((await module.reconcileInterruptedHandoff(slug, { ...canonicalHandoff, sourceBranch: `mission/${slug}` }, root, { missionStore: store })).outcome, 'reconciled');
     const state = await readReviewState(slug, root, store);
     const logs: string[] = [];
-    await status([slug], {
-      log: (line: string) => logs.push(line), exit: (() => undefined),
-      inferSlugFn: value => value ?? null,
-      getCurrentBranchFn: () => `mission/${slug}`,
-      getPrStatusFn: () => ({ raw: '',  exists: false as const }),
-      findStaleMissionWorktreesFn: () => [], readAgentConfigOrExitFn: () => ({}),
-      eligibleAgentsForStepFn: () => [], allWorkflowAgentNamesFn: () => [],
-      workflowLauncherStatusFn: () => ({ supported: true }), getLastThreeCommitsFn: () => [], getUncommittedCountFn: () => 0,
-      detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
-      buildProjectionFn: async () => ({ build: async () => makeProjection({ review: [makeCard({ id: missionId(slug), rawStatus: 'review', reviewPhase: parseReviewPhase(state?.phase), reviewRound: state?.round ?? null, reviewDisposition: parseReviewDisposition(state?.disposition) })] }) }),
+    const recorded = await store.load(missionId(slug));
+    assert.equal(recorded.kind, 'found');
+    const board = createStatusBoardAdapter({
+      loadMissionFn: async () => recorded.kind === 'found' ? recorded : null,
+      buildProjectionFn: async () => ({ buildMissionCard: async () => makeCard({ id: missionId(slug), rawStatus: 'review', reviewPhase: parseReviewPhase(state?.phase), reviewRound: state?.round ?? null, reviewDisposition: parseReviewDisposition(state?.disposition) }) }),
     });
+    renderStatus(statusResult({ slug, missionData: await board.getMissionData(slug, root) }), line => logs.push(line));
     assert.match(logs.join('\n'), /Review: round 1, phase reviewing/);
   }, { seedReview: false });
 });

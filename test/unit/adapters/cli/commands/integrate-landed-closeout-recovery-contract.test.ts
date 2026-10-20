@@ -29,7 +29,9 @@ import { createGithubPrLanding } from '../../../../../src/application/integrate/
 import { printIntegrationPreflight } from '../../../../../src/adapters/cli/commands/integrate.js';
 import { cleanupMissionWorktree, persistLandedIntegrationOrAbort, closeLandedIntegrationOrAbort } from '../../../../../src/adapters/cli/commands/integrate-post.js';
 import { conventionalWorktreePath } from '../../../../../src/adapters/filesystem/mission-utils.js';
-import status from '../../../../../src/adapters/cli/commands/status.js';
+import { createStatusBoardAdapter } from '../../../../../src/adapters/cli/commands/status-adapter.js';
+import { renderStatus } from '../../../../../src/interfaces/cli/status.js';
+import { statusResult } from '../../../../fixtures/status-result.js';
 import { composeBoardProjection } from '../../../../../src/composition/board-projection.js';
 import type { MissionStore } from '../../../../../src/application/domain-ports.js';
 import type { Mission, MissionId, MissionStatus } from '../../../../../src/domain/mission.js';
@@ -613,23 +615,13 @@ describe("interrupted landed integration", () => {
 
   test('px status reports the authoritative done lifecycle', async () => {
     const lines: string[] = [];
-    await status(['task-2508'], {
-      log: line => lines.push(line),
-      exit: () => {},
-      inferSlugFn: () => 'task-2508',
-      getCurrentBranchFn: () => 'main',
-      getPrStatusFn: () => ({ raw: '',  exists: false as const }),
-      readAgentConfigOrExitFn: () => ({}),
-      eligibleAgentsForStepFn: () => [],
-      allWorkflowAgentNamesFn: () => [],
-      workflowLauncherStatusFn: () => ({ agent: 'codex', supported: true, detail: 'fixture' }),
-      getLastThreeCommitsFn: () => [],
-      getUncommittedCountFn: () => 0,
-      detectRebaseStateFn: () => ({ inProgress: false, detached: false, rebaseDir: null, rebaseHead: '', unmergedFiles: [] }),
-      buildProjectionFn: async () => ({ build: async () => makeProjection({ done: [makeCard({
-        id: fixtureMissionId('task-2508'), lane: 'done', status: 'done', rawStatus: 'active',
-      })] }) }),
+    const board = createStatusBoardAdapter({
+      loadMissionFn: async () => ({ mission: fixtureMission('task-2508', { status: 'done' }), version: 1 }),
+      buildProjectionFn: async () => ({ buildMissionCard: async () => makeCard({
+        id: fixtureMissionId('task-2508'), lane: 'active', status: 'active', rawStatus: 'active',
+      }) }),
     });
+    renderStatus(statusResult({ missionData: await board.getMissionData('task-2508', '/fixture') }), line => lines.push(line));
 
     assert.ok(lines.includes('Mission status: done'));
   });

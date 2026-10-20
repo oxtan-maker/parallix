@@ -70,6 +70,8 @@ export type HandoffGitOptions = {
 export type HandoffCommandRunner = (_command: string, _args: string[], _options?: HandoffGitOptions) => CommandResult;
 
 export interface HandoffGitPort {
+  /** Capture dirty mission changes before verification; Git mechanics stay in the adapter. */
+  commitMissionChanges(_rootDir: string, _slug: string, _log: HandoffLog, _error: HandoffLog): { repaired: boolean; blocker: string | null };
   git(_args: string[], _options?: HandoffGitOptions): CommandResult;
   readonly run: HandoffCommandRunner;
   getCurrentBranch(_rootDir: string): string;

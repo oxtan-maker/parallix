@@ -23,6 +23,7 @@ import { IntakeColumn } from './intake-column.js';
 import { OperationLog } from './operation-log.js';
 import { TopBar } from './top-bar.js';
 import { MissionHistory } from './mission-history.js';
+import { DANGER, MODAL, RADIUS, SPACE, TRACK, TYPE } from './palette.js';
 import { unavailableReason, type PendingCommands } from './pending-command.js';
 
 // Presentation-only grouping: which reference region a received stage sits in.
@@ -41,8 +42,8 @@ function setDragPreview(event: DragEvent<HTMLElement>, card: WebMissionCard) {
   const preview = document.createElement('div');
   preview.textContent = card.id;
   Object.assign(preview.style, {
-    position: 'fixed', top: '-1000px', left: '-1000px', padding: '5px 9px', borderRadius: '4px',
-    border: '1px solid #43e891', background: '#102419', color: '#68f6a7', font: '12px monospace',
+    position: 'fixed', top: '-1000px', left: '-1000px', padding: `${SPACE.sm}px ${SPACE.md}px`, borderRadius: RADIUS.control,
+    border: `1px solid ${MODAL.accent}`, background: MODAL.accentFill, color: MODAL.accent, font: `${TYPE.body}px monospace`,
   });
   document.body.append(preview);
   event.dataTransfer.setData('text/plain', card.id);
@@ -147,10 +148,10 @@ cancelPrompt !== null && (
           feedback={outcomes.get(cancelPrompt.card.id)}
           onKeep={() => { setCancelPrompt(null); publishOutcome(cancelPrompt.card.id, `Kept ${cancelPrompt.card.id}. Nothing was deleted.`); }}>
 
-          <p style={{ margin: 0, fontSize: 12 }}>
+          <p style={{ margin: 0, fontSize: TYPE.body }}>
             {`Cancelling ${cancelPrompt.card.id} deletes its lifecycle rows — lanes, checkpoints, review rounds, findings and session markers — and cannot be undone. Usage statistics are kept, and its git branch and worktree stay for you to remove.`}
           </p>
-          <div style={{ display: 'flex', gap: 7, marginTop: 8 }}>
+          <div style={{ display: 'flex', gap: SPACE.md, marginTop: SPACE.md }}>
             <button
               type="button"
               onClick={() => {
@@ -164,7 +165,7 @@ cancelPrompt !== null && (
                 setCancelPrompt(null);
                 void dispatch(card, action);
               }}
-              style={{ background: '#3a1618', border: '1px solid #a83c3c', borderRadius: 4, color: '#f0a0a0', cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5, letterSpacing: 0.5, padding: '4px 10px' }}
+              style={{ background: DANGER.fill, border: `1px solid ${DANGER.controlEdge}`, borderRadius: RADIUS.control, color: DANGER.controlText, cursor: 'pointer', fontFamily: 'inherit', fontSize: TYPE.micro, letterSpacing: TRACK.tight, padding: `${SPACE.sm}px ${SPACE.lg}px` }}
             >
               {`delete ${cancelPrompt.card.id} lifecycle rows`}
             </button>
@@ -172,7 +173,7 @@ cancelPrompt !== null && (
               type="button"
               data-cancel-keep
               onClick={() => { setCancelPrompt(null); publishOutcome(cancelPrompt.card.id, `Kept ${cancelPrompt.card.id}. Nothing was deleted.`); }}
-              style={{ background: 'none', border: '1px solid #3a4550', borderRadius: 4, color: '#aab4bf', cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5, letterSpacing: 0.5, padding: '4px 10px' }}
+              style={{ background: 'none', border: `1px solid ${MODAL.controlEdge}`, borderRadius: RADIUS.control, color: MODAL.muted, cursor: 'pointer', fontFamily: 'inherit', fontSize: TYPE.micro, letterSpacing: TRACK.tight, padding: `${SPACE.sm}px ${SPACE.lg}px` }}
             >
               keep mission
             </button>
@@ -216,9 +217,9 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
           const card = snapshot.stages.flatMap((stage) => stage.cards).find((candidate) => candidate.id === item.missionId);
           if (card !== undefined) { open(card, item.action, control); } else { publishOutcome(item.missionId, `Mission ${item.missionId} is no longer in the current projection.`); }
         }} />
-        <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0, gap: 14, padding: 14, overflowX: 'auto' }}>
+        <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0, gap: SPACE.xl, padding: SPACE.xl, overflowX: 'auto' }}>
           {intake.length > 0 && (
-            <div style={{ width: 222, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, gap: 16 }}>
+            <div style={{ width: 222, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, gap: SPACE.xxl }}>
               {intake.map((stage, index) => (
                 <IntakeColumn
                   key={stage.lane}
@@ -260,7 +261,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
         />
       )}
       {terminalMission !== null && <MissionHistory missionId={terminalMission} onClose={closeTerminal} />}
-      {[...outcomes.entries()].map(([missionId, outcome]) => <p key={missionId} role="status" aria-live="polite" style={{ margin: '0 14px 10px', color: '#aab4bf' }}>{outcome}</p>)}
+      {[...outcomes.entries()].map(([missionId, outcome]) => <p key={missionId} role="status" aria-live="polite" style={{ margin: `0 ${SPACE.xl}px ${SPACE.lg}px`, color: MODAL.muted }}>{outcome}</p>)}
       <OperationLog snapshot={snapshot} />
     </div>
   );

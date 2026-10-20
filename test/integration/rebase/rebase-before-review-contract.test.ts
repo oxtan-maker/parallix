@@ -1,3 +1,6 @@
+import { createStatusCommand } from '../../../src/interfaces/cli/status.js';
+import { createStatusGitAdapter } from '../../../src/adapters/cli/commands/status-adapter.js';
+import { statusResult } from '../../fixtures/status-result.js';
 import { rebaseWorkflowFixture } from '../../helpers/rebase-workflow-fixture.js';
 import { integrationContext } from '../../fixtures/integration-context.js';
 // Historical regression provenance: TASK-1104, TASK-1272.
@@ -15,7 +18,6 @@ import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
 // Declaration order is load-bearing: installModuleMocks relinks modules in this order, so a
 // module must be declared after the modules it depends on (merged from every section below).
 mockModule('../../../src/adapters/review/rebase.js', import.meta.url);
-mockModule('../../../src/adapters/cli/commands/status.js', import.meta.url);
 mockModule('../../../src/adapters/cli/commands/rebase.js', import.meta.url);
 mockModule('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 await installModuleMocks();
@@ -378,12 +380,10 @@ describe("rebase diagnostics", () => {
   // fixed index again, without loose whole-array matching that would also accept
   // a malformed command. Returns the tail whose index 0 is the Git subcommand.
 
-  const statusModule = mockModule<typeof import('../../../src/adapters/cli/commands/status.js')>('../../../src/adapters/cli/commands/status.js', import.meta.url);
   const rebaseModule = mockModule<typeof import('../../../src/adapters/cli/commands/rebase.js')>('../../../src/adapters/cli/commands/rebase.js', import.meta.url);
   const printIntegrationPreflightModule = mockModule<typeof import('../../../src/adapters/cli/commands/integrate.js')>('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 
   test.afterEach(() => mock.restoreAll());
-  const status = statusModule.default;
   const rebase = rebaseModule.default;
   const { printIntegrationPreflight } = printIntegrationPreflightModule;
   function gitSubcommandArgs(args: string[]): string[] {
@@ -491,21 +491,12 @@ describe("rebase diagnostics", () => {
     const statusLines: string[] = [];
     let statusExitCode: { value: number | null } = { value: null };
 
-    await status(['task-1322'], {
-      inferSlugFn: () => 'task-1322',
-      getCurrentBranchFn: () => '',
-      findTaskFileFn: () => '/tmp/task-1322.md',
-      getTaskStatusFn: () => 'active',
-      findMissionDirFn: () => null,
-      getPrStatusFn: () => ({ raw: '',  exists: false as const }),
-      readAgentConfigOrExitFn: () => ({}),
-      eligibleAgentsForStepFn: () => [],
-      workflowLauncherStatusFn: () => ({ supported: false }),
-      getLastThreeCommitsFn: () => [],
-      getUncommittedCountFn: () => TASK_1322_UNMERGED.length,
-      detectRebaseStateFn: () => task1322RebaseState(),
-      log: line => statusLines.push(line),
-      exit: code => { statusExitCode.value = code; }
+    const git = createStatusGitAdapter({ detectRebaseStateFn: () => task1322RebaseState() });
+    await createStatusCommand({ execute: async () => statusResult({
+      branch: '', slug: 'task-1322', rebaseInfo: git.getRebaseInfo('/fixture'),
+      uncommittedCount: TASK_1322_UNMERGED.length,
+    }) })(['task-1322'], {
+      logFn: line => statusLines.push(line), exitFn: code => { statusExitCode.value = code ?? 0; },
     });
 
     assert.equal(statusExitCode.value, 0);

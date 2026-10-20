@@ -894,3 +894,44 @@ test('handoff blocks a failed verifier after integration proof rejection (TASK-2
   assert.equal(result.gateFailure?.exitCode, 7);
   assert.deepEqual(recorder.transitions, []);
 });
+
+test('handoff stops before proof lookup rebase and review when mission commit is blocked (px-0014)', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, {
+    git: { commitMissionChanges: (root, slug) => {
+      assert.equal(root, ROOT);
+      assert.equal(slug, SLUG);
+      return { repaired: false, blocker: 'Commit failed; retry handoff.' };
+    } },
+    rebase: { rebaseBeforeReviewRound: async () => { throw new Error('must not rebase'); } },
+    verification: { readReusableVerificationProof: () => { throw new Error('must not verify'); } },
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'Commit failed; retry handoff.');
+  assert.deepEqual(recorder.transitions, []);
+});
+
+test('handoff commits mission changes through its port before fresh proof lookup (px-0014)', async () => {
+  const recorder = makeRecorder();
+  let committed = false;
+  let verified = false;
+  const ports = makePorts(recorder, {
+    git: { commitMissionChanges: (root, slug) => {
+      assert.equal(root, ROOT);
+      assert.equal(slug, SLUG);
+      committed = true;
+      return { repaired: true, blocker: null };
+    } },
+    verification: {
+      readReusableVerificationProof: () => { assert.equal(committed, true); return { ok: false, error: 'HEAD changed; dirty-tree proof is stale' }; },
+      createVerificationProofIdentity: () => { assert.equal(committed, true); return { ok: true, identity: 'committed-head' }; },
+      writeReusableVerificationProof: (_command, _root, options) => { assert.equal(verified, true); if (options) assert.equal(options.expectedIdentity, 'committed-head'); return { ok: true }; },
+    },
+    rebase: { rebaseBeforeReviewRound: async () => { assert.equal(verified, true); return { ok: true, sharedFileConflicts: false, hookFailure: false }; } },
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder, {
+    runVerificationGateFn: () => { verified = true; return { status: 0, stdout: '', stderr: '' }; },
+  }));
+  assert.equal(result.ok, true, result.error ?? "handoff failed");
+});

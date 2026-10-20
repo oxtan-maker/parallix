@@ -13,6 +13,7 @@ import { createRoot } from 'react-dom/client';
 import React from 'react';
 import { Board } from '../../../../web/src/board.js';
 import { MissionHistory } from '../../../../web/src/mission-history.js';
+import { C } from '../../../../web/src/palette.js';
 import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
 import { missionId } from '../../../../src/domain/mission.js';
@@ -261,5 +262,21 @@ test('new operations preserve paused run and scroll until follow resumes (TASK-2
     await act(async () => { view.button(/follow output/)!.click(); });
     await view.settle();
     assert.equal(view.text(), 'NEW-RUN');
+  } finally { await view.close(); }
+});
+
+test('the history dialog consumes the board token surface and keeps its controls (TASK-2773.02)', async context => {
+  const view = await render((url) => url.pathname.endsWith('/history') ? page(0, 8, 'OLD-RUN') : overview('ended', [operation('old')]), context);
+  try {
+    const dialog = view.mount.querySelector<DomHtmlElement>('[role="dialog"]');
+    assert.ok(dialog);
+    const style = dialog.getAttribute('style') ?? '';
+    assert.ok(style.includes(`background: ${C.card}`), 'the dialog surface is the board card token, not a separate green palette');
+    assert.ok(style.includes(`border: 1px solid ${C.cardEdge}`), 'the dialog edge is the board card edge token');
+    assert.ok(!style.includes('#101c16') && !style.includes('#2f5a3f') && !style.includes('#cbd9cf'), 'the removed green modal palette stays removed');
+    assert.match(style, /font-size: 12px/, 'history body text sits at the shared body step');
+    assert.equal(dialog.className, 'modal-panel', 'bare history controls take the shared dialog control treatment');
+    assert.ok(dialog.querySelector('[aria-label="Operation"]') && dialog.querySelector('[aria-label="Stream"]'), 'operation and stream selection remain');
+    assert.ok(view.button(/close/), 'close remains');
   } finally { await view.close(); }
 });

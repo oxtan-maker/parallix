@@ -588,3 +588,40 @@ test('status projects stored classification and distinguishes unset from unknown
     }
   }
 });
+
+test('status retains stored closeout timestamp when projection is unavailable (TASK-2782)', async () => {
+  const closedAt = '2026-10-19T09:15:00.000Z';
+  const mission = fixtureMission('task-closed', { status: 'done', closedAt, checkpoints: [] });
+  const board = createStatusBoardAdapter({
+    loadMissionFn: async () => ({ mission, version: 9 }),
+    buildProjectionFn: async () => { throw new Error('projection unavailable'); },
+  });
+  const md = await board.getMissionData('task-closed', '/fixture');
+  const result = statusResult({ slug: 'task-closed', missionData: md });
+  const json = JSON.parse(statusJson(result));
+  assert.equal(json.missionStatus, 'done');
+  assert.equal(json.closedAt, closedAt);
+  assert.equal(json.version, 9);
+  const lines: string[] = [];
+  renderStatus(result, line => lines.push(line));
+  assert.ok(lines.includes(`Closed at: ${closedAt}`));
+  assert.ok(lines.includes('Mission status: done'));
+});
+
+test('status unavailable Mission source does not invent file facts (TASK-2782)', async () => {
+  const board = createStatusBoardAdapter({
+    loadMissionFn: async () => { throw new Error('store unavailable'); },
+    buildProjectionFn: async () => { throw new Error('projection unavailable'); },
+  });
+  const md = await board.getMissionData('task-unavailable', '/fixture');
+  assert.equal(md, null);
+  const result = statusResult({ slug: 'task-unavailable', missionData: md });
+  const json = JSON.parse(statusJson(result));
+  assert.equal(json.missionStatus, null);
+  assert.equal(json.latestCheckpoint, null);
+  assert.deepEqual(json.checkpoints, []);
+  const lines: string[] = [];
+  renderStatus(result, line => lines.push(line));
+  assert.ok(lines.includes('Mission status: unknown (projection unavailable)'));
+  assert.ok(lines.includes('Last checkpoint: none'));
+});

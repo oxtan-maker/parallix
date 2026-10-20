@@ -23,8 +23,6 @@ const ALLOWED_ASSEMBLERS = new Set([
   'src/adapters/backlog/mission-materialization.ts',
   'src/application/projections/board-readers.ts',
   'src/composition/board-projection.ts',
-  // SC8/SC9: status.ts now routes through BoardProjectionBuilder
-  'src/adapters/cli/commands/status.ts',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -71,30 +69,21 @@ function findTsFiles(dir: string): string[] {
 // Guardrail tests
 // ---------------------------------------------------------------------------
 
-test('SC10: status.ts routes mission output through BoardProjectionBuilder (single-path guardrail)', () => {
-  const statusPath = path.join(repoRoot, 'src/adapters/cli/commands/status.ts');
-  const content = fs.readFileSync(statusPath, 'utf8');
-
-  // The adapter must declare the projection dependency instead of importing
-  // the composition root that constructs it.
-  assert.ok(
-    content.includes('buildProjectionFn'),
-    'status.ts must accept an injected projection builder for SC8/SC9',
-  );
-
-  // status.ts must build the projection through composition.
-  assert.ok(
-    content.includes('await buildProjectionFn('),
-    'status.ts must obtain BoardProjectionBuilder through its injected dependency for SC8',
-  );
-
-  // status.ts must use the projection for mission output (projection.stages or
-  // projection.cards), reached directly or through optional chaining.
-  assert.match(
-    content,
-    /projection\??\.(stages|cards)/,
-    'status.ts must read mission data from the projection for SC9',
-  );
+test('status uses the composed application route and has no retired alternative (TASK-2782)', () => {
+  assert.equal(fs.existsSync(path.join(repoRoot, 'src/adapters/cli/commands/status.ts')), false);
+  const read = (file: string) => fs.readFileSync(path.join(repoRoot, file), 'utf8');
+  const composition = read('src/composition/cli-read-commands.ts');
+  for (const dependency of ['../application/status-command-use-case.js', '../interfaces/cli/status.js', '../adapters/cli/commands/status-adapter.js']) {
+    assert.ok(composition.includes(dependency), `composition must wire ${dependency}`);
+  }
+  assert.match(composition, /new StatusCommandUseCase\(board, gitPort, prPort, agentPort, staleWorktrees\)/);
+  assert.match(composition, /createStatusCommand\(useCase\)/);
+  assert.match(read('src/interfaces/cli/status.ts'), /await useCase\.execute\(/);
+  assert.match(read('src/adapters/cli/commands/status-adapter.ts'), /builder\.buildMissionCard\(/);
+  assert.match(read('src/composition/status-board.ts'), /mission!\.store\.load\(/);
+  const callers = [...findTsFiles(path.join(repoRoot, 'src')), ...findTsFiles(path.join(repoRoot, 'test'))]
+    .filter(file => /(?:from\s*|import\s*\(|mockModule[^\n]*\()\s*['"][^'"\n]*adapters\/cli\/commands\/status\.js['"]/.test(read(file)));
+  assert.deepEqual(callers, [], 'production and tests must not import the retired status implementation');
 });
 
 test('SC10: no module outside the allowed set assembles a board projection', () => {
@@ -161,7 +150,7 @@ test('SC1: BoardProjectionBuilder construction is limited to src/composition/', 
 test('SC10: status-projection.ts removed (dead code eliminated)', () => {
   const statusProjPath = path.join(repoRoot, 'src/adapters/cli/commands/status-projection.ts');
 
-  // status-projection.ts should no longer exist (merged into status.ts)
+  // Neither the old projection command nor its retired replacement may return.
   assert.ok(
     !fs.existsSync(statusProjPath),
     'status-projection.ts should be removed (dead code eliminated, SC9)',
@@ -173,8 +162,7 @@ test('SC10: status-projection.ts removed (dead code eliminated)', () => {
   assert.match(indexContent, /\.\.\.createReadCommands\(context\)/, 'CLI must register its canonical read commands');
   const readCommands = fs.readFileSync(path.join(repoRoot, 'src/composition/cli-read-commands.ts'), 'utf8');
   assert.ok(
-    readCommands.includes('../adapters/cli/commands/status.js')
-    || readCommands.includes('../adapters/cli/commands/status-adapter.js'),
-    'CLI composition must import status.ts or status-adapter.ts (the dispatched command)',
+    readCommands.includes('../adapters/cli/commands/status-adapter.js'),
+    'CLI composition must import the live status adapter',
   );
 });

@@ -13,7 +13,7 @@ import { startPiAgent, resolvePiCommand } from './pi.js';
 import { startQwenAgent, resolveQwenCommand } from './qwen.js';
 import { CONFIG_PATH, readAgentConfig, isAgentBlocked, type AgentConfig, type ReadAgentConfigOptions } from './agent-config.js';
 import { resolveCustomRunner } from '../config/product-config.js';
-import { AgentPoolExhaustedError } from '../../domain/agents.js';
+import { agentPolicyStep, AgentPoolExhaustedError } from '../../domain/agents.js';
 
 interface LauncherStatus {
   agent: string;
@@ -122,10 +122,10 @@ function eligibleAgentsForStep(step: string, options: AgentSelectionOptions = {}
     ? options.config
     : readAgentConfig(options.configPath || CONFIG_PATH, options);
   let eligible: string[];
-  if (!config || !config.steps || !config.steps[step]) {
+  if (!config || !config.steps || !config.steps[agentPolicyStep(step)]) {
     eligible = WORKFLOW_AGENT_NAMES.slice(); // Use the public workflow agent names
   } else {
-    eligible = config.steps[step].eligible || WORKFLOW_AGENT_NAMES.slice();
+    eligible = config.steps[agentPolicyStep(step)].eligible || WORKFLOW_AGENT_NAMES.slice();
   }
   return eligible.filter((agent) => !isAgentBlocked(agent, config));
 }
@@ -197,7 +197,7 @@ function selectFromAvailable(available: string[], step: string, options: AgentSe
   const config = options.config !== undefined
     ? options.config
     : readAgentConfig(options.configPath || CONFIG_PATH, options);
-  const stepConfig = config && config.steps && config.steps[step] ? config.steps[step] : {};
+  const stepConfig = config && config.steps && config.steps[agentPolicyStep(step)] ? config.steps[agentPolicyStep(step)] : {};
   const selection = stepConfig.selection || 'random';
 
   if (selection === 'weighted') {

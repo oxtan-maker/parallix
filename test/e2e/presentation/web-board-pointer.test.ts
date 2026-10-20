@@ -244,16 +244,23 @@ test('checkpoint indicators stay below terminal and edit dialogs with usable evi
     for (const partial of [false, true]) {
       await show(partial, false);
       const plan = page.getByLabel('Checkpoint plan', { exact: true });
-      assert.deepEqual(await plan.locator('span').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label'))), ['CP-1', 'CP-2', 'CP-3']);
-      assert.equal(await plan.locator('.review-pip--running').count(), 0);
+      const track = plan.locator('[data-checkpoint-track]');
+      const fill = plan.locator('[data-checkpoint-fill]');
+      const expectedCurrent = partial ? 'CP-2' : 'CP-1';
+      const assertProgress = async () => {
+        assert.equal(await track.count(), 1);
+        assert.equal(await fill.count(), 1);
+        assert.ok((await track.boundingBox())!.width <= 120);
+        assert.ok(Math.abs(await fill.evaluate(node => Number.parseFloat((node as HTMLElement).style.width)) - (partial ? 100 / 3 : 0)) < 0.001);
+        assert.match(await plan.getAttribute('aria-description') ?? '', new RegExp(`${partial ? 1 : 0}/3 completed.*Current: ${expectedCurrent}`));
+        assert.equal(await plan.locator('.review-pip--running').count(), 0);
+        assert.deepEqual(await plan.locator('span').evaluateAll(nodes => nodes.map(node => getComputedStyle(node).animationName)), ['none', 'none']);
+      };
+      await assertProgress();
       await show(partial, true, true);
-      const running = plan.locator('.review-pip--running');
-      assert.equal(await running.count(), 1);
-      assert.equal(await running.getAttribute('aria-label'), partial ? 'CP-2' : 'CP-1');
-      assert.equal(await running.evaluate(node => getComputedStyle(node).animationName), 'blink');
+      await assertProgress();
       await show(partial, false, true);
-      assert.equal(await plan.locator('.review-pip--running').count(), 0);
-      assert.deepEqual(await plan.locator('span').evaluateAll(nodes => nodes.map(node => getComputedStyle(node).animationName)), ['none', 'none', 'none']);
+      await assertProgress();
     }
     // Open at coordinates; then hit-test at the underlying indicator location.
     const underlying = await page.getByLabel('Checkpoint plan', { exact: true }).boundingBox();
@@ -279,12 +286,14 @@ test('checkpoint indicators stay below terminal and edit dialogs with usable evi
     assert.equal(await page.getByLabel('Title (required)', { exact: true }).inputValue(), 'Disposable edit');
     await page.keyboard.press('Escape');
     await edit.waitFor({ state: 'hidden' });
-    await clickAt(page.getByRole('button', { name: 'View checkpoint evidence for CP-1' }));
+    await clickAt(page.getByRole('button', { name: /View checkpoint evidence for CP-1/ }));
     const evidence = page.getByRole('dialog', { name: /Checkpoint evidence/ });
     await evidence.waitFor();
+    assert.deepEqual(await evidence.getByRole('navigation', { name: 'Checkpoints' }).getByRole('button').allTextContents(), ['CP-1', 'CP-2', 'CP-3']);
+    await clickAt(evidence.getByRole('button', { name: 'CP-1', exact: true }));
     assert.match(await evidence.textContent() ?? '', /visible.*evidence: npm test/);
     await clickAt(evidence.getByRole('button', { name: 'close', exact: true }));
     await evidence.waitFor({ state: 'hidden' });
-    console.log('TASK-2745 browser: CP-1/2/3 visible planned-only and partial; CP-1 then CP-2 blink on working and stop on idle; terminal/edit cover indicators at coordinates; editor typing and evidence access pass.');
+    console.log('TASK-2745/TASK-2776 browser: bounded track for planned-only and partial; supplied completion/current labels remain stable and never blink through working/idle SSE transitions; CP-1/2/3 selectable in evidence dialog; terminal/edit cover indicators at coordinates; editor typing and evidence access pass.');
   } finally { await fixture.close(); }
 });

@@ -7,7 +7,8 @@ import type {
   WebBoardSnapshot,
 } from '../../src/interfaces/web/transport.js';
 import { ActionButton } from './action-button.js';
-import { C, DISPLAY } from './palette.js';
+import { laneCard, laneHeading } from './lane-header.js';
+import { C, RADIUS, SPACE, TRACK, TYPE } from './palette.js';
 import type { PendingCommands } from './pending-command.js';
 
 /**
@@ -26,8 +27,7 @@ const REASON_ACCENT: Readonly<Record<WebAttentionReasonKind, string>> = {
 };
 
 const headingStyle = {
-  color: C.amber, fontFamily: DISPLAY, fontWeight: 700, letterSpacing: 2,
-  fontSize: 14, margin: 0, display: 'inline',
+  ...laneHeading, color: C.amber,
 } as const;
 
 function AttentionEntry({ item, onAction, onSelect, selected, pendingCommands }: { item: WebAttentionItem; onAction: (item: WebAttentionItem, control: HTMLButtonElement) => void; onSelect: (id: string) => void; selected: boolean; pendingCommands: PendingCommands }) {
@@ -39,31 +39,31 @@ function AttentionEntry({ item, onAction, onSelect, selected, pendingCommands }:
       aria-selected={selected}
       onFocus={() => onSelect(item.missionId)}
       style={{
-        border: `1px solid ${selected ? C.cyan : C.cardEdge}`, borderRadius: 6, background: '#12161b',
-        marginBottom: 9, padding: '9px 11px',
+        ...laneCard(selected), background: C.card,
+        marginBottom: SPACE.md, padding: `${SPACE.md}px ${SPACE.lg}px`,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: SPACE.md }}>
         <span style={{ color: C.faint }}>{String(item.rank).padStart(2, '0')}</span>
         <span style={{ color: C.cyan, fontWeight: 500 }}>{item.missionId}</span>
         <span
           style={{
-            color: accent, border: `1px solid ${accent}55`, borderRadius: 3,
-            fontSize: 10, padding: '0 4px',
+            color: accent, border: `1px solid ${accent}55`, borderRadius: RADIUS.chip,
+            fontSize: TYPE.micro, padding: `0 ${SPACE.sm}px`,
           }}
         >
           {item.reason.kind}
         </span>
       </div>
       {item.reason.detail !== null && (
-        <p style={{ color: C.muted, fontSize: 11, margin: '5px 0 7px 20px', lineHeight: 1.45 }}>
+        <p style={{ color: C.muted, fontSize: TYPE.meta, margin: `${SPACE.sm}px 0 ${SPACE.md}px 20px`, lineHeight: 1.45 }}>
           {item.reason.detail}
         </p>
       )}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.md, marginLeft: 20 }}>
         <span
           style={{
-            color: C.faint, fontSize: 11, flex: 1, minWidth: 0,
+            color: C.faint, fontSize: TYPE.meta, flex: 1, minWidth: 0,
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}
         >
@@ -86,16 +86,16 @@ export function AttentionRail({ snapshot, onAction, onSelect, selectedId, pendin
     >
       <div
         style={{
-          display: 'flex', alignItems: 'baseline', gap: 8, padding: '14px 14px 7px',
+          display: 'flex', alignItems: 'baseline', gap: SPACE.md, padding: `${SPACE.xl}px ${SPACE.xl}px ${SPACE.md}px`,
           borderBottom: `1px solid ${C.rule}`, flexShrink: 0,
         }}
       >
         <h2 id="attention-heading" style={headingStyle}>▲ NEEDS YOU NEXT</h2>
-        <span style={{ color: C.dim }}>{snapshot.attentionQueue.length}</span>
+        <span style={{ color: C.dim, fontSize: TYPE.meta, letterSpacing: TRACK.normal }}>{snapshot.attentionQueue.length}</span>
       </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: 10, minHeight: 0 }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: SPACE.lg, minHeight: 0 }}>
         {snapshot.attentionQueue.length === 0 && (
-          <p style={{ color: C.faint, fontSize: 11, padding: 2 }}>nothing in the attention queue</p>
+          <p style={{ color: C.faint, fontSize: TYPE.meta, padding: SPACE.xs }}>nothing in the attention queue</p>
         )}
         {snapshot.attentionQueue.map((item) => <AttentionEntry key={item.missionId} item={item} onAction={onAction} onSelect={onSelect} selected={selectedId === item.missionId} pendingCommands={pendingCommands} />)}
       </div>

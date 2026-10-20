@@ -2,7 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const cp = require('node:child_process');
-const prompt = process.argv.at(-1) || '';
+const prompt = process.argv.includes('--help') ? '' : fs.readFileSync(0, 'utf8');
 if (process.argv.includes('--help')) { console.log('run --format json'); process.exit(0); }
 const slug = 'task-unit-rehearsal';
 function px(args) {
@@ -35,7 +35,23 @@ if (/^Mode: execute after lock\./m.test(prompt)) {
     '--evidence', 'src/value.js: initial candidate', '--next', 'Review the candidate']);
   write(['mission', 'mark-complete', '--all']);
   commit('candidate');
-  px(['verify', 'all']); px(['verify', 'all']);
+  if (!process.env.REHEARSAL_DIRTY_HANDOFF_REPAIR) { px(['verify', 'all']); px(['verify', 'all']); }
+}
+if (process.env.REHEARSAL_DIRTY_HANDOFF_REPAIR && prompt.includes('PRE-REVIEW GATE FAILURE')) {
+  fs.writeFileSync('src/value.js', 'export const value = 2;\n');
+  fs.writeFileSync('repair-new.txt', 'untracked repair output\n');
+  if (fs.existsSync('src/remove.js')) cp.execFileSync('git', ['rm', 'src/remove.js']);
+  if (fs.existsSync('src/rename.js')) cp.execFileSync('git', ['mv', 'src/rename.js', 'src/renamed file.js']);
+  fs.writeFileSync(path.join(process.env.REHEARSAL_STATE, 'dirty-repaired'), 'yes');
+  const state = JSON.parse(px(['status', slug, '--json']));
+  const checkpoint = state.checkpoints.find(item => item.repair && !item.repair.verified);
+  if (checkpoint) write(['checkpoint', 'record', '--name', checkpoint.name, '--criterion', 'The disposable lifecycle reaches integration', '--evidence', 'src/value.js: fixed gate failure; repair-new.txt: untracked output', '--next', 'Verify and rebase the repaired candidate']);
+  // Force a real rebase after repair without changing the primary source file.
+  if (!fs.existsSync(path.join(process.env.PRIMARY_WORKTREE, 'parallel.txt'))) {
+  fs.writeFileSync(path.join(process.env.PRIMARY_WORKTREE, 'parallel.txt'), 'parallel work\n');
+  cp.execFileSync('git', ['-C', process.env.PRIMARY_WORKTREE, 'add', 'parallel.txt']);
+  cp.execFileSync('git', ['-C', process.env.PRIMARY_WORKTREE, 'commit', '-m', 'parallel main advance']);
+  }
 }
 if (/^Mode: act-on-review\./m.test(prompt)) {
   fs.writeFileSync('src/value.js', 'export const value = 2;\n');
@@ -59,9 +75,10 @@ if (process.env.REHEARSAL_INTEGRATION_REBOUND === '1' && prompt.includes('The in
   fs.writeFileSync(path.join(process.env.REHEARSAL_STATE, 'integration-repaired'), 'repaired');
 }
 if (/^Mode: review\./m.test(prompt)) {
+  if (process.env.REHEARSAL_DIRTY_HANDOFF_REPAIR) px(['rebase', slug]);
   px(['verify', 'all']);
   const marker = path.join(process.env.REHEARSAL_STATE, 'reviewed');
-  if (!fs.existsSync(marker)) {
+  if (!fs.existsSync(marker) && !process.env.REHEARSAL_DIRTY_HANDOFF_REPAIR) {
     fs.writeFileSync(marker, 'first review');
     write(['verdict', 'request-changes', '--actor', 'custom', '--finding', 'repair-value', '--summary', 'Set value to 2', '--location', 'src/value.js']);
   } else {

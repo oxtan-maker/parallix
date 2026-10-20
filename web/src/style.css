@@ -3,12 +3,40 @@
  * (`Parallix Board GPU.dc.html`). Self-contained: no external fonts or
  * scripts, so the mono and condensed stacks fall back to platform faces when
  * JetBrains Mono / Barlow Condensed are not installed locally (ADR 0054).
+ *
+ * The custom properties below mirror `web/src/palette.ts`, which is the design
+ * authority; a value here is a copy of a token because a stylesheet cannot
+ * import a module. They are the same surfaces, radii and rhythm, not a second
+ * scale.
  */
+:root {
+  --page: #08090b;
+  --panel: #0b0e11;
+  --card: #101419;
+  --card-edge: #232a31;
+  --control-edge: #2a323a;
+  --control-surface: #0f1216;
+  --card-foot: #0d1115;
+  --cyan: #6fd0e8;
+  --cyan-edge: #27495a;
+  --text: #c9d2d9;
+  --faint: #98a5af;
+  --dim: #a4b0b9;
+  --stroke: #3f4a53;
+  --radius-card: 6px;
+  --radius-panel: 8px;
+  --radius-control: 4px;
+  --space-sm: 4px;
+  --space-md: 8px;
+  --space-lg: 11px;
+  --type-meta: 11px;
+}
+
 html,
 body {
   margin: 0;
   padding: 0;
-  background: #08090b;
+  background: var(--page);
 }
 
 ::-webkit-scrollbar {
@@ -17,7 +45,9 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #232a31;
+  background: var(--card-edge);
+  /* The audited reference treatment fixes the thumb radius; it is not a
+   * spacing-rhythm value, so it stays literal next to the 9px width. */
   border-radius: 5px;
 }
 
@@ -26,21 +56,44 @@ body {
 }
 
 :focus-visible {
-  outline: 2px solid #6fd0e8;
+  outline: 2px solid var(--cyan);
   outline-offset: 1px;
+}
+
+/*
+ * Controls inside a tokenised dialog. The history view ships bare semantic
+ * controls; they take the dialog surface, edge and metadata type step from the
+ * same tokens the inline modal surfaces use, so a dialog control never renders
+ * with the browser's default chrome beside a tokenised panel.
+ */
+.modal-panel button,
+.modal-panel input,
+.modal-panel select,
+.modal-panel code {
+  background: var(--control-surface);
+  border: 1px solid var(--control-edge);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--type-meta);
+  padding: var(--space-sm) var(--space-md);
+}
+
+.modal-panel button:disabled {
+  color: var(--faint);
 }
 
 /*
  * The card fans. Rotation is a keyframe rather than a timer, so a spinning
  * card costs the client no state; `prefers-reduced-motion` stops them.
+ *
+ * The fans are the only moving mark on the board. A checkpoint track or a
+ * review attempt budget that blinks reads as progress, and neither is a fact
+ * about liveness: the server's work publication decides whether a fan turns.
  */
 @keyframes spin {
   from { transform: rotate(0); }
   to { transform: rotate(360deg); }
-}
-
-@keyframes blink {
-  50% { opacity: 0; }
 }
 
 .fan.spin {
@@ -49,13 +102,8 @@ body {
   animation-iteration-count: infinite;
 }
 
-.review-pip--running {
-  animation: blink 1s step-end infinite;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .fan.spin,
-  .review-pip--running {
+  .fan.spin {
     animation: none;
   }
 }
@@ -76,13 +124,15 @@ body {
 
 .shipped:not([open]) {
   width: 36px;
-  border: 1px solid #232a31;
-  border-radius: 6px;
-  background: #0d1115;
+  border: 1px solid var(--card-edge);
+  border-radius: var(--radius-card);
+  background: var(--card-foot);
 }
 
 .shipped:not([open]):hover {
-  border-color: #2c4735;
+  /* The shipped rail is a recorded fact, not an available action: it picks out
+   * on hover with the board's information edge, never the action green. */
+  border-color: var(--cyan-edge);
 }
 
 .shipped > summary {
@@ -112,13 +162,13 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding-top: 11px;
-  gap: 9px;
+  padding-top: var(--space-lg);
+  gap: var(--space-md);
 }
 
 .shipped > .shipped-cards {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding-top: 9px;
+  padding-top: var(--space-lg);
 }

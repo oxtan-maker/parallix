@@ -7,13 +7,21 @@ import assert from 'node:assert/strict';
 import { workflowBoard, until } from '../../fixtures/workflow-board.js';
 import { bundleWorkflowChild } from '../../fixtures/workflow-bundle.js';
 import { workflowHttp } from '../../fixtures/workflow-http.js';
+// Both cases share one board fixture and host process to stay inside the integration time cap;
+// each case drives its own slug and the provider case switches provider fixtures on only when it starts.
 let bundle: Awaited<ReturnType<typeof bundleWorkflowChild>>;
-before(async () => { bundle = await bundleWorkflowChild(); });
-after(() => bundle?.close());
+let fixture: Awaited<ReturnType<typeof workflowBoard>>;
+let host: Awaited<ReturnType<typeof fixture.start>>;
+before(async () => {
+  bundle = await bundleWorkflowChild();
+  fixture = await workflowBoard(2, { cli: bundle.cli });
+  fs.mkdirSync(path.join(fixture.root, 'config'), { recursive: true });
+  fs.writeFileSync(path.join(fixture.root, 'config/agents.json'), JSON.stringify({ families: ['codex', 'claude'] }));
+  host = await fixture.start();
+});
+after(async () => { try { await fixture?.close(); } finally { bundle?.close(); } });
 
-test('held synchronous terminal probe cannot block board snapshots or independent admission (TASK-2750)', { timeout: 3500 }, async t => {
-  const fixture = await workflowBoard(2, { cli: bundle.cli }); t.after(() => fixture.close());
-  const host = await fixture.start();
+test('held synchronous terminal probe cannot block board snapshots or independent admission (TASK-2750)', { timeout: 3500 }, async () => {
   const http = await workflowHttp(host);
   let settled = false;
   const probe = fetch(`${host.origin}/api/terminal/${fixture.slugs[0]}/live`).then(response => { settled = true; return response; });
@@ -29,9 +37,8 @@ test('held synchronous terminal probe cannot block board snapshots or independen
   await until(async () => (await fixture.service.current(fixture.slugs[1])) === null, 'worker completes');
 });
 
-test('board observes provider execution separately from held workflow preparation and gates (TASK-2769)', { timeout: 3500 }, async t => {
-  const fixture = await workflowBoard(1, { cli: bundle.cli, providers: true }); t.after(() => fixture.close());
-  const host = await fixture.start();
+test('board observes provider execution separately from held workflow preparation and gates (TASK-2769)', { timeout: 3500 }, async () => {
+  fs.writeFileSync(path.join(fixture.root, 'provider-fixture'), 'enabled');
   const http = await workflowHttp(host);
   const slug = fixture.slugs[0];
   assert.equal((await http.post(slug, 'provider')).status, 202);

@@ -4,21 +4,26 @@
  * disclosure can reuse the same box inside its <summary>.
  */
 import type { CSSProperties, ReactNode } from 'react';
-import { C, DISPLAY } from './palette.js';
+import { C, DISPLAY, RADIUS, SPACE, TRACK, TYPE } from './palette.js';
 
 export const laneHeaderBox: CSSProperties = {
   alignItems: 'baseline',
-  gap: 7,
-  padding: '0 2px 7px',
+  gap: SPACE.md,
+  padding: `0 ${SPACE.xs}px ${SPACE.md}px`,
   borderBottom: `1px solid ${C.cardEdge}`,
 };
 
 export const laneHeading: CSSProperties = {
-  fontFamily: DISPLAY, fontWeight: 700, letterSpacing: 2, fontSize: 14,
+  fontFamily: DISPLAY, fontWeight: 700, letterSpacing: TRACK.display, fontSize: TYPE.heading,
   color: C.text, margin: 0, display: 'inline',
 };
 
-export const laneEmpty: CSSProperties = { color: C.faint, fontSize: 11, padding: 2 };
+export const laneEmpty: CSSProperties = { color: C.faint, fontSize: TYPE.meta, padding: SPACE.xs };
+
+/** The shared card box for a lane row: same edge, radius and selection accent. */
+export function laneCard(selected: boolean): CSSProperties {
+  return { border: `1px solid ${selected ? C.cyan : C.cardEdge}`, borderRadius: RADIUS.card };
+}
 
 export function LaneHeader({ lane, count, countText, note }: {
   lane: string;
@@ -30,7 +35,7 @@ export function LaneHeader({ lane, count, countText, note }: {
   return (
     <div style={{ display: 'flex', ...laneHeaderBox }}>
       <h2 style={laneHeading}>{lane.toUpperCase()}</h2>
-      <span style={{ color: C.faint, fontSize: 11 }}>{countText ?? count}</span>
+      <span style={{ color: C.faint, fontSize: TYPE.meta }}>{countText ?? count}</span>
       <div style={{ flex: 1 }} />
       {note}
     </div>

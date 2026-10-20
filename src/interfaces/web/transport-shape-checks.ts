@@ -115,7 +115,7 @@ export function checkMissionCard(object: unknown, path: string, problems: string
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
   checkKeys(object,
     ['id', 'title', 'lane', 'status', 'closed', 'agent', 'checkpoint', 'checkpointDescription',
-      'checkpointEvidence', 'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
+      'currentCheckpoint', 'checkpointEvidence', 'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
       'reviewDisposition', 'reviewHistory', 'blockingReason', 'flags', 'activity', 'actions', 'execution'],
     ['id', 'title', 'lane', 'status', 'closed', 'agent', 'checkpoint', 'checkpointDescription',
       'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
@@ -127,6 +127,9 @@ export function checkMissionCard(object: unknown, path: string, problems: string
   checkBoolean(object, 'closed', path, problems);
   checkNullableString(object, 'agent', path, problems);
   checkNullableString(object, 'checkpoint', path, problems);
+  if (Object.prototype.hasOwnProperty.call(object, 'currentCheckpoint')) {
+    checkNullableString(object, 'currentCheckpoint', path, problems);
+  }
   checkNullableString(object, 'checkpointDescription', path, problems);
   // checkpointEvidence is optional-and-nullable: an omitted field means "no
   // evidence" and is never malformed, so it is not in the required list above.

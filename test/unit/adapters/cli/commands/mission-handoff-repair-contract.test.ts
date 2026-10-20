@@ -1,3 +1,4 @@
+import { commitDirtyFiles } from '../../../../../src/adapters/git/commit-dirty-files.js';
 import type { GitOptions } from "../../../../../src/adapters/git/git.js";
 // Mission handoff repair contract: repairHandoff auto-commit, failure classification, and dispatch.
 //
@@ -36,10 +37,11 @@ describe('Repair handoff', () => {
             ' M missions/task-1037/MISSION.md',
             '?? missions/task-1037/CP-1.md',
             ' M backlog/tasks/task-1037 - some task.md'
-          ].join('\n')
+          ].join('\0')
         };
       }
       if (args.includes('add')) {
+        assert.deepEqual(args.slice(2, 5), ['add', '--all', '--']);
         adds.push(...args.slice(args.indexOf('--') + 1));
         return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
@@ -57,16 +59,12 @@ describe('Repair handoff', () => {
 
     assert.equal(repaired, true, 'repairHandoff should return repaired:true when it committed files');
     assert.equal(blocker, null);
-    assert.deepEqual(adds, [
-      'missions/task-1037/MISSION.md',
-      'missions/task-1037/CP-1.md',
-      'backlog/tasks/task-1037 - some task.md'
-    ]);
+    assert.deepEqual(adds, ['.']);
     assert.equal(commits.length, 1);
     assert.match(commits[0], /auto-commit mission artifacts/);
   });
 
-  test('repairHandoff stages renamed mission files by destination path', async () => {
+  test('repairHandoff stages the checkout for already staged renames', async () => {
     const adds: string[] = [];
     const commits: true[] = [];
 
@@ -75,11 +73,12 @@ describe('Repair handoff', () => {
         return { signal: null, stderr: '', 
           status: 0,
           stdout: [
-            'R  missions/task-1037/CP-1.md -> missions/task-1037/CP-1-renamed.md'
-          ].join('\n')
+            'R  missions/task-1037/CP-1-renamed.md\0missions/task-1037/CP-1.md'
+          ].join('\0')
         };
       }
       if (args.includes('add')) {
+        assert.deepEqual(args.slice(2, 5), ['add', '--all', '--']);
         adds.push(...args.slice(args.indexOf('--') + 1));
         return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
@@ -97,7 +96,7 @@ describe('Repair handoff', () => {
 
     assert.equal(repaired, true);
     assert.equal(blocker, null);
-    assert.deepEqual(adds, ['missions/task-1037/CP-1-renamed.md']);
+    assert.deepEqual(adds, ['.']);
     assert.equal(commits.length, 1);
   });
 
@@ -115,10 +114,11 @@ describe('Repair handoff', () => {
             ' M .sessions/task-1037-implementer.json',
             ' M .forgejo-local/tokens/codex',
             ' M graphify-out/GRAPH_REPORT.md'
-          ].join('\n')
+          ].join('\0')
         };
       }
       if (args.includes('add')) {
+        assert.deepEqual(args.slice(2, 5), ['add', '--all', '--']);
         adds.push(...args.slice(args.indexOf('--') + 1));
         return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
@@ -132,13 +132,7 @@ describe('Repair handoff', () => {
 
     assert.equal(repaired, true);
     assert.equal(blocker, null);
-    assert.deepEqual(adds, [
-      'missions/task-1037/MISSION.md',
-      '.workflow/codex-home/.codex/logs_2.sqlite',
-      '.sessions/task-1037-implementer.json',
-      '.forgejo-local/tokens/codex',
-      'graphify-out/GRAPH_REPORT.md'
-    ]);
+    assert.deepEqual(adds, ['.']);
     assert.ok(logs.some(l => l.includes('Auto-committing dirty files')));
   });
 
@@ -155,10 +149,11 @@ describe('Repair handoff', () => {
             ' M server/src/main/java/visual/App.java',
             ' M .env',
             ' M .claude/settings.local.json'
-          ].join('\n')
+          ].join('\0')
         };
       }
       if (args.includes('add')) {
+        assert.deepEqual(args.slice(2, 5), ['add', '--all', '--']);
         adds.push(...args.slice(args.indexOf('--') + 1));
         return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
@@ -172,12 +167,7 @@ describe('Repair handoff', () => {
 
     assert.equal(repaired, true);
     assert.equal(blocker, null);
-    assert.deepEqual(adds, [
-      'missions/task-1037/MISSION.md',
-      'server/src/main/java/visual/App.java',
-      '.env',
-      '.claude/settings.local.json'
-    ]);
+    assert.deepEqual(adds, ['.']);
     assert.ok(logs.some(l => l.includes('Auto-committing dirty files')));
   });
 
@@ -192,10 +182,11 @@ describe('Repair handoff', () => {
           status: 0,
           stdout: [
             ' M missions/task-1037/MISSION.md'
-          ].join('\n')
+          ].join('\0')
         };
       }
       if (args.includes('add')) {
+        assert.deepEqual(args.slice(2, 5), ['add', '--all', '--']);
         adds.push(args[args.length - 1]);
         return { signal: null, stdout: '',  status: 1, stderr: 'permission denied' };
       }
@@ -213,10 +204,10 @@ describe('Repair handoff', () => {
     });
 
     assert.equal(repaired, false);
-    assert.ok(blocker);    assert.match(blocker, /failed to stage dirty files/);
+    assert.ok(blocker);    assert.match(blocker, /Cannot stage mission changes/);
     assert.ok(blocker);    assert.match(blocker, /permission denied/);
     assert.equal(commits.length, 0);
-    assert.ok(errors.some(line => line.includes('failed to stage dirty files')));
+    assert.ok(errors.some(line => line.includes('Cannot stage mission changes')));
   });
 
   test('repairHandoff refuses to commit when mission files are conflicted', async () => {
@@ -229,7 +220,7 @@ describe('Repair handoff', () => {
           status: 0,
           stdout: [
             'UU missions/task-1037/MISSION.md'
-          ].join('\n')
+          ].join('\0')
         };
       }
       return { signal: null, stdout: '', stderr: '',  status: 0 };
@@ -237,14 +228,15 @@ describe('Repair handoff', () => {
 
     const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
       gitFn,
-      log: (msg) => logs.push(msg)
+      log: (msg) => logs.push(msg),
+      error: (msg) => logs.push(msg)
     });
 
     assert.equal(repaired, false);
-    assert.ok(blocker);    assert.match(blocker, /Conflicted files detected/);
+    assert.ok(blocker);    assert.match(blocker, /unresolved conflict/);
     assert.ok(blocker);    assert.match(blocker, /missions\/task-1037\/MISSION\.md/);
     assert.equal(adds.length, 0);
-    assert.ok(logs.some(l => l.includes('Cannot auto-commit: Conflicted files detected')));
+    assert.ok(logs.some(l => l.includes('unresolved conflict')));
   });
 
   test('repairHandoff calls rebase when branch is behind', async () => {
@@ -309,10 +301,11 @@ describe('Repair handoff', () => {
           status: 0,
           stdout: [
             ' M backlog/completed/task-1037 - some task.md'
-          ].join('\n')
+          ].join('\0')
         };
       }
       if (args.includes('add')) {
+        assert.deepEqual(args.slice(2, 5), ['add', '--all', '--']);
         adds.push(args[args.length - 1]);
         return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
@@ -325,7 +318,7 @@ describe('Repair handoff', () => {
     });
 
     assert.equal(repaired, true);
-    assert.ok(adds.includes('backlog/completed/task-1037 - some task.md'));
+    assert.deepEqual(adds, ['.']);
   });
 
   test('repairHandoff returns repaired:false when rebase fails after successful auto-commit', async () => {
@@ -637,10 +630,11 @@ describe('Repair handoff', () => {
           status: 0,
           stdout: [
             ' M missions/task-1037/MISSION.md',
-          ].join('\n')
+          ].join('\0')
         };
       }
       if (args.includes('add')) {
+        assert.deepEqual(args.slice(2, 5), ['add', '--all', '--']);
         adds.push(args[args.length - 1]);
         return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
@@ -658,7 +652,7 @@ describe('Repair handoff', () => {
 
     assert.equal(repaired, true, 'repairHandoff should return repaired:true when classifyError detects GitBlockers');
     assert.equal(blocker, null);
-    assert.ok(adds.includes('missions/task-1037/MISSION.md'));
+    assert.deepEqual(adds, ['.']);
   });
 
   test('repairHandoff uses classifyError internally for behind errors', async () => {
@@ -779,10 +773,11 @@ describe('Repair handoff auto-commit', () => {
             ' M lib/commands/repair-handoff.ts',
             ' M px.ts',
             '?? test/task-2202-repair-handoff-autocommit.test.js'
-          ].join('\n')
+          ].join('\0')
         };
       }
       if (args.includes('add')) {
+        assert.deepEqual(args.slice(2, 5), ['add', '--all', '--']);
         adds.push(...args.slice(args.indexOf('--') + 1));
         return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
@@ -805,13 +800,7 @@ describe('Repair handoff auto-commit', () => {
 
     assert.equal(repaired, true, `expected active-step repair to auto-commit bounded implementation files; blocker was: ${blocker}`);
     assert.equal(blocker, null);
-    assert.deepEqual(adds, [
-      'missions/task-2202/MISSION.md',
-      'backlog/tasks/task-2202 - parallix-autocommit-seems-to-exclude-some-files.md',
-      'lib/commands/repair-handoff.ts',
-      'px.ts',
-      'test/task-2202-repair-handoff-autocommit.test.js'
-    ]);
+    assert.deepEqual(adds, ['.']);
     assert.deepEqual(commits, [
       'workflow(task-2202): auto-commit mission artifacts before handoff'
     ]);
@@ -831,10 +820,11 @@ describe('Repair handoff auto-commit', () => {
             ' M docs/adr/0048-rebound-kernel.md',
             ' M graphify-out/graph.json',
             ' M backlog/completed/task-2480.md'
-          ].join('\n')
+          ].join('\0')
         };
       }
       if (args.includes('add')) {
+        assert.deepEqual(args.slice(2, 5), ['add', '--all', '--']);
         adds.push(args.slice(args.indexOf('--') + 1));
         return { signal: null, stdout: '', stderr: '',  status: 0 };
       }
@@ -854,12 +844,7 @@ describe('Repair handoff auto-commit', () => {
 
     assert.equal(repaired, true, `expected git-blocker repair to commit all dirty files; blocker was: ${blocker}`);
     assert.equal(blocker, null);
-    assert.deepEqual(adds, [[
-      'src/adapters/cli/commands/repair-handoff.ts',
-      'docs/adr/0048-rebound-kernel.md',
-      'graphify-out/graph.json',
-      'backlog/completed/task-2480.md'
-    ]]);
+    assert.deepEqual(adds, [['.']]);
     assert.deepEqual(commits, [
       'workflow(task-2480): auto-commit mission artifacts before handoff'
     ]);
@@ -941,3 +926,57 @@ test('default execute runtime preserves configuration through handoff and automa
   assert.equal(rebases, 1);
   assert.deepEqual(result, { repaired: true, blocker: null });
 });
+
+// The repair launcher may succeed without committing its edits (px-0014).
+test('successful gate repair commits tracked and untracked edits before handoff rebase (px-0014)', async () => {
+  const { HandoffCommandUseCase } = await import('../../../../../src/application/handoff-command-use-case.js');
+  const { SLUG, ROOT, makeRecorder, makePorts, runOptions } = await import('../../../../helpers/handoff-ports.js');
+  const recorder = makeRecorder();
+  const events: string[] = [];
+  let dirty = false;
+  let gateRuns = 0;
+  const ports = makePorts(recorder, {
+    git: { git: args => {
+      assert.equal(args[1], ROOT, 'Git operations stay in the selected worktree');
+      if (args.includes('status')) return { signal: null, status: 0, stderr: '', stdout: dirty ? ' M src/fix.ts\0?? test/fix.test.ts\0' : '' };
+      if (args.includes('add')) events.push('stage');
+      if (args.includes('commit')) { events.push('commit'); dirty = false; }
+      return { signal: null, status: 0, stderr: '', stdout: args.includes('rev-parse') ? 'head' : '' };
+    } },
+    agents: { startAgent: async () => { dirty = true; events.push('repair'); return { agent: 'claude', result: { status: 0 } }; } },
+    rebase: { rebaseBeforeReviewRound: async () => {
+      events.push('rebase');
+      assert.equal(dirty, false, 'eligible repair changes must be committed before rebase');
+      assert.ok(events.includes('commit'));
+      return { ok: true, sharedFileConflicts: false, hookFailure: false };
+    } },
+  });
+  ports.git.commitMissionChanges = (root, slug, log, error) =>
+    commitDirtyFiles(root, slug, args => ports.git.git(args), log, error);
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder, {
+    recoverGateFailure: true,
+    runVerificationGateFn: () => ({ status: ++gateRuns === 1 ? 1 : 0, stdout: '', stderr: '' }),
+  }));
+  assert.equal(result.ok, true, result.error ?? "handoff failed");
+  assert.deepEqual(events, ['repair', 'stage', 'commit', 'rebase']);
+});
+
+for (const operation of ['status', 'commit', 'throw'] as const) {
+  test(`automatic Git repair stops before rebase on ${operation} failure (px-0014)`, async () => {
+    const calls: string[][] = [];
+    const result = await repairHandoff.default('px-0014', '/selected', 'git push failed: Updates were rejected', {
+      gitFn: args => {
+        calls.push(args);
+        assert.equal(args[1], '/selected');
+        if (operation === 'throw') throw new Error('Git unavailable');
+        return { status: args[2] === operation ? 1 : 0, stderr: 'permission denied',
+          stdout: args[2] === 'status' ? ' M file\0' : '' };
+      },
+      rebaseFn: async () => { assert.fail('must not rebase'); },
+      log: () => {}, error: () => {},
+    });
+    assert.equal(result.repaired, false);
+    assert.match(result.blocker ?? '', operation === 'throw' ? /Git unavailable/ : /permission denied/);
+    if (operation !== 'commit') assert.equal(calls.length, 1);
+  });
+}

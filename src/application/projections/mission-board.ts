@@ -115,6 +115,8 @@ export interface MissionCard {
   readonly agent: AgentFamily | null;
   /** Checkpoint filename with .md extension (e.g. "CP-2.md"). Preserves legacy output contract. */
   readonly checkpoint: string | null;
+  /** Current execution checkpoint derived from the ordered unfinished plan. */
+  readonly currentCheckpoint?: string | null;
   /** First line of checkpoint file (e.g. "CP-2: Status Command Re-implemented"). */
   readonly checkpointDescription: string | null;
   /** Complete ordered checkpoint plan and recorded evidence. */
@@ -382,10 +384,13 @@ function activeCommandFacts(mission: Mission, facts: Pick<MissionOperationalFact
 }
 
 function cardCheckpoint(mission: Mission, checkpoint: ReturnType<typeof latestEvidencedCheckpoint>) {
+  const evidence = checkpointEvidence(mission.checkpoints, mission.status);
   return {
     checkpoint: checkpoint?.rawFilename ?? checkpoint?.name ?? null,
     checkpointDescription: checkpoint?.firstLine ?? null,
-    checkpointEvidence: checkpointEvidence(mission.checkpoints, mission.status),
+    // Execute advances to the next checkpoint when the preceding one is recorded.
+    currentCheckpoint: evidence.find(entry => entry.state === 'current')?.name ?? null,
+    checkpointEvidence: evidence,
     nextActionText: checkpoint?.nextActionText ?? null,
   };
 }

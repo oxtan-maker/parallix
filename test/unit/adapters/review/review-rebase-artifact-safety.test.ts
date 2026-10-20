@@ -1,3 +1,4 @@
+import { commitDirtyFiles } from '../../../../src/adapters/git/commit-dirty-files.js';
 import { rebaseWorkflowFixture } from '../../../helpers/rebase-workflow-fixture.js';
 import type { RebaseWorkflowPort } from '../../../../src/application/ports/rebase-workflow.js';
 // review rebase artifact safety.
@@ -352,4 +353,51 @@ describe("autocommit nonmission", { concurrency: false }, () => {
     assert.deepEqual(added, ['docs/missions/2026/task-2592/MISSION.md']);
     assert.equal(errors.some(message => message.includes('non-mission paths')), false);
   });
+});
+
+// The shared mechanism owns Git failures; application tests consume typed outcomes.
+for (const blocker of ['conflict', 'status', 'add', 'commit', 'throw'] as const) {
+  test(`shared autocommit stops on ${blocker} before later Git operations (px-0014)`, () => {
+    const calls: string[][] = [];
+    const result = commitDirtyFiles('/fixture', 'px-0014', args => {
+      calls.push(args);
+      assert.equal(args[1], '/fixture');
+      if (blocker === 'throw') throw new Error('Git unavailable');
+      const operation = args[2];
+      return { status: operation === blocker ? 1 : 0,
+        stderr: operation === blocker ? 'permission denied' : '',
+        stdout: operation === 'status' ? (blocker === 'conflict' ? 'UU src/fix.ts\0' : ' M src/fix.ts\0?? test/new.ts\0') : '' };
+    }, () => {}, () => {});
+    assert.equal(result.repaired, false);
+    assert.match(result.blocker ?? '', blocker === 'conflict' ? /unresolved conflict.*src\/fix.ts/ : blocker === 'throw' ? /Git unavailable/ : /permission denied/);
+    if (blocker === 'status' || blocker === 'conflict') assert.equal(calls.length, 1);
+    if (blocker === 'add') assert.equal(calls.some(args => args.includes('commit')), false);
+  });
+}
+test('shared autocommit does not stage or commit a clean checkout (px-0014)', () => {
+  const calls: string[][] = [];
+  const result = commitDirtyFiles('/fixture', 'px-0014', args => {
+    calls.push(args);
+    return { status: 0, stdout: '' };
+  }, () => {}, () => {});
+  assert.deepEqual(result, { repaired: false, blocker: null });
+  assert.equal(calls.length, 1);
+});
+
+test('artifact autocommit includes both rename paths and already staged deletions (px-0014)', async () => {
+  const calls: string[][] = [];
+  const result = await commitSafeMissionArtifacts('px-0014', '/fixture', {
+    gitFn: args => {
+      calls.push(args);
+      return { signal: null, status: 0, stderr: '', stdout: args.includes('status')
+        ? 'R  mission/new.md\0mission/old.md\0D  mission/deleted.md\0M  unrelated.ts\0' : '' };
+    },
+    isMissionArtifactFn: file => file.startsWith('mission/'),
+    isWorkflowGeneratedArtifactFn: () => false, log: () => {}, error: () => {},
+  });
+  assert.deepEqual(result, { ok: true, dirty: true });
+  const stages = calls.filter(args => args.includes('add'));
+  assert.deepEqual(stages, [['-C', '/fixture', 'add', '--all', '--', 'mission/new.md']]);
+  const commit = calls.find(args => args.includes('commit'))!;
+  assert.deepEqual(commit.slice(commit.indexOf('--') + 1), ['mission/new.md', 'mission/old.md', 'mission/deleted.md']);
 });

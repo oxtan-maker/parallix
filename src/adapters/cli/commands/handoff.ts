@@ -1,3 +1,4 @@
+import { commitDirtyFiles } from '../../git/commit-dirty-files.js';
 import { verificationEnvironment } from '../../config/verification-environment.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 /**
@@ -56,6 +57,7 @@ export function createHandoffPorts(configuration?: ParallixConfiguration): Hando
       listEntries: (target) => fs.readdirSync(target, { withFileTypes: true }),
     },
     git: {
+      commitMissionChanges: (rootDir, slug, log, error) => commitDirtyFiles(rootDir, slug, args => git.git(args), log, error),
       git: (args, options) => (options === undefined ? git.git(args) : git.git(args, options)),
       get run() { return git.run; },
       getCurrentBranch: (rootDir) => git.getCurrentBranch(rootDir),

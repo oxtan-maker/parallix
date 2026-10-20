@@ -15,6 +15,20 @@ import { isAgentPoolExhaustionError, agentPoolExhaustedError } from './agent-lau
 import { normalizeSessionRole, defaultSessionMarkerPort, sessionMissionId, sessionAgentFamily } from './agent-launch-authority.js';
 
 
+async function applyRecoveryPolicy(state: StartAgentLoopState, deps: StartAgentLoopDeps): Promise<void> {
+  if (deps.step === 'act-on-review' && state.chosen) {
+    const policy = await deps.runtimeBlockContext(deps.step, state.tried);
+    if (!policy.eligible.includes(state.chosen)) {
+      deps.refuseFallbackWhenPinned('excluded by active agent policy');
+      state.chosen = undefined;
+    }
+  }
+}
+
+function recoveryFallback(candidates: string[], eligible: readonly string[], step: string): string[] {
+  return step === 'act-on-review' ? candidates.filter(family => eligible.includes(family)) : candidates;
+}
+
 /**
  * Pick the agent for the next attempt and gate it: selection with the
  * single-family escape hatch, the pre-launch blocklist reroute, and the
@@ -22,6 +36,7 @@ import { normalizeSessionRole, defaultSessionMarkerPort, sessionMissionId, sessi
  * fresh selection.
  */
 export async function selectAndGateAgent(state: StartAgentLoopState, deps: StartAgentLoopDeps): Promise<boolean> {
+  await applyRecoveryPolicy(state, deps);
   if (!state.chosen) {
     // Exclude every family the runtime blocklist currently blocks so no launch
     // is ever attempted against a blocked family when another eligible family is
@@ -44,7 +59,7 @@ export async function selectAndGateAgent(state: StartAgentLoopState, deps: Start
       const excludeList = deps.exclude instanceof Set ? [...deps.exclude] : deps.exclude;
       // Last-resort escape hatch: a runtime-blocked family is never a valid
       // fallback, so filter it out before picking one (SC 2/SC 3).
-      const fallbackCandidates = filterBlockedFallback(excludeList, blockedPool.blocked);
+      const fallbackCandidates = recoveryFallback(filterBlockedFallback(excludeList, blockedPool.blocked), blockedPool.eligible, deps.step);
       const fallbackAgent = fallbackCandidates.find((a: string) => !state.launched.has(a));
       if (fallbackAgent !== undefined) {
         state.chosen = fallbackAgent;

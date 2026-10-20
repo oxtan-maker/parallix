@@ -4,22 +4,22 @@
  */
 import type { WebMissionCard, WebStage } from '../../src/interfaces/web/transport.js';
 import { laneEmpty, laneHeaderBox, laneHeading } from './lane-header.js';
-import { C } from './palette.js';
+import { C, RADIUS, SPACE, TRACK, TYPE } from './palette.js';
 import { CheckpointPips } from './checkpoint-pips.js';
 
 function ShippedCard({ card }: { card: WebMissionCard }) {
   return (
     <article
       style={{
-        border: `1px solid ${C.rule}`, borderRadius: 5, background: C.cardFoot,
-        padding: '6px 9px', marginBottom: 7, opacity: 0.75,
+        border: `1px solid ${C.rule}`, borderRadius: RADIUS.card, background: C.cardFoot,
+        padding: `${SPACE.sm}px ${SPACE.md}px`, marginBottom: SPACE.md, opacity: 0.75,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-        {card.closed && <span style={{ color: C.green, fontSize: 10 }}>✓</span>}
-        <span style={{ color: C.dim, fontWeight: 500 }}>{card.id}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.md }}>
+        {card.closed && <span style={{ color: C.done, fontSize: TYPE.micro }}>✓</span>}
+        <span style={{ color: C.dim, fontWeight: 500, fontSize: TYPE.meta, letterSpacing: TRACK.normal }}>{card.id}</span>
       </div>
-      <p style={{ margin: '3px 0 0', color: C.faint, fontSize: 11 }}>{card.title}</p>
+      <p style={{ margin: `${SPACE.sm}px 0 0`, color: C.faint, fontSize: TYPE.meta }}>{card.title}</p>
       <CheckpointPips card={card} />
     </article>
   );
@@ -31,13 +31,13 @@ export function DoneRail({ stage }: { stage: WebStage }) {
       <summary>
         <span className="rail-open" style={{ ...laneHeaderBox, width: '100%' }}>
           <h2 style={laneHeading}>{stage.lane.toUpperCase()}</h2>
-          <span style={{ color: C.faint, fontSize: 11 }}>{stage.count}</span>
+          <span style={{ color: C.faint, fontSize: TYPE.meta }}>{stage.count}</span>
           <span style={{ flex: 1 }} />
-          <span aria-hidden="true" style={{ color: C.green, fontSize: 11 }}>▸</span>
+          <span aria-hidden="true" style={{ color: C.dim, fontSize: TYPE.meta }}>▸</span>
         </span>
         <span className="rail-closed">
-          <span aria-hidden="true" style={{ color: C.green }}>◂</span>
-          <span style={{ writingMode: 'vertical-rl', color: C.dim, fontSize: 11, letterSpacing: 2 }}>
+          <span aria-hidden="true" style={{ color: C.dim, fontSize: TYPE.meta }}>◂</span>
+          <span style={{ writingMode: 'vertical-rl', color: C.dim, fontSize: TYPE.meta, letterSpacing: TRACK.display }}>
             {stage.lane.toUpperCase()} · {stage.count}
           </span>
         </span>

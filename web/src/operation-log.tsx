@@ -10,7 +10,7 @@
  * Regressed stream cursors reset transient state after host restart.
  */
 import type { WebBoardSnapshot, WebOperationLogEntry, WebProgressEvent } from '../../src/interfaces/web/transport.js';
-import { C } from './palette.js';
+import { C, SPACE, TYPE } from './palette.js';
 
 export const OPERATION_LOG_LIMIT = 256;
 
@@ -62,7 +62,7 @@ export function OperationLog({ snapshot }: { snapshot: WebBoardSnapshot }) {
       aria-label="Operation log"
       style={{
         flexShrink: 0, borderTop: `1px solid ${C.rule}`, background: C.log,
-        padding: '7px 18px', fontSize: 11, lineHeight: 1.7, height: 64, overflowY: 'auto',
+        padding: `${SPACE.md}px ${SPACE.xxl}px`, fontSize: TYPE.meta, lineHeight: 1.7, height: 64, overflowY: 'auto',
       }}
     >
       {snapshot.operationLog.length === 0 && <div style={{ color: C.faint }}>no operations recorded</div>}

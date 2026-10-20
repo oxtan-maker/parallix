@@ -4,7 +4,7 @@ import { integrationContext } from '../../fixtures/integration-context.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 // Historical regression provenance: TASK-2500.
 // Behavior-owned suite (TASK-2622.09): integration mode capability dispatch (local, github-publish,
-// github-pr), mode reporting in config/status, the recorded-brief contract, the Mission integration
+// github-pr), mode reporting in config, the recorded-brief contract, the Mission integration
 // service, and mode dispatch through `px integrate` (task-2500). Legacy case names unchanged.
 import test, { mock, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,7 +26,6 @@ import { approvedReview, inMemoryTransitionStore, integrateCommandMission } from
 // Declaration order is load-bearing: installModuleMocks relinks modules in this order, so a
 // module must be declared after the modules it depends on (merged from every section below).
 mockModule('../../../src/adapters/cli/commands/config.js', import.meta.url);
-mockModule('../../../src/adapters/cli/commands/status.js', import.meta.url);
 mockModule('../../../src/adapters/git/git.js', import.meta.url);
 mockModule('../../../src/adapters/filesystem/mission-utils.js', import.meta.url);
 mockModule('../../../src/adapters/backlog/backlog.js', import.meta.url);
@@ -153,11 +152,10 @@ describe("integration strategy dispatch", () => {
 
 // ---- integration mode CLI reporting (consolidated from test/integration-mode-cli.test.ts, TASK-2622.09) ----
 describe("integration mode CLI reporting", () => {
-  // task-2500.01 CP-3: `px config` and `px status` surface the active integration
+  // task-2500.01 CP-3: `px config` surfaces the active integration
   // mode. `local` (the default) and a configured mode both print a stable line.
 
   const config = mockModule<typeof import('../../../src/adapters/cli/commands/config.js')>('../../../src/adapters/cli/commands/config.js', import.meta.url);
-  const status = mockModule<typeof import('../../../src/adapters/cli/commands/status.js')>('../../../src/adapters/cli/commands/status.js', import.meta.url);
 
   test.afterEach(() => mock.restoreAll());
 
@@ -185,32 +183,6 @@ describe("integration mode CLI reporting", () => {
     }).then(() => ({ logs, errors, exitCode: exitCode.value }));
   }
 
-  function runStatus(root: string) {
-    const logs: string[] = [];
-    let exitCode = 0;
-    return status.default([], {
-      exit: code => { exitCode = code; },
-      log: message => logs.push(message),
-      inferSlugFn: () => null,
-      getCurrentBranchFn: () => 'main',
-      findTaskFileFn: () => null,
-      getTaskStatusFn: () => null,
-      findMissionDirFn: () => null,
-      findCheckpointsFn: () => [],
-      getFirstLineFn: () => '',
-      getPrStatusFn: () => ({ raw: '',  exists: false as const }),
-      findStaleMissionWorktreesFn: () => [],
-      readAgentConfigOrExitFn: () => ({}),
-      eligibleAgentsForStepFn: () => [],
-      allWorkflowAgentNamesFn: () => ['codex'],
-      workflowLauncherStatusFn: () => ({ supported: false, agent: '' }),
-      getLastThreeCommitsFn: () => [],
-      getUncommittedCountFn: () => 0,
-      detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
-      buildProjectionFn: async () => { throw new Error('no projection in CLI surface test'); },
-    }).then(() => ({ logs, exitCode }));
-  }
-
   test('config prints an explicit active integration mode line', async () => {
     await withTempConfig({ integration: { mode: 'github-publish' } }, async root => {
       const result = await runConfig(root);
@@ -223,19 +195,9 @@ describe("integration mode CLI reporting", () => {
     });
   });
 
-  test('status prints the active integration mode for the configured mode', async () => {
-    await withTempConfig({ integration: { mode: 'github-pr' } }, async root => {
-      const cwd = process.cwd();
-      try {
-        process.chdir(root);
-        const { logs, exitCode } = await runStatus(root);
-        assert.equal(exitCode, 0);
-        assert.match(logs.join('\n'), /Integration mode: github-pr/);
-      } finally {
-        process.chdir(cwd);
-      }
-    });
-  });
+  // Retired status-only assertion removed (TASK-2782): the composed public
+  // status has no integration-mode line. Config remains the owning surface.
+
 });
 
 // ---- integration recorded contract (consolidated from test/integration-recorded-contract.test.ts, TASK-2622.09) ----

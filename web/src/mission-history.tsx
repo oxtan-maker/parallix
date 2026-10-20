@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { describeState, loadLive, loadOverview, loadPage, searchHistory, type HistoryOperation, type HistoryOverview, type HistorySearch } from './mission-history-data.js';
+import { MODAL, RADIUS, SPACE, TYPE } from './palette.js';
 
 /**
  * The mission view (TASK-2749): retained workflow history first, with the
@@ -120,7 +121,7 @@ function LivePane({ missionId }: { missionId: string }) {
     const interval = window.setInterval(refresh, POLL_MS);
     return () => { alive = false; window.clearInterval(interval); };
   }, [missionId]);
-  return <pre aria-label="Live pane" style={{ maxHeight: 200, margin: 0, overflow: 'auto', whiteSpace: 'pre-wrap', borderTop: '1px solid #2f5a3f', paddingTop: 8 }}>{live ?? 'Loading live pane…'}</pre>;
+  return <pre aria-label="Live pane" style={{ maxHeight: 200, margin: 0, overflow: 'auto', whiteSpace: 'pre-wrap', borderTop: `1px solid ${MODAL.accentEdge}`, paddingTop: SPACE.md }}>{live ?? 'Loading live pane…'}</pre>;
 }
 
 function SearchPanel({ missionId, onError, onJump }: { missionId: string; onError: (_detail: string) => void; onJump: (_runId: string, _stream: 'stdout' | 'stderr', _offset: number) => void }) {
@@ -134,7 +135,7 @@ function SearchPanel({ missionId, onError, onJump }: { missionId: string; onErro
   };
   return (
     <>
-      <form onSubmit={search} style={{ display: 'flex', gap: 8 }}>
+      <form onSubmit={search} style={{ display: 'flex', gap: SPACE.md }}>
         <input name="q" aria-label="Search retained history" placeholder="search retained history" maxLength={200} style={{ flex: 1 }} />
         <button type="submit">search</button>
       </form>
@@ -158,7 +159,7 @@ function Toolbar({ operations, selection, pinned, follow, showLive, canCopy, onS
   onSelect: (_next: Selection | null) => void; onCopy: () => void; onLive: (_on: boolean) => void; onFollow: () => void;
 }) {
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: SPACE.md, alignItems: 'center' }}>
       <label>Operation{' '}
         <select aria-label="Operation" value={selection?.runId ?? ''} onChange={event => onSelect(event.target.value === '' ? null : { runId: event.target.value, stream: selection?.stream ?? 'stdout' })}>
           {operations.length === 0 && <option value="">none retained</option>}
@@ -265,14 +266,14 @@ export function MissionHistory({ missionId, onClose }: { missionId: string; onCl
 
   const coverage = coverageFor(overview, selection);
   return (
-    <div role="presentation" onClick={event => { if (event.target === event.currentTarget) { onClose(); } }} style={{ position: 'fixed', inset: 0, zIndex: 70, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.55)' }}>
-      <section role="dialog" aria-modal="true" aria-label={`Mission progress for ${missionId}`} style={{ width: 720, maxWidth: '92vw', maxHeight: '80vh', display: 'flex', flexDirection: 'column', gap: 8, padding: 16, background: '#101c16', border: '1px solid #2f5a3f', borderRadius: 6, color: '#cbd9cf', fontFamily: 'inherit' }}>
-        <header style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-          <h2 style={{ margin: 0, fontSize: 14 }}>{missionId} — mission history</h2>
+    <div role="presentation" onClick={event => { if (event.target === event.currentTarget) { onClose(); } }} style={{ position: 'fixed', inset: 0, zIndex: 70, display: 'flex', alignItems: 'center', justifyContent: 'center', background: MODAL.scrim }}>
+      <section role="dialog" aria-modal="true" aria-label={`Mission progress for ${missionId}`} className="modal-panel" style={{ width: 720, maxWidth: '92vw', maxHeight: '80vh', display: 'flex', flexDirection: 'column', gap: SPACE.md, padding: SPACE.xxl, background: MODAL.surface, border: `1px solid ${MODAL.edge}`, borderRadius: RADIUS.panel, color: MODAL.text, fontFamily: 'inherit', fontSize: TYPE.body, boxShadow: MODAL.shadow }}>
+        <header style={{ display: 'flex', justifyContent: 'space-between', gap: SPACE.md }}>
+          <h2 style={{ margin: 0, fontSize: TYPE.title }}>{missionId} — mission history</h2>
           <button type="button" onClick={onClose}>close</button>
         </header>
         <p role="status" style={{ margin: 0 }}>{overview ? describeState(overview) : 'Loading mission history…'}</p>
-        {readError !== null && <p role="status" style={{ margin: 0, color: '#e0b973' }}>Refresh interrupted ({readError}); showing what was already loaded. Retrying…</p>}
+        {readError !== null && <p role="status" style={{ margin: 0, color: MODAL.warning }}>Refresh interrupted ({readError}); showing what was already loaded. Retrying…</p>}
         <Toolbar operations={overview?.operations ?? []} selection={selection} pinned={pinned !== null} follow={follow} showLive={showLive} canCopy={chunks.length > 0}
           onSelect={next => { pausedAutomatically.current = false; setPinned(next); }} onCopy={() => copyChunks(chunks, setCopied)} onLive={setShowLive} onFollow={() => { if (pausedAutomatically.current) { setPinned(null); pausedAutomatically.current = false; } setFollow(true); }} />
         <SearchPanel missionId={missionId} onError={setReadError} onJump={jumpTo} />

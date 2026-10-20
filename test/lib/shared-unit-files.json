@@ -36,7 +36,6 @@
     "unit/adapters/cli/commands/stats-normalization.test.ts",
     "unit/adapters/cli/commands/stats-report-rendering-pure.test.ts",
     "unit/adapters/cli/commands/stats-report.test.ts",
-    "unit/adapters/cli/commands/status-characterization-cp4.test.ts",
     "unit/adapters/filesystem/mission-utils-graphify.test.ts",
     "unit/adapters/github/github-pr.test.ts",
     "unit/adapters/review/review-artifact-dispatcher.test.ts",

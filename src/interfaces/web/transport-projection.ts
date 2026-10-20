@@ -104,6 +104,7 @@ function toWebMissionCard(card: MissionCard): WebMissionCard {
     closed: card.closed,
     agent: card.agent,
     checkpoint: card.checkpoint,
+    currentCheckpoint: card.currentCheckpoint ?? null,
     checkpointDescription: card.checkpointDescription,
     checkpointEvidence: card.checkpointEvidence.map(({ name, description, goalCheck, state }) => ({
       name,

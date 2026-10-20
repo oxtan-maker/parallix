@@ -4,16 +4,16 @@
  * carrying checkpoint, gate, actor and next action; and a footer of the
  * server's actions.
  */
-import { useEffect, useState } from 'react';
-import type { CSSProperties, DragEvent, KeyboardEvent as ReactKeyboardEvent } from 'react';
+import type { CSSProperties, DragEvent } from 'react';
 import type { WebMissionCard, WebStage } from '../../src/interfaces/web/transport.js';
 import { ActionButton, cardCommands } from './action-button.js';
 import { Fan } from './fan.js';
 import { CheckpointPips } from './checkpoint-pips.js';
-import { LaneHeader, laneEmpty } from './lane-header.js';
-import { C } from './palette.js';
+import { LaneHeader, laneCard, laneEmpty } from './lane-header.js';
+import { C, REVIEW, SPACE, TRACK, TYPE } from './palette.js';
 import type { PendingCommands } from './pending-command.js';
-import { actorLine, coordinatorText, familyAccent, GATE_COLOR, GATE_TEXT, isSpinning } from './format.js';
+import { ActorLine, AgentLabel } from './card-activity.js';
+import { coordinatorText, executingFamily, familyAccent, GATE_COLOR, GATE_TEXT, isSpinning } from './format.js';
 
 function edgeColor(card: WebMissionCard): string {
   if (card.blockingReason !== null) { return C.red; }
@@ -22,133 +22,106 @@ function edgeColor(card: WebMissionCard): string {
   return C.headEdge;
 }
 
-function ReviewPips({ card }: { card: WebMissionCard }) {
-  if (card.reviewRound === null) { return null; }
-  const currentRound = card.reviewRound;
-  const work = card.activity.work;
-  const active = isSpinning(card) && work.kind === 'working'
-    && ((work.phase === 'review' && card.reviewPhase === 'reviewing')
-      || (work.phase === 'review-response' && card.reviewPhase === 'fixing'));
-  const rounds = new Map(card.reviewHistory.map((round) => [round.number, round]));
-  return (
-    <span aria-label={`review round ${currentRound}`} style={{ display: 'flex', gap: 4 }}>
-      {Array.from({ length: 5 }, (_unused, index) => {
-        const round = rounds.get(index + 1);
-        const completed = index + 1 < currentRound;
-        const running = index + 1 === currentRound;
-        const background = running
-          ? C.green
-          : completed
-            ? round?.disposition === 'APPROVED' ? C.green : C.amber
-            : C.headEdge;
-        return (
-        <span
-          key={index}
-          className={running && active ? 'review-pip--running' : undefined}
-          title={round === undefined ? undefined : `round ${round.number}: ${round.disposition ?? round.phase}`}
-          style={{ width: 16, height: 8, borderRadius: 2, background }}
-        />
-        );
-      })}
-    </span>
-  );
+/**
+ * The review attempt budget, as stated by the board contract. The client draws
+ * the budget it was told about; it never extends it, and it never reads a round
+ * number as progress toward the goal — a spent budget is not a finished plan.
+ */
+const ATTEMPT_BUDGET = 5;
+
+type AttemptState = 'approved' | 'changes-requested' | 'recorded' | 'current' | 'unknown-outcome';
+
+/**
+ * One attempt, told apart by shape and words before colour: a tick, a cross, a
+ * filled dot, a bare outline and a question mark. The caption is what a tooltip
+ * and a screen reader read, so the distinction survives a greyscale board.
+ */
+const ATTEMPT_MARKS: Record<AttemptState, { glyph: string; stroke: string; fill: string; tone: string }> = {
+  approved: { glyph: '✓', stroke: REVIEW.approved, fill: REVIEW.approvedFill, tone: REVIEW.approved },
+  'changes-requested': { glyph: '✗', stroke: REVIEW.changesRequested, fill: REVIEW.changesRequestedFill, tone: REVIEW.changesRequested },
+  recorded: { glyph: '▪', stroke: REVIEW.recorded, fill: 'transparent', tone: REVIEW.recorded },
+  current: { glyph: '●', stroke: REVIEW.current, fill: 'transparent', tone: REVIEW.current },
+  'unknown-outcome': { glyph: '?', stroke: REVIEW.unknown, fill: 'transparent', tone: REVIEW.unknown },
+};
+
+/** The disposition the server records for one attempt, or null when it records none. */
+function recordedDisposition(card: WebMissionCard, number: number): string | null {
+  const history = card.reviewHistory.find((entry) => entry.number === number)?.disposition ?? null;
+  return history ?? (number === card.reviewRound ? card.reviewDisposition : null);
 }
 
 /**
- * The per-checkpoint evidence panel. Opens when a user clicks a checkpoint
- * label on the mission card and closes on its close control, the Escape key, or a
- * click on the backdrop. It renders the selected checkpoint's first-line
- * description and every recorded Goal Check row for it. Missions whose wire
- * card carries no evidence rows render nothing, so an empty mission keeps its
- * original layout with no panel.
+ * What one attempt slot may claim. A round number alone claims nothing: a past
+ * attempt with no recorded disposition stays unknown rather than borrowing an
+ * outcome, and APPROVED and REQUEST_CHANGES name a glyph; any other recorded
+ * disposition prints verbatim, because naming a synonym for it is the domain's
+ * job and not this one.
  */
-export function CheckpointDetail({ card, initial, onClose }: {
-  card: WebMissionCard;
-  initial: string;
-  onClose: () => void;
-}) {
-  const evidence = card.checkpointEvidence ?? [];
-  const hasRows = evidence.some((checkpoint) => checkpoint.goalCheck.length > 0);
-  if (!hasRows) { return null; }
-  const [selected, setSelected] = useState(initial);
-  // `initial` is the card's checkpoint filename ("CP-2.md"); evidence entries
-  // are keyed by checkpoint name ("CP-2"), so match on either form.
-  const active = evidence.find((checkpoint) => checkpoint.name === selected || selected === `${checkpoint.name}.md`) ?? evidence[0];
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') { onClose(); } };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-  const onBackdrop = (event: React.MouseEvent<HTMLDivElement>) => {
-    // The backdrop closes only on a direct click. Clicks inside the dialog
-    // (checkpoint selector buttons, the close button, evidence text) bubble up
-    // to the backdrop and must not dismiss the panel.
-    if (event.target !== event.currentTarget) { return; }
-    onClose();
-  };
-  return (
-    <div
-      role="presentation"
-      style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.55)' }}
-      onClick={onBackdrop}
-    >
-      <section
-        role="dialog"
-        aria-label={`Checkpoint evidence for ${card.id}`}
-        aria-modal="true"
-        style={{
-          width: 480,
-          maxWidth: '92vw', maxHeight: '80vh', overflow: 'auto',
-          background: '#101c16', border: '1px solid #2f5a3f', borderRadius: 6,
-          color: '#cbd9cf', padding: 16, fontFamily: 'inherit', fontSize: 12,
-          boxShadow: '0 12px 36px rgba(0,0,0,.6)',
-        }}
+function attemptSlot(card: WebMissionCard, currentRound: number, number: number): { state: AttemptState; label: string } {
+  const disposition = recordedDisposition(card, number);
+  if (disposition === 'APPROVED') { return { state: 'approved', label: 'outcome recorded: approved' }; }
+  if (disposition === 'REQUEST_CHANGES') { return { state: 'changes-requested', label: 'outcome recorded: changes requested' }; }
+  if (disposition !== null) { return { state: 'recorded', label: `outcome recorded: ${disposition}` }; }
+  return number === currentRound
+    ? { state: 'current', label: 'current attempt, no outcome recorded' }
+    : { state: 'unknown-outcome', label: 'outcome not recorded' };
+}
+
+/**
+ * The review attempts so far, one circle each. Attempts that may never happen
+ * are not drawn: the budget bounds what is valid, it is not a promise. It shares no shape
+ * with the checkpoint track below it, and it does not blink — whether work is
+ * running is the fan's fact, carried by the server's work publication.
+ */
+function ReviewAttempts({ card }: { card: WebMissionCard }) {
+  const currentRound = card.reviewRound;
+  if (currentRound === null) { return null; }
+  // The transport admits any finite number. A round the budget cannot hold is
+  // reported as unknown: never clamped into a valid slot, never drawn as extra
+  // circles, never given a negative remainder.
+  if (!Number.isInteger(currentRound) || currentRound < 1 || currentRound > ATTEMPT_BUDGET) {
+    return (
+      <span
+        role="group"
+        aria-label="Review attempts"
+        data-review-round="unknown"
+        title={`the supplied review round ${String(currentRound)} lies outside the attempt budget`}
+        style={{ color: C.faint, fontSize: TYPE.meta, letterSpacing: TRACK.normal }}
       >
-        <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
-          <h2 style={{ margin: 0, fontSize: 14, color: C.cyan }}>{card.id} — checkpoints</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{ background: 'none', border: '1px solid #3a4550', borderRadius: 4, color: '#aab4bf', cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5, padding: '2px 8px' }}
+        review round unknown
+      </span>
+    );
+  }
+  return (
+    <span
+      role="group"
+      aria-label="Review attempts"
+      style={{ display: 'inline-flex', gap: SPACE.xs, alignItems: 'center', fontSize: TYPE.meta }}
+    >
+      {Array.from({ length: currentRound }, (_unused, index) => {
+        const number = index + 1;
+        const { state, label } = attemptSlot(card, currentRound, number);
+        const mark = ATTEMPT_MARKS[state];
+        const caption = `attempt ${number}: ${label}`;
+        return (
+          <span
+            key={number}
+            role="img"
+            aria-label={caption}
+            title={caption}
+            data-review-attempt={number}
+            data-review-state={state}
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 14, height: 14, borderRadius: '50%', flexShrink: 0, lineHeight: 1,
+              border: `1px solid ${mark.stroke}`, background: mark.fill, color: mark.tone,
+            }}
           >
-            close
-          </button>
-        </header>
-        <nav aria-label="Checkpoints" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
-          {evidence.map((checkpoint) => {
-            const chosen = checkpoint.name === active?.name;
-            return (
-              <button
-                key={checkpoint.name}
-                type="button"
-                aria-pressed={chosen}
-                onClick={() => setSelected(checkpoint.name)}
-                style={{
-                  background: chosen ? '#1f4a31' : '#16241c',
-                  border: `1px solid ${chosen ? '#43e891' : '#2f4a3a'}`,
-                  borderRadius: 4, color: chosen ? '#68f6a7' : '#aab4bf',
-                  cursor: 'pointer', fontFamily: 'inherit', fontSize: 11,
-                  padding: '3px 9px',
-                }}
-              >
-                {checkpoint.name}
-              </button>
-            );
-          })}
-        </nav>
-        <p style={{ margin: '0 0 10px', color: C.dim, fontStyle: 'italic' }}>
-          {active?.description ?? 'No description recorded for this checkpoint.'}
-        </p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {(active?.goalCheck ?? []).map((row, index) => (
-            <div key={index} style={{ border: '1px solid #264030', borderRadius: 4, padding: '8px 10px', background: '#0c1712' }}>
-              <div style={{ color: '#68f6a7', marginBottom: 4 }}>{row.criterion}</div>
-              <div style={{ color: '#cbd9cf' }}>evidence: {row.evidence}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-    </div>
+            {mark.glyph}
+          </span>
+        );
+      })}
+    </span>
   );
 }
 
@@ -161,104 +134,65 @@ function FlightCardHeader({ card, agent, liveAgent, accent, spinning }: { card: 
   return (
       <div
         style={{
-          display: 'flex', alignItems: 'stretch', gap: 8, padding: '9px 10px 8px',
+          display: 'flex', alignItems: 'stretch', gap: SPACE.md, padding: `${SPACE.lg}px ${SPACE.lg}px ${SPACE.md}px`,
           background: C.cardHead, borderBottom: `1px solid ${C.panel}`,
         }}
       >
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0, lineHeight: 0 }}>
+        <div style={{ display: 'flex', gap: SPACE.sm, alignItems: 'center', flexShrink: 0, lineHeight: 0 }}>
           <Fan size={23} color={accent} spinning={spinning} speed="0.9s" />
           <Fan size={23} color={accent} spinning={spinning} speed="1.7s" />
         </div>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, minWidth: 0 }}>
-            <span style={{ color: C.cyan, fontWeight: 500, flexShrink: 0 }}>{card.id}</span>
-            <div style={{ flex: 1, minWidth: 4 }} />
-            {agent !== null && (
-            <span
-              title={agent === null ? undefined : `${liveAgent === null ? 'implementer' : 'active worker'} family: ${agent}`}
-              style={{
-                color: agent === null ? C.faint : familyAccent(agent),
-                fontSize: 10, letterSpacing: 1, minWidth: 0,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}
-            >
-              {agent}
-            </span>
-            )}
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: SPACE.md, minWidth: 0 }}>
+            <span style={{ color: C.cyan, fontWeight: 500, flexShrink: 0, fontSize: TYPE.meta, letterSpacing: TRACK.normal }}>{card.id}</span>
+            <div style={{ flex: 1, minWidth: SPACE.sm }} />
+            <AgentLabel agent={agent} liveAgent={liveAgent} />
           </div>
-          <p style={{ margin: '5px 0 0', lineHeight: 1.35, color: C.text, fontSize: 13 }}>{card.title}</p>
+          <p style={{ margin: `${SPACE.sm}px 0 0`, lineHeight: 1.35, color: C.text, fontSize: TYPE.heading }}>{card.title}</p>
         </div>
       </div>
 
   );
 }
 
-function FlightCardReview({ card, review }: { card: WebMissionCard; review: string[] }) {
+function FlightCardReview({ card }: { card: WebMissionCard }) {
   return (
-(card.pullRequest !== null || review.length > 0) && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8, fontSize: 11 }}>
-            {card.pullRequest !== null && (card.pullRequest.url === null
-              ? <span style={{ color: C.cyan }}>PR #{card.pullRequest.id}</span>
-              : <a href={card.pullRequest.url} rel="noreferrer" style={{ color: C.cyan }}>PR #{card.pullRequest.id}</a>)}
-            {review.length > 0 && <span style={{ color: C.dim }}>{review.join(' · ')}</span>}
-            <div style={{ flex: 1, minWidth: 4 }} />
-            <ReviewPips card={card} />
+(card.pullRequest !== null || card.reviewRound !== null) && (
+          <div style={{ marginBottom: SPACE.md, fontSize: TYPE.meta }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.md, flexWrap: 'wrap' }}>
+              {card.pullRequest !== null && (card.pullRequest.url === null
+                ? <span style={{ color: C.cyan }}>PR #{card.pullRequest.id}</span>
+                : <a href={card.pullRequest.url} rel="noreferrer" style={{ color: C.cyan }}>PR #{card.pullRequest.id}</a>)}
+              <ReviewAttempts card={card} />
+            </div>
           </div>
         )
   );
 }
 
-function FlightCardCheckpoint({ card, openCheckpointDetail }: { card: WebMissionCard; openCheckpointDetail: () => void }) {
-  const checkpointEvidence = card.checkpointEvidence ?? [];
-  const hasCheckpointEvidence = checkpointEvidence.some(entry => entry.goalCheck.length > 0);
+function FlightCardCheckpoint({ card }: { card: WebMissionCard }) {
   return (
-(card.checkpoint !== null || checkpointEvidence.length > 0) && (
-          <div
-            role="button"
-            tabIndex={hasCheckpointEvidence ? 0 : undefined}
-            aria-label={hasCheckpointEvidence ? `View checkpoint evidence for ${card.checkpoint}` : undefined}
-            onClick={openCheckpointDetail}
-            onKeyDown={(event: ReactKeyboardEvent<HTMLElement>) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openCheckpointDetail(); } }}
-            style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginBottom: 8, fontSize: 11, cursor: hasCheckpointEvidence ? 'pointer' : 'default', position: 'relative', zIndex: 10 }}
-          >
-            <CheckpointPips card={card} />
-            {card.checkpoint !== null && <span style={{ color: C.dim }} title={card.checkpointDescription ?? undefined}>{card.checkpoint}</span>}
-            <span style={{ color: GATE_COLOR[card.gate], fontWeight: card.gate === 'failed' ? 700 : 400 }}>
-              {GATE_TEXT[card.gate]}
-            </span>
-          </div>
-        )
+    <div>
+      <CheckpointPips card={card} />
+      <div style={{ marginBottom: SPACE.md, fontSize: TYPE.meta, color: GATE_COLOR[card.gate], fontWeight: card.gate === 'failed' ? 700 : 400 }}>
+        {GATE_TEXT[card.gate]}
+      </div>
+    </div>
   );
 }
-
-function executingFamily(card: WebMissionCard) { return card.execution?.invocations[0]?.family ?? null; }
 
 function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCommands }: { card: WebMissionCard; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingCommands: PendingCommands }) {
-  const [openCheckpoint, setOpenCheckpoint] = useState<string | null>(null);
-  const openCheckpointDetail = () => setOpenCheckpoint(openCheckpoint === card.checkpoint ? null : (card.checkpoint ?? null));
   const spinning = isSpinning(card);
   // The work publication names the worker; a px process alone does not.
   const working = card.activity.work.kind === 'working';
   const liveAgent = executingFamily(card);
   const agent = liveAgent ?? (working ? null : card.agent);
-  const accent = card.gate === 'failed' ? C.red : familyAccent(agent);
-  const actor = actorLine(card);
+  const accent = card.gate === 'failed' ? C.red : agent === null ? C.stroke : familyAccent(agent);
   const actions = cardCommands(card.actions);
   const cancel = cancelAction(card.actions);
   // The footer carries the actions the server marked runnable for this card.
   // Which ones those are is the server's lifecycle decision, not a lane rule
   // evaluated here — the client only reads `state`.
-  // Phase and disposition often carry the same word in different casing; the
-  // reference prints one review status, so repeats collapse to one chip.
-  const review = [...new Map(
-    [
-      card.reviewRound === null ? null : `round ${card.reviewRound}/5`,
-      card.reviewPhase,
-      card.reviewDisposition,
-    ]
-      .filter((part): part is string => part !== null)
-      .map((part) => [part.toLowerCase(), part] as const),
-  ).values()];
   return (
     <article
       data-board-card={card.id}
@@ -269,42 +203,39 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
       onFocus={(event) => { if (event.target === event.currentTarget) { onSelect(card.id); } }}
       onDragStart={(event) => onDragStart(card, event)}
       style={{
-        border: `1px solid ${selected ? C.cyan : C.cardEdge}`, borderTop: `2px solid ${edgeColor(card)}`,
-        borderRadius: 6, background: C.card, marginBottom: 22,
+        ...laneCard(selected), borderTop: `2px solid ${edgeColor(card)}`,
+        background: C.card, marginBottom: 22,
         boxShadow: '0 6px 18px rgba(0,0,0,.55)',
       }}
     >
       <FlightCardHeader card={card} agent={agent} liveAgent={liveAgent} accent={accent} spinning={spinning} />
 
-      <div style={{ padding: '8px 10px' }}>
-        <FlightCardReview card={card} review={review} />
-        <FlightCardCheckpoint card={card} openCheckpointDetail={openCheckpointDetail} />
-        {openCheckpoint !== null && (
-          <CheckpointDetail card={card} initial={openCheckpoint} onClose={() => setOpenCheckpoint(null)} />
-        )}
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
-          <span aria-hidden="true" style={{ color: actor.color, fontSize: 8, flexShrink: 0 }}>●</span>
-          <span style={{ color: actor.color, fontSize: 11 }}>{actor.text}</span>
-        </div>
-        <p style={{ color: C.faint, fontSize: 10, margin: '5px 0 0' }}>{coordinatorText(card)}</p>
+      <div style={{ padding: SPACE.lg }}>
+        <FlightCardReview card={card} />
+        <FlightCardCheckpoint card={card} />
+        <ActorLine card={card} />
+        <p style={{ color: C.faint, fontSize: TYPE.micro, margin: `${SPACE.sm}px 0 0` }}>{coordinatorText(card)}</p>
         {card.nextActionText !== null && (
-          <p style={{ color: C.dim, fontSize: 11, lineHeight: 1.4, margin: '5px 0 0' }}>
-            <span style={{ color: C.faint }}>next:</span> {card.nextActionText}
+          <p style={{ color: C.dim, fontSize: TYPE.meta, lineHeight: 1.4, margin: `${SPACE.sm}px 0 0` }}>
+            <span style={{ color: C.faint }}>recorded guidance ({card.checkpoint}):</span> {card.nextActionText}
           </p>
         )}
         {card.flags.length > 0 && (
-          <p style={{ color: C.amber, fontSize: 10, margin: '6px 0 0', letterSpacing: 0.5 }}>▲ {card.flags.join(' · ')}</p>
+          <p style={{ color: C.amber, fontSize: TYPE.micro, margin: `${SPACE.md}px 0 0`, letterSpacing: TRACK.tight }}>▲ {card.flags.join(' · ')}</p>
         )}
         {card.blockingReason !== null && (
-          <p style={{ color: C.red, fontSize: 10, margin: '6px 0 0', letterSpacing: 0.5 }}>{card.blockingReason}</p>
+          <p style={{ color: C.red, fontSize: TYPE.micro, margin: `${SPACE.md}px 0 0`, letterSpacing: TRACK.tight }}>{card.blockingReason}</p>
         )}
       </div>
 
       {(actions.length > 0 || cancel !== null) && (
         <div
           style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 7,
-            padding: '7px 10px', borderTop: `1px solid ${C.rule}`, background: C.cardFoot,
+            display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: SPACE.md,
+            // The action row fits the narrowest lane with only a few px of slack,
+            // so the footer keeps its horizontal padding at the md step instead
+            // of lg; lg would push three projected actions onto a second row.
+            padding: SPACE.md, borderTop: `1px solid ${C.rule}`, background: C.cardFoot,
             flexWrap: 'wrap',
           }}
         >
@@ -327,7 +258,7 @@ function Grille() {
     <div aria-hidden="true" style={{ display: 'flex', alignItems: 'flex-start', height: 0, paddingLeft: '10%', overflow: 'visible' }}>
       <div
         style={{
-          display: 'flex', alignItems: 'flex-start', gap: 5, width: '32%', height: 9,
+          display: 'flex', alignItems: 'flex-start', gap: SPACE.sm, width: '32%', height: 9,
           overflow: 'hidden', background: 'linear-gradient(180deg,#1d3325 0%,#16281c 100%)',
           borderRadius: '0 0 1px 1px', padding: '0 2px 1px', boxShadow: '0 3px 6px rgba(0,0,0,.6)',
         }}
@@ -365,10 +296,10 @@ export function FlightColumn({ stage, style, onAction, onSelect, onDragStart, on
         count={stage.count}
         countText={`${stage.count} ${stage.count === 1 ? 'card' : 'cards'}`}
         note={note.text === '' ? undefined : (
-          <span style={{ color: note.color, fontSize: 10, whiteSpace: 'nowrap' }}>{note.text}</span>
+          <span style={{ color: note.color, fontSize: TYPE.micro, whiteSpace: 'nowrap' }}>{note.text}</span>
         )}
       />
-      <div onDragOver={(event: DragEvent<HTMLDivElement>) => { if (draggable) { event.preventDefault(); } }} onDrop={() => onDrop(stage.lane)} style={{ flex: 1, overflowY: 'auto', paddingTop: 10, minHeight: 0 }}>
+      <div onDragOver={(event: DragEvent<HTMLDivElement>) => { if (draggable) { event.preventDefault(); } }} onDrop={() => onDrop(stage.lane)} style={{ flex: 1, overflowY: 'auto', paddingTop: SPACE.lg, minHeight: 0 }}>
         {stage.cards.length === 0 && <p style={laneEmpty}>no missions in this stage</p>}
         {stage.cards.map((card) => <FlightCard key={card.id} card={card} onAction={onAction} onSelect={onSelect} onDragStart={onDragStart} selected={selectedId === card.id} pendingCommands={pendingCommands} />)}
       </div>

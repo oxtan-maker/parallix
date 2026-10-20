@@ -898,3 +898,22 @@ test('checkpoint progress state round-trips and invalid states fail closed (TASK
   malformed.stages.flatMap((stage: { cards: unknown[] }) => stage.cards)[0].checkpointEvidence[0].state = 'guess';
   assert.equal(validateWebBoardSnapshot(malformed).ok, false);
 });
+
+
+test('execution checkpoint and absent current plan round-trip fail closed (TASK-2776)', () => {
+  for (const state of ['completed', 'future', 'current'] as const) {
+    const wire = toWebBoardSnapshot(makeProjection({ active: [makeFullCard({ currentCheckpoint: state === 'current' ? 'CP-2' : null,
+      checkpointEvidence: [{ name: 'CP-2', description: 'Step', goalCheck: [], state }] })] }));
+    assert.equal(validateWebBoardSnapshot(wire).ok, true);
+    const card = wire.stages.flatMap(stage => stage.cards)[0];
+    assert.equal(card.currentCheckpoint, state === 'current' ? 'CP-2' : null);
+    const malformed = JSON.parse(JSON.stringify(wire));
+    malformed.stages.flatMap((stage: { cards: unknown[] }) => stage.cards)[0].checkpointEvidence[0].state = 'running';
+    assert.equal(validateWebBoardSnapshot(malformed).ok, false);
+    malformed.stages.flatMap((stage: { cards: unknown[] }) => stage.cards)[0].checkpointEvidence[0].state = 'planned';
+    assert.equal(validateWebBoardSnapshot(malformed).ok, false);
+    const invalidAttribution = JSON.parse(JSON.stringify(wire));
+    invalidAttribution.stages.flatMap((stage: { cards: unknown[] }) => stage.cards)[0].currentCheckpoint = 42;
+    assert.equal(validateWebBoardSnapshot(invalidAttribution).ok, false);
+  }
+});

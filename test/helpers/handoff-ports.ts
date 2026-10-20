@@ -92,6 +92,7 @@ export function makePorts(recorder: Recorder, overrides: HandoffOverrides = {}):
       listEntries: () => [],
     },
     git: {
+      commitMissionChanges: () => ({ repaired: false, blocker: null }),
       git: (args: readonly string[]) => ({ signal: null,  status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }),
       run: () => ({ signal: null, stdout: '', stderr: '',  status: 0 }),
       getCurrentBranch: () => BRANCH,

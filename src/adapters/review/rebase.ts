@@ -1,3 +1,4 @@
+import { commitDirtyFiles } from '../git/commit-dirty-files.js';
 /**
  * Rebase helpers for pre-review workflow.
  *
@@ -59,76 +60,31 @@ export async function commitSafeMissionArtifacts(slug: string, worktree: string,
   isWorkflowGeneratedArtifactFn?: (_file: string) => boolean;
 } = {}): Promise<{ ok: boolean; dirty: boolean; unsafe?: boolean; unsafeFiles?: string[]; hookFailure?: boolean; hook?: string; output?: string }> {
   const rootDir = worktree || process.cwd();
-  const statusResult = gitFn(['-C', rootDir, 'status', '--porcelain=v1', '-z']);
-  if (statusResult.status !== 0 || !statusResult.stdout) {
-    return { ok: true, dirty: false };
-  }
-
-  const parsePorcelainZ = (stdout: string | Buffer) => {
-    const entries = String(stdout).split('\0').filter(Boolean);
-    const dirty: { xy: string; file: string; paths: string[]; source?: string }[] = [];
-    for (let i = 0;i < entries.length;i += 1) {
-      const entry = entries[i];
-      const xy = entry.slice(0, 2);
-      const file = entry.slice(3);
-      const record: { xy: string; file: string; paths: string[]; source?: string } = { xy, file, paths: [file] };
-      if ((xy[0] === 'R' || xy[0] === 'C') && i + 1 < entries.length) {
-        const source = entries[i + 1];
-        record.source = source;
-        record.paths.push(source);
-        i += 1;
-      }
-      dirty.push(record);
-    }
-    return dirty;
-  };
-
-  const dirtyFiles = parsePorcelainZ(statusResult.stdout);
-
-  const unmerged = dirtyFiles.filter(f => ['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'].includes(f.xy));
-  if (unmerged.length > 0) {
-    error(fmt.status('FAIL', `Cannot auto-commit: unmerged/conflicting files detected:\n${unmerged.map((f: { file: string }) => `       - ${f.file}`).join('\n')}`));
-    return { ok: false, dirty: true, unsafe: true, unsafeFiles: unmerged.map((f: { file: string }) => f.file) };
-  }
-
-  // architecture migration: there is no stats CSV to auto-commit any more — measurements
-  // live in the operator-local database, outside every repository.
   const resolvedTaskFile = taskFile ? path.relative(rootDir, taskFile) : null;
-  const isSafeToCommit = (file: string) =>
-    isWorkflowGeneratedArtifactFn(file)
-    || isMissionArtifactFn(file, slug, rootDir)
-    || !!(resolvedTaskFile && file === resolvedTaskFile);
-
-  // Unrelated dirty files belong to the caller and must remain untouched. Git's
-  // index is shared by a normal commit, so commit only the vetted paths below
-  // rather than allowing a pre-staged unrelated path into the auto-commit.
-  const safeRecords = dirtyFiles.filter((f: { paths: string[] }) => f.paths.every(isSafeToCommit));
-  if (safeRecords.length === 0) {
-    return { ok: true, dirty: true };
-  }
-
-  log(`Auto-committing safe mission artifacts for ${fmt.branch(`mission/${slug}`)} before rebase...`);
-  safeRecords.forEach((f: { file: string }) => {
-    log(`       - ${f.file}`);
-    gitFn(['-C', rootDir, 'add', '--', f.file]);
+  const blockers: string[] = [];
+  const result = commitDirtyFiles(rootDir, slug, gitFn, log, message => blockers.push(message), {
+    accepts: file => isWorkflowGeneratedArtifactFn(file)
+      || isMissionArtifactFn(file, slug, rootDir)
+      || !!(resolvedTaskFile && file === resolvedTaskFile),
+    message: `workflow(${slug}): auto-commit mission artifacts before pre-review rebase`,
   });
+  // An unreadable status leaves nothing to commit; the rebase reports the Git error itself.
+  if (result.blocker && result.operation !== 'status') { blockers.forEach(message => error(message)); }
+  return cleanupOutcome(result, error);
+}
 
-  const commitRes = gitFn([
-    '-C', rootDir, 'commit', '--only', '-m', `workflow(${slug}): auto-commit mission artifacts before pre-review rebase`,
-    '--', ...safeRecords.map((f: { file: string }) => f.file),
-  ]);
-  if (commitRes.status === 0) {
-    log(fmt.status('PASS', 'Mission artifacts committed.'));
-    return { ok: true, dirty: true };
-  } else {
-    const failureMsg = [commitRes.stderr, commitRes.stdout].filter(Boolean).join('\n').trim();
-    error(fmt.status('FAIL', `Failed to commit mission artifacts: ${failureMsg}`));
-    // The index was just staged from a vetted safe-file list, so a non-zero
-    // `git commit` here is the commit hook rejecting the tree. Hook identity
-    // follows the failing git operation (commit -> pre-commit); no classifier
-    // regex reads the output (TASK-2377.02).
-    return { ok: false, dirty: true, hookFailure: true, hook: 'pre-commit', output: failureMsg };
+function cleanupOutcome(result: ReturnType<typeof commitDirtyFiles>, error: (_msg: string) => void): Awaited<ReturnType<typeof commitSafeMissionArtifacts>> {
+  if (result.conflicts) {
+    error(fmt.status('FAIL', `Cannot auto-commit: unmerged/conflicting files detected:\n${result.conflicts.map(file => `       - ${file}`).join('\n')}`));
+    return { ok: false, dirty: true, unsafe: true, unsafeFiles: result.conflicts };
   }
+  if (result.operation === 'status') { return { ok: true, dirty: false }; }
+  if (result.blocker && result.operation === 'commit') {
+    error(fmt.status('FAIL', `Failed to commit mission artifacts: ${result.output}`));
+    return { ok: false, dirty: true, hookFailure: true, hook: 'pre-commit', output: result.output };
+  }
+  if (result.blocker) { return { ok: false, dirty: result.dirty ?? false }; }
+  return { ok: true, dirty: result.repaired || !!result.dirty };
 }
 
 /**

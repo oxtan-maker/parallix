@@ -1,4 +1,4 @@
-import { agentFamily, type AgentAvailability, type AgentFamily, type AgentSelectionSnapshot, type StepSelectionPolicy } from '../../domain/agents.js';
+import { agentPolicyStep, agentFamily, type AgentAvailability, type AgentFamily, type AgentSelectionSnapshot, type StepSelectionPolicy } from '../../domain/agents.js';
 import type { AgentSelectionSnapshotPort } from '../../application/domain-ports.js';
 import { AgentBlockService, parseAgentBlockUntil } from '../../application/services/agent-block-service.js';
 import type { AgentBlocklistRepository } from '../../application/ports/agent-blocklist.js';
@@ -64,6 +64,7 @@ export class SqliteAgentSelectionSnapshotAdapter implements AgentSelectionSnapsh
       };
     });
     const steps = Object.fromEntries(Object.entries(config.steps ?? {}).map(([step, value]) => [step, policy(value, this.knownAgentFamilies)]));
+    steps['act-on-review'] = steps[agentPolicyStep('act-on-review')] ?? policy(null, this.knownAgentFamilies);
     return { capturedAtMs, defaultPolicy: policy(null, this.knownAgentFamilies), steps, agents };
   }
 }

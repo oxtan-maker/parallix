@@ -1,8 +1,8 @@
 ---
 id: TASK-2776
 title: Make web checkpoint labels and current work agree
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-18 06:02'
 labels:
   - bug

@@ -150,6 +150,8 @@ export interface WebMissionCard {
   readonly closed: boolean;
   readonly agent: string | null;
   readonly checkpoint: string | null;
+  /** Null when the authoritative work fact does not name a checkpoint. */
+  readonly currentCheckpoint?: string | null;
   readonly checkpointDescription: string | null;
   /**
    * Per-checkpoint evidence for the mission, oldest first. Optional-and-nullable:

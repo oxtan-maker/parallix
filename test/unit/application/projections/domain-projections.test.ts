@@ -313,6 +313,7 @@ test('mission card preserves planned-only, partial and empty checkpoint plans (T
   const facts = { latestGate: 'not-run' as const, reviewApproval: null, currentWork: null, blockingReason: null, flags: [] };
   const planned = projectMissionCard(mission, facts);
   assert.equal(planned.checkpoint, null);
+  assert.equal(planned.currentCheckpoint, 'CP-1');
   assert.deepEqual(planned.checkpointEvidence.map(cp => cp.state), ['current', 'future', 'future']);
   assert.deepEqual(planned.checkpointEvidence.map(cp => cp.name), ['CP-1', 'CP-2', 'CP-3']);
   assert.deepEqual(planned.checkpointEvidence.map(cp => cp.description), ['Deliver step 1', 'Deliver step 2', 'Deliver step 3']);
@@ -321,6 +322,8 @@ test('mission card preserves planned-only, partial and empty checkpoint plans (T
     ...checkpoints.slice(1),
   ] }, facts);
   assert.equal(partial.checkpoint, 'CP-1');
+  assert.equal(partial.currentCheckpoint, 'CP-2');
+  assert.equal(partial.nextActionText, 'CP-2');
   assert.deepEqual(partial.checkpointEvidence.map(cp => cp.state), ['completed', 'current', 'future']);
   assert.deepEqual(partial.checkpointEvidence.map(cp => cp.goalCheck.length), [1, 0, 0]);
   assert.deepEqual(partial.checkpointEvidence.map(cp => cp.name), ['CP-1', 'CP-2', 'CP-3']);
@@ -329,6 +332,7 @@ test('mission card preserves planned-only, partial and empty checkpoint plans (T
     assert.equal(projectMissionCard({ ...mission, status }, facts).checkpointEvidence.some(cp => cp.state === 'current'), false);
   }
   const complete = projectMissionCard({ ...mission, checkpoints: checkpoints.map(cp => ({ ...cp, goalCheck: [{ criterion: 'done', evidence: 'npm test' }], nextActionText: 'handoff' })) }, facts);
+  assert.equal(complete.currentCheckpoint, null);
   assert.deepEqual(complete.checkpointEvidence.map(cp => cp.state), ['completed', 'completed', 'completed']);
   const gap = projectMissionCard({ ...mission, checkpoints: [checkpoints[0], { ...checkpoints[1], goalCheck: [{ criterion: 'done', evidence: 'npm test' }], nextActionText: 'resume CP-1' }, checkpoints[2]] }, facts);
   assert.deepEqual(gap.checkpointEvidence.map(cp => cp.state), ['current', 'completed', 'future']);

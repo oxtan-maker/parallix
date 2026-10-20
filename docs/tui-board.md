@@ -69,9 +69,10 @@ PR 42 · review approved
 
 - **slug and agent** — the mission id and the assigned agent family.
 - **title** — truncated with `…` when it does not fit the column.
-- **checkpoint and gate** — the latest checkpoint file and the state of the gate
+- **checkpoint and gate** — the last recorded checkpoint and the state of the gate
   that applies now (see [Gate states](#gate-states)).
-- **next step** — the `Next action:` line from that checkpoint.
+- **next step** — recorded guidance from the `Next action:` line of that
+  checkpoint.
 - **pull request and review** — the PR number when one exists, and whether the
   current revision is approved.
 - **blocking reason** — a red flag line, shown only when the mission is blocked.
@@ -79,6 +80,11 @@ PR 42 · review approved
 A fact the projection does not have reads `unavailable`. That is deliberate: the
 card distinguishes "we know there is nothing" from "we could not read this", and
 it never guesses a value the workflow has not recorded.
+
+Backlog and refined web cards with current work show its summary or blocking
+reason, and name the family the provider observation saw in the same header
+label a flight card uses. The assigned family never stands in for the executing
+worker, and no card header carries a work badge or an execution count row.
 
 Web cards show the available commands alongside Cancel. When no command can
 run, one unavailable control explains why. Commands that can run together remain
@@ -91,16 +97,22 @@ the mission worktree is missing, is on another branch, or the base cannot be
 resolved, the command stops before any merge or push and its outcome names the
 mission and the missing fact.
 
-Web cards show the entire checkpoint plan in order, including checkpoints with
-no evidence yet. Completed checkpoints are green; future checkpoints are dim.
-On an active mission, the first checkpoint without recorded evidence is green,
-using the same color as the current review indicator and completed checkpoints.
-That current checkpoint uses the review indicator's blink while the board reports
-working activity, and stays steady when work stops. Reduced-motion settings
-disable the animation. Hover an indicator to read its name and planned
-description. Missions without a checkpoint plan show no indicators.
+Web cards show a bounded neutral checkpoint track with cyan fill for the fraction
+of supplied entries explicitly marked completed. Hover the track to read its
+counts and separate current and recorded checkpoint labels; screen readers receive
+the same summary. Current work does not add completion. Checkpoint
+names are labels, so sparse names do not change the supplied plan size. Missing
+or empty plans show plan unavailable without a progress track; legacy plans with
+omitted states show
+completion unknown and no fill, even when evidence is present. Checkpoint tracks
+never blink.
 
-Click the latest recorded checkpoint label to read its Goal Check evidence.
+Click the checkpoint track, or focus it and press Enter or Space, to open the
+checkpoint dialog, including in intake cards and the expanded done rail. A
+checkmark to the right means every supplied checkpoint is explicitly completed.
+The dialog opens on the supplied current checkpoint, or the recorded checkpoint when no current entry is
+supplied. Select any checkpoint to read its description and Goal Check evidence;
+planned entries without evidence remain available.
 Close the evidence panel with its close control, Escape, or the backdrop.
 Checkpoint indicators stay beneath the terminal and mission edit dialogs, so
 they cannot cover dialog content or receive clicks through a backdrop.
@@ -149,7 +161,7 @@ until the step that produces it has run.
 
 | Field | Source | Appears after |
 |---|---|---|
-| checkpoint, next step, Goal Check | the latest `CP-N.md` in the mission directory | the executing agent commits checkpoint evidence |
+| recorded checkpoint, guidance, Goal Check | recorded Mission checkpoint evidence | the executing agent records checkpoint evidence |
 | gate | executor observations and verification evidence for the mission worktree's current inputs (see [Gate states](#gate-states)) | the mission declares a gate, or integration gates are configured |
 | pull request | the pull-request reference the review loop records on the round once it confirms an open PR | `px review` with a review provider configured |
 | agent availability | the `agent_blocklist` table | an agent hits a provider usage limit |
@@ -317,6 +329,11 @@ default for one invocation, run `PARALLIX_NO_TUI=1 px`; set that environment
 variable in your shell environment to keep usage help as the no-command default.
 
 ## Browser freshness and operation history
+
+The web board keeps informational body and metadata text at 11px or larger,
+including unavailable actions and unknown states. Secondary text colors meet
+4.5:1 contrast on their rendered surfaces, including faded shipped cards.
+Decorative strokes and hidden glyphs use separate treatments.
 
 The web host stays responsive while a separate process builds board data. A read
 that exceeds its deadline fails individually; it does not discard work already

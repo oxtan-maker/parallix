@@ -1,3 +1,8 @@
+/** Recovery keeps its launch identity but shares the implementation policy. */
+export function agentPolicyStep(step: string): string {
+  return step === 'act-on-review' ? 'active' : step;
+}
+
 export type AgentFamily = string & { readonly __brand: 'AgentFamily' };
 
 /** A selector exhausted the eligible pool after applying its exclusions. */
@@ -68,7 +73,7 @@ export function selectableAgents(
   step: string,
   excluded: ReadonlySet<AgentFamily> = new Set(),
 ): AgentFamily[] {
-  const policy = snapshot.steps[step] ?? snapshot.defaultPolicy;
+  const policy = snapshot.steps[agentPolicyStep(step)] ?? snapshot.defaultPolicy;
   const available = new Map(snapshot.agents.map((agent) => [agent.family, agent]));
   return policy.eligible.filter((family) => {
     const candidate = available.get(family);
@@ -102,7 +107,7 @@ export function selectAgent(
   const pool = selectableAgents(snapshot, step, request.excluded);
   if (request.preferred && pool.includes(request.preferred)) { return request.preferred; }
   if (pool.length === 0) { throw new AgentPoolExhaustedError(step, `No available agent for step ${step}`); }
-  const policy = snapshot.steps[step] ?? snapshot.defaultPolicy;
+  const policy = snapshot.steps[agentPolicyStep(step)] ?? snapshot.defaultPolicy;
   const random = request.random ?? Math.random;
   if (policy.strategy === 'weighted') {
     return weightedPick(pool, policy.weights ?? {}, random);

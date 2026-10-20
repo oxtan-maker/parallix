@@ -1,4 +1,4 @@
-import { makeProjection, makeCard } from '../../fixtures/board-projection.js';
+import { makeCard } from '../../fixtures/board-projection.js';
 import { reviewFindingId } from '../../../src/domain/review.js';
 import { changeRevision as fixtureRevision } from '../../../src/domain/review.js';
 // review read projection contract.
@@ -30,7 +30,9 @@ import { BoardProjectionBuilder } from '../../../src/application/projections/boa
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../../../src/adapters/sqlite/migration-runner.js';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
-import status from '../../../src/adapters/cli/commands/status.js';
+import { createStatusBoardAdapter } from '../../../src/adapters/cli/commands/status-adapter.js';
+import { renderStatus } from '../../../src/interfaces/cli/status.js';
+import { statusResult } from '../../fixtures/status-result.js';
 import { projectReviewHistory } from '../../../src/application/projections/mission-board.js';
 
 // Regression provenance: TASK-2358.
@@ -621,35 +623,15 @@ describe("review history status repro", { concurrency: false }, () => {
     assert.ok(persistedReview);
 
     const lines: string[] = [];
-    await status(['task-2344'], {
-      log: (line: string) => lines.push(line),
-      exit: () => {},
-      inferSlugFn: () => 'task-2344',
-      getCurrentBranchFn: () => 'mission/task-2344',
-      detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
-      getPrStatusFn: () => ({ raw: '',  exists: false as const }),
-      readAgentConfigOrExitFn: () => ({}),
-      eligibleAgentsForStepFn: () => [],
-      allWorkflowAgentNamesFn: () => [],
-      workflowLauncherStatusFn: () => ({ supported: true }),
-      getLastThreeCommitsFn: () => [],
-      getUncommittedCountFn: () => 0,
-      buildProjectionFn: async () => ({
-        build: async () => ({
-          ...makeProjection({ review: [makeCard({
-            id: slug,
-            status: 'review',
-            rawStatus: 'review',
-            checkpoint: null,
-            checkpointDescription: null,
-            reviewRound: 2,
-            reviewPhase: 'reviewing',
-            reviewDisposition: 'BLOCKED',
-            reviewHistory: projectReviewHistory(persistedReview),
-          })] }),
-        }),
-      }),
+    const board = createStatusBoardAdapter({
+      loadMissionFn: async () => ({ mission: { ...mission, review: persistedReview }, version: 2 }),
+      buildProjectionFn: async () => ({ buildMissionCard: async () => makeCard({
+        id: slug, status: 'review', rawStatus: 'review', checkpoint: null, checkpointDescription: null,
+        reviewRound: 2, reviewPhase: 'reviewing', reviewDisposition: 'BLOCKED',
+        reviewHistory: projectReviewHistory(persistedReview),
+      }) }),
     });
+    renderStatus(statusResult({ slug, missionData: await board.getMissionData(slug, '/fixture') }), line => lines.push(line));
 
     const output = lines.join('\n');
     assert.match(output, /Round 1 \[codex -> codex\]: PUSHBACK_ALL/);

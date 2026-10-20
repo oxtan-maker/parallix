@@ -20,12 +20,13 @@ import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Board } from '../../../../web/src/board.js';
-import { CheckpointDetail } from '../../../../web/src/flight-column.js';
+import { CheckpointDetail } from '../../../../web/src/checkpoint-detail.js';
+import { CheckpointPips } from '../../../../web/src/checkpoint-pips.js';
 import { FlowPanel } from '../../../../web/src/flow-panel.js';
 import { EMPTY_LIVE_PROGRESS, OPERATION_LOG_LIMIT, recordProgress } from '../../../../web/src/operation-log.js';
 import { Shell } from '../../../../web/src/shell.js';
 import { durationText, isSpinning } from '../../../../web/src/format.js';
-import { C } from '../../../../web/src/palette.js';
+import { C, TYPE } from '../../../../web/src/palette.js';
 import { toWebBoardSnapshot, validateWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import type { WebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import type { BoardProjection } from '../../../../src/application/projections/board.js';
@@ -219,10 +220,10 @@ test('card facts render from the server without substitution', () => {
   assert.match(html, /CP-2\.md/);
   assert.match(html, /gate ✗ FAIL/);
   assert.match(html, /act on reviewer findings/);
-  assert.match(html, /round 2\/5/);
+  assert.doesNotMatch(html, /future attempts|round 2 of 5/, 'rounds that may not happen are not announced');
   assert.match(html, /href="https:\/\/example\.invalid\/pr\/47"/);
-  assert.match(html, /review round 2/);
-  assert.match(html, /CP-2\.md<\/span>/, 'the checkpoint is a visible marker');
+  assert.match(html, /aria-label="Review attempts"/, 'the budget is a named group, not a progress track');
+  assert.match(html, /Recorded: CP-2\.md/, 'the checkpoint remains available in track metadata');
   assert.match(html, /review_blocking/);
 });
 
@@ -244,8 +245,8 @@ test('a checkpoint with evidence renders a clickable label that opens its detail
   });
   const html = render(snapshot);
   // The label is a clickable affordance only when evidence exists.
-  assert.match(html, /role="button"[^>]*aria-label="View checkpoint evidence for CP-2\.md"/);
-  assert.match(html, /CP-2\.md<\/span>/, 'the checkpoint label is a visible marker');
+  assert.match(html, /<button[^>]*aria-label="View checkpoint evidence for CP-2\.md:/);
+  assert.match(html, /Recorded: CP-2\.md/, 'recorded checkpoint remains in accessible track metadata');
 });
 
 test('the checkpoint detail renders the description and every evidence row', () => {
@@ -273,6 +274,28 @@ test('the checkpoint detail renders the description and every evidence row', () 
   assert.match(html, /test\/unit\/x/);
   assert.match(html, /src\/interfaces\/web\/transport\.ts/);
   assert.doesNotMatch(html, /runs the gate/, 'an unopened checkpoint keeps its rows hidden');
+});
+
+test('the checkpoint detail takes the board color authority and the title/body type steps (TASK-2773.02)', () => {
+  const snapshot = snapshotOf({
+    stages: makeProjection({
+      review: [makeCard({
+        id: fixtureMissionId('task-0100') as MissionCard['id'],
+        checkpoint: 'CP-2.md',
+        checkpointEvidence: [{ name: 'CP-2', description: 'CP-2: components extracted', goalCheck: [{ criterion: 'adds rows', evidence: 'test/unit/x' }] }],
+      })],
+    }).stages,
+  });
+  const card = snapshot.stages.flatMap((stage) => stage.cards).find((wireCard) => wireCard.checkpoint !== null);
+  assert.ok(card);
+  const html = renderToStaticMarkup(React.createElement(CheckpointDetail, { card, initial: 'CP-2.md', onClose: () => {} }));
+  // The panel is the board's own card surface and edge, not a modal palette.
+  assert.ok(html.includes(`background:${C.card}`), 'the dialog surface is the board card token');
+  assert.ok(html.includes(`border:1px solid ${C.cardEdge}`), 'the dialog edge is the board card edge token');
+  assert.match(html, /font-size:18px/, 'the dialog title sits at the title step of the shared ladder');
+  assert.match(html, /font-size:12px/, 'evidence rows sit at the body step, never smaller');
+  assert.ok(TYPE.title > TYPE.heading && TYPE.heading > TYPE.body && TYPE.body > TYPE.meta && TYPE.meta >= TYPE.micro && TYPE.micro >= 11,
+    'the shared ladder keeps title above heading above body, with metadata at or above the 11px floor');
 });
 
 test('the checkpoint detail renders nothing when the card carries no evidence rows', () => {
@@ -441,6 +464,34 @@ test('the top bar renders the server-owned decision-window completion count betw
     snapshot: { ...populated(), inFlightWip: 5, metrics: { ...populated().metrics, weeklyCompletedMissions: 21 } }, onRefresh: async () => {},
   }));
   assert.match(html, /wip <span[^>]*>5<\/span> · 21 missions\/wk · attention <span[^>]*>1<\/span>/);
+});
+
+test('board, card, lane and modal surfaces consume one design token authority (TASK-2773.02)', () => {
+  // The separate green modal palette is gone from every browser surface; the
+  // dialogs reuse the board's card/edge/text tokens and green status accent.
+  const removedModalPalette = ['#101c16', '#2f5a3f', '#cbd9cf', '#e0b973', '#16241c', '#2f4a3a', '#264030', '#68f6a7', '#43e891', '#102419', '#0c1712'];
+  for (const file of browserSources.filter((source) => /\.tsx?$/.test(source.name))) {
+    for (const value of removedModalPalette) {
+      assert.ok(!file.text.includes(value), `${file.name} still carries the removed modal palette value ${value}`);
+    }
+  }
+  const sourceOf = (name: string): string => {
+    const text = browserSources.find((source) => source.name === name)?.text ?? '';
+    assert.ok(text, `${name} is not a browser source`);
+    return text;
+  };
+  for (const name of ['board.tsx', 'flight-column.tsx', 'lane-header.tsx', 'intake-column.tsx', 'done-rail.tsx', 'attention-rail.tsx', 'top-bar.tsx', 'action-button.tsx', 'checkpoint-pips.tsx', 'flow-panel.tsx', 'operation-log.tsx']) {
+    const text = sourceOf(name);
+    assert.match(text, /from '\.\/palette\.js'/, `${name} does not import the design authority`);
+    assert.match(text, /\b(SPACE|RADIUS|TYPE)\b/, `${name} does not consume a shared spacing, radius or type scale`);
+  }
+  for (const name of ['checkpoint-detail.tsx', 'mission-history.tsx', 'cancel-confirmation.tsx', 'create-mission-dialog.tsx']) {
+    assert.match(sourceOf(name), /\bMODAL\./, `${name} does not consume the semantic modal surfaces`);
+  }
+  // The stylesheet mirrors the same tokens instead of defining a second scale.
+  const css = sourceOf('style.css');
+  assert.match(css, /--card-edge: #232a31;/, 'the stylesheet keeps a token mirror of the palette edge');
+  assert.match(css, /var\(--card-edge\)/, 'the stylesheet consumes its token mirror');
 });
 
 test('the audited reference treatment omits non-reference source and attribution text and retains its scrollbar', () => {
@@ -795,7 +846,7 @@ test('the client adds no router, browser state framework, server-rendering layer
   }
   const imports = browserSources.flatMap((file) => [...file.text.matchAll(/from '([^']+)'/g)].map((match) => match[1]));
   const external = imports.filter((specifier) => specifier !== undefined && !specifier.startsWith('.'));
-  assert.deepEqual([...new Set(external)].sort(), ['react', 'react-dom/client'], 'the client depends on React and React DOM only');
+  assert.deepEqual([...new Set(external)].sort(), ['react', 'react-dom', 'react-dom/client'], 'the client depends on React and React DOM only');
 });
 
 test('weekly missions use the delivery cohort instead of current DONE stock (TASK-2688)', () => {
@@ -819,19 +870,162 @@ test('DONE exposes other retained history without adding it to the weekly count 
 });
 
 
-test('board renders the entire checkpoint plan before evidence and during partial execution (TASK-2745)', () => {
-  const plan = [1, 2, 3].map(number => ({ name: `CP-${number}`, description: `Deliver step ${number}`, goalCheck: [] }));
-  for (const lane of ['refined', 'active', 'review', 'integration', 'done'] as const) {
-    for (const partial of [false, true]) {
-      const card = makeCard({ lane, status: lane, checkpoint: partial ? 'CP-1' : null,
-        checkpointEvidence: partial ? [{ ...plan[0], goalCheck: [{ criterion: 'delivers', evidence: 'npm test' }] }, ...plan.slice(1)] : plan });
+test('checkpoint track is bounded and honest across supplied plan shapes (TASK-2773.04)', () => {
+  const entry = (name: string, state?: 'completed' | 'current' | 'future') => ({
+    name, description: `Deliver ${name}`, state, goalCheck: [{ criterion: 'contract', evidence: 'retained evidence' }],
+  });
+  const cases = [
+    { plan: [entry('CP-2', 'completed'), entry('CP-9', 'current')], fill: '50%', label: '1/2 completed' },
+    { plan: [entry('CP-2', 'completed'), entry('CP-9', 'completed')], fill: '100%', label: '2/2 completed' },
+    { plan: [entry('CP-2'), entry('CP-9', 'current')], fill: '0%', label: 'Completion unknown' },
+    { plan: Array.from({ length: 100 }, (_, i) => entry(`CP-${i}`, i < 25 ? 'completed' : 'future')), fill: '25%', label: '25/100 completed' },
+    { plan: [], fill: '0%', label: 'Plan unavailable' },
+  ];
+  for (const { plan, fill, label } of cases) {
+    for (const lane of ['backlog', 'refined', 'active', 'review', 'integration', 'done'] as const) {
+      const card = makeCard({ lane, status: lane, checkpoint: 'CP-99', checkpointEvidence: plan });
       const snapshot = toWebBoardSnapshot(makeProjection({ [lane]: [card] }));
-      assert.equal(validateWebBoardSnapshot(snapshot).ok, true);
       const html = render(snapshot);
-      const pips = [...html.matchAll(/aria-label="(CP-\d+)"/g)].map(match => match[1]);
-      assert.deepEqual(pips, ['CP-1', 'CP-2', 'CP-3'], `${lane}/${partial}: complete plan in order`);
-      assert.match(html, /title="CP-3: Deliver step 3"/);
+      assert.match(html, new RegExp(label));
+      assert.match(html, /Recorded: CP-99/);
+      if (plan.length) {
+        assert.match(html, /data-checkpoint-track=""/);
+        assert.equal((html.match(/data-checkpoint-fill=""/g) ?? []).length, 1);
+        assert.ok(html.includes(`width:${fill}`));
+        assert.match(html, /max-width:120px/);
+      } else {
+        assert.doesNotMatch(html, /data-checkpoint-track|data-checkpoint-fill|View checkpoint evidence/);
+      }
+      assert.doesNotMatch(html, /review-pip--running/);
+      assert.doesNotMatch(html, />View checkpoints/);
+      assert.equal((html.match(/data-checkpoint-complete=""/g) ?? []).length, fill === '100%' ? 1 : 0);
+      if (plan.length) { assert.match(html, /aria-haspopup="dialog"/); }
+      assert.doesNotMatch(html, /<details aria-label="Checkpoint descriptions/);
+      if (plan.some(item => item.state === 'current')) { assert.match(html, /Current: CP-9/); }
     }
   }
-  assert.doesNotMatch(render(toWebBoardSnapshot(makeProjection({ active: [makeCard()] }))), /aria-label="Checkpoint plan"/);
+  const absent = renderToStaticMarkup(React.createElement(CheckpointPips, {
+    card: { ...toWebBoardSnapshot(makeProjection({ active: [makeCard()] })).stages.find(stage => stage.lane === 'active')!.cards[0], checkpointEvidence: undefined },
+  }));
+  assert.match(absent, /Plan unavailable/);
+  assert.doesNotMatch(absent, /0\/0|completed|data-checkpoint-track|data-checkpoint-fill|View checkpoint evidence/);
+});
+
+test('recorded guidance and checkpoint evidence stay distinct from current activity (TASK-2776)', () => {
+  const card = makeCard({ checkpoint: 'CP-1', checkpointDescription: 'Recorded step',
+    nextActionText: 'Resume planned step', currentCheckpoint: 'CP-2',
+    checkpointEvidence: [
+      { name: 'CP-1', description: 'Recorded step', state: 'completed', goalCheck: [{ criterion: 'verified', evidence: 'npm test' }] },
+      { name: 'CP-2', description: 'Planned step', state: 'current', goalCheck: [] },
+    ], currentWork: { operationId: 'repair', phase: 'review-response', summary: 'Repairing reviewer findings', agent: null, updatedAt: 'now', freshness: 'live' },
+  });
+  const snapshot = toWebBoardSnapshot(makeProjection({ active: [card] }));
+  const html = render(snapshot);
+  assert.match(html, /Recorded: CP-1/);
+  assert.match(html, /Current: CP-2/);
+  assert.match(html, /recorded guidance \(CP-1\):/);
+  assert.match(html, /Resume planned step/);
+  assert.match(html, /Repairing reviewer findings/);
+  assert.doesNotMatch(html, /review-pip--running/);
+  const wire = snapshot.stages.flatMap(stage => stage.cards)[0];
+  const detail = renderToStaticMarkup(React.createElement(CheckpointDetail, { card: wire, initial: 'CP-1', onClose: () => {} }));
+  assert.match(detail, /Last recorded Goal Check evidence/);
+  assert.match(detail, /Recorded step/);
+  assert.match(detail, /verified/);
+});
+
+const refinementExecution = (family: string | null, complete = true): MissionCard['execution'] => ({
+  observedAt: '2026-10-18T10:00:00Z', complete, limitations: complete ? [] : ['Provider execution could not be observed'],
+  invocations: family === null ? [] : [{ runId: `draft-${family}-a1-test`, operationId: 'op-draft', family: agentFamily(family) }],
+});
+const refinementCard = (overrides: Partial<MissionCard>): MissionCard => makeCard({
+  id: fixtureMissionId('task-refine') as MissionCard['id'], lane: 'backlog', status: 'backlog', agent: agentFamily('codex'), ...overrides,
+});
+const refinementWork = (overrides: Partial<NonNullable<MissionCard['currentWork']>> = {}): MissionCard['currentWork'] => ({
+  operationId: 'op-draft', phase: 'draft', summary: 'refining acceptance criteria', agent: agentFamily('claude'),
+  updatedAt: '2026-10-18T10:00:00.000Z', freshness: 'live', ...overrides,
+});
+const renderRefinement = (card: MissionCard): string => render(snapshotOf({ stages: makeProjection({ backlog: [card] }).stages }));
+
+const intakeFan = (html: string): string => html.match(/class="fan[^"]*" style="[^"]*"/)?.[0] ?? '';
+const headerOf = (html: string): string => {
+  const start = html.indexOf('<article');
+  return html.slice(start, html.indexOf('<p', start));
+};
+
+test('a refinement card shows the observed executing worker and published summary, not the assignee (TASK-2774)', () => {
+  const html = renderRefinement(refinementCard({ currentWork: refinementWork(), execution: refinementExecution('claude') }));
+  assert.match(html, /refining acceptance criteria/, 'the published work summary is visible');
+  assert.match(html, /title="active worker family: claude"/, 'the header names the observed provider family');
+  assert.match(intakeFan(html), /#d97757/, 'the fan takes the executing claude accent, not the codex assignee');
+  assert.doesNotMatch(html, /codex/, 'assignment alone is never shown as the worker');
+});
+
+test('refinement cards keep preparing, handover, completion and blocked states distinct from execution (TASK-2774)', () => {
+  const coordinator = { missionId: fixtureMissionId('task-refine') as MissionCard['id'], family: agentFamily('claude') };
+  const preparing = renderRefinement(refinementCard({ currentWork: refinementWork({ summary: 'preparing draft context', agent: null }), execution: refinementExecution(null), liveSession: coordinator }));
+  assert.match(preparing, /preparing draft context/);
+  assert.doesNotMatch(preparing, /title="active worker|title="implementer/, 'a live coordinator and the assignee never name the worker');
+  assert.doesNotMatch(intakeFan(preparing), /#d97757|#19b48c/, 'a live coordinator and the assignee never colour the worker fan');
+  const handover = renderRefinement(refinementCard({ currentWork: refinementWork({ summary: 'handing over to reviewer' }), execution: refinementExecution(null), liveSession: coordinator }));
+  assert.match(handover, /handing over to reviewer/);
+  assert.doesNotMatch(handover, /title="active worker/, 'the previously published worker is not shown as executing');
+  const completed = renderRefinement(refinementCard({ currentWork: null, execution: refinementExecution(null) }));
+  assert.match(completed, /title="implementer family: codex"/, 'an idle card names its assignee as implementer in the header, as a flight card does');
+  assert.doesNotMatch(completed, /no work observed|active worker|executing|execution unknown|data-provider-execution|working ·|>idle</, 'an idle intake card keeps its compact layout');
+  assert.doesNotMatch(completed, /fan spin/);
+  const blocked = renderRefinement(refinementCard({ blockingReason: 'draft needs operator answer', execution: refinementExecution(null) }));
+  assert.match(blocked, /draft needs operator answer/);
+  assert.match(blocked, /title="implementer family: codex"/, 'a blocked card names its assignee as implementer in the header, as a flight card does');
+  assert.doesNotMatch(blocked, /fan spin|executing|title="active worker/);
+});
+
+test('refinement cards keep missing, stale and incomplete execution evidence uncertain (TASK-2774)', () => {
+  const missing = renderRefinement(refinementCard({ currentWork: refinementWork(), execution: undefined }));
+  assert.match(missing, /refining acceptance criteria/);
+  assert.doesNotMatch(missing, /title="active worker|title="implementer|executing|execution unknown|codex/, 'no observation never prints a worker or a zero');
+  assert.doesNotMatch(intakeFan(missing), /#d97757|#19b48c/);
+  const stale = renderRefinement(refinementCard({ currentWork: refinementWork({ freshness: 'stale' }), execution: refinementExecution(null, false) }));
+  assert.match(stale, /refining acceptance criteria/, 'the stale publication stays visible while no worker is claimed');
+  assert.match(headerOf(stale), /class="fan"[^>]*#3f4a53/, 'a stale card colours no family and spins no fan');
+  assert.doesNotMatch(stale, /title="active worker|0 executing|execution unknown|fan spin|working · /, 'an unreadable probe names no worker, never becomes a confirmed zero and prints no work badge');
+  const incomplete = renderRefinement(refinementCard({ currentWork: refinementWork(), execution: refinementExecution('claude', false) }));
+  assert.match(incomplete, /title="active worker family: claude"/, 'an incomplete probe still names the invocation it did observe');
+  assert.doesNotMatch(incomplete, /1\+|executing|execution unknown/, 'the card states no count the probe could not confirm');
+  for (const lane of ['backlog', 'refined'] as const) {
+    const html = render(snapshotOf({ stages: makeProjection({ [lane]: [refinementCard({ lane, status: lane, currentWork: refinementWork(), execution: refinementExecution('claude') })] }).stages }));
+    assert.match(html, /title="active worker family: claude"/, `${lane} intake cards name the executing worker`);
+  }
+});
+
+test('refinement cards reuse the card design elements instead of a bespoke activity line (TASK-2774)', () => {
+  assert.deepEqual(browserSources.filter((file) => /=\s*actorLine\(card\)/.test(file.text)).map((file) => file.name),
+    ['card-activity.tsx'], 'one card element prints the published activity for every card design');
+  assert.deepEqual(browserSources.filter((file) => /'active worker'/.test(file.text)).map((file) => file.name),
+    ['card-activity.tsx'], 'one card element prints the worker identity for every card design');
+  assert.deepEqual(browserSources.filter((file) => /data-provider-execution/.test(file.text)).map((file) => file.name),
+    [], 'no card adds the execution count row the card design removed (px-0013)');
+  for (const name of ['intake-column.tsx', 'flight-column.tsx']) {
+    const text = browserSources.find((file) => file.name === name)!.text;
+    assert.match(text, /<AgentLabel agent=\{(?:worker|agent)\}/, `${name} renders the shared worker label`);
+    assert.match(text, /<ActorLine card=\{card\}/, `${name} renders the shared actor line`);
+  }
+  assert.deepEqual(browserSources.filter((file) => /workText|working · /.test(file.text)).map((file) => file.name),
+    [], 'no card prints a work certainty badge; the other columns never did (TASK-2687)');
+  const workerLabel = (markup: string): string | undefined => {
+    const match = markup.match(/<span title="([^"]* family: [^"]*)"[^>]*>([^<]*)<\/span>/);
+    return match ? `${match[1]} = ${match[2]}` : undefined;
+  };
+  const intake = renderRefinement(refinementCard({ currentWork: refinementWork(), execution: refinementExecution('claude') }));
+  const flight = render(snapshotOf({ stages: makeProjection({ active: [refinementCard({ lane: 'active', status: 'active', currentWork: refinementWork(), execution: refinementExecution('claude') })] }).stages }));
+  assert.ok(workerLabel(intake), 'the intake card states the worker in the design element, not in prose');
+  assert.equal(workerLabel(intake), workerLabel(flight), 'an intake card states the worker exactly as a flight card does');
+  assert.doesNotMatch(intake, /refining acceptance criteria[^<]*claude/, 'the published summary and the worker identity stay separate elements');
+  const intakeHeader = headerOf(intake);
+  const flightHeader = headerOf(flight);
+  assert.match(intakeHeader, /title="active worker family: claude"/, 'the intake header carries the worker label where every other column carries it');
+  assert.equal(workerLabel(intakeHeader), workerLabel(flightHeader), 'the label sits in the header, not beside the activity line');
+  assert.match(intakeHeader, /family: claude"[^>]*>claude<\/span><\/div>$/, 'the label ends the header row, as it does on a flight card');
+  assert.doesNotMatch(intakeHeader, /working ·|>idle<|>blocked<|●/, 'an intake header omits the work badge every flight lane omits (TASK-2687)');
+  assert.doesNotMatch(intake, /working · (?:live|unknown|stale)/, 'an intake card prints no work certainty badge');
 });

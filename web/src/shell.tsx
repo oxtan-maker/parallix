@@ -74,7 +74,7 @@ export function Shell() {
   return (
     <main style={page} aria-busy={state.kind === 'loading'}>
       {state.kind === 'loading' && (
-        <Notice title="LOADING BOARD" tone={C.green}>
+        <Notice title="LOADING BOARD" tone={C.cyan}>
           <p style={{ color: C.dim, margin: 0 }}>reading the current snapshot from this repository&apos;s local host</p>
         </Notice>
       )}

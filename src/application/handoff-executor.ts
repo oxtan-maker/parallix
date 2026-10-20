@@ -80,7 +80,7 @@ export class HandoffExecutor {
 
     // A recorded contract does not need a directory of legacy Markdown inputs.
     // Load it before location verification, and fail closed on missing DB state.
-    const prepared = await this.prepareStart(slug, bindings, opts);
+    const prepared = await this.prepareCommittedStart(slug, bindings, opts);
     if (!('contract' in prepared)) { return prepared; }
     const { contract, verification, forgejoUser, forgejoEnabled, isForgejoReviewEnabledFn, missionServicesFn } = prepared;
     const { area, branch, rootDir, missionDir: missionDirPath } = verification;
@@ -205,6 +205,16 @@ export class HandoffExecutor {
 
     log(fmt.status('PASS', 'Implementation is ready for independent review.'));
     return { ok: true, gatekeeperPushedBack };
+  }
+
+  private async prepareCommittedStart(slug: string, bindings: HandoffBindings, opts: PerformHandoffOptions): Promise<HandoffStart | HandoffResult> {
+    const prepared = await this.prepareStart(slug, bindings, opts);
+    if (!('contract' in prepared)) { return prepared; }
+    const { blocker } = this.ports.git.commitMissionChanges(prepared.verification.rootDir, slug, bindings.log, bindings.error);
+    if (blocker) {
+      return { ok: false, error: blocker };
+    }
+    return prepared;
   }
 
   private async prepareStart(slug: string, bindings: HandoffBindings, opts: PerformHandoffOptions): Promise<HandoffStart | HandoffResult> {
