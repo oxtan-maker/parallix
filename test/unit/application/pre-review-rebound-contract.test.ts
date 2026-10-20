@@ -388,3 +388,50 @@ describe("Declared gate rebounce and review-loop resume —", () => {
       'a successful repair must not stop autonomous review for human handoff');
   });
 });
+
+for (const kind of ['gate', 'hook'] as const) {
+  test(`verified ${kind} repair returns factual brief to independent reviewer (px-0017)`, async () => {
+    let repaired = false;
+    let first = true;
+    const order: string[] = [];
+    const reason = gateFailureReason({ ok: false, area: 'all', command: 'npm run verify-fixture', exitCode: 1, stdout: 'original failing assertion', stderr: '' });
+    const fake = fakeReviewLoopPorts({
+      slug: 'repair-brief', state: new ReviewState('repair-brief', { reviewer: 'claude', implementer: 'codex' }),
+      provider: {},
+      preReview: {
+        head: () => repaired ? 'committed-fix' : 'before-fix',
+        rebase: async () => {
+          order.push('rebase');
+          if (kind === 'hook' && first) { first = false; return { ok: false, diagnostic: 'pre-commit hook failed: original failing assertion', hook: hookFailureReason('pre-commit hook failed: original failing assertion', 'rebase') }; }
+          return { ok: true };
+        },
+        runGate: async () => {
+          order.push('gate');
+          if (kind === 'gate' && first) { first = false; return { ok: false, reason, area: 'all', exitCode: 1, command: reason.command, diagnostic: 'original failing assertion' }; }
+          return { ok: true, command: 'npm run verify-fixture' };
+        },
+      },
+      agents: { launch: async launch => {
+        order.push(launch.role);
+        if (launch.role === 'implementer') { repaired = true; }
+        else {
+          const brief = launch.prompt?.preReviewRepair ?? '';
+          assert.match(brief, /original failing assertion/);
+          assert.match(brief, /before-fix -> committed-fix/);
+          assert.match(brief, /npm run verify-fixture; result=passed/);
+          assert.match(brief, /authority to approve a correct fix/);
+          assert.match(brief, /remaining mission obligations/);
+          assert.doesNotMatch(brief, /self-approv/);
+        }
+        return { agent: launch.agent, result: { status: 0 } };
+      } },
+      artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) },
+    });
+    await runReviewLoop({ slug: 'repair-brief', maxAttempts: 1 }, fake.ports);
+    assert.equal(fake.launches.length, 2);
+    assert.deepEqual(fake.launches.map(l => l.role), ['implementer', 'reviewer']);
+    assert.ok(order.indexOf('implementer') < order.lastIndexOf('gate'));
+    assert.ok(order.lastIndexOf('gate') < order.indexOf('reviewer'));
+    assert.ok(fake.mirrors.includes('approved'));
+  });
+}

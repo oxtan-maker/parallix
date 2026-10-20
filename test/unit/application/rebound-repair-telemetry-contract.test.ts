@@ -43,7 +43,7 @@ test('TASK-2653: a first-attempt pass records one fresh rescue row with agent, p
     { ...data, occurrenceId: typeof data.occurrenceId, durationMs: typeof data.durationMs },
     {
       occurrenceId: 'string', missionId: 'task-2653', repositoryId: 'repo-1', reasonKind: 'gate-failure', area: 'static-analysis',
-      attempt: 1, maxAttempts: 2, strategy: 'fresh-diagnostic', context: 'fresh', agent: 'codex', provider: 'openai', model: 'gpt-x',
+      attempt: 1, maxAttempts: 2, strategy: 'fresh-diagnostic', context: 'fresh', role: 'implementer', agent: 'codex', provider: 'openai', model: 'gpt-x',
       fingerprintBefore: data.fingerprintBefore, fingerprintAfter: data.fingerprintBefore, headBefore: 'abc', headAfter: 'abc',
       outcome: 'rescue', durationMs: 'number',
     },
@@ -148,4 +148,17 @@ test('repaired gate followed by structured conflict routes semantic resolver and
   assert.match(prompts[1], /REBASE CONFLICT/);
   assert.match(prompts[1], /Review shared conflicts semantically/);
   assert.notEqual(result.classification.failureClass, 'InfraBlocker');
+});
+
+test('reviewer output telemetry names the actual reviewer and fallback (px-0017)', async () => {
+  const rows: OperationalHistoryEntry[] = [];
+  bind(async entry => { rows.push(entry); });
+  await rebound({ kind: 'agent-timeout', role: 'reviewer', diagnostic: 'missing verdict' }, contextFor(() => ({ ok: true }), {
+    implementer: 'claude', role: 'reviewer',
+    startAgent: async () => ({ agent: 'custom', result: { status: 0 } }),
+    applyAgentFallback: ({ launchResult }) => launchResult?.agent ?? 'claude',
+  }));
+  const data = JSON.parse(rows[0].eventData);
+  assert.equal(data.role, 'reviewer');
+  assert.equal(data.agent, 'custom');
 });

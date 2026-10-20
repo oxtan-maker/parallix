@@ -103,6 +103,18 @@ test('refactor missingFileError branch rejects a non-existent relative path toke
   assert.match(result.error || '', /non-existent file/);
 });
 
+test('gate file validation checks scripts inside command substitutions (px-0017)', () => {
+  const gate = 'test "$(./hello.sh)" = "Hello, World!"';
+  const uc = useCaseWithExisting([path.join(rootDir, 'hello.sh')]);
+  assert.strictEqual(uc.validateDeclaredGates([gate], rootDir).ok, true);
+  assert.strictEqual(uc.validateDeclaredGates(['test "$(cat ./hello.sh)" = expected'], rootDir).ok, true);
+  assert.strictEqual(uc.validateDeclaredGates(['test "$(echo $(./hello.sh))" = expected'], rootDir).ok, true);
+  assert.strictEqual(uc.validateDeclaredGates([`${gate} && ./missing.sh`], rootDir).ok, false);
+  const missing = useCaseWithExisting([]).validateDeclaredGates([gate], rootDir);
+  assert.strictEqual(missing.ok, false);
+  assert.match(missing.error || '', /non-existent file: "\.\/hello\.sh"/);
+});
+
 test('refactor missingFileError branch skips URLs, flags, and globs', () => {
   const uc = useCaseWithExisting([]);
   const result = uc.validateDeclaredGates(['curl https://example.com', 'npm run test --*', 'node --version'], rootDir);

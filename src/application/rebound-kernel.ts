@@ -59,6 +59,7 @@ export type RepairStrategy = 'targeted' | 'fresh-diagnostic';
 /** Result of re-running the failing check after a fix attempt. */
 export interface VerifyResult {
   ok: boolean;
+  workflowBlock?: import('./review-verdict-readiness.js').VerdictBlock;
   /** Exact check identity supplied by the verification adapter. */
   command?: string;
   /** Fresh diagnostic from the re-run; empty when the check passed. */
@@ -314,11 +315,7 @@ type RepairOptions = Pick<ReboundContext, 'slug' | 'worktree' | 'verify' | 'star
 
 async function runRepairAttempts(state: ReboundState, options: RepairOptions): Promise<ReboundOutcome | null> {
   const { context, slug, worktree, verify, startAgent, maxAttempts, maxLaunchRetries, transitionToImplementer, applyAgentFallback, log, error } = options;
-  // Persist evidence of the original failed command before the first repair
-  // launches, so a fresh-context or restarted agent can retrieve it even when
-  // the launch path never ran captureVerifiedTreeProof. Captured once, from the
-  // original failure, so the prompt names what originally failed rather than a
-  // later retry's output.
+  // Capture the original failure once, before launch, for fresh-context recovery.
   await captureOriginalFailureEvidence(state, worktree, context, log);
   for (let attempt = 1;repairBudgetAllows(attempt, maxAttempts);attempt++) {
     const strategy: RepairStrategy = repairStrategy(attempt);
@@ -327,7 +324,7 @@ async function runRepairAttempts(state: ReboundState, options: RepairOptions): P
     catch (cause) { return stopRepair(state, context, `Repair checkpoint persistence failed before launch: ${String(cause)}`); }
     const { fixPrompt, repairCheckpoint } = prepared;
     if (transitionToImplementer) { await transitionToImplementer(slug); }
-    log(fmt.status('INFO', `Bouncing to implementer (${state.implementer}) with ${strategy} ${state.classification.failureClass} repair. Attempt ${attempt}/${maxAttempts}.`));
+    log(fmt.status('INFO', `Bouncing to ${context.role ?? 'implementer'} (${state.implementer}) with ${strategy} ${state.classification.failureClass} repair. Attempt ${attempt}/${maxAttempts}.`));
     const startedAt = Date.now();
     const headBefore = await currentHead(context);
     const fingerprintBefore = failureFingerprint(state.reason);
@@ -337,10 +334,10 @@ async function runRepairAttempts(state: ReboundState, options: RepairOptions): P
     if (blockerOutcome) { return blockerOutcome; }
     const launchResult = handleLaunchResult(state, launch, maxLaunchRetries, error);
     if (launchResult === 'retry') { attempt--; continue; }
-    if (launchResult === 'skip' && context.inspectFailedRepair) { refreshReboundState(state, await verify(attempt), log); }
-    if (launchResult === 'skip') { await recordSpentLaunch(state, context, [attempt, maxAttempts], { strategy, headBefore, fingerprintBefore }, startedAt, launch); continue; }
+    if (launchResult === 'skip') { await recordSpentLaunch(state, context, [attempt, maxAttempts], { strategy, headBefore, fingerprintBefore }, startedAt, launch, log); continue; }
     if (launchResult === 'stop') { break; }
     const verified = await verify(attempt);
+    if (verified.workflowBlock) { return stopRepair(state, context, verified.workflowBlock.diagnostic); }
     const mismatch = differentGateVerification(state.reason, verified, Boolean(repairCheckpoint));
     if (mismatch) {
       return stopRepair(state, context, `Unrelated check ${verified.command} cannot certify ${mismatch.originalCommand}`);
@@ -368,13 +365,14 @@ async function recordAttemptTelemetry(state: ReboundState, context: ReboundConte
   const canRetry = attempt < maxAttempts && classifyReboundReason(verified ? refreshedReason(state.reason, verified) : state.reason).isRelaunchable;
   await recordReboundRepair({
     occurrenceId: state.occurrenceId, missionId: state.slug, reasonKind: state.reason.kind, area: reasonArea(state.reason),
-    attempt, maxAttempts, ...detail, provider: launch.provider, model: launch.model,
+    attempt, maxAttempts, role: context.role ?? 'implementer', ...detail, provider: launch.provider, model: launch.model,
     outcome: attemptOutcome(verified?.ok === true, detail.strategy, canRetry), durationMs: Date.now() - startedAt,
   }, context.log);
 }
 
-/** A launch that exited non-zero still spent an attempt; it has no verify run, so its fingerprint and head stay put. */
-async function recordSpentLaunch(state: ReboundState, context: ReboundContext, budget: readonly [attempt: number, maxAttempts: number], before: { strategy: RepairStrategy; headBefore: string | null; fingerprintBefore: string }, startedAt: number, launch: { provider: string | null; model: string | null }): Promise<void> {
+/** Inspect opted-in failed repairs before recording their spent-launch telemetry. */
+async function recordSpentLaunch(state: ReboundState, context: ReboundContext, budget: readonly [attempt: number, maxAttempts: number], before: { strategy: RepairStrategy; headBefore: string | null; fingerprintBefore: string }, startedAt: number, launch: { provider: string | null; model: string | null }, log: ReboundContext['log']): Promise<void> {
+  if (context.inspectFailedRepair) { refreshReboundState(state, await context.verify(budget[0]), log); }
   const detail: RepairEvidence = { ...before, agent: state.implementer, context: before.strategy === 'fresh-diagnostic' ? 'fresh' : 'resumed', headAfter: await currentHead(context), fingerprintAfter: before.fingerprintBefore };
   await recordAttemptTelemetry(state, context, budget, detail, startedAt, launch);
 }
@@ -489,7 +487,7 @@ async function launchFixAttempt(options: {
       sessionPolicy,
     });
   } catch (err: unknown) {
-    return { ok: false, implementer, diagnostic: `Could not launch implementer (${implementer}): ${(err as Error).message}`, repairAttempted: false, ...none };
+    return { ok: false, implementer, diagnostic: `Could not launch ${role} (${implementer}): ${(err as Error).message}`, repairAttempted: false, ...none };
   }
 
   if (applyAgentFallback) {

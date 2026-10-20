@@ -1,3 +1,4 @@
+import { verdictBlockForReview, type VerdictBlock } from '../../application/review-verdict-readiness.js';
 import { readReviewForDecision, staleWrite } from './review-round-read.js';
 /**
  * Round advancement for the autonomous review loop.
@@ -49,7 +50,7 @@ export type ReviewRoundResult =
   | { outcome: 'recorded' }
   /** Already recorded, or nothing to record. Replaying a round is not an error. */
   | { outcome: 'unchanged'; reason: string; noRevisionChange?: boolean }
-  | { outcome: 'failed'; diagnostic: string };
+  | { outcome: 'failed'; diagnostic: string; workflowBlock?: VerdictBlock };
 
 /** Reviewer verdicts that carry the `changes-requested` decision kind. */
 const CHANGES_REQUESTED_DISPOSITIONS: readonly ReviewDisposition[] =
@@ -117,12 +118,8 @@ export async function recordRequestedChanges(
     if (loaded.kind === 'failed') { return loaded.result; }
     const mission = loaded.mission;
 
-    if (reviewStatus(mission.review) !== 'awaiting-review') {
-      return { outcome: 'unchanged', reason: `review is ${reviewStatus(mission.review)}` };
-    }
-    if (input.findings.length === 0) {
-      return { outcome: 'failed', diagnostic: `Reviewer requested changes for ${slug} without a parsable finding (expected a "## F1: ..." heading)` };
-    }
+    const rejected = requestedChangesRejection(slug, mission.review, input.findings);
+    if (rejected) { return rejected; }
 
     const review = applyReviewerCommand(mission.review, {
       type: 'request-changes',
@@ -160,16 +157,19 @@ export async function recordRequestedChanges(
   }
 }
 
-/**
- * The single source of truth for the diagnostic printed when an `approve`
- * cannot legally move the current round to `approved`. Shared by the
- * non-mutating {@link approvalLegalDiagnostic} pre-check and the write-time
- * check in {@link recordApproval}, so a future wording change to one cannot
- * make the pre-POST failure and the record-time failure diverge for the same
- * condition.
- */
-function approvalBlockedDiagnostic(status: string): string {
-  return `Approve cannot move the round to approved while review is ${status}; resolve the outstanding findings with a resolution, open the next round with \`px review <slug> --start\`, and approve that awaiting-review round (see MISSION.md "Repair path for a round already stuck in the inconsistent state")`;
+function requestedChangesRejection(slug: string, review: Review, findings: readonly ReviewFinding[]): ReviewRoundResult | null {
+  if (review.intervention && reviewStatus(review) !== 'approved') {
+    const workflowBlock = verdictBlockForReview(slug, review)!;
+    return { outcome: 'failed', diagnostic: workflowBlock.diagnostic, workflowBlock };
+  }
+  if (reviewStatus(review) !== 'awaiting-review') {
+    return { outcome: 'unchanged', reason: `review is ${reviewStatus(review)}` };
+  }
+  if (findings.length === 0) {
+    return { outcome: 'failed', diagnostic: `Reviewer requested changes for ${slug} without a parsable finding (expected a "## F1: ..." heading)` };
+  }
+
+  return null;
 }
 
 /**
@@ -210,13 +210,19 @@ export async function approvalLegalDiagnostic(
     requireReviewIdentity(mission, mission.review);
     const status = reviewStatus(mission.review);
     if (status !== 'awaiting-review' && status !== 'approved') {
-      return approvalBlockedDiagnostic(status);
+      return verdictBlockForReview(slug, mission.review)!.diagnostic;
     }
     return null;
   } catch (error) {
     return diagnosticFrom(error, 'Cannot verify independent approval');
   }
 }
+
+function blockedApproval(slug: string, review: Review): ReviewRoundResult {
+  const workflowBlock = verdictBlockForReview(slug, review)!;
+  return { outcome: 'failed', diagnostic: workflowBlock.diagnostic, workflowBlock };
+}
+
 /**
  * Record the reviewer's authoritative `approve` decision and return the mission
  * to integration.
@@ -272,10 +278,7 @@ export async function recordApproval(
       // decision, which is what leaves the mission permanently unintegratable.
       // The diagnostic names the documented resolution → new round → approve
       // sequence, not `px integrate`, which cannot repair a `fixing` round.
-      return {
-        outcome: 'failed',
-        diagnostic: approvalBlockedDiagnostic(status),
-      };
+      return blockedApproval(slug, mission.review);
     }
     if (!['review', 'integration', 'active'].includes(mission.status)) {
       // TASK-2582: an approve recorded over a Mission that is not in the review

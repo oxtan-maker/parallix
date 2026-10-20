@@ -1,3 +1,4 @@
+import { assertWorkflowControl } from './ports/mission-write-authorization.js';
 import { reviewOperation, reviewOperationPhase } from '../domain/review-command-policy.js';
 import { randomUUID } from 'node:crypto';
 import { missionId } from '../domain/mission.js';
@@ -17,6 +18,12 @@ export class ReviewCommandUseCase {
   ) {}
 
   async execute(args: string[], options: Record<string, unknown> = {}): Promise<void> {
+    // Inherited write authority belongs to an agent's evidence/verdict writes,
+    // not the coordinator's lifecycle. Refuse before preflight or stop clearing.
+    const operation = reviewOperation(args);
+    if (['submit', 'start', 'continue', 'resume'].includes(operation)) {
+      assertWorkflowControl();
+    }
     const context = await this._workflow.preflight(args, options);
     if (!context) { return; }
     await this.dispatch(context);

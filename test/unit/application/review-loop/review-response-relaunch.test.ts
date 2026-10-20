@@ -2,7 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
 import type { ImplementerArtifactFacts, ReviewAgentLaunch, ReviewerArtifactFacts } from '../../../../src/application/ports/review-round.js';
-import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
+import { fakeLoopContext, fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
+import { runReviewerPhase } from '../../../../src/application/review-loop/reviewer-phase.js';
+import { ReviewRound } from '../../../../src/application/review-loop/round.js';
+import { ReviewState } from '../../../../src/adapters/review/review-state.js';
 
 // TASK-2239: after the implementer's response the loop decides whether the
 // reviewer runs again, and records each decision durably.
@@ -23,6 +26,76 @@ function reviewLoopHarness(options: {
 }
 const reviewerLaunches = (fake: ReturnType<typeof fakeReviewLoopPorts>) => fake.launches.filter(launch => launch.role === 'reviewer');
 const request = { slug: 'task-2239', implementer: 'claude', reviewer: 'codex', maxAttempts: 3 } satisfies Partial<NonNullable<Parameters<typeof runReviewLoop>[0]>>;
+
+test('accepted child request-changes proceeds to fixing despite verdict readiness closing (px-0017)', async () => {
+  let decided = false;
+  const state = new ReviewState(request.slug, request);
+  const accepted = new ReviewState(request.slug, request);
+  accepted.transitionTo('fixing');
+  accepted.disposition = 'REQUEST_CHANGES';
+  const fake = fakeReviewLoopPorts({
+    state,
+    stateport: {
+      read: async () => decided ? accepted : state,
+      verdictBlock: async () => decided ? {
+        cause: 'awaiting-implementation', diagnostic: 'Resolve the outstanding findings', nextAction: 'resolve',
+      } : null,
+    },
+    agents: { launch: async launch => { decided = true; return { agent: launch.agent }; } },
+    artifacts: { consumeReviewer: async () => { assert.fail('accepted verdict needs no artifact polling'); } },
+  });
+  const context = fakeLoopContext(fake, { state, slug: request.slug });
+
+  const outcome = await runReviewerPhase(context, new ReviewRound(1, context));
+
+  assert.deepEqual(outcome, { reviewState: 'REQUEST_CHANGES' });
+  assert.equal(state.phase, 'fixing');
+  assert.deepEqual(fake.exits, []);
+  assert.equal(fake.launches.length, 1);
+});
+
+for (const recovery of ['artifact', 'timeout'] as const) {
+  for (const verdict of ['REQUEST_CHANGES', 'APPROVED'] as const) {
+    test(`${recovery} retry reconciles accepted ${verdict} before verdict readiness (px-0017 F1)`, async () => {
+      let launches = 0;
+      let consumes = 0;
+      let polls = 0;
+      const state = new ReviewState(request.slug, request);
+      const accepted = new ReviewState(request.slug, request);
+      accepted.transitionTo(verdict === 'APPROVED' ? 'approved' : 'fixing');
+      accepted.disposition = verdict;
+      const fake = fakeReviewLoopPorts({
+        state,
+        stateport: {
+          read: async () => launches >= 2 ? accepted : state,
+          verdictBlock: async () => launches >= 2 ? {
+            cause: 'awaiting-implementation', diagnostic: 'Verdict already accepted', nextAction: 'resolve',
+          } : null,
+        },
+        agents: { launch: async launch => { launches++; return { agent: launch.agent, result: { status: 0 } }; } },
+        artifacts: { consumeReviewer: async () => {
+          consumes++;
+          assert.equal(launches, 1, 'accepted retry verdict needs no artifact polling');
+          return recovery === 'artifact'
+            ? { consumed: true, ok: false, diagnostic: 'Missing reviewer verdict' }
+            : { consumed: false, ok: true };
+        } },
+        provider: { pollReview: async () => { polls++; return null; } },
+      });
+      const context = fakeLoopContext(fake, { state, slug: request.slug });
+
+      const outcome = await runReviewerPhase(context, new ReviewRound(1, context));
+
+      assert.deepEqual(outcome, verdict === 'APPROVED' ? { outcome: 'stop' } : { reviewState: verdict });
+      assert.equal(state.phase, accepted.phase);
+      assert.deepEqual(fake.exits, []);
+      assert.deepEqual(fake.stops, []);
+      assert.equal(launches, 2, 'retry stops after the accepted verdict');
+      assert.equal(consumes, 1);
+      assert.equal(polls, recovery === 'timeout' ? 1 : 0);
+    });
+  }
+}
 
 test('post-response transition re-launches the active reviewer and records exactly one next round before approval', async () => {
   const reviewerOutcomes = ['REQUEST_CHANGES', 'APPROVED'];

@@ -430,3 +430,19 @@ test('isArtifactInfraDiagnostic gates infra failures from artifact recovery', ()
     assert.equal(isArtifactInfraDiagnostic(diag), false, `should NOT classify as infra: ${diag}`);
   }
 });
+
+test('persisted approve output ends reviewer retry as APPROVED (px-0017)', async () => {
+  const { reviewLoopBindings } = await import('../../../../src/adapters/review/review-persistence.js');
+  const { fixtureMission, pendingReview, inMemoryTransitionStore } = await import('../../../fixtures/mission-builders.js');
+  const slug = 'review-retry-verdict';
+  const review = pendingReview(slug, '2026-10-19T10:00:00Z');
+  const store = inMemoryTransitionStore(fixtureMission(slug, { status: 'review', review: { ...review,
+    reviewEvents: [{ position: 0, eventType: 'reviewer_outcome', roundNumber: 1, phase: 'reviewing', actor: 'claude',
+      content: 'Approved', disposition: null, verdict: 'approve', itemDispositions: null, blockedReason: null,
+      followUpReference: null, createdAt: '2026-10-19T10:01:00Z' }],
+  } }));
+  const output = await reviewLoopBindings(store).consumeReviewerArtifacts(slug, 'claude');
+  assert.equal(output.consumed, true);
+  assert.ok('reviewState' in output, 'consumed verdict includes its review state');
+  assert.equal(output.reviewState, 'APPROVED');
+});

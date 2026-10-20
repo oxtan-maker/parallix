@@ -9,9 +9,8 @@ function installLauncherProbes(): void {
   setCommandPathProbe(() => '/fixture-agent');
   setLauncherHealthProbe(() => ({ ok: true as const }));
 }
-
-// Only the review process launches the fixture agent. Its pinned verdict and
-// resolve children exercise real CLI persistence without loading unused agents.
+// Only the review executor launches the fixture agent. Its pinned verdict and
+// resolve children exercise real CLI persistence without fixture preloads.
 export async function installReviewRepairAgent(): Promise<void> {
   installLauncherProbes();
   const { setWorkflowLaunchPort } = await import('../../src/adapters/agents/agents.js');
@@ -60,6 +59,3 @@ export async function installReviewRepairAgent(): Promise<void> {
   }));
 
 }
-
-if (process.argv[2] === 'review') { await installReviewRepairAgent(); }
-else if (process.argv[2] === 'verdict' || process.argv[2] === 'resolve') { installLauncherProbes(); }

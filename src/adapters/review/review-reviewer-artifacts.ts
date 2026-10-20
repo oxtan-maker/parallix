@@ -434,7 +434,7 @@ async function recordReviewerApproval(slug: string, outcomeMessage: string, opti
 }
 
 /** The loop-control review state a consumed verdict maps to. */
-function reviewerConsumeOutcome(verdict: string, findings: readonly ReviewFinding[], reviewer: string, providerEnabled: boolean, verbose: boolean, log: (_msg: string) => void) {
+export function reviewerConsumeOutcome(verdict: string, findings: readonly ReviewFinding[], reviewer: string, providerEnabled: boolean, verbose: boolean, log: (_msg: string) => void) {
   const reviewFindings = findings.map(({ id, summary }) => ({ id, summary }));
   if (verdict === 'approve') { return { consumed: true, ok: true, reviewState: 'APPROVED', reviewFindings }; }
   if (verdict === 'request-changes') { return { consumed: true, ok: true, reviewState: 'REQUEST_CHANGES', reviewFindings }; }

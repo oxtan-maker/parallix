@@ -1,3 +1,4 @@
+import { reviewVerdictBlock } from '../../application/review-verdict-readiness.js';
 import { readAgentLaunchContext } from '../../application/agent-launch-context.js';
 import { recordImplementerLaunch } from '../../application/rebase-identity.js';
 import { promptArtifacts } from '../agents/prompt-artifacts.js';
@@ -188,7 +189,7 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
     const stage = role === 'reviewer'
     ? `${buildCompactReviewPrompt({ reviewer: facts.reviewer, branch, implementer: facts.implementer, focus, attempt: facts.attempt, repoRoot: worktree, missionPath, actualReviewer: actual, reviewBaseline: facts.reviewBaseline, integrationRepair: typeof facts.integrationRepair === 'string' ? facts.integrationRepair : undefined })}${facts.humanFeedback ? `\n\nHuman review correction (authoritative): ${facts.humanFeedback}` : ''}`
     : `${buildCompactActOnReviewPrompt({ implementer: facts.implementer, branch, attempt: facts.attempt, reviewOutcome: facts.reviewOutcome === undefined ? undefined : `${facts.reviewOutcome}`, repoRoot: worktree, missionPath, actualImplementer: actual, reviewBaseline: facts.reviewBaseline })}${facts.humanFeedback ? `\n\nHuman review correction (authoritative): ${facts.humanFeedback}` : ''}`;
-    return [snapshot, stage].filter(Boolean).join('\n\n');
+    return [snapshot, stage, role === 'reviewer' ? facts.preReviewRepair : null].filter(Boolean).join('\n\n');
   };
   return {
     async launch({ role, agent, exclude, prompt, recovery }) {
@@ -303,6 +304,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
       create: identity => new ReviewState(slug, identity),
       resume: persisted => ReviewState.from(slug, persisted),
       repairInvalidPhase: async state => { await persistNormalizedPhaseRepair(slug, state, worktree, { log, writeReviewStateFn: writeState, missionStore }); },
+      verdictBlock: () => reviewVerdictBlock(slug, missionStore),
       openRound: async state => (await openReviewRound(slug, state, { worktree, log, error, writeReviewStateFn: writeState, missionStore, lifecycleService })).ok,
     },
     task: {

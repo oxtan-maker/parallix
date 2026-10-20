@@ -1,6 +1,6 @@
 import { SqliteWorkflowOperationStore } from '../../../src/adapters/sqlite/workflow-operation-store.js';
-import { inheritWorkflowAuthorization } from '../../../src/composition/workflow-authorization.js';
 import { configureMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
+import { requireWorkflowOwner } from '../../../src/domain/workflow-operation.js';
 import { phaseGateResult } from '../../helpers/phase-gate-result.js';
 import { integrationServices } from '../../helpers/stub-integration-services.js';
 import { integrationContext } from '../../fixtures/integration-context.js';
@@ -425,7 +425,14 @@ test('production CLI autonomous re-review and child verdict/resolve keep authori
   pinChildCli(entry, { nodeArgs: ['--v8-pool-size=1', ...(loader ? ['--import', loader,
     '--import', path.resolve('test/fixtures/review-repair-agent-preload.ts')] : [])],
   stateHome, env: environment, configuration: resolveConfiguration(environment) });
-  inheritWorkflowAuthorization(resolveConfiguration(environment), operations);
+  // This executor is the workflow owner, not an inherited agent CLI. Keep
+  // mission/generation fencing here; the real child CLIs inherit their fence
+  // from the pinned environment and cannot take control of review.
+  configureMissionWriteAuthorization({ operationId: 'fixture-review', assert: async (mission, read) => {
+    const operation = await (read ?? operations.get.bind(operations))('fixture-review');
+    assert.ok(operation && operation.missionId === mission, 'workflow owns the requested mission');
+    requireWorkflowOwner(operation, 1);
+  } });
   await installReviewRepairAgent();
   const output: string[] = [];
   const code = await run(['review', slug, '--continue', '--reviewer', 'codex', '--implementer', 'custom', '--max-attempts', '3'], {

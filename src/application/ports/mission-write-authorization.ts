@@ -4,6 +4,8 @@ export type WorkflowOwnerRead = (_id: string) => Promise<WorkflowOperation | nul
 /** Composition installs the process owner's authorization before workflow effects. */
 export interface MissionWriteAuthorization {
   readonly operationId: string;
+  /** Child CLI writes are fenced by the parent, without inheriting control of it. */
+  readonly inherited?: boolean;
   assert(_missionId: string, _read?: WorkflowOwnerRead): Promise<void>;
   providerStarted?(_agent: string): Promise<void>;
   progress?(_phase: string, _summary: string, _agent?: string | null): Promise<void>;
@@ -18,3 +20,10 @@ export function hasMissionWriteAuthorization(): boolean { return authorization !
 export function authorizedOperationId(): string | null { return authorization?.operationId ?? null; }
 
 export async function reportWorkflowProviderStarted(agent: string): Promise<void> { await authorization?.providerStarted?.(agent); }
+
+/** An agent may write its assigned evidence or verdict, but cannot run its parent's lifecycle. */
+export function assertWorkflowControl(): void {
+  if (authorization?.inherited) {
+    throw new Error('The parent workflow owns handoff and review. Complete your assigned work and return to it; an inherited agent CLI cannot start or resume review. Report a recorded stop for the operator.');
+  }
+}

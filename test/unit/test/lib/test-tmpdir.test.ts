@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { checkoutTestTmpdir } from '../../../lib/test-tmpdir.js';
+import { checkoutTestTmpdir, linkSharedTsxCache } from '../../../lib/test-tmpdir.js';
 import { mkdtemp, mkdtempAt } from '../../../helpers/temp-dir.js';
 
 test('each checkout gets one stable private temporary directory outside the repository', () => {
@@ -46,6 +46,28 @@ test('nested coverage scratch leaves room for the tsx build socket (TASK-2762)',
     // npm prepack launches tsx here, including its UID and build process PID.
     const socket = path.join('/tmp', path.relative(base, nested), 'tsx-1000', '9999999.pipe');
     assert.ok(Buffer.byteLength(socket) < 108, `tsx socket exceeds Linux sun_path: ${socket}`);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('a covered coverage scratch reuses the checkout tsx transpile cache (px-0017)', t => {
+  const uid = process.getuid?.();
+  if (uid === undefined) { t.skip('no POSIX uid on this platform'); return; }
+  const base = mkdtemp('test-tmpdir-tsx-cache-');
+  try {
+    const checkout = checkoutTestTmpdir('/work/repo-a', base);
+    const cache = path.join(checkout, `tsx-${uid}`);
+    fs.mkdirSync(cache, { recursive: true });
+    fs.writeFileSync(path.join(cache, 'entry.json'), '{"warm":true}');
+    const scratch = mkdtempAt(checkout, 'coverage-scratch-');
+    linkSharedTsxCache(scratch, checkout);
+    linkSharedTsxCache(scratch, checkout);
+    assert.equal(fs.realpathSync(path.join(scratch, `tsx-${uid}`)), fs.realpathSync(cache),
+      'the scratch reaches the checkout cache instead of starting a cold one');
+    fs.rmSync(scratch, { recursive: true, force: true });
+    assert.equal(fs.readFileSync(path.join(cache, 'entry.json'), 'utf8'), '{"warm":true}',
+      'removing the invocation scratch removes the link, never the cache');
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }

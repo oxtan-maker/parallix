@@ -8,6 +8,9 @@ import {
   createVerdictCommand,
   type ReviewVerbPorts,
 } from '../../../../src/interfaces/cli/review-verbs.js';
+import { inheritWorkflowAuthorization } from '../../../../src/composition/workflow-authorization.js';
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+import { configureMissionWriteAuthorization } from '../../../../src/application/ports/mission-write-authorization.js';
 import { ReviewCommandUseCase } from '../../../../src/application/review-command-use-case.js';
 import { parseReviewCliRequest } from '../../../../src/interfaces/cli/review.js';
 import { createRevokeReviewCommand } from '../../../../src/interfaces/cli/revoke-review.js';
@@ -313,6 +316,32 @@ describe("review board characterization", { concurrency: false }, () => {
     await new ReviewCommandUseCase(workflow(calls)).execute(['task-2428', '--submit']);
 
     assert.deepEqual(calls, ['submit']);
+  });
+
+  test('inherited agent authority cannot start or resume nested review, but retains verdict authority (px-0017)', async t => {
+    t.after(() => configureMissionWriteAuthorization(null));
+    inheritWorkflowAuthorization(resolveConfiguration({
+      PARALLIX_WORKFLOW_OPERATION: 'outer-execute', PARALLIX_WORKFLOW_GENERATION: '1',
+    }), { get: async () => { throw new Error('control must be refused before effects'); } });
+    const calls: Operation[] = [];
+    const port = workflow(calls);
+    let preflights = 0;
+    const command = new ReviewCommandUseCase({ ...port, preflight: async (...args: Parameters<typeof port.preflight>) => {
+      preflights++;
+      return port.preflight(...args);
+    } });
+    for (const flag of ['--submit', '--start', '--continue', '--resume']) {
+      for (const suffix of [[], ['--dry-run']]) {
+        await assert.rejects(() => command.execute(['task-2428', flag, ...suffix]), /parent workflow.*handoff and review/i);
+      }
+    }
+    assert.equal(preflights, 0, 'nested control is refused before any lifecycle effects');
+    assert.deepEqual(calls, []);
+    await command.execute(['task-2428', '--submit-review', 'approve']);
+    assert.deepEqual(calls, ['submitReview']);
+    configureMissionWriteAuthorization({ operationId: 'outer-execute', assert: async () => {} });
+    await command.execute(['task-2428', '--submit']);
+    assert.deepEqual(calls, ['submitReview', 'submit'], 'the coordinator still owns automatic handoff');
   });
 
   test('task-2428 characterization: review:act-on-findings CLI rejects retired artifact consumption', async () => {

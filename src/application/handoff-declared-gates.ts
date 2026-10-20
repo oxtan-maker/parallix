@@ -173,7 +173,14 @@ export class DeclaredGateRunner {
     rootDir: string,
     fileSystem: HandoffWorkflowPorts['fileSystem']
   ): string | null {
-    for (const token of cmd.split(/\s+/)) {
+    // A substitution is shell syntax, not a literal pathname. Inspect its
+    // contents so a missing script still fails validation before execution.
+    // Peel innermost substitutions first to retain nested command references.
+    let fileReferences = cmd;
+    while (/\$\([^()]*\)/.test(fileReferences)) {
+      fileReferences = fileReferences.replace(/\$\(([^()]*)\)/g, ' $1 ');
+    }
+    for (const token of fileReferences.split(/\s+/)) {
       if (/^https?:\/\//i.test(token) || token.includes('://')) {continue;}
       if (token.startsWith('-')) {continue;}
       const cleaned = token.replace(/^['"`]|['"`]$/g, '');

@@ -11,7 +11,7 @@ import { PROFILE_ENV } from './lib/file-timing-reporter.js';
 import { cpuSupervisor, readCpuReport } from './lib/cpu-supervisor.js';
 import { childCpuUsageModule } from './lib/child-cpu-usage.js';
 import { readCpuBudgetPolicy, suiteCpuBudget } from './lib/test-cpu-policy.mjs';
-import { checkoutTestTmpdir } from './lib/test-tmpdir.js';
+import { checkoutTestTmpdir, linkSharedTsxCache } from './lib/test-tmpdir.js';
 import { assertValidTestLayout } from './lib/test-layout-validation.js';
 import { MEMORY_BOUNDARY_ENV, MEMORY_LIMIT_ENV, classifyWorkload, formatBreachReport, MEMORY_SCOPE_ENV, resolveMemoryBoundaryPolicy } from '../src/adapters/process/test-memory-policy.js';
 import { assertCgroupEnforcement, defaultUserRuntimeDir, forgetScope, scopeCgroupDir, scopeResult, watchScope, wrapInScope } from '../src/adapters/process/test-memory-cgroup.js';
@@ -95,7 +95,12 @@ if (fastUnit && coverageEnabled) {
 // invocation's payload on every runner exit path.
 let coverageScratchDir: string | null = null;
 if (coverageEnabled) {
-  coverageScratchDir = fs.mkdtempSync(path.join(checkoutTestTmpdir(executionRoot), 'coverage-scratch-'));
+  const stableTmpdir = checkoutTestTmpdir(executionRoot);
+  coverageScratchDir = fs.mkdtempSync(path.join(stableTmpdir, 'coverage-scratch-'));
+  // The per-invocation scratch would otherwise cold-start tsx's transpile cache
+  // for every covered run, so each tsx-loaded child re-transformed the module
+  // graph. Keep that cache in the checkout's stable tmp root.
+  linkSharedTsxCache(coverageScratchDir, stableTmpdir);
 }
 
 // Unit tests import production modules directly from `src/` and replace

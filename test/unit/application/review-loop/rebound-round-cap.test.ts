@@ -112,6 +112,17 @@ test('task-2377.04: an exhausted artifact occurrence gets a fresh per-occurrence
   await first.run();
   assert.equal(first.events.filter((event) => event === 'review:reviewer').length - 1, 2, 'the first occurrence consumes its full per-occurrence budget');
 
+  const blocked = runLoop({ consume, state, isContinue: true });
+  await blocked.run();
+  assert.equal(blocked.events.length, 0, 'a retained human stop prevents relaunch before operator acknowledgement');
+  assert.equal(state.current?.metadata.humanEscalationReason, 'REVIEWER_ARTIFACT_RETRY_EXHAUSTED');
+
+  // ReviewRoundUseCase.continue clears the acknowledged intervention before
+  // entering this lower-level loop. Model that boundary for the next occurrence.
+  assert.ok(state.current);
+  delete state.current.metadata.humanEscalationReason;
+  delete state.current.metadata.humanEscalatedAt;
+
   const second = runLoop({ consume, state, isContinue: true });
   await second.run();
   assert.equal(second.events.filter((event) => event === 'review:reviewer').length - 1, 2, 'the later same-kind occurrence gets a fresh budget of 2 — no cumulative carryover');

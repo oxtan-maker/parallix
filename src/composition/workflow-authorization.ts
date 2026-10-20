@@ -12,7 +12,7 @@ export function inheritWorkflowAuthorization(configuration: ParallixConfiguratio
   const generation = configuration.runtime.workflowGeneration;
   if (!id || hasMissionWriteAuthorization()) { return; }
   if (!store || !generation) { throw new Error('Inherited workflow authority is unavailable'); }
-  configureMissionWriteAuthorization({ operationId: id, assert: async (mission, read) => {
+  configureMissionWriteAuthorization({ operationId: id, inherited: true, assert: async (mission, read) => {
     const operation = await (read ?? store.get.bind(store))(id);
     if (!operation || operation.missionId !== mission) { throw new Error('Inherited workflow does not own this mission'); }
     requireWorkflowOwner(operation, generation);

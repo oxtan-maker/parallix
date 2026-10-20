@@ -2,7 +2,7 @@ import type { ReboundContext, ReboundReason, ReboundClassification } from './reb
 import { repairCheckpointPort } from './ports/repair-checkpoint.js';
 import { recoveryEvidenceForPrompt } from './rebound-evidence.js';
 import type { RecoveryEvidenceRef } from './recovery-evidence.js';
-import { buildFreshDiagnosticRepairPrompt, promptSlotsFor } from './rebound-prompts.js';
+import { buildFreshDiagnosticRepairPrompt, promptSlotsFor, recoveryEvidenceRoute } from './rebound-prompts.js';
 
 // Non-gate checkpoints store workflow labels, not executable checks. Keep the
 // encoding shared with continuation so legacy interrupted repairs stay resumable.
@@ -27,6 +27,21 @@ export async function prepareRepairPrompt(
   // verifier. Code-repair checkpoint evidence belongs to the generic path.
   if (context.repairPrompt !== undefined) {
     return { fixPrompt: context.repairPrompt, repairPort: undefined, repairCheckpoint: null };
+  }
+  if ((state.reason.kind === 'agent-timeout' || state.reason.kind === 'artifact-incomplete') && state.reason.role === 'reviewer') {
+    return { fixPrompt: [
+      `${state.classification.label}`,
+      'Reviewer output recovery. You have a fresh context. You remain the independent reviewer.',
+      `Retry attempt: ${attempt}/${maxAttempts}`,
+      ...(state.reason.kind === 'agent-timeout' && state.reason.expectedOutput ? [`Required output: ${state.reason.expectedOutput}`] : []),
+      ...recoveryEvidenceRoute({ recoveryEvidence: state.capturedEvidence }),
+      `Mission: ${context.slug}; attempt ${attempt}/${maxAttempts}.`,
+      `Original failure: ${state.originalDiagnostic}`,
+      `Latest failure: ${state.diagnostic}`,
+      `Read px status ${context.slug} --json and the current revision; complete the remaining independent review obligations.`,
+      'Submit your verdict through px verdict approve or px verdict request-changes with the assigned reviewer actor. You have authority to approve a correct fix.',
+      'Read applicable AGENTS.md repository rules. Inspect the current branch revision and working-tree edits. If evidence is missing or stale, report it explicitly. This retry requires reviewer output only. Preserve the mission tree and report any workflow rejection with its cause and supported operator recovery action.',
+    ].join('\n'), repairPort: undefined, repairCheckpoint: null };
   }
   const { slug, worktree } = context;
   const repairPort = context.repairCheckpoints ?? repairCheckpointPort();

@@ -221,6 +221,11 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
   const maxAttempts = request.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   if (request.reset && await ports.state.reset()) { out.emit({ kind: 'review-reset', slug: slug }); }
   let persisted = await ports.state.read();
+  if (persisted?.phase !== 'approved' && persisted?.metadata.humanEscalationReason) {
+    ports.output.error(`Review entry blocked for ${slug}: ${persisted.metadata.humanEscalationReason}. Operator recovery: px review ${slug} --continue.`);
+    out.exit(1);
+    return;
+  }
   const implementer = await resolveImplementer(slug, request.implementer, persisted, ports, out, start.dryRun);
   if (stopsOnMissingTaskFile(slug, ports, out)) { return; }
   if (await resumePendingRepair(request, start, persisted, implementer, ports)) { return; }
@@ -254,6 +259,11 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
     },
   };
   context.emit({ kind: 'review-started', slug, implementer, reviewer: identities.reviewer, branch: ports.branch, focus: context.focus, maxAttempts, intervalMs: ports.polling.intervalMs, timeoutMs: ports.polling.timeoutMs, verbose: start.verbose, dryRun: start.dryRun });
+  await runReviewRounds(context, request, restarted);
+}
+
+async function runReviewRounds(context: LoopContext, request: ReviewLoopRequest, restarted: boolean): Promise<void> {
+  const { ports, state, maxAttempts } = context;
   for (let attempt = context.initialRound; attempt <= maxAttempts; attempt++) {
     const outcome = await runRound(context, attempt);
     if (outcome === 'stop') { return; }
@@ -271,7 +281,7 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
   state.disposition = 'MAX_ATTEMPTS';
   state.metadata = { ...state.metadata, humanEscalationReason: 'MAX_ATTEMPTS', humanEscalatedAt: new Date().toISOString() };
   await ports.state.persist(state);
-  out.emit({ kind: 'attempts-exhausted', maxAttempts: maxAttempts });
+  context.emit({ kind: 'attempts-exhausted', maxAttempts: maxAttempts });
 }
 
 /**

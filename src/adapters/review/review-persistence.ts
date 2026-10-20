@@ -1,3 +1,4 @@
+import { reviewerConsumeOutcome } from './review-reviewer-artifacts.js';
 import type { MissionStore, SessionMarkerPort } from '../../application/domain-ports.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import {
@@ -125,12 +126,7 @@ export function reviewLoopBindings(store: MissionStore, lifecycleService?: Missi
       event.event_type === 'reviewer_findings' && event.round === state.round && event.actor === reviewer
       && Date.parse(event.timestamp) >= Date.parse(state.startedAt),
     );
-    return {
-      consumed: true,
-      ok: true,
-      reviewState: outcome.verdict.toUpperCase().replace('-', '_'),
-      findingSummaries: parseReviewFindings(findings?.content ?? '').map((finding) => finding.summary),
-    };
+    return reviewerConsumeOutcome(outcome.verdict, parseReviewFindings(findings?.content ?? ''), reviewer, false, false, () => {});
   };
   const implementerOutput = async (
     slug: string,

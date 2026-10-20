@@ -50,9 +50,19 @@ function dryRunReviewerPrompt(context: LoopContext, round: ReviewRound): void {
   context.emit({ kind: 'reviewer-dry-run-prompt', prompt: context.ports.agents.dryRunPrompt('reviewer', round.promptFacts()) });
 }
 
+/** A workflow rejection cannot be repaired by waiting for provider output. */
+async function stopForVerdictBlock(context: LoopContext): Promise<boolean> {
+  const block = await context.ports.state.verdictBlock?.();
+  if (!block) { return false; }
+  context.ports.output.error(block.diagnostic);
+  context.exit(1);
+  return true;
+}
+
 /** Launch the reviewer (skipped for an autonomous local round). */
 async function launchReviewer(context: LoopContext, round: ReviewRound): Promise<RoundStep> {
   const { ports, identities } = context;
+  if (await stopForVerdictBlock(context)) { return 'stop'; }
   if (identities.reviewer === 'autonomous' && !ports.provider) {
     context.emit({ kind: 'autonomous-reviewer', attempt: round.attempt });
     return null;
@@ -89,6 +99,7 @@ async function consumeReviewerOutput(context: LoopContext, round: ReviewRound): 
   const persisted = await ports.state.read();
   const persistedOutcome = persistedReviewerOutcome(state, persisted);
   if (persistedOutcome) { return { step: null, reviewState: persistedOutcome }; }
+  if (await stopForVerdictBlock(context)) { return { step: 'stop' }; }
   let artifacts = await ports.artifacts.consumeReviewer(identities.reviewer, state);
   let reviewState: unknown = null;
   if (artifacts.consumed && !artifacts.ok) {
@@ -106,36 +117,51 @@ async function consumeReviewerOutput(context: LoopContext, round: ReviewRound): 
       ...reboundCollaborators(context, 'reviewer', () => round.promptFacts()),
       implementer: identities.reviewer, step: 'review', role: 'reviewer', exclude: [identities.implementer], maxAttempts,
       verify: async () => {
-        artifacts = await ports.artifacts.consumeReviewer(identities.reviewer);
+        const retry = await reviewerRecoveryOutput(context);
+        if (retry.workflowBlock) { return { ok: false, workflowBlock: retry.workflowBlock }; }
+        artifacts = retry.artifacts;
         if (!artifacts.consumed) { return { ok: false, diagnostic: `Reviewer ${identities.reviewer} produced no review artifacts after the relaunch` }; }
         return artifacts.ok ? { ok: true } : { ok: false, diagnostic: reviewerArtifactDiagnostic(context, artifacts) };
       },
     });
-    round.used += recovery.attempts ?? 0;
+    round.used += recovery.attempts;
     identities.reviewer = recovery.implementer || identities.reviewer;
-    if (recovery.outcome !== 'fixed') {
-      if (recovery.outcome === 'human-only') {
-        context.emit({ kind: 'reviewer-recovery-human', slug: context.slug });
-        await context.escalateToHumanReview('REVIEWER_ARTIFACT_INFRA_FAILURE');
-        return { step: 'stop' };
-      }
-      if (round.capReached()) { return { step: await round.stopForCap('reviewer artifact') }; }
-      context.emit({ kind: 'reviewer-recovery-exhausted', maxAttempts: maxAttempts, slug: context.slug });
-      await context.escalateToHumanReview('REVIEWER_ARTIFACT_RETRY_EXHAUSTED');
-      return { step: 'stop' };
-    }
+    const accepted = persistedReviewerOutcome(state, await ports.state.read());
+    if (accepted) { return { step: null, reviewState: accepted }; }
+    if (await stopForVerdictBlock(context)) { return { step: 'stop' }; }
+    const recoveryStop = await stopForArtifactRecovery(context, round, recovery, maxAttempts);
+    if (recoveryStop) { return { step: recoveryStop }; }
     context.emit({ kind: 'reviewer-artifacts-recovered', attempts: recovery.attempts });
   }
   if (artifacts.consumed) {
-    reviewState = artifacts.reviewState;
-    // TASK-2477/F1: recovery carries the findings too, so the CHANGES
-    // REQUESTED summary is never empty on the recovery path.
-    round.blockingFindings = artifacts.reviewFindings || [];
+    reviewState = applyReviewerArtifacts(round, artifacts);
   }
+  if (await stopForUnresolvedVerdictBlock(context)) { return { step: 'stop' }; }
   if (!reviewState && ports.provider) {
     reviewState = await ports.provider.pollReview(identities.reviewer, state.startedAt, { label: `round ${round.attempt} review`, retryCount: 0 });
   }
   return { step: null, reviewState };
+}
+
+function applyReviewerArtifacts(round: ReviewRound, artifacts: ReviewerArtifactFacts): unknown {
+  // TASK-2477/F1: recovered findings must accompany the changes-requested summary.
+  round.blockingFindings = artifacts.reviewFindings || [];
+  return artifacts.reviewState;
+}
+
+async function stopForArtifactRecovery(context: LoopContext, round: ReviewRound, recovery: Awaited<ReturnType<typeof rebound>>, maxAttempts: number): Promise<RoundStep> {
+  if (recovery.outcome !== 'fixed') {
+    if (recovery.outcome === 'human-only') {
+      context.emit({ kind: 'reviewer-recovery-human', slug: context.slug });
+      await context.escalateToHumanReview('REVIEWER_ARTIFACT_INFRA_FAILURE');
+      return 'stop';
+    }
+    if (round.capReached()) { return await round.stopForCap('reviewer artifact'); }
+    context.emit({ kind: 'reviewer-recovery-exhausted', maxAttempts: maxAttempts, slug: context.slug });
+    await context.escalateToHumanReview('REVIEWER_ARTIFACT_RETRY_EXHAUSTED');
+    return 'stop';
+  }
+  return null;
 }
 
 function persistedReviewerOutcome(state: LoopContext['state'], persisted: Awaited<ReturnType<LoopContext['ports']['state']['read']>>): string | null {
@@ -144,12 +170,34 @@ function persistedReviewerOutcome(state: LoopContext['state'], persisted: Awaite
   return null;
 }
 
+/** A retried child can close readiness by submitting its accepted verdict. */
+async function reviewerRecoveryOutput(context: LoopContext) {
+  const accepted = persistedReviewerOutcome(context.state, await context.ports.state.read());
+  if (accepted) {
+    return { artifacts: { consumed: true, ok: true, reviewState: accepted } satisfies ReviewerArtifactFacts };
+  }
+  const workflowBlock = await context.ports.state.verdictBlock?.();
+  if (workflowBlock) { return { workflowBlock }; }
+  return { artifacts: await context.ports.artifacts.consumeReviewer(context.identities.reviewer) };
+}
+
+async function stopForUnresolvedVerdictBlock(context: LoopContext): Promise<boolean> {
+  if (persistedReviewerOutcome(context.state, await context.ports.state.read())) { return false; }
+  return stopForVerdictBlock(context);
+}
+
 /**
  * A round with no usable review outcome (poll timeout or nothing at all)
  * relaunches the reviewer through the kernel; a spent budget needs a human.
  */
 async function recoverReviewerTimeout(context: LoopContext, round: ReviewRound, reviewState: unknown): Promise<{ step: RoundStep; reviewState?: unknown }> {
   const { ports, state, identities } = context;
+  // An accepted child verdict closes verdict readiness as part of its normal
+  // transition. Reconcile that outcome before deciding whether output recovery
+  // is blocked; request-changes must proceed to the implementer.
+  const accepted = persistedReviewerOutcome(state, await ports.state.read());
+  if (accepted) { return { step: null, reviewState: accepted }; }
+  if (await stopForVerdictBlock(context)) { return { step: 'stop' }; }
   if (!isPollTimeout(reviewState) && reviewState) { return { step: null, reviewState }; }
   if (!reviewState) {
     context.emit({ kind: 'missing-review-outcome', reviewer: identities.reviewer, providerEnabled: Boolean(ports.provider), branch: ports.branch });
@@ -164,7 +212,9 @@ async function recoverReviewerTimeout(context: LoopContext, round: ReviewRound, 
     implementer: identities.reviewer, step: 'review', role: 'reviewer', exclude: [identities.implementer],
     maxAttempts: round.occurrenceBudget(DEFAULT_REBOUND_ATTEMPTS),
     verify: async () => {
-      const retry = await ports.artifacts.consumeReviewer(identities.reviewer);
+      const output = await reviewerRecoveryOutput(context);
+      if (output.workflowBlock) { return { ok: false, workflowBlock: output.workflowBlock }; }
+      const retry = output.artifacts;
       const diagnostic = retry.diagnostic || `Reviewer output still missing for ${ports.branch}`;
       recovered = retry.consumed && retry.ok ? retry.reviewState : null;
       if (!recovered && ports.provider) {
@@ -177,6 +227,9 @@ async function recoverReviewerTimeout(context: LoopContext, round: ReviewRound, 
   });
   round.used += recovery.attempts;
   identities.reviewer = recovery.implementer || identities.reviewer;
+  const acceptedAfterRetry = persistedReviewerOutcome(state, await ports.state.read());
+  if (acceptedAfterRetry) { return { step: null, reviewState: acceptedAfterRetry }; }
+  if (await stopForVerdictBlock(context)) { return { step: 'stop' }; }
   if (recovery.outcome === 'fixed') { return { step: null, reviewState: recovered }; }
   if (round.capReached()) { return { step: await round.stopForCap('reviewer timeout recovery') }; }
   context.emit({ kind: 'reviewer-timeout-exhausted', dossier: recovery.dossier, reviewer: identities.reviewer, attempts: recovery.attempts });

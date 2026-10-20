@@ -52,6 +52,7 @@ export class ReviewRound {
   blockingFindings: { id: string; summary: string }[] = [];
   /** The integration repair the reviewer is told about (TASK-2620); empty otherwise. */
   integrationRepair = '';
+  preReviewRepair = '';
   humanFeedback = '';
 
   readonly attempt: number;
@@ -86,7 +87,7 @@ export class ReviewRound {
 
   promptFacts(reviewOutcome?: unknown): ReviewPromptFacts {
     const { implementer, reviewer } = this._context.identities;
-    return { reviewer, implementer, attempt: this.attempt, reviewBaseline: this.reviewBaseline, integrationRepair: this.integrationRepair, ...(this.humanFeedback ? { humanFeedback: this.humanFeedback } : {}), ...(reviewOutcome === undefined ? {} : { reviewOutcome }) };
+    return { reviewer, implementer, attempt: this.attempt, reviewBaseline: this.reviewBaseline, integrationRepair: this.integrationRepair, preReviewRepair: this.preReviewRepair, ...(this.humanFeedback ? { humanFeedback: this.humanFeedback } : {}), ...(reviewOutcome === undefined ? {} : { reviewOutcome }) };
   }
 }
 

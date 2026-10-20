@@ -81,9 +81,10 @@ describe("review store bindings", { concurrency: false }, () => {
     });
 
     assert.equal(result.consumed, true);
+    assert.ok('reviewFindings' in result, 'consumed reviewer output includes finding facts');
     assert.equal(result.ok, true);
     assert.equal(result.reviewState, 'REQUEST_CHANGES');
-    assert.deepEqual(result.findingSummaries, ['persisted finding']);
+    assert.deepEqual(result.reviewFindings, [{ id: 'F1', summary: 'persisted finding' }]);
   });
 
   test('loop reviewer reader ignores events from another round or reviewer', async () => {

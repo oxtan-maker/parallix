@@ -396,6 +396,18 @@ source as `mechanical-restoration`, with both revisions, the failed gate and a
 validation citation. This is a restoration of prior review authority, not a
 new model verdict. Initial reviews and integration gates are still required.
 
+An agent's child CLI can record its assigned evidence and review verdict, but
+cannot start or resume a review workflow under inherited authority. It returns
+to the parent workflow, which owns handoff and reviewer launch. This prevents a
+nested review from leaving a stop behind for the parent's later handoff.
+
+A retained reviewer-launch failure stops automatic review entry before another
+reviewer is launched. The diagnostic names the cause and operator continuation.
+Reviewer-output retries retain independent verdict authority and require only
+reviewer output; they create no implementer repair checkpoint. Gate and hook
+failures still return to the implementer and rerun the failing prerequisite
+before independent review resumes.
+
 If the review loop escalates to a human, run `px review <slug> --continue` to
 resume its persisted review. This clears the recorded stop and grants another
 review attempt, including when the previous round limit was exhausted. After

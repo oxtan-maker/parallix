@@ -230,3 +230,23 @@ describe('review round advancement', () => {
     assert.equal(resubmitted.status, 'completed', resubmitted.error?.message ?? '');
   });
 });
+
+it('workflow-rejected verdicts expose cause and supported recovery without clearing stops (px-0017)', async () => {
+  const { pendingReview } = await import('../../../fixtures/mission-builders.js');
+  const { recordApproval } = await import('../../../../src/adapters/review/review-round.js');
+  const slug = 'stopped-verdict';
+  const review = { ...pendingReview(slug), intervention: {
+    reason: 'REVIEWER_LAUNCH_FAILURE', requestedAt: '2026-10-19T10:00:00Z', requestedBy: 'workflow' as const,
+  } };
+  const store = inMemoryTransitionStore(fixtureMission(slug, { status: 'review', review }));
+  for (const outcome of [
+    await recordApproval(slug, { comment: null, decidedAt: '2026-10-19T10:01:00Z' }, { missionStore: store }),
+    await recordRequestedChanges(slug, { comment: null, findings: [], decidedAt: '2026-10-19T10:01:00Z' }, { missionStore: store }),
+  ]) {
+    assert.equal(outcome.outcome, 'failed');
+    if (outcome.outcome !== 'failed') { assert.fail('must fail'); }
+    assert.equal(outcome.workflowBlock?.cause, 'REVIEWER_LAUNCH_FAILURE');
+    assert.match(outcome.workflowBlock?.nextAction ?? '', /px review stopped-verdict --continue/);
+  }
+  assert.deepEqual(store.mission().review?.intervention, review.intervention);
+});

@@ -7,7 +7,7 @@
  * decides whether a repair is attempted at all (the per-round cap), which
  * lifecycle transitions bracket it, and whether the round continues.
  */
-import { DEFAULT_REBOUND_ATTEMPTS, rebound, type GateFailureReason, type HookFailureReason, type ReboundOutcome, type VerifyResult } from '../rebound-kernel.js';
+import { DEFAULT_REBOUND_ATTEMPTS, rebound, reboundDiagnostic, type GateFailureReason, type HookFailureReason, type ReboundOutcome, type VerifyResult } from '../rebound-kernel.js';
 import { transitionReviewRepair } from '../review-repair-lifecycle.js';
 import { configuredReviewerEligibility, reboundCollaborators, type LoopContext, type ReviewRound, type RoundStep } from './round.js';
 
@@ -18,6 +18,7 @@ export interface PreReviewRepair {
   readonly attempts: number;
   readonly diagnostic: string;
   readonly implementer: string;
+  readonly reviewBrief: string;
 }
 
 /**
@@ -47,11 +48,17 @@ export async function repairPreReviewFailure(
   maxAttempts: number,
 ): Promise<PreReviewRepair> {
   const { slug, ports } = context;
+  const before = ports.preReview.head();
+  let successfulCheck: string | undefined;
   const outcome = await rebound(reason, {
     ...reboundCollaborators(context, 'implementer'),
     implementer: context.identities.implementer,
     maxAttempts,
-    verify: async () => await verifyPreReviewSetup(context),
+    verify: async () => {
+      const verified = await verifyPreReviewSetup(context);
+      if (verified.ok) { successfulCheck = verified.command; }
+      return verified;
+    },
     transitionToImplementer: async () => {
       if (ports.missionStore) { await transitionReviewRepair(slug, 'active', context.identities.implementer, ports.missionStore, ports.lifecycle); }
       await ports.task.mirror('active');
@@ -62,7 +69,14 @@ export async function repairPreReviewFailure(
     await ports.task.mirror('review');
   }
   context.identities.implementer = outcome.implementer || context.identities.implementer;
-  return { bounced: outcome.outcome === 'fixed', outcome: outcome.outcome, attempts: outcome.attempts, diagnostic: outcome.diagnostic, implementer: outcome.implementer };
+  const reviewBrief = outcome.outcome === 'fixed' ? [
+    'Verified implementer repair for independent review:',
+    `Original failure: ${reboundDiagnostic(reason)}`,
+    `Committed fix: ${before ?? 'unavailable'} -> ${ports.preReview.head() ?? 'unavailable'}`,
+    `Successful prerequisite: ${successfulCheck ?? 'pre-review rebase and declared gate (no command reported)'}; result=passed.`,
+    'Review the committed fix and remaining mission obligations independently. You have authority to approve a correct fix through px verdict approve; request changes for any remaining blocking findings.',
+  ].join('\n') : '';
+  return { reviewBrief, bounced: outcome.outcome === 'fixed', outcome: outcome.outcome, attempts: outcome.attempts, diagnostic: outcome.diagnostic, implementer: outcome.implementer };
 }
 
 /** Repair under the round cap; 'stop' when the round must end. */
@@ -70,7 +84,7 @@ async function repairUnderCap(context: LoopContext, round: ReviewRound, reason: 
   if (round.capReached()) { return await round.stopForCap(occurrence); }
   const repair = await repairPreReviewFailure(context, reason, round.occurrenceBudget(DEFAULT_REBOUND_ATTEMPTS));
   round.used += repair.attempts ?? 0;
-  if (repair.bounced) { return null; }
+  if (repair.bounced) { round.preReviewRepair = [round.preReviewRepair, repair.reviewBrief].filter(Boolean).join('\n\n'); return null; }
   if (round.capReached()) { return await round.stopForCap(occurrence); }
   onStranded(repair);
   context.exit(1);

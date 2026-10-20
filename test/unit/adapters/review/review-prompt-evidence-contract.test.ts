@@ -153,7 +153,13 @@ describe("context compaction", { concurrency: false }, () => {
         verify: () => ({ ok: true as const }), log: () => {}, error: () => {},
       });
 
-      assertFreshRepairAuthority(repairPrompt);
+      if (role === 'implementer') { assertFreshRepairAuthority(repairPrompt); }
+      else {
+        assert.match(repairPrompt, /You have a fresh context/);
+        assert.match(repairPrompt, /Read px status .* --json/);
+        assert.match(repairPrompt, /Read applicable AGENTS.md/);
+        assert.match(repairPrompt, /authority to approve/);
+      }
       assert.match(repairPrompt, new RegExp(`Required output: ${expectedOutput}`));
       assert.match(repairPrompt, /Retry attempt: 1\/2/);
     }
@@ -892,3 +898,26 @@ test('prompt history artifacts are private, immutable and survive subsequent rou
     await assert.rejects(artifacts.retain('first complete review 🌍'));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+for (const kind of ['agent-timeout', 'artifact-incomplete'] as const) {
+  test(`combined reviewer ${kind} retry preserves verdict authority (px-0017)`, async () => {
+    const root = registeredMkdtemp('reviewer-retry-authority-');
+    try {
+      let combined = '';
+      const result = await rebound({ kind, role: 'reviewer', diagnostic: 'No valid verdict' }, {
+        slug: 'px-fixture', worktree: root, implementer: 'claude', role: 'reviewer', maxAttempts: 1,
+        repairCheckpoints: { open: async () => assert.fail('reviewer retry cannot open a repair checkpoint'),
+          verify: async () => assert.fail('reviewer output is not implementer certification'), readBlocker: async () => undefined },
+        startAgent: async (_step, options) => {
+          combined = buildCompactReviewPrompt({ reviewer: 'claude', implementer: 'codex', branch: 'mission/px-fixture', attempt: 1, repoRoot: root })
+            + '\n' + (typeof options.prompt === 'function' ? options.prompt('claude') : options.prompt);
+          return { agent: 'claude', result: { status: 0 } };
+        }, verify: () => ({ ok: true }),
+      });
+      assert.equal(result.outcome, 'fixed');
+      assert.match(combined, /authority to approve a correct fix/);
+      assert.match(combined, /px verdict approve/);
+      assert.doesNotMatch(combined, /Commit tracked repair|Harness-created repair checkpoint|do not self-approve|do not inherit.*review-approval authority/);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+}

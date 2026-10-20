@@ -103,3 +103,55 @@ test('direct operator acknowledgment precedes continuation readiness and dry-run
   await missing.useCase.continue({ ...base, rawMaxAttempts: null });
   assert.deepEqual(missing.calls, ['missing aggregate']);
 });
+
+test('nested reviewer launch failure blocks outer post-execute review entry (px-0017)', async () => {
+  const { fake, useCase } = fixture(1, true, {
+    state: new ReviewState(base.slug, { implementer: 'codex', reviewer: 'claude', round: 1 }),
+    handoff: { handoff: async () => ({ ok: true }) },
+    agents: { launch: async () => { throw new Error('nested reviewer unavailable'); } },
+  });
+  await useCase.start({ ...base, maxAttempts: 1 });
+  assert.equal(fake.current()?.metadata.humanEscalationReason, 'REVIEWER_LAUNCH_FAILURE');
+  assert.equal(fake.launches.length, 1);
+  await useCase.start({ ...base, maxAttempts: 1 });
+  assert.equal(fake.launches.length, 1, 'outer entry must stop before another blocked verdict launch');
+  assert.ok(fake.errors.some(line => line.includes('REVIEWER_LAUNCH_FAILURE') && line.includes('review task-2637 --continue')));
+});
+
+test('workflow rejection after launch stops provider polling and output retries (px-0017)', async () => {
+  let blocked = false;
+  let polls = 0;
+  const { fake, useCase } = fixture(1, true, {
+    state: new ReviewState(base.slug, { implementer: 'codex', reviewer: 'claude' }),
+    provider: { pollReview: async () => { polls++; return null; } },
+    agents: { launch: async () => { blocked = true; return { agent: 'claude' }; } },
+    stateport: { verdictBlock: async () => blocked ? {
+      cause: 'REVIEWER_LAUNCH_FAILURE', diagnostic: 'cause=REVIEWER_LAUNCH_FAILURE; px review task-2637 --continue',
+      nextAction: 'px review task-2637 --continue',
+    } : null },
+  });
+  await useCase.start({ ...base, maxAttempts: 1 });
+  assert.equal(fake.launches.length, 1);
+  assert.equal(polls, 0);
+  assert.deepEqual(fake.exits, [1]);
+  assert.match(fake.errors.join('\n'), /cause=REVIEWER_LAUNCH_FAILURE/);
+});
+
+test('workflow blocker during reviewer retry ends recovery without replacing the stop (px-0017)', async () => {
+  let launches = 0;
+  let polls = 0;
+  const { POLL_TIMEOUT } = await import('../../../src/application/ports/review-round.js');
+  const { fake, useCase } = fixture(1, true, {
+    state: new ReviewState(base.slug, { implementer: 'codex', reviewer: 'claude' }),
+    provider: { pollReview: async () => { polls++; return POLL_TIMEOUT; } },
+    agents: { launch: async () => { launches++; return { agent: 'claude', result: { status: 0 } }; } },
+    stateport: { verdictBlock: async () => launches >= 2 ? {
+      cause: 'operator stop', diagnostic: 'operator stop; px review task-2637 --continue', nextAction: 'operator continuation',
+    } : null },
+  });
+  await useCase.start({ ...base, maxAttempts: 1 });
+  assert.equal(launches, 2);
+  assert.equal(polls, 1);
+  assert.deepEqual(fake.stops, [], 'retained authority must not be replaced with retry exhaustion');
+  assert.match(fake.errors.join('\n'), /operator stop/);
+});

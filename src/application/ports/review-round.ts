@@ -73,6 +73,7 @@ export interface ReviewLoopState {
 /** Review-round persistence for one Mission. */
 export interface ReviewStatePort {
   read(): Promise<ReviewLoopState | null>;
+  verdictBlock?(): Promise<import('../review-verdict-readiness.js').VerdictBlock | null>;
   /** Persist an already-decided state; throws when the write does not commit. */
   persist(_state: ReviewLoopState): Promise<void>;
   /** Discard the persisted state; true when a reset was committed. */
@@ -219,6 +220,7 @@ export interface ReviewPromptFacts {
   readonly attempt: number;
   readonly reviewBaseline: string | undefined;
   readonly integrationRepair: string;
+  readonly preReviewRepair?: string;
   readonly reviewOutcome?: unknown;
   readonly humanFeedback?: string;
 }

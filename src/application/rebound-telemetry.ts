@@ -31,6 +31,7 @@ export interface ReboundRepairRecord {
   readonly context: 'resumed' | 'fresh';
   /** Agent that ran the attempt, after fallback selection. */
   readonly agent: string;
+  readonly role?: string;
   readonly provider: string | null;
   readonly model: string | null;
   readonly fingerprintBefore: string;
