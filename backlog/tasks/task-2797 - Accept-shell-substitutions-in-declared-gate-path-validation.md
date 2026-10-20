@@ -1,7 +1,7 @@
 ---
 id: TASK-2797
 title: Accept shell substitutions in declared-gate path validation
-status: backlog
+status: ready-for-integration
 assignee: []
 created_date: '2026-10-20 10:34'
 updated_date: '2026-10-20 10:40'
