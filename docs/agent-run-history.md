@@ -91,8 +91,10 @@ text); the operation and stream selectors switch between records; copy copies
 what is shown. Scrolling back keeps the selected operation and position when
 new runs arrive; resume following to return to the newest operation. Failed
 initial history reads retry during polling. The live
-pane is an optional extra view and never replaces the history. The view states
-whether an operation is starting, live, ended, ran without a terminal (pipe),
+pane is an optional extra view and never replaces the history. It refreshes
+once a second while open, skips refresh ticks while a read is pending, and
+keeps its displayed output if a refresh fails. Closing it cancels the read.
+The view states whether an operation is starting, live, ended, ran without a terminal (pipe),
 has no history, or whether the terminal could not be inspected; a failed or
 timed-out inspection keeps the history on screen and is not reported as "no
 terminal".

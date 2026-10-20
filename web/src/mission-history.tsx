@@ -91,7 +91,7 @@ function useTranscript(missionId: string, selection: Selection | null, setReadEr
   return { chunks, edges, startAt, loadEarlier, appendNewer };
 }
 
-/** Poll the overview, then the selected operation's newer output, one request at a time. */
+/** Own one cancellable polling generation, skipping ticks until its read settles. */
 function usePolling(missionId: string, tick: (_signal: AbortSignal) => Promise<void>) {
   const latest = useRef(tick);
   latest.current = tick;
@@ -111,16 +111,11 @@ function usePolling(missionId: string, tick: (_signal: AbortSignal) => Promise<v
 
 function LivePane({ missionId }: { missionId: string }) {
   const [live, setLive] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    const refresh = () => void loadLive(missionId).then(result => {
-      if (!alive || result.ok === false) { return; }
-      setLive(result.value.kind === 'live' ? result.value.output : `No live pane (${result.value.probe.kind}${result.value.probe.detail ? `: ${result.value.probe.detail}` : ''}).`);
-    });
-    refresh();
-    const interval = window.setInterval(refresh, POLL_MS);
-    return () => { alive = false; window.clearInterval(interval); };
-  }, [missionId]);
+  usePolling(missionId, async signal => {
+    const result = await loadLive(missionId, signal);
+    if (signal.aborted || result.ok === false) { return; }
+    setLive(result.value.kind === 'live' ? result.value.output : `No live pane (${result.value.probe.kind}${result.value.probe.detail ? `: ${result.value.probe.detail}` : ''}).`);
+  });
   return <pre aria-label="Live pane" style={{ maxHeight: 200, margin: 0, overflow: 'auto', whiteSpace: 'pre-wrap', borderTop: `1px solid ${MODAL.accentEdge}`, paddingTop: SPACE.md }}>{live ?? 'Loading live pane…'}</pre>;
 }
 

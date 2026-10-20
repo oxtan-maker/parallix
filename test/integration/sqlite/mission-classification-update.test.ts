@@ -8,7 +8,8 @@
  * production command graph `px status` reads from.
  */
 
-import test from 'node:test';
+import test, { before } from 'node:test';
+import { copyMigratedSchema, prepareMigratedSchema } from '../../fixtures/migrated-database.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,176 +24,89 @@ import { intakeMission, missionId, missionLabels, type Mission, type MissionLabe
 import { repositoryId } from '../../../src/domain/repository.js';
 
 const SLUG = 'task-2609-classification-set';
+before(prepareMigratedSchema);
 
-test('classification set discovers the version itself and records the value', async () => {
+async function withClassificationFixture(check: (_fixture: {
+  invoke(_args: string[]): Promise<number>;
+  readBack(): Promise<{ mission: Mission; version: number }>;
+  output: string[];
+  errors: string[];
+}) => Promise<void>) {
   const home = mkdtemp('parallix-class-');
   const repo = mkdtemp('parallix-class-repo-');
-  fs.writeFileSync(path.join(repo, 'workflow.config.json'), JSON.stringify({
-    product: { name: 'Classification Fixture' },
-    adapters: {
-      tasks: { provider: 'backlog-md', storage: 'backlog' },
-      missions: { baseDir: 'docs/missions' },
-      verification: { command: './scripts/verify-local.sh {{area}}' },
-      review: { provider: 'none' },
-      agents: {},
-    },
-  }, null, 2));
   const previousHome = process.env.PARALLIX_HOME;
   const output: string[] = [];
   const errors: string[] = [];
-  process.env.PARALLIX_HOME = home;
-
   try {
+    copyMigratedSchema(path.join(home, 'parallix.db'));
+    fs.writeFileSync(path.join(repo, 'workflow.config.json'), JSON.stringify({
+      product: { name: 'Classification Fixture' },
+      adapters: {
+        tasks: { provider: 'backlog-md', storage: 'backlog' },
+        missions: { baseDir: 'docs/missions' },
+        verification: { command: './scripts/verify-local.sh {{area}}' },
+        review: { provider: 'none' }, agents: {},
+      },
+    }));
+    process.env.PARALLIX_HOME = home;
     const { db } = await initOperatorState({ homeDir: home });
-    const store = new SqliteMissionStore(db);
-    await store.save({
+    await new SqliteMissionStore(db).save({
       ...intakeMission({
-        id: missionId(SLUG),
-        repositoryId: repositoryId('parallix'),
-        title: 'Classification fixture',
-        labels: missionLabels(['cli']),
-        assignee: agentFamily('codex'),
+        id: missionId(SLUG), repositoryId: repositoryId('parallix'),
+        title: 'Classification fixture', labels: missionLabels(['cli']), assignee: agentFamily('codex'),
       }),
       status: 'active',
-      brief: missionBrief({
-        goal: 'Prove classification set needs no flag',
-        why: 'The version is discoverable from mission state.',
-        scope: null,
-        outOfScope: [],
-      }),
+      brief: missionBrief({ goal: 'Prove classification writes', why: 'The version is discoverable from mission state.', scope: null, outOfScope: [] }),
     }, null);
     await clearOperatorStateCache();
+    await check({
+      output, errors,
+      async invoke(args) {
+        output.length = 0; errors.length = 0;
+        const write = process.stdout.write;
+        process.stdout.write = chunk => { output.push(String(chunk)); return true; };
+        try { return await run(args, { baseCwd: repo, error: message => { errors.push(message); return message; } }); }
+        finally { process.stdout.write = write; }
+      },
+      async readBack() {
+        await clearOperatorStateCache();
+        const { db: readDb } = await initOperatorState({ homeDir: home });
+        return await new SqliteMissionStore(readDb).load(missionId(SLUG)) as { mission: Mission; version: number };
+      },
+    });
+  } finally {
+    await clearOperatorStateCache();
+    if (previousHome === undefined) { delete process.env.PARALLIX_HOME; }
+    else { process.env.PARALLIX_HOME = previousHome; }
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+}
 
-    const invoke = async (args: string[]) => {
-      output.length = 0;
-      errors.length = 0;
-      const write = process.stdout.write.bind(process.stdout);
-      ((process.stdout)).write = (chunk) => {
-        output.push(String(chunk));
-        return true;
-      };
-      try { return await run(args, { baseCwd: repo, error: (message) => { errors.push(message); return message; } }); }
-      finally { ((process.stdout)).write = write; }
-    };
-    const readBack = async () => {
-      await clearOperatorStateCache();
-      const { db: readDb } = await initOperatorState({ homeDir: home });
-      const loaded = await new SqliteMissionStore(readDb).load(missionId(SLUG));
-      return loaded as { mission: Mission; version: number };
-    };
-
+test('classification set discovers the version itself and records the value', async () => {
+  await withClassificationFixture(async ({ invoke, readBack, output, errors }) => {
     const before = await readBack();
     // No --expected-version: the command discovers the version itself.
     assert.equal(await invoke(['classification', 'set', '--slug', SLUG, '--value', 'user_value']), 0, errors.join('\n'));
-    // The write used the version it just discovered: exactly one increment.
     const after = await readBack();
     assert.equal(after.version, before.version + 1, 'classification set must write with the discovered version');
     assert.match(JSON.parse(output.join('')).classification, /user_value/);
-    const labels = after.mission.labels ?? [];
-    assert.ok(labels.includes('user_value' as MissionLabel), 'user_value must be recorded on the Mission');
-  } finally {
-    process.env.PARALLIX_HOME = previousHome;
-  }
+    assert.ok((after.mission.labels ?? []).includes('user_value' as MissionLabel), 'user_value must be recorded on the Mission');
+  });
 });
 
 test('classification set still rejects a value that is not one of the allowed labels', async () => {
-  const home = mkdtemp('parallix-class-');
-  const repo = mkdtemp('parallix-class-repo-');
-  fs.writeFileSync(path.join(repo, 'workflow.config.json'), JSON.stringify({
-    product: { name: 'Classification Fixture' },
-    adapters: {
-      tasks: { provider: 'backlog-md', storage: 'backlog' },
-      missions: { baseDir: 'docs/missions' },
-      verification: { command: './scripts/verify-local.sh {{area}}' },
-      review: { provider: 'none' },
-      agents: {},
-    },
-  }, null, 2));
-  const previousHome = process.env.PARALLIX_HOME;
-  const errors: string[] = [];
-  process.env.PARALLIX_HOME = home;
-
-  try {
-    const { db } = await initOperatorState({ homeDir: home });
-    const store = new SqliteMissionStore(db);
-    await store.save({
-      ...intakeMission({
-        id: missionId(SLUG),
-        repositoryId: repositoryId('parallix'),
-        title: 'Classification fixture',
-        labels: missionLabels(['cli']),
-        assignee: agentFamily('codex'),
-      }),
-      status: 'active',
-      brief: missionBrief({ goal: 'g', why: 'w', scope: null, outOfScope: [] }),
-    }, null);
-    await clearOperatorStateCache();
-
-    const invoke = async (args: string[]) => {
-      errors.length = 0;
-      const write = process.stdout.write.bind(process.stdout);
-      ((process.stdout)).write = (chunk) => true;
-      try { return await run(args, { baseCwd: repo, error: (message) => { errors.push(message); return message; } }); }
-      finally { ((process.stdout)).write = write; }
-    };
-
+  await withClassificationFixture(async ({ invoke, readBack, errors }) => {
     assert.equal(await invoke(['classification', 'set', '--slug', SLUG, '--value', 'bogus']), 1);
     assert.match(errors.join('\n'), /exactly one of ai_sdlc, user_value, or unknown/);
     // The rejected write changed nothing.
-    const after = await new SqliteMissionStore((await initOperatorState({ homeDir: home })).db).load(missionId(SLUG));
-    assert.deepEqual((after as { mission: Mission }).mission.labels ?? [], ['cli']);
-  } finally {
-    process.env.PARALLIX_HOME = previousHome;
-  }
+    assert.deepEqual((await readBack()).mission.labels ?? [], ['cli']);
+  });
 });
 
 test('other write verbs resolve the version without --expected-version', async () => {
-  const home = mkdtemp('parallix-class-');
-  const repo = mkdtemp('parallix-class-repo-');
-  fs.writeFileSync(path.join(repo, 'workflow.config.json'), JSON.stringify({
-    product: { name: 'Classification Fixture' },
-    adapters: {
-      tasks: { provider: 'backlog-md', storage: 'backlog' },
-      missions: { baseDir: 'docs/missions' },
-      verification: { command: './scripts/verify-local.sh {{area}}' },
-      review: { provider: 'none' },
-      agents: {},
-    },
-  }, null, 2));
-  const previousHome = process.env.PARALLIX_HOME;
-  const errors: string[] = [];
-  process.env.PARALLIX_HOME = home;
-
-  try {
-    const { db } = await initOperatorState({ homeDir: home });
-    const store = new SqliteMissionStore(db);
-    await store.save({
-      ...intakeMission({
-        id: missionId(SLUG),
-        repositoryId: repositoryId('parallix'),
-        title: 'Classification fixture',
-        labels: missionLabels(['cli']),
-        assignee: agentFamily('codex'),
-      }),
-      status: 'active',
-      brief: missionBrief({ goal: 'Prove other verbs keep the flag', why: 'w', scope: null, outOfScope: [] }),
-    }, null);
-    await clearOperatorStateCache();
-
-    const invoke = async (args: string[]) => {
-      errors.length = 0;
-      const write = process.stdout.write.bind(process.stdout);
-      ((process.stdout)).write = (chunk) => true;
-      try { return await run(args, { baseCwd: repo, error: (message) => { errors.push(message); return message; } }); }
-      finally { ((process.stdout)).write = write; }
-    };
-
-    // A brief write resolves its own version without the flag and persists.
+  await withClassificationFixture(async ({ invoke, readBack, errors }) => {
     assert.equal(await invoke(['goal', 'set', '--slug', SLUG, '--goal', 'x', '--why', 'y']), 0, errors.join('\n'));
-    const after = await new SqliteMissionStore((await initOperatorState({ homeDir: home })).db).load(missionId(SLUG));
-    assert.equal((after as { mission: Mission }).mission.brief?.goal, 'x');
-  } finally {
-    process.env.PARALLIX_HOME = previousHome;
-  }
+    assert.equal((await readBack()).mission.brief?.goal, 'x');
+  });
 });
-

@@ -1,8 +1,8 @@
 ---
 id: TASK-2781
 title: Reuse serial cancellable polling for the live mission pane
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-10-19 09:54'
 labels: []
 dependencies: []
