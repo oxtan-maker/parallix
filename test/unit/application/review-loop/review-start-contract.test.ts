@@ -209,3 +209,48 @@ test('start fails closed when the Mission store cannot load the assignee (TASK-2
   assert.deepEqual(fake.launches, []);
   assert.deepEqual(fake.writes, []);
 });
+
+
+import { MissionLifecycleService } from '../../../../src/application/mission-lifecycle-service.js';
+import { pendingReview } from '../../../fixtures/mission-builders.js';
+
+for (const dryRun of [false, true]) {
+  test(`explicit continue implementer overrides database assignment${dryRun ? ' without dry-run writes' : ' before handoff'}`, async () => {
+    const mission = fixtureMission(slug, { assignee: agentFamily('custom'), review: {
+      ...pendingReview(slug), rounds: pendingReview(slug).rounds.map(round => ({ ...round, implementer: agentFamily('custom') })),
+    } });
+    const store = inMemoryTransitionStore(mission);
+    let handoffs = 0;
+    const fake = fakeReviewLoopPorts({ slug, missionStore: store, lifecycle: new MissionLifecycleService(store),
+      state: new ReviewState(slug, { implementer: 'custom', reviewer: 'claude', round: 1 }),
+      handoff: { handoff: async () => {
+        handoffs += 1;
+        assert.equal(store.mission().assignee, 'codex');
+        assert.equal(store.mission().review!.rounds.at(-1)!.implementer, 'codex');
+        return { ok: false, error: 'stop after identity observation' };
+      } },
+    });
+    await runReviewLoop({ slug, isContinue: true, implementer: 'codex', dryRun }, fake.ports);
+    assert.equal(handoffs, dryRun ? 0 : 1);
+    assert.equal(store.mission().assignee, dryRun ? 'custom' : 'codex');
+    if (dryRun) { assert.deepEqual(store.mission(), mission); assert.deepEqual(fake.writes, []); }
+    assert.deepEqual(fake.launches, []);
+  });
+}
+
+
+for (const boundary of ['approved review', 'missing lifecycle authority'] as const) {
+  test(`implementer override preserves ${boundary} boundary`, async () => {
+    const mission = fixtureMission(slug, { status: 'review', assignee: agentFamily('codex'),
+      review: boundary === 'approved review' ? approvedReview(slug) : pendingReview(slug),
+    });
+    const store = inMemoryTransitionStore(mission);
+    const fake = fakeReviewLoopPorts({ slug, missionStore: store,
+      lifecycle: boundary === 'approved review' ? new MissionLifecycleService(store) : null,
+    });
+    await assert.rejects(runReviewLoop({ slug, isContinue: true, implementer: 'custom' }, fake.ports),
+      boundary === 'approved review' ? /Revoke the approved review/ : /no lifecycle authority/);
+    assert.deepEqual(store.mission(), mission);
+    assert.deepEqual(fake.launches, []);
+  });
+}

@@ -11,7 +11,7 @@
 import { isDbAdhocIdentity, missionId } from '../../domain/mission.js';
 import { reviewStatus, type PullRequestReference } from '../../domain/review.js';
 import { transitionReviewRepair } from '../review-repair-lifecycle.js';
-import { rebaseImplementer } from '../rebase-identity.js';
+import { rebaseImplementer, recordImplementerLaunch } from '../rebase-identity.js';
 import type { HandoffFacts, HumanReviewFeedback, ReviewLoopPorts, ReviewLoopRequest, ReviewLoopState } from '../ports/review-round.js';
 import { pendingRetainedRepair, resumeRetainedRepair } from './retained-repair.js';
 import { selectReviewer } from './reviewer-selection.js';
@@ -24,12 +24,15 @@ export const DEFAULT_MAX_ATTEMPTS = 5;
 type Output = Pick<LoopContext, 'emit' | 'exit'>;
 type Start = Required<Pick<ReviewLoopRequest, 'dryRun' | 'isContinue' | 'verbose'>> & { slug: string };
 
-/** Database assignment owns composed identity; legacy-only callers retain their recorded identity. */
-async function resolveImplementer(slug: string, requested: string | undefined, persisted: ReviewLoopState | null, ports: ReviewLoopPorts, out: Output): Promise<string> {
+/** Explicit operator selection updates the lifecycle authority; otherwise resume its assignment. */
+async function resolveImplementer(slug: string, requested: string | undefined, persisted: ReviewLoopState | null, ports: ReviewLoopPorts, out: Output, dryRun: boolean): Promise<string> {
   if (ports.missionStore) {
     const actual = await rebaseImplementer(ports.missionStore, slug);
     if (!actual) { throw new Error(`Mission ${slug} has no database-assigned implementer`); }
-    if (requested && requested !== actual) { throw new Error(`Mission ${slug} implementer identity mismatch: requested ${requested}, database ${actual}`); }
+    if (requested && requested !== actual) {
+      if (!dryRun) { await recordImplementerLaunch(slug, requested, ports.missionStore, ports.lifecycle); }
+      return requested;
+    }
     out.emit({ kind: 'implementer-derived', implementer: actual });
     return actual;
   }
@@ -154,12 +157,12 @@ async function startState(persisted: ReviewLoopState | null, identity: { reviewe
     state = ports.state.resume(persisted);
     state.reviewer = identity.reviewer;
     state.implementer = identity.implementer;
-    await ports.state.persist(state);
+    if (!dryRun) { await ports.state.persist(state); }
   } else {
     state = ports.state.create(identity);
   }
   if (pullRequest) { state.pullRequest = pullRequest; }
-  await ports.state.repairInvalidPhase(state);
+  if (!dryRun) { await ports.state.repairInvalidPhase(state); }
   if (persisted && state.round > 1 && !dryRun) {
     out.emit({ kind: 'review-resumed', round: state.round, phase: state.phase });
   }
@@ -218,7 +221,7 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
   const maxAttempts = request.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   if (request.reset && await ports.state.reset()) { out.emit({ kind: 'review-reset', slug: slug }); }
   let persisted = await ports.state.read();
-  const implementer = await resolveImplementer(slug, request.implementer, persisted, ports, out);
+  const implementer = await resolveImplementer(slug, request.implementer, persisted, ports, out, start.dryRun);
   if (stopsOnMissingTaskFile(slug, ports, out)) { return; }
   if (await resumePendingRepair(request, start, persisted, implementer, ports)) { return; }
   persisted = await ports.state.read();

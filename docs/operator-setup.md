@@ -302,6 +302,11 @@ a stale approval as soon as the branch moves. `px rebase` also records the move
 against the approval, naming the revision that superseded it. If an integration
 gate later refuses the merge, the refusal names the staleness already reported.
 
+An explicit `px review --continue --implementer <family>` changes the Mission
+and current review implementer through the lifecycle authority before resuming.
+`--dry-run` previews the selection without changing the assignment. An effective
+approval must be revoked before changing implementer.
+
 Rebase recovery uses the database-assigned Mission implementer even before a
 review round exists. Missing identity or an unreadable database stops recovery;
 replayed task files cannot replace that identity.
