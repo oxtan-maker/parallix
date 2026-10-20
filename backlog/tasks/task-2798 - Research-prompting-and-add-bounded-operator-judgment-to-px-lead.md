@@ -4,7 +4,7 @@ title: Research prompting and add bounded operator judgment to px lead
 status: backlog
 assignee: []
 created_date: '2026-10-20 10:59'
-updated_date: '2026-10-20 16:43'
+updated_date: '2026-10-20 18:16'
 labels:
   - enhancement
   - research
@@ -101,6 +101,16 @@ Follow-up monitored reproduction, 2026-10-20 13:02–13:09 UTC: TASK-2797 comple
 
 Monitored recurrence, 2026-10-20 16:41 UTC: unchanged task-2794 revision ca95d156bd202bf4c385f71170d6a0dcd41c1711 failed its second covered integration capture with SC3 exit-control CPU 3.494 > 3.400 seconds, TASK-2771 held-foreground preparation timeout, TASK-2750 wall 6.595 seconds, and TASK-2769 assertion 1 != 0. Evidence: /mnt/data/code/parallix-task-2794/.workflow/recovery-evidence/task-2794/d1964ffb90d7d58ee5ce926bd2274c70e503abd59dfac07b664f8450be2f13fb/attempt-2.stdout.txt. Parent then launched bounded repair attempt 2/2; its fresh worker ran another raw full exact integration command without a tracked change (/tmp/task-2794-fresh-gate.log), again reproducing SC3 while reporting about 55 percent CPU pressure. The worker had no isolated cause or concrete fix and attributed contention only as a contributor. This extends the existing raw-gate contention/judgment observation; it does not prove configured admission failed or justify budget changes. The operator stopped the idle lead watcher and used supported px stop task-2794 to stop futile repetition. Old owner 1896874 and agent 3002923 settled, but a subsequent identity check still found orphan raw-gate npm PID 3009422 start 242485933 and runner PID 3009593 start 242485956; settlement remained under investigation. No approval, successful gate, or complete cleanup should be inferred from worker or stop summaries.
 <!-- SECTION:NOTES:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+author: codex
+created: 2026-10-20 18:16
+---
+2026-10-20 fleet observation: lead PID3085666 start242504266 stayed alive with no children while root log /tmp/parallix-lead-watch-after-stop-20261020.log remained at pass24 integration waits for 79 minutes. Meanwhile external integration attempts returned px-0016, task-2784, task-2785, task-2792 and task-2796 active; lead did not refresh its attention output or launch recovery. Verified identity and no owned children, operator-authorized SIGINT settled it. Distinguish polling stall from legitimate shared gate admission: external holders progressed, but this lead had no child and no changed passes. Diagnosis not yet established; add an isolated long-running monitoring probe for queue refresh after an integration item becomes active. No PR768 or production code changed.
+---
+<!-- COMMENTS:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
