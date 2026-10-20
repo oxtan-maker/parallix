@@ -1,9 +1,10 @@
 ---
 id: TASK-2802
-title: Avoid replaying superseded retained repair checkpoints
+title: Reconcile historical pending repairs with newer verified incidents
 status: backlog
 assignee: []
 created_date: '2026-10-20 18:57'
+updated_date: '2026-10-20 18:58'
 labels:
   - bug
 dependencies: []
@@ -33,3 +34,13 @@ Public task-2788 state active80 retains historical CP-5 browser repair incident 
 - [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+author: codex
+created: 2026-10-20 18:58
+---
+Authority qualification: CP-5 and CP-6 are DIFFERENT incident IDs. Both record the same browser command and byte-identical authorizedGates and nine authorizedCriteria, matching the current locked contract. Public checkpoint fields expose no captured revision, gate fingerprint or failure fingerprint. The isolated probe proves the backward scan selects historical CP-5 despite newer verified CP-6; it does NOT prove that ignoring CP-5 automatically is authorized. Incident identity and revision-bound proof may distinguish legitimate obligations. Before implementation, establish an authoritative supersession/proof rule through existing lifecycle evidence, or retain explicit unresolved classification. Do not implement latest-command-wins, mark old verified, or rewrite historical failure rows. Coordinate independent ownership analysis; TASK-2796 approval remains untouched.
+---
+<!-- COMMENTS:END -->
