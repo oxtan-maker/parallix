@@ -69,16 +69,14 @@ export function getDispatchAction(failureClass: FailureClassType): DispatchActio
 export type GitBlockerReason = 'dirty' | 'behind' | 'other';
 
 /**
- * Diagnostics whose remedy lies outside the implementer's working tree.
- *
- * These are the recognized infrastructure and state-machine markers of ADR 0048
- * classes 7 and 8. The kernel uses this rule to tell an *explicit* human-only
- * diagnostic apart from `classifyError`'s catch-all InfraBlocker default, which
- * merely means "no pattern matched". Before the rebound kernel this rule lived
- * as an ad-hoc regex at the pre-review gate call site; it is now a named rule of
- * the classifier with no independent consumer.
+ * Shared explicit blocker rules. Keep these separate from the conservative
+ * unknown-error fallback and the reviewer non-submission recovery policy.
  */
-const EXPLICIT_HUMAN_ONLY_DIAGNOSTIC_RE = /state\s+violation|invalid\s+state|transition\s+not\s+allowed|cannot\s+(move|transition)\s+(from|to)\s+\w+\s+(to|from)|forgejo|infrastructure|authentication\s+failed|token\s+(expired|invalid|missing)|forbidden|unauthorized\s+(access|request)|connection\s+(refused|timed?\s*out)|network\s+error/i;
+function explicitHumanOnlyClass(errorMsg: string): FailureClassType | null {
+  if (/state\s+violation|invalid\s+state|transition\s+not\s+allowed|cannot\s+(move|transition)\s+(from|to)\s+\w+\s+(to|from)/i.test(errorMsg) || /task\s+state/i.test(errorMsg) && /invalid|violation|incorrect/i.test(errorMsg) || /no\s+recorded\s+implementer.*cannot\s+launch\s+conflict\s+resolution/i.test(errorMsg)) { return FailureClass.StateMachineViolation; }
+  if (/forgejo|infrastructure|authentication\s+failed|token\s+(expired|invalid|missing)|forbidden|unauthorized\s+(access|request)|connection\s+(refused|timed?\s*out)|network\s+error/i.test(errorMsg)) { return FailureClass.InfraBlocker; }
+  return null;
+}
 
 /**
  * A passing test-result line (node:test spec `✔`, mocha/vitest `✓`, TAP `ok N`).
@@ -100,7 +98,7 @@ export function hasExplicitHumanOnlyDiagnostic(diagnostic: string): boolean {
   const evidence = diagnostic.split('\n').filter((line) => !PASSING_TEST_RESULT_LINE_RE.test(line)).join('\n');
   const { dispatchAction } = classifyError(evidence);
   return dispatchAction === DispatchAction.HumanOnly
-    && EXPLICIT_HUMAN_ONLY_DIAGNOSTIC_RE.test(evidence);
+    && explicitHumanOnlyClass(evidence) !== null;
 }
 
 /**
@@ -169,7 +167,7 @@ export function classifyError(errorMsg: string): { failureClass: FailureClassTyp
   // like "Forgejo quota exceeded" or "network error: quota exhausted" would be
   // classified as AgentCapacity/AutoRepair — mislabeling a genuine infra/Forgejo
   // failure. Preserve the InfraBlocker classification in that case (F1, task-2494
-  // round 3). This is exactly the EXPLICIT_HUMAN_ONLY_DIAGNOSTIC_RE infra
+  // round 3). The shared explicit blocker rules supply this infra
   // marker set, so a usage-block rule never matches an explicit infra diagnostic.
   // Note: a bare `rate limit` is intentionally NOT an infra marker — agent-
   // branded rate limits (see agent-limit.ts) are agent-capacity events, so it
@@ -219,8 +217,9 @@ function classifyGitBlocker(errorMsg: string): { failureClass: FailureClassType;
 }
 
 function classifyOperationalFailure(errorMsg: string): { failureClass: FailureClassType; dispatchAction: DispatchActionType } | null {
-  if (/state\s+violation|invalid\s+state|transition\s+not\s+allowed|cannot\s+(move|transition)\s+(from|to)\s+\w+\s+(to|from)/i.test(errorMsg) || /task\s+state/i.test(errorMsg) && /invalid|violation|incorrect/i.test(errorMsg) || /no\s+recorded\s+implementer.*cannot\s+launch\s+conflict\s+resolution/i.test(errorMsg)) {return { failureClass: FailureClass.StateMachineViolation, dispatchAction: DispatchAction.HumanOnly };}
-  const infra = /forgejo|infrastructure|authentication\s+failed|token\s+(expired|invalid|missing)|forbidden|unauthorized\s+(access|request)|connection\s+(refused|timed?\s*out)|network\s+error/i.test(errorMsg);
+  const explicitClass = explicitHumanOnlyClass(errorMsg);
+  if (explicitClass === FailureClass.StateMachineViolation) {return { failureClass: explicitClass, dispatchAction: DispatchAction.HumanOnly };}
+  const infra = explicitClass === FailureClass.InfraBlocker;
   if (!infra && (/usage\s+limit|hit\s+your\s+(?:weekly|daily|monthly|usage)\s+limit|rate[_\s]?limit\s+(?:reached|exceeded)|\bquota\b|\b429\b[^\n]*?\b(?:rate|usage|quota)\b|resource[_\s ]?(?:has\s+)?been[_\s ]+exhausted|resource_exhausted/i.test(errorMsg))) {return { failureClass: FailureClass.AgentCapacity, dispatchAction: DispatchAction.AutoRepair };}
   if (infra || /did not (submit|leave).*(review (outcome|handoff)|formal review)/i.test(errorMsg)) {return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };}
   return null;

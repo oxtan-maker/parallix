@@ -1,8 +1,8 @@
 ---
 id: TASK-2780
 title: Unify explicit failure diagnostics while preserving current recovery policy
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-19 09:53'
 labels: []
 dependencies: []

@@ -175,7 +175,7 @@ The `AgentCapacity` class is an additive entry in the dispatch table; the eight 
 
 ### Passing test output is not human-only evidence (task-2663)
 
-A gate or hook failure escalates to `HumanOnly` only when its failure evidence names an infrastructure or state-machine marker. Gate output echoes every passing test title, and a title such as "direct review → done forbidden" reports a contract that held. The explicit human-only rule therefore ignores passing test-result lines (`✔`, `✓`, TAP `ok N`) before matching its markers; the marker set itself is unchanged, so a genuine Forgejo, authentication, connection, or state-machine failure still dispatches `HumanOnly`, while a repairable gate failure that merely prints such a title is sent back to the implementer.
+A gate or hook failure escalates to `HumanOnly` only when its failure evidence names an infrastructure or state-machine marker. Gate output echoes every passing test title, and a title such as "direct review → done forbidden" reports a contract that held. The explicit human-only rule therefore ignores passing test-result lines (`✔`, `✓`, TAP `ok N`) before matching its markers; the marker set itself is unchanged, so a genuine Forgejo, authentication, connection, or state-machine failure still dispatches `HumanOnly`, while a repairable gate failure that merely prints such a title is sent back to the implementer. Task-state diagnostics such as “task state invalid” and “no recorded implementer … cannot launch conflict resolution” also stop gate and hook recovery for operator intervention; they do not launch repair agents.
 
 ## Consequences
 

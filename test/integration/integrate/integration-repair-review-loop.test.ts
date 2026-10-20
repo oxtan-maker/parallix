@@ -15,6 +15,12 @@
 // fixture controls the gate through a file in the worktree). Evidence is read
 // back from the committed Mission state and the lane-event log, not from
 // captured log lines.
+// This contract measures the repair workflow, not cold TypeScript module loading.
+// Load the CLI registries with the other immutable imports; all command execution,
+// fixture creation and teardown stay inside the budgeted case.
+import '../../../src/composition/cli-command-registry.js';
+import '../../../src/composition/cli-brief-writes.js';
+import '../../../src/composition/cli-review-verbs.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';

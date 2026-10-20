@@ -216,8 +216,9 @@ import { pendingReview } from '../../../fixtures/mission-builders.js';
 
 for (const dryRun of [false, true]) {
   test(`explicit continue implementer overrides database assignment${dryRun ? ' without dry-run writes' : ' before handoff'}`, async () => {
+    const review = pendingReview(slug);
     const mission = fixtureMission(slug, { assignee: agentFamily('custom'), review: {
-      ...pendingReview(slug), rounds: pendingReview(slug).rounds.map(round => ({ ...round, implementer: agentFamily('custom') })),
+      ...review, rounds: [{ ...review.rounds[0], implementer: agentFamily('custom') }],
     } });
     const store = inMemoryTransitionStore(mission);
     let handoffs = 0;

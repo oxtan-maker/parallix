@@ -13,7 +13,6 @@ import { transientRetryAllowed, reboundRequiresHuman, repairStrategy, launchReco
 //   Recovery dossier: TASK-2413
 //   Bounce output elision: TASK-2369.13
 //   Integration gate rebound: TASK-2492
-
 import assert from 'node:assert/strict';
 import test, { afterEach, describe, it, type TestContext } from 'node:test';
 import fs from 'node:fs';
@@ -25,7 +24,6 @@ import { gateFailureReason } from '../../../src/adapters/review/review-gate-hand
 import { elideBounceOutput, BOUNCE_OUTPUT_MAX_CHARS } from '../../../src/application/output-elision.js';
 import { rebound, classifyReboundReason, buildFreshDiagnosticRepairPrompt, reboundDiagnostic, DEFAULT_REBOUND_ATTEMPTS, type ReboundContext, type ReboundReason } from '../../../src/application/rebound-kernel.js';
 import { listRecoveryEvidence } from '../../../src/application/recovery-evidence.js';
-
 // ── Rebound kernel — TASK-2377.03 (was task-2377.03-rebound-kernel.test.ts) ──
 /**
  * TASK-2377.03 — rebound kernel contract, classification, verify loop, budget.
@@ -33,7 +31,6 @@ import { listRecoveryEvidence } from '../../../src/application/recovery-evidence
  * Mock-only: `startAgent` and `verify` are injected; no real agents, no git,
  * no Forgejo.
  */
-
 const gateReason: ReboundReason = {
   kind: 'gate-failure',
   area: 'static-analysis',
@@ -43,14 +40,12 @@ const gateReason: ReboundReason = {
   stderr: '',
   error: 'verification gate failed with exit code 1',
 };
-
 const hookReason: ReboundReason = {
   kind: 'hook-failure',
   hook: 'pre-commit',
   operation: 'pre-review safety commit',
   output: 'pre-commit hook failed: lint error',
 };
-
 test('escalates an agent-reported invalid locked contract before repair (TASK-2695)', async () => {
   let launches = 0;
   let verifications = 0;
@@ -78,7 +73,6 @@ test('escalates an agent-reported invalid locked contract before repair (TASK-26
   assert.equal(launches, 0);
   assert.equal(verifications, 0);
 });
-
 /** Context with silent logging and an injected launch/verify pair. */
 function contextFor(overrides: Partial<ReboundContext> = {}): ReboundContext {
   return {
@@ -94,23 +88,19 @@ function contextFor(overrides: Partial<ReboundContext> = {}): ReboundContext {
     ...overrides,
   };
 }
-
 // ── Classification (ADR 0048 single table) ───────────────────────────────────
-
 test('task-2377.03: a declared gate that ran and exited non-zero classifies as GateFailure, not a Git blocker', () => {
   const classification = classifyReboundReason(gateReason);
   assert.equal(classification.failureClass, 'GateFailure');
   assert.equal(classification.dispatchAction, 'AutoSendBack');
   assert.equal(classification.isRelaunchable, true);
 });
-
 test('task-2377.03: a Git hook failure classifies as a mechanical GitBlockers auto-repair', () => {
   const classification = classifyReboundReason(hookReason);
   assert.equal(classification.failureClass, 'GitBlockers');
   assert.equal(classification.dispatchAction, 'AutoRepair');
   assert.equal(classification.isRelaunchable, true);
 });
-
 test('task-2377.03: an artifact-incomplete reason classifies as IncompleteEvidence auto-send-back', () => {
   const classification = classifyReboundReason({
     kind: 'artifact-incomplete',
@@ -120,14 +110,12 @@ test('task-2377.03: an artifact-incomplete reason classifies as IncompleteEviden
   assert.equal(classification.failureClass, 'IncompleteEvidence');
   assert.equal(classification.dispatchAction, 'AutoSendBack');
 });
-
 test('task-2377.03: an agent-timeout reason classifies as incomplete evidence and gets the shared rebound budget', () => {
   const classification = classifyReboundReason({ kind: 'agent-timeout', role: 'reviewer' });
   assert.equal(classification.failureClass, 'IncompleteEvidence');
   assert.equal(classification.dispatchAction, 'AutoSendBack');
   assert.equal(classification.isRelaunchable, true);
 });
-
 test('task-2413: an agent-timeout carrying explicit infrastructure evidence does not burn repair attempts', async () => {
   let launches = 0;
   const outcome = await rebound({
@@ -137,7 +125,6 @@ test('task-2413: an agent-timeout carrying explicit infrastructure evidence does
   assert.equal(outcome.classification.failureClass, 'InfraBlocker');
   assert.equal(launches, 0);
 });
-
 test('task-2377.03: a handoff-verification reason classifies from its own ADR 0048 error text', () => {
   const classification = classifyReboundReason({
     kind: 'handoff-verification',
@@ -146,7 +133,6 @@ test('task-2377.03: a handoff-verification reason classifies from its own ADR 00
   assert.equal(classification.failureClass, 'IncompleteEvidence');
   assert.equal(classification.dispatchAction, 'AutoSendBack');
 });
-
 test('task-2377.03: the human-only rule inside the classifier keeps an infrastructure gate diagnostic human-only', () => {
   const classification = classifyReboundReason({
     ...(gateReason as { kind: 'gate-failure' } & typeof gateReason),
@@ -158,7 +144,6 @@ test('task-2377.03: the human-only rule inside the classifier keeps an infrastru
   assert.equal(classification.dispatchAction, 'HumanOnly');
   assert.equal(classification.isRelaunchable, false);
 });
-
 test('task-2377.03: the human-only rule keeps a state-machine gate diagnostic human-only', () => {
   const classification = classifyReboundReason({
     ...(gateReason as { kind: 'gate-failure' } & typeof gateReason),
@@ -169,7 +154,6 @@ test('task-2377.03: the human-only rule keeps a state-machine gate diagnostic hu
   assert.equal(classification.failureClass, 'StateMachineViolation');
   assert.equal(classification.dispatchAction, 'HumanOnly');
 });
-
 test('task-2377.03: an unrecognized gate diagnostic still bounces instead of stranding as the classifier default', () => {
   const classification = classifyReboundReason({
     ...(gateReason as { kind: 'gate-failure' } & typeof gateReason),
@@ -180,13 +164,11 @@ test('task-2377.03: an unrecognized gate diagnostic still bounces instead of str
   assert.equal(classification.failureClass, 'GateFailure');
   assert.equal(classification.isRelaunchable, true);
 });
-
 /** Observed px integrate output (TASK-2663): a passing title containing `forbidden`, then a CPU-budget failure. */
 const passingForbiddenTitleCpuStdout = [
   '✔ R8: direct review → done forbidden — integrate requires integration status (12.4ms)',
   'integration-test-cpu:exceeded test/integration/cli/headless-cli.test.ts used 2.043s CPU (budget 2.000s)',
 ].join('\n');
-
 test('TASK-2663: a passing test title containing a human-only keyword does not strand a repairable CPU-budget gate failure', () => {
   const classification = classifyReboundReason({
     kind: 'gate-failure',
@@ -200,7 +182,6 @@ test('TASK-2663: a passing test title containing a human-only keyword does not s
   assert.equal(classification.dispatchAction, 'AutoSendBack');
   assert.equal(classification.isRelaunchable, true);
 });
-
 test('TASK-2663: passing TAP and spec titles naming unauthorized access in stderr do not escalate a verification-gate failure', () => {
   const classification = classifyReboundReason({
     ...(gateReason as { kind: 'gate-failure' } & typeof gateReason),
@@ -212,7 +193,6 @@ test('TASK-2663: passing TAP and spec titles naming unauthorized access in stder
   assert.equal(classification.dispatchAction, 'AutoSendBack');
   assert.equal(classification.isRelaunchable, true);
 });
-
 test('TASK-2663: genuine infrastructure evidence beside passing output still dispatches HumanOnly', () => {
   const classification = classifyReboundReason({
     kind: 'gate-failure',
@@ -227,7 +207,6 @@ test('TASK-2663: genuine infrastructure evidence beside passing output still dis
   assert.equal(classification.dispatchAction, 'HumanOnly');
   assert.equal(classification.isRelaunchable, false);
 });
-
 test('task-2377.03: reboundDiagnostic flattens structured reasons without regex on combined text', () => {
   assert.match(reboundDiagnostic(gateReason), /failing test: preserves diagnostic/);
   assert.equal(reboundDiagnostic(hookReason), 'pre-commit hook failed: lint error');
@@ -997,3 +976,24 @@ test('first agent-fixable repair uses independent diagnostic context (TASK-2700)
   assert.match(prompt, /Latest failure evidence/);
   assert.doesNotMatch(prompt, /compact the aborted working context/);
 });
+
+for (const diagnostic of ['Task state invalid for review', 'No recorded implementer for task-2780; cannot launch conflict resolution.']) {
+  for (const reason of [
+      { ...gateReason, stdout: diagnostic, stderr: '', error: undefined },
+      { ...hookReason, output: diagnostic },
+  ] as ReboundReason[]) {
+    test(`explicit state blockers never launch ${reason.kind} repairs: ${diagnostic} (TASK-2780)`, async () => {
+      let launches = 0;
+      const classification = classifyReboundReason(reason);
+      assert.equal(classification.failureClass, 'StateMachineViolation');
+      assert.equal(classification.dispatchAction, 'HumanOnly');
+      assert.equal(classification.isRelaunchable, false);
+      const outcome = await rebound(reason, contextFor({
+        startAgent: async () => { launches++; return { result: { status: 0 } }; },
+      }));
+      assert.equal(outcome.outcome, 'human-only');
+      assert.equal(outcome.attempts, 0);
+      assert.equal(launches, 0);
+    });
+  }
+}

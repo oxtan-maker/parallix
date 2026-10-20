@@ -10,6 +10,7 @@ import type { GitOptions } from "../../../../../src/adapters/git/git.js";
 
 import test, { describe, mock } from 'node:test';
 import assert from 'node:assert/strict';
+import { hasExplicitHumanOnlyDiagnostic } from '../../../../../src/domain/failure-classification.js';
 import { resolveConfiguration } from '../../../../../src/composition/config.js';
 import { mockModule, installModuleMocks } from '../../../../lib/module-mock.js';
 
@@ -854,20 +855,16 @@ describe('Repair handoff auto-commit', () => {
 // TASK-2366 (was test/task-2366-repro.test.ts)
 describe('Rebase failure classification', () => {
   const { classifyError, FailureClass, DispatchAction } = repairHandoff;
-
   test('task-2366 repro: classifyError maps rebase failure to GateFailure/AutoSendBack', () => {
     const result = classifyError(
       'Rebase failed before handoff. Ensure the mission branch can be rebased onto the latest primary branch.',
     );
-
     assert.equal(result.failureClass, FailureClass.GateFailure,
       'rebase failure must be classified as a relaunchable gate failure, not an infrastructure blocker');
     assert.equal(result.dispatchAction, DispatchAction.AutoSendBack,
       'rebase failure must auto-send-back to the implementer');
   });
 });
-
-
 test('nested handoff preserves configuration and caller rebase seams (TASK-2744)', async () => {
   const configuration = resolveConfiguration({ PATH: '/injected/bin', PARALLIX_HOME: '/injected/home' });
   const gitFn = () => ({ signal: null,  status: 0, stdout: '', stderr: '' });
@@ -890,7 +887,6 @@ test('nested handoff preserves configuration and caller rebase seams (TASK-2744)
   const result = await handoff.createHandoffPorts(configuration).rebase.rebaseBeforeReviewRound('task-2744', options);
   assert.equal(result.ok, true);
 });
-
 test('default execute runtime preserves configuration through handoff and automatic repair rebase (TASK-2744)', async () => {
   const configuration = resolveConfiguration({ PATH: '/injected/bin', PARALLIX_HOME: '/injected/home' });
   const runtime = execute.createDefaultExecuteMissionRuntime(configuration);
@@ -926,7 +922,6 @@ test('default execute runtime preserves configuration through handoff and automa
   assert.equal(rebases, 1);
   assert.deepEqual(result, { repaired: true, blocker: null });
 });
-
 // The repair launcher may succeed without committing its edits (px-0014).
 test('successful gate repair commits tracked and untracked edits before handoff rebase (px-0014)', async () => {
   const { HandoffCommandUseCase } = await import('../../../../../src/application/handoff-command-use-case.js');
@@ -960,7 +955,6 @@ test('successful gate repair commits tracked and untracked edits before handoff 
   assert.equal(result.ok, true, result.error ?? "handoff failed");
   assert.deepEqual(events, ['repair', 'stage', 'commit', 'rebase']);
 });
-
 for (const operation of ['status', 'commit', 'throw'] as const) {
   test(`automatic Git repair stops before rebase on ${operation} failure (px-0014)`, async () => {
     const calls: string[][] = [];
@@ -980,3 +974,27 @@ for (const operation of ['status', 'commit', 'throw'] as const) {
     if (operation !== 'commit') assert.equal(calls.length, 1);
   });
 }
+test('direct and explicit state recognition agree without widening unknown fallback (TASK-2780)', () => {
+  for (const diagnostic of ['Task state invalid for review', 'No recorded implementer for task-2780; cannot launch conflict resolution.']) {
+    assert.deepEqual(repairHandoff.classifyError(diagnostic), {
+      failureClass: 'StateMachineViolation', dispatchAction: 'HumanOnly',
+    });
+    assert.equal(hasExplicitHumanOnlyDiagnostic(diagnostic), true);
+  }
+  assert.deepEqual(repairHandoff.classifyError('unrecognized diagnostic'), {
+    failureClass: 'InfraBlocker', dispatchAction: 'HumanOnly',
+  });
+  assert.equal(hasExplicitHumanOnlyDiagnostic('unrecognized diagnostic'), false);
+});
+test('explicit evidence ignores passing titles and retains capacity precedence (TASK-2780)', () => {
+  for (const prefix of ['✔ ', '  ✓ ', 'ok 14 - ']) {
+    assert.equal(hasExplicitHumanOnlyDiagnostic(prefix + 'Task state invalid'), false);
+    assert.equal(hasExplicitHumanOnlyDiagnostic(prefix + 'forgejo forbidden'), false);
+  }
+  assert.equal(hasExplicitHumanOnlyDiagnostic('not ok 14 - Task state invalid'), true);
+  assert.equal(hasExplicitHumanOnlyDiagnostic('✖ forgejo authentication failed'), true);
+  assert.equal(hasExplicitHumanOnlyDiagnostic('quota exhausted'), false);
+  assert.equal(repairHandoff.classifyError('quota exhausted').failureClass, 'AgentCapacity');
+  assert.equal(hasExplicitHumanOnlyDiagnostic('forgejo quota exhausted'), true);
+  assert.equal(repairHandoff.classifyError('forgejo quota exhausted').failureClass, 'InfraBlocker');
+});
