@@ -43,4 +43,10 @@ created: 2026-10-20 18:58
 ---
 Authority qualification: CP-5 and CP-6 are DIFFERENT incident IDs. Both record the same browser command and byte-identical authorizedGates and nine authorizedCriteria, matching the current locked contract. Public checkpoint fields expose no captured revision, gate fingerprint or failure fingerprint. The isolated probe proves the backward scan selects historical CP-5 despite newer verified CP-6; it does NOT prove that ignoring CP-5 automatically is authorized. Incident identity and revision-bound proof may distinguish legitimate obligations. Before implementation, establish an authoritative supersession/proof rule through existing lifecycle evidence, or retain explicit unresolved classification. Do not implement latest-command-wins, mark old verified, or rewrite historical failure rows. Coordinate independent ownership analysis; TASK-2796 approval remains untouched.
 ---
+
+author: codex
+created: 2026-10-20 18:58
+---
+Independent ownership analysis: existing repair records do not contain chronology, revision-bound proof links or authoritative coverage relationships. Do not retrospectively infer latest-command-wins. Proposed minimal design for operator review: extend the existing checkpoint verification owner to record explicit coverage only from actual successful exact-check evidence, with Mission compare-and-swap; share one selector between pendingRetainedRepair and repairContractFailure. Preserve historical failures unchanged. Focused owning cases must cover an explicitly covered older incident, an uncovered distinct incident, reopening after new failure, locked-contract changes, CAS conflicts and preserved history. Activation/design decision remains pending; no implementation authorized by this note.
+---
 <!-- COMMENTS:END -->
