@@ -62,7 +62,7 @@ interface RunOptions {
   environment?: NodeJS.ProcessEnv;
 }
 
-async function runtimeOptions(rootDir: string, configuration: ParallixConfiguration, operatorReview = false, command = ''): Promise<Pick<MainOptions, 'commandFns' | 'ensureStandaloneGitRepoFn' | 'loadAliasesFn' | 'product' | 'runtime'>> {
+async function runtimeOptions(rootDir: string, configuration: ParallixConfiguration, operatorInvocation = false, command = ''): Promise<Pick<MainOptions, 'commandFns' | 'ensureStandaloneGitRepoFn' | 'loadAliasesFn' | 'product' | 'runtime'>> {
   bindGateAdmission(configuration);
   const base = {
     runtime: configuration.runtime,
@@ -77,7 +77,7 @@ async function runtimeOptions(rootDir: string, configuration: ParallixConfigurat
   // Brief writes need the Mission authority without loading execute or presentation composition.
   if (command === 'classification' || command === 'goal' || command === 'checkpoint') {
     const { createBriefWriteCommands } = await import('./cli-brief-writes.js');
-    return { ...base, commandFns: createBriefWriteCommands(rootDir, configuration) };
+    return { ...base, commandFns: createBriefWriteCommands(rootDir, configuration, operatorInvocation) };
   }
   if (command === 'config') {
     const [{ default: config }, { createConfigCommand }] = await Promise.all([
@@ -88,7 +88,7 @@ async function runtimeOptions(rootDir: string, configuration: ParallixConfigurat
   }
   if (!command && !shouldLaunchDefaultUi({ runtime: configuration.runtime })) { return { ...base, commandFns: {} }; }
   const { createRuntimeOptions } = await import('./cli-command-registry.js');
-  return createRuntimeOptions(rootDir, configuration, operatorReview);
+  return createRuntimeOptions(rootDir, configuration, operatorInvocation && command === 'review');
 }
 
 export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedArgs {
@@ -277,7 +277,7 @@ async function runTargetCommand(parsed: ParsedArgs, configuration: ParallixConfi
       return startupPreflightModule.default([], { command: 'verify-env', returnResult: true, log, error })?.pass ? 0 : 1;
     }
     await ensureWorkflowAgentConfig(parsed.command || '', parsed.target, configuration);
-    const options = await runtimeOptions(parsed.target, configuration, operatorInvocation && parsed.command === 'review', parsed.command);
+    const options = await runtimeOptions(parsed.target, configuration, operatorInvocation, parsed.command);
     const invoke = () => commandInvocation(exitFn => workflow.main([parsed.command, ...parsed.args], {
       ...options,
       cwdFn: () => parsed.target,

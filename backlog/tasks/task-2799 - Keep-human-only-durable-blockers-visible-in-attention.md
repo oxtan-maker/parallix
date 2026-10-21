@@ -4,6 +4,7 @@ title: Keep human-only durable blockers visible in attention
 status: backlog
 assignee: []
 created_date: '2026-10-20 16:06'
+updated_date: '2026-10-21 08:35'
 labels:
   - bug
 dependencies: []
@@ -40,3 +41,13 @@ Deduplication checked native Mission records and Backlog: no matching open ticke
 - [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+author: codex
+created: 2026-10-21 08:35
+---
+2026-10-21 recurrence from TASK-2798: after the bounded repair completed, handoff stopped because planned CP-7 is unrecorded. CP-7 requires resolving PR #768 human ADR feedback, judgment-boundary defects, final adapter/session capture and a discriminating matched evaluation. The unresolved choice is whether bounded operator judgment should inspect/action credible live stalled workers, beyond its delivered pre-fresh-recovery admission. The Mission remains lifecycle active with no human-attention action even though an agent must not invent the operator design decision. px history run:workflow-cb62f359-423f-401d-a547-a82146a586bf records Planned checkpoint evidence is missing before handoff: CP-7. Board/CLI should surface this as a distinct actionable human blocker rather than ordinary active repair.
+---
+<!-- COMMENTS:END -->

@@ -140,3 +140,42 @@ test('mission-bound recovery commands restore worktree after base-started consol
     slug => { assert.equal(slug, 'task-2'); return '/other'; }), '/other');
   assert.equal(missionCommandTarget('review', ['--help'], '/base', configuration, () => assert.fail()), '/base');
 });
+
+test('checkpoint correction CLI requires operator decision and evidence and keeps public read history (TASK-2803)', async () => {
+  const { createCheckpointCommand } = await import('../../../../src/interfaces/cli/mission-writes.js');
+  const { MissionCheckpointService } = await import('../../../../src/application/mission-checkpoint-service.js');
+  const { inMemoryTransitionStore } = await import('../../../fixtures/mission-builders.js');
+  const { missionId } = await import('../../../../src/domain/mission.js');
+  const id = missionId('correction-cli');
+  const blocker = { command: 'npm test', diagnostic: 'false stop', authorityReason: 'operator owns decision', proposedCorrection: 'confirm decision' };
+  const store = inMemoryTransitionStore(fixtureMission(id, { checkpoints: [{ missionId: id, name: 'CP-5', goalCheck: [], nextActionText: 'Resume CP-3',
+    repair: { incidentId: 'false-stop', command: 'npm test', attempt: 1, authorizedCriteria: [], authorizedGates: [], evidenceRecorded: false, verified: false, blocker } }] }));
+  const service = new MissionCheckpointService(store, { rootFor: () => '/repo', fileSystem: {
+    existsSync: () => false, readText: () => '', listNames: () => [], listEntries: () => [],
+  } });
+  const command = createCheckpointCommand(service, () => id, undefined, true);
+  const args = ['correct-invalid-contract', '--name', 'CP-5', '--operator', 'Magnus', '--decision', 'Decision is recorded', '--evidence', '`npm test`'];
+  const before = structuredClone(await store.load());
+  await assert.rejects(createCheckpointCommand(service, () => id)(args), /direct operator/);
+  await assert.rejects(createCheckpointCommand(service, () => id)(['record', '--force', '--name', 'CP-5', '--criterion', 'proof', '--evidence', '`npm test`', '--next', 'continue']), /direct operator/);
+  await assert.rejects(command(args.slice(0, 3)), /--operator/);
+  await assert.rejects(command(args.slice(0, 5)), /--decision/);
+  await assert.rejects(command(args.slice(0, 7)), /--evidence/);
+  await assert.rejects(command([...args, '--expected-version', '99']), /version/i);
+  assert.deepEqual(await store.load(), before);
+  const chunks: string[] = [];
+  const original = process.stdout.write;
+  process.stdout.write = ((chunk: string) => { chunks.push(String(chunk)); return true; }) as typeof original;
+  try {
+    await command(args);
+    assert.equal(JSON.parse(chunks.join('')).version, 2);
+    chunks.length = 0;
+    await command(['read', '--name', 'CP-5']);
+    const cp = JSON.parse(chunks.join('')).checkpoints[0];
+    assert.deepEqual(cp.repair.corrections[0].blocker, blocker);
+    assert.equal(cp.repair.corrections[0].operator, 'Magnus');
+    assert.equal(cp.repair.blocker, undefined);
+    assert.deepEqual(cp.goalCheck, []);
+    assert.equal(cp.repair.evidenceRecorded, false);
+  } finally { process.stdout.write = original; }
+});

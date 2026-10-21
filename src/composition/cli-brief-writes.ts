@@ -5,12 +5,12 @@ import { inferSlug } from '../adapters/filesystem/mission-paths.js';
 import { createMissionApplicationServices } from './mission-services.js';
 
 /** Brief writes share one Mission-only composition across every CLI entrypoint. */
-export function createBriefWriteCommands(rootDir: string, configuration: ParallixConfiguration): Record<string, Command> {
+export function createBriefWriteCommands(rootDir: string, configuration: ParallixConfiguration, operatorInvocation = false): Record<string, Command> {
   const invoke = async (command: 'classification' | 'goal' | 'checkpoint', args: string[]) => {
     const mission = await createMissionApplicationServices(rootDir, { configuration });
     try {
       if (command === 'checkpoint') {
-        return await createCheckpointCommand(mission.checkpoints, explicit => inferSlug(explicit), rootDir)(args);
+        return await createCheckpointCommand(mission.checkpoints, explicit => inferSlug(explicit), rootDir, operatorInvocation)(args);
       }
       const create = command === 'classification' ? createClassificationCommand : createGoalCommand;
       return await create({ ...mission, resolveSlug: explicit => inferSlug(explicit) })(args);

@@ -74,7 +74,7 @@ function checkpointFindings(contract: EvidenceContract, record: (_name: string) 
       checkpoint: checkpoints.find(cp => cp.repair?.blocker)?.name });
   }
   if (contract.draftedInDb) {
-    const missing = missingCheckpointEvidence(checkpoints);
+    const missing = missingCheckpointEvidence(checkpoints, contract.gates, successCriteria);
     for (const cp of missing) {
       findings.push({ code: 'missing-checkpoint', checkpoint: cp.name,
         message: `Planned checkpoint evidence is missing before handoff: ${missing.map(item => item.name).join(', ')}. Record fresh evidence with px checkpoint record before handoff.`, nextCommands: [record(cp.name)] });

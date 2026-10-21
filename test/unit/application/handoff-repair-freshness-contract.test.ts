@@ -334,3 +334,46 @@ test('checkpoint readiness service preserves state for ready and incomplete evid
   assert.deepEqual(mission, readyBefore);
   assert.equal(writes, 0);
 });
+
+test('operator correction resumes CP-3 while readiness and handoff retain missing evidence obligations (TASK-2803)', async () => {
+  const { inMemoryTransitionStore } = await import('../../fixtures/mission-builders.js');
+  const { RepairCheckpointService } = await import('../../../src/application/repair-checkpoint-service.js');
+  const { renderLaunchContext } = await import('../../../src/application/mission-brief-service.js');
+  const id = missionId(SLUG);
+  const store = inMemoryTransitionStore(fixtureMission(SLUG, { assignee: agentFamily('custom'), brief: DRAFTED_BRIEF,
+    successCriteria: ['first', 'unfinished'], completedSuccessCriteria: [0], declaredGates: ['npm test'],
+    checkpoints: [
+      ...['CP-1', 'CP-2'].map(name => ({ missionId: id, name, goalCheck: [{ criterion: 'first', evidence: REPAIR_REF }], nextActionText: 'CP-3' })),
+      ...['CP-3', 'CP-4'].map(name => ({ missionId: id, name, goalCheck: [], nextActionText: 'implement' })),
+    ] }));
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, { ...contractServices(() => store.load()) });
+  const service = new MissionCheckpointService(store, { fileSystem: ports.fileSystem, rootFor: () => ROOT });
+  const repair = new RepairCheckpointService(store);
+  await repair.open({ slug: SLUG, incidentId: 'stale', command: 'npm test', attempt: 1 });
+  await repair.report({ operationId: 'report', missionId: id, capabilities: new Set(['checkpoint:record']), name: 'CP-5',
+    blocker: { command: 'npm test', diagnostic: 'decision missing', authorityReason: 'human decision', proposedCorrection: 'record decision' } });
+  const req = { operationId: 'check', missionId: id, capabilities: new Set(['checkpoint:record'] as const) };
+  assert.equal((await service.check(req)).value?.primaryStopReason, 'human-only-contract-blocker');
+  const handoff = () => new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  assert.match((await handoff()).error ?? '', /human review/);
+  assert.equal((await service.correctInvalidContract({ ...req, capabilities: new Set(['checkpoint:correct']), name: 'CP-5',
+    operator: 'operator', decision: 'CP-2 decision already recorded', evidence: REPAIR_REF })).status, 'completed');
+  const readiness = (await service.check(req)).value!;
+  assert.equal(readiness.ready, false);
+  assert.equal(readiness.primaryStopReason, 'missing-checkpoint');
+  assert.deepEqual(readiness.findings.filter(item => item.code === 'missing-checkpoint').map(item => item.checkpoint), ['CP-3', 'CP-4', 'CP-5']);
+  assert.ok(readiness.findings.some(item => item.code === 'incomplete-criterion' && item.criterion === 'unfinished'));
+  const current = store.mission();
+  assert.match(renderLaunchContext({ brief: current.brief!, checkpoints: current.checkpoints, declaredGates: current.declaredGates!, latestCheckpoint: current.checkpoints[1] }), /Next checkpoint: CP-3/);
+  assert.match((await handoff()).error ?? '', /missing.*CP-3, CP-4, CP-5/i);
+  assert.deepEqual(recorder.transitions, []);
+  assert.deepEqual(recorder.spawned, []);
+  assert.deepEqual(recorder.gatekeeperCalls, []);
+  // Normal final recording still cannot invent coverage for unfinished work.
+  const rejected = await service.record({ ...req, checkpoint: { missionId: id, name: 'CP-5',
+    goalCheck: [{ criterion: 'first', evidence: REPAIR_REF }], nextActionText: 'handoff' } });
+  assert.equal(rejected.status, 'failed');
+  assert.match(rejected.error?.message ?? '', /Uncovered criteria: unfinished/);
+  await assert.rejects(repair.verify(SLUG, 'CP-5'), /fresh authorized evidence/);
+});

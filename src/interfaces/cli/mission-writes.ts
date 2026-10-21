@@ -55,6 +55,9 @@ function flags(args: readonly string[], name: string): string[] {
 }
 
 function fail(message: string): never { throw new Error(message); }
+function requireOperator(direct: boolean): void {
+  if (!direct) { fail('Checkpoint correction requires a direct operator invocation'); }
+}
 
 function required(args: readonly string[], name: string): string {
   const value = flag(args, name);
@@ -73,7 +76,7 @@ function request(
   args: readonly string[],
   operation: string,
   resolveSlug: (_explicit?: string) => string | null,
-  capability: 'mission:context' | 'checkpoint:record' = 'mission:context',
+  capability: 'mission:context' | 'checkpoint:record' | 'checkpoint:correct' = 'mission:context',
 ) {
   const slug = resolveSlug(flag(args, '--slug') ?? undefined);
   if (!slug) { fail('no mission slug: run inside the mission worktree or pass --slug <slug>'); }
@@ -179,6 +182,10 @@ Usage: px checkpoint check  [--slug <slug>] [--json]
                             --criterion <text> --evidence <text> [--criterion ... --evidence ...]
                             [--force]
 
+Correct a false or resolved blocker before unfinished implementation checkpoints:
+  px checkpoint correct-invalid-contract --name <CP-N> --operator <name>
+    --decision <explicit correction> --evidence <verifiable reference>
+
 Report an invalid locked contract: px checkpoint report-invalid-contract --name <CP-N>
   --command <exact failing command> --diagnostic <text> --authority-reason <text>
   --proposed-correction <text>
@@ -192,7 +199,13 @@ pair up in the order given, so the counts must match. Each row must cite a
 repository-relative path, a quoted test name, a recognized command or an ADR,
 and the final planned checkpoint needs one row per success criterion; handoff
 applies the same checks. \`px status\` shows which checkpoints have evidence;
-the first without is where a relaunched agent resumes. An operator may use
+the first without is where a relaunched agent resumes. A direct operator may
+use \`correct-invalid-contract\` with their identity, decision and a verifiable
+reference; nested or automatic invocations cannot correct a blocker. The write
+checks the current Mission version and retains every original blocker and
+correction in \`checkpoint read\` and \`status --json\`. It supplies no Goal Check
+rows, completion or verification, so unfinished checkpoints and repair checks
+remain required. An operator may also use
 \`record --force\` to clear a reported invalid-contract blocker while recording
 corrected evidence. It retains unrelated proof and still validates evidence and
 the write version; it does not mark the repair verified or skip its required check.
@@ -365,13 +378,8 @@ async function readCheckpointCommand(services: MissionCheckpointService, resolve
   output(unwrap(outcome, `checkpoint ${args[0]}`));
 }
 
-/**
- * `px checkpoint record`. TASK-2482 removed an earlier `px checkpoint` because
- * it was unused and could be mistaken for verification. It returns here as the
- * agent's only durable evidence path once the workflow files are retired, and
- * it records evidence only — it runs no gate and asserts no verification.
- */
-export function createCheckpointCommand(services: MissionCheckpointService, resolveSlug: (_explicit?: string) => string | null, checkoutRoot?: string) {
+/** Checkpoint reads, planning, evidence writes and explicit operator corrections. */
+export function createCheckpointCommand(services: MissionCheckpointService, resolveSlug: (_explicit?: string) => string | null, checkoutRoot?: string, operatorInvocation = false) {
   return async (args: string[] = []): Promise<void> => {
     if (helped(args, CHECKPOINT_HELP)) { return; }
     if (args[0] === 'check') {
@@ -391,6 +399,14 @@ export function createCheckpointCommand(services: MissionCheckpointService, reso
       output(unwrap(outcome, `checkpoint ${args[0]}`));
       return;
     }
+    if (args[0] === 'correct-invalid-contract') {
+      requireOperator(operatorInvocation);
+      const req = request(args, 'checkpoint-correct', resolveSlug, 'checkpoint:correct');
+      output(unwrap(await services.correctInvalidContract({ ...req, name: required(args, '--name'),
+        operator: required(args, '--operator'), decision: required(args, '--decision'), evidence: required(args, '--evidence'),
+      }), 'checkpoint correct-invalid-contract'));
+      return;
+    }
     if (args[0] === 'report-invalid-contract') {
       const req = request(args, 'checkpoint-invalid-contract', resolveSlug, 'checkpoint:record');
       output(unwrap(await services.reportInvalidContract({ ...req, name: required(args, '--name'), blocker: {
@@ -407,6 +423,10 @@ export function createCheckpointCommand(services: MissionCheckpointService, reso
       fail(`--criterion and --evidence must pair up: got ${criteria.length} criteria and ${evidence.length} evidence values`);
     }
     const req = request(args, 'checkpoint-record', resolveSlug, 'checkpoint:record');
+    if (args.includes('--force')) {
+      requireOperator(operatorInvocation);
+      req.capabilities.add('checkpoint:correct');
+    }
     const goalCheck: GoalCheckRow[] = criteria.map((criterion, index) => ({
       criterion, evidence: evidence[index] as string,
     }));

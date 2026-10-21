@@ -732,6 +732,48 @@ describe('retained verification repair continuation', { concurrency: false }, ()
     assert.ok(f.fake.errors.some(line => line.includes('repair budget (2)')));
   });
 
+  test('explicit exact-success coverage omits an older distinct repair diagnostic without rewriting history (TASK-2802)', async () => {
+    const f = fixture();
+    const older = { ...f.mission.checkpoints[0], name: 'CP-5',
+      goalCheck: [{ criterion: 'original criterion', evidence: 'historical failed check', repairedGate: f.command }],
+      repair: { ...f.repair, incidentId: 'older-incident', attempt: 2,
+        occurrence: { openedMissionRevision: 8, worktree: f.fake.ports.worktree, failureRevision: 'head-1', failureEvidenceId: 'older-failure-2' } } };
+    // Harness-produced occurrence proof authorized at CP-2, not an inference
+    // from the matching command, checkpoint order or newer verified flag.
+    const newer = { ...f.mission.checkpoints[0], name: 'CP-6',
+      goalCheck: [{ criterion: 'original criterion', evidence: 'accepted fresh exact-check evidence' }],
+      recording: { recordedAt: '2026-10-20T18:00:00Z', recordedRound: null, missionRevision: 12 },
+      repair: { ...f.repair, incidentId: 'newer-incident', evidenceRecorded: true, verified: true,
+        occurrence: { openedMissionRevision: 10, worktree: f.fake.ports.worktree, failureRevision: 'head-1', failureEvidenceId: 'newer-failure-1' },
+        exactSuccessCoverage: {
+          producer: 'harness-exact-check', missionId: f.mission.id, worktree: f.fake.ports.worktree,
+          command: f.command, authorizedGates: [f.command], authorizedCriteria: ['original criterion'],
+          executionRevision: 'head-2', executionMissionRevision: 12, checkpointEvidenceRevision: 12, verifiedMissionRevision: 13,
+          execution: { id: 'exact-execution-1', exitCode: 0, producer: 'rebound-exact-verifier',
+            startedAt: '2026-10-20T18:01:00Z', completedAt: '2026-10-20T18:02:00Z' },
+          verifiedOccurrence: { checkpoint: 'CP-6', incidentId: 'newer-incident', attempt: 1, openedMissionRevision: 10,
+            worktree: f.fake.ports.worktree, failureRevision: 'head-1', failureEvidenceId: 'newer-failure-1' },
+          coveredOccurrences: [{ checkpoint: 'CP-5', incidentId: 'older-incident', attempt: 2, openedMissionRevision: 8, worktree: f.fake.ports.worktree,
+            failureRevision: 'head-1', failureEvidenceId: 'older-failure-2' }],
+        } } };
+    f.mission.checkpoints = [older, newer];
+    f.mission.review = pendingReview('task-2757');
+    const history = structuredClone(f.mission.checkpoints);
+    let diagnosticReads = 0;
+    let handoffs = 0;
+    const read = f.fake.ports.retainedRepair.read;
+    f.fake.ports.retainedRepair.read = async command => { diagnosticReads++; return read(command); };
+    f.fake.ports.handoff = { handoff: async () => { handoffs++; return { gatekeeperPushedBack: true }; } };
+
+    await f.run();
+
+    assert.deepEqual(f.mission.checkpoints, history, 'continuation preserves historical failure rows and incident identities');
+    assert.equal(diagnosticReads, 0, 'explicitly covered CP-5 must not select its obsolete diagnostic');
+    assert.deepEqual(f.checks, [], 'covered occurrences require no repeated exact check');
+    assert.equal(handoffs, 1, 'covered continuation reaches the ordinary handoff owner');
+    assert.deepEqual(f.fake.launches, [], 'covered continuation launches no obsolete repair');
+  });
+
   for (const command of ['px handoff', 'hook-failure', 'artifact-incomplete', 'agent-timeout']) {
     for (const verifiedGate of [false, true]) {
       test(`non-gate ${command} resumes without retained evidence, verified gate=${verifiedGate} (TASK-2757 F1)`, async () => {

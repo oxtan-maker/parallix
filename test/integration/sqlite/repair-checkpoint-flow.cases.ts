@@ -16,6 +16,9 @@ import { RepairCheckpointService } from '../../../src/application/repair-checkpo
 import { configureRepairCheckpoints } from '../../../src/application/ports/repair-checkpoint.js';
 import { createCheckpointCommand } from '../../../src/interfaces/cli/mission-writes.js';
 import { missionId } from '../../../src/domain/mission.js';
+import { effectiveRepairObligations } from '../../../src/domain/repair-coverage.js';
+import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
+import { runCheckpointVerification } from '../../../src/application/rebound-checkpoints.js';
 
 /** Real SQLite, CLI evidence writes and shell gate; agent and external review effects are isolated doubles. */
 export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' | 'force' = 'repair') {
@@ -40,7 +43,7 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' | 'forc
     const checkpoints = new MissionCheckpointService(store);
     const repair = new RepairCheckpointService(store);
     configureRepairCheckpoints(repair);
-    const cli = createCheckpointCommand(checkpoints, () => SLUG);
+    const cli = createCheckpointCommand(checkpoints, () => SLUG, undefined, true);
     const record = async (name: string, force = false) => {
       const loaded = await store.load(id); assert.equal(loaded.kind, 'found');
       if (loaded.kind !== 'found') { throw new Error('missing fixture'); }
@@ -124,6 +127,60 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' | 'forc
 export function repairCheckpointFlowCases(): void {
   // Share only the closed empty schema; every case retains its own writable DB.
   before(prepareMigratedSchema);
+  test('exact-success occurrence coverage and provenance survive SQLite reload atomically (TASK-2802)', async () => {
+    const slug = 'coverage-persistence';
+    const mission = fixtureMission(slug, { brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
+      declaredGates: ['git diff --check'], successCriteria: ['criterion'], completedSuccessCriteria: [0] });
+    const fixture = await openMigratedMissionStore([mission], migratedSchemaPath());
+    try {
+      const { store } = fixture;
+      const repair = new RepairCheckpointService(store);
+      const request = { slug, command: 'git diff --check', worktree: fixture.root, failureRevision: 'failed-head',
+        failureEvidenceId: 'failure-1', attempt: 1 };
+      const record = async (name: string) => {
+        const result = await new MissionCheckpointService(store).record({ operationId: 'record', missionId: mission.id,
+          capabilities: new Set(['checkpoint:record']), checkpoint: { missionId: mission.id, name, nextActionText: 'handoff',
+            goalCheck: [{ criterion: 'criterion', evidence: 'test/integration/sqlite/repair-checkpoint-flow.cases.ts' }] } });
+        assert.equal(result.status, 'completed');
+      };
+      await repair.open({ ...request, incidentId: 'older' });
+      await record('CP-2');
+      await repair.open({ ...request, incidentId: 'newer', failureEvidenceId: 'failure-2' });
+      await record('CP-3');
+      const before = await store.load(mission.id);
+      assert.equal(before.kind, 'found');
+      if (before.kind !== 'found') { throw new Error('missing fixture'); }
+      // Failed execution never reaches certification and writes neither proof nor success.
+      const context = { slug, worktree: fixture.root, implementer: 'codex', readHead: () => 'fixed-head',
+        repairCheckpoints: repair, startAgent: async () => ({ result: { status: 0 } }),
+        verify: () => ({ ok: false, command: request.command }) };
+      const prepared = { repairPort: repair, repairCheckpoint: { name: 'CP-3', version: before.version }, fixPrompt: '' };
+      const failed = await runCheckpointVerification(context, prepared, 1);
+      await failed.certify();
+      assert.deepEqual(await store.load(mission.id), before);
+      // The actual shell check supplies the successful result; the harness supplies provenance.
+      const initialized = spawnSync('git', ['init', '-q'], { cwd: fixture.root, timeout: 1000 });
+      assert.equal(initialized.status, 0);
+      const passing = { ...context, verify: () => ({ ok: spawnSync('git', ['diff', '--check'],
+        { cwd: fixture.root, timeout: 1000 }).status === 0, command: request.command,
+      exactExecution: { command: request.command, worktree: fixture.root, exitCode: 0 as const } }) };
+      const passed = await runCheckpointVerification(passing, prepared, 1);
+      assert.equal(passed.verified.ok, true);
+      await passed.certify();
+      const reloaded = await new SqliteMissionStore(fixture.database).load(mission.id);
+      assert.equal(reloaded.kind, 'found');
+      if (reloaded.kind !== 'found') { throw new Error('missing reloaded fixture'); }
+      assert.deepEqual(reloaded.mission.checkpoints[1], before.mission.checkpoints[1]);
+      assert.equal(reloaded.mission.checkpoints[1].repair!.verified, false);
+      assert.deepEqual(effectiveRepairObligations(reloaded.mission.checkpoints, mission.declaredGates, mission.successCriteria), []);
+      const proof = reloaded.mission.checkpoints[2].repair!.exactSuccessCoverage!;
+      assert.equal(proof.execution.producer, 'rebound-exact-verifier');
+      assert.equal(proof.executionRevision, 'fixed-head');
+      assert.equal(proof.verifiedMissionRevision, reloaded.version);
+      assert.equal(proof.coveredOccurrences[0].incidentId, 'older');
+      assert.equal(proof.checkpointEvidenceRevision, before.mission.checkpoints[2].recording!.missionRevision);
+    } finally { await fixture.close(); }
+  });
   test('forced CLI evidence clears a persisted blocker and reruns handoff gate', async () => { await runRepairCheckpointFlow('force'); });
   test('isolated repair persists before launch, reruns exact gate and hands off with retained proof (TASK-2695)', async () => { await runRepairCheckpointFlow(); });
   test('isolated first contract report persists across reload and stops retries and handoff (TASK-2695)', async () => { await runRepairCheckpointFlow('blocker'); });

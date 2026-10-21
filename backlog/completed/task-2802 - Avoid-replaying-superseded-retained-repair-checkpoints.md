@@ -1,8 +1,8 @@
 ---
 id: TASK-2802
 title: Reconcile historical pending repairs with newer verified incidents
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-20 18:57'
 updated_date: '2026-10-20 18:58'
 labels:

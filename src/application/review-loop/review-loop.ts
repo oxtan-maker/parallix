@@ -334,7 +334,7 @@ async function continuesActiveHandoff(start: Start, ports: ReviewLoopPorts): Pro
 async function resumePendingRepair(request: ReviewLoopRequest, start: Start, persisted: ReviewLoopState | null, implementer: string, ports: ReviewLoopPorts): Promise<boolean> {
   if (!start.isContinue || !ports.missionStore) { return false; }
   const loaded = await ports.missionStore.load(missionId(start.slug));
-  if (loaded.kind !== 'found' || loaded.mission.status !== 'active' || !pendingRetainedRepair(loaded.mission)) { return false; }
+  if (loaded.kind !== 'found' || loaded.mission.status !== 'active' || !pendingRetainedRepair(loaded.mission, ports.worktree)) { return false; }
   // Successful exact-check recovery rejoins the historical start/handoff path.
   return !await resumeRetainedRepair(request, loaded.mission, implementer, ports, persisted?.reviewer);
 }

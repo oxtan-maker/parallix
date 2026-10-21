@@ -2,11 +2,13 @@ import { missionId, type Mission } from '../../domain/mission.js';
 import type { ReviewLoopPorts, ReviewLoopRequest } from '../ports/review-round.js';
 import { rebound, DEFAULT_REBOUND_ATTEMPTS } from '../rebound-kernel.js';
 import { repairContractFailure } from '../repair-checkpoint-service.js';
+import { effectiveRepairObligations } from '../../domain/repair-coverage.js';
 import { isRetainedGateRepair } from '../rebound-checkpoints.js';
 
 /** Gate checkpoints alone own retained process output; workflow repairs do not. */
-export function pendingRetainedRepair(mission: Mission) {
-  return mission.checkpoints.findLast(cp => cp.repair && !cp.repair.verified && isRetainedGateRepair(cp.repair.command));
+export function pendingRetainedRepair(mission: Mission, worktree?: string) {
+  return effectiveRepairObligations(mission.checkpoints, mission.declaredGates, mission.successCriteria, worktree)
+    .findLast(cp => isRetainedGateRepair(cp.repair!.command));
 }
 
 /** Continuation is recovery until the original check and checkpoint are verified. */
@@ -14,7 +16,7 @@ export async function resumeRetainedRepair(request: ReviewLoopRequest, mission: 
   try {
     const contractFailure = repairContractFailure(mission.checkpoints, mission.declaredGates, mission.successCriteria);
     if (contractFailure) { throw new Error(contractFailure); }
-    const checkpoint = pendingRetainedRepair(mission)!;
+    const checkpoint = pendingRetainedRepair(mission, ports.worktree)!;
     const repair = checkpoint.repair!;
     const retained = ports.retainedRepair;
     if (!retained) { throw new Error('Retained repair evidence port is unavailable'); }

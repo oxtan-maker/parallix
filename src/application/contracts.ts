@@ -51,6 +51,7 @@ export type Capability =
   | 'integration:decide'
   | 'closure:record'
   | 'checkpoint:record'
+  | 'checkpoint:correct'
   | 'mission:context'
   | 'handoff:record'
   | 'review:submit';

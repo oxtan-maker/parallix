@@ -1,8 +1,8 @@
 ---
 id: TASK-2803
 title: Clear corrected human-only checkpoint blockers before handoff
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-20 19:36'
 labels:
   - bug

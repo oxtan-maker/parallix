@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import type { ReboundContext, ReboundReason, ReboundClassification } from './rebound-kernel.js';
+import type { OpenRepairCheckpoint } from './ports/repair-checkpoint.js';
 import { repairCheckpointPort } from './ports/repair-checkpoint.js';
 import { recoveryEvidenceForPrompt } from './rebound-evidence.js';
 import type { RecoveryEvidenceRef } from './recovery-evidence.js';
@@ -50,7 +52,8 @@ export async function prepareRepairPrompt(
   const required = state.reason;
   const command = required.kind === 'gate-failure' || required.kind === 'declared-gate-validation'
     ? required.command : NON_GATE_COMMANDS[required.kind];
-  const repairCheckpoint = await repairPort?.open({ slug, incidentId: state.occurrenceId, command, attempt }) ?? null;
+  const repairCheckpoint = await repairPort?.open({ slug, incidentId: state.occurrenceId, command, attempt,
+    ...failureOccurrence(command, worktree, state.capturedEvidence) }) ?? null;
   const lookup = context.retainedFailure ? {} : worktree ? recoveryEvidenceForPrompt(worktree, slug) : {};
   const slots = { label: state.classification.label, slug, worktree, diagnostic: state.diagnostic,
     originalDiagnostic: state.originalDiagnostic, classification: state.classification, attempt, maxAttempts,
@@ -58,4 +61,32 @@ export async function prepareRepairPrompt(
     recoveryEvidence: state.capturedEvidence ?? lookup.recoveryEvidence, repairCheckpoint };
   const fixPrompt = buildFreshDiagnosticRepairPrompt(slots);
   return { fixPrompt, repairPort, repairCheckpoint };
+}
+
+/** The harness snapshots authority before the exact verifier and certifies only its success. */
+export async function runCheckpointVerification(context: ReboundContext, prepared: Awaited<ReturnType<typeof prepareRepairPrompt>>, attempt: number) {
+  const { repairPort, repairCheckpoint } = prepared;
+  const readHead = async () => await context.readHead?.() ?? context.head ?? null;
+  const snapshot = repairCheckpoint ? await repairPort?.prepareVerification?.(context.slug, repairCheckpoint.name,
+    { worktree: context.worktree, executionRevision: await readHead() }) : undefined;
+  const startedAt = new Date().toISOString();
+  const verified = await context.verify(attempt);
+  const revisionAfter = snapshot ? await readHead() : null;
+  const exact = verified.exactExecution;
+  const freshExecution = snapshot && exact?.command === snapshot.command && exact.worktree === snapshot.worktree && exact.exitCode === 0;
+  return { verified, certify: async () => {
+    if (verified.ok && repairCheckpoint) {
+      await repairPort!.verify(context.slug, repairCheckpoint.name, ...(freshExecution ? [{ snapshot,
+        command: verified.command ?? '', revisionAfter,
+        execution: { id: randomUUID(), producer: 'rebound-exact-verifier' as const, startedAt,
+          completedAt: new Date().toISOString(), exitCode: 0 as const },
+      }] : []));
+    }
+  } };
+}
+
+function failureOccurrence(command: string, worktree: string, failure?: RecoveryEvidenceRef | null): Pick<OpenRepairCheckpoint, 'worktree' | 'failureRevision' | 'failureEvidenceId'> {
+  if (!failure || failure.command !== command || failure.cwd !== worktree || failure.exitCode === 0 || !failure.captureComplete) { return {}; }
+  return { worktree, failureRevision: failure.capturedRevision,
+    failureEvidenceId: `${failure.incidentId}:${failure.attempt}` };
 }

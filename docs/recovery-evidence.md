@@ -100,6 +100,21 @@ The repair budget and launcher retry budget remain separate. A successful agent
 exit alone is insufficient: the authorized verifier must rerun successfully,
 with committed-tree proof wherever the workflow requires it.
 
+Continuation omits an older repair diagnostic only when the harness has recorded
+explicit coverage of that failure occurrence after successful exact verification
+and accepted fresh checkpoint evidence. The receipt binds the command, Mission,
+worktree, locked gates and criteria, execution revision and verifier provenance.
+Coverage is committed atomically with repair certification; a conflicting write
+cannot leave partial success. Historical failures retain their original rows and
+identities. Reopening a failure creates a new occurrence that the earlier receipt
+does not cover, and changed gates or criteria cannot reuse that coverage.
+
+Legacy incidents without explicit coverage remain unresolved. Matching commands,
+a later checkpoint or a verified flag alone do not establish supersession.
+Uncovered repairs still require exact verification, and invalid-contract blockers
+still require an operator decision before continuation can advance to handoff and
+independent review.
+
 Selected paired first-repair replays favored fresh context in token use. They did
 not validate full-cascade success or production savings. Automatic recovery keeps
 production verification authority; an exploratory green probe cannot establish

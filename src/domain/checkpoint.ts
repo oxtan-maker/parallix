@@ -1,5 +1,6 @@
 import type { InvalidContractBlocker } from './rebound-policy.js';
 import type { SuccessCriterion } from './mission-success-criteria.js';
+import { isExplicitlyCovered, type RepairOccurrence, type ExactSuccessCoverage } from './repair-coverage.js';
 import type { MissionId } from './mission.js';
 
 /** One Goal Check evidence row. Handoff requires each row to cite a verifiable
@@ -53,6 +54,8 @@ export interface CheckpointData {
     readonly attempt: number;
     readonly evidenceRecorded: boolean;
     readonly verified: boolean;
+    readonly occurrence?: RepairOccurrence;
+    readonly exactSuccessCoverage?: ExactSuccessCoverage;
     readonly blocker?: InvalidContractBlocker;
     /**
      * A human-only contract stop an operator acknowledged and cleared by an
@@ -63,6 +66,15 @@ export interface CheckpointData {
     /** The command that carried the operator authority for the acknowledgment. */
     readonly acknowledgedBy?: string;
     readonly acknowledgedAt?: string;
+    /** Append-only operator decisions; correction evidence never becomes a Goal Check row. */
+    readonly corrections?: readonly {
+      readonly blocker: InvalidContractBlocker;
+      readonly operator: string;
+      readonly decision: string;
+      readonly evidence: string;
+      readonly occurredAt: string;
+      readonly missionRevision: number;
+    }[];
   };
   readonly goalCheck: readonly GoalCheckRow[];
   /** Operator guidance rendered in checkpoint and board views; never executed. */
@@ -293,6 +305,6 @@ export function captureReviewCheckpointState(
 }
 
 /** Planned or incident evidence still owed; shared by handoff and readiness. */
-export function missingCheckpointEvidence(checkpoints: readonly CheckpointData[]): readonly CheckpointData[] {
-  return checkpoints.filter(cp => !cp.goalCheck.length || (cp.repair && !cp.repair.evidenceRecorded));
+export function missingCheckpointEvidence(checkpoints: readonly CheckpointData[], gates?: readonly string[], criteria?: readonly string[]): readonly CheckpointData[] {
+  return checkpoints.filter(cp => !cp.goalCheck.length || (cp.repair && !cp.repair.evidenceRecorded && !isExplicitlyCovered(cp, checkpoints, gates, criteria)));
 }

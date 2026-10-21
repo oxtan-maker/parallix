@@ -1,7 +1,7 @@
 import { classifyRecoveryReason as classifyReboundReason } from './rebound-classification.js';
 import type { ReboundStartAgent } from './ports/repair-agent-launch.js';
 export type { ReboundLaunchOptions, ReboundStartAgent } from './ports/repair-agent-launch.js';
-import { prepareRepairPrompt } from './rebound-checkpoints.js';
+import { prepareRepairPrompt, runCheckpointVerification } from './rebound-checkpoints.js';
 import { elideBounceOutput } from './output-elision.js';
 import { type RepairCheckpointPort } from './ports/repair-checkpoint.js';
 import type { InvalidContractBlocker } from '../domain/rebound-policy.js';
@@ -59,6 +59,8 @@ export type RepairStrategy = 'targeted' | 'fresh-diagnostic';
 /** Result of re-running the failing check after a fix attempt. */
 export interface VerifyResult {
   ok: boolean;
+  /** Supplied only by an adapter that just executed this exact command successfully. */
+  exactExecution?: { readonly command: string; readonly worktree: string; readonly exitCode: 0 };
   workflowBlock?: import('./review-verdict-readiness.js').VerdictBlock;
   /** Exact check identity supplied by the verification adapter. */
   command?: string;
@@ -256,7 +258,7 @@ async function reboundImpl(reason: ReboundReason, context: ReboundContext): Prom
   // skips the implementer launch. Other transient gates remain fixable and
   // still launch an implementer after their retry.
   if (reboundRequiresHuman(state.reason, state.classification, true)) { return humanOnlyOutcome(state, context, error); }
-  const repairOutcome = await runRepairAttempts(state, { context, slug, worktree, verify, startAgent, maxAttempts, maxLaunchRetries, transitionToImplementer, applyAgentFallback, log, error });
+  const repairOutcome = await runRepairAttempts(state, { context, slug, worktree, startAgent, maxAttempts, maxLaunchRetries, transitionToImplementer, applyAgentFallback, log, error });
   if (repairOutcome) { return repairOutcome; }
   const exhaustion = reboundExhaustion(state.classification, state.attempts, maxAttempts);
   const why = exhaustion === 'human'
@@ -311,10 +313,10 @@ function refreshReboundState(state: ReboundState, result: VerifyResult, log: Reb
   if (fingerprint !== previous) { log?.(fmt.status('INFO', `Recovery incident changed; reclassified as ${state.classification.failureClass}.`)); }
 }
 
-type RepairOptions = Pick<ReboundContext, 'slug' | 'worktree' | 'verify' | 'startAgent' | 'transitionToImplementer' | 'applyAgentFallback'> & { context: ReboundContext; maxAttempts: number; maxLaunchRetries: number; log: NonNullable<ReboundContext['log']>; error: NonNullable<ReboundContext['error']> };
+type RepairOptions = Pick<ReboundContext, 'slug' | 'worktree' | 'startAgent' | 'transitionToImplementer' | 'applyAgentFallback'> & { context: ReboundContext; maxAttempts: number; maxLaunchRetries: number; log: NonNullable<ReboundContext['log']>; error: NonNullable<ReboundContext['error']> };
 
 async function runRepairAttempts(state: ReboundState, options: RepairOptions): Promise<ReboundOutcome | null> {
-  const { context, slug, worktree, verify, startAgent, maxAttempts, maxLaunchRetries, transitionToImplementer, applyAgentFallback, log, error } = options;
+  const { context, slug, worktree, startAgent, maxAttempts, maxLaunchRetries, transitionToImplementer, applyAgentFallback, log, error } = options;
   // Capture the original failure once, before launch, for fresh-context recovery.
   await captureOriginalFailureEvidence(state, worktree, context, log);
   for (let attempt = 1;repairBudgetAllows(attempt, maxAttempts);attempt++) {
@@ -336,23 +338,26 @@ async function runRepairAttempts(state: ReboundState, options: RepairOptions): P
     if (launchResult === 'retry') { attempt--; continue; }
     if (launchResult === 'skip') { await recordSpentLaunch(state, context, [attempt, maxAttempts], { strategy, headBefore, fingerprintBefore }, startedAt, launch, log); continue; }
     if (launchResult === 'stop') { break; }
-    const verified = await verify(attempt);
-    if (verified.workflowBlock) { return stopRepair(state, context, verified.workflowBlock.diagnostic); }
-    const mismatch = differentGateVerification(state.reason, verified, Boolean(repairCheckpoint));
-    if (mismatch) {
-      return stopRepair(state, context, `Unrelated check ${verified.command} cannot certify ${mismatch.originalCommand}`);
-    }
-    // Contract escalation is immediate; other fresh human-only failures retain
-    // the existing exhaustion path and its attempted-repair evidence.
-    if (repairVerificationRequiresHuman(verified.reason)) {
-      const detail: RepairEvidence = { strategy, agent: state.implementer, context: 'fresh', headBefore, headAfter: await currentHead(context), fingerprintBefore, fingerprintAfter: failureFingerprint(refreshedReason(state.reason, verified)) };
-      state.attemptsDetail.push(detail);
-      await recordAttemptTelemetry(state, context, [attempt, maxAttempts], detail, startedAt, launch, verified);
-      refreshReboundState(state, verified, log);
-      return humanOnlyOutcome(state, context, error);
-    }
-    const checkpointOutcome = await certifyRepairCheckpoint(state, context, prepared, verified);
-    if (checkpointOutcome) { return checkpointOutcome; }
+    let verified: VerifyResult;
+    try {
+      const verification = await runCheckpointVerification(context, prepared, attempt);
+      verified = verification.verified;
+      if (verified.workflowBlock) { return stopRepair(state, context, verified.workflowBlock.diagnostic); }
+      const mismatch = differentGateVerification(state.reason, verified, Boolean(repairCheckpoint));
+      if (mismatch) {
+        return stopRepair(state, context, `Unrelated check ${verified.command} cannot certify ${mismatch.originalCommand}`);
+      }
+      // Contract escalation is immediate; other fresh human-only failures retain
+      // the existing exhaustion path and its attempted-repair evidence.
+      if (repairVerificationRequiresHuman(verified.reason)) {
+        const detail: RepairEvidence = { strategy, agent: state.implementer, context: 'fresh', headBefore, headAfter: await currentHead(context), fingerprintBefore, fingerprintAfter: failureFingerprint(refreshedReason(state.reason, verified)) };
+        state.attemptsDetail.push(detail);
+        await recordAttemptTelemetry(state, context, [attempt, maxAttempts], detail, startedAt, launch, verified);
+        refreshReboundState(state, verified, log);
+        return humanOnlyOutcome(state, context, error);
+      }
+      await verification.certify();
+    } catch (cause) { return stopRepair(state, context, String(cause)); }
     const outcome = await finishVerifiedRepair(state, options, attempt, { strategy, headBefore, fingerprintBefore, startedAt, launch }, verified);
     if (outcome === 'stop') { break; }
     if (outcome) { return outcome; }
@@ -423,16 +428,6 @@ async function repairBlockerOutcome(state: ReboundState, context: ReboundContext
   if (blocker) {
     if (launch.repairAttempted) { state.attempts++; }
     return stopRepair(state, context, JSON.stringify(blocker));
-  }
-  return null;
-}
-
-async function certifyRepairCheckpoint(state: ReboundState, context: ReboundContext, prepared: Awaited<ReturnType<typeof prepareRepairPrompt>>, verified: VerifyResult): Promise<ReboundOutcome | null> {
-  const { repairPort, repairCheckpoint } = prepared;
-  const { slug } = context;
-  if (verified.ok && repairCheckpoint) {
-    try { await repairPort!.verify(slug, repairCheckpoint.name); }
-    catch (cause) { return stopRepair(state, context, String(cause)); }
   }
   return null;
 }

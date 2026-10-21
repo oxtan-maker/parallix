@@ -2,14 +2,19 @@ import { HandoffGateRecovery } from '../../../src/application/handoff-gate-recov
 import { DeclaredGateRunner } from '../../../src/application/handoff-declared-gates.js';
 import { makePorts, makeRecorder } from '../../helpers/handoff-ports.js';
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
+import fs from 'node:fs';
+import path from 'node:path';
+import { mkdtemp } from '../../helpers/temp-dir.js';
+import { fixtureMission, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
+import { RepairCheckpointService } from '../../../src/application/repair-checkpoint-service.js';
 import { buildTypedMissionRecoveryAdvice } from '../../../src/application/typed-mission-recovery-advice.js';
 import { rebound, type ReboundContext, type ReboundReason } from '../../../src/application/rebound-kernel.js';
 import type { RepairCheckpointPort } from '../../../src/application/ports/repair-checkpoint.js';
 
 /** Cases owned and executed by rebound-kernel-contract.test.ts. In-process ports only. */
 export function repairCheckpointCases(): void {
-  const reason: ReboundReason = { kind: 'gate-failure', command: 'npm test -- test/unit/application/rebound-kernel-contract.test.ts', area: 'unit', exitCode: 1, stdout: 'failure', stderr: '' };
+  const reason = { kind: 'gate-failure', command: 'npm test -- test/unit/application/rebound-kernel-contract.test.ts', area: 'unit', exitCode: 1, stdout: 'failure', stderr: '' } satisfies ReboundReason;
   const context = (overrides: Partial<ReboundContext>): ReboundContext => ({
     slug: 'repair-fixture', worktree: '', implementer: 'codex', log() {}, error() {},
     startAgent: async () => ({ result: { status: 0 } }), verify: () => ({ ok: true as const, command: reason.command }), ...overrides,
@@ -180,6 +185,69 @@ export function repairCheckpointCases(): void {
     const result = await rebound(reason, context({ repairCheckpoints: port(), verify: () => ({ ok: true as const }) }));
     assert.equal(result.outcome, 'human-only');
     assert.match(result.diagnostic, /cannot certify/);
+  });
+
+  function realRepair(t: TestContext) {
+    const worktree = mkdtemp('checkpoint-preparation-');
+    t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+    const mission = fixtureMission('repair-fixture', { brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
+      declaredGates: [reason.command], successCriteria: ['criterion'], completedSuccessCriteria: [0] });
+    const store = inMemoryTransitionStore(mission);
+    const checkpoints = new RepairCheckpointService(store);
+    const options = context({ worktree, maxAttempts: 2, repairCheckpoints: checkpoints, readHead: () => 'execution-head',
+      retainedFailure: { version: 1, incidentId: 'retained-failure', attempt: 1, command: reason.command, cwd: worktree,
+        capturedRevision: 'failed-head', exitCode: 1, signal: null, stdoutPath: path.join(worktree, 'stdout'),
+        stderrPath: path.join(worktree, 'stderr'), stdoutBytes: 7, stderrBytes: 0, captureComplete: true,
+        truncatedFrom: null, redacted: false, capturedAt: '2026-10-21T13:00:00Z' },
+    });
+    return { store, checkpoints, options };
+  }
+
+  test('real checkpoint service without recorded evidence preserves reruns, relaunch and structured stop (TASK-2802 F1)', async t => {
+    const f = realRepair(t);
+    let launches = 0;
+    let verifies = 0;
+    const outcome = await rebound(reason, { ...f.options,
+      startAgent: async () => { launches++; return { result: { status: 0 } }; },
+      verify: () => { verifies++; return { ok: verifies === 2, command: reason.command }; },
+    });
+    assert.equal(launches, 2);
+    assert.equal(verifies, 2, 'the authorized failing check still executes before evidence certification');
+    assert.equal(outcome.outcome, 'human-only');
+    assert.equal(outcome.attempts, 2);
+    assert.match(outcome.diagnostic, /fresh authorized evidence/);
+    assert.match(outcome.dossier ?? '', /Recovery dossier/);
+    const repair = f.store.mission().checkpoints.at(-1)!.repair!;
+    assert.equal(repair.evidenceRecorded, false);
+    assert.equal(repair.verified, false);
+    assert.equal(repair.exactSuccessCoverage, undefined);
+  });
+
+  test('snapshot preparation port failure returns the structured kernel stop (TASK-2802 F1)', async () => {
+    const outcome = await rebound(reason, context({
+      repairCheckpoints: port({ prepareVerification: async () => { throw new Error('Mission store unavailable during snapshot'); },
+        verify: async () => { assert.fail('failed preparation cannot certify success'); } }),
+      verify: () => { return assert.fail('cannot run with unavailable authority'); },
+    }));
+    assert.equal(outcome.outcome, 'human-only');
+    assert.match(outcome.diagnostic, /Mission store unavailable during snapshot/);
+    assert.match(outcome.dossier ?? '', /Recovery dossier/);
+  });
+
+  test('snapshot contract refusal preserves its actual cause in the structured stop (TASK-2802 F1)', async t => {
+    const f = realRepair(t);
+    const outcome = await rebound(reason, { ...f.options,
+      startAgent: async () => {
+        await f.store.save({ ...f.store.mission(), declaredGates: ['changed required check'] });
+        return { result: { status: 0 } };
+      },
+      verify: () => { return assert.fail('changed authority must stop before running a gate'); },
+    });
+    assert.equal(outcome.outcome, 'human-only');
+    assert.match(outcome.diagnostic, /Authorized required checks changed/);
+    assert.doesNotMatch(outcome.diagnostic, /requires fresh accepted evidence/);
+    assert.match(outcome.dossier ?? '', /Recovery dossier/);
+    assert.equal(f.store.mission().checkpoints.at(-1)!.repair!.verified, false);
   });
 
   test('harness success with missing fresh repair evidence still fails closed (TASK-2695)', async () => {

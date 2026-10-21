@@ -424,6 +424,23 @@ time, and refreshes unfinished repair authorization to the current recorded
 checks and success criteria. Settled repair history stays intact. Automatic or
 nested continuation does not acknowledge these stops.
 
+To clear a false report or a stop whose operator decision is already recorded,
+run `px checkpoint correct-invalid-contract --name CP-5 --operator <name>
+--decision <correction> --evidence <verifiable-reference>` directly. This works
+while later implementation checkpoints still lack evidence. Supply an explicit
+decision and a repository-relative path, recognized command, quoted test name
+or ADR supporting it. The command checks the current Mission version; a pinned
+stale version or invalid reference leaves the blocker unchanged. Nested and
+automatic invocations have no correction authority.
+
+`px checkpoint read --name CP-5` and `px status --json` retain the original
+blocker's diagnostic, authority reason and proposed correction alongside each
+operator correction, its evidence, identity and time. Clearing resumes work at
+the first unfinished planned checkpoint. It records no Goal Check rows, completes
+no criteria and certifies no gate. Inspect `px checkpoint check --json` for the
+remaining evidence obligations; fresh repair proof and the original required
+checks are still owed before handoff.
+
 Acknowledgment supplies no repair evidence, verification or approval. Retained
 failure diagnostics, fresh checkpoint evidence and successful reruns of the
 original required checks are still required; a newly reported blocker stops

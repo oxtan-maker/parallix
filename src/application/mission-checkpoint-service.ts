@@ -1,6 +1,6 @@
 import { evaluateMissionEvidence } from './mission-evidence-readiness.js';
 import { criterionContract, identifyGoalCheckRows } from '../domain/mission-success-criteria.js';
-import { RepairCheckpointService } from './repair-checkpoint-service.js';
+import { RepairCheckpointService, correctRepairBlocker } from './repair-checkpoint-service.js';
 /**
  * Checkpoint use case.
  *
@@ -96,6 +96,10 @@ export class MissionCheckpointService {
 
   reportInvalidContract(request: Parameters<RepairCheckpointService['report']>[0]) {
     return new RepairCheckpointService(this._store).report(request);
+  }
+
+  correctInvalidContract(request: Parameters<RepairCheckpointService['correct']>[0]) {
+    return new RepairCheckpointService(this._store).correct(request, this._evidence, this._now());
   }
 
   /** The operator resume write, composed through the same repair authority. */
@@ -240,8 +244,13 @@ export class MissionCheckpointService {
       if (stamped.goalCheck.some(row => !(mission.successCriteria ?? []).includes(row.criterion))) {
         return { ok: false, failure: failure('validation', 'Repair evidence must name an exact recorded success criterion') };
       }
-      if (prior.repair.blocker && !request.force) { return { ok: false, failure: failure('validation', 'Invalid locked contract awaits operator decision; an operator can re-record corrected evidence with --force') }; }
-      merged = { ...merged, repair: { ...prior.repair, ...(request.force ? { blocker: undefined } : {}), evidenceRecorded: true, verified: false } };
+      if (prior.repair.blocker && !request.force) { return { ok: false, failure: failure('validation', 'Invalid locked contract awaits operator decision; use px checkpoint correct-invalid-contract to clear a corrected or false blocker before recording evidence') }; }
+      if (prior.repair.blocker && !request.capabilities.has('checkpoint:correct')) {
+        return { ok: false, failure: failure('capability', 'checkpoint:correct operator capability is required') };
+      }
+      const corrected = prior.repair.blocker ? correctRepairBlocker(prior, 'px checkpoint record --force operator',
+        'Operator supplied corrected repair evidence', stamped.goalCheck.map(row => row.evidence).join('\n'), this._now(), version + 1) : prior;
+      merged = { ...merged, repair: { ...corrected.repair!, evidenceRecorded: true, verified: false } };
     }
     merged = { ...merged, recording: { recordedAt: this._now(), recordedRound: round ?? null, missionRevision: version + 1 } };
     const updated: Mission = {
@@ -315,7 +324,7 @@ export class MissionCheckpointService {
   }
 
   /** Inspect evidence without recording, verifying gates, or resolving blockers. */
-  async check(request: MissionCommandRequest, checkoutRoot?: string) {
+  async check(request: MissionCommandRequest, checkoutRoot?: string): Promise<ApplicationOutcome<ReturnType<typeof evaluateMissionEvidence> & { version: MissionVersion; slug: string }>> {
     const loaded = await loadForCommand<ReturnType<typeof evaluateMissionEvidence> & { version: MissionVersion; slug: string }>(this._store, request);
     if (!isLoaded(loaded)) { return loaded; }
     const rootDir = this._evidence?.rootFor(request.missionId) ?? checkoutRoot;
