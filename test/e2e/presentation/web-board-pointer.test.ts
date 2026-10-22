@@ -5,6 +5,7 @@ import { makeProjection } from '../../fixtures/board-projection.js';
 import { projectMissionCard } from '../../../src/application/projections/mission-board.js';
 import { toWebBoardSnapshot } from '../../../src/interfaces/web/transport.js';
 import type { Locator, Page } from 'playwright-core';
+import type { HistoryOperation, HistoryOverview, HistoryPage } from '../../../src/interfaces/web/history-transport-types.js';
 import { compactPointerSnapshot, pointerBoard, pointerSnapshot } from '../../fixtures/web-pointer-board.js';
 
 async function clickAt(control: Locator) {
@@ -232,10 +233,10 @@ test('checkpoint indicators stay below terminal and edit dialogs with usable evi
     });
     await fixture.render(toWebBoardSnapshot(makeProjection({ active: [card] })), sse);
   };
-  const operation = { runId: 'execute-codex-a1-x', role: 'execute', family: 'codex', attempt: 1, state: 'exited', terminalHost: 'tmux', startedAt: '2026-10-14T00:00:00.000Z', endedAt: null, exitCode: 0, signal: null, streams: { stdout: 27, stderr: 0 }, coverage: [] };
+  const operation: HistoryOperation = { legacy: false, redacted: false, captureKind: 'agent', operationId: null, execution: 'stopped', runId: 'execute-codex-a1-x', role: 'execute', family: 'codex', attempt: 1, state: 'exited', terminalHost: 'tmux', startedAt: '2026-10-14T00:00:00.000Z', endedAt: null, exitCode: 0, signal: null, streams: { stdout: 27, stderr: 0 }, coverage: [] };
   await page.route('**/api/terminal/**', route => route.fulfill({ json: new URL(route.request().url()).pathname.endsWith('/history')
-    ? { ok: true, runId: operation.runId, stream: 'stdout', from: 0, to: 27, text: 'Checkpoint terminal output\n', hasEarlier: false, atEnd: true, running: false, gaps: [] }
-    : { missionId: mission.id, state: 'ended', probe: { kind: 'absent' }, operations: [operation], unattributed: [], notices: [] } }));
+    ? { runId: operation.runId, stream: 'stdout', from: 0, to: 27, text: 'Checkpoint terminal output\n', hasEarlier: false, atEnd: true, running: false, gaps: [] } satisfies HistoryPage
+    : { missionId: mission.id, state: 'ended', probe: { kind: 'absent' }, operations: [operation], unattributed: [], notices: [] } satisfies HistoryOverview }));
   await page.route('**/api/commands', route => route.fulfill({ json: {
     kind: 'command-result', transportVersion: 2, status: 'completed', error: null, durableEvidence: [],
     value: { missionId: mission.id, version: 1, title: mission.title, description: '', context: '', labels: [], successCriteria: ['visible'], successCriterionIds: ['sc-1'], dependencies: [] },

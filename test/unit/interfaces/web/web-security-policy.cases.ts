@@ -194,12 +194,13 @@ test('mission history routes fail closed when projection or capability is unavai
       return { status: response.statusCode, body: response.json<unknown>() };
     } finally { await app.close(); }
   }
-  const terminal = { overview: () => ({ state: 'missing' }) } as never;
+  const body = { missionId: 'task-1', state: 'missing', probe: { kind: 'absent' }, operations: [], notices: [], unattributed: [] };
+  const terminal = { overview: () => body } as never;
   assert.equal((await invoke({})).status, 503);
   assert.equal((await invoke({ missionTerminal: () => terminal, buildProjection: async () => { throw new Error('offline'); } })).status, 503);
   const buildProjection = async () => ({ stages: [{ cards: [{ id: 'task-1' }] }] }) as never;
   assert.equal((await invoke({ buildProjection, missionTerminal: () => null })).status, 503, 'an unwired capability is unavailable, not absent');
   assert.equal((await invoke({ buildProjection, missionTerminal: () => terminal }, { missionId: 'task-2' })).status, 404);
-  assert.deepEqual(await invoke({ buildProjection, missionTerminal: () => terminal }), { status: 200, body: { state: 'missing' } });
+  assert.deepEqual(await invoke({ buildProjection, missionTerminal: () => terminal }), { status: 200, body });
   assert.equal((await invoke({ buildProjection, missionTerminal: () => terminal }, {} as never)).status, 503);
 });

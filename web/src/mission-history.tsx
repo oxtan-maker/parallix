@@ -114,7 +114,7 @@ function LivePane({ missionId }: { missionId: string }) {
   usePolling(missionId, async signal => {
     const result = await loadLive(missionId, signal);
     if (signal.aborted || result.ok === false) { return; }
-    setLive(result.value.kind === 'live' ? result.value.output : `No live pane (${result.value.probe.kind}${result.value.probe.detail ? `: ${result.value.probe.detail}` : ''}).`);
+    setLive(result.value.kind === 'live' ? result.value.output : `No live pane (${result.value.probe.kind}${'detail' in result.value.probe ? `: ${result.value.probe.detail}` : ''}).`);
   });
   return <pre aria-label="Live pane" style={{ maxHeight: 200, margin: 0, overflow: 'auto', whiteSpace: 'pre-wrap', borderTop: `1px solid ${MODAL.accentEdge}`, paddingTop: SPACE.md }}>{live ?? 'Loading live pane…'}</pre>;
 }

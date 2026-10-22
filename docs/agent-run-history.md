@@ -99,7 +99,9 @@ history loads page by page; search covers every retained operation (literal
 text); the operation and stream selectors switch between records; copy copies
 what is shown. Scrolling back keeps the selected operation and position when
 new runs arrive; resume following to return to the newest operation. Failed
-initial history reads retry during polling. The live
+initial history reads retry during polling. Incomplete or malformed history
+responses are reported as read errors; already loaded history stays visible
+until a valid refresh recovers. The live
 pane is an optional extra view and never replaces the history. It refreshes
 once a second while open, skips refresh ticks while a read is pending, and
 keeps its displayed output if a refresh fails. Closing it cancels the read.

@@ -11,6 +11,8 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { BoardProjection } from '../../application/projections/board.js';
 import type { MissionHistoryError, MissionHistoryPageRequest, MissionTerminalCapability } from '../../application/ports/mission-terminal.js';
 
+import { toHistoryOverview, toHistoryPage, toHistorySearch, toHistoryLive } from './history-transport-projection.js';
+
 export const WEB_TERMINAL_PATH = '/api/terminal/:missionId';
 export const WEB_TERMINAL_HISTORY_PATH = '/api/terminal/:missionId/history';
 export const WEB_TERMINAL_SEARCH_PATH = '/api/terminal/:missionId/search';
@@ -34,10 +36,16 @@ function invalid(reply: FastifyReply, detail: string): FastifyReply {
   return reply.code(400).type('application/json; charset=utf-8').send({ ok: false, error: 'invalid', detail });
 }
 
-function send(reply: FastifyReply, result: object): FastifyReply {
-  const error = (result as Partial<MissionHistoryError>).ok === false ? (result as MissionHistoryError).error : null;
-  const status = error === null ? 200 : error === 'invalid' ? 400 : error === 'missing' ? 404 : 409;
-  return reply.code(status).type('application/json; charset=utf-8').send(result);
+function isHistoryError<T extends object>(result: T | MissionHistoryError): result is MissionHistoryError {
+  return 'ok' in result && result.ok === false;
+}
+
+function send<T extends object>(reply: FastifyReply, result: T | MissionHistoryError, project: (_value: T) => object): FastifyReply {
+  if (isHistoryError(result)) {
+    const status = result.error === 'invalid' ? 400 : result.error === 'missing' ? 404 : 409;
+    return reply.code(status).type('application/json; charset=utf-8').send(result);
+  }
+  return reply.code(200).type('application/json; charset=utf-8').send(project(result));
 }
 
 function offset(query: Query, key: string): number | undefined | null {
@@ -83,14 +91,14 @@ export function registerTerminalRoute(app: FastifyInstance, options: {
 
   app.get(WEB_TERMINAL_PATH, guarded(async (request, reply) => {
     const resolved = await resolve(request, reply);
-    return resolved ? send(reply, await resolved.terminal.overview(resolved.missionId)) : undefined;
+    return resolved ? send(reply, await resolved.terminal.overview(resolved.missionId), toHistoryOverview) : undefined;
   }));
 
   app.get(WEB_TERMINAL_HISTORY_PATH, guarded(async (request, reply) => {
     const parsed = pageRequest((request.query ?? {}) as Query);
     if (typeof parsed === 'string') { return invalid(reply, parsed); }
     const resolved = await resolve(request, reply);
-    return resolved ? send(reply, await resolved.terminal.page(resolved.missionId, parsed)) : undefined;
+    return resolved ? send(reply, await resolved.terminal.page(resolved.missionId, parsed), toHistoryPage) : undefined;
   }));
 
   app.get(WEB_TERMINAL_SEARCH_PATH, guarded(async (request, reply) => {
@@ -102,11 +110,11 @@ export function registerTerminalRoute(app: FastifyInstance, options: {
     const resolved = await resolve(request, reply);
     if (!resolved) { return undefined; }
     // Literal search only: the browser never supplies a regular expression.
-    return send(reply, await resolved.terminal.search(resolved.missionId, { pattern, ...(typeof run === 'string' ? { runId: run } : {}) }));
+    return send(reply, await resolved.terminal.search(resolved.missionId, { pattern, ...(typeof run === 'string' ? { runId: run } : {}) }), toHistorySearch);
   }));
 
   app.get(WEB_TERMINAL_LIVE_PATH, guarded(async (request, reply) => {
     const resolved = await resolve(request, reply);
-    return resolved ? send(reply, await resolved.terminal.live(resolved.missionId)) : undefined;
+    return resolved ? send(reply, await resolved.terminal.live(resolved.missionId), toHistoryLive) : undefined;
   }));
 }

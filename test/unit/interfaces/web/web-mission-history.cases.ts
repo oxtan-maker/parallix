@@ -13,9 +13,11 @@ import { createRoot } from 'react-dom/client';
 import React from 'react';
 import { Board } from '../../../../web/src/board.js';
 import { MissionHistory } from '../../../../web/src/mission-history.js';
+import { loadOverview, loadLive, loadPage, searchHistory } from '../../../../web/src/mission-history-data.js';
 import { C } from '../../../../web/src/palette.js';
 import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
+import { agentFamily } from '../../../../src/domain/agents.js';
 import { missionId } from '../../../../src/domain/mission.js';
 
 type Route = (_url: URL, _init?: RequestInit) => unknown;
@@ -23,7 +25,7 @@ type Route = (_url: URL, _init?: RequestInit) => unknown;
 const MISSION = 'task-2749.1';
 
 function operation(runId: string, state: 'running' | 'exited' = 'exited', role = 'execute') {
-  return { runId, role, family: 'codex', attempt: 1, state, terminalHost: 'tmux', startedAt: '2026-10-14T10:00:00.000Z', endedAt: null, exitCode: state === 'exited' ? 4 : null, signal: null, streams: { stdout: 100, stderr: 0 }, coverage: ['stdout: 100 of 100 bytes retained'] };
+  return { captureKind: 'agent', operationId: null, execution: 'stopped', legacy: false, redacted: false, runId, role, family: agentFamily('codex'), attempt: 1, state, terminalHost: 'tmux', startedAt: '2026-10-14T10:00:00.000Z', endedAt: null, exitCode: state === 'exited' ? 4 : null, signal: null, streams: { stdout: 100, stderr: 0 }, coverage: ['stdout: 100 of 100 bytes retained'] };
 }
 
 function overview(state: string, operations: unknown[], probe: Record<string, unknown> = { kind: 'absent' }) {
@@ -134,7 +136,7 @@ test('earlier history loads page by page and marks dropped bytes (TASK-2749)', a
 });
 
 test('probe failures and failed reads keep displayed history and recover (TASK-2661, TASK-2749)', async context => {
-  let mode: 'timeout' | 'throw' | 'ok' = 'timeout';
+  let mode: 'timeout' | 'throw' | 'malformed' | 'ok' = 'timeout';
   let initialFailure = true;
   const view = await render(url => {
     if (mode === 'throw') { return new Error('network down'); }
@@ -142,6 +144,7 @@ test('probe failures and failed reads keep displayed history and recover (TASK-2
       if (initialFailure) { initialFailure = false; return new Error('temporary'); }
       return page(0, 15, 'real progress\n');
     }
+    if (mode === 'malformed') { return { ...overview('ended', [operation('execute-codex-a1-x')]), notices: undefined }; }
     return mode === 'timeout'
       ? overview('probe-timeout', [operation('execute-codex-a1-x')], { kind: 'unavailable', reason: 'timeout', detail: 'tmux did not answer within 1000 ms' })
       : overview('ended', [operation('execute-codex-a1-x')]);
@@ -155,6 +158,10 @@ test('probe failures and failed reads keep displayed history and recover (TASK-2
   await view.poll();
   assert.equal(view.text(), 'real progress\n', 'a failed read never wipes displayed history');
   assert.match(view.dialog(), /Refresh interrupted \(Mission history is unavailable\.\)/);
+  mode = 'malformed';
+  await view.poll();
+  assert.equal(view.text(), 'real progress\n', 'a malformed overview keeps useful history (TASK-2786)');
+  assert.match(view.dialog(), /Refresh interrupted.*unexpected shape/);
   mode = 'ok';
   await view.poll();
   assert.doesNotMatch(view.dialog(), /Refresh interrupted/);
@@ -263,7 +270,7 @@ for (const stop of ['close', 'mission change', 'unmount'] as const) {
     await complete(2, live('RECOVERED'));
     assert.equal(view.text('Live pane'), 'RECOVERED');
     await view.poll();
-    await complete(3, { kind: 'not-live', probe: { kind: 'unavailable', detail: 'timeout' } });
+    await complete(3, { kind: 'not-live', probe: { kind: 'unavailable', reason: 'timeout', detail: 'timeout' } });
     assert.equal(view.text('Live pane'), 'No live pane (unavailable: timeout).');
     await view.poll();
     if (stop === 'close') { await view.click('input[type="checkbox"]'); await view.click('input[type="checkbox"]'); }
@@ -307,3 +314,139 @@ test('nested card interactions do not open mission progress (TASK-2773.09)', asy
     assert.equal(page.mount.querySelector('[aria-label^="Mission progress for"]'), null);
   } finally { await page.close(); }
 });
+
+test('history reads reject incomplete and nested malformed wire payloads (TASK-2786)', async context => {
+  const original = globalThis.fetch;
+  context.after(() => { globalThis.fetch = original; });
+  const validOverview = overview('ended', [operation('run')]);
+  const missingNotices = { ...validOverview, notices: undefined };
+  const cases: Array<[() => Promise<{ ok: boolean }>, unknown]> = [
+    [() => loadOverview(MISSION), missingNotices],
+    [() => loadLive(MISSION), { kind: 'not-live' }],
+    [() => loadOverview(MISSION), { ...validOverview, operations: [{ ...operation('run'), startedAt: 42 }] }],
+    [() => loadOverview(MISSION), { ...validOverview, probe: { kind: 'live' } }],
+    [() => loadPage(MISSION, { runId: 'run', stream: 'stdout' }), page(0, 1, 'x', { gaps: [{ from: -1, to: 1 }] })],
+    [() => searchHistory(MISSION, 'x'), { hits: [{ runId: 'run', stream: 'stdin', offset: 0, preview: 'x' }], totalHits: 1, scanLimited: false }],
+  ];
+  for (const [load, body] of cases) {
+    globalThis.fetch = async () => new Response(JSON.stringify(body));
+    assert.equal((await load()).ok, false, JSON.stringify(body));
+  }
+});
+
+test('application history payloads survive JSON browser reads (TASK-2786)', async context => {
+  const original = globalThis.fetch;
+  context.after(() => { globalThis.fetch = original; });
+  const payload: import('../../../../src/application/ports/mission-terminal.js').MissionHistoryOverview = {
+    missionId: MISSION, state: 'ended', probe: { kind: 'live', operation: 'execute', runId: null, execution: null },
+    operations: [{ ...operation('run'), captureKind: 'agent', operationId: null, execution: 'unknown', legacy: false, redacted: false, state: 'exited', terminalHost: 'tmux' }],
+    notices: [], unattributed: [],
+  };
+  for (const probe of [payload.probe, { kind: 'starting', operation: 'execute' }, { kind: 'absent' }] as const) {
+    globalThis.fetch = async () => new Response(JSON.stringify({ ...payload, probe }));
+    assert.equal((await loadOverview(MISSION)).ok, true);
+  }
+});
+
+test('history wire validators check every required field and numeric range (TASK-2786)', async () => {
+  const { validateHistoryOverview, validateHistoryPage, validateHistorySearch, validateHistoryLive } = await import('../../../../src/interfaces/web/history-transport.js');
+  const validOperation = operation('run');
+  const validOverview = overview('ended', [validOperation]);
+  const validPage = page(0, 10, 'text');
+  const hit = { ref: 'run:run:stdout@0+4', runId: 'run', stream: 'stdout', offset: 0, preview: 'text' };
+  const validSearch = { hits: [hit], totalHits: 1, searchedRuns: ['run'], scanLimited: false, coverage: [], errors: [] };
+  const invalid = (check: (_body: unknown) => unknown, body: Record<string, unknown>, keys: string[]) => {
+    assert.ok(check(JSON.parse(JSON.stringify(body))));
+    for (const key of keys) {
+      const missing = { ...body }; delete missing[key];
+      assert.equal(check(missing), null, 'missing ' + key);
+      assert.equal(check({ ...body, [key]: {} }), null, 'mistyped ' + key);
+    }
+  };
+  invalid(validateHistoryOverview, validOverview, Object.keys(validOverview));
+  invalid(body => validateHistoryOverview({ ...validOverview, operations: [body] }), validOperation, Object.keys(validOperation));
+  invalid(validateHistoryPage, validPage, Object.keys(validPage).filter(key => key !== 'ok'));
+  invalid(validateHistorySearch, validSearch, Object.keys(validSearch));
+  invalid(body => validateHistorySearch({ ...validSearch, hits: [body] }), hit, Object.keys(hit));
+  invalid(validateHistoryLive, { kind: 'live', operation: null, output: '' }, ['kind', 'operation', 'output']);
+  invalid(validateHistoryLive, { kind: 'not-live', probe: { kind: 'absent' } }, ['kind', 'probe']);
+  for (const probe of [
+    { kind: 'absent' }, { kind: 'idle' }, { kind: 'starting', operation: 'execute' },
+    { kind: 'live', operation: 'execute', runId: null, execution: null },
+    { kind: 'ambiguous', sessions: ['other'], detail: 'ambiguous' },
+    ...['host-missing', 'failed', 'timeout'].map(reason => ({ kind: 'unavailable', reason, detail: reason })),
+  ]) {
+    invalid(body => validateHistoryLive({ kind: 'not-live', probe: body }), probe, Object.keys(probe).filter(key => key !== 'runId' && key !== 'execution'));
+  }
+  for (const bad of [NaN, Infinity, -Infinity, -1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.equal(validateHistoryPage({ ...validPage, from: bad }), null);
+    assert.equal(validateHistoryPage({ ...validPage, gaps: [{ from: 0, to: bad }] }), null);
+    assert.equal(validateHistoryOverview({ ...validOverview, operations: [{ ...validOperation, streams: { stdout: bad, stderr: 0 } }] }), null);
+    assert.equal(validateHistorySearch({ ...validSearch, totalHits: bad }), null);
+    assert.equal(validateHistorySearch({ ...validSearch, hits: [{ ...hit, offset: bad }] }), null);
+    assert.equal(validateHistoryOverview({ ...validOverview, operations: [{ ...validOperation, attempt: bad }] }), null);
+  }
+  assert.equal(validateHistoryPage({ ...validPage, from: 11 }), null);
+  assert.equal(validateHistorySearch({ ...validSearch, totalHits: 0 }), null);
+  assert.equal(validateHistoryOverview({ ...validOverview, operations: [{ ...validOperation, attempt: 0 }] }), null);
+  assert.equal(validateHistoryOverview({ ...validOverview, operations: [{ ...validOperation, exitCode: Infinity }] }), null);
+  for (const probe of [
+    { kind: 'starting', operation: 'execute', runId: undefined },
+    { kind: 'live', operation: 'execute', execution: 'yes' },
+    { kind: 'live', operation: null }, { kind: 'unavailable', reason: 'unknown', detail: '' },
+  ]) { assert.equal(validateHistoryLive({ kind: 'not-live', probe }), null); }
+  for (const state of ['starting', 'live', 'ended', 'capture-only', 'missing', 'probe-failed', 'probe-timeout', 'ambiguous']) {
+    assert.ok(validateHistoryOverview({ ...validOverview, state }));
+  }
+});
+
+test('terminal route JSON projects application history into browser validated reads (TASK-2786)', async context => {
+  const { default: Fastify } = await import('fastify');
+  const { registerTerminalRoute } = await import('../../../../src/interfaces/web/terminal-route.js');
+  const app = Fastify();
+  const original = globalThis.fetch;
+  context.after(async () => { globalThis.fetch = original; await app.close(); });
+  const model: import('../../../../src/application/ports/mission-terminal.js').MissionHistoryOverview = {
+    missionId: MISSION, state: 'ended', probe: { kind: 'starting', operation: 'execute' },
+    operations: [{ ...operation('run'), captureKind: 'coordinator', family: null, attempt: null, operationId: null, execution: 'unknown', legacy: false, redacted: true, state: 'exited', terminalHost: 'pipe' }],
+    notices: ['bounded'], unattributed: ['legacy record'],
+  };
+  registerTerminalRoute(app, {
+    buildProjection: async () => makeProjection({ active: [makeCard({ id: missionId(MISSION) })] }),
+    missionTerminal: () => ({
+      overview: () => model,
+      page: () => ({ ok: true, runId: 'run', stream: 'stdout', from: 2, to: 5, text: 'abc', hasEarlier: true, atEnd: false, running: true, gaps: [{ from: 0, to: 2 }] }),
+      search: () => ({ ok: true, hits: [{ ref: 'run:run:stdout@2+3', runId: 'run', stream: 'stdout', offset: 2, preview: 'abc' }], totalHits: 1, searchedRuns: ['run'], scanLimited: true, coverage: ['limited'], errors: [] }),
+      live: () => ({ kind: 'not-live', probe: { kind: 'live', operation: 'execute', runId: null, execution: null } }),
+    }),
+  });
+  globalThis.fetch = async input => {
+    const response = await app.inject({ method: 'GET', url: String(input) });
+    assert.equal(response.statusCode, 200);
+    return new Response(response.body);
+  };
+  const result = await loadOverview(MISSION);
+  assert.deepEqual(result, { ok: true, value: model });
+  assert.ok(result.ok && !('runId' in result.value.probe), 'optional omission stays omitted');
+  const live = await loadLive(MISSION);
+  assert.deepEqual(live, { ok: true, value: { kind: 'not-live', probe: { kind: 'live', operation: 'execute', runId: null, execution: null } } });
+  assert.equal((await loadPage(MISSION, { runId: 'run', stream: 'stdout' })).ok, true);
+  assert.equal((await searchHistory(MISSION, 'abc')).ok, true);
+});
+
+for (const [state, probe, description] of [
+  ['starting', { kind: 'starting', operation: 'execute' }, /Starting:/],
+  ['live', { kind: 'live', operation: 'execute', execution: null }, /Live: operation execute/],
+  ['ended', { kind: 'idle' }, /No operation is running/],
+  ['capture-only', { kind: 'absent' }, /without a terminal/],
+  ['missing', { kind: 'absent' }, /No terminal and no retained history/],
+  ['probe-failed', { kind: 'unavailable', reason: 'failed', detail: 'failed' }, /could not be inspected/],
+  ['probe-timeout', { kind: 'unavailable', reason: 'timeout', detail: 'timeout' }, /did not answer in time/],
+  ['ambiguous', { kind: 'ambiguous', sessions: ['other'], detail: 'ambiguous' }, /could not be attributed/],
+] as const) {
+  test('validated history renders ' + state + ' (TASK-2786)', async context => {
+    const view = await render(() => overview(state, [], probe), context);
+    assert.match(view.dialog(), description);
+    assert.doesNotMatch(view.dialog(), /Refresh interrupted/);
+  });
+}

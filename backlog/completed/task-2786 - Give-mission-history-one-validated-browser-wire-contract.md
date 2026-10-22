@@ -1,8 +1,8 @@
 ---
 id: TASK-2786
 title: Give mission history one validated browser wire contract
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-19 09:56'
 labels: []
 dependencies: []
