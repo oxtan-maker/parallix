@@ -111,6 +111,9 @@ function runDevWithAnchor(
   // than paying for a host-sized V8 pool under coverage.
   return spawnSync(process.execPath, ['--v8-pool-size=1', '--import', TSX_URL, '-e', script], {
     cwd: cwd ?? repoRoot,
+    // The disposable repository owns command data, while the source entry
+    // keeps its checkout compiler configuration (and matching transform cache).
+    env: { ...process.env, TSX_TSCONFIG_PATH: path.join(repoRoot, 'tsconfig.json') },
     encoding: 'utf8',
     timeout: timeoutMs,
   });

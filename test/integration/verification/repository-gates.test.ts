@@ -388,6 +388,8 @@ test('this repository starts every independent check while Sonar waits for cover
   let peak = 0;
   const result = await runPhaseGates('integration', {
     slug: 'task-2558', checkoutPath: repoRoot, gates,
+    // Admission has its own real-boundary suite. This scheduling probe owns
+    // only the declared dependency graph and uses an injected command runner.
     admission: {
       assertIndependent: () => {},
       run: (_root, action, signal) => action({ signal: signal ?? new AbortController().signal, environment: {}, bindProcessGroup: () => {} }),

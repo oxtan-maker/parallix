@@ -1,8 +1,8 @@
 ---
 id: TASK-2784
 title: Remove the unused mission card and test the live board rendering
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-19 09:55'
 labels: []
 dependencies: []

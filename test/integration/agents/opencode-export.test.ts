@@ -17,9 +17,10 @@ const { captureOpencodeExport } = captureOpencodeExportModule;
 
 test('captureOpencodeExport returns the full stdout JSON on clean exit', async () => {
   const expected = JSON.stringify({ info: { tokens: { input: 1, output: 2 } } });
-  const encoded = Buffer.from(expected).toString('base64');
   const spawn: NonNullable<NonNullable<Parameters<typeof captureOpencodeExport>[1]>["spawn"]> = (cmd, args, opts) => {
-    return realSpawn('node', ['-e', 'process.stdout.write(Buffer.from(process.argv[1], "base64"))', encoded], opts);
+    // Exercise a real child's stdout fd without starting a JS runtime merely
+    // to emit a constant. Child CPU counts against this capture contract too.
+    return realSpawn('printf', ['%s', expected], opts);
   };
   const result = await captureOpencodeExport('ses_x', { configuration: resolveConfiguration(process.env), spawn });
   assert.equal(result, expected);

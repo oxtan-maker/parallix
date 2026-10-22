@@ -1,3 +1,4 @@
+import './web-board-card-facts.cases.js';
 import './web-refinement-render.cases.js';
 import type { BoardLane } from '../../../../src/application/projections/mission-board.js';
 const laneCounts = (values: Partial<Record<BoardLane, number>>) => ({ backlog: 0, refined: 0, active: 0, review: 0, integration: 0, done: 0, ...values });

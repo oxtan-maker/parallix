@@ -18,6 +18,10 @@ before(async () => {
   fs.mkdirSync(path.join(fixture.root, 'config'), { recursive: true });
   fs.writeFileSync(path.join(fixture.root, 'config/agents.json'), JSON.stringify({ families: ['codex', 'claude'] }));
   host = await fixture.start();
+  // Each read-only observer process builds its own graph on its first request. Warm both
+  // here so the timed cases measure isolation, not cold observer startup.
+  await fixture.observation.board();
+  await fixture.observation.terminal.overview(fixture.slugs[0]);
 });
 after(async () => { try { await fixture?.close(); } finally { bundle?.close(); } });
 

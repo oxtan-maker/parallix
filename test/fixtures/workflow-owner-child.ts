@@ -5,6 +5,7 @@ import { createMissionTerminalCapability } from '../../src/composition/mission-t
 /** Real worker entry with deterministic mechanism doubles; never uses a model. */
 import fs from 'node:fs';
 import path from 'node:path';
+import { flushCompileCache } from 'node:module';
 import { runWorkflowWorker } from '../../src/composition/workflow-operations.js';
 import type { createProductionApplicationServices } from '../../src/composition/application-services.js';
 import { resolveProcessConfiguration } from '../../src/composition/config.js';
@@ -68,6 +69,9 @@ const createGraph: typeof createProductionApplicationServices = async (root, pro
   const raw = new BoardCommandController(executePorts, undefined, {}, graph.currentWork, graph.mission!.store);
   return { ...graph, executePorts, presentationCapabilities: { ...graph.presentationCapabilities, commandController: raw } };
 };
+
+// Publish compiled fixture modules before starting the next isolated child.
+flushCompileCache();
 
 if (process.argv[2] === '--fixture-public') {
   const { setCommandPathProbe, setLauncherHealthProbe } = await import('../../src/adapters/agents/agents.js');

@@ -31,7 +31,7 @@ import { makeProjection } from '../../fixtures/board-projection.js';
 import { validateWebBoardSnapshot } from '../../../src/interfaces/web/transport.js';
 import { WEB_SNAPSHOT_PATH, createWebHost } from '../../../src/interfaces/web/host.js';
 import { recoverMissionLifecycle } from '../../../src/application/mission-lifecycle-recovery.js';
-import { MissionCardView } from '../../../web/src/mission-card.js';
+import { Board } from '../../../web/src/board.js';
 
 describe("active invocation overlap", () => {
   /**
@@ -373,7 +373,7 @@ describe("active persisted Mission", () => {
       const webCard = wire.value.stages.flatMap((stage) => stage.cards).find((card) => card.id === 'task-2580');
       assert.equal(webCard?.status, 'active');
       assert.equal(webCard?.agent, 'claude', 'the fallback implementer replaces the preselected family');
-      assert.match(renderToString(createElement(MissionCardView, { card: webCard! })), /mission-card/);
+      assert.match(renderToString(createElement(Board, { snapshot: wire.value, onRefresh: async () => {} })), /data-board-card="task-2580"/);
       assert.ok(performance.now() - startedAt < 200, 'px active command, persistence, delivery, and rendering stay within 200 ms');
     } finally {
       finish.resolve();

@@ -213,16 +213,25 @@ test('sonar analysis configuration consumes LCOV without a Cloud-unsupported new
 });
 
 test('no local SonarQube path survives anywhere in the tracked tree', () => {
-  const tracked = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], { cwd: repoRoot, encoding: 'utf8' }).stdout.split('\n').filter(file => file && fs.existsSync(path.join(repoRoot, file)));
+  const tracked = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], { cwd: repoRoot, encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
   // ADR 0060 and this file are excluded on purpose: a decision record names the
   // mechanisms it rejects, and this test must quote the retired literals to
   // search for them. Neither is surviving machinery.
   const self = path.relative(repoRoot, fileURLToPath(import.meta.url));
   const sources = tracked.filter((file) => file !== self).filter((file) => /^(src|test|scripts|\.github)\//.test(file)
-    || ['package.json', 'workflow.config.json', 'sonar-project.properties'].includes(file));
+    || ['package.json', 'workflow.config.json', 'sonar-project.properties'].includes(file))
+    .filter((file) => fs.existsSync(path.join(repoRoot, file)));
 
-  assert.equal(tracked.filter((file) => file.startsWith('infra/sonarqube/')).length, 0, 'the Compose stack is gone');
-  for (const file of sources) {
+  assert.equal(tracked.filter((file) => file.startsWith('infra/sonarqube/') && fs.existsSync(path.join(repoRoot, file))).length, 0, 'the Compose stack is gone');
+  // Use the hosted runner's text scanner for the full source inventory rather
+  // than decoding every file in JS. -a includes binary content, and explicit
+  // paths retain untracked files and symlink targets from the inventory above.
+  // Keep the individual assertions for precise diagnostics on every match.
+  const scan = spawnSync('grep', ['-a', '-l', '-E',
+    '127\\.0\\.0\\.1:9000|SONAR_MODE|resolveSonarProjectKey|encodeBranchIdentity|sanitizeProjectKey',
+    '--', ...sources], { cwd: repoRoot, encoding: 'utf8' });
+  assert.ok(scan.status === 0 || scan.status === 1, scan.stderr || scan.error?.message || 'source scan failed');
+  for (const file of scan.stdout.split('\n').filter(Boolean)) {
     const contents = fs.readFileSync(path.join(repoRoot, file), 'utf8');
     assert.doesNotMatch(contents, /127\.0\.0\.1:9000/, `${file} must not reference the retired local server`);
     assert.doesNotMatch(contents, /SONAR_MODE/, `${file} must not reintroduce a local/cloud toggle`);

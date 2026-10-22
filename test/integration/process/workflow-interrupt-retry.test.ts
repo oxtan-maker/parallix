@@ -5,13 +5,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import path from 'node:path';
 import { workflowBoard, until } from '../../fixtures/workflow-board.js';
 
 test('direct active Ctrl+C settles held children and ownership before immediate retry (TASK-2771, TASK-2792)', { timeout: 3500 }, async t => {
   const bundle = await bundleWorkflowChild(); t.after(() => bundle.close());
   const fixture = await workflowBoard(1, { cli: bundle.cli }); t.after(() => fixture.close());
   const child = spawn(bundle.cli.command, [...bundle.cli.args, '--fixture-cli-execute', fixture.root, fixture.slugs[0]], {
-    cwd: fixture.root, env: { ...fixture.configuration.forwardedEnvironment }, stdio: 'pipe',
+    cwd: fixture.root, env: { ...fixture.configuration.forwardedEnvironment, NODE_COMPILE_CACHE: path.join(fixture.root, 'compile-cache') }, stdio: 'pipe',
   });
   let output = ''; child.stdout.on('data', bytes => { output += String(bytes); }); child.stderr.on('data', bytes => { output += String(bytes); });
   const exited = once(child, 'exit');
