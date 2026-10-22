@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Jev cleared 36% of re-reviews</title>
+  <desc id="desc">In my coding-agent workflow, Jev cleared 41 of 114 re-reviews, leaving 73 for the general reviewer.</desc>
+  <rect width="1200" height="630" fill="#faf8f3" />
+  <rect width="1200" height="10" fill="#24604f" />
+  <g font-family="system-ui, sans-serif" fill="#252b2a">
+    <text x="64" y="147" font-size="80" font-weight="650" letter-spacing="-2">
+      <tspan x="64">Jev cleared <tspan fill="#24604f">36%</tspan></tspan>
+      <tspan x="64" dy="94">of re-reviews</tspan>
+    </text>
+    <text x="64" y="303" font-size="30" fill="#535e57">114 re-reviews in my coding-agent workflow</text>
+    <!-- Same sample as results.svg; both Jev-cleared categories are combined. -->
+    <rect x="64" y="354" width="385.54" height="56" fill="#24604f" />
+    <rect x="449.54" y="354" width="686.46" height="56" fill="#a3aba3" />
+    <g font-size="30">
+      <rect x="64" y="447" width="20" height="20" rx="3" fill="#24604f" />
+      <text x="100" y="468">41 cleared by Jev</text>
+      <rect x="680" y="447" width="20" height="20" rx="3" fill="#a3aba3" />
+      <text x="716" y="468">73 general reviewer</text>
+    </g>
+    <path d="M64 528H1136" stroke="#c7ccc3" />
+    <text x="64" y="577" font-size="25" font-weight="600">Magnus Ekdahl</text>
+  </g>
+</svg>
