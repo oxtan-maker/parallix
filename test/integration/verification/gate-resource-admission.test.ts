@@ -85,6 +85,28 @@ test('a finished test gate frees its slot for another run while an unrelated gat
   assert.equal((await first).ok, true);
 });
 
+test('one mission shares its test slot across parallel checks and dependencies (TASK-2807)', async t => {
+  const { root, run } = await resourceFixture(t, { resources: { test: 1 } });
+  const first = run([
+    { key: 'unit', command: 'touch unit-start; while [ ! -f integration-start ]; do sleep 0.01; done', order: 0, resource: 'test' },
+    { key: 'integration', command: 'touch integration-start; while [ ! -f release ]; do sleep 0.01; done', order: 1, resource: 'test' },
+    { key: 'browser', command: 'touch browser-start', order: 2, after: ['unit'], resource: 'test' },
+    { key: 'smoke', command: 'touch smoke-start; while [ ! -f smoke-release ]; do sleep 0.01; done', order: 3 },
+  ]);
+  // Bound the reproduction before the fixture's hang deadline on the broken scheduler.
+  await delay(150);
+  assert.equal(fs.existsSync(path.join(root, 'integration-start')), true, 'checks within one mission must overlap at capacity one');
+  await untilGateFile(path.join(root, 'browser-start'));
+  await untilGateFile(path.join(root, 'smoke-start'));
+  const second = run([{ key: 'next', command: 'touch next-start', order: 0, resource: 'test' }]);
+  await delay(30);
+  assert.equal(fs.existsSync(path.join(root, 'next-start')), false, 'another mission must wait for every tagged check');
+  fs.writeFileSync(path.join(root, 'release'), '');
+  assert.equal((await second).ok, true, 'another mission proceeds while untagged smoke is still running');
+  fs.writeFileSync(path.join(root, 'smoke-release'), '');
+  assert.equal((await first).ok, true);
+});
+
 test('resource gates serialize across runs and cancellation releases the slot (px-0019)', async t => {
   const { root, run, admission } = await resourceFixture(t, { resources: { test: 1 } });
   const first = run([{ key: 'a', command: 'touch a-start; while [ ! -f release ]; do sleep 0.01; done; touch a-end', order: 0, resource: 'test' }]);

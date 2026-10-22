@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildTestRunPlan } from '../../../lib/test-run-plan.js';
+import { loadPhaseGateParallelism } from '../../../../src/adapters/config/repository-gates.js';
 import { EARLY_CI_CPU_CUTOFF_MS, declaredSuiteCpuLimitMs } from '../../../lib/test-tier-selection.js';
 import { readCpuBudgetPolicy } from '../../../lib/test-cpu-policy.mjs';
 import {
@@ -181,7 +182,7 @@ test('browser E2E runs alongside local E2E gates and stays out of GitHub (TASK-2
     assert.ok(gate, `${key} gate is configured`);
     assert.deepEqual(gate.after, browser.after);
   }
-  assert.ok(config.adapters.gates.parallel.preIntegration > 1);
+  assert.ok(loadPhaseGateParallelism(executionRoot, 'preIntegration') > 1);
   const standalone = JSON.parse(fs.readFileSync(path.join(executionRoot, 'config/integration-pipelines.json'), 'utf8'));
   assert.equal(standalone.gates['browser-e2e'].command, browser.command);
   assert.equal(standalone.gates['browser-e2e'].run_last, true);

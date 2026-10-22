@@ -1,14 +1,8 @@
-
-
-
-import test, { mock } from 'node:test';
+// Prompt rendering uses shipped templates and in-process inputs only.
+import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
-const __mm1 = mockModule<typeof import('../../../src/adapters/review/review-prompts.js')>('../../../src/adapters/review/review-prompts.js', import.meta.url);
-await installModuleMocks();
-test.afterEach(() => mock.restoreAll());
-const { WORKFLOW_AGENT_NAMES } = await import('../../../src/adapters/agents/agents.js');
-const {
+import { WORKFLOW_AGENT_NAMES } from '../../../../src/adapters/agents/agents.js';
+import {
   PROMPT_ENTRYPOINTS,
   reviewEntrypoint,
   actOnReviewEntrypoint,
@@ -16,7 +10,7 @@ const {
   buildActOnReviewPrompt,
   buildCompactReviewPrompt,
   buildCompactActOnReviewPrompt
-} = __mm1;
+} from '../../../../src/adapters/review/review-prompts.js';
 
 test('PROMPT_ENTRYPOINTS covers all supported agent families', () => {
   // Sourced from the launcher registry so a newly added agent family cannot

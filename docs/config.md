@@ -507,8 +507,9 @@ non-empty string `command` (an exact runnable shell command with no trailing
 prose), an optional numeric `order` (default `0`; gates run in ascending
 order), and optional `after` keys for gates that must finish first.
 
-Gates run serially unless the repository opts a phase into bounded parallelism
-with `parallel`. Independent gates fill that phase's configured limit; a gate
+Gates run serially unless the repository opts a phase into parallelism
+with `parallel`. A finite limit bounds simultaneous gates; `"unlimited"` starts
+every ready gate without waiting for another check to finish. A gate
 with `after` waits for each named producer. Output is emitted as a complete,
 labeled section per gate after it finishes, so concurrent command streams stay
 readable. When the interactive dashboard is unavailable, each gate instead
@@ -525,12 +526,14 @@ limit, so a mission worktree cannot raise it locally. This is separate from
 
 For finer control, declare named shared capacities with
 `adapters.gates.resources` (for example `{ "test": 1 }`; values are positive
-integers) and assign individual gates to one with `"resource": "test"`. A gate
-waits for a free slot on its resource before its command launches and gives the
-slot back once its process tree has settled, so unrelated gates and gates on other
-resources proceed meanwhile, and other runs can take the slot even while the
-first run is still executing its remaining stages. Gates without a `resource`
-never wait for one. Set `adapters.gates.verificationResource` to a declared resource
+integers) and assign individual gates to one with `"resource": "test"`. Each
+phase run takes one slot per resource and shares it across its tagged gates;
+`parallel` still controls how many checks run together within that phase. The
+slot remains reserved across dependencies until every gate assigned to that
+resource has completed and its process trees have settled. Other runs can then
+take the slot while unrelated stages of the first run continue. Gates without
+a `resource` do not acquire a resource slot. Set
+`adapters.gates.verificationResource` to a declared resource
 to put the shift-left verification between active and review under the same
 capacity: the configured verification command (`px verify`, pre-review) and
 mission-declared handoff gates then wait for that resource slot too. Resources are independent of `maxConcurrent`, which still

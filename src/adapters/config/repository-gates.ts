@@ -21,6 +21,7 @@ import { runGateCommand } from './gate-command-runner.js';
 export { runGateCommand } from './gate-command-runner.js';
 import type { IntegrationVerificationEvidencePort, ReusableVerificationProofPort } from '../../application/ports/integration-verification-evidence.js';
 import { GateDashboard } from './gate-dashboard.js';
+import { PhaseGateResources } from './phase-gate-resources.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { loadEffectiveConfig, loadWorkflowConfig, resolveCanonicalGateResources, resolveCanonicalMaxConcurrentGates } from './product-config.js';
 
@@ -31,7 +32,7 @@ export type GateLog = (message: string) => void;
 type ConfigPhase = 'preHandoff' | 'preReview' | 'preIntegration';
 interface GateConfiguration {
   preHandoff?: unknown; preReview?: unknown; preIntegration?: unknown;
-  requirePreIntegration?: unknown; parallel?: Partial<Record<ConfigPhase, number>>;
+  requirePreIntegration?: unknown; parallel?: Partial<Record<ConfigPhase, number | 'unlimited'>>;
 }
 
 /** Environment keys shared by every configured gate command. */
@@ -136,6 +137,7 @@ export type GateCommandRunner = (
 /** Read a phase's opt-in concurrency limit; serial is the default. */
 export function loadPhaseGateParallelism(rootDir: string, phase: 'preHandoff' | 'preReview' | 'preIntegration'): number {
   const parallel = (loadEffectiveConfig(rootDir || process.cwd()).adapters as { gates?: GateConfiguration } | undefined)?.gates?.parallel?.[phase];
+  if (parallel === 'unlimited') { return Infinity; }
   return Number.isInteger(parallel) && (parallel as number) >= 2 ? parallel as number : 1;
 }
 
@@ -267,7 +269,7 @@ function phaseExecutionState(phase: GatePhase, opts: PhaseGateOptions, gates: Re
 
   Object.assign(env, opts.admissionRun?.environment);
 
-  const maxParallel = opts.maxParallel ?? loadPhaseGateParallelism(checkoutPath, toConfigPhase(phase));
+  const maxParallel = Math.min(gates.length, opts.maxParallel ?? loadPhaseGateParallelism(checkoutPath, toConfigPhase(phase)));
 
   const phaseStarted = Date.now();
 
@@ -302,7 +304,12 @@ function phaseExecutionState(phase: GatePhase, opts: PhaseGateOptions, gates: Re
 
 class PhaseGateExecution {
   private readonly state: ReturnType<typeof phaseExecutionState>;
-  constructor(phase: GatePhase, opts: PhaseGateOptions, gates: RepositoryGate[], log: GateLog, error: GateLog) { this.state = phaseExecutionState(phase, opts, gates, log, error); }
+  private readonly resources: PhaseGateResources;
+  constructor(phase: GatePhase, opts: PhaseGateOptions, gates: RepositoryGate[], log: GateLog, error: GateLog) {
+    this.state = phaseExecutionState(phase, opts, gates, log, error);
+    this.resources = new PhaseGateResources(gates, this.state.checkoutPath, opts.resourceLimits ?? {},
+      () => opts.admission ?? gateAdmission(), this.state.controller.signal);
+  }
 
   async startPending(): Promise<void> {
     while (this.state.failure.failedGate === null && !this.state.controller.signal.aborted && this.state.running.size < this.state.maxParallel) {
@@ -317,7 +324,7 @@ class PhaseGateExecution {
     }
   }
 
-  /** A resource gate holds its slot only while its own process tree runs. */
+  /** Tagged gates share their phase's resource slot without changing phase parallelism. */
   private runAdmitted(gate: RepositoryGate) {
     const { opts, controller } = this.state;
     const invoke = (slot?: GateAdmissionRun) => this.state.runner(gate.command, [], {
@@ -328,8 +335,7 @@ class PhaseGateExecution {
       onOutput: chunk => this.state.dashboard?.append(gate.key, chunk)
     });
     if (!gate.resource) { return invoke(); }
-    return (opts.admission ?? gateAdmission()).runOnResource(this.state.checkoutPath,
-      { name: gate.resource, capacity: opts.resourceLimits![gate.resource] }, async slot => invoke(slot), controller.signal);
+    return this.resources.run(gate.resource, invoke);
   }
 
   launchGate(gate: RepositoryGate, verification: ReusableVerificationProofPort | null): Promise<GateRunOutcome> {
@@ -364,6 +370,7 @@ class PhaseGateExecution {
     this.state.running.delete(run);
     this.state.executed++;
     this.state.outcomes.push(outcome);
+    this.resources.complete(this.state.gates.find(gate => gate.key === outcome.key)!);
     this.state.dashboard?.finishGate(outcome.key, outcome.exitCode, [outcome.stdout, outcome.stderr].filter(Boolean).join('\n'), outcome.durationMs ?? 0, this.state.controller.signal.aborted);
     if (!this.state.dashboard && !this.state.liveSerial && outcome.exitCode !== 0) { renderGateOutput(this.state.phase, outcome, this.state.log); }
     if (outcome.exitCode !== 0 && this.state.failure.failedGate === null) {
@@ -394,6 +401,12 @@ class PhaseGateExecution {
   }
 
   async execute(): Promise<PhaseGateRunResult> {
+    try { return await this.executeGates(); }
+    catch (cause) { this.state.controller.abort(); throw cause; }
+    finally { try { await this.resources.close(); } finally { this.close(); } }
+  }
+
+  private async executeGates(): Promise<PhaseGateRunResult> {
     while (this.state.pending.length > 0 || this.state.running.size > 0) {
       await this.startPending();
       if (this.state.running.size === 0 && this.state.failure.failedGate === null && !this.state.controller.signal.aborted) {
@@ -407,7 +420,6 @@ class PhaseGateExecution {
       const { run, outcome } = await Promise.race([...this.state.running].map(run => run.then(outcome => ({ run, outcome }))));
       this.settleOutcome(run, outcome);
     }
-    this.close();
     this.reportDashboard();
     if (this.state.cancellation.operatorCancelled) { this.state.failure.errorText = `Repository gates (${this.state.phase}) cancelled.`; }
     if (this.state.coverage) {

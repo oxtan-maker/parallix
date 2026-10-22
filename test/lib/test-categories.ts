@@ -86,8 +86,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/agents/mistral.test.ts',
   'integration/integrate/nels.test.ts',
   'integration/agents/opencode-export.test.ts',
-  'integration/config/product-config-cp.test.ts',
-  'integration/config/product-config-validation.test.ts',
   'integration/config/product-config.test.ts',
   'integration/cli/px-runner.test.ts',
   'integration/cli/px-runtime-smoke.test.ts',
@@ -109,13 +107,11 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/review/review-artifacts.test.ts',
   'integration/review/review-autoderive.test.ts',
   'integration/review/review-backfill.test.ts',
-  'integration/review/review-commands-additional.test.ts',
   'integration/review/review-commands-supplemental.test.ts',
   'integration/review/review-events.test.ts',
   'integration/review/review-identity.test.ts',
   // Real disposable Git/SQLite and loopback Forgejo; injected model launcher.
   'integration/review/review-implementer-reassignment.test.ts',
-  'integration/review/review-prompts.test.ts',
   'integration/review/review-state-class.test.ts',
   'integration/review/review-state.test.ts',
   'integration/review/review.test.ts',
@@ -242,7 +238,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/packaging/release-publication-and-version-allocation-contract.test.ts',
   // TASK-2585: injects GitHub Actions API responses to prove the durable
   // publication-proof reader; it makes no live provider call.
-  'integration/verification/github-publication-proof.test.ts',
   'integration/verification/github-release-proof-reuse.test.ts',
   // TASK-2516: landed-mission recovery crosses the git boundary with a real
   // temporary Git repository and worktrees, so it runs in the integration layer.
@@ -280,7 +275,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // branches) and injects a fetch spy for the Sonar API, so it crosses the
   // git/process boundary; every dependency is what a clean GitHub runner
   // provides, so it is CI-safe.
-  'integration/verification/sonar-short-branch-confirmation.test.ts',
   // TASK-2580: drives the real `px active` command and a loopback web snapshot
   // to measure command-to-rendered-card delivery; both are CI-safe boundaries.
   // TASK-2521.03: seeds an isolated SQLite operator database and drives the

@@ -126,12 +126,12 @@
               },
               "parallel": {
                 "type": "object",
-                "description": "Optional bounded parallelism by phase. Omit a phase to retain serial execution; each configured limit must be at least 2.",
+                "description": "Optional parallelism by phase. Omit a phase to retain serial execution; use an integer of at least 2 for a finite limit or unlimited to launch every dependency-ready gate.",
                 "additionalProperties": false,
                 "properties": {
-                  "preHandoff": { "type": "integer", "minimum": 2 },
-                  "preReview": { "type": "integer", "minimum": 2 },
-                  "preIntegration": { "type": "integer", "minimum": 2 }
+                  "preHandoff": { "anyOf": [{ "type": "integer", "minimum": 2 }, { "const": "unlimited" }] },
+                  "preReview": { "anyOf": [{ "type": "integer", "minimum": 2 }, { "const": "unlimited" }] },
+                  "preIntegration": { "anyOf": [{ "type": "integer", "minimum": 2 }, { "const": "unlimited" }] }
                 }
               },
               "preHandoff": {

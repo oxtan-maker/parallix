@@ -1,3 +1,4 @@
+import './review-prompt-rendering.cases.js';
 import { promptArtifacts } from '../../../../src/adapters/agents/prompt-artifacts.js';
 import { readAgentLaunchContext } from '../../../../src/application/agent-launch-context.js';
 import { promptSectionBytes } from '../../../helpers/prompt-section-metrics.js';

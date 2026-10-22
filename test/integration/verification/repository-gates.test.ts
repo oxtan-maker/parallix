@@ -380,8 +380,10 @@ test('gate loading rejects an invalid dependency instead of selecting no gates',
 
 test('this repository starts every independent check while Sonar waits for coverage', async () => {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-  const gates = loadPhaseGates(repoRoot, 'preIntegration');
+  const gates = loadPhaseGates(repoRoot, 'preIntegration').map(gate => ({ ...gate, reuse: 'never' as const }));
+  const independent = gates.filter(gate => gate.key !== 'build' && (gate.after ?? []).every(key => key === 'build'));
   const active = new Set<string>();
+  const completed = new Set<string>();
   const launched: string[] = [];
   let peak = 0;
   const result = await runPhaseGates('integration', {
@@ -398,12 +400,15 @@ test('this repository starts every independent check while Sonar waits for cover
       launched.push(key);
       active.add(key);
       peak = Math.max(peak, active.size);
+      if (key === 'agent-smoke') {
+        assert.ok(independent.every(gate => !completed.has(gate.key)), 'smoke starts with all independent checks, without waiting for a completed check (TASK-2807)');
+      }
       assert.ok(key !== 'quality-gate' || !active.has('coverage-merge'), 'Sonar starts after coverage merge completes');
-      setTimeout(() => { active.delete(key); resolve({ status: 0, stdout: '', stderr: '' }); }, key === 'build' ? 2 : key === 'coverage-merge' ? 5 : 30);
+      setTimeout(() => { active.delete(key); completed.add(key); resolve({ status: 0, stdout: '', stderr: '' }); }, key === 'build' ? 2 : key === 'coverage-merge' ? 5 : 30);
     }),
   });
   assert.equal(result.ok, true, String(result.error));
-  assert.equal(peak, 6);
+  assert.equal(peak, independent.length);
   assert.equal(launched.length, gates.length);
 });
 

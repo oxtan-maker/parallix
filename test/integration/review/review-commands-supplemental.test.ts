@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { flagValue, readTextFlag, formatStaticReviewFindings, formatStaticReviewSuccess, performStaticReview, verifyReview, submitReviewRound, pushRound, showReviewStatus } from '../../../src/adapters/review/review-commands.js';
+import { flagValue, readTextFlag, formatStaticReviewFindings, formatStaticReviewSuccess, performStaticReview, verifyReview, submitReviewRound, pushRound, commentRound, showReviewStatus } from '../../../src/adapters/review/review-commands.js';
 const mockWorktree = '/mock/worktree';
 const mockSlug = 'test-slug';
 const mockBranch = 'mission/test-slug';
@@ -666,4 +666,30 @@ test('verifyReview warns (not fails) when task status maps to virtual active via
   assert.ok(logs.some(l => l.includes('WARN') && l.includes('still in-progress')), 'expected task-still-active warning');
   // Should have WARN about no PR (no-PR path)
   assert.ok(logs.some(l => l.includes('WARN') && l.includes('no PR found') && l.includes('--push')), 'expected no-pr-yet warning');
+});
+
+// Missing identity is the same command contract as the provider and token cases above.
+test('commentRound exits when no forgejoUser', async () => {
+  let exited = false;
+  await commentRound('test-slug', 'msg', {
+    readReviewStateFn: () => null,
+    exit: (code) => { exited = true; },
+    log: () => {},
+    error: () => {},
+    rootDir: mockWorktree
+  });
+  assert.equal(exited, true);
+});
+
+test('submitReviewRound exits when no forgejoUser', async () => {
+  let exited = false;
+  await submitReviewRound(mockSlug, 'approve', 'msg', {
+    worktree: mockWorktree,
+    readReviewStateFn: () => null,
+    exit: (code) => { exited = true; },
+    log: () => {},
+    error: () => {},
+    isForgejoReviewEnabledFn: () => true
+  });
+  assert.equal(exited, true);
 });

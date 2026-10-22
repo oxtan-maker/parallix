@@ -7,7 +7,7 @@ export interface GateAdmissionRun {
 export interface GateAdmissionPort {
   assertIndependent(): void;
   run<T>(_root: string, _action: (_run: GateAdmissionRun) => Promise<T>, _signal?: AbortSignal): Promise<T>;
-  /** Admits one gate on a named shared resource; the slot is held until its descendants settle. */
+  /** Admits a run on a named shared resource; the slot is held until its descendants settle. */
   runOnResource<T>(_root: string, _resource: { name: string; capacity: number }, _action: (_run: GateAdmissionRun) => Promise<T>, _signal?: AbortSignal): Promise<T>;
 }
 

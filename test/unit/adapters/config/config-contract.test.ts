@@ -1,3 +1,5 @@
+// In-process config cases share this owner and worker; real Git cases remain integration.
+import './product-config.cases.js';
 // Historical regression provenance: TASK-1233, TASK-2500.01, TASK-2455.01, TASK-2455.02.
 // Workflow configuration contract: discovery, readiness, integration mode,
 // product defaults and task-provider validation. Each describe block keeps the
@@ -8,6 +10,7 @@
 import { describe, test } from 'node:test';
 import { resolveGateResources, resolveVerificationResource, resolveMaxConcurrentGates } from '../../../../src/adapters/config/product-config.js';
 import { normalizeGates } from '../../../../src/adapters/config/repository-gate-schema.js';
+import { loadPhaseGateParallelism } from '../../../../src/adapters/config/repository-gates.js';
 import { terminalHostConfig } from '../../../../src/adapters/config/terminal-host-config.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -163,7 +166,11 @@ describe("integration.mode configuration", () => {
     assert.equal(parseIntegrationMode(null), 'local');
     assert.equal(parseIntegrationMode('github-pr'), 'github-pr');
     assert.throws(() => parseIntegrationMode(7), /is not a supported integration mode/);
-    assert.equal(isIntegrationMode('local'), true);
+    assert.equal(parseIntegrationMode(DEFAULT_INTEGRATION_MODE), DEFAULT_INTEGRATION_MODE);
+    assert.throws(() => parseIntegrationMode('bogus'), /not a supported integration mode/);
+    for (const mode of INTEGRATION_MODES) assert.equal(isIntegrationMode(mode), true);
+    assert.equal(isIntegrationMode('nope'), false);
+    assert.equal(isIntegrationMode(42), false);
     assert.equal(isIntegrationMode('LOCAL'), false);
   });
 });
@@ -322,6 +329,23 @@ test('gate run limits use the positive-integer capacity contract (H2)', () => {
   for (const maxConcurrent of [true, false, null, 0, -1, 1.5, '1', [], {}]) {
     assert.ok(validateWorkflowConfig({ adapters: { gates: { maxConcurrent } } })
       .includes('adapters.gates.maxConcurrent must be a positive integer'));
+  }
+});
+
+test('phase parallelism supports dependency-only scheduling and finite limits (TASK-2807)', () => {
+  const phases = ['preHandoff', 'preReview', 'preIntegration'] as const;
+  const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8')).properties.adapters.properties.gates.properties.parallel;
+  for (const phase of phases) {
+    for (const limit of [2, 6, 'unlimited']) {
+      const config = { adapters: { gates: { parallel: { [phase]: limit } } } };
+      assert.deepEqual(validateWorkflowConfig(config), []);
+      withConfig(config, root => assert.equal(loadPhaseGateParallelism(root, phase), limit === 'unlimited' ? Infinity : limit));
+    }
+    withConfig(null, root => assert.equal(loadPhaseGateParallelism(root, phase), 1));
+    assert.deepEqual(schema.properties[phase].anyOf, [{ type: 'integer', minimum: 2 }, { const: 'unlimited' }]);
+    for (const limit of [1, 0, -1, 1.5, true, null, '6', 'unbounded']) {
+      assert.ok(validateWorkflowConfig({ adapters: { gates: { parallel: { [phase]: limit } } } }).length > 0);
+    }
   }
 });
 

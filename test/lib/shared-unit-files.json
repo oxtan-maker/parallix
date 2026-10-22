@@ -8,6 +8,8 @@
     "unit/scripts/lcov-summary-contract.test.ts",
     "unit/scripts/package-audit-contract.test.ts",
     "unit/scripts/runtime-benchmark.test.ts",
+    "unit/scripts/sonar-local.test.ts",
+    "unit/scripts/verify-github-publication-proof.test.ts",
     "unit/test/lib/coverage-tier-selection.test.ts",
     "unit/test/lib/default-test-suite.test.ts",
     "unit/test/lib/test-categories.test.ts",

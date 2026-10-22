@@ -23,7 +23,7 @@
       "resources": { "test": 1 },
       "verificationResource": "test",
       "requirePreIntegration": true,
-      "parallel": { "preIntegration": 6 },
+      "parallel": { "preIntegration": "unlimited" },
       "preIntegration": [
         { "key": "build", "command": "npm run build", "order": 1 },
         { "key": "dependency-audit", "command": "pnpm audit --audit-level=high", "order": 2 },

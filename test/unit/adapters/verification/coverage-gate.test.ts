@@ -21,22 +21,27 @@ test('coverage-gate includes its own test file in authoritative discovery', () =
 });
 
 test('native coverage keeps the historical c8 contract: src denominator, unloaded files, exclusions, source maps', () => {
-  const plan = buildTestRunPlan({ executionRoot: REPO_ROOT, requestedArgs: ['--integration-ci'], probeNodeVersion: () => 'v26.7.0', coverage: true });
-  const args = withCoverageReporters(plan.nodeArgs, 'coverage/.lcov-integration-ci.info');
-  const coverageArgs = args.slice(0, args.indexOf('--test'));
-  assert.deepEqual(COVERAGE_INCLUDES, ['src/**/*.ts', 'src/**/*.tsx']);
-  assert.deepEqual(COVERAGE_EXCLUDES, ['test/**', 'prompts/**', 'config/*.json', '.workflow/**', 'node_modules/**']);
-  for (const flag of [
-    '--enable-source-maps',
-    '--experimental-test-coverage',
-    '--test-coverage-include-all',
-    '--test-coverage-include=src/**/*.ts',
-    ...COVERAGE_EXCLUDES.map(pattern => `--test-coverage-exclude=${pattern}`),
-    '--test-coverage-lines=0',
-    '--test-reporter=lcov',
-    '--test-reporter-destination=coverage/.lcov-integration-ci.info',
-  ]) {
-    assert.ok(coverageArgs.includes(flag), `coverage argv carries ${flag}`);
+  for (const requestedArgs of [['--integration-ci'], ['--integration-ci-all']]) {
+    const plan = buildTestRunPlan({ executionRoot: REPO_ROOT, requestedArgs, probeNodeVersion: () => 'v26.7.0', probeTestConcurrency: () => true, coverage: true });
+    const args = withCoverageReporters(plan.nodeArgs, 'coverage/.lcov-integration-ci.info');
+    assert.deepEqual(args.slice(args.indexOf('--test') + 1), plan.testFiles,
+      'coverage retains every selected suite exactly once (TASK-2807)');
+    assert.equal(new Set(plan.testFiles).size, plan.testFiles.length);
+    const coverageArgs = args.slice(0, args.indexOf('--test'));
+    assert.deepEqual(COVERAGE_INCLUDES, ['src/**/*.ts', 'src/**/*.tsx']);
+    assert.deepEqual(COVERAGE_EXCLUDES, ['test/**', 'prompts/**', 'config/*.json', '.workflow/**', 'node_modules/**']);
+    for (const flag of [
+      '--enable-source-maps',
+      '--experimental-test-coverage',
+      '--test-coverage-include-all',
+      '--test-coverage-include=src/**/*.ts',
+      ...COVERAGE_EXCLUDES.map(pattern => `--test-coverage-exclude=${pattern}`),
+      '--test-coverage-lines=0',
+      '--test-reporter=lcov',
+      '--test-reporter-destination=coverage/.lcov-integration-ci.info',
+    ]) {
+      assert.ok(coverageArgs.includes(flag), `coverage argv carries ${flag}`);
+    }
   }
 });
 

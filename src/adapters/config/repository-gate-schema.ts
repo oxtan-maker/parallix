@@ -137,8 +137,8 @@ function validateParallelism(parallel: unknown, issues: string[]): void {
       for (const [phase, limit] of Object.entries(parallel as Record<string, unknown>)) {
         if (!['preHandoff', 'preReview', 'preIntegration'].includes(phase)) {
           issues.push(`adapters.gates.parallel.${phase} is not a recognised phase`);
-        } else if (!Number.isInteger(limit) || (limit as number) < 2) {
-          issues.push(`adapters.gates.parallel.${phase} must be an integer of at least 2`);
+        } else if (limit !== 'unlimited' && (!Number.isInteger(limit) || (limit as number) < 2)) {
+          issues.push(`adapters.gates.parallel.${phase} must be an integer of at least 2 or "unlimited"`);
         }
       }
     }
