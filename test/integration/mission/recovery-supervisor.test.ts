@@ -704,7 +704,7 @@ test('lead starts long forward workflows without blocking fleet supervision', ()
   const runAction = supervisor.slice(supervisor.indexOf('runAction: async'));
   assert.match(
     runAction,
-    /openServices\(missionWorktree\)[\s\S]*?startForward\(mission, action, \(\) => active\(invocation\.args, \{[\s\S]*?controller,/,
+    /openWorkflowServices\(missionWorktree\)[\s\S]*?startForward\(mission, action, \(\) => runBorrowedActive\(targetServices, active, missionWorktree, invocation\.args, signal\)\)/,
     'lead active recovery must use a controller rooted in the mission worktree',
   );
   assert.match(
@@ -714,7 +714,7 @@ test('lead starts long forward workflows without blocking fleet supervision', ()
   );
   assert.match(
     runAction,
-    /startForward\(mission, action, \(\) => run\(\s*\[invocation\.command, \.\.\.invocation\.args\],\s*\{ baseCwd: missionWorktree,/,
+    /startForward\(mission, action, async \(\) => \{[\s\S]*?await run\(\[invocation\.command, \.\.\.invocation\.args\],\s*\{ baseCwd: missionWorktree,/,
     'review work is also started without awaiting its autonomous loop, targeted at the mission worktree',
   );
   assert.match(
@@ -893,4 +893,27 @@ test('an unreadable current-work authority stops the step instead of dispatching
   assert.deepEqual(fleet.ran, [], 'nothing is dispatched while liveness is unknown');
   assert.deepEqual(fleet.recoveries, [], 'and no recovery agent is started either');
   assert.ok(resultFor(results).steps.some((step) => step.includes('the operator database is unavailable')));
+});
+
+test('interrupted supervision wakes its poll and refuses a late action (TASK-2792)', async () => {
+  const interruption = new AbortController();
+  const f = board([[item()]]);
+  const port: SupervisorPort = { ...f.port, liveness: async () => {
+    interruption.abort();
+    return { working: false, detail: null };
+  } };
+  await superviseFleet(port, { keepWatching: true, signal: interruption.signal });
+  assert.deepEqual(f.ran, []);
+  assert.deepEqual(f.recoveries, []);
+
+  const sleeping = board([[]]);
+  let cancelled = false;
+  const sleepingPort: SupervisorPort = { ...sleeping.port, wait: () => {
+    queueMicrotask(() => interruption2.abort());
+    return { elapsed: new Promise(() => {}), cancel: () => { cancelled = true; } };
+  } };
+  const interruption2 = new AbortController();
+  await superviseFleet(sleepingPort, { keepWatching: true, signal: interruption2.signal });
+  assert.equal(cancelled, true);
+  assert.equal(sleeping.reads(), 1);
 });

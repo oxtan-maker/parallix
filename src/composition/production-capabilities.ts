@@ -41,6 +41,7 @@ import { CONFIG_PATH, readAgentConfig } from '../adapters/agents/agent-config.js
 import { eligibleAgentsForStep } from '../adapters/agents/agents.js';
 import { git } from '../adapters/git/git.js';
 import path from 'node:path';
+import fs from 'node:fs';
 import { missionBranchName } from '../adapters/filesystem/mission-paths.js';
 import { conventionalWorktreePath, resolveWorktree } from '../adapters/git/worktree.js';
 import { performHandoff } from '../adapters/cli/commands/handoff.js';
@@ -170,6 +171,13 @@ export function missionCleanupCommand(slug: string, rootDir: string, gitFn?: Git
   return `git worktree remove ${worktree} && git branch -D ${missionBranchName(slug, rootDir)}`;
 }
 
+function boardReviewConfigPath(worktree: string): string {
+  const worktreeConfig = path.join(worktree, CONFIG_PATH);
+  // Installed worktrees omit the untracked first-run config. The default
+  // resolver retains the operator/shipped policy in that case (ADR 0044).
+  return fs.existsSync(worktreeConfig) ? worktreeConfig : CONFIG_PATH;
+}
+
 async function resumeActiveBoardHandoff(existing: Extract<Awaited<ReturnType<MissionStore['load']>>, { kind: 'found' }> & { mission: { review: NonNullable<import('../domain/mission.js').Mission['review']> } }, store: MissionStore & MissionTransitionStore & MissionNelRecorder, lifecycle: MissionLifecycleService, slug: string, reviewer?: ReturnType<typeof agentFamily>): Promise<void> {
   if (existing.mission.status !== 'active') { return; }
   const previous = existing.mission.review;
@@ -183,7 +191,7 @@ async function resumeActiveBoardHandoff(existing: Extract<Awaited<ReturnType<Mis
   const resolved = reviewStatus(previous) === 'awaiting-implementation'
     ? applyImplementerCommand(previous, { type: 'submit-resolution', respondedAt: new Date().toISOString(), resultingRevision: changeRevision(head.stdout.trim()), resolutions: findings.map((finding) => ({ findingId: finding.id, kind: 'fixed', evidence: 'Resolved in the handed-off revision.' })) })
     : previous;
-  const eligible = eligibleAgentsForStep('review', { configPath: path.join(worktree, CONFIG_PATH) }).map(agentFamily);
+  const eligible = eligibleAgentsForStep('review', { configPath: boardReviewConfigPath(worktree) }).map(agentFamily);
   const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible, strategy: 'random' });
   const priorReviewer = currentReviewRound(resolved).reviewer;
   const review = reviewStatus(resolved) === 'ready-for-next-round'

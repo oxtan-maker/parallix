@@ -6,9 +6,9 @@ import { repositoryId as fixtureRepositoryId } from '../../../../../src/domain/r
 import { missionVersion as fixtureVersion } from '../../../../../src/application/domain-ports.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { parseTaskFrontmatterValue, taskIdFromFilename } from '../../../../../src/adapters/backlog/task-file-io.js';
 import { ensureMissionFile } from '../../../../../src/adapters/cli/commands/draft-setup.js';
 import { runDraftCommand } from '../../../../../src/adapters/cli/commands/draft.js';
 import { HandoffCommandUseCase } from '../../../../../src/application/handoff-command-use-case.js';
@@ -33,43 +33,71 @@ test('a new typed draft does not prepare a retired mission directory', () => {
   }
 });
 
+function containsRetiredArchiveFile(directory: string): boolean {
+  if (!fs.existsSync(directory)) { return false; }
+  return fs.readdirSync(directory, { withFileTypes: true }).some(entry => {
+    if (entry.name !== 'tasks' || !entry.isDirectory()) { return true; }
+    return fs.readdirSync(path.join(directory, entry.name), { withFileTypes: true }).some(task => {
+      // The provider's archive is flat. A task-looking directory must not hide
+      // MISSION.md, checkpoints or other retired ledger files.
+      if (!task.isFile() || !task.name.endsWith('.md')) { return true; }
+      const id = taskIdFromFilename(task.name);
+      const content = fs.readFileSync(path.join(directory, entry.name, task.name), 'utf8');
+      return !id || parseTaskFrontmatterValue(content, 'id')?.toUpperCase() !== id;
+    });
+  });
+}
+
+function containsRetiredWorkflowMetadata(root: string): boolean {
+  const missions = path.join(root, 'missions');
+  return (fs.existsSync(missions) && containsFile(missions))
+    || containsRetiredArchiveFile(path.join(root, 'backlog/archive'))
+    || fs.existsSync(path.join(root, 'backlog.md'));
+}
+
 test('the self-hosted tree contains no retired workflow ledger roots', () => {
-  // backlog/completed/ is not retired: landing archives each task file there
-  // and the stale-copy guards check later landings against it (TASK-2613).
-  // Integration fails closed on every archive path, including task history.
-  const retiredDirectories = [
-    'missions',
-    'backlog/archive',
-  ];
-  for (const retiredRoot of retiredDirectories) {
-    const directory = path.join(process.cwd(), retiredRoot);
-    assert.equal(
-      fs.existsSync(directory) && containsFile(directory),
-      false,
-      `retired workflow metadata must not remain under ${retiredRoot}`,
-    );
-  }
-  assert.equal(fs.existsSync(path.join(process.cwd(), 'backlog.md')), false,
-    'retired workflow metadata must not be tracked at backlog.md');
+  // Completed and cancelled task-provider records remain history, not ledgers.
+  assert.equal(containsRetiredWorkflowMetadata(process.cwd()), false);
 });
 
-test('the retired archive guard rejects task history and ledger files (TASK-2712)', () => {
-  const root = registeredMkdtemp('parallix-archive-guard-');
-  const tasks = path.join(root, 'tasks');
+test('the retired archive guard permits cancelled task history (TASK-2794)', () => {
+  const root = registeredMkdtemp('parallix-cancelled-archive-');
   try {
-    fs.mkdirSync(tasks);
-    fs.writeFileSync(path.join(tasks, 'task-1 - cancelled.md'), 'Cancelled task history');
-    assert.equal(containsFile(root), true);
-    for (const relative of ['MISSION.md', 'missions/CP-1.md', 'other/tasks/ledger.md']) {
+    const tasks = path.join(root, 'backlog/archive/tasks');
+    fs.mkdirSync(tasks, { recursive: true });
+    fs.writeFileSync(path.join(tasks, 'task-1 - cancelled.md'),
+      '---\nid: TASK-1\ntitle: Cancelled task\nstatus: active\n---\nPreserved cancellation history.\n');
+    assert.equal(containsRetiredWorkflowMetadata(root), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the retired archive guard rejects ledgers and malformed task stores (TASK-2794)', () => {
+  const root = registeredMkdtemp('parallix-archive-guard-');
+  try {
+    for (const relative of [
+      'backlog/archive/MISSION.md',
+      'backlog/archive/missions/CP-1.md',
+      'backlog/archive/other/tasks/ledger.md',
+      'backlog/archive/tasks',
+      'backlog/archive/tasks/MISSION.md',
+      'backlog/archive/tasks/CP-1.md',
+      'backlog/archive/tasks/mission-documents.json',
+      'backlog/archive/tasks/task-1/MISSION.md',
+      'backlog/archive/tasks/task-1 - ledger.md',
+      'missions/task-1/CP-1.md',
+      'backlog.md',
+    ]) {
       const target = path.join(root, relative);
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.writeFileSync(target, 'Retired workflow ledger');
-      assert.equal(containsFile(root), true, relative);
-      fs.rmSync(target);
+      assert.equal(containsRetiredWorkflowMetadata(root), true, relative);
+      // Each negative stands alone; no accepted or rejected fixture can mask it.
+      fs.rmSync(path.join(root, 'backlog'), { recursive: true, force: true });
+      fs.rmSync(path.join(root, 'missions'), { recursive: true, force: true });
+      fs.rmSync(path.join(root, 'backlog.md'), { force: true });
     }
-    fs.rmSync(tasks, { recursive: true });
-    fs.writeFileSync(tasks, 'A file named tasks is not the task store');
-    assert.equal(containsFile(root), true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

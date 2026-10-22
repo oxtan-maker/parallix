@@ -854,6 +854,31 @@ export function resolveMaxConcurrentGates(rootDir: string = process.cwd()): numb
   return Number.isInteger(max) && (max as number) > 0 ? max as number : Infinity;
 }
 
+/** Validated shared gate resource limits; an invalid declaration is rejected by canonical validation. */
+export function resolveGateResources(rootDir: string = process.cwd()): Readonly<Record<string, number>> {
+  const gates = (loadEffectiveConfig(rootDir).adapters as { gates?: PlainObject }).gates;
+  const declared = isPlainObject(gates?.resources) ? gates.resources as PlainObject : {};
+  return Object.fromEntries(Object.entries(declared).filter(([, limit]) => Number.isInteger(limit) && (limit as number) > 0)) as Record<string, number>;
+}
+
+/** The canonical checkout owns every limit it declares; a checkout may only add resources the canonical one has not yet declared. */
+export function resolveCanonicalGateResources(rootDir: string = process.cwd()): Readonly<Record<string, number>> {
+  const canonical = resolveCanonicalAdmissionLimit(rootDir, 'adapters.gates.resources', resolveGateResources);
+  return { ...resolveGateResources(rootDir), ...canonical };
+}
+
+/** Resource shared by the configured verification command and mission-declared gates (the active-to-review shift-left runs). */
+export function resolveVerificationResource(rootDir: string = process.cwd()): string | undefined {
+  const gates = (loadEffectiveConfig(rootDir).adapters as { gates?: PlainObject }).gates;
+  const name = gates?.verificationResource;
+  return typeof name === 'string' && name ? name : undefined;
+}
+
+/** Shift-left verification goes through admitted gate runs when whole-run admission or a verification resource is configured. */
+export function usesAdmittedVerification(rootDir: string = process.cwd()): boolean {
+  return Number.isFinite(resolveCanonicalMaxConcurrentGates(rootDir)) || resolveVerificationResource(rootDir) !== undefined;
+}
+
 export function resolveCanonicalMaxConcurrentCustom(rootDir: string = process.cwd()): number {
   return resolveCanonicalAdmissionLimit(rootDir, 'adapters.agents.maxConcurrentCustom', resolveMaxConcurrentCustom);
 }
@@ -862,7 +887,7 @@ export function resolveCanonicalMaxConcurrentGates(rootDir: string = process.cwd
   return resolveCanonicalAdmissionLimit(rootDir, 'adapters.gates.maxConcurrent', resolveMaxConcurrentGates);
 }
 
-function resolveCanonicalAdmissionLimit(rootDir: string, setting: string, resolve: (_root: string) => number): number {
+function resolveCanonicalAdmissionLimit<T>(rootDir: string, setting: string, resolve: (_root: string) => T): T {
   const canonicalRoot = resolveCanonicalRepositoryRoot(rootDir);
   const loaded = loadWorkflowConfig(canonicalRoot);
   if (loaded.found && (loaded.parseError || validateWorkflowConfig(loaded.config).length > 0)) {

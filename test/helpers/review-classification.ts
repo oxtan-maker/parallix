@@ -12,12 +12,8 @@ export function distribution(selected: string, score: number) {
 }
 
 // New contract: classifier orchestration at the verified repeat-review boundary.
-export function scenario(mode: ReviewClassificationPorts['mode'] = 'enabled', obligations = false) {
+export function scenario(mode: ReviewClassificationPorts['mode'] = 'enabled') {
   const review = repeatReview();
-  if (!obligations && review.rounds[0].decision?.kind === 'changes-requested') {
-    (review.rounds[0].decision.findings[0] as { id: string }).id = 'legacy-F1';
-    (review.rounds[0].response!.resolutions[0] as { findingId: string }).findingId = 'legacy-F1';
-  }
   const store = inMemoryTransitionStore(fixtureMission('task-2658', { status: 'review', review }));
   const attempts: ClassifierCallMeasurement[] = [];
   const published: string[] = [];

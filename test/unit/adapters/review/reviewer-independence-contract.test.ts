@@ -238,32 +238,41 @@ test('PR 739 drift cannot grant a self-author local Mission approval (TASK-2778 
   assert.equal(store.events.length, 0, 'no integration transition');
 });
 
-for (const author of ['claude', 'codex']) {
-  test(`provider verdict by claude with PR author ${author} requires independent approval before local authority (TASK-2778 F2)`, async () => {
+for (const { author, reviewer, implementer } of [
+  { author: 'claude', reviewer: 'claude', implementer: 'codex' },
+  { author: 'codex', reviewer: 'claude', implementer: 'codex' },
+  // TASK-2804: original author is advisory after reassignment; a third reviewer can approve.
+  { author: 'codex', reviewer: 'codex', implementer: 'claude' },
+  { author: 'codex', reviewer: 'custom', implementer: 'claude' },
+]) {
+  test(`provider verdict by ${reviewer} for ${implementer} with PR author ${author} requires independent approval before local authority (TASK-2778 F2)`, async () => {
     const slug = 'task-2778';
     const review = startReview({ change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' }, revision: changeRevision('head') },
-      fixtureAgentFamily('claude'), fixtureAgentFamily('codex'), '2026-10-19T10:00:00Z',
-      ConfiguredReviewerEligibility.fromReviewStep({ eligible: [fixtureAgentFamily('claude')], strategy: 'random' }));
-    const store = inMemoryTransitionStore(fixtureMission(slug, { status: 'review', assignee: fixtureAgentFamily('codex'), review }));
+      fixtureAgentFamily(reviewer), fixtureAgentFamily(implementer), '2026-10-19T10:00:00Z',
+      ConfiguredReviewerEligibility.fromReviewStep({ eligible: [fixtureAgentFamily(reviewer)], strategy: 'random' }));
+    const store = inMemoryTransitionStore(fixtureMission(slug, { status: 'review', assignee: fixtureAgentFamily(implementer), review }));
     const lifecycle = new MissionLifecycleService(store);
     let posts = 0;
-    const result = await consumeReviewerArtifacts(slug, 'claude', {
+    const result = await consumeReviewerArtifacts(slug, reviewer, {
       worktree: '/fixture', revision: 'head', expectedVersion: 1, providerEnabled: true,
       output: { verdict: 'approve', findings: [], comment: 'looks good' }, missionStore: store, lifecycleService: lifecycle,
-      readTokenFn: () => 'claude-token', getPrAuthorFn: () => author, getCommentsFn: async () => [],
+      readTokenFn: () => `${reviewer}-token`, getPrAuthorFn: () => author, getCommentsFn: async () => [],
       postCommentFn: () => ({ ok: true, status: 0, statusCode: 200, stderr: null, data: null, error: null }), postReviewFn: () => {
         assert.equal(store.mission().review!.rounds.at(-1)!.decision, null, 'POST precedes approval');
         posts++; return { ok: true, status: 0, statusCode: 200, stderr: null, data: null, error: null };
       },
-      readReviewStateFn: async () => new ReviewState(slug, { reviewer: 'claude', implementer: 'codex', round: 1, phase: 'reviewing' }),
+      readReviewStateFn: async () => new ReviewState(slug, { reviewer, implementer, round: 1, phase: 'reviewing' }),
       writeReviewStateFn: async (_slug, state) => new ReviewState(_slug, state).save('/fixture', { missionStore: store, lifecycleService: lifecycle }),
       createEventFn: () => ({ ok: true, path: null }), buildMetadataFooterFn: () => '', log: () => {}, error: () => {},
     });
-    assert.equal(result.ok, author !== 'claude', result.diagnostic ?? '');
-    assert.equal(posts, author === 'claude' ? 0 : 1);
-    assert.equal(store.mission().status, author === 'claude' ? 'review' : 'integration');
-    assert.equal(store.mission().review!.rounds.at(-1)!.decision?.kind ?? null, author === 'claude' ? null : 'approved');
-    if (author !== 'claude') {
+    assert.equal(result.ok, author !== reviewer, result.diagnostic ?? '');
+    assert.equal(posts, author === reviewer ? 0 : 1);
+    assert.equal(store.mission().status, author === reviewer ? 'review' : 'integration');
+    assert.equal(store.mission().review!.rounds.at(-1)!.decision?.kind ?? null, author === reviewer ? null : 'approved');
+    assert.equal(store.mission().assignee, implementer);
+    assert.equal(store.mission().review!.rounds.at(-1)!.implementer, implementer);
+    if (author === reviewer) assert.equal(store.events.length, 0, 'original author cannot authorize integration');
+    if (author !== reviewer) {
       const decision = store.mission().review!.rounds.at(-1)!.decision;
       assert.ok(decision?.kind === 'approved');
       assert.equal(decision.source.kind, 'provider');

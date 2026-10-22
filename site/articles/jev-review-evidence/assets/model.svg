@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="235" viewBox="0 0 800 235" role="img" aria-labelledby="title desc">
+<title id="title">Approved repairs cleared · same 43 packets</title><desc id="desc">Common zero-based scale from zero to 43. Historical tuning evidence, not live quality validation.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8" fill="#535e57"/></marker></defs>
+<text x="8" y="26" font-family="system-ui,sans-serif" font-size="21" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="8" dy="0">Approved repairs cleared · same 43 packets</tspan></text>
+<text x="8" y="86" font-family="system-ui,sans-serif" font-size="19" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="8" dy="0">Jev 1.13</tspan></text>
+<rect x="242" y="64" width="251.1627906976744" height="29" rx="3" fill="#24604f" stroke="none" stroke-width="0"/>
+<text x="718" y="86" font-family="system-ui,sans-serif" font-size="22" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="718" dy="0">24</tspan></text>
+<text x="8" y="151" font-family="system-ui,sans-serif" font-size="19" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="8" dy="0">Jev 1.14</tspan></text>
+<rect x="242" y="129" width="125.5813953488372" height="29" rx="3" fill="#a3aba3" stroke="none" stroke-width="0"/>
+<text x="718" y="151" font-family="system-ui,sans-serif" font-size="22" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="718" dy="0">12</tspan></text>
+<path d="M242,191 H692" fill="none" stroke="#c7ccc3" stroke-width="1.5"/>
+<text x="242" y="216" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#535e57" text-anchor="start"><tspan x="242" dy="0">0</tspan></text>
+<text x="692" y="216" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#535e57" text-anchor="end"><tspan x="692" dy="0">43</tspan></text>
+<text x="467.0" y="216" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#535e57" text-anchor="middle"><tspan x="467.0" dy="0">approved clears</tspan></text>
+</svg>

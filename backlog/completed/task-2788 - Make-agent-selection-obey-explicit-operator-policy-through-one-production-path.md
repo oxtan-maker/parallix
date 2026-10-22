@@ -1,8 +1,8 @@
 ---
 id: TASK-2788
 title: Make agent selection obey explicit operator policy through one production path
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-19 09:57'
 labels: []
 dependencies: []

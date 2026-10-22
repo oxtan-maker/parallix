@@ -20,19 +20,20 @@
     "draft": { "preDraftCommand": "./scripts/px-install.sh" },
     "integrate": { "preCommitCommand": "./scripts/bump-version.sh", "postIntegrateCommand": "./scripts/refresh-global-px.sh && npm run sonar:delete-branch" },
     "gates": {
-      "maxConcurrent": 1,
+      "resources": { "test": 1 },
+      "verificationResource": "test",
       "requirePreIntegration": true,
       "parallel": { "preIntegration": 6 },
       "preIntegration": [
         { "key": "build", "command": "npm run build", "order": 1 },
         { "key": "dependency-audit", "command": "pnpm audit --audit-level=high", "order": 2 },
         { "key": "verification", "command": "./scripts/verify-local.sh static-analysis", "order": 3, "reuse": "clean-tree" },
-        { "key": "unit", "command": "PARALLIX_FAST_UNIT=1 PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom", "order": 4, "after": ["build"] },
-        { "key": "integration-ci", "command": "PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt", "order": 5, "after": ["build"] },
-        { "key": "integration-local", "command": "npm run test:integration:local:prebuilt", "order": 6, "after": ["build"] },
+        { "key": "unit", "command": "PARALLIX_FAST_UNIT=1 PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom", "order": 4, "after": ["build"], "resource": "test" },
+        { "key": "integration-ci", "command": "PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt", "order": 5, "after": ["build"], "resource": "test" },
+        { "key": "integration-local", "command": "npm run test:integration:local:prebuilt", "order": 6, "after": ["build"], "resource": "test" },
         { "key": "coverage-merge", "command": "rm -f coverage/lcov.info && npm run coverage:merge && test -s coverage/lcov.info", "order": 7, "after": ["unit", "integration-ci"] },
-        { "key": "workflow", "command": "node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/lifecycle/mission-lifecycle.test.ts", "order": 8, "after": ["build"] },
-        { "key": "browser-e2e", "command": "npm run test:browser-e2e", "order": 9, "after": ["build"] },
+        { "key": "workflow", "command": "node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/lifecycle/mission-lifecycle.test.ts", "order": 8, "after": ["build"], "resource": "test" },
+        { "key": "browser-e2e", "command": "npm run test:browser-e2e", "order": 9, "after": ["build"], "resource": "test" },
         { "key": "agent-smoke", "command": "node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/agents/real-agent-smoke.test.ts", "order": 9, "after": ["build"] },
         { "key": "quality-gate", "command": "npm run sonar", "order": 10, "after": ["coverage-merge"] }
       ]

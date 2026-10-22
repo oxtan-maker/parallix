@@ -97,31 +97,32 @@ async function groupHasLivingProcesses(group: number): Promise<boolean> {
   if (process.platform === 'win32') { return false; }
   try { workflowProcessSystem.kill(-group, 0); } catch { return false; }
   if (process.platform !== 'linux') { return true; }
-  const processes = await workflowProcessSystem.readdir('/proc');
-  for (const pid of processes.filter(value => /^\d+$/.test(value))) {
-    try {
-      const stat = await workflowProcessSystem.readFile(`/proc/${pid}/stat`, 'utf8');
-      const fields = stat.slice(stat.lastIndexOf(')') + 2).split(/\s+/);
-      if (Number(fields[2]) === group && fields[0] !== 'Z') { return true; }
-    } catch { /* exited while scanning */ }
-  }
+  for await (const _pid of livingGroupPids(group)) { return true; }
   return false;
 }
 
 /** Process-group membership survives reparenting; every member is identity checked. */
 async function livingGroupMembers(group: number, minimumStart: number): Promise<Array<{ pid: number; identity: string }> | null> {
   const members: Array<{ pid: number; identity: string }> = [];
-  const processes = await workflowProcessSystem.readdir('/proc');
-  for (const token of processes.filter(value => /^\d+$/.test(value))) {
-    const pid = Number(token);
-    try {
-      const stat = await workflowProcessSystem.readFile(`/proc/${pid}/stat`, 'utf8');
-      const fields = stat.slice(stat.lastIndexOf(')') + 2).split(/\s+/);
-      if (Number(fields[2]) !== group || fields[0] === 'Z') { continue; }
-      const identity = workflowProcessSystem.processStartIdentity(pid);
-      if (!identity || Number(identity) < minimumStart) { return null; }
-      members.push({ pid, identity });
-    } catch { /* exited during the scan */ }
+  for await (const pid of livingGroupPids(group)) {
+    const identity = workflowProcessSystem.processStartIdentity(pid);
+    if (!identity || Number(identity) < minimumStart) { return null; }
+    members.push({ pid, identity });
   }
   return members;
+}
+
+/** Bound inspection concurrency; serial /proc reads delay every stop on busy hosts. */
+async function* livingGroupPids(group: number): AsyncGenerator<number> {
+  const processes = (await workflowProcessSystem.readdir('/proc')).filter(value => /^\d+$/.test(value));
+  for (let offset = 0; offset < processes.length; offset += 32) {
+    const batch = await Promise.all(processes.slice(offset, offset + 32).map(async token => {
+      try {
+        const stat = await workflowProcessSystem.readFile(`/proc/${token}/stat`, 'utf8');
+        const fields = stat.slice(stat.lastIndexOf(')') + 2).split(/\s+/);
+        return Number(fields[2]) === group && fields[0] !== 'Z' ? Number(token) : null;
+      } catch { return null; } // Exited during inspection.
+    }));
+    for (const pid of batch) { if (pid !== null) { yield pid; } }
+  }
 }

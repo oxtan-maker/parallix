@@ -172,17 +172,14 @@ closure only after the same integration and worktree-removal conditions.
 | Open worktree exists but cannot be read | Unavailable rather than stale reconstruction |
 | Integration base is missing, even if a worktree copy exists | Unavailable: lifecycle authority is missing |
 
-Agent selection proves the sync/async boundary on the consumer that caused the
-agent-selection migration. An `AgentSelectionSnapshotPort` asynchronously materializes
-configuration, block, and launcher-availability facts once.
-`PreparedAgentSelection.prepare()` crosses that boundary; subsequent `select()`
-calls are synchronous pure reads (`src/application/services/agent-selection.ts:6-15`).
-No launcher probe or persistence read occurs in `selectAgent()`.
-The custom launcher's internal concurrency check remains runtime-specific; it
-is not modeled as a general capability shared by every agent family.
-Unweighted selection is random across the available pool. Array order is never
-a selection strategy; explicit CLI choice enters as `preferred`, while durable
-selection bias must be declared with `weighted` policy and explicit weights.
+Agent selection consumes materialized configuration, block and launcher facts.
+The snapshot port loads asynchronous inputs before pure synchronous selection;
+production launcher adapters materialize their inputs before calling the same
+selector. Availability probing and persistence stay outside the domain.
+Unweighted selection is uniform across the available pool. Weighted selection
+requires explicit finite nonnegative weights for every configured eligible
+family. Zero-weight families are excluded from draws. Invalid policies fail
+before availability filtering, and review requires explicit configured eligibility.
 
 ## Compatibility routing
 

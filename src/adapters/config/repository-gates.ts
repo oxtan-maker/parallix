@@ -22,7 +22,7 @@ export { runGateCommand } from './gate-command-runner.js';
 import type { IntegrationVerificationEvidencePort, ReusableVerificationProofPort } from '../../application/ports/integration-verification-evidence.js';
 import { GateDashboard } from './gate-dashboard.js';
 import * as fmt from '../../application/presentation/cli-format.js';
-import { loadEffectiveConfig, loadWorkflowConfig, resolveCanonicalMaxConcurrentGates } from './product-config.js';
+import { loadEffectiveConfig, loadWorkflowConfig, resolveCanonicalGateResources, resolveCanonicalMaxConcurrentGates } from './product-config.js';
 
 /** Ordered lifecycle phases that may carry configured gates. */
 export const GATE_PHASES = ['handoff', 'review', 'integration'] as const;
@@ -189,6 +189,8 @@ export function buildGateEnv(phase: GatePhase, slug: string, checkoutPath: strin
 export interface PhaseGateOptions {
   admission?: GateAdmissionPort;
   admissionRun?: GateAdmissionRun;
+  /** Resolved before launch from adapters.gates.resources; only gates with a resource consult it. */
+  resourceLimits?: Readonly<Record<string, number>>;
   signal?: AbortSignal;
   configuration?: ParallixConfiguration;
   verificationEvidence?: IntegrationVerificationEvidencePort;
@@ -221,13 +223,24 @@ export async function runPhaseGates(phase: GatePhase, opts: PhaseGateOptions): P
   try {
     assertIndependentGateInvocation();
     opts.admission?.assertIndependent();
-    if (!Number.isFinite(resolveCanonicalMaxConcurrentGates(checkoutPath))) { return execute(opts); }
+    const limited = { ...opts, resourceLimits: resolveGateResourceLimits(checkoutPath, gates) };
+    if (!Number.isFinite(resolveCanonicalMaxConcurrentGates(checkoutPath))) { return execute(limited); }
     return await (opts.admission ?? gateAdmission()).run(checkoutPath,
-      admissionRun => execute({ ...opts, admissionRun, signal: admissionRun.signal }), opts.signal);
+      admissionRun => execute({ ...limited, admissionRun, signal: admissionRun.signal }), opts.signal);
   } catch (cause) {
     return { ok: false, phase, gates, executed: 0, skipped: false, dryRun: false,
       cancelled: cause instanceof Error && cause.name === 'AbortError', failedGate: null, error: String(cause) };
   }
+}
+
+/** Rejects undeclared resource references before any gate child can launch. */
+function resolveGateResourceLimits(checkoutPath: string, gates: RepositoryGate[]): Readonly<Record<string, number>> {
+  if (!gates.some(gate => gate.resource)) { return {}; }
+  const limits = resolveCanonicalGateResources(checkoutPath);
+  for (const gate of gates) {
+    if (gate.resource && !(gate.resource in limits)) { throw new Error(`Repository gate "${gate.key}" uses undeclared resource "${gate.resource}"`); }
+  }
+  return limits;
 }
 
 function phaseDashboard(phase: GatePhase, opts: PhaseGateOptions, gates: RepositoryGate[], cancelByOperator: () => void): GateDashboard | null {
@@ -304,6 +317,21 @@ class PhaseGateExecution {
     }
   }
 
+  /** A resource gate holds its slot only while its own process tree runs. */
+  private runAdmitted(gate: RepositoryGate) {
+    const { opts, controller } = this.state;
+    const invoke = (slot?: GateAdmissionRun) => this.state.runner(gate.command, [], {
+      cwd: path.resolve(this.state.checkoutPath), stdio: 'pipe', forwardOutput: this.state.liveSerial,
+      env: { ...this.state.env, ...slot?.environment },
+      signal: slot ? AbortSignal.any([controller.signal, slot.signal]) : controller.signal,
+      bindProcessGroup: slot ? (pid: number) => { opts.admissionRun?.bindProcessGroup(pid); slot.bindProcessGroup(pid); } : opts.admissionRun?.bindProcessGroup,
+      onOutput: chunk => this.state.dashboard?.append(gate.key, chunk)
+    });
+    if (!gate.resource) { return invoke(); }
+    return (opts.admission ?? gateAdmission()).runOnResource(this.state.checkoutPath,
+      { name: gate.resource, capacity: opts.resourceLimits![gate.resource] }, async slot => invoke(slot), controller.signal);
+  }
+
   launchGate(gate: RepositoryGate, verification: ReusableVerificationProofPort | null): Promise<GateRunOutcome> {
     const started = Date.now();
     // Delay proof loading until a clean-tree gate actually runs. This keeps
@@ -317,12 +345,7 @@ class PhaseGateExecution {
     }
     // Reuse the freshly checked identity snapshot returned even on a cache miss.
     const beforeProof = { ok: Boolean(reusable.identity), identity: reusable.identity, error: reusable.error };
-    const run = Promise.resolve().then(() => this.state.runner(gate.command, [], {
-      cwd: path.resolve(this.state.checkoutPath), env: this.state.env, stdio: 'pipe', signal: this.state.controller.signal,
-      forwardOutput: this.state.liveSerial,
-      bindProcessGroup: this.state.opts.admissionRun?.bindProcessGroup,
-      onOutput: chunk => this.state.dashboard?.append(gate.key, chunk)
-    }))
+    const run = Promise.resolve().then(() => this.runAdmitted(gate))
       .then(result => {
         const exitCode = typeof result.status === 'number' ? result.status : null;
         if (exitCode === 0 && gate.reuse === 'clean-tree') {

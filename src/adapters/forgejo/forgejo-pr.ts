@@ -207,11 +207,6 @@ function prLookupFailure(apiErr: { error?: string | null; status?: number | null
   return { ok: false, error: `failed to check existing PR: ${(apiErr.error || 'API error')}${apiErr.status === 7 ? ` (${codexSandboxHint()})` : ''}` };
 }
 
-function prAuthorMismatch(prNumber: number, author: string | undefined, implementer: string | null | undefined, publicationAccount: string): CreatePrResult | null {
-  if (!author || author === implementer || author === publicationAccount) { return null; }
-  return { ok: false, error: `PR #${prNumber} author ${author} differs from implementer ${implementer}. PR authorship is immutable; replace the PR under the actual implementer's credentials before review.` };
-}
-
 /**
  * The open PR already on this branch, an API-failure result, or null when there
  * is none and one must be created.
@@ -225,12 +220,8 @@ function existingPrForBranch(branch: string, context: ForgejoOptions): CreatePrR
   if (!lookup?.prNumber) { return null; }
   const details = apiCall<ForgejoPullRequest>('GET', `/pulls/${lookup.prNumber}`, lookup.token || apiToken, undefined, { ...({ rootDir }), configuration: context.configuration });
   if (!details.ok) { return null; }
-  const author = details.data?.user?.login;
-  // A sanctioned Parallix publication remains valid when implementer credentials
-  // become available later; its immutable PR author is not the implementer identity.
-  const publicationAccount = resolveForgejoSettings(rootDir, context.configuration).repo.split('/')[0];
-  const mismatch = prAuthorMismatch(lookup.prNumber, author ?? undefined, apiUser, publicationAccount);
-  if (mismatch) { return mismatch; }
+  // PR authorship is immutable; supported reassignment changes Mission ownership,
+  // not the branch's PR. Approval authority checks reviewer independence separately.
   const url = details.data?.html_url;
   log(`PR already exists: ${url}`);
   return { ok: true, url, prNumber: lookup.prNumber };

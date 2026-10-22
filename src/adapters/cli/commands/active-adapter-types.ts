@@ -25,6 +25,7 @@ export interface ActiveOptions {
   payloadLandedFn?: (_slug: string) => boolean | Promise<boolean>;
 }
 export interface ActiveExecution extends Pick<ActiveOptions, 'controller' | 'controllerFactory' | 'service' | 'serviceFactory' | 'operatorInvocation'> {
+  cancellation: import('../../../application/controller/board-command.js').BoardCancellation;
   rootDir: string; renderProgress: (_event: Pick<ProgressEvent, 'phase' | 'agent'>) => void; operationId: string; slug: string; agent: string | null; reviewer: string | null;
 }
 export interface LaunchOptions {

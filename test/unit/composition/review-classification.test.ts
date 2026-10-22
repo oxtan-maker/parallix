@@ -35,9 +35,12 @@ test('panel uses the configured Jev route and admits every frozen question throu
   }
 });
 
-test('obligation activation is explicit and defaults to shadow (TASK-2753)', () => {
-  for (const value of [undefined, '', 'off', 'shadow', 'unknown']) {
-    assert.equal(classify({ PARALLIX_JEV_OBLIGATION_REVIEW: value }).obligationMode, 'shadow');
+test('retired obligation setting cannot suppress the default active panel (TASK-2805)', () => {
+  for (const value of [undefined, '', 'off', 'shadow', 'on', 'unknown']) {
+    const config = resolveConfiguration({ PARALLIX_JEV_OBLIGATION_REVIEW: value }).decision;
+    assert.equal('obligationReviewMode' in config, false);
+    const ports = classify({ PARALLIX_JEV_OBLIGATION_REVIEW: value });
+    assert.equal(ports.mode, 'enabled');
+    assert.equal('obligationMode' in ports, false);
   }
-  assert.equal(classify({ PARALLIX_JEV_OBLIGATION_REVIEW: ' ON ' }).obligationMode, 'enabled');
 });

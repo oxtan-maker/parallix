@@ -1,4 +1,4 @@
-import { resolveCanonicalMaxConcurrentGates } from '../../config/product-config.js';
+import { resolveVerificationResource, usesAdmittedVerification } from '../../config/product-config.js';
 import { assertIndependentGateInvocation } from '../../../application/ports/gate-admission.js';
 import { runConfiguredVerification } from '../../verification/configured-verification.js';
 import { commitDirtyFiles } from '../../git/commit-dirty-files.js';
@@ -82,9 +82,10 @@ function createDeclaredGateExecution(configuration?: ParallixConfiguration): Non
   return {
     run(commands, root, log) {
       assertIndependentGateInvocation();
-      if (!Number.isFinite(resolveCanonicalMaxConcurrentGates(root))) { return null; }
+      if (!usesAdmittedVerification(root)) { return null; }
+      const resource = resolveVerificationResource(root);
       return runPhaseGates('handoff', { configuration, slug: '', checkoutPath: root, log,
-        maxParallel: 1, commandRunner: declaredCommandRunner(root, log, configuration), gates: commands.map((command, order) => ({ key: `declared-${order}`, command, order })),
+        maxParallel: 1, commandRunner: declaredCommandRunner(root, log, configuration), gates: commands.map((command, order) => ({ key: `declared-${order}`, command, order, resource })),
       }).then(result => ({ ok: result.ok, error: result.error ?? undefined,
         gate: result.failedGate?.command ?? commands[0], stdout: result.failedGate?.stdout,
         stderr: result.failedGate?.stderr, exitCode: result.failedGate?.exitCode ?? null }));
@@ -153,7 +154,7 @@ export function createHandoffPorts(configuration?: ParallixConfiguration, missio
       createVerificationProofIdentity: (command, rootDir) => createVerificationProofIdentity(command, rootDir, { configuration }),
       readReusableVerificationProof: (command, rootDir) => readReusableVerificationProof(command, rootDir, { configuration }),
       writeReusableVerificationProof: (command, rootDir, options) => writeReusableVerificationProof(command, rootDir, { ...options, configuration }),
-      runVerificationGate: (area, options) => Number.isFinite(resolveCanonicalMaxConcurrentGates(options.rootDir ?? process.cwd()))
+      runVerificationGate: (area, options) => usesAdmittedVerification(options.rootDir ?? process.cwd())
         ? runConfiguredVerification(area, options.rootDir ?? process.cwd(), configuration)
         : runVerificationGate(area, { ...options, env: configuration?.forwardedEnvironment }),
       isTransientVerificationFailure: (output) => isTransientVerificationFailure(output),

@@ -1,8 +1,8 @@
 ---
 id: TASK-2805
 title: Restore the active Jev panel and remove the per-obligation shadow detour
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-21 12:44'
 labels:
   - bug

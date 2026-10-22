@@ -1,5 +1,5 @@
 import { gateFailureReasonFromProcess } from '../../domain/failure-classification.js';
-import { resolveCanonicalMaxConcurrentGates } from '../config/product-config.js';
+import { usesAdmittedVerification } from '../config/product-config.js';
 import { runConfiguredVerification } from '../verification/configured-verification.js';
 /**
  * Pre-review Gate Handling (ADR 0048 Control C1)
@@ -116,7 +116,7 @@ async function executePreReviewGate(
   configuration: ParallixConfiguration | undefined,
   runFn: typeof run,
 ) {
-  return Number.isFinite(resolveCanonicalMaxConcurrentGates(worktree)) ? await runConfiguredVerification(area, worktree, configuration) : runFn('bash', ['-lc', command], {
+  return usesAdmittedVerification(worktree) ? await runConfiguredVerification(area, worktree, configuration) : runFn('bash', ['-lc', command], {
     progressLabel: `Pre-review verification (${area})`,
     cwd: worktree,
     stdio: 'pipe',

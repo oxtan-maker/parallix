@@ -1,4 +1,3 @@
-import { attachWorkflowOperations } from './workflow-operations.js';
 import { bindReviewOperatorResume } from './review-operator-resume.js';
 import { commandInvocation } from './command-invocation.js';
 import { hasMissionWriteAuthorization } from '../application/ports/mission-write-authorization.js';
@@ -153,8 +152,8 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
 }
 
 function createActiveService(context: CliCommandContext): Command {
-  const { rootDir, configuration, scope, active } = context;
-  const { openServices, withGraph } = scope;
+  const { rootDir, scope, active } = context;
+  const { withGraph } = scope;
   const withActiveService = async (args: string[], options: Record<string, unknown> = {}) => {
     const activeServices: { value: Awaited<ReturnType<typeof createProductionApplicationServices>> | null } = { value: null };
     try {
@@ -166,7 +165,7 @@ function createActiveService(context: CliCommandContext): Command {
         // The headline names the Mission exactly as `px status` does.
         missionTitleFn: (s: string) => withGraph(services => statusMissionTitle(services, s, rootDir)),
         controllerFactory: async (requestedRoot: string, progress: BoardProgressSink) => {
-          activeServices.value = await attachWorkflowOperations(requestedRoot, configuration, await openServices(requestedRoot, progress), false, progress);
+          activeServices.value = await scope.openWorkflowServices(requestedRoot, progress);
           const controller = activeServices.value.presentationCapabilities?.commandController;
           if (!controller) { throw new Error('active command requires BoardCommandController from presentation capabilities'); }
           return controller;

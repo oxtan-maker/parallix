@@ -108,8 +108,8 @@ function withPrimaryAndMissionWorktrees(run: (fixture: { tmpRoot: string; primar
       path.join(primaryWorktree, 'workflow', 'config', 'agents.json'),
       JSON.stringify({
         steps: {
-          active: { eligible: ['custom', 'codex'], selection: 'first' },
-          review: { eligible: ['custom', 'codex'], selection: 'first' }
+          active: { eligible: ['custom', 'codex'], selection: 'random' },
+          review: { eligible: ['custom', 'codex'], selection: 'random' }
         }
       }, null, 2)
     );

@@ -45,7 +45,7 @@ test('PR publication mirrors baseline without running implicit verification (TAS
 });
 
 for (const author of ['codex', 'claude', 'test-org']) {
-  test(`existing PR author ${author} must be implementer codex or Parallix publication account (TASK-2778)`, t => {
+  test(`existing PR author ${author} survives implementation ownership changes (TASK-2804)`, t => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'px-pr-author-'));
     try {
       initCommittedRepository(root, { 'workflow.config.json': JSON.stringify({ adapters: {
@@ -64,8 +64,9 @@ for (const author of ['codex', 'claude', 'test-org']) {
           return { ok: true, data: endpoint === '/pulls/739' ? existing : [existing] };
         }),
       });
-      assert.equal(result.ok, author !== 'claude', result.error ?? 'publication result');
-      if (author === 'claude') { assert.match(result.error ?? '', /author claude differs from implementer codex.*immutable/); }
+      assert.equal(result.ok, true, result.error ?? 'publication result');
+      assert.equal(result.prNumber, 739);
+      assert.equal(result.url, existing.html_url);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 }

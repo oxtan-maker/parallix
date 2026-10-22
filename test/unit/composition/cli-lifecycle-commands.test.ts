@@ -40,6 +40,7 @@ function fixture(t: TestContext, denyAdmission = false) {
   const missionFactory = async () => graph.mission!;
   const scope: CliCommandContext['scope'] = {
     openServices: async () => graph,
+    openWorkflowServices: async () => graph,
     withGraph: async invoke => invoke(graph),
     withMissionFactories: async invoke => invoke(missionFactory),
     withMissionAndGraph: async (invoke, _options, borrowed) => {

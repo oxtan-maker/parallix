@@ -1,3 +1,9 @@
+import { createReviewLoopPorts } from '../../../../src/adapters/review/review-loop.js';
+import { selectReviewer } from '../../../../src/application/review-loop/reviewer-selection.js';
+import { createHandoffPorts } from '../../../../src/adapters/cli/commands/handoff.js';
+import { HandoffReviewSubmission } from '../../../../src/application/handoff-review-submission.js';
+import { AgentExecutionAdapter, createDefaultExecuteMissionRuntime } from '../../../../src/adapters/mission/execute-mission-adapters.js';
+import { resolveAgentsLocalPath } from '../../../../src/adapters/storage/storage.js';
 // Historical regression provenance: TASK-2626, TASK-2351.
 // Agent selection contract: pure selection over a materialized snapshot, the SQLite snapshot
 // adapter, selection telemetry, launcher availability probing, and known-family resolution.
@@ -11,12 +17,11 @@
 
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { AgentPoolExhaustedError, blockedForMs, selectAgent, selectableAgents, type AgentSelectionSnapshot, agentFamily } from '../../../../src/domain/agents.js';
+import { AgentSelectionPolicyError, AgentPoolExhaustedError, blockedForMs, selectAgent, selectableAgents, type AgentSelectionSnapshot, agentFamily } from '../../../../src/domain/agents.js';
 import type { AgentStepConfig } from '../../../../src/adapters/agents/agent-config.js';
 import { selectAgent as selectLauncherAgent } from '../../../../src/adapters/agents/launcher-selection.js';
 import { startAgent } from '../../../../src/adapters/agents/agents.js';
 import { defaultStepEligibleFamilies, resolveBlockContext } from '../../../../src/adapters/agents/agent-block-selection.js';
-import { PreparedAgentSelection } from '../../../../src/application/services/agent-selection.js';
 import { SqliteAgentSelectionSnapshotAdapter } from '../../../../src/adapters/agents/agent-selection-snapshot.js';
 import { resolveHandoffReviewAssignment } from '../../../../src/adapters/cli/commands/handoff.js';
 import { AGENT_SELECTION_OUTCOMES, recordAgentSelectionOutcome } from '../../../../src/application/services/agent-selection-telemetry.js';
@@ -159,7 +164,7 @@ describe('Domain agent selection', () => {
     return {
       capturedAtMs: 1_000,
       defaultPolicy: { eligible: [codex, custom, future], strategy: 'random' },
-      steps: {},
+      steps: { review: { eligible: [codex, custom, future], strategy: 'random' } },
       agents: [
         { family: codex, launcherAvailable: true, block: { kind: 'none' } },
         { family: custom, launcherAvailable: false, block: { kind: 'none' } },
@@ -218,15 +223,16 @@ describe('Domain agent selection', () => {
     assert.equal(blockedForMs({ kind: 'indefinite', reason: null }, 2_500), Infinity);
   });
 
-  test('async port is crossed once while prepared selection stays synchronous', async () => {
+  test('async port is crossed once while snapshot selection stays synchronous', async () => {
     let loads = 0;
-    const prepared = await PreparedAgentSelection.prepare({
+    const port = {
       async load() {
         loads += 1;
         return snapshot();
       },
-    });
-    const picks = ['active', 'review', 'draft'].map((step) => prepared.select(step));
+    };
+    const materialized = await port.load();
+    const picks = ['active', 'review', 'draft'].map((step) => selectAgent(materialized, step));
     assert.equal(loads, 1);
     assert.deepEqual(picks, [codex, codex, codex]);
     assert.ok(picks.every((pick) => typeof pick === 'string'));
@@ -404,7 +410,7 @@ describe("SQLite agent selection snapshot adapter", () => {
     const adapter = new SqliteAgentSelectionSnapshotAdapter({
       knownAgentFamilies: families,
       blocklistRepo: { async findAll() { reads += 1; return [{ agent: 'codex', blocked: true, until: '2099-01-01 00', reason: 'limit' }]; }, async findByAgent() { return undefined; }, async save() {}, async deleteByAgent() {}, async clear() {} },
-      readConfig: () => ({ blocklist: { claude: { blocked: true } }, steps: { review: { eligible: ['codex', 'claude'], selection: 'weighted', weights: { claude: 2 } } } }),
+      readConfig: () => ({ blocklist: { claude: { blocked: true } }, steps: { review: { eligible: ['codex', 'claude'], selection: 'weighted', weights: { codex: 0, claude: 2 } } } }),
       launcherStatus: (family) => ({ supported: family === 'codex', reason: 'mocked missing launcher' as const }),
       now: () => 1_000,
     });
@@ -415,7 +421,7 @@ describe("SQLite agent selection snapshot adapter", () => {
     assert.equal(snapshot.agents[0].block.reason, 'limit');
     assert.ok(snapshot.agents[0].block.kind !== 'until' || snapshot.agents[0].block.untilMs > snapshot.capturedAtMs);
     assert.equal(snapshot.agents[1].launcherAvailable, false);
-    assert.deepEqual(snapshot.steps.review, { eligible: families, strategy: 'weighted', weights: { claude: 2 } });
+    assert.deepEqual(snapshot.steps.review, { eligible: families, strategy: 'weighted', weights: { codex: 0, claude: 2 } });
     assert.deepEqual(selectableAgents(snapshot, 'review'), []);
   });
 
@@ -436,8 +442,8 @@ describe("Reviewer nomination with stale JSON blocklist", () => {
   test('SQLite-blocked reviewer is not nominated when JSON blocklist is stale (TASK-2351 repro)', async () => {
     const codex = agentFamily('codex');
     const claude = agentFamily('claude');
-    const prepared = await PreparedAgentSelection.prepare({
-      async load() {
+    const port = {
+      async load(): Promise<AgentSelectionSnapshot> {
         return {
           capturedAtMs: 1_000,
           defaultPolicy: { eligible: [codex, claude], strategy: 'random' },
@@ -448,10 +454,11 @@ describe("Reviewer nomination with stale JSON blocklist", () => {
           ],
         };
       },
-    });
+    };
+    const materialized = await port.load();
     const assignment = resolveHandoffReviewAssignment('vibe', {
       eligibleAgentsForStepFn: () => ['codex', 'claude'],
-      preparedSelection: prepared,
+      selectAgentFn: (step, options) => selectAgent(materialized, step, { excluded: new Set([...(options?.exclude ?? [])].map(agentFamily)) }),
     });
     assert.equal(assignment.reviewer, 'claude', 'SQLite-blocked codex must be excluded before nomination');
   });
@@ -765,4 +772,169 @@ describe('Known agent family resolution', () => {
       },
     );
   });
+});
+
+
+describe('Explicit operator selection policy', () => {
+  function draw(policy: AgentStepConfig, value: number, extra = {}) {
+    const previous = Math.random;
+    Math.random = () => value;
+    try {
+      const eligible = (policy.eligible ?? []).map(agentFamily);
+      const snapshot: AgentSelectionSnapshot = {
+        capturedAtMs: 0, defaultPolicy: { eligible, strategy: policy.selection ?? 'random', weights: policy.weights }, steps: {},
+        agents: eligible.map(family => ({ family, launcherAvailable: true, block: { kind: 'none' } })),
+      };
+      if (Object.keys(extra).length === 0) {
+        const result = selectAgent(snapshot, 'active', { random: () => value });
+        assert.equal(result, selectLauncherAgent('active', { config: { steps: { active: policy } }, checkAvailability: false }));
+        return result;
+      }
+      return selectLauncherAgent('active', { config: { steps: { active: policy } }, checkAvailability: false, ...extra });
+    } finally { Math.random = previous; }
+  }
+
+  test('uniform intervals follow candidate permutations without identity preference (TASK-2788)', () => {
+    for (const eligible of [['codex', 'claude', 'qwen'], ['qwen', 'codex', 'claude'], ['claude', 'qwen', 'codex']]) {
+      for (let index = 0; index < eligible.length; index += 1) {
+        for (const offset of [0, 0.5, 0.999]) {
+          assert.equal(draw({ eligible, selection: 'random' }, (index + offset) / 3), eligible[index]);
+        }
+      }
+    }
+  });
+
+  test('zero weight stays zero at draw zero and interval boundaries (TASK-2788)', () => {
+    const policy = { eligible: ['codex', 'claude', 'qwen'], selection: 'weighted', weights: { codex: 0, claude: 1, qwen: 3 } };
+    for (const value of [0, 0.1, 0.249999]) { assert.equal(draw(policy, value), 'claude'); }
+    for (const value of [0.25, 0.5, 0.99999]) { assert.equal(draw(policy, value), 'qwen'); }
+    assert.equal(draw({ ...policy, weights: { codex: 0, claude: Number.MAX_VALUE, qwen: Number.MAX_VALUE } }, 0.75), 'qwen');
+  });
+
+  test('invalid weights and strategies fail before exclusions hide configured families (TASK-2788)', () => {
+    for (const weight of [undefined, -1, '2', NaN, Infinity, -Infinity]) {
+      const weights = { codex: 1, claude: weight } as Record<string, number>;
+      assert.throws(() => draw({ eligible: ['codex', 'claude'], selection: 'weighted', weights }, 0,
+        { exclude: new Set(['claude']) }), /weight.*claude|claude.*weight/i);
+    }
+    assert.throws(() => draw({ eligible: ['codex'], selection: 'unknown' }, 0), /strategy.*unknown|unknown.*strategy/i);
+    assert.throws(() => draw({ eligible: ['codex'], selection: 'weighted', weights: { codex: 0 } }, 0), /positive.*weight/i);
+    assert.throws(() => draw({ eligible: ['codex', 'claude'], selection: 'weighted', weights: { codex: 1, claude: 0 } }, 0,
+      { exclude: new Set(['codex']) }), /positive.*weight/i);
+  });
+
+  test('review cannot inherit a generic eligibility pool (TASK-2788)', () => {
+    assert.throws(() => selectLauncherAgent('review', { config: {}, checkAvailability: false }), /review.*eligib|eligib.*review/i);
+  });
+
+  test('explicit operator override precedes weighted draws while respecting eligibility and exclusions (TASK-2788)', () => {
+    const policy = { eligible: ['codex', 'claude'], selection: 'weighted', weights: { codex: 0, claude: 1 } };
+    const configuration = resolveConfiguration({ WORKFLOW_AGENT: 'codex' });
+    assert.equal(draw(policy, 0.9, { configuration }), 'codex');
+    assert.equal(draw(policy, 0, { configuration, exclude: ['codex'] }), 'claude');
+  });
+});
+
+
+test('composed review, handoff, active and runtime fallback obey the same draws and policy failures (TASK-2788)', async t => {
+  const root = registeredMkdtemp('selection-composition-');
+  const previousCwd = process.cwd();
+  const previousRandom = Math.random;
+  const configuration = resolveConfiguration({ HOME: root, PARALLIX_HOME: path.join(root, 'operator') });
+  t.after(() => {
+    process.chdir(previousCwd); Math.random = previousRandom;
+    setCommandPathProbe(null); setLauncherHealthProbe(null);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  fs.mkdirSync(path.join(root, 'config'));
+  const localPath = resolveAgentsLocalPath({ configuration, ensureDir: true });
+  fs.writeFileSync(localPath, '{}');
+  process.chdir(root);
+  setCommandPathProbe(name => name);
+  setLauncherHealthProbe(() => ({ ok: true as const }));
+  let policy: AgentStepConfig = { eligible: ['codex', 'claude', 'qwen'], selection: 'weighted', weights: { codex: 0, claude: 1, qwen: 3 } };
+  const config = () => ({ steps: { review: policy, active: policy } });
+  const write = () => fs.writeFileSync(path.join(root, 'config/agents.json'), JSON.stringify(config()));
+  const runtime = { ...createDefaultExecuteMissionRuntime(), readAgentConfig: config };
+  const active = new AgentExecutionAdapter(runtime, null, null, configuration);
+  const handoff = new HandoffReviewSubmission(createHandoffPorts(configuration));
+  const review = () => selectReviewer({ implementer: 'vibe', isContinue: false, persisted: null,
+    maxAttempts: 1, dryRun: false, providerEnabled: false, slug: 'selection-fixture' },
+    createReviewLoopPorts('selection-fixture', { worktree: root }, { configuration, isProviderEnabled: () => false }).routing,
+    { emit: () => {} });
+  for (const [strategy, value, expected] of [['random', 0.4, 'claude'], ['weighted', 0.75, 'qwen']] as const) {
+    policy.selection = strategy; Math.random = () => value; write();
+    assert.equal(await active.select('selection-fixture'), expected);
+    assert.equal(handoff.resolveHandoffReviewAssignment('vibe').reviewer, expected);
+    assert.equal(review()?.reviewer, expected);
+  }
+  const launched: string[] = [];
+  await startAgent('active', { configuration, prompt: 'fixture',
+    runtimeBlockContextFn: async (_step, tried) => resolveBlockContext(policy.eligible!, tried, new Set()),
+    isAgentBlockedFn: () => false, assertAgentSupportedFn: () => {}, resolveAgentModelFn: () => null,
+    detectLimitHitFn: () => null, updateAgentBlockFn: () => ({}), log: () => {},
+    launchAgentFn: deps => {
+      launched.push(deps.env!.FORGEJO_USER!);
+      return { invocation: { command: 'fixture', args: [] }, result: { status: launched.length === 1 ? 1 : 0 } };
+    },
+  });
+  assert.deepEqual(launched, ['qwen', 'claude']);
+  for (const invalid of [{ selection: 'unknown' }, { selection: 'weighted', weights: { codex: 0, claude: 1 } }]) {
+    policy = { ...policy, ...invalid }; write();
+    await assert.rejects(active.select('selection-fixture'), /Invalid agent policy/);
+    assert.throws(() => handoff.resolveHandoffReviewAssignment('vibe'), /Invalid agent policy/);
+    assert.throws(review, /Invalid agent policy/);
+    await assert.rejects(startAgent('active', { configuration, prompt: 'fixture',
+      runtimeBlockContextFn: async (_step, tried) => resolveBlockContext(policy.eligible!, tried, new Set()),
+      launchAgentFn: () => assert.fail('invalid policy must not launch'),
+    }), /Invalid agent policy/);
+  }
+});
+
+
+test('weighted pools report recoverable exhaustion after availability, blocks and exclusions (TASK-2788)', () => {
+  const families = ['codex', 'claude'].map(agentFamily);
+  for (const kind of ['unavailable', 'blocked', 'excluded']) {
+    const snapshot: AgentSelectionSnapshot = {
+      capturedAtMs: 0, defaultPolicy: { eligible: families, strategy: 'weighted', weights: { [families[0]]: 1, [families[1]]: 0 } }, steps: {},
+      agents: families.map(family => ({ family, launcherAvailable: kind !== 'unavailable' || family !== 'codex',
+        block: kind === 'blocked' && family === 'codex' ? { kind: 'indefinite', reason: null } : { kind: 'none' } })),
+    };
+    assert.throws(() => selectAgent(snapshot, 'active', { excluded: kind === 'excluded' ? new Set(families) : undefined }), error => error instanceof AgentPoolExhaustedError && /positive weight/.test(error.message));
+  }
+  const weighted = { eligible: ['codex', 'claude'], selection: 'weighted', weights: { codex: 1, claude: 0 } };
+  assert.throws(() => selectLauncherAgent('active', { config: { blocklist: { codex: true, claude: true }, steps: { active: weighted } }, checkAvailability: false }), AgentPoolExhaustedError);
+  assert.throws(() => selectLauncherAgent('active', { config: { steps: { active: { ...weighted, weights: { codex: 0, claude: 0 } } } }, exclude: new Set(['codex', 'claude']) }), AgentSelectionPolicyError);
+  setCommandPathProbe(name => name);
+  setLauncherHealthProbe(command => command.includes('codex') ? { ok: false as const, reason: 'exit 9' } : { ok: true as const });
+  try {
+    assert.throws(() => selectLauncherAgent('active', { config: { steps: { active: {
+      eligible: ['codex', 'claude'], selection: 'weighted', weights: { codex: 1, claude: 0 },
+    } } } }), error => error instanceof AgentPoolExhaustedError && /positive weight/.test(error.message));
+    assert.throws(() => selectLauncherAgent('active', { config: { steps: { active: {
+      eligible: ['codex', 'claude'], selection: 'weighted', weights: { claude: 1 },
+    } } } }), /weight for codex/);
+  } finally { setCommandPathProbe(null); setLauncherHealthProbe(null); }
+});
+
+
+test('explicit override bypasses a launcher probe but never operator blocks (TASK-2788)', () => {
+  const configuration = resolveConfiguration({ WORKFLOW_AGENT: 'codex' });
+  setCommandPathProbe(() => { throw new Error('override must precede probing'); });
+  const config = { steps: { active: { eligible: ['codex', 'claude'], selection: 'weighted', weights: { codex: 0, claude: 1 } } } };
+  try {
+    assert.equal(selectLauncherAgent('active', { config, configuration }), 'codex');
+    assert.equal(selectLauncherAgent('active', { config: { ...config, blocklist: { codex: true } }, configuration, checkAvailability: false }), 'claude');
+  } finally { setCommandPathProbe(null); }
+});
+
+test('snapshot materialization retains unknown strategy for actionable rejection (TASK-2788)', async () => {
+  const adapter = new SqliteAgentSelectionSnapshotAdapter({
+    knownAgentFamilies: [agentFamily('codex')], readConfig: () => ({ steps: { review: { eligible: ['codex'], selection: 'unknown' } } }),
+    blocklistRepo: { async findAll() { return []; }, async findByAgent() { return undefined; }, async save() {}, async deleteByAgent() {}, async clear() {} },
+    launcherStatus: () => ({ supported: true }),
+  });
+  const snapshot = await adapter.load();
+  assert.equal(snapshot.steps.review.strategy, 'unknown');
+  assert.throws(() => selectAgent(snapshot, 'review'), /unknown selection strategy/);
 });

@@ -33,7 +33,7 @@ export function createLeadSupervisorPort(
   context: LeadCompositionContext,
 ): SupervisorPort {
   const { rootDir, active, registry, runPublicCli: run } = context;
-  const { openServices } = context.scope;
+  const { openWorkflowServices } = context.scope;
   const builder = services.presentationCapabilities?.boardProjection;
   if (!builder) { throw new Error('board projection is unavailable for px lead'); }
   const currentWork = services.currentWork;
@@ -45,10 +45,6 @@ export function createLeadSupervisorPort(
       const mission = String(item.missionId);
       return observationFromAttention(item, !headFor || mission === headFor ? leadHeadSha(mission) : null);
     });
-  // A pressed command runs inside this long-lived process. Its default exit
-  // is `process.exit`, which would end the whole supervisor on the first
-  // failure; turning it into a throw makes it a failed step instead.
-  const exitAsError = (code: number): never => { throw new Error(`command exited with status ${code}`); };
   // `px active` and `px review --continue` own long agent loops. Start one
   // and return to the fleet loop immediately; the current-work fact prevents
   // the next poll from treating that mission as idle and starting it again.
@@ -102,7 +98,7 @@ export function createLeadSupervisorPort(
         detail: work ? `${work.phase} — ${work.summary} (${work.freshness}, ${work.updatedAt})` : null,
       };
     },
-    runAction: async (mission, action, observation) => {
+    runAction: async (mission, action, observation, signal) => {
       if (observation) {
         const detail = observation.reason.kind === 'none' ? 'none' : observation.reason.detail;
         fmt.log.info(`[lead] Found stuck mission ${fmt.slug(mission)} in state ${observation.lane}; fixing by ${action.display} (${observation.reason.kind}: ${detail})`);
@@ -121,37 +117,24 @@ export function createLeadSupervisorPort(
       }
       const invocation = leadInvocation(action.kind, mission);
       if (!invocation) { throw new Error(`px lead does not run ${action.kind}`); }
-      // `active` is the lead's recovery action. Reuse the controller already
-      // rooted in the target worktree. Do not close this borrowed graph: it
-      // shares the lead process's cached SQLite handle, which the outer graph
-      // owns until shutdown.
-      if (invocation.command === 'active') {
-        const missionWorktree = resolveWorktree(mission, {});
-        if (!missionWorktree) { throw new Error(`No worktree resolved for ${mission}`); }
-        const targetServices = await openServices(missionWorktree);
-        const controller = targetServices.presentationCapabilities?.commandController;
-        if (!controller) { throw new Error(`No active controller available for ${mission}`); }
-        await startForward(mission, action, () => active(invocation.args, {
-          controller,
-          missionTitleFn: (s: string) => statusMissionTitle(targetServices, s, missionWorktree),
-          rootDir: missionWorktree,
-          exitFn: exitAsError,
-          exit: exitAsError,
-        }));
-        return;
-      }
-      const commandRun = registry[invocation.command];
-      if (!commandRun) { throw new Error(`No runnable px command for ${action.kind}`); }
       const missionWorktree = resolveWorktree(mission, {});
       if (!missionWorktree) { throw new Error(`No worktree resolved for ${mission}`); }
+      // Borrow the target's workflow owner, including admission and cancellation.
+      if (invocation.command === 'active') {
+        const targetServices = await openWorkflowServices(missionWorktree);
+        await startForward(mission, action, () => runBorrowedActive(targetServices, active, missionWorktree, invocation.args, signal));
+        return;
+      }
+      if (!registry[invocation.command]) { throw new Error(`No runnable px command for ${action.kind}`); }
       // Run a forwarded command through the public CLI entry point so its
       // target is explicit. Calling the cached registry directly inherits
       // the process directory of `px lead`; that is wrong when lead is
       // supervising a sibling worktree and forces callers to mutate cwd.
-      await startForward(mission, action, () => run(
-        [invocation.command, ...invocation.args],
-        { baseCwd: missionWorktree, log: fmt.log.plain, error: fmt.log.plainError, operatorInvocation: false },
-      ));
+      await startForward(mission, action, async () => {
+        if (signal?.aborted) { return; }
+        await run([invocation.command, ...invocation.args],
+          { baseCwd: missionWorktree, log: fmt.log.plain, error: fmt.log.plainError, operatorInvocation: false });
+      });
     },
     claimRecovery: async (mission) => claimRecoveryLock(mission),
     wait: pollingPause,
@@ -163,6 +146,21 @@ export function createLeadSupervisorPort(
   };
   return port;
 }
+/** Finish only this borrowed scope; shared SQLite shutdown remains process-owned. */
+async function runBorrowedActive(services: Awaited<ReturnType<typeof createProductionApplicationServices>>,
+  active: LeadCompositionContext['active'], root: string, args: string[], signal?: AbortSignal): Promise<void> {
+  try {
+    if (signal?.aborted) { return; }
+    const controller = services.presentationCapabilities?.commandController;
+    if (!controller) { throw new Error(`No active controller available for ${args[0]}`); }
+    await active(args, {
+      controller, rootDir: root,
+      missionTitleFn: (slug: string) => statusMissionTitle(services, slug, root),
+      exitFn: (code: number): never => { throw new Error(`command exited with status ${code}`); },
+    });
+  } finally { await services.operatorState.close(); }
+}
+
 interface LeadCompositionContext { rootDir: string; active: ReturnType<typeof createActiveCommand>; registry: Record<string, Command>; runPublicCli: typeof import('./create-cli.js').run; scope: CliServiceScope; launchRecovery: SupervisorPort['launchRecovery'] }
 
 function leadHeadSha(mission: string): string | null {

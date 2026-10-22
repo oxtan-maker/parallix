@@ -15,19 +15,8 @@ import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 
 // ---------- TASK-1036: review/act-on-review fallback pool tracks current launchers ----------
 
-test('eligibleAgentsForStep returns all current launchers when review step is missing from config (TASK-1036)', () => {
-  // Without a review step in agents.json, eligibleAgentsForStep falls back to
-  // Object.keys(LAUNCHERS), which now reflects the current supported families.
-  const configWithoutReview = {
-    steps: {
-      draft: { eligible: ['vibe', 'codex', 'custom'], selection: 'random' },
-      active: { eligible: ['codex', 'claude', 'vibe', 'custom'], selection: 'random' }
-    }
-  } satisfies import("../../../../src/adapters/agents/agent-config.js").AgentConfig;
-  const eligible = eligibleAgentsForStep('review', { config: configWithoutReview });
-  assert.ok(eligible.includes('vibe'), 'mistral must be in fallback pool when review step is absent');
-  assert.ok(eligible.includes('claude'), 'claude must also be present');
-  assert.ok(eligible.includes('codex'), 'codex must also be present');
+test('review requires explicit eligibility instead of a generic launcher fallback (TASK-2788)', () => {
+  assert.throws(() => eligibleAgentsForStep('review', { config: { steps: { active: { eligible: ['vibe'] } } } }), /review requires explicit/);
 });
 
 test('eligibleAgentsForStep returns all current launchers when act-on-review step is missing from config (TASK-1036)', () => {
@@ -41,9 +30,9 @@ test('eligibleAgentsForStep returns all current launchers when act-on-review ste
   assert.ok(eligible.includes('vibe'), 'mistral must be in fallback pool when act-on-review step is absent');
 });
 
-test('startAgent review fallback selects vibe when claude hits limit and review step is missing (TASK-1036 transcript)', async () => {
+test('startAgent review fallback selects configured vibe when claude hits limit (TASK-1036 transcript)', async () => {
   // Current behavior: pinned reviewer=claude, implementer=codex, claude limit-hit,
-  // fallback selects vibe because review step has no explicit eligibility config.
+  // fallback selects vibe from explicit review eligibility.
   const tmpRoot = registeredMkdtemp('task-1036-review-fallback-');
   try {
     const order = ['claude', 'vibe'];
@@ -69,15 +58,16 @@ test('startAgent review fallback selects vibe when claude hits limit and review 
     delete environment.WORKFLOW_AGENT;
 
     try {
-      // Config without review step — gemini is in the fallback pool
-      const configWithoutReview = {
+      // Retain the provider-limit fallback assertions under explicit review policy.
+      const configuredReview = {
         steps: {
+          review: { eligible: ['claude', 'vibe'], selection: 'random' },
           draft: { eligible: ['vibe', 'codex', 'custom'], selection: 'random' },
           active: { eligible: ['codex', 'claude', 'vibe', 'custom'], selection: 'random' }
         }
       };
 
-      assert.ok(eligibleAgentsForStep('review', { config: configWithoutReview }).includes('vibe'));
+      assert.ok(eligibleAgentsForStep('review', { config: configuredReview }).includes('vibe'));
       const result = await startAgent('review', { configuration: resolveConfiguration(environment),
         prompt: 'Execute the mission.',
         worktree: tmpRoot,
@@ -93,7 +83,7 @@ test('startAgent review fallback selects vibe when claude hits limit and review 
         log: () => {}
       });
 
-      assert.equal(result.agent, 'vibe', 'mistral should be selected as fallback when claude hits limit and review step is missing');
+      assert.equal(result.agent, 'vibe', 'mistral should be selected as fallback when claude hits limit within configured review eligibility');
       assert.ok(blocks.length <= 1, `expected at most one block write, got ${blocks.length}`);
       if (blocks.length === 1) {
         assert.deepEqual(blocks[0], { agent: 'claude', until: '2026-05-01 18' });

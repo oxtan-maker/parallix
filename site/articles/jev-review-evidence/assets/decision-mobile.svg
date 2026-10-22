@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="380" height="860" viewBox="0 0 380 860" role="img" aria-labelledby="title desc">
+<title id="title">Building the repair evidence</title><desc id="desc">Compare the approved mission change against its original main baseline with the repaired mission change against its current main baseline. Select files whose mission changes differ. Files changed only on main and Backlog records are excluded. The approved-to-repaired diff for a selected file can still include changes brought in by a rebase. The packet adds both revisions, failed-gate details, rebase metadata, gate-rerun information and omission notices, then goes to Jev. File examples are schematic.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8" fill="#535e57"/></marker></defs>
+<text x="18" y="26" font-family="system-ui,sans-serif" font-size="18" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="18" dy="0">Keep the repair in view</tspan></text>
+<rect x="18" y="48" width="164" height="94" rx="3" fill="#faf8f3" stroke="#c7ccc3" stroke-width="1.5"/>
+<text x="30" y="71" font-family="system-ui,sans-serif" font-size="16" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="30" dy="0">At approval</tspan></text>
+<text x="30" y="99" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#535e57" text-anchor="start"><tspan x="30" dy="0">main at approval</tspan><tspan x="30" dy="21">→ approved head</tspan></text>
+<rect x="198" y="48" width="164" height="94" rx="3" fill="#faf8f3" stroke="#c7ccc3" stroke-width="1.5"/>
+<text x="210" y="71" font-family="system-ui,sans-serif" font-size="16" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="210" dy="0">After rebase</tspan></text>
+<text x="210" y="99" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#535e57" text-anchor="start"><tspan x="210" dy="0">main after rebase</tspan><tspan x="210" dy="21">→ repair head</tspan></text>
+<path d="M100,142 V157 H190" fill="none" stroke="#535e57" stroke-width="1.5"/>
+<path d="M280,142 V157 H190 V174" fill="none" stroke="#535e57" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="190" y="197" font-family="system-ui,sans-serif" font-size="17" font-weight="650" fill="#252b2a" text-anchor="middle"><tspan x="190" dy="0">Compare the two mission changes</tspan></text>
+<rect x="18" y="212" width="344" height="64" rx="3" fill="#eef1e9" stroke="#c7ccc3" stroke-width="1.5"/>
+<text x="31" y="236" font-family="ui-monospace,monospace" font-size="15" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="31" dy="0">src/worker.ts</tspan></text>
+<text x="349" y="236" font-family="system-ui,sans-serif" font-size="14" font-weight="650" fill="#24604f" text-anchor="end"><tspan x="349" dy="0">Keep</tspan></text>
+<text x="31" y="258" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#535e57" text-anchor="start"><tspan x="31" dy="0">Repair changes</tspan></text>
+<rect x="18" y="288" width="344" height="64" rx="3" fill="#faf8f3" stroke="#c7ccc3" stroke-width="1.5"/>
+<text x="31" y="312" font-family="ui-monospace,monospace" font-size="15" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="31" dy="0">src/ui.ts</tspan></text>
+<text x="349" y="312" font-family="system-ui,sans-serif" font-size="14" font-weight="650" fill="#535e57" text-anchor="end"><tspan x="349" dy="0">Leave out</tspan></text>
+<text x="31" y="334" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#535e57" text-anchor="start"><tspan x="31" dy="0">Changes from main only</tspan></text>
+<rect x="18" y="364" width="344" height="84" rx="3" fill="#eef1e9" stroke="#c7ccc3" stroke-width="1.5"/>
+<text x="31" y="388" font-family="ui-monospace,monospace" font-size="15" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="31" dy="0">test/worker.test.ts</tspan></text>
+<text x="349" y="388" font-family="system-ui,sans-serif" font-size="14" font-weight="650" fill="#24604f" text-anchor="end"><tspan x="349" dy="0">Keep</tspan></text>
+<text x="31" y="410" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#535e57" text-anchor="start"><tspan x="31" dy="0">Repair + changes from main</tspan></text>
+<text x="31" y="432" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#8d3925" text-anchor="start"><tspan x="31" dy="0">Main hunks can remain in this diff.</tspan></text>
+<rect x="18" y="460" width="344" height="64" rx="3" fill="#faf8f3" stroke="#c7ccc3" stroke-width="1.5"/>
+<text x="31" y="484" font-family="ui-monospace,monospace" font-size="15" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="31" dy="0">backlog/…</tspan></text>
+<text x="349" y="484" font-family="system-ui,sans-serif" font-size="14" font-weight="650" fill="#535e57" text-anchor="end"><tspan x="349" dy="0">Leave out</tspan></text>
+<text x="31" y="506" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#535e57" text-anchor="start"><tspan x="31" dy="0">Bookkeeping</tspan></text>
+<path d="M190,524 V546" fill="none" stroke="#535e57" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="18" y="548" width="344" height="198" rx="3" fill="#faf8f3" stroke="#24604f" stroke-width="1.5"/>
+<text x="34" y="577" font-family="system-ui,sans-serif" font-size="18" font-weight="650" fill="#24604f" text-anchor="start"><tspan x="34" dy="0">Jev’s evidence packet</tspan></text>
+<text x="34" y="608" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="34" dy="0">Approved + repair revisions</tspan><tspan x="34" dy="22.4">Diff for selected files</tspan><tspan x="34" dy="22.4">Failed gate + failure lines</tspan><tspan x="34" dy="22.4">Rebase baselines + commit subjects</tspan><tspan x="34" dy="22.4">Gate rerun information</tspan><tspan x="34" dy="22.4">Omissions from fitting the packet</tspan></text>
+<path d="M190,746 V768" fill="none" stroke="#535e57" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="60" y="770" width="260" height="72" rx="3" fill="#eef1e9" stroke="#24604f" stroke-width="1.5"/>
+<text x="190" y="798" font-family="system-ui,sans-serif" font-size="17" font-weight="650" fill="#24604f" text-anchor="middle"><tspan x="190" dy="0">Jev: does the repair preserve</tspan><tspan x="190" dy="23.8">the check and behaviour?</tspan></text>
+</svg>

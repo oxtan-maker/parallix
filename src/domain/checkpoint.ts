@@ -68,6 +68,9 @@ export interface CheckpointData {
     readonly acknowledgedAt?: string;
     /** Append-only operator decisions; correction evidence never becomes a Goal Check row. */
     readonly corrections?: readonly {
+      /** Authorization before this decision; absent on historical correction records. */
+      readonly authorizedCriteria?: readonly string[];
+      readonly authorizedGates?: readonly string[];
       readonly blocker: InvalidContractBlocker;
       readonly operator: string;
       readonly decision: string;

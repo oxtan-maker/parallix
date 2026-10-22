@@ -7,6 +7,8 @@ export interface RepositoryGate {
   order: number;
   after?: string[];
   reuse?: 'never' | 'clean-tree';
+  /** Named adapters.gates.resources capacity this gate occupies while it runs. */
+  resource?: string;
 }
 
 /** The complete declared gate surface for a repository. */
@@ -37,13 +39,16 @@ export function normalizeGates(raw: unknown): RepositoryGate[] {
       continue;
     }
     const order = typeof record.order === 'number' ? record.order : 0;
-    const after = Array.isArray(record.after) && record.after.every((dependency: unknown) => typeof dependency === 'string' && dependency)
-      ? record.after as string[]
-      : undefined;
+    const after = normalizeAfter(record.after);
     const reuse: RepositoryGate['reuse'] = record.reuse === 'clean-tree' ? 'clean-tree' : 'never';
-    gates.push({ key, command, order, ...(after ? { after } : {}), reuse });
+    const resource = typeof record.resource === 'string' && record.resource ? record.resource : undefined;
+    gates.push({ key, command, order, ...(after ? { after } : {}), reuse, ...(resource ? { resource } : {}) });
   }
   return gates.sort((a, b) => a.order - b.order);
+}
+
+function normalizeAfter(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((dependency: unknown) => typeof dependency === 'string' && dependency) ? value as string[] : undefined;
 }
 
 /**
@@ -67,7 +72,7 @@ export function validateRepositoryGates(adapters: unknown): string[] {
   // adapters.gates declares additionalProperties:false in the workflow schema;
   // reject any key it does not recognise so a typo (e.g. requireIntegration)
   // fails validation instead of silently disappearing.
-  const KNOWN_GATE_KEYS = new Set(['maxConcurrent', 'requirePreIntegration', 'parallel', 'preHandoff', 'preReview', 'preIntegration']);
+  const KNOWN_GATE_KEYS = new Set(['maxConcurrent', 'resources', 'verificationResource', 'requirePreIntegration', 'parallel', 'preHandoff', 'preReview', 'preIntegration']);
   for (const key of Object.keys(gates)) {
     if (!KNOWN_GATE_KEYS.has(key)) {
       issues.push(`adapters.gates.${key} is not a recognised key (allowed: ${[...KNOWN_GATE_KEYS].join(', ')})`);
@@ -77,6 +82,8 @@ export function validateRepositoryGates(adapters: unknown): string[] {
     issues.push('adapters.gates.requirePreIntegration must be a boolean');
   }
   validateMaxConcurrent(gates.maxConcurrent, issues);
+  const resources = validateResources(gates.resources, issues);
+  validateGateResource(gates.verificationResource, 'adapters.gates', resources, issues, 'verificationResource');
   validateParallelism(gates.parallel, issues);
   const PHASE_LABELS = {
     preHandoff: 'pre-handoff',
@@ -92,7 +99,7 @@ export function validateRepositoryGates(adapters: unknown): string[] {
       issues.push(`adapters.gates.${phase} must be an array (${expected} gates)`);
       continue;
     }
-    (value as unknown[]).forEach((entry, index) => validateGateEntry(entry, phase, index, issues));
+    (value as unknown[]).forEach((entry, index) => validateGateEntry(entry, phase, index, issues, resources));
     validateGateDependencies(value as GateEntryRecord[], phase, issues);
   }
   return issues;
@@ -102,6 +109,24 @@ function validateMaxConcurrent(value: unknown, issues: string[]): void {
   if (value !== undefined && (!Number.isInteger(value) || (value as number) < 1)) {
     issues.push('adapters.gates.maxConcurrent must be a positive integer');
   }
+}
+
+/** @returns the declared resource names, so gate assignments can be checked against them. */
+function validateResources(value: unknown, issues: string[]): Set<string> {
+  const names = new Set<string>();
+  if (value === undefined) { return names; }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    issues.push('adapters.gates.resources must be an object');
+    return names;
+  }
+  for (const [name, limit] of Object.entries(value as Record<string, unknown>)) {
+    names.add(name);
+    if (!name) { issues.push('adapters.gates.resources names must be non-empty'); }
+    if (!Number.isInteger(limit) || (limit as number) < 1) {
+      issues.push(`adapters.gates.resources.${name} must be a positive integer`);
+    }
+  }
+  return names;
 }
 
 function validateParallelism(parallel: unknown, issues: string[]): void {
@@ -120,7 +145,7 @@ function validateParallelism(parallel: unknown, issues: string[]): void {
   }
 }
 
-function validateGateEntry(rawEntry: unknown, phase: string, index: number, issues: string[]): void {
+function validateGateEntry(rawEntry: unknown, phase: string, index: number, issues: string[], resources: Set<string>): void {
   const entry = rawEntry as Record<string, unknown>;
   if (!entry || typeof entry !== 'object') {
     issues.push(`adapters.gates.${phase}[${index}] must be an object`);
@@ -142,6 +167,16 @@ function validateGateEntry(rawEntry: unknown, phase: string, index: number, issu
     issues.push(`adapters.gates.${phase}[${index}].reuse must be "never" or "clean-tree"`);
   }
 
+  validateGateResource(entry.resource, `adapters.gates.${phase}[${index}]`, resources, issues);
+}
+
+function validateGateResource(resource: unknown, label: string, resources: Set<string>, issues: string[], field = 'resource'): void {
+  if (resource === undefined) { return; }
+  if (typeof resource !== 'string' || !resource) {
+    issues.push(`${label}.${field} must be a non-empty resource name`);
+  } else if (!resources.has(resource)) {
+    issues.push(`${label}.${field} "${resource}" is not declared in adapters.gates.resources`);
+  }
 }
 
 function validateGateDependencies(value: GateEntryRecord[], phase: string, issues: string[]): void {

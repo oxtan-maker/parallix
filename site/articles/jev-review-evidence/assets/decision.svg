@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600" role="img" aria-labelledby="title desc">
+<title id="title">Building the repair evidence</title><desc id="desc">Compare the approved mission change against its original main baseline with the repaired mission change against its current main baseline. Select files whose mission changes differ. Files changed only on main and Backlog records are excluded. The approved-to-repaired diff for a selected file can still include changes brought in by a rebase. The packet adds both revisions, failed-gate details, rebase metadata, gate-rerun information and omission notices, then goes to Jev. File examples are schematic.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8" fill="#535e57"/></marker></defs>
+<text x="8" y="26" font-family="system-ui,sans-serif" font-size="21" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="8" dy="0">Keep the repair in view</tspan></text>
+<rect x="8" y="44" width="300" height="80" rx="3" fill="#faf8f3" stroke="#c7ccc3" stroke-width="1.5"/>
+<text x="23" y="71" font-family="system-ui,sans-serif" font-size="17" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="23" dy="0">At approval</tspan></text>
+<text x="23" y="102" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#535e57" text-anchor="start"><tspan x="23" dy="0">main at approval → approved head</tspan></text>
+<rect x="492" y="44" width="300" height="80" rx="3" fill="#faf8f3" stroke="#c7ccc3" stroke-width="1.5"/>
+<text x="507" y="71" font-family="system-ui,sans-serif" font-size="17" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="507" dy="0">After repair + rebase</tspan></text>
+<text x="507" y="102" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#535e57" text-anchor="start"><tspan x="507" dy="0">main after rebase → repair head</tspan></text>
+<path d="M158,124 V142 H400" fill="none" stroke="#535e57" stroke-width="1.5"/>
+<path d="M642,124 V142 H400 V158" fill="none" stroke="#535e57" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="400" y="180" font-family="system-ui,sans-serif" font-size="18" font-weight="650" fill="#252b2a" text-anchor="middle"><tspan x="400" dy="0">Compare the two mission changes; select files</tspan></text>
+<rect x="8" y="195" width="784" height="182" rx="3" fill="#faf8f3" stroke="#c7ccc3" stroke-width="1.5"/>
+<rect x="8" y="195" width="784" height="28" rx="3" fill="#eef1e9" stroke="none" stroke-width="0"/>
+<text x="22" y="214" font-family="system-ui,sans-serif" font-size="15" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="22" dy="0">Illustrative file</tspan></text>
+<text x="284" y="214" font-family="system-ui,sans-serif" font-size="15" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="284" dy="0">What changed</tspan></text>
+<text x="618" y="214" font-family="system-ui,sans-serif" font-size="15" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="618" dy="0">In the packet?</tspan></text>
+<text x="22" y="246" font-family="ui-monospace,monospace" font-size="16" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="22" dy="0">src/worker.ts</tspan></text>
+<text x="284" y="246" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#535e57" text-anchor="start"><tspan x="284" dy="0">Repair changes</tspan></text>
+<text x="618" y="243" font-family="system-ui,sans-serif" font-size="16" font-weight="650" fill="#24604f" text-anchor="start"><tspan x="618" dy="0">Keep</tspan></text>
+<text x="22" y="280" font-family="ui-monospace,monospace" font-size="16" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="22" dy="0">src/ui.ts</tspan></text>
+<text x="284" y="280" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#535e57" text-anchor="start"><tspan x="284" dy="0">Changes from main only</tspan></text>
+<text x="618" y="277" font-family="system-ui,sans-serif" font-size="16" font-weight="650" fill="#535e57" text-anchor="start"><tspan x="618" dy="0">Leave out</tspan></text>
+<text x="22" y="314" font-family="ui-monospace,monospace" font-size="16" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="22" dy="0">test/worker.test.ts</tspan></text>
+<text x="284" y="314" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#535e57" text-anchor="start"><tspan x="284" dy="0">Repair + changes from main</tspan></text>
+<text x="618" y="311" font-family="system-ui,sans-serif" font-size="16" font-weight="650" fill="#24604f" text-anchor="start"><tspan x="618" dy="0">Keep</tspan></text>
+<text x="618" y="332" font-family="system-ui,sans-serif" font-size="13" font-weight="400" fill="#8d3925" text-anchor="start"><tspan x="618" dy="0">Main hunks can remain</tspan></text>
+<text x="22" y="366" font-family="ui-monospace,monospace" font-size="16" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="22" dy="0">backlog/…</tspan></text>
+<text x="284" y="366" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#535e57" text-anchor="start"><tspan x="284" dy="0">Bookkeeping</tspan></text>
+<text x="618" y="363" font-family="system-ui,sans-serif" font-size="16" font-weight="650" fill="#535e57" text-anchor="start"><tspan x="618" dy="0">Leave out</tspan></text>
+<path d="M400,377 V398" fill="none" stroke="#535e57" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="8" y="400" width="588" height="184" rx="3" fill="#faf8f3" stroke="#24604f" stroke-width="1.5"/>
+<text x="24" y="429" font-family="system-ui,sans-serif" font-size="18" font-weight="650" fill="#24604f" text-anchor="start"><tspan x="24" dy="0">Jev’s evidence packet</tspan></text>
+<text x="24" y="454" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="24" dy="0">Approved + repair revisions</tspan><tspan x="24" dy="22.4">Diff for selected files</tspan><tspan x="24" dy="22.4">Failed gate + failure lines</tspan><tspan x="24" dy="22.4">Rebase baselines + commit subjects</tspan><tspan x="24" dy="22.4">Gate rerun information</tspan><tspan x="24" dy="22.4">Omissions from fitting the packet</tspan></text>
+<path d="M596,495 H626" fill="none" stroke="#535e57" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="628" y="440" width="164" height="110" rx="3" fill="#eef1e9" stroke="#24604f" stroke-width="1.5"/>
+<text x="710" y="467" font-family="system-ui,sans-serif" font-size="18" font-weight="650" fill="#24604f" text-anchor="middle"><tspan x="710" dy="0">Jev</tspan></text>
+<text x="710" y="493" font-family="system-ui,sans-serif" font-size="16" font-weight="650" fill="#24604f" text-anchor="middle"><tspan x="710" dy="0">Preserves</tspan><tspan x="710" dy="22.4">the check and</tspan><tspan x="710" dy="22.4">behaviour?</tspan></text>
+</svg>

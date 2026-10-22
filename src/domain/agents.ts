@@ -44,7 +44,7 @@ export interface AgentAvailability {
 
 export interface StepSelectionPolicy {
   readonly eligible: readonly AgentFamily[];
-  readonly strategy: 'random' | 'weighted';
+  readonly strategy: string;
   readonly weights?: Readonly<Partial<Record<AgentFamily, number>>>;
 }
 
@@ -58,6 +58,8 @@ export interface AgentSelectionSnapshot {
 
 export interface SelectionRequest {
   readonly preferred?: AgentFamily | null;
+  /** Explicit operator override precedes launcher probing, but never blocks or exclusions. */
+  readonly override?: AgentFamily | null;
   readonly excluded?: ReadonlySet<AgentFamily>;
   readonly random?: () => number;
 }
@@ -73,9 +75,9 @@ export function selectableAgents(
   step: string,
   excluded: ReadonlySet<AgentFamily> = new Set(),
 ): AgentFamily[] {
-  const policy = snapshot.steps[agentPolicyStep(step)] ?? snapshot.defaultPolicy;
+  const policy = selectionPolicy(snapshot, step);
   const available = new Map(snapshot.agents.map((agent) => [agent.family, agent]));
-  return policy.eligible.filter((family) => {
+  return [...new Set(policy.eligible)].filter((family) => {
     const candidate = available.get(family);
     return candidate !== undefined
       && !excluded.has(family)
@@ -84,18 +86,62 @@ export function selectableAgents(
   });
 }
 
+/** Invalid operator policy must never be treated as recoverable pool exhaustion. */
+export class AgentSelectionPolicyError extends Error {
+  readonly code = 'WORKFLOW_AGENT_POLICY_INVALID';
+  constructor(step: string, detail: string) {
+    super(`Invalid agent policy for step "${step}": ${detail}. Fix config/agents.json before retrying.`);
+    this.name = 'AgentSelectionPolicyError';
+  }
+}
+
+export function selectionPolicy(snapshot: AgentSelectionSnapshot, step: string): StepSelectionPolicy {
+  const policyStep = agentPolicyStep(step);
+  const configured = snapshot.steps[policyStep];
+  if (policyStep === 'review' && (!configured || configured.eligible.length === 0)) {
+    throw new AgentSelectionPolicyError(step, 'review requires explicit nonempty eligible families');
+  }
+  const policy = configured ?? snapshot.defaultPolicy;
+  if (policy.strategy !== 'random' && policy.strategy !== 'weighted') {
+    throw new AgentSelectionPolicyError(step, `unknown selection strategy ${JSON.stringify(policy.strategy)}`);
+  }
+  if (policy.strategy === 'weighted') {
+    const weights = policy.weights ?? {};
+    for (const family of policy.eligible) {
+      const weight = weights[family];
+      if (!Object.hasOwn(weights, family) || !Number.isFinite(weight) || weight! < 0) {
+        throw new AgentSelectionPolicyError(step, `weight for ${family} must be an explicit finite nonnegative number`);
+      }
+    }
+    if (!policy.eligible.some(family => weights[family]! > 0)) {
+      throw new AgentSelectionPolicyError(step, 'weighted policy requires at least one positive weight');
+    }
+  }
+  return policy;
+}
+
 function weightedPick(
   pool: readonly AgentFamily[],
   weights: Readonly<Partial<Record<AgentFamily, number>>>,
   random: () => number,
+  step: string,
 ): AgentFamily {
-  const total = pool.reduce((sum, family) => sum + (weights[family] ?? 1), 0);
-  let cursor = random() * total;
-  for (const family of pool) {
-    cursor -= weights[family] ?? 1;
-    if (cursor <= 0) { return family; }
+  const positive = pool.filter(family => weights[family]! > 0);
+  if (positive.length === 0) {
+    throw new AgentPoolExhaustedError(step, `No available positive weight remains for step ${step} after blocks, availability and exclusions; zero-weight families cannot be drawn.`);
   }
-  return pool[pool.length - 1] as AgentFamily;
+  // Scale before summing: even multiple MAX_VALUE weights cannot overflow.
+  const scale = Math.max(...positive.map(family => weights[family]!));
+  if (positive.some(family => weights[family]! / scale === 0)) {
+    throw new AgentSelectionPolicyError(step, 'positive weight range exceeds numeric sampling precision; reduce the weight range');
+  }
+  const total = positive.reduce((sum, family) => sum + weights[family]! / scale, 0);
+  let cursor = random() * total;
+  for (const family of positive) {
+    cursor -= weights[family]! / scale;
+    if (cursor < 0) { return family; }
+  }
+  return positive[positive.length - 1];
 }
 
 /** Pure and synchronous: no config, process, filesystem, or launcher probe access. */
@@ -104,13 +150,17 @@ export function selectAgent(
   step: string,
   request: SelectionRequest = {},
 ): AgentFamily {
+  const policy = selectionPolicy(snapshot, step);
+  if (request.override && policy.eligible.includes(request.override) && !request.excluded?.has(request.override)) {
+    const candidate = snapshot.agents.find(agent => agent.family === request.override);
+    if (candidate && blockedForMs(candidate.block, snapshot.capturedAtMs) === 0) { return request.override; }
+  }
   const pool = selectableAgents(snapshot, step, request.excluded);
   if (request.preferred && pool.includes(request.preferred)) { return request.preferred; }
-  if (pool.length === 0) { throw new AgentPoolExhaustedError(step, `No available agent for step ${step}`); }
-  const policy = snapshot.steps[agentPolicyStep(step)] ?? snapshot.defaultPolicy;
   const random = request.random ?? Math.random;
   if (policy.strategy === 'weighted') {
-    return weightedPick(pool, policy.weights ?? {}, random);
+    return weightedPick(pool, policy.weights!, random, step);
   }
+  if (pool.length === 0) { throw new AgentPoolExhaustedError(step, `No available agent for step ${step}`); }
   return pool[Math.floor(random() * pool.length)] as AgentFamily;
 }

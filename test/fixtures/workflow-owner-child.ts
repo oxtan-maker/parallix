@@ -6,14 +6,14 @@ import { createMissionTerminalCapability } from '../../src/composition/mission-t
 import fs from 'node:fs';
 import path from 'node:path';
 import { runWorkflowWorker } from '../../src/composition/workflow-operations.js';
-import { createProductionApplicationServices } from '../../src/composition/application-services.js';
+import type { createProductionApplicationServices } from '../../src/composition/application-services.js';
 import { resolveProcessConfiguration } from '../../src/composition/config.js';
 import { BoardCommandController } from '../../src/application/controller/board-controller.js';
 import { runWorkflowObservation } from '../../src/composition/workflow-observation.js';
 
 /** Block this executor/observer itself without paying for a polling subprocess. */
 function synchronousBarrier(release: string): void {
-  const deadline = Date.now() + 20_000;
+  const deadline = Date.now() + Number(process.env.PARALLIX_FIXTURE_DEADLINE_MS ?? 20_000);
   const sleeper = new Int32Array(new SharedArrayBuffer(4));
   while (!fs.existsSync(release)) {
     if (Date.now() >= deadline) { throw new Error(`Fixture barrier expired: ${release}`); }
@@ -22,6 +22,7 @@ function synchronousBarrier(release: string): void {
 }
 
 const createGraph: typeof createProductionApplicationServices = async (root, progress, options) => {
+  const { createProductionApplicationServices } = await import('../../src/composition/application-services.js');
   const graph = await createProductionApplicationServices(root, progress, options);
   const fixtureRoot = options!.configuration!.storage.parallixHome!;
   const ports = graph.executePorts;
@@ -68,7 +69,14 @@ const createGraph: typeof createProductionApplicationServices = async (root, pro
   return { ...graph, executePorts, presentationCapabilities: { ...graph.presentationCapabilities, commandController: raw } };
 };
 
-if (process.argv[2] === '--workflow-foreground') {
+if (process.argv[2] === '--fixture-public') {
+  const { setCommandPathProbe, setLauncherHealthProbe } = await import('../../src/adapters/agents/agents.js');
+  setCommandPathProbe(() => '/controlled-provider');
+  setLauncherHealthProbe(() => ({ ok: true }));
+  const { run } = await import('../../src/composition/create-cli.js');
+  const code = await run(process.argv.slice(4), { baseCwd: process.argv[3], environment: { ...process.env } });
+  process.exit(code);
+} else if (process.argv[2] === '--workflow-foreground') {
   const { ownWorkflowCli } = await import('../../src/composition/workflow-cli.js');
   const root = process.argv[3];
   const configuration = resolveProcessConfiguration();
@@ -108,14 +116,33 @@ if (process.argv[2] === '--workflow-foreground') {
   process.once('disconnect', () => { void (async () => {
     await host.close(); await observation.close(); await owned.close(); await graph.operatorState.close();
   })().finally(() => process.exit(0)); });
-} else if (process.argv[2] === '--fixture-cli-execute') {
+} else if (['--fixture-cli-execute', '--fixture-cli-lead'].includes(process.argv[2])) {
   const root = process.argv[3]; const slug = process.argv[4]; const configuration = resolveProcessConfiguration();
   const graph = await createGraph(root, undefined, { configuration });
   const owned = await composeWorkflowOperations(root, configuration, graph.presentationCapabilities!.commandController,
     path.join(root, 'parallix.db'), async () => 'codex', { command: process.execPath, args: [...process.execArgv, import.meta.filename] });
   try {
     const { default: active } = await import('../../src/adapters/cli/commands/active.js');
-    await active([slug, '--implementer', 'codex'], { controller: owned.service, rootDir: root, missionTitleFn: async () => 'fixture mission', exitFn: code => { throw new Error(`CLI exited ${code}`); } });
+    if (process.argv[2] === '--fixture-cli-lead') {
+      const { createLeadSupervisorPort } = await import('../../src/composition/lead-supervisor.js');
+      const { createLeadCommand } = await import('../../src/interfaces/cli/lead.js');
+      const { createActiveCommand } = await import('../../src/interfaces/cli/active.js');
+      const { createCliServiceScope } = await import('../../src/composition/cli-service-scope.js');
+      const target = { ...graph, presentationCapabilities: { ...graph.presentationCapabilities!, commandController: owned.service } };
+      const scope = { ...createCliServiceScope(root, configuration), openWorkflowServices: async () => target };
+      // Only the board queue is controlled; borrowing, forwarding, signals and ownership are real.
+      target.presentationCapabilities.boardProjection = { ...graph.presentationCapabilities!.boardProjection,
+        build: async () => ({ attentionQueue: [{ missionId: slug, card: { lane: 'active', gate: 'PASS', currentWork: null }, reason: { kind: 'none' }, action: { kind: 'active:execute', display: `px active ${slug}` } }] }) as never };
+      const forwards = new Set<Promise<unknown>>();
+      try {
+        process.exitCode = await createLeadCommand(createLeadSupervisorPort(target, forwards, { rootDir: root, scope,
+          active: createActiveCommand((request, options) => active([...request.args], options)), registry: {},
+          runPublicCli: async () => { throw new Error('Unexpected non-active forward'); },
+          launchRecovery: async () => { throw new Error('Unexpected recovery'); } }))([slug, '--poll', '60', '--budget', '0']);
+      } finally { await Promise.allSettled(forwards); }
+    } else {
+      await active([slug, '--implementer', 'codex'], { controller: owned.service, rootDir: root, missionTitleFn: async () => 'fixture mission', exitFn: code => { throw new Error(`CLI exited ${code}`); } });
+    }
   } finally { await owned.close(); await graph.operatorState.close(); }
 } else if (process.argv[2] === '--workflow-observe') {
   runWorkflowObservation(process.argv[3], resolveProcessConfiguration(), (root, configuration) => {

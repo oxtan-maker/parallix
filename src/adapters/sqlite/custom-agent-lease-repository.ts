@@ -15,9 +15,10 @@ export class SqliteCustomAgentLeaseRepository implements CustomAgentLeaseReposit
       const rows = await this._db.query<LeaseRow>('SELECT lease_id, capacity, launcher_pid, launcher_start_id, child_pid, child_start_id FROM custom_agent_leases WHERE resource = ?', [this.resource]);
       for (const row of rows) {
         const live = row.child_pid !== null ? isSameLiveProcess(row.child_pid, row.child_start_id) : isSameLiveProcess(row.launcher_pid, row.launcher_start_id);
-        const groups = this.resource === 'verification'
+        const verification = this.resource.startsWith('verification');
+        const groups = verification
           ? await this._db.query<{ pid: number; start_id: string }>('SELECT pid, start_id FROM admission_process_groups WHERE lease_id = ?', [row.lease_id]) : [];
-        const descendants = this.resource === 'verification' && !live ? gateDescendants(row.lease_id) : [];
+        const descendants = verification && !live ? gateDescendants(row.lease_id) : [];
         if (!live && descendants.length === 0 && !groups.some(group => isLiveProcessGroup(group.pid, group.start_id))) {
           await this._db.execute('DELETE FROM custom_agent_leases WHERE lease_id = ?', [row.lease_id]);
         }

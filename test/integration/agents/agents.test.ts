@@ -152,8 +152,8 @@ test('custom capacity saturation reports at launch while selection remains eligi
   }), 'utf8');
   const config = {
     steps: {
-      draft: { eligible: ['custom', 'codex'], selection: 'first' },
-      review: { eligible: ['custom'], selection: 'first' }
+      draft: { eligible: ['custom', 'codex'], selection: 'weighted', weights: { custom: 1, codex: 0 } },
+      review: { eligible: ['custom'], selection: 'random' }
     }
   } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
   const reservation = await tryAcquireCustomCapacity(worktree);
@@ -663,7 +663,7 @@ test('selectAgent honors a changed eligible list from the working-tree config/ag
     // Only vibe is eligible; the existing path-launcher fixtures make it run.
     fs.writeFileSync(
       path.join(configDir, 'agents.json'),
-      JSON.stringify({ steps: { draft: { eligible: ['vibe'], selection: 'first' } } }),
+      JSON.stringify({ steps: { draft: { eligible: ['vibe'], selection: 'random' } } }),
       'utf8'
     );
     process.chdir(tmpRoot);

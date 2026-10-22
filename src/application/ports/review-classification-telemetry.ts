@@ -2,7 +2,7 @@ import type { ClassifierRoute } from '../review-classification/routing-policy.js
 
 /** Call measurements carry deduplication metadata; no durable launch or retry entity. */
 export interface ClassifierCallMeasurement {
-  readonly obligations?: readonly import('../review-classification/obligation-review.js').ObligationAnswer[];
+  readonly obligations?: readonly HistoricalObligationAnswer[];
   readonly panel?: import('../review-classification/panel.js').PanelMeasurement;
   readonly decisionId: string;
   readonly fingerprint: string;
@@ -51,4 +51,12 @@ export interface ReviewClassificationTelemetryPort {
 
 export interface ClassifierStatisticsReadPort {
   read(): Promise<import('../review-classification/statistics.js').ClassifierStatisticsInput>;
+}
+
+/** Retained schema for decoding measurements from the retired per-obligation route. */
+export interface HistoricalObligationAnswer {
+  readonly id: string;
+  readonly selected: string | null;
+  readonly probabilities: Readonly<Record<string, number>> | null;
+  readonly failure: string | null;
 }

@@ -9,15 +9,23 @@ type GateLeases = CustomAgentLeaseRepository & {
 };
 
 export class SharedGateAdmission implements GateAdmissionPort {
-  constructor(private readonly leases: () => Promise<GateLeases>, private readonly nested: boolean, private readonly maxConcurrent: (_root: string) => number) {}
+  constructor(private readonly leases: (_resource: string) => Promise<GateLeases>, private readonly nested: boolean, private readonly maxConcurrent: (_root: string) => number) {}
 
   assertIndependent(): void {
     if (this.nested) { throw new Error('Nested verification gate invocation is not supported'); }
   }
 
   async run<T>(root: string, action: (_run: GateAdmissionRun) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.admit(root, 'verification', this.maxConcurrent(root), action, signal);
+  }
+
+  /** Resource leases use their own lease partition, so independent resources never contend. */
+  async runOnResource<T>(root: string, resource: { name: string; capacity: number }, action: (_run: GateAdmissionRun) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.admit(root, `verification:${resource.name}`, resource.capacity, action, signal);
+  }
+
+  private async admit<T>(root: string, partition: string, capacity: number, action: (_run: GateAdmissionRun) => Promise<T>, signal?: AbortSignal): Promise<T> {
     this.assertIndependent();
-    const capacity = this.maxConcurrent(root);
     if (!Number.isFinite(capacity)) { throw new Error('Gate admission requires a configured finite maximum'); }
     const controller = new AbortController();
     const cancel = () => controller.abort();
@@ -31,7 +39,7 @@ export class SharedGateAdmission implements GateAdmissionPort {
     try {
       const owner = processIdentity(process.pid);
       if (!owner) { throw new Error('Cannot establish verification owner identity'); }
-      leases = await this.leases();
+      leases = await this.leases(partition);
       while (!lease) {
         controller.signal.throwIfAborted();
         lease = await leases.acquire(root, capacity, owner);

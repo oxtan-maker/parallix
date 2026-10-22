@@ -85,7 +85,7 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
     ...createAuthoringCommands(context), ...createLegacyCommands(context), ...createReadCommands(context), ...createLifecycleCommands(context),
   };
   const registry: Record<string, Command> = Object.fromEntries(["active", "recover", "config", "goal", "repro", "classification", "scope", "gate", "criterion", "mission", "depends", "nel", "checkpoint", "assign", "verdict", "resolve", "revoke-review", "revoke", "unassign", "diff", "history", "attach", "draft", "integrate", "cancel", "import-legacy", "migrate-legacy-adhoc-ids", "audit-legacy", "verify-env", "rebase", "resolve-conflict", "review", "setup", "setup-review", "stats", "github-publish-status", "status", "verify", "web", "ui"].map(name => [name, configuredCommands[name]]));
-  registry.lead = (args: string[]) => withGraph(async services => {
+  registry.lead = (args: string[], options: Record<string, unknown> = {}) => withGraph(async services => {
     // Fleet supervision is unused by short CLI commands and autonomous review.
     const [{ createLeadSupervisorPort, leadRecoveryWorkspace }, { createLeadCommand }, { FRESH_SESSION_MARKER_PORT }] = await (leadComposition ??= loadLeadComposition());
     const forwards = new Set<Promise<unknown>>();
@@ -141,8 +141,14 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
         if (publication) { await currentWork.ended(publication); }
       }
     };
-    try { return await createLeadCommand(createLeadSupervisorPort(services, forwards, { rootDir, scope, active, registry, runPublicCli: run, launchRecovery }))(args); }
+    let result: number;
+    try { result = await createLeadCommand(createLeadSupervisorPort(services, forwards, { rootDir, scope, active, registry, runPublicCli: run, launchRecovery }))(args); }
     finally { await Promise.allSettled(forwards); }
+    if (result !== 0) {
+      if (typeof options.exitFn === 'function') { options.exitFn(result); }
+      else { throw new Error(`Lead exited with status ${result}`); }
+    }
+    return result;
   });
   ownWorkflowCli(registry, async () => attachWorkflowOperations(rootDir, configuration, await openServices(rootDir)));
   return registry;

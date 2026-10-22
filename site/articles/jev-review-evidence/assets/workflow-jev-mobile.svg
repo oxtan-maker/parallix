@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="380" height="686" viewBox="0 0 380 686" role="img" aria-labelledby="title desc">
+<title id="title">The review workflow with Jev</title><desc id="desc">Agent A implements with checkpoints. Agent B independently reviews using a different model. Human review precedes local integration gates. A dotted arrow marks the handoff to upstream CI integration gates, not an optional check. Findings and failed local gates share a return path for repair. Jev assesses integration-gate repairs and general re-reviews. Approve proceeds to human review; abstain sends the patch to agent B; request changes returns it directly to the implementer. First review always uses agent B.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8" fill="#535e57"/></marker></defs>
+<rect x="58" y="10" width="307" height="58" rx="8" fill="#eef1e9" stroke="#c9ccc3" stroke-width="1"/>
+<g transform="translate(72 22)" fill="none" stroke="#252b2a" stroke-width="1.7"><rect x="2" y="8" width="28" height="22" rx="5"/><path d="M16 8V2M0 16H2M30 16H33M10 24H22"/><circle cx="10" cy="16" r="1.4" fill="#252b2a"/><circle cx="22" cy="16" r="1.4" fill="#252b2a"/></g>
+<text x="117" y="45" font-family="system-ui,sans-serif" font-size="18" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="117" dy="0">Implement</tspan></text>
+<text x="235" y="34" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#59615c" text-anchor="start"><tspan x="235" dy="0">Agent A writes</tspan></text>
+<g stroke="#9b3d25" stroke-width="1.5" fill="#eef1e9"><path d="M235 54H253" fill="none"/><circle cx="235" cy="54" r="2.5"/><circle cx="244" cy="54" r="2.5"/><circle cx="253" cy="54" r="2.5"/></g>
+<text x="263" y="59" font-family="system-ui,sans-serif" font-size="14" font-weight="400" fill="#59615c" text-anchor="start"><tspan x="263" dy="0">Checkpoints</tspan></text>
+<rect x="38" y="110" width="148" height="92" rx="8" fill="#e5eee7" stroke="#24604f" stroke-width="1.5"/>
+<text x="50" y="140" font-family="system-ui,sans-serif" font-size="20" font-weight="650" fill="#24604f" text-anchor="start"><tspan x="50" dy="0">Jev</tspan></text>
+<text x="50" y="170" font-family="system-ui,sans-serif" font-size="13" font-weight="400" fill="#59615c" text-anchor="start"><tspan x="50" dy="0">Check preserved?</tspan></text>
+<text x="50" y="189" font-family="system-ui,sans-serif" font-size="13" font-weight="400" fill="#59615c" text-anchor="start"><tspan x="50" dy="0">Findings fixed?</tspan></text>
+<rect x="204" y="170" width="158" height="92" rx="8" fill="#eef1e9" stroke="#c9ccc3" stroke-width="1"/>
+<g transform="translate(216 183)" fill="none" stroke="#252b2a" stroke-width="1.7"><rect x="2" y="8" width="28" height="22" rx="5"/><path d="M16 8V2M0 16H2M30 16H33M10 24H22"/><circle cx="10" cy="16" r="1.4" fill="#252b2a"/><circle cx="22" cy="16" r="1.4" fill="#252b2a"/></g>
+<text x="256" y="200" font-family="system-ui,sans-serif" font-size="18" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="256" dy="0">Review</tspan></text>
+<text x="216" y="230" font-family="system-ui,sans-serif" font-size="13" font-weight="400" fill="#59615c" text-anchor="start"><tspan x="216" dy="0">Agent B reviews</tspan></text>
+<text x="216" y="249" font-family="system-ui,sans-serif" font-size="13" font-weight="400" fill="#59615c" text-anchor="start"><tspan x="216" dy="0">(different model)</tspan></text>
+<rect x="58" y="354" width="307" height="58" rx="8" fill="#f4e9de" stroke="#c9ccc3" stroke-width="1"/>
+<g transform="translate(72 366)" fill="none" stroke="#252b2a" stroke-width="1.7"><circle cx="16" cy="9" r="7"/><path d="M2 33v-4c0-13 28-13 28 0v4"/></g>
+<text x="117" y="376" font-family="system-ui,sans-serif" font-size="18" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="117" dy="0">Human review</tspan></text>
+<text x="117" y="402" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#59615c" text-anchor="start"><tspan x="117" dy="0">Try the result</tspan></text>
+<rect x="58" y="432" width="307" height="58" rx="8" fill="#eef1e9" stroke="#c9ccc3" stroke-width="1"/>
+<text x="78" y="454" font-family="system-ui,sans-serif" font-size="18" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="78" dy="0">Local integration</tspan></text>
+<text x="78" y="480" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#59615c" text-anchor="start"><tspan x="78" dy="0">Repository gates</tspan></text>
+<path d="M158,68 V108" fill="none" stroke="#535e57" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="168" y="92" font-family="system-ui,sans-serif" font-size="12" font-weight="400" fill="#59615c" text-anchor="start"><tspan x="168" dy="0">Re-review</tspan></text>
+<path d="M315,68 V168" fill="none" stroke="#535e57" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="238" y="92" font-family="system-ui,sans-serif" font-size="12" font-weight="400" fill="#59615c" text-anchor="start"><tspan x="238" dy="0">First review</tspan></text>
+<path d="M38,155 H22" fill="none" stroke="#535e57" stroke-width="1.5"/>
+<text x="25" y="92" font-family="system-ui,sans-serif" font-size="12" font-weight="650" fill="#8d3925" text-anchor="start"><tspan x="25" dy="0">Request changes</tspan></text>
+<path d="M186,155 H283 V168" fill="none" stroke="#535e57" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="208" y="143" font-family="system-ui,sans-serif" font-size="14" font-weight="400" fill="#59615c" text-anchor="start"><tspan x="208" dy="0">Abstain</tspan></text>
+<path d="M112,202 V327 H211 V352" fill="none" stroke="#535e57" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="38" y="302" font-family="system-ui,sans-serif" font-size="15" font-weight="650" fill="#24604f" text-anchor="start"><tspan x="38" dy="0">Approve</tspan></text>
+<path d="M283,262 V327 H211" fill="none" stroke="#535e57" stroke-width="1.5"/>
+<text x="209" y="305" font-family="system-ui,sans-serif" font-size="14" font-weight="400" fill="#59615c" text-anchor="start"><tspan x="209" dy="0">Approved</tspan></text>
+<path d="M211,412 V430" fill="none" stroke="#535e57" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M211,490 V528" fill="none" stroke="#535e57" stroke-width="1.5" stroke-dasharray="2 5" stroke-linecap="round" marker-end="url(#arrow)"/>
+<rect x="58" y="530" width="307" height="58" rx="8" fill="#eef1e9" stroke="#c9ccc3" stroke-width="1"/>
+<text x="78" y="552" font-family="system-ui,sans-serif" font-size="18" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="78" dy="0">CI integration</tspan></text>
+<text x="78" y="578" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#59615c" text-anchor="start"><tspan x="78" dy="0">Upstream gates</tspan></text>
+<path d="M362,216 H374 V620 H22 V39 H56" fill="none" stroke="#535e57" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M58,383 H22" fill="none" stroke="#535e57" stroke-width="1.5"/>
+<path d="M58,461 H22" fill="none" stroke="#535e57" stroke-width="1.5"/>
+<text x="22" y="652" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#59615c" text-anchor="start"><tspan x="22" dy="0">Findings or failed local gates → repair</tspan></text>
+<text x="22" y="677" font-family="system-ui,sans-serif" font-size="14" font-weight="400" fill="#59615c" text-anchor="start"><tspan x="22" dy="0">Dotted arrow: handoff to upstream CI.</tspan></text>
+</svg>

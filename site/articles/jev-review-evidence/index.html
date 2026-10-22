@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Jev clears about a third of re-reviews in my coding-agent workflow. What that saves in agent time and API budget, and when it can save human attention."
+    />
+    <meta name="color-scheme" content="light" />
+    <title>Building a cheaper review loop for coding agents using Jev — Magnus Ekdahl</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#article">Skip to article</a>
+    <header class="masthead">
+      <a href="../../index.html">Engineering notes</a><span>Magnus Ekdahl</span>
+    </header>
+    <main id="article">
+      <article aria-labelledby="title">
+        <header class="article-header">
+          <h1 id="title">Building a cheaper review loop for coding agents using Jev</h1>
+          <p class="standfirst">
+            When tests find a regression in agent-written code, the agent repairs it and the change needs another review.
+            <a href="https://docs.typesafe.ai/models">Jev</a>, TypeSafe’s hosted classifier,
+            clears about a third of those re-reviews in my personal workflow, at a fraction of the
+            cost of a general LLM review.
+          </p>
+          <p class="byline">Magnus Ekdahl · <time datetime="2026-10-21">21 October 2026</time></p>
+        </header>
+
+        <p>
+          In <a href="https://github.com/oxtan-maker/parallix">Parallix</a>, one agent family implements
+          a change and another agent, using a different model, reviews it before I do. Human review and integration gates
+          decide when the work is done. I don't expect the first agent to get it right first time; it usually needs a couple of feedback cycles.<sup><a id="feedback-note-ref"
+            href="#agent-findings" aria-label="Footnote: feedback-cycle numbers">*</a></sup>
+        </p>
+
+        <figure class="article-figure" id="workflow">
+          <picture
+            ><source media="(max-width: 560px)" srcset="assets/workflow-mobile.svg" />
+            <img
+              src="assets/workflow.svg"
+              width="800"
+              height="255"
+              alt="Implementation goes through independent agent review, human review and local integration gates. A dotted arrow marks the handoff to upstream CI integration gates. Findings and failed local gates return the patch to the implementer. A repair reopens the earlier agent approval."
+          /></picture>
+          <figcaption>
+            <strong>The work comes around again.</strong> Tests between handoffs, review by an agent from another model family, human review and integration gates can all return the work to the implementer.
+          </figcaption>
+        </figure>
+
+        <p>
+          Each re-review used to mean another general LLM review. That needs the requirements and codebase context, more than Jev can fit in 32k input tokens per question. Many re-reviews are easier:
+
+          did this repair fix the failed check without weakening it?
+          And would it not be great if we can take decisions in those cases an order of magnitude
+          faster and a couple of orders of magnitude cheaper?<sup><a id="comparison-note-ref"
+            href="#comparison-note" aria-label="Footnote: cost and time comparison">†</a></sup>
+        </p>
+
+        <section aria-labelledby="results-heading">
+          <h2 id="results-heading">The result: 36% of re-reviews</h2>
+          <p>
+            Jev cleared
+            <strong>41 of 114 re-reviews (36%)</strong><sup><a id="results-note-ref"
+              href="#results-note" aria-label="Footnote: sample exclusions and replay provenance">‡</a></sup>:
+            37 repairs to local
+            integration gates and four general re-reviews. That leaves 73 for the general reviewer.
+
+            A typical integration-gate repair fixes one failed test or a performance regression.
+          </p>
+
+          <figure class="article-figure" id="workflow-jev">
+            <picture>
+              <source media="(max-width: 560px)" srcset="assets/workflow-jev-mobile.svg" />
+              <img
+                src="assets/workflow-jev.svg"
+                width="800"
+                height="374"
+                alt="Agent B handles the first review. Jev assesses local integration repairs and general re-reviews. Approve proceeds to human review; abstain sends the patch to agent B; request changes returns it directly to the implementer. Human review and local integration gates remain required, followed by a dotted handoff to upstream CI integration gates."
+              />
+            </picture>
+            <figcaption>
+              <strong>Jev at the re-review.</strong> Approve proceeds to human review;
+              abstain sends the patch to agent B; request changes returns it directly to the
+              implementer. Local integration gates follow human approval; the dotted arrow
+              continues to upstream CI integration.
+            </figcaption>
+          </figure>
+
+          <p>
+            Using Claude API prices as the baseline, that routing mix gives this projection:
+          </p>
+
+          <figure class="article-figure" id="results">
+            <picture
+              ><source media="(max-width: 560px)" srcset="assets/results-mobile.svg" />
+              <img
+                src="assets/results.svg"
+                width="800"
+                height="365"
+                alt="Jev clears 41 of 114 re-reviews: 37 local integration repairs and 4 general re-reviews, leaving 73 for the general reviewer. For an illustrative 800 re-reviews per month, estimated review work falls from 7.5 to 5.3 hours and Claude API-equivalent cost from $208.79 to $134.95."
+            /></picture>
+            <figcaption>
+              <strong>About 29% less review work and 35% less API spend.</strong>
+              For 800 re-reviews per month, the projection saves about
+              <a href="#monthly-projection">2.2 hours and $74</a>,
+              allowing for general-reviewer fallback, Jev’s evidence preparation and calls.
+            </figcaption>
+          </figure>
+
+          <p>
+            Production uses several general reviewers; the estimate assumes the avoided reviews
+            would resemble the Claude sample. 
+          </p>
+        </section>
+
+        <section aria-labelledby="question-heading">
+          <h2 id="question-heading">Integration gates</h2>
+          <p>
+            Early experiments asked whether a repair addressed an integration failure. Jev kept
+            leaving the decision to the general reviewer. Some requests also exceeded its token
+            budget. Better packing got the requests through, but the decisions still weren’t useful.
+          </p>
+          <p>
+            The test run already answers whether the test passes after the fix. A reviewer has a
+            different job. An agent can make a test pass by fixing a code or test regression,
+            or by deleting or weakening a test.
+            Both can produce a green exit status; only one preserves what the test was
+            meant to establish.
+          </p>
+
+          <figure class="article-figure" id="preservation">
+            <picture
+              ><source media="(max-width: 560px)" srcset="assets/preservation-mobile.svg" />
+              <img
+                src="assets/preservation.svg"
+                width="800"
+                height="300"
+                alt="Two schematic repairs both produce a green PASS. Fixing a code or test regression preserves the intended check. Deleting or weakening a test or required assertion leaves intended behaviour unchecked. The test run reports the result; the reviewer judges whether the repair preserved what the test was meant to establish."
+            /></picture>
+            <figcaption>
+              <strong>Both tests pass. The repairs are different.</strong> The test run answers
+              whether it passes; the reviewer asks whether the repair preserves what it was meant
+              to establish. These are schematic examples.
+            </figcaption>
+          </figure>
+
+          <p>
+            That gave Jev a bounded job: judge whether the repair preserves the check and the
+            behaviour already approved. The question names concrete ways to weaken a check,
+            including skipping a test, loosening assertions or raising a CPU or time budget.
+          </p>
+        </section>
+
+        <section aria-labelledby="packet-heading">
+          <h3 id="packet-heading">Build the evidence around that judgment</h3>
+          <p>
+            The classifier needs to know what was approved and what the repair changed. Its
+            packet identifies the approved and repair revisions, supplies their relevant diff, names the
+            failed check and states omissions. It excludes files changed only by other work
+            landed on main and identifies changes brought in by a rebase. Rebase changes in
+            the same file can still appear in the diff.
+          </p>
+
+          <figure class="article-figure" id="decision">
+            <picture
+              ><source media="(max-width: 560px)" srcset="assets/decision-mobile.svg?v=c438c8a573" />
+              <img
+                src="assets/decision.svg?v=0b5447c56c"
+                width="800"
+                height="600"
+                alt="Compare each mission revision against its own main baseline to select files whose mission changes differ. Files changed only on main and Backlog records are excluded. The approved-to-repaired diff for a selected file can still include rebase changes. The packet adds revision IDs, failed-gate details, rebase metadata, gate-rerun information and omissions, then goes to Jev. File examples are schematic."
+            /></picture>
+            <figcaption>
+              <strong>Filter files, not individual rebase hunks.</strong> A file changed only
+              on main is left out. If the repair also changes that file, its diff can still
+              contain changes from main. Filenames are schematic.
+            </figcaption>
+          </figure>
+
+          <p>
+            The local repair loop reruns its gates before re-review. A later rebase does not by
+            itself require repeating every local test; upstream CI provides the usual integration
+            validation. Jev’s approval leaves both stages in place.
+          </p>
+          <p>
+            The model version matters. I use Jev 1.13: on the same 43 approved historical repairs,
+            it cleared 24 against Jev 1.14’s 12.
+          </p>
+        </section>
+
+        <section aria-labelledby="rereview-heading">
+          <h2 id="rereview-heading">General re-reviews</h2>
+          <p>
+            A request for changes gives Jev a specific question: did the repair fix what the
+            reviewer asked for? Parallix sends the earlier findings, repair diff, relevant source and
+            implementer’s response. Three questions run in parallel over that evidence, covering
+            the requested fixes and related regressions introduced by the repair.
+          </p>
+          <p>
+            One clear was a one-line TypeScript correction. A test helper accepted the wrong
+            callback return type; the repair changed it to the type the test runner requires.
+          </p>
+
+          <figure class="article-figure" id="rereview-case">
+            <picture
+              ><source media="(max-width: 560px)" srcset="assets/rereview-repair-mobile.svg" />
+              <img
+                src="assets/rereview-repair.svg"
+                width="800"
+                height="265"
+                alt="An actual general re-review clear: a test helper's callback type changes from unknown or Promise of unknown to void or Promise of void, matching the test runner's contract. Jev approves the repair, one of four general re-review clears."
+            /></picture>
+            <figcaption>
+              <strong>A repair the classifier could check.</strong> Only the callback’s type
+              changed; runtime behaviour and assertions stayed the same.
+            </figcaption>
+          </figure>
+
+          <p>
+            The panel can approve or send the patch back to the implementer. With uncertainty,
+            conflicting votes or a failed call, the general reviewer takes over.
+            This path cleared four re-reviews in the dataset.
+          </p>
+        </section>
+
+        <section aria-labelledby="scope-heading">
+          <h2 id="scope-heading">An approval can miss a defect</h2>
+          <p>
+            Jev is a different model from general LLMs such as Claude and makes different decisions.
+            It can make mistakes, but the difference I found in this sample was small.<sup><a
+              href="#matrix-detection-note" aria-label="Footnote 1: known difference in the sample">1</a></sup>
+            For example, in a local integration repair, the implementer added an <code>admission</code>
+            property to a fixture that already had one. Jev cleared the change. The focused suite
+            passed, but the separate TypeScript check later in the process rejected the duplicate key.
+          </p>
+
+          <figure class="article-figure" id="repair-case">
+            <picture
+              ><source media="(max-width: 560px)" srcset="assets/repair-mobile.svg" />
+              <img
+                src="assets/repair.svg"
+                width="800"
+                height="290"
+                alt="A simplified version of the inspected repair contains two admission properties. Jev clears it. A follow-up review reproduces TS1117, the duplicate-property error. The ordinary local typecheck rejects this revision."
+            /></picture>
+            <figcaption>
+              <strong>The repair introduced another problem.</strong> A follow-up review
+              reproduced <code>TS1117</code> on this revision. The ordinary local typecheck rejects
+              it too. The example is simplified from the inspected patch.
+            </figcaption>
+          </figure>
+        </section>
+
+        <section aria-labelledby="decision-heading">
+          <h2 id="decision-heading">The Jev tradeoffs</h2>
+          <p>
+            For me, the main cost is the attention tied up in review: waiting, checking progress
+            and switching back. The estimate saves about two hours of review work per month
+            at 800 re-reviews. How much human attention that recovers depends on when the workflow needs
+            me, and on how quickly I switch to the next task instead of waiting for the re-review
+            to finish. Reviews that run unattended offer less direct benefit.
+          </p>
+          <p>
+            Parallix keeps a human in the loop on purpose; I cannot assume a single agent pass finishes a mission. A defect Jev misses can reach my review or fail a later gate.
+          </p>
+          <p>
+            Cost matters too. Re-review API spend also falls by about 35%: $74 a month at API prices, before extra
+            repairs and upkeep. That can matter when reviews compete for a fixed token budget.
+            Human approval and the required gates stay in place in both options:
+          </p>
+
+          <figure class="decision-matrix" id="matrix">
+            <table>
+              <caption>
+                Two options for 800 re-reviews per month
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Criterion</th>
+                  <th scope="col">General reviewer every time</th>
+                  <th scope="col">Jev + general-reviewer fallback</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">Re-reviews requesting fixes</th>
+                  <td>
+                    <strong>32.1%</strong><sup><a href="#matrix-detection-note"
+                      aria-label="Footnote 1: re-reviews requesting fixes">1</a></sup>
+                  </td>
+                  <td>
+                    <strong>~31.2%</strong><sup><a href="#matrix-detection-note"
+                      aria-label="Footnote 1: re-reviews requesting fixes">1</a></sup>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Review work</th>
+                  <td>
+                    <strong>7.5 hours</strong><sup><a href="#matrix-time-note"
+                      aria-label="Footnote 2: review work">2</a></sup>
+                  </td>
+                  <td>
+                    <strong>~5.3 hours</strong> (29% less)<sup><a href="#matrix-time-note"
+                      aria-label="Footnote 2: review work">2</a></sup>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Human attention</th>
+                  <td>
+                    Ranges from waiting and checking during reviews to returning only for human
+                    approval.
+                  </td>
+                  <td>
+                    Less waiting and checking if reviews interrupt me; little direct saving when
+                    they run unattended. A missed defect can add an interruption.
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">API cost</th>
+                  <td>
+                    <strong>$208.79</strong><sup><a href="#matrix-cost-note"
+                      aria-label="Footnote 3: API cost">3</a></sup>
+                  </td>
+                  <td>
+                    <strong>~$134.95</strong> (35% less)<sup><a href="#matrix-cost-note"
+                      aria-label="Footnote 3: API cost">3</a></sup>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Upkeep</th>
+                  <td>Existing reviewer setup and maintenance.</td>
+                  <td>
+                    Adds Jev maintenance and a vendor dependency: code diffs go to TypeSafe via
+                    OpenRouter. Failures fall back to the general reviewer.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <figcaption>
+              <p>
+                Both options retain human review, local integration gates and upstream CI. Cost
+                and review work use the Claude Sonnet baseline and exclude extra repairs and upkeep.
+                The monthly workload is illustrative: four weeks at 200 re-reviews, not a measured rate.
+                The effect on human attention depends on the workflow and has not been measured.
+              </p>
+              <p id="matrix-detection-note">
+                <sup>1</sup> The small difference in the sample is one confirmed repair defect
+                Jev cleared among 114 re-reviews. The combined route requested fixes 18 times
+                (15.8%); counting that missed defect gives 19 known cases a general reviewer
+                would have returned (16.7%), a difference of 0.9 percentage points. Follow-up
+                review covered selected cases, so this is the known difference rather than a
+                complete count of misses. General reviewers requested changes in 252 of 786
+                historical re-reviews (32.1%), from 14 August through 21 October. The matrix
+                applies the sample's 0.9-point difference to that baseline: ~31.2%, or about
+                256 versus 249 requests for fixes per 800 re-reviews. That projection holds the
+                review mix fixed; the historical and current cohorts are not a matched comparison.
+                <a href="#review-findings-rate">Calculation details</a>.
+              </p>
+              <p id="matrix-time-note">
+                <sup>2</sup> The 25 recovered Sonnet re-reviews averaged 33.84 seconds from
+                process launch to exit, including tool calls. Apply that mean to 800 reviews
+                without Jev, or 73/114 of them with Jev. Evidence preparation and classifier
+                calls add about 31 minutes per month, leaving about 2.2 hours saved (29%).
+                Untimed replay preparation uses the mean of four production panels. Shared
+                gates, general-reviewer prompt preparation, final workflow bookkeeping, extra
+                repairs and upkeep are excluded. <a href="#accounting">Calculation details</a>.
+              </p>
+              <p id="matrix-cost-note">
+                <sup>3</sup> The Sonnet sample averaged $0.261 per re-review at API prices.
+                Apply the same routing shares and add about $1.25 of classifier calls per 800
+                re-reviews, using recorded panel costs and historical integration-question
+                costs. Estimated monthly saving: $73.84. <a href="#accounting">Calculation details</a>.
+              </p>
+            </figcaption>
+          </figure>
+
+          <p>
+            What I’d carry to another team is the bounded question: give Jev a repair it can
+            judge, leave uncertain cases with the general reviewer, and keep human approval
+            and the downstream gates. Count the misses as well as the reviews avoided;
+            the extra repair cycles determine whether the saving survives.
+          </p>
+        </section>
+
+        <footer class="article-footer">
+          <p class="author">
+            Magnus Ekdahl builds <a href="https://github.com/oxtan-maker/parallix">Parallix</a>, a
+            workflow for coding agents with independent agent review, human approval and
+            repository-owned checks.
+          </p>
+          <h2 id="methods">Sources and calculation</h2>
+          <p>
+            Evidence reconciled on 21 October 2026.
+            <a href="data.json">Aggregate data and calculation inputs</a> ·
+            <a href="research-results.csv">CSV</a>. Raw sessions and case-review
+            transcripts are retained privately; the case accounts above are selected source-checked
+            summaries.
+          </p>
+          <details>
+            <summary>Review population and the case investigations</summary>
+            <p>
+              The live snapshot selects decided pull-request re-review rounds in the Parallix
+              repository after round one, from the review-classifier update completed on
+              16 October at 04:39:57.259 UTC
+              through 21 October 08:29:07.320 UTC. The recorded workflow contains 114 model-reviewed
+              rounds across 41 missions: 37 classifier clears and 77 general-reviewer decisions.
+              All 37 classifier
+              decisions are integration-repair clears naming <code>typesafe/jev-1.13-20260917</code>.
+              Twelve packets contain a recorded gate-rerun result; the other 25 state the
+              workflow’s rerun guarantee. Neither form waives the required gates.
+            </p>
+            <p id="results-note">
+              <sup>‡</sup> Sometimes the infrastructure or tests are just flaky, and a test rerun
+              clears the code without changes. Seven runs reused the old approval without a model
+              review; those results were excluded from the 114 re-reviews. The four general
+              re-review clears are <a href="#panel-replay">replays with the original evidence
+              and policy</a>.
+              <a href="#results-note-ref" aria-label="Back to the results paragraph">↩</a>
+            </p>
+            <p>
+              The duplicate-key case is task-2785 round 4, inspected at revision
+              <code>39b85d160e20b71e23ce0408f749f2834b792b5a</code>. The original Qwen reviewer
+              resumed its original session and reproduced TS1117. The reviewer-model-change case is
+              task-2792 round 2; the original Sonnet 5.5 session approved. That comparison changes
+              both model and history, so it does not isolate a causal model effect. The cases were
+              selected for investigation, rather than sampled to estimate an error rate; the 37 live
+              clears have not all received uniform independent adjudication.
+            </p>
+            <p>
+              I count a clear as wrong when the general reviewer finds an earlier obligation
+              unfixed or a new problem inside the latest repair. A finding outside that repair
+              is an acceptable pass. The general reviewer is the comparator, not ground truth;
+              an unnecessary return adds repair work rather than letting a defect through.
+            </p>
+          </details>
+          <details id="panel-replay">
+            <summary>Research correction: an inactive classification path</summary>
+            <p>
+              I found a routing bug that left general re-review classification inactive for
+              42 of these rounds. I reran their original evidence with the existing questions,
+              thresholds and pinned model: four approvals and 38 abstentions. Four control
+              packets matched the recorded production hashes. Each approval agreed with the
+              general reviewer at the same revision. These four rounds were already inside the
+              114, giving 37 integration-gate repair approvals plus four general re-review
+              approvals. Jev requested no changes in this dataset; it has done so historically.
+              <a href="data.json">The aggregate data</a> retains the rerun cases, protocol and
+              original workflow counts. The production routing fix is queued separately.
+            </p>
+            <p>
+              The three-question panel is not a majority vote. One approve vote with no reject
+              can clear; one reject with no approve can return the repair. Conflicting votes,
+              a failed call or no decisive vote leave the decision to the general reviewer.
+              The <code>v3</code> question can approve at a label score of 0.51; <code>v1</code>
+              needs 0.80. The <code>v1</code> and <code>original</code> questions can reject at 0.89.
+              Three of the four replay approvals scored 0.53–0.58; the fourth scored 0.71.
+              These historically tuned scores are not calibrated probabilities of defect-free
+              code. The exact questions and aggregation are in
+              <a href="https://github.com/oxtan-maker/parallix/blob/d22332f960f513ef243219e14d3fd119c8d120bb/src/application/review-classification/panel-questions.ts">the question definitions</a>
+              and <a href="https://github.com/oxtan-maker/parallix/blob/d22332f960f513ef243219e14d3fd119c8d120bb/src/application/review-classification/panel.ts">panel policy</a>.
+            </p>
+          </details>
+          <details>
+            <summary>Feedback-cycle numbers</summary>
+            <p id="agent-findings">
+              <sup>*</sup> The re-review sample contains 114 re-reviews across 41 missions:
+              2.8 per mission, including repairs after failed local integration gates.
+              Separately, 39 missions completed from 16 to 21 October had 26 recorded agent
+              findings before the first human note or handoff to human review: 0.7 per mission,
+              with findings in eight missions. Re-reviews and reported findings are different
+              counts; neither measures independently verified bugs.
+              <a href="#feedback-note-ref" aria-label="Back to the opening paragraph">↩</a>
+            </p>
+          </details>
+          <details id="review-findings-rate">
+            <summary>How often a review requested fixes</summary>
+            <p>
+              The historical baseline uses recorded pull-request review decisions from
+              14 August through 21 October, beginning with the first complete local calendar day
+              after repairs to the review statistics. General reviewers
+              requested changes in 449 of 1,242 rounds (36.2%): 197 of 456 first reviews (43.2%)
+              and 252 of 786 re-reviews (32.1%). First reviews remain with the general reviewer;
+              the matrix uses the re-review rate to match the work Jev replaces.
+            </p>
+            <p>
+              Each mission/round counts once, using its recorded decision. Where an older round
+              lacks that decision, its latest recorded reviewer outcome supplies it: 172 rounds
+              in total, including 78 re-reviews. Classifier decisions and mechanical approval
+              restorations are excluded from this baseline. These are requests for changes,
+              rather than independently verified defects.
+            </p>
+            <p>
+              The estimate subtracts the sample’s one confirmed miss per 114 re-reviews from
+              252/786: 32.1% − 0.9 percentage points = 31.2%. The four general re-review clears
+              matched general approvals and leave the sample’s 18 returns unchanged. The case
+              investigations establish one additional miss; they did not uniformly adjudicate
+              every clear. This calculation holds the review mix and repair attempts fixed.
+              Additional undiscovered misses would lower the combined rate. The historical
+              general-reviewer cohort and current mixed-route sample are not matched populations.
+            </p>
+          </details>
+          <details id="accounting">
+            <summary>Monthly API budget and review-time projection</summary>
+            <p id="comparison-note">
+              <sup>†</sup> A Jev approval averaged 1.7 seconds including evidence preparation
+              and recording the result (36 clears); a Claude Sonnet 5.5 approval averaged
+              34.6 seconds from reviewer launch to workflow completion (22 approvals).
+              API-equivalent costs averaged $0.0016 across 111 classifier rounds and $0.26
+              across 25 Sonnet re-reviews. These are different samples, not paired trials.
+              <a href="#comparison-note-ref" aria-label="Back to the comparison paragraph">↩</a>
+            </p>
+            <p>
+              Of 36 Claude re-reviews in the sample, 33 original transcript rounds were
+              recovered: 25 pure Sonnet 5.5 and eight Opus 5.5. Only the 25 Sonnet rounds set this
+              baseline. All 25 were checked against their raw sessions, 104 message IDs and
+              captured launcher records. Usage is deduplicated by assistant-message ID and
+              includes the recorded cache-read and cache-write categories. On resumed sessions,
+              the CLI’s cost total is cumulative; per-invocation usage avoids counting it twice.
+            </p>
+            <p>
+              Sonnet’s session span averaged 31.46 seconds; process launch to exit averaged
+              33.84 seconds, including startup, tools and shutdown. No review was dropped.
+              The longest process took 114 seconds, including an 80-second browser E2E command.
+              The full round’s 74-second median also includes work before reviewer launch,
+              such as shared gates, and can span paused or resumed work. I do not credit Jev
+              with removing that time. Completed approval records cover 36 of 37 Jev clears
+              and 22 of 23 Sonnet approvals; the other two Sonnet rounds requested changes.
+            </p>
+            <p>
+              <a href="https://platform.claude.com/docs/en/about-claude/pricing"
+                >Official Claude prices</a
+              >, checked 21 October: per million tokens, Sonnet 5.5 input $2, output $10, cache
+              reads $0.10, five-minute writes $2.50 and one-hour writes $4. Mean historical API
+              equivalent: $0.260988272 per round. These are
+              historical workloads repriced, not subscription bills.
+            </p>
+            <p id="monthly-projection">
+              Without Jev, all 114 rounds in the comparison would require general review; with
+              the Jev routing evaluated here, 73 do. The illustrative monthly workload is
+              800 re-reviews: four weeks at 200, not an observed monthly rate. Multiply those
+              routing shares by 800 and the mean Sonnet process duration. Classifier records
+              cover 111 of the 114 rounds: 69 production rounds and 42 restored-panel replays.
+              Their call time totals 82.9 seconds, including retries and counting parallel
+              panels by elapsed time. Recorded production evidence preparation adds 49.1 seconds.
+            </p>
+            <p>
+              Replay preparation was not timed, so I estimate it using the four production
+              panels’ mean of 2.915 seconds. Five attempts made no classifier call and have no
+              preparation duration; each receives the 68 timed attempts’ mean preparation of
+              0.722 seconds. Together with the recorded calls, that gives about 2.32 seconds
+              per covered round. Applied to 800 rounds, it adds about 31 minutes of classifier
+              work. The three unmeasured rounds receive the same mean. Review work therefore
+              falls from 7.52 to 5.33 hours per month: about 2.19 hours saved (29%). This projection
+              includes evidence preparation but excludes shared gates, general-reviewer prompt
+              preparation and final workflow bookkeeping on both routes.
+            </p>
+            <p>
+              The recorded production and replay panels cost $0.1399. Integration questions
+              lack recorded live costs, so I estimate their 64 first questions and 27 follow-up
+              questions using pinned Jev 1.13 historical usage. The first question averaged
+              $0.000334 over 100 packets; the follow-up averaged $0.000467 over the 64 packets
+              that needed it. Together these give $0.1738 across the 111 covered rounds, or
+              about $1.25 per 800. The three rounds without measurements receive that sample
+              mean.
+              <a href="https://docs.typesafe.ai/models">TypeSafe publishes</a> $0.042 per
+              million input tokens with free output.
+            </p>
+            <p>
+              The projection assumes avoided reviews resemble the recovered sample. It includes
+              general-reviewer fallback and the classifier allowance, but no measured incremental
+              repair cost, maintenance, recovered human time or end-to-end latency benefit. It
+              therefore estimates API expenditure and time spent on review, rather than realized
+              total net savings.
+            </p>
+          </details>
+          <details>
+            <summary>Historical experiments and current policy</summary>
+            <p>
+              The
+              <a
+                href="https://github.com/oxtan-maker/parallix/blob/d22332f960f513ef243219e14d3fd119c8d120bb/docs/adr/0065-local-review-classification-evidence.md#re-review-packet-and-question-experiments"
+                >recorded research decisions</a
+              >
+              and
+              <a
+                href="https://github.com/oxtan-maker/parallix/blob/d22332f960f513ef243219e14d3fd119c8d120bb/src/application/review-classification/weakening-policy.ts"
+                >frozen preservation questions</a
+              >
+              are linked at revision <code>d22332f960</code>; the relevant current implementation
+              was rechecked at main <code>c95e5189fd</code>. The earlier four-arm study had 120
+              correlated rows from ten families, 108 API attempts, 87 responses, 21 provider
+              rejections and 12 local size fallbacks. Its token-aware follow-up made 33 successful
+              replacement calls without useful routing.
+            </p>
+
+            <figure class="article-figure" id="model-comparison">
+              <picture
+                ><source media="(max-width: 560px)" srcset="assets/model-mobile.svg" />
+                <img
+                  src="assets/model.svg"
+                  width="800"
+                  height="235"
+                  alt="On the same 43 historically approved gate-fact repairs, Jev 1.13 cleared 24 and Jev 1.14 cleared 12 at a chosen 0.60 threshold."
+              /></picture>
+              <figcaption>
+                Identical historical packets at the same 0.60 threshold: 24/43 versus 12/43 approved
+                repairs. Both versions also cleared the same acceptable old-code case among eight
+                send-backs. The best 1.14 threshold tried reached 19/43. Tuning evidence, with no
+                observed safety gain in the compared datasets.
+              </figcaption>
+            </figure>
+            <figure class="article-figure" id="extra-question">
+              <picture
+                ><source media="(max-width: 560px)" srcset="assets/extra-question-mobile.svg" />
+                <img
+                  src="assets/extra-question.svg"
+                  width="800"
+                  height="235"
+                  alt="On 35 reused historical test rounds, obligations alone cleared 20 approved rounds; adding a general new-defect question reduced those correct clears to eight."
+              /></picture>
+              <figcaption>
+                Obligation bar 0.90; added-question bar 0.85. The added question also removed all
+                four send-back clears. These thresholds were studied on historical rounds; this is
+                not a production error-rate estimate.
+              </figcaption>
+            </figure>
+            <p>
+              This rejected arm added a separate, open-ended new-defect question to a
+              finding-by-finding experiment. The current three-question panel instead includes
+              related-regression checks within its repair questions; it is a different policy.
+            </p>
+          </details>
+        </footer>
+      </article>
+    </main>
+  </body>
+</html>

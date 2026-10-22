@@ -74,7 +74,6 @@ export interface DecisionConfiguration {
   readonly apiKeys: Readonly<Record<'TYPESAFE_API_KEY' | 'OPENROUTER_API_KEY' | 'AI_GATEWAY_API_KEY', OptionalString>>;
   readonly timeoutMs: OptionalString;
   readonly model: OptionalString;
-  readonly obligationReviewMode?: OptionalString;
   readonly reviewMode: OptionalString;
 }
 

@@ -49,7 +49,8 @@ export function ownWorkflowCli(registry: Record<string, Command>, open: () => Pr
     try {
       graph = await open();
       const result = await graph.presentationCapabilities?.commandController.dispatch({ operationId: randomUUID(), missionId: slug, kind: 'workflow:stop', capabilities: new Set(['workflow:stop']) });
-      if (result?.status !== 'completed') { throw new Error(result?.error?.message ?? 'Stop failed'); }
+      if (result?.status !== 'completed') { throw new Error(`Stop ${slug}: ${result?.error?.message ?? 'Stop failed'}`); }
+      console.log(`Stop ${slug}: owned-work shutdown confirmed; mission and history retained.`);
     } finally {
       try { await graph?.operatorState.close(); }
       finally { process.removeListener('SIGINT', interrupt); process.removeListener('SIGTERM', interrupt); }

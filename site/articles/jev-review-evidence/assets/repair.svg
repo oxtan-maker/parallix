@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="290" viewBox="0 0 800 290" role="img" aria-labelledby="title desc">
+<title id="title">A repair introduces a duplicate property</title><desc id="desc">The same object has two admission properties. Jev cleared the repair. A follow-up review reproduced the deterministic TS1117 typecheck error; the ordinary local typecheck rejects the revision.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8" fill="#535e57"/></marker></defs>
+<text x="8" y="26" font-family="system-ui,sans-serif" font-size="20" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="8" dy="0">Repair fixture · simplified</tspan></text>
+<rect x="8" y="49" width="385" height="160" rx="3" fill="#faf8f3" stroke="#c7ccc3" stroke-width="1.5"/>
+<text x="22" y="79" font-family="ui-monospace,monospace" font-size="18" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="22" dy="0">{</tspan><tspan x="22" dy="25.2">  admission: { /* added */ },</tspan><tspan x="22" dy="25.2">  admission: { /* existing */ }</tspan><tspan x="22" dy="25.2">}</tspan></text>
+<path d="M22,139 H379" fill="none" stroke="#8d3925" stroke-width="1.5"/>
+<path d="M393,105 H428" fill="none" stroke="#535e57" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="431" y="53" width="361" height="63" rx="3" fill="#eef1e9" stroke="#24604f" stroke-width="1.5"/>
+<text x="611" y="92" font-family="system-ui,sans-serif" font-size="20" font-weight="650" fill="#24604f" text-anchor="middle"><tspan x="611" dy="0">Jev: preserves → clear</tspan></text>
+<rect x="431" y="149" width="361" height="70" rx="3" fill="#faf8f3" stroke="#8d3925" stroke-width="1.5"/>
+<text x="611" y="177" font-family="system-ui,sans-serif" font-size="17" font-weight="650" fill="#8d3925" text-anchor="middle"><tspan x="611" dy="0">Follow-up review: TS1117</tspan><tspan x="611" dy="23.8">Local typecheck rejects the repair</tspan></text>
+<path d="M393,166 H428" fill="none" stroke="#535e57" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="8" y="272" font-family="system-ui,sans-serif" font-size="19" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="8" dy="0">Caught by human review or a gate → another repair/re-review round</tspan></text>
+</svg>

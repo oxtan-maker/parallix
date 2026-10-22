@@ -1,8 +1,8 @@
 ---
 id: TASK-2792
 title: Release workflow ownership correctly after Ctrl+C
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-20 02:34'
 updated_date: '2026-10-20 16:44'
 labels:

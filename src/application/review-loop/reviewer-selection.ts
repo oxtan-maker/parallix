@@ -1,3 +1,4 @@
+import { AgentSelectionPolicyError } from '../../domain/agents.js';
 /**
  * Reviewer selection policy for the autonomous review loop.
  *
@@ -63,6 +64,7 @@ function deriveInitialReviewer(selection: Selection, context: Context): Error | 
     context.emit({ kind: 'agent-selection', outcome: 'nominated', fields: { agent: selection.reviewer, step: 'review' } });
     return null;
   } catch (err: unknown) {
+    if (err instanceof AgentSelectionPolicyError) { throw err; }
     selection.reviewer = undefined;
     return err as Error;
   }
@@ -129,7 +131,8 @@ function nextReviewerCandidate(excluded: Set<string>, context: Context): { fallb
     if (fallback) { context.emit({ kind: 'agent-selection', outcome: 'nominated', fields: { agent: fallback, step: 'review', retry: true } }); }
     if (excluded.has(fallback)) { return { status: null }; }
     return { fallback, status: context.routing.launcherStatus(fallback) };
-  } catch {
+  } catch (err) {
+    if (err instanceof AgentSelectionPolicyError) { throw err; }
     return { status: null };
   }
 }

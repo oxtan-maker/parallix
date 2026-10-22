@@ -19,6 +19,9 @@ import { emptyBoardRepositories } from '../../../helpers/empty-board-repositorie
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { runtimeAssetStore } from '../../../../src/adapters/assets/runtime-assets.js';
 
 import { missionVersion, MissionStaleVersion } from '../../../../src/application/domain-ports.js';
 import type {
@@ -252,4 +255,39 @@ test('board handoff resume refuses a review that is not waiting on the implement
   assert.notEqual(result.status, 'completed', 'a review that is not awaiting the implementer cannot resume');
   assert.equal(store.events.length, 0, 'a refused resume records no lane event');
   assert.equal(launches.length, 0, 'a refused resume never reaches the review loop');
+});
+
+
+test('board review resume uses shipped eligibility when worktree config is absent (TASK-2788 F1)', async context => {
+  const configPath = path.join(process.cwd(), 'config/agents.json');
+  const exists = fs.existsSync;
+  context.mock.method(fs, 'existsSync', (file: fs.PathLike) => String(file) === configPath ? false : exists(file));
+  const reads: string[] = [];
+  context.mock.method(runtimeAssetStore, 'readText', (key: string) => {
+    reads.push(key);
+    return JSON.stringify({ steps: { review: { eligible: ['claude'], selection: 'random' } } });
+  });
+  const store = new FakeMissionStore(activeMissionUnderReview(), 3);
+  const { capabilities, launches } = composeWithRecordedLoop(store);
+  const result = await resumeVia(capabilities, 'active');
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(reads, ['config/agents.json']);
+  assert.equal(currentReviewRound(store.mission!.review!).reviewer, REVIEWER);
+  assert.equal(store.events.length, 1);
+  assert.equal(launches.length, 1);
+});
+
+
+test('board review resume rejects a shipped policy without explicit review eligibility (TASK-2788 F1)', async context => {
+  const configPath = path.join(process.cwd(), 'config/agents.json');
+  const exists = fs.existsSync;
+  context.mock.method(fs, 'existsSync', (file: fs.PathLike) => String(file) === configPath ? false : exists(file));
+  context.mock.method(runtimeAssetStore, 'readText', () => JSON.stringify({ steps: { active: { eligible: ['claude'] } } }));
+  const store = new FakeMissionStore(activeMissionUnderReview(), 3);
+  const { capabilities, launches } = composeWithRecordedLoop(store);
+  const result = await resumeVia(capabilities, 'active');
+  assert.equal(result.status, 'failed');
+  assert.match(result.error?.message ?? '', /review requires explicit nonempty eligible families/);
+  assert.equal(store.events.length, 0);
+  assert.equal(launches.length, 0);
 });

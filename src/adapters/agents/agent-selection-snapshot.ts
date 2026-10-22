@@ -21,7 +21,7 @@ function policy(value: AgentStepConfig | null, fallback: readonly AgentFamily[])
     : [...fallback];
   return {
     eligible,
-    strategy: value?.selection === 'weighted' ? 'weighted' : 'random',
+    strategy: value?.selection ?? 'random',
     ...(value?.weights && typeof value.weights === 'object' ? { weights: value.weights } : {}),
   };
 }
@@ -63,7 +63,7 @@ export class SqliteAgentSelectionSnapshotAdapter implements AgentSelectionSnapsh
             : { kind: 'indefinite', reason: state.reason },
       };
     });
-    const steps = Object.fromEntries(Object.entries(config.steps ?? {}).map(([step, value]) => [step, policy(value, this.knownAgentFamilies)]));
+    const steps = Object.fromEntries(Object.entries(config.steps ?? {}).map(([step, value]) => [step, policy(value, step === 'review' ? [] : this.knownAgentFamilies)]));
     steps['act-on-review'] = steps[agentPolicyStep('act-on-review')] ?? policy(null, this.knownAgentFamilies);
     return { capturedAtMs, defaultPolicy: policy(null, this.knownAgentFamilies), steps, agents };
   }

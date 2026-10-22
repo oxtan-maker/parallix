@@ -1,8 +1,8 @@
 ---
 id: TASK-2794
 title: Reconcile cancelled task archives with retired mission ledger checks
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-20 09:30'
 labels:
   - bug
@@ -14,7 +14,7 @@ ordinal: 274008
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Production archiveTask in src/adapters/backlog/task-transitions.ts:103-122 intentionally writes cancelled task-provider history to backlog/archive/tasks; docs/tui-board.md documents that behavior. test/unit/repository/mission-directory-free-workflow.test.ts rejects all files under backlog/archive. task-2785 CP-4 retains this exact failure for operator-archived task-2767 (commit 2eefe2555d6bc85cb94fd9b10e36431e3b768bfc). This blocks unrelated handoffs. Related historical TASK-2712 prohibited retired ledger roots. Preserve operator archive history, hidden card semantics and verification gates; distinguish legitimate task-provider archives from retired Mission ledgers.
+Production archiveTask in src/adapters/backlog/task-transitions.ts:103-122 intentionally writes cancelled task-provider history to backlog/archive/tasks; docs/tui-board.md documents that behavior. test/unit/adapters/cli/commands/mission-directory-free-workflow.test.ts rejects all files under backlog/archive. task-2785 CP-4 retains this exact failure for operator-archived task-2767 (commit 2eefe2555d6bc85cb94fd9b10e36431e3b768bfc). This blocks unrelated handoffs. Related historical TASK-2712 prohibited retired ledger roots. Preserve operator archive history, hidden card semantics and verification gates; distinguish legitimate task-provider archives from retired Mission ledgers.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

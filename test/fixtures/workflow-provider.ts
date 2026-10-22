@@ -13,7 +13,7 @@ import { missionRepositoryKey } from '../../src/adapters/filesystem/mission-repo
 
 export async function barrier(root: string, name: string) {
   fs.writeFileSync(path.join(root, `${name}.entered`), 'entered');
-  const deadline = Date.now() + 20_000;
+  const deadline = Date.now() + Number(process.env.PARALLIX_FIXTURE_DEADLINE_MS ?? 20_000);
   while (!fs.existsSync(path.join(root, `${name}.release`))) {
     if (Date.now() >= deadline) { throw new Error(`Fixture barrier expired: ${name}`); }
     await new Promise(resolve => setTimeout(resolve, 10));
@@ -21,7 +21,7 @@ export async function barrier(root: string, name: string) {
 }
 
 export async function fixtureProvider(root: string, slug: string, configuration: ParallixConfiguration, family = 'codex', attempt = 1) {
-  const script = `const fs=require('fs'); const base=process.argv[1]; fs.writeFileSync(base+'.entered',String(process.pid)); console.log('PROVIDER-READY'); const timer=setInterval(()=>{if(fs.existsSync(base+'.release')) {clearInterval(timer);console.log('PROVIDER-EXIT');process.exit(0)}},10); process.on('SIGTERM',()=>process.exit(0)); setTimeout(()=>process.exit(9),20000).unref();`;
+  const script = `const fs=require('fs'); const base=process.argv[1]; fs.writeFileSync(base+'.entered',String(process.pid)); console.log('PROVIDER-READY'); const timer=setInterval(()=>{if(fs.existsSync(base+'.release')) {clearInterval(timer);console.log('PROVIDER-EXIT');process.exit(0)}},10); process.on('SIGTERM',()=>process.exit(0)); setTimeout(()=>process.exit(9),Number(process.env.PARALLIX_FIXTURE_DEADLINE_MS||20000)).unref();`;
   const prepared: PreparedLaunch = {
     launcher: options => ({ invocation: { command: process.execPath, args: ['-e', script, path.join(root, `${slug}.provider-${attempt}`)] },
       resultPromise: spawnAndTee(process.execPath, ['-e', script, path.join(root, `${slug}.provider-${attempt}`)], { ...options.teeOptions, configuration, cwd: root }) }),

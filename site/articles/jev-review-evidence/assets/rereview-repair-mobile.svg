@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="380" height="414" viewBox="0 0 380 414" role="img" aria-labelledby="title desc">
+<title id="title">One line fixed the earlier finding</title><desc id="desc">Actual general re-review case, task-2762 round 8. The callback return type changes from unknown or Promise of unknown to void or Promise of void, matching the test runner. Runtime behaviour and assertions are unchanged. Jev approves the repair; the general reviewer approved the same revision.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8" fill="#535e57"/></marker></defs>
+<text x="18" y="26" font-family="system-ui,sans-serif" font-size="18" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="18" dy="0">One line fixed the earlier finding</tspan></text>
+<rect x="18" y="48" width="344" height="120" rx="3" fill="#faf8f3" stroke="#c7ccc3" stroke-width="1.5"/>
+<text x="33" y="77" font-family="system-ui,sans-serif" font-size="18" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="33" dy="0">Earlier finding</tspan></text>
+<text x="33" y="104" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#535e57" text-anchor="start"><tspan x="33" dy="0">Callback type fails the typecheck.</tspan></text>
+<text x="33" y="142" font-family="ui-monospace,monospace" font-size="15" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="33" dy="0">() =&gt; unknown | Promise&lt;unknown&gt;</tspan></text>
+<rect x="18" y="194" width="344" height="120" rx="3" fill="#faf8f3" stroke="#24604f" stroke-width="1.5"/>
+<text x="33" y="223" font-family="system-ui,sans-serif" font-size="18" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="33" dy="0">Repair</tspan></text>
+<text x="33" y="250" font-family="system-ui,sans-serif" font-size="15" font-weight="400" fill="#535e57" text-anchor="start"><tspan x="33" dy="0">Match the test runner’s callback contract.</tspan></text>
+<text x="33" y="288" font-family="ui-monospace,monospace" font-size="15" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="33" dy="0">() =&gt; void | Promise&lt;void&gt;</tspan></text>
+<path d="M190,168 V192" fill="none" stroke="#535e57" stroke-width="1.5" marker-end="url(#arrow)"/>
+<rect x="18" y="338" width="344" height="52" rx="3" fill="#e5eee7" stroke="#24604f" stroke-width="1.5"/>
+<text x="190" y="358" font-family="system-ui,sans-serif" font-size="17" font-weight="650" fill="#24604f" text-anchor="middle"><tspan x="190" dy="0">Jev: approve</tspan><tspan x="190" dy="23.8">One of four general re-review clears</tspan></text>
+</svg>

@@ -118,3 +118,20 @@ test('active forwards --implementer and --reviewer to the execute service and re
   assert.match(missing.failures.join('\n'), /Missing value for --reviewer/);
   assert.equal(requests.length, 2, 'a missing reviewer value launches nothing');
 });
+
+test('active carries repeated interrupts across admission and removes handlers (TASK-2792)', async () => {
+  const before = [process.listenerCount('SIGINT'), process.listenerCount('SIGTERM')];
+  let observed = false;
+  await active.default(['task-test'], {
+    inferSlugFn: () => 'task-test', logFn: () => {}, errorFn: () => {}, exitFn: () => {},
+    controllerFactory: async () => {
+      process.emit('SIGINT'); process.emit('SIGINT');
+      return { canExecute: () => true, dispatch: async request => {
+        observed = request.cancellation?.requested === true && request.cancellation.stopOwnedWorkflow === true;
+        return { status: 'cancelled', error: { kind: 'cancelled', message: 'Cancelled before admission' }, durableEvidence: [] };
+      } };
+    },
+  });
+  assert.equal(observed, true);
+  assert.deepEqual([process.listenerCount('SIGINT'), process.listenerCount('SIGTERM')], before);
+});

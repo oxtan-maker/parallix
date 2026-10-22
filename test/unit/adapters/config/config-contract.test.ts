@@ -6,7 +6,8 @@
 // task-2455.01-target-user-repro and task-2455.02-task-provider-config-repro
 // suites (TASK-2622.14).
 import { describe, test } from 'node:test';
-import { resolveMaxConcurrentGates } from '../../../../src/adapters/config/product-config.js';
+import { resolveGateResources, resolveVerificationResource, resolveMaxConcurrentGates } from '../../../../src/adapters/config/product-config.js';
+import { normalizeGates } from '../../../../src/adapters/config/repository-gate-schema.js';
 import { terminalHostConfig } from '../../../../src/adapters/config/terminal-host-config.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -322,4 +323,37 @@ test('gate run limits use the positive-integer capacity contract (H2)', () => {
     assert.ok(validateWorkflowConfig({ adapters: { gates: { maxConcurrent } } })
       .includes('adapters.gates.maxConcurrent must be a positive integer'));
   }
+});
+
+test('gate resources are validated positive limits that gates reference by name (px-0019)', () => {
+  const gate = (resource: unknown) => ({ key: 'unit', command: 'true', order: 1, resource });
+  const issues = (gates: object) => validateWorkflowConfig({ adapters: { gates } });
+  assert.deepEqual(issues({ resources: { test: 1, wide: 3 }, preIntegration: [gate('test')] }), []);
+  assert.deepEqual(issues({ preIntegration: [{ key: 'unit', command: 'true' }] }), [], 'legacy gates need no resource');
+  for (const limit of [0, -1, 1.5, '1', null, true]) {
+    assert.ok(issues({ resources: { test: limit } }).includes('adapters.gates.resources.test must be a positive integer'));
+  }
+  assert.ok(issues({ resources: [] }).includes('adapters.gates.resources must be an object'));
+  assert.ok(issues({ resources: { test: 1 }, preIntegration: [gate('missing')] })
+    .some(issue => issue.includes('"missing" is not declared in adapters.gates.resources')));
+  assert.ok(issues({ preIntegration: [gate('test')] }).some(issue => issue.includes('is not declared')));
+  assert.ok(issues({ resources: { test: 1 }, preIntegration: [gate('')] }).some(issue => issue.includes('.resource must be a non-empty')));
+});
+
+test('gate resource limits resolve from the effective configuration and default to none (px-0019)', () => {
+  withConfig(null, root => assert.deepEqual(resolveGateResources(root), {}));
+  withConfig({ adapters: { gates: { resources: { test: 2 } } } }, root => {
+    assert.deepEqual(resolveGateResources(root), { test: 2 });
+    assert.equal(resolveMaxConcurrentGates(root), Infinity, 'resources do not enable whole-run admission');
+  });
+  assert.deepEqual(normalizeGates([{ key: 'a', command: 'true', resource: 'test' }, { key: 'b', command: 'true' }]).map(gate => gate.resource), ['test', undefined]);
+});
+
+test('verification resource must reference a declared gate resource (px-0019)', () => {
+  const issues = (gates: object) => validateWorkflowConfig({ adapters: { gates } });
+  assert.deepEqual(issues({ resources: { test: 1 }, verificationResource: 'test' }), []);
+  assert.ok(issues({ verificationResource: 'test' }).some(issue => issue.includes('verificationResource "test" is not declared')));
+  assert.ok(issues({ resources: { test: 1 }, verificationResource: '' }).some(issue => issue.includes('verificationResource must be a non-empty')));
+  withConfig({ adapters: { gates: { resources: { test: 1 }, verificationResource: 'test' } } }, root => assert.equal(resolveVerificationResource(root), 'test'));
+  withConfig(null, root => assert.equal(resolveVerificationResource(root), undefined));
 });

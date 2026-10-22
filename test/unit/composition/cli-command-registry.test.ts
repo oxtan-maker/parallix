@@ -28,6 +28,7 @@ for (const fails of [false, true]) {
     mock.method(cli, 'createLeadCommand', (port: SupervisorPort) => async () => {
       if (fails) { await assert.rejects(port.launchRecovery(request), /launch failed/); }
       else { assert.equal(await port.launchRecovery(request), 'custom ran in /fixture'); }
+      return 0;
     });
     mock.method(config, 'resolveAgentModel', () => 'fixture-model');
     mock.method(stats, 'recordStageStatsSafe', async (_stage: string, options: { stage: string; model: string }) => {
@@ -47,3 +48,22 @@ for (const fails of [false, true]) {
     assert.deepEqual(events, fails ? ['running', 'launch', 'ended'] : ['running', 'launch', 'usage', 'ended']);
   });
 }
+
+
+test('lead interruption returns failure after forwarded settlement (TASK-2792)', async t => {
+  t.after(() => mock.restoreAll());
+  const events: string[] = [];
+  mock.method(scope, 'createCliServiceScope', () => ({ withGraph: async (invoke: (s: unknown) => unknown) => {
+    try { return await invoke({}); } finally { events.push('closed'); }
+  } }));
+  mock.method(lead, 'createLeadSupervisorPort', (_services: unknown, forwards: Set<Promise<unknown>>) => {
+    forwards.add(Promise.resolve().then(() => { events.push('settled'); }));
+    return {};
+  });
+  mock.method(cli, 'createLeadCommand', () => async () => 130);
+  const command = createRuntimeOptions('/fixture', resolveConfiguration({})).commandFns!.lead!;
+  await assert.rejects(async () => command([], { exitFn: (code: number) => {
+    assert.equal(code, 130); events.push('exit'); throw new Error('interrupted');
+  } }), /interrupted/);
+  assert.deepEqual(events, ['settled', 'exit', 'closed']);
+});

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="380" height="490" viewBox="0 0 380 490" role="img" aria-labelledby="title desc">
+<title id="title">Both repairs can make the test pass</title><desc id="desc">Schematic examples, not measured repairs. Fixing a code or test regression preserves the intended check. Deleting or weakening a test or required assertion leaves intended behaviour unchecked. Both test runs report PASS; the reviewer judges whether the repair preserved what the test was meant to establish.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8" fill="#535e57"/></marker></defs>
+<text x="18" y="26" font-family="system-ui,sans-serif" font-size="18" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="18" dy="0">Both repairs can make the test pass</tspan></text>
+<rect x="18" y="48" width="344" height="180" rx="3" fill="#faf8f3" stroke="#24604f" stroke-width="1.5"/>
+<text x="33" y="77" font-family="system-ui,sans-serif" font-size="18" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="33" dy="0">Fix the code or test regression</tspan></text>
+<text x="33" y="107" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#535e57" text-anchor="start"><tspan x="33" dy="0">Repair the code or test logic.</tspan><tspan x="33" dy="22.4">Preserve the intended check.</tspan></text>
+<rect x="33" y="147" width="314" height="32" rx="3" fill="#e5eee7" stroke="#24604f" stroke-width="1.5"/>
+<text x="48" y="170" font-family="system-ui,sans-serif" font-size="17" font-weight="650" fill="#24604f" text-anchor="start"><tspan x="48" dy="0">Test run: PASS</tspan></text>
+<text x="33" y="210" font-family="system-ui,sans-serif" font-size="17" font-weight="650" fill="#24604f" text-anchor="start"><tspan x="33" dy="0">Reviewer: check preserved</tspan></text>
+<rect x="18" y="246" width="344" height="180" rx="3" fill="#faf8f3" stroke="#8d3925" stroke-width="1.5"/>
+<text x="33" y="275" font-family="system-ui,sans-serif" font-size="18" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="33" dy="0">Delete or weaken the test</tspan></text>
+<text x="33" y="305" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#535e57" text-anchor="start"><tspan x="33" dy="0">Remove a test or assertion.</tspan><tspan x="33" dy="22.4">Leave its behaviour unchecked.</tspan></text>
+<rect x="33" y="345" width="314" height="32" rx="3" fill="#e5eee7" stroke="#24604f" stroke-width="1.5"/>
+<text x="48" y="368" font-family="system-ui,sans-serif" font-size="17" font-weight="650" fill="#24604f" text-anchor="start"><tspan x="48" dy="0">Test run: PASS</tspan></text>
+<text x="33" y="408" font-family="system-ui,sans-serif" font-size="17" font-weight="650" fill="#8d3925" text-anchor="start"><tspan x="33" dy="0">Reviewer: check weakened</tspan></text>
+<text x="18" y="455" font-family="system-ui,sans-serif" font-size="16" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="18" dy="0">Test run: does it pass?</tspan><tspan x="18" dy="22.4">Review: does it still check what it should?</tspan></text>
+</svg>

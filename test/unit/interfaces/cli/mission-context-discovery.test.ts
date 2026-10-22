@@ -148,8 +148,8 @@ test('checkpoint correction CLI requires operator decision and evidence and keep
   const { missionId } = await import('../../../../src/domain/mission.js');
   const id = missionId('correction-cli');
   const blocker = { command: 'npm test', diagnostic: 'false stop', authorityReason: 'operator owns decision', proposedCorrection: 'confirm decision' };
-  const store = inMemoryTransitionStore(fixtureMission(id, { checkpoints: [{ missionId: id, name: 'CP-5', goalCheck: [], nextActionText: 'Resume CP-3',
-    repair: { incidentId: 'false-stop', command: 'npm test', attempt: 1, authorizedCriteria: [], authorizedGates: [], evidenceRecorded: false, verified: false, blocker } }] }));
+  const store = inMemoryTransitionStore(fixtureMission(id, { successCriteria: ['current criterion'], checkpoints: [{ missionId: id, name: 'CP-5', goalCheck: [], nextActionText: 'Resume CP-3',
+    repair: { incidentId: 'false-stop', command: 'npm test', attempt: 1, authorizedCriteria: ['obsolete criterion'], authorizedGates: [], evidenceRecorded: false, verified: false, blocker } }] }));
   const service = new MissionCheckpointService(store, { rootFor: () => '/repo', fileSystem: {
     existsSync: () => false, readText: () => '', listNames: () => [], listEntries: () => [],
   } });
@@ -157,6 +157,15 @@ test('checkpoint correction CLI requires operator decision and evidence and keep
   const args = ['correct-invalid-contract', '--name', 'CP-5', '--operator', 'Magnus', '--decision', 'Decision is recorded', '--evidence', '`npm test`'];
   const before = structuredClone(await store.load());
   await assert.rejects(createCheckpointCommand(service, () => id)(args), /direct operator/);
+  const { withinCliInvocation } = await import('../../../../src/composition/review-operator-resume.js');
+  await withinCliInvocation(false, async automatic => {
+    await assert.rejects(createCheckpointCommand(service, () => id, undefined, automatic)(args), /direct operator/);
+  });
+  await withinCliInvocation(true, async () => {
+    await withinCliInvocation(true, async nested => {
+      await assert.rejects(createCheckpointCommand(service, () => id, undefined, nested)(args), /direct operator/);
+    });
+  });
   await assert.rejects(createCheckpointCommand(service, () => id)(['record', '--force', '--name', 'CP-5', '--criterion', 'proof', '--evidence', '`npm test`', '--next', 'continue']), /direct operator/);
   await assert.rejects(command(args.slice(0, 3)), /--operator/);
   await assert.rejects(command(args.slice(0, 5)), /--decision/);
@@ -175,6 +184,8 @@ test('checkpoint correction CLI requires operator decision and evidence and keep
     assert.deepEqual(cp.repair.corrections[0].blocker, blocker);
     assert.equal(cp.repair.corrections[0].operator, 'Magnus');
     assert.equal(cp.repair.blocker, undefined);
+    assert.deepEqual(cp.repair.authorizedCriteria, ['current criterion']);
+    assert.deepEqual(cp.repair.corrections[0].authorizedCriteria, ['obsolete criterion']);
     assert.deepEqual(cp.goalCheck, []);
     assert.equal(cp.repair.evidenceRecorded, false);
   } finally { process.stdout.write = original; }

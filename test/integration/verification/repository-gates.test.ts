@@ -22,7 +22,7 @@ import {
   runPhaseGates,
   validateRepositoryGates,
 } from '../../../src/adapters/config/repository-gates.js';
-import { loadEffectiveConfig, validateWorkflowConfig } from '../../../src/adapters/config/product-config.js';
+import { loadEffectiveConfig, resolveGateResources, resolveMaxConcurrentGates, resolveVerificationResource, validateWorkflowConfig } from '../../../src/adapters/config/product-config.js';
 import { unitGroupFailure } from '../../lib/unit-group-failure.js';
 import { elideBounceOutput } from '../../../src/application/output-elision.js';
 
@@ -389,6 +389,7 @@ test('this repository starts every independent check while Sonar waits for cover
     admission: {
       assertIndependent: () => {},
       run: (_root, action, signal) => action({ signal: signal ?? new AbortController().signal, environment: {}, bindProcessGroup: () => {} }),
+      runOnResource: (_root, _resource, action, signal) => action({ signal: signal ?? new AbortController().signal, environment: {}, bindProcessGroup: () => {} }),
     },
     maxParallel: loadPhaseGateParallelism(repoRoot, 'preIntegration'),
     log: () => {}, error: () => {},
@@ -401,9 +402,20 @@ test('this repository starts every independent check while Sonar waits for cover
       setTimeout(() => { active.delete(key); resolve({ status: 0, stdout: '', stderr: '' }); }, key === 'build' ? 2 : key === 'coverage-merge' ? 5 : 30);
     }),
   });
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, String(result.error));
   assert.equal(peak, 6);
   assert.equal(launched.length, gates.length);
+});
+
+test('this repository shares one test slot across test gates and leaves other stages independent (px-0019)', () => {
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+  const gates = loadPhaseGates(repoRoot, 'preIntegration');
+  const shared = gates.filter(gate => gate.resource === 'test').map(gate => gate.key).sort();
+  assert.deepEqual(shared, ['browser-e2e', 'integration-ci', 'integration-local', 'unit', 'workflow']);
+  assert.equal(gates.some(gate => gate.resource && gate.resource !== 'test'), false);
+  assert.equal(resolveGateResources(repoRoot).test, 1);
+  assert.equal(resolveVerificationResource(repoRoot), 'test', 'handoff verification and declared gates share the slot');
+  assert.equal(resolveMaxConcurrentGates(repoRoot), Infinity, 'no whole-run lock holds the slot through quality-gate or agent-smoke');
 });
 
 test('buildGateEnv scrubs BASH_ENV and threads real-agent selection', () => {

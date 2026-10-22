@@ -411,22 +411,6 @@ test('omission instructions are conditional across panel, repair and weakening q
   }
 });
 
-test('obligation policy validates every call before inclusive 0.97 clear or return (TASK-2753)', async () => {
-  const { aggregateObligations, obligationAnswer } = await import('../../../../src/application/review-classification/obligation-review.js');
-  const answer = (id: string, selected: string, score: number) => obligationAnswer(id, { provider: 'stub', model: 'jev', answers: {
-    resolution: { type: 'choice', selected, confidence: 1, probabilities: Object.fromEntries(['addresses', 'does_not_address', 'insufficient_evidence'].map(l => [l, l === selected ? score : (1 - score) / 2])) } } });
-  for (const label of ['addresses', 'does_not_address']) {
-    assert.equal(aggregateObligations(['F1'], [answer('F1', label, 0.97)]).route, label === 'addresses' ? 'clear' : 'implementer');
-    assert.equal(aggregateObligations(['F1'], [answer('F1', label, 0.969999)]).route, 'reviewer');
-  }
-  const returned = answer('F1', 'does_not_address', 1);
-  for (const answers of [[returned], [returned, { id: 'F2', selected: null, probabilities: null, failure: 'provider-failure' }],
-    [returned, obligationAnswer('F2', { provider: '', model: '', answers: {} })]]) {
-    assert.equal(aggregateObligations(['F1', 'F2'], answers).route, 'reviewer');
-  }
-  assert.equal(aggregateObligations(['F1', 'F2'], [returned, answer('F2', 'addresses', 1)]).reason, 'unresolved-obligations:F1');
-});
-
 test('source windows keep mixed line endings and long unterminated lines (TASK-2746)', () => {
   for (const ending of ['\r\n', '\r', '\n', '\v', '\f', '\x1c', '\x1d', '\x1e', '\x85', '\u2028', '\u2029']) {
     const source = `first${ending}${ending}last`;

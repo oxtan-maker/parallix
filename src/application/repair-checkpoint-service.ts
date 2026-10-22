@@ -115,7 +115,7 @@ export class RepairCheckpointService implements RepairCheckpointPort {
     if (!references || !root) { return failure('unavailable', 'Correction evidence reference checkout is unavailable'); }
     const invalid = findUnverifiableRecordedRow(references.fileSystem, [{ criterion: request.decision, evidence: request.evidence }], root);
     if (invalid) { return failure('validation', invalid.message); }
-    const corrected = correctRepairBlocker(checkpoint, request.operator, request.decision, request.evidence, occurredAt, loaded.version + 1);
+    const corrected = correctRepairBlocker(checkpoint, request.operator, request.decision, request.evidence, occurredAt, loaded.version + 1, loaded.mission.successCriteria ?? []);
     try {
       const version = await this._store.save({ ...loaded.mission,
         checkpoints: loaded.mission.checkpoints.map(cp => cp === checkpoint ? corrected : cp) } as Mission, loaded.version);
@@ -231,12 +231,13 @@ export function repairCheckpointFailure(checkpoints: readonly CheckpointData[], 
 
 /** Shared durable correction fact for a dedicated correction or combined forced evidence write. */
 export function correctRepairBlocker(checkpoint: CheckpointData, operator: string, decision: string, evidence: string,
-  occurredAt: string, missionRevision: number): CheckpointData {
+  occurredAt: string, missionRevision: number, currentCriteria: readonly string[]): CheckpointData {
   const { blocker, ...repair } = checkpoint.repair!;
   if (!blocker) { throw new Error('Correction requires an unresolved repair blocker'); }
-  return { ...checkpoint, repair: { ...repair,
+  return { ...checkpoint, repair: { ...repair, authorizedCriteria: [...currentCriteria],
     acknowledgedBlocker: blocker, acknowledgedBy: operator, acknowledgedAt: occurredAt,
-    corrections: [...(repair.corrections ?? []), { blocker, operator, decision, evidence, occurredAt, missionRevision }],
+    corrections: [...(repair.corrections ?? []), { blocker, operator, decision, evidence, occurredAt, missionRevision,
+      authorizedCriteria: [...repair.authorizedCriteria], authorizedGates: [...repair.authorizedGates] }],
   } };
 }
 

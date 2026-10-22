@@ -377,3 +377,46 @@ test('operator correction resumes CP-3 while readiness and handoff retain missin
   assert.match(rejected.error?.message ?? '', /Uncovered criteria: unfinished/);
   await assert.rejects(repair.verify(SLUG, 'CP-5'), /fresh authorized evidence/);
 });
+
+test('operator correction clears obsolete impossible repair criteria without bypassing readiness (TASK-2808)', async () => {
+  const { inMemoryTransitionStore } = await import('../../fixtures/mission-builders.js');
+  const { RepairCheckpointService } = await import('../../../src/application/repair-checkpoint-service.js');
+  const id = missionId(SLUG);
+  const impossible = 'GitHub-hosted acceptance before pre-handoff publication';
+  const store = inMemoryTransitionStore(fixtureMission(SLUG, { assignee: agentFamily('custom'), brief: DRAFTED_BRIEF,
+    successCriteria: ['first', impossible], completedSuccessCriteria: [0], declaredGates: ['npm test'],
+    checkpoints: [{ missionId: id, name: 'CP-1', goalCheck: [{ criterion: 'first', evidence: REPAIR_REF }], nextActionText: 'repair' }] }));
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, { ...contractServices(() => store.load()),
+    fileSystem: { existsSync: target => target === path.join(ROOT, REPAIR_REF), readText: () => '', listNames: () => [], listEntries: () => [] } });
+  const service = new MissionCheckpointService(store, { fileSystem: ports.fileSystem, rootFor: () => ROOT });
+  const repair = new RepairCheckpointService(store);
+  await repair.open({ slug: SLUG, incidentId: 'impossible-criterion', command: 'npm test', attempt: 1 });
+  await store.save({ ...store.mission(), successCriteria: ['first'] } as Mission);
+  const req = { operationId: 'criteria-correction', missionId: id, capabilities: new Set(['checkpoint:record'] as const) };
+  const check = async () => (await service.check(req)).value!;
+  assert.ok((await check()).findings.some(item => item.code === 'repair-contract-changed'));
+  const handoff = () => new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  assert.match((await handoff()).error ?? '', /success criteria changed/);
+  await repair.report({ ...req, name: 'CP-2', blocker: { command: 'npm test', diagnostic: impossible,
+    authorityReason: 'operator owns locked criteria', proposedCorrection: 'remove impossible criterion' } });
+  assert.equal((await service.correctInvalidContract({ ...req, capabilities: new Set(['checkpoint:correct']), name: 'CP-2',
+    operator: 'operator', decision: 'Accept removal of impossible criterion', evidence: REPAIR_REF })).status, 'completed');
+  assert.equal((await check()).findings.some(item => item.code === 'repair-contract-changed'), false);
+  assert.deepEqual(store.mission().checkpoints[1].repair!.authorizedCriteria, ['first']);
+  assert.equal((await check()).ready, false, 'carried evidence is not fresh repair proof');
+  assert.match((await handoff()).error ?? '', /missing.*CP-2/i);
+  await store.save({ ...store.mission(), completedSuccessCriteria: [] } as Mission);
+  assert.ok((await check()).findings.some(item => item.code === 'incomplete-criterion'));
+  assert.equal((await service.record({ ...req, checkpoint: { missionId: id, name: 'CP-2', nextActionText: 'handoff',
+    goalCheck: [{ criterion: 'first', evidence: 'nonexistent-proof.txt' }] } })).status, 'failed');
+  assert.equal((await service.record({ ...req, checkpoint: { missionId: id, name: 'CP-2', nextActionText: 'handoff',
+    goalCheck: [{ criterion: 'first', evidence: REPAIR_REF }] } })).status, 'completed');
+  assert.ok((await check()).findings.some(item => item.code === 'incomplete-criterion'));
+  await store.save({ ...store.mission(), completedSuccessCriteria: [0] } as Mission);
+  assert.equal((await check()).ready, true);
+  assert.equal((await handoff()).ok, true);
+  assert.ok(recorder.transitions.length > 0, 'normal handoff transition is reached');
+  await store.save({ ...store.mission(), successCriteria: ['first', 'later change'] } as Mission);
+  assert.ok((await check()).findings.some(item => item.code === 'repair-contract-changed'));
+});

@@ -53,8 +53,7 @@ function launch(checkout: string, name: string) {
 }
 try {
   fs.mkdirSync(base);
-  const policy = JSON.parse(fs.readFileSync(path.join(repository, 'workflow.config.json'), 'utf8')) as { adapters: { gates: { maxConcurrent: number } } };
-  assert.equal(policy.adapters.gates.maxConcurrent, 1, 'repository opt-in');
+  const policy = { adapters: { gates: { maxConcurrent: 1 } } };
   fs.writeFileSync(path.join(base, 'workflow.config.json'), JSON.stringify({ adapters: {
     gates: { maxConcurrent: policy.adapters.gates.maxConcurrent }, verification: { command: 'node gate.mjs', defaultArea: 'all' },
   } }));

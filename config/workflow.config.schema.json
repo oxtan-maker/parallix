@@ -110,6 +110,16 @@
                 "minimum": 1,
                 "description": "Optional maximum simultaneously running independent verification runs across processes and worktrees sharing admission state. Unset means unlimited; positive integers are required. Set 1 to serialize runs. The canonical checkout owns the limit, independently of within-run phase parallelism."
               },
+              "resources": {
+                "type": "object",
+                "description": "Optional named shared capacities for individual gates. Each value is a positive integer limit on gate process trees using that resource at once across processes and worktrees sharing admission state. Gates opt in with their own resource key; unassigned gates and gates on different resources do not wait for each other.",
+                "additionalProperties": { "type": "integer", "minimum": 1 }
+              },
+              "verificationResource": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Optional adapters.gates.resources entry occupied by the configured verification command (px verify, pre-review) and mission-declared gates run at handoff, so the active-to-review verification shares the same capacity as resource-assigned lifecycle gates."
+              },
               "requirePreIntegration": {
                 "type": "boolean",
                 "description": "When true, the integration merge boundary fails closed if no adapters.gates.preIntegration gates are configured. Defaults to false so an unconfigured repository completes the integration path with no lifecycle gate (mission task-2457 success criterion 1). Set true in a repository that wants the TASK-2300 mandatory-gate invariant."
@@ -135,7 +145,8 @@
                     "command": { "type": "string", "description": "Exact runnable shell command. No trailing prose or outcome language." },
                     "order": { "type": "number", "description": "Sort key; gates run in ascending order. Defaults to 0." },
                     "after": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Same-phase gate keys that must complete before this gate starts." },
-                    "reuse": { "type": "string", "enum": ["never", "clean-tree"], "description": "never (default) always executes. clean-tree may reuse only an exact passing clean committed-tree proof; use only for deterministic side-effect-free verification." }
+                    "reuse": { "type": "string", "enum": ["never", "clean-tree"], "description": "never (default) always executes. clean-tree may reuse only an exact passing clean committed-tree proof; use only for deterministic side-effect-free verification." },
+                    "resource": { "type": "string", "minLength": 1, "description": "Optional name of an adapters.gates.resources entry. The gate waits for that shared resource slot before launching and releases it after its process tree settles." }
                   }
                 }
               },
@@ -150,7 +161,8 @@
                   "command": { "type": "string" },
                   "order": { "type": "number" },
                     "after": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-                    "reuse": { "type": "string", "enum": ["never", "clean-tree"] }
+                    "reuse": { "type": "string", "enum": ["never", "clean-tree"] },
+                    "resource": { "type": "string", "minLength": 1, "description": "Optional name of an adapters.gates.resources entry. The gate waits for that shared resource slot before launching and releases it after its process tree settles." }
                 }
               }
             },
@@ -165,7 +177,8 @@
                   "command": { "type": "string" },
                   "order": { "type": "number" },
                     "after": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-                    "reuse": { "type": "string", "enum": ["never", "clean-tree"] }
+                    "reuse": { "type": "string", "enum": ["never", "clean-tree"] },
+                    "resource": { "type": "string", "minLength": 1, "description": "Optional name of an adapters.gates.resources entry. The gate waits for that shared resource slot before launching and releases it after its process tree settles." }
                 }
               }
             }

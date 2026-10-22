@@ -383,6 +383,7 @@ test('operator corrects false CP-5 blocker after CP-2 before unfinished CP-3 and
 
 test('operator correction rejects unauthorized, stale and invalid evidence writes atomically (TASK-2803)', async () => {
   const { store, correct } = await falseBlockerFixture();
+  await store.save({ ...store.mission(), successCriteria: ['first'] } as Mission);
   const before = structuredClone(await store.load());
   for (const patch of [
     { capabilities: new Set(['checkpoint:record'] as const) }, { capabilities: new Set<import('../../../src/application/contracts.js').Capability>() },
@@ -423,6 +424,7 @@ test('public checkpoint reads retain original diagnostics and every operator cor
 test('concurrent correction refuses CAS conflict without losing the blocker (TASK-2803)', async () => {
   const { MissionStaleVersion } = await import('../../../src/application/domain-ports.js');
   const { mission, store, references } = await falseBlockerFixture();
+  await store.save({ ...store.mission(), successCriteria: ['first'] } as Mission);
   const before = structuredClone(await store.load());
   const checkpoints = new MissionCheckpointService({ load: () => store.load(), save: async (_next, version) => {
     assert.equal(version, before.version);
@@ -602,4 +604,55 @@ describe('Exact repair success coverage', () => {
     await assert.rejects(repair.verify(f.mission.id, 'CP-3', f.proof), /Stale write/);
     assert.deepEqual(f.store.mission(), before);
   });
+});
+
+
+test('criterion corrections retain each authorization and leave other incidents and gates untouched (TASK-2808)', async () => {
+  const { mission, store, repair, blocker, correct, references } = await falseBlockerFixture();
+  const initial = structuredClone(store.mission().checkpoints[4].repair!);
+  // Both an unrelated open incident and a settled one must remain byte-for-byte history.
+  const others = ['unrelated', 'settled'].map((incidentId, index) => ({
+    ...store.mission().checkpoints[4], name: `CP-${index + 6}`,
+    repair: { ...initial, incidentId, blocker: undefined, verified: index === 1 },
+  }));
+  await store.save({ ...store.mission(), successCriteria: ['first', 'second'], declaredGates: ['changed gate'],
+    checkpoints: [...store.mission().checkpoints, ...others] } as Mission);
+  const before = structuredClone(store.mission());
+  assert.equal((await correct()).status, 'completed');
+  const firstDecision = structuredClone(store.mission().checkpoints[4].repair!.corrections![0]);
+  assert.deepEqual(firstDecision.authorizedCriteria, initial.authorizedCriteria);
+  assert.deepEqual(firstDecision.authorizedGates, initial.authorizedGates);
+  assert.deepEqual(store.mission().checkpoints[4].repair!.authorizedCriteria, ['first', 'second']);
+  assert.deepEqual(store.mission().checkpoints[4].repair!.authorizedGates, initial.authorizedGates);
+  assert.match(repairCheckpointFailure([store.mission().checkpoints[4]], ['changed gate'], ['first', 'second']) ?? '', /required checks changed/);
+  await assert.rejects(repair.verify(mission.id, 'CP-5'), /fresh authorized evidence/);
+  const secondBlocker = { ...blocker, diagnostic: 'second criterion is impossible too' };
+  await repair.report({ operationId: 'second-report', missionId: mission.id, capabilities: new Set(['checkpoint:record']), name: 'CP-5', blocker: secondBlocker });
+  await store.save({ ...store.mission(), successCriteria: ['first'] } as Mission);
+  assert.equal((await correct({ decision: 'Accept second criterion removal' })).status, 'completed');
+  const reloaded = new MissionCheckpointService(inMemoryTransitionStore(JSON.parse(JSON.stringify(store.mission()))), references);
+  const read = await reloaded.read({ operationId: 'read', missionId: mission.id, capabilities: new Set(['checkpoint:record']), name: 'CP-5' });
+  assert.equal(read.status, 'completed');
+  const retained = read.value!.checkpoints[0].repair!;
+  assert.equal(retained.incidentId, initial.incidentId);
+  assert.equal(retained.command, initial.command);
+  assert.deepEqual(retained.authorizedCriteria, ['first']);
+  assert.deepEqual(retained.authorizedGates, initial.authorizedGates);
+  assert.deepEqual(retained.corrections![0], firstDecision);
+  assert.deepEqual(retained.corrections!.map(item => item.authorizedCriteria), [initial.authorizedCriteria, ['first', 'second']]);
+  assert.deepEqual(retained.corrections!.map(item => item.blocker), [blocker, secondBlocker]);
+  assert.equal(retained.corrections![1].decision, 'Accept second criterion removal');
+  assert.ok(retained.corrections![1].missionRevision > firstDecision.missionRevision);
+  for (const correction of retained.corrections!) {
+    assert.equal(correction.operator, 'operator');
+    assert.equal(correction.evidence, 'decision.txt');
+    assert.ok(correction.occurredAt);
+  }
+  assert.deepEqual(store.mission().checkpoints.slice(0, 4), before.checkpoints.slice(0, 4));
+  assert.deepEqual(store.mission().checkpoints.slice(5), before.checkpoints.slice(5));
+  assert.deepEqual(store.mission().checkpoints[4].goalCheck, before.checkpoints[4].goalCheck);
+  assert.deepEqual(store.mission().completedSuccessCriteria, before.completedSuccessCriteria);
+  assert.deepEqual(store.mission().review, before.review);
+  assert.equal(retained.verified, false);
+  assert.equal(retained.evidenceRecorded, false);
 });

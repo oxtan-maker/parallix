@@ -46,7 +46,7 @@ test('application import guard scans all canonical application modules', () => {
     'projections/board.ts', 'projections/board-readers.ts',
     'projections/metrics.ts', 'projections/activity.ts',
     'recording/board-event-recorder.ts',
-    'services/agent-selection.ts',
+    'services/agent-selection-telemetry.ts',
   ]) {
     assert.ok(names.includes(required), `missing application module ${required}`);
   }

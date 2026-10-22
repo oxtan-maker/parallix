@@ -218,7 +218,7 @@ collection is not claimed complete and does not block this implementation.
 ## Re-review packet and question experiments
 
 Offline replays of historical re-reviews (research mission px-0010, Jev only,
-labelled by the general reviewer's decision) set the current re-review design.
+labelled by the general reviewer's decision) informed the re-review design.
 
 A classifier clear on a round the general reviewer sent back is a wrong approval
 when the reviewer found a prior obligation unfixed or a new problem inside the
@@ -239,14 +239,13 @@ Decisions:
   were new findings in old code, or the repair checkpoint dropping Goal Check
   rows. TASK-2755 removed that cause by carrying accepted rows into a new repair
   checkpoint.
-- Re-reviews after a general-reviewer decision ask one question per
-  obligation: the prior findings plus human notes since that decision
-  (TASK-2753). The route clears at addresses >= 0.97 on every obligation and
-  returns at does_not_address >= 0.97 on any. On 158 rounds it cleared 12
-  rounds correctly and 1 wrongly. In task-2717 r3, the latest changes orphaned a
-  fixture that reached the branch through a rebase. The route stays in shadow
-  until 50 qualifying shadow rounds show no wrong approval and no return of an
-  approved round.
+- TASK-2753 evaluated one question per obligation: prior findings plus human
+  notes since the general-reviewer decision. At addresses >= 0.97 on every
+  obligation or does_not_address >= 0.97 on any, its 158-round replay cleared
+  12 rounds correctly and 1 wrongly. In task-2717 r3, the latest changes
+  orphaned a fixture that reached the branch through a rebase. These historical
+  observations remain research evidence; the production detour was removed by
+  TASK-2805 as described below.
 - The classifier model is pinned to typesafe/jev-1.13-20260917 (TASK-2763).
   The provider moved the `jev-latest` alias to 1.14 on 2026-10-15. Pinned on
   identical packets, 1.14 cleared 12 of 43 gate-fact repairs against 24 for
@@ -265,13 +264,22 @@ Rejected:
 - Reviewer-authored per-finding templates, repair interdiff with gate-failure
   extraction, and checkpoint-state evidence gave no routing gain.
 
-Expected effect and test: the classifier should decide about 16% of decided
-re-reviews while the per-obligation route is in shadow, and about 20% after it
-acts. The current measured share is 2–7%. About 120 decided re-reviews, roughly
-40 to 50 missions, separate the hypotheses: 14 or more classifier decisions
-support at least 17%, and fewer support no change from about 7%. Each
-conclusion has about a 4% error rate. All thresholds were
-chosen on these historical rounds, so the live count is the validation.
+The experiment projected about 16% of decided re-reviews with the per-obligation
+route in shadow and about 20% after activation, against a measured share of
+2–7%. Its proposed 120-round study, roughly 40 to 50 missions, would distinguish
+14 or more classifier decisions from fewer with about a 4% error rate. Those
+were historical hypotheses, with thresholds chosen on historical rounds, rather
+than observed production effects or activation requirements for the restored panel.
+
+TASK-2805 restores the existing active three-question panel for ordinary
+qualifying re-reviews, including prior findings and human/operator requests.
+The per-obligation dispatch, production shadow calls and activation setting are
+removed. Restoration requires no new opt-in or validation quota. The frozen
+questions, prompt versions, aggregation, pinned Jev 1.13, evidence fitting and
+V4/V5 integration-repair route remain unchanged. First reviews still require
+the general reviewer; explicit global shadow/opt-out, genuine fallbacks,
+human review and integration gates retain their authority. Historical
+measurements, observations and provenance remain readable.
 
 ## Reconsideration triggers
 

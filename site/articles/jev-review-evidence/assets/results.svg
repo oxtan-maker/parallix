@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="365" viewBox="0 0 800 365" role="img" aria-labelledby="title desc">
+<title id="title">Jev decisions by review type and projected monthly savings</title><desc id="desc">Jev clears 37 local integration repairs and 4 general re-reviews, leaving 73 for the general reviewer out of 114. Mechanical restorations are excluded. Monthly projections include classifier evidence preparation and calls for both review types; untimed preparation is estimated.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8" fill="#535e57"/></marker></defs>
+<text x="8" y="25" font-family="system-ui,sans-serif" font-size="21" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="8" dy="0">41 of 114 re-reviews (36%)</tspan></text>
+<rect x="8" y="49" width="254.4561403508772" height="30" rx="3" fill="#24604f" stroke="none" stroke-width="0"/>
+<rect x="262.4561403508772" y="49" width="27.50877192982456" height="30" rx="3" fill="#73a08a" stroke="none" stroke-width="0"/>
+<rect x="289.96491228070175" y="49" width="502.03508771929825" height="30" rx="3" fill="#a3aba3" stroke="none" stroke-width="0"/>
+<rect x="8" y="102" width="12" height="12" rx="3" fill="#24604f" stroke="none" stroke-width="0"/>
+<text x="29" y="115" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="29" dy="0">37 local integration repairs</tspan></text>
+<rect x="278" y="102" width="12" height="12" rx="3" fill="#73a08a" stroke="none" stroke-width="0"/>
+<text x="299" y="115" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="299" dy="0">4 general re-reviews</tspan></text>
+<rect x="548" y="102" width="12" height="12" rx="3" fill="#a3aba3" stroke="none" stroke-width="0"/>
+<text x="569" y="115" font-family="system-ui,sans-serif" font-size="16" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="569" dy="0">73 general reviewer</tspan></text>
+<text x="8" y="165" font-family="system-ui,sans-serif" font-size="21" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="8" dy="0">Projected API cost / 800 re-reviews (month)</tspan></text>
+<text x="8" y="208" font-family="system-ui,sans-serif" font-size="19" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="8" dy="0">Without Jev</tspan></text>
+<rect x="183" y="187" width="452.0" height="28" rx="3" fill="#a3aba3" stroke="none" stroke-width="0"/>
+<text x="652" y="208" font-family="system-ui,sans-serif" font-size="19" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="652" dy="0">$208.79</tspan></text>
+<text x="8" y="257" font-family="system-ui,sans-serif" font-size="19" font-weight="400" fill="#252b2a" text-anchor="start"><tspan x="8" dy="0">With Jev</tspan></text>
+<rect x="183" y="236" width="292.1509268245309" height="28" rx="3" fill="#24604f" stroke="none" stroke-width="0"/>
+<text x="652" y="257" font-family="system-ui,sans-serif" font-size="19" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="652" dy="0">$134.95</tspan></text>
+<text x="8" y="320" font-family="system-ui,sans-serif" font-size="19" font-weight="650" fill="#252b2a" text-anchor="start"><tspan x="8" dy="0">Review work / 800 re-reviews (month)</tspan></text>
+<text x="8" y="352" font-family="system-ui,sans-serif" font-size="24" font-weight="650" fill="#24604f" text-anchor="start"><tspan x="8" dy="0">7.5 → 5.3 hours (29% less)</tspan></text>
+</svg>

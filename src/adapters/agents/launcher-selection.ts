@@ -13,7 +13,7 @@ import { startPiAgent, resolvePiCommand } from './pi.js';
 import { startQwenAgent, resolveQwenCommand } from './qwen.js';
 import { CONFIG_PATH, readAgentConfig, isAgentBlocked, type AgentConfig, type ReadAgentConfigOptions } from './agent-config.js';
 import { resolveCustomRunner } from '../config/product-config.js';
-import { agentPolicyStep, AgentPoolExhaustedError } from '../../domain/agents.js';
+import { agentPolicyStep, agentFamily, selectAgent as selectFromSnapshot, selectionPolicy, AgentPoolExhaustedError, AgentSelectionPolicyError, type AgentSelectionSnapshot } from '../../domain/agents.js';
 
 interface LauncherStatus {
   agent: string;
@@ -121,6 +121,9 @@ function eligibleAgentsForStep(step: string, options: AgentSelectionOptions = {}
   const config = options.config !== undefined
     ? options.config
     : readAgentConfig(options.configPath || CONFIG_PATH, options);
+  if (agentPolicyStep(step) === 'review' && !config?.steps?.review?.eligible?.length) {
+    throw new AgentSelectionPolicyError(step, 'review requires explicit nonempty eligible families');
+  }
   let eligible: string[];
   if (!config || !config.steps || !config.steps[agentPolicyStep(step)]) {
     eligible = WORKFLOW_AGENT_NAMES.slice(); // Use the public workflow agent names
@@ -130,17 +133,7 @@ function eligibleAgentsForStep(step: string, options: AgentSelectionOptions = {}
   return eligible.filter((agent) => !isAgentBlocked(agent, config));
 }
 
-function weightedRandom(agents: string[], weights: {[key: string]: number}) {
-  const total = agents.reduce((sum, agent) => sum + (weights[agent] || 1), 0);
-  let r = Math.random() * total;
-  for (const agent of agents) {
-    r -= weights[agent] || 1;
-    if (r <= 0) {return agent;}
-  }
-  return agents[agents.length - 1];
-}
-
-function availableLaunchers(pool: string[], step: string, options: AgentSelectionOptions): string[] {
+function availableLaunchers(pool: string[], step: string, options: AgentSelectionOptions, allowEmpty = false): string[] {
   let available = pool;
   if (options.checkAvailability !== false) {
     const { worktree } = options;
@@ -152,7 +145,7 @@ function availableLaunchers(pool: string[], step: string, options: AgentSelectio
       const status = statuses.get(agent);
       return Boolean(status && status.supported);
     });
-    if (available.length === 0) {
+    if (available.length === 0 && !allowEmpty) {
       const blockers = pool.map((agent) => {
         const status = statuses.get(agent) || { detail: agent, reason: 'unsupported-agent' };
         const suffix = status.reason ? `; ${status.reason}` : '';
@@ -169,47 +162,37 @@ function availableLaunchers(pool: string[], step: string, options: AgentSelectio
   return available;
 }
 
-function selectAgent(step: string, options: AgentSelectionOptions = {}) {
-  const envOverride = options.configuration?.agents.override;
-  const excluded = options.exclude instanceof Set ? options.exclude : new Set();
-  const eligible = eligibleAgentsForStep(step, options);
-  if (envOverride && !excluded.has(envOverride) && eligible.includes(envOverride)) {
-    return envOverride;
-  }
-
-  const pool = eligible.filter((agent) => !excluded.has(agent));
-  if (eligible.length === 0) {
-    throw new Error(`No agents are eligible for workflow step: ${step}`);
-  }
-  if (pool.length === 0) {
-    throw new AgentPoolExhaustedError(step,
-      `All eligible agents for step "${step}" are exhausted (limit-hit or excluded). ` +
-      `Tried: ${[...excluded].join(', ')}.`
-    );
-  }
-
-  const available = availableLaunchers(pool, step, options);
-
-  return selectFromAvailable(available, step, options);
+function materializeSelection(step: string, config: AgentConfig | null, eligible: string[]): AgentSelectionSnapshot {
+  const stepConfig = config?.steps?.[agentPolicyStep(step)];
+  const configured = stepConfig?.eligible ?? (agentPolicyStep(step) === 'review' ? [] : WORKFLOW_AGENT_NAMES);
+  const policy = { eligible: configured.map(agentFamily), strategy: stepConfig?.selection ?? 'random', weights: stepConfig?.weights };
+  return {
+    capturedAtMs: Date.now(), defaultPolicy: policy, steps: { [agentPolicyStep(step)]: policy },
+    agents: configured.map(name => ({ family: agentFamily(name), launcherAvailable: true,
+      block: eligible.includes(name) ? { kind: 'none' } : { kind: 'indefinite', reason: 'operator block' } })),
+  };
 }
 
-function selectFromAvailable(available: string[], step: string, options: AgentSelectionOptions): string {
-  const config = options.config !== undefined
-    ? options.config
-    : readAgentConfig(options.configPath || CONFIG_PATH, options);
-  const stepConfig = config && config.steps && config.steps[agentPolicyStep(step)] ? config.steps[agentPolicyStep(step)] : {};
-  const selection = stepConfig.selection || 'random';
-
-  if (selection === 'weighted') {
-    const weights = stepConfig.weights || {};
-    return weightedRandom(available, weights);
+function selectAgent(step: string, options: AgentSelectionOptions = {}): string {
+  const config = options.config !== undefined ? options.config : readAgentConfig(options.configPath || CONFIG_PATH, options);
+  const eligible = eligibleAgentsForStep(step, { ...options, config });
+  const excluded = new Set([...(options.exclude ?? [])].map(agentFamily));
+  const snapshot = materializeSelection(step, config, eligible);
+  const policy = snapshot.defaultPolicy;
+  // Validate the complete configured policy before availability or exclusions can hide an entry.
+  selectionPolicy(snapshot, step);
+  const override = options.configuration?.agents.override;
+  if (override && eligible.includes(override) && !excluded.has(agentFamily(override))) {
+    return selectFromSnapshot(snapshot, step, { override: agentFamily(override), excluded });
   }
-
-  if (selection === 'random') {
-    return available[Math.floor(Math.random() * available.length)];
+  if (eligible.length === 0 && policy.strategy !== 'weighted') { throw new Error(`No agents are eligible for workflow step: ${step}`); }
+  const pool = eligible.filter(name => !excluded.has(agentFamily(name)));
+  if (pool.length === 0 && policy.strategy !== 'weighted') {
+    throw new AgentPoolExhaustedError(step, `All eligible agents for step "${step}" are exhausted (limit-hit or excluded). Tried: ${[...excluded].join(', ')}.`);
   }
-
-  return available[0];
+  const available = new Set(availableLaunchers(pool, step, options, policy.strategy === 'weighted'));
+  return selectFromSnapshot({ ...snapshot, agents: snapshot.agents.map(agent => ({ ...agent,
+    launcherAvailable: available.has(agent.family) })) }, step, { excluded });
 }
 
 function assertAgentSupported(agent: string, worktree?: string, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) {
@@ -290,7 +273,6 @@ export {
   setCommandPathProbe,
   setLauncherHealthProbe,
   eligibleAgentsForStep,
-  weightedRandom,
   selectAgent,
   assertAgentSupported,
   resolveNoOutputWatchdogConfig,

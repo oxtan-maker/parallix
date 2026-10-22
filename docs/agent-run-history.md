@@ -13,12 +13,17 @@ Redirected output uses plain messages. Interactive active, recover and verify
 operations enter the mission terminal automatically. Queries and structured
 writes keep their caller-side output.
 
-For foreground draft, review/handoff and integration, Ctrl+C stops the invoked
+For foreground draft, active, review/handoff and integration, Ctrl+C stops the invoked
 workflow and its owned children before returning a non-success result. Repeated
 Ctrl+C keeps the same cleanup running. After cleanup succeeds, retry the same
 command immediately; the Mission and recorded evidence remain available.
+Interrupting `px lead` also ends fleet polling and interrupts the workflows it
+forwarded. Each forwarded command reports confirmed shutdown or continuing
+work with instructions; use `px history <slug> list` to inspect its retained output.
 A CLI interrupt does not stop an independently started web workflow or another
 Mission. Use `px stop <slug>` to explicitly settle that Mission's workflow.
+The stop result names the Mission and reports confirmed shutdown or a pending
+stop; a successful signal delivery alone does not confirm shutdown.
 Cleanup escalates to forced termination when needed, with two confirmation
 stages of up to two seconds of polling per owned process tree, plus process
 inspection time. Attributed detached executions are also settled. If termination
@@ -67,7 +72,7 @@ Use `px attach <slug> --close` to remove an idle terminal when finished; it
 refuses to close a terminal with an owned operation. Terminal cleanup does not
 remove retained history. `px attach <slug> --list` reports the terminal state
 and how many operations are retained; after landing has retired the terminal,
-`px history <slug> list` and `search` recover the final integration result,
+`px history <slug> list list` and `search` recover the final integration result,
 gate diagnostics and statistics from the surviving repository checkout.
 Terminals and history recorded by earlier releases resolve without being
 renamed. A record or session that cannot be attributed to exactly this Mission

@@ -10,19 +10,26 @@ import type { MissionTerminalCapability } from '../../../src/application/ports/m
 import { completed, failure } from '../../../src/application/contracts.js';
 import type { BoardCommandRequest } from '../../../src/application/controller/board-command.js';
 
-test('CLI preserves review flags and reports stop diagnostics while closing its graph (TASK-2750 F4)', async () => {
+test('CLI preserves review flags and reports stop diagnostics while closing its graph (TASK-2750 F4)', async t => {
   const requests: BoardCommandRequest[] = [];
   let closed = 0;
+  let pending = true;
+  const messages: string[] = [];
+  t.mock.method(console, 'log', (line: string) => { messages.push(line); });
   const registry: Record<string, Command> = { draft: async () => {}, integrate: async () => {}, review: async () => {} };
   const graph = { mission: { store: { load: async () => ({ kind: 'found', mission: { status: 'review' } }) } },
     presentationCapabilities: { commandController: { dispatch: async (request: BoardCommandRequest) => {
-      requests.push(request); return request.kind === 'workflow:stop' ? failure('conflict', 'Stop is pending') : completed({});
+      requests.push(request); return request.kind === 'workflow:stop' && pending ? failure('conflict', 'Stop is pending') : completed({});
     } } }, operatorState: { close: async () => { closed++; } } } as unknown as ProductionApplicationServices;
   ownWorkflowCli(registry, async () => graph);
   await registry.review(['task-test', '--continue', '--reviewer', 'codex']);
   assert.deepEqual(requests[0].invocation, { command: 'review', args: ['task-test', '--continue', '--reviewer', 'codex'], interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY) });
   await assert.rejects(async () => registry.stop(['task-test']), /Stop is pending/);
   assert.equal(closed, 2);
+  pending = false;
+  await registry.stop(['task-test']);
+  assert.deepEqual(messages, ['Stop task-test: owned-work shutdown confirmed; mission and history retained.']);
+  assert.equal(closed, 3);
 });
 
 test('CLI streams only its coordinator bytes incrementally and renders phase changes (TASK-2750 F4)', () => {

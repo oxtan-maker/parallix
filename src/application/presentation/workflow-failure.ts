@@ -33,7 +33,7 @@ export function workflowFailureSummary(facts: WorkflowFailureFacts): string {
     ...(facts.diagnostics.length > 6 ? ['  Diagnostic: additional recorded diagnostics omitted; inspect retained output'] : []),
     ...(refs.length ? refs : ['  Output: no output was retained']),
     `  Recovery: ${recoveryText}`,
-    `  Next: ${line(facts.next ?? `Inspect px history ${facts.mission} and px status ${facts.mission}; address the recorded failure before explicitly retrying.`)}`,
+    `  Next: ${line(facts.next ?? `Inspect px history ${facts.mission} list and px status ${facts.mission}; address the recorded failure before explicitly retrying.`)}`,
     '',
   ].join('\n');
 }

@@ -8,8 +8,7 @@ import assert from 'node:assert/strict';
 import { selectReviewer, type ReviewerSelectionRequest } from '../../../../src/application/review-loop/reviewer-selection.js';
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
 import type { ReviewerRoutingPort } from '../../../../src/application/ports/review-round.js';
-import { agentFamily } from '../../../../src/domain/agents.js';
-import { PreparedAgentSelection } from '../../../../src/application/services/agent-selection.js';
+import { agentFamily, selectAgent, type AgentSelectionSnapshot } from '../../../../src/domain/agents.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 
 function routing(eligible: string[], supported: (_agent: string) => boolean, nominate: (_excluded: ReadonlySet<string>) => string): ReviewerRoutingPort {
@@ -184,26 +183,43 @@ describe("review fallback", { concurrency: false }, () => {
 
 // Regression provenance: TASK-2351.
 describe("review loop selection", { concurrency: false }, () => {
-  test('review-loop prepared selection skips SQLite-blocked reviewer before any launch (TASK-2351)', async () => {
+  test('review-loop snapshot selection skips SQLite-blocked reviewer before any launch (TASK-2351)', async () => {
     const codex = agentFamily('codex');
     const claude = agentFamily('claude');
     let launchCalls = 0;
-    const prepared = await PreparedAgentSelection.prepare({
-      async load() {
-        return {
-          capturedAtMs: 1_000,
-          defaultPolicy: { eligible: [codex, claude], strategy: 'random' },
-          steps: { review: { eligible: [codex, claude], strategy: 'random' } },
-          agents: [
-            { family: codex, launcherAvailable: true, block: { kind: 'until', untilMs: 2_000, reason: 'SQLite limit' } },
-            { family: claude, launcherAvailable: true, block: { kind: 'none' } },
-          ],
-        };
-      },
-    });
-    const reviewer = prepared.select('review', { excluded: new Set() });
+    const snapshot: AgentSelectionSnapshot = {
+      capturedAtMs: 1_000,
+      defaultPolicy: { eligible: [codex, claude], strategy: 'random' },
+      steps: { review: { eligible: [codex, claude], strategy: 'random' } },
+      agents: [
+        { family: codex, launcherAvailable: true, block: { kind: 'until', untilMs: 2_000, reason: 'SQLite limit' } },
+        { family: claude, launcherAvailable: true, block: { kind: 'none' } },
+      ],
+    };
+    const reviewer = selectAgent(snapshot, 'review', { excluded: new Set() });
     if (reviewer === 'codex') { launchCalls += 1; }
     assert.equal(reviewer, 'claude');
     assert.equal(launchCalls, 0, 'blocked codex receives zero launch calls');
   });
+});
+
+
+test('weighted exclusion exhaustion retains single-family review recovery (TASK-2788 F1)', () => {
+  const codex = agentFamily('codex');
+  const claude = agentFamily('claude');
+  const snapshot: AgentSelectionSnapshot = {
+    capturedAtMs: 0, defaultPolicy: { eligible: [], strategy: 'random' },
+    steps: { review: { eligible: [codex, claude], strategy: 'weighted', weights: { [codex]: 1, [claude]: 0 } } },
+    agents: [
+      { family: codex, launcherAvailable: true, block: { kind: 'none' } },
+      { family: claude, launcherAvailable: false, block: { kind: 'none' } },
+    ],
+  };
+  const port = routing(['codex', 'claude'], family => family === 'codex', excluded =>
+    selectAgent(snapshot, 'review', { excluded: new Set([...excluded].map(agentFamily)) }));
+  for (const persisted of [null, { reviewer: 'claude', round: 1, phase: 'reviewing' as const }]) {
+    const result = select({ implementer: 'codex', dryRun: false, persisted }, port);
+    assert.equal(result.selected?.reviewer, 'codex');
+    assert.equal(result.selected?.reviewerSource, 'single-family-fallback');
+  }
 });

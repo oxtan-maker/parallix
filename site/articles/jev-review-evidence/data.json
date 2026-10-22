@@ -1,0 +1,277 @@
+{
+  "snapshot": "2026-10-21T08:29:07.320Z",
+  "cutoff": "2026-10-16T04:39:57.259Z",
+  "cutoff_event": "Completion of the pinned review-classifier update.",
+  "live": {
+    "n": 114,
+    "classifier": 37,
+    "general": 77,
+    "missions": 41
+  },
+  "sonnet_baseline": {
+    "model": "claude-sonnet-5-5",
+    "rounds": 25,
+    "mean_api_equivalent_usd": 0.26098827199999997,
+    "method": "All 25 native sessions and captured launcher/CLI records cross-checked. Deduplicate assistant-message IDs and use current-invocation token usage, not session-cumulative CLI cost totals. Reprice at the frozen 21 October 2026 list rates. Process timing includes startup, all tools and shutdown; shared pre-review gates and pauses outside the process are excluded.",
+    "mean_session_span_seconds": 31.461319971084595,
+    "mean_cli_invocation_seconds": 31.64512,
+    "mean_process_seconds": 33.8425599861145,
+    "audited_messages": 104,
+    "audited_sessions": 17,
+    "excluded_rounds": 0
+  },
+  "pricing_usd_per_million_tokens": {
+    "input": 2,
+    "output": 10,
+    "cache_read": 0.1,
+    "cache_write_5m": 2.5,
+    "cache_write_1h": 4
+  },
+  "projection": {
+    "claude_without": 800,
+    "claude_with": 512.280701754386,
+    "cost_without": 208.79061759999996,
+    "cost_with": 134.95215142501374,
+    "time_without_minutes": 451.23413314819334,
+    "time_with_minutes": 319.944628188999,
+    "cost_saved": 73.83846617498622,
+    "cost_saving_pct": 35.36483919811263,
+    "time_saved_minutes": 131.28950495919437,
+    "time_saving_pct": 29.095650198979193
+  },
+  "projection_assumptions": "Same 41/114 routing mix and all 25 audited Sonnet process durations and costs. Scale the 111 covered classifier rounds to 800; the three missing rounds receive the estimated mean. Include packet preparation, retries, calls and general-reviewer fallback. Replay preparation uses the mean of four production panels; five untimed no-call preparations use the mean of 68 called attempts. Integration call costs use historical pinned Jev 1.13 usage; panel costs are recorded. Exclude shared gates, general-reviewer prompt preparation, final workflow bookkeeping, extra repairs, upkeep and human attention. Sample-based planning estimates, not measured monthly savings or confidence intervals.",
+  "model_comparison": {
+    "approved_rounds": 43,
+    "jev_1_13_clears": 24,
+    "jev_1_14_clears": 12,
+    "best_1_14_threshold_clears": 19,
+    "status": "historical tuning; general-reviewer comparator"
+  },
+  "extra_question_comparison": {
+    "rounds": 35,
+    "correct_clears_obligations_only": 20,
+    "correct_clears_with_new_defect_question": 8,
+    "status": "reused historical rounds; tuning; obligation bar .90, added question bar .85"
+  },
+  "scope": "Jev decisions for integration-gate repairs and general re-reviews. The comparison includes reruns after finding an inactive classification path; original counts and rerun provenance are retained. First review, human approval, local integration gates and upstream CI integration remain required.",
+  "quality": "Selected case investigations establish a repair-introduced duplicate-key defect and a separate reviewer-model-change case. They do not establish a population error rate.",
+  "preservation_illustration": {
+    "evidence_kind": "schematic policy examples, not measured repairs",
+    "preserves": "Fix a code or test regression while preserving the intended behaviour and required assertions",
+    "weakens": "Delete or weaken a test or required assertion, leaving intended behaviour unchecked",
+    "execution": "Both schematic test runs report PASS; the reviewer judges whether the repair preserved the intended check"
+  },
+  "excluded_population": {
+    "mechanical_restorations": 7,
+    "reason": "Prior approval restored mechanically without a model review; excluded from the 114-round comparison and monthly projections."
+  },
+  "agent_findings_before_human_involvement": {
+    "from_local_date": "2026-10-16",
+    "to_local_date": "2026-10-21",
+    "timezone": "Europe/Stockholm",
+    "completed_missions": 39,
+    "agent_findings": 26,
+    "mean_findings_per_mission": 0.6666666666666666,
+    "zero_finding_missions_included": true,
+    "missions_with_findings": 8,
+    "boundary": "Earlier of the first handoff to human approval or the first recorded human note not authored by the workflow. Findings must precede that boundary.",
+    "measure": "Recorded agent review findings, not independently verified unique bugs or measured human attention.",
+    "cross_check": "Independent SQL count against persisted structured findings equals the event-derived 26; px stats completed-mission cohort equals 39."
+  },
+  "comparison": {
+    "n": 114,
+    "classifier": 41,
+    "general": 73,
+    "missions": 41,
+    "live_clears": 37,
+    "replayed_clears": 4,
+    "share_pct": 35.96491228070175,
+    "evidence": "37 local integration repair clears and four general re-review clears within the same 114 rounds. The general re-review classifier path was inactive because of a routing bug; its 42 affected rounds were rerun using the original evidence and fixed policy. Original live counts are retained separately.",
+    "integration_gate_repair_clears": 37,
+    "general_rereview_clears": 4
+  },
+  "panel_replay": {
+    "n": 42,
+    "clears": 4,
+    "abstentions": 38,
+    "returns": 0,
+    "model": "typesafe/jev-1.13-20260917",
+    "production_packet_controls": 4,
+    "matching_control_hashes": 4,
+    "clears_general_approved_same_revision": 4,
+    "cases": [
+      {
+        "id": "px-0012-r2",
+        "score": 0.53,
+        "candidate_revision": "7af1a90f7b68cb06527b17d4d946702c5c5e3ed8",
+        "general_outcome": "approved",
+        "packet_hash": "bdf1881caeae8603e83fecaec76bd180a62ec0d1ac2e34a8f591caede462103e"
+      },
+      {
+        "id": "px-0014-r7",
+        "score": 0.71,
+        "candidate_revision": "5e53b16f650fd381ab6eb0ba970eabcb454c6a6c",
+        "general_outcome": "approved",
+        "packet_hash": "f5d9609b69eb06cd84cc7c9c7234245276767e5b8a0a4b6ec87db9f0fd2e9454"
+      },
+      {
+        "id": "task-2762-r12",
+        "score": 0.53,
+        "candidate_revision": "2fa3d7daa90ee5c8855e0c52362a65973eae7f3f",
+        "general_outcome": "approved",
+        "packet_hash": "0908d6c5a2994a2ef76564d06908fae058d9ad14e0a300a6e151476daf832579"
+      },
+      {
+        "id": "task-2762-r8",
+        "score": 0.58,
+        "candidate_revision": "b8ce25b3bcb23b8654a8197432c0591563e9dc67",
+        "general_outcome": "approved",
+        "packet_hash": "355dbbc705cfb03a565ee3bdf6f9373d3e25cc3b8e4e35d40eaddded8d2473dc"
+      }
+    ],
+    "rerun_reason": "A routing bug left the existing general re-review classification path inactive for 42 rounds.",
+    "source_revision": "c95e5189fde1d2c647346d81c14a5474172852fb",
+    "protocol": "Bypass only the erroneous review-obligations dispatch. Reconstruct evidence available at each original attempt; retain the same packet builder, three frozen questions, thresholds and pinned model. Four recorded production panel packet hashes match exactly. No production votes or mission/statistics writes.",
+    "question_hash": "9307b7c76a3168fb9c25c76409b1e153066ad0ac6e7f747992cf2302e95602a5",
+    "calls": 126,
+    "provider_failures": 0
+  },
+  "additional_panel_overhead": {
+    "rounds": 42,
+    "calls": 126,
+    "reported_cost_usd": 0.125905878,
+    "sum_panel_elapsed_seconds": 32.89864043900028,
+    "method": "Measured replay-panel component of the 111 covered classifier rounds; three questions run in parallel. Include this component in the total sample mean; exclude calls from retired experimental paths.",
+    "cost_per_800_rounds": 0.9074297513513513,
+    "elapsed_seconds_per_800_rounds": 237.1073184792813
+  },
+  "general_rereview_example": {
+    "case": "task-2762-r8",
+    "revision": "b8ce25b3bcb23b8654a8197432c0591563e9dc67",
+    "before": "() => unknown | Promise<unknown>",
+    "after": "() => void | Promise<void>",
+    "change": "One callback type annotation; runtime behaviour and assertions unchanged.",
+    "evidence": "One of the four restored-panel clears, matching the recorded general approval at the same revision. Full provenance remains in panel_replay."
+  },
+  "projection_base_rounds": 800,
+  "projection_period_label": "month",
+  "projection_period_assumption": "Illustrative month of 800 re-reviews: four weeks at the earlier illustrative 200 per week, not an observed monthly rate or a calendar-month forecast.",
+  "review_requests_for_changes": {
+    "start_inclusive": "2026-08-13T22:00:00.000Z",
+    "end_inclusive": "2026-10-21T14:43:50.350013Z",
+    "timezone": "Europe/Stockholm",
+    "unit": "One repository/mission/round with a recorded decision; not missions, findings or model calls.",
+    "method": "Round decisions take precedence. If absent, use the latest recorded non-human reviewer outcome event for that same round. Scope by decision time, repository parallix and pull-request change kind. Exclude classifier decisions and mechanical restorations from the general-reviewer baseline. Do not treat missing evidence as approval or infer outcomes from prose, commits or round count.",
+    "historical": {
+      "all": {
+        "rounds": 1242,
+        "requests_for_changes": 449,
+        "share_pct": 36.151368760064415,
+        "event_recovered_rounds": 172
+      },
+      "first": {
+        "rounds": 456,
+        "requests_for_changes": 197,
+        "share_pct": 43.20175438596491,
+        "event_recovered_rounds": 94
+      },
+      "re_review": {
+        "rounds": 786,
+        "requests_for_changes": 252,
+        "share_pct": 32.06106870229008,
+        "event_recovered_rounds": 78
+      }
+    },
+    "excluded_decided_routes": {
+      "classifier": 54,
+      "mechanical": 8
+    },
+    "sample": {
+      "rounds": 114,
+      "recorded_requests_for_changes": 18,
+      "request_share_pct": 15.789473684210526,
+      "known_additional_general_reviewer_requests": 1,
+      "known_general_only_requests": 19,
+      "known_general_only_share_pct": 16.666666666666668,
+      "miss_case": "task-2785-r4",
+      "restored_panel": "The four rerun clears were general-approved at the same revisions, so do not alter the 18 returns.",
+      "boundary": "One confirmed missed repair defect; not an exhaustive count of misses. Selected suspect cases were investigated, not all clears uniformly adjudicated. A request for changes is a recorded reviewer judgment, not verified ground truth."
+    },
+    "estimate": {
+      "basis": "Subtract the sample's known loss of 1/114 reviews from the historical general re-review return share. Hold case mix, review scope and repair attempts fixed; no workflow simulation. This is a sample-based extrapolation, not a validated population estimate or confidence interval. This uses at least one known miss from selected investigations, not an exhaustive miss count; further misses would lower the combined rate. The historical general-reviewer cohort and current mixed-route sample differ and are not matched.",
+      "general_baseline_pct": 32.06106870229008,
+      "sample_gap_percentage_points": 0.8771929824561403,
+      "jev_plus_general_estimate_pct": 31.18387571983394,
+      "general_returns_per_800": 256.48854961832063,
+      "jev_plus_general_returns_per_800": 249.4710057586715,
+      "additional_misses_per_800": 7.017543859649122
+    },
+    "start_rationale": "First complete Europe/Stockholm day after the TASK-2347 through TASK-2369 statistics repairs. Later review-persistence fixes motivate using recorded outcome events when round decisions are absent."
+  },
+  "classifier_overhead_estimate": {
+    "covered_rounds": 111,
+    "cohort_rounds": 114,
+    "missing_rounds": [
+      "px-0015-r3",
+      "task-2762-r9",
+      "task-2778-r2"
+    ],
+    "integration_first_question_calls": 64,
+    "integration_followup_question_calls": 27,
+    "production_panel_calls": 12,
+    "replay_panel_calls": 126,
+    "replay_panel_seconds": 32.89864043900028,
+    "total_classification_seconds": 82.91568282600028,
+    "mean_classification_seconds_per_covered_round": 0.7469881335675701,
+    "integration_first_question_mean_call_usd": 0.00033392268,
+    "integration_first_question_cost_sample_n": 100,
+    "integration_followup_question_mean_call_usd": 0.0004669993125,
+    "integration_followup_question_cost_sample_n": 64,
+    "integration_estimated_cost_usd": 0.0339800329575,
+    "production_panel_reported_cost_usd": 0.01395345,
+    "replay_panel_reported_cost_usd": 0.125905878,
+    "total_estimated_cost_usd": 0.1738393609575,
+    "method": "Include all decision-relevant production attempts, retries and the 42 restored-panel replays. Recorded provider time counts parallel panels by elapsed time. Add recorded production packet preparation; impute untimed replay preparation from four production panels and five untimed no-call preparations from the 68 called attempts. Apply the resulting mean over 111 covered rounds to 800. General prompt preparation, shared gates and final workflow bookkeeping are excluded. Integration-call costs use historical pinned Jev 1.13 usage; production and replay panel costs are reported. Planning estimates, not confidence intervals or significance tests.",
+    "classification_seconds_per_800": 597.5905068540561,
+    "estimated_cost_per_800": 1.252896295189189,
+    "production_rounds": 69,
+    "production_attempts": 73,
+    "production_called_attempts": 68,
+    "production_classification_seconds": 50.017042387000004,
+    "recorded_preparation_seconds": 49.09802570300012,
+    "preparation_sample_attempts": 68,
+    "production_panel_preparation_mean_seconds": 2.914800765000029,
+    "production_panel_preparation_sample_rounds": 4,
+    "replay_preparation_estimated_seconds": 122.42163213000123,
+    "untimed_no_call_attempts": 5,
+    "no_call_preparation_estimated_seconds": 3.610148948750009,
+    "preparation_and_calls_estimated_seconds": 258.0454896077516,
+    "mean_preparation_and_calls_estimated_seconds_per_covered_round": 2.3247341406103748,
+    "preparation_and_calls_estimated_seconds_per_800": 1859.7873124883
+  },
+  "review_timing_audit": {
+    "general_approval_completion": {
+      "n": 22,
+      "mean": 34.64695451476357,
+      "median": 27.16100001335144,
+      "minimum": 16.723000049591064,
+      "maximum": 114.72099995613098
+    },
+    "general_approved_rounds": 23,
+    "classifier_clear_completion": {
+      "n": 36,
+      "mean": 1.6901666522026062,
+      "median": 1.4470000267028809,
+      "minimum": 1.1419999599456787,
+      "maximum": 4.33299994468689
+    },
+    "classifier_clear_rounds": 37,
+    "completion_boundary": "Classifier: preparation start through enclosing workflow completion. General approval: reviewer process launch through enclosing workflow completion. General prompt preparation is outside that boundary. Different samples, not paired trials; missing completion records are not imputed into these observed means.",
+    "whole_round_median_seconds": 74.128,
+    "whole_round_boundary": "The round clock opens before shared pre-review rebase/gates and can retain an old start across resumed work. It does not measure time removed by Jev.",
+    "longest_reviewer_process_seconds": 114.4469997882843,
+    "longest_reviewer_api_equivalent_usd": 0.29681559999999996,
+    "longest_tool_seconds": 79.98099994659424,
+    "longest_tool": "Browser E2E command inside the reviewer invocation; retained in both means."
+  }
+}

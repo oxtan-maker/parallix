@@ -50,7 +50,7 @@ describe('Execute Mission adapters', () => {
       resolveTaskFile() { return { ok: true as const, taskFile: '/worktree/task.md', matches: ['/worktree/task.md'] }; },
       buildCheckpointContext() { return 'CP-5'; },
       async resolveExecutionContext() { return null; },
-      readAgentConfig() { return { steps: { active: { eligible: ['codex'], selection: 'first' } } }; },
+      readAgentConfig() { return { steps: { active: { eligible: ['codex'], selection: 'random' } } }; },
       buildExecutePrompt() { return 'execute prompt'; },
       async selectLaunchAndRecord() { return { agent: 'codex', result: { status: 0 }, rebaseDeferred: false }; },
       enforceExecuteCommitSafety() {},
@@ -152,7 +152,7 @@ describe('Execute Mission adapters', () => {
       }),
     );
     const plan = await ports.agentExecution.prepare({ slug: 'task-1', worktree: '/worktree' });
-    assert.deepEqual(plan.agentConfig, { steps: { active: { eligible: ['codex'], selection: 'first' } }, blocklist });
+    assert.deepEqual(plan.agentConfig, { steps: { active: { eligible: ['codex'], selection: 'random' } }, blocklist });
     assert.equal(plan.prompt, 'execute prompt');
     assert.equal(await ports.agentExecution.eligible('codex'), false, 'operator blocks prevent retention');
   });
@@ -204,7 +204,7 @@ describe('Execute Mission adapters', () => {
   test('agent execution adapter leaves the file agent config untouched without a blocklist overlay', async () => {
     const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub());
     const plan = await ports.agentExecution.prepare({ slug: 'task-1', worktree: '/worktree' });
-    assert.deepEqual(plan.agentConfig, { steps: { active: { eligible: ['codex'], selection: 'first' } } });
+    assert.deepEqual(plan.agentConfig, { steps: { active: { eligible: ['codex'], selection: 'random' } } });
   });
 
   test('agent execution adapter selects before launch without probing a launcher', async () => {
@@ -212,7 +212,7 @@ describe('Execute Mission adapters', () => {
     setLauncherHealthProbe(() => { throw new Error('prepare must not probe a launcher'); });
     try {
       const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
-        readAgentConfig() { return { steps: { active: { eligible: ['codex'], selection: 'first' } } }; },
+        readAgentConfig() { return { steps: { active: { eligible: ['codex'], selection: 'random' } } }; },
       }));
       assert.equal(await ports.agentExecution.select?.('task-1'), 'codex');
       assert.equal(await ports.agentExecution.eligible('codex'), true);

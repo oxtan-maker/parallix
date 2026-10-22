@@ -342,9 +342,9 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
     } : null,
     humanFeedback: composeHumanFeedback({ slug, branch, worktree, providerEnabled, missionStore, log, error, fetchComments, tokenFor, recordHumanNote }),
     routing: {
-      eligibleFamilies: () => eligibleAgentsForStep('review'),
+      eligibleFamilies: () => eligibleAgentsForStep('review', { configuration: bindings.configuration }),
       launcherStatus: agent => workflowLauncherStatus(agent, worktree, bindings.configuration),
-      nominate: excluded => selectAgent('review', { exclude: new Set(excluded), configuration: bindings.configuration }),
+      nominate: excluded => selectAgent('review', { exclude: new Set(excluded), worktree, configuration: bindings.configuration }),
       runtimeMatrix: () => formatMatrixSummary(buildAutonomousReviewMatrix()),
     },
     agents: agentPort(slug, branch, worktree, missionPath, target, bindings, writeState, log, error),

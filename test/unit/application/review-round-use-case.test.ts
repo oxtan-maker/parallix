@@ -19,7 +19,7 @@ function fixture(round: number | null = 2, controllerFree = false, overrides: Re
     invalidMaxAttempts: raw => { calls.push(`invalid ${raw}`); },
     missingReviewAggregate: () => { calls.push('missing aggregate'); },
   };
-  return { calls, requests, fake, useCase: new ReviewRoundUseCase(port) };
+  return { calls, requests, fake, port, useCase: new ReviewRoundUseCase(port) };
 }
 
 const base = { slug: 'task-2637', focus: 'all', dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null };
@@ -155,3 +155,46 @@ test('workflow blocker during reviewer retry ends recovery without replacing the
   assert.deepEqual(fake.stops, [], 'retained authority must not be replaced with retry exhaustion');
   assert.match(fake.errors.join('\n'), /operator stop/);
 });
+
+
+for (const mode of ['start', 'continue'] as const) {
+  for (const invocation of ['operator', 'operator-corrected', 'nested', 'dry-run'] as const) {
+    test(`${mode} ${invocation} reconciles repair authorization only with operator authority (TASK-2807)`, async () => {
+      const { fixtureMission, inMemoryTransitionStore } = await import('../../fixtures/mission-builders.js');
+      const { bindReviewOperatorResume } = await import('../../../src/composition/review-operator-resume.js');
+      const { missionId } = await import('../../../src/domain/mission.js');
+      const { repairContractFailure } = await import('../../../src/application/repair-checkpoint-service.js');
+      const blocker = { command: 'npm test', diagnostic: 'old contract', authorityReason: 'operator decision', proposedCorrection: 'correct criterion' };
+      const mission = fixtureMission(base.slug, { successCriteria: ['corrected criterion'], declaredGates: ['npm test'], checkpoints: [{
+        missionId: missionId(base.slug), name: 'CP-1', goalCheck: [], nextActionText: 'repair',
+        repair: { incidentId: 'stale-contract', command: 'npm test', attempt: 1,
+          ...(invocation === 'operator-corrected' ? { acknowledgedBlocker: blocker } : { blocker }),
+          authorizedGates: ['npm test'], authorizedCriteria: ['old criterion'], evidenceRecorded: false, verified: false },
+      }] });
+      const store = inMemoryTransitionStore(mission);
+      const f = fixture(mode === 'start' ? null : 1);
+      Object.assign(f.port, { operatorResume: bindReviewOperatorResume(store, invocation !== 'nested', {}) });
+      const mechanisms = f.port.mechanisms;
+      f.port.mechanisms = request => {
+        const current = store.mission();
+        const repair = current.checkpoints[0].repair!;
+        if (invocation.startsWith('operator')) {
+          assert.equal(repairContractFailure(current.checkpoints, current.declaredGates, current.successCriteria), null);
+          assert.deepEqual(repair.acknowledgedBlocker, blocker);
+          assert.deepEqual(f.calls, mode === 'start' ? [] : ['clear intervention', 'invalidate blocker']);
+        } else {
+          assert.deepEqual(current, mission, 'nested work and dry-run retain authorization and blockers');
+        }
+        assert.equal(repair.evidenceRecorded, false);
+        assert.equal(repair.verified, false);
+        assert.deepEqual(current.checkpoints[0].goalCheck, []);
+        return mechanisms(request);
+      };
+      const request = { ...base, dryRun: invocation === 'dry-run' };
+      if (mode === 'start') { await f.useCase.start({ ...request, maxAttempts: 1 }); }
+      else { await f.useCase.continue({ ...request, rawMaxAttempts: null }); }
+      assert.equal(f.requests.length, 1);
+      assert.deepEqual(f.fake.launches, []);
+    });
+  }
+}

@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test, { type TestContext } from 'node:test';
+import { build } from 'esbuild';
 import { setTimeout as delay } from 'node:timers/promises';
 import { resolveCanonicalMaxConcurrentGates } from '../../../src/adapters/config/product-config.js';
 import { runPhaseGates } from '../../../src/adapters/config/repository-gates.js';
@@ -51,8 +52,21 @@ async function gateProcessFixture(t: TestContext) {
   const worktree = path.join(root, 'worktree');
   git(['worktree', 'add', '-qb', 'mission/fixture', worktree]);
   const worker = fileURLToPath(new URL('../../fixtures/gate-admission-worker.ts', import.meta.url));
+  // Compile the immutable worker once per isolated fixture, as workflow-bundle
+  // does for real workflow children. Repeated tsx loader startup otherwise
+  // dominates the waited-child CPU of the cross-process admission assertion.
+  const bundleRoot = path.join(root, 'worker-bundle');
+  const entry = path.join(bundleRoot, 'worker.mjs');
+  await build({ entryPoints: [worker], outfile: entry, bundle: true, minify: true,
+    platform: 'node', format: 'esm', packages: 'external',
+    banner: { js: `import { createRequire } from 'node:module'; const require = createRequire(${JSON.stringify(path.resolve('package.json'))});` },
+  });
+  fs.symlinkSync(path.resolve('node_modules'), path.join(bundleRoot, 'node_modules'), 'dir');
+  fs.symlinkSync(path.resolve('src/adapters/sqlite/migrations'), path.join(bundleRoot, 'migrations'), 'dir');
   const launch = (cwd: string, command: string) => {
-    const child = spawn(process.execPath, ['--import', 'tsx', worker, cwd, path.join(root, 'leases'), command], { stdio: 'pipe' });
+    // Match the runner's bounded compiler pool in this independently started
+    // worker; host-sized pools inflate waited-child CPU without adding coverage.
+    const child = spawn(process.execPath, ['--v8-pool-size=1', entry, cwd, path.join(root, 'leases'), command], { stdio: 'pipe' });
     children.push(child);
     const exit = new Promise<number | null>(resolve => child.once('exit', resolve));
     exits.push(exit);

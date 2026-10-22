@@ -13,7 +13,7 @@ import { EvidenceReadError } from '../../../../src/application/ports/review-evid
 import { WEAKENING_POLICY_VERSION } from '../../../../src/application/review-classification/weakening-policy.js';
 import { PANEL_QUESTIONS } from '../../../../src/application/review-classification/panel-questions.js';
 import type { ReviewClassificationPorts } from '../../../../src/application/ports/review-classification.js';
-import type { DecisionResult } from '../../../../src/application/ports/decision.js';
+import type { DecisionData, DecisionResult } from '../../../../src/application/ports/decision.js';
 
 import { scenario, distribution } from '../../../helpers/review-classification.js';
 
@@ -117,7 +117,7 @@ test('a rebased branch whose prior revision is not an ancestor still reaches Jev
   assert.equal(s.attempts[0].reason, 'resolved-threshold');
 });
 
-test('human feedback is evidence for Jev rather than a reason to skip it (TASK-2675)', async () => {
+test('human feedback is evidence for Jev rather than a reason to skip it (TASK-2675, TASK-2805)', async () => {
   const s = scenario();
   s.round.humanFeedback = 'New obligation: also keep logging.';
   s.context.state.metadata.humanFeedbackSources = ['comment-7'];
@@ -142,7 +142,7 @@ test('unresolved classifier returns preserve original findings without invented 
     type: 'choice', selected: 'does_not_address', probabilities: distribution('does_not_address', 0.89), confidence: 0.1 } } });
   assert.equal(await tryClassifyReview(s.context, s.round), 'REQUEST_CHANGES');
   assert.deepEqual(s.published, ['implementer']);
-  assert.deepEqual(s.round.blockingFindings, [{ id: 'legacy-F1', summary: 'x.java:1 drops output' }]);
+  assert.deepEqual(s.round.blockingFindings, [{ id: 'F1', summary: 'x.java:1 drops output' }]);
   const loaded = await s.store.load(missionId(s.context.slug));
   assert.equal(loaded.kind, 'found');
   if (loaded.kind !== 'found') { return; }
@@ -159,7 +159,7 @@ test('one classifier return permits another return using retained findings and c
     classifier: {
       kind: 'classifier', identity: 'jev', decisionId: 'prior-decision', provider: 'typesafe', model: 'jev',
       packetHash: 'c'.repeat(64), priorRevision: 'd'.repeat(40), candidateRevision: 'a'.repeat(40),
-      findingIds: ['legacy-F1'], policyVersion: 'repeat-findings-52-89-v2', label: 'does_not_address', score: 0.89,
+      findingIds: ['F1'], policyVersion: 'repeat-findings-52-89-v2', label: 'does_not_address', score: 0.89,
     },
   };
   s.classifier.decision.decide = async request => {
@@ -168,7 +168,7 @@ test('one classifier return permits another return using retained findings and c
   };
   assert.equal(await tryClassifyReview(s.context, s.round), 'REQUEST_CHANGES');
   assert.deepEqual(s.published, ['implementer']);
-  assert.deepEqual(s.round.blockingFindings, [{ id: 'legacy-F1', summary: 'x.java:1 drops output' }]);
+  assert.deepEqual(s.round.blockingFindings, [{ id: 'F1', summary: 'x.java:1 drops output' }]);
 });
 
 test('frozen V3 includes 51% approval boundary (TASK-2716)', async () => {
@@ -912,7 +912,6 @@ test('general obligation ancestry retains findings, human corrections and decide
   assert.equal(reviewObligations({ ...review, rounds: [{ ...approved, decision: { ...approved.decision, revocation: undefined } }, current] }), null);
 });
 
-import "./repeat-review-obligations.cases.js";
 test('no-fact repairs retain evidence, provider and empty repair fallback (TASK-2754)', async () => {
   for (const cause of ['baseline', 'read', 'empty', 'bookkeeping', 'budget', 'provider'] as const) {
     const s = gateRepairScenario();
@@ -932,5 +931,61 @@ test('no-fact repairs retain evidence, provider and empty repair fallback (TASK-
     assert.equal(calls, 0, cause);
     assert.deepEqual(s.published, []);
     assert.equal(s.attempts[0].admissibleFact, false);
+  }
+});
+
+
+test('frozen V3 0.53 publishes and persists approval for qualifying prior findings (TASK-2805)', async () => {
+  const { default: frozen } = await import('../../../fixtures/review-classification/frozen-panel-regressions.json', { with: { type: 'json' } });
+  assert.deepEqual(frozen.restoredCases.map(c => [c.id, c.members[0].response.answers.resolution.probabilities.addresses]),
+    [['px-0012-r2', 0.53], ['px-0014-r7', 0.71], ['task-2762-r8', 0.58], ['task-2762-r12', 0.53]]);
+  for (const sample of frozen.restoredCases) {
+    assert.equal(sample.expected, 'clear');
+    for (const member of sample.members) {
+      const raw = JSON.parse(member.rawResponse);
+      assert.equal(raw.model, member.response.model);
+      assert.equal(raw.answers.resolution.choice, member.response.answers.resolution.selected);
+      assert.deepEqual(raw.answers.resolution.probabilities, member.response.answers.resolution.probabilities);
+    }
+    const s = scenario();
+    s.round.verifiedRevision = sample.pinned.after;
+    s.context.ports.preReview.head = () => sample.pinned.after;
+    let calls = 0;
+    s.classifier.decision.decide = async () => sample.members[calls++].response as DecisionResult;
+    assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED');
+    assert.equal(calls, 3);
+    assert.deepEqual(s.published, ['clear']);
+    const stored = await s.store.load(missionId(s.context.slug));
+    assert.equal(stored.kind, 'found');
+    if (stored.kind !== 'found') { throw new Error('mission missing'); }
+    assert.equal(stored.mission.status, 'integration');
+    const decision = stored.mission.review!.rounds.at(-1)!.decision!;
+    assert.equal(decision.kind, 'approved');
+    assert.equal(decision.revision, sample.pinned.after);
+    assert.equal(decision.classifier!.score, sample.members[0].response.answers.resolution.probabilities.addresses);
+    assert.equal(decision.classifier!.candidateRevision, sample.pinned.after);
+  }
+});
+
+
+test('frozen production controls reproduce all four recorded packet hashes (TASK-2805)', async () => {
+  const { default: frozen } = await import('../../../fixtures/review-classification/frozen-panel-regressions.json', { with: { type: 'json' } });
+  const { runPanel } = await import('../../../../src/application/review-classification/panel.js');
+  assert.equal(frozen.productionControls.length, 4);
+  for (const control of frozen.productionControls) {
+    const state = JSON.parse(JSON.stringify(control.state)) as DecisionData;
+    const s = scenario();
+    let calls = 0;
+    s.classifier.decision.decide = async request => {
+      assert.deepEqual(request.questions, { resolution: Object.values(PANEL_QUESTIONS)[calls++] });
+      assert.equal(request.state, state);
+      assert.equal(s.classifier.hash(JSON.stringify(request.state)), control.originalPacketHash, control.id);
+      return abstain();
+    };
+    const outcome = await runPanel(state, s.classifier.decision,
+      { provider: 'openrouter', model: 'typesafe/jev-1.13-20260917' }, s.classifier.hash);
+    assert.equal(calls, 3);
+    assert.equal(outcome.selected.route, 'reviewer');
+    assert.equal(s.classifier.hash(JSON.stringify(control.state)), control.originalPacketHash, control.id);
   }
 });

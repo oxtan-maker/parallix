@@ -1,8 +1,8 @@
 ---
 id: TASK-2804
 title: Make implementer reassignment recover an existing PR
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-20 22:21'
 updated_date: '2026-10-20 22:23'
 labels:

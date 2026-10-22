@@ -1,0 +1,39 @@
+population,measure,value,denominator,unit,evidence_kind
+after the pinned classifier update through 2026-10-21 08:29 UTC,Jev clears,37,114,rounds,live observed
+after the pinned classifier update through 2026-10-21 08:29 UTC,general reviewer decisions,77,114,rounds,live observed
+recovered original Sonnet re-reviews,Sonnet mean API equivalent,0.26098827199999997,25,USD per round,historical workload baseline
+recovered original Sonnet re-reviews,Sonnet mean process time,33.8425599861145,25,seconds per round,All 25 original reviews audited; process launch to exit includes tools; no rounds dropped
+identical gate-fact packets,Jev 1.13 approved clears,24,43,rounds,historical tuning
+identical gate-fact packets,Jev 1.14 approved clears,12,43,rounds,historical tuning
+identical gate-fact packets,best tried 1.14 bar,19,43,rounds,historical tuning
+missions completed 2026-10-16 through 2026-10-21 (Europe/Stockholm),agent findings before first recorded human involvement,26,39,findings per completed-mission cohort,recorded review findings; not verified unique bugs
+same 114 rounds; combined production and restored-panel replay,Jev clears with restored route,41,114,rounds,37 production + 4 historical replay
+same 114 rounds; combined production and restored-panel replay,general reviews with restored route,73,114,rounds,restored-route comparison
+42 rounds with an inactive classification path,restored panel replay clears,4,42,rounds,historical replay; all 4 general-approved at same revision
+42 rounds with an inactive classification path,restored panel replay calls,126,42,calls,historical replay
+42 rounds with an inactive classification path,restored panel replay cost,0.125905878,42,USD,provider-reported replay usage
+same 114 rounds; corrected classification routing,Jev integration-gate repair clears,37,114,rounds,observed production decisions
+same 114 rounds; corrected classification routing,Jev general re-review clears,4,114,rounds,rerun after inactive classification path found
+general reviews 14 Aug–21 Oct 2026 (Europe/Stockholm),all reviews requesting changes,449,1242,rounds,recorded round decisions plus surviving outcome events
+general reviews 14 Aug–21 Oct 2026 (Europe/Stockholm),first reviews requesting changes,197,456,rounds,recorded round decisions plus surviving outcome events
+general reviews 14 Aug–21 Oct 2026 (Europe/Stockholm),re-reviews requesting changes,252,786,rounds,recorded round decisions plus surviving outcome events
+same 114 model-reviewed re-reviews,observed requests for changes,18,114,rounds,sample observed
+same 114 model-reviewed re-reviews,confirmed additional defect cleared by Jev,1,114,rounds,selected original-model case adjudication; not exhaustive miss count
+historical general re-review baseline adjusted by sample difference,Jev plus general reviewer request-changes estimate,31.18387571983394,100,percent,sample-based extrapolation; subtract 1/114; not population validation
+800 re-reviews per month at evaluated mix (37 local integration repairs + 4 general re-reviews),claude_without,800,800,reviews,Monthly planning estimate; audited Sonnet means and recorded classifier work plus explicit preparation proxies
+800 re-reviews per month at evaluated mix (37 local integration repairs + 4 general re-reviews),claude_with,512.280701754386,800,reviews,Monthly planning estimate; audited Sonnet means and recorded classifier work plus explicit preparation proxies
+800 re-reviews per month at evaluated mix (37 local integration repairs + 4 general re-reviews),cost_without,208.79061759999996,800,USD,Monthly planning estimate; audited Sonnet means and recorded classifier work plus explicit preparation proxies
+800 re-reviews per month at evaluated mix (37 local integration repairs + 4 general re-reviews),cost_with,134.95215142501374,800,USD,Monthly planning estimate; audited Sonnet means and recorded classifier work plus explicit preparation proxies
+800 re-reviews per month at evaluated mix (37 local integration repairs + 4 general re-reviews),time_without_minutes,451.23413314819334,800,minutes,Monthly planning estimate; audited Sonnet means and recorded classifier work plus explicit preparation proxies
+800 re-reviews per month at evaluated mix (37 local integration repairs + 4 general re-reviews),time_with_minutes,319.944628188999,800,minutes,Monthly planning estimate; audited Sonnet means and recorded classifier work plus explicit preparation proxies
+800 re-reviews per month at evaluated mix (37 local integration repairs + 4 general re-reviews),cost_saved,73.83846617498622,800,USD,Monthly planning estimate; audited Sonnet means and recorded classifier work plus explicit preparation proxies
+800 re-reviews per month at evaluated mix (37 local integration repairs + 4 general re-reviews),cost_saving_pct,35.36483919811263,800,percent,Monthly planning estimate; audited Sonnet means and recorded classifier work plus explicit preparation proxies
+800 re-reviews per month at evaluated mix (37 local integration repairs + 4 general re-reviews),time_saved_minutes,131.28950495919437,800,minutes,Monthly planning estimate; audited Sonnet means and recorded classifier work plus explicit preparation proxies
+800 re-reviews per month at evaluated mix (37 local integration repairs + 4 general re-reviews),time_saving_pct,29.095650198979193,800,percent,Monthly planning estimate; audited Sonnet means and recorded classifier work plus explicit preparation proxies
+111 covered classifier rounds,classifier decision time,82.91568282600028,111,seconds,sample timings; recorded panel cost plus historical integration cost proxy
+111 covered classifier rounds,classifier API cost,0.1738393609575,111,USD,sample timings; recorded panel cost plus historical integration cost proxy
+recoverable completed approvals,Sonnet mean approval completion time,34.64695451476357,22,seconds per approval,Reviewer launch through workflow completion; 22 of 23 approvals recoverable; not paired with Jev clears
+recoverable completed approvals,Jev mean clear completion time,1.6901666522026062,36,seconds per clear,Evidence preparation through workflow completion; 36 of 37 clears recoverable; not paired with Sonnet approvals
+111 covered classifier rounds,classifier recorded preparation time,49.09802570300012,68,seconds,Recorded packet preparation for all called production attempts
+42 restored-panel replays,classifier estimated replay preparation time,122.42163213000123,42,seconds,Untimed; proxy is mean preparation of four production panels
+five untimed no-call attempts,classifier estimated no-call preparation time,3.610148948750009,5,seconds,Untimed; proxy is mean preparation of 68 called production attempts

@@ -77,7 +77,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
           : failure('execution', operation.reason ?? operation.phase)) as BoardCommandResult<T>;
       }
       if (request.cancellation?.requested || this._wait.now() >= deadline) {
-        return failure('cancelled', `Stopped waiting for ${operation.id}; workflow continues independently. Inspect px history ${operation.missionId} or use px stop ${operation.missionId}`);
+        return failure('cancelled', `Stopped waiting for ${operation.id}; workflow continues independently. Inspect px history ${operation.missionId} list or use px stop ${operation.missionId}`);
       }
       await this._pause();
     }
@@ -363,7 +363,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
       return next;
     });
     if (!stopping) { return completed({ stopped: true }); }
-    const pendingGuidance = `Inspect px history ${mission} for surviving executions. Manually terminate a surviving process only after verifying its current start identity matches the retained workflow or run identity, then rerun px stop ${mission}.`;
+    const pendingGuidance = `Inspect px history ${mission} list for surviving executions. Manually terminate a surviving process only after verifying its current start identity matches the retained workflow or run identity, then rerun px stop ${mission}.`;
     const [ownerStopped, launcherStopped] = await Promise.all([
       stopping.owner ? this._processes.stop(stopping.owner) : true,
       stopping.launcher ? this._processes.stop(stopping.launcher) : true,

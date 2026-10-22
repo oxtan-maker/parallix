@@ -249,7 +249,7 @@ export class MissionCheckpointService {
         return { ok: false, failure: failure('capability', 'checkpoint:correct operator capability is required') };
       }
       const corrected = prior.repair.blocker ? correctRepairBlocker(prior, 'px checkpoint record --force operator',
-        'Operator supplied corrected repair evidence', stamped.goalCheck.map(row => row.evidence).join('\n'), this._now(), version + 1) : prior;
+        'Operator supplied corrected repair evidence', stamped.goalCheck.map(row => row.evidence).join('\n'), this._now(), version + 1, mission.successCriteria ?? []) : prior;
       merged = { ...merged, repair: { ...corrected.repair!, evidenceRecorded: true, verified: false } };
     }
     merged = { ...merged, recording: { recordedAt: this._now(), recordedRound: round ?? null, missionRevision: version + 1 } };

@@ -129,7 +129,7 @@ export interface SupervisorPort {
    */
   readonly liveness: (_missionId: string) => Promise<MissionLiveness>;
   /** Run the command the attention item advertises, through its existing use case. */
-  readonly runAction: (_missionId: string, _action: AttentionAction, _observation?: AttentionObservation) => Promise<void>;
+  readonly runAction: (_missionId: string, _action: AttentionAction, _observation?: AttentionObservation, _signal?: AbortSignal) => Promise<void>;
   /**
    * Claim the mission for recovery across local supervisor runs. Returns the
    * release, or null when another run holds it.
@@ -342,6 +342,7 @@ async function superviseItem(
   run: MissionRun,
   observed: AttentionObservation,
   budget: number,
+  signal?: AbortSignal,
 ): Promise<PassResult> {
   run.steps.push(`${attentionDetail(observed.reason)} — board offers ${observed.action.display}`);
 
@@ -365,13 +366,14 @@ async function superviseItem(
   const key = `${observed.action.kind}@${observed.progress}@${failureFingerprint(observed)}`;
   if (!run.pressed.has(key)) {
     const beforeDispatch = await port.liveness(run.missionId);
+    assertSupervisionRunning(signal);
     if (beforeDispatch.working) {
       run.steps.push(`not dispatching ${observed.action.display}: ${beforeDispatch.detail ?? 'an agent is working this mission'}`);
       return 'watching';
     }
     run.lastAction = observed.action.display;
     try {
-      await port.runAction(run.missionId, observed.action, observed);
+      await port.runAction(run.missionId, observed.action, observed, signal);
       run.pressed.add(key);
       run.steps.push(`ran ${run.lastAction}`);
     } catch (error) {
@@ -410,6 +412,7 @@ async function superviseItem(
     // Liveness is rechecked inside the claim: the window between reading the
     // queue and launching is exactly where an agent would appear.
     const beforeLaunch = await port.liveness(run.missionId);
+    assertSupervisionRunning(signal);
     if (beforeLaunch.working) {
       run.steps.push(`work started before the recovery agent could: ${beforeLaunch.detail ?? 'current work is live'}`);
       return 'watching';
@@ -435,6 +438,7 @@ async function superviseItem(
 }
 
 export interface SuperviseFleetOptions {
+  readonly signal?: AbortSignal;
   /** Fresh recovery agents per failure. */
   readonly budget?: number;
   /** Watch only these missions instead of the whole attention queue. */
@@ -486,14 +490,14 @@ export async function superviseFleet(
   // progress, and treating its instant return as a wake-up would spin the loop.
   let actedSinceLastPass = false;
   const start = (run: MissionRun, observed: AttentionObservation): void => {
-    const step = superviseItem(port, run, observed, budget)
+    const step = superviseItem(port, run, observed, budget, options.signal)
       .then((result) => { if (result !== 'watching') { actedSinceLastPass = true; } })
       .catch((error) => { run.steps.push(`supervising this item failed: ${errorText(error)}`); })
       .finally(() => { inFlight.delete(run.missionId); });
     inFlight.set(run.missionId, step);
   };
 
-  for (;;) {
+  for (; !supervisionStopped(options.signal);) {
     pass += 1;
     let queue: readonly AttentionObservation[];
     try {
@@ -503,10 +507,12 @@ export async function superviseFleet(
       if (outcome.error) { state.boardReadError = outcome.error; break; }
       continue;
     }
+    if (supervisionStopped(options.signal)) { break; }
     state.boardReadFailures = 0;
     const onQueue = new Set(queue.map((item) => item.missionId));
 
     const watching = await clearIdleMissions(runs, inFlight, onQueue, port, options);
+    if (supervisionStopped(options.signal)) { break; }
     const open = processAttentionQueue(queue, runs, inFlight, start);
     options.onPass?.(pass, [...runs.values()].map(report));
 
@@ -515,7 +521,7 @@ export async function superviseFleet(
     // Wake on whichever comes first: a step finishing, or the polling interval.
     // Racing the interval too is what lets a mission that becomes stuck while
     // every running agent is slow still be discovered.
-    await wakeFleet(port, pollMs, inFlight, actedSinceLastPass);
+    await wakeFleet(port, pollMs, inFlight, actedSinceLastPass, options.signal);
     actedSinceLastPass = false;
   }
 
@@ -550,7 +556,7 @@ async function handleBoardReadFailure(
     return { error: failure };
   }
   const poll = port.wait(pollMs);
-  try { await poll.elapsed; } finally { poll.cancel(); }
+  try { await interruptiblePause(poll.elapsed, options.signal); } finally { poll.cancel(); }
   return { error: null };
 }
 
@@ -648,12 +654,28 @@ async function wakeFleet(
   pollMs: number,
   inFlight: Map<string, Promise<unknown>>,
   actedSinceLastPass: boolean,
+  signal?: AbortSignal,
 ): Promise<void> {
   const poll = port.wait(pollMs);
   try {
-    await Promise.race(inFlight.size > 0 ? [...inFlight.values(), poll.elapsed] : [poll.elapsed]);
-    if (!actedSinceLastPass) { await poll.elapsed; }
+    await interruptiblePause(Promise.race([...inFlight.values(), poll.elapsed]), signal);
+    if (!actedSinceLastPass) { await interruptiblePause(poll.elapsed, signal); }
   } finally {
     poll.cancel();
   }
+}
+
+/** Wake a polling caller promptly without retaining a signal listener. */
+async function interruptiblePause(wait: Promise<unknown>, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) { return; }
+  let wake: () => void = () => {};
+  const interrupted = new Promise<void>(resolve => { wake = resolve; });
+  signal?.addEventListener('abort', wake, { once: true });
+  try { await Promise.race([wait, interrupted]); }
+  finally { signal?.removeEventListener('abort', wake); }
+}
+
+function supervisionStopped(signal?: AbortSignal): boolean { return signal?.aborted === true; }
+function assertSupervisionRunning(signal?: AbortSignal): void {
+  if (supervisionStopped(signal)) { throw new Error('Supervision interrupted'); }
 }

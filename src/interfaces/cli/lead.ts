@@ -136,46 +136,56 @@ export function createLeadCommand(
   logFn: (_message: string) => void = fmt.log.plain,
 ) {
   return async (args: string[] = []) => {
-    const { missions, dryRun, once, budget, pollMs } = parseLeadArgs(args);
+    const interruption = new AbortController();
+    const interrupt = () => interruption.abort();
+    process.on('SIGINT', interrupt); process.on('SIGTERM', interrupt);
+    try {
+      const { missions, dryRun, once, budget, pollMs } = parseLeadArgs(args);
 
-    for (const mission of missions) {
-      if (!await port.missionExists(mission)) { throw new Error(`Unknown mission: ${mission}`); }
-    }
+      for (const mission of missions) {
+        if (!await port.missionExists(mission)) { throw new Error(`Unknown mission: ${mission}`); }
+      }
 
-    if (dryRun) { await runDryRun(port, missions, logFn); return 0; }
+      if (dryRun) { await runDryRun(port, missions, logFn); return 0; }
 
-    let lastReported = '';
-    const results = await superviseFleet(port, {
-      budget,
-      once,
-      keepWatching: !once,
-      pollMs,
-      ...(missions.length > 0 ? { missions } : {}),
-      // Report changes, not every poll: a human integration handoff can sit
-      // unchanged for hours without spamming the terminal.
-      onPass: (pass, board) => {
-        const signature = board.map((result) => `${result.missionId}|${result.outcome}|${result.summary}`).join('\n');
-        if (signature === lastReported) { return; }
-        lastReported = signature;
-        logFn(fmt.status('INFO', `pass ${pass}: ${board.length} mission(s) on the attention queue`));
-        for (const result of board) { logFn(formatSupervision(result)); }
-      },
-      onBoardReadFailure: (error) => logFn(fmt.status('FAIL', error.message)),
-    });
-    if (results.length === 0) {
-      logFn(fmt.status('INFO', 'The board asks for attention on nothing: no missions to supervise.'));
-      return 0;
-    }
+      let lastReported = '';
+      const results = await superviseFleet(port, {
+        signal: interruption.signal,
+        budget,
+        once,
+        keepWatching: !once,
+        pollMs,
+        ...(missions.length > 0 ? { missions } : {}),
+        // Report changes, not every poll: a human integration handoff can sit
+        // unchanged for hours without spamming the terminal.
+        onPass: (pass, board) => {
+          const signature = board.map((result) => `${result.missionId}|${result.outcome}|${result.summary}`).join('\n');
+          if (signature === lastReported) { return; }
+          lastReported = signature;
+          logFn(fmt.status('INFO', `pass ${pass}: ${board.length} mission(s) on the attention queue`));
+          for (const result of board) { logFn(formatSupervision(result)); }
+        },
+        onBoardReadFailure: (error) => logFn(fmt.status('FAIL', error.message)),
+      });
+      if (interruption.signal.aborted) {
+        logFn(fmt.status('INFO', 'Lead supervision interrupted; forwarded commands report owned-work settlement. Inspect px history <slug> list; use px stop <slug> for any pending work.'));
+        return 130;
+      }
+      if (results.length === 0) {
+        logFn(fmt.status('INFO', 'The board asks for attention on nothing: no missions to supervise.'));
+        return 0;
+      }
 
-    let escalated = 0;
-    for (const result of results) {
-      // Only an escalation needs its evidence printed: it is the handoff to a
-      // human, and a summary without what was observed is not a handoff.
-      if (result.outcome !== 'escalated') { continue; }
-      escalated += 1;
-      logFn(formatSupervision(result));
-      for (const line of formatSteps(result)) { logFn(line); }
-    }
-    return escalated > 0 ? 1 : 0;
+      let escalated = 0;
+      for (const result of results) {
+        // Only an escalation needs its evidence printed: it is the handoff to a
+        // human, and a summary without what was observed is not a handoff.
+        if (result.outcome !== 'escalated') { continue; }
+        escalated += 1;
+        logFn(formatSupervision(result));
+        for (const line of formatSteps(result)) { logFn(line); }
+      }
+      return escalated > 0 ? 1 : 0;
+    } finally { process.removeListener('SIGINT', interrupt); process.removeListener('SIGTERM', interrupt); }
   };
 }

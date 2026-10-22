@@ -59,7 +59,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'Checkpoint evidence from another mission is rejected, and a checkpoint that is not handoff-ready cannot be recorded; a same-named checkpoint replaces the latest-state projection while durable storage retains recorded versions.',
     fileLocation: 'src/domain/checkpoint.ts',
-    line: 104,
+    line: 107,
     anchor: 'export function recordCheckpoint',
   },
   Review: {
@@ -115,7 +115,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'A block is time-bounded, indefinite, or absent; an expired `until` block yields zero remaining time and therefore stops excluding its family from selection.',
     fileLocation: 'src/domain/agents.ts',
-    line: 65,
+    line: 67,
     anchor: 'export function blockedForMs',
   },
 } as const;

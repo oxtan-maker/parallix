@@ -1,3 +1,4 @@
+import { configureMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
 import { assertClassifierReviewSource } from '../../../src/domain/classifier-review.js';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -6,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { run } from '../../../src/composition/create-cli.js';
 import { createDecisionPort } from '../../../src/composition/decision.js';
@@ -31,7 +32,15 @@ function records(value: unknown): Record<string, unknown>[] {
 // publication and Jev model. Deterministic drafting/implementation use the same
 // fake-agent boundary as mission-lifecycle; no model result is fabricated.
 test('live Jev applies an integration-repair verdict and the standard lifecycle lands it (TASK-2667 regression)', { timeout: 240_000 }, async t => {
-  assert.equal((await createDecisionPort(resolveConfiguration(process.env).decision).available()).status, 'available', 'A configured live Jev provider is required');
+  await classifierLifecycle(t, false);
+});
+
+test('recorded pinned panel publishes and persists an ordinary repeat-review approval (TASK-2805)', { timeout: 240_000 }, async t => {
+  await classifierLifecycle(t, true);
+});
+
+async function classifierLifecycle(t: TestContext, recorded: boolean) {
+  if (!recorded) { assert.equal((await createDecisionPort(resolveConfiguration(process.env).decision).available()).status, 'available', 'A configured live Jev provider is required'); }
   const sourceRoot = fileURLToPath(new URL('../../../', import.meta.url));
   const { waitedChildCpuUs } = createRequire(import.meta.url)(childCpuUsageModule(sourceRoot, process.execPath)) as { waitedChildCpuUs(): number };
   const cpuUs = () => {
@@ -41,6 +50,10 @@ test('live Jev applies an integration-repair verdict and the standard lifecycle 
   const registry = createTempRootRegistry();
   const root = registry.register(fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-classifier-lifecycle-')));
   const previousEnv = { ...process.env };
+  const previousFetch = globalThis.fetch;
+  const { default: frozen } = await import('../../fixtures/review-classification/frozen-panel-regressions.json', { with: { type: 'json' } });
+  const sample = frozen.restoredCases[0];
+  let recordedCalls = 0;
   const previousCwd = process.cwd();
   const home = path.join(root, 'operator-state');
   const repo = path.join(root, 'repo');
@@ -79,6 +92,8 @@ test('live Jev applies an integration-repair verdict and the standard lifecycle 
     return { status, output: lines.join('\n') };
   }
   t.after(async () => {
+    configureMissionWriteAuthorization(null);
+    globalThis.fetch = previousFetch;
     process.chdir(previousCwd);
     setWorkflowLaunchPort(null); setCommandPathProbe(null); setLauncherHealthProbe(null);
     await clearOperatorStateCache();
@@ -99,8 +114,30 @@ test('live Jev applies an integration-repair verdict and the standard lifecycle 
     process.env.PRIMARY_WORKTREE = repo;
     process.env.PARALLIX_NO_BUBBLEWRAP = '1';
     process.env.PARALLIX_JEV_REVIEW = 'on';
+    if (recorded) {
+      process.env.JEV_CODE_PROVIDER = 'openrouter';
+      process.env.OPENROUTER_API_KEY = 'isolated-recorded-response';
+      process.env.TYPESAFE_DEFAULT_MODEL = 'typesafe/jev-1.13-20260917';
+      delete process.env.TYPESAFE_BASE_URL;
+      globalThis.fetch = async (input, init) => {
+        if (String(input) === 'https://openrouter.ai/api/v1/systemone') {
+          const request = JSON.parse(String(init!.body));
+          assert.equal(request.model, 'typesafe/jev-1.13-20260917');
+          const member = sample.members[recordedCalls++];
+          assert.ok(member, 'exactly the three pinned responses are consumed');
+          return new Response(member.rawResponse, { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        return previousFetch(input, init);
+      };
+    }
     process.env.FORGEJO_USER = 'human';
     provider = await isolatedForgejo(process.env.FORGEJO_HOME);
+    if (recorded) {
+      await provider.api('POST', '/admin/users', { username: 'claude', password: 'isolated-lifecycle-password', email: 'claude@example.test', must_change_password: false });
+      const token = record(await provider.api('POST', '/users/claude/tokens', { name: 'isolated-review', scopes: ['all'] }, 'claude'));
+      write(path.join(process.env.FORGEJO_HOME!, 'tokens/claude'), String(token.sha1));
+      await provider.api('PUT', '/repos/human/probe/collaborators/claude', { permission: 'write' });
+    }
     process.env.FORGEJO_URL = provider.baseUrl;
     process.env.FORGEJO_REPO = 'human/probe';
     process.env.FORGEJO_AUTHORIZED_APPROVER = 'human';
@@ -139,6 +176,20 @@ test('live Jev applies an integration-repair verdict and the standard lifecycle 
       const repairing = /^[^\n]*(?:FIX REQUIRED|REPAIR REQUIRED)$/m.test(options.prompt);
       if (executing) { executeLaunches++; }
       if (repairing) { repairLaunches++; }
+      if (recorded && (reviewing || /^Mode: act-on-review\./m.test(options.prompt))) {
+        const resultPromise = (async () => {
+          if (reviewing) {
+            await px(options.worktree!, ['verdict', 'request-changes', '--slug', slug, '--actor', String(readDb('SELECT reviewer FROM mission_review_rounds ORDER BY position DESC LIMIT 1')[0].reviewer),
+              '--finding', 'F1', '--summary', 'answer.mjs must preserve Hello output', '--location', 'answer.mjs:1', '--comment', 'Fix output in answer.mjs']);
+          } else {
+            write(path.join(options.worktree!, 'answer.mjs'), "console.log('Hello');\n");
+            git(options.worktree!, 'add', 'answer.mjs'); git(options.worktree!, 'commit', '-m', 'repair requested output');
+            await px(options.worktree!, ['resolve', '--slug', slug, '--actor', 'custom', '--finding', 'F1', '--fixed', 'answer.mjs now preserves Hello output']);
+          }
+          return { status: 0, stdout: '', stderr: '' };
+        })();
+        return { invocation: { command: 'recorded-lifecycle-agent', args: [], options: { cwd: options.worktree! } }, resultPromise };
+      }
       const launch = fakeLifecycleAgent(options);
       return { ...launch, resultPromise: launch.resultPromise.then(async result => {
         if (repairing) {
@@ -154,8 +205,13 @@ test('live Jev applies an integration-repair verdict and the standard lifecycle 
         return result;
       }) };
     });
+    // Execute the fixture worker in process so it retains the fake launcher,
+    // using the same single-mission write fence as mission-lifecycle.test.ts.
+    configureMissionWriteAuthorization({ operationId: `classifier-lifecycle:${slug}`, async assert(id) {
+      assert.equal(id, slug, 'the isolated worker may only mutate its fixture mission');
+    } });
     await px(repo, ['draft', slug, '--agent', 'custom']);
-    await px(worktree, ['active', slug, '--implementer', 'custom']);
+    await px(worktree, ['active', slug, '--implementer', 'custom', ...(recorded ? ['--reviewer', 'claude'] : [])]);
     assert.equal(readDb('SELECT status FROM missions')[0].status, 'integration');
     const firstMeasurements = readDb('SELECT samples FROM review_classifier_measurements').flatMap(row => records(JSON.parse(String(row.samples))));
     assert.ok(firstMeasurements.some(row => row.round === 1 && row.reason === 'first-review'
@@ -166,6 +222,31 @@ test('live Jev applies an integration-repair verdict and the standard lifecycle 
     const prs = records(await provider.api('GET', '/repos/human/probe/pulls?state=open'));
     assert.equal(prs.length, 1);
     await provider.api('POST', `/repos/human/probe/pulls/${prs[0].number}/reviews`, { event: 'APPROVED', body: 'Initial fixture approval', commit_id: record(prs[0].head).sha });
+    if (recorded) {
+      assert.equal(recordedCalls, 3);
+      assert.equal(reviewLaunches, 1, 'ordinary repeat review clears without another general reviewer');
+      const classified = readDb('SELECT * FROM mission_review_rounds WHERE classifier_source IS NOT NULL');
+      assert.equal(classified.length, 1, transcript.join('\n'));
+      assert.equal(classified[0].decision_kind, 'approved');
+      const source: unknown = JSON.parse(String(classified[0].classifier_source));
+      assertClassifierReviewSource(source);
+      assert.equal(source.score, 0.53);
+      assert.equal(source.model, 'typesafe/jev-1.13-20260917');
+      assert.equal(source.candidateRevision, classified[0].decided_revision);
+      assert.deepEqual(source.findingIds, ['F1']);
+      assert.equal(source.obligations, undefined);
+      const reviews = records(await provider.api('GET', `/repos/human/probe/pulls/${prs[0].number}/reviews`));
+      assert.ok(reviews.some(review => record(review.user).login === 'jev' && review.state === 'APPROVED'
+        && String(review.body).includes(`revision: ${source.candidateRevision}`)
+        && String(review.body).includes(`[classifier-decision:${source.decisionId}]`)),
+      'the existing publication boundary names the verified local revision in its approval body');
+      const measurements = readDb('SELECT samples FROM review_classifier_measurements').flatMap(row => records(JSON.parse(String(row.samples))));
+      assert.ok(measurements.some(row => row.round === 2 && row.route === 'clear' && row.shadow === false));
+      assert.deepEqual(readDb('SELECT id FROM missions').map(row => row.id), [slug]);
+      assert.equal(readDb('PRAGMA integrity_check')[0].integrity_check, 'ok');
+      t.diagnostic(`Recorded ${sample.id}: public CLI review approved ${source.candidateRevision}; Jev publication and isolated SQLite decision agree, V3 score 0.53, three pinned responses, no live model calls. Fixture cleanup removes repository, operator store and Forgejo container.`);
+      return;
+    }
     const failedIntegration = await px(worktree, ['integrate', slug], true);
     assert.match(failedIntegration.output, /required-output/);
     transcript.push('Classifier measurements: ' + JSON.stringify(readDb('SELECT samples FROM review_classifier_measurements')));
@@ -214,4 +295,4 @@ test('live Jev applies an integration-repair verdict and the standard lifecycle 
     }
     t.diagnostic(transcript.join('\n').split('\n').filter(Boolean).slice(-100).join('\n')); throw error;
   }
-});
+}

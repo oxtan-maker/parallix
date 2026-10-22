@@ -38,7 +38,6 @@ export class HandoffReviewSubmission {
       reviewer?: import('../domain/agents.js').AgentFamily;
       eligibleAgentsForStepFn?: HandoffWorkflowPorts['agentSelection']['eligibleAgentsForStep'];
       selectAgentFn?: HandoffWorkflowPorts['agentSelection']['selectAgent'];
-      preparedSelection?: { select(_step: string, _opts: Record<string, unknown>): string } | null;
       log?: (_msg: string) => void;
     } = {},
   ) {
@@ -55,9 +54,7 @@ export class HandoffReviewSubmission {
       return { reviewer: options.reviewer, implementer, reviewerEligibility: ConfiguredReviewerEligibility.fromReviewStep({ eligible: configuredFamilies, strategy: 'random' }) };
     }
     try {
-      const reviewer = agentFamily(options.preparedSelection
-        ? options.preparedSelection.select('review', { excluded: new Set([implementer]) })
-        : selectFn('review', {
+      const reviewer = agentFamily(selectFn('review', {
           exclude: new Set([implementerName]),
           worktree: options.worktree,
         }));

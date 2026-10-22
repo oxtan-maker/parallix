@@ -1,6 +1,6 @@
 
 
-import { observeWorkflowOperations } from './workflow-operations.js';
+import { attachWorkflowOperations, observeWorkflowOperations } from './workflow-operations.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 
 import { type Command } from '../interfaces/cli/runtime.js';
@@ -9,6 +9,8 @@ import { createProductionApplicationServices, type ProductionApplicationServiceO
 export function createCliServiceScope(rootDir: string, configuration: ParallixConfiguration) {
   const openServices = (root: string, progress?: Parameters<typeof createProductionApplicationServices>[1], options: Omit<ProductionApplicationServiceOptions, 'configuration'> = {}) =>
     createProductionApplicationServices(root, progress, { ...options, configuration }).then(observeWorkflowOperations);
+  const openWorkflowServices = async (root: string, progress?: Parameters<typeof createProductionApplicationServices>[1]) =>
+    attachWorkflowOperations(root, configuration, await openServices(root, progress), false, progress);
   const withGraph = async (
     invoke: (_services: Awaited<ReturnType<typeof createProductionApplicationServices>>) => unknown,
     options: Omit<ProductionApplicationServiceOptions, 'configuration'> = {},
@@ -37,7 +39,7 @@ export function createCliServiceScope(rootDir: string, configuration: ParallixCo
     const invoke = (services: Awaited<ReturnType<typeof createProductionApplicationServices>>) => withMissionFactories(missionServicesFn => run(missionServicesFn, services), services);
     return borrowed ? invoke(borrowed) : withGraph(invoke, options);
   };
-  return { openServices, withGraph, withMissionFactories, withMissionAndGraph };
+  return { openServices, openWorkflowServices, withGraph, withMissionFactories, withMissionAndGraph };
 }
 export type CliServiceScope = ReturnType<typeof createCliServiceScope>;
 

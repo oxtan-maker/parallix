@@ -321,10 +321,12 @@ replayed task files cannot replace that identity.
 
 Handoff publishes with the actual implementer's credentials and stops if the
 Mission and review disagree about that identity. Missing implementer credentials
-cannot be replaced with reviewer or owner credentials. An existing PR with a
-different author must be replaced under the implementer's identity because PR
-authorship cannot change. A PR author's review remains advisory: independent
-review is required before local approval or integration.
+cannot be replaced with reviewer or owner credentials. Supported implementer
+reassignment preserves the existing open PR, including its number, discussion
+and reviews. The original author remains unchanged while continuation rebases
+and publishes the branch for the current implementer and selected eligible
+reviewer. A PR author's review remains advisory: independent review is required
+before local approval or integration.
 
 When a rebase pauses on shared conflicts, the implementer completes the Git
 rebase and runs the repository's verification against the final repaired tree.
@@ -416,13 +418,13 @@ mandatory gates still apply; a failed gate never counts as approval. An interrup
 repair resumes the implementer even with unfinished checkpoints. Checkpoint
 evidence is required before leaving active work for reviewer handoff.
 
-Direct operator continuation also acknowledges a retained invalid-contract stop,
-including when the slug is inferred from the current worktree with
-`px review --continue`. Repair the recorded contract first. Continuation retains
+Direct operator `px review --start` and `px review --continue` also acknowledge
+a retained invalid-contract stop, including when the slug is inferred from the
+current worktree. Repair the recorded contract first. Both commands retain
 the prior diagnostic and proposed correction with the acknowledgment actor and
-time, and refreshes unfinished repair authorization to the current recorded
+time, and refresh unfinished repair authorization to the current recorded
 checks and success criteria. Settled repair history stays intact. Automatic or
-nested continuation does not acknowledge these stops.
+nested review does not acknowledge these stops.
 
 To clear a false report or a stop whose operator decision is already recorded,
 run `px checkpoint correct-invalid-contract --name CP-5 --operator <name>
@@ -431,7 +433,11 @@ while later implementation checkpoints still lack evidence. Supply an explicit
 decision and a repository-relative path, recognized command, quoted test name
 or ADR supporting it. The command checks the current Mission version; a pinned
 stale version or invalid reference leaves the blocker unchanged. Nested and
-automatic invocations have no correction authority.
+automatic invocations have no correction authority. The correction accepts the
+current recorded success criteria for that targeted repair checkpoint only. Each
+decision retains the prior authorized criteria and gates in its append-only
+history; unrelated and settled repairs stay unchanged. Changed gates are not
+authorized by this correction.
 
 `px checkpoint read --name CP-5` and `px status --json` retain the original
 blocker's diagnostic, authority reason and proposed correction alongside each
@@ -439,7 +445,8 @@ operator correction, its evidence, identity and time. Clearing resumes work at
 the first unfinished planned checkpoint. It records no Goal Check rows, completes
 no criteria and certifies no gate. Inspect `px checkpoint check --json` for the
 remaining evidence obligations; fresh repair proof and the original required
-checks are still owed before handoff.
+checks are still owed before handoff. Independent review and approval remain
+required.
 
 Acknowledgment supplies no repair evidence, verification or approval. Retained
 failure diagnostics, fresh checkpoint evidence and successful reruns of the

@@ -248,6 +248,23 @@ system temporary directory.
 
 ## Agents
 
+Agent selection follows the effective policy in `config/agents.json`. Random
+selection gives each eligible available family an equal chance. Weighted
+selection requires an explicit finite nonnegative numeric weight for every
+configured eligible family, including currently unavailable families. Zero means
+no chance in a weighted draw. All-zero configuration is invalid. If blocks,
+availability or exclusions exhaust a valid weighted pool, selection reports
+recoverable exhaustion so normal workflow fallback can proceed. Unknown strategies
+and missing or invalid weights must be corrected before retrying. Very large finite weights are scaled for sampling;
+an unrepresentable weight range fails with a configuration diagnostic.
+
+Review requires its own nonempty eligibility policy and cannot inherit a generic
+pool. Board review resume uses the worktree policy when present; otherwise it
+uses the default resolver, including the shipped policy when no local config exists.
+Act-on-review uses the active policy. Explicit operator overrides retain
+precedence over draws, including zero weights, while eligibility, blocks and
+exclusions still apply. Launcher availability is checked before launching.
+
 `adapters.agents.maxConcurrentCustom` is an optional positive integer enforced
 across local custom-agent processes that share `PARALLIX_HOME`; its default is
 unlimited custom-agent launches. `subagents.maxParallel` is separate: it is an
@@ -506,13 +523,31 @@ unlimited runs. A value of `1` serializes runs. The canonical checkout owns the
 limit, so a mission worktree cannot raise it locally. This is separate from
 `parallel`, which still controls gates within an admitted phase run.
 
+For finer control, declare named shared capacities with
+`adapters.gates.resources` (for example `{ "test": 1 }`; values are positive
+integers) and assign individual gates to one with `"resource": "test"`. A gate
+waits for a free slot on its resource before its command launches and gives the
+slot back once its process tree has settled, so unrelated gates and gates on other
+resources proceed meanwhile, and other runs can take the slot even while the
+first run is still executing its remaining stages. Gates without a `resource`
+never wait for one. Set `adapters.gates.verificationResource` to a declared resource
+to put the shift-left verification between active and review under the same
+capacity: the configured verification command (`px verify`, pre-review) and
+mission-declared handoff gates then wait for that resource slot too. Resources are independent of `maxConcurrent`, which still
+serializes whole runs (and mission-declared gates) when set; combining both is
+allowed. A `resource` that is not declared, or a limit that is not a positive
+integer, fails validation and the phase fails before any gate command starts. As
+with `maxConcurrent`, the canonical checkout owns every limit it declares; a
+mission worktree can only add resources the canonical checkout does not declare yet.
+
 Admission state normally lives in the operator home selected by `PARALLIX_HOME`;
 processes using different operator homes can share lease-only state through
-`PARALLIX_CUSTOM_ADMISSION_HOME`. Parallix self-development sets the limit to `1`
-in its tracked configuration. It covers configured lifecycle gates and
-mission-declared gates; implementation work and agent capacity remain independent.
+`PARALLIX_CUSTOM_ADMISSION_HOME`. Parallix self-development shares one `test` resource slot across its unit,
+integration, workflow and browser test gates instead of serializing whole runs;
+quality-gate, agent-smoke, implementation work and agent capacity remain independent.
 
-A waiting run starts when the previous run and its gate descendants have settled.
+A waiting run (or a gate waiting for a resource) starts when the previous holder
+and its gate descendants have settled.
 Cancellation while waiting launches no gate children; cancellation while running
 terminates the gate process groups before releasing ownership. Interrupted owners
 are recovered using process identity and liveness, including surviving descendants.
@@ -583,11 +618,14 @@ configurable gates above.
 
 In the self-hosted workflow, integration removes stale active-task copies when
 an existing completed record is canonical, preserving that completed history.
-Every file beneath `backlog/archive` in the resulting payload blocks landing,
-whether inherited from the base or reintroduced by a mission. Preserve any
-needed history and commit the retired paths' deletion on the mission branch
-before retrying. Recheck after a rebase: the new base may carry retired files
-that the previously verified tree did not contain. The final landing guard checks a
+Cancelled task-provider records in `backlog/archive/tasks/` are legitimate
+history and must be preserved; they are distinct from retired Mission ledgers.
+The current integration landing check still blocks every tracked file beneath
+`backlog/archive`, including these task records, whether inherited from the base
+or reintroduced by a mission. If preserved cancellation history triggers that
+check, stop for operator resolution rather than deleting the history to pass.
+Recheck after a rebase: the new base may carry retired files that the previously
+verified tree did not contain. The final landing guard checks a
 disposable copy of the tree destined for the squash commit, including closeout
 and excluding unrelated staged board changes. A failed check leaves the base
 branch unchanged; a payload change during verification requires a retry.
@@ -599,39 +637,16 @@ the integration consistency gate rejects an unmatched fixture before landing.
 
 ## Review classification
 
-First reviews always use the general reviewer. Re-reviews with prior reviewer
-findings or human/operator requests use one frozen obligation question per
-obligation, against the last general-reviewer decided revision and the verified
-current head. Intervening classifier returns retain that general-decision
-baseline. Prior changes-requested F findings and human notes since that decision
-are obligations, including requests revoking approval; system notes, cleared
-stops and workflow trailers are excluded. Missing recorded revisions retain the
-general reviewer.
+First reviews always use the general reviewer. Ordinary qualifying re-reviews,
+including prior findings and human/operator requests, use the active three-question
+panel by default. Human feedback is evidence for the panel. Missing recorded
+revisions and genuine evidence/provider failures retain the general reviewer.
+No separate per-obligation route, activation flag or sample quota is required.
+The global shadow and opt-out modes described below remain available.
 
-This obligation route defaults to **shadow**: telemetry records each obligation's
-probabilities and the aggregate decision, while the general reviewer retains
-decision authority. Set `PARALLIX_JEV_OBLIGATION_REVIEW=on` explicitly to act on
-its clear/return decisions. Before activation, collect at least 50 qualifying
-post-change shadow rounds with no clear leaving a prior obligation unfixed
-according to the general reviewer and no return on a reviewer-approved round.
-New findings alone do not count as an unfixed prior obligation. Historical
-px-0010 results do not satisfy this prospective confirmation requirement.
-`PARALLIX_JEV_REVIEW=shadow` still keeps all classification in shadow, and its
-opt-out disables classification.
-
-The versioned obligation policy clears only when every obligation selects
-`addresses` at probability at least 0.97. It returns when any obligation selects
-`does_not_address` at probability at least 0.97, naming the failing obligations,
-only after every call has returned a valid answer. Scores below either bar,
-missing or failed calls, invalid answers and oversized mandatory packets defer
-to the general reviewer. Each request includes the obligation, prior review
-comment, implementer response and diff; budget fitting discloses omitted changes.
-
-Nonqualifying re-reviews retain the experimental panel below. After two
-consecutive classifier returns on those rounds, the next eligible panel round
-hands off to the general reviewer. A general-reviewer decision or classifier
-clear resets that count. Integration repair without human/operator requests
-retains its weakening route.
+After two consecutive classifier returns, the next eligible panel round hands
+off to the general reviewer. A general-reviewer decision or classifier clear
+resets that count. Integration repairs retain their weakening route.
 
 The operator-selected experimental baseline asks three frozen resolution
 questions in separate configured Jev calls. All three must finish successfully:
@@ -644,7 +659,7 @@ without approval return them to the implementer. Conflicts, no votes, incomplete
 or invalid results, provider failures and stale revision/version results retain
 the general reviewer. No partial panel can approve.
 
-An integration repair without human/operator requests is judged by the weakening questions rather than that panel.
+An integration repair is judged by the weakening questions rather than that panel.
 A substantive repair can be classified with or without an admitted green gate
 re-run. A recorded result is admitted only when it names the failed gate, precedes
 the review round, and covers the candidate or an equivalent mission patch.

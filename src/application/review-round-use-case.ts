@@ -15,6 +15,7 @@ export class ReviewRoundUseCase {
       this._entry.missingReviewAggregate(request.slug);
       return;
     }
+    if (!request.dryRun) { await this._entry.operatorResume?.acknowledge(request.slug); }
     await this.run({ ...request, isContinue: false });
   }
 

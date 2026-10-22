@@ -98,6 +98,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/verification/active-verifier-shell.test.ts',
   'integration/verification/integration-gate-observation.test.ts',
   'integration/verification/gate-admission.test.ts',
+  'integration/verification/gate-resource-admission.test.ts',
 
   // TASK-2573: exercises reusable gate proofs against a temporary Git checkout;
   // a clean hosted runner provides Git and the injected command runner.
@@ -112,6 +113,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/review/review-commands-supplemental.test.ts',
   'integration/review/review-events.test.ts',
   'integration/review/review-identity.test.ts',
+  // Real disposable Git/SQLite and loopback Forgejo; injected model launcher.
+  'integration/review/review-implementer-reassignment.test.ts',
   'integration/review/review-prompts.test.ts',
   'integration/review/review-state-class.test.ts',
   'integration/review/review-state.test.ts',
@@ -218,6 +221,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/process/workflow-owner-host-restart.test.ts',
   'integration/process/workflow-stop-attribution.test.ts',
   'integration/process/workflow-interrupt-retry.test.ts',
+  'integration/process/workflow-execution-interruption.test.ts',
+  'integration/process/lead-active-interruption.test.ts',
   'integration/process/workflow-observation-isolation.test.ts',
   // TASK-2777: disposable git repositories and worktrees only; git is on every runner.
   'integration/process/workflow-execution-context.test.ts',

@@ -21,7 +21,6 @@ export function createReviewClassification(slug: string, worktree: string,
   const raw = settings.reviewMode;
   const mode = raw === undefined || raw === '' || raw === 'on' ? 'enabled' : raw === 'shadow' ? 'shadow' : 'disabled';
   return {
-    obligationMode: settings.obligationReviewMode === 'on' ? 'enabled' : 'shadow',
     mode, decision: createDecisionPort(settings), evidence: new GitReviewEvidence(worktree),
     telemetry: async () => new SqliteReviewClassificationStore((await initOperatorState({ configuration })).db),
     async validations(mission) {

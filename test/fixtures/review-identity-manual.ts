@@ -12,11 +12,12 @@ import { fixtureMission } from './mission-builders.js';
 import { resolveCanonicalRepositoryId } from '../../src/adapters/git/repository-identity.js';
 import { agentFamily } from '../../src/domain/agents.js';
 import { missionLabels } from '../../src/domain/mission.js';
-import { startReview, changeRevision, ConfiguredReviewerEligibility } from '../../src/domain/review.js';
+import { startReview, changeRevision, ConfiguredReviewerEligibility, reviewStatus } from '../../src/domain/review.js';
 
 const cli = path.resolve(process.env.MANUAL_PX_ENTRY || 'build/px.mjs');
 const failures: string[] = [];
-for (const scenario of ['publication', 'fallback-publication', 'fallback-pr-retry', 'single-family', 'independent-approval', 'self-author', 'original-drift-approval', 'identity-drift', 'wrong-author-pr'] as const) {
+for (const scenario of ['publication', 'fallback-publication', 'fallback-pr-retry', 'single-family', 'independent-approval', 'self-author', 'original-drift-approval', 'identity-drift', 'reassignment'] as const) {
+  if (process.env.MANUAL_REVIEW_SCENARIO && process.env.MANUAL_REVIEW_SCENARIO !== scenario) continue;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'px-review-identity-'));
   const base = path.join(root, 'repo');
   const worktree = `${base}-px-97781`;
@@ -27,8 +28,8 @@ for (const scenario of ['publication', 'fallback-publication', 'fallback-pr-retr
   const slug = 'px-97781';
   const db = new SqliteDatabaseAdapter();
   const approval = ['single-family', 'independent-approval', 'self-author', 'original-drift-approval'].includes(scenario);
-  let pr: Record<string, unknown> | null = approval || scenario === 'wrong-author-pr' || scenario === 'fallback-pr-retry' ? {
-    number: 739, user: { login: scenario === 'independent-approval' ? 'codex' : scenario === 'fallback-pr-retry' ? 'manual' : 'claude' }, head: { ref: `mission/${slug}` }, base: { ref: 'main' }, state: 'open',
+  let pr: Record<string, unknown> | null = approval || scenario === 'reassignment' || scenario === 'fallback-pr-retry' ? {
+    number: 739, html_url: 'http://fixture/manual/repo/pulls/739', user: { login: scenario === 'independent-approval' || scenario === 'reassignment' ? 'codex' : scenario === 'fallback-pr-retry' ? 'manual' : 'claude' }, head: { ref: `mission/${slug}` }, base: { ref: 'main' }, state: 'open',
   } : null;
   const publications: string[] = [];
   const provider = http.createServer(async (request, response) => {
@@ -45,7 +46,7 @@ for (const scenario of ['publication', 'fallback-publication', 'fallback-pr-retr
     } else if (api === '/pulls') { data = pr ? [pr] : []; }
     else if (api === '/pulls/739') { data = pr; }
     else if (api === '/pulls/739/reviews' && request.method === 'POST') {
-      data = { id: 1, state: 'APPROVED', user: { login: 'claude' } };
+      data = { id: 1, state: 'APPROVED', user: { login: String(request.headers.authorization).replace('token ', '').replace('-token', '') } };
     }
     response.setHeader('content-type', 'application/json'); response.end(JSON.stringify(data));
   });
@@ -54,7 +55,7 @@ for (const scenario of ['publication', 'fallback-publication', 'fallback-pr-retr
     await new Promise<void>(resolve => provider.listen(0, '127.0.0.1', resolve));
     const origin = `http://127.0.0.1:${(provider.address() as import('node:net').AddressInfo).port}`;
     const env = { PATH: `${bin}:${process.env.PATH}`, HOME: root, PARALLIX_HOME: home, FORGEJO_HOME: forgejo,
-      FORGEJO_URL: origin, FORGEJO_REPO: 'manual/repo', PRIMARY_WORKTREE: base, PARALLIX_MISSION_TERMINAL: slug, PARALLIX_NO_TUI: '1' };
+      FORGEJO_URL: origin, FORGEJO_REPO: 'manual/repo', PRIMARY_WORKTREE: base, PARALLIX_MISSION_TERMINAL: slug, PARALLIX_NO_TUI: '1', PARALLIX_NO_BUBBLEWRAP: '1' };
     const git = (cwd: string, ...args: string[]) => {
       const result = spawnSync('git', ['-C', cwd, ...args], { env, encoding: 'utf8' });
       assert.equal(result.status, 0, result.stderr); return result.stdout.trim();
@@ -62,16 +63,23 @@ for (const scenario of ['publication', 'fallback-publication', 'fallback-pr-retr
     fs.mkdirSync(base); fs.mkdirSync(home); fs.mkdirSync(bin); fs.mkdirSync(path.join(forgejo, 'tokens'), { recursive: true }); fs.mkdirSync(bare);
     fs.writeFileSync(path.join(root, '.bashrc'), `export PATH='${bin}':$PATH\n`);
     for (const family of ['claude', 'codex']) { fs.writeFileSync(path.join(bin, family), '#!/bin/sh\nexit 0\n', { mode: 0o755 }); }
-    for (const family of ['claude', 'codex', 'human', 'manual']) { fs.writeFileSync(path.join(forgejo, 'tokens', family), `${family}-token`); }
+    for (const family of ['claude', 'codex', 'custom', 'human', 'manual']) { fs.writeFileSync(path.join(forgejo, 'tokens', family), `${family}-token`); }
     if (scenario === 'fallback-publication') { fs.unlinkSync(path.join(forgejo, 'tokens', 'codex')); }
     git(base, 'init', '-qb', 'main'); git(base, 'config', 'user.name', 'Fixture'); git(base, 'config', 'user.email', 'fixture@example.invalid');
     git(bare, 'init', '--bare', '-qb', 'main');
     fs.writeFileSync(path.join(base, 'payload.txt'), 'unique implementation\n');
     fs.writeFileSync(path.join(base, 'check.sh'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     fs.writeFileSync(path.join(base, 'workflow.config.json'), JSON.stringify({ adapters: {
-      terminal: { host: 'pipe' }, verification: { command: './check.sh' },
+      agents: { models: { custom: 'fixture' } }, terminal: { host: 'pipe' }, verification: { command: './check.sh' },
       review: { provider: 'forgejo', baseUrl: origin, repo: 'manual/repo', remote: 'review' },
     } }));
+    if (scenario === 'reassignment') {
+      fs.mkdirSync(path.join(base, 'config'));
+      fs.writeFileSync(path.join(base, 'config/agents.json'), JSON.stringify({ steps: { review: { eligible: ['custom'], selection: 'random' } } }));
+      // The running CLI launches a disposable executable that submits through
+      // its pinned public verdict command. No model or operator state is used.
+      fs.writeFileSync(path.join(bin, 'opencode'), `#!/bin/sh\nif [ "$1" != run ]; then echo fixture; exit 0; fi\nexec '${process.execPath}' '${cli}' verdict approve --slug '${slug}' --actor custom --comment 'Manual independent review'\n`, { mode: 0o755 });
+    }
     if (scenario === 'single-family') {
       fs.mkdirSync(path.join(base, 'backlog', 'tasks'), { recursive: true });
       fs.writeFileSync(path.join(base, 'backlog', 'tasks', `${slug} - intake.md`), `---\nid: ${slug}\ntitle: Intake\nstatus: active\nassignee: [claude]\n---\n`);
@@ -85,21 +93,26 @@ for (const scenario of ['publication', 'fallback-publication', 'fallback-pr-retr
     }
     git(base, 'worktree', 'add', '-qb', `mission/${slug}`, worktree);
     fs.writeFileSync(path.join(worktree, 'unique.txt'), 'mission intent\n'); git(worktree, 'add', '.'); git(worktree, 'commit', '-qm', 'implementation');
-    const head = git(worktree, 'rev-parse', 'HEAD'); const baseHead = git(base, 'rev-parse', 'HEAD');
+    const head = git(worktree, 'rev-parse', 'HEAD');
+    if (scenario === 'reassignment') {
+      git(worktree, 'push', '-q', 'review', `mission/${slug}`);
+      fs.writeFileSync(path.join(base, 'advance.txt'), 'advance primary\n'); git(base, 'add', '.'); git(base, 'commit', '-qm', 'advance primary');
+    }
+    const baseHead = git(base, 'rev-parse', 'HEAD');
     const review = startReview({ change: { kind: 'pull-request', provider: 'forgejo', id: '739', url: null,
-      sourceBranch: `mission/${slug}`, targetBranch: 'main' }, revision: changeRevision(head) }, agentFamily('claude'), agentFamily(scenario === 'single-family' ? 'claude' : 'codex'),
-    '2026-10-19T10:00:00Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily('claude')], strategy: 'random' }));
+      sourceBranch: `mission/${slug}`, targetBranch: 'main' }, revision: changeRevision(head) }, agentFamily(scenario === 'reassignment' ? 'custom' : 'claude'), agentFamily(scenario === 'single-family' ? 'claude' : 'codex'),
+    '2026-10-19T10:00:00Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily(scenario === 'reassignment' ? 'custom' : 'claude')], strategy: 'random' }));
     await db.open({ path: path.join(home, 'parallix.db') }); await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
     const store = new SqliteMissionStore(db);
     await store.save(fixtureMission(slug, { repositoryId: resolveCanonicalRepositoryId(base),
-      status: approval ? 'review' : 'active',
+      status: approval || scenario === 'reassignment' ? 'review' : 'active',
       assignee: agentFamily(scenario === 'identity-drift' || scenario === 'original-drift-approval' || scenario === 'single-family' ? 'claude' : 'codex'), review,
       labels: missionLabels(['user_value']), brief: { goal: 'Retain payload', why: 'Manual identity observation', scope: 'disposable state', outOfScope: ['real state'] },
       successCriteria: ['Retain payload'], completedSuccessCriteria: [0], predictedNelBucket: 'Small', declaredGates: ['./check.sh'],
       checkpoints: [{ missionId: fixtureMission(slug).id, name: 'CP-1',
         goalCheck: [{ criterion: 'Retain payload', evidence: 'payload.txt' }], nextActionText: 'review' }],
     }), null);
-    const args = approval ? ['review', slug, '--submit-review', 'approve', '--message', 'looks good'] : ['review', slug, '--submit'];
+    const args = scenario === 'reassignment' ? ['review', slug, '--continue', '--implementer', 'claude', '--reviewer', 'custom'] : approval ? ['review', slug, '--submit-review', 'approve', '--message', 'looks good'] : ['review', slug, '--submit'];
     const result = await new Promise<{ code: number | null; output: string }>((resolve, reject) => {
       child = spawn(process.execPath, [cli, ...args], { cwd: base, env, stdio: ['ignore', 'pipe', 'pipe'] });
       let output = ''; child.stdout!.on('data', chunk => { output += chunk; }); child.stderr!.on('data', chunk => { output += chunk; });
@@ -109,7 +122,18 @@ for (const scenario of ['publication', 'fallback-publication', 'fallback-pr-retr
     console.log(JSON.stringify({ scenario, args, ...result, publications }));
     const loaded = await store.load(fixtureMission(slug).id); assert.equal(loaded.kind, 'found');
     if (loaded.kind !== 'found') { throw new Error('missing fixture'); }
-    if (scenario === 'publication' || scenario === 'fallback-publication' || scenario === 'fallback-pr-retry') {
+    if (scenario === 'reassignment') {
+      assert.equal(result.code, 0, result.output);
+      assert.deepEqual(publications, []);
+      assert.equal(pr?.number, 739); assert.deepEqual(pr?.user, { login: 'codex' });
+      assert.equal(loaded.mission.assignee, 'claude');
+      const round = loaded.mission.review!.rounds.at(-1)!;
+      assert.equal(round.implementer, 'claude'); assert.equal(round.reviewer, 'custom');
+      assert.equal(reviewStatus(loaded.mission.review!), 'approved');
+      assert.notEqual(git(worktree, 'rev-parse', 'HEAD'), head);
+      assert.equal(git(bare, 'rev-parse', `refs/heads/mission/${slug}`), round.decision?.revision);
+      console.log(JSON.stringify({ pr, implementer: loaded.mission.assignee, reviewer: round.reviewer, approval: reviewStatus(loaded.mission.review!), reviewedRevision: round.decision?.revision }));
+    } else if (scenario === 'publication' || scenario === 'fallback-publication' || scenario === 'fallback-pr-retry') {
       assert.deepEqual(publications, scenario === 'fallback-pr-retry' ? [] : [scenario === 'publication' ? 'codex' : 'manual']); assert.equal(result.code, 0, result.output);
       assert.equal(loaded.mission.assignee, 'codex'); assert.equal(loaded.mission.review!.rounds.at(-1)!.implementer, 'codex');
       assert.notEqual(loaded.mission.review!.rounds.at(-1)!.reviewer, 'codex');
@@ -125,7 +149,6 @@ for (const scenario of ['publication', 'fallback-publication', 'fallback-pr-retr
       assert.notEqual(result.code, 0, 'identity drift/self-author approval must stop');
       assert.deepEqual(publications, []); assert.equal(loaded.mission.review!.rounds.at(-1)!.decision, null);
       assert.notEqual(loaded.mission.status, 'integration');
-      if (scenario === 'wrong-author-pr') { assert.match(result.output, /authorship is immutable/); }
     }
     assert.equal(git(base, 'rev-parse', 'HEAD'), baseHead); assert.equal(git(base, 'status', '--porcelain'), '');
     console.log(`PASS ${scenario}`);
