@@ -38,6 +38,7 @@ Before adding an implementation, inspect and reuse the existing owner when its c
   `integration-local` when a declared workstation dependency is required);
   `agent-e2e` for configured agent runners with reachable model backends.
   Keep integration membership and local dependency reasons in the category registry.
+- If the mission requires an integration test (most don't), its not ok to agent slop a new one just because the mission gets easier, find the existing integration test for that workflow first and prefer to extend it.
 - Each case owns isolated fixtures and cleanup on success, assertion failure,
   timeout, signal, and child-process exit; later cases must not depend on them.
 - Bug-labeled Missions require a focused reproduction: red on parent behavior,
