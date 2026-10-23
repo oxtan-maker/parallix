@@ -182,7 +182,7 @@ Usage: px checkpoint check  [--slug <slug>] [--json]
                             --criterion <text> --evidence <text> [--criterion ... --evidence ...]
                             [--force]
 
-Correct a false or resolved blocker before unfinished implementation checkpoints:
+Correct a false or resolved blocker, or reconcile legacy corrected criteria:
   px checkpoint correct-invalid-contract --name <CP-N> --operator <name>
     --decision <explicit correction> --evidence <verifiable reference>
 
@@ -201,7 +201,9 @@ and the final planned checkpoint needs one row per success criterion; handoff
 applies the same checks. \`px status\` shows which checkpoints have evidence;
 the first without is where a relaunched agent resumes. A direct operator may
 use \`correct-invalid-contract\` with their identity, decision and a verifiable
-reference; nested or automatic invocations cannot correct a blocker. The write
+reference; retained correction history also permits reconciling stale criteria
+authority without a blocker, provided required checks are unchanged. Already-current
+replays are refused. Nested or automatic invocations cannot correct a blocker. The write
 checks the current Mission version and retains every original blocker and
 correction in \`checkpoint read\` and \`status --json\`. It supplies no Goal Check
 rows, completion or verification, so unfinished checkpoints and repair checks

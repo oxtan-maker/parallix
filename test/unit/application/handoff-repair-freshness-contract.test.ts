@@ -420,3 +420,60 @@ test('operator correction clears obsolete impossible repair criteria without byp
   await store.save({ ...store.mission(), successCriteria: ['first', 'later change'] } as Mission);
   assert.ok((await check()).findings.some(item => item.code === 'repair-contract-changed'));
 });
+
+
+test('legacy corrected criteria require explicit reconciliation, current proof and original handoff gates (TASK-2809)', async () => {
+  const { inMemoryTransitionStore } = await import('../../fixtures/mission-builders.js');
+  const { RepairCheckpointService } = await import('../../../src/application/repair-checkpoint-service.js');
+  const id = missionId(SLUG);
+  const blocker = { command: 'npm test', diagnostic: 'old contradictory criterion', authorityReason: 'operator owns criteria', proposedCorrection: 'amend criteria' };
+  const store = inMemoryTransitionStore(JSON.parse(JSON.stringify(fixtureMission(SLUG, {
+    assignee: agentFamily('custom'), brief: DRAFTED_BRIEF, successCriteria: ['first', 'amended'], completedSuccessCriteria: [0],
+    declaredGates: ['npm test'], checkpoints: [
+      { missionId: id, name: 'CP-1', goalCheck: [{ criterion: 'first', evidence: REPAIR_REF }], nextActionText: 'CP-2' },
+      { missionId: id, name: 'CP-2', goalCheck: [], nextActionText: 'record current proof', repair: {
+        incidentId: 'legacy-task-2807', command: 'npm test', authorizedGates: ['npm test'], authorizedCriteria: ['first', 'old'],
+        attempt: 2, evidenceRecorded: false, verified: false, acknowledgedBlocker: blocker,
+        acknowledgedBy: 'original operator', acknowledgedAt: '2026-10-20T12:00:00Z',
+        corrections: [{ blocker, operator: 'original operator', decision: 'criteria amended', evidence: REPAIR_REF,
+          occurredAt: '2026-10-20T12:00:00Z', missionRevision: 2 }],
+      } },
+    ],
+  }))) as Mission, { version: 3 });
+  const recorder = makeRecorder();
+  const commands: string[] = [];
+  let gateExit = 1;
+  const ports = makePorts(recorder, { ...contractServices(() => store.load()), process: {
+    spawnSync: (_cmd, args) => { commands.push(args.join(' ')); return { status: gateExit, stdout: '', stderr: 'original gate diagnostic' }; },
+  } });
+  const service = new MissionCheckpointService(store, { fileSystem: ports.fileSystem, rootFor: () => ROOT });
+  const repair = new RepairCheckpointService(store);
+  const req = { operationId: 'read', missionId: id, capabilities: new Set(['checkpoint:record'] as const) };
+  const handoff = () => new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  const before = structuredClone(await store.load());
+  assert.equal((await service.check(req)).value?.primaryStopReason, 'repair-contract-changed');
+  await service.read(req);
+  assert.match((await handoff()).error ?? '', /success criteria changed/);
+  await assert.rejects(repair.open({ slug: SLUG, incidentId: 'legacy-task-2807', command: 'npm test', attempt: 3 }), /operator decision/);
+  assert.deepEqual(await store.load(), before, 'reads and automatic reopening never refresh authority');
+  assert.equal((await service.correctInvalidContract({ ...req, capabilities: new Set(['checkpoint:correct']), name: 'CP-2',
+    operator: 'operator', decision: 'authorize amended criteria', evidence: REPAIR_REF })).status, 'completed');
+  assert.equal((await service.check(req)).value?.primaryStopReason, 'missing-checkpoint');
+  assert.equal((await handoff()).ok, false);
+  await assert.rejects(repair.verify(SLUG, 'CP-2'), /fresh authorized evidence/);
+  assert.equal(commands.length, 0);
+  assert.deepEqual(recorder.transitions, []);
+  assert.equal((await service.record({ ...req, checkpoint: { missionId: id, name: 'CP-2',
+    goalCheck: ['first', 'amended'].map(criterion => ({ criterion, evidence: REPAIR_REF })), nextActionText: 'handoff' } })).status, 'completed');
+  assert.equal((await handoff()).ok, false, 'completion remains independently required');
+  await store.save({ ...store.mission(), completedSuccessCriteria: [0, 1] });
+  assert.equal((await service.check(req)).value?.ready, true);
+  assert.equal((await handoff()).ok, false, 'failed original gate still stops handoff');
+  assert.ok(commands.some(command => command.includes('npm test')));
+  assert.deepEqual(recorder.transitions, []);
+  gateExit = 0;
+  const success = await handoff();
+  assert.equal(success.ok, true, success.error ?? 'handoff failed');
+  assert.deepEqual(recorder.transitions, ['review']);
+  assert.equal(store.mission().checkpoints[1].repair!.verified, false, 'handoff is not fabricated repair certification');
+});

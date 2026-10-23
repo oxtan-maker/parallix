@@ -439,6 +439,17 @@ decision retains the prior authorized criteria and gates in its append-only
 history; unrelated and settled repairs stay unchanged. Changed gates are not
 authorized by this correction.
 
+The same direct correction command reconciles a legacy corrected repair when
+`px checkpoint check --json` reports `repair-contract-changed` after success
+criteria were amended, even though no unresolved blocker remains. Select the
+repair checkpoint with `--name` and supply a new operator decision and verifiable
+evidence. It requires retained operator correction history and unchanged required
+checks; an acknowledgment alone is insufficient. Reconciliation refreshes only
+that repair's criteria authorization and appends the decision to its history.
+An already-current replay is refused. Reads and automatic recovery do not perform
+this reconciliation, and changing required checks needs a separate operator
+decision.
+
 `px checkpoint read --name CP-5` and `px status --json` retain the original
 blocker's diagnostic, authority reason and proposed correction alongside each
 operator correction, its evidence, identity and time. Clearing resumes work at

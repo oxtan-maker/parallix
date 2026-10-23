@@ -107,7 +107,11 @@ export class RepairCheckpointService implements RepairCheckpointPort {
     const loaded = await loadForCommand<{ version: number }>(this._store, request);
     if (!isLoaded(loaded)) { return loaded; }
     const checkpoint = loaded.mission.checkpoints.find(cp => cp.name === request.name);
-    if (!checkpoint?.repair?.blocker) { return failure('validation', 'Correction requires an unresolved repair blocker'); }
+    if (!checkpoint?.repair) { return failure('validation', 'Correction requires a repair checkpoint'); }
+    const repair = checkpoint.repair;
+    const criteria = loaded.mission.successCriteria ?? [];
+    const eligibilityFailure = legacyCriteriaReconciliationFailure(repair, loaded.mission.declaredGates ?? [], criteria);
+    if (eligibilityFailure) { return failure('validation', eligibilityFailure); }
     if (![request.operator, request.decision, request.evidence].every(value => value?.trim())) {
       return failure('validation', 'Correction requires an explicit operator, decision and verifiable evidence');
     }
@@ -115,7 +119,13 @@ export class RepairCheckpointService implements RepairCheckpointPort {
     if (!references || !root) { return failure('unavailable', 'Correction evidence reference checkout is unavailable'); }
     const invalid = findUnverifiableRecordedRow(references.fileSystem, [{ criterion: request.decision, evidence: request.evidence }], root);
     if (invalid) { return failure('validation', invalid.message); }
-    const corrected = correctRepairBlocker(checkpoint, request.operator, request.decision, request.evidence, occurredAt, loaded.version + 1, loaded.mission.successCriteria ?? []);
+    const corrected = repair.blocker
+      ? correctRepairBlocker(checkpoint, request.operator, request.decision, request.evidence, occurredAt, loaded.version + 1, criteria)
+      : { ...checkpoint, repair: { ...repair, authorizedCriteria: [...criteria],
+        corrections: [...repair.corrections!, { blocker: repair.corrections!.at(-1)!.blocker, operator: request.operator,
+          decision: request.decision, evidence: request.evidence, occurredAt, missionRevision: loaded.version + 1,
+          authorizedCriteria: [...repair.authorizedCriteria], authorizedGates: [...repair.authorizedGates] }],
+      } };
     try {
       const version = await this._store.save({ ...loaded.mission,
         checkpoints: loaded.mission.checkpoints.map(cp => cp === checkpoint ? corrected : cp) } as Mission, loaded.version);
@@ -227,6 +237,21 @@ export function repairCheckpointFailure(checkpoints: readonly CheckpointData[], 
   if (contractFailure) { return contractFailure; }
   const missing = missingCheckpointEvidence(checkpoints, gates, criteria);
   return missing.length ? `Planned checkpoint evidence is missing before handoff: ${missing.map(cp => cp.name).join(', ')}. Record fresh evidence with px checkpoint record before handoff.` : null;
+}
+
+/** Retained direct correction authority permits criteria reconciliation, never gate drift. */
+function legacyCriteriaReconciliationFailure(repair: NonNullable<CheckpointData['repair']>, gates: readonly string[], criteria: readonly string[]): string | null {
+  if (repair.blocker) { return null; } // Preserve the existing unresolved-blocker correction contract.
+  const prior = repair.corrections?.at(-1);
+  if (!prior || ![prior.operator, prior.decision, prior.evidence, prior.occurredAt].every(value => value?.trim())
+    || !Number.isInteger(prior.missionRevision) || prior.missionRevision < 1) {
+    return 'Criteria reconciliation requires retained operator correction authority';
+  }
+  if (!sameRepairAuthority(repair.authorizedGates, gates)) {
+    return 'Criteria reconciliation cannot authorize changed required gates';
+  }
+  if (sameRepairAuthority(repair.authorizedCriteria, criteria)) { return 'Repair criteria authority is already current'; }
+  return null;
 }
 
 /** Shared durable correction fact for a dedicated correction or combined forced evidence write. */

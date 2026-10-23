@@ -360,6 +360,115 @@ async function falseBlockerFixture() {
   return { mission, store, repair, checkpoints, blocker, correct, references };
 }
 
+// Serialized Mission snapshots model the pre-reconciliation persisted legacy payload.
+async function legacyCorrectedFixture() {
+  const f = await falseBlockerFixture();
+  assert.equal((await f.correct()).status, 'completed');
+  assert.equal((await f.repair.report({ operationId: 'second-report', missionId: f.mission.id,
+    capabilities: new Set(['checkpoint:record']), name: 'CP-5', blocker: { ...f.blocker, diagnostic: 'second retained diagnostic' } })).status, 'completed');
+  assert.equal((await f.correct({ decision: 'second retained decision' })).status, 'completed');
+  const persisted = JSON.stringify({ ...f.store.mission(), successCriteria: ['first', 'second', 'amended implementation'],
+    checkpoints: f.store.mission().checkpoints.map(cp => cp.name === 'CP-5' ? { ...cp, repair: { ...cp.repair!,
+      occurrence: { worktree: '/repo', failureRevision: 'old-head', failureEvidenceId: 'retained-failure', openedMissionRevision: 4 },
+    } } : cp),
+  });
+  const store = inMemoryTransitionStore(JSON.parse(persisted) as Mission, { version: 10 });
+  const checkpoints = new MissionCheckpointService(store, f.references);
+  const correct = async (patch: Partial<Parameters<typeof checkpoints.correctInvalidContract>[0]> = {}) => checkpoints.correctInvalidContract({
+    operationId: 'reconcile', missionId: f.mission.id, expectedVersion: (await store.load()).version,
+    capabilities: new Set(['checkpoint:correct']), name: 'CP-5', operator: 'reconciling operator',
+    decision: 'authorize amended criteria after retained correction', evidence: 'decision.txt', ...patch,
+  });
+  return { ...f, store, checkpoints, correct };
+}
+
+test('persisted legacy corrected repair reconciles stale criteria without a new blocker (TASK-2809)', async () => {
+  const { evaluateMissionEvidence } = await import('../../../src/application/mission-evidence-readiness.js');
+  const f = await legacyCorrectedFixture();
+  const before = structuredClone(f.store.mission());
+  const readiness = evaluateMissionEvidence({ draftedInDb: true, checkpoints: before.checkpoints,
+    successCriteria: before.successCriteria!, completedSuccessCriteria: before.completedSuccessCriteria!,
+    gates: before.declaredGates ?? [], review: before.review }, f.references.fileSystem, '/repo');
+  assert.ok(readiness.findings.some(row => row.code === 'repair-contract-changed'));
+  assert.equal(before.checkpoints[4].repair!.blocker, undefined);
+  assert.equal(before.checkpoints[4].repair!.corrections!.length, 2);
+  const result = await f.correct();
+  assert.equal(result.status, 'completed', result.error?.message ?? 'reconciliation failed');
+  const after = f.store.mission();
+  const priorRepair = before.checkpoints[4].repair!;
+  const nextRepair = after.checkpoints[4].repair!;
+  assert.deepEqual(nextRepair.authorizedCriteria, before.successCriteria);
+  assert.deepEqual(nextRepair.corrections!.slice(0, -1), priorRepair.corrections);
+  assert.deepEqual({ ...nextRepair, authorizedCriteria: priorRepair.authorizedCriteria, corrections: priorRepair.corrections }, priorRepair);
+  assert.deepEqual({ ...after, checkpoints: before.checkpoints }, before);
+  assert.deepEqual(after.checkpoints.slice(0, 4), before.checkpoints.slice(0, 4));
+  assert.deepEqual({ ...after.checkpoints[4], repair: priorRepair }, before.checkpoints[4]);
+  const reloaded = inMemoryTransitionStore(JSON.parse(JSON.stringify(after)) as Mission);
+  assert.deepEqual(reloaded.mission(), after);
+  const audit = nextRepair.corrections!.at(-1)!;
+  assert.equal(audit.operator, 'reconciling operator');
+  assert.equal(audit.decision, 'authorize amended criteria after retained correction');
+  assert.equal(audit.evidence, 'decision.txt');
+  assert.deepEqual(audit.authorizedCriteria, priorRepair.authorizedCriteria);
+  assert.deepEqual(audit.authorizedGates, priorRepair.authorizedGates);
+  assert.ok(audit.occurredAt);
+  assert.equal(audit.missionRevision, (await f.store.load()).version);
+  assert.deepEqual(audit.blocker, priorRepair.corrections!.at(-1)!.blocker);
+});
+
+test('legacy criteria reconciliation rejects missing authority, gate drift and replay atomically (TASK-2809)', async () => {
+  const f = await legacyCorrectedFixture();
+  const before = structuredClone(await f.store.load());
+  for (const patch of [
+    { capabilities: new Set(['checkpoint:record'] as const) },
+    { expectedVersion: missionVersion(before.version - 1) }, { operator: '' }, { decision: ' ' },
+    { evidence: '' }, { evidence: 'operator assertion only' }, { evidence: 'missing.txt' }, { name: 'CP-3' },
+  ]) {
+    assert.notEqual((await f.correct(patch)).status, 'completed');
+    assert.deepEqual(await f.store.load(), before);
+  }
+  for (const repairPatch of [
+    { corrections: undefined }, { corrections: [] },
+    { corrections: [{ ...before.mission.checkpoints[4].repair!.corrections![0], operator: '' }] },
+    { authorizedGates: ['other required gate'] },
+  ]) {
+    const mission = { ...before.mission, checkpoints: before.mission.checkpoints.map(cp => cp.name === 'CP-5'
+      ? { ...cp, repair: { ...cp.repair!, ...repairPatch } } : cp) } as Mission;
+    const store = inMemoryTransitionStore(mission);
+    const checkpoints = new MissionCheckpointService(store, f.references);
+    const request = { operationId: 'invalid', missionId: mission.id, capabilities: new Set(['checkpoint:correct'] as const),
+      name: 'CP-5', operator: 'operator', decision: 'reconcile', evidence: 'decision.txt' };
+    assert.equal((await checkpoints.correctInvalidContract(request)).status, 'failed');
+    assert.deepEqual(store.mission(), mission);
+  }
+  for (const references of [undefined, { ...f.references, rootFor: () => null }]) {
+    const service = new MissionCheckpointService(f.store, references);
+    const result = await service.correctInvalidContract({ operationId: 'no-checkout', missionId: f.mission.id,
+      capabilities: new Set(['checkpoint:correct']), name: 'CP-5', operator: 'operator', decision: 'reconcile', evidence: 'decision.txt' });
+    assert.equal(result.error?.kind, 'unavailable');
+    assert.deepEqual(await f.store.load(), before);
+  }
+  assert.equal((await f.correct()).status, 'completed');
+  const current = structuredClone(await f.store.load());
+  assert.match((await f.correct()).error?.message ?? '', /already current/);
+  assert.deepEqual(await f.store.load(), current);
+});
+
+test('legacy reconciliation CAS conflict retains the entire stale snapshot (TASK-2809)', async () => {
+  const { MissionStaleVersion } = await import('../../../src/application/domain-ports.js');
+  const f = await legacyCorrectedFixture();
+  const before = structuredClone(await f.store.load());
+  const service = new MissionCheckpointService({ load: () => f.store.load(), save: async (_next, version) => {
+    assert.equal(version, before.version);
+    throw new MissionStaleVersion(f.mission.id, version, missionVersion(before.version + 1));
+  } }, f.references);
+  const result = await service.correctInvalidContract({ operationId: 'race', missionId: f.mission.id,
+    expectedVersion: before.version, capabilities: new Set(['checkpoint:correct']), name: 'CP-5',
+    operator: 'operator', decision: 'reconcile', evidence: 'decision.txt' });
+  assert.equal(result.error?.kind, 'conflict');
+  assert.deepEqual(await f.store.load(), before);
+});
+
 test('operator corrects false CP-5 blocker after CP-2 before unfinished CP-3 and CP-4 (TASK-2803)', async () => {
   const { mission, store, repair, checkpoints, blocker, correct } = await falseBlockerFixture();
   const before = structuredClone(store.mission());

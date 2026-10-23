@@ -188,5 +188,17 @@ test('checkpoint correction CLI requires operator decision and evidence and keep
     assert.deepEqual(cp.repair.corrections[0].authorizedCriteria, ['obsolete criterion']);
     assert.deepEqual(cp.goalCheck, []);
     assert.equal(cp.repair.evidenceRecorded, false);
+    await store.save({ ...store.mission(), successCriteria: ['amended criterion'] });
+    const legacy = structuredClone(await store.load());
+    await assert.rejects(createCheckpointCommand(service, () => id)(args), /direct operator/);
+    assert.deepEqual(await store.load(), legacy, 'nested legacy reconciliation writes nothing (TASK-2809)');
+    chunks.length = 0;
+    await command(args);
+    assert.deepEqual(store.mission().checkpoints[0].repair!.authorizedCriteria, ['amended criterion']);
+    assert.equal(store.mission().checkpoints[0].repair!.corrections!.length, 2);
+    const reconciled = structuredClone(await store.load());
+    await assert.rejects(command(args), /already current/);
+    assert.deepEqual(await store.load(), reconciled);
+
   } finally { process.stdout.write = original; }
 });

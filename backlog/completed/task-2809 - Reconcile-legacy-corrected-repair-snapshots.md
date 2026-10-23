@@ -1,8 +1,8 @@
 ---
 id: TASK-2809
 title: Reconcile legacy corrected repair snapshots
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-22 12:27'
 labels:
   - bug
