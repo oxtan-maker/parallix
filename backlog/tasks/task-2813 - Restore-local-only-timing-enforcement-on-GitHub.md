@@ -4,6 +4,7 @@ title: Restore local-only timing enforcement on GitHub
 status: backlog
 assignee: []
 created_date: '2026-10-23 05:32'
+updated_date: '2026-10-23 05:33'
 labels:
   - bug
   - ai_sdlc
@@ -19,23 +20,31 @@ ordinal: 292008
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-GitHub CI failed test/integration/process/lead-active-interruption.test.ts:6: the TASK-2792 case timed out after 3500 ms (reported duration 3694.621453 ms). The same current-tree test passed locally in 2440 ms without coverage and 2518 ms with coverage. Hosted CPU speed and contention must not decide compliance with workstation performance budgets.
+Restore the existing TASK-2542 policy: performance/timing enforcement is local-only. GitHub must execute the functional contracts without workstation-speed requirements. Keep finite hang protection and cleanup. This is a restoration of existing behavior through its current owner, not a new timing framework or a one-test timeout workaround.
 
-Historical policy: TASK-2542, "gitbhub runs tests and checks it should not (yet again)" (2026-09-19), explicitly states "TIMING ENFORCEMENT IS LOCAL-ONLY". Its archived record is recoverable with git show fad897a84:"backlog/completed/task-2542 - gitbhub-runs-tests-and-checks-it-should-not-yet-again.md". It excluded the timing-proof suite and budget reporter from GitHub while retaining local timing enforcement and finite timeout safety nets. TASK-2615 subsequently replaced brittle elapsed-time guardrails with CPU accounting and retained hosted timing suspension (commit b0cb0710f).
+Evidence and provenance:
+- TASK-2542 ("gitbhub runs tests and checks it should not (yet again)", 2026-09-19) explicitly states "TIMING ENFORCEMENT IS LOCAL-ONLY". Recover its historical record with git show fad897a84:"backlog/completed/task-2542 - gitbhub-runs-tests-and-checks-it-should-not-yet-again.md". It retained finite timeout safety nets, local headroom enforcement and local timing-proof coverage.
+- TASK-2615 retained GitHub timing suspension when replacing brittle elapsed-time budgets with CPU accounting (b0cb0710f). Current owners include test/lib/test-run-plan.ts, test/run-default-tests.ts, the CPU hooks and the existing default-test-suite timing-policy assertions.
+- TASK-2792 ("Release workflow ownership correctly after Ctrl+C") introduced the unconditional 3500 ms case timeout and 1800 ms startup deadline in test/integration/process/lead-active-interruption.test.ts. Original mission commits: 016164ca6 / 7cb6a7a86. Main received it through combined squash 5a5e6cb23; that squash headline names TASK-2804, but its body and original mission commits identify TASK-2792.
+- TASK-2807 (95e4cda00) later restored covered integration concurrency from one worker to four. It did not introduce this timeout; changing concurrency again is not the restoration.
+- Reported GitHub failure: timeout after 3500 ms, duration 3694.621453 ms. Current-tree focused local runs passed at 2440 ms without coverage and 2518 ms with coverage.
 
-Regression provenance: TASK-2792, "Release workflow ownership correctly after Ctrl+C", introduced the unconditional { timeout: 3500 } and 1800 ms startup deadline in the lead interruption suite (mission commits 016164ca6 / 7cb6a7a86; landed on current main through combined squash 5a5e6cb23, whose headline names TASK-2804 but whose body includes TASK-2792). These deadlines bypass the existing onGitHubActions() suspension of CPU hooks/reporters. TASK-2807 (95e4cda00) subsequently restored covered integration concurrency from one to four; it did not introduce this timeout, although contention can expose it.
+Trace and repair the entire enforcement path, including per-case options and helper startup/poll deadlines that can bypass runner policy. Reuse the existing owner where its contract matches, ensure real execution uses the restored policy, and remove superseded or duplicate enforcement. Preserve distinct functional assertions. Do not merely add another helper, special-case this test, inflate all deadlines, optimize until this workstation passes, or add tests that only inspect configuration.
 
-Restore the operator's intended separation: local verification enforces the existing performance/CPU limits; GitHub verifies functionality without workstation-speed deadlines, while retaining generous finite hang protection and reliable cleanup. Reuse the existing timing-policy owner and inspect other CI-selected cases/helpers for the same bypass. Keep functional suites in GitHub and preserve their assertions, coverage and normal parallel scheduling. This task explicitly authorizes separating the affected hosted hang bounds from local performance limits; it does not authorize weakening local budgets, removing all deadlines, adding/restoring verification gates, or suppressing failures with retries.
+The operator explicitly authorizes correcting hosted deadline behavior in this task while retaining local performance enforcement. Do not weaken local CPU/headroom budgets, skip functional suites on GitHub, remove finite hang bounds, serialize the coverage population, add retries, or add/restore verification gates.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Retain a focused red-to-green regression in the existing timing-policy/runner owning suite showing that hosted execution cannot enforce the local 3500 ms performance threshold through a case-level timeout or its startup helper; local enforcement remains intact.
-- [ ] #2 The TASK-2792 lead SIGINT case runs in GitHub with finite, generous hang/startup bounds independent of workstation performance limits; exit 130, interruption diagnostics, stopped durable operation and released current ownership assertions are preserved.
-- [ ] #3 Audit CI-selected case-level timeouts and helper deadlines for equivalent bypasses of hosted timing suspension; correct performance-derived limits within a cohesive shared policy and record the scope/evidence in mission evidence.
-- [ ] #4 Existing local CPU budgets, headroom checks, tier membership, functional coverage, LCOV/Sonar flow and normal covered parallel scheduling remain intact; no new/restored gate, blanket skip, retry-based pass or global serialization is introduced.
-- [ ] #5 Exercise the real interruption flow using isolated fixture state under local and simulated hosted timing policies, including controlled delay beyond 3500 ms that passes hosted functional verification within its finite hang bound; demonstrate that a hung child still fails and is cleaned up. Follow ADR 0057, use the owning suite, and keep any added/modified integration case within the repository 3.5-second execution constraint by testing policy with doubles where needed.
+- [ ] #1 Trace TASK-2542/TASK-2615 policy through the current runner, case-level options and helper deadlines; identify the existing owner and record which TASK-2792 paths bypass it. Distinguish actual performance enforcement from finite hang protection before editing.
+- [ ] #2 Restore local-only performance enforcement through the existing policy owner, with production test execution using that owner; remove the superseded bypass and redundant logic/tests while preserving distinct behavioral assertions. No parallel policy framework or lead-test-only exception is introduced.
+- [ ] #3 Extend the existing owning suite with behavioral red-to-green evidence: a functionally successful operation exceeding the local performance threshold is accepted under hosted policy, the equivalent local performance violation is still rejected, and a genuine hang still fails with cleanup. Use doubles/controlled time for threshold proofs so no new or modified integration test exceeds 3.5 seconds.
+- [ ] #4 The retained TASK-2792 real-process case proves SIGINT exit 130, interruption diagnostics, durable stopped operation and released current ownership under the restored execution path; hosted startup and outer hang bounds do not enforce workstation-speed requirements.
+- [ ] #5 Audit the CI-selected population for equivalent case/helper bypasses and fix those belonging to this same policy contract. Preserve local CPU budgets/headroom enforcement, functional assertions, tier membership, coverage/LCOV/Sonar and normal parallel scheduling; do not obtain green by skips, retries, global serialization or weakened local limits.
+- [ ] #6 Manually exercise the interruption/settlement flow in isolated state and verify the real runner with local and hosted policy selection, with no real missions or operator state touched. Capture focused contract results and actual GitHub functional verification before claiming restoration; a local-only green or static configuration assertion is insufficient.
 <!-- AC:END -->
+
+
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
