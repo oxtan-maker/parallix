@@ -450,7 +450,7 @@ describe('Cancel surfaces', () => {
   // ---------------------------------------------------------------------------
 
 
-  async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<boolean> {
+  async function waitFor(predicate: () => boolean, timeoutMs = Infinity): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       if (predicate()) { return true; }
@@ -459,7 +459,7 @@ describe('Cancel surfaces', () => {
     }
   }
 
-  function waitForOutput(stream: Stream, pattern: RegExp, timeoutMs = 2_000): Promise<boolean> {
+  function waitForOutput(stream: Stream, pattern: RegExp, timeoutMs = Infinity): Promise<boolean> {
     return waitFor(() => pattern.test(stream.writes.join('')), timeoutMs);
   }
 

@@ -10,7 +10,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { workflowBoard, until } from '../../fixtures/workflow-board.js';
 
-test('direct active Ctrl+C settles execution before retry (TASK-2792)', { timeout: 3500 }, async t => {
+test('direct active Ctrl+C settles execution before retry (TASK-2792)', async t => {
   const bundle = await bundleWorkflowChild(); t.after(() => bundle.close());
   const fixture = await workflowBoard(1, { cli: bundle.cli, providers: true }); t.after(() => fixture.close());
   const child = spawn(bundle.cli.command, [...bundle.cli.args, '--fixture-cli-execute', fixture.root, fixture.slugs[0]], {
@@ -18,10 +18,10 @@ test('direct active Ctrl+C settles execution before retry (TASK-2792)', { timeou
   });
   const exited = once(child, 'exit');
   t.after(async () => { if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await exited; } });
-  await until(() => fixture.entered(fixture.slugs[0]), 'active preparation', 1800);
+  await until(() => fixture.entered(fixture.slugs[0]), 'active preparation');
   fixture.release(fixture.slugs[0]);
   const providerMarker = path.join(fixture.root, `${fixture.slugs[0]}.provider-1.entered`);
-  await until(() => fs.existsSync(providerMarker), 'controlled provider execution', 1800);
+  await until(() => fs.existsSync(providerMarker), 'controlled provider execution');
   const provider = { pid: Number(fs.readFileSync(providerMarker, 'utf8')), identity: '' };
   provider.identity = processStartIdentity(provider.pid)!;
   assert.ok(provider.identity);

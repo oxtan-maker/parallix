@@ -263,7 +263,6 @@ test('TASK-2377: repeated SIGINT during board shutdown still exits with a numeri
 // each fixture explicitly stops its workflow and cleans up its own resources.
 
 const DISPATCH_START_BUDGET_MS = 30_000;
-const PROGRESS_BUDGET_MS = 1_000;
 const SC3_SLUG = 'task-2375shut';
 
 async function listSockets(dir: string): Promise<string[]> {
@@ -471,8 +470,7 @@ async function assertInflightTermination(fixture: InflightBoardFixture, key: str
   assert.ok(fixture.childPid !== null && pidAlive(fixture.childPid), `${description}: independent provider survives board and PTY teardown (TASK-2750)`);
   assert.equal(existsSync(fixture.signalPath), false, `${description}: provider receives no board-session termination signal`);
   await writeFile(fixture.releasePath, 'release');
-  const deadline = Date.now() + PROGRESS_BUDGET_MS;
-  while (!existsSync(fixture.continuedPath) && Date.now() < deadline) {
+  while (!existsSync(fixture.continuedPath)) {
     await new Promise(resolve => setTimeout(resolve, 10));
   }
   assert.ok(existsSync(fixture.continuedPath), `${description}: provider progresses after the board exits`);

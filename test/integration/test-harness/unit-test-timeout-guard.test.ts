@@ -163,7 +163,7 @@ function runnerProofRoot(directory: string): string {
 
 async function runCpuFixture(source: string, extraEnv: Record<string, string> = {}) {
   const directory = mkdtemp('cpu-guard-probe-');
-  const throughRunner = Boolean(extraEnv.PARALLIX_SUITE_HANG_TIMEOUT_MS || source.includes("test('wait'"));
+  const throughRunner = Boolean(extraEnv.PARALLIX_SUITE_HANG_TIMEOUT_MS || extraEnv.GITHUB_ACTIONS !== undefined || source.includes("test('wait'"));
   const file = path.join(directory, throughRunner ? 'probe.test.js' : 'probe.test.mjs');
   fs.writeFileSync(file, `import test from 'node:test';\n${source}\n`);
   const env: NodeJS.ProcessEnv = { ...process.env, NODE_NO_WARNINGS: '1', ...extraEnv,
@@ -200,6 +200,16 @@ probe('worker CPU guard rejects a burner even when its assertion passes', async 
   assert.match(result.stdout, /\[unit-test-cpu:exceeded\] burn/);
 });
 
+probe('runner rejects a burner locally and accepts it under hosted policy (TASK-2813)', async () => {
+  const source = `test('burn', async () => { ${burnCpuSource(150_000)} });`;
+  const budget = { PARALLIX_UNIT_TEST_CPU_BUDGET_US: '100000' };
+  const local = await runCpuFixture(source, { ...budget, GITHUB_ACTIONS: '' });
+  assert.notEqual(local.status, 0, `${local.stdout}\n${local.stderr}`);
+  assert.match(local.stdout, /\[unit-test-cpu:exceeded\] burn/);
+  const hosted = await runCpuFixture(source, { ...budget, GITHUB_ACTIONS: 'true' });
+  assert.equal(hosted.status, 0, `${hosted.stdout}\n${hosted.stderr}`);
+});
+
 probe('nested tests receive exclusive CPU charges', async () => {
   const burn = burnCpuSource(35_000);
   const source = `test('outer', async t => { ${burn} await t.test('inner', async () => { ${burn} }); });`;
@@ -214,12 +224,22 @@ probe('overlapping sibling tests fail closed instead of sharing a CPU sample', a
   assert.match(result.stdout, /overlapping unit tests cannot share one process CPU counter/);
 });
 
-probe('suite watchdog still terminates a low-CPU hang', async () => {
-  const result = await runCpuFixture("test('hang', async () => { await new Promise(() => {}); });", {
-    PARALLIX_SUITE_HANG_TIMEOUT_MS: '1200',
-  });
+probe('suite watchdog terminates a low-CPU hang and its descendants (TASK-2813)', async () => {
+  const pidFile = path.join(mkdtemp('watchdog-pid-'), 'child.pid');
+  const result = await runCpuFixture(`test('hang', async () => {
+    const { spawn } = await import('node:child_process');
+    const fs = await import('node:fs');
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));
+    await new Promise(() => {});
+  });`, { PARALLIX_SUITE_HANG_TIMEOUT_MS: '1200' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /\[suite-watchdog\]/);
+  const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  for (let attempt = 0; attempt < 100 && alive(); attempt++) await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(alive(), false, 'the hung test descendant is cleaned up');
+  fs.rmSync(path.dirname(pidFile), { recursive: true, force: true });
 });
 
 probe('suite CPU meter includes a waited grandchild once', async () => {

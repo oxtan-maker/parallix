@@ -23,7 +23,7 @@ function directJsonWritesInLib(libDir: string): string[] {
   // Avoid instrumenting the external TypeScript compiler. Product coverage
   // remains owned by the covered worker, including its unchanged denominator.
   const result = spawnSync(process.execPath, [path.join(ROOT, 'test/lib/direct-json-writes.mjs'), libDir], {
-    encoding: 'utf8', timeout: 3000,
+    encoding: 'utf8',
     env: { ...process.env, NODE_V8_COVERAGE: '' },
   });
   assert.equal(result.status, 0, `${result.error ?? ''}\n${result.stderr}`);

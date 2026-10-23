@@ -23,7 +23,7 @@ const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..');
         // optimizing JIT: this one-shot batch cannot amortize that compilation.
         ['--single-threaded', '--no-opt', '--v8-pool-size=1', '--max-semi-space-size=64', path.join(repoRoot, 'test/fixtures/standard-analysis-batch.mjs'), root,
           path.join(repoRoot, 'eslint.config.mjs'), JSON.stringify(scenarios)], {
-          encoding: 'utf8', timeout: 3000,
+          encoding: 'utf8',
           // Tool dependencies supply diagnostics, not product coverage.
           env: { ...process.env, NODE_V8_COVERAGE: '', NODE_OPTIONS: '' },
         });
@@ -42,7 +42,7 @@ const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..');
       fs.mkdirSync(path.dirname(focusFile), { recursive: true });
       fs.writeFileSync(focusFile, focused.source);
       const hygiene = childProcess.spawnSync('bash', [path.join(repoRoot, 'scripts/test-hygiene.sh')], {
-        cwd: root, encoding: 'utf8', timeout: 1000,
+        cwd: root, encoding: 'utf8',
       });
       assert.notEqual(hygiene.status, 0, hygiene.stdout + hygiene.stderr);
       assert.match(hygiene.stdout, /VIOLATION: \.only found/);

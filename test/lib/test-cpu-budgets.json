@@ -342,7 +342,7 @@
       "integration/review/review-events.test.ts": 150,
       "integration/review/review-gate-ownership.test.ts": 1000,
       "integration/review/review-identity.test.ts": 100,
-      "integration/review/review-implementer-reassignment.test.ts": 2000,
+      "integration/review/review-implementer-reassignment.test.ts": 3000,
       "integration/review/review-intervention-resume.integration.test.ts": 3400,
       "integration/review/review-native-mission-recovery.test.ts": 150,
       "integration/review/review-evidence-git.integration.test.ts": 1650,

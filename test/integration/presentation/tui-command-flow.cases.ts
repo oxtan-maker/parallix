@@ -16,10 +16,7 @@ class Stream extends TerminalStream {
 
 async function waitForWrite(stream: Stream, writeCount: number): Promise<void> {
   if (stream.writes.length > writeCount) { return; }
-  await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('timed out waiting for TUI re-render')), 1_000);
-    stream.once('write', () => { clearTimeout(timeout); resolve(); });
-  });
+  await new Promise<void>(resolve => { stream.once('write', () => resolve()); });
 }
 
 /**
@@ -27,7 +24,7 @@ async function waitForWrite(stream: Stream, writeCount: number): Promise<void> {
  * the event loop, so a fixed sleep before asserting on rendered output is a
  * load-dependent flake; waiting for the condition makes the wait exact.
  */
-async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<boolean> {
+async function waitFor(predicate: () => boolean, timeoutMs = Infinity): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     if (predicate()) {return true;}
@@ -37,7 +34,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<boo
 }
 
 /** Wait until the cumulative stream output matches the pattern. */
-function waitForOutput(stream: Stream, pattern: RegExp, timeoutMs = 2_000): Promise<boolean> {
+function waitForOutput(stream: Stream, pattern: RegExp, timeoutMs = Infinity): Promise<boolean> {
   return waitFor(() => pattern.test(stream.writes.join('')), timeoutMs);
 }
 

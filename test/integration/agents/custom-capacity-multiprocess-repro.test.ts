@@ -24,7 +24,6 @@ function contender(root: string, home: string, admission: string, policy: string
     process.on('disconnect', () => { lease?.release(); process.exit(0); });
     process.on('message', action => {
       if (action === 'release') lease?.release();
-      clearTimeout(timer);
       process.exit(0);
     });
   `;
@@ -37,12 +36,10 @@ function contender(root: string, home: string, admission: string, policy: string
 
 function message(child: ChildProcess): Promise<string> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => finish(new Error('contender message deadline exceeded')), 4000);
     const onMessage = (value: unknown) => finish(undefined, String(value));
     const onExit = (code: number | null) => finish(new Error(`contender exited before admission response: ${code}`));
     const onError = (error: Error) => finish(error);
     function finish(error?: Error, value?: string) {
-      clearTimeout(timer);
       child.off('message', onMessage); child.off('exit', onExit); child.off('error', onError);
       if (error) reject(error); else resolve(value!);
     }

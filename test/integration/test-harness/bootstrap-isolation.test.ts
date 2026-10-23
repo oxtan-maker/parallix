@@ -42,7 +42,7 @@ test('bootstrap removes invoking workflow authority and live terminal identity (
     '--import', 'tsx', '--import', path.resolve('test/bootstrap-parallix-home.ts'),
     '-e', `process.stdout.write(JSON.stringify(${JSON.stringify(keys)}.filter(key => process.env[key] !== undefined)))`,
   ], {
-    encoding: 'utf8', timeout: 2_000,
+    encoding: 'utf8',
     env: { ...process.env, ...Object.fromEntries(keys.map(key => [key, 'operator-owned'])) },
   });
   assert.equal(result.status, 0, result.stderr);

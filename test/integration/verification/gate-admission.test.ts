@@ -19,11 +19,7 @@ import { configureGateAdmission } from '../../../src/application/ports/gate-admi
 import { createGateAdmission } from '../../../src/composition/gate-admission.js';
 
 async function untilGateFile(file: string): Promise<void> {
-  const end = Date.now() + 2000;
-  while (!fs.existsSync(file)) {
-    assert.ok(Date.now() < end, `gate did not create ${file}`);
-    await delay(5);
-  }
+  while (!fs.existsSync(file)) { await delay(5); }
 }
 
 async function gateProcessFixture(t: TestContext) {

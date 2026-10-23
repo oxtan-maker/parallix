@@ -1,8 +1,8 @@
 ---
 id: TASK-2813
 title: Restore local-only timing enforcement on GitHub
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-10-23 05:32'
 updated_date: '2026-10-23 05:34'
 labels:

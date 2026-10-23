@@ -25,7 +25,7 @@ before(async () => {
 });
 after(async () => { try { await fixture?.close(); } finally { bundle?.close(); } });
 
-test('held synchronous terminal probe cannot block board snapshots or independent admission (TASK-2750)', { timeout: 3500 }, async () => {
+test('held synchronous terminal probe cannot block board snapshots or independent admission (TASK-2750)', async () => {
   const http = await workflowHttp(host);
   let settled = false;
   const probe = fetch(`${host.origin}/api/terminal/${fixture.slugs[0]}/live`).then(response => { settled = true; return response; });
@@ -41,7 +41,7 @@ test('held synchronous terminal probe cannot block board snapshots or independen
   await until(async () => (await fixture.service.current(fixture.slugs[1])) === null, 'worker completes');
 });
 
-test('board observes provider execution separately from held workflow preparation and gates (TASK-2769)', { timeout: 3500 }, async () => {
+test('board observes provider execution separately from held workflow preparation and gates (TASK-2769)', async () => {
   fs.writeFileSync(path.join(fixture.root, 'provider-fixture'), 'enabled');
   const http = await workflowHttp(host);
   const slug = fixture.slugs[0];

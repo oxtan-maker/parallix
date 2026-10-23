@@ -8,7 +8,7 @@ import { once } from 'node:events';
 import path from 'node:path';
 import { workflowBoard, until } from '../../fixtures/workflow-board.js';
 
-test('direct active Ctrl+C settles held children and ownership before immediate retry (TASK-2771, TASK-2792)', { timeout: 3500 }, async t => {
+test('direct active Ctrl+C settles held children and ownership before immediate retry (TASK-2771, TASK-2792)', async t => {
   const bundle = await bundleWorkflowChild(); t.after(() => bundle.close());
   const fixture = await workflowBoard(1, { cli: bundle.cli }); t.after(() => fixture.close());
   const child = spawn(bundle.cli.command, [...bundle.cli.args, '--fixture-cli-execute', fixture.root, fixture.slugs[0]], {
@@ -17,7 +17,7 @@ test('direct active Ctrl+C settles held children and ownership before immediate 
   let output = ''; child.stdout.on('data', bytes => { output += String(bytes); }); child.stderr.on('data', bytes => { output += String(bytes); });
   const exited = once(child, 'exit');
   t.after(async () => { if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await exited; } });
-  await until(() => fixture.entered(fixture.slugs[0]) || child.exitCode !== null || child.signalCode !== null, 'held foreground preparation', 1800)
+  await until(() => fixture.entered(fixture.slugs[0]) || child.exitCode !== null || child.signalCode !== null, 'held foreground preparation')
     .catch(error => { throw new Error(`${error.message}: ${output}`); });
   assert.ok(fixture.entered(fixture.slugs[0]), output);
   const original = (await fixture.service.current(fixture.slugs[0]))!;

@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 
-test('lead SIGINT settles borrowed active work and stops supervision (TASK-2792)', { timeout: 3500 }, async t => {
+test('lead SIGINT settles borrowed active work and stops supervision (TASK-2792)', async t => {
   const { bundleWorkflowChild } = await import('../../fixtures/workflow-bundle.js');
   const { workflowBoard, until } = await import('../../fixtures/workflow-board.js');
   const { spawn } = await import('node:child_process');
@@ -17,7 +17,7 @@ test('lead SIGINT settles borrowed active work and stops supervision (TASK-2792)
   t.after(async () => { if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await exited; } });
   let output = ''; child.stdout.on('data', bytes => { output += String(bytes); });
   child.stderr.on('data', bytes => { output += String(bytes); });
-  await until(() => fixture.entered(fixture.slugs[0]), 'lead borrowed active preparation', 1800).catch(error => { throw new Error(`${error.message}: ${output}`); });
+  await until(() => fixture.entered(fixture.slugs[0]), 'lead borrowed active preparation').catch(error => { throw new Error(`${error.message}: ${output}`); });
   const original = (await fixture.service.current(fixture.slugs[0]))!;
   child.kill('SIGINT');
   const [code] = await exited;

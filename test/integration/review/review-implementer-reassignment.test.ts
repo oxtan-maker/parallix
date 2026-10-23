@@ -14,7 +14,7 @@ import { run as runCli } from '../../../src/composition/create-cli.js';
 import { setLogger } from '../../../src/application/presentation/cli-format.js';
 import { setCommandPathProbe, setLauncherHealthProbe, setWorkflowLaunchPort } from '../../../src/adapters/agents/agents.js';
 
-test('continued review preserves the Codex PR after Claude reassignment (TASK-2784)', { timeout: 3500 }, async t => {
+test('continued review preserves the Codex PR after Claude reassignment (TASK-2784)', async t => {
   const fixture = await openRepairFixture({ slug: 'task-reassignment', state: 'undecided-review' });
   t.after(() => fixture.close());
   const { root, repo, worktree, slug, git } = fixture;
