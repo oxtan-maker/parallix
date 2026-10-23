@@ -359,7 +359,7 @@ test('attention action keeps the server-owned display text and state', () => {
   assert.equal(item.reason.kind, 'review-lane');
   assert.equal(item.reason.detail, 'Awaiting review decision');
   assert.equal(item.action.kind, 'review:submit');
-  assert.equal(item.action.display, `px review ${card.id}`);
+  assert.equal(item.action.display, 'px review');
   assert.equal(item.action.state, 'enabled');
   assert.equal(item.action.reason, null);
   assert.deepStrictEqual(item.dependsOnSources, ['task-markdown']);

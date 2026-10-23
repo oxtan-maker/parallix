@@ -21,7 +21,7 @@ export class ReviewCommandUseCase {
     // Inherited write authority belongs to an agent's evidence/verdict writes,
     // not the coordinator's lifecycle. Refuse before preflight or stop clearing.
     const operation = reviewOperation(args);
-    if (['submit', 'start', 'continue', 'resume'].includes(operation)) {
+    if (['submit', 'enter'].includes(operation)) {
       assertWorkflowControl();
     }
     const context = await this._workflow.preflight(args, options);
@@ -59,7 +59,7 @@ export class ReviewCommandUseCase {
     // publishes under that operation and hands the board back to it, whatever
     // the outcome, because the outer process is still working the mission.
     const nested = isNestedWorkPublisher(context.options.nestedWork) ? context.options.nestedWork : null;
-    const summary = `px review --${operation} ${context.slug}`;
+    const summary = `px review ${context.slug}${operation === 'enter' ? '' : ` --${operation}`}`;
     const publication = nested?.parent ?? {
       missionId: missionId(context.slug),
       operationId: `review:${context.slug}:${randomUUID()}`,

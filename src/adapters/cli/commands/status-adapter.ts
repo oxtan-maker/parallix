@@ -17,12 +17,10 @@ import type {
   StatusRebaseInfo,
 } from '../../../application/ports/cli-workflows.js';
 import { detectRebaseState, getCurrentBranch, getUncommittedCount, getLastThreeCommits, run } from '../../git/git.js';
-import { findTaskFile, getTaskStatus } from '../../backlog/backlog.js';
 import {
-  getPrimaryWorktree,
+  extractSlugFromBranch,
   inferSlug,
   missionBranchName,
-  missionBranchPrefix,
 } from '../../filesystem/mission-utils.js';
 import { ConcreteAgentReadAdapter } from '../../backlog/concrete-agent-read-adapter.js';
 import { knownAgentFamiliesFromConfig } from '../../agents/known-agent-families.js';
@@ -31,6 +29,9 @@ import type { AgentBlocklistRepository } from '../../../application/ports/agent-
 import type { AgentFamily } from '../../../domain/agents.js';
 import { getPrStatus } from '../../review/review-adapter.js';
 import type { BoardProjectionBuilder } from '../../../application/projections/board-readers.js';
+import { missionId } from '../../../domain/mission.js';
+import type { RepositoryId } from '../../../domain/repository.js';
+import type { MissionStore } from '../../../application/domain-ports.js';
 import type { MissionId } from '../../../domain/mission.js';
 
 function parseWorktreeList(porcelain: string) {
@@ -55,41 +56,50 @@ function parseWorktreeList(porcelain: string) {
   return entries;
 }
 
-function findStaleMissionWorktrees(opts: {
+async function findStaleMissionWorktrees(opts: {
   gitRun: typeof run;
-  findTaskFileFn: typeof findTaskFile;
-  getTaskStatusFn: typeof getTaskStatus;
+  rootDir: string;
   primaryWorktree: string | null;
-}): StatusStaleWorktree[] {
-  const result = opts.gitRun('git', ['worktree', 'list', '--porcelain']);
+  missionStore?: Pick<MissionStore, 'load'>;
+  repositoryId?: RepositoryId;
+}): Promise<StatusStaleWorktree[]> {
+  const result = opts.gitRun('git', ['-C', opts.rootDir, 'worktree', 'list', '--porcelain']);
   if (result.status !== 0) { return []; }
 
-  return parseWorktreeList(result.stdout)
-    .filter(entry => entry.path !== opts.primaryWorktree)
-    .map(entry => {
+  const worktrees = parseWorktreeList(result.stdout);
+  // Git reports the owning checkout first, even when invoked from a linked
+  // worktree. Derive it from this same repository-scoped observation.
+  const primary = opts.primaryWorktree ?? worktrees[0]?.path;
+  const entries = await Promise.all(worktrees
+    .filter(entry => entry.path !== primary)
+    .map(async entry => {
       const branchRef = entry.branch || '';
-      const prefix = missionBranchPrefix(opts.primaryWorktree || process.cwd());
-      const normalizedRefPrefix = `refs/heads/${prefix}`;
-      const match = branchRef.startsWith(normalizedRefPrefix)
-        ? [branchRef, branchRef.slice(normalizedRefPrefix.length)]
-        : null;
-      if (!match) { return null; }
-
-      const slug = match[1];
-      const taskFile = opts.findTaskFileFn(slug);
-      const taskStatus = taskFile ? opts.getTaskStatusFn(taskFile) : null;
-      if (taskStatus !== 'done' && taskFile) { return null; }
-
-      return {
-        slug,
-        path: entry.path,
-        branch: branchRef,
-        taskStatus: taskStatus || 'missing',
-        // Recovery verifies the landed commit and completes stats and hooks
-        // before removing a worktree left by interrupted closeout.
-        cleanupCommand: `px integrate ${slug} --recover-landed`,
-      };
-    })
+      const slug = extractSlugFromBranch(branchRef.replace(/^refs\/heads\//, ''), opts.rootDir);
+      if (!slug) { return null; }
+      const base = { slug, path: entry.path, branch: branchRef };
+      try {
+        const loaded = await opts.missionStore?.load(missionId(slug));
+        if (loaded?.kind === 'found') {
+          if (opts.repositoryId && loaded.mission.repositoryId !== opts.repositoryId) {
+            return { ...base, taskStatus: 'unknown', uncertainty: 'Mission not found in this repository' };
+          }
+          if (loaded.mission.status !== 'done') { return null; }
+          return {
+            ...base,
+            taskStatus: loaded.mission.closedAt ? 'closed' : 'done',
+            // Recovery still verifies landing and completes stats/hooks.
+            cleanupCommand: `px integrate ${slug} --recover-landed`,
+          };
+        }
+        return { ...base, taskStatus: 'unknown',
+          uncertainty: loaded?.kind === 'missing' ? 'Mission not found in authoritative store'
+            : `Mission authority unavailable${loaded?.kind === 'unavailable' ? `: ${loaded.reason}` : ''}` };
+      } catch (error) {
+        return { ...base, taskStatus: 'unknown',
+          uncertainty: `Authoritative Mission lookup failed: ${String(error)}` };
+      }
+    }));
+  return entries
     .filter(Boolean) as StatusStaleWorktree[];
 }
 
@@ -242,30 +252,24 @@ export function createStatusAgentAdapter(options: {
 /** Create a concrete StatusStaleWorktreesPort implementation. */
 export function createStatusStaleWorktreesAdapter(options: {
   readonly gitRun?: typeof run;
-  readonly findTaskFileFn?: typeof findTaskFile;
-  readonly getTaskStatusFn?: typeof getTaskStatus;
+  readonly missionStore?: Pick<MissionStore, 'load'>;
+  readonly repositoryId?: RepositoryId;
   readonly detectRebaseStateFn?: (_path: string) => { inProgress: boolean; detached: boolean; unmergedFiles: string[] };
   readonly primaryWorktree?: string | null;
 } = {}): StatusStaleWorktreesPort {
   const gitRun = options.gitRun || run;
-  const findTaskFileFn = options.findTaskFileFn || findTaskFile;
-  const getTaskStatusFn = options.getTaskStatusFn || getTaskStatus;
   const detectRebaseStateFn = options.detectRebaseStateFn || detectRebaseState;
 
   return {
-    findStaleWorktrees(explicitSlug: string | null, _rootDir: string): readonly StatusStaleWorktree[] {
+    async findStaleWorktrees(explicitSlug: string | null, rootDir: string): Promise<readonly StatusStaleWorktree[]> {
       if (explicitSlug) { return []; }
-
-      let resolvedPrimary: string | null = options.primaryWorktree ?? null;
-      if (!resolvedPrimary) {
-        try { resolvedPrimary = getPrimaryWorktree(); } catch { resolvedPrimary = null; }
-      }
 
       return findStaleMissionWorktrees({
         gitRun,
-        findTaskFileFn,
-        getTaskStatusFn,
-        primaryWorktree: resolvedPrimary,
+        rootDir,
+        missionStore: options.missionStore,
+        repositoryId: options.repositoryId,
+        primaryWorktree: options.primaryWorktree ?? null,
       });
     },
 

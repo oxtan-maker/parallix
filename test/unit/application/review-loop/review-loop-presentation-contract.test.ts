@@ -18,7 +18,7 @@ function providerNone(consumeReviewer: () => Promise<ReviewerArtifactFacts>, run
       launcherStatus: () => ({ supported: false, detail: 'not installed' }),
       nominate: () => { throw new Error('No agents available'); },
     },
-    // SC1: a provider-disabled --start performs the handoff transition.
+    // SC1: a provider-disabled first entry performs the handoff transition.
     handoff: { handoff: async () => ({ ok: true as const }) },
     agents: { launch: async launch => { throw new Error(`unexpected ${launch.role} launch`); } },
     artifacts: { consumeReviewer, consumeImplementer: async () => ({ consumed: true, ok: true as const, disposition: 'CHANGES_MADE' }) },

@@ -141,7 +141,6 @@ test('workflow ownership guard finds no adapter-owned workflow control in produc
 
 test('workflow ownership guard accepts the re-homed review adapter through its typed port bindings', t => {
   const source = fs.readFileSync(path.join(root, REVIEW_WORKFLOW_ADAPTER), 'utf8');
-  assert.match(source, /: StaticReviewWorkflowPort = \{/);
   // The autonomous review loop is re-homed through the typed entry port and its
   // mechanism bindings, not through a broad workflow port.
   assert.match(source, /: ReviewRoundEntryPort = \{/);
@@ -153,7 +152,7 @@ test('workflow ownership guard rejects the review adapter choosing a follow-on a
   const source = fs.readFileSync(path.join(root, REVIEW_WORKFLOW_ADAPTER), 'utf8').replace(
     /\n\}\n\nexport function createReviewWorkflowAdapter/,
     "\n  private async relaunch(findings: string[], agent: string): Promise<void> { if (findings.length) { await startAgent('active', { prompt: '', worktree: '', agent }); } else { await submitForReview('', true, {}); } }\n}\n\nexport function createReviewWorkflowAdapter",
-  );
+  ).replace("import { run }", "import { startAgent } from '../agents/agents.js';\nimport { run }");
   const violations = findWorkflowOwnershipViolations(adapterRepo(t, REVIEW_WORKFLOW_ADAPTER, source));
   assert.deepEqual(violations.map(violation => [violation.file, violation.rule]), [
     [REVIEW_WORKFLOW_ADAPTER, 'adapter-owned-workflow-control'],

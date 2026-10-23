@@ -248,7 +248,7 @@ export async function submitForReview(
   // 3. Mode-specific final fallback: named identity (provider-backed) vs "autonomous" (provider=none) (SC 6)
   if (!reviewIdentity) {
     if (providerEnabled) {
-      log(fmt.status('FAIL', `No review identity resolved for ${slug}. Start the review with px review ${slug} --start, or set the task implementer, before submitting for review.`));
+      log(fmt.status('FAIL', `No review identity resolved for ${slug}. Start the review with px review ${slug}, or set the task implementer, before submitting for review.`));
       exit(1);
       return;
     } else {

@@ -352,7 +352,7 @@ test('attention-items: each item renders exact command string from attentionComm
   );
   assert.equal(
     attentionCommand(reviewCard, { kind: 'review-lane' }),
-    'px review task-4002',
+    'px review',
   );
   assert.equal(
     attentionCommand(blockingCard, { kind: 'blocking' }),
@@ -667,12 +667,12 @@ test('attention-items: reason kinds render with correct colors (blocking=red, ga
   }
 });
 
-test('attention-items: exact command text matches px <command> <mission-id> pattern for all reason kinds', async () => {
+test('attention-items: exact command text uses mission context for review and selectors for other actions', async () => {
   const { attentionCommand } = await import('../../../../src/interfaces/tui/shell.js');
 
   const cases = [
     { id: 'task-c1', lane: 'integration', reasonKind: 'integrate-lane', expected: 'px integrate task-c1' },
-    { id: 'task-c2', lane: 'review', reasonKind: 'review-lane', expected: 'px review task-c2' },
+    { id: 'task-c2', lane: 'review', reasonKind: 'review-lane', expected: 'px review' },
     { id: 'task-c3', lane: 'active', reasonKind: 'blocking', expected: 'px active task-c3' },
     { id: 'task-c4', lane: 'active', reasonKind: 'gate-failed', expected: 'px active task-c4' },
   ] as const;

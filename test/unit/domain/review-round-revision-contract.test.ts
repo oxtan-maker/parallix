@@ -353,7 +353,7 @@ describe("revision integrity", { concurrency: false }, () => {
 });
 
 // ── --continue invalidates a BLOCKED/PARKED stop — TASK-2478 (was task-2478-invalidate-blocker.test.ts) ──
-// TASK-2478 — `px review --continue` invalidates a BLOCKED/PARKED implementer
+// TASK-2478 — `px review` invalidates a BLOCKED/PARKED implementer
 // stop so the review loop re-polls the reviewer on the current tree instead of
 // relaunching the stuck implementer on every invocation.
 //
@@ -472,7 +472,7 @@ describe("continue invalidates a BLOCKED/PARKED stop —", () => {
     return { root, store };
   }
 
-  describe("px review --continue invalidates a BLOCKED/PARKED stop", () => {
+  describe("px review invalidates a BLOCKED/PARKED stop", () => {
     it('clears a BLOCKED disposition and resets the round to reviewing', async () => {
       await withHome(createTempRoot(), async () => {
         const { root, store } = await seedRoot(blockedRound());
@@ -553,6 +553,7 @@ describe("continue invalidates a BLOCKED/PARKED stop —", () => {
         );
         assert.ok(note, 'the invalidation is attributed to the current git user');
         assert.match(String(note!.content), /BLOCKED/, 'the event names the invalidated stop');
+        assert.equal(String(note!.content).split('\n')[0], 'invalidated a BLOCKED stop; reviewStatus now awaiting-review. Operator cleared the blocker via px review.', 'correction provenance names the surviving operator entry (TASK-2810 F1)');
       });
     });
 

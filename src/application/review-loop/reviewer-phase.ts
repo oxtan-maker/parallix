@@ -24,7 +24,7 @@ async function integrationRepairBrief(context: LoopContext): Promise<string> {
   return loaded.kind === 'found' ? integrationRepairReviewBrief(latestIntegrationRepair(loaded.mission)) : '';
 }
 
-/** A --continue re-enters its first round with a check for an existing review. */
+/** A continuation re-enters its first round with a check for an existing review. */
 async function existingReviewOnContinue(context: LoopContext, round: ReviewRound): Promise<unknown> {
   const { ports, state, identities } = context;
   if (!(context.isContinue && round.attempt === context.initialRound)) { return undefined; }

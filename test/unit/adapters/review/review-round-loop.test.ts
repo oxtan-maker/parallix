@@ -246,7 +246,7 @@ it('workflow-rejected verdicts expose cause and supported recovery without clear
     assert.equal(outcome.outcome, 'failed');
     if (outcome.outcome !== 'failed') { assert.fail('must fail'); }
     assert.equal(outcome.workflowBlock?.cause, 'REVIEWER_LAUNCH_FAILURE');
-    assert.match(outcome.workflowBlock?.nextAction ?? '', /px review stopped-verdict --continue/);
+    assert.match(outcome.workflowBlock?.nextAction ?? '', /px review stopped-verdict/);
   }
   assert.deepEqual(store.mission().review?.intervention, review.intervention);
 });

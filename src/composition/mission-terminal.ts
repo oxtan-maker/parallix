@@ -1,3 +1,4 @@
+import { reviewOperation } from '../domain/review-command-policy.js';
 import { spawn } from 'node:child_process';
 import type { WorkflowOperationRecord as WorkflowOperation } from '../application/ports/workflow-operation.js';
 import type { ParallixConfiguration } from "../application/ports/configuration.js";
@@ -96,7 +97,7 @@ export async function hostMissionCommand(command: string, args: string[], target
 
 function shouldHostForeground(command: string, args: readonly string[], interactive?: boolean): boolean {
   const owned = command === 'draft' || command === 'integrate'
-    || command === 'review' && args.some(arg => ['--start', '--continue', '--submit'].includes(arg));
+    || command === 'review' && ['enter', 'submit'].includes(reviewOperation(args));
   return !owned && (interactive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY));
 }
 

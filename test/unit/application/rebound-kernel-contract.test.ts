@@ -918,7 +918,7 @@ describe("Integration gate rebound —", () => {
     assert.equal(route.route, 'exhausted');
     assert.equal(h.launches, INTEGRATION_GATE_REBOUND_ATTEMPTS_PER_INVOCATION, 'the bounded per-integrate repair budget is spent, then it stops');
     assert.match(h.messages.join('\n'), /bounded budget/i);
-    assert.match(h.messages.join('\n'), /px review .* --continue/, 'the exhaustion names its human continuation');
+    assert.match(h.messages.join('\n'), /px review .*/, 'the exhaustion names its human continuation');
   });
 
   test('TASK-2492: a repair left uncommitted fails the re-run instead of being reported as fixed', async () => {

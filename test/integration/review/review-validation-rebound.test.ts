@@ -207,7 +207,11 @@ test('task-2234 repro: review-loop self-heal does NOT bounce on gate-failed (exe
       'gate-failed (execution failure) must NOT trigger any task transition'
     );
     assert.ok(
-      errors.some(m => /No open review PR found/.test(m)),
+      errors.some(m => /Handoff failed.*Gate exited with status 1/.test(m)),
+      'gate-failed must report the failed handoff'
+    );
+    assert.ok(
+      errors.some(m => /Run: px review task-2234 after resolving the error/.test(m)),
       'gate-failed must fall through to the manual-guidance failure path'
     );
     assert.deepEqual(exitCodes, [1], 'loop must exit non-zero without bouncing');

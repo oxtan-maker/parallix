@@ -6,9 +6,7 @@ import { extractOpencodeTelemetryFromExport } from './opencode-telemetry.js';
 import { captureOpencodeExport } from './opencode-export.js';
 import { detectLimitHit } from '../../application/services/agent-limit.js';
 import { spawnSync } from 'node:child_process';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
+import { resolveOpencodeCommand } from './opencode-command.js';
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
 import type { MissionId } from '../../domain/mission.js';
 import type { SessionRole } from '../../domain/session.js';
@@ -100,54 +98,6 @@ let _jsonFormatSupported: boolean | null = null;
 // Injectable feature-detect function for tests.  When set, checkJsonFormatSupport(configuration)
 // calls this function instead of shelling out, making tests hermetic.
 let _jsonFormatDetectFn: (() => boolean) | null = null;
-
-function opencodeCommandCandidates(configuration: ParallixConfiguration) {
-  const candidates: string[] = [];
-  const seen = new Set<string>();
-  const pushCandidate = (candidate?: string | null) => {
-    if (!candidate || seen.has(candidate)) {return;}
-    seen.add(candidate);
-    candidates.push(candidate);
-  };
-
-  pushCandidate(configuration.agents.opencodeBin);
-  pushCandidate('opencode');
-  pushCandidate(path.join(configuration.storage.homeDirectory || os.homedir(), '.opencode', 'bin', 'opencode'));
-  pushCandidate(path.join(configuration.storage.homeDirectory || os.homedir(), '.local', 'bin', 'opencode'));
-
-  return candidates;
-}
-
-function resolveExistingCommand(candidate: string, configuration: ParallixConfiguration) {
-  if (!candidate) {return null;}
-  if (candidate.includes(path.sep)) {
-    try {
-      fs.accessSync(candidate, fs.constants.X_OK);
-      return candidate;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  const dirs = configuration.agents.searchPath.split(path.delimiter);
-  for (const dir of dirs) {
-    if (!dir) {continue;}
-    const commandPath = path.join(dir, candidate);
-    try {
-      fs.accessSync(commandPath, fs.constants.X_OK);
-      return candidate;
-    } catch (_) { /* keep looking */ }
-  }
-  return null;
-}
-
-function resolveOpencodeCommand(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) {
-  for (const candidate of opencodeCommandCandidates(configuration)) {
-    const resolved = resolveExistingCommand(candidate, configuration);
-    if (resolved) {return resolved;}
-  }
-  return 'opencode';
-}
 
 // Lightweight feature-detect: try `opencode --format json --help`.
 // Returns true if the flag is accepted (exit 0 or non-zero for unrelated reasons),

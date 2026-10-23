@@ -30,3 +30,12 @@ test('pxNodeArgs adds --import only when the entry needs a loader', () => {
   assert.deepEqual(pxNodeArgs({ entry: '/b/px.mjs', loader: '' }, ['status']), ['--v8-pool-size=1', '/b/px.mjs', 'status']);
   assert.deepEqual(pxNodeArgs({ entry: '/s/px.ts', loader: '/tsx.mjs' }, ['status']), ['--v8-pool-size=1', '--import', '/tsx.mjs', '/s/px.ts', 'status']);
 });
+
+test('prebuilt CLI launches omit unattributable bundle coverage while source launches retain their loader (TASK-2787)', () => {
+  assert.deepEqual(pxNodeArgs({ entry: PREBUILT_PX_ENTRY, loader: '' }, ['version']), [
+    '--v8-pool-size=1', '--import', path.resolve('test/lib/prebuilt-cli-runtime.mjs'), PREBUILT_PX_ENTRY, 'version',
+  ]);
+  assert.deepEqual(pxNodeArgs(SOURCE_PX, ['version']), [
+    '--v8-pool-size=1', '--import', TSX_LOADER, SOURCE_PX_ENTRY, 'version',
+  ]);
+});

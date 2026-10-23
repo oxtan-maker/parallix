@@ -53,7 +53,7 @@ class MissionRecovery {
   async recordHumanOverrideDecision(context: IntegrationRecoveryContext, missionServices: IntegrationMissionServices, missionLoad: Extract<MissionLoadResult, { kind: 'found' }>, overrideApprovedAt: string): Promise<Extract<MissionLoadResult, { kind: 'found' }> | null> {
     const review = missionLoad.mission.review!;
     if (reviewStatus(review) !== 'awaiting-review') {
-      fmt.log.fail(`Human override cannot be recorded for ${context.slug}: the Review is ${reviewStatus(review)}, not awaiting a decision. Resolve the current round (or start a new one with px review ${context.slug} --start) before overriding.`);
+      fmt.log.fail(`Human override cannot be recorded for ${context.slug}: the Review is ${reviewStatus(review)}, not awaiting a decision. Resolve the current round (or start a new one with px review ${context.slug}) before overriding.`);
       return null;
     }
     const decidedReview = applyReviewerCommand(review, {
@@ -87,7 +87,7 @@ class MissionRecovery {
   private recoveryEntryRound(context: IntegrationRecoveryContext, missionLoad: Extract<MissionLoadResult, { kind: 'found' }>, overrideApprovedAt: string | undefined) {
     const slugId = missionId(context.slug);
     if (!missionLoad.mission.review && overrideApprovedAt === undefined) {
-      throw abortWith(this.dependencies.landing, `Mission ${slugId} is active with no authoritative Review. Run px review ${context.slug} --start (or record a human decision through px review) before integration.`);
+      throw abortWith(this.dependencies.landing, `Mission ${slugId} is active with no authoritative Review. Run px review ${context.slug} (or record a human decision through px review) before integration.`);
     }
     const entryRound = missionLoad.mission.review?.rounds?.length ? this.dependencies.lastRound(missionLoad.mission.review) : null;
     // A stored approval alone is not authority while a review provider exists:
@@ -98,7 +98,7 @@ class MissionRecovery {
     // repository permanently unintegratable.
     const providerlessStoredApproval = context.approval?.ok === true && context.approval.providerDisabled === true;
     if (entryRound?.decision?.kind === 'approved' && overrideApprovedAt === undefined && !providerlessStoredApproval) {
-      throw abortWith(this.dependencies.landing, `Mission ${slugId} has a stored approval without the required provider approval. Refresh provider review state before integration; if an integration-gate repair retracted the approval, run px review ${context.slug} --start to review the repaired revision.`);
+      throw abortWith(this.dependencies.landing, `Mission ${slugId} has a stored approval without the required provider approval. Refresh provider review state before integration; if an integration-gate repair retracted the approval, run px review ${context.slug} to review the repaired revision.`);
     }
     return entryRound;
   }
@@ -117,7 +117,7 @@ class MissionRecovery {
       reviewEntryAt = context.pr.createdAt;
     }
     if (!reviewEntryAt) {
-      throw abortWith(this.dependencies.landing, `Cannot derive an authoritative review-entry timestamp for ${context.slug}: no Review round startedAt and no PR creation time. Re-run px review ${context.slug} --start to record the review entry, or record the decision through px review, before integration.`);
+      throw abortWith(this.dependencies.landing, `Cannot derive an authoritative review-entry timestamp for ${context.slug}: no Review round startedAt and no PR creation time. Re-run px review ${context.slug} to record the review entry, or record the decision through px review, before integration.`);
     }
     const approvalAt = (entryRound?.decision?.kind === 'approved' ? entryRound.decision.decidedAt : undefined) ?? overrideApprovedAt;
     this.assertRecoveryTimestampOrder(context, reviewEntryAt, approvalAt);

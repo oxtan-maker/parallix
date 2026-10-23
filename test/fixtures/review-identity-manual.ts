@@ -112,7 +112,7 @@ for (const scenario of ['publication', 'fallback-publication', 'fallback-pr-retr
       checkpoints: [{ missionId: fixtureMission(slug).id, name: 'CP-1',
         goalCheck: [{ criterion: 'Retain payload', evidence: 'payload.txt' }], nextActionText: 'review' }],
     }), null);
-    const args = scenario === 'reassignment' ? ['review', slug, '--continue', '--implementer', 'claude', '--reviewer', 'custom'] : approval ? ['review', slug, '--submit-review', 'approve', '--message', 'looks good'] : ['review', slug, '--submit'];
+    const args = scenario === 'reassignment' ? ['review', slug, '--implementer', 'claude', '--reviewer', 'custom'] : approval ? ['review', slug, '--submit-review', 'approve', '--message', 'looks good'] : ['review', slug, '--submit'];
     const result = await new Promise<{ code: number | null; output: string }>((resolve, reject) => {
       child = spawn(process.execPath, [cli, ...args], { cwd: base, env, stdio: ['ignore', 'pipe', 'pipe'] });
       let output = ''; child.stdout!.on('data', chunk => { output += chunk; }); child.stderr!.on('data', chunk => { output += chunk; });

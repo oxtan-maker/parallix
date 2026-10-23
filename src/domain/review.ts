@@ -1016,13 +1016,13 @@ export function resumeReview(review: Review): Review {
 }
 
 /**
- * Invalidate a BLOCKED/PARKED implementer stop for the `px review --continue`
+ * Invalidate a BLOCKED/PARKED implementer stop for the `px review`
  * path, then return so the caller relaunches the loop.
  *
  * An implementer BLOCKED/PARKED disposition pins the current round in the
  * fixing phase; the review loop relaunches the implementer on every
- * `--continue` because it treats any existing disposition as "resolve the
- * blocker". When the operator runs `--continue` they are declaring the blocker
+ * review entry because it treats any existing disposition as "resolve the
+ * blocker". When the operator runs `px review`, they declare the blocker
  * resolved by hand, so preserve that round and open a fresh round in
  * `reviewing`. The loop then re-polls the reviewer on the current tree instead
  * of relaunching the stuck implementer.

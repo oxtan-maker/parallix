@@ -61,3 +61,27 @@ test('native LCOV omits comments and local exports while preserving uncovered ru
   assert.equal(result, 'SF:mixed.ts\nDA:4,2\nDA:6,0\nDA:7,0\nDA:8,0\nDA:9,0\nLF:5\nLH:1\nend_of_record\n' + untouched);
   assert.equal(removeNonExecutableCoverage('', root), '');
 });
+
+test('mixed-module LCOV omits erased type syntax and retains runtime expressions (TASK-2801)', () => {
+  const root = path.resolve('virtual-coverage-root');
+  const source = [
+    'import type { Mission } from "./mission.js";',
+    'export type { Mission } from "./mission.js";',
+    'interface Options {',
+    '  mission?: Mission;',
+    '}',
+    'type Id = string;',
+    'export function status(options: {',
+    '  mission?: Mission;',
+    '  repositoryId?: string;',
+    '}) {',
+    '  return options.mission;',
+    '}',
+    'export enum State { Active, Done }',
+    'import "./side-effect.js";',
+    'export { value } from "./runtime.js";',
+  ].join('\n');
+  const record = `SF:mixed.ts\n${source.split('\n').map((_, i) => `DA:${i + 1},0`).join('\n')}\nLF:15\nLH:0\nend_of_record\n`;
+  assert.equal(removeNonExecutableCoverage(record, root, () => source),
+    'SF:mixed.ts\nDA:7,0\nDA:10,0\nDA:11,0\nDA:12,0\nDA:13,0\nDA:14,0\nDA:15,0\nLF:7\nLH:0\nend_of_record\n');
+});

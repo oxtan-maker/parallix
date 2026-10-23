@@ -18,7 +18,8 @@ test.afterEach(() => mock.restoreAll());
 test('composed status dispatch injects configuration and focused ports for explicit and inferred slugs', async () => {
   const configuration = resolveConfiguration({ WORKFLOW_AGENT: 'codex' });
   const blocklist = {};
-  const services = { operatorState: { repositories: { agentBlocklist: blocklist } } } as unknown as ProductionApplicationServices;
+  const mission = { store: { load: async () => ({ kind: 'missing' as const }) }, repositoryId: 'selected-repository' };
+  const services = { mission, operatorState: { repositories: { agentBlocklist: blocklist } } } as unknown as ProductionApplicationServices;
   const selected: string[] = [];
   const staleRequests: (string | null)[] = [];
   mock.method(boardComposition, 'createStatusReadBoard', async (...[graph, root, config]: Parameters<typeof boardComposition.createStatusReadBoard>): ReturnType<typeof boardComposition.createStatusReadBoard> => {
@@ -44,9 +45,11 @@ test('composed status dispatch injects configuration and focused ports for expli
     assert.equal(options.blocklistRepo, blocklist);
     return { getAgents: async () => [{ agent: 'codex', block: { kind: 'none' } }], getAgentOverride: () => 'codex' };
   });
-  mock.method(adapters, 'createStatusStaleWorktreesAdapter', (): ReturnType<typeof adapters.createStatusStaleWorktreesAdapter> => ({
-    findStaleWorktrees: explicit => { staleRequests.push(explicit); return []; }, getStaleWorktreeRebase: () => ({}),
-  }));
+  mock.method(adapters, 'createStatusStaleWorktreesAdapter', (options: Parameters<typeof adapters.createStatusStaleWorktreesAdapter>[0]): ReturnType<typeof adapters.createStatusStaleWorktreesAdapter> => {
+    assert.equal(options?.missionStore, mission.store);
+    assert.equal(options?.repositoryId, mission.repositoryId);
+    return { findStaleWorktrees: async explicit => { staleRequests.push(explicit); return []; }, getStaleWorktreeRebase: () => ({}) };
+  });
   const scope = { withGraph: async (invoke, options) => {
     assert.deepEqual(options, { includePresentationCapabilities: false });
     return invoke(services);

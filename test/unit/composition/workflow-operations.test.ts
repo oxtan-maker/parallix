@@ -348,6 +348,7 @@ for (const hostFailure of [false, true]) {
 }
 
 for (const [label, patch, expected] of [
+  ['web review runs in the selected mission worktree without a CLI slug (TASK-2810 H7)', { command: 'review:submit' }, '/missions/task-test'],
   ['board integration runs in the resolved mission worktree', { command: 'integrate:merge' }, '/missions/task-test'],
   ['terminal integration resolves the Mission checkout', { command: 'integrate:merge', invocation: { command: 'integrate', args: ['task-test'] } }, '/missions/task-test'],
   ['execute resolves the Mission checkout', { command: 'active:execute' }, '/missions/task-test'],

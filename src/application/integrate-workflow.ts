@@ -175,7 +175,7 @@ class IntegrateWorkflow {
     if (readable.status === 0) { return; }
     throw abortWith(this.dependencies.landing,
       `Approved revision ${revision} cannot be read; integration cannot prove approval coverage for the landing payload.`,
-      `Fetch or restore revision ${revision}, then run px review ${context.slug} --continue to establish review for the current branch before retrying integrate.`);
+      `Fetch or restore revision ${revision}, then run px review ${context.slug} to establish review for the current branch before retrying integrate.`);
   }
 
   /**
@@ -277,10 +277,10 @@ class IntegrateWorkflow {
       const repair = await missionServices.store.load(missionId(slug));
       if (repair.kind === 'found' && integrationRepairNeedsReview(repair.mission)) {
         if (!seams.reReviewFn) {
-          throw abortWith(this.dependencies.ports.landing, `The repaired mission ${slug} requires review. Run px review ${slug} --continue.`);
+          throw abortWith(this.dependencies.ports.landing, `The repaired mission ${slug} requires review. Run px review ${slug}.`);
         }
         if (!await seams.reReviewFn(slug, this.dependencies.ports.process.cwd())) {
-          throw abortWith(this.dependencies.ports.landing, `Review of the repaired mission ${slug} stopped. Run px review ${slug} --continue to resume.`);
+          throw abortWith(this.dependencies.ports.landing, `Review of the repaired mission ${slug} stopped. Run px review ${slug} to resume.`);
         }
         // TASK-2620: on approval the repaired mission sits in the integration
         // lane for the human to read the fresh PR and integrate. No path

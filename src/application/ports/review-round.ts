@@ -21,7 +21,7 @@ export interface PersistedReviewRound {
   readonly round: number;
 }
 
-/** One `px review --start|--continue` request, as parsed by the CLI adapter. */
+/** One `px review` request, as parsed by the CLI adapter. */
 export interface StartReviewRound {
   readonly slug: string;
   readonly implementer?: string;

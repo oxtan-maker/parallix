@@ -48,7 +48,9 @@ export function createReadCommands(context: CliCommandContext): Record<string, C
         rootDir,
         blocklistRepo: services.operatorState.repositories?.agentBlocklist ?? null,
       });
-      const staleWorktrees = createStatusStaleWorktreesAdapter();
+      const staleWorktrees = createStatusStaleWorktreesAdapter({
+        missionStore: services.mission?.store, repositoryId: services.mission?.repositoryId,
+      });
       const useCase = new StatusCommandUseCase(board, gitPort, prPort, agentPort, staleWorktrees);
       const cmd = createStatusCommand(useCase);
       return cmd(args, options);

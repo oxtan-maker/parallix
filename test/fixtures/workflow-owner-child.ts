@@ -139,7 +139,7 @@ if (process.argv[2] === '--fixture-public') {
         build: async () => ({ attentionQueue: [{ missionId: slug, card: { lane: 'active', gate: 'PASS', currentWork: null }, reason: { kind: 'none' }, action: { kind: 'active:execute', display: `px active ${slug}` } }] }) as never };
       const forwards = new Set<Promise<unknown>>();
       try {
-        process.exitCode = await createLeadCommand(createLeadSupervisorPort(target, forwards, { rootDir: root, scope,
+        process.exitCode = await createLeadCommand(createLeadSupervisorPort(target, forwards, { rootDir: root, scope, configuration,
           active: createActiveCommand((request, options) => active([...request.args], options)), registry: {},
           runPublicCli: async () => { throw new Error('Unexpected non-active forward'); },
           launchRecovery: async () => { throw new Error('Unexpected recovery'); } }))([slug, '--poll', '60', '--budget', '0']);

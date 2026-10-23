@@ -47,5 +47,7 @@ export function resolvePxEntryLoader({ env = process.env, exists = fs.existsSync
 export function pxNodeArgs(px: PxEntryLoader, args: readonly string[]): string[] {
   // These short fixture commands need one compiler worker. Node 26 otherwise
   // starts a host-sized V8 pool before a case can do its actual CLI work.
-  return ['--v8-pool-size=1', ...(px.loader ? ['--import', px.loader] : []), px.entry, ...args];
+  const preload = px.loader || (px.entry === PREBUILT_PX_ENTRY
+    ? path.join(REPO_ROOT, 'test/lib/prebuilt-cli-runtime.mjs') : '');
+  return ['--v8-pool-size=1', ...(preload ? ['--import', preload] : []), px.entry, ...args];
 }

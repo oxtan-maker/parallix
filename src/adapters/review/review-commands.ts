@@ -7,87 +7,20 @@ import { reviewPushIdentity } from '../../domain/review-command-policy.js';
 
 import * as fmt from '../../application/presentation/cli-format.js';
 import { resolveWorktree, missionBranchName } from '../filesystem/mission-utils.js';
-import { resolveTaskFile, getTaskStatus, getTaskImplementer, transitionTask } from '../backlog/backlog.js';
+import { resolveTaskFile, getTaskImplementer, transitionTask } from '../backlog/backlog.js';
 import { readToken, postComment, createPr, getComments, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
-import { readReviewState, writeReviewState, resolveReviewIdentity, persistReviewStateOrThrow, reconcileInterruptedHandoff } from './review-state.js';
+import { readReviewState, writeReviewState, resolveReviewIdentity, persistReviewStateOrThrow } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { readAllEvents } from './review-events.js';
 import { bootstrapReviewSurface } from './setup-review.js';
 import { resolveReviewAdapter } from '../config/product-config.js';
 import { buildMetadataFooter, postWorkflowComment } from './review-artifacts.js';
-export { resumeIntervenedReview, continueReviewClearsIntervention, continueReviewInvalidatesBlocker } from './review-intervention-commands.js';
+export { continueReviewClearsIntervention, continueReviewInvalidatesBlocker } from './review-intervention-commands.js';
 export { verifyReview, submitForReview } from './review-verify-commands.js';
 export { submitReviewRound, closeMissionPr } from './review-submit-round.js';
-export { createEventHandler, importLegacyHandler, backfillReviewHandler, reconcileInterruptedHandoffHandler } from './review-event-handlers.js';
+export { backfillReviewHandler, reconcileInterruptedHandoffHandler } from './review-event-handlers.js';
 
 export { REVIEW_FLAGS, REVIEW_VALUE_FLAGS, unknownReviewFlags, flagValue, readTextFlag, repeatedFlagValues } from './review-cli-flags.js';
-export { formatStaticReviewFindings, formatStaticReviewSuccess, performStaticReview } from './review-static-evidence.js';
-
-export async function postStaticReviewComment(
-  slug: string,
-  message: string,
-  options: {
-    log?: (_msg: string) => void;
-    error?: (_msg: string) => void;
-    resolveTaskFileFn?: typeof resolveTaskFile;
-    getTaskStatusFn?: typeof getTaskStatus;
-    getTaskImplementerFn?: typeof getTaskImplementer;
-    resolveWorktreeFn?: typeof resolveWorktree;
-    reconcileInterruptedHandoffFn?: typeof reconcileInterruptedHandoff;
-    /** Production composition enables the pre-launch aggregate guard. */
-    requireReviewAggregate?: boolean;
-    missionStore?: MissionStore | null;
-    readTokenFn?: typeof readToken;
-    postCommentFn?: typeof postComment;
-    resolveReviewUserFn?: typeof resolveReviewUser;
-    resolveForgejoUserFn?: typeof resolveReviewUser;
-    readReviewStateFn?: ReviewStateReader;
-    buildMetadataFooterFn?: typeof buildMetadataFooter;
-    rootDir?: string;
-  } = {}
-): Promise<{ ok: boolean; error?: string }> {
-  const { log, error, resolveTaskFileFn, getTaskImplementerFn, resolveWorktreeFn, readTokenFn, postCommentFn, resolveReviewUserFn, readReviewStateFn, buildMetadataFooterFn } = postStaticReviewCommentBindings(options);
-  const rootDir = options.rootDir || resolveWorktreeFn(slug) || process.cwd();
-  const branch = missionBranchName(slug, rootDir);
-  const { identityUser } = await resolveReviewIdentity(slug, rootDir, {
-    readReviewStateFn,
-  });
-  let resolvedUser = identityUser;
-
-  if (!resolvedUser) {
-    const taskResolution = resolveTaskFileFn(slug, rootDir);
-    if (taskResolution.ok) {
-      resolvedUser = getTaskImplementerFn(taskResolution.taskFile!);
-    }
-  }
-  if (!resolvedUser) {
-    error(`Cannot determine review identity. Set FORGEJO_USER, start the review with px review ${slug} --start, or assign the task implementer.`);
-    return { ok: false, error: 'missing-user' };
-  }
-  resolvedUser = resolveReviewUserFn(resolvedUser!);
-  const token = readTokenFn(resolvedUser!, { rootDir });
-  if (!token) {
-    error(`No Forgejo token found for user "${resolvedUser}". Cannot post static review comment.`);
-    return { ok: false, error: 'missing-token' };
-  }
-
-  const taggedMessage = message + buildMetadataFooterFn(slug, rootDir);
-  log(`Posting static review comment on ${fmt.branch(branch)} as ${resolvedUser}...`);
-  const result = postCommentFn(branch, token, taggedMessage, { reviewIdentity: resolvedUser, forgejoUser: resolvedUser }) as { ok: boolean; error?: string };
-
-  if (!result.ok) {
-    error(`Could not post static review comment: ${result.error || 'API error'}`);
-    return result;
-  }
-
-  log(fmt.status('PASS', `Static review comment posted on PR for ${fmt.branch(branch)}.`));
-  return result;
-}
-
-// ===============================================================================
-// Command: resumeIntervenedReview
-// ===============================================================================
-
 export async function readComments(
   slug: string,
   options: {
@@ -127,7 +60,7 @@ export async function readComments(
   })).identityUser;
 
   if (!reviewIdentity) {
-    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px review ${slug} --start, or set FORGEJO_USER.`));
+    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px review ${slug}, or set FORGEJO_USER.`));
     exit(1);
     return;
   }
@@ -226,7 +159,7 @@ async function resolvePushReviewIdentity(slug: string, rootDir: string, provider
   const taskImplementer = task?.ok ? getImplementer(task.taskFile!) : null;
   const { identity, defaulted } = reviewPushIdentity(identityUser, taskImplementer, providerEnabled);
   if (!identity) {
-    error(fmt.status('FAIL', providerEnabled ? `No review identity resolved for --push on ${slug}. Start the review with px review ${slug} --start, or set the task implementer.` : 'No review identity resolved for push.'));
+    error(fmt.status('FAIL', providerEnabled ? `No review identity resolved for --push on ${slug}. Start the review with px review ${slug}, or set the task implementer.` : 'No review identity resolved for push.'));
     exit(1);
     return null;
   }
@@ -306,7 +239,7 @@ export async function commentRound(
   })).identityUser;
 
   if (!reviewIdentity) {
-    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px review ${slug} --start, or set FORGEJO_USER.`));
+    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px review ${slug}, or set FORGEJO_USER.`));
     exit(1);
     return;
   }
@@ -337,21 +270,6 @@ export async function commentRound(
 // ============================================================================
 
 export { ReviewWorkflowAdapter, createReviewWorkflowAdapter } from './review-workflow-adapter.js';
-
-function postStaticReviewCommentBindings(options: NonNullable<Parameters<typeof postStaticReviewComment>[2]>) {
-  const log = options.log || fmt.log.plain;
-  const error = options.error || fmt.log.plainError;
-  const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
-  const getTaskImplementerFn = options.getTaskImplementerFn || getTaskImplementer;
-  const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
-  const readTokenFn = options.readTokenFn || readToken;
-  const postCommentFn = options.postCommentFn || postComment;
-  const resolveReviewUserFn = options.resolveReviewUserFn || options.resolveForgejoUserFn || resolveReviewUser;
-  const readReviewStateFn = options.readReviewStateFn || readReviewState;
-  const buildMetadataFooterFn = options.buildMetadataFooterFn || buildMetadataFooter;
-
-  return { log, error, resolveTaskFileFn, getTaskImplementerFn, resolveWorktreeFn, readTokenFn, postCommentFn, resolveReviewUserFn, readReviewStateFn, buildMetadataFooterFn };
-}
 
 function readCommentsBindings(options: NonNullable<Parameters<typeof readComments>[1]>) {
   const log = options.log || fmt.log.plain;

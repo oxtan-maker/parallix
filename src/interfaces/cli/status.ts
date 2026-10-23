@@ -288,13 +288,14 @@ function logPrInfo(prInfo: StatusPrInfo | null, log: (_msg: string) => void): vo
 
 function logStaleWorktrees(result: StatusResult, log: (_msg: string) => void): void {
   for (const entry of result.staleWorktrees) {
-    log(`Stale worktree: ${fmt.path(entry.path)} (task: ${entry.taskStatus})`);
+    log(`${entry.uncertainty ? 'Worktree state uncertain' : 'Stale worktree'}: ${fmt.path(entry.path)} (Mission: ${entry.taskStatus})`);
     const rebaseInfo = result.staleWorktreeRebase[entry.path];
     if (rebaseInfo?.inProgress) {
       const branchName = entry.branch ? entry.branch.replace(/^refs\/heads\//, '') : '(detached HEAD)';
       logRebaseFiles(`Rebase in progress on ${branchName}`, rebaseInfo, log);
     }
-    log(`  Cleanup: ${fmt.command(entry.cleanupCommand)}`);
+    if (entry.uncertainty) { log(`  Uncertain: ${entry.uncertainty}; no cleanup advised.`); }
+    if (entry.cleanupCommand) { log(`  Cleanup: ${fmt.command(entry.cleanupCommand)}`); }
   }
 }
 

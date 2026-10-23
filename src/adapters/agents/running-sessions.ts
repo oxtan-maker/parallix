@@ -187,7 +187,7 @@ const MISSION_SLUG_PATTERN = /^[a-z][a-z0-9]*(?:[-.][a-z0-9]+)+$/;
  * Detect which missions have a live agent-launching `px` process.
  *
  * A mission is identified by the slug on the `px` command line, and for
- * slug-less commands (`px review --continue`) by the mission worktree the
+ * slug-less commands (`px review`) by the mission worktree the
  * process runs in.
  *
  * Returns `null` when the count cannot be trusted — the process listing failed,
@@ -226,9 +226,9 @@ function runningMissionSession(
     if (role === undefined) { return null; }
 
     // The command line names the mission for `px <cmd> <slug>`; the worktree
-    // identifies it for slug-less forms such as `px review --continue`.
+    // identifies it for slug-less forms such as `px review`.
     if (invocation.missionId === null && worktrees === null) {
-      // A slug-less command (`px review --continue`) can only be identified by
+      // A slug-less command (`px review`) can only be identified by
       // its worktree, and the worktree listing failed: the count would be short
       // by at least this session, so report unknown instead.
       return 'unknown';

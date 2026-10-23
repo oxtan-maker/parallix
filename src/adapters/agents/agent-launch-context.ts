@@ -34,6 +34,7 @@ export interface StartAgentOptions {
   env?: {[key: string]: string};
   exclude?: string[] | Set<string>;
   onLimitHit?: (event: { agent: string; until: string; source?: string }) => unknown;
+  launchAdmission?: import('../../application/ports/repair-agent-launch.js').AgentLaunchAdmission;
   onLaunch?: (event: { agent: string; invocation: AgentInvocation | null | undefined; startedAtMs: number }) => unknown | Promise<unknown>;
   slug?: string | null;
   role?: string | null;
@@ -91,6 +92,7 @@ export type StartAgentLoopDeps = {
   updateAgentBlockFn: AgentBlockWriter;
   launchAgentFn: AgentLauncher | null;
   onLaunch: StartAgentOptions['onLaunch'];
+  launchAdmission?: StartAgentOptions['launchAdmission'];
   onLimitHit: StartAgentOptions['onLimitHit'];
   sessionMarkerPort: SessionMarkerPort | undefined;
   worktree: string | undefined;

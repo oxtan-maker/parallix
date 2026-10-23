@@ -96,8 +96,11 @@ export async function defaultIsAgentBlockedNow(agent: string, configuration: Par
 }
 
 
-/** Persist runtime blocks through the checked authority without changing the synchronous config seam. */
+/** Runtime block writes require a composed configuration; never infer operator storage. */
 export async function updateAgentBlockChecked(agent: string, until: string, options: {reason?: string; configuration?: ParallixConfiguration} = {}) {
+  if (!options.configuration) {
+    throw new Error('updateAgentBlockChecked requires explicit configuration to select operator storage');
+  }
   const { initOperatorState } = await import('../sqlite/adapter-factory.js');
   const { SqliteBlocklistRepository } = await import('../sqlite/blocklist-repository.js');
   const { AgentBlockService } = await import('../../application/services/agent-block-service.js');

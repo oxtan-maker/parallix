@@ -30,14 +30,13 @@ export function formatSupervision(result: MissionSupervision): string {
 /**
  * The px invocation behind each board action the supervisor may press.
  *
- * A bare `px review <slug>` only prints status, so the review item runs the
- * autonomous review loop instead. `integrate:merge` has no entry: landing is
- * the human's decision.
+ * A bare `px review <slug>` infers the review workflow from durable state.
+ * `integrate:merge` has no entry: landing is the human's decision.
  */
 export function leadInvocation(kind: AttentionAction['kind'], mission: string): { command: string; args: string[] } | null {
   switch (kind) {
     case 'active:execute': return { command: 'active', args: [mission] };
-    case 'review:submit': return { command: 'review', args: [mission, '--continue'] };
+    case 'review:submit': return { command: 'review', args: [mission] };
     default: return null;
   }
 }
@@ -46,7 +45,7 @@ export function leadInvocation(kind: AttentionAction['kind'], mission: string): 
  * Whether `px lead` may finish a review-lane mission's lost review →
  * integration move itself. Only a round a reviewer already approved qualifies;
  * lead never records a reviewer decision, so an undecided round is forwarded
- * to `px review --continue` instead (TASK-2620).
+ * to `px review` instead (TASK-2620).
  */
 export function leadFinishesParkedApproval(loaded: MissionLoadResult): boolean {
   if (loaded.kind !== 'found') { return false; }

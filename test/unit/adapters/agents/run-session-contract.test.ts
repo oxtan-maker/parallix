@@ -196,3 +196,20 @@ test('in-process preparation never records its workflow owner as provider execut
     assert.equal(record(worktree, session.runId).execution, null, 'SDK preparation and workflow ownership do not confirm a provider invocation');
   } finally { session.finish({ status: 0 }); }
 });
+
+test('a refused prepared launch settles its reservation without invoking a provider (TASK-2798)', async () => {
+  const { launchPrepared } = await import('../../../../src/adapters/agents/agent-launch-process.js');
+  let launches = 0; let releases = 0;
+  const prepared: Parameters<typeof launchPrepared>[0] = {
+    launcher: () => { launches++; return { result: { status: 0 } }; },
+    agentEnv: {}, resume: false, sessionId: null, launchSessionMarkerPort: undefined, sessionRole: null,
+    actualPrompt: 'fixture', model: null, watchdogConfig: null, effectiveProfile: null, nativeSandbox: false,
+    customReservation: { bindChild: () => {}, release: () => { releases++; } },
+  };
+  await assert.rejects(launchPrepared(prepared, { configuration: resolveConfiguration({}), step: 'execute', slug: null,
+    worktree: undefined, role: null, onLaunch: undefined, unrefChild: false, log: () => {},
+    launchAdmission: { assert: async () => { throw new Error('stale recovery'); } },
+  }, 'custom', 1), /stale recovery/);
+  assert.equal(launches, 0);
+  assert.equal(releases, 1);
+});

@@ -32,7 +32,7 @@ const DRAFT_IN_OTHER_REPO = 'node /home/other/parallix/node_modules/.bin/tsx src
 const DRAFT_IN_BOARD_REPO = 'node /home/dev/parallix/node_modules/.bin/tsx src/entry/px.ts draft task-5000 --agent custom';
 // A slug-less review loop whose arguments do not name the worktree path, so
 // only its nested working directory identifies the mission.
-const NESTED_REVIEW = 'node /usr/local/bin/px.ts review --continue --max-attempts 8';
+const NESTED_REVIEW = 'node /usr/local/bin/px.ts review --max-attempts 8';
 
 test('SC1: an explicit-slug process outside the board repository is not reported as local', () => {
   const sessions = detectRunningMissionSessions({

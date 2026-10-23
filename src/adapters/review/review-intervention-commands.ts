@@ -44,74 +44,6 @@ export async function repairStaleActiveTaskAfterReview(
   return result;
 }
 
-/**
- * Recover a review stopped in `human-intervention`.
- *
- * A review stopped by an implementer retry-budget exhaustion, a manual operator
- * stop, or the gate-rebound path carries a `human-intervention` flag that makes
- * every subsequent handoff fail (`A submitted review must be awaiting a reviewer
- * decision`). `resumeReview` is the one domain transition that clears the flag,
- * but it derives the next status from the surviving round rather than forcing
- * `awaiting-review`: a round that already holds an implementer response flows to
- * `ready-for-next-round`, a `changes-requested` round with no response flows to
- * `awaiting-implementation`, and an undecided round flows to `awaiting-review`.
- *
- * This is the explicit "I fixed it manually, resume" path: it requires a named
- * operator, and it deliberately does not re-run the review loop (which would
- * hit the same guard). `--continue` is the parallel path that relaunches the
- * loop after clearing the stop.
- */
-export async function resumeIntervenedReview(
-  slug: string,
-  args: string[],
-  options: {
-    log?: (_msg: string) => void;
-    error?: (_msg: string) => void;
-    exit?: (_code: number) => void;
-    resolveWorktreeFn?: typeof resolveWorktree;
-    missionStore?: MissionStore | null;
-    createEventFn?: typeof createEvent;
-  } = {}
-): Promise<void> {
-  const result = await clearHumanInterventionIfPresent(slug, args, {
-    ...options,
-    requireExplicitActor: true,
-  });
-  if (!result.cleared) {
-    // No intervention to clear. Only surface a message when a review exists but
-    // is in another status, so an already-recovered review stays quiet.
-    if (result.review && result.status !== 'human-intervention') {
-      (options.log || fmt.log.plain)(fmt.status('INFO', `Review for ${slug} is ${result.status}; nothing to resume.`));
-    }
-    return;
-  }
-  (options.log || fmt.log.plain)(
-    fmt.status('PASS', `Review for ${slug} resumed by ${result.operator}: intervention cleared, status now ${result.status}.`),
-  );
-}
-
-/**
- * Clear a persisted mission review's `human-intervention` stop, if present.
- *
- * Shared by `px review --resume` (explicit operator, no relaunch) and
- * `px review --continue` (operator-attributed, then relaunch). `resumeReview`
- * is the sole domain transition that clears the flag; the Review aggregate is
- * the sole write authority (ADR 0053), so we persist the recovered review
- * directly via `store.save` rather than merging over the escalated state that
- * would resurrect the intervention.
- *
- * Attribution is to the operator (the human at the terminal), never to the
- * review's own reviewer/implementer — that is the agent that got stuck, and
- * crediting it would let a stuck review resume itself. Identity resolution
- * order:
- *   1. an explicit `--actor`;
- *   2. the current git user (`user.name`), which is the human at the terminal;
- *   3. when `requireExplicitActor` is set, a FAIL; otherwise `operator`.
- *
- * Returns `cleared:false` (no exit) when there is no intervention to clear, so
- * callers can proceed without treating a no-op as an error. An `exit`-style
- * failure (no bound store, no review, or a missing required actor) exits.
- */
 interface InterventionClearResult {
   cleared: boolean;
   operator: string;
@@ -130,7 +62,6 @@ async function clearHumanInterventionIfPresent(
     missionStore?: MissionStore | null;
     createEventFn?: typeof createEvent;
     runFn?: typeof run;
-    requireExplicitActor?: boolean;
   },
 ): Promise<InterventionClearResult> {
   const error = options.error || fmt.log.plainError;
@@ -154,7 +85,7 @@ async function clearHumanInterventionIfPresent(
   }
 
   if (result.kind !== 'found' || !result.mission.review) {
-    error(fmt.status('FAIL', `Mission ${slug} has no review; px review ${slug} --start begins a review.`));
+    error(fmt.status('FAIL', `Mission ${slug} has no review; px review ${slug} begins a review.`));
     exit(1);
     return { cleared: false, operator: '', review: null, status: null };
   }
@@ -173,23 +104,7 @@ async function clearHumanInterventionIfPresent(
     return actor && actor.trim() ? actor.trim() : null;
   })();
 
-  // Attribution is to the operator, never to the review's own reviewer/
-  // implementer — that is the agent that got stuck, and crediting it would let a
-  // stuck review resume itself. Resolve the operator identity: the explicit
-  // --resume path requires a named --actor (no git fallback, so a stuck review
-  // cannot be cleared by anyone the operator did not explicitly name); the
-  // zero-ceremony --continue path prefers --actor, then the current git user,
-  // then a generic `operator` attribution.
-  let operator: string;
-  if (explicitActor) {
-    operator = explicitActor;
-  } else if (options.requireExplicitActor) {
-    error(fmt.status('FAIL', `px review ${slug} requires --actor <name>; only an authorized operator may clear a human-intervention stop.`));
-    exit(1);
-    return { cleared: false, operator: '', review, status: reviewStatus(review) };
-  } else {
-    operator = operatorFromGit(slug, options.resolveWorktreeFn, options.runFn);
-  }
+  const operator = explicitActor ?? operatorFromGit(slug, options.resolveWorktreeFn, options.runFn);
 
   // The domain transition clears the intervention and derives the surviving
   // round status; it does not force awaiting-review.
@@ -228,16 +143,7 @@ async function clearHumanInterventionIfPresent(
   return { cleared: true, operator, review: recovered, status: reviewStatus(recovered) };
 }
 
-/**
- * Clear a persisted mission review's `human-intervention` stop for the
- * `px review --continue` path, then return so the caller relaunches the loop.
- *
- * Unlike `--resume`, `--continue` relaunches the review loop after clearing the
- * stop. Attribution is to the operator (the current git user) with zero
- * ceremony, and a missing operator identity falls back to `operator` rather
- * than failing — the human at the terminal is the one who ran `--continue`, and
- * they are the operator. Returns whether the intervention was cleared.
- */
+/** Clear an intervention for the direct operator, retaining actor attribution. */
 export async function continueReviewClearsIntervention(
   slug: string,
   args: string[],
@@ -253,7 +159,6 @@ export async function continueReviewClearsIntervention(
 ): Promise<boolean> {
   const result = await clearHumanInterventionIfPresent(slug, args, {
     ...options,
-    requireExplicitActor: false,
   });
   if (result.cleared) {
     (options.log || fmt.log.plain)(
@@ -263,21 +168,7 @@ export async function continueReviewClearsIntervention(
   return result.cleared;
 }
 
-/**
- * Invalidate a persisted mission review's BLOCKED/PARKED stop for the
- * `px review --continue` path, then return so the caller relaunches the loop.
- *
- * The review loop relaunches the implementer on every `--continue` whenever it
- * finds an existing BLOCKED/PARKED disposition, so a blocker that the operator
- * has resolved by hand (for example the terminal `external-formal-approval-
- * owed` stop on an already-approved mission) spins forever. `--continue` is the
- * operator's declaration that the blocker is resolved, so clear the
- * disposition and reset the round to `reviewing`: the loop re-polls the
- * reviewer on the current tree instead of relaunching the stuck implementer.
- * Attribution is to the operator (the current git user) with zero ceremony,
- * mirroring `continueReviewClearsIntervention`. Returns whether a stop was
- * invalidated.
- */
+/** Clear a resolved BLOCKED/PARKED stop before direct operator review re-entry. */
 export async function continueReviewInvalidatesBlocker(
   slug: string,
   args: string[],
@@ -312,7 +203,7 @@ export async function continueReviewInvalidatesBlocker(
   }
 
   if (result.kind !== 'found' || !result.mission.review) {
-    error(fmt.status('FAIL', `Mission ${slug} has no review; px review ${slug} --start begins a review.`));
+    error(fmt.status('FAIL', `Mission ${slug} has no review; px review ${slug} begins a review.`));
     exit(1);
     return { invalidated: false, operator: '', status: 'awaiting-review' };
   }
@@ -320,7 +211,7 @@ export async function continueReviewInvalidatesBlocker(
   const review = result.mission.review;
   const round = currentReviewRound(review);
   if (round.disposition !== 'BLOCKED' && round.disposition !== 'PARKED') {
-    // No implementer stop to clear: a `--continue` on an otherwise-normal
+    // No implementer stop to clear: an operator review entry on an otherwise-normal
     // review is a no-op here, not an error. The loop handles it normally.
     return { invalidated: false, operator: '', status: reviewStatus(review) };
   }
@@ -354,7 +245,7 @@ export async function continueReviewInvalidatesBlocker(
     'human_note',
     {
       actor: operator,
-      content: `invalidated a ${round.disposition} stop; reviewStatus now ${reviewStatus(invalidated)}. Operator cleared the blocker via --continue.`,
+      content: `invalidated a ${round.disposition} stop; reviewStatus now ${reviewStatus(invalidated)}. Operator cleared the blocker via px review.`,
       round: currentReviewRound(invalidated).number,
       phase: 'reviewing',
     },

@@ -435,7 +435,7 @@ test('production CLI autonomous re-review and child verdict/resolve keep authori
   } });
   await installReviewRepairAgent();
   const output: string[] = [];
-  const code = await run(['review', slug, '--continue', '--reviewer', 'codex', '--implementer', 'custom', '--max-attempts', '3'], {
+  const code = await run(['review', slug, '--reviewer', 'codex', '--implementer', 'custom', '--max-attempts', '3'], {
     baseCwd: repo, environment, log: line => { output.push(String(line)); return null; }, error: line => { output.push(String(line)); return null; },
   });
   assert.equal(code, 0, output.join('\n'));

@@ -22,8 +22,8 @@ test('CLI preserves review flags and reports stop diagnostics while closing its 
       requests.push(request); return request.kind === 'workflow:stop' && pending ? failure('conflict', 'Stop is pending') : completed({});
     } } }, operatorState: { close: async () => { closed++; } } } as unknown as ProductionApplicationServices;
   ownWorkflowCli(registry, async () => graph);
-  await registry.review(['task-test', '--continue', '--reviewer', 'codex']);
-  assert.deepEqual(requests[0].invocation, { command: 'review', args: ['task-test', '--continue', '--reviewer', 'codex'], interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY) });
+  await registry.review(['task-test', '--reviewer', 'codex']);
+  assert.deepEqual(requests[0].invocation, { command: 'review', args: ['task-test', '--reviewer', 'codex'], interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY) });
   await assert.rejects(async () => registry.stop(['task-test']), /Stop is pending/);
   assert.equal(closed, 2);
   pending = false;
@@ -212,4 +212,13 @@ test('invalid integrate flags fail before workflow admission opens state (TASK-2
   await assert.rejects(async () => registry.integrate(['task-does-not-exist', '--invalid-option']),
     /Unknown integrate option: --invalid-option/);
   assert.equal(opened, false);
+});
+
+
+test('removed review switches fail before workflow admission or effects (TASK-2810)', async () => {
+  const registry = { review: async () => assert.fail('invalid flags must not run review') } as Record<string, Command>;
+  ownWorkflowCli(registry, async () => assert.fail('invalid flags must not open the workflow graph'));
+  for (const flag of ['--start', '--continue', '--resume', '--create-event', '--import-legacy']) {
+    await assert.rejects(async () => registry.review(['task-test', flag]), /Unknown flag for px review/);
+  }
 });

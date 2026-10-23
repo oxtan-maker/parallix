@@ -21,7 +21,7 @@ export function verdictBlockForReview(slug: string, review: Review): VerdictBloc
   if (status === 'approved' || status === 'awaiting-review') { return null; }
   const cause = review.intervention?.reason ?? status;
   const nextAction = review.intervention
-    ? `Operator recovery: px review ${slug} --continue`
-    : `Resolve the outstanding findings, then px review ${slug} --start`;
+    ? `Operator recovery: px review ${slug}`
+    : `Resolve the outstanding findings, then px review ${slug}`;
   return { cause, diagnostic: `Verdict blocked: review is ${status}; cause=${cause}. ${nextAction}`, nextAction };
 }

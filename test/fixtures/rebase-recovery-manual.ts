@@ -110,7 +110,7 @@ exit 1
   for (let i = 0; i < 100 && !fs.existsSync(`${report}.exit`); i++) { await new Promise(resolve => setTimeout(resolve, 100)); }
   assert.equal(fs.readFileSync(`${report}.exit`, 'utf8').trim(), '0', fs.readFileSync(report, 'utf8'));
   console.log('TMUX', fs.readFileSync(report, 'utf8'));
-  for (const [index, args] of [ ['active', slug, '--execute'], ['review', slug, '--submit'], ['review', slug, '--continue'] ].entries()) {
+  for (const [index, args] of [ ['active', slug, '--execute'], ['review', slug, '--submit'], ['review', slug] ].entries()) {
     const output = `${report}-${index}`;
     const invocation = `${wrapper} ${args.join(' ')} > '${output}' 2>&1; echo $? > '${output}.exit'`;
     tmux('send-keys', '-t', `=${terminal.sessionName}:console`, '-l', invocation);
@@ -119,7 +119,7 @@ exit 1
     const text = fs.readFileSync(output, 'utf8');
     console.log('TMUX PREFLIGHT', JSON.stringify({ args, status: fs.readFileSync(`${output}.exit`, 'utf8'), output: text }));
     assert.equal(fs.readFileSync(`${output}.exit`, 'utf8').trim(), '1', 'fixture admission blockers remain enforced');
-    assert.doesNotMatch(text, /current branch.*main|Backlog context: does not resolve|Inherited workflow does not own/);
+    assert.doesNotMatch(text, /Unknown flag|current branch.*main|Backlog context: does not resolve|Inherited workflow does not own/);
     assert.match(text, /preflight|checkpoint|criterion|criteria|gate|review/i);
   }
   assert.equal(git(base, 'rev-parse', 'HEAD'), baseHead); assert.equal(git(base, 'status', '--porcelain'), baseStatus);

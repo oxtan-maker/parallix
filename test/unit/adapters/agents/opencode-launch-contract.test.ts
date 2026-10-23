@@ -96,6 +96,42 @@ describe("OpenCode launcher ,", () => {
     }
   });
 
+  test('launch preserves executable candidate precedence and rejection (TASK-2787)', async () => {
+    const root = registeredMkdtemp('opencode-candidates-');
+    const configured = path.join(root, 'custom');
+    const pathBin = path.join(root, 'path', 'opencode');
+    const homeBin = path.join(root, '.opencode', 'bin', 'opencode');
+    const localBin = path.join(root, '.local', 'bin', 'opencode');
+    for (const file of [configured, pathBin, homeBin, localBin]) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, '');
+      fs.chmodSync(file, 0o755);
+    }
+    const configuration = resolveConfiguration({ HOME: root, PATH: path.delimiter + path.dirname(pathBin) + path.delimiter, OPENCODE_BIN: configured });
+    opencode.__setJsonFormatSupportForTest(true);
+    opencode.__setExportCaptureForTest(async () => null);
+    try {
+      for (const expected of [configured, 'opencode', homeBin, localBin, 'opencode']) {
+        let selected = '';
+        opencode.__setSpawnAndTeeForTest(async (command, _args, options) => {
+          selected = command;
+          assert.ok(options?.input?.toString().endsWith('candidate prompt'));
+          return { status: 0, signal: null, stdout: '', stderr: '', error: null };
+        });
+        await opencode.startOpencodeAgent({ configuration, prompt: 'candidate prompt', worktree: root }).resultPromise;
+        assert.equal(selected, expected);
+        const rejected = expected === 'opencode' ? pathBin : expected;
+        if (fs.existsSync(rejected)) { fs.chmodSync(rejected, 0o644); }
+      }
+      const duplicateConfiguration = resolveConfiguration({ HOME: root, PATH: path.delimiter + path.dirname(pathBin) + path.delimiter, OPENCODE_BIN: homeBin });
+      const access = mock.method(fs, 'accessSync', () => { throw new Error('missing'); });
+      assert.equal(opencode.buildOpencodeInvocation({ configuration: duplicateConfiguration, prompt: '', worktree: root }).command, 'opencode');
+      assert.deepEqual(access.mock.calls.map(call => call.arguments[0]), [homeBin, pathBin, localBin]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   // ---------- extractOpencodeSessionId ----------
 
   test('extractOpencodeSessionId matches opencode -s pattern', () => {

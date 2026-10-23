@@ -45,7 +45,7 @@ test('a working card with an unidentified agent omits its label and dot, never t
     currentWork: {
       operationId: 'review:task-2498:current',
       phase: 'review',
-      summary: 'px review --continue',
+      summary: 'px review',
       agent: null,
       updatedAt: '2026-09-12T10:00:00.000Z',
       freshness: 'live',
@@ -86,7 +86,7 @@ function nullAgentWork(overrides: Partial<CurrentWorkEvent> = {}): CurrentWorkEv
     operationId: 'review:task-2498:current',
     phase: 'review' as const,
     state: 'running',
-    summary: 'px review --continue',
+    summary: 'px review',
     agent: null,
     processId: null,
     blockedReason: null,

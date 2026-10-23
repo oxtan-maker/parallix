@@ -170,7 +170,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-session-marker-write',
     family: 'launch',
     fileLocation: 'src/adapters/agents/agent-launch-authority.ts',
-    line: 123,
+    line: 126,
     anchor: 'launchSessionMarkerPort.save({',
     reads: ['SessionMarker'],
     requirement:
@@ -317,9 +317,9 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'review-checkpoint-evidence',
     family: 'review',
-    fileLocation: 'src/adapters/review/review-static-evidence.ts',
-    line: 111,
-    anchor: 'findCheckpointsFn(missionDir)',
+    fileLocation: 'src/application/handoff-contract.ts',
+    line: 141,
+    anchor: 'verifyCheckpointEvidence(',
     reads: ['CheckpointData', 'Mission'],
     requirement:
       'Checkpoint presence and the final checkpoint Goal Check evidence for the mission, as replaceable checkpoint data keyed by name.',

@@ -23,7 +23,7 @@ export async function readReviewForDecision(slug: string, store: MissionStore, e
   const stale = staleWrite(slug, expectedVersion, loaded.version);
   if (stale) { return { kind: 'failed', result: { outcome: 'failed', diagnostic: stale } }; }
   if (!hasStoredReview(loaded.mission)) {
-    return { kind: 'failed', result: { outcome: 'failed', diagnostic: `Mission ${slug} has no review to ${action}; px review ${slug} --start starts the review` } };
+    return { kind: 'failed', result: { outcome: 'failed', diagnostic: `Mission ${slug} has no review to ${action}; px review ${slug} starts the review` } };
   }
   return { kind: 'ready', mission: loaded.mission, version: loaded.version };
 }

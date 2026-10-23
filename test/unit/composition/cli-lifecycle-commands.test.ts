@@ -69,7 +69,7 @@ test('unowned integration re-review goes through workflow admission (TASK-2762)'
   await f.invoke();
   assert.equal(f.requests.length, 1);
   assert.equal(f.requests[0].kind, 'review:submit');
-  assert.deepEqual(f.requests[0].invocation?.args, ['task-nested', '--continue']);
+  assert.deepEqual(f.requests[0].invocation?.args, ['task-nested']);
   assert.equal(f.directReviews(), 0);
   assert.equal(f.admissionsClosed(), 1);
 });

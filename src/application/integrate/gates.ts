@@ -41,7 +41,7 @@ export interface IntegrateSeams extends BounceSeams {
   routeIntegrationGateFailureFn: IntegrateGatesPort['routeIntegrationGateFailure'];
   /**
    * Send a repaired revision back through review — the same review
-   * `px review <slug> --start` runs — and report whether it came back approved.
+   * `px review <slug>` runs — and report whether it came back approved.
    * Absent, a changed revision stops integration for the operator to re-review.
    *
    * TASK-2620: the single live re-review route. On approval the mission stays
@@ -389,10 +389,10 @@ class IntegrationGateStep {
     try {
       approved = await reReviewFn(slug, checkout);
     } catch (error) {
-      throw abortWith(this.dependencies.landing, `Re-review of ${slug} could not run: ${(error as Error).message}`, `Run px review ${slug} --continue to resume review; an approval returns the mission to the integration lane for you to integrate.`, 'Aborting before merge.');
+      throw abortWith(this.dependencies.landing, `Re-review of ${slug} could not run: ${(error as Error).message}`, `Run px review ${slug} to resume review; an approval returns the mission to the integration lane for you to integrate.`, 'Aborting before merge.');
     }
     if (!approved) {
-      throw abortWith(this.dependencies.landing, `The repaired revision of ${slug} was not approved in re-review. Run px review ${slug} --continue to resume review; an approval returns the mission to the integration lane for you to integrate.`, 'Aborting before merge.');
+      throw abortWith(this.dependencies.landing, `The repaired revision of ${slug} was not approved in re-review. Run px review ${slug} to resume review; an approval returns the mission to the integration lane for you to integrate.`, 'Aborting before merge.');
     }
     fmt.log.pass(`The repaired revision of ${slug} was re-reviewed and approved. ${slug} now sits in the integration lane for the human to read the fresh PR and integrate (TASK-2620).`);
     return true;

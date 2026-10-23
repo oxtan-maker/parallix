@@ -178,9 +178,9 @@ function recoveryManualNextAction(reason: ReboundReason, context: ReboundContext
     case 'rebase-conflict': return `Resolve and stage the current conflicts in ${context.worktree}, then git rebase --continue; rerun px review ${context.slug} --submit after Git completes.`;
     case 'gate-failure': return `Repair the reported failure, then rerun ${reason.command} from ${context.worktree}.`;
     case 'hook-failure': return hookRecoveryAction(reason);
-    case 'artifact-incomplete': return `Create the missing artifacts named above, then rerun px review ${context.slug} --continue.`;
-    case 'agent-timeout': return `Produce the required ${reason.role} output named above, then rerun px review ${context.slug} --continue.`;
-    default: return `Repair the retained handoff failure, then rerun px review ${context.slug} --start.`;
+    case 'artifact-incomplete': return `Create the missing artifacts named above, then rerun px review ${context.slug}.`;
+    case 'agent-timeout': return `Produce the required ${reason.role} output named above, then rerun px review ${context.slug}.`;
+    default: return `Repair the retained handoff failure, then rerun px review ${context.slug}.`;
   }
 }
 

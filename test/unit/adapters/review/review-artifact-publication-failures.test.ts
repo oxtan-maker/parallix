@@ -3,16 +3,11 @@
 
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
-import path from 'node:path';
 import { mockModule, installModuleMocks } from '../../../lib/module-mock.js';
 const commitSafeMissionArtifactsModule = mockModule<typeof import('../../../../src/adapters/review/rebase.js')>('../../../../src/adapters/review/rebase.js', import.meta.url);
-const postStaticReviewCommentModule = mockModule<typeof import('../../../../src/adapters/review/review-commands.js')>('../../../../src/adapters/review/review-commands.js', import.meta.url);
-const performStaticReviewModule = mockModule<typeof import('../../../../src/adapters/review/review-commands.js')>('../../../../src/adapters/review/review-commands.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const { commitSafeMissionArtifacts } = commitSafeMissionArtifactsModule;
-const { postStaticReviewComment } = postStaticReviewCommentModule;
-const { performStaticReview } = performStaticReviewModule;
 
 const TEST_SLUG = 'task-1135-coverage';
 
@@ -85,51 +80,4 @@ test('commitSafeMissionArtifacts leaves genuinely non-mission paths untouched', 
 
   assert.equal(result.ok, true, 'unrelated product code must not block a mission auto-commit');
   assert.deepEqual(errors, []);
-});
-
-test('postStaticReviewComment handles missing token', async () => {
-  const errors: string[] = [];
-
-  const result = await postStaticReviewComment(TEST_SLUG, 'message', {
-    readTokenFn: () => null, // No token
-    resolveWorktreeFn: () => '/tmp/worktree',
-    resolveTaskFileFn: () => ({ matches: ['/tmp/task.md'],  ok: true as const, taskFile: '/tmp/task.md' }),
-    getTaskImplementerFn: () => 'gemini',
-    resolveForgejoUserFn: (u) => u,
-    error: m => errors.push(m)
-  });
-
-  assert.equal(result.ok, false);
-  assert.equal(result.error, 'missing-token');
-  assert.ok(errors.some(e => e.includes('No Forgejo token found for user')), `Expected missing-token error; got: ${errors.join(' | ')}`);
-});
-
-test('performStaticReview handles missing Goal Check section', async () => {
-  const logs = [];
-
-  const result = performStaticReview(TEST_SLUG, {
-    findMissionDir: () => '/tmp/mission',
-    findCheckpoints: () => ['/tmp/mission/CP-1.md'],
-    readFileSync: () => '# CP-1\nNo goal check here.',
-    run: () => ({ signal: null, stderr: '',  status: 0, stdout: '' }),
-    log: m => logs.push(m)
-  });
-
-  assert.equal(result.ok, false);
-  assert.ok(result.findings.some(f => f.includes('missing a "## Goal Check" section')));
-});
-
-test('performStaticReview handles Goal Check section with no evidence rows', async () => {
-  const logs = [];
-
-  const result = performStaticReview(TEST_SLUG, {
-    findMissionDir: () => '/tmp/mission',
-    findCheckpoints: () => ['/tmp/mission/CP-1.md'],
-    readFileSync: () => '## Goal Check\n| Goal | Evidence | Status |\n|---|---|---|',
-    run: () => ({ signal: null, stderr: '',  status: 0, stdout: '' }),
-    log: m => logs.push(m)
-  });
-
-  assert.equal(result.ok, false);
-  assert.ok(result.findings.some(f => f.includes('no evidence rows')));
 });

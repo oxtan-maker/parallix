@@ -1,3 +1,4 @@
+import { resolveOpencodeCommand } from './opencode-command.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import childProcess from 'node:child_process';
@@ -22,54 +23,6 @@ interface CaptureOpencodeExportOptions {
   /** Injectable temporary root for deterministic tests. */
   tmpDir?: string;
   spawn?: (command: string, args: readonly string[], options: childProcess.SpawnOptions) => ExportChild;
-}
-
-function opencodeCommandCandidates(configuration: ParallixConfiguration) {
-  const candidates: string[] = [];
-  const seen = new Set<string>();
-  const pushCandidate = (candidate?: string | null) => {
-    if (!candidate || seen.has(candidate)) {return;}
-    seen.add(candidate);
-    candidates.push(candidate);
-  };
-
-  pushCandidate(configuration.agents.opencodeBin);
-  pushCandidate('opencode');
-  pushCandidate(path.join(configuration.storage.homeDirectory || os.homedir(), '.opencode', 'bin', 'opencode'));
-  pushCandidate(path.join(configuration.storage.homeDirectory || os.homedir(), '.local', 'bin', 'opencode'));
-
-  return candidates;
-}
-
-function resolveExistingCommand(candidate: string, configuration: ParallixConfiguration) {
-  if (!candidate) {return null;}
-  if (candidate.includes(path.sep)) {
-    try {
-      fs.accessSync(candidate, fs.constants.X_OK);
-      return candidate;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  const dirs = configuration.agents.searchPath.split(path.delimiter);
-  for (const dir of dirs) {
-    if (!dir) {continue;}
-    const commandPath = path.join(dir, candidate);
-    try {
-      fs.accessSync(commandPath, fs.constants.X_OK);
-      return candidate;
-    } catch (_) { /* keep looking */ }
-  }
-  return null;
-}
-
-function resolveOpencodeCommand(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) {
-  for (const candidate of opencodeCommandCandidates(configuration)) {
-    const resolved = resolveExistingCommand(candidate, configuration);
-    if (resolved) {return resolved;}
-  }
-  return 'opencode';
 }
 
 /**

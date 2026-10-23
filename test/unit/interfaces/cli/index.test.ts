@@ -369,7 +369,7 @@ test('printUsage documents every KNOWN_COMMANDS exactly once across all sections
 // ---------- alias system ----------
 
 // TASK-2490: the standalone `px handoff` command is retired; the sync/push and
-// active -> review transition now lives in `px review <slug> --start`.
+// active -> review transition now lives in `px review <slug>`.
 test('KNOWN_COMMANDS no longer registers the retired handoff command (task-2490)', () => {
   assert.ok(!KNOWN_COMMANDS.includes('handoff'), 'handoff must not be a known command');
 });

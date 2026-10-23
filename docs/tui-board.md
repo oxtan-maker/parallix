@@ -295,6 +295,18 @@ integration closeout resumes through `px integrate <slug> --recover-landed` so
 the remaining statistics, cleanup and post-integration hook finish without
 another gate run or merge.
 
+From the repository root, `px status` checks stored Mission state before calling
+a retained worktree stale. Live Missions stay out of cleanup diagnostics even
+when their task mirror is missing or still says `done`. If Mission authority is
+unavailable, unreadable or has no matching Mission in this repository, status
+reports uncertainty without a cleanup command. A missing or completed task
+mirror alone does not establish safe cleanup. Done and closed Missions retain
+guarded landed-recovery advice; recovery still checks that landing occurred.
+The scan uses the requested repository and normalizes branch slugs just like
+single-Mission status. Read failures include their underlying cause. A retained
+worktree can outlive cancellation, which deletes its Mission record; status
+cannot reconstruct that lifecycle from a branch or an old task mirror.
+
 ## Creating a mission (web board)
 
 `px web` has a **Create new mission** button in the top bar. It opens a dialog

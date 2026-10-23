@@ -20,7 +20,7 @@ async function completeRepairReview({ request, ports, configured, checkout, rout
   const { landing } = ports;
     // The repair changed what the reviewer approved, so the standing approval
     // was retracted on the PR. Re-review the repaired revision through the
-    // single live `px review --continue` route. On approval the mission sits
+    // single live `px review` route. On approval the mission sits
     // in the integration lane for the human to read the fresh PR and
     // integrate; no path auto-restarts integration or merges (TASK-2620 AC2).
     const current = route.invalidation?.ok ? null : await missionServices?.store?.load(missionId(slug));
@@ -29,7 +29,7 @@ async function completeRepairReview({ request, ports, configured, checkout, rout
       if (approved) {
         throw new IntegrationStopsForHuman(`${configured.length} integration gate(s) passed after ${route.rebounds} integration-gate rebound(s); the repaired revision was re-reviewed and approved. Read the fresh PR and run px integrate ${slug} to land.`);
       }
-      throw abortWith(landing, `The repaired revision of ${slug} was not approved in re-review. Run px review ${slug} --continue to resume review; an approval returns the mission to the integration lane for you to integrate.`, 'Aborting before merge.');
+      throw abortWith(landing, `The repaired revision of ${slug} was not approved in re-review. Run px review ${slug} to resume review; an approval returns the mission to the integration lane for you to integrate.`, 'Aborting before merge.');
     }
     throw abortWith(landing, `The approval for ${slug}'s superseded revision could not be retracted. Aborting before merge.`);
 }
@@ -52,7 +52,7 @@ export async function completeGateRepairRoute(completion: GateRepairCompletion):
   }
   if (repairRoute === 're-review' && seams.reReviewFn) { return completeRepairReview(completion, seams.reReviewFn); }
   if (repairRoute === 'stop') {
-    throw abortWith(landing, `Aborting before merge. Resume the repair review with px review ${slug} --continue; an approval returns the mission to the integration lane for you to integrate.`);
+    throw abortWith(landing, `Aborting before merge. Resume the repair review with px review ${slug}; an approval returns the mission to the integration lane for you to integrate.`);
   }
   // A route may report `fixed` only if the repair left the approved diff
   // unchanged and its approval was never retracted. Restore the mission to

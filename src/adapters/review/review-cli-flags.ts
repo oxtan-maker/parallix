@@ -1,13 +1,8 @@
 import * as fs from 'fs';
 import * as fmt from '../../application/presentation/cli-format.js';
 
-export const REVIEW_FLAGS = new Set([
-  '--actor', '--backfill-review', '--branch', '--close', '--comment', '--comment-file', '--comments', '--continue', '--create-event', '--disposition', '--dry-run', '--eligible-reviewer', '--focus', '--force', '--implementer', '--import-legacy', '--input-file', '--max-attempts', '--message', '--message-file', '--mission', '--no-gate', '--phase', '--poll-timeout-seconds', '--push', '--reconcile-review', '--resume', '--revision', '--reset', '--reviewer', '--round', '--target', '--start', '--status', '--submit', '--submit-review', '--tmp-dir', '--type', '--verbose', '--verdict', '--verify'
-]);
-
-export const REVIEW_VALUE_FLAGS = new Set([
-  '--actor', '--branch', '--comment', '--comment-file', '--disposition', '--eligible-reviewer', '--focus', '--implementer', '--input-file', '--max-attempts', '--message', '--message-file', '--mission', '--phase', '--poll-timeout-seconds', '--reviewer', '--round', '--revision', '--submit-review', '--target', '--tmp-dir', '--type', '--verdict'
-]);
+export { REVIEW_FLAGS, REVIEW_VALUE_FLAGS } from '../../domain/review-cli-options.js';
+import { REVIEW_FLAGS, REVIEW_VALUE_FLAGS } from '../../domain/review-cli-options.js';
 
 export function unknownReviewFlags(args: string[]): string[] {
   const unknown: string[] = [];

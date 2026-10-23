@@ -195,7 +195,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     if (!workflowEligible(command, loaded.mission.status, loaded.mission.review !== null && reviewStatus(loaded.mission.review) === 'approved', loaded.mission.review?.rounds.at(-1)?.phase === 'fixing', reviewMode)) { return rejected('validation', `${command} is not eligible in ${loaded.mission.status}`); }
     // Domain policy admits this explicit continuation even though the board
     // offers no review button in integration. All other requests use both checks.
-    if (command === 'review:submit' && loaded.mission.status === 'integration' && reviewMode === 'continue') { return null; }
+    if (command === 'review:submit' && loaded.mission.status === 'integration' && reviewMode === 'enter') { return null; }
     const availability = this.boardAvailability(loaded, command);
     if (!availability?.enabled) { return rejected('validation', availability?.reason ?? 'Workflow action is not eligible'); }
     return null;

@@ -28,36 +28,24 @@ import {
   continueReviewClearsIntervention,
   createReviewWorkflowAdapter,
 } from '../../../src/adapters/review/review-commands.js';
+import { bindReviewOperatorResume } from '../../../src/composition/review-operator-resume.js';
+import { fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
 import { unknownReviewFlags } from '../../../src/adapters/review/review-cli-flags.js';
 import { applyReviewStateToReview, reviewStateDataFrom } from '../../../src/adapters/review/review-state-mapping.js';
 import { readAllEvents } from '../../../src/adapters/review/review-events.js';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
 
-// Regression provenance: TASK-2473.
-// TASK-2473 — red-to-green reproduction for `px review --resume`.
-//
-// A review stopped in `human-intervention` by `IMPLEMENTER_ARTIFACT_RETRY_EXHAUSTED`
-// (task-2465 round 4 shape: reviewer decided `changes-requested`, then the
-// implementer stopped on budget exhaustion) cannot be resubmitted while the
-// intervention flag is set: `submit-for-review` throws
-// `A submitted review must be awaiting a reviewer decision`, and `resumeReview`
-// is only reachable from tests. This test drives the supported `--resume` CLI
-// path against a real operator database and asserts the intervention is cleared,
-// the derived status is not `human-intervention`, the cleared state survives a
-// reload, and the handoff the derived status permits runs without a
-// `MissionRuleViolation`.
-//
-// Red at the mission parent commit: `ReviewCommandUseCase.dispatch` has no
-// `--resume` branch, so the flag falls through to `status` and no supported
-// invocation clears the intervention. Green after the fix.
-
+// Regression provenance: TASK-2473, TASK-2810. Direct entry clears the
+// intervention without supplying a verdict; automatic entry retains it.
 const SLUG = 'task-2473-resume';
 const REVIEWER = agentFamily('configured-reviewer');
 const IMPLEMENTER = agentFamily('configured-implementer');
 
 const tempDirs: string[] = [];
+const databases: SqliteDatabaseAdapter[] = [];
 
-afterEach(() => {
+afterEach(async () => {
+  for (const db of databases.splice(0)) { await db.close(); }
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -185,6 +173,7 @@ function missionWith(review: Review): Mission {
 
 async function openMigrated(root: string): Promise<SqliteDatabaseAdapter> {
   const db = new SqliteDatabaseAdapter();
+  databases.push(db);
   copyRepairSchema(databasePathOf(root));
   await db.open({ path: databasePathOf(root) });
   return db;
@@ -200,10 +189,19 @@ async function seedRoot(review: Review): Promise<Harness> {
   return { root, store };
 }
 
-/** Invoke the supported `px review --resume` CLI recovery adapter path. */
-async function invokeResume(store: SqliteMissionStore, root: string, actor: string | null): Promise<{ cleared: boolean; outcome: string | null }> {
+/** Invoke the inferred review entry with real SQLite and a held loop fence. */
+async function invokeResume(store: SqliteMissionStore, root: string, actor: string | null, direct = true): Promise<{ cleared: boolean; outcome: string | null }> {
   const adapter = createReviewWorkflowAdapter({
     missionStore: store,
+    operatorResume: bindReviewOperatorResume(store, direct, {}),
+    readReviewStateFn: async () => {
+      const loaded = await store.load(missionId(SLUG));
+      if (loaded.kind !== 'found' || !loaded.mission.review) { return null; }
+      const { ReviewState } = await import('../../../src/adapters/review/review-state.js');
+      return new ReviewState(SLUG, reviewStateDataFrom(loaded.mission.review));
+    },
+    reviewLoopMechanisms: () => fakeReviewLoopPorts({ lock: { tryAcquire: () => false, release: () => {} } }).ports,
+    run: () => ({ status: 1, signal: null, stdout: '', stderr: '' }),
     resolveWorktreeFn: () => root,
     log: () => undefined,
     error: () => undefined,
@@ -211,18 +209,18 @@ async function invokeResume(store: SqliteMissionStore, root: string, actor: stri
     inferSlugFn: () => SLUG,
   });
   const useCase = new ReviewCommandUseCase(adapter);
-  const args = actor === null ? [SLUG, '--resume'] : [SLUG, '--resume', `--actor=${actor}`];
+  const args = actor === null ? [SLUG] : [SLUG, `--actor=${actor}`];
   try {
     await useCase.execute(args, {});
   } catch {
-    // parent commit: `--resume` is an unknown flag and the CLI exits 1.
+    // Injected failure remains visible in persisted state below.
   }
   const loaded = await store.load(missionId(SLUG));
   const review = loaded.kind === 'found' && loaded.mission.review ? loaded.mission.review : null;
   return { cleared: review?.intervention === null, outcome: review ? reviewStatus(review) : null };
 }
 
-describe("stopped review recovery through px review --resume", () => {
+describe("stopped review recovery through inferred px review", () => {
   it('clears a human-intervention stop and derives the surviving-round status', async () => {
     await withHome(createTempRoot(), async () => {
       const { root, store } = await seedRoot(stoppedReview());
@@ -240,10 +238,10 @@ describe("stopped review recovery through px review --resume", () => {
     });
   });
 
-  it('requires an authorized --actor to clear the intervention', async () => {
+  it('automatic invocation cannot clear the intervention without operator authority', async () => {
     await withHome(createTempRoot(), async () => {
       const { root, store } = await seedRoot(stoppedReview());
-      const { cleared } = await invokeResume(store, root, null);
+      const { cleared } = await invokeResume(store, root, null, false);
       assert.equal(cleared, false, 'an operator identity is required to clear an intervention');
     });
   });
@@ -337,19 +335,13 @@ describe("stopped review recovery through px review --resume", () => {
     });
   });
 
-  it('keeps ordinary review command flags parsing (continue and resume coexist)', () => {
-    // Regression: adding --resume did not disturb the existing flag allow-list;
-    // --continue and --resume are both recognized and --resume is not a value
-    // flag.
-    assert.deepEqual(
-      unknownReviewFlags([SLUG, '--continue', '--resume', '--actor', 'human']),
-      [],
-      'continue and resume are recognized review flags',
-    );
+  it('rejects removed modes while keeping operator attribution', () => {
+    assert.deepEqual(unknownReviewFlags([SLUG, '--actor', 'human']), []);
+    assert.deepEqual(unknownReviewFlags(['--start', '--continue', '--resume']), ['--start', '--continue', '--resume']);
   });
 
   it('continue clears a human-intervention stop attributed to the git user', async () => {
-    // `px review --continue` relaunches the loop after clearing the stop. It
+    // `px review` relaunches the loop after clearing the stop. It
     // takes no --actor: attribution is to the operator (the current git user),
     // with zero ceremony. A stubbed `run` stands in for `git config user.name`.
     await withHome(createTempRoot(), async () => {
@@ -362,7 +354,7 @@ describe("stopped review recovery through px review --resume", () => {
         error: () => undefined,
         runFn: (() => gitUser),
       });
-      assert.equal(cleared, true, 'the intervention is cleared by --continue');
+      assert.equal(cleared, true, 'review entry clears the intervention');
       const loaded = await store.load(missionId(SLUG));
       const review = loaded.kind === 'found' ? loaded.mission.review! : null;
       assert.equal(review?.intervention, null, 'intervention cleared on the persisted aggregate');
@@ -410,15 +402,10 @@ describe("stopped review recovery through px review --resume", () => {
     });
   });
 
-  it('reproduces the red parent-commit state: dispatch falls through to status', async () => {
-    // This assertion documents the red baseline: at the mission parent commit
-    // `--resume` has no dispatch branch, so the command falls through to
-    // `status` and leaves the review in human-intervention. It stays green at
-    // HEAD too, because after the fix the actor-less call is still rejected by
-    // the --actor boundary — so this pins the boundary, not a flag allow-list.
+  it('automatic invocation retains the persisted stop (TASK-2810)', async () => {
     await withHome(createTempRoot(), async () => {
       const { root, store } = await seedRoot(stoppedReview());
-      const { cleared, outcome } = await invokeResume(store, root, null);
+      const { cleared, outcome } = await invokeResume(store, root, null, false);
       assert.equal(cleared, false, 'no supported invocation clears the intervention without an actor');
       assert.equal(outcome, 'human-intervention');
     });
@@ -426,5 +413,15 @@ describe("stopped review recovery through px review --resume", () => {
 });
 
 import { copyRepairSchema } from '../../lib/integration-repair-fixture.js';
-import { registerRetainedRepairCases } from '../../fixtures/review-repair-recovery.js';
+import { registerRetainedRepairCases, retainedRepairCase } from '../../fixtures/review-repair-recovery.js';
 registerRetainedRepairCases(['acknowledgment']);
+
+
+it('first review recovers acknowledged criteria correction without a persisted Review (TASK-2810)', { timeout: 10000 }, async t => {
+  await retainedRepairCase('acknowledgment', true, t, true);
+});
+
+
+it('inferred recovery stops for a newly reported blocker (TASK-2810)', { timeout: 10000 }, async t => {
+  await retainedRepairCase('new-blocker', false, t);
+});

@@ -72,5 +72,5 @@ export function workflowEligible(command: WorkflowCommand, status: MissionStatus
 }
 
 function reviewWorkflowEligible(status: MissionStatus, mode: ReviewOperation | undefined): boolean {
-  return status === 'review' || status === 'integration' && mode === 'continue';
+  return status === 'review' || status === 'integration' && mode === 'enter';
 }

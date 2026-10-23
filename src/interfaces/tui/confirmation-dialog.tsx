@@ -9,7 +9,7 @@ export interface ConfirmationDialogProps {
 
 /** Exact command text is informational; Enter is still required to dispatch. */
 export function applicationCommandText(kind: BoardCommandKind, missionId: string): string {
-  if (kind === 'review:submit') { return `px review ${missionId}`; }
+  if (kind === 'review:submit') { return 'px review'; }
   if (kind === 'integrate:merge') { return `px integrate ${missionId}`; }
   if (kind === 'mission:cancel') { return `px cancel ${missionId} --yes`; }
   return `px active ${missionId}`;

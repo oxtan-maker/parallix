@@ -38,7 +38,13 @@ export function removeTypeOnlyCoverage(
   }).join('end_of_record');
 }
 
-/** Native include-all emits zero-hit records for comments and local export lists. */
+function isErasedTypeSyntax(node: import('typescript').Node): boolean {
+  return ts.isTypeNode(node) || ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)
+    || (ts.isImportDeclaration(node) && node.importClause?.isTypeOnly === true)
+    || (ts.isExportDeclaration(node) && node.isTypeOnly);
+}
+
+/** Native include-all also emits zero-hit records for syntax erased at runtime. */
 export function removeNonExecutableCoverage(
   lcov: string,
   rootDir: string,
@@ -55,6 +61,9 @@ export function removeNonExecutableCoverage(
     const tokenLines = new Set<number>();
     function visit(node: import('typescript').Node): void {
       if (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode) { return; }
+      // Mixed modules retain runtime coverage, but type annotations and explicit
+      // type imports/exports cannot execute. Keep value imports and enums.
+      if (isErasedTypeSyntax(node)) { return; }
       // Local export lists have no executable expression. Re-exports can load
       // another module, so retain those along with imports and runtime code.
       if (ts.isExportDeclaration(node) && !node.moduleSpecifier) { return; }

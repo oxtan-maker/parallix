@@ -30,7 +30,7 @@ export const reviewerOutputRenderers = {
   }),
   'approved-round-correction': reviewEventRenderer('approved-round-correction', (event, output) => {
     if (event.diagnostic) { output.log(fmt.status('INFO', `Approval revocation failed: ${event.diagnostic}`)); }
-    output.log(fmt.status('INFO', `A human requested changes on ${event.slug} while its round ${event.round} approval is still effective. Run: px revoke-review --slug ${event.slug} --decision ${event.round} --reason <text> --operator <name>, then px review ${event.slug} --continue.`));
+    output.log(fmt.status('INFO', `A human requested changes on ${event.slug} while its round ${event.round} approval is still effective. Run: px revoke-review --slug ${event.slug} --decision ${event.round} --reason <text> --operator <name>, then px review ${event.slug}.`));
     return;
   }),
   'attempts-exhausted': reviewEventRenderer('attempts-exhausted', (event, output) => {
@@ -38,7 +38,7 @@ export const reviewerOutputRenderers = {
     return;
   }),
   'controller-active': reviewEventRenderer('controller-active', (event, output) => {
-    output.log(fmt.status('INFO', `Review controller already active for ${event.slug}; this invocation is not starting a competing loop. Run px review ${event.slug} --continue after the active controller stops if the authoritative round still needs work.`));
+    output.log(fmt.status('INFO', `Review controller already active for ${event.slug}; this invocation is not starting a competing loop. Run px review ${event.slug} after the active controller stops if the authoritative round still needs work.`));
     return;
   }),
   'local-review': reviewEventRenderer('local-review', (event, output) => {
@@ -221,7 +221,7 @@ export const reviewerOutputRenderers = {
     return;
   }),
   'controller-superseded': reviewEventRenderer('controller-superseded', (event, output) => {
-    output.log(fmt.status('INFO', `Review controller for ${event.slug} was superseded before ${event.boundary} by authoritative round ${event.round} (${event.phase}). Stopping without applying stale state; run px review ${event.slug} --continue only if the authoritative round still needs work.`));
+    output.log(fmt.status('INFO', `Review controller for ${event.slug} was superseded before ${event.boundary} by authoritative round ${event.round} (${event.phase}). Stopping without applying stale state; run px review ${event.slug} only if the authoritative round still needs work.`));
     return;
   }),
   'review-started': reviewEventRenderer('review-started', (event, output) => {

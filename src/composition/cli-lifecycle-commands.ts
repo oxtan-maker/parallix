@@ -71,9 +71,9 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
         reviewerSessionPort,
       );
       const adapter = createReviewWorkflowAdapter({
-        operatorResume: bindReviewOperatorResume(services.mission.store, context.operatorReview ?? false, options ?? {}),
         configuration,
         ...options,
+        operatorResume: bindReviewOperatorResume(services.mission.store, context.operatorReview ?? false, options ?? {}),
         // SC4: refuse to review a mission whose payload already landed.
         payloadLandedFn: (s: string) => findLandedSquashOnBaseBranch(rootDir, s) !== null,
         missionServicesFn,
@@ -100,7 +100,7 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
         }),
       });
       const result = await createReviewCommand(new ReviewCommandUseCase(adapter, services.currentWork))(args, options);
-      // TASK-2620: `px review --continue` never chains into `px integrate`.
+      // TASK-2620: `px review` never chains into `px integrate`.
       // On approval of a repaired revision the mission stays in the integration
       // lane for the human to read the fresh PR and integrate; no path
       // auto-restarts integration or merges.
@@ -201,8 +201,8 @@ function createIntegrationRunner(context: CliCommandContext, runReview: (args: s
       const options = { integrationOwnsReview: owned, nestedWork, exit };
       // Reuse the owner's graph only inside an admitted integration. Internal
       // callers without authority must enter through the public review wrapper.
-      return owned ? runReview([slug, '--continue'], options, services)
-        : context.commands().review([slug, '--continue'], options);
+      return owned ? runReview([slug], options, services)
+        : context.commands().review([slug], options);
     });
     if (status !== 0) { return false; }
     const after = await services.mission.store.load(missionId(slug));

@@ -302,7 +302,7 @@ export function attentionAction(card: MissionCard, reason: AttentionReason): Att
     case 'integrate-lane':
       return { kind: 'integrate:merge', display: `px integrate ${card.id}` };
     case 'review-lane':
-      return { kind: 'review:submit', display: `px review ${card.id}` };
+      return { kind: 'review:submit', display: 'px review' };
     default:
       return { kind: 'active:execute', display: `px active ${card.id}` };
   }

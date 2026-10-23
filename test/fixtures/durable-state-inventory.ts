@@ -1393,13 +1393,6 @@ export interface MissionDocumentCallSiteEntry {
  */
 export const MISSION_DOCUMENT_CALL_SITES: readonly MissionDocumentCallSiteEntry[] = [
   {
-    id: 'mission-doc-call-squash-retired-root-rejection',
-    fileLocation: 'src/application/integrate/squash.ts',
-    purpose: 'inspect Git payload paths and reject retired archive entries before landing; no Mission-state persistence',
-    pathPatterns: ['ls-files.*backlog/archive', 'rejectSquash.*Retired backlog/archive'],
-    classification: 'git-topology-observation',
-  },
-  {
     id: 'mission-doc-call-execute-handoff',
     fileLocation: 'src/application/execute-handoff-service.ts',
     purpose: 'describe legacy checkpoint evidence repair paths without persisting Mission state',
@@ -1491,8 +1484,8 @@ export const MISSION_DOCUMENT_CALL_SITES: readonly MissionDocumentCallSiteEntry[
     classification: 'git-topology-observation',
   },
   {
-    id: 'mission-doc-call-recovery-supervisor',
-    fileLocation: 'src/application/recovery-supervisor.ts',
+    id: 'mission-doc-call-recovery-contract',
+    fileLocation: 'src/application/recovery-contract.ts',
     purpose: 'state the operator-constraint that the recovery agent may not change the scope of MISSION.md during autonomous repair',
     pathPatterns: ['MISSION.md'],
     classification: 'mission-document-evidence',

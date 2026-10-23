@@ -322,7 +322,7 @@ async function submitProviderReview(slug: string, outcome: string, message: stri
   })).identityUser;
 
   if (!reviewIdentity) {
-    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px review ${slug} --start, or set FORGEJO_USER.`));
+    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px review ${slug}, or set FORGEJO_USER.`));
     exit(1);
     return;
   }
@@ -422,7 +422,7 @@ export async function closeMissionPr(
   })).identityUser;
 
   if (!reviewIdentity) {
-    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px review ${slug} --start, or set FORGEJO_USER.`));
+    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px review ${slug}, or set FORGEJO_USER.`));
     exit(1);
     return;
   }

@@ -41,9 +41,9 @@ function recorder() {
 function reviewWorkflow(onContinue: (_context: ReviewWorkflowContext) => Promise<void>) {
   const unused = () => { throw new Error('Unexpected review workflow operation'); };
   return {
-    verify: unused, submit: unused, push: unused, start: unused, resume: unused, comment: unused, readComments: unused, submitReview: unused, close: unused, status: unused, createEvent: unused, backfillReview: unused, reconcileReview: unused, importLegacy: unused,
+    verify: unused, submit: unused, push: unused, comment: unused, readComments: unused, submitReview: unused, close: unused, status: unused, backfillReview: unused, reconcileReview: unused,
     async preflight(args: string[], options: Record<string, unknown> = {}) { return { slug: SLUG, args, options }; },
-    continue: onContinue,
+    enter: onContinue,
   };
 }
 
@@ -70,7 +70,7 @@ test('integration, its repair agent and its nested re-review keep the mission li
       }, nested, 'execute', (agent) => `integration repair: implementer ${agent}`);
       await launch('act-on-review', { agent: 'claude' });
       snapshot();
-      await review.execute([SLUG, '--continue'], { nestedWork: nested });
+      await review.execute([SLUG], { nestedWork: nested });
       snapshot();
       return 0;
     },
@@ -105,8 +105,8 @@ test('a review whose injected exit reports failure is published as blocked, not 
   const review = new ReviewCommandUseCase(reviewWorkflow(async (context) => {
     (context.options.exit as (_code: number) => void)(1);
   }), port);
-  await review.execute([SLUG, '--continue'], { exit: () => {} });
-  assert.match(board()?.blockingReason ?? '', /px review --continue task-2620 exited with status 1/);
+  await review.execute([SLUG], { exit: () => {} });
+  assert.match(board()?.blockingReason ?? '', /px review task-2620 exited with status 1/);
 });
 
 for (const status of [0, 23]) {
@@ -117,8 +117,8 @@ for (const status of [0, 23]) {
       (context.options.exit as (_code: number) => never)(status);
       return assert.fail('exit must terminate workflow execution');
     }), port);
-    await assert.rejects(review.execute([SLUG, '--continue'], { exit: () => { throw stopped; } }), error => error === stopped);
+    await assert.rejects(review.execute([SLUG], { exit: () => { throw stopped; } }), error => error === stopped);
     assert.equal(board()?.currentWork ?? null, null);
-    assert.equal(board()?.blockingReason ?? null, status === 0 ? null : `px review --continue ${SLUG} exited with status ${status}`);
+    assert.equal(board()?.blockingReason ?? null, status === 0 ? null : `px review ${SLUG} exited with status ${status}`);
   });
 }

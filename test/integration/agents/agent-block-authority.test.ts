@@ -11,16 +11,17 @@ import { initOperatorState } from '../../../src/adapters/sqlite/adapter-factory.
 import { ConcreteAgentReadAdapter } from '../../../src/adapters/backlog/concrete-agent-read-adapter.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { resolveAgentBlockAuthority } from '../../../src/adapters/agents/agent-block-authority.js';
+import { DEFAULT_CONFIGURATION } from '../../../src/application/ports/configuration.js';
 
 test('block persisted via updateAgentBlockChecked makes defaultIsAgentBlockedNow return true', async () => {
-  const previousHome = process.env.PARALLIX_HOME;
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2345-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-block-authority-'));
+  const configuration = { ...DEFAULT_CONFIGURATION, storage: { ...DEFAULT_CONFIGURATION.storage, parallixHome: home } };
+  fs.writeFileSync(path.join(home, 'agents.local.json'), '{"blocklist":{}}\n');
   try {
-    process.env.PARALLIX_HOME = home;
-    await updateAgentBlockChecked('codex', '2099-01-01 00', { reason: 'quota' });
+    await updateAgentBlockChecked('codex', '2099-01-01 00', { reason: 'quota', configuration });
 
-    assert.equal(await defaultIsAgentBlockedNow('codex'), true);
-    const { db } = await initOperatorState();
+    assert.equal(await defaultIsAgentBlockedNow('codex', configuration), true);
+    const { db } = await initOperatorState({ configuration });
     const board = new ConcreteAgentReadAdapter({
       rootDir: process.cwd(),
       blocklistRepo: new SqliteBlocklistRepository(db),
@@ -31,11 +32,6 @@ test('block persisted via updateAgentBlockChecked makes defaultIsAgentBlockedNow
     assert.notEqual((await board.loadAgentAvailability())[0].block.kind, 'none');
   } finally {
     await clearOperatorStateCache();
-    if (previousHome === undefined) {
-      delete process.env.PARALLIX_HOME;
-    } else {
-      process.env.PARALLIX_HOME = previousHome;
-    }
     fs.rmSync(home, { recursive: true, force: true });
   }
 });

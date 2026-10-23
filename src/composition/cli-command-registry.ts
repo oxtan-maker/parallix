@@ -58,6 +58,15 @@ let leadComposition: ReturnType<typeof loadLeadComposition> | undefined;
 
 const packageDir = packageRoot(path.dirname(fileURLToPath(import.meta.url)));
 
+function judgedRecoveryLaunch(request: import('../application/recovery-supervisor.js').RecoveryRequest, supervisor: SupervisorPort, publish: () => Promise<void>) {
+  if (!request.admission) { return {}; }
+  const admission = request.admission;
+  return { launchAdmission: { assert: async () => {
+    if (!supervisor.admitRecovery) { throw new Error('Recovery launch admission unavailable'); }
+    await supervisor.admitRecovery(admission);
+  } }, onLaunch: publish };
+}
+
 function createCommandRegistry(rootDir: string, configuration: ParallixConfiguration, operatorReview = false): Record<string, Command> {
   const scope = createCliServiceScope(rootDir, configuration);
   const { withGraph, openServices } = scope;
@@ -90,9 +99,12 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
     const [{ createLeadSupervisorPort, leadRecoveryWorkspace }, { createLeadCommand }, { FRESH_SESSION_MARKER_PORT }] = await (leadComposition ??= loadLeadComposition());
     const forwards = new Set<Promise<unknown>>();
     const currentWork = services.currentWork;
+    let supervisor: SupervisorPort;
     const launchRecovery: SupervisorPort['launchRecovery'] = async (request) => {
       fmt.log.info(`[lead] Starting fresh recovery agent for ${fmt.slug(request.missionId)} with a general diagnostic prompt`);
       let publication: ReturnType<typeof currentWorkPublication> = null;
+      let published = false;
+      const publish = async () => { if (publication) { published = true; await currentWork.running(publication); } };
       try {
         const { worktree, prompt } = leadRecoveryWorkspace(request);
         fmt.log.info(`[lead] Recovery prompt for ${fmt.slug(request.missionId)}:\n---\n${prompt}\n---`);
@@ -104,7 +116,9 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
           phase: 'recovery',
           summary: `recovery agent working ${request.missionId} after ${request.attemptedOperation}`,
         });
-        if (publication) { await currentWork.running(publication); }
+        // A judged recovery is published only after spawn: otherwise its own
+        // publication would appear as competing work at final admission.
+        if (!request.admission) { await publish(); }
         const launched = await agents.startAgent('execute', {
           configuration,
           prompt,
@@ -112,6 +126,7 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
           agent: assignedAgent,
           slug: request.missionId,
           role: 'implementer',
+          ...judgedRecoveryLaunch(request, supervisor, publish),
           // Without this the launcher would resume the implementer session
           // that got stuck. Recovery is a new context by definition.
           sessionMarkerPort: FRESH_SESSION_MARKER_PORT,
@@ -138,11 +153,12 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
         fmt.log.fail(`[lead] Recovery agent for ${fmt.slug(request.missionId)} failed: ${error instanceof Error ? error.message : String(error)}`);
         throw error;
       } finally {
-        if (publication) { await currentWork.ended(publication); }
+        if (published) { await currentWork.ended(publication!); }
       }
     };
+    supervisor = createLeadSupervisorPort(services, forwards, { rootDir, scope, active, registry, runPublicCli: run, launchRecovery, configuration });
     let result: number;
-    try { result = await createLeadCommand(createLeadSupervisorPort(services, forwards, { rootDir, scope, active, registry, runPublicCli: run, launchRecovery }))(args); }
+    try { result = await createLeadCommand(supervisor)(args); }
     finally { await Promise.allSettled(forwards); }
     if (result !== 0) {
       if (typeof options.exitFn === 'function') { options.exitFn(result); }

@@ -93,7 +93,7 @@ export class GatekeeperRemediation {
         .filter(item => item.includes('backlog/tasks') || item.includes('backlog/task'))
         .map(() => '- **create** a backlog task file at `backlog/tasks/<slug> - <title>.md` with YAML frontmatter (id, title, status, labels) and a description section.'),
       '',
-      `After creating the missing artifacts, re-run the review start (\`px review ${slug} --start\`).`,
+      `After creating the missing artifacts, re-run the review start (\`px review ${slug}\`).`,
     ].join('\n');
 
     // TASK-2377.05 (SC7): gatekeeper pushback bounces through the one rebound

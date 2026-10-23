@@ -313,14 +313,6 @@ class SquashLanding {
         intendedPayloadPaths,
       );
     }
-    const retiredEntries = this.dependencies.git(['-C', baseWorktree, 'ls-files', '-z', '--', 'backlog/archive']);
-    if (retiredEntries.status !== 0) {
-      rejectSquash('Could not inspect retired archive paths before landing.', intendedPayloadPaths);
-    }
-    const retiredPaths = retiredEntries.stdout.split('\0').filter(Boolean);
-    if (retiredPaths.length > 0) {
-      rejectSquash(`Retired backlog/archive paths cannot land: ${retiredPaths.join(', ')}`, intendedPayloadPaths);
-    }
     await this.stageCloseout(run, mainTaskFile, intendedPayloadPaths);
     const guardHead = this.dependencies.git(['-C', baseWorktree, 'rev-parse', 'HEAD']).stdout.trim();
     const tierGuardResult = this.dependencies.ports.gates.runStagedTierGuards?.(baseWorktree, intendedPayloadPaths) ?? { ok: true };

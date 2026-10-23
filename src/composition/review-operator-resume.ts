@@ -22,7 +22,7 @@ export function bindReviewOperatorResume(
   return {
     acknowledge: async slug => {
       await new MissionCheckpointService(store).acknowledgeOperatorResume({
-        operationId: `review-continue:${slug}`, missionId: missionId(slug),
+        operationId: `review-entry:${slug}`, missionId: missionId(slug),
         capabilities: new Set(['checkpoint:record']), actor: 'px review operator', occurredAt: new Date().toISOString(),
       });
     },

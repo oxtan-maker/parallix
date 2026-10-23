@@ -1,4 +1,4 @@
-export type ReviewOperation = 'status' | 'verify' | 'submit' | 'push' | 'readComments' | 'comment' | 'submitReview' | 'close' | 'createEvent' | 'importLegacy' | 'backfillReview' | 'reconcileReview' | 'start' | 'continue' | 'resume';
+export type ReviewOperation = 'status' | 'verify' | 'submit' | 'push' | 'readComments' | 'comment' | 'submitReview' | 'close' | 'backfillReview' | 'reconcileReview' | 'enter';
 /**
  * Review operations that keep the board busy, and the phase each publishes.
  *
@@ -7,19 +7,18 @@ export type ReviewOperation = 'status' | 'verify' | 'submit' | 'push' | 'readCom
  * for them would flicker the board without telling an operator anything.
  */
 const PUBLISHED_PHASES: Readonly<Record<string, 'review'>> = {
-  start: 'review',
-  continue: 'review',
+  enter: 'review',
   submit: 'review',
   submitReview: 'review',
 };
 const REVIEW_FLAG_OPERATIONS: ReadonlyArray<readonly [string, ReviewOperation]> = [
-  ['--status', 'status'], ['--verify', 'verify'], ['--submit', 'submit'], ['--push', 'push'], ['--comments', 'readComments'], ['--comment', 'comment'], ['--comment-file', 'comment'], ['--submit-review', 'submitReview'], ['--close', 'close'], ['--create-event', 'createEvent'], ['--import-legacy', 'importLegacy'], ['--backfill-review', 'backfillReview'], ['--reconcile-review', 'reconcileReview'], ['--start', 'start'], ['--continue', 'continue'], ['--resume', 'resume'],
+  ['--status', 'status'], ['--verify', 'verify'], ['--submit', 'submit'], ['--push', 'push'], ['--comments', 'readComments'], ['--comment', 'comment'], ['--comment-file', 'comment'], ['--submit-review', 'submitReview'], ['--close', 'close'], ['--backfill-review', 'backfillReview'], ['--reconcile-review', 'reconcileReview'],
 ];
 
 
 export function reviewOperation(args: readonly string[]): ReviewOperation {
   const flags = new Set(args.filter(arg => arg.startsWith('--')).map(arg => arg.split('=', 1)[0]));
-  return REVIEW_FLAG_OPERATIONS.find(([flag]) => flags.has(flag))?.[1] || 'status';
+  return REVIEW_FLAG_OPERATIONS.find(([flag]) => flags.has(flag))?.[1] || 'enter';
 }
 
 export function reviewOperationPhase(operation: ReviewOperation): 'review' | undefined { return PUBLISHED_PHASES[operation]; }

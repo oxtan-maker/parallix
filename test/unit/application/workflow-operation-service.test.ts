@@ -132,7 +132,7 @@ test('review continuation is admitted from integration without moving the missio
   f.missions.set('task-one', fixtureMission('task-one', { status: 'integration' }));
   const reviewRequest: BoardCommandRequest = { ...request(), kind: 'review:submit',
     missionStatusAtRequest: 'integration', capabilities: new Set(['review:submit']),
-    invocation: { command: 'review', args: ['--continue'] } };
+    invocation: { command: 'review', args: [] } };
   const admitted = await f.service.admit(reviewRequest);
   assert.equal(admitted.status, 'accepted');
   assert.deepEqual((await f.service.operation('request-one'))?.invocation, reviewRequest.invocation);
@@ -150,12 +150,11 @@ test('CLI review retains eligibility outside integration continuation (TASK-2750
   const cases = [
     { status: 'backlog', args: ['--submit'] },
     { status: 'done', args: ['--submit'] },
-    { status: 'backlog', args: ['--continue'] },
-    { status: 'done', args: ['--continue'] },
+    { status: 'backlog', args: [] },
+    { status: 'done', args: [] },
     { status: 'integration', args: ['--submit'] },
-    { status: 'integration', args: ['--start'] },
-    { status: 'integration', args: ['--submit', '--continue'] },
-    { status: 'integration', args: ['--status', '--continue'] },
+    { status: 'integration', args: ['--submit'] },
+    { status: 'integration', args: ['--status'] },
   ] as const;
   for (const { status, args } of cases) {
     const f = fixture();
@@ -175,7 +174,7 @@ test('review invocation cannot make another workflow eligible (TASK-2750)', asyn
   const f = fixture();
   f.missions.set('task-one', fixtureMission('task-one', { status: 'integration' }));
   const result = await f.service.admit({ ...request(), missionStatusAtRequest: 'integration',
-    invocation: { command: 'review', args: ['--continue'] } });
+    invocation: { command: 'review', args: [] } });
   assert.equal(result.status, 'rejected');
   assert.deepEqual(f.launches, []);
 });

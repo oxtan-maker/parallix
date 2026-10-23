@@ -113,11 +113,11 @@ for (const scenario of ['covered', 'uncovered', 'unrecorded']) {
     // Exercise the public review CLI parser and application command with agent/review fixtures.
     const unused = async () => { throw new Error('unexpected CLI operation'); };
     const workflow: ReviewWorkflowPort = { preflight: (args, options = {}) => ({ slug, args, options }),
-      continue: async () => runReviewLoop({ slug, isContinue: true, implementer: 'codex' }, ports),
-      verify: unused, submit: unused, push: unused, start: unused, resume: unused, comment: unused,
-      readComments: unused, submitReview: unused, close: unused, status: unused, createEvent: unused,
-      backfillReview: unused, reconcileReview: unused, importLegacy: unused };
-    await createReviewCommand(new ReviewCommandUseCase(workflow))([slug, '--continue']);
+      enter: async () => runReviewLoop({ slug, isContinue: true, implementer: 'codex' }, ports),
+      verify: unused, submit: unused, push: unused, comment: unused,
+      readComments: unused, submitReview: unused, close: unused, status: unused,
+      backfillReview: unused, reconcileReview: unused };
+    await createReviewCommand(new ReviewCommandUseCase(workflow))([slug]);
     if (unrecorded) {
       assert.deepEqual(fake.exits, [1]);
       assert.equal(handoffs, 0);
@@ -138,7 +138,7 @@ for (const scenario of ['covered', 'uncovered', 'unrecorded']) {
       assert.equal(fake.current()?.phase, 'approved');
       if (covered) { assert.deepEqual((await read()).mission.checkpoints[1], historical); }
     }
-    console.log(JSON.stringify({ command: `px review ${slug} --continue`, scenario, diagnosticReads, exactChecks,
+    console.log(JSON.stringify({ command: `px review ${slug}`, scenario, diagnosticReads, exactChecks,
       handoffs, launches: fake.launches.map(item => item.role), review: fake.current()?.phase,
       boundaries: 'public CLI factory, real Git/shell/SQLite; agent and handoff/reviewer fixtures' }));
   } finally {

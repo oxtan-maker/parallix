@@ -304,7 +304,7 @@ describe("review board characterization", { concurrency: false }, () => {
     const record = (operation: Operation) => async () => { calls.push(operation); };
     return {
       preflight: async (args: string[], options: Record<string, unknown> = {}) => ({ slug: 'task-2428', args, options }),
-      verify: async () => {}, submit: record('submit'), push: async () => {}, start: async () => {}, continue: async () => {}, resume: async () => {},
+      verify: async () => {}, submit: record('submit'), push: async () => {}, enter: async () => {},
       comment: async () => {}, readComments: async () => {}, submitReview: record('submitReview'),
       close: async () => {}, status: async () => {}, createEvent: async () => {}, backfillReview: async () => {},
       reconcileReview: async () => {}, importLegacy: async () => {},
@@ -330,9 +330,9 @@ describe("review board characterization", { concurrency: false }, () => {
       preflights++;
       return port.preflight(...args);
     } });
-    for (const flag of ['--submit', '--start', '--continue', '--resume']) {
+    for (const entryArgs of [[], ['--submit']]) {
       for (const suffix of [[], ['--dry-run']]) {
-        await assert.rejects(() => command.execute(['task-2428', flag, ...suffix]), /parent workflow.*handoff and review/i);
+        await assert.rejects(() => command.execute(['task-2428', ...entryArgs, ...suffix]), /parent workflow.*handoff and review/i);
       }
     }
     assert.equal(preflights, 0, 'nested control is refused before any lifecycle effects');
@@ -362,7 +362,7 @@ describe("review use case", { concurrency: false }, () => {
     const record = (operation: string) => async (context: { args: string[] }) => { calls.push({ operation, args: context.args }); };
     return {
       preflight: async (args: string[], options: Record<string, unknown> = {}) => ({ slug: 'task-2332.14', args, options }),
-      verify: record('verify'), submit: record('submit'), push: record('push'), start: record('start'), continue: record('continue'), resume: record('resume'),
+      verify: record('verify'), submit: record('submit'), push: record('push'), enter: record('enter'),
       comment: record('comment'), readComments: record('readComments'), submitReview: record('submitReview'), consumeArtifacts: record('consumeArtifacts'),
       close: record('close'), status: record('status'), createEvent: record('createEvent'), backfillReview: record('backfillReview'),
       reconcileReview: record('reconcileReview'), importLegacy: record('importLegacy'),
@@ -392,14 +392,14 @@ describe("review use case", { concurrency: false }, () => {
 
   test('ReviewCommandUseCase dispatches retry-after-failure continuation to mocked port', async () => {
     const calls: Array<{ operation: string; args: string[] }> = [];
-    await new ReviewCommandUseCase(mockedPort(calls)).execute(['task-2332.14', '--continue', '--max-attempts', '2']);
-    assert.deepEqual(calls.map(call => call.operation), ['continue']);
+    await new ReviewCommandUseCase(mockedPort(calls)).execute(['task-2332.14', '--max-attempts', '2']);
+    assert.deepEqual(calls.map(call => call.operation), ['enter']);
   });
 
   test('ReviewCommandUseCase preserves reviewer selection on mocked start path', async () => {
     const calls: Array<{ operation: string; args: string[] }> = [];
-    await new ReviewCommandUseCase(mockedPort(calls)).execute(['task-2332.14', '--start', '--reviewer', 'codex']);
-    assert.equal(calls[0].operation, 'start');
+    await new ReviewCommandUseCase(mockedPort(calls)).execute(['task-2332.14', '--reviewer', 'codex']);
+    assert.equal(calls[0].operation, 'enter');
     assert.deepEqual(calls[0].args.slice(-2), ['--reviewer', 'codex']);
   });
 });

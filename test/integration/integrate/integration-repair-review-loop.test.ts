@@ -3,11 +3,11 @@
 // integration lane whose integration gate goes red.
 //
 // On the parent commit this run either skips the repair after the budget or
-// chains `px integrate` after `review --continue` and merges the re-approved
+// chains `px integrate` after `review` and merges the re-approved
 // work in the same invocation (the mission moves to `done`) — the defect.
 // After the fix the run repairs once through the bounded implementer budget,
-// re-reviews the repaired revision through the single live `px review
-// --continue` route, and then STOPS in the integration lane for the human: no
+// re-reviews the repaired revision through `px review <slug>`, and then
+// STOPS in the integration lane for the human: no
 // merge, no `done`, no auto-restart.
 //
 // Only external boundaries are mocked: the agent launcher, the Forgejo HTTP

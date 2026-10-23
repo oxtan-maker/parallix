@@ -659,7 +659,7 @@ test('runHandoffAndReview passes worktree and implementer to startReviewLoop', a
   // SC3: handoff already ran in this function, so the review loop must skip its
   // own handoff. On a provider-disabled repository a start that runs
   // performHandoff a second time would resubmit/mutate the Review the active
-  // path just created. This is a fresh review start (not a --continue), so it
+  // path just created. This is a fresh review start (not a), so it
   // is signaled with skipHandoff rather than isContinue.
   assert.equal(reviewLoopCalls[0].opts.skipHandoff, true, 'startReviewLoop must be told to skip handoff after an active handoff');
 });

@@ -1,23 +1,19 @@
+import { REVIEW_USAGE, reviewExplicitSlug } from '../../domain/review-cli-options.js';
 import type { ReviewStateInstanceReader } from './review-state.js';
-import * as fs from 'fs';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { run } from '../git/git.js';
-import { findMissionDir, findCheckpoints, resolveWorktree, inferSlug, missionBranchName } from '../filesystem/mission-utils.js';
-import { resolveTaskFile, getTaskStatus, getTaskImplementer } from '../backlog/backlog.js';
-import { getPrStatus } from './review-adapter.js';
+import { getPrStatus, isProviderEnabled } from './review-adapter.js';
+import { resolveWorktree, inferSlug, missionBranchName } from '../filesystem/mission-utils.js';
 import { missionId } from '../../domain/mission.js';
 import { readReviewState, reconcileInterruptedHandoff } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
-import { startAgent } from '../agents/agents.js';
 import type { ReviewWorkflowContext, ReviewWorkflowPort } from '../../application/ports/review-workflow.js';
 import { ReviewRoundUseCase } from '../../application/review-round-use-case.js';
 import type { ReviewLoopPorts, ReviewRoundEntryPort, StartReviewRound } from '../../application/ports/review-round.js';
-import { StaticReviewUseCase } from '../../application/static-review-use-case.js';
-import type { StaticReviewWorkflowPort } from '../../application/ports/static-review-workflow.js';
 import { flagValue, readTextFlag, type ReadUtf8File } from './review-cli-flags.js';
 import { createEvent } from './review-events.js';
 import type { ReviewLoopBindings } from './review-loop.js';
-import { backfillReviewHandler, continueReviewClearsIntervention, continueReviewInvalidatesBlocker, closeMissionPr, commentRound, createEventHandler, formatStaticReviewSuccess, importLegacyHandler, performStaticReview, postStaticReviewComment, pushRound, readComments, reconcileInterruptedHandoffHandler, resumeIntervenedReview, showReviewStatus, submitForReview, submitReviewRound, verifyReview } from './review-commands.js';
+import { backfillReviewHandler, continueReviewClearsIntervention, continueReviewInvalidatesBlocker, closeMissionPr, commentRound, pushRound, readComments, reconcileInterruptedHandoffHandler, showReviewStatus, submitForReview, submitReviewRound, verifyReview } from './review-commands.js';
 
 /** Command dispatch awaits completion and forwards failures; receipts are owned by each command. */
 type ReviewCommandObserver<Handler extends (...args: never[]) => unknown> = (...args: Parameters<Handler>) => unknown;
@@ -45,12 +41,6 @@ async function isKnownMission(slug: string, store: MissionStore | null | undefin
 /** Per-invocation output and current-work observers the review loop reports to. */
 export type ReviewLoopObservers = Pick<ReviewLoopBindings, 'log' | 'error' | 'exit' | 'onAgentLaunched' | 'onAutonomousStop'>;
 
-/** Static review awaits launch completion and does not inspect a launch receipt. */
-type StaticReviewAgentLauncher = (_step: 'active', _options: {
-  prompt: string; worktree: string; agent: string; slug: string;
-}) => unknown;
-/** Posting completion is awaited; no provider receipt is consumed here. */
-type StaticReviewCommentPoster = (...args: Parameters<typeof postStaticReviewComment>) => unknown;
 /** The prerequisite reports failure through its exit observer or rejection. */
 type ReviewInterventionClearer = (...args: Parameters<typeof continueReviewClearsIntervention>) => Promise<unknown>;
 
@@ -59,7 +49,8 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
     configuration?: import('../../application/ports/configuration.js').ParallixConfiguration;
     readFileSync?: ReadUtf8File;
     inferSlugFn?: typeof inferSlug; log?: (_msg: string) => void; error?: (_msg: string) => void; exit?: (_code: number) => void;
-    verifyReviewFn?: ReviewCommandObserver<typeof verifyReview>; submitForReviewFn?: ReviewCommandObserver<typeof submitForReview>; pushRoundFn?: ReviewCommandObserver<typeof pushRound>; readCommentsFn?: ReviewCommandObserver<typeof readComments>; commentRoundFn?: ReviewCommandObserver<typeof commentRound>; submitReviewRoundFn?: ReviewCommandObserver<typeof submitReviewRound>; closeMissionPrFn?: ReviewCommandObserver<typeof closeMissionPr>; startAgentFn?: StaticReviewAgentLauncher; resolveTaskFileFn?: typeof resolveTaskFile; getTaskStatusFn?: typeof getTaskStatus; getTaskImplementerFn?: typeof getTaskImplementer; getPrStatusFn?: typeof getPrStatus; readReviewStateFn?: ReviewStateInstanceReader; performStaticReviewFn?: typeof performStaticReview; postStaticReviewCommentFn?: StaticReviewCommentPoster; resolveWorktreeFn?: typeof resolveWorktree; reconcileInterruptedHandoffFn?: typeof reconcileInterruptedHandoff;
+    verifyReviewFn?: ReviewCommandObserver<typeof verifyReview>; submitForReviewFn?: ReviewCommandObserver<typeof submitForReview>; pushRoundFn?: ReviewCommandObserver<typeof pushRound>; readCommentsFn?: ReviewCommandObserver<typeof readComments>; commentRoundFn?: ReviewCommandObserver<typeof commentRound>; submitReviewRoundFn?: ReviewCommandObserver<typeof submitReviewRound>; closeMissionPrFn?: ReviewCommandObserver<typeof closeMissionPr>; readReviewStateFn?: ReviewStateInstanceReader; resolveWorktreeFn?: typeof resolveWorktree; reconcileInterruptedHandoffFn?: typeof reconcileInterruptedHandoff;
+    getPrStatusFn?: typeof getPrStatus; isReviewProviderEnabledFn?: typeof isProviderEnabled;
     operatorResume?: import('../../application/ports/review-round.js').ReviewOperatorResumePort;
     missionServicesFn?: NonNullable<Parameters<typeof submitForReview>[2]>['missionServicesFn'];
     writeReviewStateFn?: typeof import('./review-state.js').writeReviewState;
@@ -73,21 +64,15 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   } = {}) {}
 
   async preflight(args: string[], suppliedOptions: Record<string, unknown> = {}): Promise<ReviewWorkflowContext | null> {
-    const options = { ...this._defaults, ...suppliedOptions } as typeof this._defaults; const slug = (options.inferSlugFn || inferSlug)(args.find(arg => !arg.startsWith('--')));
-    if (!slug) { (options.error || fmt.log.plainError)('Usage: px review [<slug>] [--verify] [--submit] [--push] [--force] [--start|--continue [--implementer <a>] [--reviewer <a>] [--focus <f>] [--max-attempts <n>]] [--reconcile-review --branch <branch> --target <branch> --reviewer <agent> --implementer <agent> --revision <revision> --eligible-reviewer <agent>] [--no-gate] [--status] [--comments] [--comment "<msg>"|--comment-file <path>] [--submit-review <outcome> [--message "<summary>"|--message-file <path>] [--close] [--create-event --type <classification> [--input-file <path>] [--actor <name>] [--round <n>] [--phase <phase>] [--mission <path>]] [--import-legacy [--tmp-dir <dir>]] [--backfill-review [--dry-run]] [--resume --actor <name>]'); (options.exit || process.exit)(1); return null; }
+    const options = { ...this._defaults, ...suppliedOptions, operatorResume: this._defaults.operatorResume } as typeof this._defaults; const slug = (options.inferSlugFn || inferSlug)(reviewExplicitSlug(args));
+    if (!slug) { (options.error || fmt.log.plainError)(`Usage: ${REVIEW_USAGE}`); (options.exit || process.exit)(1); return null; }
     if (await options.payloadLandedFn?.(slug)) { (options.error || fmt.log.plainError)(fmt.status('FAIL', `Mission ${slug} payload already landed on the base branch. Close it out with: px integrate ${slug} --recover-landed`)); (options.exit || process.exit)(1); return null; }
     return { slug, args, options };
   }
-  async verify(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.verifyReviewFn || verifyReview)(context.slug, context.args.includes('--no-gate'), { ...o, missionPath: flagValue(context.args, '--mission') || undefined }); }
+  async verify(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.verifyReviewFn || verifyReview)(context.slug, context.args.includes('--no-gate'), { ...o }); }
   async submit(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.submitForReviewFn || submitForReview)(context.slug, context.args.includes('--no-gate'), o); }
   async push(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.pushRoundFn || pushRound)(context.slug, { ...o, force: context.args.includes('--force') }); }
-  async start(context: ReviewWorkflowContext): Promise<void> {
-    const raw = flagValue(context.args, '--max-attempts');
-    const maxAttempts = raw === null ? 5 : Number.parseInt(raw, 10);
-    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) { this.invalidMaxAttempts(raw ?? ''); return; }
-    await this.roundUseCase(context).start({ ...this.roundRequest(context), maxAttempts });
-  }
-  async continue(context: ReviewWorkflowContext): Promise<void> {
+  async enter(context: ReviewWorkflowContext): Promise<void> {
     // Helpers historically relied on process.exit. Fence this invocation even
     // when a host's exit observer returns; keep cancellation inside the adapter.
     const stopped = new Error('review continuation stopped');
@@ -97,15 +82,14 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
       throw stopped;
     };
     try {
-      await this.roundUseCase(context, helperExit).continue({ ...this.roundRequest(context), rawMaxAttempts: flagValue(context.args, '--max-attempts') });
+      await this.roundUseCase(context, helperExit).enter({ ...this.roundRequest(context), rawMaxAttempts: flagValue(context.args, '--max-attempts') });
     } catch (error) {
       if (error !== stopped) { throw error; }
     }
   }
-  async resume(context: ReviewWorkflowContext): Promise<void> { await resumeIntervenedReview(context.slug, context.args, context.options); }
   private roundRequest(context: ReviewWorkflowContext): Omit<StartReviewRound, 'maxAttempts' | 'isContinue'> {
     const poll = flagValue(context.args, '--poll-timeout-seconds');
-    return { slug: context.slug, implementer: flagValue(context.args, '--implementer') ?? undefined, reviewer: flagValue(context.args, '--reviewer') ?? undefined, focus: flagValue(context.args, '--focus') ?? 'all', dryRun: context.args.includes('--dry-run'), reset: context.args.includes('--reset'), verbose: context.args.includes('--verbose'), pollTimeoutSeconds: poll ? Number.parseInt(poll, 10) : null, missionPath: flagValue(context.args, '--mission') ?? undefined };
+    return { slug: context.slug, implementer: flagValue(context.args, '--implementer') ?? undefined, reviewer: flagValue(context.args, '--reviewer') ?? undefined, focus: flagValue(context.args, '--focus') ?? 'all', dryRun: context.args.includes('--dry-run'), reset: context.args.includes('--reset'), verbose: context.args.includes('--verbose'), pollTimeoutSeconds: poll ? Number.parseInt(poll, 10) : null };
   }
   private invalidMaxAttempts(raw: string): void { const o = this._defaults; (o.error || fmt.log.plainError)(fmt.status('FAIL', `--max-attempts requires a positive integer (got "${raw}").`)); (o.exit || process.exit)(1); }
   private roundUseCase(context: ReviewWorkflowContext, helperExit?: (_code: number) => never): ReviewRoundUseCase {
@@ -124,10 +108,7 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
       },
       invalidMaxAttempts: raw => this.invalidMaxAttempts(raw),
       missingReviewAggregate: slug => {
-        const guidance = context.args.includes('--continue')
-          ? `Run px review ${slug} --start to begin a review; handoff readiness still applies.`
-          : `Stop before reviewer launch and run px review ${slug} --reconcile-review --branch <branch> --target <branch> --reviewer <agent> --implementer <agent> --revision <revision> --eligible-reviewer <agent>.`;
-        (o.error || fmt.log.plainError)(fmt.status('FAIL', `Mission ${slug} has no valid Review aggregate. ${guidance}`));
+        (o.error || fmt.log.plainError)(fmt.status('FAIL', `Mission ${slug} is unknown or has no valid Review aggregate; load a known Mission before review.`));
         (o.exit || process.exit)(1);
       },
     };
@@ -137,24 +118,16 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   async readComments(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.readCommentsFn || readComments)(context.slug, o); }
   async submitReview(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; const outcome = flagValue(context.args, '--submit-review'); if (!outcome) { (o.error || fmt.log.plainError)(fmt.status('FAIL', '--submit-review requires an outcome: px review <slug> --submit-review <approve|request-changes|comment> [--message "<summary>"|--message-file <path>]')); (o.exit || process.exit)(1); return; } await (o.submitReviewRoundFn || submitReviewRound)(context.slug, outcome, readTextFlag(context.args, '--message', '--message-file', 'review message', o) || '', o); }
   async close(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.closeMissionPrFn || closeMissionPr)(context.slug, o); }
-  async createEvent(context: ReviewWorkflowContext): Promise<void> { await createEventHandler(context.slug, context.args, context.options); }
-  async importLegacy(context: ReviewWorkflowContext): Promise<void> { importLegacyHandler(context.slug, context.args, context.options); }
   async backfillReview(context: ReviewWorkflowContext): Promise<void> { await backfillReviewHandler(context.slug, context.args, context.options); }
   async reconcileReview(context: ReviewWorkflowContext): Promise<void> { await reconcileInterruptedHandoffHandler(context.slug, context.args, context.options); }
-  async status(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; if (context.args.includes('--status')) { await showReviewStatus(context.slug, { ...o, readReviewStateFn: o.readReviewStateFn || readReviewState }); return; } const log = o.log || fmt.log.plain; const worktree = o.resolveWorktreeFn || resolveWorktree; const pr = (o.getPrStatusFn || getPrStatus)(missionBranchName(context.slug, process.cwd()), process.cwd()); log(fmt.status('INFO', `Review status for mission: ${fmt.slug(context.slug)}`)); if (pr.exists) {log(pr.raw);} else { log(fmt.status('INFO', 'No active PR found for this mission.')); await this.staticReview(context, worktree); } const persisted = await Promise.resolve((o.readReviewStateFn || readReviewState)(context.slug)); if (persisted) {log(fmt.status('INFO', `Persisted reviewer state: reviewer=${fmt.agent(persisted.reviewer ?? '')} implementer=${fmt.agent(persisted.implementer ?? '')} round=${persisted.round}`));} }
-  private async staticReview(context: ReviewWorkflowContext, worktreeFn: typeof resolveWorktree): Promise<void> {
-    const o = context.options as typeof this._defaults; const log = o.log || fmt.log.plain; const error = o.error || fmt.log.plainError; const worktree = worktreeFn(context.slug) || process.cwd();
-    const port: StaticReviewWorkflowPort = {
-      review: slug => (o.performStaticReviewFn || performStaticReview)(slug, { log, findMissionDir, findCheckpoints, readFileSync: fs.readFileSync, run: o.run || run, resolveWorktree: worktreeFn, rootDir: worktree, missionPath: flagValue(context.args, '--mission') || undefined }),
-      resolveImplementer: slug => { const resolution = (o.resolveTaskFileFn || resolveTaskFile)(slug, worktree); return resolution?.taskFile ? (o.getTaskImplementerFn || getTaskImplementer)(resolution.taskFile) : null; },
-      implementerUnresolved: (slug, findings) => log(fmt.status('WARN', `Static review found ${findings.length} finding(s) but the implementer could not be resolved for ${fmt.slug(slug)} — not re-launching the implementer and not starting the review loop.`)),
-      relaunchImplementer: async (slug, implementer, findings) => { log(`\nStatic review found ${findings.length} finding(s). Re-launching implementer (${fmt.agent(implementer)}) with a targeted fix prompt...`); await (o.startAgentFn || startAgent)('active', { prompt: `Static review of your mission branch found the following issue(s). Fix them and commit, then stop:\n${findings.map(f => `- ${f}`).join('\n')}`, worktree, agent: implementer, slug }); },
-      reportClean: () => log(fmt.status('INFO', 'Static review passed — no findings. Mission branch is clean.')),
-      hasOpenPr: slug => { const pr = (o.getPrStatusFn || getPrStatus)(missionBranchName(slug, process.cwd()), process.cwd()) as Record<string, unknown>; return Boolean(pr.exists) && pr.state === 'open'; },
-      submitForReview: async slug => { log(fmt.status('INFO', 'No open PR found — submitting for review before finalizing static review...')); await (o.submitForReviewFn || submitForReview)(slug, true, o); },
-      postSuccess: async slug => { await (o.postStaticReviewCommentFn || postStaticReviewComment)(slug, formatStaticReviewSuccess(slug), { ...o, rootDir: worktree, log, error }); },
-    };
-    await new StaticReviewUseCase(port).run(context.slug);
+  async status(context: ReviewWorkflowContext): Promise<void> {
+    const o = context.options as typeof this._defaults;
+    await showReviewStatus(context.slug, { ...o, readReviewStateFn: o.readReviewStateFn || readReviewState });
+    const rootDir = (o.resolveWorktreeFn || resolveWorktree)(context.slug) || process.cwd();
+    if ((o.isReviewProviderEnabledFn || isProviderEnabled)(rootDir)) {
+      const pr = (o.getPrStatusFn || getPrStatus)(missionBranchName(context.slug, rootDir), rootDir);
+      (o.log || fmt.log.plain)(pr.raw);
+    }
   }
 }
 

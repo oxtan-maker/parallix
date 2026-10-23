@@ -1,13 +1,13 @@
 // Lead borrows active's owner; interruption must settle that forwarded workflow.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { bundleWorkflowChild } from '../../fixtures/workflow-bundle.js';
+import { workflowBoard, until } from '../../fixtures/workflow-board.js';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 
 
 test('lead SIGINT settles borrowed active work and stops supervision (TASK-2792)', async t => {
-  const { bundleWorkflowChild } = await import('../../fixtures/workflow-bundle.js');
-  const { workflowBoard, until } = await import('../../fixtures/workflow-board.js');
-  const { spawn } = await import('node:child_process');
-  const { once } = await import('node:events');
   const bundle = await bundleWorkflowChild(); t.after(() => bundle.close());
   const fixture = await workflowBoard(1, { cli: bundle.cli }); t.after(() => fixture.close());
   const child = spawn(bundle.cli.command, [...bundle.cli.args, '--fixture-cli-lead', fixture.root, fixture.slugs[0]], {

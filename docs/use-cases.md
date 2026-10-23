@@ -118,6 +118,23 @@ cleared only when the board stops asking about it. Integration items are left fo
 the operator, and defects that belong to the primary branch are escalated rather
 than repaired.
 
+Lead uses bounded judgment before fresh recovery (see `px --help`). It uses the operator's
+configured decision capability, separately from coding-agent sessions. It can
+wait, request evidence, permit the existing recovery path or escalate. Changed
+Mission or operation identity invalidates its proposal. Unchanged evidence does
+not cause another model call. Each Mission has a 120-second judgment window
+from its first consultation in the lead process, including time spent waiting;
+later Missions receive independent windows. At expiry, even unchanged-evidence
+waits escalate with evidence. Exhausted budgets or an unavailable provider
+are reported with evidence in operational history. This judgment has
+no measured live-model advantage yet. It cannot stop or restart workers, change
+contracts, file issues, decide reviews or integrate; an unavailable owned action
+is reported for operator handling. Judgment also assesses whether installed controls
+include the required behavior or recovery needs the mission worktree entry point;
+the recovery agent verifies repository instructions, command help and target before
+using it. Missing evidence requires inspection or escalation, never a guessed
+command or replacement gate.
+
 ## Agent-facing capabilities
 
 The use cases above are written for the operator. These are for the other user

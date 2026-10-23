@@ -17,7 +17,7 @@ import { captureRecoveryEvidence } from '../../src/application/recovery-evidence
 
 // Keep acknowledgment and verified recovery as separate contracts. Each owns a
 // fresh Git/SQLite fixture; neither depends on a preceding test's mutations.
-export function registerRetainedRepairCases(phases: readonly ('acknowledgment' | 'recovery' | 'failed-check')[]): void {
+export function registerRetainedRepairCases(phases: readonly ('acknowledgment' | 'recovery' | 'failed-check' | 'new-blocker')[]): void {
   for (const phase of phases) {
     for (const inferred of [false, true]) {
       it(`running CLI ${phase} with ${inferred ? 'inferred' : 'explicit'} slug (TASK-2759)`, { timeout: 10000 }, async t => {
@@ -27,7 +27,7 @@ export function registerRetainedRepairCases(phases: readonly ('acknowledgment' |
   }
 }
 
-export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 'failed-check', inferred: boolean, t: TestContext): Promise<void> {
+export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 'failed-check' | 'new-blocker', inferred: boolean, t: TestContext, withoutReview = false): Promise<void> {
   const command = phase === 'failed-check' ? 'false' : ':';
   const fixture = await openRepairFixture({ slug: 'task-repair-recovery' });
   const priorConfinement = process.env.PARALLIX_NO_BUBBLEWRAP;
@@ -49,7 +49,7 @@ export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 
   const stopped = requestReviewIntervention(bounced, {
     requestedAt: '2026-10-01T13:00:00Z', requestedBy: 'workflow', reason: 'REPAIR_EXHAUSTED',
   });
-  await store.save({ ...original, status: 'active', rawStatus: 'active', closedAt: null, review: stopped, declaredGates: ['stale-check'] }, missionVersion(await fixture.version()));
+  await store.save({ ...original, status: 'active', rawStatus: 'active', closedAt: null, review: withoutReview ? null : stopped, declaredGates: ['stale-check'] }, missionVersion(await fixture.version()));
   const repair = new RepairCheckpointService(store);
   const opened = await repair.open({ slug: fixture.slug, incidentId: 'interrupted-incident', command, attempt: 3 });
   assert.ok(opened);
@@ -65,7 +65,7 @@ export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 
     await repair.acknowledgeOperatorResume({ operationId: 'seed-acknowledgment', missionId: missionId(fixture.slug),
       capabilities: new Set(['checkpoint:record']), actor: 'px review operator', occurredAt: '2026-10-01T14:00:00Z' });
     const acknowledged = await fixture.load();
-    await store.save({ ...acknowledged, review: resumeReview(acknowledged.review!) }, missionVersion(await fixture.version()));
+    await store.save({ ...acknowledged, review: acknowledged.review ? resumeReview(acknowledged.review) : null }, missionVersion(await fixture.version()));
   }
   const before = await fixture.load();
   const prompts: string[] = [];
@@ -76,14 +76,22 @@ export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 
     launches.push('act-on-review');
     prompts.push(prompt);
     return { invocation: { command: 'fixture-agent', args: [], options: { cwd: worktree } },
-      resultPromise: Promise.resolve({ status: 0, stdout: '', stderr: '' }) };
+      resultPromise: (async () => {
+        if (phase === 'new-blocker') {
+          const result = await repair.report({ operationId: 'new-report', missionId: missionId(fixture.slug),
+            capabilities: new Set(['checkpoint:record']), name: opened.name,
+            blocker: { ...blocker, diagnostic: 'new blocker during repair' } });
+          assert.equal(result.status, 'completed');
+        }
+        return { status: 0, stdout: '', stderr: '' };
+      })() };
   });
   const messages: string[] = [];
   const previousLogger = setLogger({ log: text => { messages.push(String(text)); }, error: text => { messages.push(String(text)); } });
   t.after(() => { setLogger(previousLogger); });
   const invoke = (args: string[]) => runCli(inferred && args[0] === 'review' ? args.filter(arg => arg !== fixture.slug) : args, { baseCwd: fixture.worktree, log: text => { messages.push(text); return text; }, error: text => { messages.push(text); return text; } });
   if (phase === 'acknowledgment') {
-    assert.equal(await runCli(['review', fixture.slug, '--continue'], {
+    assert.equal(await runCli(['review', fixture.slug], {
       operatorInvocation: false, baseCwd: fixture.worktree,
       log: text => { messages.push(text); return text; }, error: text => { messages.push(text); return text; },
     }), 1);
@@ -91,7 +99,7 @@ export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 
     assert.equal(launches.length, 0, 'automatic continuation cannot acknowledge the stop');
     messages.length = 0;
     // An interrupted checkpoint without retained diagnostics must fail before launch.
-    assert.equal(await invoke(['review', fixture.slug, '--continue']), 1, messages.join('\n'));
+    assert.equal(await invoke(['review', fixture.slug]), 1, messages.join('\n'));
     assert.equal(launches.length, 0);
     assert.match(messages.join('\n'), /Retained evidence unavailable/);
     const after = await fixture.load();
@@ -104,18 +112,23 @@ export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 
     assert.equal(acknowledged.acknowledgedBy, 'px review operator');
     assert.ok(Number.isFinite(Date.parse(acknowledged.acknowledgedAt!)));
     assert.deepEqual(after.checkpoints.at(-1)!.goalCheck, before.checkpoints.at(-1)!.goalCheck);
-    assert.equal(after.review?.intervention, null, '--continue clears the operator stop');
+    assert.equal(after.review?.intervention ?? null, null, 'direct entry clears the operator stop');
     assert.equal(after.checkpoints.at(-1)?.repair?.evidenceRecorded, false);
     assert.equal(after.checkpoints.at(-1)?.repair?.verified, false);
-    const priorDecision = after.review?.rounds[0].decision;
-    assert.equal(priorDecision?.kind, 'approved');
-    assert.equal(priorDecision?.kind === 'approved' && priorDecision.revocation?.reason, 'gate failed');
-    assert.equal(reviewStatus(after.review!), 'awaiting-review', 'acknowledgment supplies no approval');
+    if (withoutReview) {
+      assert.equal(after.review, null, 'acknowledgment never fabricates a Review or approval');
+      assert.doesNotMatch(messages.join('\n'), /no valid Review|--push|push.*PR/i);
+    } else {
+      const priorDecision = after.review?.rounds[0].decision;
+      assert.equal(priorDecision?.kind, 'approved');
+      assert.equal(priorDecision?.kind === 'approved' && priorDecision.revocation?.reason, 'gate failed');
+      assert.equal(reviewStatus(after.review!), 'awaiting-review', 'acknowledgment supplies no approval');
+    }
 
     t.diagnostic(`CLI recovery refused missing diagnostics before launch; ${opened.name}/interrupted-incident retained, evidenceRecorded=false, verified=false; operator stop cleared.`);
 
     messages.length = 0;
-    assert.equal(await invoke(['review', fixture.slug, '--start']), 1);
+    assert.equal(await invoke(['review', fixture.slug, '--submit']), 1);
     assert.ok(messages.join('\n').includes('checkpoint evidence is missing'), messages.join('\n'));
     assert.ok(messages.join('\n').includes(opened.name), messages.join('\n'));
     assert.equal(launches.length, 0, 'handoff refusal must not launch a reviewer or repair agent');
@@ -137,7 +150,17 @@ export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 
   assert.equal(captured.ok, true);
   // A no-op agent cannot turn even a passing check into checkpoint proof.
   messages.length = 0;
-  assert.equal(await invoke(['review', fixture.slug, '--continue']), 1, messages.join('\n'));
+  assert.equal(await invoke(['review', fixture.slug]), 1, messages.join('\n'));
+  if (phase === 'new-blocker') {
+    const after = await fixture.load();
+    assert.equal(launches.length, 1, 'new blocker stops the finite repair before another agent');
+    assert.equal(after.checkpoints.at(-1)?.repair?.blocker?.diagnostic, 'new blocker during repair');
+    assert.equal(after.checkpoints.at(-1)?.repair?.verified, false);
+    assert.notEqual(reviewStatus(after.review!), 'approved');
+    assert.match(messages.join('\n'), /new blocker during repair/);
+    t.diagnostic('New blocker retained with diagnostics; exit 1, no reviewer or approval.');
+    return;
+  }
   if (phase === 'failed-check') {
     const after = await fixture.load();
     assert.equal(launches.length, 2, 'failed exact check spends only the finite repair budget');
@@ -170,9 +193,9 @@ export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 
       return { status: 0, stdout: '', stderr: '' };
     })(),
   }));
-  assert.equal(await invoke(['review', fixture.slug, '--continue']), 0, messages.join('\n'));
+  assert.equal(await invoke(['review', fixture.slug]), 0, messages.join('\n'));
   assert.equal((await fixture.load()).checkpoints.at(-1)?.repair?.verified, true);
   assert.deepEqual(launches, ['act-on-review', 'repair', 'review']);
   assert.equal(reviewStatus((await fixture.load()).review!), 'approved');
-  t.diagnostic('After valid evidence, normal --continue passed handoff and launched the independent reviewer; approval came only from its explicit verdict.');
+  t.diagnostic('After valid evidence, inferred review passed handoff and launched the independent reviewer; approval came only from its explicit verdict.');
 }

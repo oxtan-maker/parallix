@@ -1,8 +1,8 @@
 ---
 id: TASK-2801
 title: Honor authoritative Mission state in stale worktree status
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-20 18:49'
 labels:
   - bug

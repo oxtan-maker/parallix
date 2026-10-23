@@ -1,15 +1,15 @@
 import { fixtureMission as typedMissionFixture } from '../../fixtures/mission-builders.js';
 // Historical regression provenance: TASK-2614.
-// TASK-2614 — red-to-green reproduction for review --start and --reconcile-review
+// TASK-2614 — red-to-green reproduction for review and --reconcile-review
 // on a completed native (database-backed) Mission that carries no legacy
 // `missions/<slug>` directory and no Backlog task file marked review.
 //
-// At the mission parent commit a fresh `px review <slug> --start` on such a
+// At the mission parent commit a fresh `px review <slug>` on such a
 // mission fails closed: `ReviewWorkflowAdapter.runLoop` treats the absence of
 // the retired `missions/<slug>` directory as "not a known mission" and stops
 // before the reviewer-launch seam, and `--reconcile-review` fails closed on the
 // absent Backlog task file. After the fix the Mission store is the sole
-// authority, so `--start` reaches the reviewer-launch boundary and
+// authority, so `px review <slug>` reaches the reviewer-launch boundary and
 // `--reconcile-review` rebuilds the missing round-one Review.
 
 import { after, describe, it } from 'node:test';
@@ -103,7 +103,7 @@ interface InvokeStartResult {
   error: string | null;
 }
 
-/** Drive `px review <slug> --start` through the review CLI against a store. */
+/** Drive `px review <slug>` through the review CLI against a store. */
 async function invokeStart(store: SqliteMissionStore, root: string, status: 'active' | 'review'): Promise<InvokeStartResult> {
   let launched = false;
   let error: { value: string | null } = { value: null };
@@ -120,7 +120,7 @@ async function invokeStart(store: SqliteMissionStore, root: string, status: 'act
   });
   const useCase = new ReviewCommandUseCase(adapter);
   try {
-    await useCase.execute([SLUG, '--start'], {});
+    await useCase.execute([SLUG], {});
   } catch {
     // exit() throws; a launch either happened before the throw or the guard
     // rejected the start.
@@ -243,7 +243,7 @@ describe("native Mission review start and recovery", () => {
   it('reproduces TASK-2614 start path: Review null with an existing open PR resumes', async () => {
     // The TASK-2614 shape: a handoff already opened a Forgejo PR, but the
     // round-one Review aggregate was never persisted to the operator store
-    // (Review null). A fresh `px review <slug> --start` must resume. This drives
+    // (Review null). A fresh `px review <slug>` must resume. This drives
     // the application review loop's start transition over the real Mission
     // store, so the open-PR handoff path executes for real — not a copied helper.
     const root = createFileFreeHome(SLUG);
@@ -312,7 +312,7 @@ describe("native Mission review start and recovery", () => {
       await store.save(completedNativeMission(SLUG, root), null);
 
       const { launched, error } = await invokeStart(store, root, 'active');
-      assert.equal(launched, true, 'a fresh --start reaches the reviewer-launch boundary for a known native Mission');
+      assert.equal(launched, true, 'fresh review entry reaches the reviewer-launch boundary for a known native Mission');
       assert.equal(error, null, 'no failure diagnostic is emitted for a known active Mission');
     } finally {
       if (previousHome === undefined) { delete process.env.PARALLIX_HOME; }
@@ -321,7 +321,7 @@ describe("native Mission review start and recovery", () => {
     }
   });
 
-  it('rejects a --start for a Mission that is not in the operator database', async () => {
+  it('rejects review entry for a Mission that is not in the operator database', async () => {
     const root = createFileFreeHome('task-2614-unknown');
     const previousHome = process.env.PARALLIX_HOME;
     process.env.PARALLIX_HOME = path.join(root, 'parallix-home');
@@ -329,7 +329,7 @@ describe("native Mission review start and recovery", () => {
     try {
       const store = await openStore(root);
       // No mission saved: the identity is unknown to the store and carries no
-      // legacy directory, so a fresh --start must fail closed.
+      // legacy directory, so fresh review entry must fail closed.
       const { launched, error } = await invokeStart(store, root, 'active');
       assert.equal(launched, false, 'an unknown Mission never reaches the reviewer-launch seam');
       assert.match(error ?? '', /no valid Review aggregate/);

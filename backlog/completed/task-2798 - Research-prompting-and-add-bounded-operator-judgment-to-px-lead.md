@@ -1,8 +1,8 @@
 ---
 id: TASK-2798
 title: Research prompting and add bounded operator judgment to px lead
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-20 10:59'
 updated_date: '2026-10-20 18:54'
 labels:
@@ -37,14 +37,15 @@ Keep model consultation opt-in, observable and finite: do not consult on unchang
 - [ ] #4 Judgment proposals preserve recorded implementer and reviewer selection exactly; they cannot select, substitute or fall back agent families, manufacture approval/state, weaken gates, replace PRs, launch duplicate work, kill raw PIDs, merge or integrate.
 - [ ] #5 The only delivered outcomes are an existing supported action, escalation, or systematic-defect ownership handling: extend/resume an active blocked Mission for a minor in-scope confirmed main defect, otherwise deduplicate then create/refine/start a bug Mission. Neither path proceeds beyond `integration`.
 - [ ] #6 Invocation, action, token, time and cost budgets are finite and observable; unchanged evidence does not invoke the model; budget exhaustion and evidence insufficiency escalate with recorded evidence.
-- [ ] #7 Evaluate continuous lead, focused fixes and bounded judgment on repeated matched cases with independent outcome checks, including correct continuations, false interventions, review/history/PR preservation, agent-selection preservation, ownership choice, duplicate work/issues, unnecessary gates, latency, tokens and actions.
-- [ ] #8 Retain negative controls; extend owning suites; perform disposable public-CLI validation; update ADR 0059 and live documentation without adding/restoring gates or changing operator-owned budgets.
+- [ ] #7 Retain negative controls; extend owning suites; perform disposable public-CLI validation; update ADR 0059 and live documentation without adding/restoring gates or changing operator-owned budgets.
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
 Current policy clarification: lead works the product board and supported actions. It stops at `integration`, never at merge/publication. It must preserve the Mission's recorded implementer and reviewer; unavailability is evidence for escalation, not permission to substitute an agent. Main-root-cause defects are owned by an already blocked active Mission only when minor and in scope; otherwise they receive a deduplicated bug Mission. Raw process inspection may inform application-owned diagnostics but is never a judgment action boundary. Existing historical observations remain evidence only where their source/revision is still valid.
+
+Operator decision, 2026-10-23: remove the matched actual-recovery evaluation requirement (former SC4, acceptance criterion #7). The pilot's measurement limits remain documented; the study is no longer required to complete this Mission. Earlier checkpoints and review findings retain the prior contract as history.
 <!-- SECTION:NOTES:END -->
 
 ## Comments

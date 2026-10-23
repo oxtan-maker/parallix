@@ -625,3 +625,14 @@ test('status unavailable Mission source does not invent file facts (TASK-2782)',
   assert.ok(lines.includes('Mission status: unknown (projection unavailable)'));
   assert.ok(lines.includes('Last checkpoint: none'));
 });
+
+test('root status renders uncertain worktree authority without stale or cleanup advice (TASK-2801)', () => {
+  const lines: string[] = [];
+  renderStatus(statusResult({ staleWorktrees: [{ slug: 'task-unknown', path: '/unknown',
+    branch: 'refs/heads/mission/task-unknown', taskStatus: 'unknown', uncertainty: 'Mission authority unavailable' }],
+  }), line => lines.push(line));
+  const output = lines.join('\n');
+  assert.match(output, /Worktree state uncertain:.*unknown/);
+  assert.match(output, /Uncertain: Mission authority unavailable; no cleanup advised/);
+  assert.doesNotMatch(output, /Stale worktree:|Cleanup:|recover-landed/);
+});

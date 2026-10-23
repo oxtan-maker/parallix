@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 type Version = [number, number, number];
+type ReleaseEnvironment = { NPM_TOKEN?: string; NODE_AUTH_TOKEN?: string };
 type Command = (command: string, args: string[]) => { status: number | null, stdout: string, stderr: string };
 
 const packageName = '@magnusekdahl/parallix';
@@ -48,21 +49,27 @@ function npmValue(run: Command, spec: string, field: string): string | null {
     if (/\bE404\b|404 Not Found/i.test(`${result.stderr}\n${result.stdout}`)) { return null; }
     throw new Error(`npm view ${spec} ${field} failed: ${result.stderr || result.stdout}`);
   }
-  try { return String(JSON.parse(result.stdout)); } catch { return result.stdout.trim() || null; }
+  try {
+    const value: unknown = JSON.parse(result.stdout);
+    return value === null ? null : String(value);
+  } catch { return result.stdout.trim() || null; }
 }
 
-export function validateTrustedRelease(root: string, trustedSha: string, run: Command = command) {
-  if (process.env.NPM_TOKEN || process.env.NODE_AUTH_TOKEN) {
+export function validateTrustedRelease(root: string, trustedSha: string, run: Command = command, env: ReleaseEnvironment = process.env) {
+  if (env.NPM_TOKEN || env.NODE_AUTH_TOKEN) {
     throw new Error('release must use npm Trusted Publishing without NPM_TOKEN or NODE_AUTH_TOKEN');
   }
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   const version = validateMetadata(manifest);
   const publishedVersion = npmValue(run, `${packageName}@${version}`, 'version');
   const publishedGitHead = publishedVersion === null ? null : npmValue(run, `${packageName}@${version}`, 'gitHead');
+  const latest = npmValue(run, packageName, 'version');
   if (publishedVersion !== null && publishedGitHead !== trustedSha) {
+    if (publishedVersion === version && latest === version && publishedGitHead) {
+      return { version, skipRelease: true as const };
+    }
     throw new Error(`${packageName}@${version} is already published for a different SHA`);
   }
-  const latest = npmValue(run, packageName, 'version');
   if (publishedVersion === null && latest !== null && !isNewerNormalVersion(version, latest)) {
     throw new Error(`${version} is not newer than published normal release ${latest}`);
   }
@@ -74,8 +81,12 @@ export function validateTrustedRelease(root: string, trustedSha: string, run: Co
   return { version, tag, alreadyPublished: publishedVersion !== null, tagExists: tagSha.status === 0 };
 }
 
-export function publishTrustedRelease(root: string, trustedSha: string, run: Command = command) {
-  const release = validateTrustedRelease(root, trustedSha, run);
+export function publishTrustedRelease(root: string, trustedSha: string, run: Command = command, env: ReleaseEnvironment = process.env) {
+  const release = validateTrustedRelease(root, trustedSha, run, env);
+  if (release.skipRelease) {
+    console.log(`No release needed: unchanged version ${release.version} is already the latest npm release, published from an earlier SHA.`);
+    return;
+  }
   required(run, 'npm', ['run', 'prepack']);
   required(run, 'npm', ['run', 'prepublishOnly']);
   if (!release.alreadyPublished) {

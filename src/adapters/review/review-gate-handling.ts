@@ -18,7 +18,7 @@ import { findMissionDir, findMissionArea } from '../filesystem/mission-utils.js'
 import { formatVerificationCommand, isTransientVerificationFailure, resolveEffectiveArea } from '../verification/verification.js';
 import { createActiveVerificationIdentity as createVerificationProofIdentity, readActiveVerificationProof as readReusableVerificationProof, writeActiveVerificationProof as writeReusableVerificationProof } from '../verification/active-verification-proof.js';
 
-/** How long a --continue skip-check waits for an existing disposition. */
+/** How long a continuation skip-check waits for an existing disposition. */
 export const CONTINUE_SKIP_CHECK_TIMEOUT_MS = 10_000;
 
 export interface PreReviewGateResult {

@@ -1,8 +1,8 @@
 ---
 id: TASK-2787
 title: Share OpenCode executable resolution between launch and export
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-19 09:56'
 labels: []
 dependencies: []

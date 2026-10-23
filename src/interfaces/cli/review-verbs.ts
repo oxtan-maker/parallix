@@ -180,7 +180,7 @@ export function createVerdictCommand(ports: ReviewVerbPorts) {
     const { slug, worktree } = slugOf(args, ports);
     const state = await ports.readReviewState(slug, worktree);
     if (!state) {
-      fail(`no review state for ${slug}: start a review with \`px review ${slug} --start\` before recording a verdict`);
+      fail(`no review state for ${slug}: start a review with \`px review ${slug}\` before recording a verdict`);
     }
     const { round } = state;
 

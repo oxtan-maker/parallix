@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { REVIEW_USAGE } from '../../domain/review-cli-options.js';
 
 /**
  * VisualBoard Parallix Coordination CLI
@@ -277,7 +278,7 @@ Usage: px <command> [args]
 ${fmt.bold('Core Commands:')}
   draft [<slug>] [--agent <family>]  Mission setup automation; use --agent to select the draft implementer family.
   active [<slug>] [--implementer <family>] [--reviewer <family>]  Run preflight and launch the execute agent; --implementer selects its family, --reviewer requires that family for automatic review (refused, never replaced, if blocked or unavailable; omitted = automatic selection).
-  review [<slug>] [--verify|--submit|--push [--force]|--comment "<msg>"|--comment-file <path>|--submit-review <outcome> [--message "<msg>"|--message-file <path>]|--start|--continue] [--implementer <a>] [--reviewer <a>] [--focus <f>] [--max-attempts <n>] [--dry-run] [--reset] [--no-gate]
+  review [options]  From the mission worktree, create or resume review and retained repair from Mission state; --status inspects without running review.
   integrate [<slug>] [--dry-run] [--no-integration-gates] [--real-agent codex --real-agent-model gpt-5.6-luna]  Land a reviewed mission into the local integration checkout on main. --no-integration-gates skips integration-time staging/e2e gates; the paired real-agent flags override the Codex integration-gate runner.
 
 ${fmt.bold('Advanced Commands:')}
@@ -308,7 +309,7 @@ ${fmt.bold('Advanced Commands:')}
         The slug is inferred from the branch or worktree; pass --slug <slug> outside it.
         Every write resolves its own current version; pass \`--expected-version <n>\` only to pin it.
   github-publish-status  Show github-publish publication engine status (local head, published head, awaiting/verified-blocked/failed). No-op when the mode is disabled.
-  lead [<slug>...] [--once] [--poll <s>] [--budget <n>] [--dry-run]  Work active, review, and integration missions from the board's needs-attention queue; refined missions stay for operator activation. Press the action each item offers, then give a stuck mission a fresh agent in its worktree. Attempts are per failure; integration items are left for you. Keeps watching until stopped (default poll 60 seconds); --once takes a single pass and exits.
+  lead [<slug>...] [--once] [--poll <s>] [--budget <n>] [--dry-run]  Work active, review, and integration missions from the board's needs-attention queue; refined missions stay for operator activation. Press the action each item offers, then give a stuck mission a fresh agent in its worktree. Attempts are per failure; integration items are left for you. Judgment consults the configured decision provider before fresh recovery, with finite budgets and current-state admission. Keeps watching until stopped (default poll 60 seconds); --once takes a single pass and exits.
   import-legacy [--dry-run] [--existing-only] [--reconcile-checkpoints]  Explicit one-way import of the legacy Backlog Markdown tree into the existing Mission aggregate. Use --existing-only to refresh imported missions without ingesting native missions or future backlog inputs. Commit any refreshed task-body archive before status or audit. The reconciliation flag uses committed provenance to replace disputed historical checkpoint rows; normal imports never overwrite them.
   audit-legacy [--json]   Classify retired workflow files and report a fail-closed GO/NO-GO migration audit with eight counters.
   migrate-legacy-adhoc-ids  Rewrite every legacy \`parallix-adhoc-<…>\` mission id to a unique, repository-scoped \`px-<NNNN>\` id owned by the per-repository counter. Atomic, collision-safe, and rerun-safe; leaves no orphan reference.
@@ -328,6 +329,9 @@ ${fmt.bold('Utility Commands:')}
   version, --version, -v  Print the package version, px path, package root, and Node version.
   shell-init [bash|zsh]   Print the shell integration snippet that cds your terminal into the next mission worktree on transitions.
   review-event <slug> --type <type> --actor <actor> --content <text> [--disposition <disposition>] [--timestamp <stamp>] [--skip-git]  Append a review-thread event for a mission.
+
+${fmt.bold('Review options:')}
+  ${REVIEW_USAGE}
 
 ${fmt.bold('Notes:')}
   - <slug> is optional if it can be inferred from the current branch, directory name, or git worktree.

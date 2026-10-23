@@ -84,6 +84,15 @@ function git(cwd: string, args: string[]): string {
   return result.stdout.trim();
 }
 
+/** Keep setup Git processes real, without forking the large test worker per command. */
+export function seedGit(cwd: string, commands: readonly (readonly string[])[]): string {
+  const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+  const script = commands.map(args => ['git', ...args].map(quote).join(' ')).join('\n');
+  const result = spawnSync('sh', ['-e'], { cwd, input: script, encoding: 'utf8' });
+  assert.equal(result.status, 0, `fixture Git setup: ${result.stderr}`);
+  return result.stdout.trim();
+}
+
 /**
  * An approved mission in the integration lane, the state a human leaves it in
  * before running `px integrate`. `status` lets a caller start from the
@@ -127,15 +136,16 @@ export async function openRepairFixture(options: {
   fs.writeFileSync(path.join(repo, 'config', 'state-map.json'), JSON.stringify({ ready: 'refined', approved: 'ready-for-integration' }));
   fs.writeFileSync(path.join(repo, 'backlog', 'tasks', `${slug} - Fixture.md`),
     `---\nid: ${slug.toUpperCase()}\ntitle: Fixture\nstatus: ready-for-integration\nassignee: [custom]\nlabels: []\n---\n`);
-  git(repo, ['init', '-b', 'main']);
-  git(repo, ['config', 'user.name', 'Fixture']);
-  git(repo, ['config', 'user.email', 'fixture@example.com']);
-  git(repo, ['add', '.']);
-  git(repo, ['commit', '-m', 'fixture']);
-  git(repo, ['worktree', 'add', '-b', `mission/${slug}`, worktree]);
+  seedGit(repo, [
+    ['init', '-b', 'main'],
+    ['config', 'user.name', 'Fixture'],
+    ['config', 'user.email', 'fixture@example.com'],
+    ['add', '.'],
+    ['commit', '-m', 'fixture'],
+    ['worktree', 'add', '-b', `mission/${slug}`, worktree],
+  ]);
   fs.writeFileSync(path.join(worktree, 'feature.txt'), 'approved feature\n');
-  git(worktree, ['add', 'feature.txt']);
-  git(worktree, ['commit', '-m', `${slug}: approved feature`]);
+  seedGit(worktree, [['add', 'feature.txt'], ['commit', '-m', `${slug}: approved feature`]]);
   const approvedRevision = git(worktree, ['rev-parse', 'HEAD']);
 
   // The fixture owns its operator state. Inheriting the worker's

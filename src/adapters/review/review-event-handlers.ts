@@ -4,176 +4,19 @@ import type { ParallixConfiguration } from "../../application/ports/configuratio
  * state, backfill reviews, and reconcile interrupted handoffs.
  */
 
-import * as fs from 'fs';
-import * as os from 'os';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { resolveWorktree } from '../filesystem/mission-utils.js';
 import { resolveTaskFile, getTaskStatus } from '../backlog/backlog.js';
-import { readReviewState, resolveReviewIdentity, backfillReviewFromLegacyState, reconcileInterruptedHandoff } from './review-state.js';
+import { backfillReviewFromLegacyState, reconcileInterruptedHandoff } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { missionId } from '../../domain/mission.js';
-import { type ReviewItemDisposition, type ReviewFindingId } from '../../domain/review.js';
-import { type CreateEventParams, createEvent, ALL_EVENT_TYPES, isValidEventType, shouldMirrorToProvider } from './review-events.js';
 import { flagValue, repeatedFlagValues } from './review-cli-flags.js';
-
-const EVENT_ITEM_LISTS: ReadonlyArray<readonly [RegExp, ReviewItemDisposition['kind']]> = [
-  [/fixed_items:\s*(\[[^\]]*\])/i, 'fixed'],
-  [/pushed_back_items:\s*(\[[^\]]*\])/i, 'pushed_back'],
-  [/parked_items:\s*(\[[^\]]*\])/i, 'parked'],
-];
-
-/**
- * Lift the structured item dispositions and blocked reason out of an event body
- * onto `params`. A malformed list is skipped, never fatal: the event body is
- * agent-authored, and a half-parsed list must not lose the event itself.
- */
-function applyStructuredEventFields(content: string, params: CreateEventParams): void {
-  if (!content.includes('fixed_items:') && !content.includes('fixedItems:')) { return; }
-  const itemDispositions: ReviewItemDisposition[] = [];
-  for (const [pattern, kind] of EVENT_ITEM_LISTS) {
-    try {
-      const match = content.match(pattern);
-      if (!match) { continue; }
-      for (const id of JSON.parse(match[1]) as string[]) {
-        itemDispositions.push({ kind, findingId: id as ReviewFindingId });
-      }
-    } catch (_) { /* a malformed list is skipped, not fatal */ }
-  }
-  const blocked = content.match(/blocked_reason:\s*"([^"]*)"/i);
-  if (blocked) { params.blockedReason = blocked[1]; }
-  if (itemDispositions.length > 0) { params.itemDispositions = itemDispositions; }
-}
-
-/**
- * Parse and validate the `--create-event` flags. Returns null once a diagnostic
- * has been reported and the exit code set, so the caller only has to return.
- */
-function parseCreateEventArgs(
-  args: string[],
-  log: (_msg: string) => void,
-  error: (_msg: string) => void,
-  exit: (_code: number) => void,
-): { eventType: string; actor: string | null; content: string; params: CreateEventParams } | null {
-  const fail = (message: string) => { error(fmt.status('FAIL', message)); exit(1); return null; };
-  const eventType = flagValue(args, '--type');
-  if (!eventType) { return fail('--create-event requires --type <classification>'); }
-  if (!isValidEventType(eventType)) {
-    return fail(`Invalid event type "${eventType}". Valid: ${ALL_EVENT_TYPES.join(', ')}`);
-  }
-
-  const inputFile = flagValue(args, '--input-file');
-  let content = '';
-  if (inputFile) {
-    try {
-      content = fs.readFileSync(inputFile, 'utf8');
-      log(fmt.status('INFO', `Read event content from: ${inputFile}`));
-    } catch (err) {
-      return fail(`Failed to read input file: ${(err as Error).message}`);
-    }
-  }
-
-  const roundRaw = flagValue(args, '--round');
-  const round = roundRaw ? Number.parseInt(roundRaw, 10) : undefined;
-  if (roundRaw && Number.isNaN(round!)) { return fail(`--round must be a number, got "${roundRaw}"`); }
-
-  const actor = flagValue(args, '--actor');
-  const params: CreateEventParams = { content };
-  if (round !== undefined) { params.round = round; }
-  for (const [flag, key] of [['--phase', 'phase'], ['--actor', 'actor'], ['--disposition', 'disposition'], ['--verdict', 'verdict']] as const) {
-    const value = flagValue(args, flag);
-    if (value) { params[key] = value; }
-  }
-  return { eventType, actor, content, params };
-}
-
-export async function createEventHandler(
-  slug: string,
-  args: string[],
-  options: {
-    configuration?: ParallixConfiguration;
-    log?: (_msg: string) => void;
-    error?: (_msg: string) => void;
-    exit?: (_code: number) => never;
-    resolveWorktreeFn?: typeof resolveWorktree;
-    readReviewStateFn?: typeof readReviewState;
-    createEventFn?: typeof createEvent;
-  } = {}
-): Promise<void> {
-  const log = options.log || fmt.log.plain;
-  const error = options.error || fmt.log.plainError;
-  const exit = options.exit || process.exit;
-  const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
-
-  const parsed = parseCreateEventArgs(args, log, error, exit);
-  if (!parsed) { return; }
-  const { eventType, actor, content, params } = parsed;
-
-  const worktree = resolveWorktreeFn(slug) || process.cwd();
-
-  const readReviewStateFn = options.readReviewStateFn || readReviewState;
-  const { identityUser: stateReviewIdentity } = await resolveReviewIdentity(slug, worktree, {
-    readReviewStateFn,
-  });
-  const reviewIdentity = actor || stateReviewIdentity;
-
-  // SC 4: For mirrored event types, a provider identity is required before creating the event.
-  if (shouldMirrorToProvider(eventType) && !reviewIdentity) {
-    error(fmt.status('FAIL', `Cannot determine review identity for a mirrored event. Start the review with px review ${slug} --start, or use --actor.`));
-    exit(1);
-    return;
-  }
-
-  applyStructuredEventFields(content, params);
-
-  // Create the event
-  const createEventFn = options.createEventFn || createEvent;
-  const result = await createEventFn(slug, eventType, params, {
-    worktree,
-    skipGit: false,
-    log,
-    error
-  });
-
-  if (!result.ok) {
-    error(fmt.status('FAIL', `Could not create event: ${result.error}`));
-    exit(1);
-    return;
-  }
-
-  log(fmt.status('PASS', `Created review event at: ${result.path}`));
-}
-
-export function importLegacyHandler(
-  slug: string,
-  args: string[],
-  options: {
-    configuration?: ParallixConfiguration;
-    log?: (_msg: string) => void;
-    error?: (_msg: string) => void;
-    exit?: (_code: number) => never;
-    resolveWorktreeFn?: typeof resolveWorktree;
-  } = {}
-): void {
-  const log = options.log || fmt.log.plain;
-  const _error = options.error || fmt.log.plainError;
-  const _exit = options.exit || process.exit;
-  const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
-
-  const _tmpDir = flagValue(args, '--tmp-dir') || options.configuration?.runtime.tmpDir || os.tmpdir();
-  const _worktree = resolveWorktreeFn(slug) || process.cwd();
-
-  // architecture migration: the legacy /tmp/ artifact import path is removed. Review
-  // events remain file-backed under missions/<slug>/review-events/ until the
-  // architecture migration cutover moves them onto the SQLite Review aggregate.
-  log(fmt.status('INFO', `Legacy /tmp artifact import was removed by architecture migration.`));
-  log(fmt.status('PASS', `Legacy import handler completed for ${slug} (no artifacts to migrate).`));
-}
 
 /**
  * `px review <slug> --backfill-review [--dry-run]`
  *
  * Seed the Review aggregate for a mission handed off before the architecture migration
- * cutover, so `px review --continue` can resume it. Reports and writes nothing
+ * cutover, so `px review` can resume it. Reports and writes nothing
  * when the mission already has a Review or has no legacy state to migrate.
  */
 export async function backfillReviewHandler(
@@ -259,7 +102,7 @@ export async function reconcileInterruptedHandoffHandler(
   }
   const result = await (options.reconcileInterruptedHandoffFn || reconcileInterruptedHandoff)(slug, reconciliationInputs(args), worktree, { missionStore: options.missionStore });
   if (result.outcome === 'reconciled') {
-    log(fmt.status('PASS', `Reconciled round-one review for ${slug}. Re-run px review ${slug} --start to launch the reviewer.`));
+    log(fmt.status('PASS', `Reconciled round-one review for ${slug}. Re-run px review ${slug} to launch the reviewer.`));
     return;
   }
   if (result.outcome === 'already-present') {

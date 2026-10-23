@@ -1,15 +1,8 @@
-// Recovery supervisor contract (TASK-2489, ADR 0059): the fleet-level recovery supervisor and `px lead`.
-//
-// What the supervisor reacts to is the board's own "needs your attention" queue
-// — the same list the web board shows a human. These tests drive it with a
-// scripted queue: no filesystem, no Forgejo, no agent launch. What is pinned
-// here is that it presses the action the board advertises, never presses
-// integrate, recovers only what the board's own action could not clear, and
-// counts its attempts per failure.
+// Recovery supervisor and px lead contract (TASK-2489, ADR 0059): scripted board
+// attention drives supported actions, bounded recovery and human-only integration.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-
 import {
   attentionDetail,
   failureFingerprint,
@@ -32,18 +25,14 @@ import type { BoardLane, CommandAvailability, MissionCard } from '../../../src/a
 import { agentFamily } from '../../../src/domain/agents.js';
 import { missionId, missionLabels } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
-
 const MISSION = 'task-2489-stuck';
-
 const GATE_FAILED: AttentionReason = { kind: 'gate-failed', detail: 'Gate failed' };
-
 /** A cancellable pause, shaped like the production polling timer. */
 function pause(milliseconds: number): Poll {
   let timer: NodeJS.Timeout | undefined;
   const elapsed = new Promise<void>((resolve) => { timer = setTimeout(resolve, milliseconds); });
   return { elapsed, cancel: () => { if (timer) { clearTimeout(timer); } } };
 }
-
 function item(overrides: Partial<AttentionObservation> = {}): AttentionObservation {
   return {
     missionId: MISSION,
@@ -56,7 +45,13 @@ function item(overrides: Partial<AttentionObservation> = {}): AttentionObservati
     ...overrides,
   };
 }
-
+const fixtureJudgment: NonNullable<SupervisorPort['judgeRecovery']> = async missionId => {
+      const facts = { missionId, version: 1, operationId: null, progress: item().progress, lane: 'active', working: false, evidence: [{ ref: 'fixture', summary: 'fixture' }] };
+      return { action: 'continue', summary: 'Verify mission worktree controls.', admission: {
+        envelope: { ...facts, observedAt: 0, allowedActions: ['continue'] },
+        proposal: { missionId, version: 1, operationId: null, progress: facts.progress, evidenceRefs: ['fixture'], action: 'continue', summary: 'fixture' },
+      } };
+};
 interface Recorder {
   readonly port: SupervisorPort;
   readonly ran: Array<[string, string]>;
@@ -66,7 +61,6 @@ interface Recorder {
   /** Attention-queue reads: one per pass. */
   readonly reads: () => number;
 }
-
 /**
  * A board driven by a script of attention queues, one entry per pass. The last
  * entry repeats, so a test says exactly what the board reports at each pass.
@@ -83,6 +77,7 @@ function board(passes: Array<readonly AttentionObservation[]>, options: {
   let pass = -1;
   const current = (): readonly AttentionObservation[] => passes[Math.min(Math.max(pass, 0), passes.length - 1)];
   const port: SupervisorPort = {
+    judgeRecovery: fixtureJudgment,
     attention: async () => {
       pass += 1;
       return current();
@@ -114,7 +109,6 @@ function board(passes: Array<readonly AttentionObservation[]>, options: {
   };
   return { port, ran, recoveries, released, waits, reads: () => pass + 1 };
 }
-
 function resultFor(results: readonly MissionSupervision[], mission = MISSION): MissionSupervision {
   const found = results.find((result) => result.missionId === mission);
   assert.ok(found, `${mission} was supervised`);
@@ -584,7 +578,7 @@ test('px lead --once reports a single pass without treating pending recovery as 
 
 test('px lead presses commands that do work, never a status print or integrate', () => {
   assert.deepEqual(leadInvocation('active:execute', 'task-a'), { command: 'active', args: ['task-a'] });
-  assert.deepEqual(leadInvocation('review:submit', 'task-a'), { command: 'review', args: ['task-a', '--continue'] });
+  assert.deepEqual(leadInvocation('review:submit', 'task-a'), { command: 'review', args: ['task-a'] });
   assert.equal(leadInvocation('integrate:merge', 'task-a'), null);
 });
 
@@ -719,12 +713,10 @@ test('lead starts long forward workflows without blocking fleet supervision', ()
   );
   assert.match(
     composition,
-    /createLeadCommand\(createLeadSupervisorPort\(services, forwards, \{ rootDir, scope, active, registry, runPublicCli: run, launchRecovery \}\)\)\(args\); \}\s*finally \{ await Promise\.allSettled\(forwards\); \}/,
+    /supervisor = createLeadSupervisorPort\(services, forwards, \{ rootDir, scope, active, registry, runPublicCli: run, launchRecovery, configuration \}\);\s*let result: number;\s*try \{ result = await createLeadCommand\(supervisor\)\(args\); \}\s*finally \{ await Promise\.allSettled\(forwards\); \}/,
     'lead settles the forwards it started only after its fleet loop returns, before its graph closes',
   );
 });
-
-// ── Regressions from review round 7 ─────────────────────────────────────────
 
 test('a pending agent does not stop the queue from being read for new missions', async () => {
   // `task-slow`'s recovery agent only finishes once `task-appeared` — which
@@ -745,6 +737,7 @@ test('a pending agent does not stop the queue from being read for new missions',
   ];
   const ran: string[] = [];
   const port: SupervisorPort = {
+    judgeRecovery: fixtureJudgment,
     attention: async () => { reads += 1; return queue(); },
     missionExists: async () => true,
     liveness: async (mission) => {
@@ -784,6 +777,7 @@ test('a live or claimed mission is polled, not spun on', async () => {
   const ran: string[] = [];
   const current = (): AttentionObservation[] => (elapsedPolls < 8 ? [live] : []);
   const port: SupervisorPort = {
+    judgeRecovery: fixtureJudgment,
     attention: async () => { reads += 1; return current(); },
     missionExists: async () => true,
     liveness: async () => ({ working: current()[0]?.working ?? false, detail: current()[0]?.workingDetail ?? null }),
@@ -804,8 +798,6 @@ test('a live or claimed mission is polled, not spun on', async () => {
   assert.ok(waits.length >= 1, 'and every pass that moved nothing waited out the interval');
   assert.deepEqual([...new Set(waits)], [5], 'for the configured interval');
 });
-
-// ── Regressions from review round 8 ─────────────────────────────────────────
 
 test('the polling pause keeps the process alive, and the loop cancels the one it drops', async () => {
   // An unreferenced timer lets Node exit while the supervisor is waiting on
@@ -862,6 +854,7 @@ test('liveness is read per mission, not by rebuilding the queue', async () => {
   let livenessReads = 0;
   const stuck = item();
   const port: SupervisorPort = {
+    judgeRecovery: fixtureJudgment,
     attention: async () => { queueReads += 1; return queueReads <= 3 ? [stuck] : []; },
     missionExists: async () => true,
     liveness: async () => { livenessReads += 1; return { working: false, detail: null }; },
@@ -874,7 +867,7 @@ test('liveness is read per mission, not by rebuilding the queue', async () => {
   const results = await superviseFleet(port, { budget: 1, pollMs: 1 });
 
   assert.equal(queueReads, 4, 'one queue read per pass, and never one to answer a liveness question');
-  assert.equal(livenessReads, 2, 'liveness is asked before the dispatch and before the launch, without touching the queue');
+  assert.equal(livenessReads, 3, 'liveness is asked before dispatch, recovery and after judgment, without touching the queue');
   assert.equal(resultFor(results).outcome, 'escalated');
 });
 
@@ -916,4 +909,92 @@ test('interrupted supervision wakes its poll and refuses a late action (TASK-279
   await superviseFleet(sleepingPort, { keepWatching: true, signal: interruption2.signal });
   assert.equal(cancelled, true);
   assert.equal(sleeping.reads(), 1);
+});
+
+for (const action of ['wait', 'request-evidence', 'continue', 'escalate'] as const) {
+  test(`bounded judgment ${action} preserves recovery ownership (TASK-2798)`, async () => {
+    const recorder = board([[item()], [item()], []]);
+    let consultations = 0;
+    const facts = { missionId: MISSION, version: 1, operationId: null, progress: item().progress, lane: 'active', working: false, evidence: [{ ref: 'fixture', summary: 'fixture' }] };
+    const admission = { envelope: { ...facts, observedAt: 0, allowedActions: ['continue'] as const },
+      proposal: { missionId: MISSION, version: 1, operationId: null, progress: facts.progress, evidenceRefs: ['fixture'], action: 'continue' as const, summary: 'fixture' } };
+    const port: SupervisorPort = { ...recorder.port, judgeRecovery: async () => {
+      consultations++;
+      return { action, summary: 'fixture decision; mission:task-2489-stuck@1', ...(action === 'continue' ? { admission } : {}) };
+    } };
+    await superviseFleet(port, { pollMs: 1 });
+    assert.equal(consultations, 1);
+    assert.equal(recorder.recoveries.length, action === 'continue' ? 1 : 0);
+    if (action === 'continue') { assert.match(recorder.recoveries[0].instruction, /Control assessment: fixture decision/); }
+    assert.equal(recorder.released.length, 1, 'claim released on every decision');
+    assert.deepEqual(recorder.ran, [[MISSION, 'active:execute']], 'only existing board dispatch');
+  });
+}
+test('missing judgment escalates and progress racing judgment prevents duplicate work (TASK-2798)', async () => {
+  const missing = board([[item()], [item()], []]);
+  const results = await superviseFleet({ ...missing.port, judgeRecovery: undefined }, { pollMs: 1 });
+  assert.equal(resultFor(results).outcome, 'escalated');
+  assert.equal(missing.recoveries.length, 0);
+  const racing = board([[item()], [item()], []]);
+  let live = false;
+  await superviseFleet({ ...racing.port, liveness: async () => ({ working: live, detail: null }),
+    judgeRecovery: async () => { live = true; return { action: 'continue', summary: 'racing' }; },
+    attention: async () => { const q = await racing.port.attention(); if (!q.length) { live = false; } return q; },
+  }, { pollMs: 1 });
+  assert.equal(racing.recoveries.length, 0);
+});
+
+test('continuous supervision escalates model and unchanged-evidence waits at the Mission deadline (TASK-2798)', async () => {
+  const { OperatorJudgmentService } = await import('../../../src/application/operator-judgment.js');
+  const recorder = board(Array.from({ length: 8 }, () => [item()]));
+  let now = 0; let calls = 0; const events: import('../../../src/application/ports/operator-judgment.js').OperatorDecisionEvent[] = [];
+  const service = new OperatorJudgmentService({ propose: async e => {
+    calls++;
+    return { missionId: e.missionId, version: e.version, operationId: e.operationId,
+      progress: e.progress, action: 'wait', summary: 'Wait for evidence', evidenceRefs: ['fixture:current'] };
+  } }, { read: async missionId => ({ missionId, version: 1, operationId: null, progress: 'unchanged',
+    lane: 'active', working: false, evidence: [{ ref: 'fixture:current', summary: 'Frozen evidence' }] }),
+    now: () => now, record: e => { events.push(e); } });
+  const results = await superviseFleet({ ...recorder.port, judgeRecovery: async mission => {
+    const decision = await service.judge(mission); now += 60_000; return decision;
+  } }, { pollMs: 1 });
+  assert.equal(resultFor(results).outcome, 'escalated');
+  assert.match(resultFor(results).summary, /budget/);
+  assert.deepEqual(events.map(e => e.action), ['wait', 'wait', 'escalate']);
+  assert.deepEqual(events.at(-1)!.evidenceRefs, ['fixture:current']);
+  assert.equal(calls, 1);
+  assert.equal(recorder.recoveries.length, 0);
+  assert.equal(recorder.released.length, 3);
+});
+
+for (const failure of ['read', 'record'] as const) {
+  test(`judgment authority ${failure} failure settles once instead of repeating recovery 1/1 (TASK-2798)`, async () => {
+    const { OperatorJudgmentService } = await import('../../../src/application/operator-judgment.js');
+    const fleet = board([[item()], [item()], [item()], []]);
+    let reads = 0;
+    const service = new OperatorJudgmentService({ propose: async e => ({ missionId: e.missionId,
+      version: e.version, operationId: e.operationId, progress: e.progress,
+      evidenceRefs: e.evidence.map(x => x.ref), action: 'wait', summary: 'wait' }) }, {
+      now: () => 240_000,
+      read: async () => { reads++; if (failure === 'read') { throw new Error('authority unavailable'); }
+        return { missionId: MISSION, version: 1, operationId: null, progress: 'head', lane: 'active', working: false,
+          evidence: [{ ref: 'mission:fixture@1', summary: 'fixture' }] }; },
+      record: () => { if (failure === 'record') { throw new Error('history unavailable'); } },
+    });
+    const results = await superviseFleet({ ...fleet.port, judgeRecovery: mission => service.judge(mission) },
+      { budget: 1, pollMs: 1 });
+    assert.equal(resultFor(results).outcome, 'escalated');
+    assert.equal(fleet.recoveries.length, 0);
+    assert.equal(fleet.released.length, 1);
+    assert.ok(reads <= 2, 'the same unavailable authority is not retried indefinitely');
+  });
+}
+test('judged continuation without admitted identity fails closed (TASK-2798)', async () => {
+  const fleet = board([[item()], [item()], []]);
+  const results = await superviseFleet({ ...fleet.port,
+    judgeRecovery: async () => ({ action: 'continue', summary: 'missing admission' }),
+  }, { pollMs: 1 });
+  assert.equal(resultFor(results).outcome, 'escalated');
+  assert.match(resultFor(results).summary, /missing its admitted identity/);
+  assert.equal(fleet.recoveries.length, 0);
 });

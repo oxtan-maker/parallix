@@ -17,3 +17,6 @@ export type ReboundStartAgent = (
   _step: string,
   _options: ReboundLaunchOptions,
 ) => Promise<{ agent?: string | null; result?: { status?: number | null; invalidContract?: InvalidContractBlocker } | null } | null | undefined>;
+
+/** Rechecked after preparation/capacity waits, immediately before a provider launch. */
+export interface AgentLaunchAdmission { assert(): Promise<void> }

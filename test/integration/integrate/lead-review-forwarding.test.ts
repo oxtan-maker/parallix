@@ -5,13 +5,13 @@ import { setCommandPathProbe, setLauncherHealthProbe, setWorkflowLaunchPort } fr
 import { run } from '../../../src/composition/create-cli.js';
 import { openRepairFixture } from '../../lib/integration-repair-fixture.js';
 
-test('task-2620 AC1: px lead forwards an undecided review round to review --continue and records no approval', async (t) => {
+test('task-2620 AC1: px lead forwards an undecided review round to review and records no approval', async (t) => {
   const fixture = await openRepairFixture({ slug: 'task-9620', state: 'undecided-review' });
   t.after(() => fixture.close());
   const atReviewerLaunch: Array<{ approved: boolean; status: string }> = [];
   setCommandPathProbe(() => '/fixture-agent');
   setLauncherHealthProbe(() => ({ ok: true as const }));
-  // The configured reviewer reached through `review --continue` is the only
+  // The configured reviewer reached through `review` is the only
   // actor that decides. It records what lead left behind, then approves
   // through the same `verdict` command a human reviewer would run.
   setWorkflowLaunchPort(({ prompt, worktree }: { prompt: string; worktree?: string }) => ({
@@ -32,7 +32,7 @@ test('task-2620 AC1: px lead forwards an undecided review round to review --cont
   await run(['lead', '--once', '--budget', '0', fixture.slug], { baseCwd: fixture.worktree, log: () => '', error: () => '' });
   const mission = await fixture.load();
 
-  assert.deepEqual(atReviewerLaunch, [{ approved: false, status: 'review' }], 'lead forwarded to review --continue once, with no approval written before the reviewer ran');
+  assert.deepEqual(atReviewerLaunch, [{ approved: false, status: 'review' }], 'lead forwarded to review once, with no approval written before the reviewer ran');
   const approvals = mission.review!.rounds.filter((round) => round.decision?.kind === 'approved');
   assert.equal(approvals.length, 1, 'the only approval is the one the forwarded reviewer recorded');
   assert.notEqual(mission.status, 'done', 'lead did not integrate');

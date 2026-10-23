@@ -46,8 +46,13 @@ export async function stopLaunchedChild(child: { pid?: number } | null): Promise
 }
 
 
+async function authorizeLaunch(slug: string | null, admission: StartAgentLoopDeps['launchAdmission']): Promise<void> {
+  await authorizeMissionWrite(slug ?? '');
+  await admission?.assert();
+}
+
 /** Run the launcher, announce the invocation, and await the result. */
-export async function launchPrepared(prepared: PreparedLaunch, deps: Pick<StartAgentLoopDeps, 'step' | 'log' | 'slug' | 'unrefChild' | 'configuration' | 'worktree' | 'role' | 'onLaunch'>, chosen: string, attempt: number): Promise<{ invocation: AgentInvocation | null | undefined; result: AgentProcessResult }> {
+export async function launchPrepared(prepared: PreparedLaunch, deps: Pick<StartAgentLoopDeps, 'step' | 'log' | 'slug' | 'unrefChild' | 'configuration' | 'worktree' | 'role' | 'onLaunch' | 'launchAdmission'>, chosen: string, attempt: number): Promise<{ invocation: AgentInvocation | null | undefined; result: AgentProcessResult }> {
   const { step, log, slug, unrefChild } = deps;
   const { launcher, agentEnv, resume, sessionId, model, watchdogConfig, customReservation, effectiveProfile, nativeSandbox, launchSessionMarkerPort, sessionRole, actualPrompt } = prepared;
   let invocation: AgentInvocation | null | undefined;
@@ -67,7 +72,7 @@ export async function launchPrepared(prepared: PreparedLaunch, deps: Pick<StartA
   // Durable run history and the optional tmux terminal host (TASK-2643).
   const runSession = openRunSession({ worktree: deps.worktree, slug, role: sessionRole ?? deps.role ?? step, family: chosen, attempt, log: (line) => log(line) }, { configuration: deps.configuration });
   try {
-    await authorizeMissionWrite(slug ?? '');
+    await authorizeLaunch(slug, deps.launchAdmission);
     const launchResult = withSandboxProfile(effectiveProfile, () => launcher({
       configuration: deps.configuration,
       prompt: actualPrompt,

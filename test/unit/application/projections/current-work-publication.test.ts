@@ -276,9 +276,7 @@ function makeReviewWorkflow(ran: string[]) {
     verify: operation('verify'),
     submit: operation('submit'),
     push: operation('push'),
-    start: operation('start'),
-    continue: operation('continue'),
-    resume: operation('resume'),
+    enter: operation('enter'),
     comment: operation('comment'),
     readComments: operation('readComments'),
     submitReview: operation('submitReview'),
@@ -291,13 +289,13 @@ function makeReviewWorkflow(ran: string[]) {
   };
 }
 
-test('px review --start brackets the review loop with review-phase current work', async () => {
+test('px review brackets the review loop with review-phase current work', async () => {
   const { repo, appended } = inMemoryOperationalHistory();
   const ran: string[] = [];
   await new ReviewCommandUseCase(makeReviewWorkflow(ran), new CurrentWorkRecorder(repo, { processId: 9 }))
-    .execute(['task-2370', '--start']);
+    .execute(['task-2370']);
 
-  assert.deepEqual(ran, ['start']);
+  assert.deepEqual(ran, ['enter']);
   assert.deepEqual(published(appended).map((fact) => [fact.phase, fact.state]), [
     ['review', 'running'],
     ['review', 'ended'],
@@ -308,14 +306,14 @@ test('px review republishes current work with the family that actually launched'
   const { repo, appended } = inMemoryOperationalHistory();
   const workflow = {
     ...makeReviewWorkflow([]),
-    start: async (context) => {
+    enter: async (context) => {
       const launched = context.options.onAgentLaunched;
       assert.equal(typeof launched, 'function');
       if (typeof launched === 'function') { await launched('custom', 'review'); }
     },
   } satisfies NonNullable<ConstructorParameters<typeof ReviewCommandUseCase>[0]>;
   await new ReviewCommandUseCase(workflow, new CurrentWorkRecorder(repo, { processId: 9 }))
-    .execute(['task-2370', '--start']);
+    .execute(['task-2370']);
 
   assert.deepEqual(published(appended).map((fact) => [fact.phase, fact.agent, fact.state]), [
     ['review', null, 'running'],
@@ -338,10 +336,10 @@ test('a failing review operation stops claiming work and keeps its reason', asyn
   const { repo, appended } = inMemoryOperationalHistory();
   const workflow = {
     ...makeReviewWorkflow([]),
-    start: async () => { throw new Error('review loop failed'); },
+    enter: async () => { throw new Error('review loop failed'); },
   } satisfies NonNullable<ConstructorParameters<typeof ReviewCommandUseCase>[0]>;
   await assert.rejects(
-    new ReviewCommandUseCase(workflow, new CurrentWorkRecorder(repo, { processId: 9 })).execute(['task-2370', '--start']),
+    new ReviewCommandUseCase(workflow, new CurrentWorkRecorder(repo, { processId: 9 })).execute(['task-2370']),
     /review loop failed/,
   );
   // The mission stops being WORKING either way; publishing `blocked` keeps the
@@ -552,14 +550,14 @@ describe("Workflow current work follows launches —", () => {
     await new ReviewCommandUseCase({
       preflight: (args: string[]) => ({ slug: SLUG, args, options: {} }),
       verify: operation(), submit: operation(), push: operation(),
-      start: async (context: ReviewWorkflowContext) => {
+      enter: async (context: ReviewWorkflowContext) => {
         await (context.options.onAgentLaunched as (_agent: string, _phase: AgentLaunchPhase) => Promise<void>)('qwen', 'review');
       },
-      continue: operation(), resume: operation(), comment: operation(), readComments: operation(),
+      comment: operation(), readComments: operation(),
       submitReview: operation(), close: operation(),
-      status: operation(), createEvent: operation(), backfillReview: operation(),
-      reconcileReview: operation(), importLegacy: operation(),
-    }, new CurrentWorkRecorder(viaReview.repo, { processId: 7 })).execute([SLUG, '--start']);
+      status: operation(), backfillReview: operation(),
+      reconcileReview: operation(),
+    }, new CurrentWorkRecorder(viaReview.repo, { processId: 7 })).execute([SLUG]);
 
     const launchFact = (entries: readonly OperationalHistoryEntry[]) =>
       published(entries).filter((fact) => fact.agent === 'qwen').map((fact) => [fact.phase, fact.agent, fact.summary]);

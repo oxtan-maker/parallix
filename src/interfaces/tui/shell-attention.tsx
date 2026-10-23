@@ -33,7 +33,7 @@ export function attentionCommand(card: MissionCard, reason: { kind: string }, ac
     case 'integrate-lane':
       return `px integrate ${card.id}`;
     case 'review-lane':
-      return `px review ${card.id}`;
+      return 'px review';
     case 'gate-failed':
     case 'blocking':
       return `px active ${card.id}`;

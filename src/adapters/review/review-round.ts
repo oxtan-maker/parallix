@@ -180,7 +180,7 @@ function requestedChangesRejection(slug: string, review: Review, findings: reado
  * `px integrate` (TASK-2397).
  */
 function approvalLaneDiagnostic(slug: string, status: string): string {
-  return `The Mission is ${status}, not review; the review → integration boundary cannot complete from ${status}. Open the round with \`px review ${slug} --start\` so the Mission returns to review, or recover an already-approved round with \`px integrate ${slug}\`.`;
+  return `The Mission is ${status}, not review; the review → integration boundary cannot complete from ${status}. Open the round with \`px review ${slug}\` so the Mission returns to review, or recover an already-approved round with \`px integrate ${slug}\`.`;
 }
 
 /**

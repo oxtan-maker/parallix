@@ -83,12 +83,6 @@ async function reportFailedStartHandoff(start: Start, implementer: string, hando
     await ports.state.persist(recorded);
     return;
   }
-  if (ports.provider && !ports.provider.openPullRequest()) {
-    out.emit({ kind: 'missing-review-pr', branch: ports.branch });
-    if (handoff.error) { out.emit({ kind: 'handoff-diagnostic', error: handoff.error }); }
-    out.emit({ kind: 'push-guidance', slug: slug });
-    return;
-  }
   out.emit({ kind: 'handoff-failed', branch: ports.branch, error: handoff.error });
   out.emit({ kind: 'start-guidance', slug: slug });
 }
@@ -122,7 +116,7 @@ async function performStartHandoff(start: Start, implementer: string, ports: Rev
   const healed = ports.provider.openPullRequest();
   if (!healed) {
     out.emit({ kind: 'missing-review-pr', branch: ports.branch });
-    out.emit({ kind: 'push-guidance', slug: slug });
+    out.emit({ kind: 'start-guidance', slug: slug });
     out.exit(1);
     return null;
   }
@@ -132,7 +126,7 @@ async function performStartHandoff(start: Start, implementer: string, ports: Rev
 
 /**
  * Decide whether this start runs the handoff. An open PR alone does not prove
- * the handoff finished writing the Review; a --continue re-runs it only when
+ * the handoff finished writing the Review; a continuation re-runs it only when
  * the Mission is still active with a review awaiting its next round.
  */
 async function prepareStart(start: Start, skipHandoff: boolean, implementer: string, ports: ReviewLoopPorts, out: Output): Promise<{ handoffRan: boolean; pullRequest: PullRequestReference | null } | null> {
@@ -214,18 +208,24 @@ async function runRound(context: LoopContext, attempt: number): Promise<'stop' |
   return await runImplementerPhase(context, round, reviewed.reviewState);
 }
 
+async function resetAtEntry(request: ReviewLoopRequest, persisted: ReviewLoopState | null, ports: ReviewLoopPorts, out: Output): Promise<ReviewLoopState | null> {
+  if (!request.reset || request.dryRun || !await ports.state.reset()) { return persisted; }
+  out.emit({ kind: 'review-reset', slug: request.slug });
+  return await ports.state.read();
+}
+
 async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopPorts, restarted = false): Promise<void> {
   const { slug } = request;
   const out: Output = { emit: event => ports.output.emit(event), exit: code => ports.output.exit(code) };
   const start = reviewStart(request);
   const maxAttempts = request.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
-  if (request.reset && await ports.state.reset()) { out.emit({ kind: 'review-reset', slug: slug }); }
   let persisted = await ports.state.read();
   if (persisted?.phase !== 'approved' && persisted?.metadata.humanEscalationReason) {
-    ports.output.error(`Review entry blocked for ${slug}: ${persisted.metadata.humanEscalationReason}. Operator recovery: px review ${slug} --continue.`);
+    ports.output.error(`Review entry blocked for ${slug}: ${persisted.metadata.humanEscalationReason}. Operator recovery: px review ${slug}.`);
     out.exit(1);
     return;
   }
+  persisted = await resetAtEntry(request, persisted, ports, out);
   const implementer = await resolveImplementer(slug, request.implementer, persisted, ports, out, start.dryRun);
   if (stopsOnMissingTaskFile(slug, ports, out)) { return; }
   if (await resumePendingRepair(request, start, persisted, implementer, ports)) { return; }
@@ -332,7 +332,7 @@ async function continuesActiveHandoff(start: Start, ports: ReviewLoopPorts): Pro
 }
 
 async function resumePendingRepair(request: ReviewLoopRequest, start: Start, persisted: ReviewLoopState | null, implementer: string, ports: ReviewLoopPorts): Promise<boolean> {
-  if (!start.isContinue || !ports.missionStore) { return false; }
+  if (!ports.missionStore) { return false; }
   const loaded = await ports.missionStore.load(missionId(start.slug));
   if (loaded.kind !== 'found' || loaded.mission.status !== 'active' || !pendingRetainedRepair(loaded.mission, ports.worktree)) { return false; }
   // Successful exact-check recovery rejoins the historical start/handoff path.

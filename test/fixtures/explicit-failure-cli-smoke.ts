@@ -54,13 +54,13 @@ try {
     const unexpected = () => { throw new Error('unexpected workflow operation'); };
     const workflow: ReviewWorkflowPort = {
       preflight: (args, options = {}) => ({ slug: 'disposable-smoke', args, options }),
-      start: async () => runReviewLoop({ slug: 'disposable-smoke', implementer: 'codex', reviewer: 'claude' }, fake.ports),
-      verify: unexpected, submit: unexpected, push: unexpected, continue: unexpected,
-      resume: unexpected, comment: unexpected, readComments: unexpected,
-      submitReview: unexpected, close: unexpected, status: unexpected, createEvent: unexpected,
-      backfillReview: unexpected, reconcileReview: unexpected, importLegacy: unexpected,
+      enter: async () => runReviewLoop({ slug: 'disposable-smoke', implementer: 'codex', reviewer: 'claude' }, fake.ports),
+      verify: unexpected, submit: unexpected, push: unexpected,
+      comment: unexpected, readComments: unexpected,
+      submitReview: unexpected, close: unexpected, status: unexpected,
+      backfillReview: unexpected, reconcileReview: unexpected,
     };
-    await main(['review', 'disposable-smoke', '--start'], {
+    await main(['review', 'disposable-smoke'], {
       runtime: resolveConfiguration({ PARALLIX_HOME: path.join(root, 'operator') }).runtime,
       cwdFn: () => worktree, commandFns: { review: createReviewCommand(new ReviewCommandUseCase(workflow)) },
       exitFn: unexpected,

@@ -216,7 +216,7 @@ function committedRevision(tree: ReturnType<typeof captureFinalIntegrationTree>)
 
 function reportFreshReviewRoute(opts: IntegrationGateRouteOptions, invalidation: ApprovalInvalidation, repairedLabel: string, log: (_msg: string) => void, error: (_msg: string) => void): void {
   if (!(opts.reReviewFollows && invalidation.ok)) {
-    error(fmt.status('INFO', `${opts.slug} must go back through review: run px review ${opts.slug} --continue to review the repaired revision ${repairedLabel}; an approval returns it to the integration lane.`));
+    error(fmt.status('INFO', `${opts.slug} must go back through review: run px review ${opts.slug} to review the repaired revision ${repairedLabel}; an approval returns it to the integration lane.`));
   }
   // TASK-2550: the consumer (the integration gate step) now resumes the
   // review of the repaired revision automatically; the route no longer tells
@@ -399,6 +399,6 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
   if (outcome.outcome === 'fixed') {
     return routeFixedIntegrationGateRebound({ opts, failedGate, outcome, rebounds, approvedRevision, preRepairRevision, captureFinalTreeFn, invalidateApprovalFn, initialInvalidation, log, error });
   }
-  error(fmt.status('FAIL', `Integration gate ${failedGate.key} still fails for ${slug} after ${rebounds} repair(s) within this integrate's bounded budget. Address the failed gate, then run px integrate ${slug} again for a fresh repair budget, or px review ${slug} --continue once the gate is fixed.`));
+  error(fmt.status('FAIL', `Integration gate ${failedGate.key} still fails for ${slug} after ${rebounds} repair(s) within this integrate's bounded budget. Address the failed gate, then run px integrate ${slug} again for a fresh repair budget, or px review ${slug} once the gate is fixed.`));
   return { route: 'exhausted', rebounds, diagnostic: outcome.diagnostic };
 }

@@ -10,11 +10,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { spawnSync, SpawnSyncReturns } from 'node:child_process';
 import { mkdtemp } from '../../helpers/temp-dir.js';
 import test from 'node:test';
 import { seedMissionDatabase } from '../../fixtures/review-state-db.js';
-import { SOURCE_PX, pxNodeArgs, resolvePxEntryLoader, type PxEntryLoader } from '../../lib/px-entry.js';
+import { PREBUILT_PX_ENTRY, SOURCE_PX, pxNodeArgs, resolvePxEntryLoader, type PxEntryLoader } from '../../lib/px-entry.js';
 const major = Number(process.versions.node.split('.')[0]);
 if (major < 24) {
   console.warn(`px-runner tests require Node >= 24 (got ${process.version}); skipping all tests.`);
@@ -149,13 +150,28 @@ test('px --version reports package version and executing runtime path', () => {
 });
 
 test('px version is equivalent to --version', () => {
-  const result = runPx(['version']);
-  if (skipIfSandboxBlocked(result)) return;
-  const output = `${result.stdout}${result.stderr}`;
+  const coverage = mkdtemp('px-version-coverage-');
+  try {
+    // Also model an inherited preload: it must not stop a source entry's
+    // collector when this suite runs outside the prebuilt lane.
+    const preload = pathToFileURL(path.join(repoRoot, 'test/lib/prebuilt-cli-runtime.mjs')).href;
+    const result = runPx(['version'], { env: { NODE_V8_COVERAGE: coverage,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${preload}` } });
+    if (skipIfSandboxBlocked(result)) return;
+    const output = `${result.stdout}${result.stderr}`;
 
-  assert.equal(result.status, 0, output);
-  assert.match(output, versionRe);
-  assert.match(output, /px: /);
+    assert.equal(result.status, 0, output);
+    assert.match(output, versionRe);
+    assert.match(output, /px: /);
+    const reports = fs.readdirSync(coverage).filter(file => file.endsWith('.json'));
+    if (PX.entry === PREBUILT_PX_ENTRY) {
+      assert.deepEqual(reports, [], 'bundle-only execution contributes no native source coverage');
+    } else {
+      const scripts = reports.flatMap(file => JSON.parse(fs.readFileSync(path.join(coverage, file), 'utf8')).result);
+      assert.ok(scripts.some((script: { url: string }) => script.url.startsWith(`file://${repoRoot}/src/`)),
+        'source CLI execution must retain native source ranges');
+    }
+  } finally { fs.rmSync(coverage, { recursive: true, force: true }); }
 });
 
 test('px review-event writes only inside the caller cwd repo mission artifacts', async () => {

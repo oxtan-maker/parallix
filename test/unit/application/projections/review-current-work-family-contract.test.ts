@@ -23,7 +23,7 @@ import { type SessionMarkerEntry, type SessionMarkerRepository } from '../../../
 // missions/task-2416/CP-1.md): the review loop's own agents run `px review
 // --start` / `--submit`, each a separate process under
 // its own operationId (all in `PUBLISHED_PHASES`). Their nested `running`
-// fact shadowed the outer `px review --continue` loop's family-carrying fact,
+// fact shadowed the outer `px review` loop's family-carrying fact,
 // attributing the live continuation as `family unknown`, and their `ended`
 // then cleared the mission's live work entirely even though the outer process
 // was still alive. The fix lives in `reconcileCurrentWork`
@@ -87,10 +87,10 @@ async function publishReviewLaunch(
 
 /**
  * The regression guard (TASK-2416). Publishes, in the order a live review round
- * actually produces them: the outer `px review --continue` bracket, the loop's
+ * actually produces them: the outer `px review` bracket, the loop's
  * agent-launch fact (carrying the family), then a nested `running({agent:
  * null})` from a *different* operationId and *different* live pid (the nested
- * `px review --start` the loop's own agents run), then that nested operation's
+ * `px review` the loop's own agents run), then that nested operation's
  * `ended`. Asserts the live review continuation still attributes its family and
  * still reports live work after the nested operation closes.
  *
@@ -98,29 +98,29 @@ async function publishReviewLaunch(
  * supersedes the outer family-carrying fact (family -> null) and the nested
  * `ended` then clears the mission's current work entirely.
  */
-test('TASK-2416 repro: a nested px review --start must not shadow the outer review family', async () => {
+test('TASK-2416 repro: a nested px review must not shadow the outer review family', async () => {
   const { repo, events } = memoryHistoryRepo();
   const outer = new CurrentWorkRecorder(repo, { processId: 100 });
 
-  // Outer `px review --continue` run() bracket.
+  // Outer `px review` run() bracket.
   await outer.running({
     missionId,
     operationId: 'opA',
     phase: 'review',
-    summary: 'px review --continue task-2416',
+    summary: 'px review task-2416',
     agent: null,
   });
   // The review loop launches a claude reviewer — this fact carries the family.
   await publishReviewLaunch(outer, { slug: 'task-2416', operationId: 'opA' }, 'claude');
 
-  // Nested `px review --start` runs as a separate process (pid 200) under a
+  // Nested `px review` runs as a separate process (pid 200) under a
   // different operationId, publishing its own bracket with agent: null.
   const nested = new CurrentWorkRecorder(repo, { processId: 200 });
   await nested.running({
     missionId,
     operationId: 'opB',
     phase: 'review',
-    summary: 'px review --start task-2416',
+    summary: 'px review task-2416',
     agent: null,
   });
 
@@ -213,7 +213,7 @@ test('TASK-2416 guard: a dead recording process shows no family attribution', as
     operationId: 'review:task-2416:dead',
     phase: 'review',
     state: 'running',
-    summary: 'px review --continue task-2416',
+    summary: 'px review task-2416',
     agent: agentFamily('claude'),
     processId: 9999,
     blockedReason: null,

@@ -14,7 +14,7 @@ const CONTINUE_DISPOSITIONS = new Set(['BLOCKED', 'PARKED']);
 /** Implementer-phase scratch for one round. */
 interface Disposition {
   value: unknown;
-  /** A stale BLOCKED/PARKED found on --continue: the implementer is relaunched. */
+  /** A stale BLOCKED/PARKED found on continuation: the implementer is relaunched. */
   reLaunch: boolean;
   sinceIso: string;
   /** The disposition predates this run, so no relaunch produced a revision. */
@@ -25,7 +25,7 @@ interface Disposition {
 type Step = 'stop' | 'next-round';
 
 /**
- * A --continue re-enters its round with a disposition check: an existing
+ * A continuation re-enters its round with a disposition check: an existing
  * BLOCKED/PARKED relaunches the implementer to assess the blocker; any other
  * disposition is answered without a launch.
  */

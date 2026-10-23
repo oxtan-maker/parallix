@@ -44,7 +44,7 @@ function rejectedRecovery(reason: string): RecoveryDecision {
 
 function activeRecovery(review: Review | null | undefined, overrideAt: string | undefined): RecoveryDecision {
   if (!review && overrideAt === undefined) {
-    return rejectedRecovery('active with no authoritative Review and no default-user override; run px review <slug> --start before integration');
+    return rejectedRecovery('active with no authoritative Review and no default-user override; run px review <slug> before integration');
   }
   if (!review) { return { established: true, via: 'human-override', decidedAt: overrideAt, reason: '' }; }
   const roundStatus = reviewStatus(review);

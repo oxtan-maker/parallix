@@ -895,7 +895,7 @@ describe("behind-primary integrate", () => {
       const result = await integrate([SLUG], { missionServicesFn: composition.createMissionApplicationServices, exitFn: () => {} });
       assert.equal(result?.exitCode, 1, 'unreadable approval blocks before landing');
       assert.match(logs.join('\n'), /Approved revision missing-approved-commit cannot be read/);
-      assert.match(logs.join('\n'), /px review task-2506-intreg --continue/);
+      assert.match(logs.join('\n'), /px review task-2506-intreg/);
     } finally {
       mock.reset();
       fs.rmSync(ROOT, { recursive: true, force: true });

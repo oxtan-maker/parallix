@@ -165,7 +165,7 @@ describe("Live session attribution —", () => {
       operationId: 'review:task-2393:current',
       phase: 'review' as const,
       state: 'running',
-      summary: 'px review --continue',
+      summary: 'px review',
       agent: agentFamily('claude'),
       processId: null,
       blockedReason: null,
@@ -310,11 +310,11 @@ describe("Publish-then-reconcile defects —", () => {
     const operation = () => async () => {};
     return {
       preflight: (args: string[]) => ({ slug: 'task-2373', args, options: {} }),
-      verify: operation(), submit: operation(), push: operation(), start: operation(),
-      continue: operation(), resume: operation(), comment: operation(), readComments: operation(),
+      verify: operation(), submit: operation(), push: operation(), enter: operation(),
+      comment: operation(), readComments: operation(),
       submitReview: operation(), consumeArtifacts: operation(), close: operation(),
-      status: operation(), createEvent: operation(), backfillReview: operation(),
-      reconcileReview: operation(), importLegacy: operation(),
+      status: operation(), backfillReview: operation(),
+      reconcileReview: operation(),
       ...overrides,
     };
   }
@@ -461,11 +461,11 @@ describe("Publish-then-reconcile defects —", () => {
   test('TASK-2373 defect 4: a review loop that cannot continue publishes its blocking reason', async () => {
     const { repo, appended } = inMemoryOperationalHistory();
     const workflow = makeReviewWorkflow({
-      start: async () => { throw new Error('review loop exhausted: no eligible implementer remains'); },
+      enter: async () => { throw new Error('review loop exhausted: no eligible implementer remains'); },
     });
 
     await assert.rejects(
-      new ReviewCommandUseCase(workflow, new CurrentWorkRecorder(repo, { processId: 9 })).execute(['task-2373', '--start']),
+      new ReviewCommandUseCase(workflow, new CurrentWorkRecorder(repo, { processId: 9 })).execute(['task-2373']),
       /no eligible implementer remains/,
     );
 

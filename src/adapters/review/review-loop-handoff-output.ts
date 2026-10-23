@@ -24,7 +24,7 @@ export const handoffOutputRenderers = {
     return;
   }),
   'missing-review-pr': reviewEventRenderer('missing-review-pr', (event, output) => {
-    output.error(fmt.status('FAIL', `No open review PR found for ${event.branch}. Create the PR before starting the review loop.`));
+    output.error(fmt.status('FAIL', `No open review PR found for ${event.branch}. Handoff did not publish the required PR; resolve the handoff failure and retry review.`));
     return;
   }),
   'handoff-diagnostic': reviewEventRenderer('handoff-diagnostic', (event, output) => {
@@ -40,7 +40,7 @@ export const handoffOutputRenderers = {
     return;
   }),
   'start-guidance': reviewEventRenderer('start-guidance', (event, output) => {
-    output.error(`       Run: px review ${event.slug} --start after resolving the error.`);
+    output.error(`       Run: px review ${event.slug} after resolving the error.`);
     return;
   }),
   'handoff-unbound': reviewEventRenderer('handoff-unbound', (event, output) => {
@@ -48,7 +48,7 @@ export const handoffOutputRenderers = {
     return;
   }),
   'handoff-starting': reviewEventRenderer('handoff-starting', (event, output) => {
-    output.log(fmt.status('INFO', `No completed handoff for ${event.branch} (task in ${event.taskStatus}) — performing handoff (attempting automatic handoff) via px review ${event.slug} --start...`));
+    output.log(fmt.status('INFO', `No completed handoff for ${event.branch} (task in ${event.taskStatus}) — performing handoff (attempting automatic handoff) via px review ${event.slug}...`));
     return;
   }),
   'handoff-blocked': reviewEventRenderer('handoff-blocked', (event, output) => {

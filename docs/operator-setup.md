@@ -277,7 +277,7 @@ human judgement call, not a retry mechanism and not an implementer escape
 hatch.
 
 When a human requests changes on the review provider for a round that is
-already approved, `px review <slug> --continue` treats that human as the
+already approved, `px review` treats that human as the
 operator: it revokes the approval with the provider author and the change
 request as the recorded operator and reason, then acts on the correction. The
 loop never launches an implementer under an effective approval. If the
@@ -310,7 +310,7 @@ a stale approval as soon as the branch moves. `px rebase` also records the move
 against the approval, naming the revision that superseded it. If an integration
 gate later refuses the merge, the refusal names the staleness already reported.
 
-An explicit `px review --continue --implementer <family>` changes the Mission
+An explicit `px review --implementer <family>` changes the Mission
 and current review implementer through the lifecycle authority before resuming.
 `--dry-run` previews the selection without changing the assignment. An effective
 approval must be revoked before changing implementer.
@@ -410,17 +410,17 @@ reviewer output; they create no implementer repair checkpoint. Gate and hook
 failures still return to the implementer and rerun the failing prerequisite
 before independent review resumes.
 
-If the review loop escalates to a human, run `px review <slug> --continue` to
-resume its persisted review. This clears the recorded stop and grants another
+If the review loop escalates to a human, run `px review` from the mission
+worktree to resume its persisted review. This clears the recorded stop and grants another
 review attempt, including when the previous round limit was exhausted. After
 approval, run `px integrate <slug>` to continue integration. Repair budgets and
 mandatory gates still apply; a failed gate never counts as approval. An interrupted
 repair resumes the implementer even with unfinished checkpoints. Checkpoint
 evidence is required before leaving active work for reviewer handoff.
 
-Direct operator `px review --start` and `px review --continue` also acknowledge
-a retained invalid-contract stop, including when the slug is inferred from the
-current worktree. Repair the recorded contract first. Both commands retain
+Direct operator `px review` also acknowledges
+a retained invalid-contract stop for the mission in the current worktree.
+Repair the recorded contract first. The command retains
 the prior diagnostic and proposed correction with the acknowledgment actor and
 time, and refresh unfinished repair authorization to the current recorded
 checks and success criteria. Settled repair history stays intact. Automatic or
@@ -462,17 +462,19 @@ staging or commit failures stop handoff; resolve the reported Git error in that
 worktree before retrying. Verification proof must still match the committed
 candidate, and checkpoint evidence and completed criteria remain required.
 
-If continuation reports that the mission has no persisted Review, run
-`px review <slug> --start` to begin one. Start performs handoff, creates the
-Review, and runs the autonomous review and repair loop. An existing Review is
-not required. Continuation stops before clearing intervention or blocker state
-or launching an agent. Handoff still checks completed success criteria and
-checkpoint evidence; starting review does not supply approval evidence.
-A missing Review alone does not establish that review state was lost.
+From the mission worktree, run `px review` to enter review. It creates the first
+Review through handoff for a known Mission, or resumes its recorded round,
+intervention or unfinished repair. Web review actions select that mission
+worktree automatically. Handoff
+still requires completed success criteria and checkpoint evidence; entering
+review supplies neither evidence nor approval. Use `--status` to inspect the
+recorded Review and enabled provider PR status without running the workflow. `--start`, `--continue` and the stop-only `--resume`
+are no longer accepted. Append review-thread records with `px review-event`;
+legacy task import belongs to `px import-legacy`.
 
 If a request-changes review was interrupted and repaired by hand, the mission
 can be left active while its next round awaits review. A human reviewer
-approves that round with `px review <slug> --submit-review approve`; the one
+approves that round with `px review --submit-review approve`; the one
 command records the approval and moves the mission to integration. An approve
 is still refused while the round awaits implementation, so the requested
 changes and their findings stay intact, and a round reopened by an

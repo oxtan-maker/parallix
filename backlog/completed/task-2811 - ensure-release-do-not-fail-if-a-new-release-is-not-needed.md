@@ -1,8 +1,8 @@
 ---
 id: TASK-2811
 title: ensure release do not fail if a new release is not needed
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-23 04:58'
 labels: []
 dependencies: []

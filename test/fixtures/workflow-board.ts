@@ -17,8 +17,7 @@ import { resolveConfiguration } from '../../src/composition/config.js';
 import { createProductionApplicationServices } from '../../src/composition/application-services.js';
 import { composeWorkflowOperations } from '../../src/composition/workflow-operations.js';
 import { workflowObservationCapabilities } from '../../src/composition/workflow-observation.js';
-import { createWebHost, type WebHost, type WebHostInfo } from '../../src/interfaces/web/host.js';
-import { loadWebAssets } from '../../src/adapters/web/asset-store.js';
+import type { WebHost, WebHostInfo } from '../../src/interfaces/web/host.js';
 import { processStartIdentity } from '../../src/adapters/process/process-liveness.js';
 
 /** Isolated real store/host/process fixture shared by retained and manual checks. */
@@ -85,7 +84,6 @@ export async function workflowBoard(count = 2, options: { cli?: CliInvocation; i
   }
   const terminal = createMissionTerminalCapability(root, configuration);
   const observation = workflowObservationCapabilities(root, configuration, cli);
-  const assets = loadWebAssets(path.resolve('build/web'));
   const hostEvents: Array<{ event: string; operationId: string; time: number }> = [];
   let host: Pick<WebHost, 'close'> | null = null;
   const start = async (separateProcess = false): Promise<WebHostInfo & { processId?: number }> => {
@@ -115,7 +113,11 @@ export async function workflowBoard(count = 2, options: { cli?: CliInvocation; i
         });
       } catch (error) { await close(); throw error; }
     }
-    const inProcess = createWebHost({ assets, buildProjection: options.inProcess ? async () => projectWorkflowBoard(await graph.presentationCapabilities!.boardProjection.build(), await operations.readOnly(() => operations.open())) : observation.board, commandDispatcher: () => service, missionTerminal: () => observation.terminal });
+    // Process-only fixtures never start an HTTP host. Keep its module graph
+    // and assets out of their setup, as the child entry already does.
+    const { createWebHost } = await import('../../src/interfaces/web/host.js');
+    const { loadWebAssets } = await import('../../src/adapters/web/asset-store.js');
+    const inProcess = createWebHost({ assets: loadWebAssets(path.resolve('build/web')), buildProjection: options.inProcess ? async () => projectWorkflowBoard(await graph.presentationCapabilities!.boardProjection.build(), await operations.readOnly(() => operations.open())) : observation.board, commandDispatcher: () => service, missionTerminal: () => observation.terminal });
     host = inProcess;
     return inProcess.start();
   };

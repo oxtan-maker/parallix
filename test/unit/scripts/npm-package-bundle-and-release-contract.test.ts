@@ -544,6 +544,61 @@ describe("release publication trust", () => {
     });
   });
 
+  test('unchanged latest publication from an earlier SHA skips every mutation (TASK-2811)', () => {
+    withReleaseRoot(root => {
+      const calls: string[][] = [];
+      const run = (executable: string, args: string[]) => {
+        calls.push([executable, ...args]);
+        assert.equal(executable, 'npm', 'skip must not inspect or modify Git or GitHub artifacts');
+        assert.equal(args[0], 'view', 'skip must not run lifecycle hooks or publish');
+        return { status: 0, stdout: JSON.stringify(args[2] === 'gitHead' ? 'earlier-sha' : '1.5.120'), stderr: '' };
+      };
+      assert.doesNotThrow(() => publishTrustedRelease(root, 'trusted-sha', run));
+      assert.deepEqual(calls.map(call => call.slice(0, 4)), [
+        ['npm', 'view', '@magnusekdahl/parallix@1.5.120', 'version'],
+        ['npm', 'view', '@magnusekdahl/parallix@1.5.120', 'gitHead'],
+        ['npm', 'view', '@magnusekdahl/parallix', 'version'],
+      ]);
+    });
+  });
+
+  test('older foreign publication and missing publication SHA cannot skip (TASK-2811)', () => {
+    withReleaseRoot(root => {
+      for (const [latest, gitHead] of [['1.5.121', 'earlier-sha'], ['1.5.120', null], ['1.5.120', '']]) {
+        const run = (_executable: string, args: string[]) => ({
+          status: 0, stderr: '', stdout: JSON.stringify(args[2] === 'gitHead' ? gitHead
+            : args[1].includes('@1.5.120') ? '1.5.120' : latest),
+        });
+        assert.throws(() => publishTrustedRelease(root, 'trusted-sha', run), /different SHA/);
+      }
+    });
+  });
+
+  test('unpublished equal or older versions fail before mutation (TASK-2811)', () => {
+    withReleaseRoot(root => {
+      for (const latest of ['1.5.120', '1.5.121']) {
+        const run = (executable: string, args: string[]) => {
+          assert.equal(executable, 'npm');
+          assert.equal(args[0], 'view');
+          return args[1].includes('@1.5.120')
+            ? { status: 1, stdout: '', stderr: 'E404 Not Found' }
+            : { status: 0, stdout: JSON.stringify(latest), stderr: '' };
+        };
+        assert.throws(() => publishTrustedRelease(root, 'trusted-sha', run), /not newer/);
+      }
+    });
+  });
+
+  test('token credentials remain forbidden even for unchanged versions (TASK-2811)', () => {
+    withReleaseRoot(root => {
+      for (const key of ['NPM_TOKEN', 'NODE_AUTH_TOKEN']) {
+        assert.throws(() => publishTrustedRelease(root, 'trusted-sha', () => {
+          assert.fail('credentials must be rejected before running commands');
+        }, { [key]: 'disallowed-token' }), /Trusted Publishing/);
+      }
+    });
+  });
+
   test('task-2509: npm lookup errors fail closed', () => {
     withReleaseRoot(root => {
       assert.throws(
@@ -553,25 +608,95 @@ describe("release publication trust", () => {
     });
   });
 
-  test('task-2509: release flow publishes, tags, and creates the matching release', () => {
+  test('registry failures at each lookup and publication failures remain errors (TASK-2811)', () => {
     withReleaseRoot(root => {
-      const calls: string[][] = [];
+      for (const failedLookup of [1, 2, 3]) {
+        let lookup = 0;
+        const run = (_executable: string, args: string[]) => {
+          lookup += 1;
+          return lookup === failedLookup
+            ? { status: 1, stdout: '', stderr: 'E503 registry unavailable' }
+            : { status: 0, stdout: JSON.stringify(args[2] === 'gitHead' ? 'earlier-sha' : '1.5.120'), stderr: '' };
+        };
+        assert.throws(() => publishTrustedRelease(root, 'trusted-sha', run), /npm view.*failed/);
+      }
       const run = (executable: string, args: string[]) => {
-        calls.push([executable, ...args]);
-        if (executable === 'npm' && args[0] === 'view' && args[1].includes('@1.5.120')) {
-          return { signal: null,  status: 1, stdout: '', stderr: 'E404 Not Found' };
-        }
-        if (executable === 'npm' && args[0] === 'view') { return { signal: null,  status: 0, stdout: '"1.5.119"', stderr: '' }; }
-        if (executable === 'git' && args[0] === 'rev-parse') { return { signal: null,  status: 1, stdout: '', stderr: '' }; }
-        if (executable === 'gh' && args[0] === 'release' && args[1] === 'view') {
-          return { signal: null,  status: 1, stdout: '', stderr: 'release not found' };
-        }
-        return { signal: null,  status: 0, stdout: '', stderr: '' };
+        if (args[0] === 'view') { return { status: 1, stdout: '', stderr: 'E404 Not Found' }; }
+        if (executable === 'git') { return { status: 1, stdout: '', stderr: '' }; }
+        if (args[0] === 'publish') { return { status: 1, stdout: '', stderr: 'publication denied' }; }
+        return { status: 0, stdout: '', stderr: '' };
       };
-      publishTrustedRelease(root, 'trusted-sha', run);
-      assert.deepEqual(calls.filter(call => call[0] === 'git' && call[1] === 'tag'), [['git', 'tag', 'v1.5.120', 'trusted-sha']]);
-      assert.ok(calls.some(call => call.join(' ') === 'npm publish --access public --provenance --registry=https://registry.npmjs.org'));
-      assert.ok(calls.some(call => call.join(' ') === 'gh release create v1.5.120 --target trusted-sha --generate-notes'));
+      assert.throws(() => publishTrustedRelease(root, 'trusted-sha', run), /publication denied/);
+      fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: 'bad' }));
+      assert.throws(() => publishTrustedRelease(root, 'trusted-sha', () => {
+        assert.fail('malformed metadata must fail before commands');
+      }), /normal SemVer/);
+    });
+  });
+
+  test('task-2509: release flow publishes, tags, and creates the matching release', () => {
+    for (const initialPublication of [false, true]) {
+      withReleaseRoot(root => {
+        const calls: string[][] = [];
+        const run = (executable: string, args: string[]) => {
+          calls.push([executable, ...args]);
+          if (executable === 'npm' && args[0] === 'view' && args[1].includes('@1.5.120')) {
+            return { signal: null,  status: 1, stdout: '', stderr: 'E404 Not Found' };
+          }
+          if (executable === 'npm' && args[0] === 'view') { return initialPublication
+            ? { status: 1, stdout: '', stderr: 'E404 Not Found' }
+            : { status: 0, stdout: '"1.5.119"', stderr: '' }; }
+          if (executable === 'git' && args[0] === 'rev-parse') { return { signal: null,  status: 1, stdout: '', stderr: '' }; }
+          if (executable === 'gh' && args[0] === 'release' && args[1] === 'view') {
+            return { signal: null,  status: 1, stdout: '', stderr: 'release not found' };
+          }
+          return { signal: null,  status: 0, stdout: '', stderr: '' };
+        };
+        publishTrustedRelease(root, 'trusted-sha', run);
+        assert.deepEqual(calls.filter(call => call[0] === 'git' && call[1] === 'tag'), [['git', 'tag', 'v1.5.120', 'trusted-sha']]);
+        assert.ok(calls.some(call => call.join(' ') === 'npm publish --access public --provenance --registry=https://registry.npmjs.org'));
+        assert.ok(calls.some(call => call.join(' ') === 'gh release create v1.5.120 --target trusted-sha --generate-notes'));
+        assert.deepEqual(calls.filter(call => !(call[1] === 'view' || call[1] === 'rev-parse')), [
+          ['npm', 'run', 'prepack'], ['npm', 'run', 'prepublishOnly'],
+          ['npm', 'publish', '--access', 'public', '--provenance', '--registry=https://registry.npmjs.org'],
+          ['git', 'tag', 'v1.5.120', 'trusted-sha'], ['git', 'push', 'origin', 'v1.5.120'],
+          ['gh', 'release', 'view', 'v1.5.120'],
+          ['gh', 'release', 'create', 'v1.5.120', '--target', 'trusted-sha', '--generate-notes'],
+        ]);
+      });
+    }
+  });
+
+  test('same-SHA retry completes absent artifacts and rejects colliding tags before mutation (TASK-2811)', () => {
+    withReleaseRoot(root => {
+      for (const collision of [false, true]) {
+        const calls: string[][] = [];
+        const run = (executable: string, args: string[]) => {
+          calls.push([executable, ...args]);
+          if (executable === 'npm' && args[0] === 'view') {
+            return { status: 0, stdout: JSON.stringify(args[2] === 'gitHead' ? 'trusted-sha' : '1.5.120'), stderr: '' };
+          }
+          if (executable === 'git' && args[0] === 'rev-parse') {
+            return { status: collision ? 0 : 1, stdout: 'other-sha', stderr: '' };
+          }
+          if (executable === 'gh' && args[1] === 'view') {
+            return { status: 1, stdout: '', stderr: 'release not found' };
+          }
+          return { status: 0, stdout: '', stderr: '' };
+        };
+        if (collision) {
+          assert.throws(() => publishTrustedRelease(root, 'trusted-sha', run), /not trusted SHA/);
+          assert.ok(calls.every(call => call[1] === 'view' || call[1] === 'rev-parse'));
+        } else {
+          publishTrustedRelease(root, 'trusted-sha', run);
+          assert.deepEqual(calls.filter(call => call[1] !== 'view' && call[1] !== 'rev-parse'), [
+            ['npm', 'run', 'prepack'], ['npm', 'run', 'prepublishOnly'],
+            ['git', 'tag', 'v1.5.120', 'trusted-sha'], ['git', 'push', 'origin', 'v1.5.120'],
+            ['gh', 'release', 'view', 'v1.5.120'],
+            ['gh', 'release', 'create', 'v1.5.120', '--target', 'trusted-sha', '--generate-notes'],
+          ]);
+        }
+      }
     });
   });
 

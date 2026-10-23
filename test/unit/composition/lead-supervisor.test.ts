@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
 import type { ProductionApplicationServices } from '../../../src/composition/application-services.js';
 import * as fmt from '../../../src/application/presentation/cli-format.js';
+import { resolveConfiguration } from '../../../src/composition/config.js';
 
 const worktrees = mockModule<typeof import('../../../src/adapters/git/worktree.js')>(
   '../../../src/adapters/git/worktree.js', import.meta.url);
@@ -52,7 +53,7 @@ for (const outcome of ['success', 'cancelled', 'missing-controller', 'exit'] as 
     };
     const forwards = new Set<Promise<unknown>>();
     const port = createLeadSupervisorPort(services, forwards, {
-      rootDir: '/lead', active, registry: {},
+      rootDir: '/lead', active, registry: {}, configuration: resolveConfiguration({}),
       runPublicCli: async () => { assert.fail('active must use the borrowed controller'); },
       scope: { openWorkflowServices: async root => {
         assert.equal(root, '/target'); events.push('opened'); return borrowed;

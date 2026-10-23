@@ -10,16 +10,12 @@ export interface ReviewWorkflowPort {
   verify(_context: ReviewWorkflowContext): Promise<void> | void;
   submit(_context: ReviewWorkflowContext): Promise<void> | void;
   push(_context: ReviewWorkflowContext): Promise<void> | void;
-  start(_context: ReviewWorkflowContext): Promise<void> | void;
-  continue(_context: ReviewWorkflowContext): Promise<void> | void;
-  resume(_context: ReviewWorkflowContext): Promise<void> | void;
+  enter(_context: ReviewWorkflowContext): Promise<void> | void;
   comment(_context: ReviewWorkflowContext): Promise<void> | void;
   readComments(_context: ReviewWorkflowContext): Promise<void> | void;
   submitReview(_context: ReviewWorkflowContext): Promise<void> | void;
   close(_context: ReviewWorkflowContext): Promise<void> | void;
   status(_context: ReviewWorkflowContext): Promise<void> | void;
-  createEvent(_context: ReviewWorkflowContext): Promise<void> | void;
   backfillReview(_context: ReviewWorkflowContext): Promise<void> | void;
   reconcileReview(_context: ReviewWorkflowContext): Promise<void> | void;
-  importLegacy(_context: ReviewWorkflowContext): Promise<void> | void;
 }

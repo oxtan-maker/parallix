@@ -51,7 +51,7 @@ export class StatusCommandUseCase {
     }
 
     // Stale worktrees (only when no explicit slug)
-    const staleWorktrees = this._staleWorktrees.findStaleWorktrees(explicitSlug, rootDir);
+    const staleWorktrees = await this._staleWorktrees.findStaleWorktrees(explicitSlug, rootDir);
     const staleWorktreeRebase = this._staleWorktrees.getStaleWorktreeRebase(staleWorktrees);
 
     const agents = await this._agent.getAgents();

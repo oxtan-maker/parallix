@@ -118,3 +118,42 @@ test('captureOpencodeExport captures full output with large payloads (regression
   assert.equal(result.length, largePayload.length, 'byte count must match original');
   assert.doesNotThrow(() => JSON.parse(result), 'captured output must be valid JSON');
 });
+
+test('export preserves launch candidate precedence and deduplication (TASK-2787)', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-parity-'));
+  const candidates = [path.join(root, 'custom'), path.join(root, 'path', 'opencode'),
+    path.join(root, '.opencode', 'bin', 'opencode'), path.join(root, '.local', 'bin', 'opencode')];
+  try {
+    for (const file of candidates) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, '');
+      fs.chmodSync(file, 0o755);
+    }
+    const configuration = resolveConfiguration({ HOME: root, PATH: path.delimiter + path.dirname(candidates[1]) + path.delimiter, OPENCODE_BIN: candidates[0] });
+    const capture = async (config: typeof configuration, expected: string) => {
+      const result = await captureOpencodeExport('ses_parity', { configuration: config, tmpDir: root, env: { EXTRA: 'forwarded' },
+        spawn: (command, args, options) => {
+          assert.equal(command, expected);
+          assert.deepEqual(args, ['export', 'ses_parity']);
+          assert.equal(options.env?.EXTRA, 'forwarded');
+          const stdio = options.stdio as readonly unknown[];
+          fs.writeSync(stdio[1] as number, '{"parity":true}');
+          const child = childProcessDouble();
+          queueMicrotask(() => child.emit('close', 0));
+          return child;
+        }
+      });
+      assert.equal(result, '{"parity":true}');
+    };
+    for (const [index, expected] of [candidates[0], 'opencode', candidates[2], candidates[3], 'opencode'].entries()) {
+      await capture(configuration, expected);
+      if (index < candidates.length) { fs.chmodSync(candidates[index], 0o644); }
+    }
+    const duplicate = resolveConfiguration({ HOME: root, PATH: path.delimiter + path.dirname(candidates[1]) + path.delimiter, OPENCODE_BIN: candidates[2] });
+    const access = mock.method(fs, 'accessSync', () => { throw new Error('missing'); });
+    await capture(duplicate, 'opencode');
+    assert.deepEqual(access.mock.calls.map(call => call.arguments[0]), [candidates[2], candidates[1], candidates[3]]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

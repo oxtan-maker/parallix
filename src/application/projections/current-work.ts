@@ -126,10 +126,10 @@ function byDurableOrder(left: CurrentWorkEvent, right: CurrentWorkEvent): number
  *
  * One exception, for TASK-2416: a `running` event from a *different operation*
  * (a different process) does not supersede a standing `running` fact that is
- * still alive. The review loop's own agents run `px review --start` /
+ * still alive. The review loop's own agents run `px review` /
  * `--submit`, each a separate process under its own
  * operationId (all in `PUBLISHED_PHASES`). Their short nested bracket would
- * otherwise shadow the outer `px review --continue` loop's family-carrying
+ * otherwise shadow the outer `px review` loop's family-carrying
  * fact — attributing the live continuation as `family unknown` — and their
  * `ended` would then clear the mission's live work entirely even though the
  * outer process is still running. A nested sub-operation bracket must not win.

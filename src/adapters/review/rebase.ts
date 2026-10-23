@@ -213,7 +213,7 @@ function preReviewRebaseOutcome(slug: string, observed: PreReviewRebaseObservati
     // F8: emit the repair instruction at WARN, not INFO, so it reaches the
     // operator through `px active`'s operator-critical filter without relying
     // on the sentence containing a keyword like "conflict" (SC5).
-    log(fmt.status('WARN', `Resolve the conflicts in the worktree, then re-run: px review ${slug} --start`));
+    log(fmt.status('WARN', `Resolve the conflicts in the worktree, then re-run: px review ${slug}`));
     return {
       ok: false, sharedFileConflicts: true, hookFailure: false,
       failure: { kind: 'conflict', operation: 'rebase', sharedFiles },

@@ -216,7 +216,7 @@ function storedEventFailure(slug: string, reason: string, error: (_message: stri
     error(fmt.status('FAIL', `Cannot store review event for "${slug}": the operator database rejected the write.`));
     return { ok: false, path: null, error: `Review event write failed for ${slug}` };
   }
-  error(fmt.status('FAIL', `Cannot store review event for "${slug}": no Review in the operator database. px review ${slug} --start starts a review; px review ${slug} --backfill-review migrates a pre-cutover mission.`));
+  error(fmt.status('FAIL', `Cannot store review event for "${slug}": no Review in the operator database. px review ${slug} starts a review; px review ${slug} --backfill-review migrates a pre-cutover mission.`));
   return { ok: false, path: null, error: `No Review in the operator database for ${slug}` };
 }
 

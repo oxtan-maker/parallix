@@ -76,7 +76,6 @@ const { submitForReview, closeMissionPr } = submitForReviewModule;
 const { showReviewStatus } = showReviewStatusModule;
 const { consumeImplementerArtifacts } = consumeImplementerArtifactsModule;
 const { consumeReviewerArtifacts } = consumeReviewerArtifactsModule;
-const { createEventHandler } = createEventHandlerModule;
 
 // Base mission slug — append process.pid for isolation between parallel runs.
 const TEST_SLUG = `task-test-review-${process.pid}`;
@@ -394,8 +393,8 @@ test('review helper functions and error paths', async () => {
   // 2. review status (PR not found)
   logs.length = 0;
   exitCodes.length = 0;
-  await review(['test-slug'], { ...baseOptions });
-  assert.ok(logs.some(l => l.includes('No active PR found')), 'Should log PR not found');
+  await review(['test-slug', '--status'], { ...baseOptions });
+  assert.ok(logs.some(l => l.includes('No persisted review state found')), 'Should log PR not found');
 
   // 3. readTextFlag error path
   errors.length = 0;
@@ -524,7 +523,7 @@ test('rebaseBeforeReviewRound reports shared-file conflicts with recovery instru
     `Expected one shared-file failure message, got: ${errors.join(' | ')}`
   );
   assert.ok(
-    logs.some(message => message.includes('Resolve the conflicts in the worktree, then re-run: px review task-1087 --start')),
+    logs.some(message => message.includes('Resolve the conflicts in the worktree, then re-run: px review task-1087')),
     `Expected recovery instructions, got logs: ${logs.join(' | ')}`
   );
 });
@@ -1225,75 +1224,21 @@ test('review dispatches to commentRound with file-backed message', async () => {
   assert.deepEqual(calls, [{ slug: 'task-1031', message: 'Review body' }]);
 });
 
-test('review prints status when no action flag is provided', async () => {
+test('review --status inspects the recorded round without binding a workflow', async () => {
   const lines: string[] = [];
-
-  await review(['task-1031'], {
+  await review(['task-1031', '--status'], {
     inferSlugFn: explicit => explicit ?? null,
-    getPrStatusFn: () => ({ number: undefined, title: undefined, state: undefined, merged: false, url: undefined, createdAt: null,  exists: true as const, raw: 'PR #83 open' }),
-    readReviewStateFn: (slug: string) => (new ReviewState(slug, { reviewer: 'codex', implementer: 'claude', round: 2 })),
-    log: line => lines.push(line)
+    resolveWorktreeFn: () => null,
+    readReviewStateFn: (slug: string) => new ReviewState(slug, { reviewer: 'codex', implementer: 'claude', round: 2 }),
+    isReviewProviderEnabledFn: () => true,
+    getPrStatusFn: () => ({ exists: false, raw: 'fixture PR absent' }),
+    reviewLoopMechanisms: () => assert.fail('status must not bind a review loop'),
+    log: line => lines.push(line),
   });
-
-  assert.ok(lines.includes('[INFO] Review status for mission: task-1031'));
-  assert.ok(lines.includes('PR #83 open'));
-  assert.ok(lines.some(line => line.includes('reviewer=codex implementer=claude round=2')));
-});
-
-test('review re-launches the implementer on static findings instead of starting the autonomous loop', async () => {
-  const calls: ({ type: 'submit'; slug: string } | { type: 'comment'; slug: string; message: string } | { type: 'agent'; step: string; opts: { prompt: string; agent: string; worktree: string; slug: string } })[] = [];
-
-  await review(['task-1031'], {
-    inferSlugFn: explicit => explicit ?? null,
-    resolveWorktreeFn: () => '/tmp/mission-task-1031',
-    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
-    performStaticReviewFn: () => ({ ok: false as const, findings: ['Missing Goal Check evidence'] }),
-    resolveTaskFileFn: () => ({ matches: ['/tmp/task-1031.md'],  ok: true as const, taskFile: '/tmp/task-1031.md' }),
-    getTaskImplementerFn: () => 'claude',
-    submitForReviewFn: async slug => calls.push({ type: 'submit' as const, slug }),
-    postStaticReviewCommentFn: (slug, message) => calls.push({ type: 'comment' as const, slug, message }),
-    reviewLoopMechanisms: () => assert.fail('static findings must not start an autonomous loop'),
-    startAgentFn: async (step, opts) => calls.push({ type: 'agent' as const, step, opts }),
-    readReviewStateFn: () => null,
-    log: () => {},
-    error: () => {}
-  });
-
-  // The findings path re-launches the implementer and does not submit, comment, or loop.
-  assert.deepEqual(
-    calls.map(call => call.type),
-    ['agent']
-  );
-  assert.ok(calls[0].type === 'agent');
-  assert.equal(calls[0].step, 'active');
-  assert.equal(calls[0].opts.agent, 'claude');
-  assert.equal(calls[0].opts.worktree, '/tmp/mission-task-1031');
-  assert.ok(calls[0].opts.prompt.includes('Missing Goal Check evidence'));
-});
-
-test('review posts zero-finding artifact but does NOT transition task when static review passes', async () => {
-  const calls: ({ type: "submit"; slug: string; } | { type: "comment"; slug: string; message: string; })[] = [];
-
-  await review(['task-1031'], {
-    inferSlugFn: explicit => explicit ?? null,
-    resolveWorktreeFn: () => '/tmp/mission-task-1031',
-    getPrStatusFn: () => ({ raw: '',  exists: false as const }),
-    performStaticReviewFn: () => ({ ok: true as const, findings: [] }),
-    submitForReviewFn: async slug => calls.push({ type: 'submit' as const, slug }),
-    postStaticReviewCommentFn: (slug, message) => calls.push({ type: 'comment' as const, slug, message }),
-    readReviewStateFn: () => null,
-    log: () => {},
-    error: () => {}
-  });
-
-  // submit + comment only — the clean-static-review path performs no status
-  // transition, so the recorded side effects must not include one.
-  assert.deepEqual(
-    calls.map(call => call.type),
-    ['submit', 'comment']
-  );
-  assert.ok(calls[1].type === 'comment');
-  assert.ok(calls[1].message.includes('found zero issues'));
+  assert.ok(lines.some(line => line.includes('Round:') && line.includes('2')));
+  assert.ok(lines.some(line => line.includes('codex')));
+  assert.ok(lines.some(line => line.includes('claude')));
+  assert.ok(lines.includes('fixture PR absent'));
 });
 
 test('verifyReview reports success path with gate pass and persisted state', async () => {
@@ -2138,137 +2083,4 @@ test('consumeImplementerArtifacts proves persist-before-mirror ordering', async 
   const maxCreateIndex = Math.max(...createEventIndices);
   const minForgejoIndex = Math.min(...forgejoIndices);
   assert.ok(maxCreateIndex < minForgejoIndex, 'All createEvent calls must come before any Forgejo posting');
-});
-
-test('createEventHandler requires review-state or --actor for mirrored event types', async () => {
-
-  // Create a temporary directory for the test
-  const tmpDir = '/tmp/test-create-event-handler';
-  try {
-    if (fs.existsSync(tmpDir)) {
-      fs.rmSync(tmpDir, { recursive: true });
-    }
-    fs.mkdirSync(tmpDir, { recursive: true });
-
-    // Clear FORGEJO_USER to ensure the handler does not depend on it.
-    const oldForgejoUser = process.env.FORGEJO_USER;
-    delete process.env.FORGEJO_USER;
-
-    // Mock options
-    const logMessages = [];
-    const errorMessages: string[] = [];
-    let exitCode: { value: Parameters<typeof process.exit>[0] } = { value: null };
-
-    const options = {
-      log: (msg) => logMessages.push(msg),
-      error: (msg) => errorMessages.push(msg),
-      exit: (code) => { exitCode.value = code; throw new Error(`exit(${code})`); },
-      resolveWorktreeFn: () => tmpDir
-    } satisfies NonNullable<Parameters<typeof createEventHandler>[2]>;
-
-    try {
-      // This should fail because mirrored events need persisted identity or --actor.
-      await createEventHandler('task-test', ['--type', 'reviewer_outcome', '--verdict', 'approve'], options);
-      return assert.fail('Expected createEventHandler to exit with code 1');
-    } catch (err) {
-      assert.ok(err instanceof Error);
-      assert.match(err.message, /exit\(1\)/);
-    }
-
-    // Verify the error names both ways to give the event an identity: start the
-    // review (which creates the Review the identity comes from), or pass --actor.
-    // SC2: the retired standalone `px handoff` command is gone; the review-start
-    // transition is the supported entry point.
-    assert.ok(errorMessages.some(msg => msg.includes('px review') && msg.includes('--start') && msg.includes('--actor')));
-    assert.equal(exitCode.value, 1);
-
-    // Verify that no event file was created
-    // The event would be created in docs/missions/2026/task-test/review-events/
-    const eventDir = path.join(tmpDir, 'docs', 'missions', '2026', 'task-test', 'review-events');
-    assert.ok(!fs.existsSync(eventDir) || fs.readdirSync(eventDir).length === 0);
-
-    // Restore FORGEJO_USER
-    if (oldForgejoUser) {
-      process.env.FORGEJO_USER = oldForgejoUser;
-    }
-  } finally {
-    // Cleanup
-    if (fs.existsSync(tmpDir)) {
-      fs.rmSync(tmpDir, { recursive: true });
-    }
-  }
-});
-
-// ============================================================================
-// Pre-review phase detection tests for startReviewLoop (task-1223)
-// ============================================================================
-
-
-
-
-
-// Round-3: a fresh --start handoff creates the authoritative Review with its
-// reviewer. The loop must resume that handoff-assigned reviewer rather than
-// selecting a new one, which would desynchronize the domain Review from the
-// launched reviewer.
-
-// task-1303 self-heal: when a post-implementation task has no open PR, the loop runs
-// the handoff automatically instead of dead-ending. A *failing* injected handoff yields
-// the corrected `--push` fallback (never `--submit`); a *succeeding* one that produces an
-// open PR lets the loop proceed.
-
-
-
-
-
-
-
-test('createEventHandler allows non-mirrored event types without FORGEJO_USER', async () => {
-
-  // Create a temporary directory for the test
-  const tmpDir = '/tmp/test-create-event-handler-non-mirrored';
-  try {
-    if (fs.existsSync(tmpDir)) {
-      fs.rmSync(tmpDir, { recursive: true });
-    }
-    fs.mkdirSync(tmpDir, { recursive: true });
-
-    // Clear FORGEJO_USER
-    const oldForgejoUser = process.env.FORGEJO_USER;
-    delete process.env.FORGEJO_USER;
-
-    // Mock options
-    const logMessages = [];
-    const errorMessages: string[] = [];
-    let exitCode: { value: Parameters<typeof process.exit>[0] } = { value: null };
-    let exitCalled = false;
-
-    const options = {
-      log: (msg) => logMessages.push(msg),
-      error: (msg) => errorMessages.push(msg),
-      exit: (code) => { exitCode.value = code; exitCalled = true; throw new Error(`exit(${code})`); },
-      resolveWorktreeFn: () => tmpDir,
-
-    } satisfies NonNullable<Parameters<typeof createEventHandler>[2]>;
-
-    try {
-      // neutral_discussion is NOT mirrored, so this should succeed even without FORGEJO_USER
-      await createEventHandler('task-test', ['--type', 'neutral_discussion', '--content', 'test discussion'], options);
-      return assert.fail('Expected createEventHandler to exit with code 1');
-    } catch (err) {
-      // This will fail because it tries to create the event in a non-existent directory structure
-      // but the important thing is it doesn't fail due to FORGEJO_USER check
-      assert.ok(!errorMessages.some(msg => msg.includes('FORGEJO_USER')));
-    }
-
-    // Restore FORGEJO_USER
-    if (oldForgejoUser) {
-      process.env.FORGEJO_USER = oldForgejoUser;
-    }
-  } finally {
-    // Cleanup
-    if (fs.existsSync(tmpDir)) {
-      fs.rmSync(tmpDir, { recursive: true });
-    }
-  }
 });

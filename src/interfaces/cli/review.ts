@@ -2,12 +2,7 @@ import * as fmt from '../../application/presentation/cli-format.js';
 import { suggestFlag } from '../../application/presentation/cli-flags.js';
 import { ReviewCommandUseCase } from '../../application/review-command-use-case.js';
 
-const REVIEW_FLAGS = new Set([
-  '--actor', '--backfill-review', '--branch', '--close', '--comment', '--comment-file', '--comments', '--continue', '--create-event', '--disposition', '--dry-run', '--eligible-reviewer', '--focus', '--force', '--implementer', '--import-legacy', '--input-file', '--max-attempts', '--message', '--message-file', '--mission', '--no-gate', '--phase', '--poll-timeout-seconds', '--push', '--reconcile-review', '--resume', '--reset', '--reviewer', '--round', '--revision', '--start', '--status', '--submit', '--submit-review', '--target', '--tmp-dir', '--type', '--verbose', '--verdict', '--verify'
-]);
-const REVIEW_VALUE_FLAGS = new Set([
-  '--actor', '--branch', '--comment', '--comment-file', '--disposition', '--eligible-reviewer', '--focus', '--implementer', '--input-file', '--max-attempts', '--message', '--message-file', '--mission', '--phase', '--poll-timeout-seconds', '--reviewer', '--round', '--revision', '--submit-review', '--target', '--tmp-dir', '--type', '--verdict'
-]);
+import { REVIEW_FLAGS, REVIEW_VALUE_FLAGS } from '../../domain/review-cli-options.js';
 
 export interface ReviewCliRequest {
   readonly explicitSlug?: string;

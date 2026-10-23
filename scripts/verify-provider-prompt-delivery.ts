@@ -97,7 +97,7 @@ exit 0
         await restore.store.save(mission, loaded.version);
         const result = spawnSync(process.execPath,
           ['--import', path.join(repository, 'node_modules/tsx/dist/loader.mjs'), path.join(repository, 'src/entry/px.ts'),
-            'review', slug, '--continue', '--reviewer', reviewer, '--implementer', implementer, '--max-attempts', '1'],
+            'review', slug, '--reviewer', reviewer, '--implementer', implementer, '--max-attempts', '1'],
           { cwd: worktree, encoding: 'utf8', timeout: 30000, maxBuffer: 4 * 1024 * 1024,
             env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: directory, PARALLIX_HOME: home,
               OPENCODE_BIN: path.join(bin, 'opencode'), PARALLIX_NO_TUI: '1', PARALLIX_TEST_NO_FORGEJO: '1' } });

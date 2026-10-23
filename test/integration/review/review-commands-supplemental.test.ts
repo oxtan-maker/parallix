@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { flagValue, readTextFlag, formatStaticReviewFindings, formatStaticReviewSuccess, performStaticReview, verifyReview, submitReviewRound, pushRound, commentRound, showReviewStatus } from '../../../src/adapters/review/review-commands.js';
+import { flagValue, readTextFlag, verifyReview, submitReviewRound, pushRound, commentRound, showReviewStatus } from '../../../src/adapters/review/review-commands.js';
 const mockWorktree = '/mock/worktree';
 const mockSlug = 'test-slug';
 const mockBranch = 'mission/test-slug';
@@ -34,76 +34,6 @@ test('readTextFlag from inline', () => {
   );
   assert.equal(result, 'hello');
 });
-
-// formatStaticReviewFindings
-test('formatStaticReviewFindings with one finding', () => {
-  const result = formatStaticReviewFindings(['Issue 1']);
-  assert.ok(result.includes('Issue 1'));
-});
-
-test('formatStaticReviewFindings with multiple findings', () => {
-  const result = formatStaticReviewFindings(['Issue 1', 'Issue 2']);
-  assert.ok(result.includes('Issue 1'));
-  assert.ok(result.includes('Issue 2'));
-});
-
-// formatStaticReviewSuccess
-test('formatStaticReviewSuccess includes slug', () => {
-  const result = formatStaticReviewSuccess('test-slug');
-  assert.ok(result.includes('test-slug'));
-});
-
-// performStaticReview - test different failure modes
-test('performStaticReview fails when no mission dir', () => {
-  const result = performStaticReview(mockSlug, {
-    findMissionDir: () => null,
-    resolveWorktree: () => mockWorktree
-  });
-  assert.equal(result.ok, false);
-  assert.ok(result.findings.length > 0);
-});
-
-test('performStaticReview fails when no checkpoints', () => {
-  const result = performStaticReview(mockSlug, {
-    findMissionDir: () => '/mock/mission',
-    resolveWorktree: () => mockWorktree,
-    findCheckpoints: () => []
-  });
-  assert.equal(result.ok, false);
-  assert.ok(result.findings.length > 0);
-});
-
-test('performStaticReview fails when Goal Check missing', () => {
-  const result = performStaticReview(mockSlug, {
-    findMissionDir: () => '/mock/mission',
-    resolveWorktree: () => mockWorktree,
-    findCheckpoints: () => ['/mock/CP-1.md'],
-    getPrimaryBranch: () => 'main',
-    run: () => ({ status: 0, stdout: '', stderr: '', signal: null }),
-    readFileSync: () => '## Other'
-  });
-  assert.equal(result.ok, false);
-});
-
-// Skipping this test for now - it requires complex mocking of git operations
-// test('performStaticReview passes with valid Goal Check', () => {
-//   const missionUtils = require('../../../src/adapters/filesystem/mission-utils.js');
-//   const originalGetPrimaryBranch = missionUtils.getPrimaryBranch;
-//   missionUtils.getPrimaryBranch = () => 'main';
-//
-//   try {
-//     const result = performStaticReview(mockSlug, {
-//       findMissionDir: () => '/mock/mission',
-//       resolveWorktree: () => mockWorktree,
-//       findCheckpoints: () => ['/mock/CP-1.md'],
-//       readFileSync: () => '## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| AC1 | evidence | PASS |',
-//       runFn: () => ({ status: 0, stdout: '', stderr: '' })
-//     });
-//     assert.equal(result.ok, true);
-//   } finally {
-//     missionUtils.getPrimaryBranch = originalGetPrimaryBranch;
-//   }
-// });
 
 // verifyReview - test different branches
 test('verifyReview exits on missing mission dir', async () => {

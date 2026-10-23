@@ -938,3 +938,17 @@ test('snapshot materialization retains unknown strategy for actionable rejection
   assert.equal(snapshot.steps.review.strategy, 'unknown');
   assert.throws(() => selectAgent(snapshot, 'review'), /unknown selection strategy/);
 });
+
+// A PARALLIX_HOME env override alone did not isolate TASK-2789's direct tests.
+test('runtime block writer rejects missing configuration before opening operator storage (TASK-2789)', async (t) => {
+  let opened = false;
+  t.mock.module('../../../../src/adapters/sqlite/adapter-factory.js', {
+    namedExports: { initOperatorState: async () => { opened = true; throw new Error('unexpected storage access'); } },
+  });
+  const { updateAgentBlockChecked } = await import('../../../../src/adapters/agents/agent-launch-authority.js');
+  await assert.rejects(
+    updateAgentBlockChecked('codex', '2099-01-01 00', { reason: 'quota' }),
+    /requires explicit configuration/,
+  );
+  assert.equal(opened, false);
+});

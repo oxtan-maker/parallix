@@ -1,10 +1,10 @@
 import { stubMissionServices } from '../../../../helpers/stub-mission-services.js';
 import { rebaseWorkflowFixture } from '../../../../helpers/rebase-workflow-fixture.js';
 import { draftMissionServicesFixture } from '../../../../helpers/draft-mission-services.js';
-import type { IntegrationAgentFallbackOptions, IntegrationGateFailureRequest, IntegrationGateRoute } from '../../../../../src/application/ports/integrate-workflow.js';
+import type { IntegrateWorkflowPorts, IntegrationAgentFallbackOptions, IntegrationGateFailureRequest, IntegrationGateRoute } from '../../../../../src/application/ports/integrate-workflow.js';
 import { phaseGateResult } from '../../../../helpers/phase-gate-result.js';
 import { noFactIntegrationRepairClassifier, fixtureMission, pendingReview, approvedReview, requestedChangesReview } from '../../../../fixtures/mission-builders.js';
-import { missionVersion } from '../../../../../src/application/domain-ports.js';
+import { missionVersion, type MissionVersion } from '../../../../../src/application/domain-ports.js';
 import { integrationServices } from '../../../../helpers/stub-integration-services.js';
 import { integrationContext } from '../../../../fixtures/integration-context.js';
 import { stubIntegrateWorkflowPorts } from '../../../../helpers/stub-integrate-workflow-ports.js';
@@ -24,11 +24,9 @@ import os from 'node:os';
 import { mockModule, installModuleMocks } from '../../../../lib/module-mock.js';
 import type { DraftWorkflowContext } from '../../../../../src/application/ports/cli-workflows.js';
 import type { RebaseWorkflowPort } from '../../../../../src/application/ports/rebase-workflow.js';
-import type { IntegrateWorkflowPorts } from '../../../../../src/application/ports/integrate-workflow.js';
 import { SLUG, makePorts, makeRecorder, runOptions, handoffTransitionValue } from '../../../../helpers/handoff-ports.js';
 import type { Mission } from '../../../../../src/domain/mission.js';
 import { MissionLifecycleService } from '../../../../../src/application/mission-lifecycle-service.js';
-import type { MissionVersion } from '../../../../../src/application/domain-ports.js';
 import { mkdtemp as registeredMkdtemp } from '../../../../helpers/temp-dir.js';
 import { fakeReviewLoopPorts } from '../../../../helpers/review-loop-ports.js';
 import { IntegrationGateRouteOptions } from '../../../../../src/adapters/cli/commands/integrate-gate-rebound.js';
@@ -56,6 +54,7 @@ const { repositoryId } = await import('../../../../../src/domain/repository.js')
 const { applyReviewerCommand, applyImplementerCommand, beginNextReviewRound, changeRevision, ConfiguredReviewerEligibility, currentReviewRound, requestReviewIntervention, reviewFindingId, reviewStatus, startReview } = await import('../../../../../src/domain/review.js');
 const { integrationRepairNeedsReview } = await import('../../../../../src/application/integration-repair-review.js');
 const { createReviewWorkflowAdapter } = await import('../../../../../src/adapters/review/review-workflow-adapter.js');
+const { bindReviewOperatorResume } = await import('../../../../../src/composition/review-operator-resume.js');
 const { reviewStateDataFrom } = await import('../../../../../src/adapters/review/review-state-mapping.js');
 const { ReviewState } = await import('../../../../../src/adapters/review/review-state.js');
 const { getLatestReviewForPr, getLatestReviewDecision } = await import('../../../../../src/adapters/forgejo/forgejo.js');
@@ -822,7 +821,7 @@ describe("integration repair", () => {
     } finally { setLogger(previous); }
   });
 
-  test('operator continue clears escalation and permits an attempt even when its old round limit was exhausted', async () => {
+  test('inferred operator entry clears escalation and permits an attempt even when its old round limit was exhausted (TASK-2810)', async () => {
     const fixture = memoryMission('review');
     const approved = fixture.mission().review!;
     const pending = startReview(approved.rounds[0].subject, reviewer, implementer, startedAt, eligibility);
@@ -835,6 +834,7 @@ describe("integration repair", () => {
     let continued = false;
     const adapter = createReviewWorkflowAdapter({
       missionStore: fixture.store, inferSlugFn: () => slug, resolveWorktreeFn: () => '/fixture',
+      operatorResume: bindReviewOperatorResume(fixture.store, true, {}),
       readReviewStateFn: async () => ReviewState.from(slug, reviewStateDataFrom(fixture.mission().review!)),
       createEventFn: async () => ({ ok: true, path: null }), run: (() => ({ status: 0, stderr: '', signal: null,  stdout: 'operator' })),
       log: () => {}, error: () => {}, exit: (() => { throw new Error('must resume'); }),
@@ -848,8 +848,8 @@ describe("integration repair", () => {
         return fakeReviewLoopPorts({ lock: { tryAcquire: () => false, release: () => {} } }).ports;
       },
     });
-    const context = await adapter.preflight([slug, '--continue', '--max-attempts', '1']);
-    await adapter.continue(context!);
+    const context = await adapter.preflight([slug, '--max-attempts', '1']);
+    await adapter.enter(context!);
     assert.equal(continued, true);
   });
 

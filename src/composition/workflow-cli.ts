@@ -1,6 +1,8 @@
+import { reviewOperation } from '../domain/review-command-policy.js';
 import { isWorkflowCommand } from '../domain/workflow-operation.js';
 import { workflowFailureSummary, type WorkflowFailureFacts } from '../application/presentation/workflow-failure.js';
 import { stripTerminalControl } from '../application/run-history.js';
+import { parseReviewCliRequest } from '../interfaces/cli/review.js';
 import { parseIntegrateCliRequest } from '../interfaces/cli/integrate.js';
 import { randomUUID } from 'node:crypto';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
@@ -15,11 +17,12 @@ export function ownWorkflowCli(registry: Record<string, Command>, open: () => Pr
   for (const command of ['draft', 'review', 'integrate'] as const) {
     const original = registry[command];
     registry[command] = async (args: string[], options: Record<string, unknown> = {}) => {
+      const reviewRequest = command === 'review' ? parseReviewCliRequest(args) : null;
       if (command === 'integrate') { parseIntegrateCliRequest(args, options.configuration as ParallixConfiguration | undefined); }
       if (bypassOwnership(command, args)) {
         return original(args, options);
       }
-      const slug = inferSlug(args[0]?.startsWith('-') ? undefined : args[0]);
+      const slug = inferSlug(command === 'review' ? reviewRequest?.explicitSlug : args[0]?.startsWith('-') ? undefined : args[0]);
       if (!slug) { return original(args, options); }
       const cancellation = { requested: false, stopOwnedWorkflow: true };
       const interrupt = () => { cancellation.requested = true; };
@@ -73,7 +76,7 @@ async function dispatchOwnedCli(command: 'draft' | 'review' | 'integrate', args:
 
 function bypassOwnership(command: string, args: readonly string[]): boolean {
   return hasMissionWriteAuthorization() || args.includes('--help') || args.includes('--dry-run')
-    || command === 'review' && !args.some(arg => ['--start', '--continue', '--submit'].includes(arg));
+    || command === 'review' && !['enter', 'submit'].includes(reviewOperation(args));
 }
 function workflowKind(command: string, args: readonly string[], status: string | null): 'draft:create' | 'integrate:merge' | 'handoff:record' | 'review:submit' {
   if (command === 'draft') { return 'draft:create'; }

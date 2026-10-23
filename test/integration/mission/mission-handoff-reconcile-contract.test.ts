@@ -97,7 +97,7 @@ test('px review reconciles canonical inputs then reaches the reviewer-launch bou
       readReviewStateFn: readReviewState,
       reviewLoopMechanisms: () => { launched = true; return declinedLoop(); },
     };
-    await review([slug, '--start'], options);
+    await review([slug], options);
     assert.equal(launched, true, 'a fresh start may rerun handoff to complete the Review');
 
     launched = false;
@@ -106,15 +106,15 @@ test('px review reconciles canonical inputs then reaches the reviewer-launch bou
     assert.match(logs.join('\n'), /Reconciled round-one review/);
     assert.equal((await readReviewState(slug, root, store))?.phase, 'reviewing');
 
-    await review([slug, '--start'], options);
+    await review([slug], options);
     assert.equal(launched, true, 'the command reaches the injected reviewer-launch boundary');
   }, { seedReview: false });
 });
 
-test('px review production start guard gives reconciliation guidance before reviewer launch', async () => {
+test('px review production entry guard gives known-Mission guidance before reviewer launch', async () => {
   const logs: string[] = [];
   let launched = false;
-  await review(['task-2350-default-guard', '--start'], {
+  await review(['task-2350-default-guard'], {
     log: (line: string) => logs.push(line), error: (line: string) => logs.push(line), exit: (() => undefined),
     inferSlugFn: slug => slug ?? null,
     resolveWorktreeFn: () => process.cwd(),
@@ -122,7 +122,7 @@ test('px review production start guard gives reconciliation guidance before revi
     reviewLoopMechanisms: () => { launched = true; return declinedLoop(); },
   });
   assert.equal(launched, false, 'the default path stops before the reviewer-launch seam');
-  assert.match(logs.join('\n'), /--reconcile-review/);
+  assert.match(logs.join('\n'), /unknown or has no valid Review aggregate; load a known Mission/);
 });
 
 test('reconciliation fails closed for ambiguous identity, missing Mission, and malformed legacy Review data', async () => {

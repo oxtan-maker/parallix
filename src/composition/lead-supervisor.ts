@@ -1,3 +1,5 @@
+import { createLeadOperatorJudgment } from './lead-operator-judgment.js';
+import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import fs from 'node:fs';
 import type { createActiveCommand } from '../interfaces/cli/active.js';
 
@@ -45,7 +47,7 @@ export function createLeadSupervisorPort(
       const mission = String(item.missionId);
       return observationFromAttention(item, !headFor || mission === headFor ? leadHeadSha(mission) : null);
     });
-  // `px active` and `px review --continue` own long agent loops. Start one
+  // `px active` and `px review` own long agent loops. Start one
   // and return to the fleet loop immediately; the current-work fact prevents
   // the next poll from treating that mission as idle and starting it again.
   const startForward = async (mission: string, action: AttentionAction, work: () => Promise<unknown>) => {
@@ -106,7 +108,7 @@ export function createLeadSupervisorPort(
       // An approved round still parked in review lost its review → integration
       // transition. Finishing it moves the lane only; merging stays human.
       // Lead never decides a review: an undecided round goes to
-      // `review --continue`, whose configured reviewer decides (TASK-2620).
+      // `review`, whose configured reviewer decides (TASK-2620).
       if (action.kind === 'review:submit' && services.mission
         && leadFinishesParkedApproval(await services.mission.store.load(missionId(mission)))) {
         const finished = await recordApproval(mission, { comment: null, decidedAt: new Date().toISOString() }, {
@@ -144,7 +146,7 @@ export function createLeadSupervisorPort(
     // published as current work so the mission shows as being recovered.
     launchRecovery: context.launchRecovery,
   };
-  return port;
+  return { ...port, ...createLeadOperatorJudgment(services, port, context.configuration) };
 }
 /** Finish only this borrowed scope; shared SQLite shutdown remains process-owned. */
 async function runBorrowedActive(services: Awaited<ReturnType<typeof createProductionApplicationServices>>,
@@ -161,7 +163,7 @@ async function runBorrowedActive(services: Awaited<ReturnType<typeof createProdu
   } finally { await services.operatorState.close(); }
 }
 
-interface LeadCompositionContext { rootDir: string; active: ReturnType<typeof createActiveCommand>; registry: Record<string, Command>; runPublicCli: typeof import('./create-cli.js').run; scope: CliServiceScope; launchRecovery: SupervisorPort['launchRecovery'] }
+interface LeadCompositionContext { configuration: ParallixConfiguration; rootDir: string; active: ReturnType<typeof createActiveCommand>; registry: Record<string, Command>; runPublicCli: typeof import('./create-cli.js').run; scope: CliServiceScope; launchRecovery: SupervisorPort['launchRecovery'] }
 
 function leadHeadSha(mission: string): string | null {
   const worktree = resolveWorktree(mission, {});

@@ -623,14 +623,9 @@ In the self-hosted workflow, integration removes stale active-task copies when
 an existing completed record is canonical, preserving that completed history.
 Cancelled task-provider records in `backlog/archive/tasks/` are legitimate
 history and must be preserved; they are distinct from retired Mission ledgers.
-The current integration landing check still blocks every tracked file beneath
-`backlog/archive`, including these task records, whether inherited from the base
-or reintroduced by a mission. If preserved cancellation history triggers that
-check, stop for operator resolution rather than deleting the history to pass.
-Recheck after a rebase: the new base may carry retired files that the previously
-verified tree did not contain. The final landing guard checks a
-disposable copy of the tree destined for the squash commit, including closeout
-and excluding unrelated staged board changes. A failed check leaves the base
+The final landing guard checks a disposable copy of the tree destined for the
+squash commit, including closeout and excluding unrelated staged board changes.
+A failed check leaves the base
 branch unchanged; a payload change during verification requires a retry.
 
 When changing shipped core or default-opinion prompts, update the corresponding

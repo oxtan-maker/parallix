@@ -69,7 +69,7 @@ command line to narrow the run; that filters the queue, it does not replace it.
 
 1. an item whose action is `integrate:merge` is left on the board — the
    supervisor never integrates;
-   a review-lane item runs `px review --continue`, so the configured reviewer
+   a review-lane item runs `px review <slug>`, so the configured reviewer
    decides; the supervisor never records a review decision itself and only
    finishes the lane move of a round a reviewer already approved;
 2. otherwise the action the item advertises is run through its existing use
@@ -87,6 +87,17 @@ liveness, so a mission with a live agent can appear on it. Liveness is therefore
 rechecked from the authorities immediately before *anything* is dispatched —
 before a board action as well as before a recovery launch — and credible current
 work (`live` or `unverified`) stops both.
+
+**Bounded judgment.** Before fresh recovery, a required bounded decision call can
+select wait, request evidence, continuation or escalation. The existing decision
+transport supplies the choice; application code checks current Mission,
+operation and evidence identity before launch. Finite invocation, token and time
+budgets bound the call and its waits; unavailable authority or exhaustion
+escalates. Existing state authorities, ownership checks, review and human landing
+boundaries still govern. This experimental choice does not inspect or stop live
+workers. It assesses installed versus mission-worktree controls as recovery
+guidance; the worker verifies the supported entry point without replacing locked
+gates. Its comparative recovery benefit remains unproven.
 
 **Recovery worker.** A fresh agent context in the existing mission worktree. The
 launcher resumes a prior session whenever a stored marker matches the mission,

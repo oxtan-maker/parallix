@@ -67,3 +67,48 @@ test('lead interruption returns failure after forwarded settlement (TASK-2792)',
   } }), /interrupted/);
   assert.deepEqual(events, ['settled', 'exit', 'closed']);
 });
+for (const race of ['none', 'version', 'operation', 'progress', 'integration'] as const) {
+  test(`judged recovery revalidates ${race} at the prepared launcher boundary (TASK-2798)`, async t => {
+    t.after(() => mock.restoreAll());
+    const { OperatorJudgmentService } = await import('../../../src/application/operator-judgment.js');
+    const events: string[] = [];
+    let current = { missionId: request.missionId, version: 1, operationId: null as string | null,
+      progress: 'head', lane: 'active', working: false, evidence: [{ ref: 'fixture:1', summary: 'fixture' }] };
+    const service = new OperatorJudgmentService({ propose: async e => ({ missionId: e.missionId,
+      version: e.version, operationId: e.operationId, progress: e.progress,
+      evidenceRefs: e.evidence.map(x => x.ref), action: 'continue', summary: 'continue' }) },
+    { now: () => 100, read: async () => current, record: () => {} });
+    const judged = await service.judge(request.missionId);
+    assert.ok(judged.admission);
+    const services = { mission: { store: { load: async () => ({ kind: 'found', mission: { assignee: 'custom' } }) } }, currentWork: {
+      running: async () => { events.push('running'); }, ended: async () => { events.push('ended'); },
+    } } as unknown as ProductionApplicationServices;
+    mock.method(scope, 'createCliServiceScope', () => ({ withGraph: async (invoke: (s: unknown) => unknown) => invoke(services), openServices: async () => services }));
+    mock.method(lead, 'leadRecoveryWorkspace', () => ({ worktree: '/fixture', prompt: request.instruction }));
+    mock.method(lead, 'createLeadSupervisorPort', (_services: unknown, _forwards: unknown, context: { launchRecovery: SupervisorPort['launchRecovery'] }) => ({
+      launchRecovery: context.launchRecovery, admitRecovery: (admission: NonNullable<RecoveryRequest['admission']>) => service.assertContinuation(admission),
+    }));
+    mock.method(cli, 'createLeadCommand', (port: SupervisorPort) => async () => {
+      const launch = port.launchRecovery({ ...request, admission: judged.admission });
+      if (race === 'none') { await launch; } else { await assert.rejects(launch, /stale|not authorized/); }
+      return 0;
+    });
+    mock.method(config, 'resolveAgentModel', () => 'fixture-model');
+    mock.method(stats, 'recordStageStatsSafe', async () => { events.push('usage'); });
+    mock.method(agents, 'startAgent', async (_step: string, options: import('../../../src/adapters/agents/agent-launch-context.js').StartAgentOptions) => {
+      // Simulate Mission movement during selection/capacity preparation, after
+      // both service admission and the registry's assignee lookup.
+      if (race === 'version') { current = { ...current, version: 2 }; }
+      if (race === 'operation') { current = { ...current, operationId: 'new-owner' }; }
+      if (race === 'progress') { current = { ...current, progress: 'new-head' }; }
+      if (race === 'integration') { current = { ...current, lane: 'integration', version: 2 }; }
+      assert.ok(options.launchAdmission, 'production passes admitted facts to the actual launch seam');
+      await options.launchAdmission.assert();
+      events.push('spawn');
+      await options.onLaunch?.({ agent: 'custom', invocation: null, startedAtMs: 0 });
+      return { agent: 'custom' };
+    });
+    await createRuntimeOptions('/fixture', resolveConfiguration({})).commandFns!.lead!([]);
+    assert.deepEqual(events, race === 'none' ? ['spawn', 'running', 'usage', 'ended'] : []);
+  });
+}

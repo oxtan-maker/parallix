@@ -18,7 +18,7 @@ export interface StatusRebaseInfo {
   readonly unmergedFiles: readonly string[];
 }
 
-/** A stale mission worktree detected during status scan. */
+/** A terminal or uncertain Mission worktree detected during status scan. */
 export interface StatusStaleWorktree {
   /** Mission slug. */
   readonly slug: string;
@@ -26,10 +26,12 @@ export interface StatusStaleWorktree {
   readonly path: string;
   /** Branch ref. */
   readonly branch: string | null;
-  /** Task status of the mission. */
+  /** Authoritative Mission state, or unknown when authority cannot establish it. */
   readonly taskStatus: string;
   /** Suggested cleanup command. */
-  readonly cleanupCommand: string;
+  readonly cleanupCommand?: string;
+  /** Authority could not establish whether this worktree is stale. */
+  readonly uncertainty?: string;
 }
 
 /** Agent launcher entry in the status matrix. */
@@ -259,7 +261,7 @@ export interface StatusAgentPort {
 /** Port that supplies stale worktree detection for status. */
 export interface StatusStaleWorktreesPort {
   /** Find stale mission worktrees. Returns empty array when explicit slug provided. */
-  findStaleWorktrees(_explicitSlug: string | null, _rootDir: string): readonly StatusStaleWorktree[];
+  findStaleWorktrees(_explicitSlug: string | null, _rootDir: string): readonly StatusStaleWorktree[] | Promise<readonly StatusStaleWorktree[]>;
   /** Get rebase info for each stale worktree. */
   getStaleWorktreeRebase(_staleWorktrees: readonly StatusStaleWorktree[]): Record<string, StatusRebaseInfo | null>;
 }
