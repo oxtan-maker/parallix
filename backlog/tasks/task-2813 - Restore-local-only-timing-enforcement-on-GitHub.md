@@ -4,7 +4,7 @@ title: Restore local-only timing enforcement on GitHub
 status: backlog
 assignee: []
 created_date: '2026-10-23 05:32'
-updated_date: '2026-10-23 05:33'
+updated_date: '2026-10-23 05:34'
 labels:
   - bug
   - ai_sdlc
@@ -42,7 +42,10 @@ The operator explicitly authorizes correcting hosted deadline behavior in this t
 - [ ] #4 The retained TASK-2792 real-process case proves SIGINT exit 130, interruption diagnostics, durable stopped operation and released current ownership under the restored execution path; hosted startup and outer hang bounds do not enforce workstation-speed requirements.
 - [ ] #5 Audit the CI-selected population for equivalent case/helper bypasses and fix those belonging to this same policy contract. Preserve local CPU budgets/headroom enforcement, functional assertions, tier membership, coverage/LCOV/Sonar and normal parallel scheduling; do not obtain green by skips, retries, global serialization or weakened local limits.
 - [ ] #6 Manually exercise the interruption/settlement flow in isolated state and verify the real runner with local and hosted policy selection, with no real missions or operator state touched. Capture focused contract results and actual GitHub functional verification before claiming restoration; a local-only green or static configuration assertion is insufficient.
+- [ ] #7 Identify the timing frameworks and wrappers involved in this regression, trace their callers, and remove redundant or superseded implementations rather than layering a new policy over them. Migrate all affected callers to the retained existing owner, delete dead configuration and redundant tests, and preserve distinct behavioral assertions. Completion evidence must name what was removed and prove the removed path has no remaining callers. Retain valid local CPU/headroom enforcement and finite hang protection.
 <!-- AC:END -->
+
+
 
 
 
