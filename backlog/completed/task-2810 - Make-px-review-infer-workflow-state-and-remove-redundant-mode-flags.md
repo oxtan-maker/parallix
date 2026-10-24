@@ -1,8 +1,8 @@
 ---
 id: TASK-2810
 title: Make px review infer workflow state and remove redundant mode flags
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-22 13:05'
 labels:
   - bug

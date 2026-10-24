@@ -1,3 +1,4 @@
+import type { ReviewWorkflowPort } from '../../../../src/application/ports/review-workflow.js';
 import { makeExecutePorts as completeExecuteFixture } from '../../../fixtures/execute-mission-ports.js';
 import { fixtureMission as completeMission } from '../../../fixtures/mission-builders.js';
 import { missionId as completeMissionId } from '../../../../src/domain/mission.js';
@@ -306,7 +307,7 @@ describe("Publish-then-reconcile defects —", () => {
     };
   }
 
-  function makeReviewWorkflow(overrides: Record<string, unknown> = {}) {
+  function makeReviewWorkflow(overrides: Partial<ReviewWorkflowPort> = {}): ReviewWorkflowPort {
     const operation = () => async () => {};
     return {
       preflight: (args: string[]) => ({ slug: 'task-2373', args, options: {} }),
