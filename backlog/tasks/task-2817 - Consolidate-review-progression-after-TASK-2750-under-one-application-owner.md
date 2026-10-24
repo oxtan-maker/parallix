@@ -4,7 +4,7 @@ title: Consolidate review progression after TASK-2750 under one application owne
 status: backlog
 assignee: []
 created_date: '2026-10-24 05:29'
-updated_date: '2026-10-24 05:30'
+updated_date: '2026-10-24 05:31'
 labels:
   - bug
   - ai_sdlc
@@ -47,7 +47,11 @@ Completion is refused while a known in-scope review progression defect, competin
 - [ ] #10 Final checkpoint and review evidence enumerate removed competing paths and migrated callers, cite focused behavioral and production-composed manual results, and identify any remaining defects honestly. No known in-scope ownership/progression defect is deferred to a follow-up or accepted as residual debt; implementation is not complete while one remains.
 <!-- AC:END -->
 
+## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
+Confirmed guard blind spot: scripts/architecture/boundary-guards.ts findWorkflowOwnershipViolations scans src/adapters only; allowedDependencyGraph permits composition imports from all inner/outer production layers for wiring. compositionOwnershipViolations checks complete-graph construction and dynamic service lookup, not lifecycle sequencing in composition. scripts/architecture/workflow-ownership.ts detects a finite catalogue of adapter control calls under branches, not duplicate domain/application review algorithms. The existing board-handoff-resume case expects rejection of a pending review. Extend the existing owning architecture/behavior suites to cover this concrete escape and production caller convergence; do not add a verification gate or treat a larger name blacklist as proof of single ownership.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
