@@ -140,19 +140,23 @@ describe('Execute Mission adapters', () => {
     assert.equal(await ports.workspace.resolveWorktree('task-1'), null);
   });
 
-  test('agent execution adapter overlays the operator blocklist onto the file agent config', async () => {
-    const blocklist = { codex: { until: '9999-12-31 23' } } satisfies { codex: { until: string; }; };
+  test('agent execution adapter keeps the file agent config and applies operator blocklist rows at selection', async () => {
+    const blocklist = { codex: { agent: 'codex', blocked: true, until: '9999-12-31 23' } };
     const ports = createExecuteMissionPorts(
       '/repo',
       { missionTransitionStore: transitionStore, operatorBlocklist: blocklist },
       runtimeStub({
         async selectLaunchAndRecord(opts) {
+          launched.push(opts.runtimeBlocklist);
           return { agent: 'codex', result: { status: 0, agentConfig: opts.agentConfig }, rebaseDeferred: false };
         },
       }),
     );
+    const launched: unknown[] = [];
     const plan = await ports.agentExecution.prepare({ slug: 'task-1', worktree: '/worktree' });
-    assert.deepEqual(plan.agentConfig, { steps: { active: { eligible: ['codex'], selection: 'random' } }, blocklist });
+    assert.deepEqual(plan.agentConfig, { steps: { active: { eligible: ['codex'], selection: 'random' } } });
+    await ports.agentExecution.launch({ slug: 'task-1', worktree: '/worktree', plan, taskResolution: { ok: true, taskFile: '/worktree/task.md', matches: [] }, preselectedAgent: null } as never);
+    assert.deepEqual(launched, [blocklist], 'launch preselection consults the same persisted rows');
     assert.equal(plan.prompt, 'execute prompt');
     assert.equal(await ports.agentExecution.eligible('codex'), false, 'operator blocks prevent retention');
   });

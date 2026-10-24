@@ -265,6 +265,12 @@ Act-on-review uses the active policy. Explicit operator overrides retain
 precedence over draws, including zero weights, while eligibility, blocks and
 exclusions still apply. Launcher availability is checked before launching.
 
+A runtime usage-limit block stops applying at its recorded expiry, whether that
+is a legacy local `YYYY-MM-DD HH` hour or an ISO timestamp with an offset; an
+active block with an unreadable expiry stays blocked. An explicit entry in the
+operator-local `agents.local.json` blocklist takes precedence over a runtime
+block, so `{ "blocked": false }` makes a runtime-blocked family selectable.
+
 `adapters.agents.maxConcurrentCustom` is an optional positive integer enforced
 across local custom-agent processes that share `PARALLIX_HOME`; its default is
 unlimited custom-agent launches. `subagents.maxParallel` is separate: it is an

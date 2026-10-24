@@ -1,5 +1,5 @@
 import type { AgentConfig } from '../../../src/adapters/agents/agent-config.js';
-import { describe, it } from 'node:test';
+import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,7 +14,9 @@ import { materializeBlocklistSnapshot } from '../../../src/adapters/sqlite/block
 // through. These must stay synchronous while honoring the SQLite-materialized
 // blocklist overlay.
 import { eligibleAgentsForStep } from '../../../src/adapters/agents/launcher-selection.js';
-import { isAgentBlocked } from '../../../src/adapters/agents/agent-config.js';
+import { createExecuteMissionPorts, type ExecuteMissionRuntime } from '../../../src/adapters/mission/execute-mission-adapters.js';
+import type { MissionTransitionStore } from '../../../src/application/domain-ports.js';
+import { AgentBlockService } from '../../../src/application/services/agent-block-service.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -46,6 +48,21 @@ const activeStepConfig = (blocklist: AgentConfig['blocklist']): AgentConfig => (
   blocklist,
 });
 
+const FAMILIES = ['codex', 'claude', 'vibe', 'qwen'];
+
+/** The production execute selection consumer over a once-materialized SQLite snapshot. */
+function executeSelection(overlay: ReturnType<typeof materializeBlocklistSnapshot>, config: AgentConfig = {}) {
+  const runtime = { readAgentConfig: () => ({ steps: { active: { eligible: FAMILIES } }, ...config }) } as unknown as ExecuteMissionRuntime;
+  return createExecuteMissionPorts('/repo', { missionTransitionStore: {} as MissionTransitionStore, operatorBlocklist: overlay }, runtime).agentExecution;
+}
+
+/** Service and execute-selection eligibility at the controlled current instant. */
+async function decisionsNow(repo: SqliteBlocklistRepository, selection: ReturnType<typeof executeSelection>) {
+  const service = await new AgentBlockService(repo).queryAll(FAMILIES, Date.now());
+  const selected = await Promise.all(FAMILIES.map((family) => selection.eligible(family)));
+  return { service: service.map(({ eligible }) => eligible), selected };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -56,16 +73,18 @@ describe('SQLite operator-state transaction contract (CP3)', () => {
   it('materializes the operator blocklist from SQLite via a single async read', async () => {
     const { db, dir } = await createDbWithSchema();
     try {
-      await new SqliteBlocklistRepository(db).save({ agent: 'codex', blocked: true, reason: 'maintenance' });
-      await new SqliteBlocklistRepository(db).save({ agent: 'vibe', blocked: false });
+      await new SqliteBlocklistRepository(db).save({ agent: 'Codex', blocked: true, reason: 'maintenance' });
+      await new SqliteBlocklistRepository(db).save({ agent: 'vibe', blocked: false, until: '2099-01-01 00' });
 
-      // The one and only await: read blocklist rows, then map to a plain overlay.
+      // The one and only await: read blocklist rows, then key them by family.
       const entries = await new SqliteBlocklistRepository(db).findAll();
       const overlay = materializeBlocklistSnapshot(entries);
 
-      assert.deepEqual(overlay.codex, { blocked: true, reason: 'maintenance' });
-      // blocked=false, no `until` → not a block → omitted from the overlay.
-      assert.equal(overlay.vibe, undefined);
+      // Rows are kept unchanged; interpretation happens at each selection.
+      assert.deepEqual(overlay, {
+        codex: { agent: 'Codex', blocked: true, until: undefined, reason: 'maintenance' },
+        vibe: { agent: 'vibe', blocked: false, until: '2099-01-01 00', reason: undefined },
+      });
     } finally {
       await db.close();
       cleanupTempDir(dir);
@@ -80,7 +99,7 @@ describe('SQLite operator-state transaction contract (CP3)', () => {
       await new SqliteBlocklistRepository(db).save({ agent: 'codex', blocked: true, reason: 'blocked by operator' });
       const overlay = materializeBlocklistSnapshot(await new SqliteBlocklistRepository(db).findAll());
 
-      const result = eligibleAgentsForStep('active', { config: activeStepConfig(overlay) });
+      const result = eligibleAgentsForStep('active', { config: activeStepConfig({}), runtimeBlocklist: overlay });
 
       // Proof of no async cascade: the hot-path consumer returns a plain array,
       // never a Promise, even though the data originated in async SQLite.
@@ -88,30 +107,45 @@ describe('SQLite operator-state transaction contract (CP3)', () => {
       assert.ok(Array.isArray(result));
       assert.ok(!result.includes('codex'), 'SQLite-blocked codex must be excluded');
       assert.ok(result.includes('claude'), 'unblocked claude must remain eligible');
-
-      // isAgentBlocked itself is synchronous (boolean return) and honors the overlay.
-      const blocked: boolean = isAgentBlocked('codex', activeStepConfig(overlay));
-      assert.equal(blocked, true);
     } finally {
       await db.close();
       cleanupTempDir(dir);
     }
   });
 
-  it('time-based SQLite blocks apply and expire through the existing sync isAgentBlocked logic', async () => {
+  it('service and execute selection agree on hourly and ISO expiry as the clock advances past a once-materialized snapshot (TASK-2789)', async (t) => {
     const { db, dir } = await createDbWithSchema();
-    try {
-      const repo = new SqliteBlocklistRepository(db);
-      await repo.save({ agent: 'codex', blocked: true, until: '2099-12-31 23', reason: 'future' });
-      await repo.save({ agent: 'claude', blocked: true, until: '2000-01-01 00', reason: 'expired' });
-      const overlay = materializeBlocklistSnapshot(await repo.findAll());
+    t.after(async () => { mock.timers.reset(); await db.close(); cleanupTempDir(dir); });
+    const repo = new SqliteBlocklistRepository(db);
+    await repo.save({ agent: 'codex', blocked: true, until: '2030-01-01T05:30:15.250+02:00', reason: 'quota' });
+    await repo.save({ agent: 'claude', blocked: true, until: '2030-01-01 06', reason: 'quota' });
+    const isoExpiry = Date.UTC(2030, 0, 1, 3, 30, 15, 250);
+    const hourlyExpiry = new Date(2030, 0, 1, 6).getTime();
+    mock.timers.enable({ apis: ['Date'], now: Math.min(isoExpiry, hourlyExpiry) - 60_000 });
+    const selection = executeSelection(materializeBlocklistSnapshot(await repo.findAll()));
 
-      assert.equal(isAgentBlocked('codex', activeStepConfig(overlay)), true, 'future until → blocked');
-      assert.equal(isAgentBlocked('claude', activeStepConfig(overlay)), false, 'past until → not blocked');
-    } finally {
-      await db.close();
-      cleanupTempDir(dir);
+    for (const [instant, codex, claude] of [
+      [isoExpiry - 1, false, hourlyExpiry <= isoExpiry - 1], [isoExpiry, true, hourlyExpiry <= isoExpiry], [isoExpiry + 1, true, hourlyExpiry <= isoExpiry + 1],
+      [hourlyExpiry - 1, isoExpiry <= hourlyExpiry - 1, false], [hourlyExpiry, isoExpiry <= hourlyExpiry, true], [hourlyExpiry + 3_600_000, true, true],
+    ] as const) {
+      mock.timers.setTime(instant);
+      const { service, selected } = await decisionsNow(repo, selection);
+      assert.deepEqual(selected, service, `execute selection must match the service at ${new Date(instant).toISOString()}`);
+      assert.deepEqual(selected, [codex, claude, true, true], `eligibility at ${new Date(instant).toISOString()}`);
     }
+  });
+
+  it('service and execute selection agree on unblocked, indefinite and malformed persisted rows (TASK-2789)', async (t) => {
+    const { db, dir } = await createDbWithSchema();
+    t.after(async () => { await db.close(); cleanupTempDir(dir); });
+    const repo = new SqliteBlocklistRepository(db);
+    await repo.save({ agent: 'codex', blocked: false, until: '2099-01-01 00' });
+    await repo.save({ agent: 'claude', blocked: true, reason: 'operator' });
+    await repo.save({ agent: 'vibe', blocked: true, until: 'garbage:00', reason: 'quota' });
+
+    const { service, selected } = await decisionsNow(repo, executeSelection(materializeBlocklistSnapshot(await repo.findAll())));
+    assert.deepEqual(selected, service);
+    assert.deepEqual(selected, [true, false, false, true], 'false rows and absent rows stay eligible; indefinite and malformed active rows stay blocked');
   });
 
   // --- Rollback: without the overlay, the untouched file blocklist is authority ---

@@ -1,6 +1,6 @@
 import { agentPolicyStep, agentFamily, type AgentAvailability, type AgentFamily, type AgentSelectionSnapshot, type StepSelectionPolicy } from '../../domain/agents.js';
 import type { AgentSelectionSnapshotPort } from '../../application/domain-ports.js';
-import { AgentBlockService, parseAgentBlockUntil } from '../../application/services/agent-block-service.js';
+import { AgentBlockService, agentBlockOf } from '../../application/services/agent-block-service.js';
 import type { AgentBlocklistRepository } from '../../application/ports/agent-blocklist.js';
 import { readAgentConfig, type AgentConfig, type AgentStepConfig } from './agent-config.js';
 import { workflowLauncherStatus } from './launcher-selection.js';
@@ -58,9 +58,7 @@ export class SqliteAgentSelectionSnapshotAdapter implements AgentSelectionSnapsh
         family,
         launcherAvailable: launcher.supported,
         launcherDetail: launcher.supported ? null : (launcher.reason ?? launcher.detail ?? launcher.health ?? null),
-        block: !state.blocked ? { kind: 'none' }
-          : state.until ? { kind: 'until', untilMs: parseAgentBlockUntil(state.until), reason: state.reason }
-            : { kind: 'indefinite', reason: state.reason },
+        block: agentBlockOf(state),
       };
     });
     const steps = Object.fromEntries(Object.entries(config.steps ?? {}).map(([step, value]) => [step, policy(value, step === 'review' ? [] : this.knownAgentFamilies)]));

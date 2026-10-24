@@ -1,6 +1,6 @@
 import type { AgentAvailability, AgentBlock, AgentFamily } from '../../domain/agents.js';
 import { agentFamily } from '../../domain/agents.js';
-import { AgentBlockService, parseAgentBlockUntil } from '../../application/services/agent-block-service.js';
+import { AgentBlockService, agentBlockOf } from '../../application/services/agent-block-service.js';
 import type { AgentReadAdapter, RunningAgentSession } from '../../application/projections/board-readers.js';
 import type { SessionMarkerRepository } from '../../application/ports/mission-store.js';
 import { detectRunningMissionSessions, type RunningMissionSession } from '../agents/running-sessions.js';
@@ -130,11 +130,7 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
     const availability: AgentAvailability[] = this.knownAgentFamilies.map((family) => {
       const runtimeState = stateByAgent.get(family.toLowerCase());
       const state = runtimeState && resolveAgentBlockAuthority(family, runtimeState, config, nowMs);
-      const block: AgentBlock = state?.blocked
-        ? (state.until
-          ? { kind: 'until', untilMs: parseAgentBlockUntil(state.until), reason: state.reason }
-          : { kind: 'indefinite', reason: state?.reason ?? null })
-        : { kind: 'none' };
+      const block: AgentBlock = state ? agentBlockOf(state) : { kind: 'none' };
       const launcher = this.launcherAvailable(family);
       return {
         family,

@@ -137,7 +137,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-agent-selection',
     family: 'launch',
     fileLocation: 'src/adapters/agents/launcher-selection.ts',
-    line: 176,
+    line: 182,
     anchor: 'function selectAgent',
     reads: ['AgentBlock'],
     requirement:
@@ -148,8 +148,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-blocklist-filter',
     family: 'launch',
     fileLocation: 'src/adapters/agents/launcher-selection.ts',
-    line: 133,
-    anchor: 'isAgentBlocked',
+    line: 139,
+    anchor: 'isPersistedAgentBlocked',
     reads: ['AgentBlock'],
     requirement:
       'The durable operator-local block per agent family, with its expiry, so an expired block stops excluding the family.',

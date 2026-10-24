@@ -1,8 +1,8 @@
 ---
 id: TASK-2789
 title: Use one expiry decision for persisted agent blocks
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-10-19 09:57'
 labels: []
 dependencies: []

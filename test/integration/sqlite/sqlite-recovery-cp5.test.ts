@@ -285,14 +285,8 @@ describe('SQLite recovery, backup, concurrency, rollback — CP5', () => {
       await new SqliteBlocklistRepository(db).save({ agent: 'codex', blocked: true, reason: 'operator' });
       const overlay = materializeBlocklistSnapshot(await new SqliteBlocklistRepository(db).findAll());
 
-      // The composition root overlays ONLY the blocklist field (as LegacyActiveAdapter does).
-      const effective = { ...fileConfig, blocklist: overlay } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
-
-      // Repo-owned steps are untouched by any SQLite projection.
-      assert.deepEqual(effective.steps, fileConfig.steps, 'SQLite must not rewrite repo-owned step eligibility');
-
-      // SQLite-owned blocklist is applied; repo-owned eligibility still governs the candidate set.
-      const eligible = eligibleAgentsForStep('active', { config: effective });
+      // SQLite-owned blocks are applied beside the untouched file config; repo-owned eligibility still governs the candidate set.
+      const eligible = eligibleAgentsForStep('active', { config: fileConfig, runtimeBlocklist: overlay });
       assert.deepEqual(eligible, ['claude'], 'codex blocked by SQLite; claude kept from repo eligibility');
     } finally {
       await db.close();

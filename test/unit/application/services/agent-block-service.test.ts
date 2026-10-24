@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { AgentBlockService } from '../../../../src/application/services/agent-block-service.js';
+import { AgentBlockService, agentBlockOf } from '../../../../src/application/services/agent-block-service.js';
 
 class MemoryBlockRepository {
   private readonly entries = new Map<string, { agent: string; blocked: boolean; until?: string; reason?: string }>();
@@ -58,4 +58,41 @@ test('AgentBlock service exposes repository failures without file fallback', asy
   const repo = new MemoryBlockRepository();
   repo.fail = true;
   await assert.rejects(new AgentBlockService(repo).query('codex'), /database unavailable/);
+});
+
+test('AgentBlock service keeps local-time hourly expiry before, at and after the hour (TASK-2789)', async () => {
+  const repo = new MemoryBlockRepository();
+  await repo.save({ agent: 'codex', blocked: true, until: '2030-01-01 05', reason: 'quota' });
+  const expiry = new Date(2030, 0, 1, 5).getTime();
+  const service = new AgentBlockService(repo);
+  assert.equal((await service.query('codex', expiry - 1)).blocked, true);
+  assert.equal((await service.query('codex', expiry)).blocked, false);
+  assert.equal((await service.query('codex', expiry + 3_600_000)).blocked, false);
+});
+
+test('AgentBlock service keeps ISO offset and sub-hour precision (TASK-2789)', async () => {
+  const repo = new MemoryBlockRepository();
+  await repo.save({ agent: 'codex', blocked: true, until: '2030-01-01T05:30:15.250+02:00', reason: 'quota' });
+  const expiry = Date.UTC(2030, 0, 1, 3, 30, 15, 250);
+  const service = new AgentBlockService(repo);
+  assert.deepEqual(await service.query('codex', expiry - 1), {
+    agent: 'codex', eligible: false, blocked: true, until: '2030-01-01T05:30:15.250+02:00', reason: 'quota', limit: 'quota',
+  });
+  assert.deepEqual(agentBlockOf(await service.query('codex', expiry - 1)), { kind: 'until', untilMs: expiry, reason: 'quota' });
+  assert.equal((await service.query('codex', expiry)).blocked, false);
+  assert.equal((await service.query('codex', expiry + 1)).blocked, false);
+});
+
+test('AgentBlock service keeps unblocked rows unblocked and indefinite or malformed active rows blocked (TASK-2789)', async () => {
+  const repo = new MemoryBlockRepository();
+  await repo.save({ agent: 'codex', blocked: false, until: '2099-01-01 00' });
+  await repo.save({ agent: 'claude', blocked: true, reason: 'operator' });
+  await repo.save({ agent: 'vibe', blocked: true, until: 'not-a-time', reason: 'quota' });
+  const states = await new AgentBlockService(repo).queryAll(['codex', 'claude', 'vibe', 'qwen'], Date.parse('2030-01-01T00:00:00Z'));
+  assert.deepEqual(states.map(({ agent, blocked }) => [agent, blocked]), [
+    ['codex', false], ['claude', true], ['vibe', true], ['qwen', false],
+  ]);
+  assert.deepEqual(states.map(agentBlockOf), [
+    { kind: 'none' }, { kind: 'indefinite', reason: 'operator' }, { kind: 'indefinite', reason: 'quota' }, { kind: 'none' },
+  ], 'an unparseable expiry stays blocked without inventing an instant');
 });

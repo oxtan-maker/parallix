@@ -122,7 +122,7 @@ function reportActiveFailure(outcome: ApplicationOutcome<unknown>, slug: string,
 
 async function selectLaunchAndRecord(opts: LaunchOptions) {
   const { slug, worktree, preselectedAgent, agentConfig, taskResolution, prompt, startAgentFn, transitionTaskFn, getTaskStatusFn, getTaskImplementerFn, selectAgentFn, log, sessionMarkerPort, onAgentLaunched, onActivated, authorityAlreadyActive, unrefChild } = activeLaunchBindings(opts);
-  const preselected = preselectedAgent || selectAgentFn('active', { config: agentConfig, configuration: opts.configuration });
+  const preselected = preselectedAgent || selectAgentFn('active', { config: agentConfig, runtimeBlocklist: opts.runtimeBlocklist, configuration: opts.configuration });
   const taskResolutionTyped = taskResolution;
   const taskFile = taskResolutionTyped && taskResolutionTyped.ok && taskResolutionTyped.taskFile
     ? taskResolutionTyped.taskFile

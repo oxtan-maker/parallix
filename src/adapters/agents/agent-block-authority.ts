@@ -1,4 +1,5 @@
-import type { AgentBlockState } from '../../application/services/agent-block-service.js';
+import { agentBlockState, type AgentBlockState } from '../../application/services/agent-block-service.js';
+import type { AgentBlockEntry } from '../../application/ports/agent-blocklist.js';
 import { parseBlockUntil, type AgentConfig } from './agent-config.js';
 
 function localOverride(agent: string, config: AgentConfig | null | undefined, nowMs: number): AgentBlockState | null {
@@ -41,4 +42,18 @@ function resolveAgentBlockAuthority(
   return localOverride(agent, config, nowMs) ?? runtimeState;
 }
 
-export { resolveAgentBlockAuthority };
+/**
+ * Synchronous selection decision over once-materialized persisted rows: the
+ * rows are interpreted at the current instant by the same rule as
+ * AgentBlockService, then the explicit local config entry takes precedence.
+ */
+function isPersistedAgentBlocked(
+  agent: string,
+  persisted: Readonly<Record<string, AgentBlockEntry>>,
+  config: AgentConfig | null | undefined,
+  nowMs = Date.now(),
+): boolean {
+  return resolveAgentBlockAuthority(agent, agentBlockState(agent, persisted[agent.toLowerCase()], nowMs), config, nowMs).blocked;
+}
+
+export { resolveAgentBlockAuthority, isPersistedAgentBlocked };

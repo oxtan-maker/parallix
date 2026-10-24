@@ -312,7 +312,7 @@ describe("Publish-then-reconcile defects —", () => {
       preflight: (args: string[]) => ({ slug: 'task-2373', args, options: {} }),
       verify: operation(), submit: operation(), push: operation(), enter: operation(),
       comment: operation(), readComments: operation(),
-      submitReview: operation(), consumeArtifacts: operation(), close: operation(),
+      submitReview: operation(), close: operation(),
       status: operation(), backfillReview: operation(),
       reconcileReview: operation(),
       ...overrides,

@@ -32,6 +32,8 @@ export interface LaunchOptions {
   configuration?: ParallixConfiguration;
   slug: string; worktree: string; prompt: string; preselectedAgent?: string | null;
   agentConfig: AgentConfig;
+  /** Once-materialized SQLite blocklist rows consulted by the preselection. */
+  runtimeBlocklist?: NonNullable<Parameters<typeof agents.selectAgent>[1]>['runtimeBlocklist'];
   taskResolution?: { ok: boolean; taskFile?: string };
   startAgentFn?: (_step: string, _options: NonNullable<Parameters<typeof agents.startAgent>[1]>) => Promise<CommandAgentLaunch>;
   transitionTaskFn?: (..._args: Parameters<typeof transitionTask>) => boolean | Promise<boolean>;

@@ -13,6 +13,8 @@ import { startPiAgent, resolvePiCommand } from './pi.js';
 import { startQwenAgent, resolveQwenCommand } from './qwen.js';
 import { CONFIG_PATH, readAgentConfig, isAgentBlocked, type AgentConfig, type ReadAgentConfigOptions } from './agent-config.js';
 import { resolveCustomRunner } from '../config/product-config.js';
+import { isPersistedAgentBlocked } from './agent-block-authority.js';
+import type { AgentBlockEntry } from '../../application/ports/agent-blocklist.js';
 import { agentPolicyStep, agentFamily, selectAgent as selectFromSnapshot, selectionPolicy, AgentPoolExhaustedError, AgentSelectionPolicyError, type AgentSelectionSnapshot } from '../../domain/agents.js';
 
 interface LauncherStatus {
@@ -26,6 +28,8 @@ interface LauncherStatus {
 type AgentSelectionOptions = ReadAgentConfigOptions & {
   configuration?: ParallixConfiguration;
   config?: AgentConfig | null;
+  /** Once-materialized SQLite rows; when present they are the runtime block authority beneath local overrides. */
+  runtimeBlocklist?: Readonly<Record<string, AgentBlockEntry>> | null;
   configPath?: string;
   exclude?: readonly string[] | ReadonlySet<string>;
   worktree?: string;
@@ -130,7 +134,9 @@ function eligibleAgentsForStep(step: string, options: AgentSelectionOptions = {}
   } else {
     eligible = config.steps[agentPolicyStep(step)].eligible || WORKFLOW_AGENT_NAMES.slice();
   }
-  return eligible.filter((agent) => !isAgentBlocked(agent, config));
+  const runtime = options.runtimeBlocklist;
+  const nowMs = Date.now();
+  return eligible.filter((agent) => !(runtime ? isPersistedAgentBlocked(agent, runtime, config, nowMs) : isAgentBlocked(agent, config)));
 }
 
 function availableLaunchers(pool: string[], step: string, options: AgentSelectionOptions, allowEmpty = false): string[] {

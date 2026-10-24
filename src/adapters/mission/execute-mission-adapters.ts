@@ -146,14 +146,14 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
   ) {}
 
   async eligible(agent: string): Promise<boolean> {
-    const eligible = eligibleAgentsForStep('active', { config: this.resolveAgentConfig(), configuration: this._configuration });
+    const eligible = eligibleAgentsForStep('active', { config: this.readAgentConfig(), runtimeBlocklist: this._operatorBlocklist, configuration: this._configuration });
     const override = this._configuration.agents.override;
     if (override && eligible.includes(override) && override !== agent) { return false; }
     return eligible.includes(agent);
   }
 
   async select(_slug: string): Promise<string | null> {
-    return selectAgent('active', { config: this.resolveAgentConfig(), checkAvailability: false, configuration: this._configuration });
+    return selectAgent('active', { config: this.readAgentConfig(), runtimeBlocklist: this._operatorBlocklist, checkAvailability: false, configuration: this._configuration });
   }
 
   async prepare(request: { readonly slug: string; readonly worktree: string }): Promise<AgentLaunchPlan> {
@@ -167,7 +167,7 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
     const launchContext = persisted
       ? renderLaunchContext(persisted)
       : this._runtime.buildCheckpointContext(request.slug);
-    const agentConfig = this.resolveAgentConfig();
+    const agentConfig = this.readAgentConfig();
     return {
       agentConfig,
       // `startAgent` checks the selected launcher's health after the Mission
@@ -183,6 +183,7 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
       preselectedAgent: request.preselectedAgent ?? request.plan.agent ?? null,
       pinnedAgent: request.pinnedAgent,
       agentConfig: request.plan.agentConfig as object,
+      runtimeBlocklist: this._operatorBlocklist,
       taskResolution: request.taskResolution,
       prompt: request.plan.prompt,
       sessionMarkerPort: this._sessionMarkerPort,
@@ -203,18 +204,12 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
   }
 
   /**
-   * Read the file-based agent config and, when SQLite is enabled, overlay the
-   * operator-local blocklist as the sole authority for that field. Repository
-   * (config file) authority is preserved for every other field (steps,
-   * eligibility, weights). Fully synchronous — the async materialization
-   * already happened once at the composition root.
+   * The file-based agent config, including explicit local blocklist entries.
+   * Selection interprets the once-materialized SQLite rows beneath those
+   * entries at each synchronous call, so no block decision is frozen here.
    */
-  private resolveAgentConfig(): object {
-    const fileConfig = this._runtime.readAgentConfig() as Record<string, unknown>;
-    if (!this._operatorBlocklist) {
-      return fileConfig;
-    }
-    return { ...fileConfig, blocklist: this._operatorBlocklist };
+  private readAgentConfig(): object {
+    return this._runtime.readAgentConfig() as object;
   }
 }
 
