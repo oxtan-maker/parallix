@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 
 import type { BoardProjection } from '../../application/projections/board.js';
-import type { AttentionAction } from '../../application/projections/board.js';
+import { attentionAction, type AttentionAction } from '../../application/projections/board.js';
 import type { MissionCard } from '../../application/projections/mission-board.js';
 
 import type { BoardCommandDispatcher } from '../../application/controller/board-command.js';
@@ -34,8 +34,9 @@ export function attentionCommand(card: MissionCard, reason: { kind: string }, ac
       return `px integrate ${card.id}`;
     case 'review-lane':
       return 'px review';
-    case 'gate-failed':
     case 'blocking':
+      return attentionAction(card, { kind: 'blocking', detail: card.blockingReason ?? '' }).display;
+    case 'gate-failed':
       return `px active ${card.id}`;
     default:
       return `px ${card.lane} ${card.id}`;
@@ -85,11 +86,11 @@ export function AttentionItems({ queue, selectedMissionId, focusedIndex, sourceS
               <Text wrap="end" dimColor>{attentionWhy(item.reason)}</Text>
             </Box>
             <Box>
-              <Text wrap="end" color="gray">{`$ ${attentionCommand(item.card, item.reason, item.action)}`}</Text>
+              <Text wrap="end" color="gray">{`${item.action.kind === 'manual' ? '' : '$ '}${attentionCommand(item.card, item.reason, item.action)}`}</Text>
             </Box>
             <Box>
-              <Text color={canDispatchAction(item.action.kind, item.card, commandController) ? 'green' : 'gray'}>
-                {canDispatchAction(item.action.kind, item.card, commandController) ? ' run \u25b6' : ' unavailable'}
+              <Text color={item.action.kind !== 'manual' && canDispatchAction(item.action.kind, item.card, commandController) ? 'green' : 'gray'}>
+                {item.action.kind !== 'manual' && canDispatchAction(item.action.kind, item.card, commandController) ? ' run \u25b6' : item.action.kind === 'manual' ? ' lead investigation' : ' unavailable'}
               </Text>
             </Box>
           </Box>

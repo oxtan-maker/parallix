@@ -59,6 +59,25 @@ test('current work distinguishes unverified, stale, and known-stopped publishers
   assert.equal(reconcileCurrentWork([event()], { ...options, isProcessAlive: () => false, nowMs: now }).get(missionId('task-2370'))?.currentWork, null);
 });
 
+test('investigation alone cannot erase a durable blocker (TASK-2799)', () => {
+  const blocker = event({ state: 'blocked', blockedReason: 'Review authority needs investigation', sequence: 1 });
+  const recovery = event({ operationId: 'recovery', phase: 'recovery', sequence: 2 });
+  for (const state of ['ended', 'dead', 'stale'] as const) {
+    const events = state !== 'ended' ? [blocker, recovery] : [blocker, recovery,
+      event({ operationId: 'recovery', phase: 'recovery', state: 'ended', sequence: 3 })];
+    const facts = reconcileCurrentWork(events, { nowMs: state === 'stale' ? now + 120_000 : now, ttlMs: 60_000,
+      isProcessAlive: () => state === 'dead' ? false : null }).get(missionId('task-2370'));
+    assert.equal(facts?.blockingReason, 'Review authority needs investigation');
+    assert.equal(facts?.currentWork, null);
+  }
+  const continued = reconcileCurrentWork([blocker, recovery,
+    event({ operationId: 'supported-continuation', sequence: 3 }),
+    event({ operationId: 'recovery', phase: 'recovery', state: 'ended', sequence: 4 })],
+  { nowMs: now, ttlMs: 60_000, isProcessAlive: () => true }).get(missionId('task-2370'));
+  assert.equal(continued?.blockingReason, null);
+  assert.equal(continued?.currentWork?.operationId, 'supported-continuation');
+});
+
 // ── Operation-aware terminal events — TASK-2373 (was task-2373-operation-aware.test.ts) ──
 /**
  * TASK-2373 CP-3 — operation-aware replacement and termination (SC8, SC9).

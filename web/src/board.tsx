@@ -259,7 +259,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <AttentionRail reasonCards={[...intake.flatMap(stage => stage.cards), ...flight.flatMap(stage => stage.cards)]} snapshot={snapshot} selectedId={selectedId} pendingCommands={pendingCommands} onSelect={setSelectedId} onAction={(item, control, agent) => {
           const card = snapshot.stages.flatMap((stage) => stage.cards).find((candidate) => candidate.id === item.missionId);
-          if (card !== undefined) { open(card, item.action, control, agent); } else { publishOutcome(item.missionId, `Mission ${item.missionId} is no longer in the current projection.`); }
+          if (card !== undefined && item.action.kind !== 'manual') { open(card, item.action, control, agent); } else { publishOutcome(item.missionId, `Mission ${item.missionId} is no longer in the current projection.`); }
         }} />
         <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0, gap: SPACE.xl, padding: SPACE.xl, overflowX: 'auto' }}>
           {intake.length > 0 && (

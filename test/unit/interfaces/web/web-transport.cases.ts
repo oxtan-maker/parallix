@@ -934,3 +934,19 @@ test('execution checkpoint and absent current plan round-trip fail closed (TASK-
     assert.equal(validateWebBoardSnapshot(invalidAttribution).ok, false);
   }
 });
+
+test('manual attention round-trips without becoming a command capability (TASK-2799)', () => {
+  const card = makeCard({ blockingReason: 'Operator must decide review authority' });
+  const item = makeAttentionItem(card, { kind: 'blocking', detail: card.blockingReason! }, 1);
+  const snapshot = toWebBoardSnapshot({ ...makeProjection({ active: [card] }), attentionQueue: [item] });
+  const action = snapshot.attentionQueue[0]!.action;
+  assert.equal(action.kind, 'manual');
+  assert.equal(action.state, 'ineligible');
+  assert.equal(action.targetLane, null);
+  assert.equal(action.reason, card.blockingReason);
+  assert.ok(validateWebBoardSnapshot(JSON.parse(JSON.stringify(snapshot))).ok);
+  const invalid = structuredClone(snapshot);
+  (invalid.attentionQueue[0]!.action as { state: string }).state = 'enabled';
+  assert.equal(validateWebBoardSnapshot(invalid).ok, false);
+  assert.ok(snapshot.availableActions.every(action => action.kind !== ('manual' as string)));
+});

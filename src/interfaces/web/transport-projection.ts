@@ -157,7 +157,7 @@ function toWebMissionCard(card: MissionCard): WebMissionCard {
 
 function toWebAttentionItem(item: AttentionItem, card: MissionCard | undefined): WebAttentionItem {
   const kind = item.action.kind;
-  const boardCommand = ATTENTION_KIND_COMMANDS[kind];
+  const boardCommand = kind === 'manual' ? undefined : ATTENTION_KIND_COMMANDS[kind];
   const availability = boardCommand === undefined
     ? undefined
     : card?.commands.find((command) => command.command === boardCommand);
@@ -165,7 +165,9 @@ function toWebAttentionItem(item: AttentionItem, card: MissionCard | undefined):
     missionId: item.missionId,
     rank: item.rank,
     reason: { kind: item.reason.kind, detail: item.reason.kind === 'none' ? null : item.reason.detail },
-    action: toCommandAction(kind, item.action.display, availability),
+    action: kind === 'manual'
+      ? { kind, display: item.action.display, state: 'ineligible', reason: item.reason.kind === 'none' ? 'Operator decision required' : item.reason.detail, targetLane: null }
+      : toCommandAction(kind, item.action.display, availability),
     dependsOnSources: [...item.dependsOnSources],
   };
 }

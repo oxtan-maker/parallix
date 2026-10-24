@@ -165,6 +165,47 @@ test('attention a done mission is not stranded', async () => {
   assert.equal(item, undefined, 'a done mission must never surface an orphaned-active item');
 });
 
+test('planned active checkpoint awaiting operator decision is manual attention (TASK-2799)', async () => {
+  const blocked: Mission = {
+    ...mission('task-design-decision', 'active'),
+    checkpoints: [{
+      missionId: missionId('task-design-decision'), name: 'CP-1', goalCheck: [],
+      nextActionText: 'Await operator design decision',
+      repair: {
+        incidentId: 'design-stop', command: 'npm test', authorizedGates: [],
+        authorizedCriteria: [], attempt: 0, evidenceRecorded: false, verified: false,
+        blocker: { command: 'npm test', diagnostic: 'Required design decision is unresolved',
+          authorityReason: 'Operator owns the design decision', proposedCorrection: 'Operator must decide the contract' },
+      },
+    }],
+  };
+  const before = JSON.stringify(blocked);
+  const { root, projection } = await board(storeFor([blocked]));
+  try {
+    const item = projection.attentionQueue.find(item => item.missionId === blocked.id);
+    assert.ok(item);
+    assert.equal(item.action.kind, 'manual');
+    assert.match(item.reason.kind === 'none' ? '' : item.reason.detail, /Required design decision is unresolved/);
+    assert.equal(item.card.checkpointEvidence[0]?.goalCheck.length, 0);
+    assert.equal(item.card.commands.find(command => command.command === 'active')?.enabled, true);
+    assert.equal(JSON.stringify(blocked), before, 'projection does not mutate durable Mission evidence');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('missing planned checkpoint evidence alone retains ordinary active recovery (TASK-2799)', async () => {
+  const planned: Mission = { ...mission('task-planned-evidence', 'active'),
+    checkpoints: [{ missionId: missionId('task-planned-evidence'), name: 'CP-7', goalCheck: [],
+      firstLine: 'Finish the remaining implementation and record evidence', nextActionText: 'Record implementation evidence before handoff' }] };
+  const { root, projection } = await board(storeFor([planned]));
+  try {
+    const item = projection.attentionQueue.find(item => item.missionId === planned.id);
+    assert.equal(item?.action.kind, 'active:execute');
+    assert.equal(item?.card.blockerRequiresOperator, false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 // ── Attention queue ranking and sources — TASK-2444 (was task-2444-attention-queue-repro.test.ts) ──
 describe("Attention queue ranking and sources —", () => {
   const repo = repositoryId('task-2444');
@@ -193,6 +234,23 @@ describe("Attention queue ranking and sources —", () => {
     );
   }
 
+  test('idle approved integration retains manual durable blocker attention (TASK-2799)', () => {
+    const card = { ...makeCard('task-human-integration', 'integration', {
+      commands: [
+        { command: 'active', enabled: false, reason: 'integration lane' },
+        { command: 'integrate', enabled: true, reason: null },
+      ],
+    }), reviewApproved: true };
+    assert.equal(card.currentWork, null);
+    assert.equal(project([card]).attentionQueue[0]?.action.kind, 'integrate:merge');
+    const detail = 'Review authority is stale; operator must decide whether to stand down approval';
+    const blocked = project([{ ...card, blockingReason: detail }]).attentionQueue;
+    assert.equal(blocked.length, 1);
+    assert.equal(blocked[0]?.action.kind, 'manual');
+    assert.equal(blocked[0]?.reason.kind === 'none' ? null : blocked[0]?.reason.detail, detail);
+    assert.equal(blocked[0]?.action.display, 'px lead task-human-integration --once');
+  });
+
   test('task-2444: all-backlog cards produce no attention items', () => {
     assert.equal(project([makeCard('task-2444-a', 'backlog'), makeCard('task-2444-b', 'backlog')]).attentionQueue.length, 0);
   });
@@ -208,7 +266,7 @@ describe("Attention queue ranking and sources —", () => {
     ]);
     assert.deepEqual(mixed.attentionQueue.map((item) => item.rank), [1, 2, 3, 4, 5]);
     assert.deepEqual(mixed.attentionQueue.map((item) => [item.reason.kind, item.dependsOnSources]), [
-      ['blocking', ['current-work']],
+      ['blocking', ['current-work', 'mission-store']],
       ['gate-failed', ['gate']],
       ['review-lane', ['task-markdown']],
       ['integrate-lane', ['task-markdown']],
@@ -221,7 +279,60 @@ describe("Attention queue ranking and sources —", () => {
       blockingReason: 'decision required',
       commands: [{ command: 'active', enabled: false, reason: 'ineligible' }],
     })]);
-    assert.equal(nonRunnable.attentionQueue.length, 0);
+    assert.equal(nonRunnable.attentionQueue[0]?.action.kind, 'manual');
+    assert.ok(nonRunnable.attentionQueue.every(item => item.action.kind === 'manual'));
+    const failedGate = project([makeCard('task-disabled-gate', 'active', {
+      gate: 'failed', commands: [{ command: 'active', enabled: false, reason: 'ineligible' }],
+    })]);
+    assert.equal(failedGate.attentionQueue.length, 0);
+  });
+
+  test('manual attention preserves disabled authority and ordinary integration handoff (TASK-2799)', () => {
+    for (const reviewApproved of [false, true]) {
+      const card = { ...makeCard('task-authority', 'integration', {
+        commands: [
+          { command: 'active', enabled: false, reason: 'integration lane' },
+          { command: 'review', enabled: false, reason: 'integration lane' },
+          { command: 'integrate', enabled: false, reason: reviewApproved ? 'stale approval' : 'missing approval' },
+        ],
+      }), reviewApproved };
+      const before = JSON.stringify(card);
+      assert.equal(project([card]).attentionQueue.length, 0);
+      const blocked = { ...card, blockingReason: 'Operator review authority decision required' };
+      const item = project([blocked]).attentionQueue[0];
+      assert.equal(item?.action.kind, 'manual');
+      assert.deepEqual(item?.card.commands, card.commands);
+      assert.equal(JSON.stringify(card), before);
+      assert.deepEqual(item?.card.reviewHistory, []);
+    }
+    const ordinary = project([makeCard('task-ordinary', 'integration')]).attentionQueue[0];
+    assert.equal(ordinary?.action.kind, 'integrate:merge');
+    assert.ok(ordinary?.card.commands.some(command => command.command === 'integrate' && command.enabled));
+  });
+
+  test('ordinary blocked active run keeps its executable retry (TASK-2799)', () => {
+    const card = makeCard('task-agent-failed', 'active', { blockingReason: 'agent exited with status 1' });
+    const item = project([card]).attentionQueue[0];
+    assert.equal(item?.reason.kind, 'blocking');
+    assert.deepEqual(item?.action, { kind: 'active:execute', display: 'px active task-agent-failed' });
+    assert.ok(item?.card.commands.some(command => command.command === 'active' && command.enabled));
+    const contractStop = project([{ ...card, blockerRequiresOperator: true }]).attentionQueue[0];
+    assert.equal(contractStop?.action.kind, 'manual');
+  });
+
+  test('admitted workflow ownership suppresses manual blocker attention (TASK-2799)', async () => {
+    const { projectWorkflowBoard } = await import('../../../../src/application/projections/workflow-board.js');
+    const card = { ...makeCard('task-owned', 'active', { blockingReason: 'Operator decision required' }), blockerRequiresOperator: true };
+    const operation: import('../../../../src/domain/workflow-operation.js').WorkflowOperation = { id: 'owned-workflow', repositoryId: card.repositoryId, missionId: card.id,
+      command: 'active:execute', requestKey: 'delivery', generation: 0, phase: 'running', providerStarted: true,
+      agent: 'codex', reviewer: null, originalStatus: 'active', previousAssignee: null,
+      owner: { pid: 123, identity: 'verified-owner' }, createdAt: '2026-10-23T10:00:00Z',
+      updatedAt: '2026-10-23T10:00:00Z', reason: null };
+    assert.equal(project([card]).attentionQueue[0]?.action.kind, 'manual');
+    const owned = projectWorkflowBoard(project([card]), [operation]);
+    assert.deepEqual(owned.attentionQueue, []);
+    assert.ok(owned.stages.flatMap(stage => stage.cards).find(candidate => candidate.id === card.id)
+      ?.commands.every(command => !command.enabled));
   });
 
   test('task-2444: every queued reason carries source dependencies', () => {

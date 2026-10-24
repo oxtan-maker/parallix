@@ -130,27 +130,9 @@ async function superviseItem(
   //    mission with a live agent *can* be on it, and dispatching a command onto
   //    a running agent is the one thing the supervisor must never do.
   const key = `${observed.action.kind}@${observed.progress}@${failureFingerprint(observed)}`;
-  if (!run.pressed.has(key)) {
-    const beforeDispatch = await port.liveness(run.missionId);
-    assertSupervisionRunning(signal);
-    if (beforeDispatch.working) {
-      run.steps.push(`not dispatching ${observed.action.display}: ${beforeDispatch.detail ?? 'an agent is working this mission'}`);
-      return 'watching';
-    }
-    run.lastAction = observed.action.display;
-    try {
-      await port.runAction(run.missionId, observed.action, observed, signal);
-      run.pressed.add(key);
-      run.steps.push(`ran ${run.lastAction}`);
-    } catch (error) {
-      run.steps.push(`${run.lastAction} failed: ${errorText(error)}`);
-      const attempts = (run.actionAttempts.get(key) ?? 0) + 1;
-      run.actionAttempts.set(key, attempts);
-      if (attempts < ACTION_ATTEMPTS) { return 'watching'; }
-      run.pressed.add(key);
-      run.steps.push(`${run.lastAction} failed ${attempts}/${ACTION_ATTEMPTS} times; recovery may now diagnose it`);
-    }
-    return 'acted';
+  // Manual attention has no lifecycle command to press; it goes straight to recovery.
+  if (observed.action.kind !== 'manual' && !run.pressed.has(key)) {
+    return pressAdvertisedAction(port, run, observed, key, signal);
   }
 
   // 3. The board's own action did not clear the item. No failure classification
@@ -163,9 +145,7 @@ async function superviseItem(
     return settle(
       run,
       'escalated',
-      `${run.missionId} still needs attention in lane ${observed.lane}: ${attentionDetail(observed.reason)} `
-      + `survived ${observed.action.display} and ${spentOnFailure} recovery attempt(s). `
-      + 'Next: inspect the mission worktree yourself.',
+      unresolvedAttentionSummary(observed, spentOnFailure),
     );
   }
 
@@ -183,7 +163,7 @@ async function superviseItem(
       run.steps.push(`work started before the recovery agent could: ${beforeLaunch.detail ?? 'current work is live'}`);
       return 'watching';
     }
-    const judgment = await judgeRecoveryStep(port, run, failure);
+    const judgment = await judgeRecoveryStep(port, run, observed, failure);
     if (typeof judgment === 'string') { return judgment; }
     run.attempts.set(failure, spentOnFailure + 1);
     const request = recoveryRequest(run, observed, judgment);
@@ -200,20 +180,51 @@ async function superviseItem(
   return 'acted';
 }
 
+/** Press the board's advertised lifecycle command once, after a fresh liveness check. */
+async function pressAdvertisedAction(
+  port: SupervisorPort,
+  run: MissionRun,
+  observed: AttentionObservation,
+  key: string,
+  signal?: AbortSignal,
+): Promise<PassResult> {
+  const beforeDispatch = await port.liveness(run.missionId);
+  assertSupervisionRunning(signal);
+  if (beforeDispatch.working) {
+    run.steps.push(`not dispatching ${observed.action.display}: ${beforeDispatch.detail ?? 'an agent is working this mission'}`);
+    return 'watching';
+  }
+  run.lastAction = observed.action.display;
+  try {
+    await port.runAction(run.missionId, observed.action, observed, signal);
+    run.pressed.add(key);
+    run.steps.push(`ran ${run.lastAction}`);
+  } catch (error) {
+    run.steps.push(`${run.lastAction} failed: ${errorText(error)}`);
+    const attempts = (run.actionAttempts.get(key) ?? 0) + 1;
+    run.actionAttempts.set(key, attempts);
+    if (attempts < ACTION_ATTEMPTS) { return 'watching'; }
+    run.pressed.add(key);
+    run.steps.push(`${run.lastAction} failed ${attempts}/${ACTION_ATTEMPTS} times; recovery may now diagnose it`);
+  }
+  return 'acted';
+}
+
 function recoveryRequest(run: MissionRun, observed: AttentionObservation, judgment: OperatorJudgmentResult): Omit<RecoveryRequest, 'instruction'> {
   return { missionId: run.missionId, lane: observed.lane, diagnostic: attentionDetail(observed.reason),
-    attemptedOperation: run.lastAction, ...(judgment.admission ? { admission: judgment.admission } : {}), judgment: judgment.summary };
+    attemptedOperation: run.lastAction, directInvestigation: observed.action.kind === 'manual',
+    ...(judgment.admission ? { admission: judgment.admission } : {}), judgment: judgment.summary };
 }
 
 /** Judgment is admitted inside the recovery claim; live work still wins afterward. */
-async function judgeRecoveryStep(port: SupervisorPort, run: MissionRun, failure: string): Promise<PassResult | OperatorJudgmentResult> {
+async function judgeRecoveryStep(port: SupervisorPort, run: MissionRun, observed: AttentionObservation, failure: string): Promise<PassResult | OperatorJudgmentResult> {
   const decision: OperatorJudgmentResult = port.judgeRecovery ? await port.judgeRecovery(run.missionId)
     : { action: 'escalate', summary: 'Operator judgment capability unavailable.' };
   run.steps.push(`operator judgment ${decision.action}: ${decision.summary}`);
   if (decision.action === 'wait') { return 'watching'; }
   if (decision.action !== 'continue') {
     run.settledFailure = failure;
-    return settle(run, 'escalated', `${decision.action}: ${decision.summary}`);
+    return settle(run, 'escalated', judgmentEscalation(observed, decision, [...run.attempts.values()].reduce((sum, n) => sum + n, 0)));
   }
   const afterJudgment = await port.liveness(run.missionId);
   if (afterJudgment.working) {
@@ -225,6 +236,23 @@ async function judgeRecoveryStep(port: SupervisorPort, run: MissionRun, failure:
     return settle(run, 'escalated', 'Operator continuation is missing its admitted identity; no recovery launched.');
   }
   return decision;
+}
+
+/** A judged manual stop reports its blocker, the recovery actually spent this run, and the rerun step. */
+function judgmentEscalation(observed: AttentionObservation, decision: OperatorJudgmentResult, recoveries: number): string {
+  if (observed.action.kind !== 'manual') { return `${decision.action}: ${decision.summary}`; }
+  const work = recoveries ? `No lifecycle command ran; ${recoveries} earlier recovery attempt(s) did not clear it and judgment refused another.` : 'No lifecycle command or recovery ran.';
+  return `${observed.missionId} needs an operator decision in lane ${observed.lane}: ${attentionDetail(observed.reason)}. `
+    + `Operator judgment ${decision.action}: ${decision.summary} ${work} Next: decide the recorded blocker, then rerun px lead ${observed.missionId} --once.`;
+}
+
+/** Escalation describes actual attempts, never an ineligible command we did not run. */
+function unresolvedAttentionSummary(observed: AttentionObservation, attempts: number): string {
+  const attempted = observed.action.kind === 'manual'
+    ? `remains after ${attempts} recovery attempt(s) without lifecycle dispatch. `
+    : `survived ${observed.action.display} and ${attempts} recovery attempt(s). `;
+  return `${observed.missionId} still needs attention in lane ${observed.lane}: ${attentionDetail(observed.reason)} `
+    + attempted + 'Next: review the recovery evidence and resolve any remaining operator decision.';
 }
 
 export interface SuperviseFleetOptions {

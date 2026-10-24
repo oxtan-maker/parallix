@@ -115,8 +115,14 @@ still stuck comes back with the evidence behind it.
 **Confidence:** Confirmed. The queue is the board's own, so a mission with a live
 agent is never touched; attempts are bounded per failure; an item counts as
 cleared only when the board stops asking about it. Integration items are left for
-the operator, and defects that belong to the primary branch are escalated rather
-than repaired.
+the operator. Ordinary blocked runs keep their executable retry. Recorded
+contract stops and blockers without an eligible retry remain visible and never
+get a direct lifecycle dispatch. On active and review Missions they receive bounded
+lead investigation when judgment admits it; integration authority blockers escalate
+with their evidence instead. Recovery can resolve
+problems within the recorded contract; a remaining operator decision is escalated
+with evidence, options and a recommended next step. Defects that belong to the
+primary branch are escalated rather than repaired.
 
 Lead uses bounded judgment before fresh recovery (see `px --help`). It uses the operator's
 configured decision capability, separately from coding-agent sessions. It can

@@ -183,7 +183,17 @@ export function checkAttentionItem(object: unknown, path: string, problems: stri
   } else {
     problems.push(`${path}.reason must be an object`);
   }
-  checkCommandAction(object.action, `${path}.action`, problems);
+  if (isPlainObject(object.action) && object.action.kind === 'manual') {
+    checkKeys(object.action, ['kind', 'display', 'state', 'reason', 'targetLane'],
+      ['kind', 'display', 'state', 'reason', 'targetLane'], `${path}.action`, problems);
+    checkString(object.action, 'display', `${path}.action`, problems);
+    checkString(object.action, 'reason', `${path}.action`, problems);
+    if (object.action.state !== 'ineligible' || object.action.targetLane !== null) {
+      problems.push(`${path}.action manual attention cannot be executable or target a lane`);
+    }
+  } else {
+    checkCommandAction(object.action, `${path}.action`, problems);
+  }
   checkStringArray(object, 'dependsOnSources', path, problems);
 }
 

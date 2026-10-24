@@ -45,9 +45,9 @@ export interface AttentionItem {
   readonly dependsOnSources: readonly string[];
 }
 
-/** The command an attention item advertises and dispatches. */
+/** Lifecycle command or investigation guidance; manual items skip lifecycle dispatch. */
 export interface AttentionAction {
-  readonly kind: BoardCommandKind;
+  readonly kind: BoardCommandKind | 'manual';
   /** Exactly what the operator is shown, e.g. `px review task-0001`. */
   readonly display: string;
 }
@@ -299,6 +299,12 @@ export function attentionReason(card: MissionCard): AttentionReason {
  */
 export function attentionAction(card: MissionCard, reason: AttentionReason): AttentionAction {
   switch (reason.kind) {
+    case 'blocking':
+      // Ordinary blocked runs keep their retry. Contract stops and blockers
+      // without an eligible retry reach lead investigation without dispatch.
+      return card.blockerRequiresOperator || !card.commands.some((item) => item.command === 'active' && item.enabled)
+        ? { kind: 'manual', display: `px lead ${card.id} --once` }
+        : { kind: 'active:execute', display: `px active ${card.id}` };
     case 'integrate-lane':
       return { kind: 'integrate:merge', display: `px integrate ${card.id}` };
     case 'review-lane':
@@ -318,6 +324,7 @@ export function attentionAction(card: MissionCard, reason: AttentionReason): Att
 export function attentionSources(reason: AttentionReason): readonly string[] {
   switch (reason.kind) {
     case 'blocking':
+      return ['current-work', 'mission-store'];
     case 'stale-work':
       return ['current-work'];
     case 'gate-failed':
@@ -419,7 +426,7 @@ export function buildBoardProjection(
     if (reason.kind === 'none') { return []; }
     const action = attentionAction(card, reason);
     const command = action.kind.split(':', 1)[0];
-    if (!card.commands.some((item) => item.command === command && item.enabled)) { return []; }
+    if (action.kind !== 'manual' && !card.commands.some((item) => item.command === command && item.enabled)) { return []; }
     return [{
       missionId: card.id,
       rank: attentionRank(card),

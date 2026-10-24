@@ -187,7 +187,11 @@ export interface WebAttentionItem {
   readonly missionId: string;
   readonly rank: number;
   readonly reason: { readonly kind: WebAttentionReasonKind; readonly detail: string | null };
-  readonly action: WebCommandAction;
+  readonly action: WebCommandAction | {
+    /** No direct lifecycle command; display offers bounded lead investigation. */
+    readonly kind: 'manual'; readonly display: string;
+    readonly state: 'ineligible'; readonly reason: string; readonly targetLane: null;
+  };
   readonly dependsOnSources: readonly string[];
 }
 

@@ -96,7 +96,7 @@ export function BoardShellView({ state }: { state: BoardShellState }): React.Rea
         onToggleDone={() => setDoneCollapsed((c) => !c)}
         onEnterAttention={(item) => {
           setNavigation((previous) => ({ ...previous, selectedMissionId: item.missionId }));
-          dispatchMissionAction(item.action.kind, item.card);
+          if (item.action.kind !== 'manual') { dispatchMissionAction(item.action.kind, item.card); }
         }}
         onStartAction={startAction}
         selectedMissionId={navigation.selectedMissionId}

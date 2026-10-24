@@ -90,7 +90,8 @@ function populated(): WebBoardSnapshot {
   });
   return toWebBoardSnapshot({
     ...base,
-    attentionQueue: [makeAttentionItem(blocked, { kind: 'blocking', detail: 'two blocking findings' }, 1)],
+    attentionQueue: [{ ...makeAttentionItem(blocked, { kind: 'blocking', detail: 'two blocking findings' }, 1),
+      action: { kind: 'active:execute', display: 'px active task-0001' } }],
     availableActions: [{ command: 'draft', enabled: true, reason: null }],
     operationLog: [{ operationId: 'op-1', phase: 'checkpoint', message: 'CP-2 committed', timestamp: '2026-08-30T10:00:00.000Z' }],
     sourceFacts: [{ source: 'git', status: 'fresh', value: 'main@abcdef' }, { source: 'stats', status: 'unavailable' }],
@@ -978,4 +979,16 @@ test('recorded guidance and checkpoint evidence stay distinct from current activ
   assert.match(detail, /Last recorded Goal Check evidence/);
   assert.match(detail, /Recorded step/);
   assert.match(detail, /verified/);
+});
+
+test('attention rail shows manual blocker and lead investigation next step without a run control (TASK-2799)', () => {
+  const card = makeCard({ id: missionId('task-human'), blockingReason: 'Review authority requires operator decision' });
+  const snapshot = toWebBoardSnapshot({ ...makeProjection({ active: [card] }),
+    attentionQueue: [makeAttentionItem(card, { kind: 'blocking', detail: card.blockingReason! }, 1)] });
+  const html = render(snapshot);
+  assert.match(html, /Review authority requires operator decision/);
+  assert.match(html, /px lead task-human --once/);
+  assert.match(html, /lead investigation/);
+  assert.doesNotMatch(html, /data-action-kind="manual"/);
+  assert.doesNotMatch(html, /px integrate task-human/);
 });

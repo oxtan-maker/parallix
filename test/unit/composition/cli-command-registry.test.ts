@@ -15,8 +15,9 @@ const config = mockModule<typeof import('../../../src/adapters/config/product-co
 await installModuleMocks();
 const { createRuntimeOptions } = await import('../../../src/composition/cli-command-registry.js');
 const request: RecoveryRequest = { missionId: 'task-recovery', lane: 'active', diagnostic: 'stuck', attemptedOperation: 'active', instruction: 'Repair safely' };
-for (const fails of [false, true]) {
-  test(`lead recovery ${fails ? 'failure' : 'success'} publishes completion and retains fresh-session authority (TASK-2762)`, async t => {
+for (const mode of ['empty', 'report', 'failure'] as const) {
+  const fails = mode === 'failure';
+  test(`lead recovery ${mode} publishes completion and retains fresh-session authority (TASK-2762)`, async t => {
     t.after(() => mock.restoreAll());
     const events: string[] = [];
     const services = { mission: { store: { load: async () => ({ kind: 'found', mission: { assignee: 'custom' } }) } }, currentWork: {
@@ -27,19 +28,25 @@ for (const fails of [false, true]) {
     mock.method(lead, 'createLeadSupervisorPort', (_services: unknown, _forwards: unknown, context: { launchRecovery: SupervisorPort['launchRecovery'] }) => ({ launchRecovery: context.launchRecovery }));
     mock.method(cli, 'createLeadCommand', (port: SupervisorPort) => async () => {
       if (fails) { await assert.rejects(port.launchRecovery(request), /launch failed/); }
-      else { assert.equal(await port.launchRecovery(request), 'custom ran in /fixture'); }
+      else {
+        const report = await port.launchRecovery(request);
+        if (mode === 'report') {
+          assert.match(report, /Recovery report.*verify against Mission evidence/);
+          assert.match(report, /Decision: retain the contract; evidence: CP-2; options: A or B; recommend A/);
+        } else { assert.equal(report, 'custom ran in /fixture'); }
+      }
       return 0;
     });
     mock.method(config, 'resolveAgentModel', () => 'fixture-model');
     mock.method(stats, 'recordStageStatsSafe', async (_stage: string, options: { stage: string; model: string }) => {
       assert.equal(options.stage, 'recovery'); assert.equal(options.model, 'fixture-model'); events.push('usage');
     });
-    mock.method(agents, 'startAgent', async (mode: string, options: { agent: string; sessionMarkerPort: unknown; worktree: string; prompt: string }) => {
-      assert.equal(mode, 'execute'); assert.equal(options.agent, 'custom'); assert.equal(options.worktree, '/fixture');
+    mock.method(agents, 'startAgent', async (stage: string, options: { agent: string; sessionMarkerPort: unknown; worktree: string; prompt: string }) => {
+      assert.equal(stage, 'execute'); assert.equal(options.agent, 'custom'); assert.equal(options.worktree, '/fixture');
       assert.equal(options.prompt, request.instruction); assert.ok(options.sessionMarkerPort);
       events.push('launch');
       if (fails) { throw new Error('launch failed'); }
-      return { agent: 'custom' };
+      return { agent: 'custom', ...(mode === 'report' ? { result: { stdout: 'Decision: retain the contract; evidence: CP-2; options: A or B; recommend A' } } : {}) };
     });
     const runtime = createRuntimeOptions('/fixture', resolveConfiguration({}));
     const command = runtime.commandFns?.lead;

@@ -139,16 +139,15 @@ function resolveOperation(
   options: ReconcileCurrentWorkOptions,
 ): CurrentWorkEvent | null {
   let standing: CurrentWorkEvent | null = null;
+  let investigatedBlocker: CurrentWorkEvent | null = null;
   for (const event of ordered) {
     if (event.state === 'running') {
-      if (
-        standing !== null &&
-        standing.state === 'running' &&
-        standing.processId !== event.processId &&
-        processAlive(standing, options)
-      ) {
+      if (isNestedLiveOperation(standing, event, options)) {
         continue;
       }
+      // Investigation is not evidence that the previous failure was resolved.
+      // A supported continuation supersedes it; a recovery bracket alone does not.
+      investigatedBlocker = recoveryBlockerFor(event, standing, investigatedBlocker);
       standing = event;
       continue;
     }
@@ -157,9 +156,30 @@ function resolveOperation(
     // "why is nobody working this?". The same operation's bracket-closing
     // `ended` must not overwrite it with silence; only new work can.
     if (standing?.state === 'blocked' && event.state === 'ended') { continue; }
-    standing = event;
+    standing = event.state === 'ended' && standing?.phase === 'recovery' && investigatedBlocker
+      ? investigatedBlocker : event;
+    investigatedBlocker = null;
   }
-  return standing;
+  return restoreStoppedInvestigation(standing, investigatedBlocker, options);
+}
+
+/** A nested process must not replace a still-live operation's work. */
+function isNestedLiveOperation(standing: CurrentWorkEvent | null, event: CurrentWorkEvent, options: ReconcileCurrentWorkOptions): boolean {
+  return standing !== null && standing.state === 'running' && standing.processId !== event.processId
+    && processAlive(standing, options);
+}
+
+/** Keep the original blocker across recovery publications, until real work supersedes it. */
+function recoveryBlockerFor(event: CurrentWorkEvent, standing: CurrentWorkEvent | null, prior: CurrentWorkEvent | null): CurrentWorkEvent | null {
+  if (event.phase !== 'recovery') { return null; }
+  return standing?.state === 'blocked' ? standing : prior;
+}
+
+function restoreStoppedInvestigation(standing: CurrentWorkEvent | null, blocker: CurrentWorkEvent | null,
+  options: ReconcileCurrentWorkOptions): CurrentWorkEvent | null {
+  if (!blocker || standing?.state !== 'running') { return standing; }
+  const freshness = runningFreshness(standing, options);
+  return freshness === null || freshness === 'stale' ? blocker : standing;
 }
 
 /**

@@ -75,7 +75,8 @@ command line to narrow the run; that filters the queue, it does not replace it.
 2. otherwise the action the item advertises is run through its existing use
    case, once per distinct mission state, so an action that does not help is not
    repeated;
-3. when the item survives that action, one fresh recovery agent runs in the
+3. when the item survives that action, or the board retains a blocker without
+   a dispatchable lifecycle action, one fresh recovery agent runs in the
    mission worktree, and the fleet carries on while it runs;
 4. a failure that survives its budget is escalated with what was observed.
 

@@ -51,6 +51,12 @@ import { deriveAliases, type Command, type MainOptions } from '../interfaces/cli
 
 import { run } from './create-cli.js';
 
+/** Keep the bounded output tail as evidence for a later operator escalation. */
+function retainedRecoveryReport(launched: Awaited<ReturnType<typeof agents.startAgent>>): string {
+  const report = launched?.result?.stdout?.trim();
+  return report ? `\nRecovery report (agent output; verify against Mission evidence):\n${report}` : '';
+}
+
 const loadLeadComposition = () => Promise.all([
   import('./lead-supervisor.js'), import('../interfaces/cli/lead.js'), import('../application/recovery-supervisor.js'),
 ]);
@@ -148,7 +154,9 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
           });
         }
         fmt.log.info(`[lead] Recovery agent ${agent ?? 'with no reported family'} finished for ${fmt.slug(request.missionId)}; rechecking the board`);
-        return `${agent ?? 'agent with no reported family'} ran in ${worktree}`;
+        const report = retainedRecoveryReport(launched);
+        return `${agent ?? 'agent with no reported family'} ran in ${worktree}`
+          + report;
       } catch (error) {
         fmt.log.fail(`[lead] Recovery agent for ${fmt.slug(request.missionId)} failed: ${error instanceof Error ? error.message : String(error)}`);
         throw error;

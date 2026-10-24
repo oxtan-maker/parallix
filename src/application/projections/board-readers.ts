@@ -1,3 +1,4 @@
+import { repairContractFailure } from '../repair-checkpoint-service.js';
 import { projectWorkflowBoard, projectWorkflowCard } from './workflow-board.js';
 import type { WorkflowOperationStore } from '../ports/workflow-operation.js';
 import type { WorkflowOperation } from '../../domain/workflow-operation.js';
@@ -330,12 +331,15 @@ export class BoardProjectionBuilder {
     const approvalCoverage = isClosedMission(mission) ? null
       : identity ? missionApprovalCoverage(reviewFact.review, identity)
         : recordedApprovalCoverage(reviewFact.review);
+    const contractStop = isClosedMission(mission) ? null
+      : repairContractFailure(mission.checkpoints, mission.declaredGates, mission.successCriteria);
     const facts: MissionOperationalFacts = {
       latestGate,
       reviewApproval: reviewFact.approval,
       currentWork: work.currentWork,
       liveSession,
-      blockingReason: work.blockingReason,
+      blockingReason: contractStop ?? work.blockingReason,
+      blockerRequiresOperator: contractStop !== null,
       flags: [],
       approvalCoverage,
     };

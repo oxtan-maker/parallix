@@ -356,7 +356,7 @@ test('attention-items: each item renders exact command string from attentionComm
   );
   assert.equal(
     attentionCommand(blockingCard, { kind: 'blocking' }),
-    'px active task-4003',
+    'px lead task-4003 --once',
   );
   assert.equal(
     attentionCommand(gateFailedCard, { kind: 'gate-failed' }),
@@ -667,13 +667,13 @@ test('attention-items: reason kinds render with correct colors (blocking=red, ga
   }
 });
 
-test('attention-items: exact command text uses mission context for review and selectors for other actions', async () => {
+test('attention-items: exact next step uses mission context for review and distinguishes manual blockers from executable commands', async () => {
   const { attentionCommand } = await import('../../../../src/interfaces/tui/shell.js');
 
   const cases = [
     { id: 'task-c1', lane: 'integration', reasonKind: 'integrate-lane', expected: 'px integrate task-c1' },
     { id: 'task-c2', lane: 'review', reasonKind: 'review-lane', expected: 'px review' },
-    { id: 'task-c3', lane: 'active', reasonKind: 'blocking', expected: 'px active task-c3' },
+    { id: 'task-c3', lane: 'active', reasonKind: 'blocking', expected: 'px lead task-c3 --once' },
     { id: 'task-c4', lane: 'active', reasonKind: 'gate-failed', expected: 'px active task-c4' },
   ] as const;
 
@@ -691,6 +691,7 @@ test('attention action display and its typed confirmation command stay aligned',
   const item = makeAttentionItem(reviewCard, { kind: 'review-lane', detail: 'Awaiting review decision' }, 2);
 
   assert.equal(attentionCommand(item.card, item.reason, item.action), item.action.display);
+  assert.ok(item.action.kind !== 'manual');
   assert.equal(applicationCommandText(item.action.kind, item.missionId), item.action.display);
 });
 
@@ -715,4 +716,15 @@ test('working work is separate from NEEDS YOU', async () => {
   assert.doesNotMatch(output, /task-working · review · qwen/);
   assert.match(output, /NEEDS YOU NEXT 0/);
   assert.match(output, /work: 1 live/);
+});
+
+test('manual attention renders lead investigation next step instead of executable command (TASK-2799)', async () => {
+  const card = makeCard({ id: fixtureMissionId('task-human'), blockingReason: 'Operator decision required' });
+  const projection = { ...makeProjection({ active: [card] }),
+    attentionQueue: [makeAttentionItem(card, { kind: 'blocking', detail: card.blockingReason! }, 1)] };
+  const output = await renderShell({ projection, columns: 120, rows: 40 });
+  assert.match(output, /Operator decision required/);
+  assert.match(output, /px lead task-human --once/);
+  assert.match(output, /lead investigation/);
+  assert.doesNotMatch(output, /px (active|review|integrate) task-human/);
 });

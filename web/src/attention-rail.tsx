@@ -70,9 +70,11 @@ function AttentionEntry({ item, onAction, onSelect, selected, pendingCommands, r
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}
         >
-          $ {item.action.display}
+          {item.action.kind === 'manual' ? '' : '$ '}{item.action.display}
         </span>
-        <ActionButton action={item.action} label="run ▸" pending={pendingCommands.get(item.missionId)} onInvoke={(_action, control, agent) => onAction(item, control, agent)} />
+        {item.action.kind === 'manual'
+          ? <span style={{ color: C.amber, fontSize: TYPE.meta }}>lead investigation</span>
+          : <ActionButton action={item.action} label="run ▸" pending={pendingCommands.get(item.missionId)} onInvoke={(_action, control, agent) => onAction(item, control, agent)} />}
       </div>
     </article>
   );

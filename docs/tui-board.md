@@ -54,6 +54,25 @@ keep the mission listed: a blocking reason and a failed gate. Process liveness
 only verifies that a recorded operation has not disappeared; unavailable
 verification is never treated as an idle mission.
 
+A blocked run that can still be retried keeps its usual `px active` retry.
+A recorded contract stop, or a blocker with no eligible retry, stays visible
+with its blocking detail and a concrete `px lead <mission> --once` next step.
+The rail labels this as lead investigation and offers no direct lifecycle run
+control. Lead never first dispatches an ineligible command. On active and review
+Missions, it investigates through its bounded recovery path when operator
+judgment admits that recovery: a blocker is evidence to investigate, not proof
+that only a human can resolve the problem. Judgment never admits recovery for an
+integration Mission, so an integration authority blocker escalates with its
+blocking detail and the next step instead of being investigated.
+
+Recovery may repair within the recorded Mission contract and continue through
+supported actions. It cannot change that contract, acknowledge an operator stop,
+stand down approval, manufacture review authority or integrate. If a reserved
+operator decision remains, recovery must explain the decision, supporting
+evidence, options and recommended next step. Unchanged blockers exhaust the
+existing recovery budget; live work and workflow ownership prevent duplicate
+launches. Ordinary integration handoffs remain operator-owned.
+
 ## What a card shows
 
 Each mission card renders the facts the projection supplies:

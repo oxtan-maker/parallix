@@ -23,11 +23,8 @@ export const BOARD_READ_ATTEMPTS = DEFAULT_REBOUND_ATTEMPTS;
 export const ACTION_ATTEMPTS = 2;
 
 /**
- * The board actions the supervisor may press.
- *
- * `integrate:merge` is deliberately absent and must stay absent: landing is the
- * human's decision (TASK-2479), so an attention item asking for integration is
- * left on the board for them.
+ * Landing remains a human decision (TASK-2479). Non-dispatchable blockers
+ * still receive bounded investigation through the existing recovery path.
  */
 export const HUMAN_ONLY_ACTIONS: ReadonlySet<AttentionAction['kind']> = new Set<AttentionAction['kind']>(['integrate:merge']);
 
@@ -66,6 +63,8 @@ export interface RecoveryRequest {
   readonly diagnostic: string;
   /** The board action that was pressed and did not clear the item. */
   readonly attemptedOperation: string;
+  /** Investigate without lifecycle dispatch or pretending a command already ran. */
+  readonly directInvestigation?: boolean;
   /** The instruction handed to the fresh agent. */
   readonly instruction: string;
   readonly admission?: import('./ports/operator-judgment.js').OperatorContinuationAdmission;
@@ -183,8 +182,10 @@ export function failureFingerprint(observation: AttentionObservation): string {
 export function recoveryInstruction(request: Omit<RecoveryRequest, 'instruction'>): string {
   return [
     `Mission ${request.missionId} is stuck in lane ${request.lane}: the Parallix board keeps asking for`,
-    'attention on it, and the normal command for that has already been run without clearing it.',
-    `The command that was run and did not help: ${request.attemptedOperation}.`,
+    ...(request.directInvestigation
+      ? ['attention on a recorded blocker. No lifecycle command was dispatched; investigate the evidence before proposing a continuation.']
+      : ['attention on it, and the normal command for that has already been run without clearing it.',
+        `The command that was run and did not help: ${request.attemptedOperation}.`]),
     '',
     'What the board reports (this is evidence, not a diagnosis — the real cause may be',
     'something else entirely):',
@@ -206,12 +207,14 @@ export function recoveryInstruction(request: Omit<RecoveryRequest, 'instruction'
     'attention condition has cleared, credible work is running, or the mission has',
     'reached the human-owned integration step. If that cannot be achieved safely,',
     'report the exact remaining blocker and the command or evidence that proves it.',
+    'If an operator decision remains, report the specific decision, supporting evidence, options and recommended next step.',
     '',
     'You may not:',
     '- change the scope of MISSION.md;',
     '- weaken, skip or remove a gate, test or check to obtain a passing result;',
     '- edit the operator database to manufacture lifecycle or review state;',
     '- manufacture a review approval, or review your own repair;',
+    '- change the locked contract or reserved operator decisions: you must not acknowledge or clear an operator stop, stand down approval, or invoke a command as the operator;',
     '- merge this mission, or run `px integrate` — landing is the human decision.',
     '',
     'If the defect is outside this mission\'s scope or belongs to the primary branch,',

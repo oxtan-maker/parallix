@@ -20,100 +20,21 @@ import {
 import { createLeadCommand, leadInvocation } from '../../../src/interfaces/cli/lead.js';
 import { pollingPause } from '../../../src/adapters/process/polling-pause.js';
 import { AGENT_WORK_STAGE_BY_ACTIVITY } from '../../../src/domain/usage.js';
-import type { AttentionItem, AttentionReason } from '../../../src/application/projections/board.js';
+import { attentionAction, type AttentionItem, type AttentionReason } from '../../../src/application/projections/board.js';
 import type { BoardLane, CommandAvailability, MissionCard } from '../../../src/application/projections/mission-board.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { missionId, missionLabels } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
-const MISSION = 'task-2489-stuck';
-const GATE_FAILED: AttentionReason = { kind: 'gate-failed', detail: 'Gate failed' };
-/** A cancellable pause, shaped like the production polling timer. */
-function pause(milliseconds: number): Poll {
-  let timer: NodeJS.Timeout | undefined;
-  const elapsed = new Promise<void>((resolve) => { timer = setTimeout(resolve, milliseconds); });
-  return { elapsed, cancel: () => { if (timer) { clearTimeout(timer); } } };
-}
-function item(overrides: Partial<AttentionObservation> = {}): AttentionObservation {
-  return {
-    missionId: MISSION,
-    lane: 'active',
-    reason: GATE_FAILED,
-    action: { kind: 'active:execute', display: `px active ${overrides.missionId ?? MISSION}` },
-    working: false,
-    workingDetail: null,
-    progress: 'active|failed|-|-|-|-|sha0',
-    ...overrides,
-  };
-}
-const fixtureJudgment: NonNullable<SupervisorPort['judgeRecovery']> = async missionId => {
-      const facts = { missionId, version: 1, operationId: null, progress: item().progress, lane: 'active', working: false, evidence: [{ ref: 'fixture', summary: 'fixture' }] };
-      return { action: 'continue', summary: 'Verify mission worktree controls.', admission: {
-        envelope: { ...facts, observedAt: 0, allowedActions: ['continue'] },
-        proposal: { missionId, version: 1, operationId: null, progress: facts.progress, evidenceRefs: ['fixture'], action: 'continue', summary: 'fixture' },
-      } };
-};
-interface Recorder {
-  readonly port: SupervisorPort;
-  readonly ran: Array<[string, string]>;
-  readonly recoveries: RecoveryRequest[];
-  readonly released: string[];
-  readonly waits: number[];
-  /** Attention-queue reads: one per pass. */
-  readonly reads: () => number;
-}
-/**
- * A board driven by a script of attention queues, one entry per pass. The last
- * entry repeats, so a test says exactly what the board reports at each pass.
- */
-function board(passes: Array<readonly AttentionObservation[]>, options: {
-  readonly claimable?: boolean;
-  readonly actionFails?: string;
-  readonly launchFails?: string;
-} = {}): Recorder {
-  const ran: Array<[string, string]> = [];
-  const recoveries: RecoveryRequest[] = [];
-  const released: string[] = [];
-  const waits: number[] = [];
-  let pass = -1;
-  const current = (): readonly AttentionObservation[] => passes[Math.min(Math.max(pass, 0), passes.length - 1)];
-  const port: SupervisorPort = {
-    judgeRecovery: fixtureJudgment,
-    attention: async () => {
-      pass += 1;
-      return current();
-    },
-    missionExists: async (mission) => passes.some((entries) => entries.some((entry) => entry.missionId === mission)),
-    liveness: async (mission) => {
-      const entry = current().find((candidate) => candidate.missionId === mission);
-      return { working: entry?.working ?? false, detail: entry?.workingDetail ?? null };
-    },
-    runAction: async (mission, action) => {
-      ran.push([mission, action.kind]);
-      if (options.actionFails) { throw new Error(options.actionFails); }
-    },
-    claimRecovery: async (mission) => {
-      if (options.claimable === false) { return null; }
-      return async () => { released.push(mission); };
-    },
-    launchRecovery: async (request) => {
-      recoveries.push(request);
-      if (options.launchFails) { throw new Error(options.launchFails); }
-      return 'claude ran in /tmp/worktree';
-    },
-    // Recorded, and yielded to the macrotask queue: a pause that resolves
-    // synchronously would starve the timers the tests themselves rely on.
-    wait: (milliseconds) => {
-      waits.push(milliseconds);
-      return pause(1);
-    },
-  };
-  return { port, ran, recoveries, released, waits, reads: () => pass + 1 };
-}
-function resultFor(results: readonly MissionSupervision[], mission = MISSION): MissionSupervision {
-  const found = results.find((result) => result.missionId === mission);
-  assert.ok(found, `${mission} was supervised`);
-  return found;
-}
+import {
+  board,
+  fixtureJudgment,
+  GATE_FAILED,
+  item,
+  MISSION,
+  pause,
+  realJudgment,
+  resultFor,
+} from '../../fixtures/recovery-supervisor-board.js';
 
 test('the work list is the board attention queue, in the board order', async () => {
   const fleet = board([
@@ -190,6 +111,80 @@ test('the supervisor leaves refined missions for operator activation', async () 
   assert.deepEqual(results, []);
   assert.deepEqual(fleet.ran, [], 'lead never starts a refined mission');
   assert.deepEqual(fleet.recoveries, []);
+});
+
+test('manual blockers reach admitted recovery or evidence-backed escalation without lifecycle dispatch (TASK-2799)', async () => {
+  for (const lane of ['active', 'review', 'integration'] as const) {
+    const reason = { kind: 'blocking', detail: 'Operator design or review authority decision required' } as const;
+    const observed = item({ lane, reason,
+      action: attentionAction(makeCard({ lane, blockingReason: reason.detail, blockerRequiresOperator: true }), reason) });
+    const { offered, judgeRecovery } = realJudgment(observed);
+    const fleet = board([[observed]]);
+    const port = { ...fleet.port, judgeRecovery };
+    const lines: string[] = [];
+    assert.equal(await createLeadCommand(port, line => lines.push(line))(['--once', '--dry-run']), 0);
+    assert.match(lines.join('\n'), /Operator design or review authority decision required/);
+    assert.match(lines.join('\n'), /px lead .* --once/);
+    assert.equal(fleet.recoveries.length, 0, 'dry-run never investigates');
+    const results = await superviseFleet(port, { budget: 1, pollMs: 1 });
+    assert.equal(resultFor(results).outcome, 'escalated');
+    assert.deepEqual(fleet.ran, [], 'manual attention never dispatches a lifecycle command or recursive lead');
+    assert.deepEqual(fleet.released, [MISSION]);
+    if (lane === 'integration') {
+      assert.deepEqual(offered, [['wait', 'request-evidence', 'escalate']], 'integration judgment cannot admit continuation');
+      assert.equal(fleet.recoveries.length, 0, 'an integration authority stop escalates without investigation');
+      assert.match(resultFor(results).summary, /needs an operator decision in lane integration: blocking: Operator design or review authority decision required/);
+      assert.match(resultFor(results).summary, /No lifecycle command or recovery ran\. Next: decide the recorded blocker, then rerun px lead task-2489-stuck --once/);
+      continue;
+    }
+    assert.ok(offered[0]?.includes('continue'), `${lane} judgment may admit continuation`);
+    assert.equal(fleet.recoveries.length, 1, 'unchanged blocker exhausts its finite budget after one admitted recovery');
+    assert.ok(fleet.recoveries[0]!.admission, 'recovery carries the admitted judgment identity');
+    assert.match(fleet.recoveries[0]!.diagnostic, /Operator design or review authority decision required/);
+    assert.match(fleet.recoveries[0]!.instruction, /No lifecycle command was dispatched/);
+    assert.match(fleet.recoveries[0]!.instruction, /must not acknowledge or clear an operator stop/);
+    assert.match(fleet.recoveries[0]!.instruction, /specific decision.*evidence.*options.*recommended next step/);
+    assert.ok(resultFor(results).steps.some(step => step.includes('claude ran in /tmp/worktree')));
+  }
+  assert.equal(leadInvocation('manual', MISSION), null);
+  assert.equal(HUMAN_ONLY_ACTIONS.has('manual'), false);
+});
+
+test('judged escalation after an admitted recovery reports the recovery it spent (TASK-2799)', async () => {
+  const reason = { kind: 'blocking', detail: 'Operator design decision required' } as const;
+  const observed = item({ reason, action: attentionAction(makeCard({ lane: 'active', blockingReason: reason.detail, blockerRequiresOperator: true }), reason) });
+  let now = 1_000;
+  const fleet = board([[observed]]);
+  // The recovery outlasts judgment's Mission time budget, so the next judgment escalates.
+  const port = { ...fleet.port, judgeRecovery: realJudgment(observed, () => now).judgeRecovery,
+    launchRecovery: async (request: RecoveryRequest) => { now += 121_000; return fleet.port.launchRecovery(request); } };
+  const result = resultFor(await superviseFleet(port, { budget: 2, pollMs: 1 }));
+  assert.equal(fleet.recoveries.length, 1);
+  assert.equal(result.outcome, 'escalated');
+  assert.match(result.summary, /No lifecycle command ran; 1 earlier recovery attempt\(s\) did not clear it and judgment refused another\. Next: decide/);
+  assert.doesNotMatch(result.summary, /or recovery ran/);
+});
+
+test('manual recovery clears only after a new board observation (TASK-2799)', async () => {
+  const observed = item({ reason: { kind: 'blocking', detail: 'Recorded contract stop' },
+    action: { kind: 'manual', display: `px lead ${MISSION} --once` } });
+  const fleet = board([[observed], []]);
+  const results = await superviseFleet(fleet.port, { budget: 1, pollMs: 1 });
+  assert.equal(fleet.recoveries.length, 1);
+  assert.deepEqual(fleet.ran, []);
+  assert.equal(resultFor(results).outcome, 'cleared');
+});
+
+test('manual recovery preserves liveness, ownership and zero-budget bounds (TASK-2799)', async () => {
+  const observed = item({ reason: { kind: 'blocking', detail: 'Recorded contract stop' },
+    action: { kind: 'manual', display: `px lead ${MISSION} --once` } });
+  for (const control of ['live', 'claimed', 'zero-budget'] as const) {
+    const fleet = board([[{ ...observed, working: control === 'live' }]], { claimable: control !== 'claimed' });
+    const results = await superviseFleet(fleet.port, { once: true, budget: control === 'zero-budget' ? 0 : 1 });
+    assert.deepEqual(fleet.ran, []);
+    assert.deepEqual(fleet.recoveries, []);
+    assert.equal(resultFor(results).outcome, control === 'zero-budget' ? 'escalated' : 'open');
+  }
 });
 
 test('a mission with a working agent is never on the queue, so it is never touched', async () => {

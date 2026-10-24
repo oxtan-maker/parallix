@@ -80,6 +80,8 @@ export interface MissionOperationalFacts {
   } | null;
   readonly currentWork: LiveMissionWork | null;
   readonly blockingReason: string | null;
+  /** Recorded contract stop: investigate before retrying; operator decisions stay reserved. */
+  readonly blockerRequiresOperator?: boolean;
   readonly flags: readonly string[];
   /** Whether the effective approval still covers the branch (TASK-2555); absent when not observed. */
   readonly approvalCoverage?: ApprovalCoverage | null;
@@ -159,6 +161,8 @@ export interface MissionCard {
    */
   readonly liveSession?: RunningAgentSession | null;
   readonly blockingReason: string | null;
+  /** Recorded contract stop: investigate before retrying; operator decisions stay reserved. */
+  readonly blockerRequiresOperator?: boolean;
   readonly flags: readonly string[];
   readonly commands: readonly CommandAvailability[];
 }
@@ -303,6 +307,7 @@ export function projectMissionCard(mission: Mission, facts: MissionOperationalFa
     currentWork: facts.currentWork,
     liveSession: facts.liveSession,
     blockingReason: facts.blockingReason,
+    blockerRequiresOperator: facts.blockerRequiresOperator,
     // The board renders flags on the card, so a stale approval is visible there
     // before anyone reaches the integration gate.
     flags: facts.approvalCoverage?.kind === 'stale'
