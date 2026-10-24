@@ -4,6 +4,7 @@ title: Consolidate review progression after TASK-2750 under one application owne
 status: backlog
 assignee: []
 created_date: '2026-10-24 05:29'
+updated_date: '2026-10-24 05:30'
 labels:
   - bug
   - ai_sdlc
@@ -26,6 +27,10 @@ Retain TASK-2750's useful capabilities: durable operation admission and exclusiv
 Coordinate with TASK-2810 (review entry and flag simplification) at the shared application entry; TASK-2806 owns coordinator completion after repair, and TASK-2814 owns attention/lead discoverability. This new task owns the conflicting review progression and composition-level policy demonstrated by TASK-2789, not those separate symptoms. Reconcile current integrated and in-flight owners before editing; do not create parallel implementations. Keep dependency vulnerabilities and resource exhaustion outside this task's implementation scope.
 
 Use isolated fixtures and existing public interfaces for manual end-to-end validation. Do not mutate live Missions, reviews, provider resources or statistics. Preserve independent approval, exact failed-check verification, evidence readiness, explicit operator acknowledgment and human integration authority. No architectural principle change, operator-owned gate change, added verification gate or budget increase is authorized. Read ADR 0057 before test selection; extend owning suites, keep unit cases within 500 ms headroom and changed integration suites within 3.5 seconds. Do not add a new E2E suite or rerun full gates as ritual. Update concise live documentation only for changed public behavior.
+
+Mandatory removal and ownership guardrails (operator instruction): this is consolidation and deletion work, not permission to add a parallel solution. Before implementation, trace every production CLI, board, automatic review and repair entry to its current owner; record competing decision/transition sites in checkpoint evidence. Migrate all affected callers to the shared application owner, then delete superseded orchestration, exports, switches, dead branches, seams and obsolete tests. A new wrapper over both implementations, renamed duplicate, feature-flagged fallback, catch-and-retry workaround, or dormant legacy path fails acceptance. Keep legitimate domain rules and effect adapters; do not delete unrelated working capabilities to make checks green.
+
+Completion is refused while a known in-scope review progression defect, competing production owner, unmigrated caller or obsolete implementation remains. Do not defer those defects to follow-up tasks or describe them as out of scope after discovery. Preserve distinct behavioral assertions when removing redundant tests, and replace the test asserting rejection of a valid pending-review resume with the correct shared contract. Extend existing architecture/contract suites where appropriate without introducing new verification gates or weakening exceptions to permit the implementation. Final evidence must identify what was removed, demonstrate caller convergence and show production-composed behavior; source placement, passing import checks, mocks that bypass the real entry, or an agent completion claim alone are insufficient. Any genuinely separate blocker must be reported with evidence and prevents claims that its workflow passed.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -37,7 +42,12 @@ Use isolated fixtures and existing public interfaces for manual end-to-end valid
 - [ ] #5 Related Review and Mission mutations use existing atomic and expected-state/version checks; stale or competing callers cannot leave a partially advanced conversation or overwrite a newer owner. Retain existing cancellation and failure cleanup contracts.
 - [ ] #6 Manually exercise the built production CLI and board/application entry end to end with isolated operator state and safe boundary doubles, including the TASK-2789 shape and a blocked original check. Record executable revision, commands, observed authoritative outcomes and cleanup; leave live data and statistics untouched.
 - [ ] #7 Reconcile overlapping TASK-2810 changes, preserve TASK-2806/TASK-2814 ownership boundaries, and document only changed public behavior. Focused verification and required static checks pass without gate, tier or CPU-budget weakening.
+- [ ] #8 All affected production entry points are traced and migrated; superseded review progression code, exports, dead branches, fallback routes, test seams and redundant tests are deleted. No parallel owner, renamed duplicate, wrapper retaining competing algorithms, feature-flagged legacy path or catch-and-retry workaround remains.
+- [ ] #9 Existing owning architecture/contract suites demonstrate that production CLI, board and automatic recovery converge on the shared application review entry and cannot independently advance review/lifecycle state in composition or interfaces. Preserve distinct behavioral assertions and existing gate configuration; import-only checks do not satisfy this criterion.
+- [ ] #10 Final checkpoint and review evidence enumerate removed competing paths and migrated callers, cite focused behavioral and production-composed manual results, and identify any remaining defects honestly. No known in-scope ownership/progression defect is deferred to a follow-up or accepted as residual debt; implementation is not complete while one remains.
 <!-- AC:END -->
+
+
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
