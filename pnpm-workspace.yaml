@@ -2,6 +2,7 @@
 # published package is still built and installed with npm.
 overrides:
   source-map-js: 1.2.2
+  undici@8.10.2: 8.12.2
 packageImportMethod: auto
 allowBuilds:
   '@google/genai': true

@@ -1,3 +1,7 @@
+import { CLASSIFIER_POLICY_VERSION } from '../../../src/domain/classifier-review.js';
+import type { MechanicalApprovalSource } from '../../../src/domain/integration-approval-restoration.js';
+import { fixtureMission, approvedReview } from '../../fixtures/mission-builders.js';
+import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
 import { makeCard } from '../../fixtures/board-projection.js';
 import { reviewFindingId } from '../../../src/domain/review.js';
 import { changeRevision as fixtureRevision } from '../../../src/domain/review.js';
@@ -442,6 +446,7 @@ describe("review projection queries", { concurrency: false }, () => {
     return {
       calls,
       async query<T>(sql: string, ids: readonly MissionId[]): Promise<T[]> {
+        assert.ok(ids.length <= 999, 'bind-safe query size');
         calls.push(sql);
         if (!sql.includes('mission_review_rounds')) { return []; }
         return ids.map((id, position) => ({
@@ -479,26 +484,85 @@ describe("review projection queries", { concurrency: false }, () => {
 
   test('SQLite review projection uses four queries for one or many missions', async () => {
     for (const ids of [
+      [],
       [missionId('task-2401-one')],
+      Array.from({ length: 999 }, (_, i) => missionId(`batch-${i}`)),
       [missionId('task-2401-a'), missionId('task-2401-b'), missionId('task-2401-c')],
     ]) {
       const database = countingDatabase();
       const facts = await new SqliteReviewProjectionReader(database).loadReviews(ids);
-      assert.equal(database.calls.length, 4);
+      assert.equal(database.calls.length, ids.length ? 4 : 0);
       assert.equal(facts.size, ids.length);
-      assert.ok([...facts.values()].every(({ review, approval }) => review?.rounds.length === 1 && approval !== null));
+      assert.ok([...facts.values()].every(({ review, approval }) => review?.rounds.length === 1 && approval !== null
+        && !Object.hasOwn(review.rounds[0].subject, 'baseline')));
     }
   });
 
-  test('SQLite review projection SQL executes against the migrated schema', async () => {
-    const dir = registeredMkdtemp('task-2401-review-projection-');
+  test('SQLite SELECT preserves recorded baselines and historical absence (TASK-2785)', async () => {
+    const dir = registeredMkdtemp('review-projection-baseline-');
+    const database = new SqliteDatabaseAdapter();
     try {
-      const database = new SqliteDatabaseAdapter();
       await database.open({ path: path.join(dir, 'operator.db') });
       await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
-      const facts = await new SqliteReviewProjectionReader(database).loadReviews([missionId('task-2401-schema')]);
-      assert.equal(facts.size, 1);
+      const store = new SqliteMissionStore(database);
+      for (const baseline of [changeRevision('recorded-main-baseline'), undefined]) {
+        const id = missionId(baseline ? 'baseline-recorded' : 'baseline-historical');
+        const review = approvedReview(id);
+        const round = review.rounds[0];
+        const subject = { ...round.subject, ...(baseline ? { baseline } : {}) };
+        const revision = changeRevision('b'.repeat(40));
+        assert.equal(round.decision?.kind, 'approved');
+        if (round.decision?.kind !== 'approved') { throw new Error('approval missing'); }
+        const classifier = {
+          kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'decision-1',
+          provider: 'fixture', model: 'fixture', packetHash: 'a'.repeat(64),
+          priorRevision: 'c'.repeat(40), candidateRevision: revision,
+          findingIds: ['finding-1'], policyVersion: CLASSIFIER_POLICY_VERSION,
+          label: 'addresses', score: 0.99,
+        };
+        const source: MechanicalApprovalSource = {
+          kind: 'mechanical-restoration', approvedRevision: 'old-revision', candidateRevision: revision,
+          failedGate: 'unit', validationRevision: 'validation-revision',
+          validationReference: 'operational_history:7', validatedAt: '2026-08-04T10:20:00Z',
+        };
+        const rounds: [ReviewRound, ...ReviewRound[]] = [
+          { ...round, subject, decision: { ...round.decision, revision,
+            source: { kind: 'provider', provider: 'forgejo' },
+            revocation: { revokedAt: '2026-08-04T10:40:00Z', revokedBy: 'operator', reason: 'repair',
+              cause: { kind: 'integration-gate-failure', gate: 'unit', command: 'npm test', log: 'red' } },
+            supersession: { supersededAt: '2026-08-04T10:50:00Z', supersedingRevision: revision, recordedBy: 'px rebase' },
+          } },
+          { ...round, number: 2, subject, decision: { ...round.decision, revision, classifier } },
+          { ...round, number: 3, subject, decision: { ...round.decision, revision, source },
+            integrationRepairAssessment: { assessedAt: '2026-08-04T10:30:00Z',
+              approvedRevision: source.approvedRevision, candidateRevision: revision,
+              failedGate: source.failedGate, outcome: 'restored', source } },
+        ];
+        await store.save(fixtureMission(id, {
+          status: 'review', review: { ...review, rounds,
+            intervention: { requestedAt: '2026-08-04T10:55:00Z', requestedBy: 'workflow', reason: 'fixture intervention' },
+            stageLaunches: [{ stageKey: 'reviewer', fingerprints: ['fixture-launch'] }],
+          },
+        }), null);
+        const full = await store.load(id);
+        assert.equal(full.kind, 'found');
+        if (full.kind !== 'found') { throw new Error('fixture missing'); }
+        assert.deepEqual(full.mission.review?.rounds[0].subject, subject);
+        assert.deepEqual(full.mission.review?.rounds, rounds);
+        assert.ok(full.mission.review?.intervention);
+        assert.equal(full.mission.review?.stageLaunches.length, 1);
+        const facts = await new SqliteReviewProjectionReader(database).loadReviews([id]);
+        assert.equal(facts.size, 1);
+        const fact = facts.get(id);
+        assert.deepEqual(fact?.review?.rounds[0].subject, subject);
+        assert.deepEqual(fact?.approval?.subject, subject);
+        assert.deepEqual(fact?.review?.rounds, full.mission.review?.rounds);
+        assert.equal(fact?.review?.intervention, null);
+        assert.deepEqual(fact?.review?.stageLaunches, []);
+        assert.equal(Object.hasOwn(fact!.review!.rounds[0].subject, 'baseline'), !!baseline);
+      }
     } finally {
+      await database.close();
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });

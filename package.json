@@ -1,6 +1,6 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.5.445",
+  "version": "1.5.446",
   "description": "Local-first workflow and trust layer for AI coding agents — isolated Git worktree missions, separate code review, repository-owned verification, Linux confinement, and human-owned merges",
   "license": "AGPL-3.0-or-later",
   "private": false,
@@ -95,7 +95,8 @@
     }
   },
   "overrides": {
-    "source-map-js": "1.2.2"
+    "source-map-js": "1.2.2",
+    "undici@8.10.2": "8.12.2"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^1.0.2",
@@ -108,7 +109,7 @@
     "eslint": "^9.39.4",
     "fast-uri": "^4.2.1",
     "fastify": "^5.12.1",
-    "happy-dom": "^20.14.5",
+    "happy-dom": "^21.0.4",
     "ink": "^6.8.0",
     "jevtok-ts": "0.2.0",
     "playwright-core": "1.57.0",

@@ -1,8 +1,8 @@
 ---
 id: TASK-2785
 title: Preserve recorded review baselines in batched SQLite projections
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-19 09:55'
 labels: []
 dependencies: []

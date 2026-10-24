@@ -1,3 +1,4 @@
+import { REVIEW_ROUND_COLUMNS } from './review-round-columns.js';
 import type { MissionId } from '../../domain/mission.js';
 import type { ReviewProjectionFact } from '../../application/projections/board-readers.js';
 import { hydrateReviewProjection, type MissionReviewEventRecord, type MissionReviewFindingRecord, type MissionReviewResolutionRecord, type MissionReviewRoundRecord } from './mission-serialization.js';
@@ -35,14 +36,7 @@ export class SqliteReviewProjectionReader {
     const placeholders = ids.map(() => '?').join(', ');
     const [reviewRounds, findings, resolutions, reviewEvents] = await Promise.all([
       this.db.query<MissionReviewRoundRecord>(
-        `SELECT mission_id, position, round_number, change_kind, provider,
-                provider_change_id, provider_url, source_branch, target_branch,
-                revision, reviewer, implementer, started_at, decision_kind,
-                decided_at, decided_revision, decision_comment, classifier_source, integration_repair_assessment, mechanical_source, approval_source_kind,
-                approval_source_provider, revoked_at, revoked_by, revoked_reason, revoked_cause, revoked_gate, revoked_gate_command, revoked_gate_log,
-                  superseded_at, superseding_revision, superseded_by, responded_at, resulting_revision,
-                phase, disposition, reviewer_retry_count, implementer_retry_count,
-                implementer_response_content, item_dispositions, blocked_reason
+        `SELECT ${REVIEW_ROUND_COLUMNS}
          FROM mission_review_rounds WHERE mission_id IN (${placeholders})
          ORDER BY mission_id, position`, ids),
       this.db.query<MissionReviewFindingRecord>(
