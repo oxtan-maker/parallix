@@ -10,9 +10,16 @@ import { missionId, type Mission } from '../../src/domain/mission.js';
 import { revokeApprovedDecision, requestReviewIntervention, resumeReview, reviewStatus } from '../../src/domain/review.js';
 import { setLogger } from '../../src/application/presentation/cli-format.js';
 import { run as runCli } from '../../src/composition/create-cli.js';
-import { openRepairFixture } from '../lib/integration-repair-fixture.js';
+import { openRepairFixture, type RepairFixture } from '../lib/integration-repair-fixture.js';
 import { setCommandPathProbe, setLauncherHealthProbe, setWorkflowLaunchPort } from '../../src/adapters/agents/agents.js';
 import { RepairCheckpointService } from '../../src/application/repair-checkpoint-service.js';
+import { composeProductionCapabilities } from '../../src/composition/production-capabilities.js';
+import { resolveConfiguration } from '../../src/composition/config.js';
+import { NO_CURRENT_WORK_PORT } from '../../src/application/recording/current-work-recorder.js';
+import { agentFamily } from '../../src/domain/agents.js';
+import { repositoryId } from '../../src/domain/repository.js';
+import { makeExecutePorts } from './execute-mission-ports.js';
+import { emptyBoardRepositories } from '../helpers/empty-board-repositories.js';
 import { captureRecoveryEvidence } from '../../src/application/recovery-evidence.js';
 
 // Keep acknowledgment and verified recovery as separate contracts. Each owns a
@@ -27,7 +34,28 @@ export function registerRetainedRepairCases(phases: readonly ('acknowledgment' |
   }
 }
 
-export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 'failed-check' | 'new-blocker', inferred: boolean, t: TestContext, withoutReview = false): Promise<void> {
+
+type ReviewEntry = 'cli' | 'board';
+
+/**
+ * Enter review the way a supported caller does: the CLI runs `px review`, the
+ * board dispatches a typed `handoff:record` through production composition.
+ * A refusal or stop is exit 1 for the CLI and a failed dispatch for the board.
+ */
+export async function enterReviewVia(entry: ReviewEntry, fixture: RepairFixture, store: SqliteMissionStore, messages: string[], invoke: (_args: string[]) => Promise<number>): Promise<number> {
+  if (entry === 'cli') { return await invoke(['review', fixture.slug]); }
+  const repos = emptyBoardRepositories();
+  const capabilities = composeProductionCapabilities(fixture.worktree, repositoryId('parallix'),
+    { agentBlocklist: repos.blocklistRepo, operationalHistory: repos.historyRepo, boardLaneEvents: repos.laneEventRepo, usage: repos.usageRepo },
+    makeExecutePorts().ports, store, NO_CURRENT_WORK_PORT, undefined, null, { configuration: resolveConfiguration(process.env) });
+  const result = await capabilities.commandController.dispatch({ operationId: `board-${fixture.slug}-${Date.now()}`, kind: 'handoff:record', missionId: fixture.slug,
+    missionStatusAtRequest: (await fixture.load()).status, agent: agentFamily('custom'), capabilities: new Set(['handoff:record']), cancellation: { requested: false } });
+  if (result.status !== 'completed') { messages.push(result.error?.message ?? result.status); }
+  return result.status === 'completed' ? 0 : 1;
+}
+
+/** Seed an interrupted retained repair on an active Mission whose round awaits review (the TASK-2789 shape). */
+export async function seedRetainedRepair(phase: 'acknowledgment' | 'recovery' | 'failed-check' | 'new-blocker', t: TestContext, withoutReview = false) {
   const command = phase === 'failed-check' ? 'false' : ':';
   const fixture = await openRepairFixture({ slug: 'task-repair-recovery' });
   const priorConfinement = process.env.PARALLIX_NO_BUBBLEWRAP;
@@ -67,6 +95,11 @@ export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 
     const acknowledged = await fixture.load();
     await store.save({ ...acknowledged, review: acknowledged.review ? resumeReview(acknowledged.review) : null }, missionVersion(await fixture.version()));
   }
+  return { fixture, store, repair, opened, blocker, command };
+}
+
+export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 'failed-check' | 'new-blocker', inferred: boolean, t: TestContext, withoutReview = false, entry: 'cli' | 'board' = 'cli'): Promise<void> {
+  const { fixture, store, repair, opened, blocker, command } = await seedRetainedRepair(phase, t, withoutReview);
   const before = await fixture.load();
   const prompts: string[] = [];
   const launches: string[] = [];
@@ -90,6 +123,10 @@ export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 
   const previousLogger = setLogger({ log: text => { messages.push(String(text)); }, error: text => { messages.push(String(text)); } });
   t.after(() => { setLogger(previousLogger); });
   const invoke = (args: string[]) => runCli(inferred && args[0] === 'review' ? args.filter(arg => arg !== fixture.slug) : args, { baseCwd: fixture.worktree, log: text => { messages.push(text); return text; }, error: text => { messages.push(text); return text; } });
+  // The board dispatches the same review entry through production composition;
+  // only the launcher and provider boundaries are doubled. A refusal or stop is
+  // a failed dispatch, the board's analogue of the CLI's exit 1.
+  const enterReview = (): Promise<number> => enterReviewVia(entry, fixture, store, messages, invoke);
   if (phase === 'acknowledgment') {
     assert.equal(await runCli(['review', fixture.slug], {
       operatorInvocation: false, baseCwd: fixture.worktree,
@@ -150,7 +187,7 @@ export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 
   assert.equal(captured.ok, true);
   // A no-op agent cannot turn even a passing check into checkpoint proof.
   messages.length = 0;
-  assert.equal(await invoke(['review', fixture.slug]), 1, messages.join('\n'));
+  assert.equal(await enterReview(), 1, messages.join('\n'));
   if (phase === 'new-blocker') {
     const after = await fixture.load();
     assert.equal(launches.length, 1, 'new blocker stops the finite repair before another agent');
@@ -193,7 +230,7 @@ export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 
       return { status: 0, stdout: '', stderr: '' };
     })(),
   }));
-  assert.equal(await invoke(['review', fixture.slug]), 0, messages.join('\n'));
+  assert.equal(await enterReview(), 0, messages.join('\n'));
   assert.equal((await fixture.load()).checkpoints.at(-1)?.repair?.verified, true);
   assert.deepEqual(launches, ['act-on-review', 'repair', 'review']);
   assert.equal(reviewStatus((await fixture.load()).review!), 'approved');

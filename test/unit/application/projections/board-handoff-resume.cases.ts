@@ -19,9 +19,6 @@ import { emptyBoardRepositories } from '../../../helpers/empty-board-repositorie
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { runtimeAssetStore } from '../../../../src/adapters/assets/runtime-assets.js';
 
 import { missionVersion, MissionStaleVersion } from '../../../../src/application/domain-ports.js';
 import type {
@@ -190,31 +187,20 @@ function resumeVia(capabilities: ReturnType<typeof composeWithRecordedLoop>['cap
   });
 }
 
-test('board handoff resume advances the review round and records one lane transition', async () => {
+test('board handoff resume enters the shared review round owner without composition writes', async () => {
   const store = new FakeMissionStore(activeMissionUnderReview(), 3);
   const { capabilities, launches } = composeWithRecordedLoop(store);
 
   const result = await resumeVia(capabilities, 'active');
   assert.equal(result.status, 'completed', 'the typed handoff dispatch succeeds');
 
-  const review = store.mission!.review!;
-  assert.equal(review.rounds.length, 2, 'the resume starts the next review round');
-  assert.equal(reviewStatus(review), 'awaiting-review');
-  assert.equal(currentReviewRound(review).reviewer, REVIEWER, 'the resumed round keeps the persisted reviewer');
-  assert.equal(store.mission!.status, 'review', 'the mission moves to its authoritative review lane');
-
-  assert.equal(store.events.length, 1, 'exactly one lane event is recorded');
-  assert.equal(store.events[0].from, 'active');
-  assert.equal(store.events[0].to, 'review');
-  assert.deepEqual(store.idempotencyKeys, [`handoff-resume-${SLUG}-2`], 'the key is scoped to the resumed round');
-
+  assert.equal(store.mission!.review!.rounds.length, 1, 'composition opens no round; the loop owns progression');
+  assert.equal(store.events.length, 0, 'composition records no lane event');
   assert.equal(launches.length, 1, 'the review loop is launched exactly once');
   assert.equal(launches[0].slug, SLUG);
   assert.equal(launches[0].options.isContinue, true);
-  // SC9: a human-initiated continuation of persisted round N runs with a limit
-  // of N+1. The automatic five-round cap is the CLI's own default and is pinned
-  // by `review automation retains its five-round limit` in review-commands.test.ts.
-  assert.equal(launches[0].options.maxAttempts, 2, 'a resume at round 2 grants exactly one further round');
+  // Same limit `px review` grants a continuation of persisted round N.
+  assert.equal(launches[0].options.maxAttempts, 5, 'the continuation limit is the shared owner contract');
 });
 
 test('board handoff resume launches the loop again without inventing a second lane event', async () => {
@@ -222,23 +208,14 @@ test('board handoff resume launches the loop again without inventing a second la
   const { capabilities, launches } = composeWithRecordedLoop(store);
 
   await resumeVia(capabilities, 'active');
-  await resumeVia(capabilities, 'review');
+  await resumeVia(capabilities, 'active');
 
-  assert.equal(store.events.length, 1, 'the already-reviewing mission records no second transition');
-  assert.deepEqual(store.idempotencyKeys, [`handoff-resume-${SLUG}-2`]);
-  assert.equal(store.mission!.review!.rounds.length, 2, 'a repeated resume does not open a third round');
-  assert.equal(launches.length, 2, 'each resume still hands the loop the mission');
-  // SC9 again: the ceiling is always one beyond the persisted round count, so
-  // every human restart permits exactly one further round — including this one,
-  // which opens no new round because the mission is already reviewing.
-  assert.deepEqual(
-    launches.map((launch) => launch.options.maxAttempts),
-    [2, 3],
-    'each restart raises the limit to one beyond the rounds already persisted',
-  );
+  assert.equal(store.events.length, 0, 'composition records no transition');
+  assert.equal(store.mission!.review!.rounds.length, 1, 'a repeated resume does not open a round');
+  assert.equal(launches.length, 2, 'each resume hands the loop the mission');
 });
 
-test('board handoff resume refuses a review that is not waiting on the implementer', async () => {
+test('board handoff resume hands an active mission with a round awaiting review to the review loop (TASK-2817)', async () => {
   const store = new FakeMissionStore({
     ...activeMissionUnderReview(),
     review: startReview(
@@ -252,42 +229,9 @@ test('board handoff resume refuses a review that is not waiting on the implement
   const { capabilities, launches } = composeWithRecordedLoop(store);
 
   const result = await resumeVia(capabilities, 'active');
-  assert.notEqual(result.status, 'completed', 'a review that is not awaiting the implementer cannot resume');
-  assert.equal(store.events.length, 0, 'a refused resume records no lane event');
-  assert.equal(launches.length, 0, 'a refused resume never reaches the review loop');
-});
-
-
-test('board review resume uses shipped eligibility when worktree config is absent (TASK-2788 F1)', async context => {
-  const configPath = path.join(process.cwd(), 'config/agents.json');
-  const exists = fs.existsSync;
-  context.mock.method(fs, 'existsSync', (file: fs.PathLike) => String(file) === configPath ? false : exists(file));
-  const reads: string[] = [];
-  context.mock.method(runtimeAssetStore, 'readText', (key: string) => {
-    reads.push(key);
-    return JSON.stringify({ steps: { review: { eligible: ['claude'], selection: 'random' } } });
-  });
-  const store = new FakeMissionStore(activeMissionUnderReview(), 3);
-  const { capabilities, launches } = composeWithRecordedLoop(store);
-  const result = await resumeVia(capabilities, 'active');
-  assert.equal(result.status, 'completed');
-  assert.deepEqual(reads, ['config/agents.json']);
-  assert.equal(currentReviewRound(store.mission!.review!).reviewer, REVIEWER);
-  assert.equal(store.events.length, 1);
-  assert.equal(launches.length, 1);
-});
-
-
-test('board review resume rejects a shipped policy without explicit review eligibility (TASK-2788 F1)', async context => {
-  const configPath = path.join(process.cwd(), 'config/agents.json');
-  const exists = fs.existsSync;
-  context.mock.method(fs, 'existsSync', (file: fs.PathLike) => String(file) === configPath ? false : exists(file));
-  context.mock.method(runtimeAssetStore, 'readText', () => JSON.stringify({ steps: { active: { eligible: ['claude'] } } }));
-  const store = new FakeMissionStore(activeMissionUnderReview(), 3);
-  const { capabilities, launches } = composeWithRecordedLoop(store);
-  const result = await resumeVia(capabilities, 'active');
-  assert.equal(result.status, 'failed');
-  assert.match(result.error?.message ?? '', /review requires explicit nonempty eligible families/);
-  assert.equal(store.events.length, 0);
-  assert.equal(launches.length, 0);
+  assert.equal(result.status, 'completed', 'an interrupted pending review resumes instead of failing');
+  assert.equal(store.mission!.review!.rounds.length, 1, 'no duplicate round is opened');
+  assert.equal(store.events.length, 0, 'composition records no lane event; the review loop owns progression');
+  assert.equal(launches.length, 1, 'the review loop receives the mission once');
+  assert.equal(launches[0].options.isContinue, true);
 });

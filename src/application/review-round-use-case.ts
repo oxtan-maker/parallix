@@ -3,7 +3,7 @@ import { DEFAULT_MAX_ATTEMPTS, runReviewLoop } from './review-loop/review-loop.j
 
 /** Infer first handoff or continuation from the authoritative Review. */
 export class ReviewRoundUseCase {
-  constructor(private readonly _entry: ReviewRoundEntryPort) {}
+  constructor(private readonly _entry: ReviewRoundEntryPort, private readonly _runLoop: typeof runReviewLoop = runReviewLoop) {}
 
   async enter(request: Omit<StartReviewRound, 'maxAttempts' | 'isContinue'> & { readonly rawMaxAttempts: string | null }): Promise<void> {
     const parsed = request.rawMaxAttempts === null ? DEFAULT_MAX_ATTEMPTS : Number(request.rawMaxAttempts);
@@ -27,6 +27,6 @@ export class ReviewRoundUseCase {
     const resumedLimit = persisted ? persisted.round + DEFAULT_MAX_ATTEMPTS - 1 : DEFAULT_MAX_ATTEMPTS;
     const maxAttempts = request.rawMaxAttempts === null ? Math.max(resumedLimit, DEFAULT_MAX_ATTEMPTS) : Math.max(parsed, persisted?.round ?? 1);
     const round = { ...request, maxAttempts, isContinue: Boolean(persisted) };
-    await runReviewLoop(round, await this._entry.mechanisms(round));
+    await this._runLoop(round, await this._entry.mechanisms(round));
   }
 }

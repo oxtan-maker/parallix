@@ -37,20 +37,16 @@ import type { DraftWorkflowPort } from '../application/ports/cli-workflows.js';
 import type { BoardMissionServices } from '../application/controller/board-controller.js';
 import type { CurrentWorkPort } from '../application/recording/current-work-recorder.js';
 import { createDraftWorkflowAdapter, ensureWorktree } from '../adapters/cli/commands/draft.js';
-import { CONFIG_PATH, readAgentConfig } from '../adapters/agents/agent-config.js';
-import { eligibleAgentsForStep } from '../adapters/agents/agents.js';
-import { git } from '../adapters/git/git.js';
-import path from 'node:path';
-import fs from 'node:fs';
+import { readAgentConfig } from '../adapters/agents/agent-config.js';
 import { missionBranchName } from '../adapters/filesystem/mission-paths.js';
 import { conventionalWorktreePath, resolveWorktree } from '../adapters/git/worktree.js';
 import { performHandoff } from '../adapters/cli/commands/handoff.js';
 import { createReviewLoopPorts } from '../adapters/review/review-loop.js';
 import { runReviewLoop } from '../application/review-loop/review-loop.js';
+import { ReviewRoundUseCase } from '../application/review-round-use-case.js';
 import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
 import { composeTuiCapabilities } from './board-projection.js';
 import { reviewLoopBindings } from './review-persistence.js';
-import { applyImplementerCommand, beginNextReviewRound, changeRevision, ConfiguredReviewerEligibility, currentReviewRound, reviewStatus } from '../domain/review.js';
 import { agentFamily } from '../domain/agents.js';
 
 export interface ProductionBoardRepositories {
@@ -171,46 +167,6 @@ export function missionCleanupCommand(slug: string, rootDir: string, gitFn?: Git
   return `git worktree remove ${worktree} && git branch -D ${missionBranchName(slug, rootDir)}`;
 }
 
-function boardReviewConfigPath(worktree: string): string {
-  const worktreeConfig = path.join(worktree, CONFIG_PATH);
-  // Installed worktrees omit the untracked first-run config. The default
-  // resolver retains the operator/shipped policy in that case (ADR 0044).
-  return fs.existsSync(worktreeConfig) ? worktreeConfig : CONFIG_PATH;
-}
-
-async function resumeActiveBoardHandoff(existing: Extract<Awaited<ReturnType<MissionStore['load']>>, { kind: 'found' }> & { mission: { review: NonNullable<import('../domain/mission.js').Mission['review']> } }, store: MissionStore & MissionTransitionStore & MissionNelRecorder, lifecycle: MissionLifecycleService, slug: string, reviewer?: ReturnType<typeof agentFamily>): Promise<void> {
-  if (existing.mission.status !== 'active') { return; }
-  const previous = existing.mission.review;
-  const decision = currentReviewRound(previous).decision;
-  const findings = decision !== null && decision.kind === 'changes-requested' ? decision.findings : [];
-  // The handed-off revision is the worktree's commit, and reviewer eligibility
-  // is the configured review step, never the prior round's reviewer (TASK-2620).
-  const worktree = resolveWorktree(slug, {}) ?? process.cwd();
-  const head = git(['-C', worktree, 'rev-parse', 'HEAD']);
-  if (head.status !== 0 || !head.stdout.trim()) { throw new Error(`Cannot read the handed-off commit of ${slug}.`); }
-  const resolved = reviewStatus(previous) === 'awaiting-implementation'
-    ? applyImplementerCommand(previous, { type: 'submit-resolution', respondedAt: new Date().toISOString(), resultingRevision: changeRevision(head.stdout.trim()), resolutions: findings.map((finding) => ({ findingId: finding.id, kind: 'fixed', evidence: 'Resolved in the handed-off revision.' })) })
-    : previous;
-  const eligible = eligibleAgentsForStep('review', { configPath: boardReviewConfigPath(worktree) }).map(agentFamily);
-  const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible, strategy: 'random' });
-  const priorReviewer = currentReviewRound(resolved).reviewer;
-  const review = reviewStatus(resolved) === 'ready-for-next-round'
-    ? beginNextReviewRound(resolved, reviewer ?? resumeReviewer(eligible, priorReviewer), existing.mission.assignee ?? agentFamily('codex'), new Date().toISOString(), reviewerEligibility)
-    : resolved;
-  if (review === previous) { throw new Error('Review is not ready to resume.'); }
-  await store.save({ ...existing.mission, review }, existing.version);
-  const transition = await lifecycle.transition({
-    operationId: `handoff-resume-${slug}`,
-    missionId: missionId(slug),
-    capabilities: new Set(['mission:transition']),
-    command: { type: 'submit-for-review', gatesPassed: true, review, reviewerEligibility },
-    actor: currentReviewRound(review).reviewer,
-    occurredAt: new Date().toISOString(),
-    idempotencyKey: `handoff-resume-${slug}-${review.rounds.length}`,
-  });
-  if (transition.status !== 'completed') { throw new Error(transition.error?.message ?? 'Review resume transition failed.'); }
-}
-
 /** The browser hands off exactly as the CLI does: it supplies identity only. */
 function createBoardHandoffWorkflow(
   store: MissionStore & MissionTransitionStore & MissionNelRecorder,
@@ -224,27 +180,27 @@ function createBoardHandoffWorkflow(
     checkpoints: new MissionCheckpointService(store, checkpointEvidenceReferences()),
     handoff: new MissionHandoffService(store, store),
   };
-  const handoff = (slug: string, options: Record<string, unknown> = {}) =>
-    performHandoff(slug, { recoverGateFailure: true, ...options, configuration, missionServicesFn: async () => missionServices });
   const reviewHandoff = async (slug: string, options: Record<string, unknown> = {}): Promise<Record<string, unknown>> =>
-    ({ ...await handoff(slug, options) });
+    ({ ...await performHandoff(slug, { recoverGateFailure: true, ...options, configuration, missionServicesFn: async () => missionServices }) });
   return {
+    /** First handoff and continuation both enter the round owner `px review` uses. */
     async executeForSlug(slug: string, agent?: ReturnType<typeof agentFamily>): Promise<void> {
-      const existing = await store.load(missionId(slug));
-      if (existing.kind === 'found' && existing.mission.review?.rounds?.length) {
-        // Handoff already established the review identity. A later board handoff
-        // is a resume signal, not a second submission (which would replay the
-        // lane-event key and violate the lifecycle idempotency contract).
-        await resumeActiveBoardHandoff({ ...existing, mission: { ...existing.mission, review: existing.mission.review } }, store, lifecycle, slug, agent);
-        await reviewLoop(
-          { slug, reviewer: agent, isContinue: true, maxAttempts: existing.mission.review.rounds.length + 1 },
-          createReviewLoopPorts(slug, {}, { configuration, pinnedReviewer: agent, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd(), configuration.decision, configuration), restoration: createIntegrationApprovalRestoration(resolveWorktree(slug) ?? process.cwd(), configuration) }),
-        );
-        return;
-      }
-      const result = await handoff(slug, agent ? { reviewer: agent } : {});
-      if (!result.ok) { throw new Error(result.error ?? 'handoff workflow aborted'); }
-      await reviewLoop({ slug, reviewer: agent }, createReviewLoopPorts(slug, {}, { configuration, pinnedReviewer: agent, performHandoffFn: reviewHandoff, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd(), configuration.decision, configuration), restoration: createIntegrationApprovalRestoration(resolveWorktree(slug) ?? process.cwd(), configuration) }));
+      const worktree = resolveWorktree(slug) ?? process.cwd();
+      // The browser host must never be exited by the loop; a stop is a failed dispatch.
+      const exit = (code: number): never => { throw new Error(`review workflow stopped (exit ${code})`); };
+      await new ReviewRoundUseCase({
+        loadRound: async () => {
+          const existing = await store.load(missionId(slug));
+          const rounds = existing.kind === 'found' ? existing.mission.review?.rounds?.length ?? 0 : 0;
+          return rounds > 0 ? { round: rounds } : null;
+        },
+        isKnownMission: async () => (await store.load(missionId(slug))).kind === 'found',
+        clearHumanIntervention: async () => undefined,
+        invalidateResolvedBlocker: async () => undefined,
+        invalidMaxAttempts: () => undefined,
+        missingReviewAggregate: () => { throw new Error(`Mission ${slug} is unknown or has no valid Review aggregate.`); },
+        mechanisms: () => createReviewLoopPorts(slug, {}, { configuration, pinnedReviewer: agent, performHandoffFn: reviewHandoff, exit, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, worktree, configuration.decision, configuration), restoration: createIntegrationApprovalRestoration(worktree, configuration) }),
+      }, reviewLoop).enter({ slug, reviewer: agent, focus: 'all', dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null, rawMaxAttempts: null });
     },
   };
 }
@@ -330,8 +286,4 @@ export function composeProductionCapabilities(
     executePorts,
     commandController: controller,
   };
-}
-
-function resumeReviewer(eligible: readonly ReturnType<typeof agentFamily>[], priorReviewer: ReturnType<typeof agentFamily>): ReturnType<typeof agentFamily> {
-  return eligible.includes(priorReviewer) ? priorReviewer : eligible[0] ?? priorReviewer;
 }

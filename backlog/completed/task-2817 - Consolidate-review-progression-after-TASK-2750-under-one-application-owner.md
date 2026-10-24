@@ -1,8 +1,8 @@
 ---
 id: TASK-2817
 title: Consolidate review progression after TASK-2750 under one application owner
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-10-24 05:29'
 updated_date: '2026-10-24 05:31'
 labels:

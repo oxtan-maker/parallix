@@ -249,7 +249,8 @@ export type ResponsibilityRule =
   | 'cross-adapter-dependency-not-named'
   | 'hidden-service-location'
   | 'complete-graph-outside-composition'
-  | 'adapter-owned-workflow-control';
+  | 'adapter-owned-workflow-control'
+  | 'entry-owned-review-progression';
 
 export interface ResponsibilityViolation {
   /** Repository-relative path of the offending module. */
@@ -376,12 +377,32 @@ export function findWorkflowOwnershipViolations(repoRoot = process.cwd()): Respo
   return workflowOwnershipViolations(walk(path.join(root, 'src', 'adapters')), root);
 }
 
+const reviewProgressionTokens = /\b(beginNextReviewRound|applyImplementerCommand|applyReviewerCommand|startReview)\b|['"]submit-for-review['"]|\blifecycle\.transition\(|\b(runReviewLoop|reviewLoop)\(/;
+
+/**
+ * Composition and interfaces bind and present; they never advance a review round
+ * or sequence a lifecycle transition. The application review owner does.
+ */
+export function findEntryReviewProgressionViolations(repoRoot = process.cwd()): ResponsibilityViolation[] {
+  const root = path.resolve(repoRoot);
+  return ['composition', 'interfaces'].flatMap(layer => walk(path.join(root, 'src', layer))
+    .filter(file => file.endsWith('.ts') && !file.endsWith('.d.ts') && reviewProgressionTokens.test(fs.readFileSync(file, 'utf8')))
+    .map(file => ({
+      file: path.relative(root, file),
+      rule: 'entry-owned-review-progression' as const,
+      expectedOwner: 'application' as const,
+      actualOwner: layer as Responsibility,
+      detail: 'advances a review round or sequences a lifecycle transition; delegate to the application review owner (ReviewRoundUseCase)',
+    })));
+}
+
 export function findResponsibilityViolations(repoRoot = process.cwd()): ResponsibilityViolation[] {
   return [
     ...findUnclassifiedProductionModules(repoRoot),
     ...findCrossAdapterViolations(repoRoot),
     ...findServiceLocationViolations(repoRoot),
     ...findWorkflowOwnershipViolations(repoRoot),
+    ...findEntryReviewProgressionViolations(repoRoot),
   ];
 }
 
