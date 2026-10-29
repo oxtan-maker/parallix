@@ -51,14 +51,6 @@ export interface IntegrateSeams extends BounceSeams {
   reReviewFn?: (_slug: string, _worktree: string) => Promise<boolean>;
 }
 
-/**
- * Thrown by the integration gate step to stop the run in the integration lane
- * once a repaired revision is re-approved: the mission is ready for the human
- * to read the fresh PR and integrate, so no landing/merge happens in this
- * invocation (TASK-2620 AC2). The workflow catches it and returns a clean
- * stop with a human next action.
- */
-export { IntegrationStopsForHuman } from './gate-repair-closeout.js';
 /** The commit the mission's current approval was given to, when one is recorded. */
 function approvedRevisionOf(missionLoad: MissionLoadResult): string | null {
   const round = missionLoad?.kind === 'found' ? missionLoad.mission.review?.rounds.at(-1) : null;
@@ -374,28 +366,7 @@ class IntegrationGateStep {
           }
         : undefined,
     });
-    return completeGateRepairRoute({ request: { slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent, realAgentModel, seams, configuration }, ports: this.dependencies, configured, checkout, route, reactivateMission, reReviewRepairedRevision: this.reReviewRepairedRevision.bind(this) });
-  }
-
-  /**
-   * The repair changed what the reviewer approved, and its approval is
-   * retracted. Review the repaired revision now instead of stranding the
-   * mission for an operator: nothing is approved on the reviewer's behalf,
-   * and the superseded approval stays in the review history.
-   */
-  async reReviewRepairedRevision(slug: string, checkout: string, repairedRevision: string, reReviewFn: NonNullable<IntegrateSeams['reReviewFn']>): Promise<boolean> {
-    fmt.log.info(`Sending ${slug} back through review for the repaired revision ${repairedRevision}.`);
-    let approved = false;
-    try {
-      approved = await reReviewFn(slug, checkout);
-    } catch (error) {
-      throw abortWith(this.dependencies.landing, `Re-review of ${slug} could not run: ${(error as Error).message}`, `Run px review ${slug} to resume review; an approval returns the mission to the integration lane for you to integrate.`, 'Aborting before merge.');
-    }
-    if (!approved) {
-      throw abortWith(this.dependencies.landing, `The repaired revision of ${slug} was not approved in re-review. Run px review ${slug} to resume review; an approval returns the mission to the integration lane for you to integrate.`, 'Aborting before merge.');
-    }
-    fmt.log.pass(`The repaired revision of ${slug} was re-reviewed and approved. ${slug} now sits in the integration lane for the human to read the fresh PR and integrate (TASK-2620).`);
-    return true;
+    return completeGateRepairRoute({ request: { slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent, realAgentModel, seams, configuration }, ports: this.dependencies, configured, checkout, route, reactivateMission });
   }
 
   surface() {

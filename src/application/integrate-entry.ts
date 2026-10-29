@@ -2,7 +2,8 @@ import * as fmt from './presentation/cli-format.js';
 import type { IntegrateOptions } from './integrate-workflow.js';
 import type { IntegrateWorkflowPorts } from './ports/integrate-workflow.js';
 import type { IntegrateRunState } from './integrate/squash.js';
-import { IntegrationStopsForHuman, type IntegrateSeams } from './integrate/gates.js';
+import type { IntegrateSeams } from './integrate/gates.js';
+import { IntegrationStopsForHuman } from './integrate/review-before-integration.js';
 import { parseIntegrateArgs, type IntegrateRequest } from './integrate/support.js';
 import { isNestedWorkPublisher, publishedAgentLaunch } from './recording/current-work-recorder.js';
 

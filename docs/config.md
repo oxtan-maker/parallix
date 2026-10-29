@@ -648,6 +648,11 @@ revisions and genuine evidence/provider failures retain the general reviewer.
 No separate per-obligation route, activation flag or sample quota is required.
 The global shadow and opt-out modes described below remain available.
 
+An approved integration repair stays resolved when a later human/operator
+correction withdraws that approval for another reason. The old gate failure
+remains in history; it does not make the new correction an integration repair
+or supply stale repair context to its reviewer.
+
 After two consecutive classifier returns, the next eligible panel round hands
 off to the general reviewer. A general-reviewer decision or classifier clear
 resets that count. Integration repairs retain their weakening route.

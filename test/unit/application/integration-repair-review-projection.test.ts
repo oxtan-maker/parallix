@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 
 import {
   integrationRepairNeedsReview,
-  hasIntegrationRepairHistory,
+  integrationGateWithdrawals,
   integrationRepairPrComment,
   integrationRepairReviewBrief,
   integrationRepairSummary,
@@ -25,13 +25,17 @@ import {
 } from '../../../src/application/integration-repair-review.js';
 import {
   applyReviewerCommand,
+  applyImplementerCommand,
+  beginNextReviewRound,
   currentReviewRound,
   changeRevision,
   ConfiguredReviewerEligibility,
   reviewStatus,
+  reviewFindingId,
   revokeApprovedDecision,
   startReview,
   type Review,
+  type ReviewRevocationCause,
 } from '../../../src/domain/review.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { missionId, type Mission } from '../../../src/domain/mission.js';
@@ -96,12 +100,10 @@ function mission(status: Mission['status'], review: Review | null): Mission {
     closedAt: null});
 }
 
-// hasIntegrationRepairHistory is the typed lifecycle fact the kernel reads.
-test('task-2620: a workflow-revoked approval records repair history; a plain approval does not', () => {
-  assert.equal(hasIntegrationRepairHistory(mission('active', reviewWithRepairHistory())), true);
-  assert.equal(hasIntegrationRepairHistory(mission('active', awaitingReviewNoRepair())), false);
-  assert.equal(hasIntegrationRepairHistory(mission('active', approvedNoRepair())), false);
-  assert.equal(hasIntegrationRepairHistory(mission('active', operatorRevokedWithIntegrationWording())), false, 'reason text is never matched');
+test('task-2620: repair classification never matches reason text', () => {
+  const current = mission('active', operatorRevokedWithIntegrationWording());
+  assert.deepEqual(integrationGateWithdrawals(current), [], 'reason text is never matched');
+  assert.equal(integrationRepairNeedsReview(current), false);
 });
 
 // Lane-by-review-status-by-repair-history table.
@@ -116,7 +118,7 @@ const table: Array<{ status: Mission['status']; review: Review; expected: boolea
 ];
 
 for (const row of table) {
-  test(`task-2620: needsReview status=${row.status} review=${reviewStatus(row.review)} repair=${hasIntegrationRepairHistory(mission(row.status, row.review))}`, () => {
+  test(`task-2620: needsReview status=${row.status} review=${reviewStatus(row.review)} repair=${integrationGateWithdrawals(mission(row.status, row.review)).length > 0}`, () => {
     assert.equal(integrationRepairNeedsReview(mission(row.status, row.review)), row.expected);
   });
 }
@@ -126,6 +128,54 @@ test('task-2620: an approved repair that is not overdue does not demand review',
   const approved = approvedNoRepair();
   assert.equal(reviewStatus(approved), 'approved');
   assert.equal(integrationRepairNeedsReview(mission('active', approved)), false);
+});
+
+for (const cause of [
+  { kind: 'operator' }, { kind: 'review-repair' }, { kind: 'rebase-repair' }, undefined,
+] satisfies readonly (ReviewRevocationCause | undefined)[]) {
+  test(`resolved integration repair stays resolved after ${cause?.kind ?? 'legacy untyped'} revocation (TASK-2819)`, () => {
+    const approved = applyReviewerCommand(reviewWithRepairHistory(), {
+      type: 'approve', revision: changeRevision('repair-B'), decidedAt: '2026-09-20T12:00:00Z',
+      comment: 'Repair reviewed', source: { kind: 'local' },
+    });
+    const resolved = latestIntegrationRepair(mission('integration', approved));
+    const reopened = revokeApprovedDecision(approved, 2, {
+      revokedAt: '2026-09-21T10:00:00Z', revokedBy: 'operator', reason: 'A separate correction', cause,
+    });
+    for (const lane of ['active', 'review'] as const) {
+      const current = mission(lane, reopened);
+      assert.equal(integrationGateWithdrawals(current).length, 1, 'history remains available');
+      assert.equal(integrationRepairNeedsReview(current), false, 'old repair does not route current review');
+      assert.deepEqual(latestIntegrationRepair(current), resolved, 'resolved range and outcome remain historical facts');
+      assert.equal(integrationRepairReviewBrief(latestIntegrationRepair(current)), '', 'no stale repair prompt');
+    }
+  });
+}
+
+test('integration repair remains pending across requested changes and resolves at approval (TASK-2819)', () => {
+  const finding = { id: reviewFindingId('F1'), summary: 'Repair still weakens validation', location: null };
+  const rejected = applyReviewerCommand(reviewWithRepairHistory(), {
+    type: 'request-changes', revision: SUBJECT.revision, decidedAt: '2026-09-20T12:00:00Z', comment: null, findings: [finding],
+  });
+  const responded = applyImplementerCommand(rejected, {
+    type: 'submit-resolution', respondedAt: '2026-09-20T13:00:00Z', resultingRevision: changeRevision('repair-C'),
+    resolutions: [{ findingId: finding.id, kind: 'fixed', evidence: 'Validation retained' }],
+  });
+  const next = beginNextReviewRound(responded, REVIEWER, IMPLEMENTER, '2026-09-20T13:01:00Z', ELIGIBILITY);
+  assert.equal(integrationRepairNeedsReview(mission('active', next)), true);
+  assert.equal(latestIntegrationRepair(mission('review', next))?.repairedRevision, 'repair-C');
+  assert.match(integrationRepairReviewBrief(latestIntegrationRepair(mission('review', next))), /integration gate `unit`/);
+  const approved = applyReviewerCommand(next, { type: 'approve', revision: changeRevision('repair-C'),
+    decidedAt: '2026-09-20T14:00:00Z', comment: null, source: { kind: 'local' } });
+  assert.equal(integrationRepairNeedsReview(mission('review', approved)), false);
+  assert.equal(latestIntegrationRepair(mission('integration', approved))?.reReview, 'approved');
+  const failedAgain = revokeApprovedDecision(approved, currentReviewRound(approved).number, {
+    revokedAt: '2026-09-20T15:00:00Z', revokedBy: 'workflow', reason: 'Another gate failed',
+    cause: { kind: 'integration-gate-failure', gate: 'quality' },
+  });
+  assert.equal(integrationRepairNeedsReview(mission('review', failedAgain)), true);
+  assert.equal(latestIntegrationRepair(mission('review', failedAgain))?.gate, 'quality');
+  assert.equal(latestIntegrationRepair(mission('review', failedAgain))?.approvedRevision, 'repair-C');
 });
 
 // The facts px status, the PR comment and the re-review prompt all read.
@@ -138,16 +188,18 @@ test('task-2620: the latest integration repair reports the gate, range A..B and 
 
   const round = currentReviewRound(review);
   review = { ...review, rounds: replaceCurrentRound(review, { ...round, subject: { ...round.subject, revision: changeRevision('d4e5f6') } }) };
+  const candidate = latestIntegrationRepair(mission('review', review))!;
   review = applyReviewerCommand(review, { type: 'approve', revision: changeRevision('d4e5f6'), decidedAt: '2026-09-20T12:00:00.000Z', comment: 'repair verified', source: { kind: 'local' } });
   const approved = latestIntegrationRepair(mission('integration', review))!;
   assert.equal(approved.reReview, 'approved');
   assert.match(integrationRepairSummary(approved), /repair range a1b2c3\.\.d4e5f6; re-review approved/);
   assert.match(integrationRepairPrComment(approved), /AssertionError: boom/);
   assert.match(integrationRepairPrComment(approved), /nothing lands until a human runs `px integrate`/);
-  const brief = integrationRepairReviewBrief(approved);
+  const brief = integrationRepairReviewBrief(candidate);
   assert.match(brief, /a1b2c3\.\.d4e5f6/);
   assert.match(brief, /withdrew and dismissed that prior approval/);
   assert.match(brief, /review scope is yours/i);
+  assert.equal(integrationRepairReviewBrief(approved), '');
 });
 
 test('task-2620: no integration repair, no repair facts', () => {
@@ -238,5 +290,6 @@ test('repair facts and history name decided code and retain unknown legacy heads
   assert.equal(history[0].decidedRevision, SUBJECT.revision);
   const legacy = { ...changed, rounds: [{ ...changed.rounds[0], decision: { ...prior.decision!, revision: null } }, current] } as Review;
   assert.equal(latestIntegrationRepair(mission('review', legacy)), null);
+  assert.equal(integrationRepairNeedsReview(mission('review', legacy)), true, 'unknown decided heads still require review (TASK-2819)');
   assert.equal(projectReviewHistory(legacy)[0].decidedRevision, null);
 });

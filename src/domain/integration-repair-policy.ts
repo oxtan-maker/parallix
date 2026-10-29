@@ -12,20 +12,28 @@ export function integrationGateWithdrawals(mission: Mission): readonly Withdrawn
     && round.decision.revocation?.cause?.kind === 'integration-gate-failure');
 }
 
-/** A repair that stopped between commands still owes review before landing. */
-export function hasIntegrationRepairHistory(mission: Mission): boolean {
-  return integrationGateWithdrawals(mission).length > 0;
+/**
+ * Routing fails closed on a typed gate withdrawal even when its decided revision
+ * is unknown. Display facts below require that revision to avoid inventing a
+ * repair range; missing display facts never waive the review requirement.
+ */
+export function integrationRepairNeedsReview(mission: Mission): boolean {
+  if ((mission.status !== 'active' && mission.status !== 'review') || !mission.review
+    || reviewStatus(mission.review) === 'approved') { return false; }
+  const withdrawn = integrationGateWithdrawals(mission).at(-1);
+  return Boolean(withdrawn && !repairApproval(mission, withdrawn));
 }
 
-export function integrationRepairNeedsReview(mission: Mission): boolean {
-  return (mission.status === 'active' || mission.status === 'review') && Boolean(mission.review
-    && reviewStatus(mission.review) !== 'approved' && hasIntegrationRepairHistory(mission));
+/** A subsequent approval closes this repair even if a later correction withdraws it. */
+function repairApproval(mission: Mission, withdrawn: WithdrawnApproval): ReviewRound | undefined {
+  return mission.review?.rounds.find(round => round.number > withdrawn.number && round.decision?.kind === 'approved');
 }
 
 /**
  * What the latest integration repair was, read from typed review facts: the
  * red gate, the approved revision A it withdrew, the repair range A..B, and
- * how the repaired revision's re-review stands (TASK-2620).
+ * how the repaired revision's re-review stands (TASK-2620). Its first subsequent
+ * approval resolves the repair; later corrections do not rewrite that outcome.
  */
 export interface IntegrationRepairFacts {
   readonly gate: string | null;
@@ -34,7 +42,7 @@ export interface IntegrationRepairFacts {
   readonly approvedRevision: string;
   /** Baseline the approved revision's mission diff was measured from; null when that round recorded none. */
   readonly approvedBaseline: string | null;
-  /** Baseline of the repaired revision's round; null while unrecorded. */
+  /** Baseline of the resolving or latest pending repair round; null while unrecorded. */
   readonly repairedBaseline: string | null;
   /** The revision under re-review; null while it still names A (repair not handed off yet). */
   readonly repairedRevision: string | null;
@@ -44,7 +52,7 @@ export interface IntegrationRepairFacts {
 
 export function latestIntegrationRepair(mission: Mission): IntegrationRepairFacts | null {
   const withdrawn = recordedWithdrawal(mission);
-  const current = mission.review?.rounds.at(-1);
+  const current = withdrawn && (repairApproval(mission, withdrawn) ?? mission.review?.rounds.at(-1));
   if (!withdrawn || !current || current.number <= withdrawn.number) { return null; }
   const cause = withdrawn.decision.revocation!.cause as Extract<ReviewRevocationCause, { kind: 'integration-gate-failure' }>;
   const approvedRevision = String(withdrawn.decision.revision);
@@ -58,11 +66,14 @@ export function latestIntegrationRepair(mission: Mission): IntegrationRepairFact
     repairedBaseline: current.subject.baseline ? String(current.subject.baseline) : null,
     repairedRevision: latest === approvedRevision ? null : latest,
     withdrawnAt: withdrawn.decision.revocation!.revokedAt,
-    reReview: current.decision?.kind === 'approved' && !current.decision.revocation ? 'approved'
-      : current.decision?.kind === 'changes-requested' ? 'changes-requested' : 'pending',
+    reReview: repairReviewStatus(current),
   };
 }
 
+function repairReviewStatus(round: ReviewRound): IntegrationRepairFacts['reReview'] {
+  return round.decision?.kind === 'approved' ? 'approved'
+    : round.decision?.kind === 'changes-requested' ? 'changes-requested' : 'pending';
+}
 
 /** Pending repair rounds still name their submitted start; decisions name judged code. */
 function repairRevision(round: ReviewRound): string {

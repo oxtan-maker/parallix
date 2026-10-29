@@ -1,4 +1,5 @@
 import { runIntegrateEntry } from './integrate-entry.js';
+import { reviewBeforeIntegration } from './integrate/review-before-integration.js';
 import type { MissionLoadResult } from './domain-ports.js';
 import type { IntegrationMissionServices, IntegrationMissionServicesFactory } from './ports/integration-records.js';
 import type { IntegrationContext } from './integrate/context.js';
@@ -250,7 +251,7 @@ class IntegrateWorkflow {
     return 1;
   }
 
-  private async tryResumeIntegration(slug: string, request: IntegrateRequest, missionServices: IntegrationMissionServices, seams: IntegrateSeams, state: IntegrateRunState): Promise<0 | null> {
+  private async tryResumeIntegration(slug: string, request: IntegrateRequest, missionServices: IntegrationMissionServices, seams: IntegrateSeams): Promise<0 | null> {
     const { dryRun } = request;
     // TASK-2517 CP-3: a landed-but-stranded mission short-circuits the whole run —
     // no rebase, no gates, no publish — and closes directly.
@@ -276,17 +277,7 @@ class IntegrateWorkflow {
     if (!dryRun) {
       const repair = await missionServices.store.load(missionId(slug));
       if (repair.kind === 'found' && integrationRepairNeedsReview(repair.mission)) {
-        if (!seams.reReviewFn) {
-          throw abortWith(this.dependencies.ports.landing, `The repaired mission ${slug} requires review. Run px review ${slug}.`);
-        }
-        if (!await seams.reReviewFn(slug, this.dependencies.ports.process.cwd())) {
-          throw abortWith(this.dependencies.ports.landing, `Review of the repaired mission ${slug} stopped. Run px review ${slug} to resume.`);
-        }
-        // TASK-2620: on approval the repaired mission sits in the integration
-        // lane for the human to read the fresh PR and integrate. No path
-        // auto-restarts integration or merges, so stop here.
-        state.nextActionMessage = `The repaired mission ${slug} was re-reviewed and approved; it now sits in the integration lane. Read the fresh PR and run px integrate ${slug} to land.`;
-        return 0;
+        return reviewBeforeIntegration(slug, this.dependencies.ports.process.cwd(), this.dependencies.ports.landing, seams.reReviewFn);
       }
     }
     return null;
@@ -317,7 +308,7 @@ class IntegrateWorkflow {
     // reviewer lookup (TASK-2420 review round 2, F1) receives its `missionStore`
     // argument; the store is rootDir-independent.
     const missionServices = await missionServicesFn(this.dependencies.ports.process.cwd());
-    const resumed = await this.tryResumeIntegration(slug, request, missionServices, seams, state);
+    const resumed = await this.tryResumeIntegration(slug, request, missionServices, seams);
     if (resumed !== null) { return resumed; }
     const context: IntegrationContext = await this.dependencies.buildIntegrationContext(slug, { missionStore: missionServices.store, ...this.executionCheckouts(slug, options.executionContext) });
     const missionLoad = await this.loadMissionAuthority(slug, context, missionServices);

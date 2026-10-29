@@ -33,9 +33,11 @@ import { run } from '../../../src/composition/create-cli.js';
 // private repository, writable state, gate children and cleanup, rather than
 // charging the first invocation for tsx compilation of the lazy CLI registry.
 import '../../../src/composition/cli-command-registry.js';
-import { openRepairFixture } from '../../lib/integration-repair-fixture.js';
+import { openRepairFixture, seedGit } from '../../lib/integration-repair-fixture.js';
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
-import { reviewStatus } from '../../../src/domain/review.js';
+import { revokeApprovedDecision, reviewStatus } from '../../../src/domain/review.js';
+import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
+import { missionVersion } from '../../../src/application/domain-ports.js';
 import { setLogger } from '../../../src/application/presentation/cli-format.js';
 
 async function integrate(slug: string, worktree: string): Promise<number> {
@@ -49,6 +51,7 @@ async function integrate(slug: string, worktree: string): Promise<number> {
 test('task-2620: a red integration gate repairs once, re-reviews, and stops in the integration lane', async (t) => {
   const fixture = await openRepairFixture({ slug: 'task-2620' });
   t.after(() => fixture.close());
+  t.after(() => { setWorkflowLaunchPort(null); setCommandPathProbe(null); setLauncherHealthProbe(null); });
   const originalMission = await fixture.load();
   const approvedRounds = originalMission.review!.rounds.length;
 
@@ -131,4 +134,66 @@ test('task-2620: a red integration gate repairs once, re-reviews, and stops in t
   assert.match(status.join('\n'), new RegExp(`Previous integration failed at integration gate unit .*repair range ${fixture.approvedRevision}\.\.${decidedRevision}; re-review approved`));
 
   void SqliteDatabaseAdapter;
+});
+
+test('persisted integration repair restarts through CLI review and stops before gates or landing (TASK-2819)', async (t) => {
+  const fixture = await openRepairFixture({ slug: 'task-2819', gateCommand: 'touch gate-ran.txt' });
+  t.after(() => fixture.close());
+  t.after(() => { setWorkflowLaunchPort(null); setCommandPathProbe(null); setLauncherHealthProbe(null); });
+  const original = await fixture.load();
+  const baseHead = fixture.git(fixture.repo, ['rev-parse', 'main']);
+  fs.writeFileSync(path.join(fixture.worktree, 'repaired.txt'), 'restart repair\n');
+  seedGit(fixture.worktree, [['add', 'repaired.txt'], ['commit', '-m', 'repair before restart']]);
+  const repairedRevision = fixture.git(fixture.worktree, ['rev-parse', 'HEAD']);
+  // Persist the state an interrupted gate repair leaves. The public integrate
+  // command must reload it and enter tryResumeIntegration, before gate setup.
+  await new SqliteMissionStore(fixture.database).save({ ...original,
+    status: 'active', rawStatus: 'active', closedAt: null,
+    review: revokeApprovedDecision(original.review!, 1, {
+      revokedAt: '2026-10-25T10:00:00Z', revokedBy: 'workflow', reason: 'Gate failed before interruption',
+      cause: { kind: 'integration-gate-failure', gate: 'unit', command: 'npm test', log: 'Restart regression' },
+    }),
+  }, missionVersion(await fixture.version()));
+
+  assert.equal(await run(['checkpoint', 'record', '--slug', fixture.slug, '--name', 'CP-1',
+    '--expected-version', String(await fixture.version()), '--criterion', 'feature ships',
+    '--evidence', 'repaired.txt: committed restart repair; test -f repaired.txt',
+    '--next', 'Resume independent review after interruption'],
+  { baseCwd: fixture.worktree, log: () => '', error: () => '' }), 0);
+
+  const output: string[] = [];
+  const previousLogger = setLogger({ log: line => { output.push(String(line)); }, error: line => { output.push(String(line)); } });
+  t.after(() => setLogger(previousLogger));
+  setCommandPathProbe(() => '/fixture-agent');
+  setLauncherHealthProbe(() => ({ ok: true as const }));
+  let reviews = 0;
+  setWorkflowLaunchPort(({ prompt, worktree }) => ({
+    invocation: { command: 'fixture-agent', args: [], options: { cwd: worktree } },
+    resultPromise: (async () => {
+      reviews++;
+      assert.match(prompt, /^Mode: review\./m, 'restart never launches another repair');
+      assert.match(prompt, /Restart regression/, 'the persisted gate evidence reaches the reviewer');
+      assert.ok(prompt.includes(`${fixture.approvedRevision}..${repairedRevision}`));
+      assert.match(output.join('\n'), /Sending task-2819 back through review/, 'progress appears before the nested review');
+      const current = await fixture.load();
+      const round = current.review!.rounds.at(-1)!;
+      assert.equal(await run(['verdict', 'approve', '--slug', fixture.slug, '--actor', round.reviewer,
+        '--expected-version', String(await fixture.version()), '--comment', 'Restart repair verified'],
+      { baseCwd: fixture.worktree, log: () => '', error: () => '' }), 0);
+      return { status: 0, stdout: '', stderr: '', telemetry: { provider: 'fixture', cost_usd: 0.02 } };
+    })(),
+  }));
+  const code = await integrate(fixture.slug, fixture.worktree);
+  assert.equal(code, 0, output.join('\n'));
+  const restarted = await fixture.load();
+  assert.equal(reviews, 1);
+  assert.equal(restarted.status, 'integration');
+  assert.equal(reviewStatus(restarted.review!), 'approved');
+  const decidedRevision = String(restarted.review!.rounds.at(-1)!.decision?.revision);
+  fixture.git(fixture.worktree, ['merge-base', '--is-ancestor', repairedRevision, decidedRevision]);
+  assert.equal(fs.existsSync(path.join(fixture.worktree, 'gate-ran.txt')), false, 'restart stops before integration gates');
+  assert.equal(fixture.git(fixture.repo, ['rev-parse', 'main']), baseHead, 'restart never lands the repair');
+  assert.equal(fixture.git(fixture.worktree, ['status', '--porcelain']), '');
+  assert.match(output.join('\n'), /re-reviewed and approved; stopping before integration/);
+  assert.match(output.join('\n'), /run px integrate task-2819 to land/);
 });

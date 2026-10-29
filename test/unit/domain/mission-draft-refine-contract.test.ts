@@ -5,6 +5,9 @@ import { integrationContext } from '../../fixtures/integration-context.js';
 import { integrationServices } from '../../helpers/stub-integration-services.js';
 import { integrationBounceSeams } from '../../helpers/integration-bounce-seams.js';
 import { phaseGateResult } from '../../helpers/phase-gate-result.js';
+import { createIntegrateWorkflow } from '../../../src/application/integrate-workflow.js';
+import { approvedReview } from '../../fixtures/mission-builders.js';
+import { revokeApprovedDecision } from '../../../src/domain/review.js';
 import { missionVersion } from '../../../src/application/domain-ports.js';
 import type { GateStepRequest } from '../../../src/application/integrate/gates.js';
 import type { IntegrationGateRoute } from '../../../src/application/ports/integrate-workflow.js';
@@ -354,6 +357,38 @@ test('an approval that could not be retracted is never re-reviewed automatically
   await assert.rejects(quietly(() => gateStep(route).runRequiredLocalGates(gateRequest(route, async () => { reviewed = true; return true; }))), { name: 'IntegrationAbort' });
   assert.equal(reviewed, false);
 });
+
+for (const outcome of ['approved', 'rejected', 'throws', 'unavailable'] as const) {
+  test(`restarted integration review ${outcome} stops before gates or landing and releases ownership (TASK-2819)`, async () => {
+    const review = revokeApprovedDecision(approvedReview('task-x'), 1, {
+      revokedAt: '2026-10-25T10:00:00Z', revokedBy: 'workflow', reason: 'Unit gate failed',
+      cause: { kind: 'integration-gate-failure', gate: 'unit' },
+    });
+    const services = integrationServices({ store: { load: async () => ({ kind: 'found',
+      mission: fixtureMission('task-x', { status: 'review', review }), version: missionVersion(1) }) } });
+    const exits: number[] = [];
+    let reviews = 0, releases = 0;
+    const ports = stubIntegrateWorkflowPorts({
+      process: { cwd: () => '/wt', claimIntegration: async () => async () => { releases++; } },
+      missionPaths: { inferSlug: () => 'task-x' },
+      landing: { createAbort: () => Object.assign(new Error('aborted'), { name: 'IntegrationAbort' }),
+        isAbort: error => error instanceof Error && error.name === 'IntegrationAbort' },
+    });
+    const result = await quietly(() => createIntegrateWorkflow(ports).integrate(['task-x'], {
+      missionServicesFn: async () => services, exitFn: code => { exits.push(code); },
+      ...(outcome === 'unavailable' ? {} : { reReviewFn: async (slug: string, checkout: string) => {
+        reviews++;
+        assert.equal(slug, 'task-x'); assert.equal(checkout, '/wt');
+        if (outcome === 'throws') { throw new Error('review interrupted'); }
+        return outcome === 'approved';
+      } }),
+    }));
+    assert.equal(result?.exitCode, outcome === 'approved' ? 0 : 1);
+    assert.deepEqual(exits, [outcome === 'approved' ? 0 : 1]);
+    assert.equal(reviews, outcome === 'unavailable' ? 0 : 1);
+    assert.equal(releases, 1);
+  });
+}
 
 // --- px status ------------------------------------------------------------------------
 

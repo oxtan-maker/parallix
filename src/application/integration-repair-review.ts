@@ -33,7 +33,7 @@ export function integrationRepairSummary(facts: IntegrationRepairFacts): string 
  * recorded facts and leaves the review scope to the configured reviewer.
  */
 export function integrationRepairReviewBrief(facts: IntegrationRepairFacts | null): string {
-  if (!facts) { return ''; }
+  if (!facts || facts.reReview === 'approved') { return ''; }
   const range = integrationRepairRange(facts);
   const lines = [
     'Integration repair context (recorded by Parallix; these are facts, not findings):',

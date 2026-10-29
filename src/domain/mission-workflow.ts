@@ -1,4 +1,5 @@
 import type { AgentFamily } from './agents.js';
+import { integrationRepairNeedsReview } from './integration-repair-policy.js';
 import {
   isClosedMission,
   MissionRuleViolation,
@@ -229,14 +230,13 @@ function submitForReview(mission: Mission, command: SubmitForReviewCommand): Mis
 /**
  * An active Mission is the manually repaired shape (TASK-2514) when the lane was
  * left active while the valid next round awaits review. Only that undecided
- * round may be approved from active. A round reopened by revoking an approval
- * is an integration repair (`rebound-to-active`): its implementer must repair
- * the change and resubmit through review, so it is not approvable here.
+ * round may be approved from active. An unresolved integration-gate repair
+ * requires implementation and resubmission through review before approval,
+ * including after requested changes. Other causes do not reopen a resolved repair.
  */
-function approvableFromActiveLane(review: Review | null): boolean {
-  if (!review || reviewStatus(review) !== 'awaiting-review') { return false; }
-  const previous = review.rounds.at(-2)?.decision;
-  return !(previous?.kind === 'approved' && previous.revocation);
+function approvableFromActiveLane(mission: OpenMission): boolean {
+  return Boolean(mission.review && reviewStatus(mission.review) === 'awaiting-review'
+    && !integrationRepairNeedsReview(mission));
 }
 
 function reboundMission(mission: Mission, command: Extract<MissionCommand, { type: 'rebound-to-active' }>): Mission {
@@ -270,7 +270,7 @@ export function requireReviewIdentity(mission: Pick<Mission, 'assignee'>, review
 
 function approveMission(mission: Mission, command: Extract<MissionCommand, { type: 'approve' }>): Mission {
   requireStatus(mission, ['review', 'active'], command);
-  if (mission.status === 'active' && !approvableFromActiveLane(mission.review)) {
+  if (mission.status === 'active' && !approvableFromActiveLane(mission)) {
     throw new MissionRuleViolation('Approval from an active Mission requires an awaiting-review round outside an integration repair');
   }
   requireSameReviewedRevision(mission, command.review);

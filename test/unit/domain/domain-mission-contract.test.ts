@@ -15,7 +15,7 @@ import { recordCheckpoint } from '../../../src/domain/checkpoint.js';
 import { closeMission, missionId, missionLabels, MissionRuleViolation, recordNetEngineeringLines, requireClosedMission, type Mission, type ClosedMission } from '../../../src/domain/mission.js';
 import { decideMission } from '../../../src/domain/mission-workflow.js';
 import { repositoryId } from '../../../src/domain/repository.js';
-import { applyImplementerCommand, applyReviewerCommand, beginNextReviewRound, changeRevision, ConfiguredReviewerEligibility, currentReviewRound, requestReviewIntervention, reviewFindingId, revokeApprovedDecision, reviewStatus, resumeReview, startReview, type ReviewedChange } from '../../../src/domain/review.js';
+import { applyImplementerCommand, applyReviewerCommand, beginNextReviewRound, changeRevision, ConfiguredReviewerEligibility, currentReviewRound, requestReviewIntervention, reviewFindingId, revokeApprovedDecision, reviewStatus, resumeReview, startReview, type ReviewedChange, type ReviewRevocationCause } from '../../../src/domain/review.js';
 import { shouldResume } from '../../../src/domain/session.js';
 import { LEGACY_INVENTORY_AUTHORITY, MISSION_FIELD_AUTHORITY, missionMutationOwner, OPERATOR_CONCERN_AUTHORITY, reconcileMissionRead } from '../../../src/application/mission-authority.js';
 import { externalTaskRef } from '../../../src/domain/external-task.js';
@@ -423,6 +423,57 @@ describe("Mission lifecycle and review invariants , ,", () => {
     assert.throws(() => revokeApprovedDecision(approved, 1, {
       revokedAt: 'now', revokedBy: 'operator', reason: '',
     }), /operator reason/);
+  });
+
+  for (const cause of [
+    { kind: 'operator' }, { kind: 'review-repair' }, { kind: 'rebase-repair' }, undefined,
+  ] satisfies readonly (ReviewRevocationCause | undefined)[]) {
+    test(`active-lane approval does not classify ${cause?.kind ?? 'legacy untyped'} revocation as integration repair (TASK-2819)`, () => {
+      const reopened = revokeApprovedDecision(approve(), 1, {
+        revokedAt: '2026-07-22T09:00:00Z', revokedBy: 'operator', reason: 'Reconsider the approval', cause,
+      });
+      const active = { ...mission('active'), assignee: implementer, review: reopened };
+      const approved = approve(reopened);
+      const integrated = decideMission(active, { type: 'approve', review: approved });
+      assert.equal(integrated.status, 'integration');
+      assert.deepEqual(integrated.review, approved);
+      assert.deepEqual(integrated.review?.rounds[0], reopened.rounds[0]);
+    });
+  }
+
+  test('integration gate repair must submit before approval can leave active (TASK-2819)', () => {
+    const active = decideMission({ ...mission('integration'), review: approve() }, {
+      type: 'rebound-to-active', agent: implementer,
+      cause: { kind: 'integration-gate-failure', gate: 'unit' }, occurredAt: '2026-07-22T09:00:00Z',
+    });
+    const approved = approve(active.review!);
+    assert.throws(() => decideMission(active, { type: 'approve', review: approved }), /outside an integration repair/);
+    const submitted = decideMission({
+      ...active,
+      checkpoints: [{ missionId: id, name: 'CP-1', firstLine: 'Repair',
+        goalCheck: [{ criterion: 'gate passes', evidence: 'focused regression passed' }], nextActionText: 'review' }],
+    }, { type: 'submit-for-review', gatesPassed: true, review: active.review!, reviewerEligibility });
+    assert.equal(submitted.status, 'review');
+    const integrated = decideMission(submitted, { type: 'approve', review: approved });
+    assert.equal(integrated.status, 'integration');
+    assert.deepEqual(integrated.review?.rounds[0], active.review?.rounds[0]);
+  });
+
+  test('active-lane recovery cannot skip submission after integration repair review requests changes (TASK-2819)', () => {
+    const active = decideMission({ ...mission('integration'), review: approve() }, {
+      type: 'rebound-to-active', agent: implementer, cause: { kind: 'integration-gate-failure', gate: 'unit' },
+      occurredAt: '2026-07-22T09:00:00Z',
+    });
+    const rejected = applyReviewerCommand(active.review!, {
+      type: 'request-changes', decidedAt: '2026-07-22T10:00:00Z', comment: null, findings: [finding],
+    });
+    const response = applyImplementerCommand(rejected, {
+      type: 'submit-resolution', respondedAt: '2026-07-22T11:00:00Z', resultingRevision: changeRevision('repair-C'),
+      resolutions: [{ findingId: finding.id, kind: 'fixed', evidence: 'Validation retained' }],
+    });
+    const next = beginNextReviewRound(response, reviewer, implementer, '2026-07-22T11:01:00Z', reviewerEligibility);
+    assert.throws(() => decideMission({ ...active, review: next }, { type: 'approve', review: approve(next) }),
+      /outside an integration repair/);
   });
 
   test('recording the same checkpoint replaces stale evidence after a redo', () => {
