@@ -1,9 +1,10 @@
 ---
 id: TASK-2824
-title: Resume pending integration repair assessment before review approval
+title: Review repaired revision instead of resuming stale approval
 status: backlog
 assignee: []
 created_date: '2026-10-31 14:45'
+updated_date: '2026-10-31 14:46'
 labels:
   - bug
   - ai_sdlc
@@ -15,23 +16,24 @@ ordinal: 298008
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-After a successful exact-check repair, px review can resume an approved round on an active Mission that still has a pending integration-repair assessment. ReviewState.save persists the approved state and attempts approve, but requireRetainedJudgment correctly rejects the transition: "Integration repair may only retain the original judgment with proven evidence". The workflow exits at handoff:record instead of assessing the candidate and choosing retention or fresh review.
+px review resumes an old approved round after a successful repair instead of reviewing the current repository changes. It tries to persist that approval and move an active Mission into integration; the domain rejects it with "Integration repair may only retain the original judgment with proven evidence".
 
-Observed on px-0021 / mission/px-0021 / Forgejo PR #790 on 2026-10-31 at commit 7ba62651b. The duplicate fixture import was repaired; ./scripts/verify-local.sh static-analysis reran successfully, CP-5 reported ready, then round 2 approval persistence failed with Mission status active. Evidence: run:workflow-21d4340f-2a32-4a8c-b143-c147a57b3002:stdout@271931+16384. A read-only public CLI integrate px-0021 --dry-run also rejects the active state. Do not assume another review/integrate retry repairs this state.
+Observed on px-0021 / PR #790 on 2026-10-31 at commit 7ba62651b: ./scripts/verify-local.sh static-analysis reran successfully and CP-5 reported ready, then approval persistence failed in round 2. Evidence: run:workflow-21d4340f-2a32-4a8c-b143-c147a57b3002:stdout@271931+16384.
 
-Trace: review-loop/review-loop.ts resumes retained check recovery, then startState persists the earlier approved round; adapters/review/review-state.ts calls approve without a retention assessment. application/integrate/approval-retention.ts already owns revision-pinned assessment, equivalence, validation, human-feedback reconciliation, and retain-versus-withdraw decisions; review ports currently do not expose that capability. Reuse that owner through typed application ports and composition rather than relaxing domain guards, fabricating evidence, unconditionally revoking approval, or creating another approval mechanism. Trace interruption and normal entry as well as post-repair entry; avoid stale flattened state writes after assessment advances the aggregate.
+Make review continuation review the repaired repository with the appropriate instructions through the existing review workflow. A reviewer needs repository access and task instructions; do not require the reviewer to consume integration bookkeeping. Inspect existing review restart, approval invalidation and round creation owners before choosing the smallest fix. Do not assume that exposing integration-retention assessment to review is necessary.
 
-No matching open task found in main backlog. TASK-2820 is completed antecedent work. TASK-2806 concerns a coordinator remaining alive after children exit, whereas this incident exits with an explicit domain rejection. Preserve agent ownership, provider protections, PR and checkpoint identity, operator-owned gates and CPU budgets, and the human final integration decision. Do not mutate live mission/provider data for reproduction.
+Preserve independent review, recorded implementer, human decisions, checkpoints, provider protections and operator-owned gates. Keep valid equivalent-patch retention working through its existing owner. No matching open task was found; completed TASK-2820 is related, while TASK-2806 covers an idle coordinator rather than this explicit rejection.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Retain a focused parent-red/fixed-green reproduction in the existing owning review-start/repair suite: an active Mission with retained original approval and pending integration assessment survives successful exact-check repair and reaches the correct next action without blindly re-persisting approved state.
-- [ ] #2 Review entry and continuation reuse the existing revision-pinned retention owner. Equivalent patches retain the original judgment only with all required fresh committed-tree validation and provider evidence; changed patches withdraw that judgment and enter the existing independent review path on the repaired revision.
-- [ ] #3 Missing, stale, failed or unavailable evidence, uncommitted changes, concurrent Mission/HEAD changes and human change requests remain blocked with actionable diagnostics; no synthetic approval, weakened domain guard, duplicate review round or overwritten human decision.
-- [ ] #4 Interruption/restart and repeated invocation preserve authoritative assessment, round, implementer and checkpoint state. Reload aggregate-derived review state after a transition so old approved flattened state cannot overwrite or bypass the new review route.
-- [ ] #5 Run focused owning suites with unit headroom and manually exercise the built public CLI in disposable repositories with isolated workflow state and controlled adapters. Cover equivalent, changed and blocked repair outcomes without landing or touching live missions; preserve existing assertions, verification tiers, gates and CPU budgets, with any touched integration suite at or below 3.5 seconds.
+- [ ] #1 Retain a focused parent-red/fixed-green reproduction in the owning review suite for successful repair followed by continuation incorrectly reusing the old approved round.
+- [ ] #2 Continuation reviews the repaired revision through the existing reviewer workflow with repository access and authoritative instructions, and persists the new decision against the correct revision without reusing stale approval.
+- [ ] #3 Preserve valid approval retention, human corrections, implementer identity, checkpoint evidence and human integration authority; retries or interruptions cannot fabricate approval or overwrite a newer decision.
+- [ ] #4 Run focused owning checks with unit headroom and an isolated manual public CLI exercise; do not mutate live missions or change gates, tiers or CPU budgets. Any touched integration suite stays within 3.5 seconds.
 <!-- AC:END -->
+
+
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
