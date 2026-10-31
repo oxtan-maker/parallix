@@ -311,7 +311,7 @@ class IntegrationGateStep {
     // longer a dead end. The failure is classified and routed; only the
     // recoverable mission-regression route continues, and it continues
     // only because the identical gate set re-ran green.
-    const implementer = resolveBounceImplementer(context.taskAssignee ?? null, checkout, seams);
+    const implementer = await resolveBounceImplementer(slug, missionServices.store, context, checkout, seams);
     let repairStarted = false;
     const reactivateMission = async (bounceSlug: string) => {
       repairStarted = true;

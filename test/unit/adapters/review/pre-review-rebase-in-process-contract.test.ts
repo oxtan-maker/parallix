@@ -4,6 +4,9 @@ import { rebound } from '../../../../src/application/rebound-kernel.js';
 import { mkdtemp } from '../../../helpers/temp-dir.js';
 import { captureRecoveryEvidence } from '../../../../src/application/recovery-evidence.js';
 import { rebaseWorkflowFixture } from '../../../helpers/rebase-workflow-fixture.js';
+import { sharedConflictHarness } from '../../../helpers/rebase-conflict-fixture.js';
+import { fixtureMission, inMemoryTransitionStore } from '../../../fixtures/mission-builders.js';
+import { agentFamily } from '../../../../src/domain/agents.js';
 // Historical regression provenance: TASK-2377.
 // Behavior-owned suite (TASK-2622.09): the pre-review rebase runs in-process through the rebase workflow
 // port (task-2377-02) and hook/gate failures during it classify correctly. Legacy case names unchanged.
@@ -19,6 +22,24 @@ import { preReviewRebaseFacts } from '../../../../src/adapters/review/review-loo
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import type { RebaseWorkflowPort } from '../../../../src/application/ports/rebase-workflow.js';
+
+test('pre-review shared conflicts launch a fresh resolver with database intent (px-0021)', async () => {
+  const store = inMemoryTransitionStore(fixtureMission('task-2503', { assignee: agentFamily('codex'),
+    brief: { goal: 'Pre-review intent', why: 'Review current code', scope: 'shared source', outOfScope: ['publication rules'] },
+    successCriteria: ['Preserve the feature'] }));
+  const h = sharedConflictHarness({ missionServices: async () => ({ store }), findMissionDir: () => null });
+  const previous = setLogger({ log: (...parts: unknown[]) => h.lines.push(parts.join(' ')) });
+  try {
+    const result = await rebaseBeforeReviewRound('task-2503', { worktree: '/worktree',
+      gitFn: () => ({ status: 0, stdout: '', stderr: '', signal: null }),
+      createRebaseWorkflowPortFn: () => h.port, missionIdentityServices: async () => ({ store }),
+      isForgejoReviewEnabledFn: () => true, log: () => {}, error: () => {} });
+    assert.equal(result.ok, true, h.lines.join('\n'));
+    assert.equal(h.agentLaunches.length, 1);
+    assert.equal(h.agentLaunches[0].options.sessionPolicy, 'fresh-ephemeral');
+    assert.match(String(h.agentLaunches[0].options.prompt), /Pre-review intent/);
+  } finally { setLogger(previous); }
+});
 
 // ---- task-2377-02 pre-review rebase in-process (consolidated from test/task-2377-02-pre-review-rebase-inprocess.test.ts, TASK-2622.09) ----
 describe("02 pre-review rebase in-process", () => {
@@ -68,7 +89,6 @@ describe("02 pre-review rebase in-process", () => {
       missionBranchName: () => BRANCH,
       resolveMissionBaseBranch: () => 'main',
       missionConflictPathPrefix: () => `missions/${SLUG}/`,
-      resolvePromptBaseBranch: () => 'main',
 
       startAgent: async () => ({ agent: 'test-agent', result: { status: 0 } }),
       selectAgent: () => 'test-agent',

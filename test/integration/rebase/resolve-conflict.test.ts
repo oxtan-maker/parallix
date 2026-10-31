@@ -475,6 +475,9 @@ const MISSION_SPECIFIC_CONFLICTS: NonNullable<NonNullable<Parameters<typeof reso
 /** Backlog seams that record `implementer` as the mission's assignee. */
 const implementerSeams = (implementer: string) => ({
   rootDir: '/repo',
+  detectRebaseStateFn: () => ({ inProgress: false, unmergedFiles: [] }),
+  resolveMissionBaseBranchFn: () => PRIMARY,
+  missionBranchNameFn: () => 'mission/task-108',
   resolveTaskFileFn: () => ({ matches: ['/repo/backlog/tasks/task-108.md'],  ok: true as const, taskFile: '/repo/backlog/tasks/task-108.md' }),
   getTaskImplementerFn: () => implementer,
 });

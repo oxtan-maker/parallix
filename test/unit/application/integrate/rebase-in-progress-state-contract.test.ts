@@ -7,6 +7,9 @@ import { integrationBounceSeams } from '../../../helpers/integration-bounce-seam
 import { rebaseWorkflowFixture } from '../../../helpers/rebase-workflow-fixture.js';
 import type { IntegrateWorkflowPorts } from '../../../../src/application/ports/integrate-workflow.js';
 import { stubIntegrateWorkflowPorts } from '../../../helpers/stub-integrate-workflow-ports.js';
+import { sharedConflictHarness } from '../../../helpers/rebase-conflict-fixture.js';
+import { agentFamily } from '../../../../src/domain/agents.js';
+import { setLogger } from '../../../../src/application/presentation/cli-format.js';
 // Historical regression provenance: TASK-2520.
 // Behavior-owned suite (TASK-2622.09): a paused rebase is never reported as a clean completion — the
 // integration-time rebase inspects the mission worktree (task-2520 SC4/SC7) and `px rebase` reports
@@ -21,6 +24,30 @@ import { mockModule, installModuleMocks, importFresh } from '../../../lib/module
 mockModule('../../../../src/application/rebase-workflow.js', import.meta.url);
 mockModule('../../../../src/application/integrate/rebase.js', import.meta.url);
 await installModuleMocks();
+
+test('integration shared conflicts use the fresh shared resolver and resolved base (px-0021)', async () => {
+  const { createIntegrationRebase } = await importFresh<typeof import('../../../../src/application/integrate/rebase.js')>('../../../../src/application/integrate/rebase.js', import.meta.url);
+  const store = inMemoryTransitionStore(fixtureMission('task-2503', { assignee: agentFamily('codex'),
+    brief: { goal: 'Integration intent', why: 'Keep current base behavior', scope: 'shared source', outOfScope: [] },
+    successCriteria: ['Preserve the feature'] }));
+  const h = sharedConflictHarness({ missionServices: async () => ({ store }), findMissionDir: () => null,
+    git: args => ({ status: args.at(-1) === 'local-base' && args.includes('rebase') ? 1 : 0,
+      stdout: '', stderr: args.at(-1) === 'local-base' && args.includes('rebase') ? 'CONFLICT (content): Merge conflict in shared.ts' : '' }) });
+  const defaults = stubIntegrateWorkflowPorts();
+  const ports = stubIntegrateWorkflowPorts({
+    missionPaths: { ...defaults.missionPaths, missionBranchName: () => 'mission/task-2503', conventionalWorktreePath: () => '/worktree' },
+    rebase: { createRebaseWorkflowPort: options => { h.port.exit = options.exitFn!; return h.port; } },
+  });
+  const previous = setLogger({ log: (...parts: unknown[]) => h.lines.push(parts.join(' ')) });
+  try {
+    await createIntegrationRebase(ports).runIntegrationRebase('task-2503', { baseWorktree: '/base', baseBranch: 'local-base',
+      git: args => ({ status: 0, stdout: args.includes('rev-parse') ? 'sha' : '', stderr: '', signal: null }) });
+    assert.equal(h.agentLaunches.length, 1, h.lines.join('\n'));
+    assert.equal(h.agentLaunches[0].options.sessionPolicy, 'fresh-ephemeral');
+    assert.match(String(h.agentLaunches[0].options.prompt), /Integration intent/);
+    assert.match(String(h.agentLaunches[0].options.prompt), /Resolved local rebase base: local-base/);
+  } finally { setLogger(previous); }
+});
 
 // ---- task-2520 integration rebase state (consolidated from test/task-2520-integrate-rebase-state.test.ts, TASK-2622.09) ----
 describe("integration rebase state", async () => {
@@ -230,7 +257,6 @@ describe("px rebase in-progress", async () => {
       missionBranchName: () => BRANCH,
       resolveMissionBaseBranch: () => 'main',
       missionConflictPathPrefix: () => `missions/${SLUG}/`,
-      resolvePromptBaseBranch: () => 'main',
       startAgent: async () => ({ agent: 'test-agent', result: { status: 0 } }),
       selectAgent: () => 'test-agent',
       workflowLauncherStatus: () => ({ supported: true, agent: 'test-agent' }),

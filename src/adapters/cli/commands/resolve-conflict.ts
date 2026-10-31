@@ -1,7 +1,11 @@
 import { rebaseImplementer } from '../../../application/rebase-identity.js';
+import { readAgentLaunchIntent } from '../../../application/agent-launch-context.js';
 import type { MissionStore } from '../../../application/domain-ports.js';
+import type { RebaseStateSnapshot } from '../../../application/ports/rebase-workflow.js';
+import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 import integrate from './integrate.js';
-import { findMissionDir, findMissionArea, inferSlug, getPrimaryBranch } from '../../filesystem/mission-utils.js';
+import { findMissionDir, findMissionArea, inferSlug, getPrimaryBranch, resolveMissionBaseBranch, missionBranchName } from '../../filesystem/mission-utils.js';
+import { detectRebaseState } from '../../git/git.js';
 import { startAgent } from '../../agents/agents.js';
 import { resolveTaskFile, getTaskImplementer } from '../../backlog/backlog.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
@@ -14,7 +18,10 @@ function shellQuote(value: string) {
 }
 
 /** @param {{slug: string, area: string, worktreePath: string, missionSpecificFiles: string[]}} opts */
-function buildAgentResolutionPrompt({ slug, area, worktreePath, missionSpecificFiles }: {slug: string, area: string, worktreePath: string, missionSpecificFiles: string[]}) {
+function buildAgentResolutionPrompt({ slug, area, worktreePath, missionSpecificFiles,
+  missionIntent, missionBranch, baseBranch = getPrimaryBranch(), currentConflicts = [], rebaseInProgress = false,
+}: {slug: string, area: string, worktreePath: string, missionSpecificFiles: string[],
+  missionIntent?: string; missionBranch?: string; baseBranch?: string; currentConflicts?: string[]; rebaseInProgress?: boolean }) {
   const fileCommands = missionSpecificFiles
     .map(f => `  git checkout --theirs "${f}" && git add "${f}"`)
     .join('\n');
@@ -25,13 +32,19 @@ function buildAgentResolutionPrompt({ slug, area, worktreePath, missionSpecificF
     '',
     `Mission: ${slug}`,
     `Mission worktree: ${worktreePath}`,
+    `Captured mission branch: ${missionBranch ?? `mission/${slug}`}`,
+    ...(missionIntent ? [missionIntent] : []),
+    `Resolved local rebase base: ${baseBranch}`,
+    `Rebase in progress: ${rebaseInProgress}`,
+    'Current unmerged paths from Git:',
+    ...(currentConflicts.length ? currentConflicts.map(file => `  - ${file}`) : ['  (none)']),
     '',
-    `Conflicts detected between the mission branch and ${getPrimaryBranch()}.`,
+    `Conflicts detected between the mission branch and ${baseBranch}.`,
     'All conflicts are in mission-specific files that can be resolved by keeping',
     'the mission branch version (--theirs). Execute these steps in order:',
     '',
     `  cd ${quotedWorktreePath}`,
-    `  git rebase ${getPrimaryBranch()}`,
+    ...(rebaseInProgress ? [] : [`  git rebase ${baseBranch}`]),
     '  # When the rebase pauses on conflicts, run for each file:',
     fileCommands,
     '  git rebase --continue',
@@ -63,14 +76,30 @@ function recordedConflictImplementer(slug: string, rootDir: string, resolveTaskF
 }
 
 type ResolveConflictOptions = {
+  configuration?: ParallixConfiguration,
   resolveConflictsFn?: typeof integrate.resolveConflictsForMission,
   startAgentFn?: (...args: Parameters<typeof startAgent>) => Promise<Pick<Awaited<ReturnType<typeof startAgent>>, 'agent' | 'result'>>,
   exitFn?: (_code: number) => void,
   resolveTaskFileFn?: typeof resolveTaskFile,
   getTaskImplementerFn?: typeof getTaskImplementer,
   missionServicesFn?: (_root: string) => Promise<{ store: MissionStore | null }>,
+  detectRebaseStateFn?: (_root: string) => RebaseStateSnapshot,
+  resolveMissionBaseBranchFn?: typeof resolveMissionBaseBranch,
+  missionBranchNameFn?: typeof missionBranchName,
   rootDir?: string,
 };
+
+async function buildResolutionTask(slug: string, area: string, worktreePath: string,
+  missionSpecificFiles: string[], store: MissionStore | null, options: ResolveConflictOptions): Promise<string> {
+  const { detectRebaseStateFn = detectRebaseState, resolveMissionBaseBranchFn = resolveMissionBaseBranch,
+    missionBranchNameFn = missionBranchName } = options;
+  const current = detectRebaseStateFn(worktreePath);
+  return buildAgentResolutionPrompt({ slug, area, worktreePath, missionSpecificFiles,
+    missionIntent: await readAgentLaunchIntent(store, slug),
+    missionBranch: missionBranchNameFn(slug, worktreePath), baseBranch: resolveMissionBaseBranchFn(slug, worktreePath),
+    currentConflicts: current.unmergedFiles, rebaseInProgress: current.inProgress,
+  });
+}
 
 function resolveConflictBindings(options: ResolveConflictOptions) {
   const {
@@ -84,8 +113,17 @@ function resolveConflictBindings(options: ResolveConflictOptions) {
   return { resolveConflictsFn, startAgentFn, exitFn, resolveTaskFileFn, getTaskImplementerFn, rootDir };
 }
 
+async function resolutionIdentity(slug: string, worktreePath: string, options: ResolveConflictOptions) {
+  if (options.missionServicesFn) {
+    const { store } = await options.missionServicesFn(worktreePath);
+    return { store, implementer: await rebaseImplementer(store, slug) };
+  }
+  const { rootDir, resolveTaskFileFn, getTaskImplementerFn } = resolveConflictBindings(options);
+  return { store: null, implementer: recordedConflictImplementer(slug, rootDir, resolveTaskFileFn, getTaskImplementerFn) };
+}
+
 async function resolveConflict(args: string[], options: ResolveConflictOptions = {}) {
-  const { resolveConflictsFn, startAgentFn, exitFn, resolveTaskFileFn, getTaskImplementerFn, rootDir } = resolveConflictBindings(options);
+  const { resolveConflictsFn, startAgentFn, exitFn } = resolveConflictBindings(options);
   const explicitSlug = args[0];
   const slug = inferSlug(explicitSlug);
   if (!slug) {
@@ -124,9 +162,7 @@ async function resolveConflict(args: string[], options: ResolveConflictOptions =
   // Conflict resolution is implementation work owned by the mission's recorded
   // implementer (TASK-2294.01). Resolve that family before launching; there is
   // no separate conflict-resolution pool to fall back on.
-  const implementer = options.missionServicesFn
-    ? await rebaseImplementer((await options.missionServicesFn(result.worktreePath)).store, slug)
-    : recordedConflictImplementer(slug, rootDir, resolveTaskFileFn, getTaskImplementerFn);
+  const { store, implementer } = await resolutionIdentity(slug, result.worktreePath, options);
   if (!implementer) {
     fmt.log.fail(`No recorded implementer for ${fmt.slug(slug)}; cannot launch conflict resolution.`);
     fmt.log.info('Conflict resolution runs as the mission implementer. Assign the Mission to a configured agent, then re-run.');
@@ -136,13 +172,15 @@ async function resolveConflict(args: string[], options: ResolveConflictOptions =
   }
 
   // All conflicts are mission-specific: launch an agent to execute the --theirs rebase.
-  const prompt = buildAgentResolutionPrompt({
-    slug,
-    area,
-    worktreePath: result.worktreePath,
-    missionSpecificFiles: result.missionSpecificFiles,
-  });
-
+  let prompt: string;
+  try {
+    prompt = await buildResolutionTask(slug, area, result.worktreePath,
+      result.missionSpecificFiles, store, options);
+  } catch (err) {
+    fmt.log.fail(`Cannot construct conflict-resolution task: ${String(err)}`);
+    exitFn(1);
+    return;
+  }
   fmt.log.info(`Launching implementer (${fmt.agent(implementer)}) to execute mission-specific conflict resolution...`);
   let agent: string;
   let agentResult: Awaited<ReturnType<typeof startAgent>>['result'];
@@ -154,6 +192,8 @@ async function resolveConflict(args: string[], options: ResolveConflictOptions =
       slug,
       role: 'implementer',
       pinnedAgent: true,
+      sessionPolicy: 'fresh-ephemeral',
+      configuration: options.configuration,
     }));
   } catch (err) {
     fmt.log.fail(`Implementer (${fmt.agent(implementer)}) cannot run conflict resolution: ${(err as { message?: string }).message || String(err)}`);

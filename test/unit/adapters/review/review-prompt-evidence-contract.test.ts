@@ -829,6 +829,8 @@ test('TASK-2746-shaped review and act-on-review history has bounded inline UTF-8
       const value = JSON.parse(snapshot.slice(snapshot.indexOf('{')));
       assert.deepEqual(value.brief, mission.brief);
       assert.deepEqual(value.successCriteria, mission.successCriteria);
+      assert.deepEqual(value.brief, mission.brief);
+      assert.deepEqual(value.successCriteria, mission.successCriteria);
       assert.deepEqual(value.declaredGates, mission.declaredGates);
       assert.deepEqual(value.checkpoints, mission.checkpoints);
       assert.deepEqual(value.review.currentRound, current);

@@ -328,20 +328,32 @@ and publishes the branch for the current implementer and selected eligible
 reviewer. A PR author's review remains advisory: independent review is required
 before local approval or integration.
 
-When a rebase pauses on shared conflicts, the implementer completes the Git
-rebase and runs the repository's verification against the final repaired tree.
-A failed repository check stops completion and automatic push. After an agent
-attempt, Parallix checks Git: the rebase must have ended, no unmerged files may
-remain, and the checkout must be on the mission branch captured before launch.
+When a rebase pauses on shared conflicts, the implementer starts a fresh
+ephemeral session with the authoritative Mission goal, why, scope, out-of-scope
+constraints and success criteria, plus the mission worktree, captured mission
+branch, resolved local base and current Git conflicts. This applies to standalone,
+pre-review and integration rebases, replacement agents and later conflict launches.
+Missing intent is reported explicitly. The normal implementation session remains
+available for ordinary work; conflict resolution does not resume its conversation
+or read or change its saved session marker.
+
+The resolver completes the Git rebase and runs the repository's verification
+against the final repaired tree. A failed repository check stops completion and
+automatic push. After an agent attempt, Parallix checks Git: the rebase must have
+ended, no unmerged files may remain, and the checkout must be on the mission
+branch captured before launch.
 An unfinished rebase or wrong checkout automatically returns to the implementer
-through bounded recovery. Each completion retry asks only to complete the rebase
-and end on that captured branch. If recovery exhausts its budget, Parallix reports
-the remaining Git state and recovery instructions, then stops without automatic
-push or workflow advancement. Resolve and stage the remaining conflicts, continue
-the rebase, and restore the mission checkout before retrying; use
+through bounded recovery. Each fresh completion retry receives refreshed Mission
+and Git context, including the current completion failure, and must finish on that
+captured branch. A retry reports when the index is clean. If recovery exhausts
+its budget, Parallix reports the remaining Git state and recovery instructions,
+then stops without automatic push or workflow advancement. Resolve and stage the
+remaining conflicts, continue the rebase, and restore the mission checkout before retrying; use
 `git rebase --abort` to abandon the rebase.
-Current conflicts come from the paused Git index. Review shared conflicts
-semantically, preserving unique mission changes and newer base behavior, including
+Current conflicts come from the paused Git index. Before a pause, replacement
+launches retain the workflow’s predicted conflicts and identify them as predicted.
+Task-construction failures report the Mission or Git read error before agent launch.
+Review shared conflicts semantically, preserving unique mission changes and newer base behavior, including
 file moves and completed tasks. Do not revive retired metadata or use blanket
 ours/theirs resolution. A new ordinary conflict pause can be continued; an
 ambiguous decision or failed hook, command or verifier needs its own diagnosis.

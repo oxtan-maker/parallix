@@ -91,7 +91,7 @@ const dispatcher = {
         getCurrentBranch: () => `mission/${slug}`, cwd: () => fixture.root, inferSlug: () => slug,
         findMissionDir: () => fixture.root, findMissionArea: () => 'all', resolveWorktree: () => fixture.root,
         conventionalWorktreePath: () => fixture.root, missionBranchName: () => `mission/${slug}`,
-        resolveMissionBaseBranch: () => 'main', missionConflictPathPrefix: () => 'unused/', resolvePromptBaseBranch: () => 'main',
+        resolveMissionBaseBranch: () => 'main', missionConflictPathPrefix: () => 'unused/',
         startAgent: async (_step, r) => { launched.push(String(r.agent)); return { agent: String(r.agent), result: { status: 0 } }; },
         selectAgent: () => { throw new Error('integration repair must retain its owner'); },
         workflowLauncherStatus: agent => ({ supported: true, agent }), applyAgentFallback: async () => stored,

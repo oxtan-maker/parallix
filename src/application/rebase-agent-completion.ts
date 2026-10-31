@@ -6,6 +6,7 @@ import * as fmt from './presentation/cli-format.js';
 /** Certify agent output using the existing Git snapshot and branch ports. */
 export async function recoverAgentRebaseCompletion(
   port: RebaseWorkflowPort, slug: string, worktree: string, expectedBranch: string, implementer: string,
+  taskPrompt: (_diagnostic: string) => Promise<string>,
 ): Promise<{ implementer: string; repaired: boolean } | null> {
   const adopt = async (actual: string) => {
     if (port.missionServices) {
@@ -32,7 +33,7 @@ export async function recoverAgentRebaseCompletion(
     {
       slug, worktree, implementer, verify, log: fmt.log.plain, error: fmt.log.plain,
       inspectFailedRepair: true,
-      repairPrompt: `complete the rebase, ensuring the checkout ends at ${expectedBranch}`,
+      repairPrompt: async () => `${await taskPrompt(verify().diagnostic)}\n\ncomplete the rebase, ensuring the checkout ends at ${expectedBranch}`,
       step: 'conflict-resolution',
       startAgent: port.startAgent,
       transitionToImplementer: typeof port.missionServices === 'function'

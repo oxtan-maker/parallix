@@ -28,7 +28,8 @@ export async function prepareRepairPrompt(
   // Git completion has a stage-owned instruction and is certified by its Git
   // verifier. Code-repair checkpoint evidence belongs to the generic path.
   if (context.repairPrompt !== undefined) {
-    return { fixPrompt: context.repairPrompt, repairPort: undefined, repairCheckpoint: null };
+    const fixPrompt = await context.repairPrompt();
+    return { fixPrompt, repairPort: undefined, repairCheckpoint: null };
   }
   if ((state.reason.kind === 'agent-timeout' || state.reason.kind === 'artifact-incomplete') && state.reason.role === 'reviewer') {
     return { fixPrompt: [

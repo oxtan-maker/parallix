@@ -209,7 +209,7 @@ class SquashLanding {
     }
     // No resolver could name an implementer — strand rather than launch with
     // an empty agent identity.
-    const implementer = resolveBounceImplementer(context.taskAssignee ?? null, baseWorktree, seams);
+    const implementer = await resolveBounceImplementer(slug, missionServices.store, context, baseWorktree, seams);
     if (!implementer) {
       fmt.log.info(strandHint);
       throw this.dependencies.landing.createAbort();

@@ -10,8 +10,55 @@ import { fakeLauncher } from '../../../lib/agent-mock.js';
 import { eligibleAgentsForStep, startAgent } from '../../../../src/adapters/agents/agents.js';
 import { setBubblewrapProbeForTest } from '../../../../src/adapters/process/bubblewrap.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
+import { agentFamily } from '../../../../src/domain/agents.js';
+import type { SessionMarkerPort } from '../../../../src/application/domain-ports.js';
+import type { AgentLauncherInput } from '../../../../src/adapters/agents/agent-process-types.js';
 
 // Regression provenance: TASK-1036.
+
+test('fresh conflict launches preserve the normal session on success and failure (px-0021)', async () => {
+  const worktree = registeredMkdtemp('fresh-conflict-session-');
+  const calls = { resume: 0, find: 0, save: 0, delete: 0 };
+  const marker = { missionId: 'px-0021', role: 'implementer', agent: agentFamily('claude'),
+    lastLaunched: '2026-10-01T00:00:00Z', sessionId: 'original-implementation-session' };
+  const sessionMarkerPort: SessionMarkerPort = {
+    shouldResume: async () => (++calls.resume, true),
+    find: async (id, role) => (++calls.find, { ...marker, missionId: id, role }),
+    save: async () => { calls.save++; },
+    delete: async () => { calls.delete++; },
+  };
+  const launches: AgentLauncherInput[] = [];
+  let status = 0;
+  const common = { configuration: resolveConfiguration(environment), worktree, slug: 'px-0021',
+    role: 'implementer', agent: 'claude', pinnedAgent: true, prompt: 'current mission and Git context',
+    sessionMarkerPort, isAgentBlockedFn: () => false, assertAgentSupportedFn: () => {},
+    resolveAgentModelFn: () => null, detectLimitHitFn: () => null, log: () => {},
+    launchAgentFn: (input: AgentLauncherInput) => {
+      launches.push(input);
+      return { invocation: { command: 'claude', args: [], options: {} },
+        resultPromise: Promise.resolve({ status, stdout: '', stderr: '', sessionId: 'ephemeral-session' }) };
+    },
+  };
+  setBubblewrapProbeForTest(() => true);
+  try {
+    for (status of [0, 1, 0]) {
+      await startAgent('conflict-resolution', { ...common, sessionPolicy: 'fresh-ephemeral' });
+      assert.deepEqual(calls, { resume: 0, find: 0, save: 0, delete: 0 });
+    }
+    for (const launch of launches) {
+      assert.equal(launch.resume, false);
+      assert.equal(launch.sessionId, null);
+      assert.equal(launch.prompt, common.prompt, 'no prior transcript is injected');
+    }
+    await startAgent('execute', common);
+    assert.equal(launches[3].resume, true);
+    assert.equal(launches[3].sessionId, marker.sessionId);
+    assert.deepEqual(calls, { resume: 1, find: 1, save: 1, delete: 0 });
+  } finally {
+    setBubblewrapProbeForTest(null);
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
 
 // ---------- TASK-1036: review/act-on-review fallback pool tracks current launchers ----------
 

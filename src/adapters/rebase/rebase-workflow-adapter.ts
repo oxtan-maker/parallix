@@ -67,31 +67,20 @@ const defaultExit = (code: number) => process.exit(code);
 export function buildRebasePrompt({ slug, area, worktreePath, missionSpecificFiles, sharedFiles, gitFn = undefined as GitRunner | undefined }: {
   slug: string; area: string; worktreePath: string; missionSpecificFiles: string[]; sharedFiles: string[]; gitFn?: GitRunner;
 }): string {
+  let baseBranch = 'main';
+  try { baseBranch = resolveMissionBaseBranch(slug, worktreePath, { gitFn }); }
+  catch {
+    try { baseBranch = getPrimaryBranch(worktreePath, gitFn); } catch { /* retain the helper fallback */ }
+  }
   return buildRebasePromptPolicy({
     slug,
     area,
     worktreePath,
     missionSpecificFiles,
     sharedFiles,
-    resolveBaseBranch: (promptSlug, promptRoot) => resolvePromptBaseBranch(promptSlug, promptRoot, gitFn),
+    resolveBaseBranch: () => baseBranch,
     formatVerificationCommand,
   });
-}
-
-/**
- * Base branch shown in the conflict-resolution prompt. Never throws: a mission
- * without a recorded base falls back to the primary branch and then to `main`.
- */
-function resolvePromptBaseBranch(slug: string, worktreePath: string, gitFn?: GitRunner): string {
-  try {
-    return resolveMissionBaseBranch(slug, worktreePath, { gitFn });
-  } catch (_) {
-    try {
-      return getPrimaryBranch(worktreePath, gitFn);
-    } catch (_e) {
-      return 'main';
-    }
-  }
 }
 
 /**
@@ -177,7 +166,6 @@ export function createRebaseWorkflowPort(options: RebaseCommandOptions = {}): Re
     missionBranchName,
     resolveMissionBaseBranch: resolveMissionBaseBranchFn,
     missionConflictPathPrefix,
-    resolvePromptBaseBranch,
 
     startAgent: startAgentFn,
     selectAgent: (step, opts) => selectAgent(step, { ...opts, configuration: options.configuration }),

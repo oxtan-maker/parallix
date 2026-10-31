@@ -625,6 +625,10 @@ Integration requires a recorded reviewer approval, reruns the repository's
 resulting tree. These built-in lifecycle controls remain in force alongside the
 configurable gates above.
 
+Integration gate and squash-hook repairs use the Mission's recorded implementer,
+including database-only missions. A missing Backlog task does not select a new
+agent when the Mission already names its implementer.
+
 In the self-hosted workflow, integration removes stale active-task copies when
 an existing completed record is canonical, preserving that completed history.
 Cancelled task-provider records in `backlog/archive/tasks/` are legitimate

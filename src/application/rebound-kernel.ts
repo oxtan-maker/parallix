@@ -76,7 +76,7 @@ export interface VerifyResult {
 
 export interface ReboundContext {
   /** Exact Git-completion instruction, certified by the stage verifier without a code-repair checkpoint. */
-  repairPrompt?: string;
+  repairPrompt?: () => Promise<string>;
   /** Inspect artifacts even when a completed repair process exits unsuccessfully. */
   inspectFailedRepair?: boolean;
   repairCheckpoints?: RepairCheckpointPort;

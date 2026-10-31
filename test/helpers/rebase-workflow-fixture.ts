@@ -15,7 +15,6 @@ export function rebaseWorkflowFixture(overrides: Partial<RebaseWorkflowPort> = {
     missionBranchName: () => { throw new Error('Unexpected rebase fixture operation: missionBranchName'); },
     resolveMissionBaseBranch: () => { throw new Error('Unexpected rebase fixture operation: resolveMissionBaseBranch'); },
     missionConflictPathPrefix: () => { throw new Error('Unexpected rebase fixture operation: missionConflictPathPrefix'); },
-    resolvePromptBaseBranch: () => { throw new Error('Unexpected rebase fixture operation: resolvePromptBaseBranch'); },
     startAgent: () => { throw new Error('Unexpected rebase fixture operation: startAgent'); },
     selectAgent: () => { throw new Error('Unexpected rebase fixture operation: selectAgent'); },
     workflowLauncherStatus: () => { throw new Error('Unexpected rebase fixture operation: workflowLauncherStatus'); },

@@ -114,8 +114,6 @@ export interface RebaseWorkflowPort {
    * overridden; routing it separately preserves that behavior exactly.
    */
   missionConflictPathPrefix(_slug: string, _worktreePath: string): string;
-  /** Base branch shown in the conflict-resolution prompt (never throws). */
-  resolvePromptBaseBranch(_slug: string, _worktreePath: string, _gitFn?: GitRunner): string;
 
   // --- agents adapter ----------------------------------------------------
   startAgent(_step: string, _options: ReboundLaunchOptions): Promise<AgentLaunchResult>;

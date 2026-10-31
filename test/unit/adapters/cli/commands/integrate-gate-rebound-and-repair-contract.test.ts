@@ -503,7 +503,6 @@ describe("handoff and push-gate regressions", () => {
       missionBranchName: () => `mission/${SLUG}`,
       resolveMissionBaseBranch: () => 'main',
       missionConflictPathPrefix: () => `missions/${SLUG}/`,
-      resolvePromptBaseBranch: () => 'main',
       startAgent: async () => ({ agent: 'claude', result: { status: 0 } }),
       selectAgent: () => 'claude',
       workflowLauncherStatus: () => ({ supported: true, agent: 'claude' }),

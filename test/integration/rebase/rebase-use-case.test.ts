@@ -57,7 +57,6 @@ function harness(overrides: Partial<RebaseWorkflowPort> = {}): Harness {
     missionBranchName: () => 'mission/task-2332.12',
     resolveMissionBaseBranch: () => 'main',
     missionConflictPathPrefix: () => 'missions/task-2332.12/',
-    resolvePromptBaseBranch: () => 'main',
 
     startAgent: async (step: string, options: Record<string, unknown>) => {
       agentLaunches.push({ step, options });
@@ -144,10 +143,13 @@ test('rebase use case auto-resolves mission-specific conflicts with --theirs', a
 
 test('rebase use case launches an agent for shared-file conflicts', async () => {
   const shared = 'src/adapters/git/git.ts';
+  let paused = false;
   const h = harness({
+    detectRebaseState: () => ({ inProgress: paused, unmergedFiles: paused ? [shared] : [] }),
     git: (args: string[]) => {
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
+        paused = true;
         return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
       }
       return OK;
@@ -159,10 +161,13 @@ test('rebase use case launches an agent for shared-file conflicts', async () => 
       sharedFiles: [shared],
     }),
   });
+  const launch = h.port.startAgent;
+  h.port.startAgent = async (step, options) => { const result = await launch(step, options); paused = false; return result; };
   await run(h);
   assert.deepEqual(h.exitCodes, [0]);
   assert.equal(h.agentLaunches.length, 1);
   assert.equal(h.agentLaunches[0].step, 'conflict-resolution');
+  assert.equal(h.agentLaunches[0].options.sessionPolicy, 'fresh-ephemeral');
   assert.match(String(h.agentLaunches[0].options.prompt), new RegExp(shared.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(h.lines.join('\n'), /completed conflict resolution/);
 });

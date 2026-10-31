@@ -1,3 +1,4 @@
+import { sharedConflictHarness, run } from '../../helpers/rebase-conflict-fixture.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { transitionRebaseRepair } from '../../../src/application/rebase-repair-lifecycle.js';
 import type { StartAgentOptions } from '../../../src/adapters/agents/agent-launch-context.js';
@@ -11,7 +12,6 @@ import { rebaseHookRecoveryEligible, replacementImplementer, preContinueAction, 
 // workflow ports — pinned implementer dispatch (task-2294.01, task-2503), usage-blocked implementer
 // handling (task-2494), and integration rebase prediction (task-2506). Legacy case names unchanged.
 import test, { describe } from 'node:test';
-import { prepareRepairPrompt } from '../../../src/application/rebound-checkpoints.js';
 import assert from 'node:assert/strict';
 import resolveConflict from '../../../src/adapters/cli/commands/resolve-conflict.js';
 import { setLogger } from '../../../src/application/presentation/cli-format.js';
@@ -52,6 +52,8 @@ describe("pinned conflict agent", () => {
     await captured(async () => {
       await resolveConflict(['task-2294.01'], {
         rootDir: '/repo',
+        detectRebaseStateFn: () => ({ inProgress: false, unmergedFiles: [] }),
+        resolveMissionBaseBranchFn: () => 'main', missionBranchNameFn: () => 'mission/task-2294.01',
         resolveTaskFileFn: () => ({ matches: ['/repo/backlog/tasks/task-2294.01.md'],  ok: true as const, taskFile: '/repo/backlog/tasks/task-2294.01.md' }),
         getTaskImplementerFn: () => 'codex',
         resolveConflictsFn: () => ({
@@ -75,6 +77,184 @@ describe("pinned conflict agent", () => {
       'conflict resolution must launch as the mission implementer, not a pool-selected family');
     assert.equal(launches[0].options.slug, 'task-2294.01');
     assert.equal(launches[0].options.role, 'implementer');
+    assert.equal(launches[0].options.sessionPolicy, 'fresh-ephemeral');
+  });
+  for (const { status, paused } of [{ status: 0, paused: true }, { status: 0, paused: false },
+    { status: 1, paused: true }, { status: 1, paused: false }]) {
+    test(`resolve-conflict supplies fresh database intent and current paused Git state (exit=${status}, paused=${paused}, px-0021 F1/F9)`, async () => {
+      const slug = 'task-2294.01';
+      const store = inMemoryTransitionStore(fixtureMission(slug, { assignee: agentFamily('codex'),
+        brief: { goal: 'Preserve unique work', why: 'Users rely on it', scope: 'owned file', outOfScope: [] },
+        successCriteria: ['Keep current base behavior'] }));
+      const launches: StartAgentOptions[] = [];
+      const exits: number[] = [];
+      await captured(async () => resolveConflict([slug], {
+        missionServicesFn: async () => ({ store }),
+        resolveTaskFileFn: () => assert.fail('database-only intent'),
+        resolveConflictsFn: () => ({ ok: true, conflictFiles: ['owned.txt'], sharedFiles: [],
+          missionSpecificFiles: ['owned.txt'], worktreePath: '/isolated/worktree' }),
+        detectRebaseStateFn: () => ({ inProgress: paused, unmergedFiles: ['owned.txt', 'new-pause.txt'] }),
+        resolveMissionBaseBranchFn: (slug, root) => { assert.equal(slug, 'task-2294.01'); assert.equal(root, '/isolated/worktree'); return 'local-feature'; }, missionBranchNameFn: () => `mission/${slug}`,
+        startAgentFn: async (_step, options = { prompt: '' }) => { launches.push(options); return { agent: 'codex', result: { status } }; },
+        exitFn: code => { exits.push(code); },
+      }));
+      assert.deepEqual(exits, [status]);
+      assert.equal(launches.length, 1);
+      assert.equal(launches[0].sessionPolicy, 'fresh-ephemeral');
+      assert.equal(launches[0].pinnedAgent, true);
+      const prompt = String(launches[0].prompt);
+      for (const text of ['Preserve unique work', 'Users rely on it', 'owned file', 'outOfScope',
+        'Keep current base behavior', 'Mission worktree: /isolated/worktree', `Captured mission branch: mission/${slug}`,
+        'Resolved local rebase base: local-feature', '  - owned.txt', '  - new-pause.txt']) { assert.ok(prompt.includes(text), text); }
+      assert.match(prompt, /For an unlisted file, report the current conflict set/);
+      if (paused) { assert.doesNotMatch(prompt, /  git rebase local-feature/, 'a paused rebase continues its current index'); }
+      else { assert.match(prompt, /  git rebase local-feature/); }
+      assert.doesNotMatch(prompt, /Missing Mission intent/, 'an explicitly empty out-of-scope list is supplied intent');
+    });
+  }
+  test('task construction failure is not an implementer blocker (px-0021 F10)', async () => {
+    const exits: number[] = [];
+    let launches = 0;
+    const lines = await captured(() => resolveConflict(['task-2294.01'], {
+      resolveConflictsFn: () => ({ ok: true, conflictFiles: ['owned.txt'], sharedFiles: [],
+        missionSpecificFiles: ['owned.txt'], worktreePath: '/isolated/worktree' }),
+      resolveTaskFileFn: () => ({ ok: true, taskFile: '/unused', matches: ['/unused'] }), getTaskImplementerFn: () => 'codex',
+      detectRebaseStateFn: () => { throw new Error('git ls-files -u failed: repository locked'); },
+      startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
+      exitFn: code => { exits.push(code); },
+    }));
+    assert.equal(launches, 0);
+    assert.deepEqual(exits, [1]);
+    assert.match(lines.join('\n'), /Cannot construct conflict-resolution task.*repository locked/);
+    assert.doesNotMatch(lines.join('\n'), /cannot run conflict resolution|clear the blocker|substitute another agent/);
+  });
+  test('activation failure is a lifecycle error, not task construction or agent capacity (px-0021 F10)', async () => {
+    const store = inMemoryTransitionStore(fixtureMission('task-2503', { assignee: agentFamily('codex') }));
+    let selections = 0;
+    const h = sharedConflictHarness({ missionServices: async () => ({ store }),
+      transitionTask: async () => { throw new Error('database locked: usage limit field unreadable'); },
+      selectAgent: () => { selections++; return 'pool-selected'; } });
+    await run(h);
+    assert.deepEqual(h.exitCodes, [1]);
+    assert.equal(h.agentLaunches.length, 0);
+    assert.equal(selections, 0);
+    assert.match(h.lines.join('\n'), /Cannot activate mission for conflict resolution.*database locked/);
+    assert.doesNotMatch(h.lines.join('\n'), /Cannot construct conflict-resolution task|cannot run conflict resolution|No eligible replacement/);
+  });
+  test('first resolver preserves merge-failed ownership for mission paths in the index (px-0021 F11)', async () => {
+    const owned = ['missions/task-2503/handoff.md', 'backlog/tasks/task-2503.md'];
+    let files: string[] = [];
+    const prompts: string[] = [];
+    const h = sharedConflictHarness({ readReviewState: async () => ({ implementer: 'codex' }),
+      detectRebaseState: () => ({ inProgress: files.length > 0, unmergedFiles: [...files] }),
+      resolveConflictsForMission: () => {
+        files = [...owned, 'shared.ts'];
+        return { ok: false, error: 'merge-failed', conflictFiles: [], missionSpecificFiles: [], sharedFiles: [] };
+      },
+      git: args => subcommand(args).join(' ') === 'status --porcelain'
+        ? { ...OK, stdout: files.map(file => `UU ${file}`).join('\n') }
+        : subcommand(args).join(' ') === 'rebase main' ? { ...OK, status: 1, stderr: 'CONFLICT (content): Merge conflict in shared.ts' } : OK,
+      startAgent: async (_step, options) => {
+        prompts.push(String(options.prompt)); files = [];
+        return { agent: 'codex', result: { status: 0 } };
+      } });
+    await run(h);
+    assert.deepEqual(h.exitCodes, [0], h.lines.join('\n'));
+    assert.equal(prompts.length, 1);
+    for (const file of owned) { assert.ok(prompts[0].includes(`git checkout --theirs "${file}" && git add "${file}"`), file); }
+    assert.match(prompts[0], /Step 2 — Resolve shared-file conflicts:\n  - shared\.ts\n\n/);
+  });
+  for (const refresh of [false, true]) {
+    test(`usage-limit replacement retains known ownership from merge-failed split (refresh=${refresh}, px-0021 F11)`, async () => {
+      const owned = ['missions/task-2503/handoff.md', 'backlog/tasks/task-2503.md'];
+      const store = inMemoryTransitionStore(fixtureMission('task-2503', { assignee: agentFamily('codex') }));
+      let files: string[] = [];
+      const prompts: string[] = [];
+      const agents: unknown[] = [];
+      const h = sharedConflictHarness({ missionServices: async () => ({ store, lifecycle: new MissionLifecycleService(store) }),
+        detectRebaseState: () => ({ inProgress: files.length > 0, unmergedFiles: [...files] }),
+        resolveConflictsForMission: () => {
+          files = [...owned, 'shared.ts'];
+          return { ok: false, error: 'merge-failed', conflictFiles: [], missionSpecificFiles: [], sharedFiles: [] };
+        },
+        git: args => subcommand(args).join(' ') === 'status --porcelain'
+          ? { ...OK, stdout: files.map(file => `UU ${file}`).join('\n') }
+          : subcommand(args).join(' ') === 'rebase main' ? { ...OK, status: 1, stderr: 'CONFLICT (content): Merge conflict in shared.ts' } : OK,
+        startAgent: async (_step, options) => {
+          prompts.push(String(options.prompt)); agents.push(options.agent);
+          if (prompts.length === 1) {
+            if (refresh) { files = [owned[1], 'current.ts']; }
+            throw new Error('usage limit hit');
+          }
+          files = [];
+          return { agent: String(options.agent), result: { status: 0 } };
+        } });
+      await run(h);
+      assert.deepEqual(h.exitCodes, [0], h.lines.join('\n'));
+      assert.deepEqual(agents, ['codex', 'pool-selected']);
+      for (const file of refresh ? [owned[1]] : owned) {
+        assert.ok(prompts[1].includes(`git checkout --theirs "${file}" && git add "${file}"`), file);
+      }
+      assert.match(prompts[1], refresh ? /Step 2 — Resolve shared-file conflicts:\n  - current\.ts\n\n/ : /Step 2 — Resolve shared-file conflicts:\n  - shared\.ts\n\n/);
+      if (refresh) { assert.doesNotMatch(prompts[1], /handoff\.md|shared\.ts/); }
+    });
+  }
+  for (const failureAt of [2, 3]) {
+    test(`Mission task read failure before launch ${failureAt - 1} stays local (px-0021 F10)`, async () => {
+      let reads = 0;
+      let launches = 0;
+      const store = inMemoryTransitionStore(fixtureMission('task-2503', { assignee: agentFamily('codex') }));
+      const h = sharedConflictHarness({ missionServices: async () => {
+        if (++reads === failureAt) { throw new Error('Mission task read failed: usage limit field unreadable'); }
+        return { store };
+      }, startAgent: async () => { launches++; throw new Error('usage limit hit; blocked until tomorrow'); } });
+      await run(h);
+      assert.equal(launches, failureAt - 2);
+      assert.deepEqual(h.exitCodes, [1]);
+      assert.match(h.lines.join('\n'), /Cannot construct conflict-resolution task.*Mission task read failed/);
+      assert.doesNotMatch(h.lines.join('\n'), /cannot run conflict resolution|No eligible replacement/);
+    });
+  }
+  for (const refresh of [false, true]) {
+    test(`replacement preserves or refreshes workflow conflicts (refresh=${refresh}, px-0021 F11)`, async () => {
+      const owned = 'backlog/tasks/task-2503.md';
+      const prompts: string[] = [];
+      let files: string[] = [];
+      const h = sharedConflictHarness({ readReviewState: async () => ({ implementer: 'codex' }),
+        detectRebaseState: () => ({ inProgress: files.length > 0, unmergedFiles: [...files] }),
+        resolveConflictsForMission: () => ({ ok: true, conflictFiles: [owned, 'shared.ts'],
+          missionSpecificFiles: [owned], sharedFiles: ['shared.ts'] }),
+        startAgent: async (_step, options) => {
+          assert.equal(options.sessionPolicy, 'fresh-ephemeral');
+          prompts.push(String(options.prompt));
+          if (prompts.length === 1) { files = refresh ? ['current.ts'] : []; throw new Error('usage limit hit'); }
+          files = [];
+          return { agent: 'pool-selected', result: { status: 0 } };
+        } });
+      await run(h);
+      assert.equal(prompts.length, 2);
+      for (const prompt of refresh ? [prompts[0]] : prompts) {
+        assert.ok(prompt.includes(`git checkout --theirs "${owned}" && git add "${owned}"`));
+        assert.match(prompt, /Step 2 — Resolve shared-file conflicts:\n  - shared\.ts/);
+        assert.doesNotMatch(prompt, /paused on conflicts/);
+      }
+      if (refresh) {
+        assert.match(prompts[1], /Current unmerged paths from Git:\n  - current\.ts/);
+        assert.doesNotMatch(prompts[1], /shared\.ts|backlog\/tasks/);
+      }
+      assert.deepEqual(h.exitCodes, [0]);
+    });
+  }
+  test('shared resolver uses the workflow classification without a parallel path split (px-0021 F7)', async () => {
+    const owned = 'backlog/tasks/task-2503.md';
+    const h = sharedConflictHarness({ readReviewState: async () => ({ implementer: 'codex' }),
+      resolveConflictsForMission: () => ({ ok: true, conflictFiles: [owned, 'shared.ts'],
+        missionSpecificFiles: [owned], sharedFiles: ['shared.ts'] }) });
+    await run(h);
+    const prompt = String(h.agentLaunches[0].options.prompt);
+    assert.ok(prompt.includes(`git checkout --theirs "${owned}" && git add "${owned}"`));
+    assert.match(prompt, /Step 2 — Resolve shared-file conflicts:\n  - shared\.ts/);
+    assert.deepEqual(h.exitCodes, [0]);
   });
   test('TASK-2294.01 repro: px rebase shared-file conflict path pins the mission implementer', async () => {
     const shared = 'src/adapters/git/git.ts';
@@ -100,7 +280,6 @@ describe("pinned conflict agent", () => {
       missionBranchName: () => 'mission/task-2294.01',
       resolveMissionBaseBranch: () => 'main',
       missionConflictPathPrefix: () => 'missions/task-2294.01/',
-      resolvePromptBaseBranch: () => 'main',
       startAgent: async (step: string, options: Record<string, unknown>) => {
         launches.push({ step, options });
         return { agent: String(options.agent ?? 'pool-selected'), result: { status: 0 } };
@@ -138,6 +317,7 @@ describe("pinned conflict agent", () => {
     assert.equal(launches[0].step, 'conflict-resolution');
     assert.equal(launches[0].options.agent, 'codex',
       'shared-file conflict resolution must launch as the mission implementer');
+    assert.equal(launches[0].options.sessionPolicy, 'fresh-ephemeral');
     assert.equal(launches[0].options.slug, 'task-2294.01');
     assert.equal(launches[0].options.role, 'implementer');
   });
@@ -146,86 +326,12 @@ describe("pinned conflict agent", () => {
 describe("recorded implementer dispatch", () => {
   const OK: GitCommandResult = { status: 0, stdout: '', stderr: '' };
   const SHARED_FILE = 'src/adapters/git/git.ts';
-  /** Strip the leading `-C <root>` / `-c <key=value>` globals so index 0 is the subcommand. */
-  function subcommand(args: string[]): string[] {
-    let index = 0;
-    while (index + 1 < args.length && (args[index] === '-C' || args[index] === '-c')) { index += 2; }
-    return args.slice(index);
-  }
-  interface Harness {
-    port: RebaseWorkflowPort;
-    lines: string[];
-    exitCodes: number[];
-    agentLaunches: Array<{ step: string; options: Record<string, unknown> }>;
-  }
-  function sharedConflictHarness(overrides: Partial<RebaseWorkflowPort> = {}): Harness {
-    const lines: string[] = [];
-    const exitCodes: number[] = [];
-    const agentLaunches: Array<{ step: string; options: Record<string, unknown> }> = [];
-    const port: RebaseWorkflowPort = rebaseWorkflowFixture({
-      git: (args: string[]) => {
-        const tail = subcommand(args);
-        if (tail[0] === 'rebase' && tail[1] === 'main') {
-          return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${SHARED_FILE}\n` };
-        }
-        return OK;
-      },
-      detectRebaseState: () => ({ inProgress: false, unmergedFiles: [] }),
-      getCurrentBranch: () => 'mission/task-2503',
-      cwd: () => '/repo',
-      inferSlug: (explicitSlug?: string) => explicitSlug ?? 'task-2503',
-      findMissionDir: () => '/worktree/missions/task-2503',
-      findMissionArea: () => 'docs',
-      resolveWorktree: () => '/worktree',
-      conventionalWorktreePath: () => '/worktrees/task-2503',
-      missionBranchName: () => 'mission/task-2503',
-      resolveMissionBaseBranch: () => 'main',
-      missionConflictPathPrefix: () => 'missions/task-2503/',
-      resolvePromptBaseBranch: () => 'main',
-      startAgent: async (step: string, options: Record<string, unknown>) => {
-        agentLaunches.push({ step, options });
-        return { agent: String(options.agent ?? 'pool-selected'), result: { status: 0 } };
-      },
-      selectAgent: () => 'pool-selected',
-      workflowLauncherStatus: (_agent: string) => ({ supported: true, agent: _agent }),
-      applyAgentFallback: async () => 'pool-selected',
-      createPr: () => ({ ok: true as const }),
-      readToken: () => 'token',
-      resolveForgejoUser: (user: string | null) => user ?? 'tester',
-      fetchReviewBranch: () => OK,
-      resolveTaskFile: () => ({ ok: true as const, taskFile: '/worktree/backlog/tasks/task-2503.md', task: {} }),
-      getTaskImplementer: () => null,
-      transitionTask: async () => undefined,
-      resolveReviewIdentity: () => ({ forgejoUser: null }),
-      readReviewState: async () => null,
-      writeReviewState: async () => ({ outcome: 'committed' as const }),
-      persistReviewState: async () => ({ outcome: 'committed' as const }),
-      isForgejoReviewEnabled: () => false,
-      formatVerificationCommand: () => 'npm test',
-      resolveConflictsForMission: () => ({
-        ok: true as const,
-        conflictFiles: [SHARED_FILE],
-        missionSpecificFiles: [],
-        sharedFiles: [SHARED_FILE],
-      }),
-      missionServices: null,
-      exit: (code: number) => { exitCodes.push(code); },
-      ...overrides,
-    });
-    return { port, lines, exitCodes, agentLaunches };
-  }
-  /** Run the use case with the workflow's terminal output captured. */
-  async function run(h: Harness, args: string[] = ['task-2503']): Promise<void> {
-    const previous = setLogger({ log: (...parts: unknown[]) => h.lines.push(parts.join(' ')) });
-    try {
-      await new RebaseCommandUseCase(h.port).execute(args);
-    } finally {
-      setLogger(previous);
-    }
-  }
+  function subcommand(args: string[]): string[] { let index = 0; while (args[index] === '-C' || args[index] === '-c') { index += 2; } return args.slice(index); }
   test('database-only pre-review Mission launches codex and recovers a shared conflict (TASK-2778)', async () => {
     const store = inMemoryTransitionStore(fixtureMission('task-2503', {
       assignee: agentFamily('codex'), review: null,
+      brief: { goal: 'Preserve the mission feature', why: 'Users need it', scope: 'shared source', outOfScope: ['publication policy'] },
+      successCriteria: ['Feature and base behavior both survive'],
     }));
     const h = sharedConflictHarness({
       missionServices: async () => ({ store }),
@@ -238,7 +344,21 @@ describe("recorded implementer dispatch", () => {
     assert.equal(h.agentLaunches.length, 1, h.lines.join('\n'));
     assert.equal(h.agentLaunches[0].options.agent, 'codex');
     assert.equal(h.agentLaunches[0].options.role, 'implementer');
+    const prompt = String(h.agentLaunches[0].options.prompt);
+    for (const text of ['Preserve the mission feature', 'Users need it', 'shared source', 'publication policy',
+      'Feature and base behavior both survive', 'Mission worktree: /worktree', 'Captured mission branch: mission/task-2503',
+      'Resolved local rebase base: main']) { assert.ok(prompt.includes(text), text); }
+    assert.equal(h.agentLaunches[0].options.sessionPolicy, 'fresh-ephemeral');
     assert.deepEqual(h.exitCodes, [0], h.lines.join('\n'));
+  });
+  test('missing Mission intent is explicit rather than inferred from stale files (px-0021)', async () => {
+    const store = inMemoryTransitionStore(fixtureMission('task-2503', { assignee: agentFamily('codex') }));
+    const h = sharedConflictHarness({ missionServices: async () => ({ store }),
+      resolveTaskFile: () => assert.fail('intent must not come from backlog') });
+    await run(h);
+    assert.match(String(h.agentLaunches[0].options.prompt), /Missing Mission intent: goal, why, scope, success criteria/);
+    assert.match(String(h.agentLaunches[0].options.prompt), /out-of-scope constraints/);
+    assert.match(String(h.agentLaunches[0].options.prompt), /Do not invent it; stop with paths and evidence/);
   });
   for (const family of ['codex', 'claude', 'custom']) {
     test(`database assignee ${family} overrides stale identity (TASK-2778)`, async () => {
@@ -298,168 +418,6 @@ describe("recorded implementer dispatch", () => {
     assert.equal(store.mission().review!.rounds.at(-1)!.decision?.kind, 'changes-requested');
     assert.deepEqual(published, ['custom:custom-token']);
   });
-  for (const failure of ['active', 'unmerged', 'wrong-branch', 'valid'] as const) {
-    test(`rebounces unfinished agent checkout with stable exact target (${failure}, TASK-2728)`, async () => {
-      let launches = 0;
-      let branch = 'mission/task-2503';
-      let active = false;
-      let files: string[] = [];
-      let targetReads = 0;
-      const prompts: string[] = [];
-      const h = sharedConflictHarness({
-        readReviewState: async () => ({ implementer: 'codex' }),
-        missionBranchName: () => { targetReads++; return targetReads === 1 ? 'mission/task-2503' : 'changed-target'; },
-        getCurrentBranch: () => branch,
-        detectRebaseState: () => ({ inProgress: active, unmergedFiles: files }),
-        startAgent: async (_step, options) => {
-          prompts.push(typeof options.prompt === 'function' ? options.prompt('codex') : String(options.prompt));
-          launches++;
-          active = launches === 1 && failure === 'active';
-          files = launches === 1 && failure === 'unmerged' ? ['src/shared.ts'] : [];
-          branch = launches === 1 && failure === 'wrong-branch' ? 'main' : 'mission/task-2503';
-          return { agent: 'codex', result: { status: 0 } };
-        },
-      });
-      await run(h);
-      assert.deepEqual(h.exitCodes, [0], h.lines.join('\n'));
-      assert.equal(launches, failure === 'valid' ? 1 : 2);
-      assert.equal(targetReads, 1);
-      if (failure !== 'valid') { assert.equal(prompts[1], 'complete the rebase, ensuring the checkout ends at mission/task-2503'); }
-    });
-  }
-  test('exhausted completion recovery blocks push and advancement with one budget (TASK-2728)', async () => {
-    let launches = 0;
-    let pushes = 0;
-    let resumes = 0;
-    let branch = 'mission/task-2503';
-    const prompts: string[] = [];
-    const h = sharedConflictHarness({
-      readReviewState: async () => ({ implementer: 'codex' }),
-      getCurrentBranch: () => branch,
-      startAgent: async (_step, options) => {
-        launches++;
-        prompts.push(typeof options.prompt === 'function' ? options.prompt('codex') : String(options.prompt));
-        branch = 'main';
-        return { agent: 'codex', result: { status: 0 } };
-      },
-      isForgejoReviewEnabled: () => true,
-      createPr: () => { pushes++; return { ok: true as const }; },
-      resumeReviewAfterRepair: async () => { resumes++; },
-    });
-    await run(h, ['task-2503', '--push']);
-    assert.equal(launches, 3, 'initial resolver plus the existing two repair attempts');
-    assert.deepEqual(prompts.slice(1), Array(2).fill('complete the rebase, ensuring the checkout ends at mission/task-2503'));
-    assert.deepEqual(h.exitCodes, [1]);
-    assert.equal(pushes, 0);
-    assert.equal(resumes, 0);
-    assert.match(h.lines.join('\n'), /Expected checkout mission\/task-2503, found main/);
-    assert.match(h.lines.join('\n'), /git rebase --continue/);
-  });
-  test('Git completion prompt needs no code-repair checkpoint (TASK-2728)', async () => {
-    const reason = { kind: 'artifact-incomplete', role: 'implementer', diagnostic: 'Rebase is still in progress.' } as const;
-    const prepared = await prepareRepairPrompt({ occurrenceId: 'git-completion', reason, originalReason: reason,
-      classification: { failureClass: FailureClass.IncompleteEvidence, dispatchAction: DispatchAction.AutoSendBack,
-        isRelaunchable: true, label: 'INCOMPLETE ARTIFACTS' }, diagnostic: reason.diagnostic, originalDiagnostic: reason.diagnostic },
-    { slug: 'task-2503', worktree: '/worktree', implementer: 'codex', verify: () => ({ ok: true as const }),
-      startAgent: async () => null, repairPrompt: 'complete the rebase, ensuring the checkout ends at mission/task-2503',
-      repairCheckpoints: { open: async () => { throw new Error('must not create code-repair evidence for Git completion'); },
-        readBlocker: async () => undefined, verify: async () => undefined } }, 1, 2);
-    assert.equal(prepared.fixPrompt, 'complete the rebase, ensuring the checkout ends at mission/task-2503');
-    assert.equal(prepared.repairCheckpoint, null);
-  });
-  test('verifies active repaired rebase without APPROVED review (TASK-2673)', async () => {
-    let repositoryChecks = 0;
-    let integrationChecks = 0;
-    const h = sharedConflictHarness({
-      readReviewState: async () => ({ implementer: 'codex', status: 'active', metadata: {} }),
-      startAgent: async (_step, options) => {
-        const prompt = String(options.prompt);
-        assert.match(prompt, /npm test/);
-        repositoryChecks += 1; // Injected repository verifier succeeds on the repaired tree.
-        if (/px integrate .*--dry-run/.test(prompt)) {
-          integrationChecks += 1;
-          return { agent: 'codex', result: { status: 1 } }; // Active, unapproved mission.
-        }
-        return { agent: 'codex', result: { status: 0 } };
-      },
-    });
-    await run(h);
-    assert.equal(repositoryChecks, 1);
-    assert.equal(integrationChecks, 0, 'repair verification must not require integration eligibility');
-    assert.deepEqual(h.exitCodes, [0]);
-  });
-  test('failed repository verification prevents repair completion and push (TASK-2673)', async () => {
-    let pushes = 0;
-    let resumes = 0;
-    const h = sharedConflictHarness({
-      readReviewState: async () => ({ implementer: 'codex', status: 'active' }),
-      startAgent: async (_step, options) => {
-        assert.match(String(options.prompt), /do not report completion until it passes/);
-        return { agent: 'codex', result: { status: 1 } };
-      },
-      isForgejoReviewEnabled: () => true,
-      createPr: () => { pushes += 1; return { ok: true as const }; },
-      resumeReviewAfterRepair: async () => { resumes += 1; },
-    });
-    await run(h, ['task-2503', '--push']);
-    assert.deepEqual(h.exitCodes, [1]);
-    assert.equal(pushes, 0);
-    assert.equal(resumes, 0);
-    assert.doesNotMatch(h.lines.join('\n'), /completed conflict resolution/);
-  });
-  test('unfinished Git rebase prevents repair completion and push (TASK-2673)', async () => {
-    let launched = false;
-    let pushes = 0;
-    let resumes = 0;
-    const h = sharedConflictHarness({
-      readReviewState: async () => ({ implementer: 'codex', status: 'active' }),
-      startAgent: async () => {
-        launched = true;
-        return { agent: 'codex', result: { status: 0 } };
-      },
-      detectRebaseState: () => ({ inProgress: launched, unmergedFiles: [] }),
-      isForgejoReviewEnabled: () => true,
-      createPr: () => { pushes += 1; return { ok: true as const }; },
-      resumeReviewAfterRepair: async () => { resumes += 1; },
-    });
-    await run(h, ['task-2503', '--push']);
-    assert.deepEqual(h.exitCodes, [1]);
-    assert.equal(pushes, 0);
-    assert.equal(resumes, 0);
-    assert.doesNotMatch(h.lines.join('\n'), /completed conflict resolution/);
-  });
-  for (const remaining of [
-    { name: 'an active rebase', inProgress: true, unmergedFiles: [] },
-    { name: 'unmerged files', inProgress: false, unmergedFiles: [SHARED_FILE] },
-  ]) {
-    test(`successful Git command with ${remaining.name} cannot finalize or publish repair (TASK-2673)`, async () => {
-      let rebased = false;
-      let pushes = 0;
-      let branchMoves = 0;
-      let resumes = 0;
-      const h = sharedConflictHarness({
-        git: (args) => {
-          const tail = subcommand(args);
-          if (tail[0] === 'rebase' && tail[1] === 'main') { rebased = true; }
-          return OK;
-        },
-        detectRebaseState: () => rebased ? remaining : { inProgress: false, unmergedFiles: [] },
-        isForgejoReviewEnabled: () => true,
-        createPr: () => { pushes += 1; return { ok: true as const }; },
-        recordBranchMove: async () => { branchMoves += 1; return null; },
-        resumeReviewAfterRepair: async () => { resumes += 1; },
-      });
-      await run(h, ['task-2503', '--push']);
-      assert.equal(rebased, true);
-      assert.deepEqual(h.exitCodes, [1]);
-      assert.equal(pushes, 0);
-      assert.equal(branchMoves, 0);
-      assert.equal(resumes, 0);
-      assert.equal(h.agentLaunches.length, 0);
-      assert.match(h.lines.join('\n'), /Rebase is unfinished\. Skipping automatic push/);
-      assert.doesNotMatch(h.lines.join('\n'), /Rebase completed cleanly/);
-    });
-  }
   test('shared-file rebase recovery dispatches the implementer recorded before commit replay', async () => {
     let replayed = false;
     const h = sharedConflictHarness({
@@ -622,7 +580,6 @@ describe("usage-blocked implementer", () => {
       missionBranchName: () => 'mission/task-2494',
       resolveMissionBaseBranch: () => 'main',
       missionConflictPathPrefix: () => 'missions/task-2494/',
-      resolvePromptBaseBranch: () => 'main',
       selectAgent: () => null,
       workflowLauncherStatus: (_agent: string) => ({ supported: true, agent: _agent }),
       applyAgentFallback: async () => 'codex',
@@ -695,6 +652,7 @@ describe("usage-blocked implementer", () => {
     assert.ok(replacementLaunch, 'a replacement-family launch must occur');
     assert.equal(replacementLaunch?.step, 'conflict-resolution');
     assert.equal(replacementLaunch?.options.pinnedAgent, undefined, 'substitution launches unpinned');
+    assert.ok(launches.every(launch => launch.options.sessionPolicy === 'fresh-ephemeral'));
     assert.equal(selectionCalls.length, 1);
     assert.equal(selectionCalls[0]?.step, 'active');
     assert.ok(selectionCalls[0]?.exclude.has('codex'), 'blocked implementer must be excluded from selection');
@@ -876,10 +834,11 @@ describe("rebase through successive conflict stops", () => {
       findMissionDir: () => '/worktree/missions/task-2672', findMissionArea: () => 'docs',
       resolveWorktree: () => '/worktree', conventionalWorktreePath: () => '/worktrees/task-2672',
       missionBranchName: () => 'mission/task-2672', resolveMissionBaseBranch: () => 'main',
-      missionConflictPathPrefix: () => 'missions/task-2672/', resolvePromptBaseBranch: () => 'main',
+      missionConflictPathPrefix: () => 'missions/task-2672/',
       startAgent: async (step: string, options: Record<string, unknown>) => {
         agentLaunches.push({ step, options });
         const prompt = String(options.prompt);
+        assert.equal(options.sessionPolicy, 'fresh-ephemeral', 'every successive resolver starts fresh');
         assert.match(prompt, /stage every resolved file before each git rebase --continue/);
         assert.match(prompt, /Repeat through successive conflict pauses/);
         if (!state.incomplete) {

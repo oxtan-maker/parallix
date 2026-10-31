@@ -1,13 +1,16 @@
 import type { ParallixConfiguration } from "../ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../ports/configuration.js";
 /**
- * Small, effect-free rules shared by the integrate workflow modules: the public
+ * Shared support for the integrate workflow modules: the public
  * flag contract, task-path containment, bounce implementer resolution, and the
  * abort helper every step uses to stop a run after printing its diagnostic.
  */
 import path from 'node:path';
 import * as fmt from '../presentation/cli-format.js';
 import type { IntegrateAgentsPort, IntegrateLandingPort } from '../ports/integrate-workflow.js';
+import type { MissionStore } from '../domain-ports.js';
+import { missionId } from '../../domain/mission.js';
+import type { IntegrationContext } from './context.js';
 
 export const VARIANT_B_AUTOMATION_SUMMARY = 'Variant B automation: Backlog task closeout, worktree-path rewrite, squash commit with hook-enforced validation, Forgejo sync-merged, and mission worktree cleanup.';
 
@@ -99,26 +102,45 @@ export interface BounceSeams {
   workflowLauncherStatusFn?: IntegrateAgentsPort['workflowLauncherStatus'];
 }
 
+/** Read current recorded ownership, retaining known identity on a transient read failure. */
+async function readRepairImplementer(slug: string, store: Pick<MissionStore, 'load'>, previous: string | null): Promise<string | null> {
+  try {
+    const loaded = await store.load(missionId(slug));
+    if (loaded.kind !== 'found') { return previous; }
+    return loaded.mission.assignee ?? loaded.mission.review?.rounds.at(-1)?.implementer ?? previous;
+  } catch (error) {
+    // A failed read cannot authorize a new selection when no owner was known.
+    if (!previous) { throw error; }
+    return previous;
+  }
+}
+
 /**
  * Name the implementer a bounce should launch.
  *
  * Both `px integrate` bounces — the squash-commit hook failure and the
  * integration-gate failure — resolve the same way, so the chain lives once:
- * the task's own assignee, then the role's configured agent, then a launcher
- * probe. F3: only trust a launcher that reports itself supported; an absent
+ * the current Mission assignee or recorded review implementer, then the legacy
+ * task assignee, configured agent, and launcher probe when no identity exists.
+ * Read the Mission at repair time: rebase or an earlier repair may have changed
+ * its implementer since the integration context was built.
+ * F3: only trust a launcher that reports itself supported; an absent
  * launcher returns `{ agent: '', supported: false }`, so name an agent only
  * when the probe confirms a healthy, supported family. An empty result means
  * strand rather than launch with an empty agent identity.
  */
-export function resolveBounceImplementer(
-  taskAssignee: string | null,
+export async function resolveBounceImplementer(
+  slug: string,
+  missionStore: Pick<MissionStore, 'load'>,
+  context: Pick<IntegrationContext, 'taskAssignee' | 'reviewState'>,
   rootDir: string,
   fns: Pick<BounceSeams, 'selectAgentFn' | 'workflowLauncherStatusFn'>,
-): string {
-  const implementer = taskAssignee || (fns.selectAgentFn ? fns.selectAgentFn('act-on-review') : '');
+): Promise<string> {
+  const recorded = await readRepairImplementer(slug, missionStore, context.reviewState?.implementer || context.taskAssignee);
+  const implementer = recorded || (fns.selectAgentFn ? fns.selectAgentFn('act-on-review') : '');
   if (implementer) { return implementer; }
   if (!fns.workflowLauncherStatusFn) { return ''; }
-  const status = fns.workflowLauncherStatusFn(taskAssignee ?? '', rootDir);
+  const status = fns.workflowLauncherStatusFn(context.taskAssignee ?? '', rootDir);
   return status?.supported ? (status.agent ?? '') : '';
 }
 

@@ -100,6 +100,16 @@ The repair budget and launcher retry budget remain separate. A successful agent
 exit alone is insufficient: the authorized verifier must rerun successfully,
 with committed-tree proof wherever the workflow requires it.
 
+Rebase conflict resolution also starts fresh on its initial launch, replacement
+launches and completion retries. Each new task supplies recorded Mission intent
+and the current paused Git conflicts; a later pause refreshes that context.
+Before a pause, predicted conflicts remain available to a replacement agent.
+A completion retry with a clean index receives the actual rebase or checkout
+failure instead of instructions claiming that conflicts remain.
+Successful and failed conflict launches leave the normal implementation session
+marker untouched, so ordinary work can still resume its original conversation.
+See [operator setup](operator-setup.md) for resolution and completion requirements.
+
 Continuation omits an older repair diagnostic only when the harness has recorded
 explicit coverage of that failure occurrence after successful exact verification
 and accepted fresh checkpoint evidence. The receipt binds the command, Mission,

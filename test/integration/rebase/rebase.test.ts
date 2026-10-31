@@ -448,14 +448,12 @@ test('parseConflictFilesFromRebaseOutput handles Swedish KONFLIKT (ändra/radera
 });
 
 // ---------------------------------------------------------------------------
-// CP-1 (task-1057): Swedish tips: advice lines must not be treated as conflict paths
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // CP-3 (task-1057): Flow-level regression — sharedFiles and prompt must omit tips
 // ---------------------------------------------------------------------------
 
 test('rebase task-1057 flow: sharedFiles and prompt contain only workflow/docs/agents.md, not tips', async () => {
+  let paused = false;
+  let statusRead = false;
   const SWEDISH_REBASE_OUTPUT = [
     'KONFLIKT (ändra/radera): workflow/docs/agents.md raderad i fa9599e6 (Uppdatera agenter) och ändrad i HEAD. Versionen HEAD av workflow/docs/agents.md lämnad i trädet.',
     "tips: 'git add' för att lösa KONFLIKT-markören och kör sedan 'git rebase --continue'",
@@ -468,7 +466,8 @@ test('rebase task-1057 flow: sharedFiles and prompt contain only workflow/docs/a
   await rebase(['task-1057'], {
     // Git is injected below; completion probes must use the same isolated state.
     // TASK-2673: a real detector spawned Git twelve times under coverage.
-    detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
+    detectRebaseStateFn: () => ({ inProgress: paused && statusRead, detached: false,
+      unmergedFiles: paused && statusRead ? ['workflow/docs/agents.md'] : [] }),
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1057',
     findMissionDirFn: () => '/tmp/missions/docs/missions/2026/task-1057',
@@ -482,17 +481,20 @@ test('rebase task-1057 flow: sharedFiles and prompt contain only workflow/docs/a
       assert.equal(typeof prompt, 'string');
       assert.ok(typeof prompt === 'string');
       capturedPrompt.value = prompt;
+      paused = false;
       return { agent: 'test-agent', result: { status: 0 } };
     },
     gitFn: (args) => {
       if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
       if (gitSubcommandArgs(args)[0] === 'fetch') return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
+        paused = true;
         return { signal: null,  status: 1, stdout: '', stderr: SWEDISH_REBASE_OUTPUT };
       }
       // git status --porcelain (direct or via -C <worktreePath>)
       const statusIdx = args.indexOf('status');
       if (statusIdx !== -1 && args[statusIdx + 1] === '--porcelain') {
+        statusRead = true;
         return { signal: null,  status: 0, stdout: 'UU\tworkflow/docs/agents.md\n', stderr: '' };
       }
       return { signal: null,  status: 0, stdout: '', stderr: '' };
@@ -508,10 +510,6 @@ test('rebase task-1057 flow: sharedFiles and prompt contain only workflow/docs/a
   );
   assert.equal(exitCode.value, 0);
 });
-
-// ---------------------------------------------------------------------------
-// CP-1 (task-1057): Swedish tips: advice lines must not be treated as conflict paths
-// ---------------------------------------------------------------------------
 
 test('parseConflictFilesFromRebaseOutput task-1057: does not treat tips advice as conflict path', () => {
   // Captured Swedish rebase output: real conflict in workflow/docs/agents.md,
