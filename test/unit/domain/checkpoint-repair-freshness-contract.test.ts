@@ -765,3 +765,24 @@ test('criterion corrections retain each authorization and leave other incidents 
   assert.equal(retained.verified, false);
   assert.equal(retained.evidenceRecorded, false);
 });
+
+import { staleRepairCriteria, type CheckpointData } from '../../../src/domain/checkpoint.js';
+
+test('verified incident evidence stays fresh when changed-patch withdrawal opens review (TASK-2820)', () => {
+  const checkpoint: CheckpointData = { missionId: missionId('task-retention'), name: 'CP-2', nextActionText: 'review',
+    recording: { recordedAt: '2026-10-25T11:00:00Z', recordedRound: 1, missionRevision: 4 },
+    repair: { incidentId: 'repair', command: 'npm test', authorizedGates: ['unit'], authorizedCriteria: ['first'],
+      attempt: 1, evidenceRecorded: true, verified: true },
+    goalCheck: [{ criterion: 'first', evidence: 'test/unit/example.test.ts', recordedRound: 1 }] };
+  const repair = { round: 2, affected: ['first'], gate: 'npm test', integrationIncident: { round: 1, startedAt: '2026-10-25T10:00:00Z' } };
+  assert.deepEqual(staleRepairCriteria([checkpoint], repair), []);
+  for (const stale of [
+    { ...checkpoint, repair: undefined },
+    { ...checkpoint, repair: { ...checkpoint.repair!, verified: false } },
+    { ...checkpoint, repair: { ...checkpoint.repair!, evidenceRecorded: false } },
+    { ...checkpoint, repair: { ...checkpoint.repair!, command: 'other', authorizedGates: ['other'] } },
+    { ...checkpoint, recording: { ...checkpoint.recording!, recordedAt: '2026-10-25T09:00:00Z' } },
+    { ...checkpoint, goalCheck: checkpoint.goalCheck.map(row => ({ ...row, carriedFrom: 'CP-1' })) },
+  ]) { assert.deepEqual(staleRepairCriteria([stale], repair), ['first']); }
+  assert.deepEqual(staleRepairCriteria([checkpoint], { ...repair, integrationIncident: undefined }), ['first'], 'unrelated new round still requires fresh proof');
+});

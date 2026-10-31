@@ -1,7 +1,7 @@
 import { bindReviewOperatorResume } from './review-operator-resume.js';
 import { commandInvocation } from './command-invocation.js';
 import { hasMissionWriteAuthorization } from '../application/ports/mission-write-authorization.js';
-import { createReviewClassification, createIntegrationApprovalRestoration } from './review-classification.js';
+import { createReviewClassification } from './review-classification.js';
 
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 
@@ -94,7 +94,7 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
         reviewLoopMechanisms: (request: StartReviewRound, observers: ReviewLoopObservers) => createReviewLoopPorts(request.slug, request, {
           ...observers,
           configuration,
-          classification: createReviewClassification(request.slug, resolveWorktree(request.slug) ?? rootDir, configuration.decision, configuration), restoration: createIntegrationApprovalRestoration(resolveWorktree(request.slug) ?? rootDir, configuration),
+          classification: createReviewClassification(request.slug, resolveWorktree(request.slug) ?? rootDir, configuration.decision, configuration),
           performHandoffFn: performHandoffWithMissionServices(missionServicesFn, configuration),
           ...reviewLoopBindings(mission.store, mission.lifecycle, reviewerSessionPort),
         }),

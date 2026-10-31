@@ -58,6 +58,7 @@ type ForgejoCommentRecord = {
   kind: string;
   id: string;
   reviewId?: string;
+  commitId?: string;
   user: string;
   isBot: boolean;
   created: string;
@@ -968,6 +969,12 @@ function apiStatusLabel(result: ForgejoApiError) { return result.statusCode ?? r
 
 function isStandingApproval(review: ForgejoReview) { return review.state === 'APPROVED' && !review.dismissed && review.id; }
 
+function dismissalCoversRevision(review: ForgejoReview, expected: string | undefined, errors: string[]): boolean {
+  if (!expected || review.commit_id === expected) { return true; }
+  if (!review.commit_id) { errors.push(`approval revision is unknown for ${review.user?.login ?? review.id}; refusing to dismiss a potentially newer decision`); }
+  return false;
+}
+
 function dismissStandingApprovals(branch: string, token: string, reason: string, options: ForgejoOptions = {}) {
   const { apiCall = forgejoApi, forgejoUser, rootDir = process.cwd() } = options;
   const slugMatch = branch.match(/^mission\/(task-\d+)/);
@@ -979,6 +986,7 @@ function dismissStandingApprovals(branch: string, token: string, reason: string,
   const errors: string[] = [];
   for (const review of reviews.data.filter(isStandingApproval)) {
     const login = review.user?.login ?? `review ${review.id}`;
+    if (!dismissalCoversRevision(review, options.expectedRevision, errors)) { continue; }
     const result = apiCall('POST', `/pulls/${access.prNumber}/reviews/${review.id}/dismissals`, access.token, { message: reason }, { ...({}), configuration: options.configuration });
     if (result.ok) { dismissed.push(login); }
     else { errors.push(`dismissing ${login}'s approval failed (HTTP ${apiStatusLabel(result)})`); }
@@ -1001,7 +1009,7 @@ function commentRecord(comment: ForgejoIssueComment) {
 }
 
 function reviewRecord(review: ForgejoReview): ForgejoCommentRecord {
-  return { kind: 'review', ...commentRecord(review), created: review.submitted_at || review.created_at || '', updated: review.updated_at || review.submitted_at || review.created_at || '', state: review.state || '', dismissed: Boolean(review.dismissed) };
+  return { kind: 'review', ...commentRecord(review), created: review.submitted_at || review.created_at || '', updated: review.updated_at || review.submitted_at || review.created_at || '', state: review.state || '', dismissed: Boolean(review.dismissed), ...(review.commit_id ? { commitId: review.commit_id } : {}) };
 }
 
 function inlineCommentRecord(comment: ForgejoReviewComment, review: ForgejoReview): ForgejoCommentRecord {

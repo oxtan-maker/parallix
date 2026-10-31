@@ -235,7 +235,7 @@ export interface Decision {
   readonly provider: string;
   readonly model: string;
   readonly packetHash: string;
-  /** Present when the decision restores a withdrawn integration approval after the weakening question. */
+  /** Present when the weakening question approves the repaired revision. */
   readonly weakening?: ClassifierReviewSource['weakening'];
 }
 

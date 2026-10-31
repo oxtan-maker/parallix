@@ -365,9 +365,11 @@ describe('SQLite Mission aggregate integration', () => {
       assert.equal(result.status, 'completed');
       const loaded = await store.load(recorded.id);
       assert.equal(loaded.kind, 'found');
-      const decision = loaded.mission.review?.rounds[1]?.decision;
-      assert.equal(decision?.kind, 'approved');
-      assert.deepEqual(decision.revocation?.cause, { kind: 'integration-gate-failure', gate: 'agent-smoke', command: 'npm run test:agent-e2e', log: 'model slot busy' });
+      assert.deepEqual(loaded.mission.review?.rounds[1]?.decision, recorded.review?.rounds[1]?.decision, 'a red gate retains the judged approval');
+      assert.equal(loaded.mission.status, 'active', 'retained judgment does not authorize landing');
+      const assessment = loaded.mission.review?.rounds[1]?.integrationRepairAssessment;
+      assert.equal(assessment?.outcome, 'pending');
+      assert.deepEqual(assessment?.repair?.cause, { kind: 'integration-gate-failure', gate: 'agent-smoke', command: 'npm run test:agent-e2e', log: 'model slot busy' });
     } finally {
       await database.close();
     }

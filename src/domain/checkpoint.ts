@@ -261,17 +261,28 @@ export function assertGoalCheckRows(rows: readonly GoalCheckRow[]): void {
  * repair has supplied what it owes.
  */
 export function staleRepairCriteria(
-  checkpoints: readonly { readonly goalCheck: readonly GoalCheckRow[] }[],
-  repair: { readonly round: number; readonly affected: readonly string[] },
+  checkpoints: readonly Pick<CheckpointData, 'goalCheck' | 'recording' | 'repair'>[],
+  repair: { readonly round: number; readonly affected: readonly string[]; readonly gate?: string;
+    readonly integrationIncident?: { readonly round: number; readonly startedAt: string } },
 ): readonly string[] {
   const fresh = new Set<string>();
   for (const checkpoint of checkpoints) {
     for (const row of checkpoint.goalCheck) {
-      if (row.recordedRound === repair.round) { fresh.add(row.criterion); }
+      if (row.recordedRound === repair.round || incidentEvidenceIsFresh(checkpoint, row, repair)) { fresh.add(row.criterion); }
     }
   }
   if (repair.affected.length === 0) { return fresh.size > 0 ? [] : ['(any)']; }
   return repair.affected.filter((criterion) => !fresh.has(criterion));
+}
+
+/** A verified repair can precede the withdrawal that opens its review round. */
+function incidentEvidenceIsFresh(checkpoint: Pick<CheckpointData, 'goalCheck' | 'recording' | 'repair'>,
+  row: GoalCheckRow, repair: Parameters<typeof staleRepairCriteria>[1]): boolean {
+  const incident = repair.integrationIncident;
+  return Boolean(incident && checkpoint.repair?.evidenceRecorded && checkpoint.repair.verified
+    && checkpoint.recording && Date.parse(checkpoint.recording.recordedAt) >= Date.parse(incident.startedAt)
+    && repair.gate && (checkpoint.repair.command === repair.gate || checkpoint.repair.authorizedGates.includes(repair.gate))
+    && row.recordedRound === incident.round && !row.carriedFrom);
 }
 
 /** Immutable evidence record; null metadata identifies migrated legacy evidence. */

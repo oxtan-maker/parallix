@@ -585,7 +585,8 @@ it('flat review state preserves the exact mechanically restored subject and deci
   ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' }));
   const source = { kind: 'mechanical-restoration' as const, approvedRevision: 'approved', candidateRevision: 'candidate', failedGate: 'unit',
     validationRevision: 'candidate', validationReference: 'operational_history:42', validatedAt: '2026-10-01T11:00:00Z' };
-  review = applyReviewerCommand(review, { type: 'approve', decidedAt: '2026-10-01T12:00:00Z', comment: 'restored', source });
+  review = { ...review, rounds: [{ ...review.rounds[0], decision: { kind: 'approved', revision: null,
+    decidedAt: '2026-10-01T12:00:00Z', comment: 'historical restoration', source } }] };
   const mapped = applyReviewStateToReview(review, { round: 1, phase: 'approved', disposition: 'APPROVED' });
   assert.deepEqual(currentReviewRound(mapped).subject, currentReviewRound(review).subject);
   assert.deepEqual(currentReviewRound(mapped).decision, currentReviewRound(review).decision);

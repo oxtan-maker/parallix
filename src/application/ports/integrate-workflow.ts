@@ -188,6 +188,7 @@ export interface IntegrationGateFailureRequest {
   reportedStaleness?: string | null; realAgent?: string | null; realAgentModel?: string | null;
   startAgentFn: ReboundContext['startAgent'];
   transitionTaskFn: (slug: string) => unknown | Promise<unknown>;
+  assessRepairFn?: () => Promise<'retained' | 'changed' | 'blocked' | 'not-pending'>;
   reactivateMissionFn?: (slug: string) => unknown | Promise<unknown>;
   applyAgentFallbackFn?: ReboundContext['applyAgentFallback'];
   recordIntegrationValidationFailureFn?: (input: { missionId: string; sha: string; hooks: readonly string[] }) => Promise<void> | void;
@@ -196,6 +197,9 @@ export interface IntegrationGateFailureRequest {
 }
 
 export interface IntegrateGatesPort {
+  approvalEvidence?(_worktree: string): import('./integration-approval-evidence.js').IntegrationApprovalEvidencePort;
+  invalidateApproval?: (_options: { slug: string; branch: string; approval: IntegrationApproval; summary: string; approvedRevision?: string }) => Promise<{ ok: boolean; dismissed: string[]; errors: string[] }>;
+
   loadPhaseGates(_rootDir: string, _phase: 'preIntegration'): IntegrationGateDefinition[];
   loadRequirePreIntegration(_rootDir: string): boolean;
   runPhaseGates(_phase: 'integration', _options: { slug: string; checkoutPath: string; gates?: IntegrationGateDefinition[]; log?: (message: string) => void; error?: (message: string) => void; dryRun?: boolean; realAgent?: string | null; realAgentModel?: string | null }): Promise<IntegrationGateRunResult>;

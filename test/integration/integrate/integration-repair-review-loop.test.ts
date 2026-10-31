@@ -49,7 +49,7 @@ async function integrate(slug: string, worktree: string): Promise<number> {
 }
 
 test('task-2620: a red integration gate repairs once, re-reviews, and stops in the integration lane', async (t) => {
-  const fixture = await openRepairFixture({ slug: 'task-2620' });
+  const fixture = await openRepairFixture({ slug: 'task-2620', recordBaseline: true });
   t.after(() => fixture.close());
   t.after(() => { setWorkflowLaunchPort(null); setCommandPathProbe(null); setLauncherHealthProbe(null); });
   const originalMission = await fixture.load();
@@ -124,14 +124,16 @@ test('task-2620: a red integration gate repairs once, re-reviews, and stops in t
   assert.notEqual(repairedRevision, fixture.approvedRevision, 'the re-reviewed round names the repaired commit');
   assert.match(review, /integration gate `unit`/, 'the re-review prompt names the failed gate');
   assert.match(review, /repaired\.txt is missing/, 'the re-review prompt carries the gate output');
-  assert.ok(review.includes(`${fixture.approvedRevision}..${repairedRevision}`), 'the re-review prompt names the repair range A..B');
+  const approvedBaseline = originalMission.review!.rounds[0].subject.baseline;
+  const repairedBaseline = mission.review!.rounds.at(-1)!.subject.baseline;
+  assert.ok(review.includes(`${approvedBaseline}..${fixture.approvedRevision} -> ${repairedBaseline}..${repairedRevision}`), 'the re-review prompt names the mission interdiff');
   assert.match(review, /withdrew and dismissed that prior approval/, 'the re-review prompt states the prior approval was dismissed');
   assert.match(review, /review scope is yours/i, 'the reviewer decides the scope');
   // AC13: px status shows the previous failure, repair range and re-review outcome.
   const status: string[] = [];
   const previousLogger = setLogger({ log: (line: unknown) => { status.push(String(line)); }, error: () => {} });
   try { await run(['status', fixture.slug], { baseCwd: fixture.worktree }); } finally { setLogger(previousLogger); }
-  assert.match(status.join('\n'), new RegExp(`Previous integration failed at integration gate unit .*repair range ${fixture.approvedRevision}\.\.${decidedRevision}; re-review approved`));
+  assert.match(status.join('\n'), new RegExp(`Previous integration failed at integration gate unit .*mission interdiff ${approvedBaseline}\.\.${fixture.approvedRevision} -> ${repairedBaseline}\.\.${decidedRevision}; re-review approved`));
 
   void SqliteDatabaseAdapter;
 });

@@ -3,7 +3,7 @@ import type { GitReader } from '../adapters/git/worktree.js';
 import { randomUUID } from 'node:crypto';
 import { authorizedOperationId } from '../application/ports/mission-write-authorization.js';
 import { MissionEditService } from '../application/mission-edit-service.js';
-import { createReviewClassification, createIntegrationApprovalRestoration } from './review-classification.js';
+import { createReviewClassification } from './review-classification.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
 import type { TuiCapabilities } from '../application/tui-capabilities.js';
@@ -199,7 +199,7 @@ function createBoardHandoffWorkflow(
         invalidateResolvedBlocker: async () => undefined,
         invalidMaxAttempts: () => undefined,
         missingReviewAggregate: () => { throw new Error(`Mission ${slug} is unknown or has no valid Review aggregate.`); },
-        mechanisms: () => createReviewLoopPorts(slug, {}, { configuration, pinnedReviewer: agent, performHandoffFn: reviewHandoff, exit, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, worktree, configuration.decision, configuration), restoration: createIntegrationApprovalRestoration(worktree, configuration) }),
+        mechanisms: () => createReviewLoopPorts(slug, {}, { configuration, pinnedReviewer: agent, performHandoffFn: reviewHandoff, exit, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, worktree, configuration.decision, configuration) }),
       }, reviewLoop).enter({ slug, reviewer: agent, focus: 'all', dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null, rawMaxAttempts: null });
     },
   };

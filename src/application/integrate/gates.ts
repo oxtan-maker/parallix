@@ -1,3 +1,4 @@
+import { retainIntegrationApproval } from './approval-retention.js';
 import { completeGateRepairRoute } from './gate-repair-closeout.js';
 import type { MissionLoadResult } from '../domain-ports.js';
 import type { IntegrationMissionServices } from '../ports/integration-records.js';
@@ -13,7 +14,7 @@ import * as fmt from '../presentation/cli-format.js';
 import { agentFamily } from '../../domain/agents.js';
 import type { IntegrationReviewSnapshot } from '../ports/integration-records.js';
 import { missionId } from '../../domain/mission.js';
-import { integrationRepairNeedsReview } from '../integration-repair-review.js';
+import { integrationRepairNeedsReview, pendingIntegrationApproval } from '../integration-repair-review.js';
 import { reportedApprovalStaleness } from '../approval-coverage.js';
 import { abortWith, resolveBounceImplementer, type BounceSeams } from './support.js';
 import {
@@ -167,6 +168,11 @@ class IntegrationGateStep {
       // suite rather than silently running nothing.
       return full;
     }
+    // A later failed/cancelled validation supersedes the old green whitelist.
+    if (this.dependencies.gates.approvalEvidence) {
+      const latest = await this.dependencies.gates.approvalEvidence(checkout).validation(slug).catch(() => null);
+      if (!latest || latest.failed) { return full; }
+    }
     const marker = parseIntegrationValidationMarker(markerEntry);
     if (!marker) { return full; }
     const diff = marker.sha === finalizedCommit ? null : this.diffFromValidated(checkout, marker.sha, finalizedCommit);
@@ -248,7 +254,8 @@ class IntegrationGateStep {
       fmt.log.info('Integration gates skipped via --no-integration-gates flag');
       return 'skipped via --no-integration-gates';
     }
-    const { checkout, configured, gatesToRun, requirePreIntegration, result, finalTree } = await this.executeGatePlan({ slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent, realAgentModel, seams, configuration });
+    const execution = await this.executeGatePlan({ slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent, realAgentModel, seams, configuration });
+    const { gatesToRun, requirePreIntegration, result } = execution;
 
     const disposition = integrationGateDisposition({ dryRun, skippedAll: gatesToRun.skippedAll, skipped: result.skipped, required: requirePreIntegration, ok: result.ok, cancelled: result.cancelled });
     if (disposition === 'plan') {
@@ -280,33 +287,35 @@ class IntegrationGateStep {
       fmt.log.pass('All integration gates passed.');
       return `${gatesToRun.gates.length} integration gate(s) passed`;
     }
+    await this.recordUnsuccessfulGateRun(slug, missionServices, execution);
     if (disposition === 'cancelled') {
       throw abortWith(this.dependencies.landing, `Integration gates cancelled for ${slug}. Aborting before merge.`);
     }
 
+    return this.repairGateFailure({ slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent, realAgentModel, seams, configuration }, execution);
+  }
+
+  private async recordUnsuccessfulGateRun(slug: string, missionServices: IntegrationMissionServices,
+    { finalTree, result, configured }: Awaited<ReturnType<IntegrationGateStep['executeGatePlan']>>): Promise<void> {
+    const hooks = result.failedGate ? [result.failedGate.key] : configured.map(gate => gate.key);
+    if (!finalTree.commit || !hooks.length) { return; }
+    await missionServices.operationalHistory?.recordIntegrationValidation({ missionId: slug, sha: finalTree.commit,
+      hooks, failed: true });
+  }
+
+  private async repairGateFailure(request: GateStepRequest, execution: Awaited<ReturnType<IntegrationGateStep['executeGatePlan']>>): Promise<string> {
+    const { slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent, realAgentModel, seams, configuration } = request;
+    const { checkout, configured, result, finalTree } = execution;
     fmt.log.fail(`\nIntegration gates failed for ${slug} (root=${finalTree.rootDir}) — ${result.error}`);
     // TASK-2492: an approved mission whose integration gate goes red is no
     // longer a dead end. The failure is classified and routed; only the
     // recoverable mission-regression route continues, and it continues
     // only because the identical gate set re-ran green.
     const implementer = resolveBounceImplementer(context.taskAssignee ?? null, checkout, seams);
+    let repairStarted = false;
     const reactivateMission = async (bounceSlug: string) => {
-      const current = await missionServices.store.load(missionId(bounceSlug));
-      if (current.kind !== 'found') { throw new Error(`Mission ${bounceSlug} is unavailable for integration-gate rebound.`); }
-      if (current.mission.status === 'active' && integrationRepairNeedsReview(current.mission)) { return true; }
-      const occurredAt = new Date().toISOString();
-      const transition = await missionServices.lifecycle.transition({
-        operationId: `integration-gate-rebound:${bounceSlug}`,
-        missionId: missionId(bounceSlug),
-        expectedVersion: current.version,
-        capabilities: new Set(['mission:transition']),
-        command: { type: 'rebound-to-active', agent: agentFamily(implementer), cause: integrationGateFailureCause(result.failedGate), occurredAt },
-        actor: implementer,
-        occurredAt,
-        idempotencyKey: `integration-gate-rebound:${bounceSlug}:${current.version}`,
-      });
-      if (transition.status !== 'completed') { throw new Error(transition.error?.message ?? `Mission ${bounceSlug} could not rebound to active.`); }
-      return seams.transitionTaskFn(bounceSlug, 'active');
+      repairStarted = true;
+      return this.reactivateRepair(bounceSlug, implementer, missionServices, result.failedGate, seams);
     };
     // The rebound kernel owns the transition to active, immediately before it
     // launches an implementer. In particular, a transient verifier retries on
@@ -338,6 +347,7 @@ class IntegrationGateStep {
       startAgentFn: seams.startAgentFn,
       transitionTaskFn: (bounceSlug: string) => seams.transitionTaskFn(bounceSlug, 'active'),
       reactivateMissionFn: reactivateMission,
+      assessRepairFn: () => repairStarted ? this.assessRepair(slug, checkout, context, missionServices) : Promise.resolve('not-pending'),
       applyAgentFallbackFn: async ({ launchResult, original }) => seams.applyAgentFallbackFn({
         launchResult,
         original,
@@ -361,12 +371,53 @@ class IntegrationGateStep {
             if (!history) { return; }
             return history.recordIntegrationValidation(
               { ...buildIntegrationValidationMarker(input.missionId, input.sha, input.hooks),
-                baseline: context.baseBranch ? this.dependencies.gitPort.git(['-C', checkout, 'rev-parse', context.baseBranch]).stdout?.trim() : undefined },
+                baseline: this.candidateBaseline(checkout, context.baseBranch, input.sha) || undefined },
             );
           }
         : undefined,
     });
     return completeGateRepairRoute({ request: { slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent, realAgentModel, seams, configuration }, ports: this.dependencies, configured, checkout, route, reactivateMission });
+  }
+
+  private async reactivateRepair(bounceSlug: string, implementer: string, missionServices: IntegrationMissionServices,
+    failedGate: Parameters<typeof integrationGateFailureCause>[0], seams: IntegrateSeams) {
+    const current = await missionServices.store.load(missionId(bounceSlug));
+    if (current.kind !== 'found') { throw new Error(`Mission ${bounceSlug} is unavailable for integration-gate rebound.`); }
+    if (current.mission.status === 'active' && (integrationRepairNeedsReview(current.mission) || pendingIntegrationApproval(current.mission))) { return true; }
+    const occurredAt = new Date().toISOString();
+    const transition = await missionServices.lifecycle.transition({
+      operationId: `integration-gate-rebound:${bounceSlug}`,
+      missionId: missionId(bounceSlug),
+      expectedVersion: current.version,
+      capabilities: new Set(['mission:transition']),
+      command: { type: 'rebound-to-active', agent: agentFamily(implementer), cause: integrationGateFailureCause(failedGate), occurredAt },
+      actor: implementer,
+      occurredAt,
+      idempotencyKey: `integration-gate-rebound:${bounceSlug}:${current.version}`,
+    });
+    if (transition.status !== 'completed') { throw new Error(transition.error?.message ?? `Mission ${bounceSlug} could not rebound to active.`); }
+    return seams.transitionTaskFn(bounceSlug, 'active');
+  }
+
+  /** Compare the committed candidate against its actual base, even if the target advanced during repair. */
+  private candidateBaseline(checkout: string, branch: string, revision: string): string {
+    if (!branch) { return ''; }
+    const result = this.dependencies.gitPort.git(['-C', checkout, 'merge-base', '--all', branch, revision]);
+    const bases = result.stdout.trim().split(/\r?\n/).filter(Boolean);
+    return result.status === 0 && bases.length === 1 ? bases[0] : '';
+  }
+
+  private async assessRepair(slug: string, checkout: string, context: IntegrationContext, missionServices: IntegrationMissionServices) {
+    const evidence = this.dependencies.gates.approvalEvidence?.(checkout);
+    const candidate = this.dependencies.gates.captureFinalIntegrationTree(checkout);
+    if (!evidence || !candidate.ok || !candidate.commit) { return 'blocked' as const; }
+    const baseline = this.candidateBaseline(checkout, context.baseBranch, candidate.commit);
+    const outcome = await retainIntegrationApproval({ slug, services: missionServices, evidence, worktree: checkout,
+      candidate: { revision: candidate.commit, baseline }, head: () => {
+        const current = this.dependencies.gates.captureFinalIntegrationTree(checkout);
+        return current.ok ? current.commit ?? null : null;
+      } });
+    return outcome === 'not-pending' ? 'blocked' as const : outcome;
   }
 
   surface() {

@@ -124,14 +124,15 @@ test('TASK-2528: an unchanged retry after the same integration error still lands
   assert.deepEqual(h.invalidations, [], 'an unchanged retry never retracts the approval');
 });
 
-test('TASK-2528: a pre-retracted approval cannot take the fixed route even when the tree is unchanged', async () => {
+test('a concurrent withdrawal cannot take the fixed route even when the tree is unchanged (TASK-2820)', async () => {
   const h = harness();
   const route = await routeIntegrationGateFailure({
     ...routeArgs(h, false),
     reactivateMissionFn: async () => true,
+    assessRepairFn: async () => 'blocked',
   });
-  assert.equal(route.route, 'revision-changed');
-  assert.equal(h.invalidations.length, 1);
+  assert.equal(route.route, 'blocked');
+  assert.equal(h.invalidations.length, 0, 'the newer decision is not dismissed');
 });
 
 // ── Dismissal acts as the dedicated parallix login (TASK-2620) ───────────────

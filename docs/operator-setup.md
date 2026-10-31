@@ -372,31 +372,43 @@ contract lives in the database. A successful single-family self-author review
 also repairs a stale `active` Backlog task to `review`; advisory reviews that
 require another reviewer do not advance it.
 
-An integration-gate failure follows a separate, automatic repair path. Before
-launching the implementer, Parallix withdraws the old approval and preserves it
-in review history. If the launcher falls back to another agent family during
-that repair, its identity is persisted against the live current review round,
-not the integration context's earlier snapshot. Once the repair passes its
-gates, the fresh round compares the approved and candidate mission patches,
-each against its recorded main baseline. An unchanged patch can restore the
-prior approval mechanically before any reviewer or classifier runs, provided
-recorded green integration validation names the failed gate and covers the
-candidate or an equivalent mission patch. The validation must follow the
-withdrawal and precede restoration. Backlog task records and the integrate
-hook's release-version-only bump are excluded from comparison; other manifest,
-configuration and source changes remain substantive. Missing revisions,
-baselines, a failed validation, and Git errors prevent mechanical restoration.
-Substantive repairs can instead reach the weakening questions without an admitted
-gate fact; unavailable required evidence or a non-clearing answer retains general
-review. All approvals still require the mandatory pre-integration gates. Change requests return to implementation until review approves the new
-revision. Both restored and reviewed approvals stop in the integration lane;
-a human runs `px integrate <slug>` to land. An older mission stranded by a gate
-rebound is recovered through the same path.
+An integration-gate failure follows an automatic repair path. Before launching
+an implementer, Parallix moves the mission to active repair while retaining the
+original approval, bound to the revision it judged. Historical approval does not
+authorize landing: pending repair, failed or cancelled gates and uncommitted work
+block integration, including after interruption. Resume with `px integrate <slug>`.
+Restart rebases onto the current base before comparison and certifies outstanding
+repair checkpoints through their authorized verifier. Missing repair evidence or
+a contract blocker requires recovery before integration.
 
-`px status <slug>` retains the withdrawn approval and labels the new decision's
-source as `mechanical-restoration`, with both revisions, the failed gate and a
-validation citation. This is a restoration of prior review authority, not a
-new model verdict. Initial reviews and integration gates are still required.
+After verification, Parallix compares the approved and repaired mission patches
+against their recorded baselines. An equivalent patch retains the original
+decision only when green integration evidence names the failed gate and the exact
+committed candidate and its baseline. Backlog bookkeeping and recognized
+release-version-only hook changes are excluded from patch comparison. Missing revisions, baselines,
+evidence or unreadable Git state leave landing blocked. A changed mission patch
+makes the old approval stale: Parallix withdraws it and dismisses the provider
+approval, then enters the existing re-review workflow. A newer concurrent human
+decision is not overwritten by an assessment of an earlier version. Current human
+change requests and dismissed approvals are reconciled before retention and again
+before landing. A human dismissal invalidates an agent-authored provider approval
+too; missing matching approval or unavailable provider feedback leaves retention
+blocked. Dismissing a change request stops that request from blocking a standing
+approval. Dismissal is optional; it neither creates an approval nor replaces patch
+coverage, lifecycle or gate requirements. Unrelated base advancement during live
+repair does not change the mission patch comparison; subsequent integration still
+rebases and verifies its candidate.
+
+Substantive repairs retain the specialized weakening questions and shared general
+reviewer. All approvals still require the configured integration gates and provider
+protections. Retained and newly reviewed approvals stop in the integration lane;
+a human reads the PR and runs `px integrate <slug>` to land. Status shows the
+retention assessment and validation citation alongside the original judgment.
+If no original approval round is recorded, retention stays blocked; run
+`px review <slug>` to establish a fresh review before integration.
+Historical mechanical-restoration provenance remains readable independently of
+later repair assessments. That label describes old decisions only; retention
+preserves the original approval and issues no restoration approval.
 
 An agent's child CLI can record its assigned evidence and review verdict, but
 cannot start or resume a review workflow under inherited authority. It returns

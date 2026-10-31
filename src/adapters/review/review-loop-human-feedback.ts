@@ -47,6 +47,7 @@ function isApproval(comment: ForgejoFeedbackComment): boolean {
 
 interface HumanFeedbackDependencies {
   slug: string; branch: string; worktree: string; providerEnabled: boolean;
+  strict?: boolean; readOnly?: boolean;
   missionStore: MissionStore | null; log: (_msg: string) => void; error: (_msg: string) => void;
   fetchComments: typeof getComments; tokenFor: typeof readToken; recordHumanNote: typeof createEvent;
 }
@@ -57,9 +58,15 @@ export function composeHumanFeedback(dependencies: HumanFeedbackDependencies): H
       if (!providerEnabled) { return null; }
       const identity = state.reviewer || state.implementer;
       const token = identity ? tokenFor(identity, { rootDir: worktree }) : null;
-      if (!token) { return null; }
+      if (!token) {
+        if (dependencies.strict) { throw new Error('Human review feedback token is unavailable'); }
+        return null;
+      }
       const comments = await fetchComments(branch, token, { rootDir: worktree });
-      if (!Array.isArray(comments)) { return null; }
+      if (!Array.isArray(comments)) {
+        if (dependencies.strict) { throw new Error('Human review feedback is unavailable'); }
+        return null;
+      }
       const seen = new Set<unknown>(Array.isArray(state.metadata.humanFeedbackSources) ? state.metadata.humanFeedbackSources : []);
       const configuredAgents = new Set([...WORKFLOW_AGENT_NAMES, CLASSIFIER_FORGEJO_USER, state.reviewer ?? '', state.implementer ?? ''].map(value => value.toLowerCase()).filter(Boolean));
       const normalized = comments.map((comment, index) => ({ comment, index }));
@@ -88,7 +95,7 @@ export function composeHumanFeedback(dependencies: HumanFeedbackDependencies): H
       const consumedSources = new Set([...seen, ...newFeedback.map(item => item.source)]);
       state.metadata.humanFeedbackSources = [...consumedSources];
       state.metadata.humanFeedbackHistory = feedback.map(item => ({ source: item.source, author: item.author, state: item.state, disposition: item.disposition, reason: item.reason }));
-      for (const item of newFeedback) {
+      for (const item of dependencies.readOnly ? [] : newFeedback) {
         await recordHumanNote(slug, VALID_EVENT_TYPES.HUMAN_NOTE, {
           content: item.reason, actor: item.author, round: state.round, phase: state.phase,
           followUpReference: `${item.source}; state=${item.state}`,

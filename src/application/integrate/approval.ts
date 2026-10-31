@@ -1,3 +1,4 @@
+import { pendingIntegrationApproval } from '../../domain/integration-repair-policy.js';
 import type { Review } from '../../domain/review.js';
 import type { IntegrationApproval } from '../ports/integration-records.js';
 import type { IntegrationContext } from './context.js';
@@ -78,6 +79,9 @@ function activeApprovalNeedsProvider(context: IntegrationContext, lastRound: Non
 
 export function recoveryEstablishesApproval(context: IntegrationContext): RecoveryDecision {
   const status = context.missionStatus;
+  if (status && pendingIntegrationApproval({ status, review: context.missionReview ?? null })) {
+    return rejectedRecovery('Integration repair is pending; historical approval does not establish landing eligibility');
+  }
   if (status === 'integration' || status === 'done') {
     return { established: true, via: 'lifecycle', reason: '' };
   }

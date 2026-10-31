@@ -38,7 +38,7 @@ import type { Mission, MissionStatus } from '../../../src/domain/mission.js';
 import { missionId } from '../../../src/domain/mission.js';
 import { approvedReview, inMemoryTransitionStore, integrateCommandMission } from '../../fixtures/mission-builders.js';
 import { agentFamily } from '../../../src/domain/agents.js';
-import { applyReviewerCommand, applyImplementerCommand, beginNextReviewRound, currentReviewRound, changeRevision, ConfiguredReviewerEligibility, reviewFindingId, reviewStatus } from '../../../src/domain/review.js';
+import { applyReviewerCommand, applyImplementerCommand, beginNextReviewRound, currentReviewRound, changeRevision, ConfiguredReviewerEligibility, reviewFindingId, reviewStatus, revokeApprovedDecision } from '../../../src/domain/review.js';
 
 const SLUG = 'task-2492-gate-bounce';
 const LANDED_SHA = 'a11ced0000000000000000000000000000000001';
@@ -160,6 +160,16 @@ async function runIntegrate(scenario: Scenario) {
       assert.ok(args.reactivateMissionFn);
       await args.reactivateMissionFn(SLUG);
       assert.equal(services.store.mission().status, 'active');
+      const pending = services.store.mission();
+      assert.equal(reviewStatus(pending.review!), 'approved', 'a red gate preserves the original judgment during repair');
+      assert.equal(currentReviewRound(pending.review!).integrationRepairAssessment?.outcome, 'pending');
+      // This routing seam represents a changed patch: the retention owner
+      // withdraws the judgment before returning revision-changed to the CLI.
+      const review = revokeApprovedDecision(pending.review!, currentReviewRound(pending.review!).number, {
+        revokedAt: new Date().toISOString(), revokedBy: 'workflow', reason: 'Integration repair changed the approved mission patch.',
+        cause: { kind: 'integration-gate-failure', gate: FAILED_GATE.key, command: FAILED_GATE.command },
+      });
+      await services.store.save({ ...pending, review });
       assert.equal(reviewStatus(services.store.mission().review!), 'awaiting-review');
       return { route: 'revision-changed', rebounds: captured.length, repairedRevision: `repair-${captured.length}`, invalidation: { ok: true, dismissed: [], errors: [] } };
     }

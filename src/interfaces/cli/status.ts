@@ -151,13 +151,19 @@ function logReviewRounds(missionData: StatusMissionData, log: (_msg: string) => 
   for (const round of missionData.reviewHistory) { logReviewRound(round, log); }
 }
 
+function logIntegrationRepairAssessment(a: StatusMissionData['reviewHistory'][number]['integrationRepairAssessment'], log: (_msg: string) => void): void {
+  if (!a) { return; }
+  const source = a.source?.kind ?? (a.repair ? 'original-approval' : 'normal-review');
+  const validation = a.source
+    ? `; validated ${a.source.validationRevision} at ${a.source.validatedAt}; ${a.source.validationReference}`
+    : a.validation ? `; validated ${a.validation.sha} at ${a.validation.createdAt}; ${a.validation.reference}` : '';
+  log(`    integration repair source: ${source}; ${a.outcome}; approved ${a.approvedRevision}; candidate ${a.candidateRevision}; failed gate ${a.failedGate ?? 'unknown'}${validation}`);
+}
+
 function logReviewRound(round: StatusMissionData['reviewHistory'][number], log: (_msg: string) => void): void {
   log(`  Round ${round.number} [${round.reviewer} -> ${round.implementer}]: ${round.disposition ?? 'pending'}`);
   log(`    start revision: ${round.startRevision ?? 'unknown'}; decided revision: ${round.decidedRevision ?? 'unknown'}`);
-  if (round.integrationRepairAssessment) {
-    const a = round.integrationRepairAssessment;
-    log(`    integration repair source: ${a.source?.kind ?? 'normal-review'}; ${a.outcome}; approved ${a.approvedRevision}; candidate ${a.candidateRevision}; failed gate ${a.failedGate ?? 'unknown'}${a.source ? `; validated ${a.source.validationRevision} at ${a.source.validatedAt}; ${a.source.validationReference}` : ''}`);
-  }
+  logIntegrationRepairAssessment(round.integrationRepairAssessment, log);
   if (round.comment) { log(`    comment: ${round.comment}`); }
   if (round.revocation) { log(`    revoked by ${round.revocation.by}: ${round.revocation.reason} (${round.revocation.at})`); }
   if (round.supersession) { log(`    superseded by revision ${round.supersession.revision} (${round.supersession.by}, ${round.supersession.at})`); }

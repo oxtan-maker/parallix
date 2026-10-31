@@ -46,7 +46,7 @@ export interface StatusAgentEntry {
 export interface StatusReviewRound {
   readonly startRevision?: string;
   readonly decidedRevision?: string | null;
-  readonly integrationRepairAssessment?: import('../../domain/integration-approval-restoration.js').IntegrationRepairAssessment;
+  readonly integrationRepairAssessment?: import('../../domain/integration-approval-retention.js').IntegrationRepairAssessment;
   /** Round number. */
   readonly number: number;
   /** Reviewer agent. */

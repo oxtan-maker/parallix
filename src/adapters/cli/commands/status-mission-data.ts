@@ -133,7 +133,7 @@ function reviewFields({ recorded, card }: StatusSources) {
       number: r.number,
       startRevision: r.startRevision,
       decidedRevision: r.decidedRevision ?? null,
-      integrationRepairAssessment: r.integrationRepairAssessment as import('../../../domain/integration-approval-restoration.js').IntegrationRepairAssessment | undefined,
+      integrationRepairAssessment: r.integrationRepairAssessment as import('../../../domain/integration-approval-retention.js').IntegrationRepairAssessment | undefined,
       reviewer: r.reviewer,
       implementer: r.implementer,
       disposition: r.disposition ?? 'pending',

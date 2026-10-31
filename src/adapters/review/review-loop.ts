@@ -59,7 +59,6 @@ const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 /** The production review authority a composition root binds for one loop. */
 export interface ReviewLoopBindings {
   readonly pinnedReviewer?: string;
-  readonly restoration?: import('../../application/ports/integration-approval-restoration.js').IntegrationApprovalRestorationPort;
   readonly configuration?: ParallixConfiguration;
   readonly rebaseWorkflowOptions?: Pick<import('../rebase/rebase-workflow-adapter.js').RebaseCommandOptions, 'createPrFn' | 'readTokenFn' | 'resolveForgejoUserFn'>;
   readonly classification?: import('../../application/ports/review-classification.js').ReviewClassificationPorts;
@@ -288,7 +287,6 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
     branch,
     worktree,
     classification: bindings.classification,
-    restoration: bindings.restoration,
     polling: { intervalMs: resolvePollIntervalMs(bindings.configuration), timeoutMs: resolvePollTimeoutMs(target.pollTimeoutSeconds || 0, bindings.configuration) },
     missionStore,
     retainedRepair: missionStore ? retainedRepairPort(slug, worktree, missionStore, bindings.configuration) : undefined,

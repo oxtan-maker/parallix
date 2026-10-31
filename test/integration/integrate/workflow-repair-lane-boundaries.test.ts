@@ -1,3 +1,4 @@
+import { revokeApprovedDecision } from '../../../src/domain/review.js';
 import { SqliteWorkflowOperationStore } from '../../../src/adapters/sqlite/workflow-operation-store.js';
 import { configureMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
 import { requireWorkflowOwner } from '../../../src/domain/workflow-operation.js';
@@ -231,7 +232,7 @@ test('integration gates stop in the integration lane on a successful re-review a
   }
 });
 
-test('integration repair withdraws the old approval and returns through a new review without duplicate approval events', async () => {
+test('integration repair retains judgment until a changed patch withdraws it, without duplicate approval events', async () => {
   const fixture = await openFixture(seedMission('integration', strandedApprovedReview()));
   try {
     const rebound = await fixture.lifecycle.transition({
@@ -239,6 +240,13 @@ test('integration repair withdraws the old approval and returns through a new re
       command: { type: 'rebound-to-active', agent: IMPLEMENTER, cause: { kind: 'integration-gate-failure', gate: 'unit' }, occurredAt: APPROVED_AT }, actor: IMPLEMENTER, occurredAt: APPROVED_AT,
     });
     assert.equal(rebound.status, 'completed');
+    const retained = await currentReviewOf(fixture);
+    const retainedDecision = currentReviewRound(retained).decision;
+    assert.ok(retainedDecision?.kind === 'approved');
+    assert.equal(retainedDecision.revocation, undefined);
+    const withdrawal = await fixture.lifecycle.transition({ operationId: 'changed-repair', missionId: missionId(SLUG), capabilities: new Set(['mission:transition']),
+      command: { type: 'revoke-approval', review: revokeApprovedDecision(retained, currentReviewRound(retained).number, { revokedAt: APPROVED_AT, revokedBy: 'workflow', reason: 'Repair changed patch', cause: { kind: 'integration-gate-failure', gate: 'unit' } }) }, actor: IMPLEMENTER, occurredAt: APPROVED_AT });
+    assert.equal(withdrawal.status, 'completed');
     const review = await currentReviewOf(fixture);
     const formerApproval = review.rounds.at(-2)?.decision;
     assert.equal(formerApproval?.kind, 'approved');

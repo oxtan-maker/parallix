@@ -248,11 +248,11 @@ it('mechanical attribution survives SQLite reload without samples (TASK-2734)', 
     review = applyReviewerCommand(review, { type: 'approve', revision: changeRevision('approved'), decidedAt: '2026-10-04T13:00:00Z', comment: 'reviewed', source: { kind: 'provider', provider: 'forgejo' } });
     review = revokeApprovedDecision(review, 1, { revokedAt: '2026-10-05T10:00:00Z', revokedBy: 'parallix', reason: 'gate failed', cause: { kind: 'integration-gate-failure', gate: 'unit' } });
     const source = { kind: 'mechanical-restoration' as const, approvedRevision: 'approved', candidateRevision: 'approved', failedGate: 'unit',
-      validationRevision: 'approved', validatedAt: '2026-10-05T11:00:00Z', validationReference: 'operational_history:42' } satisfies import("../../../src/domain/integration-approval-restoration.js").MechanicalApprovalSource;
+      validationRevision: 'approved', validatedAt: '2026-10-05T11:00:00Z', validationReference: 'operational_history:42' } satisfies import("../../../src/domain/integration-repair-record.js").HistoricalMechanicalApprovalSource;
     const current = currentReviewRound(review);
     review = { ...review, rounds: [review.rounds[0], { ...current, subject: { ...current.subject, revision: changeRevision('round-start') }, integrationRepairAssessment: {
       assessedAt, outcome: 'restored', approvedRevision: 'approved', candidateRevision: 'approved', failedGate: 'unit', source } }] };
-    review = applyReviewerCommand(review, { type: 'approve', revision: changeRevision('approved'), decidedAt: assessedAt, comment: 'mechanical', source });
+    review = { ...review, rounds: [review.rounds[0], { ...review.rounds[1], decision: { kind: 'approved', revision: changeRevision('approved'), decidedAt: assessedAt, comment: 'historical mechanical restoration', source } }] };
     const mission = { ...fixtureMission('task-9734', { repositoryId: REPO }), status: 'integration' as const, closedAt: null, review };
     await store.save(mission, null);
     const first = await new SqliteClassifierStatisticsReader(db, telemetry, REPO).read();

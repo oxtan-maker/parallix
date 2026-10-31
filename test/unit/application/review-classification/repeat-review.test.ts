@@ -5,7 +5,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { tryClassifyReview } from '../../../../src/application/review-classification/classify-review.js';
-import { tryRestoreIntegrationApproval } from '../../../../src/application/review-loop/restore-integration-approval.js';
 import { ReviewRound } from '../../../../src/application/review-loop/round.js';
 import { pinReviewBaseline } from '../../../../src/application/review-loop/pin-baseline.js';
 import { repeatReview } from '../../../fixtures/repeat-review.js';
@@ -60,7 +59,7 @@ test('a verified repair with a recorded green gate and a non-weakening answer re
   assert.equal(s.attempts[0].score, 0.6);
 });
 
-test('the restored approval cites its decision source, gate, validation and probability (TASK-2736)', async () => {
+test('the repair approval cites its decision source, gate, validation and probability (TASK-2736)', async () => {
   const s = gateRepairScenario();
   assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED');
   const decision = s.store.mission().review!.rounds.at(-1)!.decision!;
@@ -71,7 +70,7 @@ test('the restored approval cites its decision source, gate, validation and prob
   assert.equal(decision.classifier!.policyVersion, WEAKENING_POLICY_VERSION);
   assert.equal(decision.classifier!.label, 'preserves');
   assert.equal(decision.classifier!.score, 0.6);
-  assert.match(decision.comment ?? '', /restored.*unit.*preserves/);
+  assert.match(decision.comment ?? '', /reviewed.*unit.*preserves/);
 });
 
 test('verified integration repair supplies the failure lines of its absolute stack path (TASK-2667 regression)', async () => {
@@ -432,31 +431,13 @@ test('ordinary finding re-reviews retain the 89% return threshold (TASK-2692)', 
   assert.deepEqual(s.published, []);
 });
 
-test('a revoked classifier clear reaches weakening and unchanged-patch restore (TASK-2741)', async () => {
-  for (const unchanged of [false, true]) {
-    const s = gateRepairScenario();
-    const prior = s.store.mission().review!.rounds[0]!;
-    (prior as { decision: typeof prior.decision }).decision = { ...prior.decision!,
-      classifier: { ...gateRepairScenario(true).store.mission().review!.rounds[0].decision!.classifier!,
-        label: 'addresses', score: 0.52 } };
-    if (unchanged) {
-      (s.store.mission().review!.rounds[1].subject as { baseline?: string }).baseline = 'e'.repeat(40);
-      s.context.ports.restoration = {
-        samePatch: async () => true,
-        validation: async () => ({ sha: 'b'.repeat(40), baseline: 'e'.repeat(40), hooks: ['unit'],
-          createdAt: '2026-10-01T00:02:30Z', missionId: s.context.slug, reference: 'isolated-green' }),
-        now: () => '2026-10-06T00:00:00Z',
-      };
-      (s.store.mission().review!.rounds[1].subject as { revision: string }).revision = 'start-before-verified';
-      assert.equal(await tryRestoreIntegrationApproval(s.context, s.round), 'APPROVED');
-      assert.equal(s.store.mission().review!.rounds[1].subject.revision, 'start-before-verified');
-      assert.equal(s.store.mission().review!.rounds[1].decision?.revision, 'b'.repeat(40));
-      assert.equal(s.attempts.length, 0);
-    } else {
-      assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED');
-      assert.equal(s.attempts[0].reason, 'weakening-preserves');
-    }
-  }
+test('a withdrawn classifier clear still reaches repair weakening review (TASK-2741)', async () => {
+  const s = gateRepairScenario();
+  const prior = s.store.mission().review!.rounds[0]!;
+  (prior as { decision: typeof prior.decision }).decision = { ...prior.decision!,
+    classifier: { ...gateRepairScenario(true).store.mission().review!.rounds[0].decision!.classifier!, label: 'addresses', score: 0.52 } };
+  assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED');
+  assert.equal(s.attempts[0].reason, 'weakening-preserves');
 });
 
 test('two mission-local classifier returns hand off and recorded reviewer or clear decisions reset the sequence (TASK-2741)', async () => {

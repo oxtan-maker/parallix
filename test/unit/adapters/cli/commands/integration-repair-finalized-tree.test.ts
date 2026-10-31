@@ -117,8 +117,7 @@ test('patch comparison fails closed on Git errors and only accepts release-versi
   assert.equal(releaseVersionOnly(json(pkg), JSON.stringify({ ...pkg, version: '1.2.4' }), 'package.json'), false);
 });
 
-import { parseIntegrationRepairAssessment, parseMechanicalApprovalSource } from '../../../../../src/domain/integration-restoration-record.js';
-import { mechanicalSource } from '../../../../../src/adapters/sqlite/integration-repair-serialization.js';
+import { parseIntegrationRepairAssessment, parseHistoricalApprovalSource } from '../../../../../src/domain/integration-repair-record.js';
 
 test('restoration provenance rejects malformed, future and mismatched persisted evidence (TASK-2734)', () => {
   const source = { kind: 'mechanical-restoration', approvedRevision: 'a', candidateRevision: 'b', failedGate: 'unit',
@@ -126,10 +125,42 @@ test('restoration provenance rejects malformed, future and mismatched persisted 
   const assessment = { assessedAt: '2026-10-01T12:00:00Z', approvedRevision: 'a', candidateRevision: 'b',
     failedGate: 'unit', outcome: 'restored', source };
   const parsed = parseIntegrationRepairAssessment(JSON.stringify(assessment));
-  assert.equal(mechanicalSource(parsed, 'b').validationReference, 'operational_history:1');
-  assert.throws(() => mechanicalSource(parsed, 'other'));
-  assert.throws(() => mechanicalSource({ ...parsed, source: { ...parsed.source!, validatedAt: parsed.assessedAt } }, 'b'));
-  assert.throws(() => parseMechanicalApprovalSource('{}'));
+  assert.equal(parseHistoricalApprovalSource(JSON.stringify(parsed.source), parsed, 'b').validationReference, 'operational_history:1');
+  assert.throws(() => parseHistoricalApprovalSource(JSON.stringify(parsed.source), parsed, 'other'));
+  assert.throws(() => parseHistoricalApprovalSource(JSON.stringify({ ...parsed.source!, validatedAt: parsed.assessedAt }), { ...parsed, source: { ...parsed.source!, validatedAt: parsed.assessedAt } }, 'b'));
+  assert.throws(() => parseHistoricalApprovalSource('{}'));
   assert.throws(() => parseIntegrationRepairAssessment(JSON.stringify({ ...assessment, outcome: 'unknown' })));
   assert.throws(() => parseIntegrationRepairAssessment(JSON.stringify({ ...assessment, normalReviewMs: -1 })));
 });
+
+test('retained approval history requires matching, well-formed committed-tree evidence (TASK-2820)', () => {
+  const assessment = { assessedAt: '2026-10-25T12:00:00Z', approvedRevision: 'a', candidateRevision: 'b', failedGate: 'unit', outcome: 'retained',
+    repair: { startedAt: '2026-10-25T10:00:00Z', cause: { kind: 'integration-gate-failure', gate: 'unit' } },
+    validation: { missionId: 'm', sha: 'b', baseline: 'base', hooks: ['unit'], createdAt: '2026-10-25T11:00:00Z', reference: 'history:1' } };
+  assert.equal(parseIntegrationRepairAssessment(JSON.stringify(assessment)).outcome, 'retained');
+  for (const validation of [undefined, { ...assessment.validation, sha: 'other' }, { ...assessment.validation, hooks: [4] },
+    { ...assessment.validation, reference: '' }, { ...assessment.validation, failed: true },
+    { ...assessment.validation, createdAt: '2026-10-25T09:00:00Z' }, { ...assessment.validation, createdAt: '2026-10-25T13:00:00Z' }]) {
+    assert.throws(() => parseIntegrationRepairAssessment(JSON.stringify({ ...assessment, validation })));
+  }
+});
+
+for (const failure of ['cancelled', 'moved-tree'] as const) {
+  test(`integration repair cannot certify ${failure} verification (TASK-2820)`, async () => {
+    const args = routeArgs([], [], true);
+    let head = 'candidate', recorded = 0;
+    args.captureFinalTreeFn = () => ({ ok: true, rootDir: '/repo', commit: head, tree: head });
+    args.recordIntegrationValidationFn = async () => { recorded++; };
+    args.runPhaseGatesFn = async () => {
+      if (failure === 'moved-tree') { head = 'different'; }
+      return phaseGateResult({ ok: true, cancelled: failure === 'cancelled' });
+    };
+    args.reboundFn = async (_reason, context) => {
+      assert.equal((await context.verify(1)).ok, false);
+      return { outcome: 'exhausted', attempts: 1, implementer: 'codex', diagnostic: 'unproven',
+        classification: { failureClass: 'GateFailure', dispatchAction: 'AutoRepair', isRelaunchable: true, label: 'gate' } };
+    };
+    assert.equal((await routeIntegrationGateFailure(args)).route, 'exhausted');
+    assert.equal(recorded, 0);
+  });
+}

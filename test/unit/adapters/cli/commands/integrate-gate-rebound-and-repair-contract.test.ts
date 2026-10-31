@@ -1,3 +1,4 @@
+import { pendingIntegrationApproval } from '../../../../../src/domain/integration-repair-policy.js';
 import { stubMissionServices } from '../../../../helpers/stub-mission-services.js';
 import { rebaseWorkflowFixture } from '../../../../helpers/rebase-workflow-fixture.js';
 import { draftMissionServicesFixture } from '../../../../helpers/draft-mission-services.js';
@@ -31,8 +32,6 @@ import { mkdtemp as registeredMkdtemp } from '../../../../helpers/temp-dir.js';
 import { fakeReviewLoopPorts } from '../../../../helpers/review-loop-ports.js';
 import { IntegrationGateRouteOptions } from '../../../../../src/adapters/cli/commands/integrate-gate-rebound.js';
 
-// Declaration order is load-bearing: installModuleMocks relinks modules in this order, so a
-// module must be declared after the modules it depends on (merged from every section below).
 mockModule('../../../../../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
 mockModule('../../../../../src/adapters/agents/runtime-matrix.js', import.meta.url);
 mockModule('../../../../../src/adapters/verification/verification.js', import.meta.url);
@@ -51,7 +50,7 @@ const { setLogger } = await import('../../../../../src/application/presentation/
 const { agentFamily } = await import('../../../../../src/domain/agents.js');
 const { missionId, missionLabels } = await import('../../../../../src/domain/mission.js');
 const { repositoryId } = await import('../../../../../src/domain/repository.js');
-const { applyReviewerCommand, applyImplementerCommand, beginNextReviewRound, changeRevision, ConfiguredReviewerEligibility, currentReviewRound, requestReviewIntervention, reviewFindingId, reviewStatus, startReview } = await import('../../../../../src/domain/review.js');
+const { applyReviewerCommand, applyImplementerCommand, beginNextReviewRound, changeRevision, ConfiguredReviewerEligibility, currentReviewRound, revokeApprovedDecision, requestReviewIntervention, reviewFindingId, reviewStatus, startReview } = await import('../../../../../src/domain/review.js');
 const { integrationRepairNeedsReview } = await import('../../../../../src/application/integration-repair-review.js');
 const { createReviewWorkflowAdapter } = await import('../../../../../src/adapters/review/review-workflow-adapter.js');
 const { bindReviewOperatorResume } = await import('../../../../../src/composition/review-operator-resume.js');
@@ -600,8 +599,6 @@ describe("handoff and push-gate regressions", () => {
     assert.deepEqual(reviewed, ['task-2547'], 'the repaired revision was re-reviewed through the single live route');
   });
 
-  // --- (e) gatekeeper on a typed-verb mission ----------------------------------------
-
   test('(e) the gatekeeper does not demand CP-*.md from a mission whose checkpoints are recorded in Mission state', async () => {
     const recorder = makeRecorder();
     const gatekeeperOptions: NonNullable<Parameters<ReturnType<typeof makePorts>['gatekeeper']['runGatekeeper']>[1]>[] = [];
@@ -642,7 +639,6 @@ describe("handoff and push-gate regressions", () => {
   });
 });
 
-// ---- task-2543 integration repair (consolidated from test/task-2543-integration-repair.test.ts, TASK-2622.09) ----
 describe("integration repair", () => {
   const slug = 'task-2543';
   const reviewer = agentFamily('claude');
@@ -655,7 +651,7 @@ describe("integration repair", () => {
       change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' },
       revision: changeRevision('approved-commit'),
     }, reviewer, implementer, startedAt, eligibility), {
-      type: 'approve', decidedAt: '2026-01-01T00:01:00Z', comment: null, source: { kind: 'local' },
+      type: 'approve', revision: changeRevision('approved-commit'), decidedAt: '2026-01-01T00:01:00Z', comment: null, source: { kind: 'local' },
     });
     let mission: Mission = {
       id: missionId(slug), repositoryId: repositoryId('parallix'), title: 'repair',
@@ -742,16 +738,19 @@ describe("integration repair", () => {
     } finally { setLogger(previous); }
   });
 
-  test('integration repair withdraws a no-fact classifier approval before launch, survives review pingpong, and requests integration restart (TASK-2754)', async () => {
+  test('integration repair retains a no-fact classifier approval until patch change, survives review pingpong, and requests integration restart (TASK-2754)', async () => {
     const fixture = memoryMission();
     const prior = fixture.mission().review!.rounds.at(-1)!.decision!;
     Object.assign(prior, { classifier: noFactIntegrationRepairClassifier(startedAt) });
+    Object.assign(currentReviewRound(fixture.mission().review!).subject, { baseline: changeRevision('base') });
     let providerRetracted = false;
     let gateRuns = 0;
     let repaired = false;
     const failedGate = { key: 'integration', command: 'gate', exitCode: 1, stdout: '', stderr: 'regression' };
     const ports = {
+      git: { git: () => ({ status: 0, stdout: 'base', stderr: '' }) },
       gates: {
+        approvalEvidence: () => ({ reconcileHumanFeedback: async () => true, samePatch: async () => false, validation: async () => null, now: () => new Date().toISOString() }),
         resolveIntegrationVerificationWorktree: () => '/fixture',
         captureFinalIntegrationTree: () => ({ ok: true as const, rootDir: '/fixture', commit: repaired ? 'repair' : 'approved', tree: repaired ? 'repair' : 'approved' }),
         loadPhaseGates: () => [{ key: 'integration', command: 'gate', order: 1 }],
@@ -765,7 +764,7 @@ describe("integration repair", () => {
     const previous = setLogger({ log: () => {} });
     try {
       await assert.rejects(step.runRequiredLocalGates({
-        slug, context: integrationContext({ taskAssignee: implementer, baseWorktree: '/fixture', area: 'all', branch: `mission/${slug}` }),
+        slug, context: integrationContext({ taskAssignee: implementer, baseWorktree: '/fixture', area: 'all', branch: `mission/${slug}`, baseBranch: 'main' }),
         missionLoad: await fixture.store.load(), missionServices: integrationServices(fixture),
         dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
         seams: {
@@ -774,9 +773,10 @@ describe("integration repair", () => {
           startAgentFn: async () => {
             const review = fixture.mission().review!;
             assert.equal(fixture.mission().status, 'active');
-            assert.equal(reviewStatus(review), 'awaiting-review');
-            assert.ok(review.rounds[0].decision?.kind === 'approved' && review.rounds[0].decision.revocation);
-            assert.equal(providerRetracted, true, 'provider approval is retracted before repair launches');
+            assert.equal(reviewStatus(review), 'approved');
+            const decision = review.rounds[0].decision; assert.ok(decision?.kind === 'approved');
+            assert.equal(decision.revocation, undefined);
+            assert.equal(providerRetracted, false, 'provider approval is retained until patch change is established');
             repaired = true;
             return { agent: implementer, result: { status: 0 } };
           },
@@ -820,7 +820,6 @@ describe("integration repair", () => {
       assert.deepEqual(fixture.history.map(event => event.trigger), ['rebound-to-active', 'submit-for-review', 'request-changes', 'submit-for-review', 'approve']);
     } finally { setLogger(previous); }
   });
-
   test('inferred operator entry clears escalation and permits an attempt even when its old round limit was exhausted (TASK-2810)', async () => {
     const fixture = memoryMission('review');
     const approved = fixture.mission().review!;
@@ -852,7 +851,6 @@ describe("integration repair", () => {
     await adapter.enter(context!);
     assert.equal(continued, true);
   });
-
   test('a repair review cannot consume an old or unassigned provider approval', async () => {
     const result = await getLatestReviewForPr(1, 'claude', '2026-01-01T00:03:00Z', 'fake', {
       apiCall: forgejoAsyncApiFixture(async () => ({ ok: true as const, data: [
@@ -862,10 +860,10 @@ describe("integration repair", () => {
     });
     assert.equal(result, null);
   });
-
   test('the real handoff binds an invalidated round to the committed repair and mirrors the review lane', async () => {
     const fixture = memoryMission();
     await transition(fixture, { type: 'rebound-to-active', agent: implementer, cause: { kind: 'integration-gate-failure', gate: 'unit' }, occurredAt: new Date().toISOString() });
+    await transition(fixture, { type: 'revoke-approval', review: revokeApprovedDecision(fixture.mission().review!, 1, { revokedAt: new Date().toISOString(), revokedBy: 'workflow', reason: 'Repair changed patch', cause: { kind: 'integration-gate-failure', gate: 'unit' } }) });
     const recorder = makeRecorder();
     const base = makePorts(recorder);
     const ports = makePorts(recorder, {
@@ -885,7 +883,6 @@ describe("integration repair", () => {
     assert.equal(fixture.mission().review!.rounds[0].subject.revision, 'approved-commit');
     assert.ok(recorder.transitions.includes('review'));
   });
-
   test('integration excludes a legacy approval from an earlier round but retains its holder for retraction', () => {
     const decision = getLatestReviewDecision(`mission/${slug}`, {
       token: 'fake', reviewerUser: 'claude', sinceIso: '2026-01-01T00:03:00Z',
@@ -896,9 +893,8 @@ describe("integration repair", () => {
     assert.equal(decision.reviewerApproved, false);
     assert.equal(decision.reviewState, null);
   });
-
   for (const route of ['limit-reached', 'revision-changed'] as const) {
-    test(`a ${route} repair route leaves the old approval invalid and continuation available`, async () => {
+    test(`a ${route} repair route blocks landing and keeps the correct continuation available`, async () => {
       const fixture = memoryMission();
       let reviewed = false;
       const step = createIntegrationGateStep(stubIntegrateWorkflowPorts({
@@ -921,17 +917,21 @@ describe("integration repair", () => {
           seams: {
             transitionTaskFn: async () => true, startAgentFn: async () => { throw new Error('no launch'); },
             applyAgentFallbackFn: async () => implementer,
-            routeIntegrationGateFailureFn: async () => ({ route, rebounds: 2, repairedRevision: 'new', invalidation: { ok: false, dismissed: [], errors: ['provider failure'] } }),
+            routeIntegrationGateFailureFn: async options => {
+              if (route === 'revision-changed') { await options.reactivateMissionFn!(slug);
+                await transition(fixture, { type: 'revoke-approval', review: revokeApprovedDecision(fixture.mission().review!, 1, { revokedAt: new Date().toISOString(), revokedBy: 'workflow', reason: 'Repair changed patch', cause: { kind: 'integration-gate-failure', gate: 'gate' } }) }); }
+              return { route, rebounds: 2, repairedRevision: 'new', invalidation: { ok: false, dismissed: [], errors: ['provider failure'] } };
+            },
             reReviewFn: async () => { reviewed = true; return false; },
           },
         }), { name: 'IntegrationAbort' });
-        assert.equal(integrationRepairNeedsReview(fixture.mission()), true);
+        assert.equal(integrationRepairNeedsReview(fixture.mission()), route === 'revision-changed');
+        assert.equal(Boolean(pendingIntegrationApproval(fixture.mission())), route === 'limit-reached');
         assert.equal(reviewed, route === 'revision-changed', 'failed provider retraction does not prevent the fresh review');
       } finally { setLogger(previous); }
     });
   }
 });
-
 // ---- task-1268 diff-scoped gate area (consolidated from test/task-1268-diff-scoped-area.test.ts, TASK-2622.09) ----
 describe("diff-scoped gate area", () => {
   const detectAreasFromChangedFilesModule = mockModule<typeof import('../../../../../src/adapters/verification/verification.js')>('../../../../../src/adapters/verification/verification.js', import.meta.url);

@@ -50,3 +50,22 @@ test('a refused dismissal is reported, never skipped', () => {
 test('setup provisions the parallix login alongside the agent logins', () => {
   assert.ok(suggestedForgejoUsers().includes(PARALLIX_FORGEJO_USER));
 });
+
+test('repair dismissal targets stale judged code and preserves newer human decisions (TASK-2820)', () => {
+  const dismissed: string[] = [];
+  const apiCall = forgejoApiFixture((method, route) => {
+    if (route.endsWith('/mission/task-2620')) { return { ok: true as const, data: { number: 7, state: 'open' } }; }
+    if (method === 'GET') { return { ok: true as const, data: [
+      { id: 1, state: 'APPROVED', commit_id: 'judged-A', user: { login: 'human-old' } },
+      { id: 2, state: 'APPROVED', commit_id: 'repair-B', user: { login: 'human-new' } },
+      { id: 3, state: 'APPROVED', user: { login: 'unknown' } },
+    ] }; }
+    dismissed.push(route);
+    return { ok: true as const, data: {} };
+  });
+  const result = dismissStandingApprovals('mission/task-2620', 'token', 'repair changed patch', { apiCall, expectedRevision: 'judged-A' });
+  assert.deepEqual(dismissed, ['/pulls/7/reviews/1/dismissals']);
+  assert.deepEqual(result.dismissed, ['human-old']);
+  assert.equal(result.ok, false, 'unknown provider evidence cannot silently authorize landing');
+  assert.match(result.errors.join(' '), /unknown/);
+});

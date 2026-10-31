@@ -1,5 +1,4 @@
-import { parseIntegrationRepairAssessment, parseMechanicalApprovalSource } from '../../domain/integration-restoration-record.js';
-import { mechanicalSource } from './integration-repair-serialization.js';
+import { parseIntegrationRepairAssessment, parseHistoricalApprovalSource } from '../../domain/integration-repair-record.js';
 import { agentFamily } from '../../domain/agents.js';
 import { assertClassifierReviewSource, clearingLabel } from '../../domain/classifier-review.js';
 import type { CheckpointData, GoalCheckRow } from '../../domain/checkpoint.js';
@@ -426,8 +425,7 @@ function mechanicalDecisionFor(row: MissionReviewRoundRecord, stored: ReviewerDe
   if (!row.mechanical_source) { return stored; }
   if (!row.integration_repair_assessment || stored?.kind !== 'approved' || row.classifier_source) { throw new Error('Invalid persisted mechanical source'); }
   const assessment = parseIntegrationRepairAssessment(row.integration_repair_assessment);
-  const source = parseMechanicalApprovalSource(row.mechanical_source);
-  if (JSON.stringify(source) !== JSON.stringify(mechanicalSource(assessment, row.decided_revision ?? source.candidateRevision))) { throw new Error('Invalid persisted mechanical source'); }
+  const source = parseHistoricalApprovalSource(row.mechanical_source, assessment.priorRestoration ?? assessment, row.decided_revision ?? undefined);
   return { ...stored, source };
 }
 

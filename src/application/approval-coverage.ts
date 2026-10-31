@@ -1,3 +1,5 @@
+import { pendingIntegrationApproval } from '../domain/integration-repair-policy.js';
+import { retentionEvidenceMatches } from '../domain/integration-approval-retention.js';
 import {
   assessApprovalCoverage,
   recordApprovalSuperseded,
@@ -38,7 +40,7 @@ export function observeLandedChange(
   move: { readonly landedRevision?: string | null; readonly movedFrom?: string | null } = {},
 ): LandedChangeObservation | null {
   const round = review ? currentReviewRound(review) : null;
-  const revision = decidedRevisionOf(round);
+  const revision = coverageRevision(round);
   if (!round || !revision) { return null; }
   const { change } = round.subject;
   const landed = move.landedRevision ?? identity.branchHead(change.sourceBranch);
@@ -53,6 +55,13 @@ export function observeLandedChange(
     landedRevision: changeRevision(landed),
     sameChange: approvedId === null || landedId === null ? null : approvedId === landedId,
   };
+}
+
+/** Retention extends coverage without rewriting the judged revision. */
+function coverageRevision(round: import('../domain/review.js').ReviewRound | null) {
+  const decided = decidedRevisionOf(round), retained = round?.integrationRepairAssessment;
+  return retained?.outcome === 'retained' && retained.approvedRevision === decided && retentionEvidenceMatches(retained)
+    ? changeRevision(retained.candidateRevision) : decided;
 }
 
 /** Coverage of a mission's current effective approval, computed with no operator input. */
@@ -97,6 +106,9 @@ export async function recordBranchMove(request: {
 }): Promise<BranchMoveRecording> {
   const loaded = await request.store.load(missionId(request.slug));
   if (loaded.kind !== 'found' || loaded.mission.status === 'done') { return { outcome: 'no-approval' }; }
+  if (pendingIntegrationApproval(loaded.mission)) {
+    return { outcome: 'unverifiable', reason: 'integration repair coverage is assessed after rebase and verification' };
+  }
   const review = loaded.mission.review;
   const coverage = assessApprovalCoverage(review, observeLandedChange(review, request.identity, { landedRevision: request.landedRevision, movedFrom: request.movedFrom }));
   if (!coverage || !review) { return { outcome: 'no-approval' }; }

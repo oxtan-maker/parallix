@@ -1,5 +1,7 @@
+import { preserveHistoricalRestoration } from './integration-repair-record.js';
+import { retentionEvidenceMatches } from './integration-approval-retention.js';
 import type { AgentFamily } from './agents.js';
-import { integrationRepairNeedsReview } from './integration-repair-policy.js';
+import { integrationRepairNeedsReview, pendingIntegrationApproval } from './integration-repair-policy.js';
 import {
   isClosedMission,
   MissionRuleViolation,
@@ -220,6 +222,7 @@ function submitForReview(mission: Mission, command: SubmitForReviewCommand): Mis
   if (mission.status === 'review' && mission.review) {
     return mission;
   }
+  if (pendingIntegrationApproval(mission)) { throw new MissionRuleViolation('Integration repair must prove approval retention before lifecycle recovery'); }
   if (hasApprovedRecordedRound(mission)) {
     return { ...mission, status: 'review' };
   }
@@ -239,14 +242,29 @@ function approvableFromActiveLane(mission: OpenMission): boolean {
     && !integrationRepairNeedsReview(mission));
 }
 
+function retainRepairJudgment(review: Review, command: Extract<MissionCommand, { type: 'rebound-to-active' }>): Review {
+  if (command.cause.kind !== 'integration-gate-failure') { throw new MissionRuleViolation('Integration repair requires a gate failure'); }
+  const round = currentReviewRound(review), revision = String(round.decision!.revision ?? 'unknown');
+  return { ...review, rounds: replaceCurrentRound(review, { ...round,
+    integrationRepairAssessment: { assessedAt: command.occurredAt!, approvedRevision: revision, candidateRevision: revision,
+      ...preserveHistoricalRestoration(round.integrationRepairAssessment),
+      failedGate: command.cause.gate, outcome: 'pending', repair: { startedAt: command.occurredAt!, cause: command.cause } } }) };
+}
+
 function reboundMission(mission: Mission, command: Extract<MissionCommand, { type: 'rebound-to-active' }>): Mission {
   requireStatus(mission, ['integration', 'review', 'active'], command);
   if (mission.status === 'review' && (!mission.review || reviewStatus(mission.review) !== 'awaiting-review')) {
     throw new MissionRuleViolation('A review repair rebound requires an undecided review round');
   }
+  if (command.cause.kind === 'integration-gate-failure' && !Number.isFinite(Date.parse(command.occurredAt ?? ''))) {
+    throw new MissionRuleViolation('Integration repair requires its failure time');
+  }
+  if (pendingIntegrationApproval(mission)) { return { ...mission, assignee: command.agent }; }
   return {
     ...mission, status: 'active', assignee: command.agent,
-    review: mission.review && reviewStatus(mission.review) === 'approved'
+    review: mission.review && reviewStatus(mission.review) === 'approved' && command.cause.kind === 'integration-gate-failure'
+      ? retainRepairJudgment(mission.review, command)
+      : mission.review && reviewStatus(mission.review) === 'approved'
       ? revokeApprovedDecision(mission.review, currentReviewRound(mission.review).number, {
         revokedAt: command.occurredAt ?? '',
         revokedBy: 'workflow',
@@ -268,9 +286,24 @@ export function requireReviewIdentity(mission: Pick<Mission, 'assignee'>, review
   }
 }
 
+function requireRetainedJudgment(mission: Mission, review: Review, pending: import('./review.js').ReviewRound): void {
+  const retained = currentReviewRound(review);
+  if (retained.integrationRepairAssessment?.outcome !== 'retained'
+    || !retentionEvidenceMatches(retained.integrationRepairAssessment, String(mission.id))
+    || retained.integrationRepairAssessment.approvedRevision !== pending.decision?.revision
+    || JSON.stringify(pending.decision) !== JSON.stringify(retained.decision)
+    || JSON.stringify(pending.subject) !== JSON.stringify(retained.subject)
+    || JSON.stringify(pending.integrationRepairAssessment?.repair) !== JSON.stringify(retained.integrationRepairAssessment.repair)
+    || mission.review!.rounds.length !== review.rounds.length) {
+    throw new MissionRuleViolation('Integration repair may only retain the original judgment with proven evidence');
+  }
+}
+
 function approveMission(mission: Mission, command: Extract<MissionCommand, { type: 'approve' }>): Mission {
   requireStatus(mission, ['review', 'active'], command);
-  if (mission.status === 'active' && !approvableFromActiveLane(mission)) {
+  const pending = pendingIntegrationApproval(mission);
+  if (pending) { requireRetainedJudgment(mission, command.review, pending); }
+  if (mission.status === 'active' && !pending && !approvableFromActiveLane(mission)) {
     throw new MissionRuleViolation('Approval from an active Mission requires an awaiting-review round outside an integration repair');
   }
   requireSameReviewedRevision(mission, command.review);
@@ -290,12 +323,15 @@ function revokeMissionApproval(mission: Mission, command: Extract<MissionCommand
   if (reviewStatus(command.review) !== 'awaiting-review') {
     throw new MissionRuleViolation('Revocation must open an awaiting-review round');
   }
-  return { ...mission, status: 'review', review: command.review };
+  const withdrawn = command.review.rounds.at(-2)?.decision;
+  const integrationRepair = mission.status === 'active' && withdrawn?.kind === 'approved'
+    && withdrawn.revocation?.cause?.kind === 'integration-gate-failure';
+  return { ...mission, status: integrationRepair ? 'active' : 'review', review: command.review };
 }
 
 function recordImplementer(mission: Mission, command: Extract<MissionCommand, { type: 'record-implementer' }>): Mission {
   requireStatus(mission, ['active', 'review'], command);
-  if (mission.review && reviewStatus(mission.review) === 'approved') {
+  if (mission.review && reviewStatus(mission.review) === 'approved' && !pendingIntegrationApproval(mission)) {
     throw new MissionRuleViolation('Revoke the approved review before recording a different implementer');
   }
   const previous = mission.review ? currentReviewRound(mission.review) : null;

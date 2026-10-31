@@ -62,8 +62,7 @@ export interface ReviewedRevision {
 
 export type ReviewApprovalSource =
   | { readonly kind: 'provider'; readonly provider: string }
-  | { readonly kind: 'local' }
-  | import('./integration-approval-restoration.js').MechanicalApprovalSource;
+  | { readonly kind: 'local' };
 
 /**
  * Why an approval was withdrawn, as a typed fact rather than reason text.
@@ -113,7 +112,7 @@ export type ReviewerDecision =
     readonly revision?: ChangeRevision | null;
     readonly decidedAt: string;
     readonly comment: string | null;
-    readonly source: ReviewApprovalSource;
+    readonly source: ReviewApprovalSource | import('./integration-repair-record.js').HistoricalMechanicalApprovalSource;
     /** Present only when this formerly-effective approval was withdrawn. */
     readonly revocation?: ReviewDecisionRevocation;
     /** Present once the branch moved to a change this approval does not cover. */
@@ -342,7 +341,7 @@ export function stageLaunchWindowsFrom(source: unknown): readonly StageLaunchWin
 }
 
 export interface ReviewRound {
-  readonly integrationRepairAssessment?: import('./integration-approval-restoration.js').IntegrationRepairAssessment;
+  readonly integrationRepairAssessment?: import('./integration-approval-retention.js').IntegrationRepairAssessment;
   readonly number: number;
   readonly subject: ReviewedRevision;
   readonly reviewer: AgentFamily;
@@ -605,7 +604,7 @@ export function openRepairFromReview(
   review: Review | null,
   successCriteria: readonly string[],
   recordedRows: readonly RecordedRow[] = [],
-): { readonly round: number; readonly affected: readonly string[]; readonly gate?: string } | null {
+): { readonly round: number; readonly affected: readonly string[]; readonly gate?: string; readonly integrationIncident?: { readonly round: number; readonly startedAt: string } } | null {
   if (!review) { return null; }
   const round = currentReviewRound(review);
   if (!round) { return null; }
@@ -621,10 +620,17 @@ export function openRepairFromReview(
   }
   const previous = review.rounds[review.rounds.length - 2];
   if (round.decision === null && previous?.decision?.kind === 'approved' && previous.decision.revocation) {
-    const names = failedGateNames(previous.decision.revocation);
-    return { round: round.number, affected: criteriaCitingFailedGate(names, successCriteria, recordedRows), gate: names[0] };
+    return withdrawnRepairObligation(round, previous, previous.decision.revocation, successCriteria, recordedRows);
   }
   return null;
+}
+
+function withdrawnRepairObligation(round: ReviewRound, previous: ReviewRound, revocation: ReviewDecisionRevocation, successCriteria: readonly string[],
+  recordedRows: readonly RecordedRow[]): NonNullable<ReturnType<typeof openRepairFromReview>> {
+  const names = failedGateNames(revocation);
+  const incident = revocation.cause?.kind === 'integration-gate-failure' ? previous.integrationRepairAssessment?.repair : null;
+  return { round: round.number, affected: criteriaCitingFailedGate(names, successCriteria, recordedRows), gate: names[0],
+    ...(incident ? { integrationIncident: { round: previous.number, startedAt: incident.startedAt } } : {}) };
 }
 
 export function replaceCurrentRound(review: Review, round: ReviewRound): Review['rounds'] {
@@ -770,6 +776,7 @@ export function applyReviewerCommand(review: Review, command: ReviewerCommand): 
   if (reviewStatus(review) !== 'awaiting-review') {
     throw new Error(`Reviewer cannot ${command.type} while review is ${reviewStatus(review)}`);
   }
+  if (command.type === 'approve' && !['provider', 'local'].includes(command.source.kind)) { throw new Error('Mechanical restoration is historical; new approvals require local or provider review'); }
   if (!command.decidedAt.trim()) { throw new Error('Reviewer decision requires a time'); }
   if (command.type === 'request-changes') {
     if (command.findings.length === 0) {

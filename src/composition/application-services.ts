@@ -4,7 +4,7 @@ import { createMissionApplicationServices } from './mission-services.js';
 import { bindRecoveryPorts, unavailableMissionTransitionStore } from './recovery-ports.js';
 import { correlateMissionCapture } from './mission-terminal.js';
 import type { SqliteMigrationRunner } from '../adapters/sqlite/migration-runner.js';
-import { createReviewClassification, createIntegrationApprovalRestoration } from './review-classification.js';
+import { createReviewClassification } from './review-classification.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 
 import { ExecuteMissionService } from '../application/execute-mission-service.js';
@@ -279,7 +279,7 @@ export async function createProductionApplicationServices(
     reviewLoopMechanisms: (reviewSlug: string, target: ReviewLoopTarget, bindings: ReviewLoopBindings = {}) => createReviewLoopPorts(reviewSlug, target, {
       ...bindings,
       configuration: options.configuration,
-      classification: createReviewClassification(reviewSlug, target.worktree ?? rootDir, options.configuration.decision, options.configuration), restoration: createIntegrationApprovalRestoration(target.worktree ?? rootDir, options.configuration),
+      classification: createReviewClassification(reviewSlug, target.worktree ?? rootDir, options.configuration.decision, options.configuration),
       performHandoffFn: handoffWithMissionServices!,
       ...reviewLoopBindings(mission.store, mission.lifecycle, sessionMarkerPort),
     }),

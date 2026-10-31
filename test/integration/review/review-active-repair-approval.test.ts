@@ -28,6 +28,7 @@ import {
   ConfiguredReviewerEligibility,
   currentReviewRound,
   reviewFindingId,
+  revokeApprovedDecision,
   reviewStatus,
   startReview,
   type Review,
@@ -217,6 +218,24 @@ test('an integration-repair round reopened by a revoked approval is not approvab
       command: { type: 'rebound-to-active', agent: IMPLEMENTER, cause: { kind: 'integration-gate-failure', gate: 'unit' }, occurredAt: APPROVED_AT }, actor: IMPLEMENTER, occurredAt: APPROVED_AT,
     });
     assert.equal(rebound.status, 'completed');
+    const pending = await loadMission(fixture);
+    assert.equal(reviewStatus(pending.review!), 'approved', 'repair retains the original judgment');
+    const replay = await approve(fixture);
+    assert.equal(replay.outcome, 'failed', 'replaying the retained judgment cannot end active repair');
+    const afterReplay = await loadMission(fixture);
+    assert.equal(afterReplay.status, 'active');
+    assert.deepEqual(afterReplay.review, pending.review, 'replay cannot overwrite the retained judgment');
+    // Retain the historical revoked-repair guard as well: old records and
+    // changed-patch withdrawals still require the normal review entry.
+    const loaded = await fixture.store.load(missionId(SLUG));
+    assert.equal(loaded.kind, 'found');
+    await fixture.store.save({ ...pending, review: revokeApprovedDecision(pending.review!, currentReviewRound(pending.review!).number, {
+      revokedAt: APPROVED_AT, revokedBy: 'workflow', reason: 'Changed repair patch',
+      cause: { kind: 'integration-gate-failure', gate: 'unit' },
+    }) }, loaded.version);
+    const historical = await loadMission(fixture);
+    assert.deepEqual(historical.review!.rounds[1].decision?.kind === 'approved' && historical.review!.rounds[1].decision.revocation?.cause,
+      { kind: 'integration-gate-failure', gate: 'unit', command: null, log: null }, 'historical gate withdrawals survive SQLite reload');
     const result = await approve(fixture);
     assert.equal(result.outcome, 'failed');
     assert.match(result.outcome === 'failed' ? result.diagnostic : '', /integration repair/);

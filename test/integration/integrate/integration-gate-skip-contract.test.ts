@@ -110,7 +110,7 @@ function makeStep(overrides: {
   runPhaseGates?: IntegrateWorkflowPorts['gates']['runPhaseGates'];
   changedPaths?: (_from: string, _to: string) => ChangedPathsResult;
 } = {}) {
-  const recorded: Array<{ missionId: string; sha: string; hooks: string[] }> = [];
+  const recorded: Array<{ missionId: string; sha: string; hooks: string[]; failed?: boolean }> = [];
   const diffCalls: Array<{ rootDir: string; from: string; to: string }> = [];
   const step = createIntegrationGateStep(stubIntegrateWorkflowPorts({
     gates: {
@@ -135,8 +135,8 @@ function makeStep(overrides: {
       assert.equal(missionId, SLUG);
       return overrides.loadLatest ? overrides.loadLatest() : null;
     },
-    async recordIntegrationValidation(marker: { missionId: string; sha: string; hooks: readonly string[] }) {
-      recorded.push({ missionId: marker.missionId, sha: marker.sha, hooks: [...marker.hooks] });
+    async recordIntegrationValidation(marker: { missionId: string; sha: string; hooks: readonly string[]; failed?: boolean }) {
+      recorded.push({ missionId: marker.missionId, sha: marker.sha, hooks: [...marker.hooks], failed: marker.failed });
     },
   };
   return { step, operationalHistory, recorded, diffCalls };
@@ -510,7 +510,7 @@ test('the integration-validation marker persists and reads back through the real
   }
 });
 
-test('runRequiredLocalGates does not record when the suite fails', async () => {
+test('runRequiredLocalGates records failure without green validation when the suite fails', async () => {
   const { step, operationalHistory, recorded } = makeStep({
     runPhaseGates: async () => (phaseGateResult({ ok: false as const, skipped: false, failedGate: { key: 'unit' }, error: 'red' })),
   });
@@ -535,6 +535,8 @@ test('runRequiredLocalGates does not record when the suite fails', async () => {
       }),
       (error: Error) => error.name === 'IntegrationAbort',
     );
-    assert.equal(recorded.length, 0, 'no marker recorded on a red suite');
+    assert.equal(recorded.filter(marker => !marker.failed).length, 0, 'no green marker recorded on a red suite');
+    assert.deepEqual(recorded, [{ missionId: SLUG, sha: 'final', hooks: ['unit'], failed: true }],
+      'the failed hook invalidates earlier green evidence');
   } finally { setLogger(previous); }
 });

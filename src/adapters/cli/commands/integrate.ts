@@ -1,3 +1,6 @@
+import { createIntegrationApprovalEvidence } from '../../review/integration-approval-evidence.js';
+import { SqliteIntegrationValidationReader } from '../../sqlite/integration-validation-reader.js';
+import { initOperatorState } from '../../sqlite/adapter-factory.js';
 import { createIntegrationVerificationEvidencePort } from '../../verification/integration-verification-proof.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 /**
@@ -123,6 +126,9 @@ export function createIntegratePorts(configuration?: ParallixConfiguration): Int
       createRebaseWorkflowPort: options => rebaseWorkflow.createRebaseWorkflowPort({ ...options, configuration }),
     },
     gates: {
+      approvalEvidence: worktree => createIntegrationApprovalEvidence(worktree,
+        async slug => new SqliteIntegrationValidationReader((await initOperatorState({ configuration })).db).read(slug), configuration),
+      invalidateApproval: options => integrationGateRebound.invalidateApprovedPrReview(options),
       loadPhaseGates: (rootDir, phase) => repositoryGates.loadPhaseGates(rootDir, phase),
       loadRequirePreIntegration: rootDir => repositoryGates.loadRequirePreIntegration(rootDir),
       runPhaseGates: (phase, options) => runIntegrationGates(phase, options),

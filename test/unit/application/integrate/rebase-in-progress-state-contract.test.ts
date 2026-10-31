@@ -1,3 +1,9 @@
+import { fixtureMission, inMemoryTransitionStore, pendingReview } from '../../../fixtures/mission-builders.js';
+import { applyReviewerCommand, changeRevision } from '../../../../src/domain/review.js';
+import { decideMission } from '../../../../src/domain/mission-workflow.js';
+import { MissionLifecycleService } from '../../../../src/application/mission-lifecycle-service.js';
+import { integrationServices } from '../../../helpers/stub-integration-services.js';
+import { integrationBounceSeams } from '../../../helpers/integration-bounce-seams.js';
 import { rebaseWorkflowFixture } from '../../../helpers/rebase-workflow-fixture.js';
 import type { IntegrateWorkflowPorts } from '../../../../src/application/ports/integrate-workflow.js';
 import { stubIntegrateWorkflowPorts } from '../../../helpers/stub-integrate-workflow-ports.js';
@@ -13,6 +19,7 @@ import { mockModule, installModuleMocks, importFresh } from '../../../lib/module
 // Declaration order is load-bearing: installModuleMocks relinks modules in this order, so a
 // module must be declared after the modules it depends on (merged from every section below).
 mockModule('../../../../src/application/rebase-workflow.js', import.meta.url);
+mockModule('../../../../src/application/integrate/rebase.js', import.meta.url);
 await installModuleMocks();
 
 // ---- task-2520 integration rebase state (consolidated from test/task-2520-integrate-rebase-state.test.ts, TASK-2622.09) ----
@@ -29,10 +36,12 @@ describe("integration rebase state", async () => {
   // The shared workflow is driven to a clean completion by the rebase port double;
   // stub it so the only behaviour under test is the post-rebase in-progress check.
   // Re-establish it per test: afterEach's mock.restoreAll() removes the stub.
-  test.beforeEach(() => { mock.method(rebaseWorkflow, 'runRebaseWorkflow', async () => {}); });
-  test.afterEach(() => mock.restoreAll());
+  let onRebase = () => {};
+  test.beforeEach(() => { mock.method(rebaseWorkflow, 'runRebaseWorkflow', async () => { onRebase(); }); });
+  test.afterEach(() => { onRebase = () => {}; mock.restoreAll(); });
 
   const { createIntegrationRebase } = await importFresh<typeof import('../../../../src/application/integrate/rebase.js')>('../../../../src/application/integrate/rebase.js', import.meta.url);
+  const { resumePendingIntegrationRepair } = await importFresh<typeof import('../../../../src/application/integrate/repair-resumption.js')>('../../../../src/application/integrate/repair-resumption.js', import.meta.url);
 
   const SLUG = 'task-2520-rebase';
   const MISSION_WORKTREE = `/tmp/mission-${SLUG}`;
@@ -126,6 +135,46 @@ describe("integration rebase state", async () => {
     assert.ok(aborted, 'a base that is not an ancestor of the mission aborts the integration rebase');
     assert.match(logs.join('\n'), /did not complete cleanly/,
       'the ancestry failure must surface as an incomplete rebase, not a clean completion');
+  });
+
+  test('interrupted repair rebases through the shared owner before equivalent-patch comparison (TASK-2820)', async () => {
+    let rebased = false, validatedSha = 'before-rebase', comparisons = 0;
+    const open = pendingReview(SLUG, '2026-10-25T08:00:00Z');
+    const round = open.rounds[0];
+    const review = applyReviewerCommand({ ...open, rounds: [{ ...round, subject: { ...round.subject, baseline: changeRevision('old-base') } }] },
+      { type: 'approve', revision: changeRevision('approved-A'), decidedAt: '2026-10-25T09:00:00Z', comment: null, source: { kind: 'local' } });
+    const active = decideMission(fixtureMission(SLUG, { status: 'integration', review, assignee: round.implementer }), {
+      type: 'rebound-to-active', agent: round.implementer, occurredAt: '2026-10-25T10:00:00Z', cause: { kind: 'integration-gate-failure', gate: 'unit' },
+    });
+    const store = inMemoryTransitionStore(active);
+    const services = integrationServices({ store, lifecycle: new MissionLifecycleService(store), operationalHistory: {
+      loadLatestByTypeForMission: async () => null, recordIntegrationValidation: async input => { validatedSha = input.sha; },
+    } });
+    onRebase = () => { rebased = true; };
+    const evidence = { now: () => '2026-10-25T12:00:00Z', reconcileHumanFeedback: async () => true,
+      samePatch: async (_approved: unknown, candidate: { baseline: string; revision: string }) => {
+        comparisons++; assert.equal(rebased, true); assert.deepEqual(candidate, { revision: 'rebased-B', baseline: 'new-base' }); return true;
+      }, validation: async () => ({ missionId: SLUG, sha: validatedSha, baseline: 'new-base', hooks: ['unit'],
+        createdAt: '2026-10-25T11:00:00Z', reference: 'history:1' }) };
+    const ports = stubIntegrateWorkflowPorts({ process: { cwd: () => MISSION_WORKTREE },
+      landing: { createAbort: () => Object.assign(new Error('Integration aborted'), { name: 'IntegrationAbort' }) },
+      missionPaths: { resolveWorktree: () => MISSION_WORKTREE, resolveMissionBaseBranch: () => 'main',
+        resolveBaseWorktree: () => BASE_WORKTREE, missionBranchName: () => `mission/${SLUG}`, conventionalWorktreePath: () => MISSION_WORKTREE },
+      rebase: { createRebaseWorkflowPort: options => { options.exitFn(0); return rebaseWorkflowFixture(); } },
+      git: { git: args => {
+        let stdout = '';
+        if (args.includes('rev-parse')) { stdout = args.at(-1) === 'main' ? 'new-base' : rebased ? 'rebased-B' : 'before-rebase'; }
+        if (args.includes('merge-base') && !args.includes('--is-ancestor')) { stdout = rebased ? 'new-base' : 'old-base'; }
+        return { status: 0, stdout, stderr: '' };
+      } },
+      gates: { approvalEvidence: () => evidence, captureFinalIntegrationTree: () => ({ ok: true, commit: rebased ? 'rebased-B' : 'before-rebase' }),
+        loadPhaseGates: () => [{ key: 'unit', command: 'verify', order: 1 }], runPhaseGates: async () => { assert.equal(rebased, true); return { ok: true }; } },
+    });
+    const seams = { ...integrationBounceSeams({ transitionTaskFn: () => true }), routeIntegrationGateFailureFn: async () => { throw new Error('unexpected repair'); } };
+    await assert.rejects(resumePendingIntegrationRepair(SLUG, services, ports, seams, { realAgent: null, realAgentModel: null }), { name: 'IntegrationStopsForHuman' });
+    assert.equal(comparisons, 1); assert.equal(store.mission().status, 'integration');
+    assert.equal(store.mission().review!.rounds.length, 1);
+    assert.equal(store.mission().review!.rounds[0].decision?.revision, 'approved-A');
   });
 
   test('integration rebase completes cleanly when no rebase is active in the mission worktree (SC7)', async () => {

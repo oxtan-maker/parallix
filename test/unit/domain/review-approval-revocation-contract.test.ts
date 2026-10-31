@@ -182,6 +182,18 @@ describe("stand down", { concurrency: false }, () => {
     changeIdentity: (revision) => (revision === 'a1a1a1a' ? 'approved-change' : 'rescoped-change'),
   };
 
+  test('pending repair defers supersession until its rebased patch can be assessed (TASK-2820)', async () => {
+    const pending = decideMission(mission, { type: 'rebound-to-active', agent: agentFamily('codex'),
+      cause: { kind: 'integration-gate-failure', gate: 'unit' }, occurredAt: '2026-10-25T10:00:00Z' });
+    const memory = memoryStore(pending);
+    const result = await recordBranchMove({ slug, store: memory.store, identity: moved,
+      landedRevision: 'rebased-B', movedFrom: 'a1a1a1a', recordedBy: 'px rebase', occurredAt: '2026-10-25T11:00:00Z' });
+    assert.equal(result.outcome, 'unverifiable'); assert.equal(memory.saves, 0);
+    const decision = memory.current.review!.rounds[0].decision;
+    assert.ok(decision?.kind === 'approved');
+    assert.equal(decision.supersession, undefined);
+  });
+
   test('the operator stand-down of a stale approval opens a new round for the new revision, never approved', async () => {
     const memory = memoryStore(mission);
     const result = await new RevokeReviewDecisionUseCase(memory.store, new MissionLifecycleService(memory.store), null, moved).execute({
@@ -302,6 +314,19 @@ describe("stand down", { concurrency: false }, () => {
     assert.equal(missionApprovalCoverage(approved, identity('a1a1a1a', {}))?.kind, 'covers');
     // A clean rebase replays the identical change under a new commit.
     assert.equal(missionApprovalCoverage(approved, identity('c3c3c3c', { a1a1a1a: 'same', c3c3c3c: 'same' }))?.kind, 'covers');
+  });
+
+  test('retained coverage follows the proven candidate while judgment stays at the original revision (TASK-2820)', () => {
+    const first = approved.rounds[0];
+    const assessment = { assessedAt: '2026-10-25T12:00:00Z', approvedRevision: String(first.decision!.revision), candidateRevision: 'retained-B',
+      failedGate: 'unit', outcome: 'retained' as const, repair: { startedAt: '2026-10-25T10:00:00Z', cause: { kind: 'integration-gate-failure' as const, gate: 'unit' } },
+      validation: { missionId: 'task-2555', sha: 'retained-B', baseline: 'base', hooks: ['unit'], reference: 'history:1', createdAt: '2026-10-25T11:00:00Z' } };
+    const retained: Review = { ...approved, rounds: [{ ...first, integrationRepairAssessment: assessment }] };
+    assert.deepEqual(missionApprovalCoverage(retained, identity('retained-B', {})), { kind: 'covers', round: 1, approvedRevision: first.decision!.revision });
+    assert.equal(missionApprovalCoverage(retained, identity('later-C', { 'retained-B': 'same', 'later-C': 'same' }))?.kind, 'covers');
+    assert.equal(missionApprovalCoverage(retained, identity('changed-D', { 'retained-B': 'same', 'changed-D': 'different' }))?.kind, 'stale');
+    const corrupt: Review = { ...retained, rounds: [{ ...first, integrationRepairAssessment: { ...assessment, validation: undefined } }] };
+    assert.equal(missionApprovalCoverage(corrupt, identity('retained-B', {}))?.kind, 'unverifiable', 'missing evidence cannot extend coverage');
   });
 
   test('an unreadable approved revision or branch is unverifiable, not stale', () => {
@@ -473,10 +498,14 @@ test('a human can revoke mechanical restoration without erasing its source or in
     revision: changeRevision('candidate') }, reviewer, implementer, '2026-10-01T10:00:00Z',
   ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' }));
   const source = { kind: 'mechanical-restoration' as const, approvedRevision: 'approved', candidateRevision: 'candidate', failedGate: 'unit',
-    validationRevision: 'candidate', validationReference: 'operational_history:42', validatedAt: '2026-10-01T11:00:00Z' } satisfies import("../../../src/domain/integration-approval-restoration.js").MechanicalApprovalSource;
+    validationRevision: 'candidate', validationReference: 'operational_history:42', validatedAt: '2026-10-01T11:00:00Z' } satisfies import("../../../src/domain/integration-repair-record.js").HistoricalMechanicalApprovalSource;
   review = { ...review, rounds: [{ ...review.rounds[0], integrationRepairAssessment: { assessedAt: '2026-10-01T12:00:00Z',
     approvedRevision: 'approved', candidateRevision: 'candidate', failedGate: 'unit', outcome: 'restored', source } }] };
-  review = applyReviewerCommand(review, { type: 'approve', revision: changeRevision('candidate'), decidedAt: '2026-10-01T12:00:00Z', comment: 'restored', source });
+  assert.throws(() => applyReviewerCommand(review, { type: 'approve', decidedAt: '2026-10-01T12:00:00Z', comment: null,
+    // @ts-expect-error Legacy provenance is permitted only on stored decisions.
+    source }), /Mechanical restoration is historical/);
+  review = { ...review, rounds: [{ ...review.rounds[0], decision: { kind: 'approved', revision: changeRevision('candidate'),
+    decidedAt: '2026-10-01T12:00:00Z', comment: 'historical restoration', source } }] };
   const revoked = revokeApprovedDecision(review, 1, { revokedAt: '2026-10-01T13:00:00Z', revokedBy: 'human', reason: 'correction', cause: { kind: 'operator' } });
   assert.equal(reviewStatus(revoked), 'awaiting-review');
   assert.deepEqual(revoked.rounds[0].decision?.kind === 'approved' && revoked.rounds[0].decision.source, source);

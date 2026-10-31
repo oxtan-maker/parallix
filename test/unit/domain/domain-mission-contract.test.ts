@@ -442,10 +442,12 @@ describe("Mission lifecycle and review invariants , ,", () => {
   }
 
   test('integration gate repair must submit before approval can leave active (TASK-2819)', () => {
-    const active = decideMission({ ...mission('integration'), review: approve() }, {
+    let active = decideMission({ ...mission('integration'), review: approve() }, {
       type: 'rebound-to-active', agent: implementer,
       cause: { kind: 'integration-gate-failure', gate: 'unit' }, occurredAt: '2026-07-22T09:00:00Z',
     });
+    const withdrawn = revokeApprovedDecision(active.review!, 1, { revokedAt: '2026-07-22T09:01:00Z', revokedBy: 'workflow', reason: 'Repair changed patch', cause: { kind: 'integration-gate-failure', gate: 'unit' } });
+    active = { ...active, review: withdrawn };
     const approved = approve(active.review!);
     assert.throws(() => decideMission(active, { type: 'approve', review: approved }), /outside an integration repair/);
     const submitted = decideMission({
@@ -464,7 +466,8 @@ describe("Mission lifecycle and review invariants , ,", () => {
       type: 'rebound-to-active', agent: implementer, cause: { kind: 'integration-gate-failure', gate: 'unit' },
       occurredAt: '2026-07-22T09:00:00Z',
     });
-    const rejected = applyReviewerCommand(active.review!, {
+    const withdrawn = revokeApprovedDecision(active.review!, 1, { revokedAt: '2026-07-22T09:01:00Z', revokedBy: 'workflow', reason: 'Repair changed patch', cause: { kind: 'integration-gate-failure', gate: 'unit' } });
+    const rejected = applyReviewerCommand(withdrawn, {
       type: 'request-changes', decidedAt: '2026-07-22T10:00:00Z', comment: null, findings: [finding],
     });
     const response = applyImplementerCommand(rejected, {

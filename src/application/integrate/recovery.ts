@@ -1,3 +1,4 @@
+import { pendingIntegrationApproval } from '../../domain/integration-repair-policy.js';
 import type { MissionLoadResult } from '../domain-ports.js';
 import type { IntegrationMissionServices, IntegrationMissionServicesFactory } from '../ports/integration-records.js';
 import type { Review, ReviewRound } from '../../domain/review.js';
@@ -227,6 +228,7 @@ class MissionRecovery {
       throw abortWith(this.dependencies.landing, `Mission ${slugId} is unavailable for lifecycle recovery.`);
     }
 
+    if (pendingIntegrationApproval(missionLoad.mission)) { throw abortWith(this.dependencies.landing, 'Pending integration repair cannot recover from historical approval.'); }
     if (missionLoad.mission.status === 'done') {
       // The existing landed-integration closeout path is idempotent and owns a
       // resumed done Mission. Do not create another lifecycle event here.

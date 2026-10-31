@@ -38,6 +38,7 @@ export type ForgejoPullRequest = {
 
 export type ForgejoReview = {
   id?: number;
+  commit_id?: string;
   state?: string;
   body?: string;
   dismissed?: boolean;

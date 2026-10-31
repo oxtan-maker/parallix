@@ -16,7 +16,7 @@ export const LEGACY_CLASSIFIER_POLICY_VERSION = 'repeat-findings-51-90-v1';
 /** Versioned with the I13 v4 question and its 0.60 `preserves` threshold; changing either needs a new version. */
 export const WEAKENING_POLICY_VERSION = 'integration-repair-weakening-v4-preserves-0.60-optional-fact-v3';
 export const WEAKENING_THRESHOLD = 0.60;
-/** Decision source of an approval restored by a non-weakening repair; integration gates remain mandatory. */
+/** Decision source of a reviewed non-weakening repair approval; integration gates remain mandatory. */
 export const WEAKENING_DECISION_SOURCE = 'integration-repair-weakening';
 
 /** Versions retain the interpretation of historical applied decisions. */
@@ -27,7 +27,7 @@ export function classifierPolicyThresholds(version: string): { clear: number; un
   if (version === INTEGRATION_REPAIR_POLICY_VERSION) { return { clear: 0.52, unresolved: 0.67 }; }
   if (version === CONSECUTIVE_REPAIR_POLICY_VERSION) { return { clear: 0.52, unresolved: 0.81 }; }
   if (version === LEGACY_CLASSIFIER_POLICY_VERSION) { return { clear: 0.51, unresolved: 0.9 }; }
-  // The weakening question can only restore an approval; no probability returns a mission.
+  // The weakening question can only approve a repair; no probability returns a mission.
   if (version === WEAKENING_POLICY_VERSION || version === 'integration-repair-weakening-v4-preserves-0.60-omissions-v2' || version === 'integration-repair-weakening-v4-preserves-0.60') { return { clear: WEAKENING_THRESHOLD, unresolved: Number.POSITIVE_INFINITY }; }
   throw new Error('Unknown classifier review policy');
 }
@@ -190,7 +190,7 @@ export function applyClassifierReview(review: Review, source: ClassifierReviewSo
   assertClassifierCoverage(ids, prior, source);
   assertClassifierDecision(current, ids, source, route, at, thresholds);
   const w = source.weakening;
-  const comment = w ? `Approval of ${w.approvedRevision} restored: gate ${w.gate} ${w.factAdmitted === false ? 'has no admitted re-run fact; mandatory integration gates still apply' : `re-ran green at ${w.validationSha} (${w.relation})`} and the repair preserves the checked obligation (${source.score})${w.question ? `; cleared by ${w.question.clearedBy}, preserves ${w.question.preserves}, questions ${w.question.versions.join(', ')}` : ''}.`
+  const comment = w ? `Repair of approved revision ${w.approvedRevision} reviewed: gate ${w.gate} ${w.factAdmitted === false ? 'has no admitted re-run fact; mandatory integration gates still apply' : `re-ran green at ${w.validationSha} (${w.relation})`} and the repair preserves the checked obligation (${source.score})${w.question ? `; cleared by ${w.question.clearedBy}, preserves ${w.question.preserves}, questions ${w.question.versions.join(', ')}` : ''}.`
     : route === 'clear' ? 'Classifier cleared the complete prior finding set.'
       : source.obligations ? `Unresolved prior obligations: ${source.obligations.failingIds.join(', ')}. Make changes or request general review.`
       : 'Classifier reports likely unresolved prior findings. Make changes or request general review; no repair instructions supplied.';

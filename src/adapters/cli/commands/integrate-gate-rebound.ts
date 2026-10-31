@@ -54,7 +54,7 @@ export const INTEGRATION_GATE_REBOUND_ATTEMPTS_PER_INVOCATION = 2;
 export const INTEGRATION_GATE_REBOUND_EVENT = 'integration.gate-rebound';
 
 export type IntegrationGateRoute =
-  | { route: 'fixed'; rebounds: number }
+  | { route: 'fixed' | 'retained' | 'blocked'; rebounds: number }
   | { route: 'revision-changed'; rebounds: number; approvedRevision: string; repairedRevision: string; invalidation: ApprovalInvalidation }
   | { route: 'exhausted'; rebounds: number; diagnostic: string }
   | { route: 'limit-reached'; rebounds: number }
@@ -138,16 +138,17 @@ export async function invalidateApprovedPrReview(opts: {
   branch: string;
   approval: IntegrationApproval | null | undefined;
   summary: string;
+  approvedRevision?: string;
   readTokenFn?: typeof readToken;
   dismissFn?: typeof dismissStandingApprovals;
 }): Promise<ApprovalInvalidation> {
   const { readTokenFn = readToken, dismissFn = dismissStandingApprovals } = opts;
-  if (opts.approval?.ok !== true) { return { ok: true, dismissed: [], errors: [] }; }
+  if (opts.approval?.ok !== true || opts.approval.providerDisabled === true) { return { ok: true, dismissed: [], errors: [] }; }
   const token = readTokenFn(PARALLIX_FORGEJO_USER);
   if (!token) {
     return { ok: false, dismissed: [], errors: [`no Forgejo token for ${PARALLIX_FORGEJO_USER}; run px setup-review to create the ${PARALLIX_FORGEJO_USER} user so it can dismiss the standing approval on ${opts.branch}`] };
   }
-  const result = dismissFn(opts.branch, token, opts.summary, { forgejoUser: PARALLIX_FORGEJO_USER });
+  const result = dismissFn(opts.branch, token, opts.summary, { forgejoUser: PARALLIX_FORGEJO_USER, expectedRevision: opts.approvedRevision });
   return { ok: result.ok, dismissed: result.dismissed, errors: result.errors };
 }
 
@@ -164,7 +165,7 @@ export function staleApprovalSummary(slug: string, approvedRevision: string, rep
 }
 
 async function routeFixedIntegrationGateRebound({
-  opts, failedGate, outcome, rebounds, approvedRevision, preRepairRevision, captureFinalTreeFn, invalidateApprovalFn, initialInvalidation, log, error,
+  opts, failedGate, outcome, rebounds, approvedRevision, preRepairRevision, captureFinalTreeFn, invalidateApprovalFn, log, error,
 }: {
   opts: IntegrationGateRouteOptions;
   failedGate: GateRunOutcome;
@@ -175,14 +176,16 @@ async function routeFixedIntegrationGateRebound({
   preRepairRevision: string | null;
   captureFinalTreeFn: typeof captureFinalIntegrationTree;
   invalidateApprovalFn: typeof invalidateApprovedPrReview;
-  initialInvalidation: ApprovalInvalidation | null;
   log: (_msg: string) => void;
   error: (_msg: string) => void;
 }): Promise<IntegrationGateRoute> {
   log(fmt.status('PASS', `Integration gate ${failedGate.key} repaired by ${outcome.implementer} and re-ran green (${rebounds}/${INTEGRATION_GATE_REBOUND_ATTEMPTS_PER_INVOCATION} integration-gate repairs allowed per integrate).`));
   const repairedTree = captureFinalTreeFn(opts.missionWorktree);
   const repairedRevision = committedRevision(repairedTree);
-  if (!initialInvalidation && preRepairRevision !== null && repairedRevision !== null && preRepairRevision === repairedRevision) {
+  const retention = await opts.assessRepairFn?.();
+  if (retention === 'retained') { return { route: 'retained', rebounds }; }
+  if (retention === 'blocked') { return { route: 'blocked', rebounds }; }
+  if (retention !== 'changed' && preRepairRevision !== null && repairedRevision !== null && preRepairRevision === repairedRevision) {
     log(fmt.status('INFO', `The repair left the mission at ${preRepairRevision}, unchanged since the review approved it; the existing approval still covers what would land.`));
     return { route: 'fixed', rebounds };
   }
@@ -190,10 +193,11 @@ async function routeFixedIntegrationGateRebound({
   const approvedLabel = approvedRevision ?? 'unknown';
   const repairedLabel = repairedRevision ?? 'unknown';
   const branch = opts.branch ?? `mission/${opts.slug}`;
-  const invalidation = initialInvalidation ?? await invalidateApprovalFn({
+  const invalidation = await invalidateApprovalFn({
     slug: opts.slug,
     branch,
     approval: opts.approval,
+    approvedRevision: approvedRevision ?? undefined,
     summary: staleApprovalSummary(opts.slug, approvedLabel, repairedLabel, failedGate.key),
   });
   error(fmt.status('INFO', `The integration-gate repair of ${opts.slug} requires a fresh review: prior approved revision ${approvedLabel}, repaired revision ${repairedLabel}. The withdrawn approval cannot authorize the merge.`));
@@ -257,6 +261,7 @@ export interface IntegrationGateRouteOptions {
   startAgentFn: ReboundContext['startAgent'];
   transitionTaskFn: (_slug: string) => Promise<unknown> | unknown;
   /** Authoritative lifecycle transition followed by an optional Backlog mirror. */
+  assessRepairFn?: () => Promise<'retained' | 'changed' | 'blocked' | 'not-pending'>;
   reactivateMissionFn?: (_slug: string) => Promise<unknown> | unknown;
   applyAgentFallbackFn?: ReboundContext['applyAgentFallback'];
   // TASK-2625: when the verify rerun goes green against the fixed tree, record
@@ -292,15 +297,11 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
     slug,
     missionWorktree,
     failedGate,
-    gates,
-    runPhaseGatesFn = runPhaseGates,
     captureFinalTreeFn = captureFinalIntegrationTree,
     reboundFn = rebound,
     invalidateApprovalFn = invalidateApprovedPrReview,
     log = fmt.log.plain,
     error = fmt.log.plainError,
-    gateRunLog = fmt.log.plain,
-    gateRunError = fmt.log.fail,
   } = opts;
 
   if (!failedGate) {
@@ -325,8 +326,6 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
   const preRepairRevision = committedRevision(approvedTree);
   // The revision the reviewer approved (A); HEAD may already carry bookkeeping after it.
   const approvedRevision = opts.approvedRevision ?? preRepairRevision;
-  let initialInvalidation: ApprovalInvalidation | null = null;
-  let requiredCommand = failedGate.command;
 
   const outcome = await reboundFn(
     integrationGateFailureReason(failedGate, { gateError: opts.gateError, verificationCommand: opts.verificationCommand, approvedRevision }),
@@ -336,60 +335,9 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
       implementer: opts.implementer,
       maxAttempts: INTEGRATION_GATE_REBOUND_ATTEMPTS_PER_INVOCATION,
       startAgent: opts.startAgentFn,
-      transitionToImplementer: opts.reactivateMissionFn ? async (bounceSlug: string) => {
-        // The durable lane move withdraws the local approval atomically. Its
-        // provider projection is corrected before the repair agent starts,
-        // including when the process later stops before completing repair.
-        const transitioned = await opts.reactivateMissionFn!(bounceSlug);
-        initialInvalidation = await invalidateApprovalFn({
-          slug, branch: opts.branch ?? `mission/${slug}`, approval: opts.approval,
-          summary: staleApprovalSummary(slug, approvedRevision ?? 'unknown', 'pending repair', failedGate.key),
-        });
-        for (const problem of initialInvalidation.errors) { error(fmt.status('WARN', problem)); }
-        return transitioned;
-      } : opts.transitionTaskFn,
+      transitionToImplementer: opts.reactivateMissionFn ?? opts.transitionTaskFn,
       ...(opts.applyAgentFallbackFn ? { applyAgentFallback: opts.applyAgentFallbackFn } : {}),
-      verify: async () => {
-        // The repair has to be committed: the integration gates are only ever
-        // allowed to verify a finalized tree, and an uncommitted fix would
-        // otherwise be reported as a repair the squash merge then drops.
-        const tree = captureFinalTreeFn(missionWorktree);
-        if (!tree.ok) {
-          return { ok: false, diagnostic: `The repair is not committed, so the integration gates cannot re-run: ${tree.error}` };
-        }
-        const rerun = await runPhaseGatesFn('integration', {
-          slug,
-          checkoutPath: missionWorktree,
-          gates,
-          log: gateRunLog,
-          error: gateRunError,
-          realAgent: opts.realAgent,
-          realAgentModel: opts.realAgentModel,
-        });
-        if (rerun.ok) {
-          // TASK-2625: the rerun went green against the fixed tree. Record a
-          // durable, sha-keyed whitelist of the validated hooks keyed on the
-          // fix commit (the mission branch HEAD at validate time) so a later
-          // integrate can skip them. Inert when the store is unavailable.
-          if (opts.recordIntegrationValidationFn && tree.commit) {
-            try {
-              await opts.recordIntegrationValidationFn({
-                missionId: missionId(slug),
-                sha: tree.commit,
-                hooks: gates.map(gate => gate.key),
-              });
-            } catch (recordError) {
-              log(`Could not record integration-validation marker for ${slug}: ${(recordError as Error)?.message ?? String(recordError)}. The full suite runs next time.`);
-            }
-          }
-          return { ok: true, command: requiredCommand, diagnostic: '' };
-        }
-        if (opts.recordIntegrationValidationFailureFn && tree.commit) {
-          try { await opts.recordIntegrationValidationFailureFn({ missionId: missionId(slug), sha: tree.commit, hooks: [rerun.failedGate?.key ?? failedGate.key] }); } catch { /* missing failure history never proves green */ }
-        }
-        if (rerun.failedGate) { requiredCommand = rerun.failedGate.command; }
-        return integrationGateRerunFailure(rerun, opts.verificationCommand, approvedRevision);
-      },
+      verify: createRepairVerifier(opts, failedGate, approvedRevision, log),
       log,
       error,
     },
@@ -397,8 +345,50 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
 
   const rebounds = outcome.attempts;
   if (outcome.outcome === 'fixed') {
-    return routeFixedIntegrationGateRebound({ opts, failedGate, outcome, rebounds, approvedRevision, preRepairRevision, captureFinalTreeFn, invalidateApprovalFn, initialInvalidation, log, error });
+    return routeFixedIntegrationGateRebound({ opts, failedGate, outcome, rebounds, approvedRevision, preRepairRevision, captureFinalTreeFn, invalidateApprovalFn, log, error });
   }
+  await withdrawChangedExhaustedRepair(opts, failedGate, approvedRevision, captureFinalTreeFn, invalidateApprovalFn);
   error(fmt.status('FAIL', `Integration gate ${failedGate.key} still fails for ${slug} after ${rebounds} repair(s) within this integrate's bounded budget. Address the failed gate, then run px integrate ${slug} again for a fresh repair budget, or px review ${slug} once the gate is fixed.`));
   return { route: 'exhausted', rebounds, diagnostic: outcome.diagnostic };
+}
+
+function greenGateRun(result: PhaseGateRunResult): boolean { return result.ok && !result.cancelled && !result.skipped; }
+
+function createRepairVerifier(opts: IntegrationGateRouteOptions, failedGate: GateRunOutcome,
+  approvedRevision: string | null, log: (_message: string) => void): ReboundContext['verify'] {
+  const { missionWorktree, slug, gates, captureFinalTreeFn = captureFinalIntegrationTree, runPhaseGatesFn = runPhaseGates } = opts;
+  let requiredCommand = failedGate.command;
+  return async () => {
+    const tree = captureFinalTreeFn(missionWorktree);
+    if (!tree.ok) { return { ok: false, diagnostic: `The repair is not committed, so the integration gates cannot re-run: ${tree.error}` }; }
+    const rerun = await runPhaseGatesFn('integration', { slug, checkoutPath: missionWorktree, gates,
+      log: opts.gateRunLog ?? fmt.log.plain, error: opts.gateRunError ?? fmt.log.fail,
+      realAgent: opts.realAgent, realAgentModel: opts.realAgentModel });
+    const after = captureFinalTreeFn(missionWorktree);
+    if (!after.ok || after.commit !== tree.commit) { return { ok: false, diagnostic: 'Mission tree changed during integration verification' }; }
+    await recordRepairValidation(opts, tree.commit, rerun, failedGate, log);
+    if (greenGateRun(rerun)) { return { ok: true, command: requiredCommand, diagnostic: '' }; }
+    if (rerun.failedGate) { requiredCommand = rerun.failedGate.command; }
+    return integrationGateRerunFailure(rerun, opts.verificationCommand, approvedRevision);
+  };
+}
+
+async function recordRepairValidation(opts: IntegrationGateRouteOptions, sha: string | undefined,
+  rerun: PhaseGateRunResult, failedGate: GateRunOutcome, log: (_message: string) => void): Promise<void> {
+  if (!sha) { return; }
+  if (!greenGateRun(rerun)) {
+    try { await opts.recordIntegrationValidationFailureFn?.({ missionId: missionId(opts.slug), sha, hooks: [rerun.failedGate?.key ?? failedGate.key] }); }
+    catch { /* Missing failure history never proves green. */ }
+    return;
+  }
+  try { await opts.recordIntegrationValidationFn?.({ missionId: missionId(opts.slug), sha, hooks: opts.gates.map(gate => gate.key) }); }
+  catch (error) { log(`Could not record integration-validation marker for ${opts.slug}: ${String(error)}. The full suite runs next time.`); }
+}
+
+async function withdrawChangedExhaustedRepair(opts: IntegrationGateRouteOptions, failedGate: GateRunOutcome,
+  approvedRevision: string | null, captureFinalTreeFn: typeof captureFinalIntegrationTree, invalidateApprovalFn: typeof invalidateApprovedPrReview): Promise<void> {
+  if (await opts.assessRepairFn?.() !== 'changed') { return; }
+  await invalidateApprovalFn({ slug: opts.slug, branch: opts.branch ?? `mission/${opts.slug}`, approval: opts.approval,
+    approvedRevision: approvedRevision ?? undefined,
+    summary: staleApprovalSummary(opts.slug, approvedRevision ?? 'unknown', committedRevision(captureFinalTreeFn(opts.missionWorktree)) ?? 'unknown', failedGate.key) });
 }

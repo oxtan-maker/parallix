@@ -1,3 +1,5 @@
+import { retainedApprovalFeedbackAllowsLanding } from './integrate/approval-retention.js';
+import { resumePendingIntegrationRepair } from './integrate/repair-resumption.js';
 import { runIntegrateEntry } from './integrate-entry.js';
 import { reviewBeforeIntegration } from './integrate/review-before-integration.js';
 import type { MissionLoadResult } from './domain-ports.js';
@@ -275,6 +277,7 @@ class IntegrateWorkflow {
       return 0;
     }
     if (!dryRun) {
+      await resumePendingIntegrationRepair(slug, missionServices, this.dependencies.ports, seams, request);
       const repair = await missionServices.store.load(missionId(slug));
       if (repair.kind === 'found' && integrationRepairNeedsReview(repair.mission)) {
         return reviewBeforeIntegration(slug, this.dependencies.ports.process.cwd(), this.dependencies.ports.landing, seams.reReviewFn);
@@ -374,6 +377,7 @@ class IntegrateWorkflow {
     if (restored.status !== 'integration' && restored.status !== 'done') {
       throw abortWith(this.dependencies.landing, `Mission ${slug} is ${restored.status} after the integration gates; integration requires the integration lane. Aborting before any landing effect.`);
     }
+    await this.requireRetainedApprovalFeedback(slug, context, missionServices);
     if (strategy.mode === 'github-pr') {
       return (await this.dependencies.landThroughGithubPr({ slug, context, missionServices, strategy })) ? 0 : 1;
     }
@@ -397,6 +401,16 @@ class IntegrateWorkflow {
       await this.dependencies.recoverMissionForIntegration(context, { missionServices });
     }
     throw abortWith(this.dependencies.landing, 'The base kept advancing during three landing attempts; retry when concurrent integration settles.');
+  }
+
+  private async requireRetainedApprovalFeedback(slug: string, context: IntegrationContext, services: IntegrationMissionServices): Promise<void> {
+    const allowed = await retainedApprovalFeedbackAllowsLanding(slug, services, () => {
+      const checkout = this.dependencies.ports.gates.resolveIntegrationVerificationWorktree(slug, { baseWorktree: context.baseWorktree });
+      return this.dependencies.ports.gates.approvalEvidence?.(checkout);
+    });
+    if (!allowed) {
+      throw abortWith(this.dependencies.landing, 'Current human review feedback blocks retained approval. Run px review before integration.');
+    }
   }
 
   async integrate(args: string[], options: IntegrateOptions = {}) {

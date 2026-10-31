@@ -1,5 +1,5 @@
 import { CLASSIFIER_POLICY_VERSION } from '../../../src/domain/classifier-review.js';
-import type { MechanicalApprovalSource } from '../../../src/domain/integration-approval-restoration.js';
+import type { HistoricalMechanicalApprovalSource } from '../../../src/domain/integration-repair-record.js';
 import { fixtureMission, approvedReview } from '../../fixtures/mission-builders.js';
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
 import { makeCard } from '../../fixtures/board-projection.js';
@@ -520,7 +520,7 @@ describe("review projection queries", { concurrency: false }, () => {
           findingIds: ['finding-1'], policyVersion: CLASSIFIER_POLICY_VERSION,
           label: 'addresses', score: 0.99,
         };
-        const source: MechanicalApprovalSource = {
+        const source: HistoricalMechanicalApprovalSource = {
           kind: 'mechanical-restoration', approvedRevision: 'old-revision', candidateRevision: revision,
           failedGate: 'unit', validationRevision: 'validation-revision',
           validationReference: 'operational_history:7', validatedAt: '2026-08-04T10:20:00Z',

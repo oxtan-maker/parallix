@@ -1,4 +1,3 @@
-import { tryRestoreIntegrationApproval } from './restore-integration-approval.js';
 import { tryClassifyReview } from '../review-classification/classify-review.js';
 /**
  * The reviewing half of a round: open the round, run the pre-review
@@ -337,12 +336,6 @@ async function freshReviewSetup(context: LoopContext, round: ReviewRound): Promi
   // opened. Pin routing to the revision that passed the complete setup.
   round.verifiedRevision = context.ports.preReview.head() ?? undefined;
   await pinReviewBaseline(context, round);
-  const restored = await tryRestoreIntegrationApproval(context, round);
-  if (restored === 'stop') { return true; }
-  if (restored === 'APPROVED') {
-    await applyReviewerOutcome(context, restored);
-    return true;
-  }
 
   return false;
 }

@@ -171,7 +171,7 @@ export interface MissionCard {
 export interface ReviewRoundSummary {
   readonly startRevision?: string;
   readonly decidedRevision?: string | null;
-  readonly integrationRepairAssessment?: import('../../domain/integration-approval-restoration.js').IntegrationRepairAssessment;
+  readonly integrationRepairAssessment?: import('../../domain/integration-approval-retention.js').IntegrationRepairAssessment;
   readonly number: number;
   readonly reviewer: AgentFamily;
   readonly implementer: AgentFamily;

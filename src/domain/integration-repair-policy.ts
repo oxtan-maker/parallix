@@ -1,5 +1,5 @@
 import type { Mission } from './mission.js';
-import { decidedRevisionOf, reviewStatus, type ReviewRevocationCause, type ReviewRound } from './review.js';
+import { currentReviewRound, decidedRevisionOf, reviewStatus, type ReviewRevocationCause, type ReviewRound } from './review.js';
 
 type WithdrawnApproval = ReviewRound & {
   readonly decision: Extract<NonNullable<ReviewRound['decision']>, { kind: 'approved' }>;
@@ -66,13 +66,12 @@ export function latestIntegrationRepair(mission: Mission): IntegrationRepairFact
     repairedBaseline: current.subject.baseline ? String(current.subject.baseline) : null,
     repairedRevision: latest === approvedRevision ? null : latest,
     withdrawnAt: withdrawn.decision.revocation!.revokedAt,
-    reReview: repairReviewStatus(current),
+    reReview: repairReviewOutcome(current),
   };
 }
 
-function repairReviewStatus(round: ReviewRound): IntegrationRepairFacts['reReview'] {
-  return round.decision?.kind === 'approved' ? 'approved'
-    : round.decision?.kind === 'changes-requested' ? 'changes-requested' : 'pending';
+function repairReviewOutcome(round: ReviewRound): IntegrationRepairFacts['reReview'] {
+  return round.decision?.kind === 'approved' ? 'approved' : round.decision?.kind === 'changes-requested' ? 'changes-requested' : 'pending';
 }
 
 /** Pending repair rounds still name their submitted start; decisions name judged code. */
@@ -84,4 +83,11 @@ function repairRevision(round: ReviewRound): string {
 function recordedWithdrawal(mission: Mission): WithdrawnApproval | undefined {
   const round = integrationGateWithdrawals(mission).at(-1);
   return decidedRevisionOf(round) ? round : undefined;
+}
+
+/** Retaining the judgment does not give an active repair permission to land. */
+export function pendingIntegrationApproval(mission: Pick<Mission, 'review' | 'status'>): ReviewRound | null {
+  if (mission.status !== 'active' || !mission.review || reviewStatus(mission.review) !== 'approved') { return null; }
+  const round = currentReviewRound(mission.review);
+  return round.integrationRepairAssessment?.repair ? round : null;
 }
