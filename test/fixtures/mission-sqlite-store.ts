@@ -1,6 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { SqliteDatabaseAdapter } from '../../src/adapters/sqlite/database-adapter.js';
+import { copyMigratedSchema, prepareMigratedSchema } from './migrated-database.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../../src/adapters/sqlite/migration-runner.js';
 import { SqliteMissionStore } from '../../src/adapters/sqlite/mission-store.js';
 import type { Mission } from '../../src/domain/mission.js';
@@ -40,8 +41,9 @@ export async function openMigratedMissionStore(
     // A suite may supply an immutable, SQLite-consistent empty-schema backup.
     // Each case still owns a separate file, connection and Mission population.
     if (schemaTemplate) { fs.copyFileSync(schemaTemplate, databasePath); }
+    else { await prepareMigratedSchema(); copyMigratedSchema(databasePath); }
     await database.open({ path: databasePath });
-    await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
+    if (schemaTemplate) { await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations()); }
     const store = new SqliteMissionStore(database);
     for (const mission of missions) { await store.save(mission, null); }
     let closed = false;

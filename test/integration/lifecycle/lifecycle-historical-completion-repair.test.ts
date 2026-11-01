@@ -4,7 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
-import { SqliteMigrationRunner, loadDefaultMigrations } from '../../../src/adapters/sqlite/migration-runner.js';
+import { copyMigratedSchema, prepareMigratedSchema } from '../../fixtures/migrated-database.js';
+
+test.before(prepareMigratedSchema);
 import { repairTask2367 } from '../../../scripts/repair-task-2367.js';
 
 test('TASK-2367: repair closes only the two approved historical missions before removing telemetry closed', async () => {
@@ -12,8 +14,13 @@ test('TASK-2367: repair closes only the two approved historical missions before 
   const databasePath = path.join(directory, 'fixture.db');
   const db = new SqliteDatabaseAdapter();
   try {
+    copyMigratedSchema(databasePath);
     await db.open({ path: databasePath });
-    await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations().filter((migration) => migration.id !== '0014-remove-usage-closed'));
+    // Restore the historical completion column and leave its real migration
+    // pending. The repair still archives it and migrates through production.
+    await db.execute('DROP TABLE legacy_usage_completion_evidence');
+    await db.execute('ALTER TABLE usage_statistics ADD COLUMN closed TEXT');
+    await db.execute("DELETE FROM schema_migrations WHERE id = '0014-remove-usage-closed'");
     for (const id of ['task-2002', 'task-2322.07', 'task-2324', 'task-2329']) {
       await db.execute(`INSERT INTO missions (id, repository_id, title, status, raw_status, assignee, net_engineering_lines, closed_at, version)
         VALUES (?, 'parallix', ?, 'integration', 'ready-for-integration', 'codex', 0, NULL, 1)`, [id, id]);

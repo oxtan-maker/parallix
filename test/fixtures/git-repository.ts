@@ -37,3 +37,12 @@ export function initCommittedRepository(root: string, files: Readonly<Record<str
   runGit(root, ['commit', '-m', 'init']);
   return { root, git: (...args) => runGit(root, args) };
 }
+
+/** Keep setup Git processes real, without forking the large test worker per command. */
+export function seedGit(cwd: string, commands: readonly (readonly string[])[]): string {
+  const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+  const script = commands.map(args => ['git', ...args].map(quote).join(' ')).join('\n');
+  const result = spawnSync('sh', ['-e'], { cwd, input: script, encoding: 'utf8' });
+  if (result.status !== 0) { throw new Error(`fixture Git setup: ${result.stderr}`); }
+  return result.stdout.trim();
+}

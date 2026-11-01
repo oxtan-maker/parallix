@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 // SQLite and HTTP/SSE boundaries; worker execution is held at the process port.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,6 +9,17 @@ import { validateWebBoardSnapshot } from '../../../src/interfaces/web/transport.
 
 test('ten admissions commit active, one lane event and preparing before held work; retries join and competitors conflict (TASK-2750)', { timeout: 10_000 }, async t => {
   const fixture = await workflowBoard(10, { inProcess: true }); t.after(() => fixture.close());
+  // This admission contract holds its workers at an in-process boundary;
+  // unrelated host sessions do not contribute to its projected operation facts.
+  const bin = path.join(fixture.root, '.fixture-bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'ps'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${bin}:${previousPath ?? ''}`;
+  t.after(() => {
+    if (previousPath === undefined) { delete process.env.PATH; }
+    else { process.env.PATH = previousPath; }
+  });
   const host = await fixture.start();
   const http = await workflowHttp(host);
   const events = await fetch(`${host.origin}/api/events`);

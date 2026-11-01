@@ -21,6 +21,9 @@
 import '../../../src/composition/cli-command-registry.js';
 import '../../../src/composition/cli-brief-writes.js';
 import '../../../src/composition/cli-review-verbs.js';
+import '../../../src/application/rebase-workflow.js';
+import '../../../src/adapters/rebase/rebase-workflow-adapter.js';
+import '../../../src/composition/production-capabilities.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
@@ -28,11 +31,12 @@ import * as path from 'node:path';
 
 import { setCommandPathProbe, setLauncherHealthProbe, setWorkflowLaunchPort } from '../../../src/adapters/agents/agents.js';
 import { run } from '../../../src/composition/create-cli.js';
-// Load the immutable command graph with the suite, as for the fixture schema.
-// The case budget measures the real repair/re-review workflow, including its
-// private repository, writable state, gate children and cleanup, rather than
-// charging the first invocation for tsx compilation of the lazy CLI registry.
-import '../../../src/composition/cli-command-registry.js';
+// Status is lazy in the CLI. Load its immutable modules alongside the command
+// registry so the case measures status execution rather than cold compilation.
+import '../../../src/composition/status-board.js';
+import '../../../src/application/status-command-use-case.js';
+import '../../../src/interfaces/cli/status.js';
+import '../../../src/adapters/cli/commands/status-adapter.js';
 import { openRepairFixture, seedGit } from '../../lib/integration-repair-fixture.js';
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
 import { revokeApprovedDecision, reviewStatus } from '../../../src/domain/review.js';

@@ -1,19 +1,26 @@
 // Public continuation boundary: reassignment, rebase, publication and independent
-// review share real disposable Git/SQLite state. The model launcher and polling
-// clock are controlled; provider requests still cross the real HTTP boundary.
+// review share real disposable Git/SQLite state. The model launcher, polling
+// clock and provider API are controlled; HTTP transport belongs to forgejo-api tests.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Worker } from 'node:worker_threads';
-import { openRepairFixture, seedGit } from '../../lib/integration-repair-fixture.js';
+import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
+import type { ForgejoApiResult } from '../../../src/adapters/forgejo/forgejo-types.js';
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
 import { missionVersion } from '../../../src/application/domain-ports.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { startReview, changeRevision, ConfiguredReviewerEligibility, currentReviewRound, reviewStatus } from '../../../src/domain/review.js';
-import { run as runCli } from '../../../src/composition/create-cli.js';
 import { setLogger } from '../../../src/application/presentation/cli-format.js';
 import { setCommandPathProbe, setLauncherHealthProbe, setWorkflowLaunchPort } from '../../../src/adapters/agents/agents.js';
+
+const providerApi = mockModule<typeof import('../../../src/adapters/forgejo/forgejo-api.js')>(
+  '../../../src/adapters/forgejo/forgejo-api.js', import.meta.url);
+const providerAuth = mockModule<typeof import('../../../src/adapters/forgejo/forgejo-auth.js')>(
+  '../../../src/adapters/forgejo/forgejo-auth.js', import.meta.url);
+await installModuleMocks();
+const { openRepairFixture, seedGit } = await import('../../lib/integration-repair-fixture.js');
+const { run: runCli } = await import('../../../src/composition/create-cli.js');
 
 test('continued review preserves the Codex PR after Claude reassignment (TASK-2784)', async t => {
   const fixture = await openRepairFixture({ slug: 'task-reassignment', state: 'undecided-review' });
@@ -23,41 +30,30 @@ test('continued review preserves the Codex PR after Claude reassignment (TASK-27
   const url = 'http://fixture/repo/pulls/739';
   const priorComment = { id: 41, body: 'Prior discussion', user: { login: 'codex' } };
   const priorReview = { id: 42, state: 'COMMENT', body: 'Prior review', user: { login: 'custom' } };
-  // A worker keeps sync curl calls from blocking the loopback server. The test
-  // runner owns the worker lifetime even on timeout, signal or process exit.
-  // This plain JavaScript server needs no test/TypeScript preloads from the
-  // parent runner; its CPU remains charged through process.cpuUsage().
-  const provider = new Worker(`
-    const { parentPort, workerData } = require('node:worker_threads');
-    const http = require('node:http');
-    const pr = { number: 739, html_url: workerData.url, state: 'open', user: { login: 'codex' },
-      head: { ref: workerData.branch }, base: { ref: 'main' } };
-    const mutations = [];
-    const comments = [workerData.priorComment]; const reviews = [workerData.priorReview];
-    const server = http.createServer(async (req, res) => {
-      let raw = ''; for await (const chunk of req) raw += chunk;
-      const route = new URL(req.url, 'http://fixture').pathname.replace('/api/v1/repos/fixture/repo', '');
-      if (req.method !== 'GET') mutations.push({ method: req.method, route, body: raw });
-      let data = [];
-      if (route === '/pulls') data = [pr];
-      else if (route === '/pulls/739' || route === '/pulls/main/' + workerData.branch) data = pr;
-      else if (route === '/pulls/739/reviews') data = reviews;
-      else if (route === '/issues/739/comments') data = comments;
-      res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(data));
-    });
-    server.listen(0, '127.0.0.1', () => parentPort.postMessage({ port: server.address().port }));
-    parentPort.on('message', () => parentPort.postMessage({ pr, mutations, comments, reviews }));
-  `, { eval: true, execArgv: [], workerData: { branch, url, priorComment, priorReview } });
-  t.after(() => provider.terminate());
-  const { port } = await new Promise<{ port: number }>((resolve, reject) => { provider.once('message', resolve); provider.once('error', reject); });
-  const origin = `http://127.0.0.1:${port}`;
+  // This contract checks continuation identity and real Git publication.
+  // Repeating curl transport here adds a worker and a fork per provider read;
+  // retain the provider state/mutation assertions at its existing API seam.
+  const pr = { number: 739, html_url: url, state: 'open', user: { login: 'codex' },
+    head: { ref: branch }, base: { ref: 'main' } };
+  const snapshot = { pr, mutations: [] as Array<{ method: string; route: string; body: unknown }>,
+    comments: [priorComment], reviews: [priorReview] };
+  const respond = <T>(method: string, apiPath: string, _token?: string, body?: unknown): ForgejoApiResult<T> => {
+    const route = new URL(apiPath, 'http://fixture').pathname;
+    if (method !== 'GET') snapshot.mutations.push({ method, route, body });
+    const data = route === '/pulls' ? [pr]
+      : route === '/pulls/739' || route === `/pulls/main/${branch}` ? pr
+      : route === '/pulls/739/reviews' ? snapshot.reviews
+      : route === '/issues/739/comments' ? snapshot.comments : [];
+    return { ok: true, data: data as T, status: 0, statusCode: 200, stderr: null, error: null };
+  };
+  t.mock.method(providerApi, 'forgejoApi', respond);
+  t.mock.method(providerApi, 'forgejoApiAsync', async (...args: Parameters<typeof respond>) => respond(...args));
+  t.mock.method(providerAuth, 'forgejoAvailable', async () => true);
+  const origin = 'http://127.0.0.1:1';
   const forgejo = path.join(root, 'forgejo');
   fs.mkdirSync(path.join(forgejo, 'tokens'), { recursive: true });
   for (const user of ['codex', 'claude', 'custom', 'fixture']) fs.writeFileSync(path.join(forgejo, 'tokens', user), `${user}-token`);
-  const bin = path.join(root, 'bin');
-  fs.mkdirSync(bin);
-  fs.symlinkSync(process.env.PARALLIX_TEST_REAL_CURL || '/usr/bin/curl', path.join(bin, 'curl'));
-  const overrides = { PATH: `${bin}:${process.env.PATH}`,  FORGEJO_HOME: forgejo, FORGEJO_USER: 'fixture', FORGEJO_TOKEN: 'fixture-token', FORGEJO_URL: origin, FORGEJO_REPO: 'fixture/repo', PARALLIX_TEST_NO_FORGEJO: '0' };
+  const overrides = { FORGEJO_HOME: forgejo, FORGEJO_USER: 'fixture', FORGEJO_TOKEN: 'fixture-token', FORGEJO_URL: origin, FORGEJO_REPO: 'fixture/repo', PARALLIX_TEST_NO_FORGEJO: '0' };
   const previous = Object.fromEntries(Object.keys(overrides).map(key => [key, process.env[key]]));
   Object.assign(process.env, overrides);
   t.after(() => { for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
@@ -144,8 +140,6 @@ test('continued review preserves the Codex PR after Claude reassignment (TASK-27
   assert.notEqual(head, oldHead);
   assert.equal(mergeBase, baseHead);
   assert.equal(publishedHead, reviewedHead);
-  provider.postMessage('snapshot');
-  const snapshot = await new Promise<{ pr: { number: number; html_url: string; user: { login: string }; state: string }; mutations: Array<{ method: string; route: string }>; comments: unknown[]; reviews: unknown[] }>(resolve => provider.once('message', resolve));
   assert.deepEqual(snapshot.pr, { number: 739, html_url: url, state: 'open', user: { login: 'codex' }, head: { ref: branch }, base: { ref: 'main' } });
   assert.deepEqual(snapshot.comments, [priorComment]);
   assert.deepEqual(snapshot.reviews, [priorReview]);

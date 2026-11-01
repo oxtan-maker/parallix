@@ -1,10 +1,12 @@
 import test from 'node:test';
+
+test.before(prepareMigratedSchema);
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
-import { SqliteMigrationRunner, loadDefaultMigrations } from '../../../src/adapters/sqlite/migration-runner.js';
+import { copyMigratedSchema, prepareMigratedSchema } from '../../fixtures/migrated-database.js';
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
 import { SqliteBoardLaneEventRepository } from '../../../src/adapters/sqlite/board-lane-event-repository.js';
 import { SqliteUsageRepository } from '../../../src/adapters/sqlite/usage-repository.js';
@@ -27,8 +29,8 @@ test('TASK-2367 certification: persisted lifecycle owns success, failure, retry,
   const failed = missionId('task-2367-failed');
   const telemetryOnly = missionId('task-2367-telemetry-only');
   try {
+    copyMigratedSchema(databasePath);
     await db.open({ path: databasePath });
-    await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
     for (const id of [landed, failed, telemetryOnly]) {
       await db.execute(`INSERT INTO missions (id, repository_id, title, status, raw_status, assignee, net_engineering_lines, closed_at, version)
         VALUES (?, ?, ?, 'integration', 'integration', 'codex', 0, NULL, 1)`, [id, repo, id]);

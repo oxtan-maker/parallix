@@ -30,6 +30,9 @@ import {
   writeReviewState,
 } from '../../../src/adapters/review/review-state.js';
 
+// Migration SQL is immutable suite input. Each case still creates and migrates
+// its own database, including cold install and the withheld-schema upgrade.
+const migrations = loadDefaultMigrations();
 const SLUG = 'task-recovery-review';
 
 const tempDirs: string[] = [];
@@ -104,10 +107,10 @@ function missionWithReview(root: string, review: Partial<Review> = {}): Mission 
   }) as Mission;
 }
 
-async function openMigrated(root: string, migrations = loadDefaultMigrations()): Promise<SqliteDatabaseAdapter> {
+async function openMigrated(root: string, selectedMigrations = migrations): Promise<SqliteDatabaseAdapter> {
   const db = new SqliteDatabaseAdapter();
   await db.open({ path: databasePathOf(root) });
-  await new SqliteMigrationRunner(db).applyPending(migrations);
+  await new SqliteMigrationRunner(db).applyPending(selectedMigrations);
   return db;
 }
 
@@ -166,7 +169,7 @@ describe("review-loop state survives every recovery scenario (SC7)", () => {
   // --- 2. upgrade from a supported prior schema ----------------------------
   it('upgrade: a database migrated before 0008/0009 gains review workflow state', async () => {
     const root = createTempRoot('upgrade');
-    const all = loadDefaultMigrations();
+    const all = migrations;
     // A database migrated before 0008/0009 also predates 0016: the drop must
     // run after 0008/0009 re-add the columns on upgrade, so 0016 is withheld
     // from the prior schema too (TASK-2377.04).
@@ -287,7 +290,7 @@ describe("review-loop state survives every recovery scenario (SC7)", () => {
     const runner = new SqliteMigrationRunner(db);
     await assert.rejects(
       () => runner.applyPending([
-        ...loadDefaultMigrations(),
+        ...migrations,
         { id: '9999-broken', checksum: 'broken-fixture', up: 'ALTER TABLE mission_reviews ADD COLUMN;' },
       ]),
       'a malformed migration must fail closed',

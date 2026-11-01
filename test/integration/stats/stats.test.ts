@@ -35,6 +35,7 @@ function createRepoFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-fixture-'));
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(root, 'docs', 'missions', '2026', 'task-2000'), { recursive: true });
+  copyMigratedSchema(path.join(root, 'parallix-home', 'parallix.db'));
   return root;
 }
 

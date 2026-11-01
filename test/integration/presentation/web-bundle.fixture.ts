@@ -63,12 +63,12 @@ interface RunningHost {
   origin: string;
 }
 
-export function startBundleWeb(context: test.TestContext, state?: { root: string; home: string }): Promise<RunningHost> {
+export function startBundleWeb(context: test.TestContext, state?: { root: string; home: string }, options: { searchPath?: string } = {}): Promise<RunningHost> {
   const home = state?.home ?? fs.mkdtempSync(path.join(work, 'home-'));
   // ADR 0062: native coverage cannot attribute this source-free bundle to src/.
   // Keep coverage on the owning suite, but avoid collecting and serializing
   // discarded bundle ranges in the host and its independent recovery process.
-  const env: NodeJS.ProcessEnv = { ...artifactEnvironment(), PARALLIX_HOME: home, PATH: '/usr/bin:/bin',
+  const env: NodeJS.ProcessEnv = { ...artifactEnvironment(), PARALLIX_HOME: home, PATH: options.searchPath ?? '/usr/bin:/bin',
     // An inherited read-only CLI cannot recover or admit unrelated work.
     // The synthetic fence has no matching operation; any attempted write fails.
     PARALLIX_WORKFLOW_OPERATION: 'package-smoke-read-only', PARALLIX_WORKFLOW_GENERATION: '1',

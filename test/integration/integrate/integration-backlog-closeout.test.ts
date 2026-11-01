@@ -1,3 +1,4 @@
+import { seedGit } from '../../fixtures/git-repository.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
 import { integrationBounceSeams } from '../../helpers/integration-bounce-seams.js';
 import { integrationServices } from '../../helpers/stub-integration-services.js';
@@ -57,29 +58,26 @@ function taskBody(id: string): string {
  */
 function seedRepository(): string {
   const root = mkdtemp('integration-backlog-closeout-');
-  git(root, ['init', '-q', '-b', 'main']);
-  git(root, ['config', 'user.email', 'test@parallix.test']);
-  git(root, ['config', 'user.name', 'Test']);
-  git(root, ['config', 'core.hooksPath', '/dev/null']);
+  seedGit(root, [
+    ['init', '-q', '-b', 'main'],
+    ['config', 'user.email', 'test@parallix.test'],
+    ['config', 'user.name', 'Test'],
+    ['config', 'core.hooksPath', '/dev/null'],
+  ]);
   for (const rel of ['workflow.config.json', 'config/state-map.json']) {
     write(root, rel, fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8'));
   }
   write(root, 'README.md', 'base\n');
-  git(root, ['add', '-A']);
-  git(root, ['commit', '-qm', 'base']);
-
-  git(root, ['checkout', '-q', '-b', `mission/${FIRST}`]);
+  seedGit(root, [['add', '-A'], ['commit', '-qm', 'base'],
+    ['checkout', '-q', '-b', `mission/${FIRST}`]]);
   write(root, `backlog/tasks/${FIRST_FILE}`, taskBody(FIRST));
   write(root, 'src/first.txt', 'first\n');
-  git(root, ['add', '-A']);
-  git(root, ['commit', '-qm', 'first mission']);
-
-  git(root, ['checkout', '-q', '-b', `mission/${SECOND}`]);
+  seedGit(root, [['add', '-A'], ['commit', '-qm', 'first mission'],
+    ['checkout', '-q', '-b', `mission/${SECOND}`]]);
   write(root, `backlog/tasks/${SECOND_FILE}`, taskBody(SECOND));
   write(root, 'src/second.txt', 'second\n');
-  git(root, ['add', '-A']);
-  git(root, ['commit', '-qm', 'second mission']);
-  git(root, ['checkout', '-q', 'main']);
+  seedGit(root, [['add', '-A'], ['commit', '-qm', 'second mission'],
+    ['checkout', '-q', 'main']]);
   return root;
 }
 

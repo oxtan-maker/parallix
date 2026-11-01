@@ -1,3 +1,4 @@
+import { seedGit } from '../fixtures/git-repository.js';
 import { fixtureMission as typedMissionFixture } from '../fixtures/mission-builders.js';
 // Load the immutable CLI composition with the fixture modules. These cases
 // measure workflow execution, not the first tsx compilation of the registry.
@@ -84,14 +85,7 @@ function git(cwd: string, args: string[]): string {
   return result.stdout.trim();
 }
 
-/** Keep setup Git processes real, without forking the large test worker per command. */
-export function seedGit(cwd: string, commands: readonly (readonly string[])[]): string {
-  const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
-  const script = commands.map(args => ['git', ...args].map(quote).join(' ')).join('\n');
-  const result = spawnSync('sh', ['-e'], { cwd, input: script, encoding: 'utf8' });
-  assert.equal(result.status, 0, `fixture Git setup: ${result.stderr}`);
-  return result.stdout.trim();
-}
+export { seedGit } from '../fixtures/git-repository.js';
 
 /**
  * An approved mission in the integration lane, the state a human leaves it in
@@ -152,6 +146,7 @@ export async function openRepairFixture(options: {
   // PARALLIX_HOME made a direct `npx tsx --test` run write to (and collide
   // with) whatever missions the operator database already held.
   const previousHome = process.env.PARALLIX_HOME;
+  const previousPath = process.env.PATH;
   const previousPrimary = process.env.PRIMARY_WORKTREE;
   const previousConfinement = process.env.PARALLIX_NO_BUBBLEWRAP;
   const previousCwd = process.cwd();
@@ -163,6 +158,7 @@ export async function openRepairFixture(options: {
       await clearOperatorStateCache();
     } finally {
       if (previousHome === undefined) { delete process.env.PARALLIX_HOME; } else { process.env.PARALLIX_HOME = previousHome; }
+      if (previousPath === undefined) { delete process.env.PATH; } else { process.env.PATH = previousPath; }
       if (previousPrimary === undefined) { delete process.env.PRIMARY_WORKTREE; } else { process.env.PRIMARY_WORKTREE = previousPrimary; }
       if (previousConfinement === undefined) { delete process.env.PARALLIX_NO_BUBBLEWRAP; } else { process.env.PARALLIX_NO_BUBBLEWRAP = previousConfinement; }
       process.chdir(previousCwd);
@@ -170,6 +166,11 @@ export async function openRepairFixture(options: {
     }
   };
   try {
+    // Agents are injected; host process discovery is outside this contract.
+    const bin = path.join(root, '.fixture-bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'ps'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    process.env.PATH = `${bin}:${previousPath ?? ''}`;
     // This fixture owns the primary checkout; pin the supported override so
     // recovery exercises the repair contract rather than repeatedly discovering it.
     process.env.PRIMARY_WORKTREE = repo;

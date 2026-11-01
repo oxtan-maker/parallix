@@ -169,15 +169,14 @@ function providerPort(slug: string, branch: string, worktree: string, target: Re
     pollDisposition: async (implementer, sinceIso, request) => await pollForDisposition(prNumber as number, implementer, sinceIso, credentials() as string, poll(request, CONTINUE_SKIP_CHECK_TIMEOUT_MS)),
     publishRevision() {
       if (!credentials()) { return null; }
-      // A stale lease is refetched once, then forced: the review ref mirrors the mission branch.
+      // Refresh a stale lease once; a concurrent remote update must remain protected.
       let result = push({ forceWithLease: true });
       if (isStaleInfoPushRejection(result)) {
         log(fmt.status('INFO', `Push rejected as stale; fetching review/${branch} and retrying.`));
         fetchReviewBranch(branch, worktree, { token: credentials() });
         result = push({ forceWithLease: true });
         if (isStaleInfoPushRejection(result)) {
-          log(fmt.status('INFO', 'Force-with-lease still stale; using force push.'));
-          result = push({ force: true });
+          log(fmt.status('WARN', `Publication failed after a concurrent remote update to review/${branch}; force-with-lease still stale.`));
         }
       }
       return { ok: result.status === 0, status: result.status ?? null, detail: result.stderr || result.stdout || '' };

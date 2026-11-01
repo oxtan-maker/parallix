@@ -182,6 +182,9 @@ function composeBoard(fixture: Fixture): BuiltBoard {
       rootDir: fixture.rootDir,
       blocklistRepo: blocklist,
       knownAgentFamilies: [agentFamily('codex'), agentFamily('claude')],
+      // No agent runs in this filesystem fixture. Host process discovery has
+      // its own boundary suite and must not import operator state here.
+      detectRunningSessions: () => [],
       resolveTaskFile: () => ({ ok: true as const, taskFile: fixture.taskFile, matches: [fixture.taskFile] }),
     }),
     new ConcreteGitReadAdapter({ rootDir: fixture.rootDir, repositoryId: repoId }),

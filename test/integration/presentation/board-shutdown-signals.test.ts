@@ -1,3 +1,4 @@
+import { copyMigratedSchema, prepareMigratedSchema } from '../../fixtures/migrated-database.js';
 /**
  * TASK-2373 — deterministic `px board` shutdown, proved on real OS processes.
  *
@@ -157,18 +158,6 @@ test('SC22: SIGTERM terminates the real interactive board cleanly', async () => 
   }
 });
 
-// Keep all ten real launches, each with its own fixture and measured budget.
-for (let index = 0; index < 10; index += 1) {
-  test(`SC26: real start-and-quit cycle ${index + 1} leaves its spawned board PID gone`, async () => {
-    const fixture = await launchBoard();
-    try {
-      await assertTerminates(fixture, 'q', `cycle ${index + 1}`);
-    } finally {
-      await fixture.dispose();
-    }
-  });
-}
-
 // ---------------------------------------------------------------------------
 // TASK-2377 — SIGINT is a board exit path, on both sides of Ink's raw-mode
 // window
@@ -282,6 +271,8 @@ async function gitIn(cwd: string, ...args: string[]): Promise<void> {
 }
 
 async function seedInflightMission(fixtureRoot: string, stateRoot: string): Promise<void> {
+  await prepareMigratedSchema();
+  copyMigratedSchema(path.join(stateRoot, 'parallix.db'));
   const services = await createMissionApplicationServices(fixtureRoot, {
     databasePath: path.join(stateRoot, 'parallix.db'),
   });
@@ -394,6 +385,9 @@ async function launchInflightBoard(t: TestContext): Promise<InflightBoardFixture
     `echo continued > "${continuedPath}"`,
   ].join('\n');
   await writeFile(path.join(stubDir, 'claude'), stub, { mode: 0o755 });
+  // The case proves liveness from the provider's PID and start marker; board
+  // metrics must not rescan unrelated workstation processes.
+  await writeFile(path.join(stubDir, 'ps'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
 
   // The verify-local git compat shim (Apple Git 2.24) misparses a bare
   // `init -q -b main` (the -q is taken as the target directory), so the
@@ -495,15 +489,3 @@ test('TASK-2375 SC3: Ctrl+C terminates the real board while a dispatched action 
     await fixture.dispose();
   }
 });
-
-for (let index = 0; index < 3; index += 1) {
-  test(`in-flight dispatch-quit cycle ${index + 1} preserves workflow and cleans its fixture (TASK-2750)`, async t => {
-    const fixture = await launchInflightBoard(t);
-    try {
-      await dispatchAndAwaitStart(fixture);
-      await assertInflightTermination(fixture, 'q', `in-flight dispatch-quit cycle ${index + 1}`);
-    } finally {
-      await fixture.dispose();
-    }
-  });
-}

@@ -27,6 +27,8 @@ import { integrationServices } from '../../helpers/stub-integration-services.js'
 // IntegrationAbort ("in review without an authoritative approval").
 
 import test from 'node:test';
+
+test.before(prepareMigratedSchema);
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -47,7 +49,7 @@ import { MissionLifecycleService } from '../../../src/application/mission-lifecy
 import { MissionIntegrationService } from '../../../src/application/mission-integration-service.js';
 import { recoverMissionForIntegration } from '../../../src/adapters/cli/commands/integrate.js';
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
-import { SqliteMigrationRunner, loadDefaultMigrations } from '../../../src/adapters/sqlite/migration-runner.js';
+import { copyMigratedSchema, prepareMigratedSchema } from '../../fixtures/migrated-database.js';
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
 import { clearOperatorStateCache } from '../../../src/adapters/sqlite/adapter-factory.js';
 
@@ -86,8 +88,8 @@ test('delayed integration: review dwell is 30m and integration dwell is 225m (R2
   await clearOperatorStateCache();
 
   const database = new SqliteDatabaseAdapter();
+  copyMigratedSchema(path.join(home, 'parallix.db'));
   await database.open({ path: path.join(home, 'parallix.db') });
-  await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
   const store = new SqliteMissionStore(database);
   const lifecycle = new MissionLifecycleService(store);
   const integration = new MissionIntegrationService(store);

@@ -119,7 +119,7 @@ for (const disposition of ['BLOCKED', 'PARKED', 'PUSHBACK_ALL']) {
 
 // ---------------------------------------------------------------------------
 // F1/F2: The Forgejo provider publishes the mission branch with a lease and
-// recovers a stale-info rejection once before forcing.
+// retries a stale-info rejection once while preserving the remote lease.
 // ---------------------------------------------------------------------------
 function boundProvider(worktree: string, providerSlug: string = TEST_SLUG, log: (_line: string) => void = () => {}) {
   mock.method(reviewAdapter, 'isProviderEnabled', () => true);
@@ -162,13 +162,58 @@ test('Forgejo PR round sync: stale-info rejection triggers fetch-retry then succ
   assert.ok(pushCalls[1].forceWithLease, 'Retry push should also use forceWithLease');
 });
 
+test('Forgejo PR round sync: a competing update between fetch and retry survives stale leases (TASK-2800)', async () => {
+  const pushCalls: Array<Record<string, unknown>> = [];
+  const events: string[] = [];
+  const logs: string[] = [];
+  const missionHead = 'mission-revision';
+  let remoteTip = 'competing-first';
+  let trackingTip = 'initial';
+  const staleDetail = ' ! [rejected] mission -> mission (stale info)';
+  mock.method(forgejo, 'pushReviewRef', (_source: string, _destination: string, _rootDir: string, opts: Record<string, unknown>) => {
+    pushCalls.push(opts);
+    events.push('push');
+    if (pushCalls.length === 2) {
+      // The competing publisher advances after our fetch took its lease snapshot.
+      assert.equal(trackingTip, 'competing-first');
+      remoteTip = 'competing-second';
+    }
+    if (opts.force || (opts.forceWithLease && trackingTip === remoteTip)) {
+      remoteTip = missionHead;
+      return { status: 0, stdout: '', stderr: '' };
+    }
+    return { status: 1, stdout: '', stderr: staleDetail };
+  });
+  mock.method(forgejo, 'fetchReviewBranch', (branch: string) => {
+    assert.equal(branch, `mission/${TEST_SLUG}`);
+    events.push('fetch');
+    trackingTip = remoteTip;
+    return { status: 0, stdout: '', stderr: '' };
+  });
+  const failed = boundProvider(os.tmpdir(), TEST_SLUG, line => logs.push(line)).publishRevision();
+
+  assert.equal(remoteTip, 'competing-second', 'publication must preserve the competing remote commit');
+  assert.deepEqual(failed, { ok: false, status: 1, detail: staleDetail });
+  assert.deepEqual(events, ['push', 'fetch', 'push']);
+  assert.ok(pushCalls.every(opts => opts.forceWithLease === true && opts.force !== true));
+  assert.ok(logs.some(line => line.includes('WARN') && line.includes('concurrent remote update')));
+
+  const { run, fake } = roundLoop({ reviews: ['REQUEST_CHANGES', 'APPROVED'], dispositions: ['CHANGES_MADE'], publish: () => failed! });
+  await run();
+  assert.ok(fake.logs.some(line => line.includes('could not push') && line.includes(staleDetail)));
+  assert.ok(fake.logs.some(line => line.includes('APPROVED')), 'a stale publication failure still allows the next round');
+});
+
 test('Forgejo PR round sync: push failure after all retries logs WARN and does not throw', async () => {
   let pushes = 0;
+  let fetches = 0;
+  mock.method(forgejo, 'fetchReviewBranch', () => { fetches += 1; return { status: 0, stdout: '', stderr: '' }; });
   mock.method(forgejo, 'pushReviewRef', () => { pushes += 1; return { status: 1, stdout: '', stderr: 'push failed: connection reset' }; });
   const provider = boundProvider(os.tmpdir());
   const failed = provider.publishRevision();
   assert.deepEqual(failed, { ok: false, status: 1, detail: 'push failed: connection reset' });
   assert.equal(pushes, 1, 'a non-stale failure is not retried');
+  assert.equal(fetches, 0, 'a non-stale failure does not fetch');
 
   // The loop reports the failed publication and continues to the next round.
   const { run, fake } = roundLoop({ reviews: ['REQUEST_CHANGES', 'APPROVED'], dispositions: ['CHANGES_MADE'], publish: () => failed! });

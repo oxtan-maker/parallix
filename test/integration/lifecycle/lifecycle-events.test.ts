@@ -1,3 +1,4 @@
+import { before } from 'node:test';
 import { seedDraftedContract } from '../../helpers/seed-drafted-contract.js';
 // Historical regression provenance: TASK-2347.02.
 /**
@@ -22,7 +23,9 @@ import { MissionLifecycleService } from '../../../src/application/mission-lifecy
 import type { MissionVersion } from '../../../src/application/domain-ports.js';
 import { SqliteBoardLaneEventRepository } from '../../../src/adapters/sqlite/board-lane-event-repository.js';
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
-import { loadDefaultMigrations, SqliteMigrationRunner } from '../../../src/adapters/sqlite/migration-runner.js';
+import { copyMigratedSchema, prepareMigratedSchema } from '../../fixtures/migrated-database.js';
+
+before(prepareMigratedSchema);
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { missionId, missionLabels } from '../../../src/domain/mission.js';
@@ -69,8 +72,8 @@ async function isolatedStore(): Promise<Fixture> {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-task-2347-02-'));
   temporaryDirectories.push(directory);
   const db = new SqliteDatabaseAdapter();
+  copyMigratedSchema(path.join(directory, 'fixture.db'));
   await db.open({ path: path.join(directory, 'fixture.db') });
-  await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
   return { store: new SqliteMissionStore(db), events: new SqliteBoardLaneEventRepository(db), db };
 }
 

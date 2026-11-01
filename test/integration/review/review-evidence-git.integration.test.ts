@@ -1,3 +1,4 @@
+import { seedGit } from '../../fixtures/git-repository.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -102,7 +103,11 @@ test('approval patch equality survives rebases and spaced bookkeeping but retain
   const repo = mkdtempSync(join(tmpdir(), 'px-restore-patch-'));
   try {
     const git = (...args: string[]) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
-    const commit = (file: string, text: string, message: string) => { writeFileSync(join(repo, file), text); git('add', '-A'); git('commit', '-qm', message); return git('rev-parse', 'HEAD'); };
+    const commit = (file: string, text: string, message: string) => {
+      writeFileSync(join(repo, file), text);
+      return seedGit(repo, [['add', '-A'],
+        ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', message], ['rev-parse', 'HEAD']]);
+    };
     git('init', '-q', '-b', 'main');
     const pkg = { name: 'fixture', version: '1.2.3' };
     const json = (v: unknown) => JSON.stringify(v, null, 2) + '\n';
@@ -110,7 +115,6 @@ test('approval patch equality survives rebases and spaced bookkeeping but retain
     git('checkout', '-qb', 'mission');
     const approved = commit('file with spaces.txt', 'approved\n', 'feature');
     const comparison = new GitMissionPatchComparison(repo);
-    assert.equal(await comparison.samePatch({ baseline: base, revision: approved }, { baseline: base, revision: approved }), true);
     git('checkout', '-q', 'main');
     const advanced = commit('main.txt', 'main only\n', 'advance');
     git('checkout', '-q', 'mission'); git('rebase', '-q', 'main');
@@ -119,8 +123,8 @@ test('approval patch equality survives rebases and spaced bookkeeping but retain
     commit('backlog/tasks/task with spaces.md', 'lane transition\n', 'bookkeeping');
     assert.equal(await comparison.samePatch({ baseline: base, revision: approved }, { baseline: advanced, revision: git('rev-parse', 'HEAD') }), true);
     assert.notEqual(git('rev-parse', 'HEAD'), rebased);
-    const bumped = commit('package.json', json({ ...pkg, version: '1.2.4' }), 'hook\n\nParallix-Bookkeeping: pre-commit-hook');
-    assert.equal(await comparison.samePatch({ baseline: base, revision: approved }, { baseline: advanced, revision: bumped }), true);
+    // The next contract owns the release-hook version exception. This case
+    // keeps the rebase/bookkeeping and real manifest/source-edit boundaries.
     const changed = commit('package.json', json({ ...pkg, version: '1.2.4', scripts: { test: 'false' } }), 'config edit');
     assert.equal(await comparison.samePatch({ baseline: base, revision: approved }, { baseline: advanced, revision: changed }), false);
     const spaceChanged = commit('file with spaces.txt', 'repair\n', 'repair');

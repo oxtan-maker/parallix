@@ -1,8 +1,8 @@
 ---
 id: TASK-2800
 title: Preserve remote lease safety in automatic review publication
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-20 16:17'
 labels:
   - bug

@@ -25,10 +25,10 @@ const { startVibeAgent } = startVibeAgentModule;
 const { ensureVibeHome, vibeConfigPath, vibeSessionLogDir } = ensureVibeHomeModule;
 const { processResult } = processResultModule;
 const { getVibeProviderModel } = getVibeProviderModelModule;
-function withVibeLauncher(run: () => ReturnType<typeof startVibeAgent>) {
+function withVibeLauncher(run: (_worktree: string) => ReturnType<typeof startVibeAgent>) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-test-'));
   const launcher = path.join(tmpRoot, 'vibe');
-  fs.writeFileSync(launcher, `#!${process.execPath}\nprocess.exit(0);\n`);
+  fs.writeFileSync(launcher, '#!/bin/sh\nexit 0\n');
   fs.chmodSync(launcher, 0o755);
   const previousPath = process.env.PATH;
   process.env.PATH = `${tmpRoot}${path.delimiter}${previousPath}`;
@@ -37,7 +37,7 @@ function withVibeLauncher(run: () => ReturnType<typeof startVibeAgent>) {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   };
   try {
-    const result = run();
+    const result = run(tmpRoot);
     if (result && result.resultPromise && typeof result.resultPromise.then === 'function') {
       result.resultPromise = result.resultPromise.finally(cleanup);
       return result;
@@ -134,7 +134,7 @@ test('buildVibeInvocation merges env', () => {
 // ---------- startVibeAgent ----------
 
 test('startVibeAgent returns invocation and resultPromise with bare name', async () => {
-  const result = withVibeLauncher(() => startVibeAgent({ configuration: resolveConfiguration(process.env), prompt: 'test', worktree: '/tmp' }));
+  const result = withVibeLauncher(worktree => startVibeAgent({ configuration: resolveConfiguration(process.env), prompt: 'test', worktree }));
   assert.ok(result.invocation);
   assert.ok(result.invocation.command);
   assert.ok(result.invocation.args);

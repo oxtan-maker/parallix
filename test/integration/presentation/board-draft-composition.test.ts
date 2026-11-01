@@ -1,3 +1,4 @@
+import { before } from 'node:test';
 import { draftMissionServicesFixture } from '../../helpers/draft-mission-services.js';
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -6,7 +7,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
-import { loadDefaultMigrations, SqliteMigrationRunner } from '../../../src/adapters/sqlite/migration-runner.js';
+import { copyMigratedSchema, prepareMigratedSchema } from '../../fixtures/migrated-database.js';
+
+before(prepareMigratedSchema);
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
 import { clearOperatorStateCache } from '../../../src/adapters/sqlite/adapter-factory.js';
 import { NO_CURRENT_WORK_PORT } from '../../../src/application/recording/current-work-recorder.js';
@@ -36,6 +39,11 @@ test('shared web and TUI board discovers launchers only on supplied PATH (TASK-2
   directories.push(root);
   const bin = path.join(root, 'bin');
   fs.mkdirSync(bin);
+  // Launcher discovery does not need the workstation's process table. Keep
+  // ambient launchers visible so the supplied-PATH assertions retain meaning.
+  fs.writeFileSync(path.join(bin, 'ps'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${bin}:${previousPath ?? ''}`;
   // Bash is a probe dependency; no host launcher directory enters this PATH.
   fs.symlinkSync('/bin/bash', path.join(bin, 'bash'));
   for (const family of ['codex', 'claude']) {
@@ -61,6 +69,8 @@ test('shared web and TUI board discovers launchers only on supplied PATH (TASK-2
       assert.equal(agents.find(agent => agent.family === 'qwen')?.reason, 'launcher missing');
     }
   } finally {
+    if (previousPath === undefined) { delete process.env.PATH; }
+    else { process.env.PATH = previousPath; }
     setCommandPathProbe(name => name);
     setLauncherHealthProbe(() => ({ ok: true as const }));
   }
@@ -70,8 +80,8 @@ async function isolatedStore() {
   const directory = registeredMkdtemp('parallix-task-2426-');
   directories.push(directory);
   const db = new SqliteDatabaseAdapter();
+  copyMigratedSchema(path.join(directory, 'fixture.db'));
   await db.open({ path: path.join(directory, 'fixture.db') });
-  await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
   return { db, store: new SqliteMissionStore(db) };
 }
 

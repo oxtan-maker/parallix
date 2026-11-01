@@ -9,10 +9,13 @@ import { fixtureMission as completeMissionFixture } from './mission-builders.js'
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { before } from 'node:test';
+import { seedGit } from './git-repository.js';
+import { copyMigratedSchema, prepareMigratedSchema } from './migrated-database.js';
+
+before(prepareMigratedSchema);
 
 import { SqliteDatabaseAdapter } from '../../src/adapters/sqlite/database-adapter.js';
-import { SqliteMigrationRunner, loadDefaultMigrations } from '../../src/adapters/sqlite/migration-runner.js';
 import { SqliteMissionStore } from '../../src/adapters/sqlite/mission-store.js';
 import { clearOperatorStateCache } from '../../src/adapters/sqlite/adapter-factory.js';
 import { missionId, missionLabels } from '../../src/domain/mission.js';
@@ -84,34 +87,32 @@ interface MissionDatabaseFixture {
 }
 async function withMissionDatabase(slug: string, fn: (fixture: MissionDatabaseFixture) => Promise<void>, { seedReview = true, reviewOverrides = {} }: { seedReview?: boolean; reviewOverrides?: Partial<Review> } = {}) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'review-state-db-'));
-  const home = path.join(tmpRoot, 'parallix-home');
-  fs.mkdirSync(home, { recursive: true });
-
-  const missionDir = path.join(tmpRoot, 'missions', slug);
-  fs.mkdirSync(missionDir, { recursive: true });
-  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), `# Mission: ${slug}\n`);
-
-  spawnSync('git', ['init'], { cwd: tmpRoot });
-  spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tmpRoot });
-  spawnSync('git', ['config', 'user.name', 'Test'], { cwd: tmpRoot });
-  spawnSync('git', ['checkout', '-b', `mission/${slug}`], { cwd: tmpRoot });
-  spawnSync('git', ['add', '.'], { cwd: tmpRoot });
-  spawnSync('git', ['commit', '-m', 'init', '--allow-empty'], { cwd: tmpRoot });
-
   const previousHome = process.env.PARALLIX_HOME;
   const previousCwd = process.cwd();
-  process.env.PARALLIX_HOME = home;
-  clearOperatorStateCache();
-  process.chdir(tmpRoot);
-
   const database = new SqliteDatabaseAdapter();
-  await database.open({ path: path.join(home, 'parallix.db') });
-  await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
-  const store = new SqliteMissionStore(database);
-
-  const mission = missionWithReview(slug, tmpRoot, reviewOverrides);
-  await store.save(seedReview ? mission : { ...mission, review: null }, null);
   try {
+    const home = path.join(tmpRoot, 'parallix-home');
+    fs.mkdirSync(home, { recursive: true });
+
+    const missionDir = path.join(tmpRoot, 'missions', slug);
+    fs.mkdirSync(missionDir, { recursive: true });
+    fs.writeFileSync(path.join(missionDir, 'MISSION.md'), `# Mission: ${slug}\n`);
+
+    seedGit(tmpRoot, [['init', '-b', `mission/${slug}`],
+      ['config', 'user.email', 'test@test.com'], ['config', 'user.name', 'Test'],
+      ['add', '.'], ['commit', '-m', 'init', '--allow-empty']]);
+
+    process.env.PARALLIX_HOME = home;
+    await clearOperatorStateCache();
+    process.chdir(tmpRoot);
+
+    const databasePath = path.join(home, 'parallix.db');
+    if (!fs.existsSync(databasePath)) { copyMigratedSchema(databasePath); }
+    await database.open({ path: databasePath });
+    const store = new SqliteMissionStore(database);
+
+    const mission = missionWithReview(slug, tmpRoot, reviewOverrides);
+    await store.save(seedReview ? mission : { ...mission, review: null }, null);
     await fn({ root: tmpRoot, missionDir, slug, home, store, openStore: async () => {
       const db = new SqliteDatabaseAdapter();
       await db.open({ path: path.join(home, 'parallix.db') });
@@ -122,7 +123,7 @@ async function withMissionDatabase(slug: string, fn: (fixture: MissionDatabaseFi
     process.chdir(previousCwd);
     if (previousHome === undefined) { delete process.env.PARALLIX_HOME; }
     else { process.env.PARALLIX_HOME = previousHome; }
-    clearOperatorStateCache();
+    await clearOperatorStateCache();
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
 }
@@ -143,8 +144,9 @@ async function seedMissionDatabase(home: string, slug: string, rootDir: string, 
   await clearOperatorStateCache();
 
   const database = new SqliteDatabaseAdapter();
-  await database.open({ path: path.join(home, 'parallix.db') });
-  await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
+  const databasePath = path.join(home, 'parallix.db');
+  if (!fs.existsSync(databasePath)) { copyMigratedSchema(databasePath); }
+  await database.open({ path: databasePath });
 
   const mission = missionWithReview(slug, rootDir);
   const [round] = mission.review.rounds;
@@ -173,7 +175,7 @@ async function seedMissionDatabase(home: string, slug: string, rootDir: string, 
     await database.close();
     if (previousHome === undefined) { delete process.env.PARALLIX_HOME; }
     else { process.env.PARALLIX_HOME = previousHome; }
-    clearOperatorStateCache();
+    await clearOperatorStateCache();
   };
   restore.store = store;
   return restore;

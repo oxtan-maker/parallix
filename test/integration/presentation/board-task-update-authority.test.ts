@@ -1,4 +1,5 @@
 import { emptyBoardRepositories } from '../../helpers/empty-board-repositories.js';
+import { copyMigratedSchema, prepareMigratedSchema } from '../../fixtures/migrated-database.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
@@ -34,6 +35,8 @@ async function openStore(databasePath: string): Promise<{ database: SqliteDataba
   return { database, store: new SqliteMissionStore(database) };
 }
 
+test.before(prepareMigratedSchema);
+
 test('external task update leaves persisted board lifecycle authoritative', async () => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'task-2440-repository-')));
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2440-home-'));
@@ -43,6 +46,7 @@ test('external task update leaves persisted board lifecycle authoritative', asyn
   process.env.PARALLIX_HOME = home;
 
   try {
+    copyMigratedSchema(databasePath);
     childProcess.spawnSync('git', ['init'], { cwd: root, encoding: 'utf8' });
     childProcess.spawnSync('git', ['config', 'user.name', 'Task 2440'], { cwd: root, encoding: 'utf8' });
     childProcess.spawnSync('git', ['config', 'user.email', 'task-2440@example.test'], { cwd: root, encoding: 'utf8' });
@@ -67,6 +71,7 @@ test('external task update leaves persisted board lifecycle authoritative', asyn
         repositoryId: repository,
         ...emptyBoardRepositories(),
         knownAgentFamilies: [],
+        detectRunningSessions: () => [],
       });
       const lanes = new Map((await board.builder.build()).stages.flatMap((stage) =>
         stage.cards.map((card) => [card.id, card.lane]),

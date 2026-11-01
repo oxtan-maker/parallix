@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import { copyMigratedSchema, prepareMigratedSchema } from '../fixtures/migrated-database.js';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { createMissionApplicationServices } from '../../src/composition/application-services.js';
@@ -5,7 +7,10 @@ import { missionId } from '../../src/domain/mission.js';
 
 /** Populate the isolated board database; Markdown fixtures supply titles only. */
 export async function seedBoardMissions(rootDir: string, stateDir: string, entries: readonly { id: string; title: string }[]): Promise<void> {
-  const services = await createMissionApplicationServices(rootDir, { databasePath: path.join(stateDir, 'parallix.db') });
+  await prepareMigratedSchema();
+  const databasePath = path.join(stateDir, 'parallix.db');
+  if (!fs.existsSync(databasePath)) { copyMigratedSchema(databasePath); }
+  const services = await createMissionApplicationServices(rootDir, { databasePath });
   for (const entry of entries) {
     const id = missionId(entry.id);
     const result = await services.intake.execute({ operationId: `${id}-fixture`, missionId: id,

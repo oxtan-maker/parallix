@@ -8,7 +8,7 @@ import { repositoryId } from '../../src/domain/repository.js';
 import { fixtureMission } from './mission-builders.js';
 
 /** Fresh populated operator state, never copied from an operator or a running workflow. */
-export async function seedBoardLoading(input: string, count = 120, options: { telemetry?: boolean } = {}) {
+export async function seedBoardLoading(input: string, count = 120, options: { telemetry?: boolean; schemaTemplate?: string } = {}) {
   const root = path.join(input, 'repository');
   const home = path.join(input, 'home');
   fs.mkdirSync(root, { recursive: true });
@@ -18,6 +18,11 @@ export async function seedBoardLoading(input: string, count = 120, options: { te
     'commit', '--allow-empty', '-qm', 'fixture'], { cwd: root });
   const database = new SqliteDatabaseAdapter();
   try {
+    // Boundary suites may reuse closed empty schema; all writable data stays
+    // private. The manual benchmark still measures fresh migration by default.
+    if (options.schemaTemplate) {
+      fs.copyFileSync(options.schemaTemplate, path.join(home, 'parallix.db'), fs.constants.COPYFILE_EXCL);
+    }
     await database.open({ path: path.join(home, 'parallix.db') });
     await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
     const store = new SqliteMissionStore(database);
