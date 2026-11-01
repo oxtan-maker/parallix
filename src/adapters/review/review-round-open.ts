@@ -1,6 +1,6 @@
 import type { ReviewLoopState } from '../../application/ports/review-round.js';
 /**
- * The review loop's round-open handoff boundary (TASK-2582).
+ * The review loop's round-open review preparation boundary (TASK-2582).
  *
  * Every round the autonomous loop opens passes through here. When the Mission
  * is `active` — the shape a request-changes round leaves behind — the
@@ -51,7 +51,7 @@ export type OpenReviewRoundResult =
   | { readonly ok: false; readonly diagnostic: string };
 
 /**
- * Open a review round at the loop's handoff boundary.
+ * Open a review round at the loop's review preparation boundary.
  *
  * The authoritative `active → review` transition runs first: destination-state
  * work must not start while the Mission is still in the active lane. When the
@@ -122,7 +122,7 @@ async function settleReviewLane(
   let review = mission.review;
   if (status === 'ready-for-next-round') {
     // Advance to the next round over the resolved revision, the same domain
-    // command the handoff and board resume paths use. The round advance stays
+    // command the review preparation and board resume paths use. The round advance stays
     // in memory here: the active → review transition below commits the
     // advanced round and the lane event as one unit (saveWithTransition).
     // Persisting the round first would leave the store with a next round

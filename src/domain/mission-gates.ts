@@ -1,10 +1,10 @@
 /**
- * Declared verification gates: the exact commands handoff runs for a Mission.
+ * Declared verification gates: the exact commands review preparation runs for a Mission.
  *
  * A replaceable attribute on `Mission`, following the precedent `src/domain/
  * README.md` sets for NEL: it describes the mission and has no identity or
  * lifecycle of its own, so it is not an entity. What makes it domain state
- * rather than configuration is that handoff executes exactly these commands —
+ * rather than configuration is that review preparation executes exactly these commands —
  * a gate recorded here is a gate that runs.
  *
  * Each value is a runnable repository command and nothing else; the domain does

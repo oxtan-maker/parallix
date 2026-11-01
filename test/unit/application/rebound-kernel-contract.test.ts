@@ -125,9 +125,9 @@ test('task-2413: an agent-timeout carrying explicit infrastructure evidence does
   assert.equal(outcome.classification.failureClass, 'InfraBlocker');
   assert.equal(launches, 0);
 });
-test('task-2377.03: a handoff-verification reason classifies from its own ADR 0048 error text', () => {
+test("task-2377.03: a review-preparation-verification reason classifies from its own ADR 0048 error text", () => {
   const classification = classifyReboundReason({
-    kind: 'handoff-verification',
+    kind: "review-preparation-verification",
     error: 'checkpoint is missing a "## Goal Check" section',
   });
   assert.equal(classification.failureClass, 'IncompleteEvidence');
@@ -835,7 +835,7 @@ describe("Integration gate rebound —", () => {
     });
     assert.match(prompt, /Gate command: npm run test:integration/);
     assert.match(prompt, /Coverage: integration-only/);
-    assert.match(prompt, /review-identity-placeholder/, 'the gate output survives into the handoff');
+    assert.match(prompt, /review-identity-placeholder/, "the gate output survives into the review preparation");
   });
 
   // ── Routing: the four operator-facing outcomes ──────────────────────────────

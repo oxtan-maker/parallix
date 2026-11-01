@@ -12,7 +12,6 @@ import { WEB_TRANSPORT_VERSION, WebTransportError, type WebBoardCommandKind, typ
 
 export const BOARD_COMMAND_KINDS: Readonly<Record<BoardCommand, WebBoardCommandKind>> = {
   active: 'active:execute',
-  handoff: 'handoff:record',
   review: 'review:submit',
   integrate: 'integrate:merge',
   draft: 'draft:create',
@@ -21,7 +20,6 @@ export const BOARD_COMMAND_KINDS: Readonly<Record<BoardCommand, WebBoardCommandK
 
 const ATTENTION_KIND_COMMANDS: Readonly<Partial<Record<WebBoardCommandKind, BoardCommand>>> = {
   'active:execute': 'active',
-  'handoff:record': 'handoff',
   'review:submit': 'review',
   'integrate:merge': 'integrate',
   'draft:create': 'draft',
@@ -156,8 +154,8 @@ function toWebMissionCard(card: MissionCard): WebMissionCard {
 }
 
 function toWebAttentionItem(item: AttentionItem, card: MissionCard | undefined): WebAttentionItem {
-  const kind = item.action.kind;
-  const boardCommand = kind === 'manual' ? undefined : ATTENTION_KIND_COMMANDS[kind];
+  const kind = item.action?.kind;
+  const boardCommand = !kind || kind === 'manual' ? undefined : ATTENTION_KIND_COMMANDS[kind];
   const availability = boardCommand === undefined
     ? undefined
     : card?.commands.find((command) => command.command === boardCommand);
@@ -165,9 +163,9 @@ function toWebAttentionItem(item: AttentionItem, card: MissionCard | undefined):
     missionId: item.missionId,
     rank: item.rank,
     reason: { kind: item.reason.kind, detail: item.reason.kind === 'none' ? null : item.reason.detail },
-    action: kind === 'manual'
-      ? { kind, display: item.action.display, state: 'ineligible', reason: item.reason.kind === 'none' ? 'Operator decision required' : item.reason.detail, targetLane: null }
-      : toCommandAction(kind, item.action.display, availability),
+    action: !item.action ? null : item.action.kind === 'manual'
+      ? { kind: item.action.kind, display: item.action.display, state: 'ineligible', reason: item.reason.kind === 'none' ? 'Operator decision required' : item.reason.detail, targetLane: null }
+      : toCommandAction(item.action.kind, item.action.display, availability),
     dependsOnSources: [...item.dependsOnSources],
   };
 }

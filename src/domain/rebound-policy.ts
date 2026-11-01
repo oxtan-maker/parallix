@@ -71,9 +71,9 @@ export interface AgentTimeoutReason {
   expectedOutput?: string;
 }
 
-/** A handoff verification check rejected the mission. */
-export interface HandoffVerificationReason {
-  kind: 'handoff-verification';
+/** A review preparation verification check rejected the mission. */
+export interface ReviewPreparationVerificationReason {
+  kind: "review-preparation-verification";
   error: string;
   gateOutput?: string;
 }
@@ -96,7 +96,7 @@ export type ReboundReason =
   | HookFailureReason
   | ArtifactIncompleteReason
   | AgentTimeoutReason
-  | HandoffVerificationReason
+  | ReviewPreparationVerificationReason
   | DeclaredGateValidationReason;
 
 export interface ReboundClassification {
@@ -119,7 +119,7 @@ export function reboundDiagnostic(reason: ReboundReason): string {
       return reason.diagnostic || '';
     case 'agent-timeout':
       return reason.diagnostic || `${reason.role} did not respond before its stage timeout`;
-    case 'handoff-verification':
+    case "review-preparation-verification":
       return [reason.error, reason.gateOutput].filter(Boolean).join('\n');
     case 'declared-gate-validation':
       return reason.diagnostic;
@@ -134,7 +134,7 @@ function reasonLabel(reason: ReboundReason): string {
     case 'hook-failure': return 'GIT HOOK FAILURE';
     case 'artifact-incomplete': return 'INCOMPLETE ARTIFACTS';
     case 'agent-timeout': return 'AGENT TIMEOUT';
-    case 'handoff-verification': return 'HANDOFF VERIFICATION FAILURE';
+    case "review-preparation-verification": return 'REVIEW PREPARATION VERIFICATION FAILURE';
     case 'declared-gate-validation': return 'DECLARED GATE VALIDATION FAILURE';
   }
 }
@@ -151,8 +151,8 @@ function reasonLabel(reason: ReboundReason): string {
  *   mechanical Git blocker (class 5, AutoRepair).
  * - `artifact-incomplete`: incomplete evidence (class 4).
  * - `agent-timeout`: no agent output to act on — infrastructure (class 7).
- * - `handoff-verification`: classified from its own error text, which is the
- *   handoff path's existing evidence.
+ * - `review-preparation-verification`: classified from its own error text, which is the
+ *   review preparation path's existing evidence.
  *
  * An explicit infrastructure or state-machine diagnostic wins over the
  * structured default for the two incident-path kinds, because its remedy is

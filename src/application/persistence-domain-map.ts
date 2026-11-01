@@ -45,19 +45,19 @@ export interface DomainConceptInvariant {
 export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
   Record<DomainConceptName, DomainConceptInvariant>
 > = {
-  WorkflowOperation: { concept: 'WorkflowOperation', invariant: 'Only an open operation with the current fencing generation can authorize workflow writes.', fileLocation: 'src/domain/workflow-operation.ts', line: 33, anchor: 'export function requireWorkflowOwner' },
+  WorkflowOperation: { concept: 'WorkflowOperation', invariant: 'Only an open operation with the current fencing generation can authorize workflow writes.', fileLocation: 'src/domain/workflow-operation.ts', line: 35, anchor: 'export function requireWorkflowOwner' },
   Mission: {
     concept: 'Mission',
     invariant:
       'A mission cannot close before integration reports `done`, cannot close twice, and cannot close without an actual closure time; each violation throws MissionRuleViolation.',
     fileLocation: 'src/domain/mission.ts',
-    line: 250,
+    line: 252,
     anchor: 'export function closeMission',
   },
   CheckpointData: {
     concept: 'CheckpointData',
     invariant:
-      'Checkpoint evidence from another mission is rejected, and a checkpoint that is not handoff-ready cannot be recorded; a same-named checkpoint replaces the latest-state projection while durable storage retains recorded versions.',
+      "Checkpoint evidence from another mission is rejected, and a checkpoint that is not review-preparation-ready cannot be recorded; a same-named checkpoint replaces the latest-state projection while durable storage retains recorded versions.",
     fileLocation: 'src/domain/checkpoint.ts',
     line: 107,
     anchor: 'export function recordCheckpoint',
@@ -75,7 +75,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'Completed statistics require a validated ClosedMission whose identity matches the outcome and whose NEL is recorded; a mismatch or missing NEL throws StatisticsRuleViolation.',
     fileLocation: 'src/domain/usage.ts',
-    line: 202,
+    line: 200,
     anchor: 'export function completedMissionStatistics',
   },
   AgentRunMeasurement: {

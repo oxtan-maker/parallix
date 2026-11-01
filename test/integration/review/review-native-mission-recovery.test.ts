@@ -13,7 +13,7 @@ import { fixtureMission as typedMissionFixture } from '../../fixtures/mission-bu
 // authority, so `px review <slug>` reaches the reviewer-launch boundary and
 // `--reconcile-review` rebuilds the missing round-one Review.
 
-import { after, describe, it } from 'node:test';
+import { afterEach, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -21,7 +21,7 @@ import * as path from 'node:path';
 
 
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
-import { SqliteMigrationRunner, loadDefaultMigrations } from '../../../src/adapters/sqlite/migration-runner.js';
+import { copyMigratedSchema, prepareMigratedSchema } from '../../fixtures/migrated-database.js';
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
 import { clearOperatorStateCache } from '../../../src/adapters/sqlite/adapter-factory.js';
 import { mkdtempAt } from '../../helpers/temp-dir.js';
@@ -30,7 +30,7 @@ import { repositoryId } from '../../../src/domain/repository.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { changeRevision, startReview, ConfiguredReviewerEligibility } from '../../../src/domain/review.js';
 import { ReviewCommandUseCase } from '../../../src/application/review-command-use-case.js';
-import { createReviewWorkflowAdapter, reconcileInterruptedHandoffHandler } from '../../../src/adapters/review/review-commands.js';
+import { createReviewWorkflowAdapter, reconcileInterruptedReviewPreparationHandler } from '../../../src/adapters/review/review-commands.js';
 import { ReviewState, readReviewState } from '../../../src/adapters/review/review-state.js';
 import { createReviewLoopPorts } from '../../../src/adapters/review/review-loop.js';
 import { runReviewLoop } from '../../../src/application/review-loop/review-loop.js';
@@ -41,9 +41,14 @@ const REVIEWER = agentFamily('codex');
 const IMPLEMENTER = agentFamily('claude');
 
 const tempDirs: string[] = [];
+const databases: SqliteDatabaseAdapter[] = [];
 
-after(() => {
-  for (const dir of tempDirs) {
+// Recovery exercises real store writes, not repeated schema migration/backups.
+// Share only an empty, closed schema; every case owns its writable copy.
+before(prepareMigratedSchema);
+afterEach(async () => {
+  for (const db of databases.splice(0)) { await db.close(); }
+  for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -94,8 +99,10 @@ function createFileFreeHome(slug: string): string {
 
 async function openStore(root: string): Promise<SqliteMissionStore> {
   const db = new SqliteDatabaseAdapter();
-  await db.open({ path: path.join(root, 'parallix-home', 'parallix.db') });
-  await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
+  databases.push(db);
+  const databasePath = path.join(root, 'parallix-home', 'parallix.db');
+  copyMigratedSchema(databasePath);
+  await db.open({ path: databasePath });
   return new SqliteMissionStore(db);
 }
 
@@ -154,7 +161,7 @@ async function invokeReconcile(store: SqliteMissionStore, root: string): Promise
 }
 
 interface StartTransitionResult {
-  handoffRan: boolean;
+  reviewPreparationRan: boolean;
   reviewerLaunched: boolean;
   reviewPersisted: boolean;
   error: string | null;
@@ -176,9 +183,9 @@ async function driveStartTransition(
   root: string,
   opts: { openPr: boolean; launchReviewer?: boolean },
 ): Promise<StartTransitionResult> {
-  let handoffRan = false;
+  let reviewPreparationRan = false;
   let error: { value: string | null } = { value: null };
-  let handoffWroteReview = false;
+  let reviewPreparationWroteReview = false;
   // The review state reads null until the handoff has run (so the fresh start
   // sees no Review and the Mission-authority reset lets the handoff proceed),
   // then the round-one view the handoff created.
@@ -204,9 +211,9 @@ async function driveStartTransition(
         ? { kind: 'pull-request', provider: 'forgejo', id: '536', url: 'https://forgejo.example/reviews/536', sourceBranch: `mission/${SLUG}`, targetBranch: 'main' }
         : null),
     },
-    handoff: {
-      handoff: async () => {
-        handoffRan = true;
+    reviewPreparation: {
+      reviewPreparation: async () => {
+        reviewPreparationRan = true;
         const loaded = await store.load(missionId(SLUG));
         if (loaded.kind === 'found' && !loaded.mission.review) {
           const review = startReview(
@@ -217,7 +224,7 @@ async function driveStartTransition(
             ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily('codex'), agentFamily('qwen'), agentFamily('vibe')], strategy: 'random' }),
           );
           await store.save({ ...loaded.mission, status: 'review', closedAt: null, rawStatus: 'review', review }, loaded.version);
-          handoffWroteReview = true;
+          reviewPreparationWroteReview = true;
         }
         reviewed = true;
         return { ok: true as const };
@@ -235,7 +242,7 @@ async function driveStartTransition(
   const loaded = await store.load(missionId(SLUG));
   const reviewPersisted = loaded.kind === 'found' && Boolean(loaded.mission.review);
   const reviewerLaunched = fake.launches.some(launch => launch.role === 'reviewer');
-  return { handoffRan, reviewerLaunched, reviewPersisted: reviewPersisted || handoffWroteReview, error: error.value };
+  return { reviewPreparationRan, reviewerLaunched, reviewPersisted: reviewPersisted || reviewPreparationWroteReview, error: error.value };
 }
 
 describe("native Mission review start and recovery", () => {
@@ -257,7 +264,7 @@ describe("native Mission review start and recovery", () => {
       // existing-open-PR recovery: handoff records the missing aggregate, then
       // the loop reaches the reviewer-launch boundary.
       const resumeLaunched = await driveStartTransition(store, root, { openPr: true, launchReviewer: true });
-      assert.equal(resumeLaunched.handoffRan, true, 'handoff runs when an open PR exists but the Review aggregate is missing');
+      assert.equal(resumeLaunched.reviewPreparationRan, true, "review preparation runs when an open PR exists but the Review aggregate is missing");
       assert.equal(resumeLaunched.reviewerLaunched, true, 'the loop reaches the reviewer-launch boundary when the Review is missing');
       assert.equal(resumeLaunched.reviewPersisted, true, 'the missing round-one Review is persisted to the operator store');
       assert.equal(resumeLaunched.error, null, 'no failure diagnostic on the resume transition');
@@ -285,7 +292,7 @@ describe("native Mission review start and recovery", () => {
         worktree: root,
         missionStore: store,
         provider: { openPullRequest: () => null },
-        handoff: { handoff: async () => ({ ok: true as const }) },
+        reviewPreparation: { reviewPreparation: async () => ({ ok: true as const }) },
         routing: { eligibleFamilies: () => [], nominate: () => { throw new Error('No agents available'); } }, // no reviewer can be routed
         // A real exit throws, so a loop that fails closed is observed.
         output: { exit: () => { surfaced = true; throw new Error('loop-exit'); } },
@@ -422,7 +429,7 @@ describe("native Mission review start and recovery", () => {
     for (const missionStore of [null, unreadableStore]) {
       const errors: string[] = [];
       await assert.rejects(
-        reconcileInterruptedHandoffHandler(SLUG, args, {
+        reconcileInterruptedReviewPreparationHandler(SLUG, args, {
           missionStore,
           error: (message: string) => errors.push(message),
           exit: () => { throw new Error('exit:1'); },

@@ -17,7 +17,7 @@ function identityRequest(kind: string, overrides: Record<string, unknown> = {}):
   };
 }
 
-function handoffPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function reviewPreparationPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     netEngineeringLines: 120,
     capturedAt: '2026-08-28T00:00:00.000Z',
@@ -30,8 +30,8 @@ function problems(result: ReturnType<typeof validateWebCommandRequest>): string[
   return result.ok ? [] : [...result.problems];
 }
 
-test('web command request: accepts a well-formed identity-only request for each of the five card-advertised kinds', () => {
-  for (const kind of ['active:execute', 'draft:create', 'integrate:merge', 'handoff:record', 'review:submit']) {
+test('web command request: accepts a well-formed identity-only request for each execution action', () => {
+  for (const kind of ['active:execute', 'draft:create', 'integrate:merge', 'review:submit']) {
     const result = validateWebCommandRequest(identityRequest(kind));
     assert.equal(result.ok, true, `${kind} must be accepted: ${JSON.stringify(result)}`);
     assert.ok(result.ok);
@@ -44,37 +44,14 @@ test('web command request: accepts a well-formed identity-only request for each 
   }
 });
 
-test('web command request: accepts a well-formed handoff:record request with the full payload', () => {
-  const result = validateWebCommandRequest(identityRequest('handoff:record', {
-    payload: handoffPayload({
-      predictedBucket: 'Medium',
-      artifacts: [
-        { kind: 'file', location: 'src/x.ts', byteSize: 1234 },
-        { kind: 'git-range', location: 'a..b', byteSize: null },
-        { kind: 'url', location: 'https://example.invalid/log', byteSize: 7 },
-      ],
-      reviewRounds: 2,
-    }),
-  }));
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.ok(result.ok);
-  assert.deepEqual(result.value, {
-    requestKey: 'delivery',
-    missionId: 'task-2433',
-    kind: 'handoff:record',
-    missionStatusAtRequest: 'active',
-    payload: {
-      netEngineeringLines: 120,
-      predictedBucket: 'Medium',
-      capturedAt: '2026-08-28T00:00:00.000Z',
-      artifacts: [
-        { kind: 'file', location: 'src/x.ts', byteSize: 1234 },
-        { kind: 'git-range', location: 'a..b', byteSize: null },
-        { kind: 'url', location: 'https://example.invalid/log', byteSize: 7 },
-      ],
-      reviewRounds: 2,
-    },
-  } satisfies WebCommandRequest);
+test('NEL has no HTTP mutation contract in any lifecycle state (TASK-2822)', () => {
+  for (const status of ['backlog', 'refined', 'active', 'review', 'integration', 'done']) {
+    const result = validateWebCommandRequest(identityRequest('nel:record', {
+      missionStatusAtRequest: status, payload: reviewPreparationPayload(),
+    }));
+    assert.equal(result.ok, false);
+    assert.ok(problems(result).some(problem => problem.includes('request.kind')));
+  }
 });
 
 test('web command request: rejects every unknown top-level key, including the forbidden client-side controls', () => {
@@ -86,7 +63,7 @@ test('web command request: rejects every unknown top-level key, including the fo
 });
 
 test('web command request: rejects each kind that is not card-advertised, and any unknown kind', () => {
-  for (const kind of ['mission:intake', 'checkpoint:record', 'approve:review', 'review:act-on-findings', 'board:nuke', '']) {
+  for (const kind of ['nel:record', 'mission:intake', 'checkpoint:record', 'approve:review', 'review:act-on-findings', 'board:nuke', '']) {
     const result = validateWebCommandRequest(identityRequest(kind));
     assert.ok(!result.ok, `${kind} must be rejected as an unsupported kind`);
     assert.ok(problems(result).some(problem => problem.includes('kind')), `${kind} rejection must name the kind`);
@@ -109,56 +86,10 @@ test('web command request: rejects missing or mistyped required fields', () => {
 
 test('web command request: rejects a payload key on every identity-only kind', () => {
   for (const kind of ['active:execute', 'draft:create', 'integrate:merge', 'review:submit']) {
-    const result = validateWebCommandRequest(identityRequest(kind, { payload: handoffPayload() }));
+    const result = validateWebCommandRequest(identityRequest(kind, { payload: reviewPreparationPayload() }));
     assert.ok(!result.ok, `payload on ${kind} must be rejected`);
     assert.ok(problems(result).some(problem => problem.includes('payload')), `${kind} rejection must name the payload key`);
   }
-});
-
-test('web command request: rejects a null or non-object handoff payload', () => {
-  for (const payload of [null, 5, 'nope', ['nope']]) {
-    const result = validateWebCommandRequest(identityRequest('handoff:record', { payload }));
-    assert.ok(!result.ok, `a non-object handoff payload must be rejected: ${String(payload)}`);
-  }
-});
-
-test('web command request: rejects handoff payloads with missing, mistyped, or out-of-range fields', () => {
-  const cases: { name: string; payload: Record<string, unknown> }[] = [
-    { name: 'missing netEngineeringLines', payload: handoffPayload({ netEngineeringLines: undefined }) as Record<string, unknown> },
-    { name: 'missing capturedAt', payload: handoffPayload({ capturedAt: undefined }) as Record<string, unknown> },
-    { name: 'negative netEngineeringLines', payload: handoffPayload({ netEngineeringLines: -1 }) },
-    { name: 'non-finite netEngineeringLines', payload: handoffPayload({ netEngineeringLines: Infinity }) },
-    { name: 'string netEngineeringLines', payload: handoffPayload({ netEngineeringLines: '120' }) },
-    { name: 'null capturedAt', payload: handoffPayload({ capturedAt: null }) },
-    { name: 'non-string capturedAt', payload: handoffPayload({ capturedAt: 1234 }) },
-    { name: 'predictedBucket null', payload: handoffPayload({ predictedBucket: null }) },
-    { name: 'predictedBucket Unknown', payload: handoffPayload({ predictedBucket: 'Unknown' }) },
-    { name: 'predictedBucket lowercase', payload: handoffPayload({ predictedBucket: 'large' }) },
-    { name: 'non-array artifacts', payload: handoffPayload({ artifacts: 'x' }) },
-    { name: 'artifact without kind', payload: handoffPayload({ artifacts: [{ location: 'a', byteSize: 1 }] }) },
-    { name: 'artifact without location', payload: handoffPayload({ artifacts: [{ kind: 'file', byteSize: 1 }] }) },
-    { name: 'artifact without byteSize', payload: handoffPayload({ artifacts: [{ kind: 'file', location: 'a' }] }) },
-    { name: 'artifact unknown kind', payload: handoffPayload({ artifacts: [{ kind: 'blob', location: 'a', byteSize: 1 }] }) },
-    { name: 'artifact non-finite byteSize', payload: handoffPayload({ artifacts: [{ kind: 'file', location: 'a', byteSize: Infinity }] }) },
-    { name: 'artifact string location', payload: handoffPayload({ artifacts: [{ kind: 'file', location: 9, byteSize: 1 }] }) },
-    { name: 'artifact extra key', payload: handoffPayload({ artifacts: [{ kind: 'file', location: 'a', byteSize: 1, content: 'x' }] }) },
-    { name: 'negative reviewRounds', payload: handoffPayload({ reviewRounds: -1 }) },
-    { name: 'fractional reviewRounds', payload: handoffPayload({ reviewRounds: 1.5 }) },
-    { name: 'null reviewRounds', payload: handoffPayload({ reviewRounds: null }) },
-    { name: 'handoff payload extra key', payload: handoffPayload({ expectedVersion: 3 }) },
-  ];
-  for (const { name, payload } of cases) {
-    const result = validateWebCommandRequest(identityRequest('handoff:record', { payload }));
-    assert.ok(!result.ok, `${name} must be rejected: ${JSON.stringify(result)}`);
-    assert.ok(problems(result).length > 0, `${name} must report at least one problem`);
-  }
-});
-
-test('web command request: accepts a zero-line handoff payload with null byteSize and no optional keys', () => {
-  const result = validateWebCommandRequest(identityRequest('handoff:record', {
-    payload: handoffPayload({ netEngineeringLines: 0, artifacts: [{ kind: 'url', location: 'u', byteSize: null }] }),
-  }));
-  assert.equal(result.ok, true, JSON.stringify(result));
 });
 
 test('web create-mission request: accepts the planning fields only and recognises its own kind (TASK-2693)', () => {
@@ -197,7 +128,7 @@ test('web edit request accepts opaque identity and complete removals, rejects li
 });
 
 test('workflow command requests require a nonblank retry key (TASK-2750)', () => {
-  for (const kind of ['active:execute', 'draft:create', 'integrate:merge', 'handoff:record', 'review:submit']) {
+  for (const kind of ['active:execute', 'draft:create', 'integrate:merge', 'review:submit']) {
     for (const requestKey of [undefined, '', '   ', '\t']) {
       assert.equal(validateWebCommandRequest(identityRequest(kind, { requestKey })).ok, false, `${kind}: ${String(requestKey)}`);
     }
@@ -218,7 +149,7 @@ test('web command request: explicit launch families are accepted only on eligibl
       assert.equal(validateWebCommandRequest(identityRequest(kind, { agent })).ok, false);
     }
   }
-  for (const kind of ['workflow:stop', 'mission:cancel', 'handoff:record', 'integrate:merge']) {
+  for (const kind of ['workflow:stop', 'mission:cancel', 'integrate:merge']) {
     assert.equal(validateWebCommandRequest(identityRequest(kind, { agent: 'codex' })).ok, false);
   }
 });

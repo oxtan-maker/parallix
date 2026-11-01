@@ -3,9 +3,9 @@ import { commitDirtyFiles } from '../git/commit-dirty-files.js';
  * Rebase helpers for pre-review workflow.
  *
  * Extracted from review-loop.js to break the circular dependency:
- *   handoff.js -> review-loop.js -> handoff.js
+ *   review-preparation.js -> review-loop.js -> review-preparation.js
  *
- * Both handoff.js and review-loop.js import from this module instead.
+ * Both review-preparation.js and review-loop.js import from this module instead.
  */
 
 import * as path from 'path';
@@ -132,7 +132,7 @@ export async function rebaseBeforeReviewRound(slug: string, options: PreReviewRe
   if (!forgejoEnabled) {
     // Provider plumbing: shown unless the caller explicitly opts out with
     // `verbose = false`. The review loop passes `verbose` at its call sites so
-    // the default review start stays quiet; handoff/standalone callers keep the
+    // the default review start stays quiet; review preparation/standalone callers keep the
     // pre-mission visibility.
     if (verbose) {
       log(fmt.status('INFO', `Review provider disabled; committed worktree state and skipping pre-review rebase for ${fmt.branch(`mission/${slug}`)}.`));
@@ -302,7 +302,7 @@ function preReviewRebaseBindings(slug: string, options: PreReviewRebaseOptions) 
     log = fmt.log.plain,
     error = fmt.log.plainError,
     // TASK-2477/F3: defaults to `true` so the pre-review rebase skip line stays
-    // visible for callers that do not thread a `verbose` flag (the handoff use
+    // visible for callers that do not thread a `verbose` flag (the review preparation use
     // case and standalone rebase). The review loop always passes `verbose` at its
     // own call sites, so the provider=none happy path is still demoted there.
     verbose = true,

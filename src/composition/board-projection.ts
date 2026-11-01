@@ -19,7 +19,7 @@ import { ConcreteGitReadAdapter } from '../adapters/backlog/concrete-git-read-ad
 import { readBacklogInputs } from '../adapters/backlog/backlog-input-reader.js';
 import { ConcreteOperationLogReadAdapter } from '../adapters/backlog/concrete-operation-log-read-adapter.js';
 import { ConcreteReviewReadAdapter } from '../adapters/backlog/concrete-review-read-adapter.js';
-import { ConcreteCurrentWorkReadAdapter } from '../adapters/backlog/concrete-current-work-read-adapter.js';
+import { SqliteExecutionActivityStore } from '../adapters/sqlite/execution-activity-store.js';
 import { processLivenessProbe } from '../adapters/process/process-liveness.js';
 import { snapshotWorktreeTopology } from '../adapters/git/worktree.js';
 import { BoardProjectionBuilder } from '../application/projections/board-readers.js';
@@ -32,7 +32,7 @@ import type { ExecuteMissionPorts } from '../application/ports/execute-mission.j
 import type { TuiCapabilities } from '../application/tui-capabilities.js';
 import type { MissionStore } from '../application/domain-ports.js';
 import type { Mission } from '../domain/mission.js';
-import type { CurrentWorkPort } from '../application/recording/current-work-recorder.js';
+import type { ExecutionActivityPort } from '../application/recording/execution-activity-recorder.js';
 import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
 import { SqliteReviewProjectionReader } from '../adapters/sqlite/review-projection-reader.js';
 import { loadEffectiveConfig } from '../adapters/config/product-config.js';
@@ -46,6 +46,7 @@ export interface BoardProjectionCompositionDeps {
   readonly rootDir: string;
   readonly missionStore: MissionStore | null;
   readonly database?: SqliteDatabaseAdapter | null;
+  readonly executionActivity?: import('../application/ports/execution-activity.js').ExecutionActivityReadPort;
   readonly repositoryId: RepositoryId;
   readonly blocklistRepo: AgentBlocklistRepository;
   readonly historyRepo: OperationalHistoryRepository;
@@ -143,7 +144,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
 
   const catalog = createRepositoryMissionCatalog(deps);
   const loadBoardMissions = () => catalog.loadAllMissions();
-  const currentWork = new ConcreteCurrentWorkReadAdapter(deps.historyRepo);
+  const currentWork = deps.executionActivity ?? (deps.database ? new SqliteExecutionActivityStore(deps.database, deps.repositoryId) : undefined);
   const runningSessions = createRunningSessionScan(deps);
   const changeIdentity = createGitChangeIdentity(deps.rootDir, deps.gitFn ?? undefined, { snapshotBranchHeads: true });
   const completedMissionRetentionDays = loadEffectiveConfig(deps.rootDir).adapters.web.completedMissionRetentionDays;
@@ -225,7 +226,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
 export function composeTuiCapabilities(
   deps: BoardProjectionCompositionDeps,
   executePorts: ExecuteMissionPorts,
-  currentWork: CurrentWorkPort,
+  currentWork: ExecutionActivityPort,
   controller?: BoardCommandController,
   missionServices: BoardMissionServices = {},
 ): TuiCapabilities {

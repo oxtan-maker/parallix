@@ -261,7 +261,7 @@ describe("stopped review recovery through inferred px review", () => {
     });
   });
 
-  it('lets the derived-status handoff proceed without a MissionRuleViolation', async () => {
+  it("lets the derived-status review preparation proceed without a MissionRuleViolation", async () => {
     await withHome(createTempRoot(), async () => {
       const { root, store } = await seedRoot(stoppedReview());
       await invokeResume(store, root, 'human');

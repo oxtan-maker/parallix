@@ -69,24 +69,24 @@ test('a just-started mission without a checkout or evidence has not run its gate
 
 test('a checking workflow without executor evidence has not run its declared gates (TASK-2775)', async () => {
   const empty = reader({ checkout: present, gates: [gate(GATE)] });
-  assert.equal(await observe(empty, mission('active'), operation('active:execute', 'checking')), 'not-run');
-  assert.equal(await observe(empty, mission('active'), operation('handoff:record', 'checking')), 'not-run');
+  assert.equal(await observe(empty, mission('active'), operation('active:execute', 'executing')), 'not-run');
+  assert.equal(await observe(empty, mission('active'), operation('review:submit', 'executing')), 'not-run');
 });
 
 test('a recorded result outranks the still-checking workflow that produced it (TASK-2775)', async () => {
   // Handoff publishes `handoff` at entry and keeps the phase through commit and
   // publication, so the phase alone cannot say a gate is executing.
   const passed = reader({ checkout: present, gates: [gate(GATE, { proof: proof('current') })] });
-  assert.equal(await observe(passed, mission('active'), operation('handoff:record', 'checking')), 'passed', 'after the result exists');
+  assert.equal(await observe(passed, mission('active'), operation('review:submit', 'executing')), 'passed', 'after the result exists');
   const failed = reader({ checkout: present, gates: [gate(GATE, { failure: failure('current') })] });
-  assert.equal(await observe(failed, mission('active'), operation('active:execute', 'checking')), 'failed', 'a current failure is a result');
+  assert.equal(await observe(failed, mission('active'), operation('active:execute', 'executing')), 'failed', 'a current failure is a result');
 });
 
 test('agent work, review checks and stopped workflows never report a running gate (TASK-2775)', async () => {
   const evidence = reader({ checkout: present, gates: [gate(GATE, { proof: proof('stale') })] });
-  assert.equal(await observe(evidence, mission('active'), operation('active:execute', 'running')), 'stale');
-  assert.equal(await observe(evidence, mission('review'), operation('active:execute', 'checking')), 'stale');
-  assert.equal(await observe(evidence, mission('review'), operation('review:submit', 'checking')), 'stale');
+  assert.equal(await observe(evidence, mission('active'), operation('active:execute', 'executing')), 'stale');
+  assert.equal(await observe(evidence, mission('review'), operation('active:execute', 'executing')), 'stale');
+  assert.equal(await observe(evidence, mission('review'), operation('review:submit', 'executing')), 'stale');
   assert.equal(await observe(evidence, mission('active'), operation('active:execute', 'stopping')), 'stale');
 });
 
@@ -99,10 +99,10 @@ test('cancelled execution leaves no passing result behind (TASK-2775)', async ()
 
 test('no workflow phase alone implies declared gate execution (TASK-2775)', async () => {
   const empty = reader({ checkout: present, gates: [gate(GATE)] });
-  for (const phase of ['accepted', 'preparing', 'running', 'blocked', 'interrupted', 'stopped', 'completed'] as const) {
+  for (const phase of ['accepted', 'accepted', 'executing', 'blocked', 'interrupted', 'stopped', 'completed'] as const) {
     assert.equal(await observe(empty, mission('active'), { ...operation('active:execute', phase), generation: 3 }), 'not-run', phase);
   }
-  assert.equal(await observe(empty, mission('active'), { ...operation('active:execute', 'checking'), generation: 3 }), 'not-run', 'checking alone is not executor evidence');
+  assert.equal(await observe(empty, mission('active'), { ...operation('active:execute', 'executing'), generation: 3 }), 'not-run', 'checking alone is not executor evidence');
   assert.equal(await observe(empty, mission('active'), { ...operation('active:execute', 'stopping'), generation: 3 }), 'not-run', 'an interrupted attempt reports no running gate');
 });
 
@@ -154,17 +154,17 @@ test('integration observes the configured plan per gate, never the workflow phas
   const pass = (key: string, state: 'current' | 'stale' = 'current') => ({ key, proof: proof(state), failure: null });
   const fail = (key: string, state: 'current' | 'stale' = 'current') => ({ key, proof: { state: 'absent' as const }, failure: failure(state) });
   assert.equal(await observe(plan([]), mission('integration')), 'unconfigured', 'no configured plan');
-  assert.equal(await observe(plan([]), mission('active'), operation('integrate:merge', 'checking')), 'unconfigured', 'an integration attempt selects its plan before the lane moves');
-  assert.equal(await observe(plan(['unit']), mission('integration'), operation('integrate:merge', 'checking')), 'not-run',
+  assert.equal(await observe(plan([]), mission('active'), operation('integrate:merge', 'executing')), 'unconfigured', 'an integration attempt selects its plan before the lane moves');
+  assert.equal(await observe(plan(['unit']), mission('integration'), operation('integrate:merge', 'executing')), 'not-run',
     'integrate is checking but no gate run is observed');
   assert.equal(await observe(plan(['unit', 'docs'], { gates: [pass('unit')] }), mission('integration')), 'not-run',
     'a marker covering one hook of a two-hook plan does not pass the plan');
   assert.equal(await observe(plan(['unit', 'docs'], { gates: [pass('unit'), pass('docs')] }), mission('integration')), 'passed');
-  assert.equal(await observe(plan(['unit'], { gates: [fail('unit')] }), mission('integration'), operation('integrate:merge', 'checking')), 'failed',
+  assert.equal(await observe(plan(['unit'], { gates: [fail('unit')] }), mission('integration'), operation('integrate:merge', 'executing')), 'failed',
     'a failed run does not stay running');
   assert.equal(await observe(plan(['unit'], { gates: [pass('unit', 'stale')] }), mission('integration')), 'stale', 'a prior success after inputs changed');
   assert.equal(await observe(plan(['unit'], { running: { attempt: 'op-1:1', startedAt: '2026-10-18T09:00:00.000Z' } }), mission('integration'),
-    operation('integrate:merge', 'checking')), 'running', 'the executor records a run for the open attempt');
+    operation('integrate:merge', 'executing')), 'running', 'the executor records a run for the open attempt');
   assert.equal(await observe(plan(['unit']), mission('done')), 'not-run');
   assert.equal(await observe(plan(['unit'], { checkout: { kind: 'absent' } }), mission('done')), 'unavailable');
   assert.equal(await observe(reader(unused, new Error('history unavailable')), mission('integration')), 'unavailable');

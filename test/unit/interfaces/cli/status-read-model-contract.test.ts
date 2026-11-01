@@ -1,3 +1,5 @@
+import { activitySnapshots } from '../../../fixtures/execution-activity.js';
+import { activityFixture } from '../../../fixtures/execution-activity.js';
 import { statusResult } from '../../../fixtures/status-result.js';
 import { fixtureMission } from '../../../fixtures/mission-builders.js';
 import { makeCard } from '../../../fixtures/board-projection.js';
@@ -5,8 +7,7 @@ import { makeCard } from '../../../fixtures/board-projection.js';
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { type AgentReadAdapter, BoardProjectionBuilder, type GateReadAdapter, type GitReadAdapter, type MissionReadAdapter, type OperationLogReadAdapter, type ReviewProjectionFact, type ReviewReadAdapter } from '../../../../src/application/projections/board-readers.js';
-import { CURRENT_WORK_EVENT_TYPE, type CurrentWorkEvent } from '../../../../src/application/recording/current-work-recorder.js';
-import { ConcreteCurrentWorkReadAdapter } from '../../../../src/adapters/backlog/concrete-current-work-read-adapter.js';
+import { EXECUTION_ACTIVITY_EVENT_TYPE, type ExecutionActivity } from '../../../../src/application/recording/execution-activity-recorder.js';
 import { createStatusBoardAdapter } from '../../../../src/adapters/cli/commands/status-adapter.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import { type Mission, type MissionId, missionId, missionLabels } from '../../../../src/domain/mission.js';
@@ -147,7 +148,7 @@ describe("focused Mission status reads only the selected Mission", () => {
     } as Review;
   }
 
-  function workEvent(id: MissionId, summary: string): CurrentWorkEvent {
+  function workEvent(id: MissionId, summary: string): ExecutionActivity {
     return {
       missionId: id,
       operationId: `op-${id}`,
@@ -159,7 +160,7 @@ describe("focused Mission status reads only the selected Mission", () => {
       processIdentity: null,
       blockedReason: null,
       occurredAt: '2026-08-24T09:00:00.000Z',
-    } as CurrentWorkEvent;
+    } as ExecutionActivity;
   }
 
   /**
@@ -221,14 +222,14 @@ describe("focused Mission status reads only the selected Mission", () => {
     return new BoardProjectionBuilder(missions, reviewAdapter, gates, agents, git, operationLog, {
       currentWork: {
         async loadCurrentWork() {
-          return [
+          return activitySnapshots([
             workEvent(selectedId, 'implementing focused status query'),
             ...unrelatedIds.map((id) => workEvent(id, `unrelated work on ${id}`)),
-          ];
+          ]);
         },
         async loadMissionCurrentWork(id) {
           ledger.currentWorkRequests.push(id);
-          return [workEvent(id, id === selectedId ? 'implementing focused status query' : `unrelated work on ${id}`)];
+          return activitySnapshots([workEvent(id, id === selectedId ? 'implementing focused status query' : `unrelated work on ${id}`)]);
         },
       },
       now: () => Date.parse('2026-08-24T09:00:30.000Z'),
@@ -287,19 +288,6 @@ describe("focused Mission status reads only the selected Mission", () => {
     assert.deepEqual(ledger.gateRequests, [selectedId]);
   });
 
-  test('focused current-work adapter queries only the selected mission', async () => {
-    const calls: Array<[string, MissionId]> = [];
-    const adapter = new ConcreteCurrentWorkReadAdapter({
-      async findAll() { return []; },
-      async findByType() { throw new Error('focused query must not read every current-work event'); },
-      async findByTypeForMission(type, id) { calls.push([type, id as MissionId]); return []; },
-      async append() {},
-      async clear() {},
-    });
-
-    assert.deepEqual(await adapter.loadMissionCurrentWork(selectedId), []);
-    assert.deepEqual(calls, [[CURRENT_WORK_EVENT_TYPE, selectedId]]);
-  });
 
   // ---------------------------------------------------------------------------
   // Contract preservation

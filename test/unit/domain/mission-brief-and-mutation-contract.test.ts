@@ -177,7 +177,7 @@ describe('Checkpoint document', () => {
     assert.equal(reconcileLegacyCheckpoint({ ...source, nextActionText: 'Different.' }, source), null);
   });
 
-  test('legacy checkpoint reconciliation replaces only a synthetic handoff action', () => {
+  test("legacy checkpoint reconciliation replaces only a synthetic review preparation action", () => {
     const source = parseCheckpointDocument(missionId, 'CP-2.md', DOC);
     const synthetic = { ...source, nextActionText: 'Review the handed-off change.' } satisfies Partial<NonNullable<Parameters<typeof reconcileLegacyCheckpoint>[0]>>;
     assert.equal(reconcileLegacyCheckpoint(synthetic, source)?.nextActionText, source.nextActionText);
@@ -339,8 +339,8 @@ describe('Prompt authority', () => {
     assert.match(source, /px checkpoint record --name CP-2 --criterion/, 'one concrete recording example');
     assert.match(source, /repository-relative path[^\n]*bare basename[^\n]*does not resolve/);
     assert.match(source, /`\.test`, `\.spec` or `\.cases` module under `test\/`/);
-    assert.match(source, /Handoff checks every recorded checkpoint/, 'handoff checks all recorded checkpoints');
-    assert.match(source, /matches each row to the success criterion its `criterion` text names/, 'handoff matches criterion identity');
+    assert.match(source, /Handoff checks every recorded checkpoint/, "review preparation checks all recorded checkpoints");
+    assert.match(source, /matches each row to the success criterion its `criterion` text names/, "review preparation matches criterion identity");
     // An executing agent must not be able to rewrite the contract it is judged
     // against: goal, scope and gates are settled at draft.
     for (const write of [/px goal set/, /px scope set/, /px gate add/, /px gate remove/]) {
@@ -411,7 +411,7 @@ describe('Typed Mission mutation parity', () => {
     ['goal and why', 'px goal set', 'px'],
     ['scope and out-of-scope', 'px scope set', 'px'],
     ['predicted NEL bucket', 'px nel set', 'px'],
-    ['confidence/selection note/drivers', 'unsupported: no consumer reads them; the predicted NEL bucket is the sizing signal handoff calibrates', 'unsupported'],
+    ['confidence/selection note/drivers', "unsupported: no consumer reads them; the predicted NEL bucket is the sizing signal review preparation calibrates", 'unsupported'],
     ['success criteria', 'px criterion add / px criterion remove / px mission mark-complete', 'px'],
     ['checkpoint plan', 'px checkpoint plan / px checkpoint unplan', 'px'],
     ['mission gates', 'px gate add / px gate remove', 'px'],
@@ -821,7 +821,7 @@ describe('Checkpoint evidence recording', () => {
     );
   });
 
-  test('record without a resolvable checkout keeps shape checks and leaves references to handoff', async () => {
+  test("record without a resolvable checkout keeps shape checks and leaves references to review preparation", async () => {
     const { record } = fixture(null);
     assert.equal((await record('CP-1', ['prose only'])).status, 'completed');
     assert.match((await record('CP-1', ['  '])).error?.message ?? '', /evidence must not be empty/);

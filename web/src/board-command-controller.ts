@@ -21,9 +21,9 @@ export function restoreActionFocus(control: HTMLButtonElement, root: HTMLDivElem
   });
 }
 
-function isRequestKind(kind: WebCommandAction['kind']): kind is 'workflow:stop' | 'active:execute' | 'draft:create' | 'handoff:record' | 'integrate:merge' | 'review:submit' | 'mission:cancel' {
-  return kind === 'workflow:stop' || kind === 'active:execute' || kind === 'draft:create' || kind === 'handoff:record'
-    || kind === 'integrate:merge' || kind === 'review:submit' || kind === 'mission:cancel';
+function isRequestKind(kind: WebCommandAction['kind']): kind is 'workflow:stop' | 'active:execute' | 'draft:create' | 'review:submit' | 'integrate:merge' | 'mission:cancel' {
+  return kind === 'workflow:stop' || kind === 'active:execute' || kind === 'draft:create' || kind === 'review:submit'
+    || kind === 'integrate:merge' || kind === 'mission:cancel';
 }
 
 async function publishCommandResult(result: Awaited<ReturnType<typeof sendCommand>>, card: WebMissionCard, action: WebCommandAction, context: BoardCommandContext) {

@@ -8,14 +8,14 @@ import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 
 const slug = 'review-start-contract';
 
-test('start resumes the handoff-assigned reviewer instead of reselecting (TASK-2490, TASK-2647)', async () => {
+test("start resumes the review-preparation-assigned reviewer instead of reselecting (TASK-2490, TASK-2647)", async () => {
   const fake = fakeReviewLoopPorts({
     slug,
     routing: {
       eligibleFamilies: () => ['claude', 'codex', 'custom'],
-      nominate: () => { return assert.fail('handoff assignment must take precedence over selection'); },
+      nominate: () => { return assert.fail("review preparation assignment must take precedence over selection"); },
     },
-    handoff: { handoff: async () => {
+    reviewPreparation: { reviewPreparation: async () => {
       await fake.ports.state.persist(new ReviewState(slug, { implementer: 'claude', reviewer: 'custom', round: 3 }));
       return { ok: true as const };
     } },
@@ -31,7 +31,7 @@ test('gatekeeper pushback stops before reviewer, gate, or rebase work (TASK-1303
   const fake = fakeReviewLoopPorts({
     slug,
     provider: { openPullRequest: () => null },
-    handoff: { handoff: async () => ({ ok: true as const, gatekeeperPushedBack: true }) },
+    reviewPreparation: { reviewPreparation: async () => ({ ok: true as const, gatekeeperPushedBack: true }) },
     preReview: {
       rebase: async () => { return assert.fail('pushback must stop before rebase'); },
       runGate: async () => { return assert.fail('pushback must stop before gate'); },
@@ -52,7 +52,7 @@ test('dry-run never self-heals or launches destination work (TASK-1303, TASK-264
       ensureReachable: async () => { return assert.fail('dry-run must not bootstrap the provider'); },
       openPullRequest: () => { return assert.fail('dry-run must not inspect the provider'); },
     },
-    handoff: { handoff: async () => { return assert.fail('dry-run must not hand off'); } },
+    reviewPreparation: { reviewPreparation: async () => { return assert.fail('dry-run must not hand off'); } },
     preReview: {
       rebase: async () => { return assert.fail('dry-run must not rebase'); },
       runGate: async () => { return assert.fail('dry-run must not run gates'); },
@@ -70,7 +70,7 @@ test('review preparation launches without a lifecycle Graphify refresh (TASK-272
   const calls: string[] = [];
   const fake = fakeReviewLoopPorts({
     slug,
-    handoff: { handoff: async () => ({ ok: true as const }) },
+    reviewPreparation: { reviewPreparation: async () => ({ ok: true as const }) },
     preReview: {
       rebase: async () => { calls.push('rebase'); return { ok: true as const }; },
       runGate: async () => { calls.push('gate'); return { ok: true as const }; },
@@ -101,21 +101,25 @@ test('continuation preparation stops after an unreachable provider even when exi
 import { fixtureMission, approvedReview, inMemoryTransitionStore } from '../../../fixtures/mission-builders.js';
 import { revokeApprovedDecision } from '../../../../src/domain/review.js';
 
-test('continue enters interrupted repair work before checkpoint handoff checks (TASK-2738)', async () => {
+for (const pendingPreparation of [false, true]) {
+test(`continue enters interrupted repair work${pendingPreparation ? ' after early review entry' : ''} before checkpoint checks (TASK-2738, TASK-2822)`, async () => {
   const review = revokeApprovedDecision(approvedReview(slug), 1, {
     revokedAt: '2026-10-01T12:00:00Z', revokedBy: 'workflow', reason: 'gate failed',
     cause: { kind: 'integration-gate-failure', gate: 'npm test' },
   });
-  const mission = fixtureMission(slug, { assignee: agentFamily('claude'), review, declaredGates: ['npm test'], successCriteria: ['repair works'], checkpoints: [{
+  const mission = fixtureMission(slug, { assignee: agentFamily('claude'), review,
+    ...(pendingPreparation ? { status: 'review', reviewPreparationPending: true as const } : {}),
+    declaredGates: ['npm test'], successCriteria: ['repair works'], checkpoints: [{
     missionId: fixtureMission(slug).id, name: 'CP-6', goalCheck: [], nextActionText: 'repair',
     repair: { incidentId: 'incident-6', command: 'npm test', attempt: 3,
       authorizedGates: ['npm test'], authorizedCriteria: ['repair works'], evidenceRecorded: false, verified: false },
   }] });
   const store = inMemoryTransitionStore(mission);
-  const fake = fakeReviewLoopPorts({ slug, missionStore: store,
-    handoff: { handoff: async () => { return assert.fail('entering implementer work must not require completed checkpoints'); } },
+  const fake = fakeReviewLoopPorts({ slug, missionStore: store, lifecycle: new MissionLifecycleService(store),
+    reviewPreparation: { reviewPreparation: async () => { return assert.fail('entering implementer work must not require completed checkpoints'); } },
     agents: { launch: async launch => {
       assert.equal(launch.role, 'implementer');
+      assert.equal(store.mission().status, 'active');
       assert.equal(launch.prompt, undefined);
       assert.equal(launch.recovery?.sessionPolicy, 'fresh-ephemeral');
       return { result: { status: 0 } };
@@ -130,9 +134,10 @@ test('continue enters interrupted repair work before checkpoint handoff checks (
   await runReviewLoop({ slug, isContinue: true, implementer: 'claude' }, fake.ports);
   const loaded = await store.load(mission.id);
   assert.equal(loaded.kind, 'found');
-  if (loaded.kind === 'found') { assert.deepEqual(loaded.mission, mission); }
+  if (loaded.kind === 'found') { assert.deepEqual(loaded.mission, { ...mission, status: 'active' }); }
   assert.deepEqual(fake.exits, [1]);
 });
+}
 
 import { RepairCheckpointService } from '../../../../src/application/repair-checkpoint-service.js';
 
@@ -155,7 +160,7 @@ for (const failure of ['original check', 'new blocker'] as const) {
     let launches = 0;
     const newBlocker = { ...blocker, diagnostic: 'new contract blocker' };
     const fake = fakeReviewLoopPorts({ slug, missionStore: store,
-      handoff: { handoff: async () => { assert.fail('unverified repair must not reach handoff'); } },
+      reviewPreparation: { reviewPreparation: async () => { assert.fail("unverified repair must not reach review preparation"); } },
       agents: { launch: async () => {
         launches += 1;
         if (failure === 'new blocker') {
@@ -185,7 +190,7 @@ test('start derives the implementer from the Mission assignee when no task file 
   const fake = fakeReviewLoopPorts({
     slug,
     task: { implementer: () => null },
-    handoff: { handoff: async () => ({ ok: true }) },
+    reviewPreparation: { reviewPreparation: async () => ({ ok: true }) },
     missionStore: { load: async () => ({ kind: 'found', mission: { assignee: 'claude' } }) } as never,
     routing: { eligibleFamilies: () => ['claude', 'codex'], nominate: () => 'codex' },
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) },
@@ -200,7 +205,7 @@ test('start fails closed when the Mission store cannot load the assignee (TASK-2
   const fake = fakeReviewLoopPorts({
     slug,
     task: { implementer: () => null },
-    handoff: { handoff: async () => ({ ok: true }) },
+    reviewPreparation: { reviewPreparation: async () => ({ ok: true }) },
     missionStore: { load: async () => { if (!loads++) { throw new Error('store unavailable'); } return { kind: 'missing' }; } } as never,
     routing: { eligibleFamilies: () => ['claude', 'codex'], nominate: () => 'codex' },
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) },
@@ -215,24 +220,24 @@ import { MissionLifecycleService } from '../../../../src/application/mission-lif
 import { pendingReview } from '../../../fixtures/mission-builders.js';
 
 for (const dryRun of [false, true]) {
-  test(`explicit continue implementer overrides database assignment${dryRun ? ' without dry-run writes' : ' before handoff'}`, async () => {
+  test(`explicit continue implementer overrides database assignment${dryRun ? ' without dry-run writes' : " before review preparation"}`, async () => {
     const review = pendingReview(slug);
     const mission = fixtureMission(slug, { assignee: agentFamily('custom'), review: {
       ...review, rounds: [{ ...review.rounds[0], implementer: agentFamily('custom') }],
     } });
     const store = inMemoryTransitionStore(mission);
-    let handoffs = 0;
+    let reviewPreparations = 0;
     const fake = fakeReviewLoopPorts({ slug, missionStore: store, lifecycle: new MissionLifecycleService(store),
       state: new ReviewState(slug, { implementer: 'custom', reviewer: 'claude', round: 1 }),
-      handoff: { handoff: async () => {
-        handoffs += 1;
+      reviewPreparation: { reviewPreparation: async () => {
+        reviewPreparations += 1;
         assert.equal(store.mission().assignee, 'codex');
         assert.equal(store.mission().review!.rounds.at(-1)!.implementer, 'codex');
         return { ok: false, error: 'stop after identity observation' };
       } },
     });
     await runReviewLoop({ slug, isContinue: true, implementer: 'codex', dryRun }, fake.ports);
-    assert.equal(handoffs, dryRun ? 0 : 1);
+    assert.equal(reviewPreparations, dryRun ? 0 : 1);
     assert.equal(store.mission().assignee, dryRun ? 'custom' : 'codex');
     if (dryRun) { assert.deepEqual(store.mission(), mission); assert.deepEqual(fake.writes, []); }
     assert.deepEqual(fake.launches, []);
@@ -283,3 +288,18 @@ for (const refused of [false, true]) {
     assert.deepEqual(fake.launches, [], 'existing provider verdict needs no new agent');
   });
 }
+
+
+test('continuing pending preparation after a restart re-runs submission before reviewer launch (TASK-2822)', async () => {
+  const store = inMemoryTransitionStore(fixtureMission(slug, { status: 'review', assignee: agentFamily('claude'),
+    review: pendingReview(slug), reviewPreparationPending: true }));
+  let preparations = 0;
+  const fake = fakeReviewLoopPorts({ slug, missionStore: store,
+    state: new ReviewState(slug, { implementer: 'claude', reviewer: 'codex', round: 1 }),
+    reviewPreparation: { reviewPreparation: async () => { preparations++; return { ok: false, error: 'controlled preparation stop' }; } },
+  });
+  await runReviewLoop({ slug, isContinue: true }, fake.ports);
+  assert.equal(preparations, 1);
+  assert.deepEqual(fake.launches, []);
+  assert.deepEqual(fake.exits, [1]);
+});

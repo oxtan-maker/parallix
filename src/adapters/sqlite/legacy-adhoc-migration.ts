@@ -1,3 +1,5 @@
+import type { ExecutionActivity, ExecutionActivitySnapshot } from '../../domain/execution-activity.js';
+import { missionId } from '../../domain/mission.js';
 import type { MigrateLegacyAdhocIdsResult } from '../../application/domain-ports.js';
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
 
@@ -126,6 +128,7 @@ const MISSION_ID_TABLES = [
   'mission_dependencies',
   'board_lane_events',
   'session_markers',
+  'execution_activity',
   'mission_review_events',
   'mission_review_stage_launches',
 ] as const;
@@ -182,10 +185,20 @@ async function reassignMission(
       [to, from],
     );
   }
+  if (liveTables.has('execution_activity')) {
+    const rows = await db.query<{ snapshot_json: string }>('SELECT snapshot_json FROM execution_activity WHERE mission_id = ?', [to]);
+    for (const row of rows) {
+      const snapshot = JSON.parse(row.snapshot_json) as ExecutionActivitySnapshot;
+      const reassign = (event: ExecutionActivity | null) => event ? { ...event, missionId: missionId(to) } : null;
+      const moved = { ...snapshot, missionId: missionId(to),
+        frames: snapshot.frames.map(frame => ({ ...frame, event: reassign(frame.event)! })),
+        terminal: reassign(snapshot.terminal), retainedBlocker: reassign(snapshot.retainedBlocker) };
+      await db.execute('UPDATE execution_activity SET snapshot_json = ? WHERE mission_id = ?', [JSON.stringify(moved), to]);
+    }
+  }
   // Two durable references trace the legacy id without a `mission_id` column:
   // `usage_statistics.mission` (statistics keyed by mission) and
-  // `operational_history.event_data.missionId` (the board current-work reads
-  // index this JSON field). The legacy id is a globally unique `missions.id`,
+  // `operational_history.event_data.missionId` (audit attribution). The legacy id is a globally unique `missions.id`,
   // so matching it rewrites only that mission's rows — repository-scoped by
   // construction — and leaves `event_data.repositoryId` untouched. A dropped
   // table skips instead of aborting the run.

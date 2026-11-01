@@ -14,7 +14,7 @@ import { mkdtemp } from './temp-dir.js';
  */
 import { ReviewState } from '../../src/adapters/review/review-state.js';
 import type {
-  ReviewAgentLaunch, ReviewAgentPort, ReviewArtifactPort, ReviewControllerLock, ReviewerRoutingPort, ReviewHandoffPort,
+  ReviewAgentLaunch, ReviewAgentPort, ReviewArtifactPort, ReviewControllerLock, ReviewerRoutingPort, ReviewReviewPreparationPort,
   ReviewLoopOutput, ReviewLoopPorts, ReviewLoopState, ReviewProviderPort, ReviewStatePort, ReviewTaskMirrorPort, PreReviewPort, HumanFeedbackPort,
 } from '../../src/application/ports/review-round.js';
 import type { LoopContext } from '../../src/application/review-loop/round.js';
@@ -41,7 +41,7 @@ export interface ReviewLoopFakeOverrides {
   readonly worktree?: string;
   readonly stateport?: Partial<ReviewStatePort>;
   readonly task?: Partial<ReviewTaskMirrorPort>;
-  readonly handoff?: ReviewHandoffPort | null;
+  readonly reviewPreparation?: ReviewReviewPreparationPort | null;
   /** A provider port (merged over the fake provider) or null for provider=none. */
   readonly provider?: Partial<ReviewProviderPort> | null;
   readonly humanFeedback?: Partial<HumanFeedbackPort>;
@@ -122,7 +122,7 @@ export function fakeReviewLoopPorts(overrides: ReviewLoopFakeOverrides = {}): Re
       assign: agent => { mirrors.push(`assign:${agent}`); return true; },
       ...overrides.task,
     },
-    handoff: overrides.handoff ?? null,
+    reviewPreparation: overrides.reviewPreparation ?? null,
     provider: overrides.provider === undefined || overrides.provider === null ? null : fakeProvider(overrides.provider),
     humanFeedback: { reconcile: async () => null, ...overrides.humanFeedback },
     routing: {

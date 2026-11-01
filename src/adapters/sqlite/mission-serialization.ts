@@ -1,5 +1,5 @@
-import { parseIntegrationRepairAssessment, parseHistoricalApprovalSource } from '../../domain/integration-repair-record.js';
 import { requireReviewPhase } from '../../domain/review-phase-policy.js';
+import { parseIntegrationRepairAssessment, parseHistoricalApprovalSource } from '../../domain/integration-repair-record.js';
 import { agentFamily } from '../../domain/agents.js';
 import { assertClassifierReviewSource, clearingLabel } from '../../domain/classifier-review.js';
 import type { CheckpointData, GoalCheckRow } from '../../domain/checkpoint.js';
@@ -49,6 +49,7 @@ export interface MissionRecord {
   readonly description?: string | null;
   readonly assignee: string | null;
   readonly net_engineering_lines: number | null;
+  readonly review_preparation_pending?: number;
   readonly closed_at: string | null;
   readonly version: number;
   readonly next_success_criterion_id?: number;
@@ -676,6 +677,7 @@ export function hydrateMission(records: MissionAggregateRecords): HydratedMissio
     predictedNelBucket: predictedNelBucketFrom(row.predicted_nel_bucket),
     reproductionTest: row.reproduction_test ?? null,
     review: reviewFrom(records),
+    ...(row.review_preparation_pending === 1 ? { reviewPreparationPending: true as const } : {}),
     netEngineeringLines: row.net_engineering_lines,
     rawStatus: row.raw_status ?? undefined,
     ...externalTaskRefFrom(records),

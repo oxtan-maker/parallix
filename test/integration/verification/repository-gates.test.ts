@@ -84,7 +84,7 @@ test('clean-tree gates reuse only an exact successful proof and never cache fail
   }
 });
 
-test('unconfigured repository runs no gate for the handoff phase', async () => {
+test("unconfigured repository runs no gate for the review preparation phase", async () => {
   const checkout = makeCheckout();
   try {
     let launched = 0;
@@ -110,7 +110,7 @@ test('unconfigured repository runs no gate for the handoff phase', async () => {
   }
 });
 
-test('configured failing pre-handoff gate blocks handoff and receives the phase contract', async () => {
+test("configured failing pre-review preparation gate blocks review preparation and receives the phase contract", async () => {
   const checkout = makeCheckout();
   try {
     let capturedEnv: { value: NodeJS.ProcessEnv | null } = { value: null };
@@ -281,7 +281,7 @@ test('buildGateEnv inherits the invoking environment and sets the three contract
 test('loadPhaseGates returns [] when the workflow config declares no gates', () => {
   const checkout = makeCheckout();
   try {
-    assert.deepEqual(loadPhaseGates(checkout, 'preHandoff'), []);
+    assert.deepEqual(loadPhaseGates(checkout, "preHandoff"), []);
   } finally {
     fs.rmSync(checkout, { recursive: true, force: true });
   }
@@ -331,7 +331,7 @@ test('workflow config surfaces configured gates through the effective config', (
     const eff = loadEffectiveConfig(tmp);
     assert.ok('gates' in eff.adapters);
     const gates = eff.adapters.gates;
-    assert.ok(gates && typeof gates === 'object' && 'preHandoff' in gates && 'preIntegration' in gates);
+    assert.ok(gates && typeof gates === 'object' && "preHandoff" in gates && 'preIntegration' in gates);
     assert.deepEqual(gates.preHandoff, [{ key: 'v', command: 'true' }]);
     assert.deepEqual(gates.preIntegration, [{ key: 'b', command: 'npm run build', order: 5 }]);
   } finally {
@@ -421,7 +421,7 @@ test('this repository shares one test slot across test gates and leaves other st
   assert.deepEqual(shared, ['browser-e2e', 'integration-ci', 'integration-local', 'unit', 'workflow']);
   assert.equal(gates.some(gate => gate.resource && gate.resource !== 'test'), false);
   assert.equal(resolveGateResources(repoRoot).test, 1);
-  assert.equal(resolveVerificationResource(repoRoot), 'test', 'handoff verification and declared gates share the slot');
+  assert.equal(resolveVerificationResource(repoRoot), 'test', "review preparation verification and declared gates share the slot");
   assert.equal(resolveMaxConcurrentGates(repoRoot), Infinity, 'no whole-run lock holds the slot through quality-gate or agent-smoke');
 });
 

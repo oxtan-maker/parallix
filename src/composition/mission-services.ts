@@ -4,7 +4,7 @@ import type { ParallixConfiguration } from '../application/ports/configuration.j
 import { MissionCheckpointService, type CheckpointEvidenceReferences } from '../application/mission-checkpoint-service.js';
 import { MissionBriefService } from '../application/mission-brief-service.js';
 import { MissionAssignmentService } from '../application/mission-assignment-service.js';
-import { MissionHandoffService } from '../application/mission-handoff-service.js';
+import { MissionNelService } from "../application/mission-nel-service.js";
 import { MissionIntakeService } from '../application/mission-intake-service.js';
 import { MissionIntegrationService } from '../application/mission-integration-service.js';
 import { resolveWorktree } from '../adapters/git/worktree.js';
@@ -22,7 +22,7 @@ export interface MissionApplicationServiceOverrides {
   readonly databasePath?: string;
 }
 
-/** Recording resolves evidence references in the Mission's checkout, as handoff does. */
+/** Recording resolves evidence references in the Mission's checkout, as review preparation does. */
 export function checkpointEvidenceReferences(): CheckpointEvidenceReferences {
   return { fileSystem: { existsSync: target => fs.existsSync(target), readText: target => fs.readFileSync(target, 'utf8'),
     listNames: target => fs.readdirSync(target), listEntries: target => fs.readdirSync(target, { withFileTypes: true }) },
@@ -54,6 +54,6 @@ export async function createMissionApplicationServices(
     checkpoints: new MissionCheckpointService(store, checkpointEvidenceReferences()),
     brief: new MissionBriefService(store, new SqliteOperationalHistoryRepository(db)),
     assignment: new MissionAssignmentService(store),
-    handoff: new MissionHandoffService(store, store),
+    nel: new MissionNelService(store),
   };
 }

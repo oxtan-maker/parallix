@@ -205,7 +205,7 @@ test('active review ' + changed + ' mismatch cannot reuse success (TASK-2715)', 
 });
 }
 
-test('outer handoff proof cannot cross identical checkout or mission branch (TASK-2715)', () => {
+test("outer review preparation proof cannot cross identical checkout or mission branch (TASK-2715)", () => {
   withTempDir((root) => {
     const repo = initCommittedRepository(root);
     const artifact = path.join(root, '.git', 'proof.json');

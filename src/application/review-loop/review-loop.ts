@@ -1,7 +1,7 @@
 /**
  * The application-owned autonomous review loop.
  *
- * Start preparation (implementer identity, the start handoff, reviewer
+ * Start preparation (implementer identity, the start review preparation, reviewer
  * selection, the round state), the round sequence, and the max-attempts
  * escalation are decided here. Each round runs the reviewing half
  * (`reviewer-phase.ts`) and, unless the reviewer approved, the implementer half
@@ -12,7 +12,7 @@ import { isDbAdhocIdentity, missionId } from '../../domain/mission.js';
 import { currentReviewRound, reviewStatus, type PullRequestReference } from '../../domain/review.js';
 import { transitionReviewRepair } from '../review-repair-lifecycle.js';
 import { rebaseImplementer, recordImplementerLaunch } from '../rebase-identity.js';
-import type { HandoffFacts, HumanReviewFeedback, ReviewLoopPorts, ReviewLoopRequest, ReviewLoopState } from '../ports/review-round.js';
+import type { ReviewPreparationFacts, HumanReviewFeedback, ReviewLoopPorts, ReviewLoopRequest, ReviewLoopState } from '../ports/review-round.js';
 import { pendingRetainedRepair, resumeRetainedRepair } from './retained-repair.js';
 import { selectReviewer } from './reviewer-selection.js';
 import { runReviewerPhase } from './reviewer-phase.js';
@@ -72,43 +72,43 @@ function stopsOnMissingTaskFile(slug: string, ports: ReviewLoopPorts, out: Outpu
  * Mission bounces back to active with the reason recorded. Every other failure
  * reports the route back to the operator.
  */
-async function reportFailedStartHandoff(start: Start, implementer: string, handoff: HandoffFacts, ports: ReviewLoopPorts, out: Output): Promise<void> {
+async function reportFailedStartReviewPreparation(start: Start, implementer: string, reviewPreparation: ReviewPreparationFacts, ports: ReviewLoopPorts, out: Output): Promise<void> {
   const { slug } = start;
-  if (handoff.reason === 'validation-failed' && !handoff.recoveryAttempted) {
+  if (reviewPreparation.reason === 'validation-failed' && !reviewPreparation.recoveryAttempted) {
     if (ports.missionStore) { await transitionReviewRepair(slug, 'active', implementer, ports.missionStore, ports.lifecycle); }
     await ports.task.mirror('active');
-    out.emit({ kind: 'handoff-validation-failed', slug: slug });
+    out.emit({ kind: "review-preparation-validation-failed", slug: slug });
     const recorded = (await ports.state.read()) ?? ports.state.create({});
-    recorded.metadata = { ...recorded.metadata, gateFailureReason: 'validation-failed', gateFailureError: handoff.error };
+    recorded.metadata = { ...recorded.metadata, gateFailureReason: 'validation-failed', gateFailureError: reviewPreparation.error };
     await ports.state.persist(recorded);
     return;
   }
-  out.emit({ kind: 'handoff-failed', branch: ports.branch, error: handoff.error });
+  out.emit({ kind: "review-preparation-failed", branch: ports.branch, error: reviewPreparation.error });
   out.emit({ kind: 'start-guidance', slug: slug });
 }
 
 /**
- * Run the start handoff (the transition `px handoff` used to own). A provider
- * start then requires the open review PR the handoff created. Null once a
+ * Run the start review preparation (the transition `px review` used to own). A provider
+ * start then requires the open review PR the review preparation created. Null once a
  * diagnostic was emitted and the exit code set.
  */
-async function performStartHandoff(start: Start, implementer: string, ports: ReviewLoopPorts, out: Output): Promise<{ pullRequest: PullRequestReference | null } | null> {
+async function performStartReviewPreparation(start: Start, implementer: string, ports: ReviewLoopPorts, out: Output): Promise<{ pullRequest: PullRequestReference | null } | null> {
   const { slug } = start;
-  if (!ports.handoff) {
-    out.emit({ kind: 'handoff-unbound', slug: slug });
+  if (!ports.reviewPreparation) {
+    out.emit({ kind: "review-preparation-unbound", slug: slug });
     out.exit(1);
     return null;
   }
   const taskStatus = ports.task.task.ok ? ports.task.status() : null;
-  out.emit({ kind: 'handoff-starting', branch: ports.branch, taskStatus: taskStatus, slug: slug });
-  const handoff = await ports.handoff.handoff(implementer);
-  if (handoff?.gatekeeperPushedBack) {
-    out.emit({ kind: 'handoff-blocked', branch: ports.branch, taskStatus: taskStatus });
+  out.emit({ kind: "review-preparation-starting", branch: ports.branch, taskStatus: taskStatus, slug: slug });
+  const reviewPreparation = await ports.reviewPreparation.reviewPreparation(implementer);
+  if (reviewPreparation?.gatekeeperPushedBack) {
+    out.emit({ kind: "review-preparation-blocked", branch: ports.branch, taskStatus: taskStatus });
     out.exit(1);
     return null;
   }
-  if (!handoff?.ok) {
-    await reportFailedStartHandoff(start, implementer, handoff || {}, ports, out);
+  if (!reviewPreparation?.ok) {
+    await reportFailedStartReviewPreparation(start, implementer, reviewPreparation || {}, ports, out);
     out.exit(1);
     return null;
   }
@@ -120,28 +120,28 @@ async function performStartHandoff(start: Start, implementer: string, ports: Rev
     out.exit(1);
     return null;
   }
-  out.emit({ kind: 'handoff-healed', id: healed.id, branch: ports.branch });
+  out.emit({ kind: "review-preparation-healed", id: healed.id, branch: ports.branch });
   return { pullRequest: healed };
 }
 
 /**
- * Decide whether this start runs the handoff. An open PR alone does not prove
- * the handoff finished writing the Review; a continuation re-runs it only when
+ * Decide whether this start runs the review preparation. An open PR alone does not prove
+ * the review preparation finished writing the Review; a continuation re-runs it only when
  * the Mission is still active with a review awaiting its next round.
  */
-async function prepareStart(start: Start, skipHandoff: boolean, implementer: string, ports: ReviewLoopPorts, out: Output): Promise<{ handoffRan: boolean; pullRequest: PullRequestReference | null } | null> {
+async function prepareStart(start: Start, skipReviewPreparation: boolean, implementer: string, ports: ReviewLoopPorts, out: Output): Promise<{ reviewPreparationRan: boolean; pullRequest: PullRequestReference | null } | null> {
   const { dryRun, isContinue } = start;
   let pullRequest: PullRequestReference | null = null;
   const providerStart = await prepareProviderStart(start, ports, out);
   if (providerStart === null) { return null; }
   pullRequest = providerStart.pullRequest;
-  if (pullRequest) { skipHandoff = true; }
-  skipHandoff = await recordedHandoffCanBeSkipped(start, skipHandoff, ports);
-  const continueHandoff = await continuesActiveHandoff(start, ports);
-  if (continueHandoff) { skipHandoff = false; }
-  if (dryRun || skipHandoff || (isContinue && !continueHandoff)) { return { handoffRan: false, pullRequest }; }
-  const handedOff = await performStartHandoff(start, implementer, ports, out);
-  return handedOff && { handoffRan: true, pullRequest: handedOff.pullRequest ?? pullRequest };
+  if (pullRequest) { skipReviewPreparation = true; }
+  skipReviewPreparation = await recordedReviewPreparationCanBeSkipped(start, skipReviewPreparation, ports);
+  const continueReviewPreparation = await continuesActiveReviewPreparation(start, ports);
+  if (continueReviewPreparation) { skipReviewPreparation = false; }
+  if (dryRun || skipReviewPreparation || (isContinue && !continueReviewPreparation)) { return { reviewPreparationRan: false, pullRequest }; }
+  const handedOff = await performStartReviewPreparation(start, implementer, ports, out);
+  return handedOff && { reviewPreparationRan: true, pullRequest: handedOff.pullRequest ?? pullRequest };
 }
 
 /** The round state a start resumes or creates. */
@@ -244,11 +244,11 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
   if (stopsOnMissingTaskFile(slug, ports, out)) { return; }
   if (await resumePendingRepair(request, start, persisted, implementer, ports)) { return; }
   persisted = await ports.state.read();
-  const prepared = await prepareStart(start, request.skipHandoff ?? false, implementer, ports, out);
+  const prepared = await prepareStart(start, request.skipReviewPreparation ?? false, implementer, ports, out);
   if (!prepared) { return; }
-  // A fresh handoff created the authoritative Review with its reviewer and
+  // A fresh review preparation created the authoritative Review with its reviewer and
   // round; resume those instead of selecting a new reviewer.
-  if (prepared.handoffRan) { persisted = await ports.state.read(); }
+  if (prepared.reviewPreparationRan) { persisted = await ports.state.read(); }
   const selected = selectReviewer({
     reviewer: request.reviewer, implementer, isContinue: start.isContinue, persisted, maxAttempts,
     dryRun: start.dryRun, providerEnabled: Boolean(ports.provider), slug,
@@ -282,7 +282,7 @@ async function runReviewRounds(context: LoopContext, request: ReviewLoopRequest,
     const outcome = await runRound(context, attempt);
     if (outcome === 'stop') { return; }
     // A revoked approval reopened the Review: start again as a continuation
-    // so the handoff opens the next round.  One restart per run bounds it.
+    // so the review preparation opens the next round.  One restart per run bounds it.
     if (outcome === 'revoked') {
       if (restarted) {
         await context.escalateToHumanReview('APPROVED_ROUND_HUMAN_CORRECTION');
@@ -333,23 +333,23 @@ async function prepareProviderStart(start: Start, ports: ReviewLoopPorts, out: O
   return { pullRequest };
 }
 
-async function continuesActiveHandoff(start: Start, ports: ReviewLoopPorts): Promise<boolean> {
+async function continuesActiveReviewPreparation(start: Start, ports: ReviewLoopPorts): Promise<boolean> {
   const { slug, dryRun, isContinue } = start;
   const store = ports.missionStore;
-  let continueHandoff = false;
+  let continueReviewPreparation = false;
   if (store && isContinue && !dryRun) {
     const loaded = await store.load(missionId(slug));
-    continueHandoff = loaded.kind === 'found' && loaded.mission.status === 'active'
+    continueReviewPreparation = loaded.kind === 'found' && (loaded.mission.status === 'active' || loaded.mission.status === 'review' && loaded.mission.reviewPreparationPending === true)
       && Boolean(loaded.mission.review && ['awaiting-review', 'ready-for-next-round'].includes(reviewStatus(loaded.mission.review)));
   }
-  return continueHandoff;
+  return continueReviewPreparation;
 }
 
 async function resumePendingRepair(request: ReviewLoopRequest, start: Start, persisted: ReviewLoopState | null, implementer: string, ports: ReviewLoopPorts): Promise<boolean> {
   if (!ports.missionStore) { return false; }
   const loaded = await ports.missionStore.load(missionId(start.slug));
-  if (loaded.kind !== 'found' || loaded.mission.status !== 'active' || !pendingRetainedRepair(loaded.mission, ports.worktree)) { return false; }
-  // Successful exact-check recovery rejoins the historical start/handoff path.
+  if (loaded.kind !== 'found' || !(loaded.mission.status === 'active' || loaded.mission.status === 'review' && loaded.mission.reviewPreparationPending === true) || !pendingRetainedRepair(loaded.mission, ports.worktree)) { return false; }
+  // Successful exact-check recovery rejoins the historical start/review preparation path.
   return !await resumeRetainedRepair(request, loaded.mission, implementer, ports, persisted?.reviewer);
 }
 
@@ -357,15 +357,15 @@ function reviewStart(request: ReviewLoopRequest): Start {
   return { slug: request.slug, dryRun: request.dryRun ?? false, isContinue: request.isContinue ?? false, verbose: request.verbose ?? false };
 }
 
-async function recordedHandoffCanBeSkipped(start: Start, skipHandoff: boolean, ports: ReviewLoopPorts): Promise<boolean> {
+async function recordedReviewPreparationCanBeSkipped(start: Start, skipReviewPreparation: boolean, ports: ReviewLoopPorts): Promise<boolean> {
   const { isContinue, dryRun } = start;
   const store = ports.missionStore;
-  if (store && skipHandoff && !isContinue && !dryRun) {
+  if (store && skipReviewPreparation && !isContinue && !dryRun) {
     const recorded = await ports.state.read();
     const taskStatus = ports.task.task.ok ? ports.task.status() : null;
     if (!recorded || (taskStatus && taskStatus !== 'review')) { return false; }
   }
-  return skipHandoff;
+  return skipReviewPreparation;
 }
 
 function loopSettings(request: ReviewLoopRequest) {

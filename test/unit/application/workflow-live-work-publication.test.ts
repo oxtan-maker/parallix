@@ -1,3 +1,4 @@
+import { projectActivityPublications, ActivityRecorderFixture } from '../../fixtures/execution-activity.js';
 // TASK-2620 AC8: the board keeps showing live work for the whole `px integrate`
 // run, including the repair agent and the nested re-review, with the family
 // that is actually running; a stop reason appears only when automation cannot
@@ -10,33 +11,43 @@ import assert from 'node:assert/strict';
 import { IntegrateCommandUseCase } from '../../../src/application/integrate-command-use-case.js';
 import { ReviewCommandUseCase } from '../../../src/application/review-command-use-case.js';
 import {
-  CurrentWorkRecorder,
-  parseCurrentWorkEntry,
+  parseExecutionActivityEntry,
   publishedAgentLaunch,
   type NestedWorkPublisher,
-} from '../../../src/application/recording/current-work-recorder.js';
-import { reconcileCurrentWork } from '../../../src/application/projections/current-work.js';
+} from '../../../src/application/recording/execution-activity-recorder.js';
 import type { OperationalHistoryEntry } from '../../../src/application/ports/operation-history.js';
 import type { ReviewWorkflowContext } from '../../../src/application/ports/review-workflow.js';
 import { missionId } from '../../../src/domain/mission.js';
+import { configureMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
 
 const SLUG = 'task-2620';
 
 function recorder() {
   const appended: OperationalHistoryEntry[] = [];
   let id = 0;
-  const port = new CurrentWorkRecorder({
+  const port = new ActivityRecorderFixture({
     async findAll() { return appended; },
     async findByType(type: string) { return appended.filter((entry) => entry.eventType === type); },
     async append(entry: OperationalHistoryEntry) { appended.push({ ...entry, id: ++id } as OperationalHistoryEntry); },
     async clear() { appended.length = 0; },
   }, { processId: 4242 });
   /** What the board would show right now. */
-  const board = () => reconcileCurrentWork(appended.flatMap((entry) => parseCurrentWorkEntry(entry) ?? []), {
+  const board = () => projectActivityPublications(appended.flatMap((entry) => parseExecutionActivityEntry(entry) ?? []), {
     nowMs: Date.now(), ttlMs: 60_000, isProcessAlive: () => true,
   }).get(missionId(SLUG)) ?? null;
   return { port, board };
 }
+
+test('inherited child completion cannot settle parent activity (TASK-2822)', async t => {
+  t.after(() => configureMissionWriteAuthorization(null));
+  const { port, board } = recorder();
+  const parent = { missionId: missionId(SLUG), operationId: 'parent', phase: 'review' as const, summary: 'parent review' };
+  await port.running(parent);
+  configureMissionWriteAuthorization({ operationId: 'parent', inherited: true, assert: async () => {} });
+  await port.running({ ...parent, operationId: 'child', summary: 'recording verdict' });
+  await port.ended({ ...parent, operationId: 'child', summary: 'verdict recorded' });
+  assert.equal(board()?.currentWork?.summary, 'parent review');
+});
 
 function reviewWorkflow(onContinue: (_context: ReviewWorkflowContext) => Promise<void>) {
   const unused = () => { throw new Error('Unexpected review workflow operation'); };

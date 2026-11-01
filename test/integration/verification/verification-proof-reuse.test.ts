@@ -138,11 +138,11 @@ test('task-2413: publication consumes an unchanged reusable proof without execut
       proofPath: proofPath(root), runFn: () => { executions++; return { signal: null,  status: 9, stdout: '', stderr: '' }; },
     });
     assert.equal(result.ok, true);
-    assert.equal(executions, 0, 'publication must consume the handoff proof instead of executing the same gate');
+    assert.equal(executions, 0, "publication must consume the review preparation proof instead of executing the same gate");
   });
 });
 
-test('task-2413: publication reuse matches the handoff command after area placeholder resolution', { concurrency: false }, () => {
+test("task-2413: publication reuse matches the review preparation command after area placeholder resolution", { concurrency: false }, () => {
   withTempDir((root) => {
     initCommittedRepository(root);
     const template = './scripts/verify-local.sh {{area}}';

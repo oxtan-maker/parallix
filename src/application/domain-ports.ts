@@ -2,7 +2,6 @@ import type { AgentFamily } from '../domain/agents.js';
 import type { AgentSelectionSnapshot } from '../domain/agents.js';
 import type { LaneTransitionEvent } from '../domain/board-event.js';
 import type { Mission, MissionId } from '../domain/mission.js';
-import type { MissionNelRecord } from '../domain/net-engineering-lines.js';
 import type { SessionMarker, SessionRole } from '../domain/session.js';
 
 export type MissionVersion = number & { readonly __brand: 'MissionVersion' };
@@ -107,24 +106,6 @@ export interface MissionTransitionStore extends MissionStore {
   findTransitions?(_missionId: MissionId): Promise<readonly MissionTransitionHistoryEntry[]>;
   /** The mission of this repository whose recorded lane event carries the idempotency key, or null. */
   findMissionByIdempotencyKey?(_repositoryId: import('../domain/repository.js').RepositoryId, _key: string): Promise<MissionId | null>;
-}
-
-/**
- * Durable recording of the structured NEL report produced at handoff.
- *
- * The record itself is derived Mission data. The port returns only the durable
- * reference the use case needs, and stale expected versions remain refused.
- */
-export interface MissionNelRecorder {
-  recordNel(
-    _record: MissionNelRecord,
-  ): Promise<MissionNelRecordReceipt>;
-}
-
-/** The durable reference for a recorded NEL report, never the payload. */
-export interface MissionNelRecordReceipt {
-  /** Locator of the durable record. */
-  readonly reference: string;
 }
 
 /** A write refused because the caller's expected revision is no longer current. */

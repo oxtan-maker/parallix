@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 
 import { BoardCommandController } from '../../../../src/application/controller/board-controller.js';
 import { createBoardIntegrateService } from '../../../../src/composition/application-services.js';
-import { NO_CURRENT_WORK_PORT } from '../../../../src/application/recording/current-work-recorder.js';
+import { NO_EXECUTION_ACTIVITY } from '../../../../src/application/recording/execution-activity-recorder.js';
 import type { BoardCommandRequest } from '../../../../src/application/controller/board-command.js';
 import { makeExecutePorts } from '../../../fixtures/execute-mission-ports.js';
 
@@ -96,7 +96,7 @@ test('task-2429: integration authorization exit returns a board failure, not com
   const root = '/isolated/board-host';
   const resolved: string[] = [];
   const controller = new BoardCommandController(makeExecutePorts().ports, undefined, {
-    integrate: createBoardIntegrateService(integrationServices(), NO_CURRENT_WORK_PORT, configuration, root,
+    integrate: createBoardIntegrateService(integrationServices(), NO_EXECUTION_ACTIVITY, configuration, root,
       (slug, hostRoot, receivedConfiguration) => {
         resolved.push(slug);
         assert.equal(hostRoot, root);

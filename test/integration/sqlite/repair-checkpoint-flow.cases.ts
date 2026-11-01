@@ -1,5 +1,5 @@
 import { agentFamily } from '../../../src/domain/agents.js';
-import { handoffTransitionValue } from '../../helpers/handoff-ports.js';
+import { reviewPreparationTransitionValue } from "../../helpers/review-preparation-ports.js";
 import { missionVersion } from '../../../src/application/domain-ports.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -9,8 +9,8 @@ import test, { before } from 'node:test';
 import { prepareMigratedSchema, migratedSchemaPath } from '../../fixtures/migrated-database.js';
 import { openMigratedMissionStore } from '../../fixtures/mission-sqlite-store.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
-import { makePorts, makeRecorder, SLUG } from '../../helpers/handoff-ports.js';
-import { HandoffCommandUseCase } from '../../../src/application/handoff-command-use-case.js';
+import { makePorts, makeRecorder, SLUG } from "../../helpers/review-preparation-ports.js";
+import { ReviewPreparationCommandUseCase } from '../../../src/application/review-preparation-command-use-case.js';
 import { MissionCheckpointService } from '../../../src/application/mission-checkpoint-service.js';
 import { RepairCheckpointService } from '../../../src/application/repair-checkpoint-service.js';
 import { configureRepairCheckpoints } from '../../../src/application/ports/repair-checkpoint.js';
@@ -48,7 +48,7 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' | 'forc
       const loaded = await store.load(id); assert.equal(loaded.kind, 'found');
       if (loaded.kind !== 'found') { throw new Error('missing fixture'); }
       await cli(['record', ...(force ? ['--force'] : []), '--name', name, '--criterion', 'repair works', '--evidence', evidence,
-        '--next', 'rerun authorized gate and handoff', '--expected-version', String(loaded.version)]);
+        '--next', "rerun authorized gate and review preparation", '--expected-version', String(loaded.version)]);
     };
     const recorder = makeRecorder();
     let launches = 0;
@@ -56,8 +56,8 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' | 'forc
     const ports = makePorts(recorder, {
       agentSelection: { eligibleAgentsForStep: () => ['claude', 'codex'], selectAgent: () => 'claude' },
       missionServices: async () => ({ store, checkpoints,
-        lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: handoffTransitionValue(missionVersion(10)) }) },
-        handoff: { recordNel: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
+        lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: reviewPreparationTransitionValue(missionVersion(10)) }) },
+        nel: { recordNel: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
       }),
       process: { spawnSync: (cmd: string, args: string[], options: object) => {
         gateRuns++;
@@ -83,14 +83,14 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' | 'forc
         return { result: { status: 0 } };
       } },
     });
-    const useCase = new HandoffCommandUseCase(ports);
-    const handoff = () => useCase.performHandoff(SLUG, { worktree: root, recoverGateFailure: true, log: line => recorder.log.push(line), error: line => recorder.errors.push(line) });
-    const missing = await handoff();
+    const useCase = new ReviewPreparationCommandUseCase(ports);
+    const reviewPreparation = () => useCase.performReviewPreparation(SLUG, { worktree: root, recoverGateFailure: true, log: line => recorder.log.push(line), error: line => recorder.errors.push(line) });
+    const missing = await useCase.performReviewPreparation(SLUG, { worktree: root, recoverGateFailure: false, log: line => recorder.log.push(line), error: line => recorder.errors.push(line) });
     assert.equal(missing.ok, false);
     assert.match(missing.error ?? '', /Planned checkpoint evidence is missing.*CP-2/);
     assert.equal(launches, 0);
     await record('CP-2');
-    const result = await handoff();
+    const result = await reviewPreparation();
     assert.equal(launches, 1, result.error ?? '');
     assert.equal(result.ok, mode === 'repair', result.error ?? '');
     const after = await store.load(id); assert.equal(after.kind, 'found');
@@ -101,23 +101,23 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' | 'forc
     const reloaded = new RepairCheckpointService(store);
     if (mode !== 'repair') {
       assert.equal((await reloaded.readBlocker(SLUG, 'CP-3'))?.command, command);
-      const blockedAgain = await handoff();
+      const blockedAgain = await reviewPreparation();
       assert.equal(blockedAgain.ok, false);
       assert.match(blockedAgain.error ?? '', /human review/);
       assert.equal(launches, 1, result.error ?? '');
     }
-    let finalHandoff = result.ok;
+    let finalReviewPreparation = result.ok;
     if (mode === 'force') {
       fs.writeFileSync(path.join(root, 'repaired'), 'fixed\n');
       await record('CP-3', true);
       assert.equal(await reloaded.readBlocker(SLUG, 'CP-3'), undefined);
-      const resolved = await handoff();
+      const resolved = await reviewPreparation();
       assert.equal(resolved.ok, true, resolved.error ?? '');
-      finalHandoff = resolved.ok;
+      finalReviewPreparation = resolved.ok;
       assert.equal(gateRuns, 2, 'forced evidence still runs the required gate');
       assert.equal(launches, 1, 'operator recovery needs no agent relaunch');
     }
-    return { mode, missingCheckpointRejected: true, launches, gateRuns, handoff: finalHandoff, priorProofRetained: true, repairCheckpoint: 'CP-3' };
+    return { mode, missingCheckpointRejected: true, launches, gateRuns, reviewPreparation: finalReviewPreparation, priorProofRetained: true, repairCheckpoint: 'CP-3' };
   } finally {
     configureRepairCheckpoints(undefined);
     await fixture.close();
@@ -181,7 +181,7 @@ export function repairCheckpointFlowCases(): void {
       assert.equal(proof.checkpointEvidenceRevision, before.mission.checkpoints[2].recording!.missionRevision);
     } finally { await fixture.close(); }
   });
-  test('forced CLI evidence clears a persisted blocker and reruns handoff gate', async () => { await runRepairCheckpointFlow('force'); });
+  test("forced CLI evidence clears a persisted blocker and reruns review preparation gate", async () => { await runRepairCheckpointFlow('force'); });
   test('isolated repair persists before launch, reruns exact gate and hands off with retained proof (TASK-2695)', async () => { await runRepairCheckpointFlow(); });
-  test('isolated first contract report persists across reload and stops retries and handoff (TASK-2695)', async () => { await runRepairCheckpointFlow('blocker'); });
+  test("isolated first contract report persists across reload and stops retries and review preparation (TASK-2695)", async () => { await runRepairCheckpointFlow('blocker'); });
 }

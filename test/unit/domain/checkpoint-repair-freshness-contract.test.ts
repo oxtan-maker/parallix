@@ -154,7 +154,7 @@ test('incident repair records only its affected criterion and preserves original
   assert.equal(store.mission().checkpoints[1].repair?.verified, true);
 });
 
-test('structured blocker validates exact command, survives evidence writes and blocks handoff (TASK-2695)', async () => {
+test("structured blocker validates exact command, survives evidence writes and blocks review preparation (TASK-2695)", async () => {
   const { mission, store, repair, record } = incidentFixture();
   await repair.open({ slug: mission.id, incidentId: 'incident', command: 'npm test', attempt: 1 });
   const blocker = { command: 'npm test', diagnostic: 'support module rejected', authorityReason: 'locked check', proposedCorrection: 'operator selects owner' } satisfies import("../../../src/domain/rebound-policy.js").InvalidContractBlocker;

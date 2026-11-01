@@ -365,7 +365,7 @@ describe("Declared gate rebounce and review-loop resume —", () => {
       },
       output: { log: line => logs.push(line), error: line => logs.push(line), exit: () => { throw new Error('unexpected exit'); } },
     });
-    await runReviewLoop({ slug, implementer: 'codex', reviewer: 'claude', maxAttempts: 1, skipHandoff: true }, fake.ports);
+    await runReviewLoop({ slug, implementer: 'codex', reviewer: 'claude', maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
 
     assert.equal(prompts.length, 1, 'the same implementer receives one repair prompt');
     assert.match(prompts[0], /Gate command: \.\/scripts\/verify-local\.sh static-analysis/);
@@ -385,7 +385,7 @@ describe("Declared gate rebounce and review-loop resume —", () => {
     assert.ok(transitions.includes('active') && transitions.filter(status => status === 'review').length >= 2,
       'the workflow returns to active for repair then to review for the resumed round');
     assert.ok(!logs.some(line => line.includes('Autonomous review stopped: gate failure auto-bounced')),
-      'a successful repair must not stop autonomous review for human handoff');
+      "a successful repair must not stop autonomous review for human review preparation");
   });
 });
 

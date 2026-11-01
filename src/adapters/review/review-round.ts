@@ -10,7 +10,7 @@ import { readReviewForDecision, type ReviewRoundObservation } from './review-rou
  * the review-event trail only, so the aggregate kept `decision: null`, the
  * Mission never moved `review → active` through `request-changes`, no
  * implementer resolution was ever recorded, and `beginNextReviewRound` had
- * nothing to advance. A second handoff then re-submitted round 1 and the
+ * nothing to advance. A second review preparation then re-submitted round 1 and the
  * workflow rejected it with "A new review round must advance the same pull
  * request or local branch".
  *
@@ -409,7 +409,7 @@ function resolutionsFor(
  * Record the implementer's resolution of the decided round.
  *
  * After this the review is `ready-for-next-round`, which is what the next
- * handoff needs in order to open round N+1 on the same pull request.
+ * review preparation needs in order to open round N+1 on the same pull request.
  */
 export async function recordImplementerResolution(
   slug: string,

@@ -16,7 +16,7 @@ import { failure, rejected } from '../../../src/application/contracts.js';
 import { composeProductionCapabilities } from '../../../src/composition/production-capabilities.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import { makeExecutePorts } from '../../fixtures/execute-mission-ports.js';
-import { NO_CURRENT_WORK_PORT } from '../../../src/application/recording/current-work-recorder.js';
+import { NO_EXECUTION_ACTIVITY } from '../../../src/application/recording/execution-activity-recorder.js';
 import { BoardCommandController } from '../../../src/application/controller/board-controller.js';
 import type { ExecuteMissionPorts } from '../../../src/application/ports/execute-mission.js';
 import { missionVersion } from '../../../src/application/domain-ports.js';
@@ -57,7 +57,7 @@ describe('Production capability composition', () => {
   test('production composition gives CLI and TUI identical board and active capability instances', () => {
     const { ports } = makeExecutePorts();
 
-    const capabilities = composeProductionCapabilities('/fixture-repository', repositoryId('fixture-repository'), repositories, ports, null, NO_CURRENT_WORK_PORT, undefined, undefined, { configuration: resolveConfiguration({}) });
+    const capabilities = composeProductionCapabilities('/fixture-repository', repositoryId('fixture-repository'), repositories, ports, null, NO_EXECUTION_ACTIVITY, undefined, undefined, { configuration: resolveConfiguration({}) });
 
     assert.strictEqual(capabilities.boardProjection, capabilities.tui.boardProjection);
     assert.strictEqual(capabilities.missionDetails, capabilities.tui.missionDetails);
@@ -194,8 +194,8 @@ describe("Command dispatch convergence", () => {
       telemetry: {
         recordLaunchTelemetry: async () => {},
       },
-      checkpointValidation: { validateBeforeHandoff: async () => ({ ok: true as const }) },
-      handoffExecution: { run: async () => ({ ok: true as const }), repairHygiene: async () => ({ repaired: false }), classifyFailure: () => null, isRelaunchableFailure: () => false },
+      checkpointValidation: { validateBeforeReviewPreparation: async () => ({ ok: true as const }) },
+      reviewPreparationExecution: { run: async () => ({ ok: true as const }), repairHygiene: async () => ({ repaired: false }), classifyFailure: () => null, isRelaunchableFailure: () => false },
       autonomousReview: { start: async () => {} },
       repairLaunch: { launch: async () => undefined, available: () => ({ supported: false }), readHead: () => null },
       output: { log: () => {}, error: () => {}, command: (value: string) => value, formatSlug: (value: string) => value, formatAgent: (value: string) => value },

@@ -89,8 +89,8 @@ export function isDuplicateLaneEvent(error: unknown): boolean {
  * True when a duplicate-key refusal is a replay rather than a collision.
  *
  * Callers that want a retried operation to record one lane event supply a
- * stable idempotency key (`handoff-${slug}` at the review transition in
- * `src/application/handoff-command-use-case.ts`). The store honours that by
+ * stable idempotency key (`review-preparation-${slug}` at the review transition in
+ * `src/application/review-preparation-command-use-case.ts`). The store honours that by
  * refusing the second write — but the refusal rolls the whole transaction back,
  * so the aggregate change is discarded together with the event that was already
  * durable, and the caller sees a conflict for work the history already records.

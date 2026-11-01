@@ -426,7 +426,7 @@ test('production CLI autonomous re-review and child verdict/resolve keep authori
   // writers inherit the same fence, as they do under the production supervisor.
   const operations = new SqliteWorkflowOperationStore(database, repositoryId('repo'));
   await operations.insert({ id: 'fixture-review', repositoryId: repositoryId('repo'), missionId: missionId(slug),
-    requestKey: 'fixture-review', command: 'review:submit', generation: 1, phase: 'running', providerStarted: false,
+    requestKey: 'fixture-review', command: 'review:submit', generation: 1, phase: 'executing', providerStarted: false,
     agent: null, reviewer: 'codex', originalStatus: 'review', previousAssignee: 'custom',
     owner: { pid: process.pid, identity: 'fixture-executor' }, createdAt: HANDOFF_AT, updatedAt: HANDOFF_AT, reason: null });
   const environment = { ...process.env, PARALLIX_WORKFLOW_OPERATION: 'fixture-review', PARALLIX_WORKFLOW_GENERATION: '1', PARALLIX_HOME: stateHome, PRIMARY_WORKTREE: repo, PARALLIX_NO_BUBBLEWRAP: '1', TASK_2582_SLUG: slug, TASK_2582_TRACE: trace, TASK_2582_REVIEWED: path.join(root, 'reviewed') };
@@ -619,16 +619,16 @@ test('request-changes -> fixes -> re-review -> approve moves the Mission active 
       REVIEWER_ELIGIBILITY,
     );
     const submitted = await fixture.lifecycle.transition({
-      operationId: `handoff-${SLUG}`,
+      operationId: `review-preparation-${SLUG}`,
       missionId: missionId(SLUG),
       capabilities: new Set(['mission:transition']),
       command: { type: 'submit-for-review', gatesPassed: true, review: round1, reviewerEligibility: REVIEWER_ELIGIBILITY },
       actor: REVIEWER,
       occurredAt: HANDOFF_AT,
-      idempotencyKey: `handoff-${SLUG}`,
+      idempotencyKey: `review-preparation-${SLUG}`,
     });
     assert.equal(submitted.status, 'completed', `submit-for-review completes: ${submitted.error?.message ?? ''}`);
-    assert.equal(await missionStatus(fixture), 'review', 'the Mission is in review after handoff');
+    assert.equal(await missionStatus(fixture), 'review', "the Mission is in review after review preparation");
 
     // 3. the reviewer requests changes — the review → active mirror boundary.
     const changes = await recordRequestedChanges(SLUG, {
@@ -820,13 +820,13 @@ test('approval replay emits no duplicate lane event', async () => {
       REVIEWER_ELIGIBILITY,
     );
     const submitted = await fixture.lifecycle.transition({
-      operationId: `handoff-${SLUG}`,
+      operationId: `review-preparation-${SLUG}`,
       missionId: missionId(SLUG),
       capabilities: new Set(['mission:transition']),
       command: { type: 'submit-for-review', gatesPassed: true, review: round1, reviewerEligibility: REVIEWER_ELIGIBILITY },
       actor: REVIEWER,
       occurredAt: HANDOFF_AT,
-      idempotencyKey: `handoff-${SLUG}`,
+      idempotencyKey: `review-preparation-${SLUG}`,
     });
     assert.equal(submitted.status, 'completed');
 
@@ -905,13 +905,13 @@ test('a failing review-state persist at the round-open boundary stops the round'
       REVIEWER_ELIGIBILITY,
     );
     const submitted = await fixture.lifecycle.transition({
-      operationId: `handoff-${SLUG}`,
+      operationId: `review-preparation-${SLUG}`,
       missionId: missionId(SLUG),
       capabilities: new Set(['mission:transition']),
       command: { type: 'submit-for-review', gatesPassed: true, review: round1, reviewerEligibility: REVIEWER_ELIGIBILITY },
       actor: REVIEWER,
       occurredAt: HANDOFF_AT,
-      idempotencyKey: `handoff-${SLUG}`,
+      idempotencyKey: `review-preparation-${SLUG}`,
     });
     assert.equal(submitted.status, 'completed');
 

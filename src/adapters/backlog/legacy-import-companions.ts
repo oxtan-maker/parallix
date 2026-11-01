@@ -28,7 +28,7 @@ export async function importLegacyMissionDocuments(
   return changed;
 }
 
-/** Restore measured NEL from the historical handoff export without changing current measurements. */
+/** Restore measured NEL from the historical review preparation export without changing current measurements. */
 export async function importLegacyNel(
   services: MissionImportServices,
   options: LegacyImportOptions,

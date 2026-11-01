@@ -11,7 +11,7 @@ import path from 'node:path';
 import childProcess from 'node:child_process';
 import { createRebaseWorkflowPort } from '../../../src/adapters/rebase/rebase-workflow-adapter.js';
 import { setCommandPathProbe, setLauncherHealthProbe } from '../../../src/adapters/agents/agents.js';
-import { createHandoffPorts } from '../../../src/adapters/cli/commands/handoff.js';
+import { createReviewPreparationPorts } from '../../../src/adapters/cli/commands/review-preparation.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import { createIntegratePorts } from '../../../src/adapters/cli/commands/integrate.js';
 import { runReviewLoop } from '../../../src/application/review-loop/review-loop.js';
@@ -61,8 +61,8 @@ function conflictRepo(root: string, extraConfig: Record<string, unknown> = {}) {
 
 describe("pre-review rebase launcher configuration", () => {
   test.before(() => { setCommandPathProbe(null); setLauncherHealthProbe(null); });
-  test('nested handoff resolves shared conflicts with Codex only in supplied PATH (TASK-2744)', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'px-handoff-cfg-'));
+  test("nested review preparation resolves shared conflicts with Codex only in supplied PATH (TASK-2744)", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "px-review-preparation-cfg-"));
     const prior = process.env.TASK_2744_ENV;
     process.env.TASK_2744_ENV = 'ambient';
     try {
@@ -77,7 +77,7 @@ describe("pre-review rebase launcher configuration", () => {
           createPrFn: () => ({ ok: true as const }),
         },
       };
-      const result = await createHandoffPorts(configuration).rebase.rebaseBeforeReviewRound('task-lcfg-iso', options);
+      const result = await createReviewPreparationPorts(configuration).rebase.rebaseBeforeReviewRound('task-lcfg-iso', options);
       assert.equal(fs.existsSync(launches), true, `Codex was not detected/launched: ${logs.join(' | ')}`);
       assert.equal(result.ok, true, JSON.stringify(result));
       assert.equal(fs.readFileSync(path.join(root, 'child-environment'), 'utf8'), 'composed');
@@ -90,8 +90,8 @@ describe("pre-review rebase launcher configuration", () => {
     }
   });
 
-  test('nested handoff reports genuinely missing pinned Codex and never launches (TASK-2744)', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'px-handoff-missing-'));
+  test("nested review preparation reports genuinely missing pinned Codex and never launches (TASK-2744)", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "px-review-preparation-missing-"));
     const prior = process.env.TASK_2744_ENV;
     process.env.TASK_2744_ENV = 'ambient';
     try {
@@ -115,7 +115,7 @@ describe("pre-review rebase launcher configuration", () => {
           return port;
         },
       };
-      const result = await createHandoffPorts(configuration).rebase.rebaseBeforeReviewRound('task-lcfg-iso', options);
+      const result = await createReviewPreparationPorts(configuration).rebase.rebaseBeforeReviewRound('task-lcfg-iso', options);
       assert.equal(probes, 1);
       assert.equal(result.ok, false);
       assert.equal(fs.existsSync(launches), false);
@@ -214,7 +214,7 @@ describe("pre-review rebase launcher configuration", () => {
         agents: { launch: async launch => { note(`launch:${launch.role}`); return { agent: launch.agent, result: { status: 0 } }; } },
         artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
       });
-      await runReviewLoop({ slug: 'task-lcfg-iso', implementer: 'codex', reviewer: 'claude', maxAttempts: 1, skipHandoff: true }, fake.ports);
+      await runReviewLoop({ slug: 'task-lcfg-iso', implementer: 'codex', reviewer: 'claude', maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
 
       // The rebase's own push check may also run the gate; what matters is the loop's gate after the rebase.
       const events = fs.readFileSync(order, 'utf8').trim().split('\n');

@@ -1,5 +1,5 @@
 /**
- * Net Engineering Lines (NEL) policy and the handoff record derived from it.
+ * Net Engineering Lines (NEL) policy and the review preparation record derived from it.
  *
  * The bucket terciles are the empirical thresholds recorded in ADR 0047. They
  * live in the domain because the classification is a rule, not a persistence or
@@ -83,7 +83,7 @@ export function artifactReference(
 }
 
 /**
- * The structured NEL data a handoff reports.
+ * The structured NEL data a review preparation reports.
  *
  * Every field is derived from the Mission aggregate plus the intake-time
  * prediction: nothing here is a second stored authority. `reviewRounds` comes

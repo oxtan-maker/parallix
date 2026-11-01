@@ -2,12 +2,12 @@
 import type { ReviewLoopEvent } from '../../application/ports/review-loop-output.js';
 import type { ReviewLoopTextOutput, ReviewLoopRenderers } from './review-loop-output-formatting.js';
 import { implementerOutputRenderers } from './review-loop-implementer-output.js';
-import { handoffOutputRenderers } from './review-loop-handoff-output.js';
+import { reviewPreparationOutputRenderers } from "./review-loop-review-preparation-output.js";
 import { reviewerOutputRenderers } from './review-loop-reviewer-output.js';
 export { renderReviewVerdict, reviewIndependence } from './review-loop-output-formatting.js';
 export type { ReviewLoopTextOutput } from './review-loop-output-formatting.js';
 
-const OUTPUT_RENDERERS = { ...implementerOutputRenderers, ...handoffOutputRenderers, ...reviewerOutputRenderers } satisfies ReviewLoopRenderers;
+const OUTPUT_RENDERERS = { ...implementerOutputRenderers, ...reviewPreparationOutputRenderers, ...reviewerOutputRenderers } satisfies ReviewLoopRenderers;
 
 export function renderReviewLoopEvent(event: ReviewLoopEvent, output: ReviewLoopTextOutput): void {
   const render = Object.hasOwn(OUTPUT_RENDERERS, event.kind) ? OUTPUT_RENDERERS[event.kind] : undefined;

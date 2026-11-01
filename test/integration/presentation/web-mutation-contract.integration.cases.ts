@@ -92,7 +92,7 @@ async function withHost(
 
 /** The one card this suite drives: task-2433 in the active lane. */
 function commandCard(
-  commands: readonly CommandAvailability[] = [{ command: 'handoff', enabled: true, reason: null }],
+  commands: readonly CommandAvailability[] = [{ command: 'review', enabled: true, reason: null }],
 ): MissionCard {
   return makeCard({ id: fixtureMissionId('task-2433') as MissionId, commands });
 }
@@ -235,9 +235,9 @@ test('web mutation: an enabled action dispatches exactly once with a host-genera
     await client.ready;
     const res = await postCommand(info, value, {
       missionId: 'task-2433',
-      kind: 'handoff:record',
+      kind: 'review:submit',
       missionStatusAtRequest: 'active',
-      payload: { netEngineeringLines: 120, capturedAt: '2026-08-28T00:00:00.000Z' },
+      requestKey: 'review-delivery',
     });
     assert.equal(res.status, 200);
     const bodyText = await res.text();
@@ -255,16 +255,12 @@ test('web mutation: an enabled action dispatches exactly once with a host-genera
       'the operation ID must be a fresh UUID');
     assert.notEqual(dispatched.operationId, 'client-supplied-operation-id',
       'a client candidate can never become the operation ID');
-    assert.deepEqual([...dispatched.capabilities], ['handoff:record'],
+    assert.deepEqual([...dispatched.capabilities], ['review:submit'],
       'the capability set is exactly the requested kind');
     assert.equal(dispatched.missionId, 'task-2433');
     assert.equal(dispatched.missionStatusAtRequest, 'active');
-    assert.equal(dispatched.agent, undefined, 'handoff does not select an agent');
-    assert.deepEqual(dispatched.payload, {
-      kind: 'handoff:record',
-      netEngineeringLines: 120,
-      capturedAt: '2026-08-28T00:00:00.000Z',
-    }, 'the payload maps to the domain handoff shape minus expectedVersion');
+    assert.equal(dispatched.agent, undefined, "review preparation does not select an agent");
+    assert.equal(dispatched.payload, undefined, 'review derives evidence through its owning workflow');
 
     // The controller's progress sink is the host's SSE sink: the dispatched
     // operation ID reaches the stream, not a second identity.
@@ -278,6 +274,27 @@ test('web mutation: an enabled action dispatches exactly once with a host-genera
     assert.ok(progressValidation.ok, `progress frame rejected: ${JSON.stringify(progressValidation)}`);
     assert.equal(client.frames.length, 1, 'exactly one progress event for the one dispatch');
     await client.close();
+  });
+});
+
+test('NEL HTTP requests are refused before projection or statistics writes in every lane (TASK-2822)', async () => {
+  const spy = makeDispatcherSpy();
+  let projections = 0;
+  await withHost({
+    buildProjection: async () => { projections++; return makeProjection({ active: [commandCard()] }); },
+    commandDispatcher: () => spy.dispatcher,
+  }, async info => {
+    const value = await launchValue(info);
+    const baselineReads = projections;
+    for (const status of ['backlog', 'refined', 'active', 'review', 'integration', 'done']) {
+      const res = await postCommand(info, value, { missionId: 'task-2433', kind: 'nel:record',
+        missionStatusAtRequest: status, payload: { netEngineeringLines: 999, capturedAt: '2026-11-01T00:00:00Z' } });
+      assert.equal(res.status, 400);
+      const result = validateWebCommandResult(await res.json());
+      assert.equal(result.ok && result.value.error?.kind, 'validation');
+    }
+    assert.equal(spy.requests.length, 0, 'no NEL mutation can reach the controller');
+    assert.equal(projections, baselineReads, 'invalid mutations do not reach the board');
   });
 });
 
@@ -349,7 +366,7 @@ test('web mutation: a kind that is not card-advertised is 400 with zero dispatch
 
 test('web mutation: rejects an action not currently enabled for the mission with 409 and zero dispatch', async () => {
   const spy = makeDispatcherSpy();
-  const card = commandCard([{ command: 'handoff', enabled: false, reason: 'mission is not in a handoff lane' }]);
+  const card = commandCard([{ command: 'review', enabled: false, reason: "mission is not in a review preparation lane" }]);
   await withHost({
     buildProjection: async () => makeProjection({ active: [card] }),
     commandDispatcher: () => spy.dispatcher,
@@ -357,9 +374,9 @@ test('web mutation: rejects an action not currently enabled for the mission with
     const value = await launchValue(info);
     const res = await postCommand(info, value, {
       missionId: 'task-2433',
-      kind: 'handoff:record',
+      kind: 'review:submit',
       missionStatusAtRequest: 'active',
-      payload: { netEngineeringLines: 120, capturedAt: '2026-08-28T00:00:00.000Z' },
+      requestKey: 'review-delivery',
     });
     assert.equal(res.status, 409);
     const bodyText = await res.text();
@@ -367,7 +384,7 @@ test('web mutation: rejects an action not currently enabled for the mission with
     assert.ok(validation.ok, `result rejected: ${bodyText}`);
     assert.equal(validation.value.status, 'failed');
     assert.equal(validation.value.error?.kind, 'conflict');
-    assert.match(validation.value.error?.message ?? '', /not in a handoff lane/);
+    assert.match(validation.value.error?.message ?? '', /not in a review preparation lane/);
     assert.equal(spy.requests.length, 0, 'a non-enabled action must dispatch nothing');
   });
 });
@@ -427,9 +444,9 @@ test('web mutation: a stale status after the snapshot is a wire conflict with ex
     const value = await launchValue(info);
     const res = await postCommand(info, value, {
       missionId: 'task-2433',
-      kind: 'handoff:record',
+      kind: 'review:submit',
       missionStatusAtRequest: 'active',
-      payload: { netEngineeringLines: 120, capturedAt: '2026-08-28T00:00:00.000Z' },
+      requestKey: 'review-delivery',
     });
     assert.equal(res.status, 200, 'a dispatched outcome answers 200; the wire status carries the meaning');
     const validation = validateWebCommandResult(await res.json());
@@ -476,8 +493,8 @@ test('web mutation: a wrong Origin, session, or CSRF is 403 with a command-resul
 
 test('web mutation: an effect failure never sends a stack trace or filesystem path', async () => {
   const spy = makeDispatcherSpy();
-  const effectError = new Error('handoff effect failed');
-  effectError.stack = 'Error: handoff effect failed\n    at recordNel (/abs/path/fixture.js:12:34)';
+  const effectError = new Error("review preparation effect failed");
+  effectError.stack = "Error: review preparation effect failed\n    at recordNel (/abs/path/fixture.js:12:34)";
   // The controller converts a thrown effect into its message only; the stack
   // and the path live on the Error object, which never crosses the wire.
   spy.setOutcome(failure('execution', effectError.message));
@@ -488,9 +505,9 @@ test('web mutation: an effect failure never sends a stack trace or filesystem pa
     const value = await launchValue(info);
     const res = await postCommand(info, value, {
       missionId: 'task-2433',
-      kind: 'handoff:record',
+      kind: 'review:submit',
       missionStatusAtRequest: 'active',
-      payload: { netEngineeringLines: 120, capturedAt: '2026-08-28T00:00:00.000Z' },
+      requestKey: 'review-delivery',
     });
     assert.equal(res.status, 200);
     const bodyText = await res.text();
@@ -498,7 +515,7 @@ test('web mutation: an effect failure never sends a stack trace or filesystem pa
     assert.ok(validation.ok, `result rejected: ${bodyText}`);
     assert.equal(validation.value.status, 'failed');
     assert.equal(validation.value.error?.kind, 'execution');
-    assert.equal(validation.value.error?.message, 'handoff effect failed');
+    assert.equal(validation.value.error?.message, "review preparation effect failed");
     assert.doesNotMatch(bodyText, /\/abs\/path\/fixture\.js/, 'the body must not contain the filesystem path');
     assert.doesNotMatch(bodyText, /at recordNel/, 'the body must not contain the stack trace');
     assert.equal(spy.requests.length, 1);

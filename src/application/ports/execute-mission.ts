@@ -1,5 +1,5 @@
 import type { MissionTransitionStore } from '../domain-ports.js';
-import type { AgentLaunchPhase } from '../recording/current-work-recorder.js';
+import type { AgentLaunchPhase } from '../recording/execution-activity-recorder.js';
 import type { GateFailureReason } from '../rebound-kernel.js';
 
 /**
@@ -7,7 +7,7 @@ import type { GateFailureReason } from '../rebound-kernel.js';
  *
  * Each port is named for the external mechanism it stands in front of — a
  * workspace, an agent process, the Mission authority, a statistics writer, a
- * handoff/review pipeline — rather than for a phase of the legacy command. The
+ * review preparation/review pipeline — rather than for a phase of the legacy command. The
  * ordering between them, the partial-failure policy, and the cancellation
  * boundaries are owned by `ExecuteMissionService`, never by an adapter
  * (ADR 0051: adapters do not choose lifecycle transitions or policy).
@@ -81,22 +81,11 @@ export interface AgentLaunchRequest {
    * automatic failover after a usage block.
    *
    * The adapter reports the mechanism fact; the use case decides what it means
-   * for the board. This is how a `claude` → `qwen` handoff stays one mission's
+   * for the board. This is how a `claude` → `qwen` failover stays one mission's
    * current work instead of becoming a lifecycle event or a new run entity.
    */
   readonly onAgentChanged?: (_agent: string) => Promise<void>;
-  /** The application already committed the authoritative active transition. */
-  readonly authorityAlreadyActive?: boolean;
-  /**
-   * Called once per family the launcher confirms has spawned. The use case
-   * persists the mission's `active` boundary here: the destination state and
-   * its lane event commit as destination-state work begins, never after the
-   * run completes (TASK-2582). A rejection stops the run before any success
-   * output or Backlog promotion. The monotonic start timestamp includes spawn
-   * and launch bookkeeping; injected launchers may omit it when they call
-   * the boundary immediately at work start.
-   */
-  readonly onActivated?: (_agent: string, _startedAtMs?: number) => Promise<void>;
+
 }
 
 /**
@@ -164,7 +153,7 @@ export interface CheckpointValidationVerdict {
 }
 
 
-/** Mechanism request for the pre-handoff checkpoint evidence check. */
+/** Mechanism request for the pre-review preparation checkpoint evidence check. */
 export interface CheckpointValidationRequest {
   readonly slug: string;
   readonly worktree: string;
@@ -174,14 +163,14 @@ export interface CheckpointValidationRequest {
 
 /**
  * The checkpoint-evidence mechanism. The use case decides whether a failed
- * verdict can be repaired and whether handoff may proceed.
+ * verdict can be repaired and whether review preparation may proceed.
  */
 export interface CheckpointValidationPort {
-  validateBeforeHandoff(_request: CheckpointValidationRequest): Promise<CheckpointValidationVerdict>;
+  validateBeforeReviewPreparation(_request: CheckpointValidationRequest): Promise<CheckpointValidationVerdict>;
 }
 
-/** A handoff attempt and its mechanism facts. */
-export interface HandoffRunRequest {
+/** A review preparation attempt and its mechanism facts. */
+export interface ReviewPreparationRunRequest {
   readonly slug: string;
   readonly worktree: string;
   readonly agent: string;
@@ -189,22 +178,24 @@ export interface HandoffRunRequest {
   readonly force?: boolean;
 }
 
-export interface HandoffRunResult {
+export interface ReviewPreparationRunResult {
+  readonly recoveryAttempted?: boolean;
   readonly recoveryFailure?: import('../../domain/rebound-policy.js').ReboundReason;
   readonly ok: boolean;
   readonly reason?: string;
   readonly error?: string;
   readonly gateFailure?: GateFailureReason;
   readonly gateOutput?: { readonly stdout?: string; readonly stderr?: string };
+  /** True only while gatekeeper pushback remains unresolved and blocks review. */
   readonly gatekeeperPushedBack?: boolean;
 }
 
 /**
- * Handoff and its one-shot hygiene repair are adapter mechanisms. The service
+ * ReviewPreparation and its one-shot hygiene repair are adapter mechanisms. The service
  * owns attempts, classification, rebound sequencing, and the terminal policy.
  */
-export interface HandoffExecutionPort {
-  run(_request: HandoffRunRequest): Promise<HandoffRunResult>;
+export interface ReviewPreparationExecutionPort {
+  run(_request: ReviewPreparationRunRequest): Promise<ReviewPreparationRunResult>;
   repairHygiene(_request: {
     readonly slug: string;
     readonly worktree: string;
@@ -220,7 +211,7 @@ export interface HandoffExecutionPort {
   isRelaunchableFailure(_error: string): boolean;
 }
 
-/** Mechanism request for beginning autonomous review after a successful handoff. */
+/** Mechanism request for beginning autonomous review after a successful review preparation. */
 export interface AutonomousReviewRequest {
   readonly slug: string;
   readonly worktree: string;
@@ -273,7 +264,7 @@ export interface ExecuteMissionPorts {
   readonly missionTransitions: MissionTransitionStore;
   readonly telemetry: ExecuteTelemetryPort;
   readonly checkpointValidation: CheckpointValidationPort;
-  readonly handoffExecution: HandoffExecutionPort;
+  readonly reviewPreparationExecution: ReviewPreparationExecutionPort;
   readonly autonomousReview: AutonomousReviewPort;
   readonly repairLaunch: ExecuteRepairLaunchPort;
   readonly output: ExecuteOperatorOutputPort;

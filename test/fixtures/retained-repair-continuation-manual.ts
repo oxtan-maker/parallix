@@ -87,7 +87,7 @@ for (const scenario of ['covered', 'uncovered', 'unrecorded']) {
     const historical = structuredClone((await read()).mission.checkpoints[1]);
     let diagnosticReads = 0;
     let exactChecks = 0;
-    let handoffs = 0;
+    let reviewPreparations = 0;
     let implementerLaunches = 0;
     const fake = fakeReviewLoopPorts({ slug, worktree: root, missionStore: store,
       preReview: { head: () => git('rev-parse', 'HEAD') },
@@ -100,8 +100,8 @@ for (const scenario of ['covered', 'uncovered', 'unrecorded']) {
         return { agent: request.agent, result: { status: 0 } };
       } },
       artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) },
-      handoff: { handoff: async () => {
-        handoffs++;
+      reviewPreparation: { reviewPreparation: async () => {
+        reviewPreparations++;
         await fake.ports.state.persist(new ReviewState(slug, { implementer: 'codex', reviewer: 'claude', round: 2 }));
         return { ok: true };
       } },
@@ -120,7 +120,7 @@ for (const scenario of ['covered', 'uncovered', 'unrecorded']) {
     await createReviewCommand(new ReviewCommandUseCase(workflow))([slug]);
     if (unrecorded) {
       assert.deepEqual(fake.exits, [1]);
-      assert.equal(handoffs, 0);
+      assert.equal(reviewPreparations, 0);
       assert.equal(diagnosticReads, 1);
       assert.equal(exactChecks, 2, 'a red first rerun still permits the second implementer attempt');
       assert.deepEqual(fake.launches.map(item => item.role), ['implementer', 'implementer']);
@@ -131,7 +131,7 @@ for (const scenario of ['covered', 'uncovered', 'unrecorded']) {
       assert.equal(checkpoint.repair!.exactSuccessCoverage, undefined);
     } else {
       assert.deepEqual(fake.exits, [], JSON.stringify(fake.errors));
-      assert.equal(handoffs, 1);
+      assert.equal(reviewPreparations, 1);
       assert.equal(diagnosticReads, covered ? 0 : 1);
       assert.equal(exactChecks, covered ? 0 : 1);
       assert.deepEqual(fake.launches.map(item => item.role), covered ? ['reviewer'] : ['implementer', 'reviewer']);
@@ -139,8 +139,8 @@ for (const scenario of ['covered', 'uncovered', 'unrecorded']) {
       if (covered) { assert.deepEqual((await read()).mission.checkpoints[1], historical); }
     }
     console.log(JSON.stringify({ command: `px review ${slug}`, scenario, diagnosticReads, exactChecks,
-      handoffs, launches: fake.launches.map(item => item.role), review: fake.current()?.phase,
-      boundaries: 'public CLI factory, real Git/shell/SQLite; agent and handoff/reviewer fixtures' }));
+      reviewPreparations, launches: fake.launches.map(item => item.role), review: fake.current()?.phase,
+      boundaries: "public CLI factory, real Git/shell/SQLite; agent and review preparation/reviewer fixtures" }));
   } finally {
     await fixture.close();
     assert.equal(fs.existsSync(root), false);

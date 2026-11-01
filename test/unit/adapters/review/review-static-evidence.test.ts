@@ -10,7 +10,7 @@ import { findUnverifiableRecordedRow } from '../../../../src/application/static-
 
 // Reference assertions formerly reached these live handoff helpers through the
 // superseded static-review command. Keep them here with an isolated memory port.
-test('handoff evidence accepts commands, test names and repository paths (TASK-2810 F2)', () => {
+test("review preparation evidence accepts commands, test names and repository paths (TASK-2810 F2)", () => {
   const { root, fileSystem } = memoryRepository({
     'scripts/verify-local.sh': '#!/bin/sh',
     'hello.sh': '#!/bin/sh',
@@ -34,7 +34,7 @@ test('handoff evidence accepts commands, test names and repository paths (TASK-2
   }
 });
 
-test('handoff evidence rejects placeholder, prose and separator-only tables (TASK-2810 F2)', () => {
+test("review preparation evidence rejects placeholder, prose and separator-only tables (TASK-2810 F2)", () => {
   const { root, fileSystem } = memoryRepository({});
   for (const evidence of ['`TBD`', 'Tested manually', 'All tests pass successfully']) {
     const rows = collectGoalCheckEvidenceRows(`| Criterion | Evidence | Status |\n|---|---|---|\n| Covered | ${evidence} | PASS |`);

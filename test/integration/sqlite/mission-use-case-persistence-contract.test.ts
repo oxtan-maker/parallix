@@ -13,12 +13,12 @@ import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { missionVersion, MissionStaleVersion, MissionLoadResult, MissionTransitionStore, MissionVersion, MissionNelRecordReceipt } from '../../../src/application/domain-ports.js';
+import { missionVersion, MissionStaleVersion, MissionLoadResult, MissionTransitionStore, MissionVersion } from '../../../src/application/domain-ports.js';
 import { MissionIntakeService } from '../../../src/application/mission-intake-service.js';
 import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 import { MissionCheckpointService } from '../../../src/application/mission-checkpoint-service.js';
 import { MissionBriefService } from '../../../src/application/mission-brief-service.js';
-import { MissionHandoffService } from '../../../src/application/mission-handoff-service.js';
+import { MissionNelService } from '../../../src/application/mission-nel-service.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { LaneTransitionEvent } from '../../../src/domain/board-event.js';
 import { CheckpointData } from '../../../src/domain/checkpoint.js';
@@ -139,7 +139,7 @@ describe('Mission use cases', () => {
     'mission:intake',
     'mission:transition',
     'checkpoint:record',
-    'handoff:record',
+    'nel:record',
   ] as const);
   const CONTEXT_CAPABILITIES = new Set(['mission:context'] as const);
 
@@ -372,7 +372,7 @@ describe('Mission use cases', () => {
     const outcome = await new MissionLifecycleService(store).activate({
       operationId: 'op-activate',
       missionId: MISSION,
-      capabilities: new Set(['handoff:record'] as const),
+      capabilities: new Set(['nel:record'] as const),
       agent: agentFamily('codex'),
       occurredAt: '2026-07-29T12:00:00Z',
     });
@@ -587,17 +587,10 @@ describe('Mission use cases', () => {
   // SC4 — handoff NEL and artifact references
   // ---------------------------------------------------------------------------
 
-  test('SC4: handoff records NEL through the boundary and reports the derived record', async () => {
+  test("SC4: review preparation records NEL through the boundary and reports the derived record", async () => {
     const store = new FakeMissionStore(activeMission(), 3);
-    const receipts: string[] = [];
-    const recorder = {
-      async recordNel(record: { netEngineeringLines: number }): Promise<MissionNelRecordReceipt> {
-        receipts.push(`recorded:${record.netEngineeringLines}`);
-        return { reference: 'missions/task-2322-05/nel-record.json' };
-      },
-    } satisfies NonNullable<ConstructorParameters<typeof MissionHandoffService>[1]>;
-    const outcome = await new MissionHandoffService(store, recorder).recordNel({
-      operationId: 'op-handoff',
+    const outcome = await new MissionNelService(store).recordNel({
+      operationId: "op-review preparation",
       missionId: MISSION,
       capabilities: ALL_CAPABILITIES,
       netEngineeringLines: 412,
@@ -610,7 +603,6 @@ describe('Mission use cases', () => {
     assert.equal(outcome.status, 'completed');
     assert.equal(store.mission!.netEngineeringLines, 412);
     assert.deepEqual(store.calls, [`load:${MISSION}`, `save:${MISSION}:3`]);
-    assert.deepEqual(receipts, ['recorded:412']);
     assert.deepEqual(outcome.value!.record, {
       missionId: MISSION,
       predictedBucket: 'Large',
@@ -620,12 +612,9 @@ describe('Mission use cases', () => {
       capturedAt: '2026-07-29T13:00:00Z',
       artifacts: [{ kind: 'git-range', location: 'main..HEAD', byteSize: 1_048_576 }],
     });
-    assert.equal(outcome.value!.recordReference, 'missions/task-2322-05/nel-record.json');
-    assert.deepEqual(outcome.durableEvidence.at(-1), {
-      id: `${MISSION}:handoff:nel-report`,
-      source: 'mission-store',
-      detail: 'structured NEL report recorded at missions/task-2322-05/nel-record.json',
-    });
+    assert.equal(outcome.value!.recordReference, `missions:${MISSION}`);
+    assert.equal(outcome.durableEvidence.length, 1);
+    assert.match(outcome.durableEvidence[0].detail, /412 NEL/);
   });
 
   test('SC4: a large generated artifact is carried as a locator, never as content', () => {
@@ -643,31 +632,10 @@ describe('Mission use cases', () => {
     assert.ok(JSON.stringify(reference).length < 200);
   });
 
-  test('SC4: a failed NEL report reports the durable evidence that exists and claims no rollback', async () => {
-    const store = new FakeMissionStore(activeMission(), 3);
-    const outcome = await new MissionHandoffService(store, {
-      async recordNel(): Promise<MissionNelRecordReceipt> {
-        throw new Error('injected NEL persistence failure');
-      },
-    }).recordNel({
-      operationId: 'op-handoff',
-      missionId: MISSION,
-      capabilities: ALL_CAPABILITIES,
-      netEngineeringLines: 12,
-      capturedAt: '2026-07-29T13:00:00Z',
-    });
-    assert.equal(outcome.status, 'failed');
-    assert.equal(outcome.error!.kind, 'execution');
-    assert.match(outcome.error!.message, /injected NEL persistence failure/);
-    assert.equal(outcome.durableEvidence.length, 1);
-    assert.match(outcome.durableEvidence[0].detail, /12 NEL \(Small\)/);
-    assert.equal(store.mission!.netEngineeringLines, 12);
-  });
-
   test('SC4: a negative NEL is refused by the domain and never written', async () => {
     const store = new FakeMissionStore(activeMission(), 3);
-    const outcome = await new MissionHandoffService(store).recordNel({
-      operationId: 'op-handoff',
+    const outcome = await new MissionNelService(store).recordNel({
+      operationId: "op-review preparation",
       missionId: MISSION,
       capabilities: ALL_CAPABILITIES,
       netEngineeringLines: -1,
@@ -707,7 +675,7 @@ describe('Mission use cases', () => {
       'mission-intake-service.ts',
       'mission-lifecycle-service.ts',
       'mission-checkpoint-service.ts',
-      'mission-handoff-service.ts',
+      "mission-nel-service.ts",
       'mission-command-support.ts',
       'controller/board-controller.ts',
       'controller/board-command.ts',
@@ -727,7 +695,7 @@ describe('Lifecycle ordering', () => {
   //   - multi-round review: test/integration/integrate/workflow-repair-lane-boundaries.test.ts
   //   - approval replay without duplicate lane events:
   //     test/integration/integrate/workflow-repair-lane-boundaries.test.ts 'approval replay emits no duplicate lane event',
-  //     test/integration/sqlite/mission-handoff-lane-events-contract.test.ts
+  //     test/integration/sqlite/mission-review-preparation-lane-events-contract.test.ts
   //   - stale versions never overwriting state:
   //     this suite (Mission use cases section) 'SC2: a stale expected
   //     version is refused before the domain decides' and 'SC2: a stale write
@@ -785,8 +753,8 @@ describe('Lifecycle ordering', () => {
       // The real mission store: the authoritative boundary under test.
       missionTransitions: (store),
       telemetry: { async recordLaunchTelemetry() {} },
-      checkpointValidation: { async validateBeforeHandoff() { return { ok: true as const }; } },
-      handoffExecution: {
+      checkpointValidation: { async validateBeforeReviewPreparation() { return { ok: true as const }; } },
+      reviewPreparationExecution: {
         async run() { return { ok: true as const }; },
         async repairHygiene() { return { repaired: false }; },
         classifyFailure() { return null; },
@@ -879,13 +847,16 @@ describe('Lifecycle ordering', () => {
 
       const loaded = await store.load(missionId(SLUG));
       assert.equal(loaded.kind, 'found');
-      assert.equal(loaded.kind === 'found' ? loaded.mission.status : null, 'active');
+      assert.equal(loaded.kind === 'found' ? loaded.mission.status : null, 'review');
       assert.equal(loaded.kind === 'found' ? loaded.mission.assignee : null, FALLBACK_AGENT,
         'the assignee is the family that actually ran');
       // Activation is idempotent on an active lane: the failover re-assert must
       // not invent a second lane event.
       const events = await laneEvents(SLUG);
-      assert.deepEqual(events, [{ from_status: 'refined', to_status: 'active', trigger: 'activate' }]);
+      assert.deepEqual(events, [
+        { from_status: 'refined', to_status: 'active', trigger: 'activate' },
+        { from_status: 'active', to_status: 'review', trigger: 'begin-review-preparation' },
+      ]);
     } finally {
       await close();
     }

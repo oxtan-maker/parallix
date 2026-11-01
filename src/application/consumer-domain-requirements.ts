@@ -281,7 +281,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'usage-completed-statistics',
     family: 'usage-statistics',
     fileLocation: 'src/domain/usage.ts',
-    line: 202,
+    line: 200,
     anchor: 'function completedMissionStatistics',
     reads: ['Mission', 'MissionOutcome', 'AgentRunMeasurement'],
     requirement:
@@ -317,7 +317,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'review-checkpoint-evidence',
     family: 'review',
-    fileLocation: 'src/application/handoff-contract.ts',
+    fileLocation: 'src/application/review-preparation-contract.ts',
     line: 141,
     anchor: 'verifyCheckpointEvidence(',
     reads: ['CheckpointData', 'Mission'],
@@ -333,11 +333,11 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'ui-board-card',
     family: 'ui-board',
     fileLocation: 'src/application/projections/mission-board.ts',
-    line: 286,
+    line: 257,
     anchor: 'function projectMissionCard',
     reads: ['Mission', 'CheckpointData', 'Review'],
     requirement:
-      'Mission lane, status, labels, assignee, latest checkpoint and its next-action text, and whether the approval names the currently reviewed revision. Live work is observed progress; workflow admission and exclusive ownership have the separate WorkflowOperation authority.',
+      'Mission lane, status, labels, assignee, latest checkpoint and its next-action text, and whether the approval names the currently reviewed revision. Live work is projected from checked execution activity; retained ownership fences conflicting writes without establishing provider liveness.',
     perLaunchIdentity: 'none',
   },
   {

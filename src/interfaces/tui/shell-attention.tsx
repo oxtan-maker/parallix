@@ -2,8 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 
 import type { BoardProjection } from '../../application/projections/board.js';
-import { attentionAction, type AttentionAction } from '../../application/projections/board.js';
-import type { MissionCard } from '../../application/projections/mission-board.js';
+import type { AttentionAction } from '../../application/projections/board.js';
 
 import type { BoardCommandDispatcher } from '../../application/controller/board-command.js';
 
@@ -26,21 +25,9 @@ export function attentionWhy(reason: { kind: string; detail?: string }): string 
   }
 }
 
-/** Suggest the px command for an attention item. */
-export function attentionCommand(card: MissionCard, reason: { kind: string }, action?: AttentionAction): string {
-  if (action) { return action.display; }
-  switch (reason.kind) {
-    case 'integrate-lane':
-      return `px integrate ${card.id}`;
-    case 'review-lane':
-      return 'px review';
-    case 'blocking':
-      return attentionAction(card, { kind: 'blocking', detail: card.blockingReason ?? '' }).display;
-    case 'gate-failed':
-      return `px active ${card.id}`;
-    default:
-      return `px ${card.lane} ${card.id}`;
-  }
+/** Render the command selected by the shared application policy. */
+export function attentionCommand(action: AttentionAction | null): string {
+  return action?.display ?? 'Operator attention required';
 }
 
 export interface AttentionItemsProps {
@@ -63,6 +50,7 @@ export function AttentionItems({ queue, selectedMissionId, focusedIndex, sourceS
   return (
     <Box flexDirection="column">
       {items.slice(0, 5).map((item, idx) => {
+        const affordance = attentionAffordance(item, commandController);
         const isSelected = item.missionId === selectedMissionId;
         const isFocused = idx === focusedIndex;
         /* Determine status indicator for this item based on source facts. */
@@ -86,11 +74,11 @@ export function AttentionItems({ queue, selectedMissionId, focusedIndex, sourceS
               <Text wrap="end" dimColor>{attentionWhy(item.reason)}</Text>
             </Box>
             <Box>
-              <Text wrap="end" color="gray">{`${item.action.kind === 'manual' ? '' : '$ '}${attentionCommand(item.card, item.reason, item.action)}`}</Text>
+              <Text wrap="end" color="gray">{affordance.preview}</Text>
             </Box>
             <Box>
-              <Text color={item.action.kind !== 'manual' && canDispatchAction(item.action.kind, item.card, commandController) ? 'green' : 'gray'}>
-                {item.action.kind !== 'manual' && canDispatchAction(item.action.kind, item.card, commandController) ? ' run \u25b6' : item.action.kind === 'manual' ? ' lead investigation' : ' unavailable'}
+              <Text color={affordance.runnable ? 'green' : 'gray'}>
+                {affordance.label}
               </Text>
             </Box>
           </Box>
@@ -136,3 +124,11 @@ function getReasonColor(kind: string): 'green' | 'yellow' | 'red' | 'blue' {
   }
 }
 
+
+function attentionAffordance(item: BoardProjection['attentionQueue'][number], controller: AttentionItemsProps['commandController']) {
+  const action = item.action;
+  const executable = action !== null && action.kind !== 'manual';
+  const runnable = executable && canDispatchAction(action.kind, item.card, controller);
+  return { runnable, preview: `${executable ? '$ ' : ''}${attentionCommand(action)}`,
+    label: runnable ? ' run ▶' : action?.kind === 'manual' ? ' lead investigation' : ' unavailable' };
+}

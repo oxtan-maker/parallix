@@ -99,7 +99,7 @@ function reviewLaneCard(): MissionCard {
   return makeFullCard({
     commands: [
       { command: 'active', enabled: false, reason: 'Mission cannot be activated from its current state' },
-      { command: 'handoff', enabled: false, reason: 'Handoff requires an active mission with checkpoint evidence' },
+      { command: 'review', enabled: false, reason: "ReviewPreparation requires an active mission with checkpoint evidence" },
       { command: 'review', enabled: true, reason: null },
       { command: 'integrate', enabled: false, reason: 'Integration requires the integration queue or an approved review' },
       { command: 'draft', enabled: false, reason: 'Draft is available only while the mission is in the pre-draft (backlog) state' },
@@ -337,19 +337,20 @@ test('enabled action DTO carries null reason and exact display text', () => {
     id: tid('task-1010'),
     lane: 'active',
     status: 'active',
-    commands: [{ command: 'handoff', enabled: true, reason: null }],
+    commands: [{ command: 'review', enabled: true, reason: null }],
   });
   const actions = actionsFor(card);
-  const handoff = actions.get('handoff:record');
-  assert.ok(handoff !== undefined);
-  assert.equal(handoff.state, 'enabled');
-  assert.equal(handoff.reason, null);
-  assert.equal(handoff.display, 'px handoff task-1010');
-  assert.equal(handoff.targetLane, null, 'fixtures without a server target remain button-only');
+  const reviewPreparation = actions.get('review:submit');
+  assert.ok(reviewPreparation !== undefined);
+  assert.equal(reviewPreparation.state, 'enabled');
+  assert.equal(reviewPreparation.reason, null);
+  assert.equal(reviewPreparation.display, "px review task-1010");
+  assert.equal(reviewPreparation.targetLane, null, 'fixtures without a server target remain button-only');
 });
 
 test('attention action keeps the server-owned display text and state', () => {
-  const card = reviewLaneCard();
+  const base = reviewLaneCard();
+  const card = { ...base, commands: base.commands.map(command => command.command === 'review' ? { ...command, enabled: true, reason: null } : command) };
   const snapshot = toWebBoardSnapshot(projectionWith({
     stages: makeProjection({ review: [card] }).stages,
     attentionQueue: [makeAttentionItem(card, { kind: 'review-lane', detail: 'Awaiting review decision' }, 2)],
@@ -358,10 +359,10 @@ test('attention action keeps the server-owned display text and state', () => {
   assert.equal(item.missionId, card.id);
   assert.equal(item.reason.kind, 'review-lane');
   assert.equal(item.reason.detail, 'Awaiting review decision');
-  assert.equal(item.action.kind, 'review:submit');
-  assert.equal(item.action.display, 'px review');
-  assert.equal(item.action.state, 'enabled');
-  assert.equal(item.action.reason, null);
+  assert.equal(item.action?.kind, 'review:submit');
+  assert.equal(item.action?.display, 'px review task-1234');
+  assert.equal(item.action?.state, 'enabled');
+  assert.equal(item.action?.reason, null);
   assert.deepStrictEqual(item.dependsOnSources, ['task-markdown']);
 });
 
@@ -446,7 +447,7 @@ test('snapshot validation accepts real command actions with and without a label'
     status: 'active',
     commands: [
       { command: 'active', enabled: true, reason: null, targetLane: 'active', label: 'resume' },
-      { command: 'handoff', enabled: false, reason: 'Handoff requires an active mission with checkpoint evidence', targetLane: 'review' },
+      { command: 'review', enabled: false, reason: "ReviewPreparation requires an active mission with checkpoint evidence", targetLane: 'review' },
     ],
   });
   const snapshot = toWebBoardSnapshot(makeProjection({ active: [card] }));
@@ -940,6 +941,7 @@ test('manual attention round-trips without becoming a command capability (TASK-2
   const item = makeAttentionItem(card, { kind: 'blocking', detail: card.blockingReason! }, 1);
   const snapshot = toWebBoardSnapshot({ ...makeProjection({ active: [card] }), attentionQueue: [item] });
   const action = snapshot.attentionQueue[0]!.action;
+  assert.ok(action);
   assert.equal(action.kind, 'manual');
   assert.equal(action.state, 'ineligible');
   assert.equal(action.targetLane, null);

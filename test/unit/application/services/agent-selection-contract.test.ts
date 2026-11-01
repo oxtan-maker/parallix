@@ -1,7 +1,7 @@
 import { createReviewLoopPorts } from '../../../../src/adapters/review/review-loop.js';
 import { selectReviewer } from '../../../../src/application/review-loop/reviewer-selection.js';
-import { createHandoffPorts } from '../../../../src/adapters/cli/commands/handoff.js';
-import { HandoffReviewSubmission } from '../../../../src/application/handoff-review-submission.js';
+import { createReviewPreparationPorts } from '../../../../src/adapters/cli/commands/review-preparation.js';
+import { ReviewSubmissionService } from '../../../../src/application/review-submission-service.js';
 import { AgentExecutionAdapter, createDefaultExecuteMissionRuntime } from '../../../../src/adapters/mission/execute-mission-adapters.js';
 import { resolveAgentsLocalPath } from '../../../../src/adapters/storage/storage.js';
 // Historical regression provenance: TASK-2626, TASK-2351.
@@ -23,7 +23,7 @@ import { selectAgent as selectLauncherAgent } from '../../../../src/adapters/age
 import { startAgent } from '../../../../src/adapters/agents/agents.js';
 import { defaultStepEligibleFamilies, resolveBlockContext } from '../../../../src/adapters/agents/agent-block-selection.js';
 import { SqliteAgentSelectionSnapshotAdapter } from '../../../../src/adapters/agents/agent-selection-snapshot.js';
-import { resolveHandoffReviewAssignment } from '../../../../src/adapters/cli/commands/handoff.js';
+import { resolveReviewPreparationReviewAssignment } from '../../../../src/adapters/cli/commands/review-preparation.js';
 import { AGENT_SELECTION_OUTCOMES, recordAgentSelectionOutcome } from '../../../../src/application/services/agent-selection-telemetry.js';
 import fs from 'node:fs';
 import { createLauncherProbe } from '../../../../src/adapters/agents/launcher-availability.js';
@@ -456,7 +456,7 @@ describe("Reviewer nomination with stale JSON blocklist", () => {
       },
     };
     const materialized = await port.load();
-    const assignment = resolveHandoffReviewAssignment('vibe', {
+    const assignment = resolveReviewPreparationReviewAssignment('vibe', {
       eligibleAgentsForStepFn: () => ['codex', 'claude'],
       selectAgentFn: (step, options) => selectAgent(materialized, step, { excluded: new Set([...(options?.exclude ?? [])].map(agentFamily)) }),
     });
@@ -836,7 +836,7 @@ describe('Explicit operator selection policy', () => {
 });
 
 
-test('composed review, handoff, active and runtime fallback obey the same draws and policy failures (TASK-2788)', async t => {
+test("composed review, review preparation, active and runtime fallback obey the same draws and policy failures (TASK-2788)", async t => {
   const root = registeredMkdtemp('selection-composition-');
   const previousCwd = process.cwd();
   const previousRandom = Math.random;
@@ -857,7 +857,7 @@ test('composed review, handoff, active and runtime fallback obey the same draws 
   const write = () => fs.writeFileSync(path.join(root, 'config/agents.json'), JSON.stringify(config()));
   const runtime = { ...createDefaultExecuteMissionRuntime(), readAgentConfig: config };
   const active = new AgentExecutionAdapter(runtime, null, null, configuration);
-  const handoff = new HandoffReviewSubmission(createHandoffPorts(configuration));
+  const reviewPreparation = new ReviewSubmissionService(createReviewPreparationPorts(configuration));
   const review = () => selectReviewer({ implementer: 'vibe', isContinue: false, persisted: null,
     maxAttempts: 1, dryRun: false, providerEnabled: false, slug: 'selection-fixture' },
     createReviewLoopPorts('selection-fixture', { worktree: root }, { configuration, isProviderEnabled: () => false }).routing,
@@ -865,7 +865,7 @@ test('composed review, handoff, active and runtime fallback obey the same draws 
   for (const [strategy, value, expected] of [['random', 0.4, 'claude'], ['weighted', 0.75, 'qwen']] as const) {
     policy.selection = strategy; Math.random = () => value; write();
     assert.equal(await active.select('selection-fixture'), expected);
-    assert.equal(handoff.resolveHandoffReviewAssignment('vibe').reviewer, expected);
+    assert.equal(reviewPreparation.resolveReviewPreparationReviewAssignment('vibe').reviewer, expected);
     assert.equal(review()?.reviewer, expected);
   }
   const launched: string[] = [];
@@ -882,7 +882,7 @@ test('composed review, handoff, active and runtime fallback obey the same draws 
   for (const invalid of [{ selection: 'unknown' }, { selection: 'weighted', weights: { codex: 0, claude: 1 } }]) {
     policy = { ...policy, ...invalid }; write();
     await assert.rejects(active.select('selection-fixture'), /Invalid agent policy/);
-    assert.throws(() => handoff.resolveHandoffReviewAssignment('vibe'), /Invalid agent policy/);
+    assert.throws(() => reviewPreparation.resolveReviewPreparationReviewAssignment('vibe'), /Invalid agent policy/);
     assert.throws(review, /Invalid agent policy/);
     await assert.rejects(startAgent('active', { configuration, prompt: 'fixture',
       runtimeBlockContextFn: async (_step, tried) => resolveBlockContext(policy.eligible!, tried, new Set()),

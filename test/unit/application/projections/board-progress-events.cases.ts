@@ -24,7 +24,7 @@ function makeRequest(overrides: Partial<BoardCommandRequest> = {}): BoardCommand
 // SC6: Progress-event sequence ordering
 // ---------------------------------------------------------------------------
 
-test('progress events are emitted in launch-record-handoff order with increasing sequence', async () => {
+test("progress events are emitted in launch-record-review preparation order with increasing sequence", async () => {
   const { ports } = makeExecutePorts();
   const events: OperationEvent[] = [];
   const controller = new BoardCommandController(ports, (event) => events.push(event as OperationEvent));
@@ -37,14 +37,14 @@ test('progress events are emitted in launch-record-handoff order with increasing
   assert.ok(sequences[0] === 0, 'First event is dispatch (sequence 0)');
   assert.ok(phases.includes('launch'), 'launch phase present');
   assert.ok(phases.includes('record'), 'record phase present');
-  assert.ok(phases.includes('handoff'), 'handoff phase present');
+  assert.ok(phases.includes('review-preparation'), "review preparation phase present");
 
   // Launch (1) before record (2) before handoff (3)
   const launchIdx = phases.indexOf('launch');
   const recordIdx = phases.indexOf('record');
-  const handoffIdx = phases.indexOf('handoff');
+  const reviewPreparationIdx = phases.indexOf('review-preparation');
   assert.ok(launchIdx < recordIdx, 'launch before record');
-  assert.ok(recordIdx < handoffIdx, 'record before handoff');
+  assert.ok(recordIdx < reviewPreparationIdx, "record before review preparation");
 
   // Sequence numbers are monotonically increasing
   for (let i = 1; i < sequences.length; i++) {
@@ -75,16 +75,16 @@ test('progress events carry timestamps in ISO format', async () => {
   }
 });
 
-test('progress event carries agent name after handoff phase', async () => {
+test("progress event carries agent name after review preparation phase", async () => {
   const { ports } = makeExecutePorts();
   const events: OperationEvent[] = [];
   const controller = new BoardCommandController(ports, (event) => events.push(event as OperationEvent));
   await controller.dispatch(makeRequest({ agent: 'codex' }));
 
   // The handoff phase (sequence 3) should carry the agent name
-  const handoffEvent = events.find((e) => e.phase === 'handoff');
-  assert.ok(handoffEvent, 'handoff event present');
-  assert.equal(handoffEvent.agent, 'codex');
+  const reviewPreparationEvent = events.find((e) => e.phase === 'review-preparation');
+  assert.ok(reviewPreparationEvent, "review preparation event present");
+  assert.equal(reviewPreparationEvent.agent, 'codex');
 });
 
 test('board active dispatch canonicalizes uppercase backlog card IDs', async () => {
@@ -172,13 +172,13 @@ test('stale check happens before capability dispatch', async () => {
 // SC9: Progress-event sequence ordering (comprehensive)
 // ---------------------------------------------------------------------------
 
-test('progress-event sequence: dispatch(0) < launch(1) < record(2) < handoff(3)', async () => {
+test("progress-event sequence: dispatch(0) < launch(1) < record(2) < review preparation(3)", async () => {
   const { ports } = makeExecutePorts();
   const events: OperationEvent[] = [];
   const controller = new BoardCommandController(ports, (event) => events.push(event as OperationEvent));
   await controller.dispatch(makeRequest());
 
-  const expectedPhases = ['dispatch', 'launch', 'record', 'handoff'];
+  const expectedPhases = ['dispatch', 'launch', 'record', 'review-preparation'];
   const expectedSequences = [0, 1, 2, 3];
 
   assert.equal(events.length, expectedPhases.length, `Expected ${expectedPhases.length} events, got ${events.length}`);

@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { DraftWorkflowPort, DraftWorkflowContext } from './ports/cli-workflows.js';
 import {
-  currentWorkPublication,
-  NO_CURRENT_WORK_PORT,
-  type CurrentWorkPort,
-} from './recording/current-work-recorder.js';
+  executionActivityIntent,
+  NO_EXECUTION_ACTIVITY,
+  type ExecutionActivityPort,
+} from './recording/execution-activity-recorder.js';
 
 /**
  * A draft workflow step signalled exit (its exit function was called).
@@ -25,7 +25,7 @@ export class DraftWorkflowAbortedError extends Error {
 export class DraftCommandUseCase {
   constructor(
     private readonly _workflow: DraftWorkflowPort,
-    private readonly _currentWork: CurrentWorkPort = NO_CURRENT_WORK_PORT,
+    private readonly _currentWork: ExecutionActivityPort = NO_EXECUTION_ACTIVITY,
   ) {}
 
   /** CLI entry point. argv and options stay the CLI adapter's concern. */
@@ -55,7 +55,7 @@ export class DraftCommandUseCase {
     // resolved the slug, so observability cannot turn invalid CLI input into a
     // new failure mode. The single operation id also keeps terminal events
     // correlated with the running fact they clear.
-    const publication = currentWorkPublication({
+    const publication = executionActivityIntent({
       slug: ctx.slug,
       operationId: `draft:${ctx.slug}:${randomUUID()}`,
       phase: 'draft',

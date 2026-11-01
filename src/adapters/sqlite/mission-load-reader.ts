@@ -34,7 +34,7 @@ export async function readMissionAggregates(db: SqliteDatabaseAdapter, scope: Mi
   const params = [...scope.params];
   const missionRows = await db.query<MissionRecord>(
     `SELECT id, repository_id, title, status, raw_status, assignee,
-              net_engineering_lines, reproduction_test, predicted_nel_bucket, description, closed_at, version, next_success_criterion_id
+              net_engineering_lines, review_preparation_pending, reproduction_test, predicted_nel_bucket, description, closed_at, version, next_success_criterion_id
        FROM missions WHERE ${scope.missions} ORDER BY id`,
     params,
   );

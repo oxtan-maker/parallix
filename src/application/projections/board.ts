@@ -1,3 +1,4 @@
+import { hasExplicitHumanOnlyDiagnostic } from '../../domain/failure-classification.js';
 import type { MissionId } from '../../domain/mission.js';
 import type { CohortComparison } from './cohorts.js';
 import type { RepositoryId } from '../../domain/repository.js';
@@ -36,7 +37,7 @@ export interface AttentionItem {
    * dispatches `action.kind`, so the advertised and dispatched commands cannot
    * drift apart (AC #14).
    */
-  readonly action: AttentionAction;
+  readonly action: AttentionAction | null;
   /**
    * The source facts this item's conclusion actually depends on. A stale
    * source is only worth warning about on the items it could have misled; a
@@ -45,7 +46,7 @@ export interface AttentionItem {
   readonly dependsOnSources: readonly string[];
 }
 
-/** Lifecycle command or investigation guidance; manual items skip lifecycle dispatch. */
+/** The command an attention item advertises and dispatches. */
 export interface AttentionAction {
   readonly kind: BoardCommandKind | 'manual';
   /** Exactly what the operator is shown, e.g. `px review task-0001`. */
@@ -273,7 +274,7 @@ export interface MetricsProvenance {
 
 /** Derive AttentionReason from a MissionCard's operational facts. */
 export function attentionReason(card: MissionCard): AttentionReason {
-  if (card.blockingReason) { return { kind: 'blocking', detail: card.blockingReason }; }
+  if (card.blockingReason) { return { kind: 'blocking', detail: card.blocker && card.nextActionText ? `${card.blockingReason}\n${card.nextActionText}` : card.blockingReason }; }
   if (card.gate === 'failed') { return { kind: 'gate-failed', detail: `Gate ${card.gate}` }; }
   // An agent is already taking this lane's turn — see `agentIsWorking`.
   if (agentIsWorking(card)) { return { kind: 'none' }; }
@@ -297,21 +298,17 @@ export function attentionReason(card: MissionCard): AttentionReason {
  * One function owns both halves of the pair the operator sees and presses, so
  * no surface can render `px review` beside a dispatch of `active:execute`.
  */
-export function attentionAction(card: MissionCard, reason: AttentionReason): AttentionAction {
-  switch (reason.kind) {
-    case 'blocking':
-      // Ordinary blocked runs keep their retry. Contract stops and blockers
-      // without an eligible retry reach lead investigation without dispatch.
-      return card.blockerRequiresOperator || !card.commands.some((item) => item.command === 'active' && item.enabled)
-        ? { kind: 'manual', display: `px lead ${card.id} --once` }
-        : { kind: 'active:execute', display: `px active ${card.id}` };
-    case 'integrate-lane':
-      return { kind: 'integrate:merge', display: `px integrate ${card.id}` };
-    case 'review-lane':
-      return { kind: 'review:submit', display: 'px review' };
-    default:
-      return { kind: 'active:execute', display: `px active ${card.id}` };
+export function attentionAction(card: MissionCard, reason: AttentionReason): AttentionAction | null {
+  if (card.workflowOperation) { return null; }
+  if (reason.kind === 'blocking' && (card.blockerRequiresOperator || card.blocker
+    || hasExplicitHumanOnlyDiagnostic(card.blockingReason ?? '')
+    || !card.commands.some(action => action.command === 'active' && action.enabled))) {
+    return { kind: 'manual', display: `px lead ${card.id} --once` };
   }
+  const command = card.lane === 'integration' ? 'integrate' : card.lane === 'review' && card.reviewPhase !== 'fixing' ? 'review' : 'active';
+  if (!card.commands.some(action => action.command === command && action.enabled)) { return null; }
+  const kind = command === 'integrate' ? 'integrate:merge' : command === 'review' ? 'review:submit' : 'active:execute';
+  return { kind, display: `px ${command} ${card.id}` };
 }
 
 /**
@@ -425,8 +422,7 @@ export function buildBoardProjection(
     const reason = attentionReason(card);
     if (reason.kind === 'none') { return []; }
     const action = attentionAction(card, reason);
-    const command = action.kind.split(':', 1)[0];
-    if (action.kind !== 'manual' && !card.commands.some((item) => item.command === command && item.enabled)) { return []; }
+    if (action === null && !card.workflowOperation) { return []; }
     return [{
       missionId: card.id,
       rank: attentionRank(card),

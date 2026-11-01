@@ -3,6 +3,7 @@ import type { ReviewLoopPorts, ReviewLoopRequest } from '../ports/review-round.j
 import { rebound, DEFAULT_REBOUND_ATTEMPTS } from '../rebound-kernel.js';
 import { repairContractFailure } from '../repair-checkpoint-service.js';
 import { effectiveRepairObligations } from '../../domain/repair-coverage.js';
+import { transitionReviewRepair } from '../review-repair-lifecycle.js';
 import { isRetainedGateRepair } from '../rebound-checkpoints.js';
 
 /** Gate checkpoints alone own retained process output; workflow repairs do not. */
@@ -41,6 +42,9 @@ export async function resumeRetainedRepair(request: ReviewLoopRequest, mission: 
         const failure = repairContractFailure(current.mission.checkpoints, current.mission.declaredGates, current.mission.successCriteria);
         if (failure) { throw new Error(failure); }
         return await retained.verify(repair.command, evidence.cwd);
+      },
+      transitionToImplementer: async () => {
+        if (ports.missionStore) { await transitionReviewRepair(request.slug, 'active', implementer, ports.missionStore, ports.lifecycle); }
       },
       startAgent: async (_step, options) => await ports.agents.launch({ role: 'implementer', agent: options.agent as string,
         exclude: [reviewer], recovery: { prompt: options.prompt as (_agent: string) => string, sessionPolicy: options.sessionPolicy } }),

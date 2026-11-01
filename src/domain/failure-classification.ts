@@ -1,12 +1,12 @@
 import { recognizedFailureReason, type FailureReason } from './failure-reason.js';
-import { isIncompleteSuccessCriteriaFailure } from './mission-handoff-policy.js';
+import { isIncompleteSuccessCriteriaFailure } from "./mission-review-preparation-policy.js";
 /**
  * ADR 0048 failure classification (single dispatch table).
  *
  * The nine failure classes, the three dispatch actions, and the pattern-based
  * classifier live here — in the domain layer — so the rebound kernel and
  * the adapter-side repair path consume one table instead of maintaining
- * parallel classifiers. `src/adapters/cli/commands/repair-handoff.ts` re-exports
+ * parallel classifiers. `src/adapters/cli/commands/repair-review-preparation.ts` re-exports
  * these symbols for its existing callers.
  *
  * Domain layer: pure string logic, no I/O.
@@ -61,7 +61,7 @@ export function getDispatchAction(failureClass: FailureClassType): DispatchActio
 
 /**
  * Sub-reason for GitBlockers classification: distinguishes dirty-artifact from behind-branch errors.
- * Used by repairHandoff() to decide whether to auto-rebase (behind) vs auto-commit only (dirty).
+ * Used by repairReviewPreparation() to decide whether to auto-rebase (behind) vs auto-commit only (dirty).
  *
  * NOTE: ADR 0048 defines eight classes; `AgentCapacity` (task-2494) is a
  * narrowly-scoped addition for agent usage/quota blocks so they are not
@@ -132,16 +132,16 @@ export function classifyError(errorMsg: string, failureReason?: unknown): { fail
   // (most specific — checked before generic gate patterns).
   // Covers both "missing section" and "section present but no valid evidence".
   // 1b. IncompleteEvidence: checkpoint missing Goal Check section entirely
-  // (architecture migration: handoff.ts emits "missing a \"## Goal Check\" section" for
+  // (architecture migration: review-preparation.ts emits "missing a \"## Goal Check\" section" for
   // checkpoints that lack the required heading).
   // 1c. IncompleteEvidence: no checkpoint documents found at all
-  // (architecture migration: validateCheckpointsBeforeHandoff emits "No checkpoint documents
+  // (architecture migration: validateCheckpointsBeforeReviewPreparation emits "No checkpoint documents
   // found" — classify as IncompleteEvidence so the lifecycle can relaunch the
   // implementer with a targeted repair prompt rather than stranding on manual
   // instructions).
   // 1d. IncompleteEvidence: the mission declared checkpoints that were never
-  // written (validateCheckpointsBeforeHandoff emits "Declared checkpoint
-  // documents are missing before handoff: CP-2, CP-3. Create and commit …").
+  // written (validateCheckpointsBeforeReviewPreparation emits "Declared checkpoint
+  // documents are missing before review preparation: CP-2, CP-3. Create and commit …").
   //
   // This is ADR 0048 class 4 — incomplete checkpoint evidence, auto-send-back.
   // An agent that ended its turn without the checkpoint documents it declared
@@ -158,14 +158,14 @@ export function classifyError(errorMsg: string, failureReason?: unknown): { fail
   if (gateOrArtifact) { return gateOrArtifact; }
 
   // 4. GateFailure: verification gate failed
-  // 5. GateFailure: pre-handoff rebase failed. This generic wrapper can hide
+  // 5. GateFailure: pre-review preparation rebase failed. This generic wrapper can hide
   // the verification-gate failure that caused the rebase command to fail.
   // 6. GateFailure: declared gate failed
   // 7. UnverifiableClaims: test claims that cannot be verified
   // 8. MalformedGates: malformed or non-runnable declared gates
   // 9. MissingArtifacts: mandatory mission artifacts missing.
   // Missing legacy checkpoints and older auto-remediation diagnostics are
-  // repairable handoff failures: checkpoint evidence is a
+  // repairable review preparation failures: checkpoint evidence is a
   // mandatory artifact, so the implementer is auto-sent-back per ADR 0048.
   const operational = classifyOperationalFailure(errorMsg);
   if (operational) { return operational; }
@@ -182,7 +182,7 @@ export function classifyError(errorMsg: string, failureReason?: unknown): { fail
   // is matched by the AgentCapacity branch below instead.
   // 10b. AgentCapacity: agent usage / quota / rate limit (an agent-capacity
   // event, NOT infrastructure). Checked before the InfraBlocker rule so a
-  // usage-block diagnostic — e.g. the pinned-agent error a rebase handoff
+  // usage-block diagnostic — e.g. the pinned-agent error a rebase review preparation
   // surfaces — is not misclassified as a Forgejo/network failure. Requires an
   // agent-capacity marker (usage limit, quota, 429 usage/quota, resource
   // exhausted, or an agent-branded rate limit); never a generic "limit", so it
@@ -200,18 +200,18 @@ export function classifyError(errorMsg: string, failureReason?: unknown): { fail
   // common infra case.
   // 12. InfraBlocker: reviewer non-submission (ADR 0048 — human-only after bounded retries)
   // Matches: "Reviewer X did not submit a formal review outcome" and
-  // "Reviewer X did not leave a complete local review handoff".
+  // "Reviewer X did not leave a complete local review review preparation".
   // Default: human-only for unrecognized errors
   return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };
 }
 
 function classifyIncompleteEvidence(errorMsg: string): { failureClass: FailureClassType; dispatchAction: DispatchActionType } | null {
   const matches = isIncompleteSuccessCriteriaFailure(errorMsg)
-    || errorMsg.includes('"## Goal Check"') && errorMsg.includes('required before handoff')
+    || errorMsg.includes('"## Goal Check"') && errorMsg.includes("required before review preparation")
     || errorMsg.includes('missing a') && errorMsg.includes('"## Goal Check" section')
     || errorMsg.includes('No checkpoint documents found') && errorMsg.includes('Goal Check table')
     || /declared\s+checkpoint\s+documents?\s+(are|is)\s+missing/i.test(errorMsg)
-    || /\bCP-\d+/.test(errorMsg) && /missing\s+before\s+handoff|create\s+and\s+commit/i.test(errorMsg)
+    || /\bCP-\d+/.test(errorMsg) && /missing\s+before\s+review\s+preparation|create\s+and\s+commit/i.test(errorMsg)
     // Recorded (typed-verb) evidence: any failure whose repair is re-recording
     // checkpoint evidence is the implementer's to fix, like a missing CP-N.md.
     || errorMsg.includes('`px checkpoint record');
@@ -219,7 +219,7 @@ function classifyIncompleteEvidence(errorMsg: string): { failureClass: FailureCl
 }
 
 function classifyGitBlocker(errorMsg: string): { failureClass: FailureClassType; dispatchAction: DispatchActionType; reason: GitBlockerReason } | null {
-  if (errorMsg.includes('is modified but uncommitted') || errorMsg.includes('Commit the mission contract before handoff') || errorMsg.includes('Commit the implementation evidence before handoff')) {return { failureClass: FailureClass.GitBlockers, dispatchAction: DispatchAction.AutoRepair, reason: 'dirty' };}
+  if (errorMsg.includes('is modified but uncommitted') || errorMsg.includes("Commit the mission contract before review preparation") || errorMsg.includes("Commit the implementation evidence before review preparation")) {return { failureClass: FailureClass.GitBlockers, dispatchAction: DispatchAction.AutoRepair, reason: 'dirty' };}
   if (errorMsg.includes('Updates were rejected') || errorMsg.includes('fetch first') || errorMsg.includes('non-fast-forward') || errorMsg.includes('behind its remote') || errorMsg.includes('git push failed') && (errorMsg.includes('rejected') || errorMsg.includes('remote contains work'))) {return { failureClass: FailureClass.GitBlockers, dispatchAction: DispatchAction.AutoRepair, reason: 'behind' };}
   return null;
 }
@@ -229,12 +229,12 @@ function classifyOperationalFailure(errorMsg: string): { failureClass: FailureCl
   if (explicitClass === FailureClass.StateMachineViolation) {return { failureClass: explicitClass, dispatchAction: DispatchAction.HumanOnly };}
   const infra = explicitClass === FailureClass.InfraBlocker;
   if (!infra && (/usage\s+limit|hit\s+your\s+(?:weekly|daily|monthly|usage)\s+limit|rate[_\s]?limit\s+(?:reached|exceeded)|\bquota\b|\b429\b[^\n]*?\b(?:rate|usage|quota)\b|resource[_\s ]?(?:has\s+)?been[_\s ]+exhausted|resource_exhausted/i.test(errorMsg))) {return { failureClass: FailureClass.AgentCapacity, dispatchAction: DispatchAction.AutoRepair };}
-  if (infra || /did not (submit|leave).*(review (outcome|handoff)|formal review)/i.test(errorMsg)) {return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };}
+  if (infra || /did not (submit|leave).*(review (outcome|preparation)|formal review)/i.test(errorMsg)) {return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };}
   return null;
 }
 
 function classifyGateOrArtifactFailure(errorMsg: string): { failureClass: FailureClassType; dispatchAction: DispatchActionType } | null {
-  if (/verification gate failed|rebase failed before handoff/i.test(errorMsg) || /\bdeclared gate\b/i.test(errorMsg) && /\bfailed\b/i.test(errorMsg)) {return { failureClass: FailureClass.GateFailure, dispatchAction: DispatchAction.AutoSendBack };}
+  if (/verification gate failed|rebase failed before review preparation/i.test(errorMsg) || /\bdeclared gate\b/i.test(errorMsg) && /\bfailed\b/i.test(errorMsg)) {return { failureClass: FailureClass.GateFailure, dispatchAction: DispatchAction.AutoSendBack };}
   if (/test(s?\s+)?passed/i.test(errorMsg) && /cannot\s+verify|unverifiable|proof\s+(not\s+)?found|stale\s+proof/i.test(errorMsg)) {return { failureClass: FailureClass.UnverifiableClaims, dispatchAction: DispatchAction.AutoSendBack };}
   if (/malformed\s+gate|invalid\s+gate\s+config|gate\s+command\s+(not\s+found|syntax\s+error|not\s+runnable)/i.test(errorMsg) || /gate/i.test(errorMsg) && /syntax\s+error|not\s+found|missing\s+(file|command)/i.test(errorMsg)) {return { failureClass: FailureClass.MalformedGates, dispatchAction: DispatchAction.AutoRepair };}
   if (errorMsg.includes('even after auto-remediation') || errorMsg.includes('No checkpoint documents found in ') || /mandatory\s+(artifact|file|document)|missing\s+(mission\s+)?(artifact|file|document)|required\s+(artifact|file|document)\s+(not\s+)?found/i.test(errorMsg) || /gatekeeper/i.test(errorMsg) && /missing\s+(artifact|file|document)/i.test(errorMsg)) {return { failureClass: FailureClass.MissingArtifacts, dispatchAction: DispatchAction.AutoSendBack };}

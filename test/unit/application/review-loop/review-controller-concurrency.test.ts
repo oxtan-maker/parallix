@@ -55,7 +55,7 @@ test('TASK-2600 repro: delayed outer fallback leaves a concurrent round-3 approv
     agents: { launch: async () => { launchEntered.resolve(); return await releaseOuterLaunch.promise; } },
     output: { exit: (code: number) => { throw new Error(`unexpected exit ${code}`); } },
   });
-  const outer = runReviewLoop({ slug: SLUG, implementer: 'claude', reviewer: 'codex', maxAttempts: 3, skipHandoff: true }, fake.ports);
+  const outer = runReviewLoop({ slug: SLUG, implementer: 'claude', reviewer: 'codex', maxAttempts: 3, skipReviewPreparation: true }, fake.ports);
 
   await launchEntered.promise;
   // A concurrent `px review` has advanced and approved round 3
@@ -86,9 +86,9 @@ test('TASK-2600 controller fence declines a concurrent continue while a start ow
     output: { exit: (code: number) => { throw new Error(`unexpected exit ${code}`); } },
   });
   const competing = fakeReviewLoopPorts({ slug: SLUG, state, lock });
-  const running = runReviewLoop({ slug: SLUG, implementer: 'claude', reviewer: 'codex', maxAttempts: 2, skipHandoff: true }, start.ports);
+  const running = runReviewLoop({ slug: SLUG, implementer: 'claude', reviewer: 'codex', maxAttempts: 2, skipReviewPreparation: true }, start.ports);
   await launchEntered.promise;
-  await runReviewLoop({ slug: SLUG, implementer: 'claude', reviewer: 'codex', maxAttempts: 2, skipHandoff: true, isContinue: true }, competing.ports);
+  await runReviewLoop({ slug: SLUG, implementer: 'claude', reviewer: 'codex', maxAttempts: 2, skipReviewPreparation: true, isContinue: true }, competing.ports);
   assert.equal(start.launches.length + competing.launches.length, 1, 'the concurrent continue must not launch another reviewer');
   assert.ok(competing.logs.some((line) => /not starting a competing loop.*px review task-2600/i.test(line)), 'the declined invocation names the precise continuation action');
   releaseLaunch.resolve({ agent: 'codex' });

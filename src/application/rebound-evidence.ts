@@ -23,7 +23,7 @@ export function recoveryEvidenceForPrompt(worktree: string, missionId: string): 
 
 /**
  * Persist attributable, retrievable evidence of the original failed gate before
- * any repair launches. Some repair paths (notably the handoff gate path, which
+ * any repair launches. Some repair paths (notably the review preparation gate path, which
  * runs the gate through `runVerificationGateFn` and never calls
  * `captureVerifiedTreeProof`) reach the kernel without having written evidence;
  * capturing here makes evidence delivery uniform across every launch path. Only

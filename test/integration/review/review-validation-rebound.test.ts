@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'child_process';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
-const runDeclaredGatesModule = mockModule<typeof import('../../../src/adapters/cli/commands/handoff.js')>('../../../src/adapters/cli/commands/handoff.js', import.meta.url);
+const runDeclaredGatesModule = mockModule<typeof import('../../../src/adapters/cli/commands/review-preparation.js')>('../../../src/adapters/cli/commands/review-preparation.js', import.meta.url);
 const reviewCommandsModule = mockModule<typeof import('../../../src/adapters/review/review-commands.js')>('../../../src/adapters/review/review-commands.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
@@ -17,7 +17,7 @@ const { mock } = test;
 import { createReviewLoopPorts } from '../../../src/adapters/review/review-loop.js';
 import { runReviewLoop } from '../../../src/application/review-loop/review-loop.js';
 import { fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
-import { HandoffFacts } from '../../../src/application/ports/review-round.js';
+import { ReviewPreparationFacts } from '../../../src/application/ports/review-round.js';
 
 // Reproduction tests for task-2234 (push-to-reviewer autobounce).
 //
@@ -26,7 +26,7 @@ import { HandoffFacts } from '../../../src/application/ports/review-round.js';
 // the mission should auto-bounce back to the repairable workflow state
 // rather than stranding as a terminal failure.
 //
-// The auto-bounce lives in the performHandoff failure path and its callers
+// The auto-bounce lives in the performReviewPreparation failure path and its callers
 // (submitForReview, review-loop self-heal), not in pushRound's createPr path.
 
 // ============================================================================
@@ -111,14 +111,14 @@ async function withTempGitRepo(fn: (_arg0: string) => void | Promise<void>) {
 // branch, so the harness binds a reachable provider with no PR. Every test
 // asserts on `logs`/`errors` that the self-heal path actually executed, so
 // these tests cannot pass by skipping the code under test.
-function baseLoopHarness(root: string, handoff: HandoffFacts|PromiseLike<HandoffFacts|null|undefined>|null|undefined, overrides: Record<string, unknown> = {}) {
+function baseLoopHarness(root: string, reviewPreparation: ReviewPreparationFacts|PromiseLike<ReviewPreparationFacts|null|undefined>|null|undefined, overrides: Record<string, unknown> = {}) {
   const transitions: { slug: string; status: "review" | "active"; }[] = [];
   const fake = fakeReviewLoopPorts({
     slug: 'task-2234',
     worktree: root,
     routing: { eligibleFamilies: () => ['codex', 'claude'] },
     provider: { openPullRequest: () => null },
-    handoff: { handoff: async () => handoff },
+    reviewPreparation: { reviewPreparation: async () => reviewPreparation },
     task: { mirror: async lane => { transitions.push({ slug: 'task-2234', status: lane }); } },
     ...overrides,
   });
@@ -128,17 +128,17 @@ function baseLoopHarness(root: string, handoff: HandoffFacts|PromiseLike<Handoff
 
 function assertSelfHealAttempted(logs: string[]) {
   assert.ok(
-    logs.some((m: string) => /attempting automatic handoff/.test(m)),
-    'test harness must reach the self-heal handoff path (guards against vacuous pass)'
+    logs.some((m: string) => /attempting automatic review preparation/.test(m)),
+    "test harness must reach the self-heal review preparation path (guards against vacuous pass)"
   );
 }
 
-test('task-2234 repro: review-loop self-heal auto-bounces to active on validation-failed handoff', async () => {
+test("task-2234 repro: review-loop self-heal auto-bounces to active on validation-failed review preparation", async () => {
   await withTempGitRepo(async (root) => {
     const { run, logs, exitCodes, transitions, fake } = baseLoopHarness(root, {
       ok: false,
       reason: 'validation-failed',
-      error: 'Declared gate "true — some description" failed for task-2234: Gate declaration must contain an exact runnable command only. Blocking handoff — task remains in active.'
+      error: "Declared gate \"true — some description\" failed for task-2234: Gate declaration must contain an exact runnable command only. Blocking review preparation — task remains in active."
     });
     await run();
     const writtenStates = fake.writes.map(state => ({ slug: 'task-2234', state }));
@@ -194,7 +194,7 @@ test('task-2234 repro: review-loop self-heal does NOT bounce on gate-failed (exe
     const { run, logs, errors, exitCodes, transitions } = baseLoopHarness(root, {
       ok: false,
       reason: 'gate-failed',
-      error: 'Declared gate "./scripts/verify-local.sh all" failed for task-2234: Gate exited with status 1. Blocking handoff — task remains in active.'
+      error: "Declared gate \"./scripts/verify-local.sh all\" failed for task-2234: Gate exited with status 1. Blocking review preparation — task remains in active."
     });
     await run();
 
@@ -207,8 +207,8 @@ test('task-2234 repro: review-loop self-heal does NOT bounce on gate-failed (exe
       'gate-failed (execution failure) must NOT trigger any task transition'
     );
     assert.ok(
-      errors.some(m => /Handoff failed.*Gate exited with status 1/.test(m)),
-      'gate-failed must report the failed handoff'
+      errors.some(m => /ReviewPreparation failed.*Gate exited with status 1/.test(m)),
+      "gate-failed must report the failed review preparation"
     );
     assert.ok(
       errors.some(m => /Run: px review task-2234 after resolving the error/.test(m)),
@@ -244,7 +244,7 @@ test('task-2234 repro: infra/auth errors do NOT bounce (mission risk: narrow cla
 // CP-2: Auto-bounce in submitForReview (px review --submit path)
 // ============================================================================
 
-function submitHarness(root: string, performHandoffResult: { ok: boolean; reason: string; error: string; }) {
+function submitHarness(root: string, performReviewPreparationResult: { ok: boolean; reason: string; error: string; }) {
   const taskFile = path.join(root, 'task.md');
   fs.writeFileSync(taskFile, '# task');
   const transitions: { slug: string; status: string }[] = [];
@@ -256,7 +256,7 @@ function submitHarness(root: string, performHandoffResult: { ok: boolean; reason
     resolveTaskFileFn: () => ({ matches: [],  ok: true as const, taskFile }),
     getTaskImplementerFn: () => 'claude',
     isReviewProviderEnabledFn: () => false,
-    performHandoffFn: async () => performHandoffResult,
+    performReviewPreparationFn: async () => performReviewPreparationResult,
     transitionTaskFn: async (slug, status) => { transitions.push({ slug, status }); return true; },
     log: (m) => logs.push(m),
     exit: (c) => { exitCodes.push(c); },
@@ -264,7 +264,7 @@ function submitHarness(root: string, performHandoffResult: { ok: boolean; reason
   return { options, transitions, logs, exitCodes };
 }
 
-test('task-2234 repro: submitForReview auto-bounces to active on validation-failed handoff', async () => {
+test("task-2234 repro: submitForReview auto-bounces to active on validation-failed review preparation", async () => {
   await withTempGitRepo(async (root) => {
     const { options, transitions, logs, exitCodes } = submitHarness(root, {
       ok: false,
@@ -282,7 +282,7 @@ test('task-2234 repro: submitForReview auto-bounces to active on validation-fail
       logs.some(m => /Auto-bounced task-2234 to active/.test(m)),
       'submitForReview must surface the auto-bounce and repair guidance'
     );
-    assert.deepEqual(exitCodes, [1], 'submitForReview must still report the failed handoff');
+    assert.deepEqual(exitCodes, [1], "submitForReview must still report the failed review preparation");
   });
 });
 

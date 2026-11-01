@@ -97,7 +97,7 @@ async function recordLocalReviewVerdict(
   // TASK-2385: a read miss must not fabricate a round-1 verdict. The old
   // `round: 1` fallback silently downgraded the round and fed the stale-round
   // producer observed on task-2377.05. A verdict can only attach to a review
-  // `px handoff` started, so fail closed rather than invent one.
+  // `px review` started, so fail closed rather than invent one.
   if (!existing) {
     throw new Error(
       `Cannot record review verdict for ${slug}: no review state found. A review must be started with \`px review ${slug}\` before recording a verdict; refusing to fabricate round 1`,

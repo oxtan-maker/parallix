@@ -706,8 +706,8 @@ describe("lifecycle not masked by completed backlog task", () => {
       const item = projection.attentionQueue.find((i) => i.missionId === missionId('task-2515'));
       assert.ok(item, 'attention queue must enqueue the integration mission');
       assert.deepEqual(item?.reason, { kind: 'integrate-lane', detail: 'Awaiting integration' });
-      assert.equal(item?.action.kind, 'integrate:merge');
-      assert.equal(item?.action.display, `px integrate ${card!.id}`);
+      assert.equal(item?.action?.kind, 'integrate:merge');
+      assert.equal(item?.action?.display, `px integrate ${card!.id}`);
 
       // SC3: single DB-backed projection — no Markdown-only reconstruction.
       const sourceFacts = projection.sourceFacts.some((f) => f.source === 'mission-store');

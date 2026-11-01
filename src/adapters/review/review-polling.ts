@@ -66,7 +66,7 @@ async function pollForReview(
   const { getLatestReviewForPrFn = getLatestReviewForPr } = options;
   const { sleepFn, intervalMs, timeoutMs, verbose, label, retryCount, logger } = pollingParameters(options, 'review');
   if (!token) {
-    logger(status('WARN', 'No Forgejo token — skipping review-outcome poll (manual handoff required).'));
+    logger(status('WARN', "No Forgejo token — skipping review-outcome poll (manual review preparation required)."));
     return null;
   }
 
@@ -126,7 +126,7 @@ async function pollForDisposition(
   const { getLatestDispositionForPrFn = getLatestDispositionForPr } = options;
   const { sleepFn, intervalMs, timeoutMs, verbose, label, retryCount, logger } = pollingParameters(options, 'disposition');
   if (!token) {
-    logger(status('WARN', 'No Forgejo token — skipping disposition poll (manual handoff required).'));
+    logger(status('WARN', "No Forgejo token — skipping disposition poll (manual review preparation required)."));
     return null;
   }
 

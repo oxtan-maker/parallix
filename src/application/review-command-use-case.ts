@@ -4,17 +4,17 @@ import { randomUUID } from 'node:crypto';
 import { missionId } from '../domain/mission.js';
 import type { ReviewWorkflowContext, ReviewWorkflowPort } from './ports/review-workflow.js';
 import {
-  NO_CURRENT_WORK_PORT,
+  NO_EXECUTION_ACTIVITY,
   isNestedWorkPublisher,
   reviewLoopPublisher,
-  type CurrentWorkPort,
-} from './recording/current-work-recorder.js';
+  type ExecutionActivityPort,
+} from './recording/execution-activity-recorder.js';
 
 /** CLI-independent orchestration of the domain-selected review lifecycle operation. */
 export class ReviewCommandUseCase {
   constructor(
     private readonly _workflow: ReviewWorkflowPort,
-    private readonly _currentWork: CurrentWorkPort = NO_CURRENT_WORK_PORT,
+    private readonly _currentWork: ExecutionActivityPort = NO_EXECUTION_ACTIVITY,
   ) {}
 
   async execute(args: string[], options: Record<string, unknown> = {}): Promise<void> {

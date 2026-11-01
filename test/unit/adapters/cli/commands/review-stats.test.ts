@@ -193,14 +193,14 @@ test('task-2213: the completing implementer owns the model row, not a later revi
   ]);
 });
 
-test('task-2213: a closed reviewer row does not replace the final implementer after a handoff', () => {
+test("task-2213: a closed reviewer row does not replace the final implementer after a review preparation", () => {
   // Completion is mission-wide: a reviewer row may carry `completedForTest: yes`, while
   // the last actual implementation was a follow-up by a different agent.
   const summary = summarizeAgentWindow([
-   row({ mission: 'task-handoff-owner', date: '2026-07-07', implementer: 'claude', model: 'claude-sonnet-5', stage: 'follow-up', completedForTest: '' }),
-   row({ mission: 'task-handoff-owner', date: '2026-07-08', implementer: 'custom', model: 'qwen3.6-27b-q8', stage: 'follow-up', completedForTest: '' }),
-   row({ mission: 'task-handoff-owner', date: '2026-07-09', implementer: 'custom', reviewer_agent: 'vibe', model: 'mistral', stage: 'review', pr_fix_rounds: '3', completedForTest: 'yes' }),
-  ], WINDOW, { completedMissionOwners: new Map([['parallix::task-handoff-owner', 'custom']]) });
+   row({ mission: "task-review-preparation-owner", date: '2026-07-07', implementer: 'claude', model: 'claude-sonnet-5', stage: 'follow-up', completedForTest: '' }),
+   row({ mission: "task-review-preparation-owner", date: '2026-07-08', implementer: 'custom', model: 'qwen3.6-27b-q8', stage: 'follow-up', completedForTest: '' }),
+   row({ mission: "task-review-preparation-owner", date: '2026-07-09', implementer: 'custom', reviewer_agent: 'vibe', model: 'mistral', stage: 'review', pr_fix_rounds: '3', completedForTest: 'yes' }),
+  ], WINDOW, { completedMissionOwners: new Map([["parallix::task-review-preparation-owner", 'custom']]) });
 
   assert.deepEqual(summary, [
     { implementer: 'custom', missions: 1, averageFixRounds: '3.00', prFixObservationCount: 1 },

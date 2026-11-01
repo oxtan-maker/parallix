@@ -18,7 +18,7 @@ function reviewLoopHarness(options: {
   return fakeReviewLoopPorts({
     slug: 'task-2239',
     routing: { eligibleFamilies: () => ['codex', 'claude'] },
-    handoff: { handoff: async () => ({ ok: true as const }) },
+    reviewPreparation: { reviewPreparation: async () => ({ ok: true as const }) },
     agents: { launch: async launch => (options.launch ? options.launch(launch) : { agent: launch.agent }) },
     artifacts: { consumeReviewer: async () => options.reviewer(), consumeImplementer: async () => options.implementer() },
     preReview: { head: () => `head-${++head}` },

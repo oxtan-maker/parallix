@@ -1,3 +1,4 @@
+import { projectActivityPublications, ActivityRecorderFixture } from '../../../fixtures/execution-activity.js';
 import { makeExecutePorts as completeExecuteFixture } from '../../../fixtures/execute-mission-ports.js';
 import { fixtureMission as completeMission } from '../../../fixtures/mission-builders.js';
 import { missionId as completeMissionId } from '../../../../src/domain/mission.js';
@@ -16,11 +17,11 @@ import assert from 'node:assert/strict';
 import { makeExecutePorts } from '../../../fixtures/execute-mission-ports.js';
 import { ExecuteMissionService } from '../../../../src/application/execute-mission-service.js';
 import type { ExecuteMissionPorts } from '../../../../src/application/ports/execute-mission.js';
-type HandoffReviewRequest = { onAgentLaunched?: (_agent: string, _phase: 'review' | 'review-response') => Promise<void>; onAutonomousStop?: (_reason: string) => Promise<void> };
-import { CurrentWorkRecorder, parseCurrentWorkEntry } from '../../../../src/application/recording/current-work-recorder.js';
+type ReviewPreparationReviewRequest = { onAgentLaunched?: (_agent: string, _phase: 'review' | 'review-response') => Promise<void>; onAutonomousStop?: (_reason: string) => Promise<void> };
+import { parseExecutionActivityEntry } from '../../../../src/application/recording/execution-activity-recorder.js';
 import type { OperationalHistoryEntry } from '../../../../src/application/ports/operation-history.js';
 import { inMemoryOperationalHistory } from '../../../fixtures/operational-history.js';
-import { reconcileCurrentWork, isWorkInProgress } from '../../../../src/application/projections/current-work.js';
+import { isWorkInProgress } from '../../../../src/domain/execution-activity.js';
 import { attentionReason } from '../../../../src/application/projections/board.js';
 import { makeCard } from '../../../fixtures/board-projection.js';
 import { missionId } from '../../../../src/domain/mission.js';
@@ -30,8 +31,8 @@ const MISSION = missionId(SLUG);
 
 /** WORKING and NEEDS YOU as the board would render them for this mission. */
 function boardState(appended: readonly OperationalHistoryEntry[], options: { nowMs?: number; alive?: boolean | null } = {}) {
-  const events = appended.flatMap((entry) => parseCurrentWorkEntry(entry) ?? []);
-  const facts = reconcileCurrentWork(events, {
+  const events = appended.flatMap((entry) => parseExecutionActivityEntry(entry) ?? []);
+  const facts = projectActivityPublications(events, {
     nowMs: options.nowMs ?? Date.now(),
     ttlMs: 5 * 60_000,
     isProcessAlive: () => options.alive ?? true,
@@ -90,7 +91,7 @@ test('SC10: review-loop escalation during px active leaves the mission in NEEDS 
   const { repo, appended } = inMemoryOperationalHistory({ assignIds: true });
   const ports = strictPorts({
     autonomousReview: {
-      async start(request: HandoffReviewRequest) {
+      async start(request: ReviewPreparationReviewRequest) {
         await request.onAgentLaunched?.('qwen', 'review');
         // The loop gives up: no eligible reviewer remains for this round.
         await request.onAutonomousStop?.('REVIEWER_ARTIFACT_RETRY_EXHAUSTED');
@@ -99,7 +100,7 @@ test('SC10: review-loop escalation during px active leaves the mission in NEEDS 
     },
   });
 
-  const outcome = await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 }))
+  const outcome = await new ExecuteMissionService(ports, undefined, new ActivityRecorderFixture(repo, { processId: 7 }))
     .execute(executeRequest());
 
   // The run itself completed; the mission still cannot progress autonomously.
@@ -114,16 +115,16 @@ test('SC10: the bracket-closing ended fact cannot erase an escalation reason', a
   const { repo, appended } = inMemoryOperationalHistory({ assignIds: true });
   const ports = strictPorts({
     autonomousReview: {
-      async start(request: HandoffReviewRequest) {
+      async start(request: ReviewPreparationReviewRequest) {
         await request.onAutonomousStop?.('implementer reported BLOCKED');
         return true;
       },
     },
   });
-  await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 })).execute(executeRequest());
+  await new ExecuteMissionService(ports, undefined, new ActivityRecorderFixture(repo, { processId: 7 })).execute(executeRequest());
 
   // The execute run publishes `ended` for the same operation on its way out.
-  const states = appended.flatMap((entry) => parseCurrentWorkEntry(entry) ?? []).map((fact) => fact.state);
+  const states = appended.flatMap((entry) => parseExecutionActivityEntry(entry) ?? []).map((fact) => fact.state);
   assert.ok(states.includes('blocked') && states.at(-1) === 'ended', 'the run still closes its bracket');
   assert.match(String(boardState(appended).detail), /implementer reported BLOCKED/);
 });
@@ -142,7 +143,7 @@ test('SC11: exhausted execute options survive into NEEDS YOU as the operator-fac
     },
   });
 
-  const outcome = await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 }))
+  const outcome = await new ExecuteMissionService(ports, undefined, new ActivityRecorderFixture(repo, { processId: 7 }))
     .execute(executeRequest());
 
   assert.equal(outcome.status, 'failed');
@@ -164,15 +165,15 @@ test('SC11: one family becoming usage-blocked while another can take over create
       },
     },
     autonomousReview: {
-      async start(request: HandoffReviewRequest) {
+      async start(request: ReviewPreparationReviewRequest) {
         await request.onAgentLaunched?.('codex', 'review');
         return true;
       },
     },
   });
-  await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 })).execute(executeRequest());
+  await new ExecuteMissionService(ports, undefined, new ActivityRecorderFixture(repo, { processId: 7 })).execute(executeRequest());
 
-  const facts = appended.flatMap((entry) => parseCurrentWorkEntry(entry) ?? []);
+  const facts = appended.flatMap((entry) => parseExecutionActivityEntry(entry) ?? []);
   assert.ok(facts.every((fact) => fact.state !== 'blocked'), 'recoverable failover never publishes a blocked fact');
 });
 
@@ -187,13 +188,13 @@ test('SC12: active work, failover, exhaustion, and dead work each project one tr
   let duringWork = boardState(sampled.appended);
   await new ExecuteMissionService(strictPorts({
     autonomousReview: {
-      async start(request: HandoffReviewRequest) {
+      async start(request: ReviewPreparationReviewRequest) {
         await request.onAgentLaunched?.('qwen', 'review');
         duringWork = boardState(sampled.appended);
         return true;
       },
     },
-  }), undefined, new CurrentWorkRecorder(sampled.repo, { processId: 7 })).execute(executeRequest());
+  }), undefined, new ActivityRecorderFixture(sampled.repo, { processId: 7 })).execute(executeRequest());
   assert.deepEqual(
     { working: duringWork.working, needsYou: duringWork.needsYou },
     { working: true, needsYou: false },
@@ -213,7 +214,7 @@ test('SC12: active work, failover, exhaustion, and dead work each project one tr
         return { agent: 'qwen', rebaseDeferred: false, errored: false, errorMessage: null, exitStatus: 0, detail: null };
       },
     },
-  }), undefined, new CurrentWorkRecorder(failover.repo, { processId: 7 })).execute(executeRequest());
+  }), undefined, new ActivityRecorderFixture(failover.repo, { processId: 7 })).execute(executeRequest());
   assert.deepEqual(
     { working: duringFailover.working, needsYou: duringFailover.needsYou },
     { working: true, needsYou: false },
@@ -224,12 +225,12 @@ test('SC12: active work, failover, exhaustion, and dead work each project one tr
   const exhausted = inMemoryOperationalHistory({ assignIds: true });
   await new ExecuteMissionService(strictPorts({
     autonomousReview: {
-      async start(request: HandoffReviewRequest) {
+      async start(request: ReviewPreparationReviewRequest) {
         await request.onAutonomousStop?.('REVIEWER_NON_APPROVAL');
         return true;
       },
     },
-  }), undefined, new CurrentWorkRecorder(exhausted.repo, { processId: 7 })).execute(executeRequest());
+  }), undefined, new ActivityRecorderFixture(exhausted.repo, { processId: 7 })).execute(executeRequest());
   const exhaustedState = boardState(exhausted.appended);
   assert.deepEqual(
     { working: exhaustedState.working, needsYou: exhaustedState.needsYou },
@@ -240,12 +241,12 @@ test('SC12: active work, failover, exhaustion, and dead work each project one tr
   const stale = inMemoryOperationalHistory({ assignIds: true });
   await new ExecuteMissionService(strictPorts({
     autonomousReview: {
-      async start(request: HandoffReviewRequest) {
+      async start(request: ReviewPreparationReviewRequest) {
         await request.onAgentLaunched?.('qwen', 'review');
         return false; // the pipeline never closed its bracket
       },
     },
-  }), undefined, new CurrentWorkRecorder(stale.repo, { processId: 7 })).execute(executeRequest());
+  }), undefined, new ActivityRecorderFixture(stale.repo, { processId: 7 })).execute(executeRequest());
   const staleState = boardState(stale.appended, { alive: null, nowMs: Date.now() + 60 * 60_000 });
   assert.equal(staleState.working, false, 'work that stopped being verifiable is not WORKING');
   assert.equal(staleState.needsYou, true, 'and it is not silently dropped either');

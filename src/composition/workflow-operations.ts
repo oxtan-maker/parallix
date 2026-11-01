@@ -8,14 +8,12 @@ import type { createMissionTerminalCapability } from './mission-terminal-capabil
 import { missionLabels } from '../domain/mission.js';
 import { completed, failure } from '../application/contracts.js';
 import { hasMissionWriteAuthorization } from '../application/ports/mission-write-authorization.js';
-import { projectWorkflowBoard } from '../application/projections/workflow-board.js';
 import { configureMissionWriteAuthorization } from '../application/ports/mission-write-authorization.js';
 import { randomUUID } from 'node:crypto';
 import { hostWorkflowExecutor } from './mission-terminal.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import type { BoardCommandRequest, BoardCommandDispatcher } from '../application/controller/board-command.js';
 import { WorkflowOperationService } from '../application/workflow-operation-service.js';
-import { CurrentWorkRecorder } from '../application/recording/current-work-recorder.js';
 import { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
 import { SqliteWorkflowOperationStore } from '../adapters/sqlite/workflow-operation-store.js';
 import { SqliteOperationalHistoryRepository } from '../adapters/sqlite/operational-history-repository.js';
@@ -28,7 +26,6 @@ import { openRunCapture } from '../adapters/filesystem/run-history-store.js';
 import { resolveConfiguredCredentialRedactor } from '../application/recovery-evidence.js';
 import type { createProductionApplicationServices } from './application-services.js';
 import { createMissionStore } from './mission-persistence.js';
-import { correlateMissionCapture } from './mission-terminal.js';
 import { startWorkflowRecovery } from './workflow-recovery.js';
 
 /** Admission owns a dedicated connection, never the HTTP graph's shared handle. */
@@ -66,12 +63,8 @@ export async function composeWorkflowOperations(root: string, configuration: Par
     return settled.every(Boolean);
   });
   const operations = new SqliteWorkflowOperationStore(db, repository);
-  const work = new CurrentWorkRecorder(new SqliteOperationalHistoryRepository(db), {
-    processId: process.pid,
-    onPublication: publication => correlateMissionCapture(root, configuration, publication),
-  });
   const observer = observe === false ? undefined : (await import('./workflow-cli.js')).workflowCliObserver;
-  const service = new WorkflowOperationService(operations, createMissionStore(db), dispatcher, processes, work, repository,
+  const service = new WorkflowOperationService(operations, createMissionStore(db), dispatcher, processes, repository,
     select, () => new Promise(resolve => setTimeout(resolve, 100)), async slug => {
       const { findTaskFile, getTaskFrontmatterValue, getTaskLabels, getTaskStatus } = await import('../adapters/backlog/backlog.js');
       const file = findTaskFile(slug, root);
@@ -80,7 +73,7 @@ export async function composeWorkflowOperations(root: string, configuration: Par
     }, observe === false ? undefined : observer!({
       history: mission => observedTerminal().history(mission),
       page: (mission, request) => observedTerminal().page(mission, request),
-    }, observe), undefined, eligible);
+    }, observe, undefined, undefined, operations.activity), undefined, eligible);
   const failureEvidence = async (operation: import('../application/ports/workflow-operation.js').WorkflowOperationRecord) => {
     const history = (await loadTerminal()).history(operation.missionId);
     let gates: ReturnType<typeof listRecoveryEvidence> = [];
@@ -189,7 +182,7 @@ async function executeWorkflowCommand(id: string, operation: import('../applicat
   try {
     const controller = graph.presentationCapabilities?.commandController;
     if (!controller) { throw new Error('Workflow authority is unavailable'); }
-    configureMissionWriteAuthorization({ operationId: id, providerStarted: agent => service.progress(id, current.generation, 'execute', 'provider execution started', agent, true), progress: (phase, summary, agent) => service.progress(id, current.generation, phase, summary, agent), assert: async (mission, read) => {
+    configureMissionWriteAuthorization({ operationId: id, start: current, providerStarted: agent => service.providerStarted(id, current.generation, agent), activity: (event, sourceId) => service.activity(id, current.generation, event, sourceId), assert: async (mission, read) => {
       if (mission !== operation.missionId) { throw new Error('Workflow cannot mutate another mission'); }
       if (read) {
         const owner = await read(id);
@@ -199,7 +192,7 @@ async function executeWorkflowCommand(id: string, operation: import('../applicat
     } });
     if (operation.invocation) {
       const { run } = await import('./create-cli.js');
-      const status = await run([operation.invocation.command, ...operation.invocation.args], { baseCwd: root, environment: configuration.forwardedEnvironment });
+      const status = await run([operation.invocation.command, ...operation.invocation.args], { baseCwd: root, environment: configuration.forwardedEnvironment, operatorInvocation: operation.operatorInvocation === true });
       return status === 0 ? completed({ operationId: id }) : failure('execution', `Workflow exited with status ${status}`);
     }
     return await controller.dispatch(request);
@@ -207,17 +200,6 @@ async function executeWorkflowCommand(id: string, operation: import('../applicat
   finally { configureMissionWriteAuthorization(null); await graph.operatorState.close(); }
 }
 
-
-/** Pure command reads use the graph's existing connection and never recover work. */
-export function observeWorkflowOperations(graph: Awaited<ReturnType<typeof createProductionApplicationServices>>) {
-  const capabilities = graph.presentationCapabilities;
-  if (!capabilities || !graph.operatorState.db || !graph.mission) { return graph; }
-  const operations = new SqliteWorkflowOperationStore(graph.operatorState.db as SqliteDatabaseAdapter, graph.mission.repositoryId);
-  const projection = { buildMissionCard: capabilities.boardProjection.buildMissionCard.bind(capabilities.boardProjection),
-    build: async () => projectWorkflowBoard(await capabilities.boardProjection.build(), await operations.readOnly(() => operations.open())) };
-  return { ...graph, presentationCapabilities: { ...capabilities, boardProjection: projection,
-    tui: { ...capabilities.tui, boardProjection: projection } } };
-}
 
 /** One shared owner boundary for the CLI, TUI and web graph. */
 export async function attachWorkflowOperations(root: string, configuration: ParallixConfiguration,
@@ -233,10 +215,9 @@ export async function attachWorkflowOperations(root: string, configuration: Para
   const { workflowFailureController } = await import('./workflow-cli.js');
   const controller = workflowFailureController(owned.service, id => owned.service.operation(id), owned.failureEvidence, mission => owned.service.current(mission));
   const recovery = recover ? startWorkflowRecovery(root, configuration) : null;
-  const projection = { buildMissionCard: capabilities.boardProjection.buildMissionCard.bind(capabilities.boardProjection), build: async () => projectWorkflowBoard(await capabilities.boardProjection.build(), await owned.operations.readOnly(() => owned.operations.open())) };
   return { ...graph,
-    presentationCapabilities: { ...capabilities, boardProjection: projection, commandController: controller,
-      tui: { ...capabilities.tui, boardProjection: projection, commandController: controller, commandControllerFactory: () => controller } },
+    presentationCapabilities: { ...capabilities, commandController: controller,
+      tui: { ...capabilities.tui, commandController: controller, commandControllerFactory: () => controller } },
     operatorState: { ...graph.operatorState, close: async () => {
       try { await recovery?.close(); }
       finally { try { await owned.close(); } finally { await graph.operatorState.close(); } }

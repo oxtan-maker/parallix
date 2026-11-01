@@ -1,3 +1,4 @@
+import { SqliteExecutionActivityStore } from '../../../src/adapters/sqlite/execution-activity-store.js';
 import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
 import { TerminalStream as Stream } from '../../helpers/terminal-stream.js';
 import type { SQLInputValue } from 'node:sqlite';
@@ -61,6 +62,7 @@ describe('Mission cancel', () => {
     'mission_review_events',
     'mission_external_task_refs',
     'session_markers',
+    'execution_activity',
     'board_lane_events',
   ];
 
@@ -104,6 +106,10 @@ describe('Mission cancel', () => {
        VALUES (?, ?, 'refined', 'active', 'activate', 'claude', '2026-09-07T10:00:00Z', ?)`,
       [REPOSITORY, id, `${id}-activate`],
     );
+    await new SqliteExecutionActivityStore(db, repositoryId(REPOSITORY)).publish({
+      missionId: missionId(id), operationId: `activity:${id}`, phase: 'execute', state: 'blocked',
+      summary: 'stopped', agent: null, processId: null, blockedReason: 'stopped', occurredAt: '2026-11-01T00:00:00Z',
+    }, `activity:${id}`);
     await db.execute('INSERT INTO usage_statistics (repo, mission, stage, cost_usd, actor_key) VALUES (?, ?, ?, ?, ?)', [REPOSITORY, id, 'implementer', 1.25, 'claude']);
     await db.execute('INSERT INTO usage_statistics (repo, mission, stage, cost_usd, actor_key) VALUES (?, ?, ?, ?, ?)', [REPOSITORY, id, 'reviewer', 0.75, 'codex']);
   }

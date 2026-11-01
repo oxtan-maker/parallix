@@ -1,3 +1,4 @@
+import { ExecutionActivityRecorder } from '../../../src/application/recording/execution-activity-recorder.js';
 import { configureMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
 import { requireWorkflowOwner } from '../../../src/domain/workflow-operation.js';
 import test from 'node:test';
@@ -8,35 +9,63 @@ import { fixtureMission } from '../../fixtures/mission-builders.js';
 import { SqliteWorkflowOperationStore } from '../../../src/adapters/sqlite/workflow-operation-store.js';
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
-import { SqliteOperationalHistoryRepository } from '../../../src/adapters/sqlite/operational-history-repository.js';
-import { CurrentWorkRecorder, type CurrentWorkPort } from '../../../src/application/recording/current-work-recorder.js';
 import { WorkflowOperationService } from '../../../src/application/workflow-operation-service.js';
 import { completed } from '../../../src/application/contracts.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 
-function bind(database: SqliteDatabaseAdapter, work?: CurrentWorkPort) {
+function bind(database: SqliteDatabaseAdapter) {
   const operations = new SqliteWorkflowOperationStore(database, repositoryId('parallix'));
   const service = new WorkflowOperationService(operations, new SqliteMissionStore(database),
     { canExecute: () => true, async dispatch<T>() { return completed({} as T); } },
     { identity: () => ({ pid: 123, identity: 'fixture-start' }), async launch() {}, async alive() { return true; }, async stop() { return true; } },
-    work ?? new CurrentWorkRecorder(new SqliteOperationalHistoryRepository(database), { processId: 123 }),
     repositoryId('parallix'), async () => 'codex', async () => {});
   return { service, operations };
 }
 const request = (id: string) => ({ operationId: id, requestKey: id, missionId: 'task-atomic-owner', kind: 'active:execute' as const, capabilities: new Set(['active:execute'] as const) });
 
 export function workflowAdmissionPersistenceCases(): void {
-  test('workflow admission rolls activation, lane and preparing back together on publication failure (TASK-2750)', async () => {
+  test('workflow admission rolls activation, lane and initial activity back together on authoritative insert failure (TASK-2750)', async () => {
     const fixture = await openMigratedMissionStore([fixtureMission('task-atomic-owner', { status: 'refined' })]);
     try {
-      const { service, operations } = bind(fixture.database, {
-        async running() { throw new Error('injected durable publication failure'); }, async ended() {}, async blocked() {},
-      });
+      const { service, operations } = bind(fixture.database);
+      operations.insert = async () => { throw new Error('injected authoritative insert failure'); };
       assert.equal((await service.admit(request('failed-admission'))).status, 'failed');
       const loaded = await fixture.store.load('task-atomic-owner' as never);
       assert.equal(loaded.kind === 'found' && loaded.mission.status, 'refined');
       assert.equal((await fixture.laneEvents('task-atomic-owner')).length, 0);
       assert.equal(await operations.get('failed-admission'), null);
+    } finally { await fixture.close(); }
+  });
+
+  test('independent observation cannot supersede admitted worker activity (TASK-2822)', async () => {
+    const fixture = await openMigratedMissionStore([fixtureMission('task-atomic-owner', { status: 'refined' })]);
+    try {
+      const { service, operations } = bind(fixture.database);
+      assert.equal((await service.admit(request('admitted-worker'))).status, 'accepted');
+      const publisher = new ExecutionActivityRecorder(operations.activity, { processId: process.pid });
+      const intent = { missionId: 'task-atomic-owner' as never, operationId: 'independent-lead', phase: 'recovery' as const, summary: 'investigating' };
+      await publisher.running(intent);
+      await publisher.blocked(intent, 'independent observation');
+      await publisher.ended(intent);
+      const snapshots = await operations.activity.loadCurrentWork();
+      assert.equal(snapshots.length, 1);
+      assert.equal(snapshots[0].operationId, 'admitted-worker');
+      assert.equal(snapshots[0].frames.at(-1)?.event.summary, 'preparing workflow');
+    } finally { await fixture.close(); }
+  });
+
+  test('activity persistence failure rolls admission and its audit back together (TASK-2822)', async () => {
+    const fixture = await openMigratedMissionStore([fixtureMission('task-atomic-owner', { status: 'refined' })]);
+    try {
+      const { service, operations } = bind(fixture.database);
+      operations.activity.publish = async () => { throw new Error('injected activity failure'); };
+      assert.equal((await service.admit(request('failed-activity'))).status, 'failed');
+      const loaded = await fixture.store.load('task-atomic-owner' as never);
+      assert.equal(loaded.kind === 'found' && loaded.mission.status, 'refined');
+      assert.equal((await fixture.laneEvents('task-atomic-owner')).length, 0);
+      assert.equal(await operations.get('failed-activity'), null);
+      assert.equal((await operations.activity.loadCurrentWork()).length, 0);
+      assert.equal((await fixture.database.query('SELECT * FROM operational_history')).length, 0);
     } finally { await fixture.close(); }
   });
 
@@ -86,7 +115,7 @@ export function workflowAdmissionPersistenceCases(): void {
       const bound = bind(fixture.database);
       await bound.service.admit(request('write-fence'));
       const operation = (await bound.service.operation('write-fence'))!;
-      await bound.operations.replace({ ...operation, phase: 'running', generation: 1 }, 0);
+      await bound.operations.replace({ ...operation, phase: 'executing', owner: { pid: 123, identity: 'fixture-start' }, generation: 1 }, 0);
       const loaded = await fixture.store.load(operation.missionId);
       assert.equal(loaded.kind, 'found'); if (loaded.kind !== 'found') { throw new Error('fixture missing'); }
       await other.open({ path: path.join(fixture.root, 'parallix.db'), busyTimeoutMs: 0 });

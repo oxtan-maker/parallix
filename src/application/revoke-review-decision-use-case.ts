@@ -53,10 +53,10 @@ export class RevokeReviewDecisionUseCase {
     const loaded = await this._store.load(missionId(request.slug));
     if (loaded.kind !== 'found') { return failure('validation', `Mission ${request.slug} has no recorded review decision`); }
     if (loaded.mission.status === 'done') { return failure('validation', `Mission ${request.slug} is closed and cannot be reopened by revocation`); }
-    const strandedApproval = loaded.mission.status === 'active' && loaded.mission.review
+    const retainedApproval = ['active', 'review'].includes(loaded.mission.status) && loaded.mission.review
       && reviewStatus(loaded.mission.review) === 'approved';
-    if (loaded.mission.status !== 'integration' && !strandedApproval) {
-      return failure('validation', `Mission ${request.slug} is ${loaded.mission.status}; revocation requires its current effective approval in integration or a stranded active lane`);
+    if (loaded.mission.status !== 'integration' && !retainedApproval) {
+      return failure('validation', `Mission ${request.slug} is ${loaded.mission.status}; revocation requires its current effective approval in integration, active or review preparation`);
     }
     if (!loaded.mission.review) { return failure('validation', `Mission ${request.slug} has no recorded review decision`); }
 

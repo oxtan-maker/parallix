@@ -19,7 +19,7 @@ import { mkdtemp as registeredMkdtemp } from '../../../../helpers/temp-dir.js';
 
 const missionStart = mockModule<typeof import('../../../../../src/adapters/cli/startup-preflight.js')>('../../../../../src/adapters/cli/startup-preflight.js', import.meta.url);
 const missionUtils = mockModule<typeof import('../../../../../src/adapters/filesystem/mission-utils.js')>('../../../../../src/adapters/filesystem/mission-utils.js', import.meta.url);
-const handoffModule = mockModule<typeof import('../../../../../src/adapters/cli/commands/handoff.js')>('../../../../../src/adapters/cli/commands/handoff.js', import.meta.url);
+const reviewPreparationModule = mockModule<typeof import('../../../../../src/adapters/cli/commands/review-preparation.js')>('../../../../../src/adapters/cli/commands/review-preparation.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 
@@ -129,7 +129,7 @@ describe('NEL capture characterization', () => {
       return 'main';
     });
 
-    const result = await handoffModule.captureNelAtHandoff(slug, {
+    const result = await reviewPreparationModule.captureNelAtReviewPreparation(slug, {
       rootDir,
       missionDir,
       log: () => {},
@@ -149,7 +149,7 @@ describe('NEL capture characterization', () => {
             };
           },
         },
-        handoff: {
+        nel: {
           async recordNel(request) {
             effects.push(`record:${request.netEngineeringLines}:${request.predictedBucket}:${request.reviewRounds}`);
             return { status: 'completed' as const, durableEvidence: [] };
@@ -170,7 +170,7 @@ describe('NEL capture characterization', () => {
     const errors: string[] = [];
     mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
 
-    const result = await handoffModule.captureNelAtHandoff(slug, {
+    const result = await reviewPreparationModule.captureNelAtReviewPreparation(slug, {
       rootDir,
       missionDir,
       log: () => {},
@@ -181,7 +181,7 @@ describe('NEL capture characterization', () => {
             return { kind: 'missing' as const };
           },
         },
-        handoff: {
+        nel: {
           async recordNel() {
             return {
               status: 'failed' as const,
@@ -204,7 +204,7 @@ describe('NEL capture characterization', () => {
     const { mock } = t;
     const { rootDir, missionDir } = missionFixture('task-4245');
     mock.method(missionUtils, 'getPrimaryBranch', () => { throw new Error('no branch'); });
-    const result = await handoffModule.captureNelAtHandoff('task-4245', {
+    const result = await reviewPreparationModule.captureNelAtReviewPreparation('task-4245', {
       rootDir,
       missionDir,
       log: () => {},

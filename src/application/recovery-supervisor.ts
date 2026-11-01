@@ -45,10 +45,8 @@ import { attentionDetail, failureFingerprint, recoveryInstruction, isLeadLane, H
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-
 /** What one pass did to one mission, which is what tells the loop whether to wait. */
 type PassResult = 'settled' | 'watching' | 'acted';
-
 /** One mission's state across the passes of a run. Process-scoped, never persisted. */
 interface MissionRun {
   readonly missionId: string;
@@ -95,7 +93,6 @@ function report(run: MissionRun): MissionSupervision {
     summary: run.outcome ? run.summary : `${run.missionId} is still on the board's attention queue.`,
   };
 }
-
 /**
  * One pass over one attention item: press its action, or recover the mission.
  *
@@ -110,14 +107,20 @@ async function superviseItem(
   budget: number,
   signal?: AbortSignal,
 ): Promise<PassResult> {
-  run.steps.push(`${attentionDetail(observed.reason)} — board offers ${observed.action.display}`);
+  const action = observed.action;
+  if (!action && (observed.owned || observed.working)) {
+    run.steps.push('waiting for current execution ownership or work to clear before reconsidering its action');
+    return 'watching';
+  }
+  if (!action) { return settle(run, 'human', `${run.missionId} requires operator attention: ${attentionDetail(observed.reason)}`); }
+  run.steps.push(`${attentionDetail(observed.reason)} — board offers ${action.display}`);
 
   // 1. The board is asking the human to land this. The supervisor never does.
-  if (HUMAN_ONLY_ACTIONS.has(observed.action.kind)) {
+  if (HUMAN_ONLY_ACTIONS.has(action.kind)) {
     return settle(
       run,
       'human',
-      `${run.missionId} is waiting for you: ${observed.action.display}. The supervisor never integrates.`,
+      `${run.missionId} is waiting for you: ${action.display}. The supervisor never integrates.`,
     );
   }
 
@@ -129,10 +132,10 @@ async function superviseItem(
   //    queue ranks a blocking reason or a failed gate above liveness, so a
   //    mission with a live agent *can* be on it, and dispatching a command onto
   //    a running agent is the one thing the supervisor must never do.
-  const key = `${observed.action.kind}@${observed.progress}@${failureFingerprint(observed)}`;
+  const key = `${action.kind}@${observed.progress}@${failureFingerprint(observed)}`;
   // Manual attention has no lifecycle command to press; it goes straight to recovery.
-  if (observed.action.kind !== 'manual' && !run.pressed.has(key)) {
-    return pressAdvertisedAction(port, run, observed, key, signal);
+  if (action.kind !== 'manual' && !run.pressed.has(key)) {
+    return pressAdvertisedAction(port, run, observed, action, key, signal);
   }
 
   // 3. The board's own action did not clear the item. No failure classification
@@ -179,24 +182,24 @@ async function superviseItem(
   //    an item that is gone is the only proof that it cleared.
   return 'acted';
 }
-
 /** Press the board's advertised lifecycle command once, after a fresh liveness check. */
 async function pressAdvertisedAction(
   port: SupervisorPort,
   run: MissionRun,
   observed: AttentionObservation,
+  action: NonNullable<AttentionObservation['action']>,
   key: string,
   signal?: AbortSignal,
 ): Promise<PassResult> {
   const beforeDispatch = await port.liveness(run.missionId);
   assertSupervisionRunning(signal);
   if (beforeDispatch.working) {
-    run.steps.push(`not dispatching ${observed.action.display}: ${beforeDispatch.detail ?? 'an agent is working this mission'}`);
+    run.steps.push(`not dispatching ${action.display}: ${beforeDispatch.detail ?? 'an agent is working this mission'}`);
     return 'watching';
   }
-  run.lastAction = observed.action.display;
+  run.lastAction = action.display;
   try {
-    await port.runAction(run.missionId, observed.action, observed, signal);
+    await port.runAction(run.missionId, action, observed, signal);
     run.pressed.add(key);
     run.steps.push(`ran ${run.lastAction}`);
   } catch (error) {
@@ -212,10 +215,9 @@ async function pressAdvertisedAction(
 
 function recoveryRequest(run: MissionRun, observed: AttentionObservation, judgment: OperatorJudgmentResult): Omit<RecoveryRequest, 'instruction'> {
   return { missionId: run.missionId, lane: observed.lane, diagnostic: attentionDetail(observed.reason),
-    attemptedOperation: run.lastAction, directInvestigation: observed.action.kind === 'manual',
+    attemptedOperation: run.lastAction, directInvestigation: observed.action?.kind === 'manual',
     ...(judgment.admission ? { admission: judgment.admission } : {}), judgment: judgment.summary };
 }
-
 /** Judgment is admitted inside the recovery claim; live work still wins afterward. */
 async function judgeRecoveryStep(port: SupervisorPort, run: MissionRun, observed: AttentionObservation, failure: string): Promise<PassResult | OperatorJudgmentResult> {
   const decision: OperatorJudgmentResult = port.judgeRecovery ? await port.judgeRecovery(run.missionId)
@@ -237,20 +239,18 @@ async function judgeRecoveryStep(port: SupervisorPort, run: MissionRun, observed
   }
   return decision;
 }
-
 /** A judged manual stop reports its blocker, the recovery actually spent this run, and the rerun step. */
 function judgmentEscalation(observed: AttentionObservation, decision: OperatorJudgmentResult, recoveries: number): string {
-  if (observed.action.kind !== 'manual') { return `${decision.action}: ${decision.summary}`; }
+  if (observed.action?.kind !== 'manual') { return `${decision.action}: ${decision.summary}`; }
   const work = recoveries ? `No lifecycle command ran; ${recoveries} earlier recovery attempt(s) did not clear it and judgment refused another.` : 'No lifecycle command or recovery ran.';
   return `${observed.missionId} needs an operator decision in lane ${observed.lane}: ${attentionDetail(observed.reason)}. `
     + `Operator judgment ${decision.action}: ${decision.summary} ${work} Next: decide the recorded blocker, then rerun px lead ${observed.missionId} --once.`;
 }
-
 /** Escalation describes actual attempts, never an ineligible command we did not run. */
 function unresolvedAttentionSummary(observed: AttentionObservation, attempts: number): string {
-  const attempted = observed.action.kind === 'manual'
+  const attempted = observed.action?.kind === 'manual'
     ? `remains after ${attempts} recovery attempt(s) without lifecycle dispatch. `
-    : `survived ${observed.action.display} and ${attempts} recovery attempt(s). `;
+    : `survived ${observed.action?.display} and ${attempts} recovery attempt(s). `;
   return `${observed.missionId} still needs attention in lane ${observed.lane}: ${attentionDetail(observed.reason)} `
     + attempted + 'Next: review the recovery evidence and resolve any remaining operator decision.';
 }
@@ -272,7 +272,6 @@ export interface SuperviseFleetOptions {
   /** Report a failed board read before retrying or handing it to the operator. */
   readonly onBoardReadFailure?: (_error: Error, _attempt: number) => void;
 }
-
 /**
  * Watch the board's attention queue and work it down.
  *
@@ -349,7 +348,6 @@ export async function superviseFleet(
   if (state.boardReadError) { throw state.boardReadError; }
   return [...runs.values()].map(report);
 }
-
 /**
  * A board read threw. Accumulate the consecutive failure, record it on every
  * open run, and decide whether to give up or wait and retry. The counter lives
@@ -377,10 +375,9 @@ async function handleBoardReadFailure(
   try { await interruptiblePause(poll.elapsed, options.signal); } finally { poll.cancel(); }
   return { error: null };
 }
-
 /**
  * A live mission is absent from the queue by design. It is cleared only after
- * both the queue and the current-work authority agree it is idle. Return whether
+ * both the queue and the execution activity projection agree it is idle. Return whether
  * at least one mission is still working, so the loop does not mistake a fleet of
  * live agents for an empty queue.
  */
@@ -412,7 +409,6 @@ async function clearIdleMissions(
   }
   return watching;
 }
-
 /**
  * Reconcile each queued mission against its run state, then start a step for
  * each mission that is open and not already in flight. One step per mission at a
@@ -432,8 +428,10 @@ function processAttentionQueue(
     runs.set(observed.missionId, run);
     // A mission that cleared and came back is stuck again. So is an escalated
     // mission whose board reason changed: attempts are per failure, not per
-    // mission. Integration remains terminal for this supervisor.
-    if (run.outcome === 'cleared' || (run.outcome === 'escalated' && run.settledFailure !== failureFingerprint(observed))) {
+    // mission. A resolved human stop is reconsidered without resetting budgets.
+    const reconsiderHuman = run.outcome === 'human' && (observed.owned || observed.working
+      || observed.action && !HUMAN_ONLY_ACTIONS.has(observed.action.kind));
+    if (run.outcome === 'cleared' || reconsiderHuman || (run.outcome === 'escalated' && run.settledFailure !== failureFingerprint(observed))) {
       run.outcome = null;
       run.settledFailure = null;
       run.steps.push('back on the attention queue after clearing or with a different failure');
@@ -444,7 +442,6 @@ function processAttentionQueue(
   }
   return open;
 }
-
 /**
  * The loop stops when the operator asked for one pass, or when nothing is open,
  * nothing is in flight, and no mission is still working. The four facts are
@@ -459,7 +456,6 @@ function fleetIsIdle(
 ): boolean {
   return !options.keepWatching && open === 0 && inFlightSize === 0 && !watching;
 }
-
 /**
  * Pause until a step finishes or the polling interval elapses, whichever comes
  * first. Racing the interval too is what lets a mission that becomes stuck while
@@ -482,7 +478,6 @@ async function wakeFleet(
     poll.cancel();
   }
 }
-
 /** Wake a polling caller promptly without retaining a signal listener. */
 async function interruptiblePause(wait: Promise<unknown>, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) { return; }

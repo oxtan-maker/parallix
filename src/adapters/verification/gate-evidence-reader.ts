@@ -84,7 +84,7 @@ function outcomeOfRun(gate: { key: string; command: string }, checkout: Extract<
 
 function runningAttempt(run: IntegrationGateRun | null, operation: Pick<WorkflowOperation, 'id' | 'generation' | 'phase'> | null,
   checkout: Extract<GateCheckout, { kind: 'present' }>) {
-  const attemptKey = operation?.phase === 'checking' ? `${operation.id}:${operation.generation}` : null;
+  const attemptKey = operation?.phase === 'executing' ? `${operation.id}:${operation.generation}` : null;
   return run && run.current && run.status === 'running' && attemptKey !== null && run.attempt === attemptKey
     && checkout.clean && run.revision === checkout.revision
     ? { attempt: run.attempt as string, startedAt: run.startedAt } : null;
@@ -133,7 +133,7 @@ export class VerificationGateEvidenceReader implements GateEvidenceReader {
   }
 
   /**
-   * Handoff captures under the mission slug; publication verification captures
+   * ReviewPreparation captures under the mission slug; publication verification captures
    * under the worktree name. Both stores live in the mission's own worktree.
    */
   private failures(worktree: string, missionId: MissionId) {

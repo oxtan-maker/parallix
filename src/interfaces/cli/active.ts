@@ -16,7 +16,7 @@ export function parseActiveCliRequest(args: string[]): ActiveCliRequest {
 
 export function renderActiveProgress(event: { phase: string; agent?: string }, log: (_message: string) => void): void {
   if (event.phase === 'launch') { log('Launching execute agent...'); }
-  if (event.phase === 'handoff') { log(`\nExecute agent (${event.agent}) completed successfully. Starting automated handoff...`); }
+  if (event.phase === 'review-preparation') { log(`\nExecute agent (${event.agent}) completed successfully. Starting automated review preparation...`); }
 }
 
 export type ActiveCliRunner = (_request: ActiveCliRequest, _options: Record<string, unknown>) => Promise<void> | void;

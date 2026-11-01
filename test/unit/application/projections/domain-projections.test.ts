@@ -1,3 +1,4 @@
+import { fixtureMission } from '../../../fixtures/mission-builders.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -49,6 +50,16 @@ function reviewConversation() {
     reviewerEligibility,
   );
 }
+
+test('integration retains human integration action without a redundant review button (TASK-2822)', () => {
+  const integration = fixtureMission('task-human-review', { status: 'integration' });
+  const actions = availableBoardCommands(integration, { reviewApproval: null });
+  assert.equal(actions.find(action => action.command === 'review')?.enabled, false);
+  assert.equal(actions.find(action => action.command === 'integrate')?.enabled, true);
+  const active = availableBoardCommands({ ...integration, status: 'active', closedAt: null }, { reviewApproval: null });
+  assert.equal(active.find(action => action.command === 'review')?.enabled, true);
+  assert.doesNotMatch(actions.find(action => action.command === 'review')?.reason ?? '', /checkpoint evidence/);
+});
 
 test('mission card contains the board decision inputs without changing lifecycle state', () => {
   const card = projectMissionCard({
@@ -132,8 +143,8 @@ test('board command projection offers active only as a resume, never as a self-t
     currentWork: { operationId: 'op', phase: 'execute', summary: 'go', agent: agentFamily('codex'), updatedAt: new Date().toISOString(), freshness: 'live' },
   });
   assert.equal(working.find(({ command }) => command === 'active')?.enabled, false);
-  assert.deepEqual(commands.find(({ command }) => command === 'handoff'), {
-    command: 'handoff', enabled: false, reason: 'Handoff requires an active mission with checkpoint evidence', targetLane: 'review', label: 'review ▸',
+  assert.deepEqual(commands.find(({ command }) => command === 'review'), {
+    command: 'review', enabled: true, reason: null, targetLane: 'review', label: 'review ▸',
   });
 });
 
@@ -166,7 +177,7 @@ test('a mission with reviewer findings can be resumed with px active', () => {
   const waiting = availableBoardCommands({ ...base, review: reviewConversation() }, { reviewApproval: null })
     .find(({ command }) => command === 'active');
   assert.equal(waiting?.enabled, false);
-  assert.equal(waiting?.reason, 'Resuming a review mission requires reviewer findings to act on');
+  assert.equal(waiting?.reason, 'Execution requires refined or active work, or review findings');
 
   // A failed gate is the other resume path, on the active lane.
   const stalled = availableBoardCommands({ ...base, status: 'active' as const, rawStatus: 'active', review: null }, { reviewApproval: null, latestGate: 'failed' })
@@ -186,7 +197,7 @@ test('approved review exposes integrate without inventing another lifecycle stat
     closedAt: null,
     assignee: null,
     checkpoints: [],
-    review: reviewConversation(),
+    review: applyReviewerCommand(reviewConversation(), { type: 'approve', decidedAt: 'now', comment: null, source: { kind: 'local' } }),
     netEngineeringLines: null,
   } satisfies Partial<NonNullable<Parameters<typeof availableBoardCommands>[0]>>;
   const approval = { subject: reviewedSubject, approvedAt: 'now' } satisfies { readonly subject: import("../../../../src/domain/review.js").ReviewedRevision; readonly approvedAt: string | null; };

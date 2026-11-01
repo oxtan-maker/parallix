@@ -118,7 +118,7 @@ function enforceDraftCommitSafety({ slug, worktree, dirtyEntries = getWorktreeSt
   rejectRetiredDraftDocuments(dirtyEntries, slug, worktree);
 
   // A draft agent may leave Backlog task metadata uncommitted for the harness.
-  // That is the designed handoff, so it travels on the plumbing channel. Genuine trouble
+  // That is the designed review preparation, so it travels on the plumbing channel. Genuine trouble
   // (shared-file conflicts, unexpected dirty files) keeps its own WARN below.
   plumbingLogFn(fmt.status('INFO', 'Draft safety harness: committing the changes the draft agent left behind.'));
   for (const entry of dirtyEntries) {

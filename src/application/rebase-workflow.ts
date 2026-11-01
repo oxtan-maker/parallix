@@ -80,7 +80,7 @@ async function performPush(ctx: RebaseContext): Promise<boolean> {
     port.exit(1);
     return false;
   }
-  // The push-time gate verifies the mission's area, the same one handoff
+  // The push-time gate verifies the mission's area, the same one review preparation
   // verification ran and the gate evidence reports — never the configured
   // defaultArea createPr falls back to when no area is given.
   const result = port.createPr(branch, forgejoUser || 'default', token, { rootDir: executionRoot, forceWithLease: true, verificationArea: area });

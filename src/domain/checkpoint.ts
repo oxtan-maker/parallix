@@ -3,7 +3,7 @@ import type { SuccessCriterion } from './mission-success-criteria.js';
 import { isExplicitlyCovered, type RepairOccurrence, type ExactSuccessCoverage } from './repair-coverage.js';
 import type { MissionId } from './mission.js';
 
-/** One Goal Check evidence row. Handoff requires each row to cite a verifiable
+/** One Goal Check evidence row. ReviewPreparation requires each row to cite a verifiable
  * reference (recognized command, test name, ADR, or test-file path; file:line is accepted when necessary). */
 export interface GoalCheckRow {
   readonly criterion: string;
@@ -91,8 +91,8 @@ export function isCheckpointName(value: string): boolean {
 }
 
 /** True when a checkpoint carries at least one Goal Check row and a
- * non-empty next action — the minimum handoff accepts. */
-export function isHandoffReadyCheckpoint(cp: CheckpointData): boolean {
+ * non-empty next action — the minimum review preparation accepts. */
+export function isReviewPreparationReadyCheckpoint(cp: CheckpointData): boolean {
   return (
     isCheckpointName(cp.name) &&
     cp.goalCheck.length > 0 &&
@@ -108,8 +108,8 @@ export function recordCheckpoint(
   checkpoints: readonly CheckpointData[],
   replacement: CheckpointData,
 ): CheckpointData[] {
-  if (!isHandoffReadyCheckpoint(replacement)) {
-    throw new Error(`Checkpoint ${replacement.name} is not ready for handoff`);
+  if (!isReviewPreparationReadyCheckpoint(replacement)) {
+    throw new Error(`Checkpoint ${replacement.name} is not ready for review preparation`);
   }
   assertGoalCheckRows(replacement.goalCheck);
   if (checkpoints.some((checkpoint) => checkpoint.missionId !== replacement.missionId)) {
@@ -229,7 +229,7 @@ export function freshGoalCheckRows(rows: readonly GoalCheckRow[]): readonly Goal
 
 /**
  * Success-criterion identities with no evidence row in any recorded checkpoint.
- * Handoff requires every completed criterion to be named by a row across the
+ * ReviewPreparation requires every completed criterion to be named by a row across the
  * recorded checkpoints; empty when all are covered. A row covers the criterion
  * whose identity its `criterion` field equals, so a repair row for one criterion
  * does not count as evidence for another.
@@ -318,7 +318,7 @@ export function captureReviewCheckpointState(
   }) };
 }
 
-/** Planned or incident evidence still owed; shared by handoff and readiness. */
+/** Planned or incident evidence still owed; shared by review preparation and readiness. */
 export function missingCheckpointEvidence(checkpoints: readonly CheckpointData[], gates?: readonly string[], criteria?: readonly string[]): readonly CheckpointData[] {
   return checkpoints.filter(cp => !cp.goalCheck.length || (cp.repair && !cp.repair.evidenceRecorded && !isExplicitlyCovered(cp, checkpoints, gates, criteria)));
 }

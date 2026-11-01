@@ -11,7 +11,7 @@ import type { MissionApplicationServiceOverrides } from './mission-services.js';
 /** Shared durable authority for full Mission services and short review writers. */
 export async function createMissionAuthority(rootDir: string, overrides: MissionApplicationServiceOverrides = {}) {
   // A mission worktree and the checkout it was branched from are the same
-  // repository: the Mission row a handoff writes from `<repo>-<slug>` is the
+  // repository: the Mission row a review preparation writes from `<repo>-<slug>` is the
   // one integrate reads from `<repo>`. Anchor the repository identity to the
   // primary worktree so callers key consistent rows.
   const repoId = overrides.repositoryId

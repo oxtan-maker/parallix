@@ -12,7 +12,7 @@ for (const phase of ['recovery', 'failed-check'] as const) {
   it(`running CLI ${phase} with inferred slug (TASK-2766)`, { timeout: 10000 }, async t => {
     await retainedRepairCase(phase, true, t);
   });
-  it(`board handoff ${phase} reaches the shared review owner (TASK-2817)`, { timeout: 10000 }, async t => {
+  it(`board review preparation ${phase} reaches the shared review owner (TASK-2817)`, { timeout: 10000 }, async t => {
     await retainedRepairCase(phase, false, t, false, 'board');
   });
 }
@@ -22,7 +22,7 @@ for (const phase of ['recovery', 'failed-check'] as const) {
 // approval only where a reviewer launch recorded one (TASK-2817).
 const HANDOFF_LANES = ['active>review', 'review>integration'];
 const PARITY: ReadonlyArray<{ scenario: ParityScenario; rounds: number; launches: string[]; lanes: string[]; code: number; status: string }> = [
-  { scenario: 'first-handoff', rounds: 1, launches: ['review'], lanes: HANDOFF_LANES, code: 0, status: 'integration' },
+  { scenario: "first-review preparation", rounds: 1, launches: ['review'], lanes: HANDOFF_LANES, code: 0, status: 'integration' },
   { scenario: 'interrupted-pending-review', rounds: 1, launches: ['review'], lanes: HANDOFF_LANES, code: 0, status: 'integration' },
   { scenario: 'findings-resolution', rounds: 2, launches: ['review', 'implement', 'review'], lanes: ['active>review', 'review>active', 'active>review', 'review>integration'], code: 0, status: 'integration' },
   { scenario: 'human-intervention', rounds: 1, launches: [], lanes: [], code: 1, status: 'active' },

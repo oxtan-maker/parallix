@@ -1,3 +1,6 @@
+import { ExecutionActivityRecorder } from '../../src/application/recording/execution-activity-recorder.js';
+import { SqliteExecutionActivityStore } from '../../src/adapters/sqlite/execution-activity-store.js';
+import { resolveCanonicalRepositoryId } from '../../src/adapters/git/repository-identity.js';
 // Public-interface observation only; run with npx tsx after npm run build.
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -9,7 +12,6 @@ import { fixtureMission } from './mission-builders.js';
 import { agentFamily } from '../../src/domain/agents.js';
 import { missionId } from '../../src/domain/mission.js';
 import { applyReviewerCommand, startReview, changeRevision, ConfiguredReviewerEligibility } from '../../src/domain/review.js';
-import { CurrentWorkRecorder } from '../../src/application/recording/current-work-recorder.js';
 import { SqliteOperationalHistoryRepository } from '../../src/adapters/sqlite/operational-history-repository.js';
 import type { WebBoardSnapshot } from '../../src/interfaces/web/transport.js';
 
@@ -18,7 +20,7 @@ let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
 try {
   const [blockedIntegration, blockedActive, ordinary, retryable] = fixture.slugs;
   const history = new SqliteOperationalHistoryRepository(fixture.database);
-  const recorder = new CurrentWorkRecorder(history);
+  const recorder = new ExecutionActivityRecorder(new SqliteExecutionActivityStore(fixture.database, resolveCanonicalRepositoryId(fixture.root)));
   for (const slug of fixture.slugs) {
     const loaded = await fixture.store.load(missionId(slug));
     assert.equal(loaded.kind, 'found');
@@ -67,7 +69,7 @@ try {
   assert.equal(integrationCard?.commands.find(command => command.command === 'active')?.enabled, false);
   assert.equal(integrationCard?.commands.find(command => command.command === 'integrate')?.enabled, true);
   const activeCard = observed.stages.flatMap(stage => stage.cards).find(card => card.id === blockedActive);
-  assert.equal(activeCard?.commands.find(command => command.command === 'active')?.enabled, true, 'contract stop stays manual although active is eligible');
+  assert.equal(activeCard?.commands.find(command => command.command === 'active')?.enabled, false, 'contract stop preserves explicit operator resume rather than automatic dispatch');
   const host = await fixture.start();
   browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true, args: ['--disable-extensions'] });
   const page = await browser.newPage({ viewport: { width: 1800, height: 1100 } });
@@ -77,15 +79,15 @@ try {
   const snapshot = await (await page.request.get(host.origin + '/api/board')).json() as WebBoardSnapshot;
   for (const slug of [blockedIntegration, blockedActive]) {
     const item = snapshot.attentionQueue.find(item => item.missionId === slug);
-    assert.equal(item?.action.kind, 'manual');
-    assert.equal(item?.action.state, 'ineligible');
+    assert.equal(item?.action?.kind, 'manual');
+    assert.equal(item?.action?.state, 'ineligible');
     const entry = rail.locator(`[data-board-card="${slug}"]`);
     assert.match(await entry.innerText(), /px lead .* --once/);
     assert.equal(await entry.locator('button').count(), 0);
-    assert.doesNotMatch(await entry.innerText(), /px (active|review|integrate)/);
+    assert.doesNotMatch(await entry.innerText(), /\$ px (active|review|integrate)/, 'manual guidance must not render an executable command');
     console.log('BOARD', slug, JSON.stringify({ reason: item?.reason, action: item?.action }));
   }
-  assert.equal(snapshot.attentionQueue.find(item => item.missionId === ordinary)?.action.kind, 'integrate:merge');
+  assert.equal(snapshot.attentionQueue.find(item => item.missionId === ordinary)?.action?.kind, 'integrate:merge');
   assert.match(await rail.locator(`[data-board-card="${ordinary}"]`).innerText(), new RegExp(`px integrate ${ordinary}`));
   console.log('BOARD', ordinary, 'px integrate handoff retained');
   const cli = path.resolve('build/px.mjs');
@@ -100,7 +102,7 @@ try {
     assert.match(output, /px lead .* --once/);
     assert.match(output, new RegExp(`px integrate ${ordinary}`));
     for (const slug of [blockedIntegration, blockedActive]) {
-      assert.doesNotMatch(output, new RegExp(`px (active|review|integrate) ${slug}`));
+      assert.doesNotMatch(output, new RegExp(`board offers px (active|review|integrate) ${slug}`));
     }
     console.log('LEAD', extra.join(' ') || 'supervision', output.trim());
   }
@@ -141,7 +143,7 @@ try {
       return { result: { status: 0, stdout: 'Decision: operator must choose the contract. Evidence: recorded authority stop. Options: retain or explicitly revise the contract. Recommended next step: inspect the recorded stop and decide.' } };
     });
     process.exitCode = await run(['lead', '--once', '--budget', '1'], {
-      baseCwd: process.cwd(), environment: { ...process.env, TYPESAFE_API_KEY: 'controlled-fixture' },
+      baseCwd: process.cwd(), environment: { ...process.env, TYPESAFE_API_KEY: 'controlled-fixture', JEV_CODE_PROVIDER: 'typesafe', TYPESAFE_BASE_URL: 'https://api.typesafe.ai' },
     });
   `;
   const supervised = spawnSync(process.execPath, ['--import', pathToFileURL(path.resolve('node_modules/tsx/dist/loader.mjs')).href, '--input-type=module', '-e', controlledLead], {
@@ -163,7 +165,7 @@ try {
   assert.deepEqual(await Promise.all(fixture.slugs.map(slug => fixture.store.load(missionId(slug)))), beforeMissions);
   const afterInvestigation = await fixture.observation.board();
   for (const slug of [blockedIntegration, blockedActive]) {
-    assert.equal(afterInvestigation.attentionQueue.find(item => item.missionId === slug)?.action.kind, 'manual',
+    assert.equal(afterInvestigation.attentionQueue.find(item => item.missionId === slug)?.action?.kind, 'manual',
       'read-only investigation must not erase a durable blocker');
   }
   console.log('LEAD controlled supervision', supervised.stdout.trim());
@@ -175,8 +177,8 @@ try {
     phase: 'execute', summary: 'Agent run failed' }, 'agent exited with status 1');
   const retrySnapshot = await (await page.request.get(host.origin + '/api/board')).json() as WebBoardSnapshot;
   const retryItem = retrySnapshot.attentionQueue.find(item => item.missionId === retryable);
-  assert.equal(retryItem?.action.kind, 'active:execute');
-  assert.equal(retryItem?.action.display, `px active ${retryable}`);
+  assert.equal(retryItem?.action?.kind, 'active:execute');
+  assert.equal(retryItem?.action?.display, `px active ${retryable}`);
   console.log('BOARD', retryable, JSON.stringify({ reason: retryItem?.reason, action: retryItem?.action }));
   const retryLead = execFileSync(process.execPath, [cli, 'lead', '--once', '--dry-run'], {
     cwd: fixture.root, encoding: 'utf8', timeout: 30_000,

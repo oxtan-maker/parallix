@@ -68,7 +68,7 @@ class IntegrationPreflight {
   }
 
   checkMissionDoc(report: PreflightReport, context: IntegrationContext, baseWorktree: string, findMissionDocInBranchesFn: NonNullable<PreflightOptions['findMissionDocInBranchesFn']>) {
-    // Match handoff: a recorded brief owns the contract for native missions.
+    // Match review preparation: a recorded brief owns the contract for native missions.
     // Repository documents are only required for the historical fallback.
     if (context.missionBrief) {
       report.detail('Mission contract: recorded in the operator database');

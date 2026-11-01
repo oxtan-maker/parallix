@@ -32,13 +32,13 @@ const ALLOWED_ASSEMBLERS = new Set([
 // ---------------------------------------------------------------------------
 
 const NON_BOARD_CONSUMERS = new Set([
-  'src/adapters/cli/commands/handoff.ts',
+  'src/adapters/cli/commands/review-preparation.ts',
   'src/adapters/cli/commands/active.ts',
   'src/adapters/cli/commands/draft.ts',
   'src/adapters/cli/commands/review.ts',
   'src/adapters/cli/commands/integrate.ts',
   'src/adapters/cli/commands/rebase.ts',
-  'src/adapters/cli/commands/repair-handoff.ts',
+  'src/adapters/cli/commands/repair-review-preparation.ts',
   'src/adapters/cli/commands/resolve-conflict.ts',
   'src/adapters/filesystem/mission-utils.ts',
   'src/adapters/backlog/backlog.ts',

@@ -12,7 +12,7 @@
  *
  * `px review` keeps the operator flags that steer the loop, including
  * `--implementer` and `--reviewer` for switching an agent that is not working
- * out. Handoff stays automatic inside `px review` and is not a command
+ * out. ReviewPreparation stays automatic inside `px review` and is not a command
  * (retired by TASK-2490).
  *
  * Every dependency is injected, so this interface module imports no adapter.

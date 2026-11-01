@@ -107,7 +107,7 @@ describe("review fallback", { concurrency: false }, () => {
       },
       artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
     });
-    await runReviewLoop({ slug: 'task-test-cp1-fallback', implementer: 'claude', maxAttempts: 1, skipHandoff: true }, fake.ports);
+    await runReviewLoop({ slug: 'task-test-cp1-fallback', implementer: 'claude', maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
     assert.deepEqual(fake.exits, [], `the loop must not exit on usage-limit; errors: ${fake.errors.join(' | ')}`);
     assert.ok(fake.logs.some(l => l.includes('Selected reviewer: custom')), `Expected selected-reviewer=custom; got: ${fake.logs.join(' | ')}`);
     assert.deepEqual(blocklistWrites, ['custom']);

@@ -1,5 +1,6 @@
+import { activitySnapshots } from '../../../../fixtures/execution-activity.js';
 import { integrationServices } from '../../../../helpers/stub-integration-services.js';
-import { approvedReview as fixtureApprovedReview, fixtureMission } from '../../../../fixtures/mission-builders.js';
+import { fixtureMission, approvedReview as fixtureApprovedReview } from '../../../../fixtures/mission-builders.js';
 import { missionVersion } from '../../../../../src/application/domain-ports.js';
 import { stubIntegrateWorkflowPorts } from '../../../../helpers/stub-integrate-workflow-ports.js';
 import { resolveConfiguration } from '../../../../../src/composition/config.js';
@@ -30,7 +31,7 @@ mockModule('../../../../../src/composition/application-services.js', import.meta
 await installModuleMocks();
 const { createIntegrateWorkflow } = await import('../../../../../src/application/integrate-workflow.js');
 const { BoardProjectionBuilder } = await import('../../../../../src/application/projections/board-readers.js');
-const { isWorkInProgress } = await import('../../../../../src/application/projections/current-work.js');
+const { isWorkInProgress } = await import('../../../../../src/domain/execution-activity.js');
 const { processLivenessProbe, processStartIdentity } = await import('../../../../../src/adapters/process/process-liveness.js');
 const { agentFamily } = await import('../../../../../src/domain/agents.js');
 const { missionId, missionLabels } = await import('../../../../../src/domain/mission.js');
@@ -74,7 +75,7 @@ describe("backlog drift retry", () => {
     assert.equal(
       areAllBacklogOnlyConflicts([
         'backlog/tasks/task-100 - feature.md',
-        'src/adapters/cli/commands/handoff.ts',
+        'src/adapters/cli/commands/review-preparation.ts',
       ]),
       false
     );
@@ -223,7 +224,7 @@ describe("backlog drift retry", () => {
     const gitRunner = createGitRunner({
       onMergeNoCommit: () => ({
         status: 1,
-        stdout: 'CONFLICT (content): Merge conflict in src/adapters/cli/commands/handoff.ts\n',
+        stdout: 'CONFLICT (content): Merge conflict in src/adapters/cli/commands/review-preparation.ts\n',
         stderr: '',
       }),
       onMergeAbort: () => ({ status: 0, stdout: '', stderr: '' }),
@@ -231,7 +232,7 @@ describe("backlog drift retry", () => {
 
     const result = simulateStep2Probe(
       gitRunner,
-      'CONFLICT (content): Merge conflict in src/adapters/cli/commands/handoff.ts\n'
+      'CONFLICT (content): Merge conflict in src/adapters/cli/commands/review-preparation.ts\n'
     );
 
     assert.equal(result.ok, true, 'simulation completed');
@@ -427,12 +428,12 @@ describe("backlog drift retry", () => {
     mock.method(compositionCjs, 'createMissionApplicationServices', async () => ({
       store: {
         _repoId: 'default',
-        load: async () => ({ kind: 'found' as const, mission: { status: 'integration', review: fixtureApprovedReview(TEST_SLUG) }, version: 1 }),
+        load: async () => ({ kind: 'found' as const, mission: fixtureMission(TEST_SLUG, { status: 'integration', labels: missionLabels(['ai_sdlc']), assignee: agentFamily('codex'), review: fixtureApprovedReview(TEST_SLUG) }), version: 1 }),
       },
       lifecycle: {
         transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: { to: 'review', version: 2 } }),
       },
-      handoff: {
+      nel: {
         recordNel: async () => ({}),
       },
     }));
@@ -447,7 +448,7 @@ describe("backlog drift retry", () => {
     const gitMockFn = (args: string|string[]) => {
       if (args.includes('merge') && args.includes('--no-commit')) {
         mergeNoCommitCalls.push(args);
-        return { status: 1, stdout: 'CONFLICT (content): Merge conflict in src/adapters/cli/commands/handoff.ts\n', stderr: '' };
+        return { status: 1, stdout: 'CONFLICT (content): Merge conflict in src/adapters/cli/commands/review-preparation.ts\n', stderr: '' };
       }
       if (args.includes('merge') && args.includes('--abort')) return { status: 0, stdout: '', stderr: '' };
       return baseGitFn(args);
@@ -655,7 +656,7 @@ describe("integrate guard", () => {
       }
 
       assert.strictEqual(exitCode, 1);
-      assert.ok(errorOutput.includes('[FAIL] Gemini is not authorized to run integrate. Post a handoff comment on the PR and stop.'));
+      assert.ok(errorOutput.includes("[FAIL] Gemini is not authorized to run integrate. Post a review preparation comment on the PR and stop."));
     });
 
     await t.test('blocks WORKFLOW_AGENT=gemini', async () => {
@@ -685,7 +686,7 @@ describe("integrate guard", () => {
       }
 
       assert.strictEqual(exitCode, 1);
-      assert.ok(errorOutput.includes('[FAIL] Gemini is not authorized to run integrate. Post a handoff comment on the PR and stop.'));
+      assert.ok(errorOutput.includes("[FAIL] Gemini is not authorized to run integrate. Post a review preparation comment on the PR and stop."));
     });
 
     await t.test('does not block other agents (e.g. codex)', async () => {
@@ -717,7 +718,7 @@ describe("integrate guard", () => {
         console.log = originalLog;
       }
 
-      assert.ok(!errorOutput.includes('[FAIL] Gemini is not authorized to run integrate. Post a handoff comment on the PR and stop.'));
+      assert.ok(!errorOutput.includes("[FAIL] Gemini is not authorized to run integrate. Post a review preparation comment on the PR and stop."));
     });
   });
 });
@@ -851,8 +852,9 @@ describe("integrate work detection", () => {
       { async loadOperationLog() { return []; } },
       {
         currentWork: {
+          async loadMissionCurrentWork() { return this.loadCurrentWork(); },
           async loadCurrentWork() {
-            return [{
+            return activitySnapshots([{
               missionId: id,
               operationId: 'integrate:task-2411',
               phase: 'integrate' as const,
@@ -863,7 +865,7 @@ describe("integrate work detection", () => {
               processIdentity: processStartIdentity(process.pid),
               blockedReason: null,
               occurredAt: new Date().toISOString(),
-            }];
+            }]);
           },
         },
         isProcessAlive: processLivenessProbe,

@@ -9,6 +9,15 @@ import { makeProjection, makeCard } from '../../../fixtures/board-projection.js'
 import type { BoardProjection } from '../../../../src/application/projections/board.js';
 import type { RunningAgentSession } from '../../../../src/application/projections/agent-status.js';
 
+test('ownership and action availability repaint without synthetic work (TASK-2822)', () => {
+  const card = makeCard();
+  const before = makeProjection({ active: [card] });
+  const after = makeProjection({ active: [{ ...card, workflowOperation: { id: 'owner', phase: 'stopping' } as NonNullable<typeof card.workflowOperation> }] });
+  assert.notEqual(boardFingerprint(before), boardFingerprint(after));
+  const actions = makeProjection({ active: [{ ...card, commands: [{ command: 'active', enabled: false, reason: 'owned' }] }] });
+  assert.notEqual(boardFingerprint(before), boardFingerprint(actions));
+});
+
 // ---------------------------------------------------------------------------
 // task-2388 regression coverage.
 //

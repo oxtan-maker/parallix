@@ -83,14 +83,13 @@ session / CSRF capability of ADR 0054. The request envelope is the fourth
 validated shape in this contract.
 
 - The top-level keys are exactly `missionId`, `kind`,
-  `missionStatusAtRequest`, optional `requestKey`, and `payload` (present only for
-  `handoff:record`). Every other key is rejected: there is no key through
-  which a client can supply an operation ID, a capability set, an agent, an
+  `missionStatusAtRequest`, optional `requestKey` and optional launch `agent`. Every other key is rejected: there is no key through
+  which a client can supply an operation ID, a capability set, an
   environment, argv, a path, a version, or a "current" status. Validation is
-  fail-closed — unknown keys, unknown kinds, and mistyped or out-of-range
-  handoff fields are all rejections, never ignored fields.
-- `kind` is one of the five card-advertised action kinds: `active:execute`,
-  `draft:create`, `integrate:merge`, `handoff:record`, `review:submit`. The
+  fail-closed: unknown keys, unknown kinds and mistyped fields are rejected.
+- Execution actions are `active:execute`, `draft:create`, `integrate:merge`,
+  and `review:submit`. NEL is captured by review preparation through the checked
+  Mission service; the board exposes no measurement mutation. The
   remaining board command kinds (`mission:intake`, `checkpoint:record`,
   `approve:review`, `review:act-on-findings`) are not card-advertised and are
   rejected as unsupported. Whether the action is currently enabled for that
@@ -101,13 +100,6 @@ validated shape in this contract.
   on the card — the observed precondition the controller's authoritative
   stale guard compares against the status it reads immediately before
   dispatch. It is never interpreted as a claim about the current status.
-- The `payload` key exists only for `handoff:record` and mirrors the domain
-  handoff payload minus `expectedVersion`: `netEngineeringLines` (finite
-  number ≥ 0), optional `predictedBucket` (`Small`/`Medium`/`Large` — the
-  browser cannot send `Unknown`), `capturedAt` (string), optional
-  `artifacts` (`{ kind: file|git-range|url, location, byteSize: finite
-  number|null }`), and optional `reviewRounds` (finite integer ≥ 0). Identity
-  kinds carrying a `payload` key are rejected.
 - The same endpoint also accepts one non-card envelope, `kind: "mission:create"`
   ("Create new mission"), recognised by that `kind` before card validation. Its
   keys are exactly `requestKey`, `title`, `labels`, `successCriteria`,
@@ -122,7 +114,7 @@ validated shape in this contract.
   key; repeating it for the same command returns the same operation, while
   competing ownership conflicts.
 - Status-code policy: 400 for schema violations — unknown keys, kinds that
-  are not card-advertised, and mistyped or out-of-range handoff fields (zero
+  are not card-advertised, and mistyped or out-of-range measurement fields (zero
   dispatch), 403 from the security boundary (zero dispatch), 409 when the
   authoritative eligibility or ownership check rejects the request (zero
   dispatch). Long-running commands return 202 after durable acceptance with
@@ -160,8 +152,6 @@ validated shape in this contract.
 - The request envelope's kind allowlist is the card-advertised set by
   construction: if card commands are ever extended beyond that set, the
   allowlist changes in the same mission as the extension, never by drift.
-  The wire handoff payload is a projection of the domain handoff payload; a
-  change to that domain shape moves the wire shape and this ADR together.
 - The mutation endpoint is the only state-changing route on the host. Every
   other path and method keeps answering 405 behind the same security
   boundary; adding a second mutation surface requires a new ADR-level

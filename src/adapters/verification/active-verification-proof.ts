@@ -107,7 +107,7 @@ function inspectionSlot(command: string, root: string, options: Options, readSna
 }
 
 /**
- * Read-only classification of the proof a handoff would consult for this
+ * Read-only classification of the proof a review preparation would consult for this
  * command: `current` when it would be reused for the checkout as it stands,
  * `stale` when it covers earlier inputs (including uncommitted changes), and
  * `absent` when no proof was ever written. Unreadable state throws.

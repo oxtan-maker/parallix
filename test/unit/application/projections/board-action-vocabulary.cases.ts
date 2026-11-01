@@ -83,10 +83,10 @@ test('stranded active mission snapshot validates and advertises active:execute',
     assert.equal(active?.targetLane, 'active');
 
     const snapshot = validation.value;
-    assert.equal(snapshot.attentionQueue[0]?.action.state, 'enabled');
+    assert.equal(snapshot.attentionQueue[0]?.action?.state, 'enabled');
     const kinds = [
       ...snapshot.stages.flatMap((stage) => stage.cards.flatMap((c) => c.actions.map((a) => a.kind))),
-      ...snapshot.attentionQueue.map((i) => i.action.kind),
+      ...snapshot.attentionQueue.map((i) => i.action?.kind),
     ];
     assert.ok(!kinds.some(kind => String(kind) === 'recover:mission'), 'no action may carry recover:mission');
   } finally {
@@ -145,12 +145,12 @@ test('every board lane produces only wire-accepted action kinds', () => {
 
   const emitted = new Set<string>([
     ...validation.value.stages.flatMap((stage) => stage.cards.flatMap((c) => c.actions.map((a) => a.kind))),
-    ...validation.value.attentionQueue.map((item) => item.action.kind),
+    ...validation.value.attentionQueue.flatMap((item) => item.action ? [item.action.kind] : []),
   ]);
   assert.deepEqual([...emitted].sort(), [...new Set([...Object.values(BOARD_COMMAND_KINDS), 'mission:edit'])].sort());
 
   // The attention queue exercises the three attention-borne kinds.
-  const byMission = new Map(validation.value.attentionQueue.map((item) => [item.missionId, item.action.kind]));
+  const byMission = new Map(validation.value.attentionQueue.map((item) => [item.missionId, item.action?.kind]));
   assert.equal(byMission.get('task-stranded'), 'active:execute');
   assert.equal(byMission.get('task-gate-failed'), 'active:execute');
   assert.equal(byMission.get('task-review'), 'review:submit');

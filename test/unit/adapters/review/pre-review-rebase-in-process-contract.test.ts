@@ -1,5 +1,5 @@
-import { HandoffCommandUseCase } from '../../../../src/application/handoff-command-use-case.js';
-import { makeRecorder, makePorts, runOptions } from '../../../helpers/handoff-ports.js';
+import { ReviewPreparationCommandUseCase } from '../../../../src/application/review-preparation-command-use-case.js';
+import { makeRecorder, makePorts, runOptions } from "../../../helpers/review-preparation-ports.js";
 import { rebound } from '../../../../src/application/rebound-kernel.js';
 import { mkdtemp } from '../../../helpers/temp-dir.js';
 import { captureRecoveryEvidence } from '../../../../src/application/recovery-evidence.js';
@@ -183,10 +183,10 @@ describe("02 pre-review rebase in-process", () => {
     assert.match(facts.diagnostic ?? '', /Mission HEAD: current-head/);
     const recorder = makeRecorder();
     const ports = makePorts(recorder, { rebase: { rebaseBeforeReviewRound: async () => result! } });
-    const handoff = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
-    assert.ok(handoff.recoveryFailure);
+    const reviewPreparation = await new ReviewPreparationCommandUseCase(ports).performReviewPreparation(SLUG, runOptions(recorder));
+    assert.ok(reviewPreparation.recoveryFailure);
     const prompts: string[] = [];
-    await rebound(handoff.recoveryFailure, {
+    await rebound(reviewPreparation.recoveryFailure, {
       slug: SLUG, worktree: root, implementer: 'codex', maxAttempts: 1,
       startAgent: async (_step, options) => {
         prompts.push(typeof options.prompt === 'function' ? options.prompt('codex') : String(options.prompt));
@@ -335,7 +335,7 @@ describe("02 pre-review rebase in-process", () => {
       provider: {},
       preReview: { rebase: async () => facts },
     });
-    await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 1, skipHandoff: true }, fake.ports);
+    await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
     const logs = [...fake.logs, ...fake.errors];
     const repairs = fake.launches.filter(launch => launch.role === 'implementer');
 

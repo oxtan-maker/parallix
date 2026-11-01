@@ -1,6 +1,6 @@
-import { HandoffGateRecovery } from '../../../src/application/handoff-gate-recovery.js';
-import { DeclaredGateRunner } from '../../../src/application/handoff-declared-gates.js';
-import { makePorts, makeRecorder } from '../../helpers/handoff-ports.js';
+import { ReviewPreparationGateRecovery } from '../../../src/application/review-preparation-gate-recovery.js';
+import { DeclaredGateRunner } from '../../../src/application/review-preparation-declared-gates.js';
+import { makePorts, makeRecorder } from "../../helpers/review-preparation-ports.js";
 import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
 import fs from 'node:fs';
@@ -47,7 +47,7 @@ export function repairCheckpointCases(): void {
       assert.match(prompt, /REPAIR AUTHORITY:.*resumed execute or act-on-review context/);
       assert.match(prompt, /px checkpoint record --name CP-2/);
       assert.match(prompt, /px checkpoint report-invalid-contract --name CP-2/);
-      assert.match(prompt, /Complete every remaining planned checkpoint before handoff/);
+      assert.match(prompt, /Complete every remaining planned checkpoint before review preparation/);
     }
   });
 
@@ -282,18 +282,18 @@ export function repairCheckpointCases(): void {
     const result = await rebound(reason, context({ repairCheckpoints: port({ verify: async () => { throw new Error('stale evidence'); } }) }));
     assert.equal(result.outcome, 'human-only'); assert.match(result.diagnostic, /stale evidence/);
   });
-  test('handoff repository repair refuses a changed verifier command before rerunning handoff (TASK-2695)', async () => {
+  test("review preparation repository repair refuses a changed verifier command before rerunning review preparation (TASK-2695)", async () => {
     const recorder = makeRecorder();
     const ports = makePorts(recorder);
     let command = 'npm test';
     let launches = 0;
-    const verification = { ...ports.verification, formatVerificationCommand: () => command } satisfies import("../../../src/application/ports/handoff-workflow.js").HandoffVerificationPort;
-    const recovery = new HandoffGateRecovery({ ...ports, verification }, new DeclaredGateRunner(ports));
+    const verification = { ...ports.verification, formatVerificationCommand: () => command } satisfies import("../../../src/application/ports/review-preparation-workflow.js").ReviewPreparationVerificationPort;
+    const recovery = new ReviewPreparationGateRecovery({ ...ports, verification }, new DeclaredGateRunner(ports));
     const result = await recovery.verifyRepository('fixture', {
-      rootDir: '', forgejoUser: 'codex', log() {}, error() {}, recoverGateFailure: true, options: {},
+      rootDir: '', transitionToImplementer: async () => {}, forgejoUser: 'codex', log() {}, error() {}, recoverGateFailure: true, options: {},
       skipGate: false, area: 'docs', runVerificationGateFn: () => ({ status: 1, stderr: 'failure' }),
       startAgentFn: async () => { launches++; command = 'npm run typecheck'; return { result: { status: 0 } }; },
-      retryHandoff: async () => { return assert.fail('must not certify a replacement command'); },
+      retryReviewPreparation: async () => { return assert.fail('must not certify a replacement command'); },
     });
     assert.equal(result?.ok, false);
     assert.equal(launches, 1);

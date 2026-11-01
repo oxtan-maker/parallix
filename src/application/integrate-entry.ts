@@ -5,7 +5,7 @@ import type { IntegrateRunState } from './integrate/squash.js';
 import type { IntegrateSeams } from './integrate/gates.js';
 import { IntegrationStopsForHuman } from './integrate/review-before-integration.js';
 import { parseIntegrateArgs, type IntegrateRequest } from './integrate/support.js';
-import { isNestedWorkPublisher, publishedAgentLaunch } from './recording/current-work-recorder.js';
+import { isNestedWorkPublisher, publishedAgentLaunch } from './recording/execution-activity-recorder.js';
 
 interface IntegrateEntrySteps {
   runIntegration(slug: string, request: IntegrateRequest, options: IntegrateOptions, seams: IntegrateSeams, state: IntegrateRunState): Promise<0 | 1>;
@@ -68,7 +68,7 @@ export async function runIntegrateEntry(args: string[], options: IntegrateOption
     const slug = ports.missionPaths.inferSlug(request.explicitSlug);
 
     if (options.configuration?.forgejo.user === 'gemini' || options.configuration?.agents.override === 'gemini') {
-      fmt.log.fail('Gemini is not authorized to run integrate. Post a handoff comment on the PR and stop.');
+      fmt.log.fail("Gemini is not authorized to run integrate. Post a review preparation comment on the PR and stop.");
       exitFn(1);
       return;
     }

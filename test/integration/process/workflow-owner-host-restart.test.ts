@@ -49,13 +49,13 @@ test('accepted workflows survive HTTP host restart, capture sync workers and exc
   assert.notEqual(host.processId, firstHostPid, 'the original HTTP process terminated before restart');
   const status = await (await fetch(`${host.origin}${acceptance.value.statusUrl}`)).json();
   assert.equal(status.operation.id, operationId);
-  assert.equal(status.operation.phase, 'preparing');
+  assert.equal(status.operation.phase, 'executing');
   assert.deepEqual(status.operation.owner, owner);
   const afterHistory = fixture.terminal.history(fixture.slugs[0]);
   assert.ok(beforeHistory.ok && afterHistory.ok);
   assert.equal(afterHistory.runs.filter(run => run.record.captureKind === 'coordinator').length, 1, 'recovery must not duplicate the workflow owner');
   assert.equal(afterHistory.ok && afterHistory.runs.length, beforeHistory.ok && beforeHistory.runs.length);
-  assert.equal((await fixture.service.operation(operationId))?.phase, 'preparing');
+  assert.equal((await fixture.service.operation(operationId))?.phase, 'executing');
   fixture.release(fixture.slugs[0]);
   await until(async () => (await fixture.service.operation(operationId))?.phase === 'completed', 'workflow progression after host restart');
   await until(async () => {

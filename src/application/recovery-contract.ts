@@ -42,7 +42,9 @@ export interface AttentionObservation {
   /** Why the board is asking for attention. This is the failure evidence. */
   readonly reason: AttentionReason;
   /** The typed command the board advertises for this item, as an operator sees it. */
-  readonly action: AttentionAction;
+  readonly action: AttentionAction | null;
+  /** Ownership may temporarily fence actions even when no agent is working. */
+  readonly owned?: boolean;
   /** True while current work is credible (`live` or `unverified`). */
   readonly working: boolean;
   /** What the current work says, for the operator-facing record. */
@@ -114,7 +116,7 @@ export interface SupervisorPort {
   readonly wait: (_milliseconds: number) => Poll;
 }
 
-/** What the current-work authority says about one mission right now. */
+/** What the execution activity projection says about one mission right now. */
 export interface MissionLiveness {
   /** True while current work is credible (`live` or `unverified`). */
   readonly working: boolean;
@@ -236,6 +238,7 @@ export function observationFromAttention(item: AttentionItem, headSha: string | 
     lane: card.lane,
     reason: item.reason,
     action: item.action,
+    owned: Boolean(card.workflowOperation),
     working: agentIsWorking(card),
     workingDetail: card.currentWork
       ? `${card.currentWork.phase} — ${card.currentWork.summary} (${card.currentWork.freshness}, ${card.currentWork.updatedAt})`
@@ -248,6 +251,10 @@ export function observationFromAttention(item: AttentionItem, headSha: string | 
       card.reviewApproved ? 'approved' : '-',
       card.checkpoint ?? '-',
       headSha ?? '-',
+      card.workflowOperation?.id ?? '-',
+      card.workflowOperation?.generation ?? '-',
+      card.workflowOperation?.phase ?? '-',
+      item.action?.kind ?? '-',
     ].join('|'),
   };
 }

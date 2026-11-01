@@ -44,16 +44,16 @@ export type ReviewLoopEvent =
   | { readonly kind: 'implementer-derived'; readonly implementer: string }
   | { readonly kind: 'implementer-unresolved'; readonly slug: string }
   | { readonly kind: 'adhoc-without-task'; readonly slug: string }
-  | { readonly kind: 'handoff-validation-failed'; readonly slug: string }
+  | { readonly kind: "review-preparation-validation-failed"; readonly slug: string }
   | { readonly kind: 'missing-review-pr'; readonly branch: string }
-  | { readonly kind: 'handoff-diagnostic'; readonly error: unknown }
+  | { readonly kind: "review-preparation-diagnostic"; readonly error: unknown }
   | { readonly kind: 'push-guidance'; readonly slug: string }
-  | { readonly kind: 'handoff-failed'; readonly branch: string; readonly error: unknown }
+  | { readonly kind: "review-preparation-failed"; readonly branch: string; readonly error: unknown }
   | { readonly kind: 'start-guidance'; readonly slug: string }
-  | { readonly kind: 'handoff-unbound'; readonly slug: string }
-  | { readonly kind: 'handoff-starting'; readonly branch: string; readonly taskStatus: string | null; readonly slug: string }
-  | { readonly kind: 'handoff-blocked'; readonly branch: string; readonly taskStatus: string | null }
-  | { readonly kind: 'handoff-healed'; readonly id: string; readonly branch: string }
+  | { readonly kind: "review-preparation-unbound"; readonly slug: string }
+  | { readonly kind: "review-preparation-starting"; readonly branch: string; readonly taskStatus: string | null; readonly slug: string }
+  | { readonly kind: "review-preparation-blocked"; readonly branch: string; readonly taskStatus: string | null }
+  | { readonly kind: "review-preparation-healed"; readonly id: string; readonly branch: string }
   | { readonly kind: 'review-pr-confirmed'; readonly id: string; readonly branch: string }
   | { readonly kind: 'local-provider' }
   | { readonly kind: 'review-resumed'; readonly round: number; readonly phase: ReviewPhase }

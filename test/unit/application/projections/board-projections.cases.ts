@@ -250,7 +250,7 @@ test('buildBoardProjection attentionQueue is sorted by priority then missionId w
   assert.equal(projection.attentionQueue[0].rank, 1);
   assert.equal(projection.attentionQueue[1].rank, 2);
   assert.equal(projection.attentionQueue[2].rank, 3);
-  assert.equal(projection.attentionQueue[2].action.kind, 'active:execute');
+  assert.equal(projection.attentionQueue[2].action?.kind, 'active:execute');
 });
 
 test('buildBoardProjection wipCounts reflects all lanes', () => {

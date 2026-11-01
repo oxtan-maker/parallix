@@ -598,7 +598,9 @@ or merge; a successful gate permits the normal transition. Gates are language
 and toolchain neutral: the command may be `cmake --build` and `ctest` for a
 C++ repository, `npm run build` for a Node one, or any other shell command.
 
-`preHandoff` gates run before the handoff (`active` → `review`) transition.
+`preHandoff` gates run during review preparation, before a verified Review is
+submitted. The Mission has already entered review. This operator-owned key and
+the `PARALLIX_PHASE=handoff` gate context retain their configured meaning.
 `preReview` gates run when a review is submitted with the `approve` outcome —
 that is, before the `review` → integration transition, not before the review
 itself. `preIntegration` gates run before the integration merge. Configuring

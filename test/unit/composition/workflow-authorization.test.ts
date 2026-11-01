@@ -9,7 +9,7 @@ import type { WorkflowOperation } from '../../../src/domain/workflow-operation.j
 test('inherited CLI authority keeps the workflow fence and refuses writes after replacement (TASK-2750)', async () => {
   const mission = fixtureMission('task-inherited');
   let operation: WorkflowOperation = { id: 'parent-operation', missionId: mission.id, repositoryId: mission.repositoryId,
-    requestKey: 'delivery', command: 'active:execute', generation: 1, phase: 'running', providerStarted: true,
+    requestKey: 'delivery', command: 'active:execute', generation: 1, phase: 'executing', providerStarted: true,
     agent: 'codex', reviewer: null, originalStatus: 'refined', previousAssignee: null,
     owner: { pid: 123, identity: 'observed-start' }, createdAt: '2026-10-15T00:00:00Z', updatedAt: '2026-10-15T00:00:00Z', reason: null };
   try {

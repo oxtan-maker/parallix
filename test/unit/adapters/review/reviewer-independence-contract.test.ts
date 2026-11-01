@@ -12,7 +12,7 @@ import {
   startReview,
 } from '../../../../src/domain/review.js';
 import { AgentPoolExhaustedError } from '../../../../src/domain/agents.js';
-import { resolveHandoffReviewAssignment } from '../../../../src/adapters/cli/commands/handoff.js';
+import { resolveReviewPreparationReviewAssignment } from '../../../../src/adapters/cli/commands/review-preparation.js';
 import { selectReviewer } from '../../../../src/application/review-loop/reviewer-selection.js';
 import { postWorkflowReview } from '../../../../src/adapters/review/review-artifacts.js';
 import { renderStatus } from '../../../../src/interfaces/cli/status.js';
@@ -25,7 +25,7 @@ import { consumeReviewerArtifacts } from '../../../../src/adapters/review/review
 describe("self review forbidden", { concurrency: false }, () => {
   const SUBJECT: ReviewedRevision = {
     change: { kind: 'local-branch', sourceBranch: 'mission/task-9001', targetBranch: 'main' },
-    revision: changeRevision('handoff-1'),
+    revision: changeRevision("review-preparation-1"),
   };
   const STARTED_AT = '2026-08-04T09:00:00.000Z';
 
@@ -59,7 +59,7 @@ describe("self review forbidden", { concurrency: false }, () => {
         implementer: fixtureAgentFamily('claude'),
         startedAt: STARTED_AT,
         decision: { kind: 'changes-requested', decidedAt: STARTED_AT, comment: null, findings: [] },
-        response: { kind: 'resolved', resolutions: [], resultingRevision: changeRevision('handoff-2'), respondedAt: STARTED_AT },
+        response: { kind: 'resolved', resolutions: [], resultingRevision: changeRevision("review-preparation-2"), respondedAt: STARTED_AT },
         phase: 'fixing',
         disposition: 'CHANGES_MADE',
         reviewerRetryCount: 0,
@@ -82,7 +82,7 @@ describe("self review forbidden", { concurrency: false }, () => {
 
   function assignment(overrides: Record<string, unknown> = {}) {
     const logged: string[] = [];
-    const result = resolveHandoffReviewAssignment('claude', {
+    const result = resolveReviewPreparationReviewAssignment('claude', {
       worktree: '/does/not/matter',
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'custom', 'vibe'],
       log: (msg: string) => logged.push(msg),
@@ -91,7 +91,7 @@ describe("self review forbidden", { concurrency: false }, () => {
     return { result, logged };
   }
 
-  test('handoff assigns a reviewer from another family when one is available', () => {
+  test("review preparation assigns a reviewer from another family when one is available", () => {
     const { result, logged } = assignment({ selectAgentFn: () => 'custom' });
     assert.equal(result.reviewer, 'custom');
     assert.equal(result.implementer, 'claude');
@@ -99,7 +99,7 @@ describe("self review forbidden", { concurrency: false }, () => {
     assert.deepEqual(logged, []);
   });
 
-  test('handoff falls back to self-review only on typed reviewer-pool exhaustion regardless of diagnostic wording, and records that eligibility (TASK-2668.04)', () => {
+  test("review preparation falls back to self-review only on typed reviewer-pool exhaustion regardless of diagnostic wording, and records that eligibility (TASK-2668.04)", () => {
     const { result, logged } = assignment({
       selectAgentFn: () => {
         throw new AgentPoolExhaustedError('review', 'routing diagnostics were revised');
@@ -114,7 +114,7 @@ describe("self review forbidden", { concurrency: false }, () => {
     assert.doesNotThrow(() => startReview(SUBJECT, result.reviewer, result.implementer, STARTED_AT, result.reviewerEligibility));
   });
 
-  test('handoff propagates a misconfigured selector instead of reviewing its own work', () => {
+  test("review preparation propagates a misconfigured selector instead of reviewing its own work", () => {
     assert.throws(
       () => assignment({
         selectAgentFn: () => {
@@ -125,7 +125,7 @@ describe("self review forbidden", { concurrency: false }, () => {
     );
   });
 
-  test('handoff propagates an unreadable agent policy instead of reviewing its own work', () => {
+  test("review preparation propagates an unreadable agent policy instead of reviewing its own work", () => {
     assert.throws(
       () => assignment({
         selectAgentFn: () => { throw new Error('Invalid agent config: unexpected token'); },

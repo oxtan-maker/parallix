@@ -32,7 +32,7 @@ test('CLI preserves review flags and reports stop diagnostics while closing its 
   assert.equal(closed, 3);
 });
 
-test('CLI streams only its coordinator bytes incrementally and renders phase changes (TASK-2750 F4)', () => {
+test('CLI streams only its coordinator bytes incrementally and renders phase changes (TASK-2750 F4)', async () => {
   const text: string[] = []; const phases: string[] = []; const after: number[] = [];
   const terminal = { history: () => ({ ok: true, runs: [
     { record: { operationId: 'owned', runId: 'run', captureKind: 'coordinator' } },
@@ -42,14 +42,14 @@ test('CLI streams only its coordinator bytes incrementally and renders phase cha
     return { ok: true, text: request.stream === 'stdout' && request.after === 0 ? 'gate failed: detail\n' : '', to: 20, atEnd: true, running: false };
   } } as unknown as MissionTerminalCapability;
   const observe = workflowCliObserver(terminal, event => phases.push(event.phase), line => text.push(line));
-  const operation = { id: 'owned', missionId: 'task-test', phase: 'checking', reason: 'checking gate' } as WorkflowOperation;
-  observe(operation); observe(operation);
+  const operation = { id: 'owned', missionId: 'task-test', phase: 'executing', reason: 'checking gate' } as WorkflowOperation;
+  await observe(operation); await observe(operation);
   assert.deepEqual(text, ['gate failed: detail\n']);
-  assert.deepEqual(phases, ['checking']);
+  assert.deepEqual(phases, ['executing']);
   assert.deepEqual(after, [0, 0, 20, 20]);
 });
 
-test('CLI observation excludes its own capture to prevent output feedback and unsettled completion (TASK-2750)', () => {
+test('CLI observation excludes its own capture to prevent output feedback and unsettled completion (TASK-2750)', async () => {
   let captured = '';
   const pages: string[] = [];
   const terminal = { history: () => ({ ok: true, runs: [
@@ -63,14 +63,14 @@ test('CLI observation excludes its own capture to prevent output feedback and un
   } } as unknown as MissionTerminalCapability;
   const observe = workflowCliObserver(terminal, undefined, text => { captured += text; });
   const operation = { id: 'owned', missionId: 'task-test', phase: 'completed', updatedAt: 'now' } as WorkflowOperation;
-  assert.equal(observe(operation), true);
-  assert.equal(observe(operation), true);
+  assert.equal(await observe(operation), true);
+  assert.equal(await observe(operation), true);
   assert.equal(captured, 'worker diagnostic\n');
   assert.deepEqual(pages, ['worker', 'worker', 'worker', 'worker']);
 });
 
 
-test('CLI replays progress controls incrementally without operation chatter (TASK-2771)', () => {
+test('CLI replays progress controls incrementally without operation chatter (TASK-2771)', async () => {
   const frames = '\r⠋ checking\r⠙ checking\r\x1b[2KPASS gate\n';
   let output = '';
   const terminal = { history: () => ({ ok: true, runs: [
@@ -81,23 +81,23 @@ test('CLI replays progress controls incrementally without operation chatter (TAS
       to: bytes.length, atEnd: true, running: false };
   } } as unknown as MissionTerminalCapability;
   const observe = workflowCliObserver(terminal, undefined, text => { output += text; }, true);
-  const operation = { id: 'owned', missionId: 'task-test', phase: 'checking', reason: 'internal preparation' } as WorkflowOperation;
-  observe(operation); observe(operation);
+  const operation = { id: 'owned', missionId: 'task-test', phase: 'executing', reason: 'internal preparation' } as WorkflowOperation;
+  await observe(operation); await observe(operation);
   assert.equal(output, frames);
 });
 
 
-test('redirected CLI output retains final progress lines without spinner debris (TASK-2771)', () => {
+test('redirected CLI output retains final progress lines without spinner debris (TASK-2771)', async () => {
   let text = '\r⠋ checking'; let output = '';
   let running = true;
   const terminal = { history: () => ({ ok: true, runs: [{ record: { operationId: 'owned', runId: 'worker', captureKind: 'coordinator' } }] }),
     page: (_mission: string, request: { after: number; stream: string }) => ({ ok: true, text: request.stream === 'stdout' ? text.slice(request.after) : '',
       to: request.stream === 'stdout' ? text.length : 0, atEnd: true, running }) } as unknown as MissionTerminalCapability;
   const observe = workflowCliObserver(terminal, undefined, chunk => { output += chunk; }, false);
-  const operation = { id: 'owned', missionId: 'task-test', phase: 'checking' } as WorkflowOperation;
-  observe(operation);
+  const operation = { id: 'owned', missionId: 'task-test', phase: 'executing' } as WorkflowOperation;
+  await observe(operation);
   text += '\r⠙ checking\r\x1b[2KPASS gate\nordered message\n';
-  observe(operation); running = false; observe(operation); observe(operation);
+  await observe(operation); running = false; await observe(operation); await observe(operation);
   assert.equal(output, 'PASS gate\nordered message\n');
 });
 
@@ -173,9 +173,9 @@ test('retained diagnostics survive long trailing replay before command, signal a
     } } as unknown as MissionTerminalCapability;
     const observe = workflowCliObserver(terminal, undefined, text => { output += text; }, false);
     const controller = workflowFailureController({ canExecute: () => true, async dispatch<T>() {
-      assert.equal(observe(operation), false);
+      assert.equal(await observe(operation), false);
       running = false;
-      assert.equal(observe(operation), true);
+      assert.equal(await observe(operation), true);
       return failure<T>('execution', 'Workflow exited with status 1');
     } }, async () => operation, async op => workflowFailureEvidence(op, [record], [], scenario === 'exhaustion'
       ? [{ operationId: 'owned', missionId: 'task-test', outcome: 'exhausted', attempts: 2, diagnostic: 'early verifier diagnostic' }] : []));
@@ -221,4 +221,37 @@ test('removed review switches fail before workflow admission or effects (TASK-28
   for (const flag of ['--start', '--continue', '--resume', '--create-event', '--import-legacy']) {
     await assert.rejects(async () => registry.review(['task-test', flag]), /Unknown flag for px review/);
   }
+});
+
+
+import { IntegrateCommandUseCase } from '../../../src/application/integrate-command-use-case.js';
+import { createIntegrateCommand } from '../../../src/interfaces/cli/integrate.js';
+import { configureMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
+
+for (const args of [['task-test'], []]) {
+  test(`inherited public integration wrapper refuses effects${args.length ? '' : ' before inferring a mission'} (TASK-2822)`, async () => {
+    let integrationCalls = 0; let inferred = 0; let opened = 0;
+    const activity: string[] = [];
+    const useCase = new IntegrateCommandUseCase({ execute: async () => { integrationCalls++; } },
+      { running: async () => { activity.push('running'); }, blocked: async () => { activity.push('blocked'); }, ended: async () => { activity.push('ended'); } },
+      () => { inferred++; return 'task-test'; });
+    const registry: Record<string, Command> = { draft: async () => {}, review: async () => {}, integrate: createIntegrateCommand(useCase) };
+    ownWorkflowCli(registry, async () => { opened++; throw new Error('inherited wrapper bypasses admission'); });
+    configureMissionWriteAuthorization({ operationId: 'parent', inherited: true, assert: async () => {} });
+    try {
+      await assert.rejects(async () => registry.integrate(args), /parent workflow|inherited agent/i);
+      assert.equal(integrationCalls, 0); assert.equal(inferred, 0); assert.equal(opened, 0);
+      assert.deepEqual(activity, [], 'child refusal cannot alter parent activity');
+    } finally { configureMissionWriteAuthorization(null); }
+  });
+}
+
+test('public integration wrapper continues its admitted owner without readmission (TASK-2822)', async () => {
+  let integrations = 0; let opened = 0;
+  const registry: Record<string, Command> = { draft: async () => {}, review: async () => {},
+    integrate: createIntegrateCommand(new IntegrateCommandUseCase({ execute: async () => { integrations++; } })) };
+  ownWorkflowCli(registry, async () => { opened++; throw new Error('already admitted owner must not reacquire'); });
+  configureMissionWriteAuthorization({ operationId: 'owned', inherited: false, assert: async () => {} });
+  try { await registry.integrate(['task-test']); assert.equal(integrations, 1); assert.equal(opened, 0); }
+  finally { configureMissionWriteAuthorization(null); }
 });

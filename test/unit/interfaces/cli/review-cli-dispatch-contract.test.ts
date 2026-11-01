@@ -332,7 +332,7 @@ describe("review board characterization", { concurrency: false }, () => {
     } });
     for (const entryArgs of [[], ['--submit']]) {
       for (const suffix of [[], ['--dry-run']]) {
-        await assert.rejects(() => command.execute(['task-2428', ...entryArgs, ...suffix]), /parent workflow.*handoff and review/i);
+        await assert.rejects(() => command.execute(['task-2428', ...entryArgs, ...suffix]), /parent workflow.*review preparation, review and integration/i);
       }
     }
     assert.equal(preflights, 0, 'nested control is refused before any lifecycle effects');
@@ -341,7 +341,7 @@ describe("review board characterization", { concurrency: false }, () => {
     assert.deepEqual(calls, ['submitReview']);
     configureMissionWriteAuthorization({ operationId: 'outer-execute', assert: async () => {} });
     await command.execute(['task-2428', '--submit']);
-    assert.deepEqual(calls, ['submitReview', 'submit'], 'the coordinator still owns automatic handoff');
+    assert.deepEqual(calls, ['submitReview', 'submit'], "the coordinator still owns automatic review preparation");
   });
 
   test('task-2428 characterization: review:act-on-findings CLI rejects retired artifact consumption', async () => {

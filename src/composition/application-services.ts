@@ -1,3 +1,4 @@
+import { SqliteExecutionActivityStore } from '../adapters/sqlite/execution-activity-store.js';
 import { bindInheritedWorkflowAuthorization } from './workflow-authorization.js';
 import { resolveProcessConfiguration } from './config.js';
 import { createMissionApplicationServices } from './mission-services.js';
@@ -13,14 +14,14 @@ import { StatsBackfillService } from '../application/stats-backfill-service.js';
 import { MissionCheckpointService } from '../application/mission-checkpoint-service.js';
 import { MissionBriefService } from '../application/mission-brief-service.js';
 import { MissionAssignmentService } from '../application/mission-assignment-service.js';
-import { MissionHandoffService } from '../application/mission-handoff-service.js';
+import { MissionNelService } from "../application/mission-nel-service.js";
 import { MissionIntakeService } from '../application/mission-intake-service.js';
 import { MissionLifecycleService } from '../application/mission-lifecycle-service.js';
 import { MissionIntegrationService } from '../application/mission-integration-service.js';
 import { KnownRepositoryService } from '../application/services/known-repository-service.js';
 import { UIPreferencesService } from '../application/services/ui-preferences-service.js';
 import { OperationalHistoryService } from '../application/services/operational-history-service.js';
-import { CurrentWorkRecorder, NO_CURRENT_WORK_PORT, type CurrentWorkPort } from '../application/recording/current-work-recorder.js';
+import { ExecutionActivityRecorder, NO_EXECUTION_ACTIVITY, type ExecutionActivityPort } from '../application/recording/execution-activity-recorder.js';
 import { processStartIdentity } from '../adapters/process/process-liveness.js';
 import { resolveMissionExecutionContext } from '../adapters/git/mission-execution-context.js';
 export { createMissionStore } from './mission-persistence.js';
@@ -31,13 +32,13 @@ import { type RepositoryId } from '../domain/repository.js';
 import { missionId } from '../domain/mission.js';
 import { resolveCanonicalRepositoryId } from '../adapters/git/repository-identity.js';
 import { createDefaultExecuteMissionRuntime, createExecuteMissionPorts } from '../adapters/mission/execute-mission-adapters.js';
-import { performHandoff } from '../adapters/cli/commands/handoff.js';
+import { performReviewPreparation } from "../adapters/cli/commands/review-preparation.js";
 import integrate from '../adapters/cli/commands/integrate.js';
 import { createReviewLoopPorts, type ReviewLoopBindings, type ReviewLoopTarget } from '../adapters/review/review-loop.js';
 import { reviewLoopBindings } from './review-persistence.js';
 import { LegacyStatsBackfillAdapter } from '../adapters/mission/stats-backfill-adapter.js';
 import type { ProgressPort } from '../application/ports.js';
-import type { MissionNelRecorder, MissionStore, MissionTransitionStore } from '../application/domain-ports.js';
+import type { MissionStore, MissionTransitionStore } from '../application/domain-ports.js';
 import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
 import type { OperatorBlocklistOverlay } from '../adapters/sqlite/blocklist-snapshot.js';
 import type {
@@ -93,7 +94,7 @@ export interface OperatorStateRepositories {
  * `SqliteMissionStore` is the sole production authority per ADR 0053.
  */
 export interface MissionApplicationServices {
-  readonly store: MissionStore & MissionTransitionStore & MissionNelRecorder;
+  readonly store: MissionStore & MissionTransitionStore;
   /**
    * The append-only operational-history store (TASK-2625): the integration gate
    * step records and reads the sha-keyed integration-validation marker here.
@@ -117,7 +118,7 @@ export interface MissionApplicationServices {
   readonly checkpoints: MissionCheckpointService;
   readonly brief: MissionBriefService;
   readonly assignment: MissionAssignmentService;
-  readonly handoff: MissionHandoffService;
+  readonly nel: MissionNelService;
 }
 
 export interface ProductionApplicationServices {
@@ -130,7 +131,7 @@ export interface ProductionApplicationServices {
   /** Operator-local SQLite state (blocklist authority + adapter handles). */
   readonly operatorState: OperatorStateServices;
   /**
-   * Mission lifecycle, checkpoint, and handoff use cases. `null` when the
+   * Mission lifecycle, checkpoint, and review preparation use cases. `null` when the
    * caller opted out of operator-local state: the Mission authority is that
    * same SQLite database, so building it would open (and create) it anyway.
    */
@@ -146,11 +147,11 @@ export interface ProductionApplicationServices {
    * to the no-op port when operator-local state is unavailable, so a command
    * still runs — the board simply reports that mission's work as unrecorded.
    */
-  readonly currentWork: CurrentWorkPort;
+  readonly currentWork: ExecutionActivityPort;
 }
 
 /** Board integration resolves checkouts from the mission identity, not this process's directory; every non-zero exit is a typed failure. */
-export function createBoardIntegrateService(mission: import('../application/ports/integration-records.js').IntegrationMissionServices, currentWork: CurrentWorkPort, configuration?: ParallixConfiguration, rootDir = process.cwd(), resolveContext: typeof resolveMissionExecutionContext = resolveMissionExecutionContext): IntegrateCommandUseCase {
+export function createBoardIntegrateService(mission: import('../application/ports/integration-records.js').IntegrationMissionServices, currentWork: ExecutionActivityPort, configuration?: ParallixConfiguration, rootDir = process.cwd(), resolveContext: typeof resolveMissionExecutionContext = resolveMissionExecutionContext): IntegrateCommandUseCase {
   return new IntegrateCommandUseCase({
     async execute(args) {
       const execution = resolveContext(args[0], rootDir, configuration ?? resolveProcessConfiguration());
@@ -184,8 +185,8 @@ export interface ProductionApplicationServiceOptions {
   readonly configuration: ParallixConfiguration;
 }
 
-function performHandoffWithMissionServices(mission: MissionApplicationServices, configuration: ParallixConfiguration) {
-  return (slug: string, options: Record<string, unknown>) => performHandoff(slug, {
+function performReviewPreparationWithMissionServices(mission: MissionApplicationServices, configuration: ParallixConfiguration) {
+  return (slug: string, options: Record<string, unknown>) => performReviewPreparation(slug, {
     ...options, configuration,
     missionServicesFn: async () => mission,
   });
@@ -214,7 +215,7 @@ function bindOperatorServices(repositories: OperatorStateRepositories | null) {
 async function bindPresentationCapabilities(
   rootDir: string, options: ProductionApplicationServiceOptions, operatorState: OperatorStateServices,
   mission: MissionApplicationServices | null, sessionMarkers: SessionMarkerRepository | null,
-  executePorts: ExecuteMissionPorts, currentWork: CurrentWorkPort, activeProgress: ProgressPort | undefined,
+  executePorts: ExecuteMissionPorts, currentWork: ExecutionActivityPort, activeProgress: ProgressPort | undefined,
 ) {
   return operatorState.repositories && options.includePresentationCapabilities !== false
     ? (await import('./production-capabilities.js')).composeProductionCapabilities(
@@ -256,15 +257,15 @@ export async function createProductionApplicationServices(
   const { sessionMarkerPort, sessionMarkers } = bindSessionMarkers(operatorState, rootDir, mission?.repositoryId);
 
   bindInheritedWorkflowAuthorization(options.configuration, options.inheritWorkflowAuthorization, mission, operatorState.db);
-  // Shared Mission-authority injection used by both the handoff and the review
+  // Shared Mission-authority injection used by both the review preparation and the review
   const defaultExecuteRuntime = createDefaultExecuteMissionRuntime(options.configuration);
-  const handoffWithMissionServices = mission && performHandoffWithMissionServices(mission, options.configuration);
+  const reviewPreparationWithMissionServices = mission && performReviewPreparationWithMissionServices(mission, options.configuration);
   const executeRuntime = mission ? {
     ...defaultExecuteRuntime,
-    performHandoff: (slug: string, handoffOptions: Record<string, unknown> = {}) =>
-      handoffWithMissionServices!(slug, handoffOptions),
-    validateCheckpointsBeforeHandoff: (slug: string, worktree: string, runtimeOptions: Record<string, unknown> = {}) =>
-      defaultExecuteRuntime.validateCheckpointsBeforeHandoff!(slug, worktree, {
+    performReviewPreparation: (slug: string, reviewPreparationOptions: Record<string, unknown> = {}) =>
+      reviewPreparationWithMissionServices!(slug, reviewPreparationOptions),
+    validateCheckpointsBeforeReviewPreparation: (slug: string, worktree: string, runtimeOptions: Record<string, unknown> = {}) =>
+      defaultExecuteRuntime.validateCheckpointsBeforeReviewPreparation!(slug, worktree, {
         ...runtimeOptions,
         loadRecordedCheckpointsFn: async (checkpointSlug: string) => {
           const loaded = await mission.store.load(missionId(checkpointSlug));
@@ -280,7 +281,7 @@ export async function createProductionApplicationServices(
       ...bindings,
       configuration: options.configuration,
       classification: createReviewClassification(reviewSlug, target.worktree ?? rootDir, options.configuration.decision, options.configuration),
-      performHandoffFn: handoffWithMissionServices!,
+      performReviewPreparationFn: reviewPreparationWithMissionServices!,
       ...reviewLoopBindings(mission.store, mission.lifecycle, sessionMarkerPort),
     }),
   } : defaultExecuteRuntime;
@@ -291,7 +292,7 @@ export async function createProductionApplicationServices(
     sessionMarkerPort,
   }, executeRuntime);
   // One publisher per process. The recorder appends to the same operational
-  // history the board reads, so there is no second current-work authority.
+  // history the board reads, so there is no second execution activity projection.
   const currentWork = bindCurrentWork(operatorState, rootDir, options.configuration);
   // Bind the one production filesystem for the recovery store. The application
   // layer cannot import `node:fs`, so composition binds the `filesystem`
@@ -329,7 +330,7 @@ export async function createProductionApplicationServices(
  * Opens the operator-local database, applies pending migrations, and constructs
  * the checked use cases. SQLite is the sole authority per ADR 0053.
  *
- * Callers that need only the Mission boundary (the handoff command, a future
+ * Callers that need only the Mission boundary (the review preparation command, a future
  * board host) use this instead of materializing operator-local SQLite state.
  *
  * Fail-closed: if the database cannot be opened or migrations fail, the
@@ -409,15 +410,15 @@ function bindSessionMarkers(operatorState: OperatorStateServices, rootDir: strin
   return { sessionMarkerPort, sessionMarkers };
 }
 
-function bindCurrentWork(operatorState: OperatorStateServices, rootDir: string, configuration: ParallixConfiguration): CurrentWorkPort {
-  const currentWork: CurrentWorkPort = operatorState.repositories
-    ? new CurrentWorkRecorder(operatorState.repositories.operationalHistory, {
+function bindCurrentWork(operatorState: OperatorStateServices, rootDir: string, configuration: ParallixConfiguration): ExecutionActivityPort {
+  const currentWork: ExecutionActivityPort = operatorState.repositories
+    ? new ExecutionActivityRecorder(new SqliteExecutionActivityStore(operatorState.db, resolveCanonicalRepositoryId(rootDir)), {
       processId: process.pid,
       onPublication: work => correlateMissionCapture(rootDir, configuration, work),
       // Pid plus start identity: a recycled pid must not keep a dead run's
       // work displayed as live (TASK-2373 SC13).
       processIdentity: processStartIdentity(process.pid),
     })
-    : NO_CURRENT_WORK_PORT;
+    : NO_EXECUTION_ACTIVITY;
   return currentWork;
 }

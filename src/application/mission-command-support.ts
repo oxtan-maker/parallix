@@ -4,7 +4,7 @@
  * Every Mission command follows the same shape: check the requested capability,
  * read the aggregate through the repository port, let the domain decide, then
  * write with the exact expected revision. These helpers keep that sequence
- * identical across intake, lifecycle, checkpoint, and handoff so a new command
+ * identical across intake, lifecycle, checkpoint, and review preparation so a new command
  * cannot quietly skip a guard.
  */
 

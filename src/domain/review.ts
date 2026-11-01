@@ -592,7 +592,7 @@ function criteriaCitingFailedGate(
 /**
  * The open repair the implementer owes evidence for, from authoritative review
  * facts: the latest `changes-requested` round (reviewer-requested changes; the
- * repair is recorded in it, and handoff begins the next round), or
+ * repair is recorded in it, and review preparation begins the next round), or
  * a pending round that follows a revoked approval (automatic bounceback or
  * operator repair). `affected` lists the criteria the findings name (see
  * `criterionNumbersNamedBy`); a finding naming none leaves it empty. For a bounceback it is the
@@ -726,7 +726,7 @@ function requireEligibleReviewer(
  * a round that names four eligible reviewers and picks the implementer is not
  * an escape hatch, it is a selection defect.
  */
-function requireSeparateReviewer(
+export function requireSeparateReviewer(
   reviewer: AgentFamily,
   implementer: AgentFamily,
   eligibility: ConfiguredReviewerEligibility,

@@ -1,4 +1,4 @@
-import type { HandoffGitOptions } from "../../../src/application/ports/handoff-workflow.js";
+import type { ReviewPreparationGitOptions } from "../../../src/application/ports/review-preparation-workflow.js";
 
 
 
@@ -70,7 +70,7 @@ test('formatVerificationCommand leaves non-templated commands unchanged', () => 
 
 test('runVerificationGate is a no-op pass when no command is configured', () => {
   withTempDir(root => {
-    const calls: { command: string; args: string[]; options: HandoffGitOptions | undefined; }[] = [];
+    const calls: { command: string; args: string[]; options: ReviewPreparationGitOptions | undefined; }[] = [];
     const logs: string[] = [];
     const result = runVerificationGate('docs', {
       rootDir: root,
@@ -101,7 +101,7 @@ test('runVerificationGate executes the configured command via bash', () => {
       },
     }, null, 2));
 
-    const calls: { command: string; args: string[]; options: HandoffGitOptions | undefined; }[] = [];
+    const calls: { command: string; args: string[]; options: ReviewPreparationGitOptions | undefined; }[] = [];
     const result = runVerificationGate('docs', {
       rootDir: root,
       env: { PATH: '/bin', PARALLIX_WORKFLOW_OPERATION: 'parent', PARALLIX_WORKFLOW_GENERATION: '1' },

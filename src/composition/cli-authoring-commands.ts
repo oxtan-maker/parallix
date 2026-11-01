@@ -1,7 +1,7 @@
 import { createReviewVerbCommands } from './cli-review-verbs.js';
 import { createBriefWriteCommands } from './cli-brief-writes.js';
 
-import { validateDeclaredGates } from '../adapters/cli/commands/handoff.js';
+import { validateDeclaredGates } from "../adapters/cli/commands/review-preparation.js";
 
 import { createRevokeReviewCommand } from '../interfaces/cli/revoke-review.js';
 import { RevokeReviewDecisionUseCase } from '../application/revoke-review-decision-use-case.js';

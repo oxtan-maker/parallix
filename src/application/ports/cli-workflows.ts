@@ -116,7 +116,7 @@ export interface StatusMissionData {
   readonly brief?: StatusBrief | null;
   /** Text captured at creation with no brief yet; the refining agent turns it into one. */
   readonly description?: string | null;
-  /** The exact commands handoff runs for this Mission. */
+  /** The exact commands review preparation runs for this Mission. */
   readonly declaredGates?: readonly string[];
   /** What must be true for the Mission to be done. */
   readonly successCriteria?: readonly string[];

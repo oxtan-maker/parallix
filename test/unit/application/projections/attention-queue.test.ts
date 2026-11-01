@@ -1,3 +1,4 @@
+import { memoryExecutionActivity } from '../../../fixtures/execution-activity.js';
 import { emptyBoardRepositories } from '../../../helpers/empty-board-repositories.js';
 import { missionVersion as fixtureVersion } from '../../../../src/application/domain-ports.js';
 // Historical regression provenance: TASK-2444.
@@ -17,7 +18,7 @@ import type { MissionStore } from '../../../../src/application/domain-ports.js';
 import type { BoardProjection } from '../../../../src/application/projections/board.js';
 import { buildBoardMetrics, buildBoardProjection } from '../../../../src/application/projections/board.js';
 import type { BoardLane, MissionCard } from '../../../../src/application/projections/mission-board.js';
-import { CURRENT_WORK_EVENT_TYPE, currentWorkEventToEntry, type CurrentWorkEvent } from '../../../../src/application/recording/current-work-recorder.js';
+import { EXECUTION_ACTIVITY_EVENT_TYPE, executionActivityToEntry, type ExecutionActivity } from '../../../../src/application/recording/execution-activity-recorder.js';
 import { composeBoardProjection } from '../../../../src/composition/board-projection.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import type { Mission, MissionId, MissionStatus } from '../../../../src/domain/mission.js';
@@ -70,21 +71,17 @@ function storeFor(persisted: readonly Mission[]): MissionStore {
 // Hermetic doubles: no shimmed git CLI, launcher probe, or OS process scan.
 const gitDouble: NonNullable<NonNullable<Parameters<typeof composeBoardProjection>[0]>["gitFn"]> = () => ({ status: 0, stdout: '', stderr: '' });
 
-async function board(store: MissionStore, currentWork: readonly CurrentWorkEvent[] = []): Promise<BoardHarness> {
+async function board(store: MissionStore, currentWork: readonly ExecutionActivity[] = []): Promise<BoardHarness> {
   const root = registeredMkdtemp('orphaned-active-');
   const repositories = emptyBoardRepositories();
-  const historyEvents = currentWork.map((event) => currentWorkEventToEntry(event));
+  const activity = memoryExecutionActivity();
+  for (const event of currentWork) { await activity.publish(event, event.operationId); }
   const projection = await composeBoardProjection({
     rootDir: root,
     missionStore: store,
     repositoryId: repository,
     ...repositories,
-    // A non-empty current-work list publishes a standing work fact for the
-    // mission, so the board must treat it as worked on (not stranded).
-    historyRepo: {
-      ...repositories.historyRepo,      async findAll() { return []; },
-      async findByType(type: string) { return type === CURRENT_WORK_EVENT_TYPE ? historyEvents : []; },
-    },
+    executionActivity: activity,
     knownAgentFamilies: [],
     launcherProbe: () => ({ available: true, detail: null }),
     readAgentConfig: () => null,
@@ -115,8 +112,8 @@ test('attention orphaned-active mission surfaces active resume item', async () =
     const item = projection.attentionQueue.find((i) => i.missionId === missionId('task-stranded'));
     assert.ok(item, 'attention queue must enqueue the stranded active mission');
     assert.deepEqual(item?.reason, { kind: 'orphaned-active', detail: 'Active mission has no live work' });
-    assert.equal(item?.action.kind, 'active:execute');
-    assert.equal(item?.action.display, `px active ${card!.id}`);
+    assert.equal(item?.action?.kind, 'active:execute');
+    assert.equal(item?.action?.display, `px active ${card!.id}`);
     // The stranded verdict rests on the DB-backed Mission lane, not the task
     // file (ADR 0053 / SC3): this item must declare the mission-store authority.
     assert.deepEqual(item?.dependsOnSources, ['mission-store']);
@@ -129,7 +126,7 @@ test('attention orphaned-active mission surfaces active resume item', async () =
 // actually holds the turn. A fresh published current-work fact means the
 // mission is being worked on and must NOT surface the stranded item.
 test('attention active mission with live work stays quiet', async () => {
-  const liveWork: CurrentWorkEvent = {
+  const liveWork: ExecutionActivity = {
     missionId: missionId('task-live'),
     operationId: 'active:task-live:run',
     phase: 'execute',
@@ -184,10 +181,12 @@ test('planned active checkpoint awaiting operator decision is manual attention (
   try {
     const item = projection.attentionQueue.find(item => item.missionId === blocked.id);
     assert.ok(item);
-    assert.equal(item.action.kind, 'manual');
+    assert.equal(item.action?.kind, 'manual');
     assert.match(item.reason.kind === 'none' ? '' : item.reason.detail, /Required design decision is unresolved/);
     assert.equal(item.card.checkpointEvidence[0]?.goalCheck.length, 0);
-    assert.equal(item.card.commands.find(command => command.command === 'active')?.enabled, true);
+    assert.equal(item.card.commands.find(command => command.command === 'active')?.enabled, false);
+    const { workflowEligible } = await import('../../../../src/domain/workflow-command-policy.js');
+    assert.equal(workflowEligible('active:execute', blocked, 'enter', true), true, 'explicit operator resume remains eligible');
     assert.equal(JSON.stringify(blocked), before, 'projection does not mutate durable Mission evidence');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -201,7 +200,7 @@ test('missing planned checkpoint evidence alone retains ordinary active recovery
   const { root, projection } = await board(storeFor([planned]));
   try {
     const item = projection.attentionQueue.find(item => item.missionId === planned.id);
-    assert.equal(item?.action.kind, 'active:execute');
+    assert.equal(item?.action?.kind, 'active:execute');
     assert.equal(item?.card.blockerRequiresOperator, false);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
@@ -242,11 +241,11 @@ describe("Attention queue ranking and sources —", () => {
       ],
     }), reviewApproved: true };
     assert.equal(card.currentWork, null);
-    assert.equal(project([card]).attentionQueue[0]?.action.kind, 'integrate:merge');
+    assert.equal(project([card]).attentionQueue[0]?.action?.kind, 'integrate:merge');
     const detail = 'Review authority is stale; operator must decide whether to stand down approval';
     const blocked = project([{ ...card, blockingReason: detail }]).attentionQueue;
     assert.equal(blocked.length, 1);
-    assert.equal(blocked[0]?.action.kind, 'manual');
+    assert.equal(blocked[0]?.action?.kind, 'manual');
     assert.equal(blocked[0]?.reason.kind === 'none' ? null : blocked[0]?.reason.detail, detail);
     assert.equal(blocked[0]?.action.display, 'px lead task-human-integration --once');
   });
@@ -274,13 +273,13 @@ describe("Attention queue ranking and sources —", () => {
     ]);
   });
 
-  test('task-2444: queued action is enabled on its card', () => {
+  test('task-2444: queued executable action is enabled on its card', () => {
     const nonRunnable = project([makeCard('task-2337', 'active', {
       blockingReason: 'decision required',
       commands: [{ command: 'active', enabled: false, reason: 'ineligible' }],
     })]);
-    assert.equal(nonRunnable.attentionQueue[0]?.action.kind, 'manual');
-    assert.ok(nonRunnable.attentionQueue.every(item => item.action.kind === 'manual'));
+    assert.equal(nonRunnable.attentionQueue[0]?.action?.kind, 'manual');
+    assert.ok(nonRunnable.attentionQueue.every(item => item.action?.kind === 'manual'));
     const failedGate = project([makeCard('task-disabled-gate', 'active', {
       gate: 'failed', commands: [{ command: 'active', enabled: false, reason: 'ineligible' }],
     })]);
@@ -300,13 +299,13 @@ describe("Attention queue ranking and sources —", () => {
       assert.equal(project([card]).attentionQueue.length, 0);
       const blocked = { ...card, blockingReason: 'Operator review authority decision required' };
       const item = project([blocked]).attentionQueue[0];
-      assert.equal(item?.action.kind, 'manual');
+      assert.equal(item?.action?.kind, 'manual');
       assert.deepEqual(item?.card.commands, card.commands);
       assert.equal(JSON.stringify(card), before);
       assert.deepEqual(item?.card.reviewHistory, []);
     }
     const ordinary = project([makeCard('task-ordinary', 'integration')]).attentionQueue[0];
-    assert.equal(ordinary?.action.kind, 'integrate:merge');
+    assert.equal(ordinary?.action?.kind, 'integrate:merge');
     assert.ok(ordinary?.card.commands.some(command => command.command === 'integrate' && command.enabled));
   });
 
@@ -317,20 +316,20 @@ describe("Attention queue ranking and sources —", () => {
     assert.deepEqual(item?.action, { kind: 'active:execute', display: 'px active task-agent-failed' });
     assert.ok(item?.card.commands.some(command => command.command === 'active' && command.enabled));
     const contractStop = project([{ ...card, blockerRequiresOperator: true }]).attentionQueue[0];
-    assert.equal(contractStop?.action.kind, 'manual');
+    assert.equal(contractStop?.action?.kind, 'manual');
   });
 
   test('admitted workflow ownership suppresses manual blocker attention (TASK-2799)', async () => {
     const { projectWorkflowBoard } = await import('../../../../src/application/projections/workflow-board.js');
     const card = { ...makeCard('task-owned', 'active', { blockingReason: 'Operator decision required' }), blockerRequiresOperator: true };
     const operation: import('../../../../src/domain/workflow-operation.js').WorkflowOperation = { id: 'owned-workflow', repositoryId: card.repositoryId, missionId: card.id,
-      command: 'active:execute', requestKey: 'delivery', generation: 0, phase: 'running', providerStarted: true,
+      command: 'active:execute', requestKey: 'delivery', generation: 0, phase: 'executing', providerStarted: true,
       agent: 'codex', reviewer: null, originalStatus: 'active', previousAssignee: null,
       owner: { pid: 123, identity: 'verified-owner' }, createdAt: '2026-10-23T10:00:00Z',
       updatedAt: '2026-10-23T10:00:00Z', reason: null };
-    assert.equal(project([card]).attentionQueue[0]?.action.kind, 'manual');
+    assert.equal(project([card]).attentionQueue[0]?.action?.kind, 'manual');
     const owned = projectWorkflowBoard(project([card]), [operation]);
-    assert.deepEqual(owned.attentionQueue, []);
+    assert.ok(owned.attentionQueue.every(item => item.action === null), 'owned work cannot advertise a lifecycle or investigation command');
     assert.ok(owned.stages.flatMap(stage => stage.cards).find(candidate => candidate.id === card.id)
       ?.commands.every(command => !command.enabled));
   });
@@ -348,4 +347,22 @@ describe("Attention queue ranking and sources —", () => {
     ]);
     assert.equal(duplicateFacts.sourceFacts.length, 1);
   });
+});
+
+test('locked-contract attention retains existing operator paperwork and review continuation (TASK-2822)', async () => {
+  const blocked = mission('task-operator-path', 'active');
+  const checkpoint = { missionId: blocked.id, name: 'CP-2', firstLine: 'Repair', goalCheck: [], nextActionText: 'repair',
+    repair: { incidentId: 'existing-incident', command: 'npm test', authorizedGates: ['npm test'], authorizedCriteria: ['actual requirement'],
+      attempt: 1, evidenceRecorded: false, verified: false,
+      blocker: { command: 'npm test', diagnostic: 'Locked criterion contradicts the required behavior', authorityReason: 'Operator owns the requirement', proposedCorrection: 'Clarify the criterion' } } };
+  const result = await board(storeFor([{ ...blocked, checkpoints: [checkpoint] }]));
+  try {
+    const item = result.projection.attentionQueue[0]!;
+    assert.equal(item.action?.kind, 'manual', 'investigation must not acknowledge the operator boundary');
+    assert.equal(item.card.commands.find(command => command.command === 'active')?.enabled, false);
+    assert.match(item.reason.kind === 'blocking' ? item.reason.detail : '', /Operator owns the requirement/);
+    assert.match(item.card.nextActionText ?? '', /px checkpoint record --name CP-2/);
+    assert.match(item.card.nextActionText ?? '', /px checkpoint correct-invalid-contract --name CP-2/);
+    assert.match(item.card.nextActionText ?? '', /Then px review task-operator-path/);
+  } finally { fs.rmSync(result.root, { recursive: true, force: true }); }
 });

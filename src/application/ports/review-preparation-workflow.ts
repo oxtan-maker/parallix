@@ -1,0 +1,386 @@
+/**
+ * Application-owned ports for the review preparation workflow (TASK-2332.09).
+ *
+ * `ReviewPreparationCommandUseCase` sequences the complete review preparation — verification, gate
+ * run, rebase, NEL capture, gatekeeper pre-review, declared gates, review
+ * assignment, Forgejo PR creation, lifecycle transition, checkpoint recording,
+ * and backlog sync — against the interfaces below and nothing else. Concrete
+ * implementations are supplied only by the composition root; the use case never
+ * imports a module from `src/adapters/`, `src/git/`, `src/forgejo/`,
+ * `src/backlog/`, `src/review/`, or `src/verification/`.
+ *
+ * Port boundary map — which adapter operations each port covers:
+ *
+ * | Port                        | Adapter operations it stands in for                                              |
+ * |-----------------------------|----------------------------------------------------------------------------------|
+ * | `ReviewPreparationFileSystemPort`     | `node:fs` reads/writes for MISSION.md, CP-N.md, task files, evidence scanning     |
+ * | `ReviewPreparationGitPort`            | `src/adapters/git/git.js` — status, current branch, add/commit/fetch/push         |
+ * | `ReviewPreparationMissionUtilsPort`   | `src/adapters/filesystem/mission-utils.js` — slug/worktree/mission/checkpoints    |
+ * | `ReviewPreparationBacklogPort`        | `src/adapters/backlog/backlog.js` — task resolution, implementer, transition      |
+ * | `ReviewPreparationForgejoPort`        | `src/adapters/forgejo/forgejo.js` — tokens, settings, PR create, tracking sha     |
+ * | `ReviewPreparationReviewIdentityPort` | `src/adapters/review/review-state.js` — `resolveReviewIdentity`                   |
+ * | `ReviewPreparationSetupReviewPort`    | `src/adapters/review/setup-review.js` — non-interactive review-surface bootstrap  |
+ * | `ReviewPreparationRebasePort`         | `src/adapters/review/rebase.js` — `rebaseBeforeReviewRound`                       |
+ * | `ReviewPreparationGatekeeperPort`     | `src/adapters/verification/gatekeeper.js` — `runGatekeeper` pre-review validation |
+ * | `ReviewPreparationVerificationPort`   | `src/adapters/verification/verification.js` — gate run and reusable proofs        |
+ * | `ReviewPreparationNelComputationPort` | `src/adapters/git/net-engineering-lines.js` — `computeNELRecord`                  |
+ * | `ReviewPreparationDocumentWriterPort` | `src/adapters/storage/storage.js` — the JSON document writer               |
+ * | `ReviewPreparationProductConfigPort`  | `src/adapters/config/product-config.js` — `isForgejoReviewEnabled`                |
+ * | `ReviewPreparationAgentLaunchPort`    | `src/adapters/agents/agents.js` — `startAgent`                                    |
+ * | `ReviewPreparationAgentSelectionPort` | `src/adapters/agents/agents.js` — reviewer eligibility and selection              |
+ * | `ReviewPreparationProcessPort`        | `node:child_process` — declared-gate command execution                            |
+ * | `ReviewPreparationMissionServicesPort`| mission service factory (checkpoints, lifecycle, store, NEL review preparation recording)    |
+ */
+
+import type { PreReviewRebaseOutcome } from './rebase-workflow.js';
+import type { MissionStore } from '../domain-ports.js';
+import type { MissionLifecycleService } from '../mission-lifecycle-service.js';
+import type { MissionCheckpointService } from '../mission-checkpoint-service.js';
+import type { MissionNelService } from "../mission-nel-service.js";
+
+/** Line-oriented progress or failure output the workflow hands to a collaborator. */
+export type ReviewPreparationLog = (_message: string) => void;
+
+export interface CommandResult {
+  signal?: string | null;
+  readonly status: number | null;
+  readonly stdout?: string;
+  readonly stderr?: string;
+}
+
+export interface DirectoryEntry {
+  readonly name: string;
+  isDirectory(): boolean;
+  isFile(): boolean;
+}
+
+export interface ReviewPreparationFileSystemPort {
+  existsSync(_target: string): boolean;
+  readText(_target: string): string;
+  writeText(_target: string, _content: string): void;
+  listNames(_target: string): string[];
+  listEntries(_target: string): DirectoryEntry[];
+}
+
+/** Process options the workflow passes to a Git invocation. */
+export type ReviewPreparationGitOptions = {
+  readonly stdio?: 'pipe' | 'ignore' | 'inherit' | Array<'pipe' | 'ignore' | 'inherit'>;
+};
+
+/** Runs one executable with arguments; the verification gate's process runner. */
+export type ReviewPreparationCommandRunner = (_command: string, _args: string[], _options?: ReviewPreparationGitOptions) => CommandResult;
+
+export interface ReviewPreparationGitPort {
+  /** Capture dirty mission changes before verification; Git mechanics stay in the adapter. */
+  commitMissionChanges(_rootDir: string, _slug: string, _log: ReviewPreparationLog, _error: ReviewPreparationLog): { repaired: boolean; blocker: string | null };
+  git(_args: string[], _options?: ReviewPreparationGitOptions): CommandResult;
+  readonly run: ReviewPreparationCommandRunner;
+  getCurrentBranch(_rootDir: string): string;
+  getWorktreeStatus(_rootDir: string): string[];
+}
+
+export interface ReviewPreparationMissionUtilsPort {
+  inferSlug(_explicitSlug?: string): string | null | undefined;
+  resolveWorktree(_slug: string, _options?: { cwd?: string }): string | null;
+  findMissionDir(_slug: string, _rootDir: string): string | null;
+  findMissionArea(_missionDir: string): string | null;
+  missionBranchName(_slug: string, _rootDir: string): string;
+  findCheckpoints(_missionDir: string): string[];
+  getPrimaryBranch(_rootDir: string): string | null;
+}
+
+export interface ReviewPreparationTaskTransitionOptions {
+  readonly rootDir: string;
+  readonly implementer?: string;
+  readonly log?: ReviewPreparationLog;
+}
+
+export interface ReviewPreparationBacklogPort {
+  resolveTaskFile(_slug: string, _rootDir: string): { ok: boolean; taskFile?: string; reason?: string };
+  getTaskImplementer(_taskFile: string): string | null;
+  transitionTask(_slug: string, _status: string, _options: ReviewPreparationTaskTransitionOptions): Promise<boolean> | boolean;
+}
+
+export interface ReviewPreparationPrOptions {
+  readonly rootDir: string;
+  readonly log: ReviewPreparationLog;
+  readonly forceWithLease: boolean;
+  readonly verificationArea: string;
+}
+
+export interface ReviewPreparationPrResult {
+  readonly ok: boolean;
+  readonly error?: string | null;
+  readonly prNumber?: number;
+  readonly url?: string | null;
+  readonly gateFailure?: ReviewPreparationResult['gateFailure'];
+}
+
+export interface ReviewPreparationForgejoPort {
+  readToken(_user: string): string | null;
+  resolveForgejoSettings(_rootDir: string): { url?: string; repo?: string };
+  createPr(_branch: string, _user: string, _token: string, _options: ReviewPreparationPrOptions): ReviewPreparationPrResult;
+  authenticatedReviewUrl(_user: string, _token: string, _rootDir: string): string;
+  resolveTrackingBranchSha(_branch: string, _rootDir: string): { ok: boolean; sha?: string; error?: string };
+}
+
+export interface ReviewPreparationReviewIdentityPort {
+  resolveReviewIdentity(_slug: string, _rootDir: string): Promise<{ forgejoUser?: string | null }>;
+}
+
+/** Forgejo API request primitive the review-surface bootstrap authenticates with. */
+export type ReviewPreparationApiRequest = (
+  _method: string,
+  _requestUrl: string,
+  _options?: { basicAuth?: { user: string; password: string }; token?: string; body?: unknown },
+) => { ok: boolean; statusCode: number | null; data: unknown; error: string | null };
+
+/** The non-interactive bootstrap request for a missing agent token. */
+export interface ReviewPreparationReviewSurfaceSetup {
+  readonly baseUrl?: string;
+  readonly repo?: string;
+  readonly ownerLogin: string;
+  readonly ownerPassword: string;
+  readonly agentPasswords: ReadonlyArray<{ user: string; password: string }>;
+}
+
+export interface ReviewPreparationSetupReviewPort {
+  bootstrapReviewSurface(
+    _rootDir: string,
+    _setup: ReviewPreparationReviewSurfaceSetup,
+    _options: { interactive: false; requestFn: ReviewPreparationApiRequest; log: ReviewPreparationLog },
+  ): Promise<{ ok: boolean; error?: string }>;
+  readonly apiRequest: ReviewPreparationApiRequest;
+}
+
+export interface ReviewPreparationRebaseOptions {
+  readonly missionIdentityServices?: NonNullable<import('./rebase-workflow.js').RebaseWorkflowPort['missionServices']>;
+  readonly worktree?: string;
+  readonly log: ReviewPreparationLog;
+  readonly error: ReviewPreparationLog;
+  readonly isForgejoReviewEnabledFn: (_rootDir: string) => boolean;
+}
+
+export interface ReviewPreparationRebasePort {
+  /**
+   * Runs the pre-review rebase in-process and returns typed failure evidence
+   * (TASK-2377.02). `ok` and `sharedFileConflicts` keep their meaning for
+   * existing consumers; `failure` carries the gate or hook discriminant.
+   */
+  rebaseBeforeReviewRound(_slug: string, _options: ReviewPreparationRebaseOptions): Promise<PreReviewRebaseOutcome>;
+}
+
+export interface GatekeeperOutcome {
+  readonly ok: boolean;
+  readonly posted?: boolean;
+  readonly skipped?: boolean;
+  readonly missing: string[];
+}
+
+export interface ReviewPreparationGatekeeperPort {
+  runGatekeeper(_slug: string, _options: { rootDir: string; log: ReviewPreparationLog; checkpointsRecorded: boolean }): GatekeeperOutcome;
+}
+
+export interface ProofResult {
+  readonly diagnostic?: string;
+  readonly ok: boolean;
+  readonly identity?: string;
+  readonly error?: string;
+}
+
+export interface ReviewPreparationVerificationGateOptions {
+  readonly rootDir: string;
+  readonly stdio: 'pipe';
+  readonly runFn: ReviewPreparationCommandRunner;
+}
+
+export interface ReviewPreparationVerificationPort {
+  resolveEffectiveArea(_area: string | undefined, _rootDir: string, _missionDir: string | null): string;
+  formatVerificationCommand(_area: string, _rootDir: string): string;
+  createVerificationProofIdentity(_command: string, _rootDir: string): ProofResult;
+  readReusableVerificationProof(_command: string, _rootDir: string): ProofResult;
+  writeReusableVerificationProof(_command: string, _rootDir: string, _options?: { expectedIdentity?: string }): ProofResult;
+  runVerificationGate(_area: string, _options: ReviewPreparationVerificationGateOptions): CommandResult | Promise<CommandResult>;
+  isTransientVerificationFailure(_output: { stdout?: unknown; stderr?: unknown }): boolean;
+}
+
+export interface ReviewPreparationRepositoryGatesPort {
+  loadPhaseGates(_rootDir: string, _phase: "preHandoff" | 'preReview' | 'preIntegration'): Array<{ key: string; command: string; order: number }>;
+  runPhaseGates(
+    _phase: 'handoff' | 'review' | 'integration',
+    _options: {
+      slug: string;
+      checkoutPath: string;
+      gates?: Array<{ key: string; command: string; order: number }>;
+      log?: ReviewPreparationLog;
+      error?: ReviewPreparationLog;
+    },
+  ): Promise<{
+    ok: boolean;
+    skipped: boolean;
+    executed: number;
+    failedGate: { key: string; command: string; exitCode: number | null; stdout: string; stderr: string } | null;
+    error: string | null;
+  }>;
+}
+
+export interface ReviewPreparationNelComputationPort {
+  computeNELRecord(_range: string, _options: { cwd: string }): { nel: number; bucket: { label: string } };
+}
+
+/** Atomic JSON document writer: a path (or path thunk) and the value to serialize. */
+export type ReviewPreparationDocumentWriter = (_filePath: string | (() => string), _data: unknown) => string;
+
+export interface ReviewPreparationDocumentWriterPort {
+  readonly write: ReviewPreparationDocumentWriter;
+}
+
+export interface ReviewPreparationProductConfigPort {
+  isForgejoReviewEnabled(_rootDir: string): boolean;
+}
+
+/**
+ * Agent launch port. The review preparation path launches an agent only through the
+ * rebound kernel (TASK-2377.05), which owns classification, the fix prompt, the
+ * budget, and the verified fix; this port supplies the launch itself.
+ */
+export interface ReviewPreparationAgentLaunchPort {
+  startAgent(
+    _step: string,
+    _options: import('../rebound-kernel.js').ReboundLaunchOptions,
+  ): Promise<{ agent?: string | null; result?: { status?: number | null } | null } | null | undefined>;
+}
+
+export interface ReviewPreparationAgentSelectionPort {
+  eligibleAgentsForStep(_step: string, _options?: { worktree?: string }): string[];
+  selectAgent(_step: string, _options?: { exclude?: Set<string>; worktree?: string }): string;
+}
+
+export interface ReviewPreparationProcessPort {
+  spawnSync(_command: string, _args: string[], _options: { cwd: string; encoding: 'utf8'; stdio: 'pipe' }): CommandResult;
+}
+
+/** Options the workflow opens a mission service bundle with. */
+export interface ReviewPreparationMissionServicesOptions {
+  readonly missionDir: string;
+  readonly documentWriter?: ReviewPreparationDocumentWriter;
+}
+
+/**
+ * The checked Mission use cases review preparation drives: store reads, the lifecycle
+ * transition to review, checkpoint recording, and NEL review preparation recording.
+ */
+export interface ReviewPreparationMissionServices {
+  readonly store: Pick<MissionStore, 'load'>;
+  readonly lifecycle: Pick<MissionLifecycleService, 'transition'>;
+  readonly checkpoints: Pick<MissionCheckpointService, 'record'> & Partial<Pick<MissionCheckpointService, 'plan'>>;
+  readonly nel: Pick<MissionNelService, 'recordNel'>;
+}
+
+/**
+ * Factory for the mission service bundle (checkpoint recording, lifecycle
+ * transition, mission store reads, and NEL review preparation recording). Kept as a
+ * factory because each call opens a store bound to a specific worktree root.
+ */
+export type ReviewPreparationMissionServicesPort = (
+  _rootDir: string,
+  _options: ReviewPreparationMissionServicesOptions,
+) => Promise<ReviewPreparationMissionServices>;
+
+/**
+ * The complete port bag injected into `ReviewPreparationCommandUseCase`. Every collaborator
+ * the workflow needs appears here; nothing else is reachable from the use case.
+ */
+export interface ReviewPreparationWorkflowPorts {
+  readonly declaredGateExecution?: {
+    run(_commands: string[], _root: string, _log: ReviewPreparationLog): Promise<{
+      ok: boolean; error?: string; gate?: string; stdout?: string; stderr?: string; exitCode?: number | null;
+    }> | null;
+  };
+  readonly fileSystem: ReviewPreparationFileSystemPort;
+  readonly git: ReviewPreparationGitPort;
+  readonly missionUtils: ReviewPreparationMissionUtilsPort;
+  readonly backlog: ReviewPreparationBacklogPort;
+  readonly forgejo: ReviewPreparationForgejoPort;
+  readonly reviewIdentity: ReviewPreparationReviewIdentityPort;
+  readonly setupReview: ReviewPreparationSetupReviewPort;
+  readonly rebase: ReviewPreparationRebasePort;
+  readonly gatekeeper: ReviewPreparationGatekeeperPort;
+  readonly verification: ReviewPreparationVerificationPort;
+  readonly repositoryGates: ReviewPreparationRepositoryGatesPort;
+  readonly nel: ReviewPreparationNelComputationPort;
+  readonly documentWriter: ReviewPreparationDocumentWriterPort;
+  readonly productConfig: ReviewPreparationProductConfigPort;
+  readonly agents: ReviewPreparationAgentLaunchPort;
+  readonly agentSelection: ReviewPreparationAgentSelectionPort;
+  readonly process: ReviewPreparationProcessPort;
+  readonly missionServices?: ReviewPreparationMissionServicesPort;
+}
+
+/** NEL capture options; `captureNelFn` callers receive the same bag. */
+export interface CaptureNelOptions {
+  readonly rootDir: string;
+  readonly missionDir: string;
+  readonly log?: ReviewPreparationLog;
+  readonly error: ReviewPreparationLog;
+  readonly missionServicesFn?: ReviewPreparationMissionServicesPort;
+  readonly documentWriterFn?: ReviewPreparationDocumentWriter;
+}
+
+export type CaptureNelResult =
+  | { readonly ok: true; readonly nel: number; readonly bucket: string }
+  | { readonly ok: false; readonly error: string; readonly persistenceFailed?: boolean };
+
+/**
+ * Per-invocation overrides for `performReviewPreparation`. Each collaborator override
+ * defaults to the matching port; the rest steer the bounded recovery recursion.
+ */
+export interface PerformReviewPreparationOptions {
+  readonly reviewer?: import('../../domain/agents.js').AgentFamily;
+  readonly skipGate?: boolean;
+  readonly worktree?: string | null;
+  readonly force?: boolean;
+  readonly forceWithLease?: boolean;
+  readonly log?: ReviewPreparationLog;
+  readonly error?: ReviewPreparationLog;
+  readonly rebaseFn?: ReviewPreparationRebasePort['rebaseBeforeReviewRound'];
+  readonly runVerificationGateFn?: ReviewPreparationVerificationPort['runVerificationGate'];
+  readonly maxAttempts?: number;
+  readonly startAgentFn?: ReviewPreparationAgentLaunchPort['startAgent'];
+  readonly remainingRetries?: number;
+  readonly runGatekeeperFn?: ReviewPreparationGatekeeperPort['runGatekeeper'];
+  readonly captureNelFn?: (_slug: string, _options: CaptureNelOptions) => Promise<CaptureNelResult>;
+  /** Authoritative review-entry timestamp when lifecycle recovery re-invokes review preparation. */
+  readonly occurredAt?: string;
+  readonly missionServicesFn?: ReviewPreparationMissionServicesPort;
+  readonly eligibleAgentsForStepFn?: ReviewPreparationAgentSelectionPort['eligibleAgentsForStep'];
+  readonly selectAgentFn?: ReviewPreparationAgentSelectionPort['selectAgent'];
+  readonly recoverGateFailure?: boolean;
+  readonly isForgejoReviewEnabledFn?: ReviewPreparationProductConfigPort['isForgejoReviewEnabled'];
+}
+
+export interface ReviewPreparationResult {
+  readonly recoveryFailure?: import('../../domain/rebound-policy.js').ReboundReason;
+  readonly ok: boolean;
+  readonly error?: string;
+  /** Set when the failure is a CLI usage error the interface layer should render. */
+  readonly usage?: boolean;
+  readonly reason?: string;
+  /** True only while gatekeeper pushback remains unresolved and blocks review. */
+  readonly gatekeeperPushedBack?: boolean;
+  /** True when this review preparation already used the rebound kernel for this incident. */
+  readonly recoveryAttempted?: boolean;
+  readonly gateOutput?: { stdout: string; stderr: string };
+  /** Process evidence for a failed final verifier; never reduce this to `error`. */
+  readonly gateFailure?: {
+    failureReason?: import('../../domain/failure-reason.js').FailureReason;
+    signal?: string | null;
+    area: string;
+    command: string;
+    cwd: string;
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    transient?: boolean;
+  };
+}

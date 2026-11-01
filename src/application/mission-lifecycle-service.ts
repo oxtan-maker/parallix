@@ -130,8 +130,8 @@ export class MissionLifecycleService {
       }
       // The store refused the lane event, which rolls its transaction back and
       // discards the aggregate write with it. When the event already recorded
-      // under this key describes exactly this transition — a retried handoff
-      // reusing `handoff-${slug}` — the history is already complete and only
+      // under this key describes exactly this transition — a retried review preparation
+      // reusing `review-preparation-${slug}` — the history is already complete and only
       // the state is missing, so the aggregate is saved on its own rather than
       // reported as a conflict. Anything else, including a stale expected
       // version, stays a conflict.

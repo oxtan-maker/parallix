@@ -7,7 +7,7 @@ import type { ExecuteMissionService } from '../../../application/execute-mission
 import type { AgentConfig } from '../../agents/agent-config.js';
 import type * as agents from '../../agents/agents.js';
 import type { inferSlug } from '../../filesystem/mission-utils.js';
-import type { transitionTask, getTaskStatus, getTaskImplementer } from '../../backlog/backlog.js';
+import type { transitionTask } from '../../backlog/backlog.js';
 import type { SessionMarkerPort } from '../../../application/domain-ports.js';
 
 export type Log = (_message: string) => void;
@@ -37,9 +37,8 @@ export interface LaunchOptions {
   taskResolution?: { ok: boolean; taskFile?: string };
   startAgentFn?: (_step: string, _options: NonNullable<Parameters<typeof agents.startAgent>[1]>) => Promise<CommandAgentLaunch>;
   transitionTaskFn?: (..._args: Parameters<typeof transitionTask>) => boolean | Promise<boolean>;
-  getTaskStatusFn?: typeof getTaskStatus; getTaskImplementerFn?: typeof getTaskImplementer; selectAgentFn?: typeof agents.selectAgent;
+  selectAgentFn?: typeof agents.selectAgent;
   log?: Log; sessionMarkerPort?: SessionMarkerPort | null;
   onAgentLaunched?: ((_agent: string) => Promise<void>) | null;
-  onActivated?: ((_agent: string, _startedAtMs?: number) => Promise<void>) | null;
-  authorityAlreadyActive?: boolean; unrefChild?: boolean; pinnedAgent?: boolean;
+  unrefChild?: boolean; pinnedAgent?: boolean;
 }

@@ -24,7 +24,6 @@ export type WebBoardCommandKind =
   | 'mission:edit'
   | 'draft:create'
   | 'checkpoint:record'
-  | 'handoff:record'
   | 'review:submit'
   | 'review:act-on-findings'
   | 'approve:review'
@@ -191,7 +190,7 @@ export interface WebAttentionItem {
     /** No direct lifecycle command; display offers bounded lead investigation. */
     readonly kind: 'manual'; readonly display: string;
     readonly state: 'ineligible'; readonly reason: string; readonly targetLane: null;
-  };
+  } | null;
   readonly dependsOnSources: readonly string[];
 }
 
@@ -303,7 +302,7 @@ export interface WebProgressEvent {
 // ---------------------------------------------------------------------------
 
 /**
- * The five action kinds a card advertises. `mission:intake`,
+ * The action kinds a card advertises. `mission:intake`,
  * `checkpoint:record`, `approve:review`, and `review:act-on-findings` are not
  * card-advertised and are rejected as unsupported request kinds.
  */
@@ -312,37 +311,13 @@ export type WebCommandRequestKind =
   | 'active:execute'
   | 'draft:create'
   | 'integrate:merge'
-  | 'handoff:record'
   | 'review:submit'
   | 'mission:cancel';
-
-/** Wire artifact reference: a pointer plus observed size, never the material. */
-export interface WebHandoffArtifact {
-  readonly kind: 'file' | 'git-range' | 'url';
-  readonly location: string;
-  /** Observed size in bytes, `null` when unmeasured. */
-  readonly byteSize: number | null;
-}
-
-/**
- * The handoff payload minus `expectedVersion`: the version precondition is
- * server-owned (TASK-2425's guard), never client-supplied.
- */
-export interface WebHandoffPayload {
-  /** Finite number, >= 0. */
-  readonly netEngineeringLines: number;
-  /** Optional: omitted, never `null` or `Unknown`. */
-  readonly predictedBucket?: 'Small' | 'Medium' | 'Large';
-  readonly capturedAt: string;
-  readonly artifacts?: readonly WebHandoffArtifact[];
-  /** Optional finite integer, >= 0. */
-  readonly reviewRounds?: number;
-}
 
 /**
  * The only mutation envelope the host accepts. Top-level keys are exactly
  * `missionId`, `kind`, `missionStatusAtRequest`, `requestKey`, optional `agent`
- * (launches only), and `payload` (handoff only).
+ * (launches only), with no measurement payload.
  * There is no key through which a client can supply an operation ID, a
  * capability set, an environment, argv, a path, or a version:
  * the host generates the operation ID and the single-kind capability set
@@ -361,8 +336,6 @@ export interface WebCommandRequest {
    * a claim about the current status.
    */
   readonly missionStatusAtRequest: string;
-  /** Present only for `handoff:record`. */
-  readonly payload?: WebHandoffPayload;
 }
 
 export type WebCommandRequestValidation =

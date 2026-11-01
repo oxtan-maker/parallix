@@ -1,3 +1,6 @@
+import { memoryExecutionActivity } from '../../fixtures/execution-activity.js';
+import { missionId } from '../../../src/domain/mission.js';
+import { configureMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { ExecuteMissionService } from '../../../src/application/execute-mission-service.js';
 import { makeExecutePorts } from '../../fixtures/execute-mission-ports.js';
@@ -18,14 +21,16 @@ import { fixtureMission } from '../../fixtures/mission-builders.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 
 function fixture(draftInput = false, wait?: { now(): number; timeoutMs: number }, preparation: {
-  select?: ConstructorParameters<typeof WorkflowOperationService>[6];
-  draft?: ConstructorParameters<typeof WorkflowOperationService>[8];
+  select?: ConstructorParameters<typeof WorkflowOperationService>[5];
+  draft?: ConstructorParameters<typeof WorkflowOperationService>[7];
   eligible?: (_agent: string) => Promise<boolean>;
 } = {}) {
   const rows = new Map<string, WorkflowOperation>();
   let tail: Promise<unknown> = Promise.resolve();
   let writing = false;
+  const activity = memoryExecutionActivity();
   const operations: WorkflowOperationStore = {
+    activity,
     readOnly: work => tail.then(work),
     transaction<T>(work: () => Promise<T>): Promise<T> {
       const next = tail.then(async () => {
@@ -36,17 +41,20 @@ function fixture(draftInput = false, wait?: { now(): number; timeoutMs: number }
     },
     async get(id) { return rows.get(id) ?? null; },
     async byRequest(mission, key) { return [...rows.values()].find(row => row.missionId === mission && row.requestKey === key) ?? null; },
-    async current(mission) { return [...rows.values()].find(row => row.missionId === mission && ['accepted', 'preparing', 'waiting', 'running', 'checking', 'stopping'].includes(row.phase)) ?? null; },
-    async open() { return [...rows.values()].filter(row => ['accepted', 'preparing', 'waiting', 'running', 'checking', 'stopping'].includes(row.phase)); },
+    async current(mission) { return [...rows.values()].find(row => row.missionId === mission && ['accepted', 'executing', 'stopping'].includes(row.phase)) ?? null; },
+    async open() { return [...rows.values()].filter(row => ['accepted', 'executing', 'stopping'].includes(row.phase)); },
+    async latest(mission) { return [...rows.values()].filter(row => row.missionId === mission).at(-1) ?? null; },
+    async latestByMission() { return [...rows.values()]; },
     async insert(row) { rows.set(row.id, row); },
     async replace(row, generation) { assert.equal(rows.get(row.id)?.generation, generation); rows.set(row.id, row); },
   };
   const missions = new Map(['task-one', 'task-two'].map(slug => [slug, fixtureMission(slug, { status: 'refined' })]));
   const events: string[] = [];
+  const versions = new Map<string, number>();
   const store: MissionTransitionStore = {
-    async load(id) { const mission = missions.get(id); return mission ? { kind: 'found', mission, version: missionVersion(1) } : { kind: 'missing' }; },
-    async save(mission) { missions.set(mission.id, mission); return missionVersion(2); },
-    async saveWithTransition(mission, _version, event) { missions.set(mission.id, mission); events.push(`${event.from}:${event.to}`); return missionVersion(2); },
+    async load(id) { const mission = missions.get(id); return mission ? { kind: 'found', mission, version: missionVersion(versions.get(id) ?? 1) } : { kind: 'missing' }; },
+    async save(mission) { missions.set(mission.id, mission); const version = (versions.get(mission.id) ?? 1) + 1; versions.set(mission.id, version); return missionVersion(version); },
+    async saveWithTransition(mission, _version, event) { const version = await store.save(mission, _version); events.push(`${event.from}:${event.to}`); return version; },
   };
   let live: boolean | null = true;
   let stopped = true;
@@ -59,14 +67,108 @@ function fixture(draftInput = false, wait?: { now(): number; timeoutMs: number }
     async alive() { return live; }, async effectsSettled() { return effectsSettled; }, async stop() { return stopped; },
   };
   const publications: string[] = [];
+  const publish = activity.publish;
+  activity.publish = async (event, source) => { publications.push(event.summary); await publish(event, source); };
   const service = new WorkflowOperationService(operations, store, { canExecute: () => true, async dispatch<T>() { return completed({} as T); } }, processes,
-    { async running(p) { publications.push(p.summary); }, async ended(p) { publications.push(p.summary); }, async blocked(p) { publications.push(p.summary); } },
     repositoryId('parallix'), preparation.select ?? (async () => 'codex'), async () => {}, preparation.draft ?? (draftInput ? async () => ({ title: 'Backlog source', labels: [], status: 'backlog' }) : undefined), undefined, wait, preparation.eligible ?? (async () => true));
   return { service, store, operations, missions, events, launches, publications, processes, isWriting: () => writing, setLaunchFailure: (value: boolean) => { failLaunch = value; }, setEffectsSettled: (value: boolean) => { effectsSettled = value; }, setLive: (value: boolean | null) => { live = value; }, setStopped: (value: boolean) => { stopped = value; } };
 }
 function request(id = 'request-one', mission = 'task-one'): BoardCommandRequest {
   return { operationId: id, requestKey: id, kind: 'active:execute', missionId: mission, missionStatusAtRequest: 'refined', capabilities: new Set(['active:execute']) };
 }
+
+test('accepted continuation does not repeat activation before workspace preparation (TASK-2822)', async t => {
+  t.after(() => configureMissionWriteAuthorization(null));
+  const f = fixture();
+  await f.service.admit(request());
+  let saves = 0;
+  const save = f.store.save.bind(f.store);
+  f.store.save = async (...args) => { saves++; return save(...args); };
+  const { ports } = makeExecutePorts({ missionTransitions: f.store, workspace: {
+    preflight: async () => { assert.equal(saves, 0, 'continuation cannot activate again'); return false; },
+  } });
+  await f.service.run('request-one', async () => {
+    configureMissionWriteAuthorization({ operationId: 'request-one', start: (await f.service.operation('request-one'))!, assert: async () => {} });
+    try { return await new ExecuteMissionService(ports).execute({ operationId: 'worker', slug: 'task-one', agent: 'codex', capabilities: new Set(['active:execute']) }); }
+    finally { configureMissionWriteAuthorization(null); }
+  });
+  assert.equal(f.missions.get('task-one')?.status, 'refined', 'only the original activation is compensated');
+});
+
+test('prelaunch compensation cannot undo a newer Mission write (TASK-2822)', async () => {
+  const f = fixture();
+  await f.service.admit(request());
+  const loaded = await f.store.load(missionId('task-one'));
+  assert.equal(loaded.kind, 'found');
+  if (loaded.kind !== 'found') { throw new Error('fixture missing'); }
+  await f.store.save({ ...loaded.mission, title: 'newer work' }, loaded.version);
+  await f.service.startupFailed('request-one', 'launcher failed');
+  assert.equal(f.missions.get('task-one')?.status, 'active');
+  assert.equal(f.missions.get('task-one')?.title, 'newer work');
+});
+
+test('typed nested activity restores its parent and waiting never becomes provider execution (TASK-2822)', async () => {
+  const f = fixture();
+  await f.service.admit(request());
+  await f.service.run('request-one', async () => {
+    const event = { missionId: missionId('task-one'), operationId: 'request-one', phase: 'review-response' as const,
+      state: 'running' as const, summary: 'answering findings', agent: agentFamily('codex'), processId: 200,
+      blockedReason: null, occurredAt: new Date().toISOString() };
+    await f.service.activity('request-one', 1, event, 'child');
+    assert.equal((await f.operations.activity.loadMissionCurrentWork(missionId('task-one')))[0]?.frames.at(-1)?.event.summary, 'answering findings');
+    await f.service.activity('request-one', 1, { ...event, state: 'ended' }, 'child');
+    assert.equal((await f.operations.activity.loadMissionCurrentWork(missionId('task-one')))[0]?.frames.at(-1)?.event.summary, 'preparing workflow');
+    await f.service.providerStarted('request-one', 1, 'codex');
+    await f.service.activity('request-one', 1, { ...event, phase: 'waiting', summary: 'waiting for capacity', agent: null }, 'request-one');
+    const current = (await f.service.operation('request-one'))!;
+    assert.equal(current.phase, 'executing');
+    assert.equal(current.providerStarted, true);
+    assert.equal((await f.operations.activity.loadMissionCurrentWork(missionId('task-one')))[0]?.frames.at(-1)?.event.phase, 'waiting');
+    return completed({});
+  });
+});
+
+test('a same-parent child ending out of order cannot clear a later live child (TASK-2822)', async () => {
+  const f = fixture();
+  await f.service.admit(request());
+  await f.service.run('request-one', async () => {
+    const event = { missionId: missionId('task-one'), operationId: 'request-one', phase: 'review' as const,
+      state: 'running' as const, summary: 'first child', agent: agentFamily('claude'), processId: 200,
+      blockedReason: null, occurredAt: new Date().toISOString() };
+    await f.service.activity('request-one', 1, event, 'first');
+    await f.service.activity('request-one', 1, { ...event, summary: 'later child', agent: agentFamily('codex') }, 'later');
+    await f.service.activity('request-one', 1, { ...event, state: 'ended' }, 'first');
+    const current = (await f.operations.activity.loadMissionCurrentWork(event.missionId))[0];
+    assert.equal(current.frames.at(-1)?.event.summary, 'later child');
+    assert.equal(current.frames.at(-1)?.event.agent, 'codex');
+    await f.service.activity('request-one', 1, { ...event, state: 'ended' }, 'later');
+    const resumed = (await f.operations.activity.loadMissionCurrentWork(event.missionId))[0];
+    assert.equal(resumed.frames.length, 1);
+    assert.equal(resumed.frames[0].event.summary, 'preparing workflow');
+    return completed({});
+  });
+});
+
+test('failed nested work survives bracket cleanup until supported parent continuation (TASK-2822)', async () => {
+  const f = fixture();
+  await f.service.admit(request());
+  await f.service.run('request-one', async () => {
+    const event = { missionId: missionId('task-one'), operationId: 'request-one', phase: 'review' as const,
+      state: 'running' as const, summary: 'reviewer running', agent: agentFamily('claude'), processId: 200,
+      blockedReason: null, occurredAt: new Date().toISOString() };
+    await f.service.activity('request-one', 1, event, 'reviewer');
+    await f.service.activity('request-one', 1, { ...event, state: 'blocked', blockedReason: 'Review needs a reserved decision' }, 'reviewer');
+    await f.service.activity('request-one', 1, { ...event, state: 'ended' }, 'reviewer');
+    const failed = (await f.operations.activity.loadMissionCurrentWork(event.missionId))[0];
+    assert.equal(failed.frames.at(-1)?.event.blockedReason, 'Review needs a reserved decision');
+    await f.service.activity('request-one', 1, { ...event, summary: 'supported continuation', agent: null }, 'request-one');
+    await f.service.activity('request-one', 1, { ...event, state: 'blocked', blockedReason: 'late child failure' }, 'reviewer');
+    const continued = (await f.operations.activity.loadMissionCurrentWork(event.missionId))[0];
+    assert.equal(continued.frames.length, 1);
+    assert.equal(continued.frames[0].event.summary, 'supported continuation');
+    return completed({});
+  });
+});
 
 test('agent selection occurs outside admission writes and settled retries do not repeat it (TASK-2750)', async () => {
   let f: ReturnType<typeof fixture>;
@@ -142,8 +244,8 @@ test('review continuation is admitted from integration without moving the missio
     return completed({});
   });
   assert.equal(executed, true);
-  assert.equal(f.missions.get('task-one')?.status, 'integration');
-  assert.deepEqual(f.events, []);
+  assert.equal(f.missions.get('task-one')?.status, 'review');
+  assert.deepEqual(f.events, ['integration:review']);
 });
 
 test('CLI review retains eligibility outside integration continuation (TASK-2750)', async () => {
@@ -265,7 +367,7 @@ test('startup and prelaunch failure safely compensate; later failures retain act
   assert.equal((await early.service.operation('request-one'))?.phase, 'blocked');
   const late = fixture(); await late.service.admit(request());
   await late.service.run('request-one', async () => {
-    await late.service.progress('request-one', 1, 'execute', 'running execute agent (codex)', 'codex', true);
+    await late.service.providerStarted('request-one', 1, 'codex');
     return failure('execution', 'Gate failed after launch');
   });
   assert.equal(late.missions.get('task-one')?.status, 'active');
@@ -314,6 +416,7 @@ test('uncertain external execution keeps ownership until reconciliation confirms
     assert.equal((await f.service.operation('request-one'))?.phase, 'stopping');
     assert.equal((await f.service.admit({ ...request('replacement'), missionStatusAtRequest: 'active' })).status, 'failed');
     assert.equal((await f.service.stop('task-one')).status, 'failed');
+    assert.match((await f.service.current('task-one'))!.reason!, /Stop is pending.*(unconfirmed|not yet reconciled)/);
     f.setEffectsSettled(true); assert.equal((await f.service.stop('task-one')).status, 'completed');
   } finally { release(); await running; }
 });
@@ -321,8 +424,8 @@ test('uncertain external execution keeps ownership until reconciliation confirms
 test('provider-capacity waiting remains admitted, visible and exclusively owned (TASK-2750)', async () => {
   const f = fixture(); await f.service.admit(request());
   await f.service.run('request-one', async () => {
-    await f.service.progress('request-one', 1, 'waiting', 'waiting for provider capacity');
-    assert.equal((await f.service.current('task-one'))?.phase, 'waiting');
+    await f.service.providerStarted('request-one', 1, 'codex');
+    assert.equal((await f.service.current('task-one'))?.phase, 'executing');
     assert.equal((await f.service.admit({ ...request('competitor'), missionStatusAtRequest: 'active' })).status, 'failed');
     return completed({});
   });
@@ -341,7 +444,7 @@ test('only one supervisor reserves capture and dispatch for repeated accepted de
 test('fallback progress changes the attributed family without changing command ownership (TASK-2750)', async () => {
   const f = fixture(); await f.service.admit(request());
   await f.service.run('request-one', async () => {
-    await f.service.progress('request-one', 1, 'execute', 'running execute agent (claude)', 'claude', true);
+    await f.service.providerStarted('request-one', 1, 'claude');
     const current = await f.service.current('task-one');
     assert.equal(current?.id, 'request-one'); assert.equal(current?.agent, 'claude'); assert.equal(current?.providerStarted, true);
     return completed({});
@@ -353,7 +456,7 @@ test('fallback progress changes the attributed family without changing command o
 test('recovery cannot steal a stop while process termination is held (TASK-2750 F2)', async () => {
   const f = fixture(); await f.service.admit(request());
   const accepted = (await f.service.operation('request-one'))!;
-  await f.operations.replace({ ...accepted, phase: 'preparing', owner: f.processes.identity(), generation: 1 }, 0);
+  await f.operations.replace({ ...accepted, phase: 'executing', owner: f.processes.identity(), generation: 1 }, 0);
   f.processes.stop = async () => {
     f.setLive(false);
     await f.service.recover();
@@ -364,15 +467,7 @@ test('recovery cannot steal a stop while process termination is held (TASK-2750 
   assert.equal((await f.service.operation('request-one'))?.reason, 'Stopped by operator');
 });
 
-test('handoff stale versions reject before ownership and payload reaches executor (TASK-2750 F8)', async () => {
-  const f = fixture();
-  f.missions.set('task-one', fixtureMission('task-one', { status: 'active' }));
-  const payload = { kind: 'handoff:record' as const, netEngineeringLines: 2, capturedAt: new Date().toISOString(), expectedVersion: missionVersion(2) };
-  const r = { ...request(), missionStatusAtRequest: 'active', kind: 'handoff:record' as const, capabilities: new Set(['handoff:record'] as const), payload };
-  const rejected = await f.service.admit(r);
-  assert.ok(rejected.status !== 'accepted' && rejected.error?.kind === 'conflict');
-  assert.equal(await f.service.current('task-one'), null);
-});
+
 
 
 test('CLI waiting ends on stopping or deadline without cancelling independent work (TASK-2750 F4)', async () => {
@@ -390,25 +485,16 @@ test('CLI waiting ends on stopping or deadline without cancelling independent wo
   assert.match((await stopping.service.dispatch(request())).error!.message, /Stop is pending/);
 });
 
-test('unavailable handoff and invalid activation return validation before launch (TASK-2750 F8)', async () => {
+test('one-shot evidence writes are not admitted as long-running execution (TASK-2750 F8)', async () => {
   const f = fixture();
   f.missions.set('task-one', fixtureMission('task-one', { status: 'active', checkpoints: [] }));
-  const result = await f.service.admit({ ...request(), missionStatusAtRequest: 'active', kind: 'handoff:record', capabilities: new Set(['handoff:record']) });
+  const result = await f.service.admit({ ...request(), missionStatusAtRequest: 'active', kind: 'checkpoint:record', capabilities: new Set(['checkpoint:record']) });
   assert.ok(result.status !== 'accepted' && result.error?.kind === 'validation');
   assert.equal(f.launches.length, 0);
 });
 
 
-test('accepted handoff payload survives durable ownership and executor claim (TASK-2750 F8)', async () => {
-  const f = fixture();
-  f.missions.set('task-one', fixtureMission('task-one', { status: 'active' }));
-  const payload = { kind: 'handoff:record' as const, netEngineeringLines: 2, capturedAt: new Date().toISOString(), expectedVersion: missionVersion(1) };
-  assert.equal((await f.service.admit({ ...request(), missionStatusAtRequest: 'active', kind: 'handoff:record', capabilities: new Set(['handoff:record']), payload })).status, 'accepted');
-  await f.service.run('request-one', async request => {
-    assert.deepEqual(request.payload, payload);
-    return completed({});
-  });
-});
+
 
 
 test('activation refusal preserves its validation error and admits no owner (TASK-2750 F8)', async () => {
@@ -421,7 +507,7 @@ test('activation refusal preserves its validation error and admits no owner (TAS
 });
 
 
-for (const phase of ['preparing', 'checking', 'running'] as const) {
+for (const phase of ['execute', 'review', 'waiting'] as const) {
   test(`foreground cancellation settles ${phase} before retry and fences late completion (TASK-2771)`, async () => {
     const f = fixture();
     const cancellation = { requested: false, stopOwnedWorkflow: true };
@@ -430,7 +516,7 @@ for (const phase of ['preparing', 'checking', 'running'] as const) {
     let running: Promise<void> | undefined;
     f.processes.launch = async id => {
       running = f.service.run(id, async () => {
-        await f.service.progress(id, 1, phase === 'checking' ? 'handoff' : 'execute', phase, undefined, phase === 'running');
+        await f.service.activity(id, 1, { missionId: missionId('task-one'), operationId: id, phase, state: 'running', summary: phase, agent: null, processId: 100, blockedReason: null, occurredAt: new Date().toISOString() }, id);
         cancellation.requested = true;
         await held;
         return completed({});
@@ -448,7 +534,7 @@ for (const phase of ['preparing', 'checking', 'running'] as const) {
       assert.deepEqual(f.missions.get('task-one')!.checkpoints, evidence);
       f.processes.launch = async () => {};
       assert.equal((await f.service.admit({ ...request('replacement'), missionStatusAtRequest: 'active' })).status, 'accepted');
-      await assert.rejects(() => f.service.progress('request-one', 1, 'execute', 'late'), /fenced|stopped/);
+      await assert.rejects(() => f.service.providerStarted('request-one', 1, 'codex'), /fenced|stopped/);
     } finally { release(); await running; }
     assert.equal((await f.service.operation('request-one'))?.phase, 'stopped');
     assert.equal((await f.service.current('task-one'))?.id, 'replacement');
@@ -526,4 +612,18 @@ test('explicit web family and pin survive durable admission for the executor', a
   assert.equal(operation?.requestedAgent, 'custom-family');
   assert.equal(operation?.pinnedAgent, true);
   assert.equal(operation?.agent, 'custom-family');
+});
+
+test('prelaunch compensation restores the recorded assignee through the execution owner (TASK-2822)', async () => {
+  for (const prior of [null, agentFamily('codex')]) {
+    const f = fixture(false, undefined, { select: async () => 'claude' });
+    f.missions.set('task-one', fixtureMission('task-one', { status: 'refined', assignee: prior }));
+    assert.equal((await f.service.admit(request())).status, 'accepted');
+    assert.equal(f.missions.get('task-one')?.assignee, 'claude');
+    await f.service.run('request-one', async () => failure('execution', 'provider did not start'));
+    assert.equal(f.missions.get('task-one')?.status, 'refined');
+    assert.equal(f.missions.get('task-one')?.assignee, prior);
+    assert.equal((await f.service.operation('request-one'))?.phase, 'blocked');
+    assert.deepEqual(f.events, ['refined:active', 'active:refined']);
+  }
 });

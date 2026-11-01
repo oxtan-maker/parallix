@@ -75,3 +75,16 @@ for (const outcome of ['success', 'cancelled', 'missing-controller', 'exit'] as 
       : outcome === 'exit' ? ['[lead] px active task-borrowed stopped: command exited with status 130'] : []);
   });
 }
+
+test('lead refuses liveness when the activity authority is unavailable (TASK-2822)', async () => {
+  let cardReads = 0;
+  const services = {
+    operatorState: { repositories: null, db: null },
+    presentationCapabilities: { boardProjection: { async buildMissionCard() { cardReads++; return { currentWork: null }; } } },
+  } as unknown as ProductionApplicationServices;
+  const port = createLeadSupervisorPort(services, new Set(), {
+    rootDir: '/lead', configuration: resolveConfiguration({}), scope: {} as Context['scope'],
+  } as Context);
+  await assert.rejects(() => port.liveness('task-unreadable'), /operator database is unavailable/);
+  assert.equal(cardReads, 0, 'missing authority cannot become a successful idle observation');
+});

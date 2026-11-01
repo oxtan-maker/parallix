@@ -26,7 +26,7 @@ const GATE_BOARD_MISSION: Mission = {
 };
 const GATE_BOARD_ATTEMPT: WorkflowOperation = {
   id: 'op-7', repositoryId: repositoryId('task-2775-repository'), missionId: missionId('task-2775-gate'), requestKey: 'integrate-1',
-  command: 'integrate:merge', generation: 1, phase: 'checking', providerStarted: true, agent: null, reviewer: null,
+  command: 'integrate:merge', generation: 1, phase: 'executing', providerStarted: true, agent: null, reviewer: null,
   originalStatus: 'review', previousAssignee: null, owner: { pid: 1, identity: 'p' },
   createdAt: '2026-10-18T08:00:00.000Z', updatedAt: '2026-10-18T08:00:00.000Z', reason: null,
 };

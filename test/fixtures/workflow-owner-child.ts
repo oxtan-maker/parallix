@@ -47,7 +47,7 @@ const createGraph: typeof createProductionApplicationServices = async (root, pro
       eligible: async () => true,
       async select() { return 'codex'; }, async prepare() { return { prompt: 'fixture', agent: 'codex', agentConfig: {} }; },
       async launch(request: { onAgentChanged?: (_agent: string) => Promise<void>; slug: string }) {
-        await request.onAgentChanged?.('codex'); console.log(`AGENT-OUTPUT:${request.slug}`);
+        console.log(`AGENT-OUTPUT:${request.slug}`);
         if (fs.existsSync(path.join(fixtureRoot, 'provider-fixture'))) {
           const { fixtureProvider, barrier } = await import('./workflow-provider.js');
           if (fs.existsSync(path.join(fixtureRoot, 'capacity.hold'))) { await barrier(fixtureRoot, `${request.slug}.capacity`); }
@@ -57,12 +57,12 @@ const createGraph: typeof createProductionApplicationServices = async (root, pro
             await request.onAgentChanged?.(family);
             await fixtureProvider(fixtureRoot, request.slug, options!.configuration!, family, index + 1);
           }
-        }
+        } else { await request.onAgentChanged?.('codex'); }
         return { agent: 'codex', rebaseDeferred: true, errored: false, errorMessage: null, exitStatus: 0, detail: {} };
       } },
     telemetry: { async recordLaunchTelemetry() {} },
-    checkpointValidation: { async validateBeforeHandoff() { if (fs.existsSync(path.join(fixtureRoot, 'provider-fixture'))) { const { barrier } = await import('./workflow-provider.js'); await barrier(fixtureRoot, 'post-agent-gate'); } console.log('CHECKPOINT-GATE'); return { ok: true }; } },
-    handoffExecution: { async run() { console.log('HANDOFF-OUTPUT'); return { ok: true }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } },
+    checkpointValidation: { async validateBeforeReviewPreparation() { if (fs.existsSync(path.join(fixtureRoot, 'provider-fixture'))) { const { barrier } = await import('./workflow-provider.js'); await barrier(fixtureRoot, 'post-agent-gate'); } console.log('CHECKPOINT-GATE'); return { ok: true }; } },
+    reviewPreparationExecution: { async run() { console.log('HANDOFF-OUTPUT'); return { ok: true }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } },
     autonomousReview: { async start() { console.log('REVIEW-OUTPUT'); } },
   };
   if (!graph.presentationCapabilities) { throw new Error('Fixture graph missing'); }
@@ -135,7 +135,8 @@ if (process.argv[2] === '--fixture-public') {
       const target = { ...graph, presentationCapabilities: { ...graph.presentationCapabilities!, commandController: owned.service } };
       const scope = { ...createCliServiceScope(root, configuration), openWorkflowServices: async () => target };
       // Only the board queue is controlled; borrowing, forwarding, signals and ownership are real.
-      target.presentationCapabilities.boardProjection = { ...graph.presentationCapabilities!.boardProjection,
+      target.presentationCapabilities.boardProjection = {
+        buildMissionCard: graph.presentationCapabilities!.boardProjection.buildMissionCard.bind(graph.presentationCapabilities!.boardProjection),
         build: async () => ({ attentionQueue: [{ missionId: slug, card: { lane: 'active', gate: 'PASS', currentWork: null }, reason: { kind: 'none' }, action: { kind: 'active:execute', display: `px active ${slug}` } }] }) as never };
       const forwards = new Set<Promise<unknown>>();
       try {

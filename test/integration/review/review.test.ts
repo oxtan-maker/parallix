@@ -1380,7 +1380,7 @@ test('commentRound and submitReviewRound fail loudly on API errors', async () =>
 test('submitForReview exits when no forgejo user and no task implementer (task-1105)', async () => {
   const previous = process.env.FORGEJO_USER;
   delete process.env.FORGEJO_USER;
-  const calls: { slug: string; opts: Parameters<typeof import('../../../src/adapters/cli/commands/handoff.js').performHandoff>[1] | undefined; }[] = [];
+  const calls: { slug: string; opts: Parameters<typeof import('../../../src/adapters/cli/commands/review-preparation.js').performReviewPreparation>[1] | undefined; }[] = [];
   let exitCode: { value: Parameters<typeof process.exit>[0] } = { value: null };
   try {
     await submitForReview('task-1105', true, {
@@ -1388,7 +1388,7 @@ test('submitForReview exits when no forgejo user and no task implementer (task-1
       getTaskImplementerFn: () => null,
       resolveWorktreeFn: () => '/tmp/mission-task-1105',
       isForgejoReviewEnabledFn: () => true,
-      performHandoffFn: async (slug, opts) => {
+      performReviewPreparationFn: async (slug, opts) => {
         calls.push({ slug, opts });
         return { ok: true as const };
       },
@@ -1402,10 +1402,10 @@ test('submitForReview exits when no forgejo user and no task implementer (task-1
   assert.equal(calls.length, 0);
 });
 
-test('submitForReview and closeMissionPr use injected handoff and close functions', async () => {
+test("submitForReview and closeMissionPr use injected review preparation and close functions", async () => {
   const previous = process.env.FORGEJO_USER;
   delete process.env.FORGEJO_USER;
-  const calls: ({ slug: string; opts: Parameters<typeof import('../../../src/adapters/cli/commands/handoff.js').performHandoff>[1] | undefined; } | { branch: string; token: string; user: string; })[] = [];
+  const calls: ({ slug: string; opts: Parameters<typeof import('../../../src/adapters/cli/commands/review-preparation.js').performReviewPreparation>[1] | undefined; } | { branch: string; token: string; user: string; })[] = [];
   let exitCode: { value: Parameters<typeof process.exit>[0] } = { value: null };
   try {
     await submitForReview('task-1031', true, {
@@ -1413,7 +1413,7 @@ test('submitForReview and closeMissionPr use injected handoff and close function
       getTaskImplementerFn: () => 'gemini',
       resolveWorktreeFn: () => '/tmp/mission-task-1031',
       isForgejoReviewEnabledFn: () => false,
-      performHandoffFn: async (slug, opts) => {
+      performReviewPreparationFn: async (slug, opts) => {
         calls.push({ slug, opts });
         return { ok: true as const };
       },

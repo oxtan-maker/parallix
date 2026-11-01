@@ -1,3 +1,4 @@
+import { projectActivityPublications } from '../../../fixtures/execution-activity.js';
 // Historical regression provenance: TASK-2375.
 // Current-work liveness contract: a publisher's pid and process-start identity decide whether its work is
 // live, aged out, or cleared; probes cover Linux, macOS, native Windows and WSL.
@@ -11,8 +12,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test, { mock, describe } from 'node:test';
 import { processStartIdentity, probeProcessLiveness, runNativeStartIdentity, readProcessStat } from '../../../../src/adapters/process/process-liveness.js';
-import { reconcileCurrentWork } from '../../../../src/application/projections/current-work.js';
-import type { CurrentWorkEvent } from '../../../../src/application/recording/current-work-recorder.js';
+import type { ExecutionActivity } from '../../../../src/application/recording/execution-activity-recorder.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import { missionId } from '../../../../src/domain/mission.js';
 
@@ -24,7 +24,7 @@ import { missionId } from '../../../../src/domain/mission.js';
 const MISSION = missionId('task-2373');
 const NOW = Date.parse('2026-08-13T12:00:00.000Z');
 
-function event(overrides: Partial<CurrentWorkEvent> = {}): CurrentWorkEvent {
+function event(overrides: Partial<ExecutionActivity> = {}): ExecutionActivity {
   return {
     missionId: MISSION,
     operationId: 'op-a',
@@ -37,11 +37,11 @@ function event(overrides: Partial<CurrentWorkEvent> = {}): CurrentWorkEvent {
     blockedReason: null,
     occurredAt: new Date(NOW - 1_000).toISOString(),
     ...overrides,
-  } as CurrentWorkEvent;
+  } as ExecutionActivity;
 }
 
 test('SC13: a reused pid whose process-start identity differs is treated as dead', () => {
-  const facts = reconcileCurrentWork([event()], {
+  const facts = projectActivityPublications([event()], {
     nowMs: NOW,
     ttlMs: 60_000,
     // The pid answers, but it belongs to a process that started later.
@@ -51,7 +51,7 @@ test('SC13: a reused pid whose process-start identity differs is treated as dead
 });
 
 test('SC13: the matching process-start identity keeps the work live', () => {
-  const facts = reconcileCurrentWork([event()], {
+  const facts = projectActivityPublications([event()], {
     nowMs: NOW,
     ttlMs: 60_000,
     isProcessAlive: (pid, identity) => pid === 4242 && identity === '900900',
@@ -82,16 +82,16 @@ test('SC13: an unreadable identity falls back to the bare pid check rather than 
 });
 
 test('SC14: an abnormally terminated publisher ages its work out instead of staying WORKING', () => {
-  const options = { ttlMs: 1_000, isProcessAlive: () => null as boolean | null } satisfies Partial<NonNullable<Parameters<typeof reconcileCurrentWork>[1]>>;
+  const options = { ttlMs: 1_000, isProcessAlive: () => null as boolean | null } satisfies Partial<NonNullable<Parameters<typeof projectActivityPublications>[1]>>;
   // Killed without publishing a terminal event, and no longer observable.
-  const fresh = reconcileCurrentWork([event()], { ...options, nowMs: NOW });
-  const aged = reconcileCurrentWork([event()], { ...options, nowMs: NOW + 10_000 });
+  const fresh = projectActivityPublications([event()], { ...options, nowMs: NOW });
+  const aged = projectActivityPublications([event()], { ...options, nowMs: NOW + 10_000 });
   assert.equal(fresh.get(MISSION)?.currentWork?.freshness, 'unverified');
   assert.equal(aged.get(MISSION)?.currentWork?.freshness, 'stale');
 });
 
 test('SC14: an abnormally terminated publisher observed dead clears the work immediately', () => {
-  const facts = reconcileCurrentWork([event()], {
+  const facts = projectActivityPublications([event()], {
     nowMs: NOW,
     ttlMs: 60_000,
     isProcessAlive: () => false,

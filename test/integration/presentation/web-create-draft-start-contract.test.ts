@@ -15,7 +15,7 @@ import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-ada
 import { loadDefaultMigrations, SqliteMigrationRunner } from '../../../src/adapters/sqlite/migration-runner.js';
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
 import { clearOperatorStateCache } from '../../../src/adapters/sqlite/adapter-factory.js';
-import { NO_CURRENT_WORK_PORT } from '../../../src/application/recording/current-work-recorder.js';
+import { NO_EXECUTION_ACTIVITY } from '../../../src/application/recording/execution-activity-recorder.js';
 import { composeProductionCapabilities } from '../../../src/composition/production-capabilities.js';
 import { missionId } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
@@ -124,6 +124,24 @@ async function build(directory: string): Promise<Isolated> {
   // the production Start action persists the refined -> active transition into
   // this same SQLite store (makeExecutePorts mocks that port and would not).
   const { ports } = makeExecutePorts({ missionTransitions: store });
+  const launchAgent = ports.agentExecution.launch;
+  ports.agentExecution.launch = async request => {
+    const atLaunch = await store.load(missionId(request.slug));
+    assert.equal(atLaunch.kind, 'found');
+    assert.equal(atLaunch.mission.status, 'active', 'Start must commit refined -> active before launching the agent (TASK-2822)');
+    const result = await launchAgent(request);
+    const afterAgent = await store.load(missionId(request.slug));
+    assert.equal(afterAgent.kind, 'found');
+    assert.equal(afterAgent.mission.status, 'active', 'implementation must remain active until the agent finishes (TASK-2822)');
+    return result;
+  };
+  const validateCheckpoints = ports.checkpointValidation.validateBeforeReviewPreparation;
+  ports.checkpointValidation.validateBeforeReviewPreparation = async request => {
+    const preparingReview = await store.load(missionId(request.slug));
+    assert.equal(preparingReview.kind, 'found');
+    assert.equal(preparingReview.mission.status, 'review', 'finished implementation must enter review before preparation checks (TASK-2822)');
+    return validateCheckpoints(request);
+  };
   // A lightweight draft agent stand-in: the draft adapter's real contract-
   // recording step reads the agent's launch facts, not a live process. This
   // keeps the suite hermetic (no opencode/codex invocation) while still proving
@@ -143,7 +161,7 @@ async function build(directory: string): Promise<Isolated> {
     repositories,
     ports,
     store,
-    NO_CURRENT_WORK_PORT,
+    NO_EXECUTION_ACTIVITY,
     undefined,
     db,
     { configuration: resolveConfiguration({ primaryWorktree: directory }), draftAdapterDeps },
@@ -268,15 +286,14 @@ test('web create draft completes through isolated launches without Bubblewrap (T
       capabilities: new Set(['active:execute']),
     });
     assert.equal(launchedResult.status, 'completed', `start must complete: ${JSON.stringify(launchedResult.error ?? launchedResult.value)}`);
-    // The production Start action synchronises the lifecycle (refined -> active)
-    // through the checked Mission boundary before it launches the agent, so the
-    // mission is active in the same SQLite store the board writes.
+    // Start commits activation before launch (asserted by the agent port), then
+    // enters review before its successful preparation double returns.
     const afterStart = await store.load(missionId(createdId));
     assert.equal(afterStart.kind, 'found', 'the started mission must be persisted');
-    assert.equal(afterStart.mission.status, 'active', 'the production start must move the mission to active from refined');
+    assert.equal(afterStart.mission.status, 'review', 'successful execution must enter review preparation after activation');
     assert.equal(afterStart.mission.id, createdId, 'start must launch the same px-<NNNN> identity, mint no new one');
 
-    // The mission is now active in the store, carrying the board's fields.
+    // The mission retains the board fields after execution enters review.
     assert.equal(afterStart.mission.title, 'Web board mission', 'title must survive web create -> draft -> start');
     assert.deepEqual(afterStart.mission.labels, ['ai_sdlc'], 'labels must survive web create -> draft -> start');
     assert.equal(afterStart.mission.repositoryId, repositoryId('web-board-repo'), 'repository id must survive web create -> draft -> start');

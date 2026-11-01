@@ -24,7 +24,7 @@ base branch. It runs only when that worktree already contains
 `graphify-out/graph.json`; Parallix does not build a graph or probe Graphify for
 repositories without one. Missing executables and failed updates produce a
 warning and allow closeout to continue without rolling back the landed commit.
-Review start, edits, checkpoints and handoff do not trigger Graphify updates.
+Review start, edits, checkpoints and review preparation do not trigger Graphify updates.
 
 Graphify's installed Git hooks are not a substitute for this operation: the
 post-commit hook launches a detached rebuild and skips linked worktrees, so its
@@ -329,7 +329,7 @@ Rebase recovery uses the database-assigned Mission implementer even before a
 review round exists. Missing identity or an unreadable database stops recovery;
 replayed task files cannot replace that identity.
 
-Handoff publishes with the actual implementer's credentials and stops if the
+Review preparation publishes with the actual implementer's credentials and stops if the
 Mission and review disagree about that identity. Missing implementer credentials
 cannot be replaced with reviewer or owner credentials. Supported implementer
 reassignment preserves the existing open PR, including its number, discussion
@@ -434,8 +434,8 @@ preserves the original approval and issues no restoration approval.
 
 An agent's child CLI can record its assigned evidence and review verdict, but
 cannot start or resume a review workflow under inherited authority. It returns
-to the parent workflow, which owns handoff and reviewer launch. This prevents a
-nested review from leaving a stop behind for the parent's later handoff.
+to the parent workflow, which owns review preparation and reviewer launch. This prevents a
+nested review from leaving a stop behind for the parent's later review preparation.
 
 A retained reviewer-launch failure stops automatic review entry before another
 reviewer is launched. The diagnostic names the cause and operator continuation.
@@ -450,7 +450,7 @@ review attempt, including when the previous round limit was exhausted. After
 approval, run `px integrate <slug>` to continue integration. Repair budgets and
 mandatory gates still apply; a failed gate never counts as approval. An interrupted
 repair resumes the implementer even with unfinished checkpoints. Checkpoint
-evidence is required before leaving active work for reviewer handoff.
+evidence is required before leaving active work for reviewer review preparation.
 
 Direct operator `px review` also acknowledges
 a retained invalid-contract stop for the mission in the current worktree.
@@ -490,27 +490,36 @@ operator correction, its evidence, identity and time. Clearing resumes work at
 the first unfinished planned checkpoint. It records no Goal Check rows, completes
 no criteria and certifies no gate. Inspect `px checkpoint check --json` for the
 remaining evidence obligations; fresh repair proof and the original required
-checks are still owed before handoff. Independent review and approval remain
+checks are still owed before review preparation. Independent review and approval remain
 required.
 
 Acknowledgment supplies no repair evidence, verification or approval. Retained
 failure diagnostics, fresh checkpoint evidence and successful reruns of the
 original required checks are still required; a newly reported blocker stops
-recovery again. Successful repair automatically performs the required handoff
+recovery again. Successful repair automatically performs the required review preparation
 and resumes normal review without another continuation command. Integration
 remains an explicit operator action.
 
-Before verification and rebase, handoff automatically commits tracked and
+Review entry records the review stage before preparation, Git or verification.
+It does not yet submit a Review or grant approval. Implementation or testing-evidence
+failures return to active with concrete checkpoint work for bounded automatic
+repair. Infrastructure and human authority failures retain their diagnostic.
+A human-only attention item can have no automatic Run action: inspect its recorded
+guidance, complete manual work and `px` paperwork in active, then use `px review`.
+Existing checkpoint correction and explicit operator resume still apply; required
+checks and independent review remain required.
+
+Before verification and rebase, review preparation automatically commits tracked and
 untracked changes in the selected mission worktree, including edits left by a
 repair agent. A clean worktree creates no commit. Conflicts or Git status,
-staging or commit failures stop handoff; resolve the reported Git error in that
+staging or commit failures stop review preparation; resolve the reported Git error in that
 worktree before retrying. Verification proof must still match the committed
 candidate, and checkpoint evidence and completed criteria remain required.
 
 From the mission worktree, run `px review` to enter review. It creates the first
-Review through handoff for a known Mission, or resumes its recorded round,
+Review prepares a known Mission or resumes its recorded round,
 intervention or unfinished repair. Web review actions select that mission
-worktree automatically. Handoff
+worktree automatically. Review preparation
 still requires completed success criteria and checkpoint evidence; entering
 review supplies neither evidence nor approval. Use `--status` to inspect the
 recorded Review and enabled provider PR status without running the workflow. `--start`, `--continue` and the stop-only `--resume`

@@ -1,3 +1,4 @@
+import { ActivityRecorderFixture } from '../../fixtures/execution-activity.js';
 import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { EventEmitter } from 'node:events';
@@ -9,7 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp } from '../../helpers/temp-dir.js';
 import { captureMissionCommand, hostMissionCommand, correlateMissionCapture, hostWorkflowExecutor } from '../../../src/composition/mission-terminal.js';
-import { CurrentWorkRecorder, currentWorkPublication } from '../../../src/application/recording/current-work-recorder.js';
+import { executionActivityIntent } from '../../../src/application/recording/execution-activity-recorder.js';
 import { createMissionTerminalResources } from '../../../src/adapters/cli/commands/mission-terminal-resources.js';
 import { missionSocketPath } from '../../../src/adapters/process/tmux-host.js';
 import { readProcessStat, runNativeStartIdentity } from '../../../src/adapters/process/process-liveness.js';
@@ -41,13 +42,13 @@ test('mission terminal host honours the configured pipe override before probing 
 test('a pipe-executed mission operation is retained as one attributed, partial-capture history record (TASK-2749)', async () => {
   const root = mkdtemp('px-mission-terminal-capture-');
   const configuration = resolveConfiguration({});
-  const recorder = new CurrentWorkRecorder({ append: async () => {}, list: async () => [] } as never, {
+  const recorder = new ActivityRecorderFixture({ append: async () => {}, list: async () => [] } as never, {
     onPublication: work => correlateMissionCapture(root, configuration, work),
   });
   const code = await captureMissionCommand('active', ['task-999999.7'], root, configuration, async () => {
-    const foreign = currentWorkPublication({ slug: 'task-other', operationId: 'foreign', phase: 'execute', summary: 'other Mission' })!;
+    const foreign = executionActivityIntent({ slug: 'task-other', operationId: 'foreign', phase: 'execute', summary: 'other Mission' })!;
     await recorder.running(foreign);
-    const work = currentWorkPublication({ slug: 'task-999999.7', operationId: 'existing-work-operation', phase: 'execute', summary: 'coordinator work' })!;
+    const work = executionActivityIntent({ slug: 'task-999999.7', operationId: 'existing-work-operation', phase: 'execute', summary: 'coordinator work' })!;
     await recorder.running(work);
     await recorder.ended(work);
     process.stdout.write('HARNESS-PREFLIGHT-LINE\n');

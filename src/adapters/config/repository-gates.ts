@@ -5,7 +5,7 @@ import { verificationEnvironment } from './verification-environment.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 // Repository-configured lifecycle gates.
 //
-// Generic, language-neutral gate execution for the pre-handoff, pre-review,
+// Generic, language-neutral gate execution for the pre-review preparation, pre-review,
 // and pre-integration phases. Gates are declared per repository in
 // `workflow.config.json` under `adapters.gates`; they are disabled by default,
 // so a repository that does not declare them runs no lifecycle gate.
@@ -29,7 +29,7 @@ import { loadEffectiveConfig, loadWorkflowConfig, resolveCanonicalGateResources,
 export const GATE_PHASES = ['handoff', 'review', 'integration'] as const;
 export type GatePhase = (typeof GATE_PHASES)[number];
 export type GateLog = (message: string) => void;
-type ConfigPhase = 'preHandoff' | 'preReview' | 'preIntegration';
+type ConfigPhase = "preHandoff" | 'preReview' | 'preIntegration';
 interface GateConfiguration {
   preHandoff?: unknown; preReview?: unknown; preIntegration?: unknown;
   requirePreIntegration?: unknown; parallel?: Partial<Record<ConfigPhase, number | 'unlimited'>>;
@@ -54,7 +54,7 @@ const EMPTY_GATES: RepositoryGates = {
  * unconfigured repository runs no gate for that phase.
  */
 /** @param {'preHandoff'|'preReview'|'preIntegration'} phase */
-export function loadPhaseGates(rootDir: string, phase: 'preHandoff' | 'preReview' | 'preIntegration'): RepositoryGate[] {
+export function loadPhaseGates(rootDir: string, phase: "preHandoff" | 'preReview' | 'preIntegration'): RepositoryGate[] {
   const declared = loadWorkflowConfig(rootDir || process.cwd());
   const gateIssues = validateRepositoryGates((declared.config as { adapters?: unknown } | null)?.adapters);
   if (gateIssues.length > 0) { throw new Error(gateIssues.join('; ')); }
@@ -135,7 +135,7 @@ export type GateCommandRunner = (
 ) => { status: number | null, stdout: string, stderr: string, signal?: string | null } | Promise<{ status: number | null, stdout: string, stderr: string, signal?: string | null }>;
 
 /** Read a phase's opt-in concurrency limit; serial is the default. */
-export function loadPhaseGateParallelism(rootDir: string, phase: 'preHandoff' | 'preReview' | 'preIntegration'): number {
+export function loadPhaseGateParallelism(rootDir: string, phase: "preHandoff" | 'preReview' | 'preIntegration'): number {
   const parallel = (loadEffectiveConfig(rootDir || process.cwd()).adapters as { gates?: GateConfiguration } | undefined)?.gates?.parallel?.[phase];
   if (parallel === 'unlimited') { return Infinity; }
   return Number.isInteger(parallel) && (parallel as number) >= 2 ? parallel as number : 1;
@@ -257,7 +257,7 @@ function phaseExecutionState(phase: GatePhase, opts: PhaseGateOptions, gates: Re
 
   const { slug, checkoutPath } = opts;
 
-  // Execute through `bash -c`, the same shell mechanism the handoff declared
+  // Execute through `bash -c`, the same shell mechanism the review preparation declared
   // gate runner and the integration gate use, so configured commands may be
   // arbitrary shell (pipelines, redirects, `./scripts/...`), not just bare
   // executables. No new runner or shell language is introduced. The default
@@ -468,6 +468,6 @@ function skippedPhaseGateResult(phase: GatePhase, gates: RepositoryGate[], dryRu
 }
 
 /** @param {GatePhase} phase */
-function toConfigPhase(phase: GatePhase): 'preHandoff' | 'preReview' | 'preIntegration' {
-  return ({ handoff: 'preHandoff', review: 'preReview', integration: 'preIntegration' } as const)[phase];
+function toConfigPhase(phase: GatePhase): "preHandoff" | 'preReview' | 'preIntegration' {
+  return ({ handoff: "preHandoff", review: 'preReview', integration: 'preIntegration' } as const)[phase];
 }

@@ -267,7 +267,7 @@ describe('SQLite Mission aggregate integration', () => {
           'reproduction_test',
           'predicted_nel_bucket',
           'description',
-          'next_success_criterion_id',
+          'next_success_criterion_id', 'review_preparation_pending',
         ],
       );
       assert.ok(!columns.some(({ name }) => ['labels', 'checkpoints', 'review'].includes(name)));
@@ -979,9 +979,9 @@ it('preserves unknown legacy decided revisions through migration and subsequent 
   const database = await openDatabase();
   try {
     const migrations = loadDefaultMigrations();
-    await new SqliteMigrationRunner(database).applyPending(migrations.filter(m => !m.id.startsWith('0039')));
+    await new SqliteMigrationRunner(database).applyPending(migrations.filter(m => m.id !== '0039-review-decided-revision'));
     const mission = completeMission();
-    await database.execute(migrations.find(m => m.id.startsWith('0039'))!.up);
+    await database.execute(migrations.find(m => m.id === '0039-review-decided-revision')!.up);
     const store = new SqliteMissionStore(database);
     await store.save(mission, null);
     await database.execute('ALTER TABLE mission_review_rounds DROP COLUMN decided_revision');

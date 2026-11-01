@@ -13,7 +13,7 @@ const card = makeCard({
     goalCheck: [{ criterion: 'Header first', evidence: 'Disposable browser observation' }] }],
   currentWork: { operationId: 'header-fixture', phase: 'execute', summary: 'Fixture activity',
     agent: agentFamily('codex'), updatedAt: new Date().toISOString(), freshness: 'live' },
-  commands: [{ command: 'handoff', enabled: true, reason: null, targetLane: 'review' }],
+  commands: [{ command: 'review', enabled: true, reason: null, targetLane: 'review' }],
 });
 const board = makeProjection({ active: [card] });
 const availability = ['codex', 'claude'].map(family => ({ family: agentFamily(family), available: true, blockedForMs: 0 }));
@@ -50,14 +50,14 @@ try {
     await page.keyboard.press('Escape');
     assert.equal(await page.getByRole('dialog', { name: /Checkpoint evidence/ }).count(), 0);
     const response = page.waitForResponse(result => result.request().method() === 'POST');
-    await article.locator('[data-action-kind="handoff:record"]').click();
+    await article.locator('[data-action-kind="review:submit"]').click();
     assert.equal((await response).status(), 200);
     assert.equal(fixture.requests.length, 1);
     assert.equal((fixture.requests[0] as { missionId: string }).missionId, card.id);
     const screenshot = process.argv[2];
     if (screenshot) { await page.screenshot({ path: screenshot }); }
     console.log(JSON.stringify({ headerOffsetPx: box.y - bounds.y, selection: true,
-      draggable: true, checkpointOpenedAndClosed: true, handoffRequests: fixture.requests.length }));
+      draggable: true, checkpointOpenedAndClosed: true, reviewPreparationRequests: fixture.requests.length }));
   }
   console.log('PASS: five observation states; isolated browser assets and in-memory command endpoint only');
 } finally { await fixture.close(); }

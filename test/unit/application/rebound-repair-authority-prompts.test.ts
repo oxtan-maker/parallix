@@ -209,7 +209,7 @@ test('current capture identity wins over newer unrelated history and retains com
   });
   assert.equal(old.ok, true);
   const prompts: string[] = [];
-  await rebound({ kind: 'handoff-verification', error: 'Rebase failed before handoff. CURRENT_DIAGNOSTIC' }, {
+  await rebound({ kind: "review-preparation-verification", error: "Rebase failed before review preparation. CURRENT_DIAGNOSTIC" }, {
     slug: SLUG, worktree, implementer: 'codex', maxAttempts: 1,
     retainedFailure: { ...current.ref, captureComplete: false, truncatedFrom: 'stdout' },
     startAgent: async (_step, options) => {
@@ -242,7 +242,7 @@ for (const history of [false, true]) {
         stdout: 'unrelated old failure', stderr: '' });
     }
     const prompts: string[] = [];
-    await rebound({ kind: 'handoff-verification', error: 'Rebase failed before handoff. CURRENT_ANCESTRY' }, {
+    await rebound({ kind: "review-preparation-verification", error: "Rebase failed before review preparation. CURRENT_ANCESTRY" }, {
       slug: SLUG, worktree, implementer: 'codex', maxAttempts: 1,
       startAgent: async (_step, options) => {
         prompts.push(typeof options.prompt === 'function' ? options.prompt('codex') : options.prompt);

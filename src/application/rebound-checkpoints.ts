@@ -11,7 +11,7 @@ import { renderRepairPrompt } from './ports/repair-prompts.js';
 // encoding shared with continuation so legacy interrupted repairs stay resumable.
 const NON_GATE_COMMANDS = {
   'rebase-conflict': 'rebase-conflict',
-  'handoff-verification': 'px handoff',
+  'review-preparation-verification': 'review-preparation',
   'hook-failure': 'hook-failure',
   'artifact-incomplete': 'artifact-incomplete',
   'agent-timeout': 'agent-timeout',

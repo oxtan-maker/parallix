@@ -319,7 +319,7 @@ test('responsibility guard fails review progression in composition and interface
   withTempRoot(root => {
     writeModule(root, path.join('src', 'composition', 'resume.ts'), 'export const resume = (r: unknown) => beginNextReviewRound(r);\n');
     writeModule(root, path.join('src', 'interfaces', 'web', 'resume.ts'), 'export const go = () => lifecycle.transition({});\n');
-    writeModule(root, path.join('src', 'composition', 'first-entry.ts'), 'export const first = async (reviewLoop: Function) => { await handoff(); await reviewLoop({}, {}); };\n');
+    writeModule(root, path.join('src', 'composition', 'first-entry.ts'), "export const first = async (reviewLoop: Function) => { await reviewPreparation(); await reviewLoop({}, {}); };\n");
     assert.deepEqual(findEntryReviewProgressionViolations(root).map(violation => [violation.file, violation.rule, violation.actualOwner]), [
       [path.join('src', 'composition', 'first-entry.ts'), 'entry-owned-review-progression', 'composition'],
       [path.join('src', 'composition', 'resume.ts'), 'entry-owned-review-progression', 'composition'],

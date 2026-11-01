@@ -73,7 +73,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/forgejo/forgejo-publication-gate-failure-contract.test.ts',
   'integration/forgejo/forgejo-pr-round-sync.test.ts',
   'integration/forgejo/forgejo.test.ts',
-  'integration/mission/handoff.test.ts',
+  "integration/mission/review-preparation.test.ts",
   'integration/packaging/install.test.ts',
   // TASK-2622.17: packs the real tarball and installs it into disposable npm prefixes.
   'integration/packaging/npm-pack-install-smoke.test.ts',
@@ -81,7 +81,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/integrate/integrate.test.ts',
   'integration/verification/integration-pipelines.test.ts',
   'integration/mission/mission-cancel-contract.test.ts',
-  'integration/mission/mission-handoff-reconcile-contract.test.ts',
+  "integration/mission/mission-review-preparation-reconcile-contract.test.ts",
   'integration/mission/mission-utils-worktree.test.ts',
   'integration/agents/mistral.test.ts',
   'integration/integrate/nels.test.ts',
@@ -265,7 +265,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/rebase/rebase-approval-coverage.test.ts',
   // TASK-2582 / TASK-2322.05: real migrated SQLite lifecycle boundaries; CI-safe.
   'integration/sqlite/mission-use-case-persistence-contract.test.ts',
-  'integration/sqlite/mission-handoff-lane-events-contract.test.ts',
+  "integration/sqlite/mission-review-preparation-lane-events-contract.test.ts",
   'integration/integrate/workflow-repair-lane-boundaries.test.ts',
   // TASK-2514: real migrated SQLite lifecycle boundary for the human approve
   // after an active-state repair; CI-safe.

@@ -1,3 +1,5 @@
+import { SqliteExecutionActivityStore } from '../../../src/adapters/sqlite/execution-activity-store.js';
+import { repositoryId as domainRepositoryId } from '../../../src/domain/repository.js';
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -146,6 +148,11 @@ async function seedLegacyMission(
     'INSERT INTO operational_history (event_type, event_data, created_at) VALUES (?, ?, ?)',
     ['brief', JSON.stringify({ missionId: legacyId, repositoryId, message: `${legacyId}: brief`, criterion: 'c1' }), '2026-10-09T00:00:00Z'],
   );
+  await new SqliteExecutionActivityStore(db, domainRepositoryId(repositoryId)).publish({
+    missionId: domainMissionId(legacyId), operationId: `activity:${legacyId}`, phase: 'review', state: 'blocked',
+    summary: 'reserved decision', blockedReason: 'reserved decision', agent: null, processId: null,
+    occurredAt: '2026-10-09T00:00:00Z',
+  }, `activity:${legacyId}`);
   if (extra?.dependsOn) {
     await db.execute(
       'INSERT INTO mission_dependencies (mission_id, position, depends_on_mission_id) VALUES (?, 0, ?)',
@@ -211,11 +218,16 @@ describe('SQLite legacy adhoc id migration', () => {
         'mission_briefs',
         'board_lane_events',
         'session_markers',
+        'execution_activity',
       ] as const) {
         assert.equal(await childCount(database, table, 'parallix-adhoc-0004'), 0, `${table} still references old id`);
         assert.equal(await childCount(database, table, 'px-0001'), 1, `${table} lost the migrated row`);
       }
 
+      const snapshots = await new SqliteExecutionActivityStore(database, domainRepositoryId('repo-parallix')).loadMissionCurrentWork(domainMissionId('px-0001'));
+      assert.equal(snapshots.length, 1);
+      assert.equal(snapshots[0].missionId, 'px-0001');
+      assert.equal(snapshots[0].frames[0].event.missionId, 'px-0001');
       // The dependency self-trace moved with its mission; the foreign target
       // (a non-migrated task id) is left untouched.
       const deps = await database.query<{ mission_id: string; depends_on_mission_id: string }>(

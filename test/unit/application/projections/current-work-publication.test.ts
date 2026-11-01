@@ -1,3 +1,5 @@
+import { projectExecutionActivity } from '../../../../src/domain/execution-activity.js';
+import { projectActivityPublications, activityFixture, ActivityRecorderFixture } from '../../../fixtures/execution-activity.js';
 import { makeExecutePorts as completeExecuteFixture } from '../../../fixtures/execute-mission-ports.js';
 import { fixtureMission as completeMission } from '../../../fixtures/mission-builders.js';
 import { missionId as completeMissionId } from '../../../../src/domain/mission.js';
@@ -27,20 +29,19 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test, { describe } from 'node:test';
 import { setImmediate } from 'node:timers';
-import { ConcreteCurrentWorkReadAdapter } from '../../../../src/adapters/backlog/concrete-current-work-read-adapter.js';
 import type { BoardCommandRequest } from '../../../../src/application/controller/board-command.js';
 import { BoardCommandController } from '../../../../src/application/controller/board-controller.js';
 import { makeExecutePorts } from '../../../fixtures/execute-mission-ports.js';
 import { ExecuteMissionService } from '../../../../src/application/execute-mission-service.js';
 import { IntegrateCommandUseCase } from '../../../../src/application/integrate-command-use-case.js';
 import type { ExecuteMissionPorts } from '../../../../src/application/ports/execute-mission.js';
-type HandoffReviewRequest = { onAgentLaunched?: (_agent: string, _phase: 'review' | 'review-response') => Promise<void>; onAutonomousStop?: (_reason: string) => Promise<void> };
+type ReviewPreparationReviewRequest = { onAgentLaunched?: (_agent: string, _phase: 'review' | 'review-response') => Promise<void>; onAutonomousStop?: (_reason: string) => Promise<void> };
 import type { OperationalHistoryEntry } from '../../../../src/application/ports/operation-history.js';
 import type { ReviewWorkflowContext } from '../../../../src/application/ports/review-workflow.js';
 import { attentionReason } from '../../../../src/application/projections/board.js';
-import { reconcileCurrentWork, isWorkInProgress } from '../../../../src/application/projections/current-work.js';
-import { CURRENT_WORK_EVENT_TYPE, CurrentWorkRecorder, currentWorkEventToEntry, currentWorkPublication, parseCurrentWorkEntry, type AgentLaunchPhase } from '../../../../src/application/recording/current-work-recorder.js';
-import type { CurrentWorkPort } from '../../../../src/application/recording/current-work-recorder.js';
+import { isWorkInProgress } from '../../../../src/domain/execution-activity.js';
+import { EXECUTION_ACTIVITY_EVENT_TYPE, executionActivityToEntry, executionActivityIntent, parseExecutionActivityEntry, type AgentLaunchPhase } from '../../../../src/application/recording/execution-activity-recorder.js';
+import type { ExecutionActivityPort } from '../../../../src/application/recording/execution-activity-recorder.js';
 import { ReviewCommandUseCase } from '../../../../src/application/review-command-use-case.js';
 import { composeProductionCapabilities } from '../../../../src/composition/production-capabilities.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
@@ -59,7 +60,7 @@ import { resolveConfiguration } from '../../../../src/composition/config.js';
 
 /** Parsed current-work facts in publication order. */
 function published(appended: readonly OperationalHistoryEntry[]) {
-  return appended.flatMap((entry) => parseCurrentWorkEntry(entry) ?? []);
+  return appended.flatMap((entry) => parseExecutionActivityEntry(entry) ?? []);
 }
 
 function strictPorts(overrides: Record<string, unknown> = {}) {
@@ -87,7 +88,7 @@ function strictPorts(overrides: Record<string, unknown> = {}) {
       async saveWithTransition(next) { recordedMission = next; calls.push('lifecycle'); return completeVersion(2); },
     },
     telemetry: { async recordLaunchTelemetry() { calls.push('telemetry'); } },
-    handoffExecution: { ...makeExecutePorts().ports.handoffExecution, async run() { calls.push('handoff'); return { ok: true as const }; } },
+    reviewPreparationExecution: { ...makeExecutePorts().ports.reviewPreparationExecution, async run() { calls.push('handoff'); return { ok: true as const }; } },
   }).ports;
   return { ports: { ...parts, ...overrides }, calls };
 }
@@ -108,7 +109,7 @@ function executeRequest(overrides: Record<string, unknown> = {}) {
 
 test('a recorded current-work fact round-trips through the operational-history entry', async () => {
   const { repo, appended } = inMemoryOperationalHistory();
-  const recorder = new CurrentWorkRecorder(repo, { processId: 4242, now: () => new Date('2026-08-13T10:00:00.000Z') });
+  const recorder = new ActivityRecorderFixture(repo, { processId: 4242, now: () => new Date('2026-08-13T10:00:00.000Z') });
 
   await recorder.running({
     missionId: missionId('task-2370'),
@@ -119,8 +120,8 @@ test('a recorded current-work fact round-trips through the operational-history e
   });
 
   assert.equal(appended.length, 1);
-  assert.equal(appended[0].eventType, CURRENT_WORK_EVENT_TYPE);
-  assert.deepEqual(parseCurrentWorkEntry(appended[0]), {
+  assert.equal(appended[0].eventType, EXECUTION_ACTIVITY_EVENT_TYPE);
+  assert.deepEqual(parseExecutionActivityEntry(appended[0]), {
     missionId: completeMissionId('task-2370'),
     operationId: 'active:task-2370',
     phase: 'execute',
@@ -137,7 +138,7 @@ test('a recorded current-work fact round-trips through the operational-history e
 });
 
 test('a stored entry of another event type is never read as current work', () => {
-  assert.equal(parseCurrentWorkEntry({
+  assert.equal(parseExecutionActivityEntry({
     eventType: 'mission.activate',
     eventData: JSON.stringify({ missionId: completeMissionId('task-2370'), phase: 'execute', state: 'running' }),
     createdAt: '2026-08-13T10:00:00.000Z',
@@ -145,12 +146,12 @@ test('a stored entry of another event type is never read as current work', () =>
 });
 
 test('a malformed current-work payload is dropped rather than treated as running work', () => {
-  assert.equal(parseCurrentWorkEntry({
-    eventType: CURRENT_WORK_EVENT_TYPE,
+  assert.equal(parseExecutionActivityEntry({
+    eventType: EXECUTION_ACTIVITY_EVENT_TYPE,
     eventData: 'not json',
     createdAt: '2026-08-13T10:00:00.000Z',
   }), null);
-  assert.equal(parseCurrentWorkEntry(currentWorkEventToEntry({
+  assert.equal(parseExecutionActivityEntry(executionActivityToEntry({
     missionId: missionId('task-2370'),
     operationId: 'op',
     phase: 'execute',
@@ -164,9 +165,9 @@ test('a malformed current-work payload is dropped rather than treated as running
 });
 
 test('publication of a non-mission slug is skipped instead of throwing into the command', () => {
-  assert.equal(currentWorkPublication({ slug: 'notaslug', operationId: 'op', phase: 'execute', summary: 's' }), null);
+  assert.equal(executionActivityIntent({ slug: 'notaslug', operationId: 'op', phase: 'execute', summary: 's' }), null);
   assert.equal(
-    currentWorkPublication({ slug: 'task-2370', operationId: 'op', phase: 'execute', summary: 's', agent: 'Not A Family' })?.agent,
+    executionActivityIntent({ slug: 'task-2370', operationId: 'op', phase: 'execute', summary: 's', agent: 'Not A Family' })?.agent,
     null,
   );
 });
@@ -175,24 +176,24 @@ test('publication of a non-mission slug is skipped instead of throwing into the 
 // Execute: launch, family handoff, handoff phase, completion
 // ---------------------------------------------------------------------------
 
-test('an execute run publishes execute work, then handoff work, then clears it', async () => {
+test("an execute run publishes execute work, then review preparation work, then clears it", async () => {
   const { repo, appended } = inMemoryOperationalHistory();
   const { ports } = strictPorts();
-  const outcome = await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 }))
+  const outcome = await new ExecuteMissionService(ports, undefined, new ActivityRecorderFixture(repo, { processId: 7 }))
     .execute(executeRequest());
 
   assert.equal(outcome.status, 'completed', JSON.stringify(outcome));
   const facts = published(appended);
   assert.deepEqual(facts.map((fact) => [fact.phase, fact.state]), [
     ['execute', 'running'],
-    ['handoff', 'running'],
+    ['review', 'running'],
     ['execute', 'ended'],
   ]);
   assert.ok(facts.every((fact) => fact.missionId === 'task-2370'), 'every fact belongs to the same mission');
   assert.ok(facts.every((fact) => fact.processId === 7), 'each fact names the publishing process for reconciliation');
 });
 
-test('an automatic family handoff updates the same mission current work and creates no second identity', async () => {
+test("an automatic family review preparation updates the same mission current work and creates no second identity", async () => {
   const { repo, appended } = inMemoryOperationalHistory();
   // The launcher hits a usage block on claude and continues with qwen inside
   // the same call — exactly what startAgent's retry loop does today.
@@ -207,7 +208,7 @@ test('an automatic family handoff updates the same mission current work and crea
     },
   });
 
-  const outcome = await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 }))
+  const outcome = await new ExecuteMissionService(ports, undefined, new ActivityRecorderFixture(repo, { processId: 7 }))
     .execute(executeRequest());
 
   assert.equal(outcome.status, 'completed', JSON.stringify(outcome));
@@ -216,7 +217,7 @@ test('an automatic family handoff updates the same mission current work and crea
   assert.equal(new Set(published(appended).map((fact) => fact.missionId)).size, 1);
   assert.ok(
     published(appended).every((fact) => fact.state !== 'blocked'),
-    'an autonomous handoff never publishes a blocked fact',
+    "an autonomous review preparation never publishes a blocked fact",
   );
 });
 
@@ -231,7 +232,7 @@ test('an execute run that cannot finish publishes blocked work carrying the reas
     },
   });
 
-  const outcome = await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 }))
+  const outcome = await new ExecuteMissionService(ports, undefined, new ActivityRecorderFixture(repo, { processId: 7 }))
     .execute(executeRequest());
 
   assert.equal(outcome.status, 'failed');
@@ -259,10 +260,10 @@ test('a recorder outage never turns a completed execute run into a failure', asy
 test('publishing current work remains isolated from the activation write', async () => {
   const { repo, appended } = inMemoryOperationalHistory();
   const { ports, calls } = strictPorts();
-  await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 })).execute(executeRequest());
+  await new ExecuteMissionService(ports, undefined, new ActivityRecorderFixture(repo, { processId: 7 })).execute(executeRequest());
 
-  assert.ok(appended.every((entry) => entry.eventType === CURRENT_WORK_EVENT_TYPE));
-  assert.deepEqual(calls, ['lifecycle', 'launch', 'lifecycle', 'safety', 'telemetry', 'handoff']);
+  assert.ok(appended.every((entry) => entry.eventType === EXECUTION_ACTIVITY_EVENT_TYPE));
+  assert.deepEqual(calls, ['lifecycle', 'launch', 'lifecycle', 'safety', 'telemetry', 'lifecycle', 'handoff']);
 });
 
 // ---------------------------------------------------------------------------
@@ -291,7 +292,7 @@ function makeReviewWorkflow(ran: string[]) {
 test('px review brackets the review loop with review-phase current work', async () => {
   const { repo, appended } = inMemoryOperationalHistory();
   const ran: string[] = [];
-  await new ReviewCommandUseCase(makeReviewWorkflow(ran), new CurrentWorkRecorder(repo, { processId: 9 }))
+  await new ReviewCommandUseCase(makeReviewWorkflow(ran), new ActivityRecorderFixture(repo, { processId: 9 }))
     .execute(['task-2370']);
 
   assert.deepEqual(ran, ['enter']);
@@ -311,7 +312,7 @@ test('px review republishes current work with the family that actually launched'
       if (typeof launched === 'function') { await launched('custom', 'review'); }
     },
   } satisfies NonNullable<ConstructorParameters<typeof ReviewCommandUseCase>[0]>;
-  await new ReviewCommandUseCase(workflow, new CurrentWorkRecorder(repo, { processId: 9 }))
+  await new ReviewCommandUseCase(workflow, new ActivityRecorderFixture(repo, { processId: 9 }))
     .execute(['task-2370']);
 
   assert.deepEqual(published(appended).map((fact) => [fact.phase, fact.agent, fact.state]), [
@@ -324,7 +325,7 @@ test('px review republishes current work with the family that actually launched'
 test('a short review read publishes no current work', async () => {
   const { repo, appended } = inMemoryOperationalHistory();
   const ran: string[] = [];
-  await new ReviewCommandUseCase(makeReviewWorkflow(ran), new CurrentWorkRecorder(repo, { processId: 9 }))
+  await new ReviewCommandUseCase(makeReviewWorkflow(ran), new ActivityRecorderFixture(repo, { processId: 9 }))
     .execute(['task-2370', '--status']);
 
   assert.deepEqual(ran, ['status']);
@@ -338,7 +339,7 @@ test('a failing review operation stops claiming work and keeps its reason', asyn
     enter: async () => { throw new Error('review loop failed'); },
   } satisfies NonNullable<ConstructorParameters<typeof ReviewCommandUseCase>[0]>;
   await assert.rejects(
-    new ReviewCommandUseCase(workflow, new CurrentWorkRecorder(repo, { processId: 9 })).execute(['task-2370']),
+    new ReviewCommandUseCase(workflow, new ActivityRecorderFixture(repo, { processId: 9 })).execute(['task-2370']),
     /review loop failed/,
   );
   // The mission stops being WORKING either way; publishing `blocked` keeps the
@@ -357,7 +358,7 @@ test('px integrate brackets the run with integrate-phase current work', async ()
   let ran = 0;
   const outcome = await new IntegrateCommandUseCase(
     { execute: async () => { ran += 1; return 'merged'; } },
-    new CurrentWorkRecorder(repo, { processId: 11 }),
+    new ActivityRecorderFixture(repo, { processId: 11 }),
   ).execute(['task-2370']);
 
   assert.equal(ran, 1);
@@ -373,7 +374,7 @@ test('px integrate without a slug publishes for the adapter-inferred mission', a
   let ran = 0;
   await new IntegrateCommandUseCase(
     { execute: async () => { ran += 1; return null; } },
-    new CurrentWorkRecorder(repo, { processId: 11 }),
+    new ActivityRecorderFixture(repo, { processId: 11 }),
     () => 'task-2370',
   ).execute(['--dry-run']);
 
@@ -399,12 +400,12 @@ describe("Workflow current work follows launches —", () => {
   const MISSION = missionId(SLUG);
 
   function published(appended: readonly OperationalHistoryEntry[]) {
-    return appended.flatMap((entry) => parseCurrentWorkEntry(entry) ?? []);
+    return appended.flatMap((entry) => parseExecutionActivityEntry(entry) ?? []);
   }
 
   /** What the board would show for the mission after the given publications. */
   function boardState(appended: readonly OperationalHistoryEntry[], nowMs = Date.now()) {
-    const facts = reconcileCurrentWork(published(appended), { nowMs, ttlMs: 5 * 60_000, isProcessAlive: () => true })
+    const facts = projectActivityPublications(published(appended), { nowMs, ttlMs: 5 * 60_000, isProcessAlive: () => true })
       .get(MISSION) ?? { currentWork: null, blockingReason: null };
     return {
       working: isWorkInProgress(facts.currentWork),
@@ -455,7 +456,7 @@ describe("Workflow current work follows launches —", () => {
   /** A handoff/review port that replays a scripted sequence of agent launches. */
   function scriptedReviewLoop(rounds: readonly (readonly [string, AgentLaunchPhase])[], observe?: () => void) {
     return {
-      async start(request: HandoffReviewRequest) {
+      async start(request: ReviewPreparationReviewRequest) {
         for (const [agent, phase] of rounds) {
           await request.onAgentLaunched?.(agent, phase);
           observe?.();
@@ -469,7 +470,7 @@ describe("Workflow current work follows launches —", () => {
   // SC2, SC3 — current work follows the review loop, not the original handoff
   // ---------------------------------------------------------------------------
 
-  test('SC2: current work follows reviewer and implementer launches after handoff instead of the original implementer', async () => {
+  test("SC2: current work follows reviewer and implementer launches after review preparation instead of the original implementer", async () => {
     const { repo, appended } = inMemoryOperationalHistory({ assignIds: true });
     const observed: { agent: import("../../../../src/domain/agents.js").AgentFamily | null; phase: string | null; working: boolean; }[] = [];
     const ports = strictPorts({
@@ -482,7 +483,7 @@ describe("Workflow current work follows launches —", () => {
       ),
     });
 
-    const outcome = await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 }))
+    const outcome = await new ExecuteMissionService(ports, undefined, new ActivityRecorderFixture(repo, { processId: 7 }))
       .execute(executeRequest());
 
     assert.equal(outcome.status, 'completed', JSON.stringify(outcome));
@@ -498,13 +499,13 @@ describe("Workflow current work follows launches —", () => {
     const ports = strictPorts({
       autonomousReview: scriptedReviewLoop([['qwen', 'review'], ['claude', 'review-response']]),
     });
-    await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 })).execute(executeRequest());
+    await new ExecuteMissionService(ports, undefined, new ActivityRecorderFixture(repo, { processId: 7 })).execute(executeRequest());
 
     assert.deepEqual(
       published(appended)
         .filter((fact) => fact.phase === 'review' || fact.phase === 'review-response')
         .map((fact) => [fact.phase, fact.agent, fact.state]),
-      [['review', 'qwen', 'running'], ['review-response', 'claude', 'running']],
+      [['review', null, 'running'], ['review', 'qwen', 'running'], ['review-response', 'claude', 'running']],
     );
   });
 
@@ -521,7 +522,7 @@ describe("Workflow current work follows launches —", () => {
         () => { seen.push(`${boardState(appended).phase}:${boardState(appended).agent}`); },
       ),
     });
-    await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 })).execute(executeRequest());
+    await new ExecuteMissionService(ports, undefined, new ActivityRecorderFixture(repo, { processId: 7 })).execute(executeRequest());
 
     assert.deepEqual(seen, [
       'review:qwen', 'review-response:claude',
@@ -541,7 +542,7 @@ describe("Workflow current work follows launches —", () => {
     await new ExecuteMissionService(
       strictPorts({ autonomousReview: scriptedReviewLoop([['qwen', 'review']]) }),
       undefined,
-      new CurrentWorkRecorder(viaActive.repo, { processId: 7 }),
+      new ActivityRecorderFixture(viaActive.repo, { processId: 7 }),
     ).execute(executeRequest());
 
     const viaReview = inMemoryOperationalHistory({ assignIds: true });
@@ -556,7 +557,7 @@ describe("Workflow current work follows launches —", () => {
       submitReview: operation(), close: operation(),
       status: operation(),
       reconcileReview: operation(),
-    }, new CurrentWorkRecorder(viaReview.repo, { processId: 7 })).execute([SLUG]);
+    }, new ActivityRecorderFixture(viaReview.repo, { processId: 7 })).execute([SLUG]);
 
     const launchFact = (entries: readonly OperationalHistoryEntry[]) =>
       published(entries).filter((fact) => fact.agent === 'qwen').map((fact) => [fact.phase, fact.agent, fact.summary]);
@@ -611,7 +612,7 @@ describe("Workflow current work follows launches —", () => {
       autonomousReview: scriptedReviewLoop([['qwen', 'review']], () => { timeline.push(boardState(appended)); }),
     });
 
-    const outcome = await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 }))
+    const outcome = await new ExecuteMissionService(ports, undefined, new ActivityRecorderFixture(repo, { processId: 7 }))
       .execute(executeRequest());
 
     assert.equal(outcome.status, 'completed', JSON.stringify(outcome));
@@ -622,9 +623,9 @@ describe("Workflow current work follows launches —", () => {
 
   test('SC7: a delayed current-work publication lands before the next state is read', async () => {
     const { repo, appended } = inMemoryOperationalHistory({ assignIds: true });
-    const slowRecorder = new CurrentWorkRecorder(repo, { processId: 7 });
+    const slowRecorder = new ActivityRecorderFixture(repo, { processId: 7 });
     const delayed = {
-      async running(publication: Parameters<CurrentWorkRecorder['running']>[0]) {
+      async running(publication: Parameters<ActivityRecorderFixture['running']>[0]) {
         // Defer to the next event-loop turn so a missing await remains visible,
         // without a fixed timer delay. A resolved promise can complete before
         // the caller observes the board even when publication is not awaited.
@@ -654,7 +655,7 @@ describe("Workflow current work follows launches —", () => {
 
 // ── Board-launched current work — TASK-2387 (was task-2387-board-current-work.test.ts) ──
 describe("Board-launched current work —", () => {
-  const CURRENT_WORK_TTL_MS = 5 * 60 * 1000;
+  const ACTIVITY_OBSERVATION_TTL_MS = 5 * 60 * 1000;
 
   function boardRequest(overrides: Record<string, unknown> = {}): BoardCommandRequest {
     return {
@@ -669,8 +670,8 @@ describe("Board-launched current work —", () => {
     } as BoardCommandRequest;
   }
 
-  /** A CurrentWorkPort that records every call for assertions. */
-  function spyCurrentWork(): CurrentWorkPort & { calls: Array<{ phase: string; state: string }> } {
+  /** A ExecutionActivityPort that records every call for assertions. */
+  function spyCurrentWork(): ExecutionActivityPort & { calls: Array<{ phase: string; state: string }> } {
     const calls: Array<{ phase: string; state: string }> = [];
     return {
       calls,
@@ -753,7 +754,7 @@ describe("Board-launched current work —", () => {
   test('production composition delivers a board controller that publishes to the wired recorder', async () => {
     const { ports } = makeExecutePorts();
     const { repo } = inMemoryOperationalHistory();
-    const recorder = new CurrentWorkRecorder(repo, { processId: 2387 });
+    const recorder = new ActivityRecorderFixture(repo, { processId: 2387 });
     const missionStore = {
       ...inMemoryTransitionStore(fixtureMission('task-fixture', { status: 'refined' })),
       async recordNel(): Promise<never> { throw new Error('Unexpected NEL write'); },
@@ -787,14 +788,16 @@ describe("Board-launched current work —", () => {
     assert.equal(result.status, 'completed');
     assert.ok(progressEvents.includes('dispatch'), 'the TUI progress sink receives controller events');
 
-    const events = await new ConcreteCurrentWorkReadAdapter(repo).loadCurrentWork();
-    // loadCurrentWork already parses the events into CurrentWorkEvent facts.
-    const states = events.map((event) => event.state);
+    const events = await activityFixture(repo).loadCurrentWork();
+    // loadCurrentWork already parses the events into ExecutionActivity facts.
+    const states = (await repo.findAll()).flatMap(entry => parseExecutionActivityEntry(entry) ?? []).map(event => event.state);
     // The production recorder is the value composition received: a completed board
     // launch writes running/ended facts to the operational-history authority it owns.
     assert.ok(states.includes('running'), 'the production recorder received a running fact');
     assert.ok(states.includes('ended'), 'the production recorder received an ended fact');
-    assert.equal(events.length, 3, 'a completed launch publishes running, running, ended');
+    assert.equal(states.length, 3, 'a completed launch audits running, running, ended');
+    assert.equal(events.length, 1, 'only one checked snapshot is current');
+    assert.equal(events[0].frames.length, 0, 'completed activity has no running frames');
   });
 
   // ---------------------------------------------------------------------------
@@ -803,7 +806,7 @@ describe("Board-launched current work —", () => {
 
   test('a board-launched agent surfaces in the WORKING projection and clears on completion', async () => {
     const { repo } = inMemoryOperationalHistory();
-    const recorder = new CurrentWorkRecorder(repo, { processId: 999 });
+    const recorder = new ActivityRecorderFixture(repo, { processId: 999 });
     const controller = new BoardCommandController(makeExecutePorts().ports, undefined, {}, recorder);
 
     // A live launch lands a running fact; the projection grades it WORKING.
@@ -814,9 +817,9 @@ describe("Board-launched current work —", () => {
       summary: 'running execute agent',
       agent: agentFamily('codex'),
     });
-    const working = await reconcileCurrentWork(
-      await new ConcreteCurrentWorkReadAdapter(repo).loadCurrentWork(),
-      { nowMs: Date.now(), ttlMs: CURRENT_WORK_TTL_MS },
+    const working = await projectExecutionActivity(
+      await activityFixture(repo).loadCurrentWork(),
+      { nowMs: Date.now(), ttlMs: ACTIVITY_OBSERVATION_TTL_MS },
     );
     const workingFact = working.get(missionId('task-2387'));
     assert.ok(isWorkInProgress(workingFact?.currentWork), 'a live launch surfaces as WORKING');
@@ -826,9 +829,9 @@ describe("Board-launched current work —", () => {
     const result = await controller.dispatch(boardRequest());
     assert.equal(result.status, 'completed');
 
-    const cleared = await reconcileCurrentWork(
-      await new ConcreteCurrentWorkReadAdapter(repo).loadCurrentWork(),
-      { nowMs: Date.now(), ttlMs: CURRENT_WORK_TTL_MS },
+    const cleared = await projectExecutionActivity(
+      await activityFixture(repo).loadCurrentWork(),
+      { nowMs: Date.now(), ttlMs: ACTIVITY_OBSERVATION_TTL_MS },
     );
     const clearedFact = cleared.get(missionId('task-2387'));
     assert.equal(clearedFact?.currentWork, null, 'an ended fact clears the WORKING projection');
@@ -848,15 +851,15 @@ describe("Board-launched current work —", () => {
       }).ports,
       undefined,
       {},
-      new CurrentWorkRecorder(repo, { processId: 1000 }),
+      new ActivityRecorderFixture(repo, { processId: 1000 }),
     );
 
     const result = await controller.dispatch(boardRequest());
     assert.equal(result.status, 'failed');
 
-    const facts = await reconcileCurrentWork(
-      await new ConcreteCurrentWorkReadAdapter(repo).loadCurrentWork(),
-      { nowMs: Date.now(), ttlMs: CURRENT_WORK_TTL_MS },
+    const facts = await projectExecutionActivity(
+      await activityFixture(repo).loadCurrentWork(),
+      { nowMs: Date.now(), ttlMs: ACTIVITY_OBSERVATION_TTL_MS },
     );
     const fact = facts.get(missionId('task-2387'));
     assert.equal(fact?.currentWork, null, 'a blocked run is no longer WORKING');
@@ -871,12 +874,12 @@ describe("Board-launched current work —", () => {
     const { ports } = makeExecutePorts();
     const { repo } = inMemoryOperationalHistory();
     // No current-work argument supplied: the controller falls back to the
-    // NO_CURRENT_WORK_PORT default for read-only shells and test fixtures.
+    // NO_EXECUTION_ACTIVITY default for read-only shells and test fixtures.
     const controller = new BoardCommandController(ports);
 
     await controller.dispatch(boardRequest());
 
-    const events = await new ConcreteCurrentWorkReadAdapter(repo).loadCurrentWork();
+    const events = await activityFixture(repo).loadCurrentWork();
     assert.equal(events.length, 0, 'a launched agent publishes nothing when the recorder is the no-op default');
   });
 });

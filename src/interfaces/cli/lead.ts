@@ -106,7 +106,7 @@ async function runDryRun(
   }
   for (const item of queue) {
     logFn(fmt.status('INFO', `${fmt.slug(item.missionId)} — lane ${item.lane}; `
-      + `${attentionDetail(item.reason)}; board offers ${item.action.display}`));
+      + `${attentionDetail(item.reason)}; board offers ${item.action?.display ?? 'operator attention'}`));
   }
 }
 
@@ -155,7 +155,7 @@ export function createLeadCommand(
         keepWatching: !once,
         pollMs,
         ...(missions.length > 0 ? { missions } : {}),
-        // Report changes, not every poll: a human integration handoff can sit
+        // Report changes, not every poll: a mission awaiting human integration can sit
         // unchanged for hours without spamming the terminal.
         onPass: (pass, board) => {
           const signature = board.map((result) => `${result.missionId}|${result.outcome}|${result.summary}`).join('\n');
@@ -177,8 +177,8 @@ export function createLeadCommand(
 
       let escalated = 0;
       for (const result of results) {
-        // Only an escalation needs its evidence printed: it is the handoff to a
-        // human, and a summary without what was observed is not a handoff.
+        // Only an escalation needs its evidence printed: the human needs
+        // the observations supporting the escalation.
         if (result.outcome !== 'escalated') { continue; }
         escalated += 1;
         logFn(formatSupervision(result));

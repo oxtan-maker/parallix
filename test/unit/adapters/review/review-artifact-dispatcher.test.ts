@@ -365,7 +365,7 @@ test('artifact recovery persists no retry state anywhere', async () => {
   const fake = fakeReviewLoopPorts({
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: false as const, diagnostic: 'Reviewer artifacts incomplete: still incomplete' }) },
   });
-  await runReviewLoop({ slug: 'test-slug', implementer: 'claude', reviewer: 'codex', maxAttempts: 1, skipHandoff: true }, fake.ports);
+  await runReviewLoop({ slug: 'test-slug', implementer: 'claude', reviewer: 'codex', maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
 
   assert.deepEqual(fake.stops, ['REVIEWER_ARTIFACT_RETRY_EXHAUSTED']);
   assert.ok(fake.writes.every(state => Object.keys((state.metadata ?? {}) as object).every(key => !/retry|attempt/i.test(key))),

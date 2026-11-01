@@ -112,20 +112,21 @@ export interface ReviewTaskMirrorPort {
 }
 
 /* ------------------------------------------------------------------ *
- * Handoff
+ * ReviewPreparation
  * ------------------------------------------------------------------ */
 
-/** What the handoff mechanism observed. */
-export interface HandoffFacts {
+/** What the review preparation mechanism observed. */
+export interface ReviewPreparationFacts {
   readonly ok?: boolean;
+  /** True only while gatekeeper pushback remains unresolved and blocks review. */
   readonly gatekeeperPushedBack?: boolean;
   readonly reason?: string;
   readonly recoveryAttempted?: boolean;
   readonly error?: unknown;
 }
 
-export interface ReviewHandoffPort {
-  handoff(_implementer: string): Promise<HandoffFacts | null | undefined>;
+export interface ReviewReviewPreparationPort {
+  reviewPreparation(_implementer: string): Promise<ReviewPreparationFacts | null | undefined>;
 }
 
 /* ------------------------------------------------------------------ *
@@ -375,7 +376,7 @@ export interface ReviewLoopPorts {
   readonly polling: { readonly intervalMs: number; readonly timeoutMs: number };
   readonly state: ReviewStatePort;
   readonly task: ReviewTaskMirrorPort;
-  readonly handoff: ReviewHandoffPort | null;
+  readonly reviewPreparation: ReviewReviewPreparationPort | null;
   readonly provider: ReviewProviderPort | null;
   readonly humanFeedback: HumanFeedbackPort;
   /** Null when no mission authority is bound; the loop then stops with `px revoke-review` guidance. */
@@ -402,8 +403,8 @@ export interface ReviewLoopRequest {
   readonly dryRun?: boolean;
   readonly reset?: boolean;
   readonly isContinue?: boolean;
-  /** The caller already ran the handoff transition (e.g. `px active` repair). */
-  readonly skipHandoff?: boolean;
+  /** The caller already ran the review preparation transition (e.g. `px active` repair). */
+  readonly skipReviewPreparation?: boolean;
   readonly verbose?: boolean;
 }
 

@@ -33,8 +33,6 @@ const ALLOWED: Record<string, string> = {
   // Initial phase launches: starting a mission phase, not repairing a failure.
   'src/adapters/cli/commands/active.ts::selectLaunchAndRecord':
     'px active initial execute launch (phase start)',
-  'src/adapters/cli/commands/active.ts::applyExecuteFallback':
-    'px active execute launch retried with a fallback agent family (agent eligibility, not failure repair)',
   'src/adapters/review/review-loop.ts::agentPort':
     'review-round reviewer and implementer launch, plus the timeout re-poll relaunches that '
     + 'TASK-2377.04 deliberately left outside the kernel and docs/agents.md documents as the exception; '
@@ -50,9 +48,9 @@ const ALLOWED: Record<string, string> = {
   'src/application/rebound-kernel.ts::launchFixAttempt':
     'the rebound kernel launch port — the one permitted failure-repair launch',
   'src/adapters/mission/execute-mission-adapters.ts::<module>':
-    'the `ExecuteRepairLaunchPort` adapter the kernel drives for the handoff bounces; it decides nothing, '
+    "the `ExecuteRepairLaunchPort` adapter the kernel drives for the review preparation bounces; it decides nothing, "
     + 'and the test below pins the launch inside that adapter',
-  'src/adapters/cli/commands/handoff.ts::createHandoffPorts':
+  "src/adapters/cli/commands/review-preparation.ts::createReviewPreparationPorts":
     'port wiring that hands `startAgent` to the use case for the kernel to drive',
   'src/adapters/cli/commands/integrate.ts::createIntegratePorts':
     'port wiring that hands `startAgent` to the integrate workflow for the kernel to drive (TASK-2512)',
@@ -129,7 +127,7 @@ test('SC7: the kernel launch port is present and is the only failure-repair laun
   assert.equal(failureRepairSites.length, 1, 'the kernel port is the single failure-repair launch');
 });
 
-test('SC7: the handoff launch lives inside the kernel launch-port adapter, not in the bounce logic', () => {
+test("SC7: the review preparation launch lives inside the kernel launch-port adapter, not in the bounce logic", () => {
   // `createReboundLaunchPort` is allow-listed because it *is* the kernel's launch
   // port. Pin the launch inside it so a future direct launch in the surrounding
   // bounce logic cannot ride in on the same allow-list entry.
@@ -143,8 +141,8 @@ test('SC7: the handoff launch lives inside the kernel launch-port adapter, not i
   assert.equal(insideAdapter, 1, 'the adapter launches exactly once');
 
   // The bounce logic itself launches nothing: it only hands the port to the kernel.
-  const handoff = fs.readFileSync('src/application/execute-handoff-service.ts', 'utf8');
-  assert.equal((handoff.match(call) || []).length, 0, 'ExecuteHandoffService launches only through the adapter');
+  const reviewPreparation = fs.readFileSync('src/application/execute-review-preparation-service.ts', 'utf8');
+  assert.equal((reviewPreparation.match(call) || []).length, 0, "ExecuteReviewPreparationService launches only through the adapter");
 });
 
 test('SC5/SC6: the deleted standalone bounce policy leaves no trace in src/', () => {
@@ -159,7 +157,7 @@ test('SC6: hook-failure-workflow exports only the hook detector', async () => {
   assert.deepEqual(Object.keys(shared).sort(), ['classifyHookFailure']);
 });
 
-test('SC8: the git-only handoff repair path launches no agent', () => {
-  const repair = fs.readFileSync('src/adapters/cli/commands/repair-handoff.ts', 'utf8');
-  assert.ok(!/\b(?:startAgent|startAgentFn)\s*\(/.test(repair), 'repair-handoff.ts stays agent-less');
+test("SC8: the git-only review preparation repair path launches no agent", () => {
+  const repair = fs.readFileSync('src/adapters/cli/commands/repair-review-preparation.ts', 'utf8');
+  assert.ok(!/\b(?:startAgent|startAgentFn)\s*\(/.test(repair), "repair-review-preparation.ts stays agent-less");
 });

@@ -370,11 +370,11 @@ test('printUsage documents every KNOWN_COMMANDS exactly once across all sections
 
 // TASK-2490: the standalone `px handoff` command is retired; the sync/push and
 // active -> review transition now lives in `px review <slug>`.
-test('KNOWN_COMMANDS no longer registers the retired handoff command (task-2490)', () => {
-  assert.ok(!KNOWN_COMMANDS.includes('handoff'), 'handoff must not be a known command');
+test("KNOWN_COMMANDS no longer registers the retired review preparation command (task-2490)", () => {
+  assert.ok(!KNOWN_COMMANDS.includes('handoff'), "review preparation must not be a known command");
 });
 
-test('printUsage no longer advertises the retired handoff command (task-2490)', () => {
+test("printUsage no longer advertises the retired review preparation command (task-2490)", () => {
   const previousLog = console.log;
   const lines: unknown[] = [];
   console.log = (msg: unknown) => lines.push(msg);
@@ -384,7 +384,7 @@ test('printUsage no longer advertises the retired handoff command (task-2490)', 
     console.log = previousLog;
   }
   const all = lines.join('\n');
-  assert.ok(!/\bhandoff\b/.test(all), 'printUsage must not mention the retired handoff command');
+  assert.ok(!/\bhandoff\b/.test(all), "printUsage must not mention the retired review preparation command");
 });
 
 test('KNOWN_COMMANDS includes aliases', () => {

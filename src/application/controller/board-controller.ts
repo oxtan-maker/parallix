@@ -8,7 +8,6 @@ import {
 } from '../execute-mission-service.js';
 import { completed, failure, rejected } from '../contracts.js';
 import type { MissionCheckpointService } from '../mission-checkpoint-service.js';
-import type { MissionHandoffService } from '../mission-handoff-service.js';
 import type { MissionCreationService } from '../mission-creation-service.js';
 import type { MissionIntakeService } from '../mission-intake-service.js';
 import type { DraftCommandUseCase } from '../draft-command-use-case.js';
@@ -17,10 +16,10 @@ import type { MissionCancelService } from '../mission-cancel-service.js';
 import type { MissionId } from '../../domain/mission.js';
 import type { MissionStore, MissionVersion } from '../domain-ports.js';
 import {
-  currentWorkPublication,
-  NO_CURRENT_WORK_PORT,
-  type CurrentWorkPort,
-} from '../recording/current-work-recorder.js';
+  executionActivityIntent,
+  NO_EXECUTION_ACTIVITY,
+  type ExecutionActivityPort,
+} from '../recording/execution-activity-recorder.js';
 import type {
   BoardCommandDispatcher,
   BoardProgressSink,
@@ -50,9 +49,8 @@ export interface BoardMissionServices {
   /** Creates a backlog mission with an allocated identity; the web board's "Create new mission". */
   readonly creation?: Pick<MissionCreationService, 'execute'>;
   readonly checkpoints?: MissionCheckpointService;
-  readonly handoff?: MissionHandoffService;
-  /** The CLI-equivalent handoff workflow derives its own evidence and starts review. */
-  readonly handoffWorkflow?: { executeForSlug(_slug: string, _agent?: AgentFamily): Promise<void> };
+  /** The CLI-equivalent review preparation workflow derives its own evidence and starts review. */
+  readonly reviewPreparationWorkflow?: { executeForSlug(_slug: string, _agent?: AgentFamily): Promise<void> };
   /**
    * The application-owned draft use case, wired by the composition from the
    * trusted draft workflow adapter. The board reaches it through
@@ -77,14 +75,14 @@ export class BoardCommandController implements BoardCommandDispatcher {
   private readonly executeMission: ExecuteMissionService;
   private readonly progressPort?: BoardProgressSink;
   private readonly missionServices: BoardMissionServices;
-  private readonly currentWork: CurrentWorkPort;
+  private readonly currentWork: ExecutionActivityPort;
   private readonly missionStore: Pick<MissionStore, 'load'> | null;
 
   constructor(
     executePorts: ExecuteMissionPorts,
     progressPort?: BoardProgressSink,
     missionServices: BoardMissionServices = {},
-    currentWork: CurrentWorkPort = NO_CURRENT_WORK_PORT,
+    currentWork: ExecutionActivityPort = NO_EXECUTION_ACTIVITY,
     missionStore: Pick<MissionStore, 'load'> | null = executePorts.missionTransitions,
   ) {
     this.executeMission = new ExecuteMissionService(executePorts, progressPort, currentWork);
@@ -100,64 +98,39 @@ export class BoardCommandController implements BoardCommandDispatcher {
     if (kind === 'mission:edit' || kind === 'mission:edit-read') { return Boolean(this.missionServices.editing); }
     if (kind === 'mission:create') { return Boolean(this.missionServices.creation); }
     if (kind === 'checkpoint:record') { return Boolean(this.missionServices.checkpoints); }
-    if (kind === 'review:submit') { return Boolean(this.missionServices.handoffWorkflow); }
-    if (kind === 'handoff:record') { return Boolean(this.missionServices.handoffWorkflow); }
+    if (kind === 'review:submit') { return Boolean(this.missionServices.reviewPreparationWorkflow); }
     if (kind === 'draft:create') { return Boolean(this.missionServices.draft); }
     if (kind === 'integrate:merge') { return Boolean(this.missionServices.integrate); }
     if (kind === 'mission:cancel') { return Boolean(this.missionServices.cancel); }
     return true;
   }
 
-  /**
-   * Dispatch a board command through the guarded controller.
-   * Only integrated capabilities are executed; all others return typed unavailable results.
-   */
+  /** Dispatch through capability, payload, version and cancellation guards. */
   async dispatch<T = unknown>(request: BoardCommandRequest): Promise<BoardCommandResult<T>> {
-    const { operationId, kind, missionId, capabilities: _capabilities, cancellation } = request;
-
-    // Emit dispatch event
-    this.emit(operationId, 0, 'dispatch', `dispatching ${kind} for ${missionId}`);
-
+    if (request.kind === 'active:execute') { request = { ...request, missionId: request.missionId.toLowerCase() }; }
+    this.emit(request.operationId, 0, 'dispatch', `dispatching ${request.kind} for ${request.missionId}`);
     const unavailable = this.unavailableDispatch(request);
     if (unavailable) { return unavailable as BoardCommandResult<T>; }
+    if (request.payload && request.payload.kind !== request.kind) { return rejected('validation', 'Payload kind must match the requested command') as BoardCommandResult<T>; }
+    const stale = await this.checkStaleCommand(request);
+    if (stale) { return stale as BoardCommandResult<T>; }
+    if (request.cancellation?.requested) { return cancelledOutcome<T>('cancelled before launch'); }
+    return await this.dispatchIntegrated(request) as BoardCommandResult<T>;
+  }
 
-    // Guard 2: stale command check
-    const staleResult = await this.checkStaleCommand(request);
-    if (staleResult) { return staleResult as BoardCommandResult<T>; }
-
-    // Guard 3: cancellation before dispatch
-    if (cancellation?.requested) {
-      return cancelledOutcome<T>('cancelled before launch');
+  private async dispatchIntegrated(request: BoardCommandRequest): Promise<BoardCommandResult> {
+    switch (request.kind) {
+      case 'mission:edit': case 'mission:edit-read': return this.dispatchEdit(request);
+      case 'active:execute': return this.dispatchActive(request);
+      case 'mission:intake': return this.dispatchIntake(request);
+      case 'mission:create': return this.dispatchCreate(request);
+      case 'draft:create': return this.dispatchDraft(request);
+      case 'checkpoint:record': return this.dispatchCheckpoint(request);
+      case 'review:submit': return this.dispatchReviewPreparation(request);
+      case 'integrate:merge': return this.dispatchIntegrate(request);
+      case 'mission:cancel': return this.dispatchCancel(request);
+      default: return unavailableCapability(request.kind, 'unexpected integrated capability');
     }
-
-    if (kind === 'mission:edit' || kind === 'mission:edit-read') { return await this.dispatchEdit(request) as BoardCommandResult<T>; }
-    // Dispatch to the integrated use cases.
-    if (kind === 'active:execute') {
-      return (await this.dispatchActive(request)) as BoardCommandResult<T>;
-    }
-    if (kind === 'mission:intake') {
-      return (await this.dispatchIntake(request)) as BoardCommandResult<T>;
-    }
-    if (kind === 'mission:create') {
-      return (await this.dispatchCreate(request)) as BoardCommandResult<T>;
-    }
-    if (kind === 'draft:create') {
-      return (await this.dispatchDraft(request)) as BoardCommandResult<T>;
-    }
-    if (kind === 'checkpoint:record') {
-      return (await this.dispatchCheckpoint(request)) as BoardCommandResult<T>;
-    }
-    if (['handoff:record', 'review:submit'].includes(kind)) {
-      return (await this.dispatchHandoff(request)) as BoardCommandResult<T>;
-    }
-    if (kind === 'integrate:merge') {
-      return (await this.dispatchIntegrate(request)) as BoardCommandResult<T>;
-    }
-    if (kind === 'mission:cancel') {
-      return (await this.dispatchCancel(request)) as BoardCommandResult<T>;
-    }
-    // Unreachable: isIntegratedCapability guard above catches all non-integrated kinds
-    return unavailableCapability(kind, 'unexpected integrated capability') as BoardCommandResult<T>;
   }
 
   private async dispatchEdit(request: BoardCommandRequest): Promise<BoardCommandResult> {
@@ -182,10 +155,9 @@ export class BoardCommandController implements BoardCommandDispatcher {
       this.emit(operationId, 1, 'unavailable', reason);
       return unavailableCapability(kind, reason);
     }
-    if (this.canExecute(kind) || (request.payload?.kind !== kind && !['draft:create', 'integrate:merge', 'mission:cancel', 'handoff:record'].includes(kind))) { return null; }
+    if (this.canExecute(kind) || (request.payload?.kind !== kind && !['draft:create', 'integrate:merge', 'mission:cancel'].includes(kind))) { return null; }
     const reason = kind === 'integrate:merge' ? 'no integration workflow is configured for this interface'
       : kind === 'mission:cancel' ? 'no cancellation authority is configured for this interface'
-      : kind === 'handoff:record' ? 'no handoff workflow is configured for this interface'
       : 'no Mission authority is configured for this interface';
     this.emit(operationId, 1, 'unavailable', reason);
     return unavailableCapability(kind, reason);
@@ -256,27 +228,27 @@ export class BoardCommandController implements BoardCommandDispatcher {
     });
   }
 
-  private async dispatchHandoff(request: BoardCommandRequest): Promise<BoardCommandResult<unknown>> {
-    if (!this.missionServices.handoffWorkflow) {
-      return unavailableCapability('handoff:record', 'no handoff workflow is configured for this interface');
+  private async dispatchReviewPreparation(request: BoardCommandRequest): Promise<BoardCommandResult<unknown>> {
+    if (!this.missionServices.reviewPreparationWorkflow) {
+      return unavailableCapability('review:submit', 'no review workflow is configured for this interface');
     }
-    this.emit(request.operationId, 1, 'handoff', `handing off ${request.missionId} and starting review`);
-    const publication = currentWorkPublication({
+    this.emit(request.operationId, 1, 'review-preparation', `handing off ${request.missionId} and starting review`);
+    const publication = executionActivityIntent({
       slug: request.missionId,
       operationId: request.operationId,
-      phase: 'handoff',
+      phase: 'review',
       summary: `px review ${request.missionId}`,
       agent: null,
     });
     if (publication) { await bestEffort(() => this.currentWork.running(publication)); }
     try {
-      await this.missionServices.handoffWorkflow.executeForSlug(request.missionId, request.kind === 'review:submit' && request.pinnedAgent && request.agent ? agentFamily(request.agent) : undefined);
+      await this.missionServices.reviewPreparationWorkflow.executeForSlug(request.missionId, request.kind === 'review:submit' && request.pinnedAgent && request.agent ? agentFamily(request.agent) : undefined);
       if (publication) { await bestEffort(() => this.currentWork.ended(publication)); }
       return completed({ slug: request.missionId });
     } catch (error) {
-      const reason = error instanceof Error ? error.message : 'handoff workflow aborted';
+      const reason = error instanceof Error ? error.message : "review preparation workflow aborted";
       if (publication) { await bestEffort(() => this.currentWork.blocked(publication, reason)); }
-      return failure('execution', `handoff:record for ${request.missionId} failed: ${reason}`);
+      return failure('execution', `review:submit for ${request.missionId} failed: ${reason}`);
     }
   }
 
@@ -412,7 +384,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
   }
 
   private expectedVersion(request: BoardCommandRequest): MissionVersion | undefined {
-    return request.payload?.kind === 'checkpoint:record' || request.payload?.kind === 'handoff:record'
+    return request.payload?.kind === 'checkpoint:record'
       ? request.payload.expectedVersion
       : undefined;
   }

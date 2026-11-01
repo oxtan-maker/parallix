@@ -284,7 +284,7 @@ describe("squash hook bounce", () => {
       store,
       lifecycle: new MissionLifecycleService(store),
       integration: new MissionIntegrationService(store),
-      handoff: { recordNel: async () => ({}) },
+      nel: { recordNel: async () => ({}) },
     };
   }
 

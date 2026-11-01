@@ -195,7 +195,7 @@ function commandReferencesFile(fileSystem: EvidenceFileSystemPort, value: string
   return existsInRepository(fileSystem, rootDir, value);
 }
 
-/** A recorded Goal Check row in the table form handoff reads: either cell may carry the reference. */
+/** A recorded Goal Check row in the table form review preparation reads: either cell may carry the reference. */
 export function goalCheckTableRow(row: GoalCheckRow): string {
   return `| ${row.criterion} | ${row.evidence} |`;
 }
@@ -213,7 +213,7 @@ export function unresolvedPathReferences(fileSystem: EvidenceFileSystemPort, row
 }
 
 /**
- * The actionable diagnostic recording and handoff both report for a Goal Check
+ * The actionable diagnostic recording and review preparation both report for a Goal Check
  * row that cites no verifiable reference.
  */
 export function describeUnverifiableGoalCheckRow(fileSystem: EvidenceFileSystemPort, row: string, rootDir: string): string {

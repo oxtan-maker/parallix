@@ -1,9 +1,6 @@
 import { SqliteWorkflowOperationStore } from '../../src/adapters/sqlite/workflow-operation-store.js';
 import type { CliInvocation } from '../../src/adapters/process/cli-invocation.js';
 import { WorkflowOperationService } from '../../src/application/workflow-operation-service.js';
-import { CurrentWorkRecorder } from '../../src/application/recording/current-work-recorder.js';
-import { SqliteOperationalHistoryRepository } from '../../src/adapters/sqlite/operational-history-repository.js';
-import { projectWorkflowBoard } from '../../src/application/projections/workflow-board.js';
 import { completed } from '../../src/application/contracts.js';
 import { createMissionTerminalCapability } from '../../src/composition/mission-terminal-capability.js';
 import { createRequire } from 'node:module';
@@ -21,7 +18,7 @@ import type { WebHost, WebHostInfo } from '../../src/interfaces/web/host.js';
 import { processStartIdentity } from '../../src/adapters/process/process-liveness.js';
 
 /** Isolated real store/host/process fixture shared by retained and manual checks. */
-export async function workflowBoard(count = 2, options: { cli?: CliInvocation; inProcess?: boolean; providers?: boolean } = {}) {
+export async function workflowBoard(count = 2, options: { cli?: CliInvocation; inProcess?: boolean; providers?: boolean; worktrees?: boolean } = {}) {
   const fixture = await openMigratedMissionStore();
   const root = fixture.root;
   const hosts = new Map<number, string>();
@@ -43,7 +40,8 @@ export async function workflowBoard(count = 2, options: { cli?: CliInvocation; i
   };
   // Run before bootstrap removes case roots, including its SIGTERM -> exit path.
   process.prependListener('exit', emergencyCleanup);
-  execFileSync('git', ['init', '--quiet', '-b', 'main', root]);
+  execFileSync('git', ['init', '--quiet', root]);
+  execFileSync('git', ['-C', root, 'symbolic-ref', 'HEAD', 'refs/heads/main']);
   fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { terminal: { host: 'pipe', whenUnavailable: 'fallback' } } }));
   if (options.providers) {
     fs.writeFileSync(path.join(root, 'provider-fixture'), 'enabled');
@@ -54,8 +52,12 @@ export async function workflowBoard(count = 2, options: { cli?: CliInvocation; i
   execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixture base']);
   const repository = resolveCanonicalRepositoryId(root);
   const slugs = Array.from({ length: count }, (_, index) => `task-worker-${index + 1}`);
-  for (const slug of slugs) {
-    execFileSync('git', ['-C', root, 'worktree', 'add', '--quiet', '-b', `mission/${slug}`, path.join(root, 'worktrees', slug)]);
+  // Admission-only fixtures may omit checkouts when their worker port is held.
+  // Real executor and Git-observation fixtures retain one worktree per mission.
+  if (options.worktrees !== false) {
+    for (const slug of slugs) {
+      execFileSync('git', ['-C', root, 'worktree', 'add', '--quiet', '-b', `mission/${slug}`, path.join(root, 'worktrees', slug)]);
+    }
   }
   for (const slug of slugs) { await fixture.store.save(fixtureMission(slug, { status: 'refined', repositoryId: repository }), null); }
   const configuration = resolveConfiguration({ ...process.env, PARALLIX_HOME: root, PARALLIX_TERMINAL_STATE_DIR: path.join(root, 'terminal-state'), PARALLIX_TEST_NO_FORGEJO: '1', PARALLIX_NO_TUI: '1' });
@@ -79,7 +81,6 @@ export async function workflowBoard(count = 2, options: { cli?: CliInvocation; i
         async launch(id) { const running = service.run(id);
           void running.catch(() => {}); executions.push(running); }, async alive() { return true; },
         async stop() { return true; } },
-      new CurrentWorkRecorder(new SqliteOperationalHistoryRepository(fixture.database), { processId: process.pid }),
       repository, async () => 'codex', async () => {});
   }
   const terminal = createMissionTerminalCapability(root, configuration);
@@ -117,7 +118,7 @@ export async function workflowBoard(count = 2, options: { cli?: CliInvocation; i
     // and assets out of their setup, as the child entry already does.
     const { createWebHost } = await import('../../src/interfaces/web/host.js');
     const { loadWebAssets } = await import('../../src/adapters/web/asset-store.js');
-    const inProcess = createWebHost({ assets: loadWebAssets(path.resolve('build/web')), buildProjection: options.inProcess ? async () => projectWorkflowBoard(await graph.presentationCapabilities!.boardProjection.build(), await operations.readOnly(() => operations.open())) : observation.board, commandDispatcher: () => service, missionTerminal: () => observation.terminal });
+    const inProcess = createWebHost({ assets: loadWebAssets(path.resolve('build/web')), buildProjection: options.inProcess ? () => graph.presentationCapabilities!.boardProjection.build() : observation.board, commandDispatcher: () => service, missionTerminal: () => observation.terminal });
     host = inProcess;
     return inProcess.start();
   };

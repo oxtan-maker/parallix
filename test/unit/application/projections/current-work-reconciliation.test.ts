@@ -1,3 +1,4 @@
+import { activitySnapshots, projectActivityPublications, activityFixture, ActivityRecorderFixture } from '../../../fixtures/execution-activity.js';
 import type { ReviewWorkflowPort } from '../../../../src/application/ports/review-workflow.js';
 import { makeExecutePorts as completeExecuteFixture } from '../../../fixtures/execute-mission-ports.js';
 import { fixtureMission as completeMission } from '../../../fixtures/mission-builders.js';
@@ -12,7 +13,6 @@ import { repositoryId as fixtureRepositoryId } from '../../../../src/domain/repo
 import assert from 'node:assert/strict';
 import test, { describe } from 'node:test';
 import { ConcreteAgentReadAdapter } from '../../../../src/adapters/backlog/concrete-agent-read-adapter.js';
-import { ConcreteCurrentWorkReadAdapter } from '../../../../src/adapters/backlog/concrete-current-work-read-adapter.js';
 import { makeExecutePorts } from '../../../fixtures/execute-mission-ports.js';
 import { ExecuteMissionService } from '../../../../src/application/execute-mission-service.js';
 import type { AgentBlockEntry, AgentBlocklistRepository } from '../../../../src/application/ports/agent-blocklist.js';
@@ -20,9 +20,9 @@ import type { ExecuteMissionPorts } from '../../../../src/application/ports/exec
 import type { SessionMarkerEntry, SessionMarkerRepository } from '../../../../src/application/ports/mission-store.js';
 import type { OperationalHistoryEntry, OperationalHistoryRepository } from '../../../../src/application/ports/operation-history.js';
 import { attentionReason } from '../../../../src/application/projections/board.js';
-import { reconcileCurrentWork, CURRENT_WORK_TTL_MS } from '../../../../src/application/projections/current-work.js';
-import type { CurrentWorkReadAdapter } from '../../../../src/application/projections/current-work.js';
-import { parseCurrentWorkEntry, currentWorkEventToEntry, type CurrentWorkEvent, CurrentWorkRecorder } from '../../../../src/application/recording/current-work-recorder.js';
+import { ACTIVITY_OBSERVATION_TTL_MS } from '../../../../src/domain/execution-activity.js';
+import type { ExecutionActivityReadPort } from '../../../../src/application/ports/execution-activity.js';
+import { parseExecutionActivityEntry, executionActivityToEntry, type ExecutionActivity, } from '../../../../src/application/recording/execution-activity-recorder.js';
 import { ReviewCommandUseCase } from '../../../../src/application/review-command-use-case.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import { missionId } from '../../../../src/domain/mission.js';
@@ -39,24 +39,32 @@ const event = (overrides: Record<string, unknown> = {}) => ({
   processId: 42, blockedReason: null, occurredAt: new Date(now - 1_000).toISOString(), ...overrides,
 });
 
-test('current work keeps automatic family handoff working and makes exhaustion actionable', () => {
-  const handoff = reconcileCurrentWork([event({ agent: agentFamily('claude') }), event({ agent: agentFamily('qwen'), occurredAt: new Date(now).toISOString() })], {
+test('worker activity supersedes a live admission publisher for the same execution (TASK-2822)', () => {
+  const facts = projectActivityPublications([
+    event({ processId: 100, summary: 'preparing' }),
+    event({ processId: 200, phase: 'review-response', summary: 'answering findings', sequence: 2 }),
+  ], { nowMs: now, ttlMs: 60_000, isProcessAlive: () => true }).get(missionId('task-2370'));
+  assert.equal(facts?.currentWork?.summary, 'answering findings');
+});
+
+test("current work keeps automatic family review preparation working and makes exhaustion actionable", () => {
+  const reviewPreparation = projectActivityPublications([event({ agent: agentFamily('claude') }), event({ agent: agentFamily('qwen'), occurredAt: new Date(now).toISOString() })], {
     nowMs: now, ttlMs: 1_000, isProcessAlive: () => true,
   }).get(missionId('task-2370'))!;
-  assert.equal(handoff.currentWork?.agent, 'qwen');
-  assert.equal(attentionReason(makeCard({ currentWork: handoff.currentWork, blockingReason: handoff.blockingReason })).kind, 'none');
+  assert.equal(reviewPreparation.currentWork?.agent, 'qwen');
+  assert.equal(attentionReason(makeCard({ currentWork: reviewPreparation.currentWork, blockingReason: reviewPreparation.blockingReason })).kind, 'none');
 
-  const exhausted = reconcileCurrentWork([event({ state: 'blocked', blockedReason: 'all eligible families are blocked' })], {
+  const exhausted = projectActivityPublications([event({ state: 'blocked', blockedReason: 'all eligible families are blocked' })], {
     nowMs: now, ttlMs: 1_000,
   }).get(missionId('task-2370'))!;
   assert.equal(attentionReason(makeCard({ currentWork: exhausted.currentWork, blockingReason: exhausted.blockingReason })).kind, 'blocking');
 });
 
 test('current work distinguishes unverified, stale, and known-stopped publishers', () => {
-  const options = { ttlMs: 1_000, isProcessAlive: () => null as boolean | null } satisfies Partial<NonNullable<Parameters<typeof reconcileCurrentWork>[1]>>;
-  assert.equal(reconcileCurrentWork([event()], { ...options, nowMs: now }).get(missionId('task-2370'))?.currentWork?.freshness, 'unverified');
-  assert.equal(reconcileCurrentWork([event()], { ...options, nowMs: now + 2_000 }).get(missionId('task-2370'))?.currentWork?.freshness, 'stale');
-  assert.equal(reconcileCurrentWork([event()], { ...options, isProcessAlive: () => false, nowMs: now }).get(missionId('task-2370'))?.currentWork, null);
+  const options = { ttlMs: 1_000, isProcessAlive: () => null as boolean | null } satisfies Partial<NonNullable<Parameters<typeof projectActivityPublications>[1]>>;
+  assert.equal(projectActivityPublications([event()], { ...options, nowMs: now }).get(missionId('task-2370'))?.currentWork?.freshness, 'unverified');
+  assert.equal(projectActivityPublications([event()], { ...options, nowMs: now + 2_000 }).get(missionId('task-2370'))?.currentWork?.freshness, 'stale');
+  assert.equal(projectActivityPublications([event()], { ...options, isProcessAlive: () => false, nowMs: now }).get(missionId('task-2370'))?.currentWork, null);
 });
 
 test('investigation alone cannot erase a durable blocker (TASK-2799)', () => {
@@ -65,12 +73,12 @@ test('investigation alone cannot erase a durable blocker (TASK-2799)', () => {
   for (const state of ['ended', 'dead', 'stale'] as const) {
     const events = state !== 'ended' ? [blocker, recovery] : [blocker, recovery,
       event({ operationId: 'recovery', phase: 'recovery', state: 'ended', sequence: 3 })];
-    const facts = reconcileCurrentWork(events, { nowMs: state === 'stale' ? now + 120_000 : now, ttlMs: 60_000,
+    const facts = projectActivityPublications(events, { nowMs: state === 'stale' ? now + 120_000 : now, ttlMs: 60_000,
       isProcessAlive: () => state === 'dead' ? false : null }).get(missionId('task-2370'));
     assert.equal(facts?.blockingReason, 'Review authority needs investigation');
     assert.equal(facts?.currentWork, null);
   }
-  const continued = reconcileCurrentWork([blocker, recovery,
+  const continued = projectActivityPublications([blocker, recovery,
     event({ operationId: 'supported-continuation', sequence: 3 }),
     event({ operationId: 'recovery', phase: 'recovery', state: 'ended', sequence: 4 })],
   { nowMs: now, ttlMs: 60_000, isProcessAlive: () => true }).get(missionId('task-2370'));
@@ -92,7 +100,7 @@ describe("Operation-aware terminal events —", () => {
   const MISSION = missionId('task-2373');
   const NOW = Date.parse('2026-08-13T12:00:00.000Z');
 
-  function event(overrides: Partial<CurrentWorkEvent> = {}): CurrentWorkEvent {
+  function event(overrides: Partial<ExecutionActivity> = {}): ExecutionActivity {
     return {
       missionId: MISSION,
       operationId: 'op-a',
@@ -104,11 +112,11 @@ describe("Operation-aware terminal events —", () => {
       blockedReason: null,
       occurredAt: new Date(NOW - 5_000).toISOString(),
       ...overrides,
-    } as CurrentWorkEvent;
+    } as ExecutionActivity;
   }
 
-  function reconcile(events: readonly CurrentWorkEvent[]) {
-    return reconcileCurrentWork(events, { nowMs: NOW, ttlMs: 60_000 }).get(MISSION);
+  function reconcile(events: readonly ExecutionActivity[]) {
+    return projectActivityPublications(events, { nowMs: NOW, ttlMs: 60_000 }).get(MISSION);
   }
 
   test('SC8: a terminal event clears the work of the operation it belongs to', () => {
@@ -152,17 +160,17 @@ describe("Operation-aware terminal events —", () => {
   });
 
   test('SC9: the durable sequence comes from the stored row id, not from the publisher', () => {
-    const stored = parseCurrentWorkEntry({
+    const stored = parseExecutionActivityEntry({
       id: 4242,
-      ...currentWorkEventToEntry(event()),
+      ...executionActivityToEntry(event()),
     });
     assert.equal(stored?.sequence, 4242);
   });
 
-  test('SC8: legacy rows published without an operation id keep clearing the mission', () => {
+  test('SC8: migrated history retains correlated completion', () => {
     const facts = reconcile([
-      event({ operationId: '', sequence: 1 }),
-      event({ operationId: '', state: 'ended', sequence: 2 }),
+      event({ operationId: 'history:task-2370', sequence: 1 }),
+      event({ operationId: 'history:task-2370', state: 'ended', sequence: 2 }),
     ]);
     assert.equal(facts?.currentWork, null);
   });
@@ -179,7 +187,7 @@ describe("Live session attribution —", () => {
   }
 
   const missionId = fixtureMissionId('task-2393') as MissionId;
-  function work(overrides: Partial<CurrentWorkEvent> = {}): CurrentWorkEvent {
+  function work(overrides: Partial<ExecutionActivity> = {}): ExecutionActivity {
     return {
       missionId,
       operationId: 'review:task-2393:current',
@@ -194,9 +202,10 @@ describe("Live session attribution —", () => {
     };
   }
 
-  function currentWork(...events: CurrentWorkEvent[]): CurrentWorkReadAdapter {
+  function currentWork(...events: ExecutionActivity[]): ExecutionActivityReadPort {
     return {
-      async loadCurrentWork() { return events; },
+      async loadCurrentWork() { return activitySnapshots(events); },
+      async loadMissionCurrentWork(id) { return activitySnapshots(events.filter(event => event.missionId === id)); },
     };
   }
 
@@ -234,7 +243,7 @@ describe("Live session attribution —", () => {
 
   test('TASK-2393: stale or dead current-work does not attribute a live session', async () => {
     for (const [reader, isProcessAlive] of [
-      [currentWork(work({ occurredAt: new Date(Date.now() - CURRENT_WORK_TTL_MS - 1).toISOString() })), undefined],
+      [currentWork(work({ occurredAt: new Date(Date.now() - ACTIVITY_OBSERVATION_TTL_MS - 1).toISOString() })), undefined],
       [currentWork(work({ processId: 123 })), () => false],
     ] as const) {
       const adapter = new ConcreteAgentReadAdapter({
@@ -285,7 +294,7 @@ describe("Publish-then-reconcile defects —", () => {
   // ---------------------------------------------------------------------------
 
   function published(appended: readonly OperationalHistoryEntry[]) {
-    return appended.flatMap((entry) => parseCurrentWorkEntry(entry) ?? []);
+    return appended.flatMap((entry) => parseExecutionActivityEntry(entry) ?? []);
   }
 
   function strictPorts(overrides: Record<string, unknown> = {}) {
@@ -341,7 +350,7 @@ describe("Publish-then-reconcile defects —", () => {
 
   const NOW = Date.parse('2026-08-13T12:00:00.000Z');
 
-  function currentWorkEvent(overrides: Partial<CurrentWorkEvent> = {}): CurrentWorkEvent {
+  function currentWorkEvent(overrides: Partial<ExecutionActivity> = {}): ExecutionActivity {
     return {
       missionId: missionId('task-2373'),
       operationId: 'op-a',
@@ -353,7 +362,7 @@ describe("Publish-then-reconcile defects —", () => {
       blockedReason: null,
       occurredAt: new Date(NOW - 10_000).toISOString(),
       ...overrides,
-    } as CurrentWorkEvent;
+    } as ExecutionActivity;
   }
 
   // ---------------------------------------------------------------------------
@@ -377,23 +386,24 @@ describe("Publish-then-reconcile defects —", () => {
       },
     });
 
-    const outcome = await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 }))
+    const outcome = await new ExecuteMissionService(ports, undefined, new ActivityRecorderFixture(repo, { processId: 7 }))
       .execute(executeRequest());
     assert.equal(outcome.status, 'completed');
 
     assert.equal(
       typeof ((seen.value))?.onAgentLaunched,
       'function',
-      'the handoff/review port must carry the current-work publication seam into the review loop',
+      "the review preparation/review port must carry the current-work publication seam into the review loop",
     );
     assert.deepEqual(
       published(appended).filter((fact) => fact.phase === 'review' || fact.phase === 'review-response')
         .map((fact) => [fact.phase, fact.agent, fact.state]),
       [
+        ['review', null, 'running'],
         ['review', 'qwen', 'running'],
         ['review-response', 'codex', 'running'],
       ],
-      'nested reviewer and implementer launches must replace the generic handoff fact',
+      "nested reviewer and implementer launches must replace the generic review preparation fact",
     );
   });
 
@@ -408,9 +418,9 @@ describe("Publish-then-reconcile defects —", () => {
     const slowRecorder = {
       async running(publication: { agent?: unknown }) {
         await new Promise((resolve) => setTimeout(resolve, 5));
-        await repo.append(currentWorkEventToEntry(currentWorkEvent({
+        await repo.append(executionActivityToEntry(currentWorkEvent({
           state: 'running',
-          agent: (publication.agent ?? null) as CurrentWorkEvent['agent'],
+          agent: (publication.agent ?? null) as ExecutionActivity['agent'],
         })));
       },
       async blocked() {},
@@ -449,7 +459,7 @@ describe("Publish-then-reconcile defects —", () => {
   // ---------------------------------------------------------------------------
 
   test('TASK-2373 defect 3: a terminal event from an older operation does not clear newer current work', () => {
-    const facts = reconcileCurrentWork([
+    const facts = projectActivityPublications([
       currentWorkEvent({ operationId: 'op-a', occurredAt: new Date(NOW - 3_000).toISOString() }),
       currentWorkEvent({ operationId: 'op-b', agent: agentFamily('qwen'), occurredAt: new Date(NOW - 2_000).toISOString() }),
       // The older operation finishes last: its terminal event must clear only
@@ -465,7 +475,7 @@ describe("Publish-then-reconcile defects —", () => {
     const at = new Date(NOW - 1_000).toISOString();
     // Delivered out of order on purpose: only the store's durable sequence can
     // decide which of two same-millisecond events is the later one.
-    const facts = reconcileCurrentWork([
+    const facts = projectActivityPublications([
       currentWorkEvent({ operationId: 'op-a', phase: 'review-response', agent: agentFamily('qwen'), occurredAt: at, sequence: 2 }),
       currentWorkEvent({ operationId: 'op-a', phase: 'review', agent: agentFamily('claude'), occurredAt: at, sequence: 1 }),
     ], { nowMs: NOW, ttlMs: 60_000 }).get(missionId('task-2373'));
@@ -485,7 +495,7 @@ describe("Publish-then-reconcile defects —", () => {
     });
 
     await assert.rejects(
-      new ReviewCommandUseCase(workflow, new CurrentWorkRecorder(repo, { processId: 9 })).execute(['task-2373']),
+      new ReviewCommandUseCase(workflow, new ActivityRecorderFixture(repo, { processId: 9 })).execute(['task-2373']),
       /no eligible implementer remains/,
     );
 
@@ -498,70 +508,23 @@ describe("Publish-then-reconcile defects —", () => {
   // Defect 5 — current-work history is reread unboundedly per board refresh
   // ---------------------------------------------------------------------------
 
-  /**
-   * A history repository that counts the rows it hands to the read adapter, so
-   * the test measures the board's real read cost rather than a claim about it.
-   */
-  function countingHistoryRepo(missions: readonly string[], roundsPerMission: number) {
-    let rowsDelivered = 0;
-    const rows: OperationalHistoryEntry[] = [];
-    let sequence = 0;
-    for (let round = 0; round < roundsPerMission; round += 1) {
+  test('TASK-2373 defect 5: activity reads use snapshots without reading audit history', async () => {
+    let reads = 0;
+    const repo: OperationalHistoryRepository = {
+      async findAll() { reads++; return []; }, async findByType() { reads++; return []; },
+      async append() {}, async clear() {},
+    };
+    const activity = activityFixture(repo);
+    const missions = ['task-0001', 'task-0002', 'task-0003'];
+    for (let round = 0; round < 400; round++) {
       for (const slug of missions) {
-        sequence += 1;
-        rows.push({
-          id: sequence,
-          ...currentWorkEventToEntry(currentWorkEvent({
-            missionId: missionId(slug),
-            operationId: `op-${round}`,
-            occurredAt: new Date(NOW - 1_000 * (roundsPerMission - round)).toISOString(),
-          })),
-        });
+        await activity.publish(currentWorkEvent({ missionId: missionId(slug), operationId: `op-${round}` }), `op-${round}`);
       }
     }
-    const repo = ({
-      async findAll() { rowsDelivered += rows.length; return rows; },
-      async findByType(type: string) {
-        const matching = rows.filter((row) => row.eventType === type);
-        rowsDelivered += matching.length;
-        return matching;
-      },
-      async findLatestByTypePerMission(type: string, limitPerMission: number) {
-        const byMission = new Map<string, OperationalHistoryEntry[]>();
-        for (const row of rows) {
-          if (row.eventType !== type) { continue; }
-          const key = String((JSON.parse(row.eventData) as { missionId?: string }).missionId ?? '');
-          byMission.set(key, [...(byMission.get(key) ?? []), row].slice(-limitPerMission));
-        }
-        const selected = [...byMission.values()].flat();
-        rowsDelivered += selected.length;
-        return selected;
-      },
-      async append(entry: OperationalHistoryEntry) { rows.push(entry); },
-      async clear() { rows.length = 0; },
-    });
-    return { repo, rowsDelivered: () => rowsDelivered };
-  }
-
-  test('TASK-2373 defect 5: board current-work reads deliver all events for correct reconciliation', async () => {
-    // TASK-2375: the bounded N-latest window (limit=2) was the thing that
-    // discarded still-running operations when older operations emitted late
-    // terminal events. The read now delivers all events so the reconciler can
-    // determine the newest standing operation correctly. Read cost grows with
-    // history, but correctness is the priority — the reconciler reduces to one
-    // fact per mission regardless of input size.
-    const missions = ['task-0001', 'task-0002', 'task-0003'];
-    const shallow = countingHistoryRepo(missions, 2);
-    const deep = countingHistoryRepo(missions, 400);
-
-    await new ConcreteCurrentWorkReadAdapter(shallow.repo).loadCurrentWork();
-    await new ConcreteCurrentWorkReadAdapter(deep.repo).loadCurrentWork();
-
-    // Deep repo delivers all rows (not bounded by limit=2), enabling correct
-    // reconciliation even when older operations emit many late terminal events.
-    assert.ok(
-      deep.rowsDelivered() > shallow.rowsDelivered(),
-      `deep read delivers all rows (${deep.rowsDelivered()}) vs shallow (${shallow.rowsDelivered()}) — unbounded for correctness`,
-    );
+    const snapshots = await activity.loadCurrentWork();
+    assert.equal(snapshots.length, missions.length);
+    assert.equal(snapshots.every(snapshot => snapshot.frames.at(-1)?.event.operationId === 'op-399'), true);
+    assert.equal((await activity.loadMissionCurrentWork(missionId(missions[0]))).length, 1);
+    assert.equal(reads, 0, 'audit history cannot become the activity authority');
   });
 });

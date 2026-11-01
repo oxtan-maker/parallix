@@ -1,7 +1,7 @@
 /** Markdown sections owned by the shared automatic-repair prompt. */
 export type RepairPromptSection = 'repair' | 'authority' | 'checkpoint' | 'report'
   | 'report-without-checkpoint' | 'repair-authority' | 'mission-outcome' | 'integration-cause'
-  | 'gate' | 'hook' | 'rebase' | 'handoff' | 'declaration' | 'artifacts'
+  | 'gate' | 'hook' | 'rebase' | 'review-preparation' | 'declaration' | 'artifacts'
   | 'timeout' | 'history' | 'evidence-read' | 'reviewer-output';
 
 export type RepairPromptReader = (_section: RepairPromptSection) => string;

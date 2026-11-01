@@ -1,5 +1,6 @@
+import { activitySnapshots } from '../../fixtures/execution-activity.js';
 import { TerminalStream as Stream } from '../../helpers/terminal-stream.js';
-import type { CurrentWorkEvent } from '../../../src/application/recording/current-work-recorder.js';
+import type { ExecutionActivity } from '../../../src/application/recording/execution-activity-recorder.js';
 import type { BoardProjection } from '../../../src/application/projections/board.js';
 import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
 import { missionId as fixtureMissionId } from '../../../src/domain/mission.js';
@@ -98,8 +99,8 @@ function mission(overrides: Partial<Mission> = {}): Mission {
  * An in-memory current-work authority. Production supplies the operational-fact
  * reader; the shape asserted here is the one the board consumes.
  */
-function makeCurrentWorkAdapter(records: readonly CurrentWorkEvent[]) {
-  return { async loadCurrentWork() { return records; } };
+function makeCurrentWorkAdapter(records: readonly ExecutionActivity[]) {
+  return { async loadCurrentWork() { return activitySnapshots(records); }, async loadMissionCurrentWork(id: import('../../../src/domain/mission.js').MissionId) { return activitySnapshots(records.filter(record => record.missionId === id)); } };
 }
 
 // ---------------------------------------------------------------------------

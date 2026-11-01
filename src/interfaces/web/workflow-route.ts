@@ -22,7 +22,6 @@ export async function admitWebWorkflow(reply: FastifyReply, dispatcher: BoardCom
   if (!dispatcher.admit || (!isWorkflowCommand(command.kind) && command.kind !== 'workflow:stop')) { return false; }
   const request: BoardCommandRequest = {
     operationId: randomUUID(), requestKey: command.requestKey, kind: command.kind, missionId: command.missionId,
-    ...(command.payload ? { payload: { kind: 'handoff:record' as const, ...command.payload } } : {}),
     missionStatusAtRequest: command.missionStatusAtRequest,
     ...selectedFamilyFields(command.agent), capabilities: new Set([command.kind as Capability]),
   };

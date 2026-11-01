@@ -115,9 +115,7 @@ export async function dispatchProjectedCommand(reply: FastifyReply, dispatcher: 
     missionStatusAtRequest: command.missionStatusAtRequest,
     ...selectedFamilyFields(command.agent),
     capabilities: new Set([command.kind as Capability] as const),
-    ...(command.payload !== undefined
-      ? { payload: { kind: 'handoff:record' as const, ...command.payload } }
-      : {}),
+
   };
   let outcome: ApplicationOutcome<unknown>;
   try {

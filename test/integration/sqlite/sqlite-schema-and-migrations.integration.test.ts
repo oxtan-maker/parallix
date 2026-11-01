@@ -1,3 +1,7 @@
+import { SqliteExecutionActivityStore } from '../../../src/adapters/sqlite/execution-activity-store.js';
+import { repositoryId } from '../../../src/domain/repository.js';
+import { missionId } from '../../../src/domain/mission.js';
+import { projectExecutionActivity } from '../../../src/domain/execution-activity.js';
 // Historical regression provenance: TASK-2521.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -793,5 +797,73 @@ it('assigns legacy criterion IDs only on exact text matches (TASK-2742)', async 
     assert.equal(JSON.parse(state[0]!.state_json).successCriteria, null, 'round-time criteria cannot be reconstructed from current text');
     await runner.applyPending(migrations);
     assert.deepEqual(await db.query("SELECT criterion_id FROM mission_success_criteria WHERE mission_id = 'identity'"), criteria);
+  } finally { await db.close(); cleanupTempDir(dir); }
+});
+
+it('cuts execution activity over once while preserving correlated history (TASK-2822)', async () => {
+  const { db, dir } = createTempDb();
+  try {
+    const migrations = loadDefaultMigrations().filter(m => m.id <= '0042-execution-activity');
+    const runner = new SqliteMigrationRunner(db);
+    await runner.applyPending(migrations.filter(m => m.id < '0042'));
+    const operation = { id: 'old-review', repositoryId: 'repo', missionId: 'task-history', requestKey: 'replay', generation: 3,
+      command: 'handoff:record', phase: 'completed', owner: null, providerStarted: true,
+      createdAt: '2026-10-25T10:00:00Z', updatedAt: '2026-10-25T11:00:00Z', reason: null };
+    await db.execute('INSERT INTO workflow_operations VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [operation.id, 'repo', operation.missionId, operation.requestKey, 3, 'completed', JSON.stringify(operation)]);
+    const oldEvent = { missionId: operation.missionId, phase: 'handoff', state: 'ended', summary: 'actual historic completion', agent: 'codex' };
+    await db.execute('INSERT INTO operational_history (event_type, event_data, created_at) VALUES (?, ?, ?)',
+      ['mission.current-work', JSON.stringify(oldEvent), operation.updatedAt]);
+    for (const id of ['task-history', 'task-blocker', 'task-resolved', 'task-newer']) {
+      await db.execute('INSERT INTO missions (id, repository_id, title, status) VALUES (?, ?, ?, ?)', [id, 'repo', id, 'active']);
+    }
+    const repair = JSON.stringify({ command: 'px handoff', incidentId: 'historical-repair', attempt: 0, authorizedGates: [], authorizedCriteria: [], evidenceRecorded: false, verified: false });
+    await db.execute('INSERT INTO mission_checkpoints (mission_id, position, checkpoint_mission_id, name, next_action_text, repair_json) VALUES (?, ?, ?, ?, ?, ?)',
+      ['task-history', 0, 'task-history', 'CP-1', 'historical next action', repair]);
+    const originalCheckpoint = JSON.stringify({ missionId: 'task-history', name: 'CP-1', repair: JSON.parse(repair), goalCheck: [], nextActionText: 'historical next action' });
+    await db.execute('INSERT INTO mission_checkpoint_versions (mission_id, version, name, checkpoint_json) VALUES (?, 1, ?, ?)', ['task-history', 'CP-1', originalCheckpoint]);
+    const publications = [
+      { missionId: 'task-blocker', phase: 'handoff', state: 'blocked', blockedReason: 'Reserved operator decision' },
+      { missionId: 'task-blocker', phase: 'handoff', state: 'ended' },
+      { missionId: 'task-blocker', operationId: 'investigation', phase: 'recovery', state: 'running' },
+      { missionId: 'task-blocker', operationId: 'investigation', phase: 'recovery', state: 'ended' },
+      { missionId: 'task-resolved', operationId: 'old', phase: 'review', state: 'blocked', blockedReason: 'repaired' },
+      { missionId: 'task-resolved', operationId: 'new', phase: 'review', state: 'running' },
+      { missionId: 'task-resolved', operationId: 'new', phase: 'review', state: 'ended' },
+      { missionId: 'task-newer', operationId: 'old', phase: 'review', state: 'running' },
+      { missionId: 'task-newer', operationId: 'new', phase: 'review', state: 'running' },
+      { missionId: 'task-newer', operationId: 'old', phase: 'review', state: 'blocked', blockedReason: 'superseded failure' },
+      { missionId: 'task-newer', operationId: 'new', phase: 'review', state: 'ended' },
+    ];
+    for (const publication of publications) {
+      await db.execute('INSERT INTO operational_history (event_type, event_data, created_at) VALUES (?, ?, ?)',
+        ['mission.current-work', JSON.stringify(publication), operation.updatedAt]);
+    }
+    const originalHistory = await db.query('SELECT * FROM operational_history ORDER BY id');
+    const applied = await runner.applyPending(migrations);
+    assert.deepEqual(applied.filter(m => m.id >= '0042').map(m => m.id), ['0042-execution-activity'], 'one migration owns the complete cutover');
+    const pending = await db.query<{ review_preparation_pending: number }>('SELECT review_preparation_pending FROM missions');
+    assert.deepEqual(pending.map(row => row.review_preparation_pending), [0, 0, 0, 0]);
+    await db.execute('UPDATE missions SET review_preparation_pending = 1 WHERE id = ?', ['task-history']);
+    assert.equal((await db.query<{ review_preparation_pending: number }>('SELECT review_preparation_pending FROM missions WHERE id = ?', ['task-history']))[0].review_preparation_pending, 1);
+    assert.deepEqual(await db.query('SELECT * FROM operational_history ORDER BY id'), originalHistory, 'all audit bytes, identities and times survive cutover');
+    assert.equal(JSON.parse((await db.query<{ repair_json: string }>('SELECT repair_json FROM mission_checkpoints'))[0].repair_json).command, 'review-preparation', 'only the live non-gate marker is converted');
+    assert.equal((await db.query<{ checkpoint_json: string }>('SELECT checkpoint_json FROM mission_checkpoint_versions'))[0].checkpoint_json, originalCheckpoint, 'immutable checkpoint history remains byte-for-byte original');
+    const activity = new SqliteExecutionActivityStore(db, repositoryId('repo'));
+    const facts = projectExecutionActivity(await activity.loadCurrentWork(), { nowMs: Date.now(), ttlMs: 300_000 });
+    assert.equal(facts.get(missionId('task-blocker'))?.blockingReason, 'Reserved operator decision');
+    assert.equal(facts.has(missionId('task-resolved')), false, 'a real continuation cleared the older blocker');
+    assert.equal(facts.has(missionId('task-newer')), false, 'a late failure cannot restore a superseded execution');
+    const rows = await db.query<{ record_json: string }>('SELECT record_json FROM workflow_operations');
+    assert.deepEqual(JSON.parse(rows[0]!.record_json), { ...operation, command: 'review:submit' });
+    const history = await db.query<{ id: number; event_data: string; created_at: string }>('SELECT id, event_data, created_at FROM operational_history');
+    assert.deepEqual(JSON.parse(history[0]!.event_data), oldEvent);
+    assert.equal(history[0]!.created_at, operation.updatedAt);
+    const firstSequence = history[0]!.id;
+    await runner.applyPending(migrations);
+    assert.equal((await db.query<{ id: number }>('SELECT id FROM operational_history'))[0]!.id, firstSequence);
+    await db.execute('INSERT INTO workflow_operations VALUES (?, ?, ?, ?, ?, ?, ?)', ['new', 'repo', operation.missionId, 'new', 0, 'executing', '{}']);
+    await assert.rejects(() => db.execute('INSERT INTO workflow_operations VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ['competing', 'repo', operation.missionId, 'other', 0, 'accepted', '{}']), /UNIQUE/);
   } finally { await db.close(); cleanupTempDir(dir); }
 });

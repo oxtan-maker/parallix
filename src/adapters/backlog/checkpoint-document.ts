@@ -4,7 +4,7 @@
  *
  * These functions are pure: the Markdown *shape* is a compatibility-adapter
  * concern, and the surrounding store owns the file access. The accepted shape is
- * the one handoff already enforces — an `# CP-N:` heading, a
+ * the one review preparation already enforces — an `# CP-N:` heading, a
  * `## Goal Check` (or `## Goal Check Table`) section, a 3-column pipe table, and
  * a `Next action:` line.
  */
@@ -102,7 +102,7 @@ export function reconcileLegacyCheckpoint(
   const sameEvidence = recorded.firstLine === source.firstLine
     && contains(recorded.goalCheck, source.goalCheck)
     && contains(source.goalCheck, recorded.goalCheck);
-  // Old handoff used this synthetic action when it failed to parse the file.
+  // Old review preparation used this synthetic action when it failed to parse the file.
   const syntheticAction = recorded.nextActionText === 'Review the handed-off change.'
     && sameEvidence && source.nextActionText.length > 0;
   // Earlier imports captured only the first line after a Next action heading.
@@ -154,7 +154,7 @@ function parseGoalCheckTable(lines: string[]): GoalCheckRow[] {
 /**
  * Render a checkpoint document from checked data.
  *
- * The output satisfies the same handoff integrity checks the hand-written
+ * The output satisfies the same review preparation integrity checks the hand-written
  * documents do, so a checkpoint recorded through the application boundary is
  * indistinguishable from one written by an agent.
  */

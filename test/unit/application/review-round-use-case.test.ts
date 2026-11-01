@@ -56,19 +56,19 @@ test('rejects an unknown mission without a persisted Review before entry effects
   assert.deepEqual(fake.launches, []);
 });
 
-test('start creates the missing Review through handoff and completes autonomous review (TASK-2696)', async () => {
-  let handoffs = 0;
+test("start creates the missing Review through review preparation and completes autonomous review (TASK-2696)", async () => {
+  let reviewPreparations = 0;
   const { fake, useCase, calls } = fixture(null, true, {
-    handoff: { handoff: async () => {
-      handoffs += 1;
+    reviewPreparation: { reviewPreparation: async () => {
+      reviewPreparations += 1;
       await fake.ports.state.persist(new ReviewState(base.slug, { implementer: 'codex', reviewer: 'claude', round: 1 }));
       return { ok: true as const };
     } },
-    routing: { nominate: () => { return assert.fail('start must use the handoff reviewer'); } },
+    routing: { nominate: () => { return assert.fail("start must use the review preparation reviewer"); } },
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
   });
   await useCase.enter({ ...base, rawMaxAttempts: '1' });
-  assert.equal(handoffs, 1);
+  assert.equal(reviewPreparations, 1);
   assert.deepEqual(calls, ['bind mechanisms']);
   assert.deepEqual(fake.launches.map(launch => [launch.role, launch.agent]), [['reviewer', 'claude']]);
   assert.deepEqual(fake.exits, []);
@@ -77,17 +77,17 @@ test('start creates the missing Review through handoff and completes autonomous 
 });
 
 
-test('starting a known mission without Review still stops at rejected handoff (TASK-2696)', async () => {
-  let handoffs = 0;
+test("starting a known mission without Review still stops at rejected review preparation (TASK-2696)", async () => {
+  let reviewPreparations = 0;
   const { fake, useCase } = fixture(null, true, {
-    handoff: { handoff: async () => {
-      handoffs += 1;
+    reviewPreparation: { reviewPreparation: async () => {
+      reviewPreparations += 1;
       return { ok: false as const, reason: 'Success criteria 1 are incomplete' as const };
     } },
-    routing: { nominate: () => { return assert.fail('rejected handoff must not select a reviewer'); } },
+    routing: { nominate: () => { return assert.fail("rejected review preparation must not select a reviewer"); } },
   });
   await useCase.enter({ ...base, rawMaxAttempts: '1' });
-  assert.equal(handoffs, 1);
+  assert.equal(reviewPreparations, 1);
   assert.deepEqual(fake.exits, [1]);
   assert.deepEqual(fake.launches, []);
   assert.deepEqual(fake.writes, []);
@@ -108,7 +108,7 @@ test('direct operator acknowledgment precedes continuation readiness and dry-run
 test('nested reviewer launch failure blocks outer post-execute review entry (px-0017)', async () => {
   const { fake, useCase } = fixture(1, true, {
     state: new ReviewState(base.slug, { implementer: 'codex', reviewer: 'claude', round: 1 }),
-    handoff: { handoff: async () => ({ ok: true }) },
+    reviewPreparation: { reviewPreparation: async () => ({ ok: true }) },
     agents: { launch: async () => { throw new Error('nested reviewer unavailable'); } },
   });
   await useCase.enter({ ...base, rawMaxAttempts: '1' });
@@ -200,7 +200,7 @@ for (const mode of ['start', 'continue'] as const) {
   }
 }
 
-test('inferred entry reaches handoff after an acknowledged criteria correction without a persisted Review (TASK-2810)', async () => {
+test("inferred entry reaches review preparation after an acknowledged criteria correction without a persisted Review (TASK-2810)", async () => {
   const { fixtureMission, inMemoryTransitionStore } = await import('../../fixtures/mission-builders.js');
   const { bindReviewOperatorResume } = await import('../../../src/composition/review-operator-resume.js');
   const { missionId } = await import('../../../src/domain/mission.js');
@@ -211,9 +211,9 @@ test('inferred entry reaches handoff after an acknowledged criteria correction w
       authorizedGates: ['npm test'], authorizedCriteria: ['old criterion'], evidenceRecorded: false, verified: false },
   }] });
   const store = inMemoryTransitionStore(mission);
-  let handoffs = 0;
-  const f = fixture(null, true, { handoff: { handoff: async () => {
-    handoffs++;
+  let reviewPreparations = 0;
+  const f = fixture(null, true, { reviewPreparation: { reviewPreparation: async () => {
+    reviewPreparations++;
     assert.deepEqual(store.mission().checkpoints[0].repair?.authorizedCriteria, ['corrected criterion']);
     return { ok: false as const, reason: 'Success criteria 1 are incomplete' };
   } } });
@@ -234,7 +234,7 @@ test('inferred entry reaches handoff after an acknowledged criteria correction w
     exit: (code: number) => { f.fake.exits.push(code); },
   };
   await createReviewCommand(new ReviewCommandUseCase(createReviewWorkflowAdapter(options)))([base.slug]);
-  assert.equal(handoffs, 1, 'known Mission must reach handoff readiness');
+  assert.equal(reviewPreparations, 1, "known Mission must reach review preparation readiness");
   assert.ok(!f.calls.includes('missing aggregate'));
   assert.doesNotMatch([...f.fake.errors, ...f.fake.logs].join('\n'), /push.*PR|no.*Review aggregate/i);
   assert.deepEqual(f.fake.exits, [1], 'missing evidence still fails');

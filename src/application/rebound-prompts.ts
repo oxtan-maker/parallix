@@ -132,13 +132,13 @@ export function promptSlotsFor(reason: ReboundReason, slug: string): Pick<FixPro
         facts: [['Role', reason.role], ...(reason.expectedOutput ? [['Required output', reason.expectedOutput] as [string, string]] : [])],
         remedy: renderRepairPrompt('timeout', { output: reason.expectedOutput || `the missing ${reason.role} output` }),
       };
-    case 'handoff-verification':
+    case "review-preparation-verification":
       return {
-        area: 'handoff',
-        facts: [['Handoff error', reason.error]],
+        area: 'review-preparation',
+        facts: [["ReviewPreparation error", reason.error]],
         remedy: isIncompleteSuccessCriteriaFailure(reason.error)
           ? buildSuccessCriteriaRecoveryAdvice(slug)
-          : renderRepairPrompt('handoff'),
+          : renderRepairPrompt('review-preparation'),
       };
     case 'declared-gate-validation':
       return {

@@ -6,7 +6,7 @@ import { selectAgent, eligibleAgentsForStep } from '../agents/agents.js';
 import { resolveWorktree } from '../filesystem/mission-utils.js';
 import startupPreflight from '../cli/startup-preflight.js';
 import { buildCheckpointContext, buildExecutePrompt, enforceExecuteCommitSafety, selectLaunchAndRecord } from '../cli/commands/active.js';
-import { validateCheckpointsBeforeHandoff } from './checkpoint-validation.js';
+import { validateCheckpointsBeforeReviewPreparation } from './checkpoint-validation.js';
 import { getTaskStatus, resolveTaskFile } from '../backlog/backlog.js';
 import { resolveAgentModel } from '../config/product-config.js';
 import * as stats from '../cli/commands/stats.js';
@@ -14,10 +14,10 @@ import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
 import { git as awaitableGit } from '../git/git.js';
 import * as agents from '../agents/agents.js';
 import * as fmt from '../../application/presentation/cli-format.js';
-import { performHandoff } from '../cli/commands/handoff.js';
+import { performReviewPreparation } from "../cli/commands/review-preparation.js";
 import { createReviewLoopPorts } from '../review/review-loop.js';
 import { runReviewLoop } from '../../application/review-loop/review-loop.js';
-import * as repairHandoff from '../cli/commands/repair-handoff.js';
+import * as repairReviewPreparation from "../cli/commands/repair-review-preparation.js";
 import type { MissionTransitionStore, SessionMarkerPort } from '../../application/domain-ports.js';
 import type {
   AgentExecutionPort,
@@ -32,9 +32,9 @@ import type {
   CheckpointValidationPort,
   CheckpointValidationRequest,
   CheckpointValidationVerdict,
-  HandoffExecutionPort,
-  HandoffRunRequest,
-  HandoffRunResult,
+  ReviewPreparationExecutionPort,
+  ReviewPreparationRunRequest,
+  ReviewPreparationRunResult,
   AutonomousReviewPort,
   AutonomousReviewRequest,
   ExecuteRepairLaunchPort,
@@ -77,11 +77,11 @@ export interface ExecuteMissionRuntime {
   readonly resolveAgentModel: typeof resolveAgentModel;
   readonly resolveStageTelemetry: (options: NonNullable<Parameters<typeof resolveStageTelemetry>[0]>) => ReturnType<typeof resolveStageTelemetry>;
   /** Individual post-execute mechanisms. The application service owns their ordering. */
-  readonly performHandoff: (slug: string, options: { forgejoUser?: string; worktree: string; force?: boolean }) => ReturnType<typeof performHandoff>;
+  readonly performReviewPreparation: (slug: string, options: { forgejoUser?: string; worktree: string; force?: boolean }) => ReturnType<typeof performReviewPreparation>;
   /** Binds the review-loop mechanisms; the application review loop sequences them. */
   readonly reviewLoopMechanisms: typeof createReviewLoopPorts;
-  readonly repairHandoff: (...args: Parameters<typeof repairHandoff.repairHandoff>) => Promise<{ repaired: boolean; blocker?: string | null }>;
-  readonly validateCheckpointsBeforeHandoff: typeof validateCheckpointsBeforeHandoff;
+  readonly repairReviewPreparation: (...args: Parameters<typeof repairReviewPreparation.repairReviewPreparation>) => Promise<{ repaired: boolean; blocker?: string | null }>;
+  readonly validateCheckpointsBeforeReviewPreparation: typeof validateCheckpointsBeforeReviewPreparation;
 }
 
 export interface ExecuteMissionAdapterOptions {
@@ -188,8 +188,6 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
       prompt: request.plan.prompt,
       sessionMarkerPort: this._sessionMarkerPort,
       onAgentLaunched: request.onAgentChanged,
-      onActivated: request.onActivated,
-      authorityAlreadyActive: request.authorityAlreadyActive === true,
       unrefChild: request.detached === true,
     });
     const result = launch.result;
@@ -243,39 +241,39 @@ export class ExecuteTelemetryAdapter implements ExecuteTelemetryPort {
   }
 }
 
-/** Typed mechanism adapters; ExecuteHandoffService owns their ordering. */
+/** Typed mechanism adapters; ExecuteReviewPreparationService owns their ordering. */
 class CheckpointValidationAdapter implements CheckpointValidationPort {
   constructor(private readonly _runtime: ExecuteMissionRuntime) {}
-  async validateBeforeHandoff(request: CheckpointValidationRequest): Promise<CheckpointValidationVerdict> {
-    return this._runtime.validateCheckpointsBeforeHandoff(request.slug, request.worktree, { log: request.log, error: request.error }) as Promise<CheckpointValidationVerdict>;
+  async validateBeforeReviewPreparation(request: CheckpointValidationRequest): Promise<CheckpointValidationVerdict> {
+    return this._runtime.validateCheckpointsBeforeReviewPreparation(request.slug, request.worktree, { log: request.log, error: request.error }) as Promise<CheckpointValidationVerdict>;
   }
 }
 
-class HandoffExecutionAdapter implements HandoffExecutionPort {
+class ReviewPreparationExecutionAdapter implements ReviewPreparationExecutionPort {
   constructor(private readonly _runtime: ExecuteMissionRuntime) {}
-  async run(request: HandoffRunRequest): Promise<HandoffRunResult> {
-    const result = await this._runtime.performHandoff(request.slug, { forgejoUser: request.agent, worktree: request.worktree, force: request.force });
-    const { gateFailure, ...handoff } = result;
+  async run(request: ReviewPreparationRunRequest): Promise<ReviewPreparationRunResult> {
+    const result = await this._runtime.performReviewPreparation(request.slug, { forgejoUser: request.agent, worktree: request.worktree, force: request.force });
+    const { gateFailure, ...reviewPreparation } = result;
     return gateFailure
-      ? { ...handoff, gateFailure: { kind: 'gate-failure', ...gateFailure } }
-      : handoff;
+      ? { ...reviewPreparation, gateFailure: { kind: 'gate-failure', ...gateFailure } }
+      : reviewPreparation;
   }
   async repairHygiene(request: { slug: string; worktree: string; taskFile: string | null; error: string; log: (_message: string) => void; outputError: (_message: string) => void }) {
-    const result = await this._runtime.repairHandoff(request.slug, request.worktree, request.error, { log: request.log, error: request.outputError });
+    const result = await this._runtime.repairReviewPreparation(request.slug, request.worktree, request.error, { log: request.log, error: request.outputError });
     return result.blocker ? { repaired: result.repaired, blocker: result.blocker } : { repaired: result.repaired };
   }
   classifyFailure(error: string) {
-    const classified = repairHandoff.classifyError(error);
+    const classified = repairReviewPreparation.classifyError(error);
     return classified ? { failureClass: classified.failureClass, dispatchAction: classified.dispatchAction } : null;
   }
-  isRelaunchableFailure(error: string) { return repairHandoff.isRelaunchableError(error); }
+  isRelaunchableFailure(error: string) { return repairReviewPreparation.isRelaunchableError(error); }
 }
 
 class AutonomousReviewAdapter implements AutonomousReviewPort {
   constructor(private readonly _runtime: ExecuteMissionRuntime) {}
   async start(request: AutonomousReviewRequest): Promise<void> {
     const mechanisms = this._runtime.reviewLoopMechanisms(request.slug, { worktree: request.worktree }, { onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop });
-    await runReviewLoop({ slug: request.slug, implementer: request.implementer, reviewer: request.reviewer, skipHandoff: true }, mechanisms);
+    await runReviewLoop({ slug: request.slug, implementer: request.implementer, reviewer: request.reviewer, skipReviewPreparation: true }, mechanisms);
   }
 }
 
@@ -333,7 +331,7 @@ export function createExecuteMissionPorts(
     missionTransitions: options.missionTransitionStore,
     telemetry: new ExecuteTelemetryAdapter(resolved),
     checkpointValidation: new CheckpointValidationAdapter(resolved),
-    handoffExecution: new HandoffExecutionAdapter(resolved),
+    reviewPreparationExecution: new ReviewPreparationExecutionAdapter(resolved),
     autonomousReview: new AutonomousReviewAdapter(resolved),
     repairLaunch: new RepairLaunchAdapter(options.configuration),
     output: new CliOutputAdapter(),
@@ -354,10 +352,10 @@ export function createDefaultExecuteMissionRuntime(configuration: ParallixConfig
     recordActiveStats: options => stats.recordActiveStats({ ...options, configuration }),
     resolveAgentModel,
     resolveStageTelemetry,
-    performHandoff: (slug, options) => performHandoff(slug, { ...options, configuration }),
+    performReviewPreparation: (slug, options) => performReviewPreparation(slug, { ...options, configuration }),
     reviewLoopMechanisms: createReviewLoopPorts,
-    repairHandoff: (slug, worktree, errorMsg, options) => repairHandoff.default(slug, worktree, errorMsg, { ...options, configuration }),
-    validateCheckpointsBeforeHandoff,
+    repairReviewPreparation: (slug, worktree, errorMsg, options) => repairReviewPreparation.default(slug, worktree, errorMsg, { ...options, configuration }),
+    validateCheckpointsBeforeReviewPreparation,
     resolveExecutionContext: async () => null,
   };
 }

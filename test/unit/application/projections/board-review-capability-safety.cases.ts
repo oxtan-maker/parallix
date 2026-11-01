@@ -30,7 +30,7 @@ test('task-2428: approve:review cannot reach authority or fabricate approval fro
   const result = await controller.dispatch({
     operationId: 'forged-approval', kind: 'approve:review', missionId: 'task-2428',
     capabilities: new Set(),
-    payload: { kind: 'handoff:record', netEngineeringLines: 0, capturedAt: 'never' },
+    payload: { kind: 'checkpoint:record', checkpoint: {} as never },
   });
 
   assert.equal(result.status, 'rejected');
@@ -38,7 +38,7 @@ test('task-2428: approve:review cannot reach authority or fabricate approval fro
   assert.equal(loads, 0, 'approval state is never read or written by the board path');
 });
 
-test('review continuation requires the configured evidence-owning handoff workflow (TASK-2750)', async () => {
+test("review continuation requires the configured evidence-owning review preparation workflow (TASK-2750)", async () => {
   const controller = new BoardCommandController(makeExecutePorts().ports);
   assert.equal(isIntegratedCapability('review:submit'), true);
   assert.equal(controller.canExecute('review:submit'), false);

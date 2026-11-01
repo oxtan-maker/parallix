@@ -296,7 +296,11 @@ Accepted commands persist a `WorkflowOperation` identity for admission,
 request deduplication and exclusive ownership across preparation and execution.
 Admission atomically commits activation and initial work before preparation; no transaction
 spans execution. Stale writers are fenced and uncertain termination excludes
-replacement. This is not the per-provider-launch `Attempt` excluded below.
+replacement. Its activity dimension has one checked snapshot owner, shared by
+admitted execution, nested work and independent recovery publications. History
+records those publications for audit and does not reconstruct current activity.
+Parent and execution identities determine precedence; process identity only
+establishes liveness. This is not the per-provider-launch `Attempt` excluded below.
 
 ### Excluded concepts
 

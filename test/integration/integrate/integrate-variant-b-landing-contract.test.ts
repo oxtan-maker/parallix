@@ -170,7 +170,7 @@ describe("Variant B landing", () => {
           return { durableEvidence: [],  status: 'completed' as const };
         },
       },
-      handoff: {
+      nel: {
         recordNel: async () => ({}),
       },
     }));

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mirrorReviewOutcome, repairReviewedTask, reboundRejectedHandoff } from '../../../../src/application/review-task-mirroring.js';
+import { mirrorReviewOutcome, repairReviewedTask, reboundRejectedReviewPreparation } from '../../../../src/application/review-task-mirroring.js';
 
 test('review outcome mirrors preserve local approval and provider active-task repair (TASK-2647)', async () => {
   const transitions: string[] = [];
@@ -23,20 +23,20 @@ test('stale task repair only transitions a resolved active task and reports fail
   assert.deepEqual(transitions, ['review']);
 });
 
-test('handoff validation rebound repairs authority before mirroring and never repeats recovery (TASK-2647)', async () => {
+test("review preparation validation rebound repairs authority before mirroring and never repeats recovery (TASK-2647)", async () => {
   const effects: string[] = [];
   const port = {
     repairMission: async () => { effects.push('authority'); },
     transition: async (status: string) => { effects.push(status); return true; },
     reportBounce: () => { effects.push('reported'); },
-  } satisfies NonNullable<Parameters<typeof reboundRejectedHandoff>[1]>;
-  await reboundRejectedHandoff({ ok: false, reason: 'validation-failed' }, port);
+  } satisfies NonNullable<Parameters<typeof reboundRejectedReviewPreparation>[1]>;
+  await reboundRejectedReviewPreparation({ ok: false, reason: 'validation-failed' }, port);
   assert.deepEqual(effects, ['authority', 'active', 'reported']);
-  await reboundRejectedHandoff({ ok: false, reason: 'validation-failed', recoveryAttempted: true }, port);
-  await reboundRejectedHandoff({ ok: false, reason: 'artifacts-missing' }, port);
-  await reboundRejectedHandoff({ ok: true, reason: 'validation-failed' }, port);
+  await reboundRejectedReviewPreparation({ ok: false, reason: 'validation-failed', recoveryAttempted: true }, port);
+  await reboundRejectedReviewPreparation({ ok: false, reason: 'artifacts-missing' }, port);
+  await reboundRejectedReviewPreparation({ ok: true, reason: 'validation-failed' }, port);
   assert.equal(effects.length, 3);
   port.repairMission = async () => { throw new Error('authority unavailable'); };
-  await assert.rejects(reboundRejectedHandoff({ ok: false, reason: 'validation-failed' }, port), /authority unavailable/);
+  await assert.rejects(reboundRejectedReviewPreparation({ ok: false, reason: 'validation-failed' }, port), /authority unavailable/);
   assert.equal(effects.length, 3, 'failed authority repair cannot move the mirror');
 });

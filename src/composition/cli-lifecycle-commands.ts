@@ -16,15 +16,15 @@ import { landedMissionIntake } from '../adapters/cli/commands/recover-landed-int
 import type { BoardProgressSink } from '../application/controller/board-command.js';
 
 import { createDraftWorkflowAdapter } from '../adapters/cli/commands/draft.js';
-import { createHandoffPorts } from '../adapters/cli/commands/handoff.js';
+import { createReviewPreparationPorts } from "../adapters/cli/commands/review-preparation.js";
 import integrate from '../adapters/cli/commands/integrate.js';
 import { DraftCommandUseCase } from '../application/draft-command-use-case.js';
 import { IntegrateCommandUseCase } from '../application/integrate-command-use-case.js';
 import { ReviewCommandUseCase } from '../application/review-command-use-case.js';
-import { HandoffCommandUseCase } from '../application/handoff-command-use-case.js';
+import { ReviewPreparationCommandUseCase } from "../application/review-preparation-command-use-case.js";
 
 import { createDraftCommand } from '../interfaces/cli/draft.js';
-import type { HandoffMissionServicesPort } from '../application/ports/handoff-workflow.js';
+import type { ReviewPreparationMissionServicesPort } from "../application/ports/review-preparation-workflow.js";
 import { createIntegrateCommand } from '../interfaces/cli/integrate.js';
 
 import { createCancelCommand } from '../interfaces/cli/cancel.js';
@@ -93,7 +93,7 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
           ...observers,
           configuration,
           classification: createReviewClassification(request.slug, resolveWorktree(request.slug) ?? rootDir, configuration.decision, configuration),
-          performHandoffFn: performHandoffWithMissionServices(missionServicesFn, configuration),
+          performReviewPreparationFn: performReviewPreparationWithMissionServices(missionServicesFn, configuration),
           ...reviewLoopBindings(mission.store, mission.lifecycle, reviewerSessionPort),
         }),
       });
@@ -221,8 +221,8 @@ function createIntegrationRunner(context: CliCommandContext, runReview: (args: s
   };
   return runIntegrated;
 }
-function performHandoffWithMissionServices(missionServicesFn: HandoffMissionServicesPort, configuration: ParallixConfiguration) {
-  return (slug: string, options: Record<string, unknown>) => new HandoffCommandUseCase({
-    ...createHandoffPorts(configuration, missionServicesFn), missionServices: missionServicesFn,
-  }).performHandoff(slug, { ...options, missionServicesFn });
+function performReviewPreparationWithMissionServices(missionServicesFn: ReviewPreparationMissionServicesPort, configuration: ParallixConfiguration) {
+  return (slug: string, options: Record<string, unknown>) => new ReviewPreparationCommandUseCase({
+    ...createReviewPreparationPorts(configuration, missionServicesFn), missionServices: missionServicesFn,
+  }).performReviewPreparation(slug, { ...options, missionServicesFn });
 }

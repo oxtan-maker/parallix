@@ -218,16 +218,15 @@ export class RepairCheckpointService implements RepairCheckpointPort {
   }
 }
 
-/** Shared by both handoff paths: plans and incident freshness remain visible. */
 export function repairContractFailure(checkpoints: readonly CheckpointData[], gates?: readonly string[], criteria?: readonly string[]): string | null {
   const blocked = checkpoints.find(cp => cp.repair?.blocker);
   if (blocked) { return `Invalid locked contract requires human review: ${JSON.stringify(blocked.repair!.blocker)}`; }
   const obligations = effectiveRepairObligations(checkpoints, gates, criteria);
   if (gates && obligations.some(cp => JSON.stringify(cp.repair!.authorizedGates) !== JSON.stringify(gates))) {
-    return 'Authorized required checks changed during repair; operator decision required before handoff.';
+    return "Authorized required checks changed during repair; operator decision required before review preparation.";
   }
   if (criteria && obligations.some(cp => JSON.stringify(cp.repair!.authorizedCriteria) !== JSON.stringify(criteria))) {
-    return 'Authorized success criteria changed during repair; operator decision required before handoff.';
+    return "Authorized success criteria changed during repair; operator decision required before review preparation.";
   }
   return null;
 }
@@ -236,7 +235,7 @@ export function repairCheckpointFailure(checkpoints: readonly CheckpointData[], 
   const contractFailure = repairContractFailure(checkpoints, gates, criteria);
   if (contractFailure) { return contractFailure; }
   const missing = missingCheckpointEvidence(checkpoints, gates, criteria);
-  return missing.length ? `Planned checkpoint evidence is missing before handoff: ${missing.map(cp => cp.name).join(', ')}. Record fresh evidence with px checkpoint record before handoff.` : null;
+  return missing.length ? `Planned checkpoint evidence is missing before review preparation: ${missing.map(cp => cp.name).join(', ')}. Record fresh evidence with px checkpoint record before review preparation.` : null;
 }
 
 /** Retained direct correction authority permits criteria reconciliation, never gate drift. */

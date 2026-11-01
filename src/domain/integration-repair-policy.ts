@@ -87,7 +87,7 @@ function recordedWithdrawal(mission: Mission): WithdrawnApproval | undefined {
 
 /** Retaining the judgment does not give an active repair permission to land. */
 export function pendingIntegrationApproval(mission: Pick<Mission, 'review' | 'status'>): ReviewRound | null {
-  if (mission.status !== 'active' || !mission.review || reviewStatus(mission.review) !== 'approved') { return null; }
+  if (!['active', 'review'].includes(mission.status) || !mission.review || reviewStatus(mission.review) !== 'approved') { return null; }
   const round = currentReviewRound(mission.review);
   return round.integrationRepairAssessment?.repair ? round : null;
 }

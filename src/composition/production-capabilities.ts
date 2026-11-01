@@ -19,10 +19,10 @@ import type {
 import type { BoardLaneEventRepository, OperationalHistoryRepository } from '../application/ports/operation-history.js';
 import type { SessionMarkerRepository } from '../application/ports/mission-store.js';
 import type { UsageRepository } from '../application/ports/mission-measurements.js';
-import type { MissionNelRecorder, MissionStore, MissionTransitionStore } from '../application/domain-ports.js';
+import type { MissionStore, MissionTransitionStore } from '../application/domain-ports.js';
 import { MissionCheckpointService } from '../application/mission-checkpoint-service.js';
 import { checkpointEvidenceReferences } from './application-services.js';
-import { MissionHandoffService } from '../application/mission-handoff-service.js';
+import { MissionNelService } from "../application/mission-nel-service.js";
 import { MissionIntakeService } from '../application/mission-intake-service.js';
 import { MissionCreationService } from '../application/mission-creation-service.js';
 import { allocateAdhocIdentity } from '../adapters/sqlite/adhoc-counter.js';
@@ -35,12 +35,12 @@ import { archiveTask } from '../adapters/backlog/task-transitions.js';
 import { IntegrateCommandUseCase } from '../application/integrate-command-use-case.js';
 import type { DraftWorkflowPort } from '../application/ports/cli-workflows.js';
 import type { BoardMissionServices } from '../application/controller/board-controller.js';
-import type { CurrentWorkPort } from '../application/recording/current-work-recorder.js';
+import type { ExecutionActivityPort } from '../application/recording/execution-activity-recorder.js';
 import { createDraftWorkflowAdapter, ensureWorktree } from '../adapters/cli/commands/draft.js';
 import { readAgentConfig } from '../adapters/agents/agent-config.js';
 import { missionBranchName } from '../adapters/filesystem/mission-paths.js';
 import { conventionalWorktreePath, resolveWorktree } from '../adapters/git/worktree.js';
-import { performHandoff } from '../adapters/cli/commands/handoff.js';
+import { performReviewPreparation } from "../adapters/cli/commands/review-preparation.js";
 import { createReviewLoopPorts } from '../adapters/review/review-loop.js';
 import { runReviewLoop } from '../application/review-loop/review-loop.js';
 import { ReviewRoundUseCase } from '../application/review-round-use-case.js';
@@ -82,11 +82,11 @@ export interface ProductionCompositionOverrides {
   /** Test-only adapter seams; production always supplies the safe exit boundary. */
   readonly draftAdapterDeps?: BoardDraftAdapterDependencies;
   /**
-   * Test-only seam for the review loop the board's handoff resume launches.
+   * Test-only seam for the review loop the board's review preparation resume launches.
    * Production always uses the real loop; a test supplies a recorder so the
    * resume branch can be driven without spawning agents.
    */
-  readonly handoffReviewLoop?: typeof runReviewLoop;
+  readonly reviewPreparationReviewLoop?: typeof runReviewLoop;
 }
 
 /**
@@ -102,8 +102,8 @@ function createBoardDraftService(deps: {
   readonly repositoryId: RepositoryId;
   // A full transition-capable store so the draft service can advance the
   // aggregate to `ready` (record refinement) the way the CLI draft does.
-  readonly store: MissionStore & MissionTransitionStore & MissionNelRecorder;
-  readonly currentWork: CurrentWorkPort;
+  readonly store: MissionStore & MissionTransitionStore;
+  readonly currentWork: ExecutionActivityPort;
   readonly progress?: BoardProgressSink;
   readonly workflow?: DraftWorkflowPort;
   readonly workflowDeps?: BoardDraftAdapterDependencies;
@@ -168,8 +168,8 @@ export function missionCleanupCommand(slug: string, rootDir: string, gitFn?: Git
 }
 
 /** The browser hands off exactly as the CLI does: it supplies identity only. */
-function createBoardHandoffWorkflow(
-  store: MissionStore & MissionTransitionStore & MissionNelRecorder,
+function createBoardReviewPreparationWorkflow(
+  store: MissionStore & MissionTransitionStore,
   configuration: ParallixConfiguration,
   reviewLoop: typeof runReviewLoop = runReviewLoop,
 ) {
@@ -178,12 +178,12 @@ function createBoardHandoffWorkflow(
     store,
     lifecycle,
     checkpoints: new MissionCheckpointService(store, checkpointEvidenceReferences()),
-    handoff: new MissionHandoffService(store, store),
+    nel: new MissionNelService(store),
   };
-  const reviewHandoff = async (slug: string, options: Record<string, unknown> = {}): Promise<Record<string, unknown>> =>
-    ({ ...await performHandoff(slug, { recoverGateFailure: true, ...options, configuration, missionServicesFn: async () => missionServices }) });
+  const reviewReviewPreparation = async (slug: string, options: Record<string, unknown> = {}): Promise<Record<string, unknown>> =>
+    ({ ...await performReviewPreparation(slug, { recoverGateFailure: true, ...options, configuration, missionServicesFn: async () => missionServices }) });
   return {
-    /** First handoff and continuation both enter the round owner `px review` uses. */
+    /** First review preparation and continuation both enter the round owner `px review` uses. */
     async executeForSlug(slug: string, agent?: ReturnType<typeof agentFamily>): Promise<void> {
       const worktree = resolveWorktree(slug) ?? process.cwd();
       // The browser host must never be exited by the loop; a stop is a failed dispatch.
@@ -199,7 +199,7 @@ function createBoardHandoffWorkflow(
         invalidateResolvedBlocker: async () => undefined,
         invalidMaxAttempts: () => undefined,
         missingReviewAggregate: () => { throw new Error(`Mission ${slug} is unknown or has no valid Review aggregate.`); },
-        mechanisms: () => createReviewLoopPorts(slug, {}, { configuration, pinnedReviewer: agent, performHandoffFn: reviewHandoff, exit, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, worktree, configuration.decision, configuration) }),
+        mechanisms: () => createReviewLoopPorts(slug, {}, { configuration, pinnedReviewer: agent, performReviewPreparationFn: reviewReviewPreparation, exit, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, worktree, configuration.decision, configuration) }),
       }, reviewLoop).enter({ slug, reviewer: agent, focus: 'all', dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null, rawMaxAttempts: null });
     },
   };
@@ -214,8 +214,8 @@ export function composeProductionCapabilities(
   owningRepositoryId: RepositoryId,
   repositories: ProductionBoardRepositories,
   executePorts: ExecuteMissionPorts,
-  missionStore: (MissionStore & MissionTransitionStore & MissionNelRecorder) | null,
-  currentWork: CurrentWorkPort,
+  missionStore: (MissionStore & MissionTransitionStore) | null,
+  currentWork: ExecutionActivityPort,
   progress: BoardProgressSink | undefined,
   database: SqliteDatabaseAdapter | null | undefined,
   overrides: ProductionCompositionOverrides,
@@ -235,8 +235,7 @@ export function composeProductionCapabilities(
         missionStore,
       ),
       checkpoints: new MissionCheckpointService(missionStore, checkpointEvidenceReferences()),
-      handoff: new MissionHandoffService(missionStore, missionStore),
-      handoffWorkflow: createBoardHandoffWorkflow(missionStore, overrides.configuration, overrides.handoffReviewLoop),
+      reviewPreparationWorkflow: createBoardReviewPreparationWorkflow(missionStore, overrides.configuration, overrides.reviewPreparationReviewLoop),
       // Only with Mission authority: a null store means no draft service, so
       // draft:create reports a typed unavailable result and the read-only
       // graph opens no database or git handle.

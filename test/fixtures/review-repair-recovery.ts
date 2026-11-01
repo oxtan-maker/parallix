@@ -15,7 +15,7 @@ import { setCommandPathProbe, setLauncherHealthProbe, setWorkflowLaunchPort } fr
 import { RepairCheckpointService } from '../../src/application/repair-checkpoint-service.js';
 import { composeProductionCapabilities } from '../../src/composition/production-capabilities.js';
 import { resolveConfiguration } from '../../src/composition/config.js';
-import { NO_CURRENT_WORK_PORT } from '../../src/application/recording/current-work-recorder.js';
+import { NO_EXECUTION_ACTIVITY } from '../../src/application/recording/execution-activity-recorder.js';
 import { agentFamily } from '../../src/domain/agents.js';
 import { repositoryId } from '../../src/domain/repository.js';
 import { makeExecutePorts } from './execute-mission-ports.js';
@@ -39,7 +39,7 @@ type ReviewEntry = 'cli' | 'board';
 
 /**
  * Enter review the way a supported caller does: the CLI runs `px review`, the
- * board dispatches a typed `handoff:record` through production composition.
+ * board dispatches a typed `review:submit` through production composition.
  * A refusal or stop is exit 1 for the CLI and a failed dispatch for the board.
  */
 export async function enterReviewVia(entry: ReviewEntry, fixture: RepairFixture, store: SqliteMissionStore, messages: string[], invoke: (_args: string[]) => Promise<number>): Promise<number> {
@@ -47,9 +47,9 @@ export async function enterReviewVia(entry: ReviewEntry, fixture: RepairFixture,
   const repos = emptyBoardRepositories();
   const capabilities = composeProductionCapabilities(fixture.worktree, repositoryId('parallix'),
     { agentBlocklist: repos.blocklistRepo, operationalHistory: repos.historyRepo, boardLaneEvents: repos.laneEventRepo, usage: repos.usageRepo },
-    makeExecutePorts().ports, store, NO_CURRENT_WORK_PORT, undefined, null, { configuration: resolveConfiguration(process.env) });
-  const result = await capabilities.commandController.dispatch({ operationId: `board-${fixture.slug}-${Date.now()}`, kind: 'handoff:record', missionId: fixture.slug,
-    missionStatusAtRequest: (await fixture.load()).status, agent: agentFamily('custom'), capabilities: new Set(['handoff:record']), cancellation: { requested: false } });
+    makeExecutePorts().ports, store, NO_EXECUTION_ACTIVITY, undefined, null, { configuration: resolveConfiguration(process.env) });
+  const result = await capabilities.commandController.dispatch({ operationId: `board-${fixture.slug}-${Date.now()}`, kind: 'review:submit', missionId: fixture.slug,
+    missionStatusAtRequest: (await fixture.load()).status, agent: agentFamily('custom'), capabilities: new Set(['review:submit']), cancellation: { requested: false } });
   if (result.status !== 'completed') { messages.push(result.error?.message ?? result.status); }
   return result.status === 'completed' ? 0 : 1;
 }
@@ -168,8 +168,11 @@ export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 
     assert.equal(await invoke(['review', fixture.slug, '--submit']), 1);
     assert.ok(messages.join('\n').includes('checkpoint evidence is missing'), messages.join('\n'));
     assert.ok(messages.join('\n').includes(opened.name), messages.join('\n'));
-    assert.equal(launches.length, 0, 'handoff refusal must not launch a reviewer or repair agent');
-    t.diagnostic(`Reviewer handoff rejected missing ${opened.name} evidence before any reviewer launch.`);
+    assert.equal(launches.length, 0, 'first entry cannot bypass retained repair through --submit (TASK-2822 F1)');
+    const refused = await fixture.load();
+    assert.deepEqual(refused.checkpoints, after.checkpoints, 'refusal adds no checkpoint or retry budget');
+    assert.deepEqual(refused.review, after.review, 'refusal fabricates no Review or approval');
+    t.diagnostic(`Missing ${opened.name} evidence prevents any launch; original incident, checkpoints and budget are unchanged.`);
     await assert.rejects(repair.verify(fixture.slug, opened.name), /fresh authorized evidence/);
     return;
   }
@@ -222,7 +225,7 @@ export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 
           '--criterion', 'feature ships', '--evidence', 'feature.txt', '--next', 'Independent review']), 0);
         return { status: 0, stdout: '', stderr: '' };
       }
-      assert.match(prompt, /^Mode: review\./m, 'only independent reviewer work is allowed after repaired handoff');
+      assert.match(prompt, /^Mode: review\./m, "only independent reviewer work is allowed after repaired review preparation");
       launches.push('review');
       const mission = await fixture.load();
       assert.equal(await invoke(['verdict', 'approve', '--slug', fixture.slug,
@@ -234,5 +237,5 @@ export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 
   assert.equal((await fixture.load()).checkpoints.at(-1)?.repair?.verified, true);
   assert.deepEqual(launches, ['act-on-review', 'repair', 'review']);
   assert.equal(reviewStatus((await fixture.load()).review!), 'approved');
-  t.diagnostic('After valid evidence, inferred review passed handoff and launched the independent reviewer; approval came only from its explicit verdict.');
+  t.diagnostic("After valid evidence, inferred review passed review preparation and launched the independent reviewer; approval came only from its explicit verdict.");
 }

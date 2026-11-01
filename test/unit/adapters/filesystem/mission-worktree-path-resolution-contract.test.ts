@@ -374,7 +374,7 @@ describe("snapshotWorktreeTopology composition export", async () => {
 
   // 2. Load the handoff use-case so the graph that reaches captureNelAtHandoff
   //    is fully resolved through the same composition entry point.
-  const handoffUseCase = await import('../../../../src/application/handoff-command-use-case.js');
+  const reviewPreparationUseCase = await import('../../../../src/application/review-preparation-command-use-case.js');
 
   // 3. The git adapter export must be a callable named export once the graph is
   //    loaded, not an undefined binding from a partially-initialised cycle.
@@ -388,9 +388,9 @@ describe("snapshotWorktreeTopology composition export", async () => {
     );
 
     assert.equal(
-      typeof handoffUseCase.HandoffCommandUseCase,
+      typeof reviewPreparationUseCase.ReviewPreparationCommandUseCase,
       'function',
-      'handoff use-case must resolve through the composition graph',
+      "review preparation use-case must resolve through the composition graph",
     );
 
     assert.equal(

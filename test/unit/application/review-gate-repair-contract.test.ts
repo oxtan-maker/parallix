@@ -6,7 +6,7 @@ import type { ReviewLoopState } from '../../../src/application/ports/review-roun
 import type { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 import { fixtureMission, pendingReview } from '../../fixtures/mission-builders.js';
 import { missionVersion } from '../../../src/application/domain-ports.js';
-import { makePorts, makeRecorder } from '../../helpers/handoff-ports.js';
+import { makePorts, makeRecorder } from "../../helpers/review-preparation-ports.js";
 // review gate repair contract.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
 import test, { describe, afterEach } from 'node:test';
@@ -20,7 +20,7 @@ import { fakeLoopContext, fakeReviewLoopPorts } from '../../helpers/review-loop-
 import fs from 'node:fs';
 import path from 'node:path';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
-import { HandoffCommandUseCase } from '../../../src/application/handoff-command-use-case.js';
+import { ReviewPreparationCommandUseCase } from '../../../src/application/review-preparation-command-use-case.js';
 import { ReviewState } from '../../../src/adapters/review/review-state.js';
 import { rebound } from '../../../src/application/rebound-kernel.js';
 import { submitForReview } from '../../../src/adapters/review/review-commands.js';
@@ -48,7 +48,7 @@ describe("pre review gate per round", { concurrency: false }, () => {
     const fake = fakeReviewLoopPorts({
       slug: TEST_SLUG,
       routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
-      handoff: { handoff: async () => ({ ok: true as const }) },
+      reviewPreparation: { reviewPreparation: async () => ({ ok: true as const }) },
       provider: { pollReview: async () => reviewOutcomes.shift() ?? null, pollDisposition: async () => dispositions.shift() ?? null },
       preReview: {
         runGate: async () => { gateCalls.push(gateCalls.length + 1); return { ok: true as const }; },
@@ -70,7 +70,7 @@ describe("pre review gate per round", { concurrency: false }, () => {
     const fake = fakeReviewLoopPorts({
       slug: TEST_SLUG,
       routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
-      handoff: { handoff: async () => ({ ok: true as const }) },
+      reviewPreparation: { reviewPreparation: async () => ({ ok: true as const }) },
       provider: {},
       preReview: {
         runGate: async () => {
@@ -104,7 +104,7 @@ describe("pre review gate per round", { concurrency: false }, () => {
     const fake = fakeReviewLoopPorts({
       slug: TEST_SLUG,
       routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
-      handoff: { handoff: async () => ({ ok: true as const }) },
+      reviewPreparation: { reviewPreparation: async () => ({ ok: true as const }) },
       provider: {},
       preReview: {
         rebase: async () => hook,
@@ -463,7 +463,7 @@ describe("pre review gate repair continues", { concurrency: false }, () => {
       slug,
       worktree,
       routing: { eligibleFamilies: () => ['codex', 'claude'] },
-      handoff: { handoff: async () => ({ ok: true as const }) },
+      reviewPreparation: { reviewPreparation: async () => ({ ok: true as const }) },
       provider: { pollReview: async () => 'APPROVED', pollDisposition: async () => 'CHANGES_MADE' },
       missionStore: missionStore,
       lifecycle: lifecycle,
@@ -526,7 +526,7 @@ describe("rebounce review submit repro", { concurrency: false }, () => {
     const command = './scripts/verify-local.sh all (CP-4: exit 0, 0 test failures)';
     let shellRuns = 0;
     const base = makePorts(makeRecorder());
-    const useCase = new HandoffCommandUseCase({
+    const useCase = new ReviewPreparationCommandUseCase({
       ...base,
       fileSystem: { ...base.fileSystem,
         existsSync: () => true,
@@ -546,11 +546,11 @@ describe("rebounce review submit repro", { concurrency: false }, () => {
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'validation-failed');
     assert.match(result.error || '', /Gate declaration must contain an exact runnable command only/);
-    assert.equal(shellRuns, 0, 'the review-submit handoff must rebound from structured validation, not raw Bash');
+    assert.equal(shellRuns, 0, "the review-submit review preparation must rebound from structured validation, not raw Bash");
   });
 
   test('task-2439 validator keeps exact commands and rejects documented outcomes', () => {
-    const useCase = new HandoffCommandUseCase(makePorts(makeRecorder()));
+    const useCase = new ReviewPreparationCommandUseCase(makePorts(makeRecorder()));
 
     assert.equal(useCase.validateDeclaredGates(['./scripts/verify-local.sh all'], '/worktree').ok, true);
     for (const declaration of [
@@ -565,21 +565,21 @@ describe("rebounce review submit repro", { concurrency: false }, () => {
     }
   });
 
-  test('task-2439 review-submit enables declared-gate recovery at the handoff seam', async () => {
-    let handoffOptions: Parameters<NonNullable<NonNullable<Parameters<typeof submitForReview>[2]>['performHandoffFn']>>[1];
+  test("task-2439 review-submit enables declared-gate recovery at the review preparation seam", async () => {
+    let reviewPreparationOptions: Parameters<NonNullable<NonNullable<Parameters<typeof submitForReview>[2]>["performReviewPreparationFn"]>>[1];
     await submitForReview('task-2439', false, {
       resolveWorktreeFn: () => '/worktree',
       readReviewStateFn: () => null,
       resolveTaskFileFn: () => ({ ok: true as const, taskFile: '/worktree/task.md', matches: [] }),
       getTaskImplementerFn: () => 'codex',
       isReviewProviderEnabledFn: () => false,
-      performHandoffFn: async (_slug, options) => {
-        handoffOptions = options;
+      performReviewPreparationFn: async (_slug, options) => {
+        reviewPreparationOptions = options;
         return { ok: false as const, recoveryAttempted: true };
       },
       exit: () => undefined,
     });
-    assert.equal(handoffOptions?.recoverGateFailure, true);
+    assert.equal(reviewPreparationOptions?.recoverGateFailure, true);
   });
 
   test('malformed locked gates escalate without launches or verification (TASK-2695)', async () => {
@@ -676,12 +676,12 @@ describe('retained verification repair continuation', { concurrency: false }, ()
     return { fake: { ...fake, ports }, mission, repair, run, checks, verified, opens, command };
   }
 
-  test('successful exact-check repair resumes handoff and reviewer decision without another resume (TASK-2766)', async () => {
+  test("successful exact-check repair resumes review preparation and reviewer decision without another resume (TASK-2766)", async () => {
     const f = fixture({ passing: true });
     f.mission.review = pendingReview('task-2757');
-    let handoffs = 0;
-    f.fake.ports.handoff = { handoff: async () => {
-      handoffs++;
+    let reviewPreparations = 0;
+    f.fake.ports.reviewPreparation = { reviewPreparation: async () => {
+      reviewPreparations++;
       assert.equal(f.repair.verified, true);
       await f.fake.ports.state.persist(new ReviewState('task-2757', { implementer: 'codex', reviewer: 'claude', round: 2 }));
       return { ok: true };
@@ -693,9 +693,9 @@ describe('retained verification repair continuation', { concurrency: false }, ()
     f.fake.ports.artifacts.consumeReviewer = async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' });
     await f.run();
     assert.deepEqual(f.checks, [[f.command, f.fake.ports.worktree]]);
-    assert.equal(handoffs, 1, 'verified active/pending repair must automatically reach handoff');
+    assert.equal(reviewPreparations, 1, "verified active/pending repair must automatically reach review preparation");
     assert.deepEqual(f.fake.launches.map(launch => launch.role), ['implementer', 'reviewer']);
-    assert.equal(f.fake.launches[1].prompt?.attempt, 2, 'handoff round state is authoritative');
+    assert.equal(f.fake.launches[1].prompt?.attempt, 2, "review preparation round state is authoritative");
     assert.equal(f.fake.current()?.phase, 'approved');
     assert.deepEqual(f.fake.exits, []);
   });
@@ -760,21 +760,21 @@ describe('retained verification repair continuation', { concurrency: false }, ()
     f.mission.review = pendingReview('task-2757');
     const history = structuredClone(f.mission.checkpoints);
     let diagnosticReads = 0;
-    let handoffs = 0;
+    let reviewPreparations = 0;
     const read = f.fake.ports.retainedRepair.read;
     f.fake.ports.retainedRepair.read = async command => { diagnosticReads++; return read(command); };
-    f.fake.ports.handoff = { handoff: async () => { handoffs++; return { gatekeeperPushedBack: true }; } };
+    f.fake.ports.reviewPreparation = { reviewPreparation: async () => { reviewPreparations++; return { gatekeeperPushedBack: true }; } };
 
     await f.run();
 
     assert.deepEqual(f.mission.checkpoints, history, 'continuation preserves historical failure rows and incident identities');
     assert.equal(diagnosticReads, 0, 'explicitly covered CP-5 must not select its obsolete diagnostic');
     assert.deepEqual(f.checks, [], 'covered occurrences require no repeated exact check');
-    assert.equal(handoffs, 1, 'covered continuation reaches the ordinary handoff owner');
+    assert.equal(reviewPreparations, 1, "covered continuation reaches the ordinary review preparation owner");
     assert.deepEqual(f.fake.launches, [], 'covered continuation launches no obsolete repair');
   });
 
-  for (const command of ['px handoff', 'hook-failure', 'artifact-incomplete', 'agent-timeout']) {
+  for (const command of ['review-preparation', 'hook-failure', 'artifact-incomplete', 'agent-timeout']) {
     for (const verifiedGate of [false, true]) {
       test(`non-gate ${command} resumes without retained evidence, verified gate=${verifiedGate} (TASK-2757 F1)`, async () => {
         const f = fixture();
@@ -784,12 +784,12 @@ describe('retained verification repair continuation', { concurrency: false }, ()
         let reads = 0;
         f.fake.ports.retainedRepair.read = async () => { reads++; throw new Error('never captured'); };
         f.mission.review = pendingReview('task-2757');
-        let handoffs = 0;
-        f.fake.ports.handoff = { handoff: async () => { handoffs++; return { gatekeeperPushedBack: true }; } };
+        let reviewPreparations = 0;
+        f.fake.ports.reviewPreparation = { reviewPreparation: async () => { reviewPreparations++; return { gatekeeperPushedBack: true }; } };
         await f.run();
         assert.equal(reads, 0);
-        assert.equal(handoffs, 1, 'ordinary handoff resume remains reachable');
-        assert.deepEqual(f.fake.exits, [1], 'handoff still owns its validation decision');
+        assert.equal(reviewPreparations, 1, "ordinary review preparation resume remains reachable");
+        assert.deepEqual(f.fake.exits, [1], "review preparation still owns its validation decision");
         assert.equal(f.fake.launches.length, 0);
         assert.equal(orphan.repair.verified, false, 'routing never fabricates repair proof');
       });
@@ -798,7 +798,7 @@ describe('retained verification repair continuation', { concurrency: false }, ()
 
   test('orphan non-gate checkpoint cannot shadow an unfinished gate repair (TASK-2757 F1)', async () => {
     const f = fixture();
-    f.mission.checkpoints.unshift({ ...f.mission.checkpoints[0], name: 'CP-1', repair: { ...f.repair, command: 'px handoff', incidentId: 'orphan' } });
+    f.mission.checkpoints.unshift({ ...f.mission.checkpoints[0], name: 'CP-1', repair: { ...f.repair, command: 'review-preparation', incidentId: 'orphan' } });
     const read = f.fake.ports.retainedRepair.read;
     const commands: string[] = [];
     f.fake.ports.retainedRepair.read = async command => { commands.push(command); return read(command); };

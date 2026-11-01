@@ -8,12 +8,12 @@ import type { AgentBlocklistRepository } from '../../application/ports/agent-blo
 import type { LauncherProbeResult } from '../agents/launcher-availability.js';
 import type { MissionId } from '../../domain/mission.js';
 import {
-  CURRENT_WORK_TTL_MS,
+  ACTIVITY_OBSERVATION_TTL_MS,
   isWorkInProgress,
-  reconcileCurrentWork,
-  type CurrentWorkReadAdapter,
+  projectExecutionActivity,
   type ProcessLivenessProbe,
-} from '../../application/projections/current-work.js';
+} from '../../domain/execution-activity.js';
+import type { ExecutionActivityReadPort } from '../../application/ports/execution-activity.js';
 import { getTaskAssignee, resolveTaskFile } from './backlog.js';
 import { readAgentConfig, type AgentConfig } from '../agents/agent-config.js';
 import { resolveAgentBlockAuthority } from '../agents/agent-block-authority.js';
@@ -77,8 +77,8 @@ export interface ConcreteAgentReadAdapterOptions {
    * cannot be attributed, which is reported as unknown rather than as zero.
    */
   readonly sessionMarkers?: SessionMarkerRepository | null;
-  /** Reconciled current-work authority, which names the family running a mission. */
-  readonly currentWork?: CurrentWorkReadAdapter | null;
+  /** Reconciled execution activity projection, which names the family running a mission. */
+  readonly currentWork?: ExecutionActivityReadPort | null;
   /** Bounded liveness evidence used while reconciling current-work. */
   readonly isProcessAlive?: ProcessLivenessProbe;
   /** Running-session detection seam; defaults to the live process scan. */
@@ -99,7 +99,7 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
   private readonly resolveTaskFile: ResolveTaskFileFn;
   private readonly getTaskAssignee: GetTaskAssigneeFn;
   private readonly sessionMarkers: SessionMarkerRepository | null;
-  private readonly currentWork: CurrentWorkReadAdapter | null;
+  private readonly currentWork: ExecutionActivityReadPort | null;
   private readonly isProcessAlive: ProcessLivenessProbe | undefined;
   private readonly detectRunningSessions: () => readonly RunningMissionSession[] | null | Promise<readonly RunningMissionSession[] | null>;
 
@@ -175,12 +175,12 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
     if (running.length === 0) { return []; }
 
     const currentWork = this.currentWork
-      ? reconcileCurrentWork(await this.currentWork.loadCurrentWork(), {
+      ? projectExecutionActivity(await this.currentWork.loadCurrentWork(), {
         nowMs: Date.now(),
-        ttlMs: CURRENT_WORK_TTL_MS,
+        ttlMs: ACTIVITY_OBSERVATION_TTL_MS,
         isProcessAlive: this.isProcessAlive,
       })
-      : new Map<Parameters<ReturnType<typeof reconcileCurrentWork>['get']>[0], NonNullable<ReturnType<ReturnType<typeof reconcileCurrentWork>['get']>>>();
+      : new Map<Parameters<ReturnType<typeof projectExecutionActivity>['get']>[0], NonNullable<ReturnType<ReturnType<typeof projectExecutionActivity>['get']>>>();
     const markers = this.sessionMarkers ? await this.sessionMarkers.findAll() : [];
     const byMissionRole = new Map(markers.map((marker) => [`${marker.missionId}:${marker.role}`, marker]));
     return Promise.all(running.map(async (session) => {

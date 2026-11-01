@@ -53,7 +53,7 @@ export type Capability =
   | 'checkpoint:record'
   | 'checkpoint:correct'
   | 'mission:context'
-  | 'handoff:record'
+  | 'nel:record'
   | 'review:submit';
 
 export function completed<T>(

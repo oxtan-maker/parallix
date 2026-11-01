@@ -28,8 +28,6 @@ export interface OperationalHistoryRepository {
   findRecentLogEntries?(_limit: number): Promise<readonly OperationLogSummary[]>;
   findByType(_type: string): Promise<readonly OperationalHistoryEntry[]>;
   findByTypeForMission?(_type: string, _missionId: string): Promise<readonly OperationalHistoryEntry[]>;
-  /** Latest facts per mission for the board's bounded current-work read. */
-  findLatestByTypePerMission?(_type: string, _limitPerMission: number): Promise<readonly OperationalHistoryEntry[]>;
   append(_entry: OperationalHistoryEntry): Promise<void>;
   clear(): Promise<void>;
 }

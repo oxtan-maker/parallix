@@ -52,7 +52,7 @@ test('CLI stop settles only its owner tree and attributed detached run before re
     assert.equal((await fixture.service.admit({ operationId: operations[index], kind: 'active:execute', missionId: slug, capabilities: new Set(['active:execute']) })).status, 'accepted');
     const operation = (await fixture.service.operation(operations[index]))!;
     const child = index === 0 ? owner : unrelated;
-    await fixture.operations.replace({ ...operation, phase: 'preparing', generation: 1,
+    await fixture.operations.replace({ ...operation, phase: 'executing', generation: 1,
       owner: { pid: child.pid!, identity: processStartIdentity(child.pid!)! } }, 0);
   }
   const coordinator = openRunCapture({ worktree: fixture.root, runId: `workflow-${randomUUID()}`, captureKind: 'coordinator', terminalHost: 'pipe',
@@ -72,7 +72,7 @@ test('CLI stop settles only its owner tree and attributed detached run before re
   await until(async () => await processes.alive({ pid: descendantPid, identity: descendantIdentity }) === false, 'owned descendant stopped');
   assert.equal(probeProcessLiveness(unrelated.pid!, processStartIdentity(unrelated.pid!)!), true);
   assert.equal((await fixture.service.operation('original'))?.phase, 'stopped');
-  assert.equal((await fixture.service.operation('other'))?.phase, 'preparing');
+  assert.equal((await fixture.service.operation('other'))?.phase, 'executing');
   const loaded = await fixture.store.load(fixture.slugs[0] as never);
   assert.equal(loaded.kind === 'found' && loaded.mission.status, 'active');
   coordinator.finish({ exitCode: null, signal: 'SIGTERM' });

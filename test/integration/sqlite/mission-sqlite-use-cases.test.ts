@@ -16,7 +16,7 @@ import * as path from 'node:path';
 
 import { missionVersion } from '../../../src/application/domain-ports.js';
 import { MissionCheckpointService } from '../../../src/application/mission-checkpoint-service.js';
-import { MissionHandoffService } from '../../../src/application/mission-handoff-service.js';
+import { MissionNelService } from '../../../src/application/mission-nel-service.js';
 import { MissionCreationService, type MissionIdentityAllocator } from '../../../src/application/mission-creation-service.js';
 import { allocateAdhocIdentity } from '../../../src/adapters/sqlite/adhoc-counter.js';
 import { createRepositoryMissionCatalog } from '../../../src/composition/board-projection.js';
@@ -46,7 +46,7 @@ const CAPABILITIES = new Set([
   'mission:intake',
   'mission:transition',
   'checkpoint:record',
-  'handoff:record',
+  'nel:record',
 ] as const);
 
 const temporaryDirectories: string[] = [];
@@ -62,7 +62,7 @@ async function isolatedStore(): Promise<{ store: SqliteMissionStore; db: SqliteD
   return { store: new SqliteMissionStore(db), db, databasePath };
 }
 
-async function intake(store: SqliteMissionStore, overrides: Record<string, unknown> = {}) {
+async function intake(store: import('../../../src/application/domain-ports.js').MissionTransitionStore, overrides: Record<string, unknown> = {}) {
   return new MissionIntakeService(store).execute({
     operationId: 'op-intake',
     missionId: MISSION,
@@ -99,6 +99,71 @@ afterEach(async () => {
 });
 
 describe('Mission application boundary over isolated SQLite adapters', () => {
+  it('pending review submission survives a database restart and clears only after verified submission (TASK-2822)', async () => {
+    const { store, db, databasePath } = await isolatedStore();
+    const { beginReviewPreparation } = await import('../../../src/application/review-submission-service.js');
+    const { startReview, changeRevision, ConfiguredReviewerEligibility } = await import('../../../src/domain/review.js');
+    const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily('claude')], strategy: 'random' });
+    try {
+      await intake(store);
+      const loaded = await store.load(MISSION);
+      assert.equal(loaded.kind, 'found');
+      if (loaded.kind !== 'found') { throw new Error('fixture missing'); }
+      await store.save({ ...loaded.mission, status: 'active', closedAt: null, checkpoints: [{ missionId: MISSION, name: 'CP-1',
+        goalCheck: [{ criterion: 'repair', evidence: 'retained regression' }], nextActionText: 'review' }] }, loaded.version);
+      await beginReviewPreparation(MISSION, { store, lifecycle: new MissionLifecycleService(store) });
+    } finally { await db.close(); }
+    const restarted = new SqliteDatabaseAdapter();
+    await restarted.open({ path: databasePath });
+    try {
+      const restartedStore = new SqliteMissionStore(restarted);
+      const services = { store: restartedStore, lifecycle: new MissionLifecycleService(restartedStore) };
+      await beginReviewPreparation(MISSION, services);
+      const pending = await restartedStore.load(MISSION);
+      assert.equal(pending.kind === 'found' && pending.mission.reviewPreparationPending, true);
+      const review = startReview({ change: { kind: 'local-branch', sourceBranch: 'mission/repair', targetBranch: 'main' },
+        revision: changeRevision('verified-head') }, agentFamily('claude'), agentFamily('codex'), '2026-10-27T10:00:00Z', reviewerEligibility);
+      const request = { operationId: 'verified-submission', missionId: MISSION, capabilities: CAPABILITIES,
+        actor: 'claude', occurredAt: '2026-10-27T10:00:00Z' };
+      const failed = await services.lifecycle.transition({ ...request, command: { type: 'submit-for-review', gatesPassed: false, review, reviewerEligibility } });
+      assert.notEqual(failed.status, 'completed');
+      const stillPending = await restartedStore.load(MISSION);
+      assert.equal(stillPending.kind === 'found' && stillPending.mission.reviewPreparationPending, true);
+      const submitted = await services.lifecycle.transition({ ...request, command: { type: 'submit-for-review', gatesPassed: true, preparedRevision: changeRevision('verified-head'), review, reviewerEligibility } });
+      assert.equal(submitted.status, 'completed', submitted.error?.message ?? '');
+      const saved = await restartedStore.load(MISSION);
+      assert.equal(saved.kind === 'found' && saved.mission.reviewPreparationPending, undefined);
+      assert.equal(saved.kind === 'found' && saved.mission.review?.rounds[0].subject.revision, 'verified-head');
+    } finally { await restarted.close(); }
+  });
+
+  it('production NEL recording cannot overwrite a later checked measurement (TASK-2822)', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-nel-race-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'parallix.db');
+    const { clearOperatorStateCache } = await import('../../../src/adapters/sqlite/adapter-factory.js');
+    try {
+      const services = await createMissionApplicationServices(path.dirname(databasePath), { databasePath, repositoryId: REPOSITORY });
+      await intake(services.store);
+      const save = services.store.save.bind(services.store);
+      let interleaved = false;
+      services.store.save = async (mission, version) => {
+        const saved = await save(mission, version);
+        if (!interleaved) {
+          interleaved = true;
+          await save({ ...mission, netEngineeringLines: 99 }, saved);
+        }
+        return saved;
+      };
+      const outcome = await services.nel.recordNel({ operationId: 'nel-race', missionId: MISSION,
+        capabilities: CAPABILITIES, netEngineeringLines: 12, capturedAt: '2026-10-26T10:00:00Z' });
+      assert.equal(outcome.status, 'completed');
+      const loaded = await services.store.load(MISSION);
+      assert.equal(loaded.kind === 'found' && loaded.mission.netEngineeringLines, 99);
+      assert.equal(outcome.value?.recordReference, `missions:${MISSION}`);
+      assert.equal(outcome.durableEvidence.length, 1, 'only the checked Mission measurement is persisted');
+    } finally { await clearOperatorStateCache(); }
+  });
   it('SC1/SC6: intake writes one Mission aggregate and its external trace, and no task catalog', async () => {
     const { store, db } = await isolatedStore();
     try {
@@ -296,18 +361,12 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
     }
   });
 
-  it('SC4: handoff stores the NEL number and keeps large artifacts as references, not blobs', async () => {
+  it("SC4: review preparation stores the NEL number and keeps large artifacts as references, not blobs", async () => {
     const { store, db, databasePath } = await isolatedStore();
     try {
       await intake(store);
-      const receipts: string[] = [];
-      const outcome = await new MissionHandoffService(store, {
-        async recordNel(record) {
-          receipts.push(`${record.netEngineeringLines}:${record.artifacts.map((a) => a.location).join(',')}`);
-          return { reference: 'missions/task-2322-05/nel-record.json' };
-        },
-      }).recordNel({
-        operationId: 'op-handoff',
+      const outcome = await new MissionNelService(store).recordNel({
+        operationId: "op-review preparation",
         missionId: MISSION,
         capabilities: CAPABILITIES,
         expectedVersion: missionVersion(1),
@@ -321,7 +380,8 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
         ],
       });
       assert.equal(outcome.status, 'completed');
-      assert.deepEqual(receipts, ['512:proofs/task-2322-05/gate.log,main..HEAD']);
+      assert.deepEqual(outcome.value!.record.artifacts.map(a => a.location), ['proofs/task-2322-05/gate.log', 'main..HEAD']);
+      assert.equal(outcome.value!.recordReference, `missions:${MISSION}`);
 
       const rows = await db.query<{ net_engineering_lines: number }>(
         'SELECT net_engineering_lines FROM missions WHERE id = ?',
@@ -374,7 +434,7 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
     assert.equal(services.lifecycle.constructor.name, 'MissionLifecycleService');
     assert.equal(services.integration.constructor.name, 'MissionIntegrationService');
     assert.equal(services.checkpoints.constructor.name, 'MissionCheckpointService');
-    assert.equal(services.handoff.constructor.name, 'MissionHandoffService');
+    assert.equal(services.nel.constructor.name, "MissionNelService");
   });
 });
 

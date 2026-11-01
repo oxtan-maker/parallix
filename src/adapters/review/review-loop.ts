@@ -35,7 +35,7 @@ import { ReviewState, readReviewState, writeReviewState, resetReviewState, persi
 import type { MissionStore } from '../../application/domain-ports.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import type {
-  HandoffFacts, PreReviewGateFacts, PreReviewRebaseFacts, ProviderPollRequest, ReviewAgentLaunch, ReviewAgentPort, ReviewLoopPorts,
+  ReviewPreparationFacts, PreReviewGateFacts, PreReviewRebaseFacts, ProviderPollRequest, ReviewAgentLaunch, ReviewAgentPort, ReviewLoopPorts,
   ReviewLoopState, ReviewPromptFacts, ReviewProviderPort, StartReviewRound,
 } from '../../application/ports/review-round.js';
 import { workflowLauncherStatus, startAgent, eligibleAgentsForStep, selectAgent } from '../agents/agents.js';
@@ -71,7 +71,7 @@ export interface ReviewLoopBindings {
   readonly consumeImplementerArtifacts?: typeof consumeImplementerArtifacts;
   readonly missionStore?: MissionStore | null;
   readonly lifecycleService?: MissionLifecycleService | null;
-  readonly performHandoffFn?: (_slug: string, _options: Record<string, unknown>) => Promise<HandoffFacts>;
+  readonly performReviewPreparationFn?: (_slug: string, _options: Record<string, unknown>) => Promise<ReviewPreparationFacts>;
   readonly onAgentLaunched?: (_agent: string, _phase: 'review' | 'review-response') => Promise<void> | void;
   readonly onAutonomousStop?: (_reason: string) => Promise<void> | void;
   readonly log?: (_msg: string) => void;
@@ -269,7 +269,7 @@ function unclassifiedRebaseReason(result: Awaited<ReturnType<typeof rebaseBefore
   const failure = result.failure;
   if (failure?.kind === 'conflict') { return { kind: 'rebase-conflict', files: failure.sharedFiles, diagnostic: rebaseDiagnostic(result) }; }
   if (failure?.kind === 'hook') { return hookFailureReason(failure.hook.output, `git ${failure.operation}`); }
-  return { kind: 'handoff-verification', error: rebaseDiagnostic(result) || 'Pre-review rebase command failed' };
+  return { kind: "review-preparation-verification", error: rebaseDiagnostic(result) || 'Pre-review rebase command failed' };
 }
 
 function gateFacts(result: Awaited<ReturnType<typeof runPreReviewGate>>): PreReviewGateFacts {
@@ -319,8 +319,8 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
       mirrorApproved: async () => { await transitionVirtual(transitionTask, slug, 'approved', { log }); },
       assign: implementer => Boolean(task.ok && enforceTaskAssignee(task.taskFile!, implementer)),
     },
-    handoff: bindings.performHandoffFn
-      ? { handoff: async implementer => await bindings.performHandoffFn!(slug, { forgejoUser: implementer, worktree, recoverGateFailure: true }) }
+    reviewPreparation: bindings.performReviewPreparationFn
+      ? { reviewPreparation: async implementer => await bindings.performReviewPreparationFn!(slug, { forgejoUser: implementer, worktree, recoverGateFailure: true }) }
       : null,
     provider: providerEnabled ? providerPort(slug, branch, worktree, target, log, error, bindings.configuration ?? DEFAULT_CONFIGURATION) : null,
     approvalRevocation: missionStore && lifecycleService ? {

@@ -4,11 +4,11 @@
  * artifacts a typed-mission recovery is allowed to manufacture.
  */
 export function isTypedCheckpointEvidenceFailure(errorMsg: string): boolean {
-  return /Planned checkpoint evidence is missing before handoff:/i.test(errorMsg);
+  return /Planned checkpoint evidence is missing before review preparation:/i.test(errorMsg);
 }
 
 export function namedCheckpointFromTypedFailure(errorMsg: string): string | null {
-  return /Planned checkpoint evidence is missing before handoff:\s*(CP-\d+)/i.exec(errorMsg)?.[1] ?? null;
+  return /Planned checkpoint evidence is missing before review preparation:\s*(CP-\d+)/i.exec(errorMsg)?.[1] ?? null;
 }
 
 /**
@@ -30,10 +30,10 @@ function repairCheckpointExample(checkpoint: string): string {
 export function buildTypedMissionRecoveryAdvice(slug: string, checkpoint: string): string {
   return [
     `Reload the recorded Mission contract with \`px status ${slug}\`, including its current Version, success criteria, checkpoint plan, and recorded evidence.`,
-    `Record ${checkpoint} as the repair checkpoint. If ${checkpoint} is the final planned checkpoint, it needs only the rows for the criteria the repair affects: valid earlier evidence for the other criteria is retained across the recorded checkpoints and stays available through repeated repair rounds, so do not restate it. If ${checkpoint} is not the final planned checkpoint, it needs only the rows for the criteria it covers. Every row cites a verifiable reference, and the repair must record at least one fresh row in the current review round: rows kept from earlier rounds are stale as fix evidence. Taken together the recorded checkpoints must still cover every success criterion, or handoff refuses them. Use \`px checkpoint record --name ${checkpoint} --criterion <exact success criterion> --evidence <durable evidence> --next <specific next action>\`; the write resolves its own current version automatically.`,
+    `Record ${checkpoint} as the repair checkpoint. If ${checkpoint} is the final planned checkpoint, it needs only the rows for the criteria the repair affects: valid earlier evidence for the other criteria is retained across the recorded checkpoints and stays available through repeated repair rounds, so do not restate it. If ${checkpoint} is not the final planned checkpoint, it needs only the rows for the criteria it covers. Every row cites a verifiable reference, and the repair must record at least one fresh row in the current review round: rows kept from earlier rounds are stale as fix evidence. Taken together the recorded checkpoints must still cover every success criterion, or review preparation refuses them. Use \`px checkpoint record --name ${checkpoint} --criterion <exact success criterion> --evidence <durable evidence> --next <specific next action>\`; the write resolves its own current version automatically.`,
     `A valid row cites a verifiable reference (recognized repo command/path, exact test name, test-file path, or ADR). One row per affected criterion; concrete example: \`${repairCheckpointExample(checkpoint)}\`.`,
     `Planned checkpoints that still lack evidence (for example an original CP-3 alongside ${checkpoint}) are also authorized for \`px checkpoint record\` within the locked scope and success criteria. Retain valid earlier evidence for unaffected criteria without restatement; affected criteria need fresh verifiable current-round evidence. If the fix shows earlier evidence is no longer accurate, re-record that checkpoint with corrected fresh evidence for the criteria it affects. Never edit locked scope or criteria, weaken or bypass gates, or self-approve; independent review stays the approver. If the locked contract is invalid, report it with \`px checkpoint report-invalid-contract\` and stop for the operator.`,
-    `Re-run \`px status ${slug}\` after recording evidence, then continue with each remaining planned checkpoint before handoff.`,
+    `Re-run \`px status ${slug}\` after recording evidence, then continue with each remaining planned checkpoint before review preparation.`,
     'Complete the implementation and run every mission-declared gate; record only evidence from work and verification actually performed. Do not hand off until every planned checkpoint has evidence and every declared gate passes, unless a mission stop rule applies or a genuine external dependency blocks progress.',
     `Before declaring completion, run px checkpoint check --slug ${slug} --json and inspect ready and primaryStopReason. Stop for the operator on a recorded human-only contract blocker even when evidence is incomplete; do not fabricate proof, repeat evidence-only repair or treat prose as resolution.`,
     'Do not create or edit retired legacy artifacts for this typed mission.',
@@ -41,7 +41,7 @@ export function buildTypedMissionRecoveryAdvice(slug: string, checkpoint: string
   ].join(' ');
 }
 
-export { isIncompleteSuccessCriteriaFailure } from '../domain/mission-handoff-policy.js';
+export { isIncompleteSuccessCriteriaFailure } from "../domain/mission-review-preparation-policy.js";
 
 export function buildSuccessCriteriaRecoveryAdvice(slug: string): string {
   return [
@@ -49,6 +49,6 @@ export function buildSuccessCriteriaRecoveryAdvice(slug: string): string {
     'Complete and verify the work for each incomplete criterion; mark only criteria actually verified against durable evidence.',
     `Record each verified criterion with \`px mission mark-complete --slug ${slug} --criterion <index>\`, using its one-based index; the write resolves its own current version automatically.`,
     'Reload status after each write before recording another criterion. The final checkpoint must evidence every criterion; completion flags do not replace evidence.',
-    'Do not create retired checkpoint documents. Let handoff verification rerun confirm the repair.',
+    "Do not create retired checkpoint documents. Let review preparation verification rerun confirm the repair.",
   ].join(' ');
 }

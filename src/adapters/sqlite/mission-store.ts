@@ -4,15 +4,12 @@ import { authorizeSqliteMissionWrite } from './workflow-write-guard.js';
 import { SqliteCheckpointHistory } from './checkpoint-history.js';
 import type {
   MissionLoadResult,
-  MissionNelRecordReceipt,
-  MissionNelRecorder,
   MissionStore,
   MigrateLegacyAdhocIdsResult,
   MissionVersion,
 } from '../../application/domain-ports.js';
 import { missionVersion } from '../../application/domain-ports.js';
 import { DuplicateLaneEventError, type LaneTransitionEvent } from '../../domain/board-event.js';
-import type { MissionNelRecord } from '../../domain/net-engineering-lines.js';
 import { missionTitle, type Mission, type MissionId } from '../../domain/mission.js';
 import { missionBrief } from '../../domain/mission-brief.js';
 import { declaredGates } from '../../domain/mission-gates.js';
@@ -68,7 +65,7 @@ const LOAD_CHUNK = 400;
  * whole time. Concurrency between *processes* keeps SQLite's own isolation;
  * this queue closes the in-process window that shared handle opens.
  */
-export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
+export class SqliteMissionStore implements MissionStore {
   private readonly eventRepo: SqliteBoardLaneEventRepository;
   private readonly valueWriter: SqliteMissionValueWriter;
   /** Tail of the serialized aggregate-operation chain. */
@@ -187,7 +184,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
    * `mission_labels`, `mission_checkpoints`, `mission_checkpoint_goal_checks`,
    * `mission_reviews`, `mission_review_rounds`, `mission_review_findings`,
    * `mission_review_resolutions`, `mission_review_stage_launches`,
-   * `mission_review_events` and `mission_external_task_refs`; the two tables
+   * `mission_review_events` and `mission_external_task_refs`; the tables deleted explicitly
    * below carry no foreign key and are deleted explicitly. `usage_statistics`
    * is deliberately absent: a cancelled mission still cost what it cost.
    */
@@ -202,6 +199,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       if (current[0]?.status === 'done') {
         throw new Error(`Refusing to cancel ${id}: integrated Mission closeout must finish through px integrate --recover-landed`);
       }
+      await this.db.execute('DELETE FROM execution_activity WHERE mission_id = ?', [id]);
       await this.db.execute('DELETE FROM session_markers WHERE mission_id = ?', [id]);
       await this.db.execute('DELETE FROM board_lane_events WHERE mission_id = ?', [id]);
       await this.db.execute('DELETE FROM missions WHERE id = ?', [id]);
@@ -305,33 +303,6 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
   }
 
   // -----------------------------------------------------------------------
-  // MissionNelRecorder
-  // -----------------------------------------------------------------------
-
-  /**
-   * Record the structured NEL report in the missions table.
-   *
-   * The `net_engineering_lines` column is the authoritative NEL field.
-   * The additional structured fields (predicted bucket, actual bucket,
-   * review rounds, capturedAt, artifacts) are recorded as part of the
-   * Mission aggregate through the `save()` call in MissionHandoffService.
-   * This method persists the NEL measurement and returns a row reference.
-   */
-  async recordNel(record: MissionNelRecord): Promise<MissionNelRecordReceipt> {
-    await this.db.beginWriteTransaction();
-    try {
-      await authorizeSqliteMissionWrite(this.db, record.missionId);
-      await this.db.execute(
-        'UPDATE missions SET net_engineering_lines = ? WHERE id = ?',
-        [record.netEngineeringLines, record.missionId],
-      );
-      await this.db.commitTransaction();
-    } catch (error) { await this.db.rollbackTransaction(); throw error; }
-    return {
-      reference: `missions:${record.missionId}`,
-    };
-  }
-
   private async persistAggregate(
     mission: Mission,
     expectedVersion: MissionVersion | null,
@@ -362,6 +333,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       mission.rawStatus ?? null,
       mission.assignee,
       mission.netEngineeringLines,
+      Number(mission.reviewPreparationPending === true),
       mission.reproductionTest ?? null,
       mission.predictedNelBucket ?? null,
       mission.description ?? null,
@@ -374,8 +346,8 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
         await this.db.execute(
           `INSERT INTO missions
              (id, repository_id, title, status, raw_status, assignee,
-              net_engineering_lines, reproduction_test, predicted_nel_bucket, description, closed_at, version)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+              net_engineering_lines, review_preparation_pending, reproduction_test, predicted_nel_bucket, description, closed_at, version)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
           [mission.id, ...params],
         );
       } catch (error) {
@@ -390,7 +362,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       const changed = await this.db.execute(
         `UPDATE missions SET
            repository_id = ?, title = ?, status = ?, raw_status = ?, assignee = ?,
-           net_engineering_lines = ?, reproduction_test = ?, predicted_nel_bucket = ?, description = ?, closed_at = ?, version = version + 1
+           net_engineering_lines = ?, review_preparation_pending = ?, reproduction_test = ?, predicted_nel_bucket = ?, description = ?, closed_at = ?, version = version + 1
          WHERE id = ? AND version = ?`,
         [...params, mission.id, expectedVersion],
       );

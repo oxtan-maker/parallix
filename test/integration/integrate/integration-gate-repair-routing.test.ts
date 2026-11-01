@@ -53,7 +53,7 @@ function servicesFor() {
     store,
     lifecycle: new MissionLifecycleService(store),
     integration: new MissionIntegrationService(store),
-    handoff: { recordNel: async () => ({}) },
+    nel: { recordNel: async () => ({}) },
   };
 }
 
@@ -81,7 +81,7 @@ async function runIntegrate(scenario: Scenario) {
   fs.writeFileSync(taskFile, 'status: approved\n');
   const services = scenario.repairs ? (() => {
     const store = createFakeStore('review');
-    return { store, lifecycle: new MissionLifecycleService(store), integration: new MissionIntegrationService(store), handoff: { recordNel: async () => ({}) } };
+    return { store, lifecycle: new MissionLifecycleService(store), integration: new MissionIntegrationService(store), nel: { recordNel: async () => ({}) } };
   })() : servicesFor();
   if (scenario.repairs) {
     await services.store.save({ ...services.store.mission(), checkpoints: [{ missionId: missionId(SLUG), name: 'CP-1', rawFilename: undefined,

@@ -4,7 +4,7 @@ import test, { mock, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
 import { configureMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
-import { NO_CURRENT_WORK_PORT } from '../../../src/application/recording/current-work-recorder.js';
+import { NO_EXECUTION_ACTIVITY } from '../../../src/application/recording/execution-activity-recorder.js';
 import { completed, failure } from '../../../src/application/contracts.js';
 import type { BoardCommandRequest } from '../../../src/application/controller/board-command.js';
 import type { ProductionApplicationServices } from '../../../src/composition/application-services.js';
@@ -30,7 +30,7 @@ function fixture(t: TestContext, denyAdmission = false) {
   const mission = fixtureMission('task-nested', { status: 'review', checkpoints: [] });
   const graph = {
     mission: { store: { load: async () => ({ kind: 'found', mission, version: 1 }) } },
-    currentWork: NO_CURRENT_WORK_PORT,
+    currentWork: NO_EXECUTION_ACTIVITY,
     operatorState: { close: async () => { admissionsClosed++; } },
     presentationCapabilities: { commandController: { dispatch: async (request: BoardCommandRequest) => {
       requests.push(request);

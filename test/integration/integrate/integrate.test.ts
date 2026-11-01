@@ -1808,7 +1808,7 @@ test('R4: stale active approved recovery skips submit-for-review replay, then ap
     { missionServices, submitForReviewFn },
   );
 
-  assert.equal(submitForReviewCalled, false, 'recovery skips the submit-for-review handoff replay for an already-approved round');
+  assert.equal(submitForReviewCalled, false, "recovery skips the submit-for-review review preparation replay for an already-approved round");
   assert.deepEqual(
     calls,
     // The active → review move carries the Review round's own startedAt, never
@@ -1868,7 +1868,7 @@ test('R4b2: stale active approved recovery proceeds when no review provider is c
   assert.deepEqual(result, { recovered: true, status: 'integration', occurredAt: decidedAt });
 });
 
-test('R4c: fresh awaiting-review recovery still uses the handoff operation', async () => {
+test("R4c: fresh awaiting-review recovery still uses the review preparation operation", async () => {
   let state = integrateCommandMission("task-2397", 'active', pendingReview("task-2397", '2026-01-01T10:00:00Z'));
   const missionServices = integrationServices({
     store: { async load() { return { kind: 'found' as const, mission: state, version: fixtureVersion(7) }; } },
@@ -1887,7 +1887,7 @@ test('R4c: fresh awaiting-review recovery still uses the handoff operation', asy
     error => error instanceof Error && error.constructor.name === 'IntegrationAbort',
   );
   assert.equal(submitForReviewCalled, true, 'fresh rounds still route through submitForReview');
-  assert.equal(state.status, 'review', 'the fresh handoff still advances active to review');
+  assert.equal(state.status, 'review', "the fresh review preparation still advances active to review");
 });
 
 // R5 — stale `active` with no Review facts and an explicit human override:
@@ -2020,7 +2020,7 @@ test('R5: stale active recovery with human override persists a real ReviewerDeci
     assert.deepEqual(
       calls,
       [['submit-for-review', slug, false, submittedAt]],
-      'recovery invokes the existing handoff operation with the authoritative entry timestamp, never patches status',
+      "recovery invokes the existing review preparation operation with the authoritative entry timestamp, never patches status",
     );
 
     const loaded = await store.load(missionId(slug));
@@ -2083,7 +2083,7 @@ test('R5b: override recovery stops without an authoritative review-entry timesta
       }),
       error => error instanceof Error && error.constructor.name === 'IntegrationAbort',
     );
-    assert.equal(submitCalls.length, 0, 'no handoff operation runs on missing entry data');
+    assert.equal(submitCalls.length, 0, "no review preparation operation runs on missing entry data");
     assert.equal(transitionCalls.length, 0, 'no transition is invented');
     assert.equal(state.status, 'active', 'Mission is not done');
   }
@@ -2101,7 +2101,7 @@ test('R5b: override recovery stops without an authoritative review-entry timesta
       }),
       error => error instanceof Error && error.constructor.name === 'IntegrationAbort',
     );
-    assert.equal(submitCalls.length, 0, 'inverted timestamps never reach the handoff operation');
+    assert.equal(submitCalls.length, 0, "inverted timestamps never reach the review preparation operation");
     assert.equal(transitionCalls.length, 0, 'no transition is invented');
     assert.equal(state.status, 'active', 'Mission is not done');
   }

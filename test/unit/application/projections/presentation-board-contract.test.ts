@@ -13,7 +13,7 @@ import './board-attention-rail-presentation.cases.js';
 import './board-draft-dispatch.cases.js';
 import './board-review-capability-safety.cases.js';
 import './board-integration-dispatch.cases.js';
-import './board-handoff-resume.cases.js';
+import "./board-review-preparation-resume.cases.js";
 import './board-countdown-refresh.cases.js';
 import './board-review-wire-facts.cases.js';
 import './board-wip-presentation.cases.js';

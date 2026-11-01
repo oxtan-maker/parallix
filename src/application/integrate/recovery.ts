@@ -82,7 +82,7 @@ class MissionRecovery {
    * entry postdates the stored approval and the projection silently drops
    * the resulting negative review dwell. The entry time comes from an
    * authoritative source: the Review round's own startedAt, or, when
-   * recovery creates the Review through the handoff operation, the PR
+   * recovery creates the Review through the review preparation operation, the PR
    * creation time of the PR the provider approval was recorded on.
    */
   private recoveryEntryRound(context: IntegrationRecoveryContext, missionLoad: Extract<MissionLoadResult, { kind: 'found' }>, overrideApprovedAt: string | undefined) {
@@ -163,19 +163,19 @@ class MissionRecovery {
     const slugId = missionId(context.slug);
     const entryRound = this.recoveryEntryRound(context, missionLoad, overrideApprovedAt);
     const reviewEntryAt = this.recoveryEntryTime(context, entryRound, overrideApprovedAt);
-    // An already-approved round is a decided review, not a fresh handoff:
+    // An already-approved round is a decided review, not a fresh review preparation:
     // replaying submit-for-review would return the round unchanged and the
     // workflow guard would reject it ("A submitted review must be awaiting a
-    // reviewer decision"). Skip the handoff replay (AC #2) and move the lane to
+    // reviewer decision"). Skip the review preparation replay (AC #2) and move the lane to
     // review via a direct submit-for-review that passes the existing round
     // through unchanged; the workflow guard recognises the decided round and
     // moves active → review without rewriting it, so the approve transition
     // below runs at the stored decidedAt. A genuinely fresh round still goes
-    // through the handoff operation unchanged (AC #3).
+    // through the review preparation operation unchanged (AC #3).
     if (entryRound?.decision?.kind === 'approved') {
       return this.moveApprovedActiveToReview(context, missionServices, missionLoad, reviewEntryAt);
     }
-    // Submit through the existing handoff operation; it alone owns the
+    // Submit through the existing review preparation operation; it alone owns the
     // active → review rules and persists the Review aggregate. The
     // authoritative entry timestamp rides along so the persisted lane event
     // and the Review round both carry it instead of the recovery wall clock.
@@ -186,7 +186,7 @@ class MissionRecovery {
     });
     const reloaded = await missionServices.store.load(slugId);
     if (reloaded.kind !== 'found' || reloaded.mission.status !== 'review') {
-      throw abortWith(this.dependencies.landing, `Mission ${slugId} did not reach review through submit-for-review; resolve the Review handoff before integration.`);
+      throw abortWith(this.dependencies.landing, `Mission ${slugId} did not reach review through submit-for-review; resolve the Review review preparation before integration.`);
     }
     return reloaded;
   }

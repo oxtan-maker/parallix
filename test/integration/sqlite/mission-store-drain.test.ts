@@ -77,7 +77,7 @@ test('the review loop awaits its stage-stats write before moving on', async () =
     },
   });
 
-  await runReviewLoop({ slug: 'task-999', implementer: 'claude', maxAttempts: 1, skipHandoff: true }, fake.ports);
+  await runReviewLoop({ slug: 'task-999', implementer: 'claude', maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
 
   const statsEnd = order.indexOf('stats:end');
   const consume = order.indexOf('consume');

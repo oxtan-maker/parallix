@@ -48,7 +48,7 @@ describe("submit for review idempotent", { concurrency: false }, () => {
     return {
       id,
       repositoryId: repo,
-      title: 'Stabilize handoff idempotency key across retries',
+      title: "Stabilize review preparation idempotency key across retries",
       labels: missionLabels(['bug']),
       status: 'active',
       rawStatus: 'active',
@@ -119,6 +119,34 @@ describe("submit for review idempotent", { concurrency: false }, () => {
       ),
     });
     assert.deepEqual(retried.review, inReview.review);
+  });
+
+  test('verified pending first-round repair replaces its subject while ordinary retries remain stable (TASK-2822)', () => {
+    const original = submittedReview();
+    const entered = decideMission({ ...activeMission(), review: original }, { type: 'begin-review-preparation' });
+    const fixed = { ...original, rounds: [{ ...original.rounds[0], subject: { ...original.rounds[0].subject, revision: changeRevision('fixed-head') } }] } satisfies typeof original;
+    const command = { type: 'submit-for-review' as const, gatesPassed: true, preparedRevision: changeRevision('fixed-head'), review: fixed, reviewerEligibility };
+    assert.throws(() => decideMission(entered, { ...command, gatesPassed: false }), /gates pass/);
+    const bound = decideMission(entered, command);
+    assert.equal(bound.review?.rounds.length, 1);
+    assert.equal(bound.review?.rounds[0].subject.revision, 'fixed-head');
+    assert.equal(bound.reviewPreparationPending, undefined);
+    assert.deepEqual(decideMission(bound, { ...command, review: original }).review, bound.review);
+  });
+
+  test('pending replacement identities use Review independence and its sole-family exception (TASK-2822)', () => {
+    const original = submittedReview();
+    const entered = decideMission({ ...activeMission(), review: original }, { type: 'begin-review-preparation' });
+    const replacement = { ...original, rounds: [{ ...original.rounds[0], reviewer: implementer,
+      subject: { ...original.rounds[0].subject, revision: changeRevision('repaired-head') } }] } satisfies typeof original;
+    const multiple = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [implementer, reviewer], strategy: 'random' });
+    const command = { type: 'submit-for-review' as const, gatesPassed: true, preparedRevision: changeRevision('repaired-head'),
+      review: replacement, reviewerEligibility: multiple };
+    assert.throws(() => decideMission(entered, command), /may not review its own work/);
+    const sole = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [implementer], strategy: 'random' });
+    const submitted = decideMission(entered, { ...command, reviewerEligibility: sole });
+    assert.equal(submitted.review?.rounds[0].reviewer, implementer);
+    assert.equal(submitted.reviewPreparationPending, undefined);
   });
 
   test('retry completes a review lane left without its Review aggregate', () => {

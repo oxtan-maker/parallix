@@ -1,47 +1,33 @@
-/**
- * TASK-2375 CP-1 — the bounded current-work read can lose the standing operation.
- *
- * This is the red reproduction for SC1 / AC #1. It drives the *production*
- * composition of the current-work read path — the real SQLite operational
- * history, `ConcreteCurrentWorkReadAdapter`, and `reconcileCurrentWork` — with
- * the ordering the mission specifies:
- *
- *   1  op-A running
- *   2  op-B running   <- the mission's actual current work
- *   3  op-A ended
- *   4  op-A blocked
- *
- * The reconciler already refuses a terminal event from a superseded operation,
- * but it never sees `op-B running`: the read adapter asks the repository for a
- * fixed number of latest rows per mission, and the two late `op-A` events fill
- * that window. The board then shows a mission with a live operation as not
- * being worked at all.
- *
- * The scenario must not be relaxed to make this pass — the fix belongs in the
- * read path, not in the ordering.
- */
-import test from 'node:test';
+import { projectExecutionActivity, isWorkInProgress } from '../../../src/domain/execution-activity.js';
+import { SqliteExecutionActivityStore } from '../../../src/adapters/sqlite/execution-activity-store.js';
+import { repositoryId } from '../../../src/domain/repository.js';
+import { ExecutionActivityRecorder } from '../../../src/application/recording/execution-activity-recorder.js';
+// TASK-2375 regression: A starts, B replaces it, then late A terminal reports
+// must leave B standing. Drive the production recorder, current snapshot store
+// and projection over migrated SQLite, including reload and durable ordering.
+import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
-import { SqliteMigrationRunner, loadDefaultMigrations } from '../../../src/adapters/sqlite/migration-runner.js';
-import { SqliteOperationalHistoryRepository } from '../../../src/adapters/sqlite/operational-history-repository.js';
-import { ConcreteCurrentWorkReadAdapter } from '../../../src/adapters/backlog/concrete-current-work-read-adapter.js';
-import { CurrentWorkRecorder, type CurrentWorkPublication } from '../../../src/application/recording/current-work-recorder.js';
-import { isWorkInProgress, reconcileCurrentWork } from '../../../src/application/projections/current-work.js';
+import { copyMigratedSchema, prepareMigratedSchema } from '../../fixtures/migrated-database.js';
+import { type ExecutionActivityIntent } from '../../../src/application/recording/execution-activity-recorder.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { missionId } from '../../../src/domain/mission.js';
 
 const MISSION = missionId('task-9101');
 const NOW = Date.parse('2026-08-14T09:00:00.000Z');
 
+// Exercise activity persistence, not repeated migration setup. Only the empty,
+// closed schema is shared; every case owns and removes its writable database.
+before(prepareMigratedSchema);
+
 interface Fixture {
   readonly db: SqliteDatabaseAdapter;
-  readonly recorder: CurrentWorkRecorder;
-  readonly readAdapter: ConcreteCurrentWorkReadAdapter;
+  readonly recorder: ExecutionActivityRecorder;
+  readonly readAdapter: SqliteExecutionActivityStore;
   dispose(): Promise<void>;
 }
 
@@ -49,19 +35,26 @@ interface Fixture {
 async function fixture(): Promise<Fixture> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-2375-current-work-'));
   const db = new SqliteDatabaseAdapter();
-  await db.open({ path: path.join(dir, 'operator.db') });
-  await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
-  const repo = new SqliteOperationalHistoryRepository(db);
+  try {
+    const databasePath = path.join(dir, 'operator.db');
+    copyMigratedSchema(databasePath);
+    await db.open({ path: databasePath });
+  } catch (error) {
+    await db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+    throw error;
+  }
+  const activity = new SqliteExecutionActivityStore(db, repositoryId('parallix'));
   let tick = 0;
   return {
     db,
     // A live publisher: the pid is this process, so reconciliation resolves the
     // surviving fact as `live` rather than aging it out on the TTL.
-    recorder: new CurrentWorkRecorder(repo, {
+    recorder: new ExecutionActivityRecorder(activity, {
       processId: process.pid,
       now: () => new Date(NOW + (tick += 1_000)),
     }),
-    readAdapter: new ConcreteCurrentWorkReadAdapter(repo),
+    readAdapter: activity,
     dispose: async () => {
       await db.close();
       fs.rmSync(dir, { recursive: true, force: true });
@@ -69,7 +62,7 @@ async function fixture(): Promise<Fixture> {
   };
 }
 
-function publication(operationId: string): CurrentWorkPublication {
+function publication(operationId: string): ExecutionActivityIntent {
   return {
     missionId: MISSION,
     operationId,
@@ -82,7 +75,7 @@ function publication(operationId: string): CurrentWorkPublication {
 /** Read the mission's current work exactly as `BoardProjectionBuilder` does. */
 async function readCurrentWork(subject: Fixture) {
   const events = await subject.readAdapter.loadCurrentWork();
-  return reconcileCurrentWork(events, {
+  return projectExecutionActivity(events, {
     nowMs: NOW + 60_000,
     ttlMs: 5 * 60 * 1000,
     isProcessAlive: () => true,
@@ -203,16 +196,55 @@ test('TASK-2375 SC2: nested phases retain the same operationId', async () => {
   try {
     const opId = 'execute:task-9101:xyz';
     const exec = { ...publication(opId), phase: 'execute' as const };
-    const handoff = { ...publication(opId), phase: 'handoff' as const };
+    const reviewPreparation = { ...publication(opId), phase: 'review' as const };
 
     await subject.recorder.running(exec);
-    await subject.recorder.running(handoff);
+    await subject.recorder.running(reviewPreparation);
 
     const facts = await readCurrentWork(subject);
 
-    assert.equal(facts?.currentWork?.operationId, opId, 'nested handoff must carry same operationId as parent execute');
-    assert.equal(facts?.currentWork?.phase, 'handoff', 'phase updates within same operation');
+    assert.equal(facts?.currentWork?.operationId, opId, "nested review preparation must carry same operationId as parent execute");
+    assert.equal(facts?.currentWork?.phase, 'review', 'phase updates within same operation');
   } finally {
     await subject.dispose();
   }
+});
+
+test('worker identity replaces a live independent publisher and audit cannot change current activity (TASK-2822)', async () => {
+  const subject = await fixture();
+  try {
+    await subject.recorder.running(publication('lead'));
+    const worker = new ExecutionActivityRecorder(new SqliteExecutionActivityStore(subject.db, repositoryId('parallix')), { processId: process.pid + 100 });
+    await worker.running({ ...publication('worker'), summary: 'reviewer running', agent: agentFamily('claude') });
+    assert.equal((await readCurrentWork(subject))?.currentWork?.operationId, 'worker');
+    await subject.recorder.ended(publication('lead'));
+    await subject.recorder.blocked(publication('lead'), 'late supervisor failure');
+    await subject.db.execute('INSERT INTO operational_history (event_type, event_data, created_at) VALUES (?, ?, ?)',
+      ['mission.current-work', JSON.stringify({ ...publication('invented'), state: 'blocked', blockedReason: 'audit only' }), new Date().toISOString()]);
+    const reloaded = new SqliteExecutionActivityStore(subject.db, repositoryId('parallix'));
+    await subject.db.execute('INSERT INTO execution_activity (repository_id, mission_id, snapshot_json) VALUES (?, ?, ?)', ['parallix', 'task-unrelated-corrupt', '{}']);
+    const work = projectExecutionActivity(await reloaded.loadMissionCurrentWork(MISSION), { nowMs: NOW + 60_000, ttlMs: 300_000, isProcessAlive: () => true }).get(MISSION);
+    assert.equal(work?.currentWork?.agent, 'claude');
+    assert.equal(work?.currentWork?.operationId, 'worker');
+    assert.equal(work?.blockingReason, null);
+    assert.deepEqual(await reloaded.loadMissionCurrentWork(missionId('task-absent')), []);
+    await subject.db.execute('UPDATE execution_activity SET snapshot_json = ? WHERE mission_id = ?', ['{}', MISSION]);
+    await assert.rejects(() => reloaded.loadMissionCurrentWork(MISSION), /Invalid stored execution activity/);
+  } finally { await subject.dispose(); }
+});
+
+test('overlapping publications on one SQLite connection retain both active sources (TASK-2822)', async () => {
+  const subject = await fixture();
+  try {
+    const first = new SqliteExecutionActivityStore(subject.db, repositoryId('parallix'));
+    const second = new SqliteExecutionActivityStore(subject.db, repositoryId('parallix'));
+    await subject.recorder.running(publication('parent'));
+    const event = { ...publication('parent'), state: 'running' as const, processId: process.pid, blockedReason: null,
+      agent: agentFamily('claude'), occurredAt: '2026-11-01T00:00:00Z' };
+    await Promise.all([first.publish(event, 'first'), second.publish({ ...event, agent: agentFamily('codex') }, 'later')]);
+    await first.publish({ ...event, state: 'ended' }, 'first');
+    const snapshot = (await second.loadMissionCurrentWork(MISSION))[0];
+    assert.deepEqual(snapshot.frames.map(frame => frame.sourceId), ['parent', 'later']);
+    assert.equal(snapshot.frames.at(-1)?.event.agent, 'codex');
+  } finally { await subject.dispose(); }
 });

@@ -43,7 +43,7 @@ import type { IntegrateWorkflowPorts } from '../../../application/ports/integrat
  * Bind the concrete mechanisms to the workflow ports. Every method reaches its
  * module through the imported namespace *at call time*, so a test that swaps a
  * dependency of this module (see `test/lib/module-mock.ts`) is observed by the
- * workflow — the `createHandoffPorts` pattern.
+ * workflow — the `createReviewPreparationPorts` pattern.
  */
 export function createIntegratePorts(configuration?: ParallixConfiguration): IntegrateWorkflowPorts {
   const runIntegrationGates: typeof repositoryGates.runPhaseGates = (phase, options) => repositoryGates.runPhaseGates(phase, {

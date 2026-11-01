@@ -31,7 +31,7 @@ interface GitResult {
 }
 
 export type VerificationGateResult = Pick<GitResult, 'status'> & Partial<Omit<GitResult, 'status'>> & { failureReason?: import('../../domain/failure-reason.js').FailureReason };
-type VerificationRunOptions = { progressLabel?: string } & import('../../application/ports/handoff-workflow.js').HandoffGitOptions
+type VerificationRunOptions = { progressLabel?: string } & import("../../application/ports/review-preparation-workflow.js").ReviewPreparationGitOptions
   & Pick<GitOptions, 'cwd' | 'env' | 'encoding' | 'maxBuffer'>;
 export type VerificationRunner = (_command: string, _args: string[], _options?: VerificationRunOptions) => VerificationGateResult;
 

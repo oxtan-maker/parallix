@@ -18,6 +18,7 @@ type ExecuteOverrides = { [K in keyof ExecuteMissionPorts]?: Partial<ExecuteMiss
 
 export function makeExecutePorts(overrides: ExecuteOverrides = {}) {
   const calls: string[] = [];
+  const missions = new Map<string, { mission: import('../../src/domain/mission.js').Mission; version: number }>();
   const base: ExecuteMissionPorts = {
     workspace: {
       async preflight(slug: string) { calls.push(`validate:${slug}`); return true; },
@@ -46,35 +47,37 @@ export function makeExecutePorts(overrides: ExecuteOverrides = {}) {
       // A refined mission carries the contract draft settled: activation
       // refuses an incomplete one (mission-workflow.ts requireDraftedContract),
       // so a fixture without it is not a mission that could reach this port.
-      async load() {
+      async load(id) {
+        const stored = missions.get(id);
+        if (stored) { return { kind: 'found' as const, mission: stored.mission, version: missionVersion(stored.version) }; }
         return {
           kind: 'found' as const,
-          mission: fixtureMission('task-0001', {
-            id: missionId('task-0001'), repositoryId: repositoryId('repo'), title: 'Fixture', labels: missionLabels([]), assignee: null,
+          mission: fixtureMission(id, {
+            id, repositoryId: repositoryId('repo'), title: 'Fixture', labels: missionLabels([]), assignee: null,
             status: 'refined',
             brief: { goal: 'Fixture goal', why: 'Fixture why', scope: 'Fixture scope', outOfScope: [] },
             declaredGates: ['npm test'],
             successCriteria: ['The mission is done'],
             predictedNelBucket: 'Small',
             // A planned checkpoint with no evidence yet: draft plans, execution records.
-            checkpoints: [{ missionId: missionId('task-0001'), name: 'CP-1', firstLine: 'Do the work', goalCheck: [], nextActionText: '' }],
+            checkpoints: [{ missionId: id, name: 'CP-1', firstLine: 'Do the work', goalCheck: [], nextActionText: '' }],
             review: null, netEngineeringLines: null, closedAt: null,
           }),
           version: missionVersion(1),
         };
       },
-      async save() { calls.push('synchronize'); return missionVersion(1); },
-      async saveWithTransition() { calls.push('synchronize'); return missionVersion(1); },
+      async save(mission, expected) { calls.push('synchronize'); const version = (expected ?? 0) + 1; missions.set(mission.id, { mission, version }); return missionVersion(version); },
+      async saveWithTransition(mission, expected) { calls.push('synchronize'); const version = (expected ?? 0) + 1; missions.set(mission.id, { mission, version }); return missionVersion(version); },
     },
     telemetry: {
       async recordLaunchTelemetry(record: { slug: string; agent: string }) {
         calls.push(`record:${record.slug}:${record.agent}`);
       },
     },
-    checkpointValidation: { async validateBeforeHandoff() { return { ok: true as const }; } },
-    handoffExecution: {
+    checkpointValidation: { async validateBeforeReviewPreparation() { return { ok: true as const }; } },
+    reviewPreparationExecution: {
       async run(request: { slug: string; agent: string }) {
-        calls.push(`handoff:${request.slug}:${request.agent}`);
+        calls.push(`review-preparation:${request.slug}:${request.agent}`);
         return { ok: true as const };
       },
       async repairHygiene() { return { repaired: false }; },
@@ -91,7 +94,7 @@ export function makeExecutePorts(overrides: ExecuteOverrides = {}) {
     missionTransitions: mergeFixturePort(base.missionTransitions, overrides.missionTransitions),
     telemetry: mergeFixturePort(base.telemetry, overrides.telemetry),
     checkpointValidation: mergeFixturePort(base.checkpointValidation, overrides.checkpointValidation),
-    handoffExecution: mergeFixturePort(base.handoffExecution, overrides.handoffExecution),
+    reviewPreparationExecution: mergeFixturePort(base.reviewPreparationExecution, overrides.reviewPreparationExecution),
     autonomousReview: mergeFixturePort(base.autonomousReview, overrides.autonomousReview),
     repairLaunch: mergeFixturePort(base.repairLaunch, overrides.repairLaunch),
     output: mergeFixturePort(base.output, overrides.output),

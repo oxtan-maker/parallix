@@ -11,7 +11,7 @@ import { resolveMissionExecutionContext } from '../../../src/adapters/git/missio
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import { runWorkflowWorker, type composeWorkflowOperations } from '../../../src/composition/workflow-operations.js';
 import { createBoardIntegrateService } from '../../../src/composition/application-services.js';
-import { NO_CURRENT_WORK_PORT } from '../../../src/application/recording/current-work-recorder.js';
+import { NO_EXECUTION_ACTIVITY } from '../../../src/application/recording/execution-activity-recorder.js';
 import { setLogger } from '../../../src/application/presentation/cli-format.js';
 import type { WorkflowOperationRecord as WorkflowOperation } from '../../../src/application/ports/workflow-operation.js';
 
@@ -71,7 +71,7 @@ test('board integration preflight reads the resolved mission branch, not the hos
   // so the run stops at preflight and never reaches gates or landing.
   const store = { load: async () => ({ kind: 'found', version: 1, mission: { id: 'task-97772', status: 'integration', labels: ['ai_sdlc'], brief: null, review: null, checkpoints: [] } }) };
   const cwd = process.cwd();
-  const service = createBoardIntegrateService({ store } as never, NO_CURRENT_WORK_PORT, fixture.configuration, fixture.primary);
+  const service = createBoardIntegrateService({ store } as never, NO_EXECUTION_ACTIVITY, fixture.configuration, fixture.primary);
   await assert.rejects(service.execute(['task-97772', '--dry-run']), /exited with code 1/);
   const output = lines.join('\n');
   assert.match(output, /Integration preflight failed/);
@@ -150,7 +150,7 @@ test('board integration with a resolved context keeps every preflight safeguard 
   const previous = setLogger({ log: (message: unknown) => { lines.push(String(message)); }, error: (message: unknown) => { lines.push(String(message)); } });
   t.after(() => { setLogger(previous); });
   const store = { load: async () => ({ kind: 'found', version: 1, mission: { id: slug, status: 'review', labels: ['ai_sdlc'], brief: { goal: 'g' }, review: null, checkpoints: [] } }) };
-  const service = createBoardIntegrateService({ store } as never, NO_CURRENT_WORK_PORT, fixture.configuration, fixture.primary);
+  const service = createBoardIntegrateService({ store } as never, NO_EXECUTION_ACTIVITY, fixture.configuration, fixture.primary);
   await assert.rejects(service.execute([slug, '--dry-run']), /exited with code 1/);
   const output = lines.join('\n');
   assert.doesNotMatch(output, /Mission branch: current branch/);
@@ -168,10 +168,10 @@ test('board integration with a resolved context keeps every preflight safeguard 
   assert.match(lines.join('\n'), new RegExp(`Integration of ${slug} is already running in another process`));
 });
 
-test('base-started console execute, handoff, review and retry resolve Mission context (TASK-2778)', async t => {
+test("base-started console execute, review preparation, review and retry resolve Mission context (TASK-2778)", async t => {
   const fixture = repository(t, ['task-97778']);
   const before = git(fixture.primary, 'status', '--porcelain');
-  for (const command of ['active:execute', 'handoff:record', 'review:submit', 'integrate:merge'] as const) {
+  for (const command of ['active:execute', 'review:submit', 'review:submit', 'integrate:merge'] as const) {
     const result = await supervise('task-97778', fixture.primary, fixture.configuration, command,
       command === 'active:execute' ? undefined : {
         command: command === 'integrate:merge' ? 'integrate' : 'review', args: ['task-97778'], interactive: true,

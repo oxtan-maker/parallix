@@ -1,3 +1,5 @@
+import { invalidContractRecoveryCommands } from '../checkpoint-recovery-commands.js';
+import { workflowEligible } from '../../domain/workflow-command-policy.js';
 import type { GateState } from './gate-observation.js';
 import type { ProviderExecutionFacts } from './provider-execution.js';
 import { projectReviewHistory } from './review-history.js';
@@ -24,7 +26,7 @@ import {
  * records — it does not invent a vocabulary of its own.
  */
 export type BoardLane = MissionStatus;
-export type BoardCommand = 'active' | 'handoff' | 'review' | 'integrate' | 'draft' | 'cancel';
+export type BoardCommand = 'active' | 'review' | 'integrate' | 'draft' | 'cancel';
 
 /**
  * How much the board can trust a current-work fact.
@@ -49,8 +51,8 @@ export type CurrentWorkFreshness = 'live' | 'unverified' | 'stale';
  * It carries everything a UI client needs to say so without going back to a
  * backing store: which operation and phase, one operator-facing line, the
  * family doing the work when one applies, and how much the board can trust the
- * fact. Freshness is derived by `reconcileCurrentWork`
- * (`src/application/projections/current-work.ts`), never by a UI component.
+ * fact. Freshness is derived by `projectExecutionActivity`
+ * (`src/domain/execution-activity.ts`), never by a UI component.
  */
 export interface LiveMissionWork {
   readonly operationId: string;
@@ -82,6 +84,8 @@ export interface MissionOperationalFacts {
   readonly blockingReason: string | null;
   /** Recorded contract stop: investigate before retrying; operator decisions stay reserved. */
   readonly blockerRequiresOperator?: boolean;
+  readonly activityOperationId?: string;
+  readonly blocker?: import('../../domain/rebound-policy.js').InvalidContractBlocker;
   readonly flags: readonly string[];
   /** Whether the effective approval still covers the branch (TASK-2555); absent when not observed. */
   readonly approvalCoverage?: ApprovalCoverage | null;
@@ -163,6 +167,8 @@ export interface MissionCard {
   readonly blockingReason: string | null;
   /** Recorded contract stop: investigate before retrying; operator decisions stay reserved. */
   readonly blockerRequiresOperator?: boolean;
+  readonly activityOperationId?: string;
+  readonly blocker?: import('../../domain/rebound-policy.js').InvalidContractBlocker;
   readonly flags: readonly string[];
   readonly commands: readonly CommandAvailability[];
 }
@@ -236,56 +242,22 @@ export function availableBoardCommands(
   mission: Mission,
   facts: Pick<MissionOperationalFacts, 'reviewApproval'> & Partial<Pick<MissionOperationalFacts, 'currentWork' | 'latestGate'>>,
 ): CommandAvailability[] {
-  const open = !isClosedMission(mission);
-  const hasCheckpointEvidence = mission.checkpoints.some((checkpoint) => checkpoint.goalCheck.length > 0);
-  const hasApprovedReview = mission.review !== null
-    && facts.reviewApproval !== null
-    && sameReviewedRevision(
-      currentReviewRound(mission.review).subject,
-      facts.reviewApproval.subject,
-    );
-  // `px active` is the launch command and the resume command: the workflow
-  // re-runs it to act on reviewer findings and to restart a mission whose gate
-  // failed. Offering it only from `refined` left a mission in review with no
-  // runnable action at all, and explained itself with a lane rule that did not
-  // apply to it.
-  const { resumesFindings, resumesGate, strandedActive, activeReason, canIntegrate, activeLabel } = activeCommandFacts(mission, facts, hasApprovedReview);
+  const eligible = (command: import('../../domain/workflow-operation.js').WorkflowCommand) => workflowEligible(command, mission, 'status', false, facts.reviewApproval?.subject ?? null);
+  const resumesFindings = mission.status === 'review' && mission.review?.rounds.at(-1)?.phase === 'fixing';
+  const activeLabel = resumesFindings ? 'findings ↩' : facts.latestGate === 'failed' ? 'resume ▸' : mission.status === 'active' ? 'restart ▸' : 'power ▸';
   return [
-    availability(
-      'active',
-      open && (mission.status === 'refined' || resumesFindings || resumesGate || strandedActive),
-      activeReason,
-      'active',
-      activeLabel,
-    ),
-    availability('handoff', open && mission.status === 'active' && hasCheckpointEvidence, 'Handoff requires an active mission with checkpoint evidence', 'review', 'review ▸'),
-    availability('review', open && mission.status === 'review', 'Review is available only while the mission is in review', null, 'review ▸'),
-    availability('integrate', open && canIntegrate, 'Integration requires the integration queue or an approved review', 'integration', 'integrate ▸'),
-    // Pre-draft state: the mission exists as a card but no draft worktree has
-    // been created yet. Once draft work exists the mission has moved on, and
-    // re-drafting is refused by the dispatch backstop, not the projection.
-    availability('draft', open && mission.status === 'backlog', 'Draft is available only while the mission is in the pre-draft (backlog) state', 'refined', 'draft ▸'),
-    // A delivered Mission may still be finishing statistics and cleanup.
-    // Cancellation must never delete its lifecycle record mid-closeout.
+    availability('active', eligible('active:execute') && (!facts.currentWork || facts.currentWork.freshness === 'stale'), mission.status === 'backlog' ? 'Mission must be refined before it can be activated' : 'Execution requires refined or active work, or review findings', 'active', activeLabel),
+    availability('review', eligible('review:submit'), 'Review requires an active mission or an existing review', 'review', 'review ▸'),
+    availability('integrate', eligible('integrate:merge'), 'Integration requires the integration queue or an approved review', 'integration', 'integrate ▸'),
+    availability('draft', eligible('draft:create'), 'Draft requires a backlog mission', 'refined', 'draft ▸'),
     availability('cancel', mission.status !== 'done', 'Delivered missions must finish integration closeout', null, 'cancel ✕'),
   ];
-}
-
-function activeCommandReason(status: Mission['status']): string {
-  if (status === 'review') { return 'Resuming a review mission requires reviewer findings to act on'; }
-  if (status === 'active') { return 'Resuming an active mission requires a failed gate or no live work'; }
-  return 'Mission must be refined before it can be activated';
-}
-
-function activeCommandLabel(resumesFindings: boolean, resumesGate: boolean, strandedActive: boolean): string {
-  if (resumesFindings) { return 'findings ↩'; }
-  if (resumesGate) { return 'resume ▸'; }
-  return strandedActive ? 'restart ▸' : 'power ▸';
 }
 
 export function projectMissionCard(mission: Mission, facts: MissionOperationalFacts): MissionCard {
   // A planned checkpoint without evidence is not progress.
   const checkpoint = latestEvidencedCheckpoint(mission.checkpoints);
+  const blockedCheckpoint = mission.checkpoints.find(cp => cp.repair?.blocker);
   const reviewedSubject = mission.review
     ? currentReviewRound(mission.review).subject
     : null;
@@ -302,11 +274,14 @@ export function projectMissionCard(mission: Mission, facts: MissionOperationalFa
     closed: isClosedMission(mission),
     agent: mission.assignee,
     ...cardCheckpoint(mission, checkpoint),
+    ...(blockedCheckpoint ? { nextActionText: `Operator: ${blockedCheckpoint.repair!.blocker!.authorityReason}. Proposed correction: ${blockedCheckpoint.repair!.blocker!.proposedCorrection}. Complete manual implementation and evidence work in active. For a false or resolved stop, existing operator options are ${invalidContractRecoveryCommands(blockedCheckpoint.name).slice(1).join(' OR ')}. Required checks remain. Then px review ${mission.id}.` } : {}),
     gate: facts.latestGate,
     ...cardReview(mission, facts, reviewedSubject, reviewedChange, currentRound),
     currentWork: facts.currentWork,
+    activityOperationId: facts.activityOperationId,
     liveSession: facts.liveSession,
-    blockingReason: facts.blockingReason,
+    blockingReason: blockedCheckpoint?.repair?.blocker?.diagnostic ?? facts.blockingReason,
+    blocker: blockedCheckpoint?.repair?.blocker,
     blockerRequiresOperator: facts.blockerRequiresOperator,
     // The board renders flags on the card, so a stale approval is visible there
     // before anyone reaches the integration gate.
@@ -334,6 +309,7 @@ export function projectMissionCard(mission: Mission, facts: MissionOperationalFa
  */
 export function agentIsWorking(card: MissionCard): boolean {
   if (card.currentWork) { return card.currentWork.freshness !== 'stale'; }
+  if (card.workflowOperation) { return false; }
   return (card.liveSession ?? null) !== null;
 }
 
@@ -365,27 +341,6 @@ export function wipCounts(cards: readonly MissionCard[]): Readonly<Record<BoardL
   };
   for (const card of cards) { result[card.lane] += 1; }
   return result;
-}
-
-function activeCommandFacts(mission: Mission, facts: Pick<MissionOperationalFacts, 'reviewApproval'> & Partial<Pick<MissionOperationalFacts, 'currentWork' | 'latestGate'>>, hasApprovedReview: boolean) {
-  const reviewPhase = mission.review === null ? null : currentReviewRound(mission.review).phase;
-  const resumesFindings = mission.status === 'review' && reviewPhase === 'fixing';
-  const resumesGate = mission.status === 'active' && facts.latestGate === 'failed';
-  const activeReason = activeCommandReason(mission.status);
-  const canIntegrate = mission.status === 'integration'
-    || (['active', 'review'].includes(mission.status) && hasApprovedReview);
-  // An active mission with no live work at all is stranded: no agent holds the
-  // turn and the aggregate never left `active`. Re-running `px active` is the
-  // defined lifecycle resume for it (the `activate` transition accepts
-  // `active`), so the stranded case joins the findings and gate-failed resumes
-  // rather than advertising a one-off recovery command. A stale published fact
-  // is reported as stale-work, so this is limited to a mission that is active,
-  // holds no work fact, and has no failing gate.
-  const strandedActive = mission.status === 'active'
-    && (facts.currentWork === null || facts.currentWork === undefined)
-    && facts.latestGate !== 'failed';
-  const activeLabel = activeCommandLabel(resumesFindings, resumesGate, strandedActive);
-  return { resumesFindings, resumesGate, strandedActive, activeReason, canIntegrate, activeLabel };
 }
 
 function cardCheckpoint(mission: Mission, checkpoint: ReturnType<typeof latestEvidencedCheckpoint>) {

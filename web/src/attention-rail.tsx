@@ -70,9 +70,9 @@ function AttentionEntry({ item, onAction, onSelect, selected, pendingCommands, r
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}
         >
-          {item.action.kind === 'manual' ? '' : '$ '}{item.action.display}
+          {item.action ? `${item.action.kind === 'manual' ? '' : '$ '}${item.action.display}` : 'Operator attention required · see recorded guidance'}
         </span>
-        {item.action.kind === 'manual'
+        {!item.action ? null : item.action.kind === 'manual'
           ? <span style={{ color: C.amber, fontSize: TYPE.meta }}>lead investigation</span>
           : <ActionButton action={item.action} label="run ▸" pending={pendingCommands.get(item.missionId)} onInvoke={(_action, control, agent) => onAction(item, control, agent)} />}
       </div>

@@ -40,7 +40,7 @@ Only a successful harness rerun of the authorized required check establishes rep
 ## checkpoint
 
 Harness-created repair checkpoint: {{checkpointName}}; Version at launch: {{checkpointVersion}}.
-Within the locked scope and success criteria, record verifiable evidence with px checkpoint record --name {{checkpointName}} --criterion "<exact affected success criterion>" --evidence "<verifiable reference and result>" --next "<specific next action>" for {{checkpointName}}, and the same command with --name <CP-N> for every other planned checkpoint (for example an original CP-3) still without recorded evidence. The write resolves its own current version. Retain valid earlier evidence for unaffected criteria without restating it; affected criteria need fresh verifiable evidence from this round. If the fix shows earlier evidence is no longer accurate, re-record that checkpoint with corrected fresh evidence for the criteria it affects. Every planned checkpoint needs evidence and every success criterion must be covered before handoff. Complete every remaining planned checkpoint before handoff. Do not edit locked scope or criteria, weaken or bypass gates, or self-approve: independent review stays the approver.
+Within the locked scope and success criteria, record verifiable evidence with px checkpoint record --name {{checkpointName}} --criterion "<exact affected success criterion>" --evidence "<verifiable reference and result>" --next "<specific next action>" for {{checkpointName}}, and the same command with --name <CP-N> for every other planned checkpoint (for example an original CP-3) still without recorded evidence. The write resolves its own current version. Retain valid earlier evidence for unaffected criteria without restating it; affected criteria need fresh verifiable evidence from this round. If the fix shows earlier evidence is no longer accurate, re-record that checkpoint with corrected fresh evidence for the criteria it affects. Every planned checkpoint needs evidence and every success criterion must be covered before review preparation. Complete every remaining planned checkpoint before review preparation. Do not edit locked scope or criteria, weaken or bypass gates, or self-approve: independent review stays the approver.
 
 ## report
 
@@ -74,9 +74,9 @@ Make the Git hook pass when Parallix commits or rebases this mission. {{repairAu
 
 Review shared conflicts semantically in the mission worktree. Preserve newer base behavior, completed work and unique mission intent; do not resurrect retired metadata or use blanket ours/theirs. Stage every resolved path and continue through successive pauses until Git reports no rebase and no unmerged paths. Stop on ambiguous intent or a human-only decision.
 
-## handoff
+## review-preparation
 
-Fix the underlying issue so handoff verification passes.
+Fix the underlying issue so review preparation verification passes.
 
 ## declaration
 

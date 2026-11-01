@@ -1,6 +1,6 @@
 # Forgejo Setup
 
-Standalone workflow installs need three review-surface pieces before `active`, `review`, `handoff`, `rebase --push`, or `integrate` can talk to Forgejo:
+Standalone workflow installs need three review-surface pieces before `active`, `review`, `rebase --push`, or `integrate` can talk to Forgejo:
 
 1. a reachable Forgejo base URL
 2. a review repository matching `adapters.review.repo`

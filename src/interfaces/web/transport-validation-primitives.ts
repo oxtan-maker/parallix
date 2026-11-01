@@ -30,16 +30,14 @@ export const ERROR_KINDS: readonly string[] = ['validation', 'capability', 'conf
 export const EVIDENCE_SOURCES: readonly string[] = ['task-markdown', 'git', 'stats', 'mission-store'];
 export const COMMAND_KINDS: readonly string[] = [
   'workflow:stop', 'active:execute', 'mission:intake', 'mission:create', 'mission:edit-read', 'mission:edit', 'draft:create', 'checkpoint:record',
-  'handoff:record', 'review:submit', 'review:act-on-findings', 'approve:review',
+  'review:submit', 'review:act-on-findings', 'approve:review',
   'integrate:merge', 'mission:cancel',
 ];
 /** The card-advertised kinds a mutation request may name (TASK-2433). */
 export const COMMAND_REQUEST_KINDS: readonly string[] = [
-  'workflow:stop', 'active:execute', 'draft:create', 'integrate:merge', 'handoff:record', 'review:submit',
+  'workflow:stop', 'active:execute', 'draft:create', 'integrate:merge', 'review:submit',
   'mission:cancel',
 ];
-export const BUCKET_LABELS: readonly string[] = ['Small', 'Medium', 'Large'];
-export const ARTIFACT_KINDS: readonly string[] = ['file', 'git-range', 'url'];
 
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

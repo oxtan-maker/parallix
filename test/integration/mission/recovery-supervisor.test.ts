@@ -44,18 +44,14 @@ test('the work list is the board attention queue, in the board order', async () 
     ],
     [],
   ]);
-
   const results = await superviseFleet(fleet.port);
-
   assert.deepEqual(fleet.ran, [['task-a', 'active:execute'], ['task-b', 'review:submit']], 'the board decides the order and the command');
   assert.deepEqual(results.map((result) => result.outcome), ['cleared', 'cleared']);
 });
 
 test('a mission the board stops asking about is cleared — the queue is the proof', async () => {
   const fleet = board([[item()], []]);
-
   const results = await superviseFleet(fleet.port);
-
   assert.equal(resultFor(results).outcome, 'cleared');
   assert.deepEqual(fleet.recoveries, [], 'the board action cleared the item, so no agent was started');
 });
@@ -76,9 +72,7 @@ test('a mission hidden by live work is watched, not cleared', async () => {
     launchRecovery: async () => 'not reached',
     wait: () => pause(0),
   };
-
   const results = await superviseFleet(port, { budget: 0, pollMs: 1 });
-
   assert.equal(reads, 3, 'the live mission is re-read instead of being treated as cleared');
   assert.equal(resultFor(results).outcome, 'cleared');
 });
@@ -89,9 +83,7 @@ test('the supervisor never integrates: an integration item is left for the human
     reason: { kind: 'integrate-lane', detail: 'Awaiting integration' },
     action: { kind: 'integrate:merge', display: `px integrate ${MISSION}` },
   })]]);
-
   const results = await superviseFleet(fleet.port);
-
   assert.equal(resultFor(results).outcome, 'human');
   assert.deepEqual(fleet.ran, [], 'no command is run for an item the human owns');
   assert.deepEqual(fleet.recoveries, [], 'and no agent is sent to do it instead');
@@ -105,9 +97,7 @@ test('the supervisor leaves refined missions for operator activation', async () 
     action: { kind: 'active:execute', display: `px active ${MISSION}` },
   });
   const fleet = board([[refined]]);
-
   const results = await superviseFleet(fleet.port);
-
   assert.deepEqual(results, []);
   assert.deepEqual(fleet.ran, [], 'lead never starts a refined mission');
   assert.deepEqual(fleet.recoveries, []);
@@ -197,7 +187,6 @@ test('a mission with a working agent is never on the queue, so it is never touch
 
   const fleet = board([[]]);
   const results = await superviseFleet(fleet.port);
-
   assert.deepEqual(results, [], 'an empty attention queue is an empty run');
   assert.equal(observationFromAttention(makeItem(card), null).working, true, 'unverified current work still counts as working');
 });
@@ -205,9 +194,7 @@ test('a mission with a working agent is never on the queue, so it is never touch
 test('the board action is pressed once per state, then recovery takes over', async () => {
   const stuck = item();
   const fleet = board([[stuck]]);
-
   const results = await superviseFleet(fleet.port, { budget: 1 });
-
   assert.deepEqual(fleet.ran, [[MISSION, 'active:execute']], 'the same action against the same facts runs once');
   assert.equal(fleet.recoveries.length, 1, 'the item survived the board action, so an agent was sent');
   assert.equal(resultFor(results).outcome, 'escalated');
@@ -237,18 +224,14 @@ test('an attention reason a classifier would call human-only still gets a recove
   // ADR 0048 would classify this HumanOnly and refuse to bounce. The supervisor
   // answers a different question — the board still wants attention — so it tries.
   const fleet = board([[item({ reason: { kind: 'blocking', detail: 'HUMAN ONLY: unknown harness failure' } })]]);
-
   const results = await superviseFleet(fleet.port, { budget: 1 });
-
   assert.equal(fleet.recoveries.length, 1);
   assert.equal(resultFor(results).outcome, 'escalated');
 });
 
 test('the budget is spent per failure, like every other retry budget in the repo', async () => {
   const fleet = board([[item({ reason: { kind: 'blocking', detail: 'rebase conflict left unresolved at line 41' } })]]);
-
   const results = await superviseFleet(fleet.port);
-
   assert.equal(RECOVERY_BUDGET, 2);
   assert.equal(fleet.recoveries.length, RECOVERY_BUDGET, 'one failure gets the budget and no more');
   assert.equal(resultFor(results).outcome, 'escalated');
@@ -260,9 +243,7 @@ test('a different attention reason reopens an escalated mission with its own att
   const first = item({ reason: { kind: 'gate-failed', detail: 'Gate failed' } });
   const second = item({ reason: { kind: 'blocking', detail: 'worktree is dirty' }, progress: 'active|failed|-|-|-|-|sha1' });
   const fleet = board([[first], [first], [first], [second], [second], [second]]);
-
   const results = await superviseFleet(fleet.port, { budget: 1 });
-
   assert.equal(fleet.recoveries.length, 2, 'the second, different failure was not refused as budget-spent');
   assert.deepEqual(
     fleet.recoveries.map((request) => request.diagnostic),
@@ -275,7 +256,6 @@ test('a different attention reason reopens an escalated mission with its own att
 
 test('the same reason with a moved line number or count is still the same failure', () => {
   const at = (line: number) => item({ reason: { kind: 'blocking', detail: `gate failed at foo.ts:${line} after 3 retries` } });
-
   assert.equal(failureFingerprint(at(41)), failureFingerprint(at(87)));
   assert.notEqual(failureFingerprint(at(41)), failureFingerprint(item()));
   assert.equal(attentionDetail({ kind: 'none' }), 'the board reports nothing');
@@ -286,9 +266,7 @@ test('a recovery agent that exits successfully is not itself evidence', async ()
   // The item is still on the queue after the first agent claimed success; it is
   // gone after the second, and only that clears the mission.
   const fleet = board([[stuck], [stuck], [stuck], []]);
-
   const results = await superviseFleet(fleet.port, { pollMs: 1 });
-
   assert.equal(fleet.recoveries.length, 2, 'the first agent changed nothing the board can see, so a second ran');
   assert.equal(resultFor(results).outcome, 'cleared');
   assert.ok(resultFor(results).steps.some((step) => step.includes('recovery agent 2/2')));
@@ -298,13 +276,11 @@ test('recovery is claimed, released, and skipped when another run holds the clai
   const held = board([[item()]], { claimable: false });
 
   const blocked = await superviseFleet(held.port, { budget: 1, once: true });
-
   assert.deepEqual(held.recoveries, [], 'a mission claimed by another supervisor run is not recovered twice');
   assert.equal(resultFor(blocked).outcome, 'open');
 
   const free = board([[item()]], { launchFails: 'agent could not start' });
   const failed = await superviseFleet(free.port, { budget: 1 });
-
   assert.deepEqual(free.released, [MISSION], 'the claim is released even when the launch throws');
   assert.equal(resultFor(failed).outcome, 'escalated');
   assert.ok(resultFor(failed).steps.some((step) => step.includes('agent could not start')));
@@ -319,9 +295,7 @@ test('work that starts between reading the queue and launching cancels the recov
     [{ ...stuck, working: true, workingDetail: 'execute — resumed (live, now)' }],
     [],
   ]);
-
   const results = await superviseFleet(fleet.port, { budget: 1, pollMs: 1 });
-
   assert.deepEqual(fleet.recoveries, [], 'liveness is rechecked inside the claim');
   assert.deepEqual(fleet.released, [MISSION], 'the claim is released without launching');
   assert.equal(resultFor(results).outcome, 'cleared');
@@ -340,9 +314,7 @@ test('a transient board-action failure is retried before recovery', async () => 
     },
     wait: () => pause(0),
   };
-
   const results = await superviseFleet(port, { budget: 1, pollMs: 1 });
-
   assert.ok(resultFor(results).steps.some((step) => step.includes('px review exited 1')));
   assert.equal(attempts, 2, 'the failed press was not recorded as spent');
   assert.deepEqual(fleet.recoveries, [], 'a transient command failure does not spend recovery budget');
@@ -351,9 +323,7 @@ test('a transient board-action failure is retried before recovery', async () => 
 
 test('a persistently failing board action reaches recovery and escalation', async () => {
   const fleet = board([[item()]], { actionFails: 'Forgejo unavailable' });
-
   const results = await superviseFleet(fleet.port, { budget: 1, pollMs: 1 });
-
   assert.equal(fleet.ran.length, 2, 'the action has a bounded retry before recovery');
   assert.equal(fleet.recoveries.length, 1, 'recovery still diagnoses a persistently failing command');
   assert.equal(resultFor(results).outcome, 'escalated');
@@ -383,9 +353,7 @@ test('a transient board read waits and does not orphan an in-flight step', async
       return pause(0);
     },
   };
-
   const results = await superviseFleet(port, { pollMs: 1 });
-
   assert.ok(reads >= 3, 'a failed read is retried');
   assert.equal(resultFor(results).outcome, 'cleared', 'the running step is awaited before reporting');
   assert.ok(resultFor(results).steps.some((step) => step.includes('board read failed')));
@@ -407,9 +375,7 @@ test('one escalated mission never stops the rest of the queue', async () => {
   const stuck = item({ missionId: 'task-stuck', action: { kind: 'active:execute', display: 'px active task-stuck' } });
   const moving = item({ missionId: 'task-moving', action: { kind: 'active:execute', display: 'px active task-moving' } });
   const fleet = board([[stuck, moving], [stuck, moving], [stuck]], { launchFails: 'agent could not start' });
-
   const results = await superviseFleet(fleet.port, { budget: 1, pollMs: 1 });
-
   assert.equal(resultFor(results, 'task-stuck').outcome, 'escalated');
   assert.equal(resultFor(results, 'task-moving').outcome, 'cleared');
 });
@@ -417,9 +383,7 @@ test('one escalated mission never stops the rest of the queue', async () => {
 test('an item that appears mid-run is picked up on the next pass', async () => {
   const late = item({ missionId: 'task-late', action: { kind: 'active:execute', display: 'px active task-late' } });
   const fleet = board([[item()], [late], []]);
-
   const results = await superviseFleet(fleet.port);
-
   assert.ok(results.some((result) => result.missionId === 'task-late'), 'the queue is re-read every pass');
 });
 
@@ -451,10 +415,12 @@ function makeItem(card: MissionCard): AttentionItem {
 
 test('the observation carries the board reason and action unchanged', () => {
   const observed = observationFromAttention(makeItem(makeCard()), 'sha1');
-
   assert.deepEqual(observed.reason, GATE_FAILED, 'the board owns the reason; the supervisor does not re-derive it');
-  assert.equal(observed.action.kind, 'active:execute');
+  assert.equal(observed.action?.kind, 'active:execute');
   assert.equal(observed.working, false);
+  assert.equal(observed.owned, false);
+  const owner = { id: 'owned', generation: 1, phase: 'executing' } as NonNullable<MissionCard['workflowOperation']>;
+  assert.equal(observationFromAttention(makeItem(makeCard({ workflowOperation: owner })), 'sha1').owned, true);
   assert.match(observed.progress, /sha1/);
 });
 
@@ -469,7 +435,6 @@ test('the recovery instruction stands alone without the supervisor', () => {
   const instruction = recoveryInstruction({
     missionId: MISSION, lane: 'active', diagnostic: 'gate-failed: Gate failed', attemptedOperation: `px active ${MISSION}`,
   });
-
   assert.match(instruction, /gate-failed: Gate failed/);
   assert.match(instruction, new RegExp(`px active ${MISSION}`));
   assert.match(instruction, /restore the mission to a state where the normal Parallix workflow can continue/);
@@ -488,7 +453,6 @@ test('px lead works the whole attention queue with no arguments', async () => {
   const lines: string[] = [];
 
   const code = await createLeadCommand(fleet.port, (line) => lines.push(line))(['--once']);
-
   assert.equal(code, 0);
   assert.deepEqual(fleet.ran.map(([mission]) => mission), ['task-a', 'task-b']);
   assert.match(lines.join('\n'), /pass 1: 2 mission\(s\) on the attention queue/);
@@ -517,7 +481,6 @@ test('px lead --dry-run prints the queue and acts on none of it', async () => {
   const lines: string[] = [];
 
   const code = await createLeadCommand(fleet.port, (line) => lines.push(line))(['--dry-run']);
-
   assert.equal(code, 0);
   assert.match(lines.join('\n'), /gate-failed: Gate failed.*board offers px active/s);
   assert.deepEqual(fleet.ran, []);
@@ -529,13 +492,12 @@ test('px lead --dry-run omits refined missions awaiting operator activation', as
   const lines: string[] = [];
 
   const code = await createLeadCommand(fleet.port, (line) => lines.push(line))(['--dry-run']);
-
   assert.equal(code, 0);
   assert.match(lines.join('\n'), /asks for attention on nothing/);
   assert.deepEqual(fleet.ran, []);
 });
 
-test('px lead keeps watching an unchanged integration handoff without duplicate output', async () => {
+test("px lead keeps watching an unchanged integration review preparation without duplicate output", async () => {
   const waiting = item({
     lane: 'integration',
     reason: { kind: 'integrate-lane', detail: 'Awaiting integration' },
@@ -555,7 +517,7 @@ test('px lead keeps watching an unchanged integration handoff without duplicate 
   };
 
   await assert.rejects(createLeadCommand(port, (line) => lines.push(line))(['--poll', '0.001']), /Could not read the board/);
-  assert.equal(reads, 4, 'the integration handoff is polled again instead of ending the lead run');
+  assert.equal(reads, 4, "the integration review preparation is polled again instead of ending the lead run");
   assert.equal(lines.filter((line) => line.includes('waiting for you')).length, 1);
 });
 
@@ -564,7 +526,6 @@ test('px lead --once reports a single pass without treating pending recovery as 
   const lines: string[] = [];
 
   const code = await createLeadCommand(fleet.port, (line) => lines.push(line))(['--budget', '1', '--once']);
-
   assert.equal(code, 0);
   assert.equal(fleet.recoveries.length, 0, '--once performs only the advertised board action');
   assert.doesNotMatch(lines.join('\n'), /escalated/);
@@ -598,9 +559,7 @@ test('a live agent is never dispatched onto, even when the board ranks its faile
   // agent mid-flight.
   const live = item({ working: true, workingDetail: 'execute — gate re-running (live, now)' });
   const fleet = board([[live], []]);
-
   const results = await superviseFleet(fleet.port, { once: true });
-
   assert.deepEqual(fleet.ran, [], 'no command is dispatched onto a working mission');
   assert.deepEqual(fleet.recoveries, [], 'and no recovery agent either');
   assert.equal(resultFor(results).outcome, 'open');
@@ -627,7 +586,6 @@ test('a mission whose agent is still running does not stop the rest of the fleet
   assert.ok(fleet.ran.some(([mission]) => mission === 'task-quick'), 'the fleet moved on while one agent was still running');
   releaseSlow?.();
   const results = await run;
-
   assert.equal(resultFor(results, 'task-quick').outcome, 'escalated');
   assert.equal(fleet.ran.filter(([mission]) => mission === 'task-slow').length, 1, 'and the slow mission got exactly one step at a time');
 });
@@ -637,9 +595,7 @@ test('a mission that clears and comes back is supervised again, keeping the atte
   // A second mission keeps the run alive while the first clears and comes back.
   const other = item({ missionId: 'task-other', action: { kind: 'active:execute', display: 'px active task-other' } });
   const fleet = board([[stuck, other], [other], [stuck, other], [other], []]);
-
   const results = await superviseFleet(fleet.port, { budget: 1, pollMs: 1 });
-
   assert.ok(resultFor(results).steps.some((step) => step.includes('back on the attention queue')));
   assert.equal(fleet.ran.filter(([mission]) => mission === MISSION).length, 1, 'the board action was already spent on this state');
   assert.equal(
@@ -752,9 +708,7 @@ test('a pending agent does not stop the queue from being read for new missions',
     },
     wait: (milliseconds) => { waits.push(milliseconds); return pause(1); },
   };
-
   const results = await superviseFleet(port, { budget: 1, pollMs: 5 });
-
   assert.ok(ran.includes('task-appeared'), 'the mission that became stuck while an agent ran was supervised');
   assert.ok(reads > 2, `the queue was read again while the agent was pending; read ${reads} time(s)`);
   assert.ok(waits.length > 0, 'the polling interval is raced against the pending step');
@@ -787,7 +741,6 @@ test('a live or claimed mission is polled, not spun on', async () => {
   };
 
   await superviseFleet(port, { pollMs: 5 });
-
   assert.deepEqual(ran, [], 'a live mission is never dispatched onto');
   assert.ok(reads <= 12, `the queue is read once per polling interval, not spun on; read ${reads} time(s)`);
   assert.ok(waits.length >= 1, 'and every pass that moved nothing waited out the interval');
@@ -837,7 +790,6 @@ test('the polling pause keeps the process alive, and the loop cancels the one it
   };
 
   await superviseFleet(port, { budget: 1, pollMs: 3 });
-
   assert.ok(cancelled.length > 0, 'every pause the loop created was cancelled');
   assert.deepEqual([...new Set(cancelled)], [3]);
 });
@@ -858,9 +810,7 @@ test('liveness is read per mission, not by rebuilding the queue', async () => {
     launchRecovery: async () => 'claude ran in /tmp/worktree',
     wait: () => pause(1),
   };
-
   const results = await superviseFleet(port, { budget: 1, pollMs: 1 });
-
   assert.equal(queueReads, 4, 'one queue read per pass, and never one to answer a liveness question');
   assert.equal(livenessReads, 3, 'liveness is asked before dispatch, recovery and after judgment, without touching the queue');
   assert.equal(resultFor(results).outcome, 'escalated');
@@ -875,9 +825,7 @@ test('an unreadable current-work authority stops the step instead of dispatching
     ...fleet.port,
     liveness: async () => { throw new Error('the operator database is unavailable'); },
   };
-
   const results = await superviseFleet(port, { budget: 1, pollMs: 1 });
-
   assert.deepEqual(fleet.ran, [], 'nothing is dispatched while liveness is unknown');
   assert.deepEqual(fleet.recoveries, [], 'and no recovery agent is started either');
   assert.ok(resultFor(results).steps.some((step) => step.includes('the operator database is unavailable')));
@@ -993,3 +941,23 @@ test('judged continuation without admitted identity fails closed (TASK-2798)', a
   assert.match(resultFor(results).summary, /missing its admitted identity/);
   assert.equal(fleet.recoveries.length, 0);
 });
+
+for (const unavailable of ['owned', 'human'] as const) {
+  test(`lead reconsiders ${unavailable} attention once execution becomes eligible (TASK-2822)`, async () => {
+    const waiting = item({ action: null, ...(unavailable === 'owned' ? { owned: true } : {}) });
+    const eligible = item({ progress: 'active|eligible|head' });
+    const fleet = board([[waiting], [eligible], []]);
+    const outcomes: string[] = [];
+    const controller = new AbortController();
+    const results = await superviseFleet(fleet.port, { keepWatching: true,
+      signal: controller.signal, onPass: (pass, reports) => {
+        if (pass === 2) { outcomes.push(resultFor(reports).outcome); }
+        if (pass === 3) { controller.abort(); }
+      },
+    });
+    assert.deepEqual(fleet.ran, [[MISSION, 'active:execute']]);
+    assert.deepEqual(fleet.recoveries, []);
+    assert.equal(resultFor(results).outcome, 'cleared');
+    if (unavailable === 'owned') { assert.ok(outcomes.every(outcome => outcome !== 'human')); }
+  });
+}

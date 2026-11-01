@@ -8,7 +8,7 @@ import { repositoryId, type RepositoryId } from '../../domain/repository.js';
 //
 // A mission worktree and the checkout it was branched from are the same
 // repository. Every command that reads or writes repository-scoped state must
-// therefore agree on one identity, or a handoff running in `<repo>-<slug>` and
+// therefore agree on one identity, or a review preparation running in `<repo>-<slug>` and
 // an integrate running in `<repo>` key different rows.
 //
 // This module is that single owner. A worktree path, the working directory, or

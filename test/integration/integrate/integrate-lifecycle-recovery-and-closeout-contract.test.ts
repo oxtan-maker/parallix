@@ -141,7 +141,7 @@ describe("active+approved recovery", async () => {
         { missionServices: integrationServices({ store, lifecycle }), submitForReviewFn },
       );
 
-      assert.equal(submitForReviewCalled, false, 'recovery skips the submit-for-review handoff replay for an already-approved round');
+      assert.equal(submitForReviewCalled, false, "recovery skips the submit-for-review review preparation replay for an already-approved round");
       assert.deepEqual(
         result,
         { recovered: true, status: 'integration', occurredAt: decidedAt },

@@ -1,18 +1,19 @@
-import { availableBoardCommands } from './projections/mission-board.js';
-import { reviewStatus } from '../domain/review.js';
+import { workflowEligible } from '../domain/workflow-command-policy.js';
+import type { ExecutionActivity } from '../domain/execution-activity.js';
 import { reviewOperation } from '../domain/review-command-policy.js';
 import { agentFamily } from '../domain/agents.js';
 import { missionId } from '../domain/mission.js';
 import type { RepositoryId } from '../domain/repository.js';
-import { isOpenWorkflow, isWorkflowCommand, requireWorkflowOwner, workflowEligible, workflowOperation, claimWorkflow, settleWorkflowStop, type WorkflowCommand } from '../domain/workflow-operation.js';
+import { isOpenWorkflow, isWorkflowCommand, requireWorkflowOwner, workflowOperation, claimWorkflow, settleWorkflowStop, finishWorkflow, requestWorkflowStop, loseWorkflowOwner, type WorkflowCommand } from '../domain/workflow-operation.js';
 import { completed, failure, rejected, type ApplicationOutcome } from './contracts.js';
 import type { BoardCommandDispatcher, BoardCommandRequest, BoardCommandResult } from './controller/board-command.js';
 import type { MissionTransitionStore, MissionLoadResult } from './domain-ports.js';
+import { ExecutionStartService, ExecutionStartRefusal } from './execution-start-service.js';
 import { MissionLifecycleService } from './mission-lifecycle-service.js';
+import { beginReviewPreparation } from './review-submission-service.js';
 import { MissionIntakeService } from './mission-intake-service.js';
 import type { MissionLabel } from '../domain/mission.js';
 import type { WorkflowOperationStore, WorkflowProcessPort, WorkflowOperationRecord as WorkflowOperation } from './ports/workflow-operation.js';
-import { currentWorkPublication, type CurrentWorkPort, type CurrentWorkPhase } from './recording/current-work-recorder.js';
 
 export interface WorkflowAcceptance {
   readonly status: 'accepted';
@@ -30,7 +31,6 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     private readonly _missions: MissionTransitionStore,
     private readonly _dispatcher: BoardCommandDispatcher,
     private readonly _processes: WorkflowProcessPort,
-    private readonly _work: CurrentWorkPort,
     private readonly _repository: RepositoryId,
     private readonly _selectAgent: () => Promise<string>,
     private readonly _pause: () => Promise<void>,
@@ -119,7 +119,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
         inserted = outcome.status === 'accepted';
         return outcome;
       });
-    } catch (error) { return failure('execution', message(error)); }
+    } catch (error) { return error instanceof ExecutionStartRefusal ? error.outcome : failure('execution', message(error)); }
     if (inserted && accepted.status === 'accepted' && accepted.operation.phase === 'accepted') {
       // Multiple launchers are harmless: only one worker can claim the intent.
       // A failed spawn leaves accepted intent recoverable on the next pass.
@@ -130,6 +130,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
 
   private admissionRequestRefusal(request: BoardCommandRequest, key: string): ApplicationOutcome<unknown> | null {
     if (!isWorkflowCommand(request.kind)) { return rejected('validation', 'Not a workflow command'); }
+    if (request.payload) { return rejected('validation', 'Workflow commands do not accept measurement or evidence payloads'); }
     if (!request.capabilities.has(request.kind) || !this.canExecute(request.kind)) {
       return rejected('capability', 'Workflow command is not available');
     }
@@ -170,35 +171,17 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     return this._selectAgent();
   }
 
-  private boardAvailability(loaded: Extract<MissionLoadResult, { kind: 'found' }>, command: WorkflowCommand) {
-    const approved = loaded.mission.review?.rounds.at(-1);
-    const commandName = command.split(':')[0];
-    return availableBoardCommands(loaded.mission, {
-      reviewApproval: approved?.decision?.kind === 'approved' && !approved.decision.revocation
-        ? { subject: approved.subject, approvedAt: approved.decision.decidedAt } : null,
-      currentWork: null,
-    }).find(action => action.command === commandName);
-  }
-
   private admissionEligibility(request: BoardCommandRequest, loaded: Extract<MissionLoadResult, { kind: 'found' }>): ApplicationOutcome<unknown> | null {
     if (request.missionStatusAtRequest !== undefined && request.missionStatusAtRequest !== loaded.mission.status) {
       return failure('conflict', `Mission status changed: ${loaded.mission.status}`);
     }
-    const expectedVersion = request.payload?.kind === 'handoff:record' ? request.payload.expectedVersion : undefined;
-    if (expectedVersion !== undefined && expectedVersion !== loaded.version) { return failure('conflict', 'Mission version changed before admission'); }
-    return this.boardAdmissionEligibility(request, loaded);
+    return this.commandEligibility(request, loaded);
   }
 
-  private boardAdmissionEligibility(request: BoardCommandRequest, loaded: Extract<MissionLoadResult, { kind: 'found' }>): ApplicationOutcome<unknown> | null {
+  private commandEligibility(request: BoardCommandRequest, loaded: Extract<MissionLoadResult, { kind: 'found' }>): ApplicationOutcome<unknown> | null {
     const command = request.kind as WorkflowCommand;
     const reviewMode = request.invocation?.command === 'review' ? reviewOperation(request.invocation.args) : 'status';
-    if (!workflowEligible(command, loaded.mission.status, loaded.mission.review !== null && reviewStatus(loaded.mission.review) === 'approved', loaded.mission.review?.rounds.at(-1)?.phase === 'fixing', reviewMode)) { return rejected('validation', `${command} is not eligible in ${loaded.mission.status}`); }
-    // Domain policy admits this explicit continuation even though the board
-    // offers no review button in integration. All other requests use both checks.
-    if (command === 'review:submit' && loaded.mission.status === 'integration' && reviewMode === 'enter') { return null; }
-    const availability = this.boardAvailability(loaded, command);
-    if (!availability?.enabled) { return rejected('validation', availability?.reason ?? 'Workflow action is not eligible'); }
-    return null;
+    return workflowEligible(command, loaded.mission, reviewMode, request.operatorInvocation) ? null : rejected('validation', `${command} is not eligible in ${loaded.mission.status}`);
   }
 
 
@@ -218,22 +201,21 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
 
   private async accept(request: BoardCommandRequest, loaded: Extract<Awaited<ReturnType<MissionTransitionStore['load']>>, { kind: 'found' }>, key: string, command: WorkflowCommand, agent: string | null): Promise<WorkflowAdmission> {
         const now = new Date().toISOString();
-        const operation: WorkflowOperation = { ...workflowOperation({
+        let operation: WorkflowOperation = { ...workflowOperation({
           id: request.operationId, repositoryId: this._repository, missionId: loaded.mission.id,
           requestKey: key, command, generation: 0, phase: 'accepted', providerStarted: false, agent,
           reviewer: request.reviewer ?? null, originalStatus: loaded.mission.status,
           previousAssignee: loaded.mission.assignee, owner: null, createdAt: now, updatedAt: now, reason: null,
-        }), invocation: request.invocation, payload: request.payload, requestedAgent: request.agent, pinnedAgent: request.pinnedAgent };
+        }), operatorInvocation: request.operatorInvocation, invocation: request.invocation, requestedAgent: request.agent, pinnedAgent: request.pinnedAgent };
         if (command === 'active:execute' && agent) {
-          const activation = await new MissionLifecycleService(this._missions).activate({
-            operationId: operation.id, missionId: loaded.mission.id, expectedVersion: loaded.version,
-            capabilities: new Set(['mission:transition']), agent: agentFamily(agent), occurredAt: now,
-            idempotencyKey: `${operation.id}:activate`,
-          });
-          if (activation.status !== 'completed') { return activation; }
+          const activation = await new ExecutionStartService(this._missions).start(loaded.mission.id, agent, operation.id, loaded.version);
+          operation = { ...operation, activationVersion: activation.version };
+        }
+        if (command === 'review:submit') {
+          await beginReviewPreparation(loaded.mission.id, { store: this._missions, lifecycle: new MissionLifecycleService(this._missions) });
         }
         await this._operations.insert(operation);
-        await this.publish(operation, 'running', 'preparing workflow');
+        await this._operations.activity.publish(executionActivity(operation, 'running', 'preparing workflow'), operation.id);
         return { status: 'accepted' as const, operation };
   }
 
@@ -263,14 +245,14 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
       if (!pending || pending.phase !== 'accepted' || pending.owner) { return null; }
       const claimed = { ...pending, ...claimWorkflow(pending, owner, new Date().toISOString()) };
       await this._operations.replace(claimed, pending.generation);
-      await this.publish(claimed, 'running', 'preparing workflow');
+      await this._operations.activity.publish(executionActivity(claimed, 'running', 'preparing workflow', owner), claimed.id);
       return claimed;
     });
     if (!operation) { return; }
     const request: BoardCommandRequest = {
       operationId: operation.id, missionId: operation.missionId, kind: operation.command,
       capabilities: new Set([operation.command]), agent: operation.command === 'active:execute' ? operation.agent : operation.requestedAgent ?? null, pinnedAgent: operation.pinnedAgent, reviewer: operation.reviewer,
-      detached: false, payload: operation.payload,
+      operatorInvocation: operation.operatorInvocation, detached: false,
     };
     let outcome: ApplicationOutcome<unknown>;
     try { outcome = await (execute ?? (r => this._dispatcher.dispatch(r)))(request); }
@@ -279,9 +261,10 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
       const current = await this._operations.get(id);
       if (!current || current.generation !== operation.generation || current.phase === 'stopping' || !isOpenWorkflow(current)) { return; }
       if (outcome.status !== 'completed' && !current.providerStarted) { await this.compensate(current); }
-      const ended: WorkflowOperation = { ...current, phase: outcome.status === 'completed' ? 'completed' : 'blocked', reason: outcome.error?.message ?? null, updatedAt: new Date().toISOString() };
+      const ended = { ...current, ...finishWorkflow(current, operation.generation, outcome.status === 'completed', outcome.error?.message ?? null, new Date().toISOString()) };
       await this._operations.replace(ended, current.generation);
       await this.publish(ended, ended.phase === 'completed' ? 'ended' : 'blocked', ended.reason ?? 'workflow completed');
+      return ended;
     });
   }
 
@@ -291,16 +274,24 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     requireWorkflowOwner(current, generation);
   }
 
-  async progress(id: string, generation: number, phase: string, summary: string, agent?: string | null, started = false): Promise<void> {
+  async activity(id: string, generation: number, event: ExecutionActivity, sourceId: string): Promise<void> {
     await this._operations.transaction(async () => {
       const current = await this._operations.get(id);
       if (!current) { throw new Error('Workflow owner is missing'); }
       requireWorkflowOwner(current, generation);
-      const providerStarted = current.providerStarted || started;
-      const next: WorkflowOperation = { ...current, providerStarted, agent: agent === undefined ? current.agent : agent,
-        phase: phase === 'waiting' ? 'waiting' : phase === 'handoff' || phase === 'review' || phase === 'integrate' ? 'checking'
-          : providerStarted ? 'running' : 'preparing', reason: summary, updatedAt: new Date().toISOString() };
-      await this._operations.replace(next, generation);
+      if (event.operationId !== current.id || event.missionId !== current.missionId) { throw new Error('Activity belongs to another execution'); }
+      const observed = event.processId === current.owner!.pid && !event.processIdentity
+        ? { ...event, processIdentity: current.owner!.identity } : event;
+      await this._operations.activity.publish(observed, sourceId);
+    });
+  }
+
+  async providerStarted(id: string, generation: number, agent: string): Promise<void> {
+    await this._operations.transaction(async () => {
+      const current = await this._operations.get(id);
+      if (!current) { throw new Error('Workflow owner is missing'); }
+      requireWorkflowOwner(current, generation);
+      await this._operations.replace({ ...current, providerStarted: true, agent }, generation);
     });
   }
 
@@ -315,16 +306,8 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     });
   }
 
-  private async compensate(operation: WorkflowOperation): Promise<void> {
-    if (operation.command !== 'active:execute' || operation.originalStatus !== 'refined') { return; }
-    const loaded = await this._missions.load(operation.missionId);
-    if (loaded.kind !== 'found' || loaded.mission.status !== 'active') { return; }
-    const outcome = await new MissionLifecycleService(this._missions).abortActivation({
-      operationId: `${operation.id}:abort`, missionId: operation.missionId, expectedVersion: loaded.version,
-      capabilities: new Set(['mission:transition']), assignee: operation.previousAssignee ? agentFamily(operation.previousAssignee) : null,
-      actor: operation.agent ?? 'workflow', occurredAt: new Date().toISOString(),
-    });
-    if (outcome.status !== 'completed') { throw new Error(outcome.error?.message ?? 'Activation compensation failed'); }
+  private compensate(operation: WorkflowOperation): Promise<void> {
+    return new ExecutionStartService(this._missions).compensate(operation);
   }
 
   async recover(operationId?: string): Promise<void> {
@@ -345,7 +328,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
         await this._operations.transaction(async () => {
           const current = await this._operations.get(operation.id);
           if (!current || current.generation !== operation.generation || current.phase === 'stopping' || !isOpenWorkflow(current)) { return; }
-          const interrupted: WorkflowOperation = { ...current, phase: liveness === false ? 'interrupted' : 'stopping', reason: liveness === false ? 'Workflow owner exited; reconcile external effects before explicitly resuming' : 'Workflow ownership is uncertain; replacement is refused until termination is confirmed', updatedAt: new Date().toISOString() };
+          const interrupted = { ...current, ...loseWorkflowOwner(current, current.generation, liveness === false ? false : null, new Date().toISOString()) };
           await this._operations.replace(interrupted, current.generation);
           await this.publish(interrupted, 'blocked', interrupted.reason!);
         });
@@ -357,7 +340,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     const stopping = await this._operations.transaction(async () => {
       const current = await this._operations.current(mission);
       if (!current || operationId && current.id !== operationId) { return null; }
-      const next: WorkflowOperation = { ...current, phase: 'stopping', updatedAt: new Date().toISOString() };
+      const next = { ...current, ...requestWorkflowStop(current, new Date().toISOString()) };
       await this._operations.replace(next, current.generation);
       await this.publish(next, 'running', 'waiting for owned workflow to stop');
       return next;
@@ -369,15 +352,15 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
       stopping.launcher ? this._processes.stop(stopping.launcher) : true,
     ]);
     if (this._processes.stopEffects && !await this._processes.stopEffects(stopping)) {
-      return failure('conflict', `Stop is pending: attributed execution termination is unconfirmed. ${pendingGuidance}`);
+      return this.pendingStop(stopping, `Stop is pending: attributed execution termination is unconfirmed. ${pendingGuidance}`);
     }
     if (this._processes.effectsSettled && !await this._processes.effectsSettled(stopping)) {
-      return failure('conflict', `Stop is pending: external execution is not yet reconciled; replacement is refused. ${pendingGuidance}`);
+      return this.pendingStop(stopping, `Stop is pending: external execution is not yet reconciled; replacement is refused. ${pendingGuidance}`);
     }
     if (!ownerStopped && stopping.owner && await this._processes.alive(stopping.owner) !== false) {
-      return failure('conflict', `Stop is pending: termination is unconfirmed; replacement is refused. ${pendingGuidance}`);
+      return this.pendingStop(stopping, `Stop is pending: termination is unconfirmed; replacement is refused. ${pendingGuidance}`);
     }
-    if (!launcherStopped) { return failure('conflict', `Stop is pending: launcher termination is unconfirmed. ${pendingGuidance}`); }
+    if (!launcherStopped) { return this.pendingStop(stopping, `Stop is pending: launcher termination is unconfirmed. ${pendingGuidance}`); }
     await this._operations.transaction(async () => {
       const current = await this._operations.get(stopping.id);
       if (current?.phase === 'stopped') { return; }
@@ -389,14 +372,24 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     return completed({ stopped: true, operationId: stopping.id });
   }
 
-  private async publish(operation: WorkflowOperation, state: 'running' | 'ended' | 'blocked', summary: string): Promise<void> {
-    const phase: CurrentWorkPhase = operation.command === 'active:execute' ? 'execute'
-      : operation.command === 'draft:create' ? 'draft' : operation.command === 'integrate:merge' ? 'integrate'
-      : operation.command === 'review:submit' ? 'review' : 'handoff';
-    const publication = currentWorkPublication({ slug: operation.missionId, operationId: operation.id, phase, summary, agent: operation.agent });
-    if (!publication) { throw new Error('Invalid workflow publication'); }
-    if (state === 'blocked') { await this._work.blocked(publication, operation.reason ?? summary); }
-    else { await this._work[state === 'ended' ? 'ended' : 'running'](publication); }
+  private async pendingStop(stopping: WorkflowOperation, reason: string): Promise<ApplicationOutcome<unknown>> {
+    await this._operations.transaction(async () => {
+      const current = await this._operations.get(stopping.id);
+      if (current?.phase !== 'stopping' || current.generation !== stopping.generation) { return; }
+      await this._operations.replace({ ...current, reason, updatedAt: new Date().toISOString() }, current.generation);
+    });
+    return failure('conflict', reason);
   }
+
+  private async publish(operation: WorkflowOperation, state: 'running' | 'ended' | 'blocked', summary: string): Promise<void> {
+    await this._operations.activity.publish(executionActivity(operation, state, summary), operation.id);
+  }
+
 }
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+
+function executionActivity(operation: WorkflowOperation, state: ExecutionActivity['state'], summary: string, publisher = operation.owner): ExecutionActivity {
+  return { missionId: operation.missionId, operationId: operation.id, phase: operation.command === 'active:execute' ? 'execute' : operation.command === 'draft:create' ? 'draft' : operation.command === 'integrate:merge' ? 'integrate' : 'review',
+    state, summary, agent: operation.agent ? agentFamily(operation.agent) : null, processId: publisher?.pid ?? null, processIdentity: publisher?.identity ?? null,
+    blockedReason: state === 'blocked' ? summary : null, occurredAt: new Date().toISOString() };
+}

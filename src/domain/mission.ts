@@ -110,7 +110,7 @@ export interface MissionData {
   readonly checkpoints: readonly CheckpointData[];
   /** What the mission is for (ADR 0053). Null until a drafting agent records it. */
   readonly brief?: MissionBrief | null;
-  /** The exact commands handoff runs for this mission. Empty until declared. */
+  /** The exact commands review preparation runs for this mission. Empty until declared. */
   readonly declaredGates?: readonly string[];
   /** What must be true for the mission to be done. Empty until the draft records them. */
   readonly successCriteria?: readonly string[];
@@ -125,7 +125,7 @@ export interface MissionData {
    */
   readonly dependencies?: readonly MissionId[];
   /**
-   * The draft's size prediction, compared at handoff with the measured NEL
+   * The draft's size prediction, compared at review preparation with the measured NEL
    * bucket for the calibration ADR 0047 describes. Null until predicted.
    */
   readonly predictedNelBucket?: NelBucketLabel | null;
@@ -139,7 +139,9 @@ export interface MissionData {
    */
   readonly reproductionTest?: string | null;
   readonly review: Review | null;
-  /** Captured at handoff; null until the change-size measurement exists. */
+  /** Early preparation still owes verified submission, including after a restart. */
+  readonly reviewPreparationPending?: true;
+  /** Captured at review preparation; null until the change-size measurement exists. */
   readonly netEngineeringLines: number | null;
   /** Original raw status from the backlog file (e.g. "ready", "approved").
    * Preserves the legacy `px status` output contract. Mapped status is `status` field.

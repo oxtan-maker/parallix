@@ -8,13 +8,13 @@ import * as path from 'node:path';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import * as agents from '../../agents/agents.js';
 import { findMissionDir, findCheckpoints, getFirstLine, inferSlug, getMissionYear, missionDirForSlug, isWorkflowGeneratedArtifact } from '../../filesystem/mission-utils.js';
-import { resolveTaskFile, transitionTask, getTaskStatus, getTaskImplementer } from '../../backlog/backlog.js';
+import { resolveTaskFile, transitionTask } from '../../backlog/backlog.js';
 import { assembleStagePrompt } from '../../assets/runtime-assets.js';
 import { resolvePromptConfiguration } from '../../config/product-config.js';
 import { isDbAdhocIdentity } from '../../../domain/mission.js';
 
 function renderActiveProgress(event: { phase: string; agent?: string }, logFn: Log) {
-  if (event.phase === 'handoff') {
+  if (event.phase === 'review-preparation') {
     logFn(fmt.status('PASS', `Implementation complete (${event.agent === undefined ? event.agent : fmt.agent(event.agent)}).`));
   }
 }
@@ -117,27 +117,21 @@ function reportActiveFailure(outcome: ApplicationOutcome<unknown>, slug: string,
 //   selectAgent → startAgent (launch) → record Backlog (status=active, assignee)
 //
 // Backlog status is moved to 'active' from the onLaunch hook, which fires
-// immediately after the launcher successfully spawns the process. If the final
-// launch result later fails, we roll the task status back to the prior status.
+// immediately after the launcher successfully spawns the process.
+// The execution use case owns any pre-launch compensation.
 
 async function selectLaunchAndRecord(opts: LaunchOptions) {
-  const { slug, worktree, preselectedAgent, agentConfig, taskResolution, prompt, startAgentFn, transitionTaskFn, getTaskStatusFn, getTaskImplementerFn, selectAgentFn, log, sessionMarkerPort, onAgentLaunched, onActivated, authorityAlreadyActive, unrefChild } = activeLaunchBindings(opts);
+  const { slug, worktree, preselectedAgent, agentConfig, taskResolution, prompt, startAgentFn, transitionTaskFn, selectAgentFn, log, sessionMarkerPort, onAgentLaunched, unrefChild } = activeLaunchBindings(opts);
   const preselected = preselectedAgent || selectAgentFn('active', { config: agentConfig, runtimeBlocklist: opts.runtimeBlocklist, configuration: opts.configuration });
   const taskResolutionTyped = taskResolution;
-  const taskFile = taskResolutionTyped && taskResolutionTyped.ok && taskResolutionTyped.taskFile
-    ? taskResolutionTyped.taskFile
-    : null;
-  const priorStatus = taskFile ? getTaskStatusFn(taskFile) : null;
-  const priorImplementer = taskFile ? getTaskImplementerFn(taskFile) : null;
   const recorder = new ActiveLaunchRecorder({
     slug, worktree, preselected, taskResolution: taskResolutionTyped,
-    priorStatus, priorImplementer, transitionTaskFn, log, onActivated, onAgentLaunched, authorityAlreadyActive
+    transitionTaskFn, log, onAgentLaunched
   });
 
   let actual;
   let result;
-  try {
-    ({ agent: actual, result } = await startAgentFn('active', {
+  ({ agent: actual, result } = await startAgentFn('active', {
       configuration: opts.configuration,
       prompt,
       worktree,
@@ -148,64 +142,21 @@ async function selectLaunchAndRecord(opts: LaunchOptions) {
       unrefChild,
       sessionMarkerPort: sessionMarkerPort ?? undefined,
       onLaunch: launch => recorder.record(launch),
-      onLimitHit: () => {
-        // Legacy launches can undo their mirror-only write. Once activation
-        // commits through the lifecycle authority, retain active for retry.
-        void recorder.rollback({ throwOnFailure: false });
-      },
       // The agent's own terminal stream is the progress record. Keep only
       // conditions an operator must act on; the normal launcher trace is debug detail.
       log: (message: string) => {
         if (/\[(WARN|FAIL)\]|No output yet|Still waiting/.test(message)) { log(message); }
       }
     }));
-  } catch (err) {
-    await recorder.rollback();
-    throw err;
-  }
 
   // `actual` is the family that actually ran (may differ from `preselected` after
   // a limit-hit fallback inside startAgent). Use it as the canonical implementer.
   const agent = actual || recorder.launchedAgent || preselected;
-  const launchSucceeded = !result.error && (typeof result.status !== 'number' || result.status === 0);
-
-  if (!launchSucceeded) {
-    await recorder.rollback();
-  }
-
   if (recorder.launchTransitionFailed) {
     throw new Error(`Failed to record task ${fmt.slug(slug)} as active after execute launch.`);
   }
 
   return { preselected, agent, result, rebaseDeferred: recorder.rebaseDeferred };
-}
-
-// When startAgent falls back to a different family after a limit hit, the
-// implementer that actually ran is `actual`, not the originally `preselected`
-// one. Re-record the resolved agent in the Backlog task so the post-active
-// handoff and the autonomous review loop poll the correct Forgejo identity.
-
-function applyExecuteFallback(opts: Pick<LaunchOptions, 'slug' | 'taskResolution' | 'log'> & { preselected: string; actual?: string | null; worktree?: string; transitionTaskFn?: typeof transitionTask }) {
-  const {
-    slug,
-    preselected,
-    actual,
-    taskResolution,
-    worktree,
-    log = fmt.log.plain,
-    transitionTaskFn = transitionTask
-  } = opts;
-  if (!actual || actual === preselected) {
-    return preselected;
-  }
-  const taskResolutionTyped2 = taskResolution;
-  if (taskResolutionTyped2 && taskResolutionTyped2.ok) {
-    log(fmt.status('INFO', `Execute agent fell back from ${fmt.agent(preselected)} to ${fmt.agent(actual)}; enforcing backlog assignee.`));
-    transitionTaskFn(slug, 'active', { implementer: actual, rootDir: worktree, log }).catch((err) => {
-      log(fmt.status('WARN', `Could not record fallback implementer ${fmt.agent(actual)} in backlog task: ${err instanceof Error ? err.message : String(err)}`));
-    });
-  }
-  return actual;
 }
 
 function buildCheckpointContext(slug: string) {
@@ -344,9 +295,9 @@ function enforceExecuteCommitSafety(opts: { slug: string; worktree: string; dirt
   return true;
 }
 
-const _activeExport = Object.assign(active, { buildExecutePrompt, buildCheckpointContext, applyExecuteFallback, selectLaunchAndRecord, enforceExecuteCommitSafety, unquoteGitStatusPath, renderActiveProgress });
+const _activeExport = Object.assign(active, { buildExecutePrompt, buildCheckpointContext, selectLaunchAndRecord, enforceExecuteCommitSafety, unquoteGitStatusPath, renderActiveProgress });
 export default _activeExport;
-export { _activeExport as active, buildExecutePrompt, buildCheckpointContext, applyExecuteFallback, selectLaunchAndRecord, enforceExecuteCommitSafety, unquoteGitStatusPath, renderActiveProgress };
+export { _activeExport as active, buildExecutePrompt, buildCheckpointContext, selectLaunchAndRecord, enforceExecuteCommitSafety, unquoteGitStatusPath, renderActiveProgress };
 
 function activeCommandBindings(options: ActiveOptions) {
   const {
@@ -374,8 +325,6 @@ function activeLaunchBindings(opts: LaunchOptions) {
     prompt,
     startAgentFn = agents.startAgent,
     transitionTaskFn = transitionTask,
-    getTaskStatusFn = getTaskStatus,
-    getTaskImplementerFn = getTaskImplementer,
     selectAgentFn = agents.selectAgent,
     log = fmt.log.plain,
     sessionMarkerPort = null,
@@ -383,14 +332,9 @@ function activeLaunchBindings(opts: LaunchOptions) {
     // automatic failover after a usage block. The application layer turns that
     // into the mission's current work; this adapter draws no conclusion.
     onAgentLaunched = null,
-    // TASK-2582: the authoritative active boundary. The application layer
-    // persists the Mission's active transition (state + lane event) when the
-    // launcher confirms the spawn; a rejection fails the run.
-    onActivated = null,
-    authorityAlreadyActive = false,
     // Board fire-and-forget dispatch: unref the child so the board process can
     // exit on q/Ctrl+C while the action runs on (CP-4 ownership rule).
     unrefChild = false,
   } = opts;
-  return { slug, worktree, preselectedAgent, agentConfig, taskResolution, prompt, startAgentFn, transitionTaskFn, getTaskStatusFn, getTaskImplementerFn, selectAgentFn, log, sessionMarkerPort, onAgentLaunched, onActivated, authorityAlreadyActive, unrefChild };
+  return { slug, worktree, preselectedAgent, agentConfig, taskResolution, prompt, startAgentFn, transitionTaskFn, selectAgentFn, log, sessionMarkerPort, onAgentLaunched, unrefChild };
 }

@@ -1,4 +1,4 @@
-import type { ReviewTaskMirror, ReviewHandoffFailurePort } from './ports/review-task-mirror.js';
+import type { ReviewTaskMirror, ReviewReviewPreparationFailurePort } from './ports/review-task-mirror.js';
 
 /** Repair only the stale active mirror after a successfully recorded review. */
 export async function repairReviewedTask(
@@ -26,8 +26,8 @@ export async function mirrorReviewOutcome(
 }
 
 /** A declared-gate rejection rebounds once, after authoritative Mission repair. */
-export async function reboundRejectedHandoff(
-  result: { ok: unknown; reason?: unknown; recoveryAttempted?: unknown }, port: ReviewHandoffFailurePort,
+export async function reboundRejectedReviewPreparation(
+  result: { ok: unknown; reason?: unknown; recoveryAttempted?: unknown }, port: ReviewReviewPreparationFailurePort,
 ): Promise<void> {
   if (!result.ok && result.reason === 'validation-failed' && !result.recoveryAttempted) {
     await port.repairMission();

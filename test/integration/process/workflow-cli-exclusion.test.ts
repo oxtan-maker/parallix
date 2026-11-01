@@ -36,7 +36,7 @@ test('real CLI refuses a held owner and stopped generation cannot write after re
   // Settle the old in-process execution before launching a replacement with its own barrier.
   fixture.release(slug);
   assert.equal((await fixture.service.admit({ operationId: 'replacement', kind: 'active:execute', missionId: slug, capabilities: new Set(['active:execute']) })).status, 'accepted');
-  await until(async () => (await fixture.service.operation('replacement'))?.phase === 'preparing', 'replacement claimed');
+  await until(async () => (await fixture.service.operation('replacement'))?.phase === 'executing', 'replacement claimed');
   configureMissionWriteAuthorization({ operationId: old.id, assert: async (_mission, read) => {
     assert.ok(read, 'fence must use the actual writer transaction');
     const owner = await read(old.id); assert.ok(owner); requireWorkflowOwner(owner, old.generation);

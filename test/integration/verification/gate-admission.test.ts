@@ -12,9 +12,9 @@ import { runPhaseGates } from '../../../src/adapters/config/repository-gates.js'
 import { resolveConfiguration } from '../../../src/composition/config.js';
 
 import { fileURLToPath } from 'node:url';
-import { createHandoffPorts } from '../../../src/adapters/cli/commands/handoff.js';
+import { createReviewPreparationPorts } from '../../../src/adapters/cli/commands/review-preparation.js';
 import { clearCustomAdmissionStateCache } from '../../../src/adapters/sqlite/custom-admission-state.js';
-import { DeclaredGateRunner } from '../../../src/application/handoff-declared-gates.js';
+import { DeclaredGateRunner } from '../../../src/application/review-preparation-declared-gates.js';
 import { configureGateAdmission } from '../../../src/application/ports/gate-admission.js';
 import { createGateAdmission } from '../../../src/composition/gate-admission.js';
 
@@ -110,10 +110,7 @@ test('enabled gates preserve parallelism, cancel waiting and running, and reject
   const waiting = new AbortController();
   const running = new AbortController();
   const runs: Promise<unknown>[] = [];
-  let release: (() => void) | undefined;
   t.after(async () => {
-    release?.();
-    configureGateAdmission(null);
     waiting.abort(); running.abort();
     await Promise.allSettled(runs);
     await clearCustomAdmissionStateCache();
@@ -141,13 +138,34 @@ test('enabled gates preserve parallelism, cancel waiting and running, and reject
   assert.equal(fs.existsSync(path.join(root, 'forbidden')), false);
   const progress = await runPhaseGates('handoff', { ...opts, gates: [{ key: 'after', command: 'true', order: 0 }] });
   assert.equal(progress.ok, true);
+});
+
+// Declared review checks share admission with repository gates, but have their
+// own queueing/failure contract and isolated fixture rather than adding their
+// process scans to the parallelism/cancellation case's finite CPU budget.
+test('declared gates share admission and retain command failures (TASK-2791)', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'declared-gate-admission-'));
+  const configuration = resolveConfiguration({ PARALLIX_CUSTOM_ADMISSION_HOME: path.join(root, 'leases') });
+  const admission = createGateAdmission(configuration);
+  const controller = new AbortController();
+  const runs: Promise<unknown>[] = [];
+  let release: (() => void) | undefined;
+  t.after(async () => {
+    release?.();
+    controller.abort();
+    configureGateAdmission(null);
+    await Promise.allSettled(runs);
+    await clearCustomAdmissionStateCache();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { gates: { maxConcurrent: 1 } } }));
   configureGateAdmission(admission);
-  const declared = new DeclaredGateRunner(createHandoffPorts(configuration));
+  const declared = new DeclaredGateRunner(createReviewPreparationPorts(configuration));
   let entered!: () => void;
   const ready = new Promise<void>(resolve => { entered = resolve; });
   const held = admission.run(root, async () => {
     entered(); await new Promise<void>(resolve => { release = resolve; });
-  });
+  }, controller.signal);
   runs.push(held);
   await ready;
   const declaredRun = declared.executeGateCommands(['touch declared', 'false'], root, { log: () => {} });

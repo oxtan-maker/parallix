@@ -133,7 +133,7 @@ describe('review round advancement', () => {
     assert.equal(round.decision?.decidedAt, decidedAt);
   });
 
-  it('resolves the round so the next handoff can submit round 2 on the same pull request', async () => {
+  it("resolves the round so the next review preparation can submit round 2 on the same pull request", async () => {
     const { store, lifecycle } = await reviewInProgress();
     await recordRequestedChanges(MISSION, {
       findings: parseReviewFindings('## F1 (blocking): first\n## F2: second'),

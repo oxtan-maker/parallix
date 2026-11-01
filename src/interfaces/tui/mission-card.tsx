@@ -114,23 +114,18 @@ export interface MissionCardProps {
  * Map a command to its contextual action label per design reference.
  *
  * Design specifies contextual labels (ckpt, review ▸, approve, integrate ▸,
- * handoff) instead of generic [kind] brackets. Intake lanes show the first
+ * review preparation) instead of generic [kind] brackets. Intake lanes show the first
  * enabled action on the slug line; in-flight lanes show actions below details.
  */
 function actionLabel(lane: BoardLane, command: string, flags: readonly string[]): string {
-  // Gate-failed or agent-stuck missions show repair actions
-  if (flags.includes('gate:failed') || flags.includes('agent:stuck')) {
-    return command === 'active' ? 'repair \u25b6' : 'handoff';
+  if (command === 'active') {
+    if (flags.includes('gate:failed') || flags.includes('agent:stuck')) { return 'repair \u25b6'; }
+    if (lane === 'refined') { return 'start \u25b6'; }
+    return lane === 'active' ? 'ckpt' : command;
   }
-
-  switch (lane) {
-    case 'backlog': return command === 'refine' ? 'refine \u25b6' : command;
-    case 'refined': return command === 'active' ? 'start \u25b6' : command;
-    case 'active': return command === 'active' ? 'ckpt' : 'handoff';
-    case 'review': return command === 'review' ? 'review \u25b6' : 'handoff';
-    case 'integration': return command === 'integrate' ? 'integrate \u25b6' : 'handoff';
-    default: return command;
-  }
+  if (command === 'review') { return 'review \u25b6'; }
+  if (command === 'integrate') { return 'integrate \u25b6'; }
+  return command === 'refine' ? 'refine \u25b6' : command;
 }
 
 /** Extract review round from flags like "review:round-2". */
@@ -158,7 +153,7 @@ function blockingFindingsFromFlags(flags: readonly string[]): number | null {
  *   - Slug line: ▶ task-id [label]  agent (right-aligned for in-flight lanes)
  *   - Title line
  *   - In-flight details: cp/gate, next action, PR/review line
- *   - Action buttons: contextual labels (ckpt, review ▸, handoff, etc.)
+ *   - Action buttons: contextual labels (ckpt, review ▸, review preparation, etc.)
  *   - Blocking indicator (if present)
  *
  * Every slot is always rendered so an operator can tell "not blocked"

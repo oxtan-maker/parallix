@@ -127,7 +127,7 @@ function parseImplementerResolution(resolution: string, disposition: string): { 
 }
 
 /**
- * Close the round on the aggregate so the next handoff can open round N+1 on
+ * Close the round on the aggregate so the next review preparation can open round N+1 on
  * the same pull request. Returns a failure result, or null when the round
  * closed (or was already closed).
  */
@@ -269,7 +269,7 @@ export async function consumeImplementerArtifacts(
     : parseImplementerResolution(artifacts.resolution, disposition);
 
   // Close the round on the aggregate. `ready-for-next-round` is the state the
-  // next handoff needs to open round N+1 on the same pull request.
+  // next review preparation needs to open round N+1 on the same pull request.
   //
   // Committed before the round-summary events, and pinned to the version the
   // caller read: the events advance the Mission, so a resolution recorded after

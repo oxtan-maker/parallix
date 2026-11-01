@@ -25,7 +25,7 @@ function runLoop(options: { consume: () => Promise<ReviewerArtifactFacts>; rebou
   const fake = fakeReviewLoopPorts({
     slug: TEST_SLUG,
     routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
-    handoff: { handoff: async () => ({ ok: true as const }) },
+    reviewPreparation: { reviewPreparation: async () => ({ ok: true as const }) },
     provider: { pollReview: async () => POLL_TIMEOUT, pollDisposition: async () => 'CHANGES_MADE' },
     // A launched implementer whose process has not reported an exit status:
     // the disposition arrives through the provider.

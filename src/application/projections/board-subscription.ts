@@ -131,10 +131,13 @@ export function boardFingerprint(
       reviewApproved: card.reviewApproved,
       blockingReason: card.blockingReason,
       currentWork: card.currentWork,
+      workflowOperation: card.workflowOperation,
+      commands: card.commands,
+      blocker: card.blocker,
       execution: card.execution ? { ...card.execution, observedAt: undefined } : undefined,
       liveSession: card.liveSession ?? null,
     }))),
-    attention: projection.attentionQueue.map((item) => [item.missionId, item.reason.kind, item.action.kind]),
+    attention: projection.attentionQueue.map((item) => [item.missionId, item.reason.kind, item.action?.kind]),
     agents: options.displayedCountdown
       ? projection.metrics.agentAvailability.map((agent) => ({
           family: agent.family,

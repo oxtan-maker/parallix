@@ -19,7 +19,7 @@ export type {
   UsageRecord,
 } from './ports/mission-measurements.js';
 // Mechanism ports for the execute workflow. Each names an external mechanism —
-// workspace, agent execution, telemetry, handoff review — rather than a command
+// workspace, agent execution, telemetry, review preparation review — rather than a command
 // phase; see `ports/execute-mission.ts`.
 export type {
   MissionWorkspacePort,

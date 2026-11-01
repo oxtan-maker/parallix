@@ -177,7 +177,7 @@ describe("context compaction", { concurrency: false }, () => {
       agents: { launch: async launch => { order.push(`launch:${launch.role}`); return { agent: launch.agent, result: { status: 0 } }; } },
       artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
     });
-    await runReviewLoop({ slug: 'task-2317-baseline', implementer: 'claude', reviewer: 'codex', maxAttempts: 1, skipHandoff: true }, fake.ports);
+    await runReviewLoop({ slug: 'task-2317-baseline', implementer: 'claude', reviewer: 'codex', maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
 
     const rebaseIndex = order.indexOf('rebase');
     const recaptureIndex = order.indexOf('baseline', rebaseIndex);
@@ -214,7 +214,7 @@ describe('human review reconciliation', { concurrency: false }, () => {
 
     await runReviewLoop({
       slug: 'task-2641-human-correction', implementer: 'claude', reviewer: 'codex',
-      maxAttempts: 1, skipHandoff: true,
+      maxAttempts: 1, skipReviewPreparation: true,
     }, fake.ports);
 
     const implementerLaunch = fake.launches.find(launch => launch.role === 'implementer');
@@ -239,7 +239,7 @@ describe('human review reconciliation', { concurrency: false }, () => {
       }) },
       artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
     });
-    await runReviewLoop({ slug: 'task-2641-dismissed', implementer: 'claude', reviewer: 'codex', maxAttempts: 1, skipHandoff: true, isContinue: true }, fake.ports);
+    await runReviewLoop({ slug: 'task-2641-dismissed', implementer: 'claude', reviewer: 'codex', maxAttempts: 1, skipReviewPreparation: true, isContinue: true }, fake.ports);
     assert.equal(fake.launches.filter(launch => launch.role === 'reviewer').length, 1);
     assert.equal(probes, 0, 'continuation must not reuse an existing provider decision');
     assert.ok(fake.mirrors.includes('approved'), 'only the newly launched reviewer supplies approval');
@@ -394,7 +394,7 @@ describe('human review reconciliation', { concurrency: false }, () => {
       humanFeedback: { reconcile: async () => ({ source: 'forgejo:review:31', author: 'operator', state: 'dismissed', disposition: 'REQUEST_CHANGES', approval: false, reason: 'withdrawn' as const, findings: [] }) },
       artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
     });
-    await runReviewLoop({ slug: 'task-2641-dismissed-change', implementer: 'claude', reviewer: 'codex', maxAttempts: 1, skipHandoff: true }, dismissedChange.ports);
+    await runReviewLoop({ slug: 'task-2641-dismissed-change', implementer: 'claude', reviewer: 'codex', maxAttempts: 1, skipReviewPreparation: true }, dismissedChange.ports);
     assert.equal(dismissedChange.launches.filter(launch => launch.role === 'reviewer').length, 1);
     assert.deepEqual(dismissedChange.stops, []);
   });
@@ -575,7 +575,7 @@ describe("completed controls", { concurrency: false }, () => {
     }
   });
 
-  test('task-2483: configured preHandoff and preReview gates render with their phase key (SC3)', () => {
+  test("task-2483: configured preHandoff and preReview gates render with their phase key (SC3)", () => {
     const { repoRoot, missionPath } = makeFixture({
       gateResult: PASSING_RECORD,
       gates: {
@@ -586,7 +586,7 @@ describe("completed controls", { concurrency: false }, () => {
     });
     try {
       const block = buildCompletedControlsBlock(missionPath, repoRoot);
-      assert.match(block, /preHandoff gates executed by handoff: unit `npm test`/);
+      assert.match(block, /preHandoff gates executed by review-preparation: unit `npm test`/);
       assert.match(block, /preReview gates NOT yet run[^\n]*lint `npm run lint`/);
       // preIntegration has not run at review time; claiming it would be a lie.
       assert.doesNotMatch(block, /npm run e2e/);
@@ -596,11 +596,11 @@ describe("completed controls", { concurrency: false }, () => {
     }
   });
 
-  test('the controls block reports handoff checked every recorded checkpoint (TASK-2662)', () => {
+  test("the controls block reports review preparation checked every recorded checkpoint (TASK-2662)", () => {
     const { repoRoot, missionPath } = makeFixture({ missionBody: MISSION_WITH_GATES });
     try {
       const block = buildCompletedControlsBlock(missionPath, repoRoot);
-      assert.match(block, /Handoff checked every recorded checkpoint/);
+      assert.match(block, /ReviewPreparation checked every recorded checkpoint/);
       assert.match(block, /name each completed success criterion by its `criterion` text/);
       assertWithinBudget(block);
     } finally {
@@ -694,7 +694,7 @@ describe("completed controls", { concurrency: false }, () => {
       const block = buildCompletedControlsBlock(missionPath, repoRoot);
       assertWithinBudget(block);
       // Fully populated means every control family is actually present.
-      for (const marker of [/Verification gate/, /Mission `## Gates`/, /preHandoff gates executed by handoff/, /preReview gates NOT yet run/, /Goal Check/]) {
+      for (const marker of [/Verification gate/, /Mission `## Gates`/, /preHandoff gates executed by review-preparation/, /preReview gates NOT yet run/, /Goal Check/]) {
         assert.match(block, marker);
       }
     } finally {

@@ -148,7 +148,7 @@ Usage:${AUTHOR_HELP}
   px mission mark-complete [--slug <slug>] (--criterion <n> | --all)
 
 Mark one success criterion, by the index \`px status\` lists it with, or every
-criterion complete. Handoff requires every criterion complete and evidenced by
+criterion complete. Review preparation requires every criterion complete and evidenced by
 a verifiable Goal Check row in the final checkpoint.
 `.trimStart();
 
@@ -168,7 +168,7 @@ export const NEL_HELP = `
 Usage: px nel set [--slug <slug>] --predicted <Small|Medium|Large>
 
 Record the draft's predicted net-engineering-lines bucket: Small (0-80),
-Medium (81-235) or Large (235+). Handoff compares it with the measured bucket.
+Medium (81-235) or Large (235+). Review preparation compares it with the measured bucket.
 `.trimStart();
 
 export const CHECKPOINT_HELP = `
@@ -197,7 +197,7 @@ the planned entry of the same --name (or earlier evidence for it) and keeping
 what it was planned to deliver. --criterion and --evidence are repeatable and
 pair up in the order given, so the counts must match. Each row must cite a
 repository-relative path, a quoted test name, a recognized command or an ADR,
-and the final planned checkpoint needs one row per success criterion; handoff
+and the final planned checkpoint needs one row per success criterion; review preparation
 applies the same checks. \`px status\` shows which checkpoints have evidence;
 the first without is where a relaunched agent resumes. A direct operator may
 use \`correct-invalid-contract\` with their identity, decision and a verifiable
@@ -282,9 +282,9 @@ export function createScopeCommand(services: MissionWriteServices) {
 
 /**
  * `px gate add|remove` — one gate per call, so no list is ever silently replaced.
- * `validateGate` returns why a command cannot run as a gate, or null. Handoff
+ * `validateGate` returns why a command cannot run as a gate, or null. ReviewPreparation
  * runs each recorded gate with `bash -c`, so a gate is refused here, while the
- * drafting agent can still fix it, rather than only when handoff runs it.
+ * drafting agent can still fix it, rather than only when review preparation runs it.
  */
 export function createGateCommand(services: Pick<MissionWriteServices, 'resolveSlug'> & { brief: Pick<MissionBriefService, 'readGates' | 'setGates'> }, validateGate: (_command: string) => string | null = () => null) {
   return async (args: string[] = []): Promise<void> => {

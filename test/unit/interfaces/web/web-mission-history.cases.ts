@@ -292,7 +292,7 @@ for (const stop of ['close', 'mission change', 'unmount'] as const) {
 
 test('nested card interactions do not open mission progress (TASK-2773.09)', async () => {
   const { renderBoard } = await import('./web-board-harness.fixture.js');
-  const card = makeCard({ gate: 'failed', blockingReason: 'Fixture blocked', commands: [{ command: 'handoff', enabled: true, reason: null, targetLane: 'review' }] });
+  const card = makeCard({ gate: 'failed', blockingReason: 'Fixture blocked', commands: [{ command: 'review', enabled: true, reason: null, targetLane: 'review' }] });
   const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ active: [card] })) });
   try {
     const article = page.mount.querySelector<DomHtmlElement>('[data-board-card]')!;
@@ -304,7 +304,7 @@ test('nested card interactions do not open mission progress (TASK-2773.09)', asy
       await act(async () => { nested.click(); });
       assert.equal(page.mount.querySelector('[aria-label^="Mission progress for"]'), null);
     }
-    assert.deepEqual(page.calls.filter(call => call.method === 'POST').map(call => JSON.parse(String(call.body)).kind), ['handoff:record', 'mission:edit-read']);
+    assert.deepEqual(page.calls.filter(call => call.method === 'POST').map(call => JSON.parse(String(call.body)).kind), ['review:submit', 'mission:edit-read']);
     await act(async () => {
       const drag = new page.window.Event('dragstart', { bubbles: true });
       Object.defineProperty(drag, 'dataTransfer', { value: { setData() {}, setDragImage() {}, effectAllowed: '' } });

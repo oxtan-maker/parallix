@@ -16,11 +16,11 @@ import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../agents/runt
 import { readReviewState, resolveReviewIdentity } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
-import { reboundRejectedHandoff } from '../../application/review-task-mirroring.js';
-import type { ReviewHandoffFailurePort } from '../../application/ports/review-task-mirror.js';
+import { reboundRejectedReviewPreparation } from '../../application/review-task-mirroring.js';
+import type { ReviewReviewPreparationFailurePort } from '../../application/ports/review-task-mirror.js';
 import { transitionReviewRepair } from '../../application/review-repair-lifecycle.js';
 import { formatVerificationCommand, runVerificationGate } from '../verification/verification.js';
-import { performHandoff } from '../cli/commands/handoff.js';
+import { performReviewPreparation } from "../cli/commands/review-preparation.js";
 
 type ReviewVerdict = { failures: string[]; warnings: string[] };
 
@@ -213,22 +213,22 @@ export async function submitForReview(
     resolveTaskFileFn?: typeof resolveTaskFile;
     getTaskImplementerFn?: typeof getTaskImplementer;
     resolveWorktreeFn?: typeof resolveWorktree;
-    performHandoffFn?: typeof performHandoff;
+    performReviewPreparationFn?: typeof performReviewPreparation;
     readReviewStateFn?: ReviewStateReader;
     transitionTaskFn?: typeof transitionTask;
     isReviewProviderEnabledFn?: typeof isProviderEnabled;
     isForgejoReviewEnabledFn?: typeof isProviderEnabled;
-    missionServicesFn?: import('../../application/ports/handoff-workflow.js').HandoffMissionServicesPort;
+    missionServicesFn?: import("../../application/ports/review-preparation-workflow.js").ReviewPreparationMissionServicesPort;
     // TASK-2379 review round 1 (F1): authoritative review-entry timestamp
     // for lifecycle recovery; a genuine submit-for-review passes nothing and
-    // the handoff keeps the wall clock.
+    // the review preparation keeps the wall clock.
     occurredAt?: string;
     missionStore?: MissionStore | null;
     lifecycleService?: MissionLifecycleService | null;
     log?: (_msg: string) => void;
   } = {}
 ): Promise<void> {
-  const { exit, resolveTaskFileFn, getTaskImplementerFn, resolveWorktreeFn, performHandoffFn, readReviewStateFn, transitionTaskFn, isReviewProviderEnabledFn, log } = submitForReviewBindings(options);
+  const { exit, resolveTaskFileFn, getTaskImplementerFn, resolveWorktreeFn, performReviewPreparationFn, readReviewStateFn, transitionTaskFn, isReviewProviderEnabledFn, log } = submitForReviewBindings(options);
   const worktree = resolveWorktreeFn(slug) || process.cwd();
   const providerEnabled = isReviewProviderEnabledFn(worktree);
 
@@ -257,16 +257,16 @@ export async function submitForReview(
     }
   }
 
-  const result = await performHandoffFn(slug, { configuration: options.configuration, skipGate, reviewIdentity, forgejoUser: reviewIdentity, worktree, missionServicesFn: options.missionServicesFn, occurredAt: options.occurredAt, recoverGateFailure: true });
+  const result = await performReviewPreparationFn(slug, { configuration: options.configuration, skipGate, reviewIdentity, forgejoUser: reviewIdentity, worktree, missionServicesFn: options.missionServicesFn, occurredAt: options.occurredAt, recoverGateFailure: true });
   if (!result.ok) {
-    const failurePort: ReviewHandoffFailurePort = {
+    const failurePort: ReviewReviewPreparationFailurePort = {
       repairMission: async () => {
         if (options.missionStore) { await transitionReviewRepair(slug, 'active', reviewIdentity, options.missionStore, options.lifecycleService ?? null); }
       },
       transition: status => transitionTaskFn(slug, status, { rootDir: worktree, log }),
       reportBounce: () => log(fmt.status('INFO', `Auto-bounced ${slug} to active: declared-gate validation failure. Fix the gate in MISSION.md and retry.`)),
     };
-    await reboundRejectedHandoff(result, failurePort);
+    await reboundRejectedReviewPreparation(result, failurePort);
     exit(1);
   }
 }
@@ -299,13 +299,13 @@ function submitForReviewBindings(options: NonNullable<Parameters<typeof submitFo
   const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
   const getTaskImplementerFn = options.getTaskImplementerFn || getTaskImplementer;
   const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
-  const performHandoffFn = options.performHandoffFn || performHandoff;
+  const performReviewPreparationFn = options.performReviewPreparationFn || performReviewPreparation;
   const readReviewStateFn = options.readReviewStateFn || readReviewState;
   const transitionTaskFn = options.transitionTaskFn || transitionTask;
   const isReviewProviderEnabledFn = options.isReviewProviderEnabledFn || options.isForgejoReviewEnabledFn || isProviderEnabled;
   const log = options.log || fmt.log.plain;
 
-  return { exit, resolveTaskFileFn, getTaskImplementerFn, resolveWorktreeFn, performHandoffFn, readReviewStateFn, transitionTaskFn, isReviewProviderEnabledFn, log };
+  return { exit, resolveTaskFileFn, getTaskImplementerFn, resolveWorktreeFn, performReviewPreparationFn, readReviewStateFn, transitionTaskFn, isReviewProviderEnabledFn, log };
 }
 
 function reviewVerificationBindings(options: NonNullable<Parameters<typeof verifyReview>[2]>) {

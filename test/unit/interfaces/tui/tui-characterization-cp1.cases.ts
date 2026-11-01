@@ -130,7 +130,7 @@ describe('SC2: On-card action buttons — current rendering path', () => {
       lane: 'active',
       commands: [
         { command: 'active', enabled: true, reason: null },
-        { command: 'handoff', enabled: true, reason: null },
+        { command: 'review', enabled: true, reason: null },
       ],
     });
     const output = plain(ink.renderToString(
@@ -141,7 +141,7 @@ describe('SC2: On-card action buttons — current rendering path', () => {
     /* Buttons render as contextual labels per design (not [kind] brackets).
      * Active lane: 'active' → 'ckpt', 'handoff' → 'handoff'. */
     assert.ok(output.includes('ckpt'), `MissionCard must render 'ckpt' label for active command. Got: ${output}`);
-    assert.ok(output.includes('handoff'), `MissionCard must render 'handoff' label. Got: ${output}`);
+    assert.ok(output.includes('review ▶'), `MissionCard must render 'review' label. Got: ${output}`);
   });
 
   it('MissionCard omits buttons for disabled commands', async () => {
@@ -153,7 +153,7 @@ describe('SC2: On-card action buttons — current rendering path', () => {
       lane: 'active',
       commands: [
         { command: 'active', enabled: false, reason: 'not in active lane' },
-        { command: 'handoff', enabled: true, reason: null },
+        { command: 'review', enabled: true, reason: null },
       ],
     });
     const output = plain(ink.renderToString(
@@ -162,7 +162,7 @@ describe('SC2: On-card action buttons — current rendering path', () => {
     ));
 
     assert.ok(!output.includes('ckpt'), `MissionCard must not render 'ckpt' when disabled. Got: ${output}`);
-    assert.ok(output.includes('handoff'), `MissionCard must render 'handoff' when enabled. Got: ${output}`);
+    assert.ok(output.includes('review ▶'), `MissionCard must render 'review' when enabled. Got: ${output}`);
   });
 
   it('ActionBar renders command availability at the bottom', async () => {

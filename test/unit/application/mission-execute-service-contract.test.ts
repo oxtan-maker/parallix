@@ -1,3 +1,4 @@
+import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 import { missionId } from '../../../src/domain/mission.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { makeExecutePorts } from '../../fixtures/execute-mission-ports.js';
@@ -20,6 +21,7 @@ import type { ExecuteMissionPorts } from '../../../src/application/ports/execute
 
 function strictPorts(overrides: Parameters<typeof makeExecutePorts>[0] = {}) {
   const calls: string[] = [];
+  let version = missionVersion(3);
   let mission = fixtureMission('task-1', { title: 'Fixture', status: 'refined', brief: { goal: 'Fixture goal', why: 'Fixture why', scope: 'Fixture scope', outOfScope: [] }, declaredGates: ['npm test'], successCriteria: ['The mission is done'], predictedNelBucket: 'Small' });
   const parts = makeExecutePorts({
     workspace: {
@@ -39,19 +41,19 @@ function strictPorts(overrides: Parameters<typeof makeExecutePorts>[0] = {}) {
     missionTransitions: {
       async load() {
         calls.push('load');
-        return { kind: 'found' as const, version: missionVersion(3), mission };
+        return { kind: 'found' as const, version, mission };
       },
-      async save(next, expectedVersion) { assert.ok(expectedVersion); mission = next; calls.push('synchronize'); return missionVersion(expectedVersion + 1); },
-      async saveWithTransition(next, expectedVersion) { assert.ok(expectedVersion); mission = next; calls.push('synchronize'); return missionVersion(expectedVersion + 1); },
+      async save(next, expectedVersion) { assert.ok(expectedVersion); mission = next; calls.push('synchronize'); version = missionVersion(expectedVersion + 1); return version; },
+      async saveWithTransition(next, expectedVersion) { assert.ok(expectedVersion); mission = next; calls.push('synchronize'); version = missionVersion(expectedVersion + 1); return version; },
     },
     telemetry: {
       async recordLaunchTelemetry(record: { agent: string }) { calls.push(`telemetry:${record.agent}`); },
     },
     checkpointValidation: {
-      async validateBeforeHandoff() { calls.push('checkpoints'); return { ok: true as const }; },
+      async validateBeforeReviewPreparation() { calls.push('checkpoints'); return { ok: true as const }; },
     },
-    handoffExecution: {
-      async run(request: { agent: string }) { calls.push(`handoff:${request.agent}`); return { ok: true as const }; },
+    reviewPreparationExecution: {
+      async run(request: { agent: string }) { calls.push(`review-preparation:${request.agent}`); return { ok: true as const }; },
       async repairHygiene() { return { repaired: false }; },
       classifyFailure() { return null; },
     },
@@ -100,7 +102,7 @@ test('activation and preparing work precede held preflight (TASK-2750)', async (
   }
 });
 
-test('execute mission use case activates before launch, then records telemetry and handoff', async () => {
+test("execute mission use case activates before launch, then records telemetry and review preparation", async () => {
   const { ports, calls } = strictPorts();
   const events: Array<{ sequence: number; phase: string }> = [];
   const work: Array<{ phase: string; agent: string | null }> = [];
@@ -113,23 +115,23 @@ test('execute mission use case activates before launch, then records telemetry a
     .execute(request());
   assert.equal(outcome.status, 'completed');
   assert.deepEqual(calls, [
-    'load', 'load', 'synchronize', 'preflight:task-1', 'worktree:task-1', 'task:task-1', 'prepare',
-    'launch:codex', 'load', 'safety', 'telemetry:codex', 'checkpoints', 'handoff:codex',
+    'load', 'load', 'load', 'synchronize', 'preflight:task-1', 'worktree:task-1', 'task:task-1', 'prepare',
+    'launch:codex', 'load', 'safety', 'telemetry:codex', 'load', 'load', 'synchronize', 'checkpoints', "review-preparation:codex",
   ]);
   assert.deepEqual(events.map((event) => event.sequence), [1, 2, 3]);
-  assert.deepEqual(work.filter((entry) => entry.phase === 'handoff'), [
-    { phase: 'handoff', agent: null },
+  assert.deepEqual(work.filter((entry) => entry.phase === 'review'), [
+    { phase: 'review', agent: null },
   ]);
   assert.equal(outcome.durableEvidence.length, 2);
 });
 
-test('execute mission use case sequences typed checkpoint, handoff, and review ports instead of the legacy delegation', async () => {
+test("execute mission use case sequences typed checkpoint, review preparation, and review ports instead of the legacy delegation", async () => {
   const { ports, calls } = strictPorts({
     checkpointValidation: {
-      async validateBeforeHandoff() { calls.push('checkpoints'); return { ok: true as const }; },
+      async validateBeforeReviewPreparation() { calls.push('checkpoints'); return { ok: true as const }; },
     },
-    handoffExecution: {
-      async run() { calls.push('typed-handoff'); return { ok: true as const }; },
+    reviewPreparationExecution: {
+      async run() { calls.push("typed-review preparation"); return { ok: true as const }; },
       async repairHygiene() { throw new Error('unexpected hygiene repair'); },
       classifyFailure() { return null; },
       isRelaunchableFailure() { return false; },
@@ -149,18 +151,18 @@ test('execute mission use case sequences typed checkpoint, handoff, and review p
   });
   const outcome = await new ExecuteMissionService(ports).execute(request());
   assert.equal(outcome.status, 'completed');
-  assert.ok(calls.indexOf('checkpoints') < calls.indexOf('typed-handoff'));
-  assert.ok(calls.indexOf('typed-handoff') < calls.indexOf('review'));
+  assert.ok(calls.indexOf('checkpoints') < calls.indexOf("typed-review preparation"));
+  assert.ok(calls.indexOf("typed-review preparation") < calls.indexOf('review'));
 });
 
-test('execute mission use case hands the explicit reviewer to review and to every handoff attempt (TASK-2723)', async () => {
-  const handoffs: Array<{ reviewer?: string; force?: boolean }> = [];
+test("execute mission use case hands the explicit reviewer to review and to every review preparation attempt (TASK-2723)", async () => {
+  const reviewPreparations: Array<{ reviewer?: string; force?: boolean }> = [];
   const reviews: Array<{ implementer: string; reviewer?: string }> = [];
   const { ports } = strictPorts({
-    handoffExecution: {
-      async run(handoff: { reviewer?: string; force?: boolean }) {
-        handoffs.push({ reviewer: handoff.reviewer, force: handoff.force });
-        return handoffs.length === 1 ? { ok: false, error: 'dirty worktree' } : { ok: true };
+    reviewPreparationExecution: {
+      async run(reviewPreparation: { reviewer?: string; force?: boolean }) {
+        reviewPreparations.push({ reviewer: reviewPreparation.reviewer, force: reviewPreparation.force });
+        return reviewPreparations.length === 1 ? { ok: false, error: 'dirty worktree' } : { ok: true };
       },
       async repairHygiene() { return { repaired: true }; },
       classifyFailure() { return null; },
@@ -170,7 +172,7 @@ test('execute mission use case hands the explicit reviewer to review and to ever
   });
   const outcome = await new ExecuteMissionService(ports).execute(request({ reviewer: 'claude' }));
   assert.equal(outcome.status, 'completed');
-  assert.deepEqual(handoffs, [{ reviewer: 'claude', force: undefined }, { reviewer: 'claude', force: true }]);
+  assert.deepEqual(reviewPreparations, [{ reviewer: 'claude', force: undefined }, { reviewer: 'claude', force: true }]);
   assert.deepEqual(reviews.map(({ implementer, reviewer }) => ({ implementer, reviewer })), [{ implementer: 'codex', reviewer: 'claude' }]);
 });
 
@@ -211,12 +213,12 @@ test('execute mission use case cancels after the durable record without a rollba
   assert.equal(outcome.status, 'cancelled');
   assert.equal(outcome.error?.message, 'cancelled after durable launch; re-query task state');
   assert.equal(outcome.durableEvidence.length, 2);
-  assert.equal(calls.some((call) => call.startsWith('handoff:')), false);
+  assert.equal(calls.some((call) => call.startsWith("review-preparation:")), false);
 });
 
-test('execute mission use case reports a refused handoff as an execution failure', async () => {
+test("execute mission use case reports a refused review preparation as an execution failure", async () => {
   const { ports } = strictPorts({
-    handoffExecution: {
+    reviewPreparationExecution: {
       async run() { return { ok: false as const }; },
       async repairHygiene() { return { repaired: false }; },
       classifyFailure() { return null; },
@@ -226,7 +228,7 @@ test('execute mission use case reports a refused handoff as an execution failure
   const outcome = await new ExecuteMissionService(ports).execute(request());
   assert.equal(outcome.status, 'failed');
   assert.equal(outcome.error?.kind, 'execution');
-  assert.equal(outcome.error?.message, 'handoff and review failed');
+  assert.equal(outcome.error?.message, "Review preparation failed");
 });
 
 test('execute mission use case keeps telemetry failures non-fatal', async () => {
@@ -238,7 +240,7 @@ test('execute mission use case keeps telemetry failures non-fatal', async () => 
   const outcome = await new ExecuteMissionService(ports).execute(request());
   assert.equal(outcome.status, 'completed');
   assert.ok(calls.includes('telemetry'));
-  assert.ok(calls.includes('handoff:codex'));
+  assert.ok(calls.includes("review-preparation:codex"));
 });
 
 test('execute mission use case owns the launcher-error and exit-status operator messages', async () => {
@@ -309,9 +311,9 @@ test('execute mission use case fails closed when the checked Mission authority r
   });
   const outcome = await new ExecuteMissionService(ports).execute(request());
   assert.equal(outcome.status, 'failed');
-  assert.match(outcome.error?.message ?? '', /^legacy task lifecycle synchronization failed: /);
+  assert.match(outcome.error?.message ?? '', /Mission task-1 is unavailable/);
   assert.equal(calls.includes('synchronize'), false);
-  assert.equal(calls.some((call) => call.startsWith('handoff:')), false);
+  assert.equal(calls.some((call) => call.startsWith("review-preparation:")), false);
 });
 
 test('execute mission use case carries run state per call instead of holding it per slug', async () => {
@@ -335,23 +337,23 @@ test('execute mission use case carries run state per call instead of holding it 
   assert.ok(calls.includes('safety:task-2:/worktrees/task-2'));
 });
 
-import { ExecuteHandoffService } from '../../../src/application/execute-handoff-service.js';
-import { validateCheckpointsBeforeHandoff } from '../../../src/adapters/mission/checkpoint-validation.js';
+import { ExecuteReviewPreparationService } from '../../../src/application/execute-review-preparation-service.js';
+import { validateCheckpointsBeforeReviewPreparation } from '../../../src/adapters/mission/checkpoint-validation.js';
 
 for (const callback of [true, false]) {
-  test(`checkpoint repair fallback retains actual identity through handoff/review, callback=${callback} (TASK-2778 F1)`, async () => {
+  test(`checkpoint repair fallback retains actual identity through review preparation/review, callback=${callback} (TASK-2778 F1)`, async () => {
     const { ports } = strictPorts();
     let checks = 0;
     let actual = 'codex';
-    const service = new ExecuteHandoffService({
-      checkpoints: { validateBeforeHandoff: async () => ++checks === 1
-        ? { ok: false, error: 'Planned checkpoint evidence is missing before handoff: CP-2.', nextCheckpoint: 'CP-2' }
+    const service = new ExecuteReviewPreparationService({
+      checkpoints: { validateBeforeReviewPreparation: async () => ++checks === 1
+        ? { ok: false, error: "Planned checkpoint evidence is missing before review preparation: CP-2.", nextCheckpoint: 'CP-2' }
         : { ok: actual === 'custom', error: 'actual repair identity was not recorded' } },
       repairLaunch: { ...ports.repairLaunch, launch: async request => {
         if (callback) { await request.onAgentChanged?.('custom'); assert.equal(actual, 'custom'); }
         return { agent: 'custom', result: { status: 0 } };
       } },
-      handoff: { ...ports.handoffExecution, run: async request => { assert.equal(request.agent, 'custom'); return { ok: true }; } },
+      reviewPreparation: { ...ports.reviewPreparationExecution, run: async request => { assert.equal(request.agent, 'custom'); return { ok: true }; } },
       review: { start: async request => { assert.equal(request.implementer, 'custom'); } },
       output: ports.output,
     });
@@ -364,47 +366,47 @@ for (const callback of [true, false]) {
 
 test('recorded contract blocker stops checkpoint repair despite missing CP-5 and CP-6 (TASK-2713)', async () => {
   const blocker = { command: 'npm test', diagnostic: 'requires operator decision', authorityReason: 'locked contract', proposedCorrection: 'operator choice' };
-  const verdict = await validateCheckpointsBeforeHandoff('task-1', '/worktree', { loadRecordedCheckpointsFn: async () => ({
+  const verdict = await validateCheckpointsBeforeReviewPreparation('task-1', '/worktree', { loadRecordedCheckpointsFn: async () => ({
     planned: ['CP-1', 'CP-5', 'CP-6'], recorded: ['CP-1'], humanOnlyContractBlocker: blocker,
   }) });
   assert.deepEqual(verdict.humanOnlyContractBlocker, blocker);
   assert.match(verdict.error ?? '', /Invalid locked contract requires human review/);
   let launches = 0;
-  let handoffs = 0;
+  let reviewPreparations = 0;
   let hygiene = 0;
   const stops: string[] = [];
   const { ports } = strictPorts();
-  const service = new ExecuteHandoffService({ checkpoints: { validateBeforeHandoff: async () => verdict },
-    handoff: { ...ports.handoffExecution, run: async () => { handoffs++; return { ok: true }; }, repairHygiene: async () => { hygiene++; return { repaired: false }; } },
+  const service = new ExecuteReviewPreparationService({ checkpoints: { validateBeforeReviewPreparation: async () => verdict },
+    reviewPreparation: { ...ports.reviewPreparationExecution, run: async () => { reviewPreparations++; return { ok: true }; }, repairHygiene: async () => { hygiene++; return { repaired: false }; } },
     review: ports.autonomousReview, repairLaunch: { ...ports.repairLaunch, launch: async () => { launches++; return undefined; } }, output: ports.output });
   for (let attempt = 0; attempt < 2; attempt++) {
     assert.equal(await service.run({ slug: 'task-1', worktree: '/worktree', agent: 'codex', taskFile: null,
       onAutonomousStop: async reason => { stops.push(reason); } }), false);
   }
   assert.equal(launches, 0);
-  assert.equal(handoffs, 0);
+  assert.equal(reviewPreparations, 0);
   assert.equal(hygiene, 0);
   assert.equal(stops.length, 2);
 });
 
-test('handoff typed contract blocker stops hygiene and evidence repair after validation (TASK-2713)', async () => {
+test("review preparation typed contract blocker stops hygiene and evidence repair after validation (TASK-2713)", async () => {
   const { ports } = strictPorts();
   let repairs = 0;
-  const service = new ExecuteHandoffService({ checkpoints: ports.checkpointValidation,
-    handoff: { ...ports.handoffExecution, run: async () => ({ ok: false, reason: 'human-only-contract-blocker', error: 'Invalid locked contract requires human review' }),
+  const service = new ExecuteReviewPreparationService({ checkpoints: ports.checkpointValidation,
+    reviewPreparation: { ...ports.reviewPreparationExecution, run: async () => ({ ok: false, reason: 'human-only-contract-blocker', error: 'Invalid locked contract requires human review' }),
       repairHygiene: async () => { repairs++; return { repaired: true }; } },
     review: ports.autonomousReview, repairLaunch: { ...ports.repairLaunch, launch: async () => { repairs++; return undefined; } }, output: ports.output });
   assert.equal(await service.run({ slug: 'task-1', worktree: '/worktree', agent: 'codex', taskFile: null }), false);
   assert.equal(repairs, 0);
 });
 
-test('a contract blocker discovered during handoff retry stops further evidence launches (TASK-2713)', async () => {
+test("a contract blocker discovered during review preparation retry stops further evidence launches (TASK-2713)", async () => {
   const { ports } = strictPorts();
   let launches = 0;
-  let handoffs = 0;
+  let reviewPreparations = 0;
   const stops: string[] = [];
-  const service = new ExecuteHandoffService({ checkpoints: ports.checkpointValidation,
-    handoff: { ...ports.handoffExecution, run: async () => ++handoffs === 1
+  const service = new ExecuteReviewPreparationService({ checkpoints: ports.checkpointValidation,
+    reviewPreparation: { ...ports.reviewPreparationExecution, run: async () => ++reviewPreparations === 1
       ? { ok: false, error: 'Missing evidence; run `px checkpoint record`' }
       : { ok: false, reason: 'human-only-contract-blocker', error: 'Recorded contract requires operator decision' },
       classifyFailure: () => ({ failureClass: 'IncompleteEvidence', dispatchAction: 'AutoSendBack' }) },
@@ -412,23 +414,23 @@ test('a contract blocker discovered during handoff retry stops further evidence 
   assert.equal(await service.run({ slug: 'task-1', worktree: '/worktree', agent: 'codex', taskFile: null, onAutonomousStop: async reason => { stops.push(reason); } }), false);
   assert.deepEqual(stops, ['Recorded contract requires operator decision']);
   assert.equal(launches, 1);
-  assert.equal(handoffs, 2);
+  assert.equal(reviewPreparations, 2);
 });
 
-test('execute handoff preserves gate-to-conflict cause and actual early stop count (TASK-2778)', async () => {
+test("execute review preparation preserves gate-to-conflict cause and actual early stop count (TASK-2778)", async () => {
   const { ports } = strictPorts();
   const errors: string[] = [];
   const prompts: string[] = [];
   let calls = 0;
-  const service = new ExecuteHandoffService({ checkpoints: ports.checkpointValidation,
-    handoff: { ...ports.handoffExecution,
+  const service = new ExecuteReviewPreparationService({ checkpoints: ports.checkpointValidation,
+    reviewPreparation: { ...ports.reviewPreparationExecution,
       run: async () => {
         calls++;
         if (calls === 1) { return { ok: false, error: 'gate failed', gateFailure: {
           kind: 'gate-failure', area: 'unit', command: 'npm test', exitCode: 1, stdout: 'original assertion', stderr: '' } }; }
         if (calls === 2) { return { ok: false, error: 'shared conflict', recoveryFailure: {
           kind: 'rebase-conflict', files: ['shared.ts'], diagnostic: 'shared conflict after repaired gate' } }; }
-        return { ok: false, recoveryFailure: { kind: 'handoff-verification', error: 'connection refused' }, error: 'connection refused' };
+        return { ok: false, recoveryFailure: { kind: "review-preparation-verification", error: 'connection refused' }, error: 'connection refused' };
       }, classifyFailure: () => ({ failureClass: 'GateFailure', dispatchAction: 'AutoSendBack' }),
       repairHygiene: async () => assert.fail('structured conflicts use semantic resolver') },
     review: ports.autonomousReview,
@@ -473,13 +475,55 @@ test('execute persists override and launched fallback for the next invocation (T
     return { agent: actual, rebaseDeferred: true, errored: false, errorMessage: null, exitStatus: 0, detail: null };
   };
   const service = new ExecuteMissionService(ports);
-  assert.equal((await service.execute(request({ agent: 'claude' }))).status, 'completed');
+  const execute = async (input: ReturnType<typeof request>) => {
+    const loaded = await ports.missionTransitions.load(missionId('task-1'));
+    if (loaded.kind === 'found' && loaded.mission.status === 'review') {
+      await new MissionLifecycleService(ports.missionTransitions).transition({ operationId: 'request-changes', missionId: loaded.mission.id, capabilities: new Set(['mission:transition']), actor: 'fixture', occurredAt: new Date().toISOString(), command: { type: 'rebound-to-active', agent: loaded.mission.assignee!, cause: { kind: 'review-repair' } } });
+    }
+    return service.execute(input);
+  };
+  assert.equal((await execute(request({ agent: 'claude' }))).status, 'completed');
   assert.equal((await ports.missionTransitions.load(missionId('task-1'))).kind, 'found');
-  assert.equal((await service.execute(request({ agent: undefined }))).status, 'completed');
+  assert.equal((await execute(request({ agent: undefined }))).status, 'completed');
   blocked = true;
-  assert.equal((await service.execute(request({ agent: undefined }))).status, 'completed');
+  assert.equal((await execute(request({ agent: undefined }))).status, 'completed');
   const stored = await ports.missionTransitions.load(missionId('task-1'));
   assert.equal(stored.kind === 'found' && stored.mission.assignee, 'codex');
-  assert.equal((await service.execute(request({ agent: undefined }))).status, 'completed');
+  assert.equal((await execute(request({ agent: undefined }))).status, 'completed');
   assert.deepEqual(launched, ['claude', 'claude', 'custom', 'codex']);
 });
+
+
+import { BoardCommandController } from '../../../src/application/controller/board-controller.js';
+import { configureMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
+import { inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
+
+for (const surface of ['service', 'controller'] as const) {
+  for (const operatorInvocation of [false, true]) {
+    test(`inherited child cannot execute through ${surface}${operatorInvocation ? ' or acknowledge an operator resume' : ''} (TASK-2822)`, async () => {
+      const blocker = { command: 'npm test', diagnostic: 'locked contract', authorityReason: 'operator decision', proposedCorrection: 'record decision' };
+      const mission = fixtureMission('task-1', { status: 'active', assignee: agentFamily('codex'),
+        ...(operatorInvocation ? { checkpoints: [{ missionId: missionId('task-1'), name: 'CP-1', goalCheck: [], nextActionText: 'operator decision',
+          repair: { incidentId: 'locked', command: 'npm test', attempt: 1, authorizedGates: ['npm test'],
+            authorizedCriteria: [], evidenceRecorded: false, verified: false, blocker } }] } : {}),
+      });
+      const store = inMemoryTransitionStore(mission);
+      const { ports, calls } = strictPorts({ missionTransitions: store });
+      const publications: string[] = [];
+      const activity = { running: async () => { publications.push('running'); }, blocked: async () => { publications.push('blocked'); },
+        ended: async () => { publications.push('ended'); } };
+      configureMissionWriteAuthorization({ operationId: 'parent-execution', inherited: true, assert: async () => {} });
+      try {
+        const execute = () => surface === 'controller'
+          ? new BoardCommandController(ports, undefined, {}, activity).dispatch({ operationId: 'child', missionId: 'task-1',
+            kind: 'active:execute', agent: 'codex', capabilities: new Set(['active:execute']), operatorInvocation })
+          : new ExecuteMissionService(ports, undefined, activity).execute(request({ operatorInvocation }));
+        await assert.rejects(execute, /parent workflow|inherited agent/i);
+        assert.deepEqual(store.mission(), mission, 'neither activation nor operator acknowledgment may precede the authority guard');
+        assert.deepEqual(store.events, []);
+        assert.deepEqual(calls, [], 'no preparation, provider or review work may run');
+        assert.deepEqual(publications, [], 'refusing child control cannot block or settle parent activity');
+      } finally { configureMissionWriteAuthorization(null); }
+    });
+  }
+}

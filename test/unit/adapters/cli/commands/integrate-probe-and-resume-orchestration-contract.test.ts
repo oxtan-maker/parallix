@@ -1,4 +1,6 @@
-import { approvedReview as fixtureApprovedReview } from '../../../../fixtures/mission-builders.js';
+import { missionLabels } from '../../../../../src/domain/mission.js';
+import { agentFamily } from '../../../../../src/domain/agents.js';
+import { fixtureMission, approvedReview as fixtureApprovedReview } from '../../../../fixtures/mission-builders.js';
 import { changeRevision } from '../../../../../src/domain/review.js';
 import { resolveConfiguration } from '../../../../../src/composition/config.js';
 // Historical regression provenance: TASK-1039, TASK-2243, TASK-2520, TASK-2506.
@@ -122,12 +124,12 @@ describe("integrate orchestration and gates", () => {
     mock.method(composition, 'createMissionApplicationServices', async () => ({
       store: {
         _repoId: 'default',
-        load: async () => ({ kind: 'found' as const, mission: { status: 'integration', review: fixtureApprovedReview(TEST_SLUG) }, version: 1 }),
+        load: async () => ({ kind: 'found' as const, mission: fixtureMission(TEST_SLUG, { status: 'integration', labels: missionLabels(['ai_sdlc']), assignee: agentFamily('codex'), review: fixtureApprovedReview(TEST_SLUG) }), version: 1 }),
       },
       lifecycle: {
         transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: { to: 'review', version: 2 } }),
       },
-      handoff: {
+      nel: {
         recordNel: async () => ({}),
       },
     }));
@@ -538,12 +540,12 @@ describe("probe abort without promotion", () => {
       mock.method(composition, 'createMissionApplicationServices', async () => ({
         store: {
           _repoId: 'default',
-          load: async () => ({ kind: 'found' as const, mission: { status: 'integration', review: fixtureApprovedReview(TEST_SLUG) }, version: 1 }),
+          load: async () => ({ kind: 'found' as const, mission: fixtureMission(TEST_SLUG, { status: 'integration', labels: missionLabels(['ai_sdlc']), assignee: agentFamily('codex'), review: fixtureApprovedReview(TEST_SLUG) }), version: 1 }),
         },
         lifecycle: {
           transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: { to: 'review', version: 2 } }),
         },
-        handoff: {
+        nel: {
           recordNel: async () => ({}),
         },
       }));
@@ -658,7 +660,7 @@ describe("resume landing closeout", () => {
       store: { _repoId: 'default', load: async () => ({ kind: 'found' as const, mission: { status, review: null }, version: 1 }) },
       integration: { decideIntegration: async () => { status = 'done'; return { durableEvidence: [],  status: 'completed' as const, value: { mission: { status }, version: 2 } }; } },
       lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: { to: 'review', version: 2 } }) },
-      handoff: { recordNel: async () => ({ }) },
+      nel: { recordNel: async () => ({ }) },
     }));
 
     fs.mkdirSync(path.join(ROOT, 'backlog', 'tasks'), { recursive: true });
@@ -799,7 +801,7 @@ describe("behind-primary integrate", () => {
       store: { _repoId: 'default', load: async () => ({ kind: 'found' as const, mission: { status, review }, version: 1 }) },
       integration: { decideIntegration: async () => { status = 'done'; return { durableEvidence: [],  status: 'completed' as const, value: { mission: { status }, version: 2 } }; } },
       lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: { to: 'review', version: 2 } }) },
-      handoff: { recordNel: async () => ({}) },
+      nel: { recordNel: async () => ({}) },
     }));
 
     return { logs, getStatus: () => status };

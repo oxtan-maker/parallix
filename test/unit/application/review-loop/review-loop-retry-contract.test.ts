@@ -71,7 +71,7 @@ describe("stale blocked relaunch", { concurrency: false }, () => {
     assert.ok(fake.logs.some(m => m.includes('implementer made changes') && m.includes('Continuing to round')), `Expected continue-to-next-round message; got: ${fake.logs.join(' | ')}`);
   });
 
-  test('SC3: Re-launched implementer still BLOCKED → loop stops with handoff', async () => {
+  test("SC3: Re-launched implementer still BLOCKED → loop stops with review preparation", async () => {
     const { fake } = continueFixing('task-1221-sc3', {
       pollDisposition: () => 'BLOCKED',
       consumeImplementer: async () => ({ consumed: true, ok: true as const, disposition: 'BLOCKED' }),
@@ -79,7 +79,7 @@ describe("stale blocked relaunch", { concurrency: false }, () => {
     await runReviewLoop({ slug: 'task-1221-sc3', isContinue: true, maxAttempts: 1 }, fake.ports);
 
     assert.equal(actOnReview(fake).length, 1, `Expected 1 act-on-review re-launch; got: ${JSON.stringify(fake.launches)}`);
-    assert.ok(fake.logs.some(m => m.includes('Autonomous review stopped') && m.includes('BLOCKED') && m.includes('Hand off')), `Expected stop/handoff message; got: ${fake.logs.join(' | ')}`);
+    assert.ok(fake.logs.some(m => m.includes('Autonomous review stopped') && m.includes('BLOCKED') && m.includes('Hand off')), `Expected stop/review preparation message; got: ${fake.logs.join(' | ')}`);
     assert.equal(fake.current()?.disposition, 'BLOCKED', 'Disposition should be BLOCKED');
     assert.deepEqual(fake.stops, ['implementer reported BLOCKED'], 'the human escalation is published');
   });
@@ -119,7 +119,7 @@ describe("stale blocked relaunch", { concurrency: false }, () => {
     // The skip-check polls since state.startedAt; the post-relaunch poll since a later instant.
     assert.ok(pollCalls.length >= 2, `Expected >=2 poll calls; got ${pollCalls.length}`);
     assert.ok(new Date(pollCalls.at(-1)!).getTime() > new Date(state.startedAt).getTime(), 'Post-relaunch poll must use a newer sinceIso than state.startedAt');
-    assert.ok(fake.logs.some(m => m.includes('Autonomous review stopped') && m.includes('BLOCKED') && m.includes('Hand off')), `Expected stop/handoff message; got: ${fake.logs.join(' | ')}`);
+    assert.ok(fake.logs.some(m => m.includes('Autonomous review stopped') && m.includes('BLOCKED') && m.includes('Hand off')), `Expected stop/review preparation message; got: ${fake.logs.join(' | ')}`);
   });
 });
 
@@ -135,7 +135,7 @@ describe("reviewer non submission bounce", { concurrency: false }, () => {
       slug: 'task-9001',
       state: new ReviewState('task-9001', { reviewer: 'custom', implementer: 'custom', round: 1, phase: 'reviewing' }),
       routing: { eligibleFamilies: () => ['custom'], nominate: () => 'custom' },
-      handoff: { handoff: async () => ({ ok: true as const }) },
+      reviewPreparation: { reviewPreparation: async () => ({ ok: true as const }) },
       provider,
       artifacts: { consumeReviewer: async () => ({ consumed: false }) },
       output: { exit: (code: number) => { throw new Error(`exit(${code})`); } },

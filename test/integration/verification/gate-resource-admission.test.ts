@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { createHandoffPorts } from '../../../src/adapters/cli/commands/handoff.js';
+import { createReviewPreparationPorts } from '../../../src/adapters/cli/commands/review-preparation.js';
 import { configureGateAdmission } from '../../../src/application/ports/gate-admission.js';
 import { runConfiguredVerification } from '../../../src/adapters/verification/configured-verification.js';
 import { resolveCanonicalGateResources } from '../../../src/adapters/config/product-config.js';
@@ -164,7 +164,7 @@ test('canonical checkout owns declared resource limits while a worktree may only
   assert.throws(() => resolveCanonicalGateResources(worktree), /resources admission fails closed/);
 });
 
-test('declared handoff gates and configured verification wait on the verification resource (px-0019)', async t => {
+test("declared review preparation gates and configured verification wait on the verification resource (px-0019)", async t => {
   const { root, configuration, admission, controller, runs } = await resourceFixture(t, { resources: { test: 1 }, verificationResource: 'test' });
   configureGateAdmission(admission);
   t.after(() => configureGateAdmission(null));
@@ -176,7 +176,7 @@ test('declared handoff gates and configured verification wait on the verificatio
     await new Promise<void>(resolve => { release = resolve; run.signal.addEventListener('abort', () => resolve(), { once: true }); });
   }, controller.signal));
   await held;
-  const declared = createHandoffPorts(configuration).declaredGateExecution!.run(['touch declared'], root, () => {})!;
+  const declared = createReviewPreparationPorts(configuration).declaredGateExecution!.run(['touch declared'], root, () => {})!;
   runs.push(declared);
   const verification = runConfiguredVerification(undefined, root, configuration);
   runs.push(verification);

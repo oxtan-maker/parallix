@@ -75,7 +75,7 @@ function servicesFor(store: FakeStore) {
     store,
     lifecycle: new MissionLifecycleService(store),
     integration: new MissionIntegrationService(store),
-    handoff: { recordNel: async () => ({}) },
+    nel: { recordNel: async () => ({}) },
   };
 }
 

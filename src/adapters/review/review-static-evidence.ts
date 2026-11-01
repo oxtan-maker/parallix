@@ -1,4 +1,4 @@
-/** Goal-check evidence helpers shared with the handoff adapter. */
+/** Goal-check evidence helpers shared with the review preparation adapter. */
 export {
   collectGoalCheckEvidenceRows,
   collectRepoTestNames,

@@ -11,8 +11,8 @@ type CommitSelection = {
 type Scan = { selected: string[]; commitPaths: string[] } | { blocker: string; detail: Partial<CommitResult> };
 
 const CONFLICT_STATES = ['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'];
-const INVALID_STATUS = 'Cannot auto-commit handoff changes: invalid Git status output. Inspect git status and retry handoff.';
-const MISSING_SOURCE = 'Cannot auto-commit handoff changes: missing rename source in Git status. Inspect git status and retry handoff.';
+const INVALID_STATUS = "Cannot auto-commit review preparation changes: invalid Git status output. Inspect git status and retry review preparation.";
+const MISSING_SOURCE = "Cannot auto-commit review preparation changes: missing rename source in Git status. Inspect git status and retry review preparation.";
 
 function scanRecords(records: string[], rootDir: string, selection?: CommitSelection): Scan {
   const selected: string[] = [];
@@ -22,7 +22,7 @@ function scanRecords(records: string[], rootDir: string, selection?: CommitSelec
     const state = record.slice(0, 2);
     const file = record.slice(3);
     if (CONFLICT_STATES.includes(state)) {
-      return { blocker: `Cannot auto-commit handoff changes: unresolved conflict in ${file}. Resolve conflicts in ${rootDir} and retry handoff.`, detail: { dirty: true, conflicts: [file] } };
+      return { blocker: `Cannot auto-commit review preparation changes: unresolved conflict in ${file}. Resolve conflicts in ${rootDir} and retry review preparation.`, detail: { dirty: true, conflicts: [file] } };
     }
     if (!file || record[2] !== ' ') { return { blocker: INVALID_STATUS, detail: {} }; }
     const paths = [file];
@@ -40,7 +40,7 @@ function scanRecords(records: string[], rootDir: string, selection?: CommitSelec
   return { selected, commitPaths };
 }
 
-/** Existing handoff repair commit mechanism, shared with pre-review artifact cleanup. */
+/** Existing review preparation repair commit mechanism, shared with pre-review artifact cleanup. */
 export function commitDirtyFiles(rootDir: string, slug: string, git: GitRunner, log: (_message: string) => void, error: (_message: string) => void, selection?: CommitSelection): CommitResult {
   const blocked = (blocker: string, detail: Partial<CommitResult> = {}): CommitResult => { error(blocker); return { repaired: false, blocker, ...detail }; };
   try {
@@ -54,10 +54,10 @@ export function commitDirtyFiles(rootDir: string, slug: string, git: GitRunner, 
     log(selection ? `Auto-committing safe mission artifacts for mission/${slug} before rebase...` : 'Auto-committing dirty files:');
     const failed = stageAndCommit(rootDir, slug, git, scan, selection);
     if (failed) { return blocked(failed.blocker, failed.detail); }
-    log(selection ? 'Mission artifacts committed.' : 'Mission changes committed before handoff verification and rebase.');
+    log(selection ? 'Mission artifacts committed.' : "Mission changes committed before review preparation verification and rebase.");
     return { repaired: true, blocker: null };
   } catch (err) {
-    return blocked(`Cannot auto-commit handoff changes: ${err instanceof Error ? err.message : String(err)}. Inspect git status in ${rootDir} and retry handoff.`);
+    return blocked(`Cannot auto-commit review preparation changes: ${err instanceof Error ? err.message : String(err)}. Inspect git status in ${rootDir} and retry review preparation.`);
   }
 }
 
@@ -69,7 +69,7 @@ function stageAndCommit(rootDir: string, slug: string, git: GitRunner, scan: { s
     const staged = git(['-C', rootDir, 'add', '--all', '--', file]);
     if (staged.status !== 0) { return { blocker: failure('stage mission changes', staged), detail: { dirty: true, operation: 'stage' } }; }
   }
-  const message = selection?.message ?? `workflow(${slug}): auto-commit mission artifacts before handoff`;
+  const message = selection?.message ?? `workflow(${slug}): auto-commit mission artifacts before review preparation`;
   const commitArgs = selection ? ['commit', '--only', '-m', message, '--', ...new Set(scan.commitPaths)] : ['commit', '-m', message];
   const committed = git(['-C', rootDir, ...commitArgs]);
   if (committed.status === 0) { return null; }
@@ -78,5 +78,5 @@ function stageAndCommit(rootDir: string, slug: string, git: GitRunner, scan: { s
 
 function failure(operation: string, result: { stdout?: string; stderr?: string }): string {
   const detail = [result.stderr, result.stdout].filter(Boolean).join('\n').trim();
-  return `Cannot ${operation} before handoff${detail ? `: ${detail}` : ''}. Resolve the Git error and retry handoff.`;
+  return `Cannot ${operation} before review preparation${detail ? `: ${detail}` : ''}. Resolve the Git error and retry review preparation.`;
 }

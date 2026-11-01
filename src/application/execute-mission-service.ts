@@ -1,10 +1,11 @@
+import { beginReviewPreparation, recordReviewPreparationFailure } from "./review-submission-service.js";
+import { ExecutionStartService } from './execution-start-service.js';
+import { assertWorkflowControl, authorizedExecutionStart, reportWorkflowProviderStarted } from './ports/mission-write-authorization.js';
 import { MissionCheckpointService } from './mission-checkpoint-service.js';
 import { recordImplementerLaunch } from './rebase-identity.js';
-import { reportWorkflowProviderStarted } from './ports/mission-write-authorization.js';
 import type { ApplicationOutcome, Cancellation, Capability, DurableEvidence } from './contracts.js';
 import { failure, rejected } from './contracts.js';
 import { MissionLifecycleService, type MissionTransitionResult } from './mission-lifecycle-service.js';
-import { agentFamily } from '../domain/agents.js';
 import { missionId, isMissionSlugCandidate } from '../domain/mission.js';
 import type {
   AgentLaunchOutcome,
@@ -12,16 +13,16 @@ import type {
   ExecuteMissionPorts,
   TaskFileResolution,
 } from './ports/execute-mission.js';
-import { ExecuteHandoffService } from './execute-handoff-service.js';
+import { ExecuteReviewPreparationService } from "./execute-review-preparation-service.js";
 import type { ProgressPort } from './ports.js';
 import {
   reviewLoopPublisher,
-  currentWorkPublication,
-  NO_CURRENT_WORK_PORT,
-  type CurrentWorkPhase,
-  type CurrentWorkPort,
-  type CurrentWorkPublication,
-} from './recording/current-work-recorder.js';
+  executionActivityIntent,
+  NO_EXECUTION_ACTIVITY,
+  type ExecutionActivityStage,
+  type ExecutionActivityPort,
+  type ExecutionActivityIntent,
+} from './recording/execution-activity-recorder.js';
 
 export interface ExecuteMissionRequest {
   /** Only the explicit operator CLI invocation may acknowledge retained stops. */
@@ -66,7 +67,7 @@ interface ExecuteWorkspace {
  *   2. checked activation and attributable preparing work
  *   3. workspace preflight, prompt preparation and agent launch
  *   4. durable launch evidence and best-effort telemetry
- *   5. the post-record cancellation boundary, then handoff and review
+ *   5. the post-record cancellation boundary, then review preparation and review
  *
  * It also owns the partial-failure policy: a launcher error or a non-zero agent
  * status stops the run before any durable record; a telemetry failure never
@@ -80,10 +81,11 @@ export class ExecuteMissionService {
   constructor(
     private readonly _ports: ExecuteMissionPorts,
     private readonly _progress?: ProgressPort,
-    private readonly _currentWork: CurrentWorkPort = NO_CURRENT_WORK_PORT,
+    private readonly _currentWork: ExecutionActivityPort = NO_EXECUTION_ACTIVITY,
   ) { }
 
   async execute(request: ExecuteMissionRequest): Promise<ApplicationOutcome<ExecuteMissionResult>> {
+    assertWorkflowControl();
     const refusal = this.validateRequest(request);
     if (refusal) { return refusal; }
     let activation: MissionTransitionResult | null = null;
@@ -113,12 +115,19 @@ export class ExecuteMissionService {
         return failure('cancelled', 'cancelled after durable launch; re-query task state', evidence);
       }
 
-      this.emit(request, 3, 'handoff', 'starting handoff', launch.agent);
-      await this.publishWork(request, 'handoff', 'handing off and reviewing', null);
-      const handoffRequest = {
+      this.emit(request, 3, 'review-preparation', "starting review preparation", launch.agent);
+      await this.publishWork(request, 'review', 'preparing agent review', null);
+      let preparationFailure: string | null = null;
+      const reviewPublisher = reviewLoopPublisher(this._currentWork, { slug: request.slug, operationId: request.operationId });
+      const reviewPreparationRequest = {
         slug: request.slug,
         worktree: prepared.worktree,
         agent: launch.agent,
+        beginReviewPreparation: async () => { await beginReviewPreparation(request.slug, { store: this._ports.missionTransitions, lifecycle: new MissionLifecycleService(this._ports.missionTransitions) }); },
+        prepareImplementationRepair: (diagnostic: string, reason?: import('../domain/rebound-policy.js').ReboundReason) => recordReviewPreparationFailure(request.slug, diagnostic, {
+          store: this._ports.missionTransitions, lifecycle: new MissionLifecycleService(this._ports.missionTransitions),
+          checkpoints: new MissionCheckpointService(this._ports.missionTransitions),
+        }, reason),
         reviewer: request.reviewer,
         taskFile: prepared.taskResolution.ok ? prepared.taskResolution.taskFile ?? null : null,
         onImplementerLaunched: async (agent: string) => {
@@ -127,20 +136,18 @@ export class ExecuteMissionService {
         // Autonomous review is real work by other families on this same
         // mission. It publishes through the same seam `px review` uses, so the
         // board follows the reviewer and the implementer answering findings
-        // instead of freezing on the original implementer's handoff.
-        ...reviewLoopPublisher(this._currentWork, {
-          slug: request.slug,
-          operationId: request.operationId,
-        }),
+        // instead of freezing on the original implementer's review preparation.
+        ...reviewPublisher,
+        onAutonomousStop: async (reason: string) => { preparationFailure = reason; await reviewPublisher.onAutonomousStop(reason); },
       };
-      const handedOff = await new ExecuteHandoffService({
+      const reviewed = await new ExecuteReviewPreparationService({
         checkpoints: this._ports.checkpointValidation,
-        handoff: this._ports.handoffExecution,
+        reviewPreparation: this._ports.reviewPreparationExecution,
         review: this._ports.autonomousReview,
         repairLaunch: this._ports.repairLaunch,
         output: this._ports.output,
-      }).run(handoffRequest);
-      if (!handedOff) { throw new Error('handoff and review failed'); }
+      }).run(reviewPreparationRequest);
+      if (!reviewed) { throw new Error(preparationFailure ?? "Review preparation and review failed"); }
 
       await this.endWork(request);
       return { status: 'completed', value: { agent: launch.agent }, durableEvidence: evidence };
@@ -187,7 +194,7 @@ export class ExecuteMissionService {
 
   private async failedExecution(request: ExecuteMissionRequest, error: unknown, activation: MissionTransitionResult | null, activationAgent: string | null, agentStarted: boolean): Promise<ApplicationOutcome<ExecuteMissionResult>> {
     let message = error instanceof Error ? error.message : 'active execution failed';
-    if (activation?.from === 'refined' && activationAgent && !agentStarted) {
+    if (!authorizedExecutionStart() && activation?.from === 'refined' && activationAgent && !agentStarted) {
       try {
         await this.abortActivation(request.slug, activation, activationAgent);
       } catch (compensationError) {
@@ -240,10 +247,9 @@ export class ExecuteMissionService {
       preselectedAgent: selectedAgent,
       pinnedAgent: request.pinnedAgent,
       detached: request.detached === true,
-      authorityAlreadyActive: true,
       // A usage block reroutes the same operation to the next eligible family.
       // Republishing here keeps that one mission WORKING with an updated agent
-      // instead of producing an attention item for an autonomous handoff.
+      // instead of producing an attention item for an autonomous review preparation.
       // Awaited, not fire-and-forget: this write is authoritative for what the
       // board shows, so it has to land before the run publishes its next
       // state. A dropped promise here reorders the board behind reality.
@@ -254,6 +260,7 @@ export class ExecuteMissionService {
         await this.publishWork(request, 'execute', `running execute agent (${agent})`, agent);
       },
     });
+    if (!launch.errored) { onStarted(); await reportWorkflowProviderStarted(launch.agent); }
     await this.assertNoRecordedStop(request.slug);
     if (launch.errored) {
       throw new Error(`Could not start execute agent (${launch.agent}): ${launch.errorMessage}`);
@@ -300,31 +307,14 @@ export class ExecuteMissionService {
    * authority's reason (for example, which contract parts are missing).
    */
   private async synchronizeLifecycle(slug: string, agent: string, operationId?: string): Promise<MissionTransitionResult> {
-    const outcome = await new MissionLifecycleService(this._ports.missionTransitions).activate({
-      operationId: operationId ?? `active-${slug}`,
-      missionId: missionId(slug),
-      capabilities: new Set(['mission:transition']),
-      agent: agentFamily(agent),
-      occurredAt: new Date().toISOString(),
-    });
-    if (outcome.status !== 'completed' || !outcome.value) {
-      throw new Error(`legacy task lifecycle synchronization failed: ${outcome.error?.message ?? outcome.status}`);
-    }
-    return outcome.value;
+    const start = new ExecutionStartService(this._ports.missionTransitions);
+    const accepted = authorizedExecutionStart();
+    return accepted ? start.continue(accepted) : start.start(slug, agent, operationId ?? `active-${slug}`);
   }
 
-  private async abortActivation(slug: string, activation: MissionTransitionResult, agent: string): Promise<void> {
-    const outcome = await new MissionLifecycleService(this._ports.missionTransitions).abortActivation({
-      operationId: `abort-active-${slug}`,
-      missionId: missionId(slug),
-      capabilities: new Set(['mission:transition']),
-      assignee: activation.previousAssignee,
-      actor: agent,
-      occurredAt: new Date().toISOString(),
-    });
-    if (outcome.status !== 'completed') {
-      throw new Error(`Could not undo failed activation: ${outcome.error?.message ?? outcome.status}`);
-    }
+  private abortActivation(slug: string, activation: MissionTransitionResult, agent: string): Promise<void> {
+    return new ExecutionStartService(this._ports.missionTransitions).compensate({ id: `active-${slug}`, missionId: missionId(slug), agent,
+      originalStatus: activation.from, previousAssignee: activation.previousAssignee, activationVersion: activation.version });
   }
 
   private emit(request: ExecuteMissionRequest, sequence: number, phase: string, message: string, agent?: string) {
@@ -339,8 +329,8 @@ export class ExecuteMissionService {
   // error. The reader ages an unterminated fact out on its own.
   // -----------------------------------------------------------------------
 
-  private publication(request: ExecuteMissionRequest, phase: CurrentWorkPhase, summary: string, agent: string | null): CurrentWorkPublication | null {
-    return currentWorkPublication({
+  private publication(request: ExecuteMissionRequest, phase: ExecutionActivityStage, summary: string, agent: string | null): ExecutionActivityIntent | null {
+    return executionActivityIntent({
       slug: request.slug,
       operationId: request.operationId,
       phase,
@@ -349,7 +339,7 @@ export class ExecuteMissionService {
     });
   }
 
-  private async publishWork(request: ExecuteMissionRequest, phase: CurrentWorkPhase, summary: string, agent: string | null): Promise<void> {
+  private async publishWork(request: ExecuteMissionRequest, phase: ExecutionActivityStage, summary: string, agent: string | null): Promise<void> {
     const publication = this.publication(request, phase, summary, agent);
     if (publication) { await bestEffort(() => this._currentWork.running(publication)); }
   }

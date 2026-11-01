@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 const _require = createRequire(import.meta.url);
 
 import { BoardCommandController } from '../../../../src/application/controller/board-controller.js';
+import { MissionNelService } from '../../../../src/application/mission-nel-service.js';
 import { makeExecutePorts } from '../../../fixtures/execute-mission-ports.js';
 import type { BoardCommandRequest } from '../../../../src/application/controller/board-command.js';
 import {
@@ -42,7 +43,7 @@ test('controller dispatches active:execute through ExecuteMissionService', async
   const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest());
   assert.equal(result.status, 'completed');
-  assert.deepEqual(calls, ['synchronize', 'validate:task-0001', 'launch:task-0001:codex', 'record:task-0001:codex', 'handoff:task-0001:codex']);
+  assert.deepEqual(calls, ['synchronize', 'validate:task-0001', 'launch:task-0001:codex', 'record:task-0001:codex', 'synchronize', "review-preparation:task-0001:codex"]);
 });
 
 test('controller honors attached CLI launches while defaulting board launches to detached', async () => {
@@ -59,7 +60,9 @@ test('controller honors attached CLI launches while defaulting board launches to
   const controller = new BoardCommandController(ports);
 
   await controller.dispatch(makeRequest({ detached: false }));
-  await controller.dispatch(makeRequest());
+  // Each launch is independent: the first has already entered review.
+  const second = makeExecutePorts({ agentExecution: ports.agentExecution });
+  await new BoardCommandController(second.ports).dispatch(makeRequest());
 
   assert.deepEqual(launchRequests.map(request => request.detached), [false, true]);
 });
@@ -128,7 +131,7 @@ test('controller hands off and starts review from mission identity alone', async
   const calls: string[] = [];
   const work: string[] = [];
   const controller = new BoardCommandController(ports, undefined, {
-    handoffWorkflow: { async executeForSlug(slug: string) { calls.push(slug); } },
+    reviewPreparationWorkflow: { async executeForSlug(slug: string) { calls.push(slug); } },
   }, {
     async running(publication) { work.push(`running:${publication.phase}`); },
     async ended(publication) { work.push(`ended:${publication.phase}`); },
@@ -138,15 +141,15 @@ test('controller hands off and starts review from mission identity alone', async
   });
 
   const result = await controller.dispatch(makeRequest({
-    kind: 'handoff:record',
+    kind: 'review:submit',
     missionStatusAtRequest: 'active',
-    capabilities: new Set(['handoff:record']),
+    capabilities: new Set(['review:submit']),
   }));
 
   assert.equal(result.status, 'completed');
   assert.deepEqual(result.value, { slug: 'task-0001' });
   assert.deepEqual(calls, ['task-0001']);
-  assert.deepEqual(work, ['running:handoff', 'ended:handoff']);
+  assert.deepEqual(work, ["running:review", "ended:review"]);
 });
 
 // ---------------------------------------------------------------------------
@@ -226,7 +229,7 @@ test('authoritative matching status proceeds to dispatch once', async () => {
   const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest({ missionStatusAtRequest: 'refined' }));
   assert.equal(result.status, 'completed');
-  assert.equal(calls.length, 5);
+  assert.equal(calls.length, 6);
 });
 
 test('authoritative read failure fails closed before the effect is called', async () => {
@@ -251,7 +254,6 @@ test('isIntegratedCapability covers the Mission commands extracted so far', () =
   assert.equal(isIntegratedCapability('mission:intake'), true);
   assert.equal(isIntegratedCapability('draft:create'), true);
   assert.equal(isIntegratedCapability('checkpoint:record'), true);
-  assert.equal(isIntegratedCapability('handoff:record'), true);
   assert.equal(isIntegratedCapability('review:submit'), true);
   assert.equal(isIntegratedCapability('review:act-on-findings'), false);
   assert.equal(isIntegratedCapability('approve:review'), false);
@@ -259,8 +261,8 @@ test('isIntegratedCapability covers the Mission commands extracted so far', () =
 });
 
 test('INTEGRATED_CAPABILITIES contains active:execute and the Mission commands', () => {
-  assert.equal(INTEGRATED_CAPABILITIES.size, 12);
-  for (const kind of ['active:execute', 'mission:intake', 'mission:create', 'mission:edit-read', 'mission:edit', 'draft:create', 'checkpoint:record', 'handoff:record', 'integrate:merge', 'mission:cancel', 'review:submit', 'workflow:stop'] as const) {
+  assert.equal(INTEGRATED_CAPABILITIES.size, 11);
+  for (const kind of ['active:execute', 'mission:intake', 'mission:create', 'mission:edit-read', 'mission:edit', 'draft:create', 'checkpoint:record', 'integrate:merge', 'mission:cancel', 'review:submit', 'workflow:stop'] as const) {
     assert.ok(INTEGRATED_CAPABILITIES.has(kind), `${kind} should be integrated`);
   }
 });
@@ -349,7 +351,7 @@ test('controller forwards an explicit review family and rejects stale requests b
   const { ports } = makeExecutePorts();
   const calls: unknown[] = [];
   const controller = new BoardCommandController(ports, undefined, {
-    handoffWorkflow: { async executeForSlug(slug, agent) { calls.push({ slug, agent }); } },
+    reviewPreparationWorkflow: { async executeForSlug(slug, agent) { calls.push({ slug, agent }); } },
   }, undefined, { async load() { return { kind: 'found', mission: fixtureMission('task-0001', { status: 'active' }), version: fixtureVersion(1) }; } });
   const selected = makeRequest({ kind: 'review:submit', agent: 'custom-family', pinnedAgent: true, missionStatusAtRequest: 'active', capabilities: new Set(['review:submit']) });
   assert.equal((await controller.dispatch(selected)).status, 'completed');

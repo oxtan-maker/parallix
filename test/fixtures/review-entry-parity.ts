@@ -15,7 +15,7 @@ import { setCommandPathProbe, setLauncherHealthProbe, setWorkflowLaunchPort } fr
 import { openRepairFixture, type RepairFixture } from '../lib/integration-repair-fixture.js';
 import { enterReviewVia } from './review-repair-recovery.js';
 
-export type ParityScenario = 'first-handoff' | 'interrupted-pending-review' | 'findings-resolution' | 'human-intervention' | 'already-approved';
+export type ParityScenario = "first-review preparation" | 'interrupted-pending-review' | 'findings-resolution' | 'human-intervention' | 'already-approved';
 
 export interface ParityOutcome {
   readonly code: number;
@@ -29,7 +29,7 @@ export interface ParityOutcome {
 async function openState(scenario: ParityScenario, fixture: RepairFixture, store: SqliteMissionStore, original: Mission): Promise<void> {
   const save = async (mission: Mission) => { await store.save(mission, missionVersion(await fixture.version())); };
   const active = { ...original, status: 'active', rawStatus: 'active' } as Mission;
-  if (scenario === 'first-handoff' || scenario === 'findings-resolution') {
+  if (scenario === "first-review preparation" || scenario === 'findings-resolution') {
     await save({ ...active, closedAt: null, review: null } as Mission);
   } else if (scenario === 'interrupted-pending-review') {
     await save(active);

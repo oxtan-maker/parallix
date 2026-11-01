@@ -71,8 +71,8 @@ interface PendingRead {
 
 /** `id` names one mission, or several separated by commas, each an active card. */
 const boardOf = (id: string, operationLog: readonly { readonly operationId: string; readonly message: string; readonly sequence?: number }[] = []) => {
-  const handoff = { command: 'handoff', enabled: true, reason: null, targetLane: 'review' } as const;
-  const snapshot = toWebBoardSnapshot(makeProjection({ active: id.split(',').map(card => makeCard({ id: missionId(card), status: 'active', lane: 'active', commands: [handoff] })) }));
+  const reviewPreparation = { command: 'review', enabled: true, reason: null, targetLane: 'review' } as const;
+  const snapshot = toWebBoardSnapshot(makeProjection({ active: id.split(',').map(card => makeCard({ id: missionId(card), status: 'active', lane: 'active', commands: [reviewPreparation] })) }));
   return {
     ...snapshot,
     operationLog: operationLog.map(entry => ({ phase: 'run' as const, timestamp: '2026-10-06T10:00:00.000Z', ...entry })),

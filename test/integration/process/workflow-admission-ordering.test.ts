@@ -1,3 +1,5 @@
+import { SqliteExecutionActivityStore } from '../../../src/adapters/sqlite/execution-activity-store.js';
+import { resolveCanonicalRepositoryId } from '../../../src/adapters/git/repository-identity.js';
 import fs from 'node:fs';
 import path from 'node:path';
 // SQLite and HTTP/SSE boundaries; worker execution is held at the process port.
@@ -8,7 +10,7 @@ import { workflowHttp } from '../../fixtures/workflow-http.js';
 import { validateWebBoardSnapshot } from '../../../src/interfaces/web/transport.js';
 
 test('ten admissions commit active, one lane event and preparing before held work; retries join and competitors conflict (TASK-2750)', { timeout: 10_000 }, async t => {
-  const fixture = await workflowBoard(10, { inProcess: true }); t.after(() => fixture.close());
+  const fixture = await workflowBoard(10, { inProcess: true, worktrees: false }); t.after(() => fixture.close());
   // This admission contract holds its workers at an in-process boundary;
   // unrelated host sessions do not contribute to its projected operation facts.
   const bin = path.join(fixture.root, '.fixture-bin');
@@ -36,7 +38,9 @@ test('ten admissions commit active, one lane event and preparing before held wor
     assert.equal(loaded.kind === 'found' && loaded.mission.status, 'active');
     const lane = await fixture.database.query('SELECT * FROM board_lane_events WHERE mission_id = ?', [slug]);
     assert.equal(lane.length, 1);
-    assert.equal((await fixture.service.operation(ids[index]))?.phase, 'preparing');
+    const operation = await fixture.service.operation(ids[index]);
+    assert.equal(operation?.phase, 'executing', 'the claimed command owns execution while preparation is held');
+    assert.match((await new SqliteExecutionActivityStore(fixture.database, resolveCanonicalRepositoryId(fixture.root)).loadMissionCurrentWork(slug as never))[0]?.frames.at(-1)?.event.summary ?? '', /preparing/, 'preparation is activity, not another execution phase');
   }
   const frame = await reader.read(); assert.match(new TextDecoder().decode(frame.value), /invalidate/);
   const snapshot = await http.snapshot(); assert.equal(validateWebBoardSnapshot(snapshot).ok, true);

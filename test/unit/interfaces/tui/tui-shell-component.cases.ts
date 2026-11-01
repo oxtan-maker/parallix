@@ -343,8 +343,8 @@ describe("Operator rail — SC15-SC18", () => {
       rows: 30,
     }), { columns: 200 });
 
-    assert.match(output, /\$ px review[\s\S]*unavailable/);
-    assert.match(output, /\$ px integrate task-integrate[\s\S]*unavailable/);
+    assert.match(output, /Operator attention required[\s\S]*unavailable/);
+    assert.doesNotMatch(output, /\$ px integrate task-integrate/);
     assert.doesNotMatch(output, /px (?:review|integrate) task-(?:review|integrate)\s+run ▶/);
   });
 });

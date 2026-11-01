@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { missionId } from '../domain/mission.js';
 import { resolveCanonicalRepositoryId } from '../adapters/git/repository-identity.js';
-import type { CurrentWorkPublication } from '../application/recording/current-work-recorder.js';
+import type { ExecutionActivityIntent } from '../application/recording/execution-activity-recorder.js';
 import type { OpenRunCaptureInput } from '../adapters/filesystem/run-history-store.js';
 import type { NativeMissionTerminalIdentity } from '../adapters/process/mission-terminal-identity.js';
 import { resolveConfiguredCredentialRedactor } from '../application/recovery-evidence.js';
@@ -90,7 +90,7 @@ export async function hostMissionCommand(command: string, args: string[], target
   try {
     result = await superviseTmuxLaunch(launch, { onOutput: (stream, chunk) => { try { capture?.write(stream, chunk); } catch { /* keep the command running */ } } });
   } finally { stopObservation(); }
-  finishOperation(capture, result, { kind: 'terminal-bytes', path: 'stdout', covers: `everything the hosted ${command} operation drew in its terminal pane: harness, preflight, gates, agent output, handoff and review messages (stderr merged by the terminal)`, complete: true },
+  finishOperation(capture, result, { kind: 'terminal-bytes', path: 'stdout', covers: `everything the hosted ${command} operation drew in its terminal pane: harness, preflight, gates, agent output, review preparation and review messages (stderr merged by the terminal)`, complete: true },
     launch.started() ? [] : ['The operation did not start in the terminal; it may run through the pipe host as a separate operation.']);
   return hostedMissionResult(launch, result, config);
 }
@@ -155,7 +155,7 @@ export async function captureMissionCommand(command: string, args: string[], tar
 const captures = new AsyncLocalStorage<{ capture: RunCapture; missionId: string }>();
 
 /** Composition connects existing CurrentWork publication to the retained coordinator capture. */
-export function correlateMissionCapture(checkout: string, configuration: ParallixConfiguration, work: CurrentWorkPublication): void {
+export function correlateMissionCapture(checkout: string, configuration: ParallixConfiguration, work: ExecutionActivityIntent): void {
   const capture = captures.getStore();
   if (capture) {
     if (capture.missionId === work.missionId) { capture.capture.correlateOperation(work.operationId); }

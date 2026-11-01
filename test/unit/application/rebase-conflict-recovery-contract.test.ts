@@ -784,7 +784,7 @@ describe("usage-blocked implementer", () => {
 // ---- successive normal conflict stops (TASK-2668.02 / TASK-2672 follow-up) ----
 describe("rebase through successive conflict stops", () => {
   const OK: GitCommandResult = { status: 0, stdout: '', stderr: '' };
-  const HANDOFF = 'missions/task-2672/handoff.ts';
+  const HANDOFF = "missions/task-2672/review-preparation.ts";
   const PKG = 'package.json';
   const PKGLCK = 'package-lock.json';
   function subcommand(args: string[]): string[] {

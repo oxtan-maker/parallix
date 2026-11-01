@@ -410,7 +410,7 @@ describe("integrate mode dispatch", () => {
       store,
       lifecycle: new MissionLifecycleService(store),
       integration: new MissionIntegrationService(store),
-      handoff: { recordNel: async () => ({ }) },
+      nel: { recordNel: async () => ({ }) },
     };
   }
 

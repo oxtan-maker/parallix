@@ -24,8 +24,6 @@ const ADAPTERS = path.join(import.meta.dirname, '..', '..', '..', 'src', 'adapte
 // once, before any of them is linked.
 const productConfig = mockModule<typeof import('../../../src/adapters/config/product-config.js')>('../../../src/adapters/config/product-config.js', import.meta.url);
 const missionStartModule = mockModule<typeof import('../../../src/adapters/cli/startup-preflight.js')>('../../../src/adapters/cli/startup-preflight.js', import.meta.url);
-import { HandoffCommandUseCase } from '../../../src/application/handoff-command-use-case.js';
-import { HandoffExecutor } from '../../../src/application/handoff-executor.js';
 const setupReviewModule = mockModule<typeof import('../../../src/adapters/review/setup-review.js')>('../../../src/adapters/review/setup-review.js', import.meta.url);
 const reviewCommandsModule = mockModule<typeof import('../../../src/adapters/review/review-commands.js')>('../../../src/adapters/review/review-commands.js', import.meta.url);
 const reviewArtifactsModule = mockModule<typeof import('../../../src/adapters/review/review-artifacts.js')>('../../../src/adapters/review/review-artifacts.js', import.meta.url);
@@ -121,19 +119,6 @@ test('mission-start accepts isForgejoReviewEnabledFn option and skips PR check w
 
   assert.deepEqual(result, { pass: true });
   assert.equal(prStatusCalled, false, 'getPrStatus should NOT be called when Forgejo review is disabled');
-});
-
-// =============================================================================
-// Section 3: handoff gates Forgejo PR creation
-// =============================================================================
-
-test('performHandoff gates Forgejo PR creation behind isForgejoReviewEnabled', () => {
-  // The handoff workflow now lives in HandoffExecutor (the CLI adapter and the
-  // use case only delegate), so the provider gate lives on the executor's
-  // performHandoff.
-  const src = HandoffExecutor.prototype.performHandoff.toString();
-  assert.ok(src.includes('isForgejoReviewEnabled'),
-    'performHandoff should check isForgejoReviewEnabled to skip Forgejo PR creation');
 });
 
 // =============================================================================

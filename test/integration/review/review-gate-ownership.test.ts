@@ -9,13 +9,13 @@ import os from 'node:os';
 import childProcess from 'node:child_process';
 import { runPreReviewGate } from '../../../src/adapters/review/review-gate-handling.js';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
-const performHandoffModule = mockModule<typeof import('../../../src/adapters/cli/commands/handoff.js')>('../../../src/adapters/cli/commands/handoff.js', import.meta.url);
+const performReviewPreparationModule = mockModule<typeof import('../../../src/adapters/cli/commands/review-preparation.js')>('../../../src/adapters/cli/commands/review-preparation.js', import.meta.url);
 const missionUtils = mockModule<typeof import('../../../src/adapters/filesystem/mission-utils.js')>('../../../src/adapters/filesystem/mission-utils.js', import.meta.url);
 const git = mockModule<typeof import('../../../src/adapters/git/git.js')>('../../../src/adapters/git/git.js', import.meta.url);
 const backlog = mockModule<typeof import('../../../src/adapters/backlog/backlog.js')>('../../../src/adapters/backlog/backlog.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
-const { performHandoff } = performHandoffModule;
+const { performReviewPreparation } = performReviewPreparationModule;
 const REPO_ROOT = path.join(import.meta.dirname, '..', '..', '..');
 const SOURCE_ROOT = path.join(REPO_ROOT, 'src');
 
@@ -28,7 +28,7 @@ test('task-2273 baseline: no repository-managed review-remote pre-push verifier 
     'the review-remote pre-push hook described by the backlog is local-only, not a tracked gate owner');
 });
 
-test('handoff, declared gates and pre-review share candidate verification and invalidate repairs (TASK-2715)', async (t) => {
+test("review preparation, declared gates and pre-review share candidate verification and invalidate repairs (TASK-2715)", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2273-gate-count-'));
   const proofHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2273-proof-home-'));
   const counter = path.join(proofHome, 'counter');
@@ -64,7 +64,7 @@ test('handoff, declared gates and pre-review share candidate verification and in
     t.mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile }));
     t.mock.method(backlog, 'getTaskImplementer', () => 'codex');
     t.mock.method(backlog, 'transitionTask', () => true);
-    const result = await performHandoff(slug, {
+    const result = await performReviewPreparation(slug, {
       missionServicesFn: stubMissionServices(),
       worktree: root,
       isForgejoReviewEnabledFn: () => false,
@@ -74,10 +74,10 @@ test('handoff, declared gates and pre-review share candidate verification and in
       log: (message: string) => logs.push(message), error: () => {}
     });
     assert.equal(result.ok, true, JSON.stringify(result));
-    assert.equal(fs.readFileSync(counter, 'utf8'), 'all\n', 'handoff resolves the configured area rather than injecting docs');
+    assert.equal(fs.readFileSync(counter, 'utf8'), 'all\n', "review preparation resolves the configured area rather than injecting docs");
     const review = await runPreReviewGate(slug, root, { log: message => logs.push(message), error: () => {} });
     assert.equal(review.ok, true, JSON.stringify(review));
-    assert.equal(fs.readFileSync(counter, 'utf8'), 'all\n', 'the real review boundary reuses handoff verification for the same candidate (TASK-2715)');
+    assert.equal(fs.readFileSync(counter, 'utf8'), 'all\n', "the real review boundary reuses review preparation verification for the same candidate (TASK-2715)");
     fs.writeFileSync(path.join(root, 'README.md'), 'changed candidate\n');
     childProcess.execFileSync('git', ['add', '.'], { cwd: root });
     childProcess.execFileSync('git', ['commit', '-m', 'repair'], { cwd: root, stdio: 'pipe' });

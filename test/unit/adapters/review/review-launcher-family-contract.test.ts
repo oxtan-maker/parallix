@@ -16,7 +16,7 @@ import {
 } from '../../../../src/adapters/agents/agents.js';
 import { selectReviewer } from '../../../../src/application/review-loop/reviewer-selection.js';
 import type { ReviewerRoutingPort } from '../../../../src/application/ports/review-round.js';
-import { resolveHandoffReviewAssignment } from '../../../../src/adapters/cli/commands/handoff.js';
+import { resolveReviewPreparationReviewAssignment } from '../../../../src/adapters/cli/commands/review-preparation.js';
 import { AgentPoolExhaustedError } from '../../../../src/domain/agents.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 
@@ -69,9 +69,9 @@ test.afterEach(() => {
 // CP-1: production regression boundary — handoff persists the first reviewer
 // =============================================================================
 
-test('handoff persists a configured cross-family reviewer instead of the PR author', () => {
+test("review preparation persists a configured cross-family reviewer instead of the PR author", () => {
   const calls: (["eligible", string] | ["select", string, readonly string[]])[] = [];
-  const assignment = resolveHandoffReviewAssignment('claude', {
+  const assignment = resolveReviewPreparationReviewAssignment('claude', {
     worktree: '/tmp/task-2335',
     eligibleAgentsForStepFn: (step: string) => {
       calls.push(['eligible', step] as const);
@@ -92,8 +92,8 @@ test('handoff persists a configured cross-family reviewer instead of the PR auth
   ]);
 });
 
-test('handoff uses same-family reviewer only when cross-family selection is exhausted', () => {
-  const assignment = resolveHandoffReviewAssignment('codex', {
+test("review preparation uses same-family reviewer only when cross-family selection is exhausted", () => {
+  const assignment = resolveReviewPreparationReviewAssignment('codex', {
     eligibleAgentsForStepFn: () => ['codex'],
     selectAgentFn: () => {
       throw new AgentPoolExhaustedError('review', 'cross-family reviewer pool exhausted');

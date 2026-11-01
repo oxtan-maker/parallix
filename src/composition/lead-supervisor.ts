@@ -9,16 +9,13 @@ import { findTaskFile } from '../adapters/backlog/backlog.js';
 
 import { leadFinishesParkedApproval, leadInvocation } from '../interfaces/cli/lead.js';
 import { recordApproval } from '../adapters/review/review-round.js';
-import { currentWorkPublication, type CurrentWorkPort } from '../application/recording/current-work-recorder.js';
+import { executionActivityIntent, type ExecutionActivityPort } from '../application/recording/execution-activity-recorder.js';
 import type { AttentionAction } from '../application/projections/board.js';
 
 import { observationFromAttention } from '../application/recovery-supervisor.js';
 import type { AttentionObservation, SupervisorPort } from '../application/recovery-supervisor.js';
 import { claimRecoveryLock } from '../adapters/filesystem/recovery-claim.js';
 import { pollingPause } from '../adapters/process/polling-pause.js';
-import { ConcreteCurrentWorkReadAdapter } from '../adapters/backlog/concrete-current-work-read-adapter.js';
-import { CURRENT_WORK_TTL_MS, reconcileCurrentWork } from '../application/projections/current-work.js';
-import { processLivenessProbe } from '../adapters/process/process-liveness.js';
 import { missionId } from '../domain/mission.js';
 import { conventionalWorktreePath, resolveWorktree } from '../adapters/git/worktree.js';
 import { git } from '../adapters/git/git.js';
@@ -51,7 +48,7 @@ export function createLeadSupervisorPort(
   // and return to the fleet loop immediately; the current-work fact prevents
   // the next poll from treating that mission as idle and starting it again.
   const startForward = async (mission: string, action: AttentionAction, work: () => Promise<unknown>) => {
-    const publication = currentWorkPublication({
+    const publication = executionActivityIntent({
       slug: mission,
       operationId: `lead-${Date.now()}`,
       phase: action.kind === 'active:execute' ? 'execute' : 'review',
@@ -67,8 +64,8 @@ export function createLeadSupervisorPort(
   // Finishing a publication is fire-and-forget: the board update may reject
   // after the process is gone, and that is not a step the fleet can act on.
   const finishPublication = (
-    publication: ReturnType<typeof currentWorkPublication>,
-    currentWork: CurrentWorkPort,
+    publication: ReturnType<typeof executionActivityIntent>,
+    currentWork: ExecutionActivityPort,
   ): void => { if (publication) { void currentWork.ended(publication).catch(() => { }); } }
   const port: SupervisorPort = {
     attention: queue,
@@ -77,24 +74,17 @@ export function createLeadSupervisorPort(
     // started from any worktree, so the store answers first.
     missionExists: async (mission) => (await services.mission?.store.load(missionId(mission)))?.kind === 'found'
       || findTaskFile(mission, rootDir) !== null,
-    // Liveness comes straight from the current-work authority for the one
+    // Liveness comes straight from the execution activity projection for the one
     // mission being acted on. Rebuilding the whole board to answer it made a
     // pass cost one projection per question (ADR 0053: the board is a read
     // model, not the only way to read a fact).
     liveness: async (mission) => {
-      const history = services.operatorState.repositories?.operationalHistory;
-      // Fail closed. An unreadable current-work authority is not evidence
-      // that nobody is working; refusing the step is the only safe answer,
-      // and the supervisor records it like any other failed step.
-      if (!history) { throw new Error(`Current work for ${mission} is unreadable: the operator database is unavailable`); }
-      const events = await new ConcreteCurrentWorkReadAdapter(history)
-        .loadMissionCurrentWork(missionId(mission));
-      const facts = reconcileCurrentWork(events, {
-        nowMs: Date.now(),
-        ttlMs: CURRENT_WORK_TTL_MS,
-        isProcessAlive: processLivenessProbe,
-      }).get(missionId(mission));
-      const work = facts?.currentWork ?? null;
+      if (!services.operatorState.repositories || !services.operatorState.db) {
+        throw new Error(`Execution activity for ${mission} is unreadable: the operator database is unavailable`);
+      }
+      const card = await builder.buildMissionCard(missionId(mission));
+      if (!card) { throw new Error(`Mission ${mission} is unavailable for execution observation`); }
+      const work = card.currentWork;
       return {
         working: work !== null && work.freshness !== 'stale',
         detail: work ? `${work.phase} — ${work.summary} (${work.freshness}, ${work.updatedAt})` : null,

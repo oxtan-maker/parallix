@@ -133,7 +133,7 @@ describe("Mission lifecycle and review invariants , ,", () => {
     assert.equal(done.closedAt, null);
   });
 
-  test('mission lifecycle rejects unsupported jumps and missing handoff evidence', () => {
+  test("mission lifecycle rejects unsupported jumps and missing review preparation evidence", () => {
     const approvedReview = approve();
     assert.equal(decideMission(mission('refined'), { type: 'activate', agent: implementer }).status, 'active');
     assert.throws(() => decideMission(mission('backlog'), { type: 'activate', agent: implementer }), MissionRuleViolation);
@@ -381,7 +381,7 @@ describe("Mission lifecycle and review invariants , ,", () => {
     assert.throws(() => decideMission(closed, { type: 'activate', agent: implementer }), /was closed/);
   });
 
-  test('NEL is a replaceable mission attribute captured at handoff', () => {
+  test("NEL is a replaceable mission attribute captured at review preparation", () => {
     const measured = recordNetEngineeringLines(mission('active'), 91);
     assert.equal(measured.netEngineeringLines, 91);
     assert.equal(recordNetEngineeringLines(measured, 74).netEngineeringLines, 74);
@@ -554,7 +554,7 @@ describe("Mission field and legacy-path authority", () => {
   const repositoryMission: Mission = {
     id: missionId('task-2294'), repositoryId: repositoryId('parallix'), title: 'authoritative',
     labels: missionLabels(['user_value', 'bug']), status: 'active', rawStatus: 'active', closedAt: null, assignee: agentFamily('codex'),
-    checkpoints: [], brief: null, declaredGates: [], successCriteria: [], successCriterionIds: [], nextSuccessCriterionId: 1, completedSuccessCriteria: [], dependencies: [], description: null, predictedNelBucket: null, reproductionTest: null, review: null, netEngineeringLines: 10,
+    checkpoints: [], brief: null, declaredGates: [], successCriteria: [], successCriterionIds: [], nextSuccessCriterionId: 1, completedSuccessCriteria: [], dependencies: [], description: null, predictedNelBucket: null, reproductionTest: null, review: null, reviewPreparationPending: undefined, netEngineeringLines: 10,
     externalTaskRef: externalTaskRef('backlog', 'TASK-2294', 'backlog/tasks/task-2294.md'),
   };
 
@@ -809,7 +809,6 @@ describe("Mission outcome and completed statistics ,", () => {
     const mappedStages = Object.values(AGENT_WORK_STAGE_BY_ACTIVITY);
     assert.equal((mappedStages as readonly string[]).includes('default'), false);
     assert.deepEqual(new Set(mappedStages), new Set(ATTRIBUTED_AGENT_WORK_STAGES));
-    assert.equal(AGENT_WORK_STAGE_BY_ACTIVITY['handoff-repair'], 'review-preparation');
     assert.equal(AGENT_WORK_STAGE_BY_ACTIVITY['pre-review-gate-repair'], 'review-preparation');
     assert.equal(AGENT_WORK_STAGE_BY_ACTIVITY['static-review-repair'], 'review-preparation');
     assert.equal(AGENT_WORK_STAGE_BY_ACTIVITY['review-response'], 'review-response');

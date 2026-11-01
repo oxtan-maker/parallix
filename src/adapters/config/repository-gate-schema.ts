@@ -72,7 +72,7 @@ export function validateRepositoryGates(adapters: unknown): string[] {
   // adapters.gates declares additionalProperties:false in the workflow schema;
   // reject any key it does not recognise so a typo (e.g. requireIntegration)
   // fails validation instead of silently disappearing.
-  const KNOWN_GATE_KEYS = new Set(['maxConcurrent', 'resources', 'verificationResource', 'requirePreIntegration', 'parallel', 'preHandoff', 'preReview', 'preIntegration']);
+  const KNOWN_GATE_KEYS = new Set(['maxConcurrent', 'resources', 'verificationResource', 'requirePreIntegration', 'parallel', "preHandoff", 'preReview', 'preIntegration']);
   for (const key of Object.keys(gates)) {
     if (!KNOWN_GATE_KEYS.has(key)) {
       issues.push(`adapters.gates.${key} is not a recognised key (allowed: ${[...KNOWN_GATE_KEYS].join(', ')})`);
@@ -86,7 +86,7 @@ export function validateRepositoryGates(adapters: unknown): string[] {
   validateGateResource(gates.verificationResource, 'adapters.gates', resources, issues, 'verificationResource');
   validateParallelism(gates.parallel, issues);
   const PHASE_LABELS = {
-    preHandoff: 'pre-handoff',
+    preHandoff: "pre-review preparation",
     preReview: 'pre-review',
     preIntegration: 'pre-integration',
   } as const;
@@ -135,7 +135,7 @@ function validateParallelism(parallel: unknown, issues: string[]): void {
       issues.push('adapters.gates.parallel must be an object');
     } else {
       for (const [phase, limit] of Object.entries(parallel as Record<string, unknown>)) {
-        if (!['preHandoff', 'preReview', 'preIntegration'].includes(phase)) {
+        if (!["preHandoff", 'preReview', 'preIntegration'].includes(phase)) {
           issues.push(`adapters.gates.parallel.${phase} is not a recognised phase`);
         } else if (limit !== 'unlimited' && (!Number.isInteger(limit) || (limit as number) < 2)) {
           issues.push(`adapters.gates.parallel.${phase} must be an integer of at least 2 or "unlimited"`);

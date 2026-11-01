@@ -28,7 +28,6 @@ export type TokenUsingAgentActivity =
   | 'draft'
   | 'draft-repair'
   | 'execute'
-  | 'handoff-repair'
   | 'pre-review-gate-repair'
   | 'static-review-repair'
   | 'review'
@@ -47,7 +46,6 @@ export const AGENT_WORK_STAGE_BY_ACTIVITY = {
   draft: 'draft',
   'draft-repair': 'draft',
   execute: 'execute',
-  'handoff-repair': 'review-preparation',
   'pre-review-gate-repair': 'review-preparation',
   'static-review-repair': 'review-preparation',
   review: 'review',

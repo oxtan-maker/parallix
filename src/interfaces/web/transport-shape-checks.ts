@@ -192,7 +192,7 @@ export function checkAttentionItem(object: unknown, path: string, problems: stri
       problems.push(`${path}.action manual attention cannot be executable or target a lane`);
     }
   } else {
-    checkCommandAction(object.action, `${path}.action`, problems);
+    if (object.action !== null) { checkCommandAction(object.action, `${path}.action`, problems); }
   }
   checkStringArray(object, 'dependsOnSources', path, problems);
 }

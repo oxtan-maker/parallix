@@ -23,7 +23,7 @@ function missingOutput(events: string[], options: { missionStore?: MissionStore;
   return fakeReviewLoopPorts({
     slug: 'task-2623',
     routing: { eligibleFamilies: () => ['codex'] },
-    handoff: { handoff: async () => ({ ok: true as const }) },
+    reviewPreparation: { reviewPreparation: async () => ({ ok: true as const }) },
     missionStore: (options.missionStore ?? null),
     provider: {
       pollReview: async () => 'REQUEST_CHANGES',

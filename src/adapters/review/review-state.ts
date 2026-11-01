@@ -13,7 +13,7 @@ import { assertReviewPhaseTransition, requireReviewPhase, ReviewPhaseViolation, 
  * correspondence lives in `review-state-mapping.ts`.
  *
  * `review-state.json` is no longer written, and the loop never reads it. A
- * mission's Review is created by `px handoff` (`startReview`), so a loop that
+ * mission's Review is created by `px review` (`startReview`), so a loop that
  * finds no Review is reported as a failure rather than inventing one without a
  * reviewed revision or a configured reviewer eligibility.
  *

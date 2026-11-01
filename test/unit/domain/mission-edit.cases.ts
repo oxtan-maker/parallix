@@ -66,8 +66,8 @@ test('criterion edits preserve IDs and evidence coverage; new rows get backend I
   assert.notEqual(after.successCriterionIds![1], identified.successCriterionIds![1], 'removed IDs are never reused');
   assert.deepEqual(after.completedSuccessCriteria, [0]);
   assert.deepEqual(uncoveredCriteria(after.checkpoints, after.successCriteria!, after.successCriterionIds), ['new']);
-  const { handoffEvidencePolicy } = await import('../../../src/domain/mission-handoff-policy.js');
-  assert.equal(handoffEvidencePolicy({ checkpoints: after.checkpoints, successCriteria: after.successCriteria!, successCriterionIds: after.successCriterionIds, completedSuccessCriteria: [0], draftedInDb: true }).insufficientRows, false);
+  const { reviewPreparationEvidencePolicy } = await import('../../../src/domain/mission-review-preparation-policy.js');
+  assert.equal(reviewPreparationEvidencePolicy({ checkpoints: after.checkpoints, successCriteria: after.successCriteria!, successCriterionIds: after.successCriterionIds, completedSuccessCriteria: [0], draftedInDb: true }).insufficientRows, false);
   assert.deepEqual(uncoveredCriteria(after.checkpoints, ['keep'], ['sc-new']), ['keep'], 'same text on a new identity cannot reuse earlier coverage');
   assert.equal((await f.service.save({ ...f.request, expectedVersion: missionVersion(2), successCriterionIds: ['foreign-id'] })).status, 'failed');
 });

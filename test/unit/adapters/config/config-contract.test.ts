@@ -333,7 +333,7 @@ test('gate run limits use the positive-integer capacity contract (H2)', () => {
 });
 
 test('phase parallelism supports dependency-only scheduling and finite limits (TASK-2807)', () => {
-  const phases = ['preHandoff', 'preReview', 'preIntegration'] as const;
+  const phases = ["preHandoff", 'preReview', 'preIntegration'] as const;
   const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8')).properties.adapters.properties.gates.properties.parallel;
   for (const phase of phases) {
     for (const limit of [2, 6, 'unlimited']) {

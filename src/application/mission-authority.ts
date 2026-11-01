@@ -37,6 +37,7 @@ export const MISSION_FIELD_AUTHORITY = {
   predictedNelBucket: localSource,
   reproductionTest: localSource,
   review: targetSource,
+  reviewPreparationPending: targetSource,
   netEngineeringLines: targetSource,
 } as const satisfies Readonly<Record<keyof Mission, Authority>>;
 

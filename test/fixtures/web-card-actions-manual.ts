@@ -78,7 +78,7 @@ try {
       console.log(JSON.stringify({ lane, viewport: width, mouseKeyboardProgress: true, focusRestored: true, cancellationConfirmedOnce: true, nestedAndDragExcluded: true }));
     }
   }
-  const live = pointerSnapshot('active', ['handoff'], 'running');
+  const live = pointerSnapshot('active', ['review'], 'running');
   const active = live.stages.find(stage => stage.lane === 'active')!.cards[0];
   const intake = compactPointerSnapshot('refined').stages.find(stage => stage.lane === 'refined')!.cards[0];
   const done = toWebBoardSnapshot(makeProjection({ done: [makeCard({ status: 'done', lane: 'done', closed: true })] })).stages.find(stage => stage.lane === 'done')!;

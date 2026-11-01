@@ -163,9 +163,9 @@ try {
   // keyboard navigation selects a card.
   await page.locator('[data-board-card="task-layout-active-1"]').focus();
   fixture.hold();
-  const handoff = page.locator('[data-board-card="task-layout-active-1"] button[data-action-kind="handoff:record"]');
-  const handoffBox = await handoff.boundingBox();
-  await page.mouse.click(handoffBox.x + handoffBox.width / 2, handoffBox.y + handoffBox.height / 2);
+  const reviewPreparation = page.locator('[data-board-card="task-layout-active-1"] button[data-action-kind="review:submit"]');
+  const reviewPreparationBox = await reviewPreparation.boundingBox();
+  await page.mouse.click(reviewPreparationBox.x + reviewPreparationBox.width / 2, reviewPreparationBox.y + reviewPreparationBox.height / 2);
   await page.waitForFunction(() => !!document.querySelector('[data-board-card] button[aria-label*="starting"]'));
   report('transition start (mixed, selected + pending)', await page.evaluate(MEASURE));
 

@@ -11,7 +11,7 @@ import {
   DraftWorkflowAbortedError,
 } from '../../../../src/application/draft-command-use-case.js';
 import type { DraftWorkflowPort, DraftWorkflowContext } from '../../../../src/application/ports/cli-workflows.js';
-import type { CurrentWorkPort } from '../../../../src/application/recording/current-work-recorder.js';
+import type { ExecutionActivityPort } from '../../../../src/application/recording/execution-activity-recorder.js';
 import { makeExecutePorts } from '../../../fixtures/execute-mission-ports.js';
 import type { BoardCommandPayload, BoardCommandRequest } from '../../../../src/application/controller/board-command.js';
 import type { Capability } from '../../../../src/application/contracts.js';
@@ -85,9 +85,9 @@ function makeMockWorkflow(overrides: WorkflowOverrides = {}): MockWorkflow {
   return { port, steps, preflightArgs };
 }
 
-function makeCurrentWorkRecorder(): { port: CurrentWorkPort; events: string[] } {
+function makeExecutionActivityRecorder(): { port: ExecutionActivityPort; events: string[] } {
   const events: string[] = [];
-  const port: CurrentWorkPort = {
+  const port: ExecutionActivityPort = {
     async running(publication) { events.push(`running:${publication.missionId}`); },
     async blocked(publication, reason) { events.push(`blocked:${publication.missionId}:${reason}`); },
     async ended(publication) { events.push(`ended:${publication.missionId}`); },
@@ -109,14 +109,14 @@ function makeRequest(overrides: Partial<BoardCommandRequest> = {}): BoardCommand
 interface ControllerDeps {
   readonly status?: MissionStatus;
   readonly workflow?: MockWorkflow;
-  readonly currentWork?: { port: CurrentWorkPort; events: string[] };
+  readonly currentWork?: { port: ExecutionActivityPort; events: string[] };
 }
 
 /** Controller with a mocked mission store (the only authority the backstop reads). */
 function makeController(deps: ControllerDeps = {}) {
   const { ports } = makeExecutePorts();
   const workflow = deps.workflow ?? makeMockWorkflow();
-  const currentWork = deps.currentWork ?? makeCurrentWorkRecorder();
+  const currentWork = deps.currentWork ?? makeExecutionActivityRecorder();
   const draft = new DraftCommandUseCase(workflow.port, currentWork.port);
   const loadCalls: string[] = [];
   const store = {

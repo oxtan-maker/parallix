@@ -16,12 +16,12 @@
  * Usage:
  *   const git = mockModule<typeof import('../src/adapters/git/git.js')>(
  *     '../src/adapters/git/git.js', import.meta.url);
- *   const handoff = mockModule<typeof import('../src/adapters/cli/commands/handoff.js')>(
- *     '../src/adapters/cli/commands/handoff.js', import.meta.url);
+ *   const handoff = mockModule<typeof import('../src/adapters/cli/commands/review-preparation.js')>(
+ *     '../src/adapters/cli/commands/review-preparation.js', import.meta.url);
  *   await installModuleMocks();
  *
  *   mock.method(git, 'getCurrentBranch', () => 'mission/task-1');
- *   handoff.performHandoff(...);
+ *   reviewPreparation.performReviewPreparation(...);
  *
  * Declaration order is irrelevant: `installModuleMocks()` registers every
  * facade first and only then re-links the implementations, so a module always

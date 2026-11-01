@@ -26,7 +26,7 @@ test('pending current-work commands wait for the response before the next coordi
   await fixture.render(pointerSnapshot('refined', undefined, 'running'));
   fixture.hold();
   try {
-    await clickAt(page.locator('[data-board-card] button[data-action-kind="handoff:record"]'));
+    await clickAt(page.locator('[data-board-card] button[data-action-kind="review:submit"]'));
     await page.waitForFunction(() => !!document.querySelector('[data-board-card] button[aria-label*="working"]'));
     // A held response must keep the sequential matrix waiting even when the
     // refreshed card uses the working label instead of the starting label.
@@ -36,7 +36,7 @@ test('pending current-work commands wait for the response before the next coordi
     await waitForCommands(page);
     await clickAt(page.locator('[data-board-card] button[data-action-kind="integrate:merge"]'));
     await waitForCommands(page);
-    assert.deepEqual(requests.map((request) => (request as { kind: string }).kind), ['handoff:record', 'integrate:merge']);
+    assert.deepEqual(requests.map((request) => (request as { kind: string }).kind), ['review:submit', 'integrate:merge']);
   } finally { fixture.release(); await fixture.close(); }
 });
 
@@ -68,15 +68,16 @@ for (const lane of ['backlog', 'refined', 'active', 'review', 'integration'] as 
         try {
           if (work === 'idle') {
             await fixture.render(compactPointerSnapshot(lane));
-            assert.equal(await page.locator('[data-board-card] button').count(), 3, `${lane}: normal projection includes Edit and stays compact`);
+            // Active offers both restart and review entry; other lanes offer one next action.
+            assert.equal(await page.locator('[data-board-card] button').count(), lane === 'active' ? 4 : 3, `${lane}: normal projection includes Edit and stays compact`);
           }
           await fixture.render(pointerSnapshot(lane, undefined, work));
           const before = requests.length;
           const card = page.locator('[data-board-card]');
-          assert.equal(await card.locator('button:not([data-action-kind="mission:edit"])').count(), 6, `${lane}/${work} enabled projected controls`);
+          assert.equal(await card.locator('button:not([data-action-kind="mission:edit"])').count(), 5, `${lane}/${work} enabled projected controls`);
           assert.equal(await card.locator('button[aria-label^="px review"]').count(), 1);
           if (contract === 'commands') {
-            for (const [command, kind] of [['active', 'active:execute'], ['draft', 'draft:create'], ['handoff', 'handoff:record'], ['review', 'review:submit'], ['integrate', 'integrate:merge']] as const) {
+            for (const [command, kind] of [['active', 'active:execute'], ['draft', 'draft:create'], ['review', 'review:submit'], ['integrate', 'integrate:merge']] as const) {
               await clickCommand(card.locator(`button[aria-label^="px ${command}"]`));
               assert.deepEqual(commandFields(requests.at(-1)), { missionId: 'task-pointer-disposable', kind, missionStatusAtRequest: lane });
               assert.equal(await card.getAttribute('aria-current'), 'false');
@@ -150,7 +151,7 @@ test('SSE refresh during coordinate press cannot invoke another action or fall t
       // committed, so the scenario became a plain click on the refreshed board,
       // which legitimately selects the card and opens its terminal.
       await fixture.press(box.x + box.width / 2, box.y + box.height / 2, 'mission:cancel');
-      await fixture.render(pointerSnapshot(lane, ['active', 'handoff', 'integrate']), true);
+      await fixture.render(pointerSnapshot(lane, ['active', 'review', 'integrate']), true);
       await fixture.releasePress();
       assert.equal(requests.length, 0);
       assert.equal(await page.locator('[data-board-card]').getAttribute('aria-current'), 'false');
@@ -208,7 +209,7 @@ test('tall board modal and pending coordinate presses remain safe (TASK-2705)', 
     await clickAt(active);
     await page.waitForFunction(() => !!document.querySelector('[data-board-card] button[aria-label*="starting"]'));
     await clickAt(active);
-    await clickAt(page.locator('[data-board-card] button[aria-label^="px handoff"]'));
+    await clickAt(page.locator("[data-board-card] button[aria-label^=\"px review\"]"));
     await clickAt(page.locator('[data-board-card] button[aria-label^="px cancel"]'));
     assert.equal(requests.length, 1);
     assert.equal(await page.getByRole('dialog').count(), 0);

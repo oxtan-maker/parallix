@@ -12,7 +12,8 @@ import type { GateState } from '../../../../src/application/projections/gate-obs
 import type { SourceFact } from '../../../../src/application/contracts.js';
 import { BoardProjectionBuilder, checkProjectionStaleness, filterCompletedMissions, type AgentReadAdapter, type GateReadAdapter, type GitReadAdapter, type MissionReadAdapter, type OperationLogReadAdapter, type ReviewReadAdapter } from '../../../../src/application/projections/board-readers.js';
 import type { BoardProjectionOptions } from '../../../../src/application/projections/board-readers.js';
-import type { CurrentWorkReadAdapter, ProcessLivenessProbe } from '../../../../src/application/projections/current-work.js';
+import type { ProcessLivenessProbe } from '../../../../src/domain/execution-activity.js';
+import type { ExecutionActivityReadPort } from '../../../../src/application/ports/execution-activity.js';
 import type { MetricsReadAdapter } from '../../../../src/application/projections/metrics-read-adapter.js';
 import { attentionQueue, attentionRank, type MissionCard } from '../../../../src/application/projections/mission-board.js';
 import { agentFamily, type AgentFamily } from '../../../../src/domain/agents.js';
@@ -380,10 +381,10 @@ test('BoardProjectionBuilder queues a gate-failed mission behind its runnable re
   // action the projection marked unavailable. The second active mission has no
   // live work, so it is queued as stranded at rank 2 behind the gate-failed one.
   assert.deepEqual(projection.attentionQueue.map((item) => item.missionId), [id1, id2]);
-  assert.equal(projection.attentionQueue[0]?.action.kind, 'active:execute');
+  assert.equal(projection.attentionQueue[0]?.action?.kind, 'active:execute');
   const stranded = projection.attentionQueue.find((item) => item.missionId === id2);
   assert.deepEqual(stranded?.reason, { kind: 'orphaned-active', detail: 'Active mission has no live work' });
-  assert.equal(stranded?.action.kind, 'active:execute');
+  assert.equal(stranded?.action?.kind, 'active:execute');
   assert.equal(
     failed?.commands.find((command) => command.command === 'active')?.label,
     'resume ▸',
@@ -634,7 +635,7 @@ describe("Slow metrics cache reuse — SC4", () => {
     const options: BoardProjectionOptions = {
       metricsAdapter,
       now: () => Date.now() + (tick += 2_000), // simulate 2s refresh interval
-      currentWork: { loadCurrentWork: async () => [] } as CurrentWorkReadAdapter,
+      currentWork: { loadCurrentWork: async () => [], loadMissionCurrentWork: async () => [] } satisfies ExecutionActivityReadPort,
     };
 
     const builder = new BoardProjectionBuilder(
@@ -722,7 +723,7 @@ describe("Slow metrics cache reuse — SC4", () => {
 
     const options: BoardProjectionOptions = {
       metricsAdapter,
-      currentWork: { loadCurrentWork: async () => [] } as CurrentWorkReadAdapter,
+      currentWork: { loadCurrentWork: async () => [], loadMissionCurrentWork: async () => [] } satisfies ExecutionActivityReadPort,
     };
 
     const builder = new BoardProjectionBuilder(
@@ -785,8 +786,8 @@ test('board and focused reads pass the current owner into execution while done h
     makeMissionAdapter([fixtureMission(id1, { repositoryId: repo, status: 'active' }), fixtureMission(id2, { repositoryId: repo, status: 'done' })]),
     makeReviewAdapter(), makeGateAdapter(), makeAgentAdapter(), makeGitAdapter(), makeOperationLogAdapter(), {
       workflowOperations: {
-        async open() { calls.push('owners'); return [owner]; },
-        async current() { calls.push('owner'); return owner; },
+        async latestByMission() { calls.push('owners'); return [owner]; },
+        async latest() { calls.push('owner'); return owner; },
       },
       providerExecution: { observe(scope, currentOperationId) {
         calls.push(`observe:${scope.missionId}`);
@@ -809,8 +810,8 @@ test('board and focused reads pass the current owner into execution while done h
 test('board and focused reads observe the gate with the owning workflow (TASK-2775)', async () => {
   const { VerificationGateObserver } = await import('../../../../src/application/projections/gate-observation.js');
   const checking = { id: 'checking-owner', repositoryId: repo, missionId: id1, requestKey: 'request', command: 'active:execute' as const,
-    generation: 1, phase: 'checking' as const, providerStarted: true, agent: 'codex', reviewer: null, originalStatus: 'active' as const, previousAssignee: null,
-    owner: { pid: 1, identity: 'owner' }, createdAt: '2026-10-18T10:00:00Z', updatedAt: '2026-10-18T10:00:00Z', reason: 'handoff checks' };
+    generation: 1, phase: 'executing' as const, providerStarted: true, agent: 'codex', reviewer: null, originalStatus: 'active' as const, previousAssignee: null,
+    owner: { pid: 1, identity: 'owner' }, createdAt: '2026-10-18T10:00:00Z', updatedAt: '2026-10-18T10:00:00Z', reason: "review preparation checks" };
   const foreign = { ...checking, id: 'foreign-owner', repositoryId: repositoryId('task-2775-foreign'), missionId: id2 };
   const reads: string[] = [];
   const gates = new VerificationGateObserver({
@@ -820,7 +821,7 @@ test('board and focused reads observe the gate with the owning workflow (TASK-27
   const builder = new BoardProjectionBuilder(
     makeMissionAdapter([fixtureMission(id1, { repositoryId: repo, status: 'active', declaredGates: ['npm test'] }), fixtureMission(id2, { repositoryId: repo, status: 'active', declaredGates: ['npm test'] })]),
     makeReviewAdapter(), gates, makeAgentAdapter(), makeGitAdapter(), makeOperationLogAdapter(), {
-      workflowOperations: { async open() { return [checking, foreign]; }, async current(id) { return id === id1 ? checking : null; } },
+      workflowOperations: { async latestByMission() { return [checking, foreign]; }, async latest(id) { return id === id1 ? checking : null; } },
     },
   );
   const cards = (await builder.build()).stages.flatMap(stage => stage.cards);

@@ -225,7 +225,7 @@ test('task-2420: active approved review by assigned reviewer recovers to integra
       { missionServices: integrationServices({ store: ctx.store, lifecycle: ctx.lifecycle }), submitForReviewFn },
     );
 
-    assert.equal(submitForReviewCalled, false, 'recovery skips the submit-for-review handoff replay for an already-approved round');
+    assert.equal(submitForReviewCalled, false, "recovery skips the submit-for-review review preparation replay for an already-approved round");
     assert.deepEqual(
       result,
       { recovered: true, status: 'integration', occurredAt: decidedAt },

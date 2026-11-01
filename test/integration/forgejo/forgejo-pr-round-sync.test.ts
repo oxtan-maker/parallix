@@ -61,7 +61,7 @@ function roundLoop(options: { reviews: string[]; dispositions?: string[]; provid
         consumeImplementer: async () => ({ consumed: true, ok: true as const, disposition: options.dispositions?.shift() ?? null }),
       },
     } : {}),
-    handoff: { handoff: async () => ({ ok: true as const }) },
+    reviewPreparation: { reviewPreparation: async () => ({ ok: true as const }) },
     agents: { launch: async () => ({ agent: null }) },
     preReview: { head: () => (options.newRevision === false ? 'head-unchanged' : `head-${++head}`) },
   });
@@ -267,7 +267,7 @@ function realGitLoop(slug: string, worktree: string, branch: string, reviews: st
     slug,
     worktree,
     routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
-    handoff: { handoff: async () => ({ ok: true as const }) },
+    reviewPreparation: { reviewPreparation: async () => ({ ok: true as const }) },
     agents: { launch: async request => { launch(request); return { agent: null }; } },
     preReview: { head: () => headPort.head() },
     output: { log: line => { if (process.env.DEBUG_SYNC) { console.error(line); } }, error: line => { if (process.env.DEBUG_SYNC) { console.error(line); } } },

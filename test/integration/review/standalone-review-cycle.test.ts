@@ -103,7 +103,7 @@ function standalone(root: string, options: { missionPath?: string; reviewer?: Re
   const fake = fakeReviewLoopPorts({
     slug: 'task-1272',
     worktree: root,
-    handoff: { handoff: async () => ({ ok: true as const }) },
+    reviewPreparation: { reviewPreparation: async () => ({ ok: true as const }) },
     routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
     artifacts: {
       ...(options.reviewer ? { consumeReviewer: options.reviewer } : {}),

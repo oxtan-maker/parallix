@@ -58,9 +58,9 @@ describe('Execute Mission adapters', () => {
       recordActiveStats() {},
       resolveAgentModel() { return 'gpt-5'; },
       resolveStageTelemetry() { return null; },
-      async validateCheckpointsBeforeHandoff() { return { ok: true as const }; },
-      async performHandoff() { return { ok: true as const }; },
-      async repairHandoff() { return { repaired: false }; },
+      async validateCheckpointsBeforeReviewPreparation() { return { ok: true as const }; },
+      async performReviewPreparation() { return { ok: true as const }; },
+      async repairReviewPreparation() { return { repaired: false }; },
       // The review loop itself is not exercised here: a held controller fence
       // makes the application loop decline immediately.
       reviewLoopMechanisms: () => fakeReviewLoopPorts({ lock: { tryAcquire: () => false, release: () => {} } }).ports,
@@ -93,7 +93,7 @@ describe('Execute Mission adapters', () => {
     assert.ok(ports.agentExecution instanceof AgentExecutionAdapter);
     assert.ok(ports.telemetry instanceof ExecuteTelemetryAdapter);
     assert.ok(ports.checkpointValidation);
-    assert.ok(ports.handoffExecution);
+    assert.ok(ports.reviewPreparationExecution);
     assert.ok(ports.autonomousReview);
   });
 
@@ -286,14 +286,14 @@ describe('Execute Mission adapters', () => {
     assert.equal(windows[0].sinceMs, Date.parse('2026-07-20T10:00:00Z'));
   });
 
-  test('typed handoff adapter forwards the resolved task file and returns the pipeline verdict', async () => {
+  test("typed review preparation adapter forwards the resolved task file and returns the pipeline verdict", async () => {
     const seen: Array<unknown[]> = [];
     const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
-      async performHandoff(...args: unknown[]) { seen.push(args); return { ok: false as const }; },
+      async performReviewPreparation(...args: unknown[]) { seen.push(args); return { ok: false as const }; },
     }));
     const onAgentLaunched = async () => {};
     const onAutonomousStop = async () => {};
-    const verdict = await ports.handoffExecution.run({ slug: 'task-1', worktree: '/worktree', agent: 'codex' });
+    const verdict = await ports.reviewPreparationExecution.run({ slug: 'task-1', worktree: '/worktree', agent: 'codex' });
     assert.equal(verdict.ok, false);
     assert.deepEqual(seen[0], [
       'task-1', { forgejoUser: 'codex', worktree: '/worktree', force: undefined },
@@ -340,17 +340,18 @@ describe('Execute Mission characterization', () => {
             predictedNelBucket: 'Small',
             status: 'refined', closedAt: null,
           });
+    let recordedVersion = missionVersion(3);
     const transitionStore: MissionTransitionStore = {
       async load() {
         calls.push('load');
         return {
           kind: 'found' as const,
-          version: missionVersion(3),
+          version: recordedVersion,
           mission: recordedMission,
         };
       },
-      async save(_mission, expectedVersion) { recordedMission = _mission; calls.push('synchronize'); return missionVersion((expectedVersion ?? 0) + 1); },
-      async saveWithTransition(_mission, expectedVersion) { recordedMission = _mission; calls.push('synchronize'); return missionVersion((expectedVersion ?? 0) + 1); },
+      async save(_mission, expectedVersion) { recordedMission = _mission; calls.push('synchronize'); recordedVersion = missionVersion((expectedVersion ?? 0) + 1); return recordedVersion; },
+      async saveWithTransition(_mission, expectedVersion) { recordedMission = _mission; calls.push('synchronize'); recordedVersion = missionVersion((expectedVersion ?? 0) + 1); return recordedVersion; },
     };
     const runtime: ExecuteMissionRuntime = {
       preflight() { calls.push('preflight'); return { pass: true }; },
@@ -373,12 +374,12 @@ describe('Execute Mission characterization', () => {
       recordActiveStats(record: { implementer: string }) { calls.push(`stats:${record.implementer}`); },
       resolveAgentModel() { calls.push('model'); return 'gpt-5'; },
       resolveStageTelemetry() { calls.push('telemetry'); return null; },
-      async validateCheckpointsBeforeHandoff() { return { ok: true as const }; },
-      async performHandoff(slug: string, options: { worktree: string; forgejoUser?: string }) {
-        calls.push(`handoff:${slug}:${options.worktree}:${options.forgejoUser}`);
+      async validateCheckpointsBeforeReviewPreparation() { return { ok: true as const }; },
+      async performReviewPreparation(slug: string, options: { worktree: string; forgejoUser?: string }) {
+        calls.push(`review-preparation:${slug}:${options.worktree}:${options.forgejoUser}`);
         return { ok: true as const };
       },
-      async repairHandoff() { return { repaired: false }; },
+      async repairReviewPreparation() { return { repaired: false }; },
       // The review loop itself is not exercised here: a held controller fence
       // makes the application loop decline immediately.
       reviewLoopMechanisms: () => fakeReviewLoopPorts({ lock: { tryAcquire: () => false, release: () => {} } }).ports,
@@ -401,7 +402,7 @@ describe('Execute Mission characterization', () => {
   // Scenario 1 — `active` success
   // ---------------------------------------------------------------------------
 
-  test('execute workflow: activation precedes launch, record, telemetry, and handoff', async () => {
+  test("execute workflow: activation precedes launch, record, telemetry, and review preparation", async () => {
     const { runtime, calls, transitionStore } = executeFixture();
     const events: Array<{ sequence: number; phase: string; agent?: string }> = [];
     const outcome = await buildExecuteWorkflow(runtime, transitionStore, (event) =>
@@ -410,14 +411,15 @@ describe('Execute Mission characterization', () => {
     assert.equal(outcome.status, 'completed');
     assert.deepEqual(outcome.value, { agent: 'codex' });
     assert.deepEqual(calls, [
-      'load', 'load', 'synchronize', 'preflight', 'worktree', 'task', 'checkpoint', 'config', 'prompt',
+      'load', 'load', 'load', 'synchronize', 'preflight', 'worktree', 'task', 'checkpoint', 'config', 'prompt',
       'launch-record:codex', 'load', 'safety',
       'model', 'telemetry', 'stats:codex',
-      'handoff:task-1:/worktree:codex',
+      'load', 'load', 'synchronize',
+      "review-preparation:task-1:/worktree:codex",
     ]);
     assert.equal(outcome.durableEvidence.length, 2);
     assert.deepEqual(events.map((event) => event.sequence), [1, 2, 3]);
-    assert.deepEqual(events.map((event) => event.phase), ['launch', 'record', 'handoff']);
+    assert.deepEqual(events.map((event) => event.phase), ['launch', 'record', 'review-preparation']);
     assert.equal(events[2].agent, 'codex');
   });
 
@@ -458,8 +460,7 @@ describe('Execute Mission characterization', () => {
 
   test('execute workflow: real launch adapter retains the active mirror after a started-agent failure', async () => {
     const { runtime, transitionStore } = executeFixture({
-      async selectLaunchAndRecord(opts: { authorityAlreadyActive?: boolean }) {
-        assert.equal(opts.authorityAlreadyActive, true);
+      async selectLaunchAndRecord() {
         return { agent: 'codex', result: { status: 19 }, rebaseDeferred: true };
       },
     });
@@ -475,7 +476,7 @@ describe('Execute Mission characterization', () => {
     const outcome = await buildExecuteWorkflow(runtime, transitionStore).execute(executeRequest());
     assert.equal(outcome.status, 'completed');
     assert.ok(calls.includes('stats'));
-    assert.ok(calls.includes('handoff:task-1:/worktree:codex'));
+    assert.ok(calls.includes("review-preparation:task-1:/worktree:codex"));
   });
 
   test('execute workflow: an already-active task still synchronizes the Mission authority', async () => {
@@ -502,9 +503,9 @@ describe('Execute Mission characterization', () => {
     assert.equal(outcome.status, 'failed');
     assert.ok(outcome.error != null);
     assert.equal(outcome.error.kind, 'execution');
-    assert.match(outcome.error.message ?? '', /^legacy task lifecycle synchronization failed: /);
+    assert.match(outcome.error.message ?? '', /^Mission task-1 is unavailable$/);
     assert.equal(calls.includes('synchronize'), false);
-    assert.equal(calls.some((call) => call.startsWith('handoff:')), false);
+    assert.equal(calls.some((call) => call.startsWith("review-preparation:")), false);
   });
 
   // ---------------------------------------------------------------------------
@@ -522,39 +523,39 @@ describe('Execute Mission characterization', () => {
     assert.equal(outcome.status, 'completed');
     assert.deepEqual(outcome.value, { agent: 'claude' });
     assert.ok(calls.includes('stats:claude'));
-    assert.ok(calls.includes('handoff:task-1:/worktree:claude'));
+    assert.ok(calls.includes("review-preparation:task-1:/worktree:claude"));
   });
 
-  test('execute workflow: a handoff relaunch retry that recovers still completes the launch', async () => {
-    let handoffAttempts = 0;
+  test("execute workflow: a review preparation relaunch retry that recovers still completes the launch", async () => {
+    let reviewPreparationAttempts = 0;
     const { runtime, calls, transitionStore } = executeFixture({
-      async performHandoff(slug: string, options: { worktree: string; forgejoUser?: string }) {
-        handoffAttempts++;
-        calls.push(`handoff:${slug}:${options.worktree}:${options.forgejoUser}`);
+      async performReviewPreparation(slug: string, options: { worktree: string; forgejoUser?: string }) {
+        reviewPreparationAttempts++;
+        calls.push(`review-preparation:${slug}:${options.worktree}:${options.forgejoUser}`);
         // The relaunch/retry loop lives inside the handoff mechanism; the
         // workflow observes only its final boolean verdict.
-        assert.ok(handoffAttempts >= 1);
+        assert.ok(reviewPreparationAttempts >= 1);
         return { ok: true as const };
       },
     });
     const outcome = await buildExecuteWorkflow(runtime, transitionStore).execute(executeRequest());
     assert.equal(outcome.status, 'completed');
-    assert.equal(handoffAttempts, 1);
+    assert.equal(reviewPreparationAttempts, 1);
   });
 
   // ---------------------------------------------------------------------------
   // Scenario 3 — handoff-and-review failure
   // ---------------------------------------------------------------------------
 
-  test('execute workflow: handoff-and-review failure surfaces as an execution failure after durable evidence', async () => {
+  test("execute workflow: review-preparation-and-review failure surfaces as an execution failure after durable evidence", async () => {
     const { runtime, calls, transitionStore } = executeFixture({
-      async performHandoff() { calls.push('handoff'); return { ok: false as const, error: 'handoff rejected' }; },
+      async performReviewPreparation() { calls.push('handoff'); return { ok: false as const, error: "review preparation rejected" }; },
     });
     const outcome = await buildExecuteWorkflow(runtime, transitionStore).execute(executeRequest());
     assert.equal(outcome.status, 'failed');
     assert.ok(outcome.error != null);
     assert.equal(outcome.error.kind, 'execution');
-    assert.equal(outcome.error.message, 'handoff and review failed');
+    assert.equal(outcome.error.message, "review preparation rejected");
     assert.ok(calls.includes('safety'));
     assert.ok(calls.includes('stats:codex'));
   });
@@ -563,7 +564,7 @@ describe('Execute Mission characterization', () => {
   // Scenario 4 — non-zero agent exit status / launcher error
   // ---------------------------------------------------------------------------
 
-  test('execute workflow: a non-zero agent exit status stops after pre-launch activation and before safety, telemetry, and handoff', async () => {
+  test("execute workflow: a non-zero agent exit status stops after pre-launch activation and before safety, telemetry, and review preparation", async () => {
     const { runtime, calls, transitionStore } = executeFixture({
       async selectLaunchAndRecord() {
         calls.push('launch-record:codex');
@@ -576,7 +577,7 @@ describe('Execute Mission characterization', () => {
     assert.equal(outcome.error.kind, 'execution');
     assert.equal(outcome.error.message, 'Execute agent (codex) exited with status 23.');
     assert.deepEqual(calls, [
-      'load', 'load', 'synchronize', 'preflight', 'worktree', 'task', 'checkpoint', 'config', 'prompt', 'launch-record:codex', 'load', 'load', 'synchronize',
+      'load', 'load', 'load', 'synchronize', 'preflight', 'worktree', 'task', 'checkpoint', 'config', 'prompt', 'launch-record:codex', 'load',
     ]);
   });
 
@@ -612,7 +613,7 @@ describe('Execute Mission characterization', () => {
   // Scenario 6 — cancellation after durable launch
   // ---------------------------------------------------------------------------
 
-  test('execute workflow: cancellation after durable launch keeps both evidence records and skips handoff', async () => {
+  test("execute workflow: cancellation after durable launch keeps both evidence records and skips review preparation", async () => {
     const cancellation = { requested: false };
     const { runtime, calls, transitionStore } = executeFixture({
       recordActiveStats(record: { implementer: string }) {
@@ -626,7 +627,7 @@ describe('Execute Mission characterization', () => {
     assert.ok(outcome.error != null);
     assert.equal(outcome.error.message, 'cancelled after durable launch; re-query task state');
     assert.equal(outcome.durableEvidence.length, 2);
-    assert.equal(calls.some((call) => call.startsWith('handoff:')), false);
+    assert.equal(calls.some((call) => call.startsWith("review-preparation:")), false);
   });
 
   // ---------------------------------------------------------------------------
@@ -642,7 +643,7 @@ describe('Execute Mission characterization', () => {
     assert.ok(outcome.error != null);
     assert.equal(outcome.error.kind, 'validation');
     assert.equal(outcome.error.message, 'execute preflight failed');
-    assert.deepEqual(calls, ['load', 'load', 'synchronize', 'preflight', 'load', 'synchronize']);
+    assert.deepEqual(calls, ['load', 'load', 'load', 'synchronize', 'preflight', 'load', 'load', 'synchronize']);
   });
 
   // ---------------------------------------------------------------------------
@@ -658,7 +659,7 @@ describe('Execute Mission characterization', () => {
     assert.ok(outcome.error != null);
     assert.equal(outcome.error.kind, 'validation');
     assert.equal(outcome.error.message, 'dedicated execute worktree is required');
-    assert.deepEqual(calls, ['load', 'load', 'synchronize', 'preflight', 'worktree', 'load', 'synchronize']);
+    assert.deepEqual(calls, ['load', 'load', 'load', 'synchronize', 'preflight', 'worktree', 'load', 'load', 'synchronize']);
   });
 
   // ---------------------------------------------------------------------------
@@ -707,7 +708,7 @@ describe('Execute Mission characterization', () => {
   // Workflow state is carried explicitly, not held per slug inside a port
   // ---------------------------------------------------------------------------
 
-  test('execute workflow: two concurrent slugs each resolve their own worktree and handoff', async () => {
+  test("execute workflow: two concurrent slugs each resolve their own worktree and review preparation", async () => {
     const first = executeFixture();
     const second = executeFixture({
       resolveWorktree() { second.calls.push('worktree'); return '/other-worktree'; },
@@ -718,7 +719,7 @@ describe('Execute Mission characterization', () => {
     ]);
     assert.equal(outcomeA.status, 'completed');
     assert.equal(outcomeB.status, 'completed');
-    assert.ok(first.calls.includes('handoff:task-1:/worktree:codex'));
-    assert.ok(second.calls.includes('handoff:task-2:/other-worktree:codex'));
+    assert.ok(first.calls.includes("review-preparation:task-1:/worktree:codex"));
+    assert.ok(second.calls.includes("review-preparation:task-2:/other-worktree:codex"));
   });
 });

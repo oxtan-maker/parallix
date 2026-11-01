@@ -20,7 +20,7 @@ function parseDeclaredCheckpointNames(missionText: string): { names: string[]; e
 }
 
 /** Filesystem/Git checkpoint evidence mechanism; it makes no workflow decision. */
-export async function validateCheckpointsBeforeHandoff(
+export async function validateCheckpointsBeforeReviewPreparation(
   slug: string,
   worktree: string,
   options: CheckpointValidationOptions = {},
@@ -39,7 +39,7 @@ function validateRecordedCheckpoints(recorded: { planned: string[]; recorded: st
     return fail(`Invalid locked contract requires human review: ${JSON.stringify(recorded.humanOnlyContractBlocker)}`, { humanOnlyContractBlocker: recorded.humanOnlyContractBlocker });
   }
   const missing = recorded.planned.filter(name => !recorded.recorded.includes(name));
-  if (missing.length) { return fail(`Planned checkpoint evidence is missing before handoff: ${missing.join(', ')}. Record each with \`px checkpoint record --name <CP-N>\` before handoff.`, { missingCheckpoints: missing, nextCheckpoint: missing[0] }); }
+  if (missing.length) { return fail(`Planned checkpoint evidence is missing before review preparation: ${missing.join(', ')}. Record each with \`px checkpoint record --name <CP-N>\` before review preparation.`, { missingCheckpoints: missing, nextCheckpoint: missing[0] }); }
   options.log?.(fmt.status('PASS', `All ${recorded.planned.length} planned checkpoint(s) have recorded evidence.`));
   return { ok: true, declaredCheckpoints: recorded.planned };
 }
@@ -55,8 +55,8 @@ function validateCheckpointFiles(slug: string, worktree: string, options: Checkp
   const checkpoints = (options.findCheckpointsFn ?? findCheckpoints)(missionDir);
   const names = new Set(checkpoints.map(checkpoint => /(?:CP-|CHECKPOINT_)(\d+)/i.exec(path.basename(checkpoint))?.[1]).filter(Boolean).map(number => `CP-${number}`));
   const missing = declared.names.filter(name => !names.has(name));
-  if (missing.length) { return fail(`Declared checkpoint documents are missing before handoff: ${missing.join(', ')}. Create and commit ${missing.map(name => `${name}.md`).join(', ')} in ${fmt.path(missionDir)} before handoff.`, { missingCheckpoints: missing, nextCheckpoint: missing[0] }); }
-  if (!checkpoints.length) { return fail(`No checkpoint documents found in ${fmt.path(missionDir)}. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff. Create at least CP-1 documenting your implementation, including a Goal Check table with real evidence such as a backticked command, test name, ADR reference, or test file path.`); }
+  if (missing.length) { return fail(`Declared checkpoint documents are missing before review preparation: ${missing.join(', ')}. Create and commit ${missing.map(name => `${name}.md`).join(', ')} in ${fmt.path(missionDir)} before review preparation.`, { missingCheckpoints: missing, nextCheckpoint: missing[0] }); }
+  if (!checkpoints.length) { return fail(`No checkpoint documents found in ${fmt.path(missionDir)}. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before review preparation. Create at least CP-1 documenting your implementation, including a Goal Check table with real evidence such as a backticked command, test name, ADR reference, or test file path.`); }
   const commitFailure = checkpointCommitFailure(slug, rootDir, checkpoints, options, fail);
   if (commitFailure) { return commitFailure; }
   options.log?.(fmt.status('PASS', `Found all ${declared.names.length} declared checkpoint document(s) in ${fmt.path(missionDir)}.`));
@@ -68,6 +68,6 @@ function checkpointCommitFailure(slug: string, rootDir: string, checkpoints: str
   const status = (options.runFn ?? git)(['status', '--porcelain', '--', ...args], { cwd: rootDir });
   if (status.status !== 0) { return fail(`Could not verify checkpoint commit state for ${fmt.slug(slug)}: ${(status.stderr || status.stdout || '').trim() || 'git status failed'}`); }
   const dirty = String(status.stdout || '').split('\n').map((line: string) => line.trimEnd()).filter(Boolean).map((line: string) => line.slice(3).trim()).filter(Boolean);
-  if (dirty.length) { return fail(`Checkpoint documents must be committed before handoff. Uncommitted checkpoint files: ${dirty.map((file: string) => fmt.path(file)).join(', ')}. Commit the checkpoint update and re-run the handoff.`); }
+  if (dirty.length) { return fail(`Checkpoint documents must be committed before review preparation. Uncommitted checkpoint files: ${dirty.map((file: string) => fmt.path(file)).join(', ')}. Commit the checkpoint update and re-run the review preparation.`); }
   return null;
 }

@@ -8,7 +8,7 @@ import type { LiveMissionWork, MissionCard } from './mission-board.js';
 // Two facts of different authority are kept apart on purpose:
 //
 //   * `work` is authoritative. The operation itself published it
-//     (`reconcileCurrentWork` in `current-work.ts`), so it can say *what* is
+//     (`projectExecutionActivity` in `domain/execution-activity.ts`), so it can say *what* is
 //     being worked and how much the reading can be trusted.
 //   * `coordinator` is recovery evidence only. It comes from scanning the
 //     process table for a live `px` command. A coordinator can be live while
@@ -64,7 +64,7 @@ export type MissionActivitySource = Pick<MissionCard, 'currentWork' | 'blockingR
 /**
  * Project one mission card into the shared activity read model.
  *
- * Overlapping operations are already resolved upstream: `reconcileCurrentWork`
+ * Overlapping operations are already resolved upstream: `projectExecutionActivity`
  * picks the standing operation by durable append order, so exactly one work
  * fact reaches this function and a late report from a superseded operation
  * cannot blank a mission that is still being worked. This projection therefore
@@ -75,6 +75,7 @@ export function projectMissionActivity(card: MissionActivitySource): MissionActi
 }
 
 function projectWork(card: MissionActivitySource): MissionWorkActivity {
+  if (card.blockingReason) { return { kind: 'blocked', reason: card.blockingReason }; }
   const work: LiveMissionWork | null = card.currentWork;
   if (work !== null) {
     return {
@@ -86,7 +87,6 @@ function projectWork(card: MissionActivitySource): MissionWorkActivity {
       operationId: work.operationId,
     };
   }
-  if (card.blockingReason) { return { kind: 'blocked', reason: card.blockingReason }; }
   return { kind: 'idle' };
 }
 

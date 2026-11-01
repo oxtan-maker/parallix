@@ -7,7 +7,7 @@ import { type RepairCheckpointPort } from './ports/repair-checkpoint.js';
 import type { InvalidContractBlocker } from '../domain/rebound-policy.js';
 import { DEFAULT_REBOUND_ATTEMPTS, reboundDiagnostic, transientRetryAllowed, reboundRequiresHuman, repairStrategy, differentGateVerification, repairVerificationRequiresHuman, launchRecoveryAction, repairBudgetAllows, reboundExhaustion, type ReboundReason, type ReboundClassification } from '../domain/rebound-policy.js';
 export { classifyReboundReason, reboundDiagnostic, isTransientVerifierFailure } from '../domain/rebound-policy.js';
-export type { ReboundReason, ReboundClassification, GateFailureReason, HookFailureReason, ArtifactIncompleteReason, AgentTimeoutReason, HandoffVerificationReason, DeclaredGateValidationReason } from '../domain/rebound-policy.js';
+export type { ReboundReason, ReboundClassification, GateFailureReason, HookFailureReason, ArtifactIncompleteReason, AgentTimeoutReason, ReviewPreparationVerificationReason, DeclaredGateValidationReason } from '../domain/rebound-policy.js';
 import { recoveryEvidenceRoute } from './rebound-prompts.js';
 export { buildFreshDiagnosticRepairPrompt } from './rebound-prompts.js';
 /**
@@ -148,7 +148,7 @@ function refreshedReason(previous: ReboundReason, result: VerifyResult): Rebound
   if (previous.kind === 'gate-failure') {
     return { ...previous, failureReason: undefined, signal: undefined, stdout: result.diagnostic || previous.stdout, stderr: '', error: undefined };
   }
-  if (previous.kind === 'handoff-verification') {
+  if (previous.kind === "review-preparation-verification") {
     return { ...previous, gateOutput: result.diagnostic || previous.gateOutput };
   }
   if (previous.kind === 'declared-gate-validation') {
@@ -180,7 +180,7 @@ function recoveryManualNextAction(reason: ReboundReason, context: ReboundContext
     case 'hook-failure': return hookRecoveryAction(reason);
     case 'artifact-incomplete': return `Create the missing artifacts named above, then rerun px review ${context.slug}.`;
     case 'agent-timeout': return `Produce the required ${reason.role} output named above, then rerun px review ${context.slug}.`;
-    default: return `Repair the retained handoff failure, then rerun px review ${context.slug}.`;
+    default: return `Repair the retained review preparation failure, then rerun px review ${context.slug}.`;
   }
 }
 

@@ -2,7 +2,7 @@
 import test, { mock } from 'node:test';
 import { EventEmitter } from 'node:events';
 import assert from 'node:assert/strict';
-import { runWorkflowWorker, composeWorkflowOperations, observeWorkflowOperations } from '../../../src/composition/workflow-operations.js';
+import { runWorkflowWorker, composeWorkflowOperations } from '../../../src/composition/workflow-operations.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import { WorkflowOperationService } from '../../../src/application/workflow-operation-service.js';
 import type { WorkflowOperation } from '../../../src/domain/workflow-operation.js';
@@ -28,7 +28,7 @@ function fixture(reserved = true, claimed = false, settled = true) {
   const dependencies = { compose, context: () => ({ ok: true as const, context: { missionId: 'task-test', missionWorktree: '/unused', missionBranch: 'mission/task-test', baseWorktree: '/base', baseBranch: 'main' } }), worktree: () => null,
     capture: (() => ({ correlateOperation: () => {}, finish: () => { events.push('capture-ended'); } })) as never,
     host: async () => {
-      if (claimed) { operation = { ...operation, phase: 'preparing', owner: { pid: 99, identity: 'executor' } }; }
+      if (claimed) { operation = { ...operation, phase: 'executing', owner: { pid: 99, identity: 'executor' } }; }
       return { exitCode: 17, signal: null };
     },
   };
@@ -57,20 +57,6 @@ test('losing supervisors build no graph, capture or executor (TASK-2750 F3)', as
 });
 
 
-test('read-only CLI observation uses the existing connection without recovery or write transactions (TASK-2750 F3)', async () => {
-  const events: string[] = [];
-  const graph = { mission: { repositoryId: 'repo' }, operatorState: {
-    db: { query: async () => { events.push('read'); return []; } },
-    close: async () => { events.push('close'); },
-  }, presentationCapabilities: { boardProjection: {
-    build: async () => ({ stages: [], attentionQueue: [] }), buildMissionCard: async () => null,
-  }, tui: {} } } as unknown as import('../../../src/composition/application-services.js').ProductionApplicationServices;
-  const observed = observeWorkflowOperations(graph);
-  await observed.presentationCapabilities!.boardProjection.build();
-  await observed.operatorState.close();
-  assert.deepEqual(events, ['read', 'close']);
-  assert.equal(observed.operatorState, graph.operatorState);
-});
 
 for (const settled of [true, false]) {
   test(`claimed executor exit reconciles without a recovery host, effects settled=${settled} (TASK-2750 F1)`, async () => {
@@ -279,11 +265,11 @@ test('owned active execution retains implementation completion output (TASK-2750
   const messages: string[] = [];
   const previous = setLogger({ log: (message: unknown) => { messages.push(String(message)); }, error: () => {} });
   t.after(() => { setLogger(previous); });
-  let operation = { id: 'operation', missionId: 'task-test', repositoryId: 'repo', command: 'active:execute', phase: 'running', generation: 1 } as WorkflowOperation;
+  let operation = { id: 'operation', missionId: 'task-test', repositoryId: 'repo', command: 'active:execute', phase: 'executing', generation: 1 } as WorkflowOperation;
   const createGraph: typeof import('../../../src/composition/application-services.js').createProductionApplicationServices = async (_root, progress) => ({
     operatorState: { close: async () => {} }, presentationCapabilities: {
       commandController: { dispatch: async () => {
-        progress?.({ operationId: 'operation', sequence: 3, phase: 'handoff', message: 'starting handoff', timestamp: 'now', agent: 'custom' });
+        progress?.({ operationId: 'operation', sequence: 3, phase: 'review-preparation', message: "starting review preparation", timestamp: 'now', agent: 'custom' });
         return { status: 'completed' };
       } },
     },
@@ -299,15 +285,17 @@ test('owned active execution retains implementation completion output (TASK-2750
 });
 
 test('owned execution scopes writes and provider progress to its claimed generation and clears authority (TASK-2750)', async () => {
-  const { authorizeMissionWrite, reportAuthorizedProgress, reportWorkflowProviderStarted, hasMissionWriteAuthorization } = await import('../../../src/application/ports/mission-write-authorization.js');
+  const { authorizeMissionWrite, reportAuthorizedActivity, reportWorkflowProviderStarted, hasMissionWriteAuthorization } = await import('../../../src/application/ports/mission-write-authorization.js');
+  const activityEvent = { operationId: 'operation', missionId: 'task-test', phase: 'execute', state: 'running', summary: 'working', agent: 'custom', processId: 1, blockedReason: null, occurredAt: 'now' } as import('../../../src/domain/execution-activity.js').ExecutionActivity;
   const events: unknown[] = [];
-  const operation = { id: 'operation', missionId: 'task-test', repositoryId: 'repo', command: 'active:execute', phase: 'running', generation: 2, owner: { pid: 1, identity: 'owner' } } as WorkflowOperation;
+  const operation = { id: 'operation', missionId: 'task-test', repositoryId: 'repo', command: 'active:execute', phase: 'executing', generation: 2, owner: { pid: 1, identity: 'owner' } } as WorkflowOperation;
   let completed = false;
   const compose = async () => ({ service: {
     operation: async () => completed ? { ...operation, phase: 'completed' } : operation,
     run: async (_id: string, execute: (request: unknown) => Promise<unknown>) => { await execute({ kind: 'active:execute', missionId: 'task-test' }); completed = true; },
     assertOwner: async (...args: unknown[]) => { events.push(args); },
-    progress: async (...args: unknown[]) => { events.push(args); },
+    activity: async (...args: unknown[]) => { events.push(args); },
+    providerStarted: async (...args: unknown[]) => { events.push(args); },
   }, close: async () => { events.push('store closed'); } }) as unknown as Awaited<ReturnType<typeof composeWorkflowOperations>>;
   const graph: typeof import('../../../src/composition/application-services.js').createProductionApplicationServices = async (_root, _progress, options) => {
     assert.equal(options?.configuration?.runtime.workflowGeneration, 2);
@@ -317,14 +305,14 @@ test('owned execution scopes writes and provider progress to its claimed generat
       await authorizeMissionWrite('task-test', async () => operation);
       await assert.rejects(authorizeMissionWrite('other'), /another mission/);
       await assert.rejects(authorizeMissionWrite('task-test', async () => null), /owner missing/);
-      await reportAuthorizedProgress('execute', 'working', 'custom');
+      await reportAuthorizedActivity(activityEvent, 'operation');
       await reportWorkflowProviderStarted('custom');
       return { status: 'completed' };
     } } } } as unknown as Awaited<ReturnType<typeof graph>>;
   };
   assert.equal(await runWorkflowWorker('operation', '/unused', resolveConfiguration({}), true, graph, { compose }), 0);
   assert.equal(hasMissionWriteAuthorization(), false);
-  assert.deepEqual(events, [['operation', 2], ['operation', 2, 'execute', 'working', 'custom'], ['operation', 2, 'execute', 'provider execution started', 'custom', true], 'graph closed', 'store closed']);
+  assert.deepEqual(events, [['operation', 2], ['operation', 2, activityEvent, 'operation'], ['operation', 2, 'custom'], 'graph closed', 'store closed']);
 });
 
 for (const hostFailure of [false, true]) {

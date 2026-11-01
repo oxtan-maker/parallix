@@ -9,9 +9,9 @@ import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js'
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
 import { missionId } from '../../../../src/domain/mission.js';
 
-const action = { command: 'handoff', enabled: true, reason: null, targetLane: 'review' } as const;
+const action = { command: 'review', enabled: true, reason: null, targetLane: 'review' } as const;
 const cancel = { command: 'cancel', enabled: true, reason: null, targetLane: null, label: 'cancel ✕' } as const;
-const request = { missionId: 'task-2436-interaction', kind: 'handoff:record', missionStatusAtRequest: 'active' };
+const request = { missionId: 'task-2436-interaction', kind: 'review:submit', missionStatusAtRequest: 'active' };
 const commandResult = (status = 'completed', error: { readonly kind: string; readonly message: string } | null = null) => ({ kind: 'command-result' as const, transportVersion: 2, status, value: null, error, durableEvidence: [] });
 
 function snapshot(cards = [makeCard({ id: missionId('task-2436-interaction'), status: 'active', lane: 'active', commands: [action] })]) {
@@ -136,7 +136,7 @@ test('a pending mission rejects its cancellation surface with feedback (TASK-265
   const page = await renderBoard({ board: snapshot([card]), respond: () => new Promise<Response>((resolve) => { resolveRequest = resolve; }) });
   try {
     const buttons = [...page.mount.querySelectorAll<DomButton>('button')];
-    await act(async () => { buttons.find((button) => /px handoff/.test(button.getAttribute('aria-label') ?? ''))!.click(); });
+    await act(async () => { buttons.find((button) => /px review/.test(button.getAttribute('aria-label') ?? ''))!.click(); });
     await act(async () => { buttons.find((button) => /px cancel/.test(button.getAttribute('aria-label') ?? ''))!.click(); });
     assert.equal(page.calls.length, 1);
     assert.match(page.mount.querySelector('[role="status"]')?.textContent ?? '', /already running/i);
@@ -370,13 +370,13 @@ test('unmounting a request and completing an older request cannot restore stale 
 });
 
 test('board failure leaves the card in its received lane and restores initiating focus', async () => {
-  const page = await renderBoard({ result: commandResult('failed', { kind: 'execution', message: 'handoff failed' }) });
+  const page = await renderBoard({ result: commandResult('failed', { kind: 'execution', message: "review preparation failed" }) });
   try {
     const button = page.mount.querySelector<DomButton>('button[aria-label^="px "][aria-label*=" — enabled"]')!;
     await act(async () => { button.click(); await new Promise<void>((resolve) => queueMicrotask(resolve)); });
     assert.equal(page.calls.length, 1);
     assert.equal(page.mount.querySelector('[aria-label="active stage"] [data-board-card]')?.getAttribute('data-board-card'), 'task-2436-interaction');
-    assert.match(page.mount.querySelector('[role="status"]')?.textContent ?? '', /handoff failed/);
+    assert.match(page.mount.querySelector('[role="status"]')?.textContent ?? '', /review preparation failed/);
     assert.equal(isSameNode(page.window.document.activeElement, button), true);
   } finally { await page.close(); }
 });
@@ -424,19 +424,19 @@ test('an empty-to-populated snapshot expands the lane and a populated-to-empty s
     await page.rerender(filledReview);
     assert.deepEqual(laneAllocation(page.mount, 'review'), POPULATED_ALLOCATION, 'a populated review lane expands');
     assert.equal(page.mount.querySelector<DomHtmlElement>('[data-board-card="task-2773-06-survivor"]')?.getAttribute('aria-current'), 'true', 'selection survives the expansion');
-    assert.match(page.mount.querySelector<DomButton>('button[data-action-kind="handoff:record"]')?.getAttribute('aria-label') ?? '', /starting/, 'the pending command survives the expansion');
+    assert.match(page.mount.querySelector<DomButton>('button[data-action-kind="review:submit"]')?.getAttribute('aria-label') ?? '', /starting/, 'the pending command survives the expansion');
     assert.equal(page.calls.length, 1, 'the transition dispatches nothing of its own');
 
     // Populated to empty: the lane compacts back with the same state held.
     await page.rerender(emptyReview);
     assert.deepEqual(laneAllocation(page.mount, 'review'), COMPACT_ALLOCATION, 'an emptied review lane compacts');
     assert.equal(page.mount.querySelector<DomHtmlElement>('[data-board-card="task-2773-06-survivor"]')?.getAttribute('aria-current'), 'true', 'selection survives the compaction');
-    assert.match(page.mount.querySelector<DomButton>('button[data-action-kind="handoff:record"]')?.getAttribute('aria-label') ?? '', /starting/, 'the pending command survives the compaction');
+    assert.match(page.mount.querySelector<DomButton>('button[data-action-kind="review:submit"]')?.getAttribute('aria-label') ?? '', /starting/, 'the pending command survives the compaction');
     assert.equal(page.calls.length, 1, 'neither transition resends or drops the command');
 
     resolveRequest!(new Response(JSON.stringify(commandResult()), { headers: { 'content-type': 'application/json' } }));
     await act(async () => { await new Promise<void>((resolve) => queueMicrotask(resolve)); });
-    assert.match(page.mount.querySelector<DomButton>('button[data-action-kind="handoff:record"]')?.getAttribute('aria-label') ?? '', / — enabled/, 'the command releases only its own pending state');
+    assert.match(page.mount.querySelector<DomButton>('button[data-action-kind="review:submit"]')?.getAttribute('aria-label') ?? '', / — enabled/, 'the command releases only its own pending state');
   } finally { await page.close(); }
 });
 
@@ -774,13 +774,13 @@ test('backlog simultaneous projected actions have separate working controls (TAS
   try {
     const buttons = [...page.mount.querySelectorAll<DomButton>('[data-board-card] button')].filter((button) => button.getAttribute('aria-label')?.startsWith('px ') && !button.getAttribute('aria-label')?.startsWith('px cancel'));
     assert.equal(buttons.length, 2);
-    for (const name of ['px handoff', 'px active']) {
+    for (const name of ["px review", 'px active']) {
       await act(async () => {
         page.mount.querySelector<DomButton>(`[data-board-card] button[aria-label^="${name}"]`)!.click();
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
     }
-    assert.deepEqual(page.calls.map((call) => JSON.parse(String(call.body)).kind), ['handoff:record', 'active:execute']);
+    assert.deepEqual(page.calls.map((call) => JSON.parse(String(call.body)).kind), ['review:submit', 'active:execute']);
     assert.equal(page.mount.querySelector('[data-board-card]')?.getAttribute('aria-current'), 'false');
     assert.equal(page.mount.querySelector('[aria-label^="Mission progress"]'), null);
   } finally { await page.close(); }
@@ -805,7 +805,7 @@ test('a refreshed pointer control cannot dispatch its replacement or activate th
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     assert.equal(page.calls.length, 1);
-    assert.equal(payload(page.calls).kind, 'handoff:record');
+    assert.equal(payload(page.calls).kind, 'review:submit');
   } finally { await page.close(); }
 });
 
@@ -837,9 +837,10 @@ test('accepted command waits for authoritative preparing snapshot and exposes se
     assert.match(page.mount.textContent ?? '', /accepted; follow server progress/);
     assert.doesNotMatch(page.mount.textContent ?? '', /preparing workflow/);
     const operation = workflowOperation({ id: 'durable-operation', repositoryId: card.repositoryId, missionId: card.id, command: 'active:execute', requestKey: 'delivery',
+
       generation: 0, phase: 'accepted', providerStarted: false, agent: 'codex', reviewer: null, originalStatus: 'refined', previousAssignee: null, owner: null,
       createdAt: '2026-10-15T00:00:00Z', updatedAt: '2026-10-15T00:00:00Z', reason: null });
-    const server = toWebBoardSnapshot(projectWorkflowBoard(makeProjection({ active: [{ ...card, status: 'active', lane: 'active' }] }), [operation]));
+    const server = toWebBoardSnapshot(projectWorkflowBoard(makeProjection({ active: [{ ...card, status: 'active', lane: 'active', currentWork: { operationId: 'durable-operation', phase: 'execute', summary: 'preparing workflow', agent: null, updatedAt: '2026-10-15T00:00:00Z', freshness: 'unverified' } }] }), [operation]));
     await page.rerender(server);
     assert.match(page.mount.textContent ?? '', /preparing workflow/);
     const stop = page.mount.querySelector<DomButton>('[data-action-kind="workflow:stop"]');
@@ -916,7 +917,7 @@ for (const result of [commandResult(), commandResult('failed', { kind: 'executio
     const footer = () => page.mount.querySelector('footer [role="status"]');
     const fallback = () => page.mount.querySelector('[data-command-fallback]');
     try {
-      await act(async () => { page.mount.querySelector<DomButton>('[data-action-kind="handoff:record"]')!.click(); });
+      await act(async () => { page.mount.querySelector<DomButton>('[data-action-kind="review:submit"]')!.click(); });
       assert.match(footer()?.textContent ?? '', new RegExp(expected));
       assert.equal(footer()?.getAttribute('aria-live'), 'polite');
       assert.equal(fallback(), null);

@@ -1,3 +1,4 @@
+import { activitySnapshots } from '../../../fixtures/execution-activity.js';
 import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 import { agentFamily as fixtureAgentFamily } from '../../../../src/domain/agents.js';
 /**
@@ -18,8 +19,8 @@ import { agentFamily } from '../../../../src/domain/agents.js';
 import type { MissionId } from '../../../../src/domain/mission.js';
 import { ConcreteAgentReadAdapter } from '../../../../src/adapters/backlog/concrete-agent-read-adapter.js';
 import type { AgentBlockEntry, AgentBlocklistRepository } from '../../../../src/application/ports/agent-blocklist.js';
-import type { CurrentWorkReadAdapter } from '../../../../src/application/projections/current-work.js';
-import type { CurrentWorkEvent } from '../../../../src/application/recording/current-work-recorder.js';
+import type { ExecutionActivityReadPort } from '../../../../src/application/ports/execution-activity.js';
+import type { ExecutionActivity } from '../../../../src/application/recording/execution-activity-recorder.js';
 import type { SessionMarkerEntry, SessionMarkerRepository } from '../../../../src/application/ports/mission-store.js';
 import type { AgentFamily } from '../../../../src/domain/agents.js';
 import { Board } from '../../../../web/src/board.js';
@@ -80,7 +81,7 @@ class EmptyBlocklistRepo implements AgentBlocklistRepository {
   async clear(): Promise<void> { /* unused */ }
 }
 
-function nullAgentWork(overrides: Partial<CurrentWorkEvent> = {}): CurrentWorkEvent {
+function nullAgentWork(overrides: Partial<ExecutionActivity> = {}): ExecutionActivity {
   return {
     missionId,
     operationId: 'review:task-2498:current',
@@ -95,9 +96,10 @@ function nullAgentWork(overrides: Partial<CurrentWorkEvent> = {}): CurrentWorkEv
   };
 }
 
-function currentWork(...events: CurrentWorkEvent[]): CurrentWorkReadAdapter {
+function currentWork(...events: ExecutionActivity[]): ExecutionActivityReadPort {
   return {
-    async loadCurrentWork() { return events; },
+    async loadCurrentWork() { return activitySnapshots(events); },
+    async loadMissionCurrentWork(id) { return activitySnapshots(events.filter(event => event.missionId === id)); },
   };
 }
 

@@ -26,7 +26,7 @@ import {
   assertGoalCheckRows,
   uncoveredCriteria,
   staleRepairCriteria,
-  isHandoffReadyCheckpoint,
+  isReviewPreparationReadyCheckpoint,
   planCheckpoint,
   recordCheckpoint,
   retainPriorGoalCheckRows,
@@ -77,10 +77,10 @@ export interface ReadCheckpointsResult {
 
 /**
  * Evidence references resolve against the Mission's repository checkout.
- * Recording applies the reference semantics handoff applies, so an evidence
- * row handoff would refuse is refused when it is written. Without it (or
+ * Recording applies the reference semantics review preparation applies, so an evidence
+ * row review preparation would refuse is refused when it is written. Without it (or
  * without a resolvable checkout) recording checks only the row shape and
- * handoff remains the check.
+ * review preparation remains the check.
  */
 export interface CheckpointEvidenceReferences {
   readonly fileSystem: EvidenceFileSystemPort;
@@ -213,7 +213,7 @@ export class MissionCheckpointService {
         + `${request.checkpoint.missionId}, not ${request.missionId}`,
       );
     }
-    if (!isHandoffReadyCheckpoint(request.checkpoint)) {
+    if (!isReviewPreparationReadyCheckpoint(request.checkpoint)) {
       return failure(
         'validation',
         `checkpoint ${request.checkpoint.name} needs a CP-N name, at least one Goal Check row, and a next action`,
@@ -262,8 +262,8 @@ export class MissionCheckpointService {
   }
 
   /**
-   * Record-time evidence checks that mirror the reference semantics handoff
-   * applies: an evidence row handoff would refuse is refused when it is written,
+   * Record-time evidence checks that mirror the reference semantics review preparation
+   * applies: an evidence row review preparation would refuse is refused when it is written,
    * and the recorded checkpoints taken together must cover every success
    * criterion. A repair checkpoint may carry only its affected criteria while
    * valid earlier evidence is retained, so the shortfall is measured across all
@@ -281,8 +281,8 @@ export class MissionCheckpointService {
     if (rootDir && this._evidence) {
       // Validate the rows that will actually be retained (prior rows kept for a
       // repair plus the new rows), not just the submitted rows: a retained row
-      // is proof the handoff later stands on, so an invalid reference must be
-      // refused at record time exactly as it would be at handoff.
+      // is proof the review preparation later stands on, so an invalid reference must be
+      // refused at record time exactly as it would be at review preparation.
       const unverifiable = findUnverifiableRecordedRow(
         this._evidence.fileSystem,
         merged.goalCheck,
@@ -306,7 +306,7 @@ export class MissionCheckpointService {
         return failure(
           'validation',
           `checkpoint ${request.checkpoint.name} rejected: the open repair needs fresh fix evidence recorded in this review round for ${stale.join(', ')}; only stale rows from earlier rounds remain. `
-          + `Run px checkpoint record --name ${request.checkpoint.name} --criterion <affected> --evidence <verifiable> for the criteria the failure touches, then handoff.`,
+          + `Run px checkpoint record --name ${request.checkpoint.name} --criterion <affected> --evidence <verifiable> for the criteria the failure touches, then review preparation.`,
         );
       }
       const uncovered = uncoveredCriteria(updated.checkpoints, mission.successCriteria ?? [], mission.successCriterionIds);
@@ -315,7 +315,7 @@ export class MissionCheckpointService {
         const criteria = mission.successCriteria?.length ?? 0;
         return failure(
           'validation',
-          `checkpoint ${request.checkpoint.name} is the final planned checkpoint, and handoff requires every success criterion to have a row across all recorded checkpoints: ${criteria} criteria need ${criteria} row(s), but ${recordedRows} were recorded. Uncovered criteria: ${uncovered.join(', ')}. `
+          `checkpoint ${request.checkpoint.name} is the final planned checkpoint, and review preparation requires every success criterion to have a row across all recorded checkpoints: ${criteria} criteria need ${criteria} row(s), but ${recordedRows} were recorded. Uncovered criteria: ${uncovered.join(', ')}. `
           + 'Record the affected criteria; valid earlier evidence for the others is retained, and add rows for any criterion left uncovered.',
         );
       }

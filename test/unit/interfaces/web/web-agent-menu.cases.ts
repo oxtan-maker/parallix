@@ -7,7 +7,7 @@ import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js'
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
 import { missionId } from '../../../../src/domain/mission.js';
 
-const action = { command: 'handoff', enabled: true, reason: null, targetLane: 'review' } as const;
+const action = { command: 'review', enabled: true, reason: null, targetLane: 'review' } as const;
 const commandResult = () => ({ kind: 'command-result' as const, transportVersion: 2, status: 'completed', value: null, error: null, durableEvidence: [] });
 function snapshot() {
   return toWebBoardSnapshot(makeProjection({ active: [makeCard({ id: missionId('task-2436-interaction'), status: 'active', lane: 'active', commands: [action] })] }));

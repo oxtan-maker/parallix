@@ -8,7 +8,7 @@ import { toWebBoardSnapshot } from '../../src/interfaces/web/transport.js';
 const id = missionId('task-outcome-disposable');
 const snapshot = (lane: 'active' | 'review' | 'done') => toWebBoardSnapshot(makeProjection({
   [lane]: [makeCard({ id, title: 'Disposable command outcome', lane, status: lane,
-    commands: [{ command: lane === 'active' ? 'handoff' : 'review', enabled: true, reason: null, targetLane: null }] })],
+    commands: [{ command: 'review', enabled: true, reason: null, targetLane: null }] })],
 }));
 const fixture = await pointerBoard();
 try {
@@ -16,7 +16,7 @@ try {
   await fixture.render(snapshot('active'));
   const status = page.locator('footer [role="status"]');
   const fallback = page.locator('[data-command-fallback]');
-  await page.locator('[data-action-kind="handoff:record"]').click();
+  await page.locator('[data-action-kind="review:submit"]').click();
   await page.waitForFunction(() => document.querySelector('footer [role="status"]')?.textContent?.includes('started'));
   assert.equal(await status.getAttribute('aria-live'), 'polite');
   assert.equal(await status.isVisible(), true);

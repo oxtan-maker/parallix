@@ -1,4 +1,4 @@
-import { reportAuthorizedProgress } from '../../application/ports/mission-write-authorization.js';
+import { reportAuthorizedActivity, authorizedOperationId } from '../../application/ports/mission-write-authorization.js';
 import * as fmt from "../../application/presentation/cli-format.js";
 import { resolveReviewArtifactDir } from "../config/product-config.js";
 import { RESUME_CAPABLE, LAUNCHERS, resolveNoOutputWatchdogConfig, resolveCustomLauncher } from "./launcher-selection.js";
@@ -256,7 +256,10 @@ export async function prepareLaunch(state: StartAgentLoopState, deps: StartAgent
   }
   const customReservation = chosen === 'custom'
     ? await waitForCustomCapacity(worktree, async () => {
-      await reportAuthorizedProgress('waiting', 'waiting for provider capacity');
+      const operationId = authorizedOperationId();
+      if (operationId && deps.slug) {
+        await reportAuthorizedActivity({ missionId: sessionMissionId(deps.slug)!, operationId, phase: 'waiting', state: 'running', summary: 'waiting for provider capacity', agent: null, processId: process.pid, processIdentity: null, blockedReason: null, occurredAt: new Date().toISOString() }, operationId);
+      }
       log(fmt.status('INFO', 'Custom-agent capacity is saturated; waiting for an available slot.'));
     }, root => tryAcquireCustomCapacity(root, deps.configuration))
     : null;

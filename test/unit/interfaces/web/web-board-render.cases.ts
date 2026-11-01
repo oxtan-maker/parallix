@@ -179,12 +179,12 @@ test('a card shows runnable projected controls without unrelated unavailable but
       lane: 'active', count: 1, cards: [makeCard({
         id: fixtureMissionId('task-2657-mixed') as MissionCard['id'], lane: 'active', status: 'active', commands: [
           { command: 'active', enabled: false, reason: 'not eligible', targetLane: 'active' },
-          { command: 'handoff', enabled: true, reason: null, targetLane: 'review', label: 'record handoff' },
+          { command: 'review', enabled: true, reason: null, targetLane: 'review', label: "record review preparation" },
         ],
       })],
     }],
   }));
-  assert.match(html, /px handoff task-2657-mixed — enabled/);
+  assert.match(html, /px review task-2657-mixed — enabled/);
   assert.doesNotMatch(html, /px active task-2657-mixed/);
 });
 
@@ -195,7 +195,8 @@ test('normal server projections keep compact cards across all unfinished lanes (
     const card = makeCard({ id: mission.id, lane, status: lane, commands });
     const board = toWebBoardSnapshot(makeProjection({ [lane]: [card] }));
     const html = render(board);
-    assert.equal((html.match(/data-action-kind=/g) ?? []).length, 3, `${lane}: Cancel, Edit and one command or explanatory fallback`);
+    const runnable = commands.filter(command => command.command !== 'cancel' && command.enabled).length;
+    assert.equal((html.match(/data-action-kind=/g) ?? []).length, Math.max(1, runnable) + 2, `${lane}: Cancel, Edit and each eligible command, or one explanatory fallback`);
     for (const action of board.stages.flatMap((stage) => stage.cards)[0].actions.filter((action) => action.state === 'enabled')) {
       assert.ok(html.includes(`${action.display} — enabled`), `${lane}: every enabled action remains reachable`);
     }

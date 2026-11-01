@@ -1,4 +1,4 @@
-import type { HandoffWorkflowPorts } from '../../../src/application/ports/handoff-workflow.js';
+import type { ReviewPreparationWorkflowPorts } from '../../../src/application/ports/review-preparation-workflow.js';
 import { draftMissionServicesFixture } from '../../helpers/draft-mission-services.js';
 import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflow-ports.js';
 import { integrationContext } from '../../fixtures/integration-context.js';
@@ -35,7 +35,7 @@ import { repositoryId } from '../../../src/domain/repository.js';
 import { validateWorkflowConfig } from '../../../src/adapters/config/product-config.js';
 import { runPreDraftHook, storeStateFromOutput } from '../../../src/adapters/process/pre-draft-hook.js';
 import { buildWorkflowConfig } from '../../../src/adapters/review/setup-review-config.js';
-import { HandoffCommandUseCase } from '../../../src/application/handoff-command-use-case.js';
+import { ReviewPreparationCommandUseCase } from '../../../src/application/review-preparation-command-use-case.js';
 import { createIntegrationGateStep } from '../../../src/application/integrate/gates.js';
 import { setLogger } from '../../../src/application/presentation/cli-format.js';
 import { getPrStatus } from '../../../src/adapters/forgejo/forgejo.js';
@@ -45,7 +45,7 @@ import type { IntegrateWorkflowPorts } from '../../../src/application/ports/inte
 import type { AgentBlocklistRepository } from '../../../src/application/ports/agent-blocklist.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { createGateCommand } from '../../../src/interfaces/cli/mission-writes.js';
-import { SLUG, makePorts, makeRecorder, runOptions } from '../../helpers/handoff-ports.js';
+import { SLUG, makePorts, makeRecorder, runOptions } from "../../helpers/review-preparation-ports.js";
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -284,27 +284,27 @@ test('generated config carries the pre-draft hook entry and Parallix installs de
 
 // --- handoff PR step area ----------------------------------------------------------------
 
-test('the handoff Forgejo PR step gates the push on the mission area', async () => {
+test("the review preparation Forgejo PR step gates the push on the mission area", async () => {
   const recorder = makeRecorder();
   const areas: unknown[] = [];
   const base = makePorts(recorder);
   const ports = makePorts(recorder, {
     productConfig: { isForgejoReviewEnabled: () => true },
     verification: { ...base.verification, resolveEffectiveArea: () => 'docs' },
-    forgejo: { ...base.forgejo, createPr: (_b: string, _u: string, _t: string, options: Parameters<HandoffWorkflowPorts['forgejo']['createPr']>[3]) => { areas.push(options.verificationArea); return { ok: true as const }; } },
+    forgejo: { ...base.forgejo, createPr: (_b: string, _u: string, _t: string, options: Parameters<ReviewPreparationWorkflowPorts['forgejo']['createPr']>[3]) => { areas.push(options.verificationArea); return { ok: true as const }; } },
   });
-  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  const result = await new ReviewPreparationCommandUseCase(ports).performReviewPreparation(SLUG, runOptions(recorder));
   assert.equal(result.ok, true, recorder.errors.join('\n'));
   assert.deepEqual(areas, ['docs']);
 });
 
-test('a non-gate rebase failure before handoff keeps the rebase message', async () => {
+test("a non-gate rebase failure before review preparation keeps the rebase message", async () => {
   const recorder = makeRecorder();
   const ports = makePorts(recorder, {
     rebase: { rebaseBeforeReviewRound: async () => ({ ok: false as const, sharedFileConflicts: false, hookFailure: false, failure: { kind: 'other', operation: 'rebase', output: 'exit 1' } }) },
   });
-  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
-  assert.match(result.error ?? '', /Rebase failed before handoff/);
+  const result = await new ReviewPreparationCommandUseCase(ports).performReviewPreparation(SLUG, runOptions(recorder));
+  assert.match(result.error ?? '', /Rebase failed before review preparation/);
   assert.equal(result.gateFailure, undefined);
 });
 

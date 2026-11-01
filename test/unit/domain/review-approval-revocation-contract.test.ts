@@ -55,6 +55,22 @@ describe("revoke review", { concurrency: false }, () => {
   ), { type: 'approve', revision: changeRevision('abc'), decidedAt: '2026-01-01T00:01:00Z', comment: null, source: { kind: 'local' } });
   const mission: Mission = { id, repositoryId: repositoryId('repo'), title: 'revoke', labels: missionLabels([]), assignee: null, checkpoints: [], review, netEngineeringLines: null, status: 'integration', closedAt: null };
 
+  test('human change request retains authority after early review entry (TASK-2822)', async () => {
+    const { inMemoryTransitionStore } = await import('../../fixtures/mission-builders.js');
+    const preparing = decideMission(mission, { type: 'begin-review-preparation' });
+    assert.equal(preparing.status, 'review');
+    assert.equal(preparing.review, review);
+    const store = inMemoryTransitionStore(preparing);
+    const result = await new RevokeReviewDecisionUseCase(store, new MissionLifecycleService(store)).execute({
+      slug: String(id), round: 1, reason: 'Human requests the behavior change', operator: 'human', occurredAt: '2026-10-26T10:00:00Z',
+    });
+    assert.equal(result.status, 'completed', result.error?.message ?? '');
+    assert.equal(store.mission().review!.rounds.length, 2);
+    assert.equal(store.mission().review!.rounds[0]!.subject.revision, 'abc');
+    assert.equal(store.mission().review!.rounds[0]!.decision?.kind, 'approved');
+    assert.equal(store.mission().review!.rounds[1]!.decision, null);
+  });
+
   test('refused revocation does not read or mutate its store', async () => {
     let reads = 0;
     const useCase = new RevokeReviewDecisionUseCase({

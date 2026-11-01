@@ -1,4 +1,4 @@
-import type { ExecuteHandoffPorts, ExecuteHandoffRequest } from '../../../../../src/application/execute-handoff-service.js';
+import type { ExecuteReviewPreparationPorts, ExecuteReviewPreparationRequest } from '../../../../../src/application/execute-review-preparation-service.js';
 // Historical regression provenance: TASK-2215, TASK-2581.
 // Mission checkpoint gate bounce contract: missing or invalid checkpoint evidence is repairable and
 // relaunches the agent within a bounded budget.
@@ -21,41 +21,41 @@ import path from 'node:path';
 import test, { mock, describe } from 'node:test';
 import { mkdtemp as registeredMkdtemp } from '../../../../helpers/temp-dir.js';
 import { mockModule, installModuleMocks } from '../../../../lib/module-mock.js';
-import { ExecuteHandoffService } from '../../../../../src/application/execute-handoff-service.js';
+import { ExecuteReviewPreparationService } from '../../../../../src/application/execute-review-preparation-service.js';
 import { classifyError } from '../../../../../src/application/failure-classification.js';
-import { isRelaunchableError } from '../../../../../src/adapters/cli/commands/repair-handoff.js';
+import { isRelaunchableError } from '../../../../../src/adapters/cli/commands/repair-review-preparation.js';
 
 // ── Checkpoint gate bounce — TASK-2261 ──
-const repairHandoff = mockModule<typeof import('../../../../../src/adapters/cli/commands/repair-handoff.js')>('../../../../../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
+const repairReviewPreparation = mockModule<typeof import('../../../../../src/adapters/cli/commands/repair-review-preparation.js')>('../../../../../src/adapters/cli/commands/repair-review-preparation.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 interface BounceOptions {
-  validateCheckpointsBeforeHandoffFn?: (slug: string, worktree: string, output: Partial<Pick<ExecuteHandoffPorts['output'], 'log' | 'error'>>) => Awaited<ReturnType<ExecuteHandoffPorts['checkpoints']['validateBeforeHandoff']>>;
-  performHandoff?: (slug: string, options: { forgejoUser: string; worktree: string; force?: boolean }) => ReturnType<ExecuteHandoffPorts['handoff']['run']>;
-  repairHandoffFn?: (slug: string, worktree: string, error: string, options: { taskFile: string | null; log: (message: string) => void; error: (message: string) => void }) => Promise<{ repaired: boolean; blocker?: string | null }>;
-  startAgentFn?: (step: string, options: Parameters<ExecuteHandoffPorts['repairLaunch']['launch']>[0] & { role: 'implementer' }) => ReturnType<ExecuteHandoffPorts['repairLaunch']['launch']>;
-  startReviewLoop?: (slug: string, options: Parameters<ExecuteHandoffPorts['review']['start']>[0] & { skipHandoff: true }) => void | Promise<void>;
-  workflowLauncherStatusFn?: ExecuteHandoffPorts['repairLaunch']['available'];
-  log?: ExecuteHandoffPorts['output']['log'];
-  error?: ExecuteHandoffPorts['output']['error'];
+  validateCheckpointsBeforeReviewPreparationFn?: (slug: string, worktree: string, output: Partial<Pick<ExecuteReviewPreparationPorts['output'], 'log' | 'error'>>) => Awaited<ReturnType<ExecuteReviewPreparationPorts['checkpoints']["validateBeforeReviewPreparation"]>>;
+  performReviewPreparation?: (slug: string, options: { forgejoUser: string; worktree: string; force?: boolean }) => ReturnType<ExecuteReviewPreparationPorts['reviewPreparation']['run']>;
+  repairReviewPreparationFn?: (slug: string, worktree: string, error: string, options: { taskFile: string | null; log: (message: string) => void; error: (message: string) => void }) => Promise<{ repaired: boolean; blocker?: string | null }>;
+  startAgentFn?: (step: string, options: Parameters<ExecuteReviewPreparationPorts['repairLaunch']['launch']>[0] & { role: 'implementer' }) => ReturnType<ExecuteReviewPreparationPorts['repairLaunch']['launch']>;
+  startReviewLoop?: (slug: string, options: Parameters<ExecuteReviewPreparationPorts['review']['start']>[0] & { skipReviewPreparation: true }) => void | Promise<void>;
+  workflowLauncherStatusFn?: ExecuteReviewPreparationPorts['repairLaunch']['available'];
+  log?: ExecuteReviewPreparationPorts['output']['log'];
+  error?: ExecuteReviewPreparationPorts['output']['error'];
   taskFile?: string | null;
-  onAgentLaunched?: ExecuteHandoffRequest['onAgentLaunched'];
-  onAutonomousStop?: ExecuteHandoffRequest['onAutonomousStop'];
+  onAgentLaunched?: ExecuteReviewPreparationRequest['onAgentLaunched'];
+  onAutonomousStop?: ExecuteReviewPreparationRequest['onAutonomousStop'];
 }
-const runHandoffAndReview = async (slug: string, worktree: string, agent: string, options: BounceOptions = {}) => {
-  const validate = options.validateCheckpointsBeforeHandoffFn ?? (() => ({ ok: true as const }));
-  const handoff = options.performHandoff ?? (async () => ({ ok: true as const }));
-  const repair: NonNullable<BounceOptions['repairHandoffFn']> = options.repairHandoffFn ?? (async () => ({ repaired: false }));
+const runReviewPreparationAndReview = async (slug: string, worktree: string, agent: string, options: BounceOptions = {}) => {
+  const validate = options.validateCheckpointsBeforeReviewPreparationFn ?? (() => ({ ok: true as const }));
+  const reviewPreparation = options.performReviewPreparation ?? (async () => ({ ok: true as const }));
+  const repair: NonNullable<BounceOptions["repairReviewPreparationFn"]> = options.repairReviewPreparationFn ?? (async () => ({ repaired: false }));
   const launch = options.startAgentFn ?? (async () => ({}));
-  return new ExecuteHandoffService({
-    checkpoints: { async validateBeforeHandoff(request) { return validate(slug, worktree, { log: request.log, error: request.error }); } },
-    handoff: {
-      async run(request) { return handoff(slug, { forgejoUser: agent, worktree, force: request.force }); },
+  return new ExecuteReviewPreparationService({
+    checkpoints: { async validateBeforeReviewPreparation(request) { return validate(slug, worktree, { log: request.log, error: request.error }); } },
+    reviewPreparation: {
+      async run(request) { return reviewPreparation(slug, { forgejoUser: agent, worktree, force: request.force }); },
       async repairHygiene(request) { const result = await repair(slug, worktree, request.error, { taskFile: request.taskFile, log: request.log, error: request.outputError }); return { ...result, blocker: result.blocker ?? undefined }; },
       classifyFailure: classifyError,
       isRelaunchableFailure: isRelaunchableError,
     },
-    review: { async start(request) { await options.startReviewLoop?.(slug, { slug, implementer: agent, worktree, skipHandoff: true, onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop }); } },
+    review: { async start(request) { await options.startReviewLoop?.(slug, { slug, implementer: agent, worktree, skipReviewPreparation: true, onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop }); } },
     repairLaunch: {
       available: options.workflowLauncherStatusFn ?? (() => ({ supported: true })),
       readHead() { return null; },
@@ -67,22 +67,22 @@ const runHandoffAndReview = async (slug: string, worktree: string, agent: string
 
 // ── CP-1: Missing checkpoint → repairable relaunch (not stranded instruction) ──
 
-test('missing checkpoint: runHandoffAndReview classifies as repairable and relaunches agent instead of stranding', async () => {
+test("missing checkpoint: runReviewPreparationAndReview classifies as repairable and relaunches agent instead of stranding", async () => {
   const slug = 'task-2261';
   const worktree = '/tmp/worktree-task-2261';
   const logs: string[] = [];
   const errors: string[] = [];
   let relaunchCalled = false;
   let relaunchPrompt = null;
-  let performHandoffCallCount = 0;
+  let performReviewPreparationCallCount = 0;
 
-  const result = await runHandoffAndReview(slug, worktree, 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({
+  const result = await runReviewPreparationAndReview(slug, worktree, 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({
       ok: false as const,
-      error: `No checkpoint documents found in /tmp/worktree-task-2261/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff. Create at least CP-1 documenting your implementation, including a Goal Check table with real evidence such as a backticked command, test name, ADR reference, or test file path.`
+      error: `No checkpoint documents found in /tmp/worktree-task-2261/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before review preparation. Create at least CP-1 documenting your implementation, including a Goal Check table with real evidence such as a backticked command, test name, ADR reference, or test file path.`
     }),
-    performHandoff: async () => {
-      performHandoffCallCount++;
+    performReviewPreparation: async () => {
+      performReviewPreparationCallCount++;
       return { ok: false as const, error: 'still missing' };
     },
     startAgentFn: async (_step, opts) => {
@@ -92,7 +92,7 @@ test('missing checkpoint: runHandoffAndReview classifies as repairable and relau
       // Simulate the launch succeeding but the checkpoint still not created
       return { agent: 'codex', result: { status: 0 } };
     },
-    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    repairReviewPreparationFn: async () => ({ repaired: false, blocker: null }),
     startReviewLoop: () => {},
     log: (msg) => logs.push(msg),
     error: (msg) => errors.push(msg)
@@ -105,8 +105,8 @@ test('missing checkpoint: runHandoffAndReview classifies as repairable and relau
 });
 
 test('missing checkpoint: classifyError recognizes missing-checkpoint message as IncompleteEvidence', () => {
-  const { classifyError, FailureClass } = repairHandoff;
-  const errorMsg = 'No checkpoint documents found in /tmp/worktree/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff. Create at least CP-1 documenting your implementation, including a Goal Check table with real evidence such as a backticked command, test name, ADR reference, or test file path.';
+  const { classifyError, FailureClass } = repairReviewPreparation;
+  const errorMsg = "No checkpoint documents found in /tmp/worktree/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before review preparation. Create at least CP-1 documenting your implementation, including a Goal Check table with real evidence such as a backticked command, test name, ADR reference, or test file path.";
 
   const result = classifyError(errorMsg);
 
@@ -121,8 +121,8 @@ test('missing checkpoint: classifyError recognizes missing-checkpoint message as
 // ── CP-2: Checkpoint missing Goal Check table → repairable relaunch ──
 
 test('checkpoint missing Goal Check: classifyError recognizes as IncompleteEvidence', () => {
-  const { classifyError, FailureClass } = repairHandoff;
-  const errorMsg = 'The final checkpoint at missions/task-2261/CP-1.md is missing a "## Goal Check" section. Review requires a goal-check table with real evidence before handoff.';
+  const { classifyError, FailureClass } = repairReviewPreparation;
+  const errorMsg = "The final checkpoint at missions/task-2261/CP-1.md is missing a \"## Goal Check\" section. Review requires a goal-check table with real evidence before review preparation.";
 
   const result = classifyError(errorMsg);
 
@@ -134,19 +134,19 @@ test('checkpoint missing Goal Check: classifyError recognizes as IncompleteEvide
 
 // ── CP-3: Retry lifecycle outcomes ──
 
-test('valid repaired checkpoint: runHandoffAndReview unblocks handoff after relaunch creates valid checkpoint', async () => {
+test("valid repaired checkpoint: runReviewPreparationAndReview unblocks review preparation after relaunch creates valid checkpoint", async () => {
   const slug = 'task-2261';
   const worktree = '/tmp/worktree-task-2261';
-  let handoffAttempts = 0;
+  let reviewPreparationAttempts = 0;
   let relaunchCount = 0;
   let reviewLoopCalled = false;
 
-  const result = await runHandoffAndReview(slug, worktree, 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async () => {
-      handoffAttempts++;
-      if (handoffAttempts === 1) {
-        return { ok: false as const, error: 'The final checkpoint at missions/task-2261/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
+  const result = await runReviewPreparationAndReview(slug, worktree, 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async () => {
+      reviewPreparationAttempts++;
+      if (reviewPreparationAttempts === 1) {
+        return { ok: false as const, error: "The final checkpoint at missions/task-2261/CP-1.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation." };
       }
       return { ok: true as const };
     },
@@ -154,49 +154,49 @@ test('valid repaired checkpoint: runHandoffAndReview unblocks handoff after rela
       relaunchCount++;
       return { agent: 'codex', result: { status: 0 } };
     },
-    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    repairReviewPreparationFn: async () => ({ repaired: false, blocker: null }),
     startReviewLoop: () => { reviewLoopCalled = true; },
     log: () => {},
     error: () => {}
   });
 
-  assert.equal(result, true, 'Handoff should succeed after agent relaunch creates valid checkpoint');
-  assert.ok(handoffAttempts >= 2, 'Handoff should be retried after relaunch');
+  assert.equal(result, true, "ReviewPreparation should succeed after agent relaunch creates valid checkpoint");
+  assert.ok(reviewPreparationAttempts >= 2, "ReviewPreparation should be retried after relaunch");
   assert.ok(relaunchCount >= 1, 'Agent relaunch should be attempted');
-  assert.ok(reviewLoopCalled, 'Review loop should be started after successful handoff');
+  assert.ok(reviewLoopCalled, "Review loop should be started after successful review preparation");
 });
 
-test('exhaustion: runHandoffAndReview stops after bounded relaunch attempts without submitting review', async () => {
+test("exhaustion: runReviewPreparationAndReview stops after bounded relaunch attempts without submitting review", async () => {
   const slug = 'task-2261';
   const worktree = '/tmp/worktree-task-2261';
-  let handoffAttempts = 0;
+  let reviewPreparationAttempts = 0;
   let relaunchCount = 0;
   let reviewLoopCalled = false;
 
-  const result = await runHandoffAndReview(slug, worktree, 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async () => {
-      handoffAttempts++;
-      return { ok: false as const, error: 'The final checkpoint at missions/task-2261/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
+  const result = await runReviewPreparationAndReview(slug, worktree, 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async () => {
+      reviewPreparationAttempts++;
+      return { ok: false as const, error: "The final checkpoint at missions/task-2261/CP-1.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation." };
     },
     startAgentFn: async () => {
       relaunchCount++;
       return { agent: 'codex', result: { status: 0 } };
     },
-    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    repairReviewPreparationFn: async () => ({ repaired: false, blocker: null }),
     startReviewLoop: () => { reviewLoopCalled = true; },
     log: () => {},
     error: () => {}
   });
 
-  assert.equal(result, false, 'Handoff should fail after exhaustion');
+  assert.equal(result, false, "ReviewPreparation should fail after exhaustion");
   assert.ok(!reviewLoopCalled, 'Review loop should NOT be called when exhaustion is reached');
   assert.ok(relaunchCount >= 2, 'Should attempt at least 2 relaunches before exhaustion');
 });
 
 // ── CP-3: Missing checkpoint path — relaunch then unblocks or exhausts ──
 
-test('missing checkpoint: valid CP after relaunch unblocks handoff and starts review loop', async () => {
+test("missing checkpoint: valid CP after relaunch unblocks review preparation and starts review loop", async () => {
   // Deterministic filesystem fixture: creates a real CP-1.md with Goal Check table
   // and one evidence row per mission criterion, then verifies the validation path accepts it.
   const tmpRoot = registeredMkdtemp('task-2261-valid-cp-');
@@ -204,17 +204,17 @@ test('missing checkpoint: valid CP after relaunch unblocks handoff and starts re
   const missionDir = path.join(tmpRoot, 'missions', slug);
   fs.mkdirSync(missionDir, { recursive: true });
   // Initially: no checkpoint files
-  let handoffAttempts = 0;
+  let reviewPreparationAttempts = 0;
   let relaunchCount = 0;
   let reviewLoopCalled = false;
   let checkpointCreated = false;
 
-  const result = await runHandoffAndReview(slug, tmpRoot, 'codex', {
-    validateCheckpointsBeforeHandoffFn: (s, w) => {
+  const result = await runReviewPreparationAndReview(slug, tmpRoot, 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: (s, w) => {
       // Real filesystem check: look for CP-*.md files with Goal Check content
       const cpFiles = fs.readdirSync(missionDir).filter(f => /^CP-\d+\.md$/.test(f));
       if (cpFiles.length === 0) {
-        return { ok: false as const, error: 'No checkpoint documents found in ' + missionDir + '. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff.' };
+        return { ok: false as const, error: 'No checkpoint documents found in ' + missionDir + ". The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before review preparation." };
       }
       // Validate Goal Check table is present in the latest checkpoint
       const latestCp = cpFiles.sort().pop();
@@ -230,8 +230,8 @@ test('missing checkpoint: valid CP after relaunch unblocks handoff and starts re
       }
       return { ok: true as const };
     },
-    performHandoff: async () => {
-      handoffAttempts++;
+    performReviewPreparation: async () => {
+      reviewPreparationAttempts++;
       return { ok: true as const };
     },
     startAgentFn: async () => {
@@ -249,23 +249,23 @@ Checkpoint created after targeted repair relaunch.
 
 | Criterion | Evidence | Status |
 |---|---|---|
-| Deterministic regression test reproduces execute-complete mission with no checkpoint | test/task-2261-checkpoint-gates-repro.test.ts:20 — "missing checkpoint: runHandoffAndReview classifies as repairable and relaunches agent" | PASS |
-| Handoff classifies missing CP-N.md and missing Goal Check as IncompleteEvidence | test/task-2261-checkpoint-gates-repro.test.ts:58 — classifyError test; test/task-2261-checkpoint-gates-repro.test.ts:89 — Goal Check classifyError test | PASS |
+| Deterministic regression test reproduces execute-complete mission with no checkpoint | test/task-2261-checkpoint-gates-repro.test.ts:20 — "missing checkpoint: runReviewPreparationAndReview classifies as repairable and relaunches agent" | PASS |
+| ReviewPreparation classifies missing CP-N.md and missing Goal Check as IncompleteEvidence | test/task-2261-checkpoint-gates-repro.test.ts:58 — classifyError test; test/task-2261-checkpoint-gates-repro.test.ts:89 — Goal Check classifyError test | PASS |
 | Targeted relaunch names CP-N.md, requires ## Goal Check and table columns, supplies px review --submit | test/task-2261-checkpoint-gates-repro.test.ts:72 — captured repair prompt | PASS |
-| Valid checkpoint with one evidence row per criterion unblocks automated handoff retry | test/task-2261-checkpoint-gates-repro.test.ts:178 — "missing checkpoint: valid CP after relaunch unblocks handoff" | PASS |
+| Valid checkpoint with one evidence row per criterion unblocks automated review preparation retry | test/task-2261-checkpoint-gates-repro.test.ts:178 — "missing checkpoint: valid CP after relaunch unblocks review preparation" | PASS |
 | Repeated absent evidence reaches configured retry/exhaustion boundary without review submission | test/task-2261-checkpoint-gates-repro.test.ts:258 — "missing checkpoint: still absent after relaunch returns false" (asserts relaunchCount === 2) | PASS |
 | Focused tests and verify-local.sh all pass | npm test -- test/task-2261-checkpoint-gates-repro.test.ts (12 tests); ./scripts/verify-local.sh all (1330 tests) | PASS |
 `, 'utf8');
       }
       return { agent: 'codex', result: { status: 0 } };
     },
-    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    repairReviewPreparationFn: async () => ({ repaired: false, blocker: null }),
     startReviewLoop: () => { reviewLoopCalled = true; },
     log: () => {},
     error: () => {}
   });
 
-  assert.equal(result, true, 'Handoff should succeed after agent creates valid checkpoint with Goal Check');
+  assert.equal(result, true, "ReviewPreparation should succeed after agent creates valid checkpoint with Goal Check");
   assert.equal(relaunchCount, 1, 'Should attempt exactly 1 relaunch (checkpoint valid after first)');
   assert.ok(checkpointCreated, 'Agent relaunch should have created a real CP-1.md');
   assert.ok(fs.existsSync(path.join(missionDir, 'CP-1.md')), 'CP-1.md file should exist on disk');
@@ -274,8 +274,8 @@ Checkpoint created after targeted repair relaunch.
   assert.ok(/\| Criterion \| Evidence \| Status \|/.test(cpContent), 'CP-1.md should contain the 3-column table header');
   const evidenceRows = cpContent.split('\n').filter(l => /^\|/.test(l) && !/Criterion/.test(l) && !/^\|-+\|/.test(l));
   assert.equal(evidenceRows.length, 6, 'CP-1.md should have exactly 6 evidence rows (one per mission Success Criterion)');
-  assert.equal(handoffAttempts, 1, 'performHandoff should be called once after validation passes');
-  assert.ok(reviewLoopCalled, 'Review loop should be started after successful handoff');
+  assert.equal(reviewPreparationAttempts, 1, "performReviewPreparation should be called once after validation passes");
+  assert.ok(reviewLoopCalled, "Review loop should be started after successful review preparation");
 
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
@@ -283,25 +283,25 @@ Checkpoint created after targeted repair relaunch.
 test('missing checkpoint: still absent after relaunch returns false with manual instruction', async () => {
   const slug = 'task-2261';
   const worktree = '/tmp/worktree-task-2261';
-  let handoffAttempts = 0;
+  let reviewPreparationAttempts = 0;
   let relaunchCount = 0;
   let reviewLoopCalled = false;
   const errors: string[] = [];
 
-  const result = await runHandoffAndReview(slug, worktree, 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({
+  const result = await runReviewPreparationAndReview(slug, worktree, 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({
       ok: false as const,
-      error: 'No checkpoint documents found in /tmp/worktree-task-2261/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff.'
+      error: "No checkpoint documents found in /tmp/worktree-task-2261/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before review preparation."
     }),
-    performHandoff: async () => {
-      handoffAttempts++;
+    performReviewPreparation: async () => {
+      reviewPreparationAttempts++;
       return { ok: false as const, error: 'still missing' };
     },
     startAgentFn: async () => {
       relaunchCount++;
       return { agent: 'codex', result: { status: 0 } };
     },
-    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    repairReviewPreparationFn: async () => ({ repaired: false, blocker: null }),
     startReviewLoop: () => { reviewLoopCalled = true; },
     log: () => {},
     error: (msg) => errors.push(msg)
@@ -309,7 +309,7 @@ test('missing checkpoint: still absent after relaunch returns false with manual 
 
   assert.equal(result, false, 'Should return false when checkpoint still missing after bounded relaunches');
   assert.equal(relaunchCount, 2, 'Should attempt 2 relaunches (bounded retry) before exhaustion');
-  assert.equal(handoffAttempts, 0, 'performHandoff should NOT be called when validation still fails');
+  assert.equal(reviewPreparationAttempts, 0, "performReviewPreparation should NOT be called when validation still fails");
   assert.ok(!reviewLoopCalled, 'Review loop should NOT be called');
   assert.ok(errors.some(e => e.includes('Create a checkpoint document')), 'Should emit manual instruction');
   assert.ok(errors.some(e => e.includes('px review task-2261 --submit')), 'Should include retry command');
@@ -318,25 +318,25 @@ test('missing checkpoint: still absent after relaunch returns false with manual 
 test('missing checkpoint: relaunch failure returns false with manual instruction', async () => {
   const slug = 'task-2261';
   const worktree = '/tmp/worktree-task-2261';
-  let handoffAttempts = 0;
+  let reviewPreparationAttempts = 0;
   let relaunchCount = 0;
   let reviewLoopCalled = false;
   const errors: string[] = [];
 
-  const result = await runHandoffAndReview(slug, worktree, 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({
+  const result = await runReviewPreparationAndReview(slug, worktree, 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({
       ok: false as const,
-      error: 'No checkpoint documents found in /tmp/worktree-task-2261/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff.'
+      error: "No checkpoint documents found in /tmp/worktree-task-2261/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before review preparation."
     }),
-    performHandoff: async () => {
-      handoffAttempts++;
+    performReviewPreparation: async () => {
+      reviewPreparationAttempts++;
       return { ok: false as const, error: 'still missing' };
     },
     startAgentFn: async () => {
       relaunchCount++;
       throw new Error('agent launcher not available');
     },
-    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    repairReviewPreparationFn: async () => ({ repaired: false, blocker: null }),
     startReviewLoop: () => { reviewLoopCalled = true; },
     log: () => {},
     error: (msg) => errors.push(msg)
@@ -346,7 +346,7 @@ test('missing checkpoint: relaunch failure returns false with manual instruction
   // TASK-2377.05 (SC5): the rebound kernel's per-occurrence budget is 2, and a
   // failed launch consumes an attempt rather than aborting the bounce.
   assert.equal(relaunchCount, 2, 'Should spend the kernel budget of 2 launch attempts');
-  assert.equal(handoffAttempts, 0, 'performHandoff should NOT be called when relaunch fails');
+  assert.equal(reviewPreparationAttempts, 0, "performReviewPreparation should NOT be called when relaunch fails");
   assert.ok(!reviewLoopCalled, 'Review loop should NOT be called');
   assert.ok(errors.some(e => e.includes('Create a checkpoint document')), 'Should emit manual instruction');
 });
@@ -356,25 +356,25 @@ test('missing checkpoint: relaunch failure returns false with manual instruction
 test('dirty checkpoint: GitBlockers classification does NOT enter the IncompleteEvidence relaunch loop', async () => {
   const slug = 'task-2261';
   const worktree = '/tmp/worktree-task-2261';
-  let handoffAttempts = 0;
+  let reviewPreparationAttempts = 0;
   let relaunchCount = 0;
   let reviewLoopCalled = false;
   const errors: string[] = [];
 
-  const result = await runHandoffAndReview(slug, worktree, 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({
+  const result = await runReviewPreparationAndReview(slug, worktree, 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({
       ok: false as const,
-      error: 'Checkpoint documents must be committed before handoff. Uncommitted checkpoint files: CP-1.md. Commit the checkpoint update and re-run the handoff.'
+      error: "Checkpoint documents must be committed before review preparation. Uncommitted checkpoint files: CP-1.md. Commit the checkpoint update and re-run the review preparation."
     }),
-    performHandoff: async () => {
-      handoffAttempts++;
+    performReviewPreparation: async () => {
+      reviewPreparationAttempts++;
       return { ok: false as const, error: 'still dirty' };
     },
     startAgentFn: async () => {
       relaunchCount++;
       return { agent: 'codex', result: { status: 0 } };
     },
-    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    repairReviewPreparationFn: async () => ({ repaired: false, blocker: null }),
     startReviewLoop: () => { reviewLoopCalled = true; },
     log: () => {},
     error: (msg) => errors.push(msg)
@@ -384,13 +384,13 @@ test('dirty checkpoint: GitBlockers classification does NOT enter the Incomplete
   // the targeted relaunch loop. Returns false immediately with manual instruction.
   assert.equal(result, false, 'Should return false for dirty checkpoint (not IncompleteEvidence)');
   assert.equal(relaunchCount, 0, 'Should NOT attempt any relaunches for non-IncompleteEvidence errors');
-  assert.equal(handoffAttempts, 0, 'performHandoff should NOT be called');
+  assert.equal(reviewPreparationAttempts, 0, "performReviewPreparation should NOT be called");
   assert.ok(!reviewLoopCalled, 'Review loop should NOT be called');
 });
 
 test('dirty checkpoint: classifyError does NOT classify uncommitted checkpoint as IncompleteEvidence', () => {
-  const { classifyError, FailureClass } = repairHandoff;
-  const errorMsg = 'Checkpoint documents must be committed before handoff. Uncommitted checkpoint files: CP-1.md. Commit the checkpoint update and re-run the handoff.';
+  const { classifyError, FailureClass } = repairReviewPreparation;
+  const errorMsg = "Checkpoint documents must be committed before review preparation. Uncommitted checkpoint files: CP-1.md. Commit the checkpoint update and re-run the review preparation.";
 
   const result = classifyError(errorMsg);
 
@@ -400,7 +400,7 @@ test('dirty checkpoint: classifyError does NOT classify uncommitted checkpoint a
 
 // ── Missing checkpoint error classification — TASK-2215 (was 2215.ts) ──
 describe("Missing checkpoint error classification —", () => {
-  const { classifyError, FailureClass, DispatchAction } = repairHandoff;
+  const { classifyError, FailureClass, DispatchAction } = repairReviewPreparation;
 
   // Reproduction tests for task-2215 (missing error bounce).
   //
@@ -424,7 +424,7 @@ describe("Missing checkpoint error classification —", () => {
   });
 
   test('missing checkpoint evidence is sent back without generating placeholders', () => {
-    const result = classifyError('No checkpoint documents found in missions/task-2521.06. Import historical evidence or record it with px checkpoint record; handoff never generates evidence.');
+    const result = classifyError("No checkpoint documents found in missions/task-2521.06. Import historical evidence or record it with px checkpoint record; review preparation never generates evidence.");
     assert.equal(result.failureClass, FailureClass.MissingArtifacts);
     assert.equal(result.dispatchAction, DispatchAction.AutoSendBack);
   });
@@ -437,7 +437,7 @@ describe("Missing checkpoint error classification —", () => {
 describe("Typed checkpoint recovery advice —", () => {
   const slug = 'task-2581';
   const worktree = '/tmp/worktree-task-2581';
-  const typedCheckpointFailure = 'Planned checkpoint evidence is missing before handoff: CP-2. Record each with `px checkpoint record --name <CP-N>` before handoff.';
+  const typedCheckpointFailure = "Planned checkpoint evidence is missing before review preparation: CP-2. Record each with `px checkpoint record --name <CP-N>` before review preparation.";
 
   function assertRecordedCheckpointRecoveryAdvice(prompt: string) {
     assert.match(prompt, /px status task-2581/, 'recovery reloads the recorded Mission contract');
@@ -452,8 +452,8 @@ describe("Typed checkpoint recovery advice —", () => {
   test('typed active checkpoint recovery uses recorded checkpoint commands through mocked boundaries', async () => {
     const prompts: string[] = [];
 
-    const result = await runHandoffAndReview(slug, worktree, 'codex', {
-      validateCheckpointsBeforeHandoffFn: () => ({
+    const result = await runReviewPreparationAndReview(slug, worktree, 'codex', {
+      validateCheckpointsBeforeReviewPreparationFn: () => ({
         ok: false as const,
         error: typedCheckpointFailure,
         nextCheckpoint: 'CP-2',
@@ -463,7 +463,7 @@ describe("Typed checkpoint recovery advice —", () => {
         return { agent: 'codex', result: { status: 0 } };
       },
       workflowLauncherStatusFn: () => ({ supported: true }),
-      performHandoff: async () => { throw new Error('handoff must not run while checkpoint evidence is missing'); },
+      performReviewPreparation: async () => { throw new Error("review preparation must not run while checkpoint evidence is missing"); },
       startReviewLoop: async () => {},
       log: () => {},
       error: () => {},
@@ -481,7 +481,7 @@ import { RepairCheckpointService, repairCheckpointFailure } from '../../../../..
 import { configureRepairCheckpoints } from '../../../../../src/application/ports/repair-checkpoint.js';
 import { missionId } from '../../../../../src/domain/mission.js';
 
-test('missing planned checkpoint repair creates durable incident evidence and completes the original plan before handoff (TASK-2695)', async (t) => {
+test("missing planned checkpoint repair creates durable incident evidence and completes the original plan before review preparation (TASK-2695)", async (t) => {
   const slug = 'typed-checkpoint-gap';
   const id = missionId(slug);
   const store = inMemoryTransitionStore(fixtureMission(slug, { brief: { goal: 'Repair missing checkpoint evidence', why: 'Preserve the planned checkpoint contract', scope: 'Fixture evidence', outOfScope: ['External state'] }, successCriteria: ['implemented'], completedSuccessCriteria: [0],
@@ -491,18 +491,18 @@ test('missing planned checkpoint repair creates durable incident evidence and co
   t.after(() => configureRepairCheckpoints(undefined));
   const service = new MissionCheckpointService(store);
   let launches = 0;
-  let handoffs = 0;
+  let reviewPreparations = 0;
   let reviews = 0;
-  const result = await runHandoffAndReview(slug, '', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => {
+  const result = await runReviewPreparationAndReview(slug, '', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => {
       const missing = store.mission().checkpoints.filter(cp => !cp.goalCheck.length || (cp.repair && !cp.repair.evidenceRecorded));
-      return missing.length ? { ok: false, error: `Planned checkpoint evidence is missing before handoff: ${missing.map(cp => cp.name).join(', ')}.`, nextCheckpoint: missing[0].name } : { ok: true };
+      return missing.length ? { ok: false, error: `Planned checkpoint evidence is missing before review preparation: ${missing.map(cp => cp.name).join(', ')}.`, nextCheckpoint: missing[0].name } : { ok: true };
     },
     startAgentFn: async (_step: string, options: { prompt: string }) => {
       launches++;
       assert.match(options.prompt, /Harness-created repair checkpoint: CP-3/);
-      assert.match(options.prompt, /Complete every remaining planned checkpoint before handoff/);
-      assert.equal(store.mission().checkpoints[2].repair?.command, 'px handoff');
+      assert.match(options.prompt, /Complete every remaining planned checkpoint before review preparation/);
+      assert.equal(store.mission().checkpoints[2].repair?.command, 'review-preparation');
       assert.equal(store.mission().checkpoints[0].goalCheck.length, 0, 'harness must not invent implementation proof');
       for (const name of ['CP-1', 'CP-2', 'CP-3']) {
         const recorded = await service.record({ operationId: name, missionId: id, expectedVersion: (await store.load()).version,
@@ -512,10 +512,10 @@ test('missing planned checkpoint repair creates durable incident evidence and co
       }
       return { result: { status: 0 } };
     },
-    performHandoff: async () => { handoffs++; assert.equal(repairCheckpointFailure(store.mission().checkpoints), null); return { ok: true as const }; },
+    performReviewPreparation: async () => { reviewPreparations++; assert.equal(repairCheckpointFailure(store.mission().checkpoints), null); return { ok: true as const }; },
     startReviewLoop: async () => { reviews++; },
   });
   assert.equal(result, true);
-  assert.equal(launches, 1); assert.equal(handoffs, 1); assert.equal(reviews, 1);
+  assert.equal(launches, 1); assert.equal(reviewPreparations, 1); assert.equal(reviews, 1);
   assert.equal(store.mission().checkpoints[2].repair?.verified, true);
 });

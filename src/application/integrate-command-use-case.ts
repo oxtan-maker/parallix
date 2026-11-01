@@ -1,17 +1,19 @@
 import { randomUUID } from 'node:crypto';
+import { assertWorkflowControl } from './ports/mission-write-authorization.js';
 import { missionId } from '../domain/mission.js';
 import type { IntegrateWorkflowPort } from './ports/cli-workflows.js';
-import { NO_CURRENT_WORK_PORT, nestedWorkPublisher, type CurrentWorkPort } from './recording/current-work-recorder.js';
+import { NO_EXECUTION_ACTIVITY, nestedWorkPublisher, type ExecutionActivityPort } from './recording/execution-activity-recorder.js';
 
 /** CLI-independent application entry point for the integration workflow. */
 export class IntegrateCommandUseCase {
   constructor(
     private readonly _workflow: IntegrateWorkflowPort,
-    private readonly _currentWork: CurrentWorkPort = NO_CURRENT_WORK_PORT,
+    private readonly _currentWork: ExecutionActivityPort = NO_EXECUTION_ACTIVITY,
     private readonly _inferSlug: () => string | null = () => null,
   ) {}
 
   async execute(args: string[], options: Record<string, unknown> = {}): Promise<unknown> {
+    assertWorkflowControl();
     const slug = args.find((arg) => !arg.startsWith('-')) ?? this._inferSlug();
     if (!slug) { return this._workflow.execute(args, options); }
 

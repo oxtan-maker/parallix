@@ -107,7 +107,7 @@ function readGateResultRecord(missionDir: string): { command: string; exitCode: 
 
 /**
  * Parse the command lines of a mission's `## Gates` checklist. Mirrors the
- * checkbox-stripping shape of the handoff runner that actually executes them;
+ * checkbox-stripping shape of the review preparation runner that actually executes them;
  * this is a read-only restatement, it never decides whether a gate runs.
  * @param {string} missionContent
  */
@@ -134,7 +134,7 @@ function renderGates(gates: { key: string; command: string }[]): string {
  * `## Gates` list — never from agent prose (ADR 0048). A pass is claimed only
  * for `exitCode === 0`, and a control is never reported as having run merely
  * because it is configured: only the phases that run strictly before this
- * prompt is issued (handoff) are reported as executed. `preReview` runs on
+ * prompt is issued (review preparation) are reported as executed. `preReview` runs on
  * approve and `preIntegration` runs at integration, both after this review.
  *
  * @param {string} missionPath absolute path to the mission's MISSION.md
@@ -167,19 +167,19 @@ export function buildCompletedControlsBlock(missionPath: string, repoRoot?: stri
     lines.push('  - No verification gate result is recorded for this mission; re-running a verification command is permitted.');
   }
   if (declared.length > 0) {
-    lines.push(`  - Mission \`## Gates\` executed by handoff: ${declared.map(c => `\`${shortCommand(c)}\``).join(', ')}.`);
+    lines.push(`  - Mission \`## Gates\` executed by review-preparation: ${declared.map(c => `\`${shortCommand(c)}\``).join(', ')}.`);
   }
-  // preHandoff gates run inside handoff and hard-fail it, so reaching review
+  // preHandoff gates run inside review preparation and hard-fail it, so reaching review
   // proves they passed. preReview gates are different: `submitReview` runs them
   // only for an `approve` outcome, which is after this prompt is issued — so
   // they are listed as configured-but-not-yet-run, never as executed.
   if (configured.preHandoff.length > 0) {
-    lines.push(`  - Configured preHandoff gates executed by handoff: ${renderGates(configured.preHandoff)}.`);
+    lines.push(`  - Configured preHandoff gates executed by review-preparation: ${renderGates(configured.preHandoff)}.`);
   }
   if (configured.preReview.length > 0) {
     lines.push(`  - Configured preReview gates NOT yet run (they run on approve, after this review): ${renderGates(configured.preReview)}.`);
   }
-  lines.push('  - Handoff checked every recorded checkpoint: every Goal Check row cites a resolvable reference (repository-relative path, quoted test name, recognized command, or ADR), and the recorded checkpoints taken together name each completed success criterion by its `criterion` text, with every criterion marked complete.');
+  lines.push("  - ReviewPreparation checked every recorded checkpoint: every Goal Check row cites a resolvable reference (repository-relative path, quoted test name, recognized command, or ADR), and the recorded checkpoints taken together name each completed success criterion by its `criterion` text, with every criterion marked complete.");
   // TASK-2521.03: this block reports controls the workflow actually executed.
   // It used to claim the red-to-green reproduction gate "already ran" whenever a
   // `Reproduction-Test:` line existed in the mission document — a claim derived

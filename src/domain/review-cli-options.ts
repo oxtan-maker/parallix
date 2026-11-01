@@ -1,8 +1,8 @@
 /** Shared review CLI vocabulary and independent operator purposes. */
 export const REVIEW_OPTIONS = {
   '--status': { value: null, purpose: 'Inspect the recorded Review without running agents.' },
-  '--verify': { value: null, purpose: 'Check handoff readiness without submitting.' },
-  '--submit': { value: null, purpose: 'Perform handoff without entering the autonomous loop.' },
+  '--verify': { value: null, purpose: "Check review preparation readiness without submitting." },
+  '--submit': { value: null, purpose: "Perform review preparation without entering the autonomous loop." },
   '--push': { value: null, purpose: 'Push the current review branch and refresh its PR.' },
   '--force': { value: null, purpose: 'Allow an explicit force push with --push.' },
   '--comments': { value: null, purpose: 'Read provider comments.' },
@@ -22,11 +22,11 @@ export const REVIEW_OPTIONS = {
   '--verbose': { value: null, purpose: 'Print detailed review and polling diagnostics.' },
   '--actor': { value: 'name', purpose: 'Attribute direct operator recovery to a named operator.' },
   '--no-gate': { value: null, purpose: 'Use the explicit readiness/submit gate bypass supported by those operations.' },
-  '--reconcile-review': { value: null, purpose: 'Reconcile an interrupted first handoff using explicit PR identity.' },
-  '--branch': { value: 'branch', purpose: 'Name the interrupted handoff branch.' },
-  '--target': { value: 'branch', purpose: 'Name the interrupted handoff target.' },
-  '--revision': { value: 'revision', purpose: 'Pin the interrupted handoff revision.' },
-  '--eligible-reviewer': { value: 'agent', purpose: 'Supply an eligible reviewer when reconciling handoff.' },
+  '--reconcile-review': { value: null, purpose: "Reconcile an interrupted first review preparation using explicit PR identity." },
+  '--branch': { value: 'branch', purpose: "Name the interrupted review preparation branch." },
+  '--target': { value: 'branch', purpose: "Name the interrupted review preparation target." },
+  '--revision': { value: 'revision', purpose: "Pin the interrupted review preparation revision." },
+  '--eligible-reviewer': { value: 'agent', purpose: "Supply an eligible reviewer when reconciling review preparation." },
 } as const;
 
 export const REVIEW_FLAGS: ReadonlySet<string> = new Set(Object.keys(REVIEW_OPTIONS));

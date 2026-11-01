@@ -12,7 +12,7 @@ import { copyMigratedSchema, prepareMigratedSchema } from '../../fixtures/migrat
 before(prepareMigratedSchema);
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
 import { clearOperatorStateCache } from '../../../src/adapters/sqlite/adapter-factory.js';
-import { NO_CURRENT_WORK_PORT } from '../../../src/application/recording/current-work-recorder.js';
+import { NO_EXECUTION_ACTIVITY } from '../../../src/application/recording/execution-activity-recorder.js';
 import type { DraftWorkflowContext, DraftWorkflowPort } from '../../../src/application/ports/cli-workflows.js';
 import type { BoardCommandKind } from '../../../src/application/controller/board-command.js';
 import { createProductionApplicationServices } from '../../../src/composition/application-services.js';
@@ -56,7 +56,7 @@ test('shared web and TUI board discovers launchers only on supplied PATH (TASK-2
   try {
     const { ports } = makeExecutePorts();
     const capabilities = composeProductionCapabilities(
-      root, repositoryId('isolated-board'), repositories, ports, null, NO_CURRENT_WORK_PORT,
+      root, repositoryId('isolated-board'), repositories, ports, null, NO_EXECUTION_ACTIVITY,
       undefined, undefined, { configuration: resolveConfiguration({ PATH: bin, HOME: root }) },
     );
     assert.equal(capabilities.boardProjection, capabilities.tui.boardProjection);
@@ -94,7 +94,7 @@ test('wired production controller dispatches mission intake and factory agrees',
   try {
     const { ports } = makeExecutePorts();
     const capabilities = composeProductionCapabilities(
-      '/fixture-repository', repositoryId('fixture-repository'), repositories, ports, store, NO_CURRENT_WORK_PORT,
+      '/fixture-repository', repositoryId('fixture-repository'), repositories, ports, store, NO_EXECUTION_ACTIVITY,
       undefined, undefined, { configuration: resolveConfiguration({}) },
     );
     const result = await capabilities.commandController.dispatch({
@@ -114,7 +114,7 @@ test('wired production controller dispatches mission intake and factory agrees',
     assert.equal(result.status, 'completed');
     assert.equal((await store.load(missionId('task-2426-fixture'))).kind, 'found');
     const factoryController = capabilities.tui.commandControllerFactory(() => {});
-    for (const kind of ['active:execute', 'mission:intake', 'checkpoint:record', 'handoff:record', 'review:submit'] as const) {
+    for (const kind of ['active:execute', 'mission:intake', 'checkpoint:record', 'review:submit', 'review:submit'] as const) {
       assert.equal(capabilities.commandController.canExecute(kind), true);
       assert.equal(factoryController.canExecute(kind), true);
     }
@@ -172,7 +172,7 @@ test('wired production controller drafts through the injected workflow port', as
     const { ports } = makeExecutePorts();
     const mock = makeMockDraftWorkflow(slug);
     const capabilities = composeProductionCapabilities(
-      '/fixture-repository', repositoryId('fixture-repository'), repositories, ports, store, NO_CURRENT_WORK_PORT,
+      '/fixture-repository', repositoryId('fixture-repository'), repositories, ports, store, NO_EXECUTION_ACTIVITY,
       undefined, undefined, { configuration: resolveConfiguration({}), draftWorkflow: mock.port },
     );
     // Draft requires the pre-draft state: materialize a backlog mission first.
@@ -215,7 +215,7 @@ test('production composition builds the trusted draft adapter by default (no ove
     // sink logging, and the composition's mission services. Construction is
     // lazy — no git or database handle is opened until a dispatch runs.
     const capabilities = composeProductionCapabilities(
-      '/fixture-repository', repositoryId('fixture-repository'), repositories, ports, store, NO_CURRENT_WORK_PORT,
+      '/fixture-repository', repositoryId('fixture-repository'), repositories, ports, store, NO_EXECUTION_ACTIVITY,
       undefined, undefined, { configuration: resolveConfiguration({}) },
     );
     assert.equal(capabilities.commandController.canExecute('draft:create'), true);
@@ -231,7 +231,7 @@ test('production draft adapter maps worktree creation abort to typed failure wit
   try {
     const { ports } = makeExecutePorts();
     const capabilities = composeProductionCapabilities(
-      '/fixture-repository', repositoryId('fixture-repository'), repositories, ports, store, NO_CURRENT_WORK_PORT,
+      '/fixture-repository', repositoryId('fixture-repository'), repositories, ports, store, NO_EXECUTION_ACTIVITY,
       undefined, undefined, {
         configuration: resolveConfiguration({}),
         draftAdapterDeps: {
@@ -270,13 +270,13 @@ test('production draft adapter maps worktree creation abort to typed failure wit
 test('read-only production controller does not advertise Mission commands', async () => {
   const { ports } = makeExecutePorts();
   const capabilities = composeProductionCapabilities(
-    '/fixture-repository', repositoryId('fixture-repository'), repositories, ports, null, NO_CURRENT_WORK_PORT,
+    '/fixture-repository', repositoryId('fixture-repository'), repositories, ports, null, NO_EXECUTION_ACTIVITY,
     undefined, undefined, { configuration: resolveConfiguration({}) },
   );
   const factoryController = capabilities.tui.commandControllerFactory(() => {});
   for (const controller of [capabilities.commandController, factoryController]) {
     assert.equal(controller.canExecute('active:execute'), true);
-    for (const kind of ['mission:intake', 'checkpoint:record', 'handoff:record', 'review:submit', ...remainingUnavailableKinds] as const) {
+    for (const kind of ['mission:intake', 'checkpoint:record', 'review:submit', 'review:submit', ...remainingUnavailableKinds] as const) {
       assert.equal(controller.canExecute(kind), false);
     }
     assert.equal(controller.canExecute('draft:create'), false, 'read-only graph has no draft service');
@@ -306,7 +306,7 @@ test('production application services wire Mission commands through their shared
   try {
     services = await createProductionApplicationServices(process.cwd(), undefined, { configuration: resolveConfiguration(process.env) });
     const controller = services.presentationCapabilities!.commandController;
-    for (const kind of ['active:execute', 'mission:intake', 'checkpoint:record', 'handoff:record', 'review:submit', 'integrate:merge'] as const) {
+    for (const kind of ['active:execute', 'mission:intake', 'checkpoint:record', 'review:submit', 'review:submit', 'integrate:merge'] as const) {
       assert.equal(controller.canExecute(kind), true);
     }
     const id = missionId('task-2426-production-fixture');
@@ -321,7 +321,7 @@ test('production application services wire Mission commands through their shared
       capabilities: new Set(['checkpoint:record']),
       payload: {
         kind: 'checkpoint:record', expectedVersion: missionVersion(1),
-        checkpoint: { missionId: id, name: 'CP-1', rawFilename: 'CP-1.md', firstLine: 'Production proof', goalCheck: [{ criterion: 'Wired', evidence: 'test/integration/presentation/board-draft-composition.test.ts' }], nextActionText: 'Record handoff.' },
+        checkpoint: { missionId: id, name: 'CP-1', rawFilename: 'CP-1.md', firstLine: 'Production proof', goalCheck: [{ criterion: 'Wired', evidence: 'test/integration/presentation/board-draft-composition.test.ts' }], nextActionText: "Record review preparation." },
       },
     });
     assert.equal(checkpoint.status, 'completed');

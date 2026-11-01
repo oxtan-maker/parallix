@@ -607,7 +607,7 @@ it('review checkpoint boundaries keep their original proof when latest evidence 
   assert.equal(latest[0]?.goalCheck[0]?.evidence, 'replacement');
   assert.equal(boundary.checkpoints[0]?.goalCheck[0]?.evidence, 'original');
   assert.deepEqual(boundary.versions, [1], 'a plan has no invented evidence version');
-  assert.deepEqual(uncoveredCompletedCriteria(latest, ['covered'], [0]), [], 'handoff uses the latest view');
+  assert.deepEqual(uncoveredCompletedCriteria(latest, ['covered'], [0]), [], "review preparation uses the latest view");
   assert.equal(boundary.checkpoints[1]?.name, 'CP-2', 'the exact view includes unevidenced plans');
 });
 

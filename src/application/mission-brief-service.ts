@@ -205,7 +205,7 @@ export class MissionBriefService {
     return completed({ dependencies: loaded.mission.dependencies ?? [], version: loaded.version });
   }
 
-  /** Record the draft's predicted NEL bucket, which handoff calibrates against the measured one. */
+  /** Record the draft's predicted NEL bucket, which review preparation calibrates against the measured one. */
   async setPredictedNelBucket(request: SetPredictedNelBucketRequest): Promise<ApplicationOutcome<MissionPredictedNelBucketResult>> {
     const guard = missingCapability<MissionPredictedNelBucketResult>(request, 'mission:context'); if (guard) { return guard; }
     const loaded = await loadForCommand<MissionPredictedNelBucketResult>(this._store, request); if (!isLoaded(loaded)) { return loaded; }
@@ -262,7 +262,7 @@ export class MissionBriefService {
     return completed({ successCriteria: loaded.mission.successCriteria ?? [], version: loaded.version });
   }
 
-  /** The gates handoff will run, or an empty list when none are declared. */
+  /** The gates review preparation will run, or an empty list when none are declared. */
   async readGates(request: MissionCommandRequest): Promise<ApplicationOutcome<MissionGatesResult>> {
     const guard = missingCapability<MissionGatesResult>(request, 'mission:context'); if (guard) { return guard; }
     const loaded = await loadForCommand<MissionGatesResult>(this._store, request); if (!isLoaded(loaded)) { return loaded; }

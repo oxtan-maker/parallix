@@ -5,7 +5,6 @@ import type { AgentFamily } from '../../domain/agents.js';
 import type { CheckpointData } from '../../domain/checkpoint.js';
 import type { ExternalTaskRef } from '../../domain/external-task.js';
 import type { MissionLabel } from '../../domain/mission.js';
-import type { ArtifactReference, NelBucketLabel } from '../../domain/net-engineering-lines.js';
 import type { RepositoryId } from '../../domain/repository.js';
 
 // ---------------------------------------------------------------------------
@@ -21,7 +20,6 @@ export type BoardCommandKind =
   | 'mission:edit'
   | 'draft:create'
   | 'checkpoint:record'
-  | 'handoff:record'
   | 'review:submit'
   | 'review:act-on-findings'
   | 'approve:review'
@@ -64,15 +62,6 @@ export type BoardCommandPayload =
   | {
     readonly kind: 'checkpoint:record';
     readonly checkpoint: CheckpointData;
-    readonly expectedVersion?: MissionVersion;
-  }
-  | {
-    readonly kind: 'handoff:record';
-    readonly netEngineeringLines: number;
-    readonly predictedBucket?: NelBucketLabel | 'Unknown';
-    readonly capturedAt: string;
-    readonly artifacts?: readonly ArtifactReference[];
-    readonly reviewRounds?: number;
     readonly expectedVersion?: MissionVersion;
   };
 
@@ -179,7 +168,6 @@ export const INTEGRATED_CAPABILITIES = new Set<BoardCommandKind>([
   'mission:edit',
   'draft:create',
   'checkpoint:record',
-  'handoff:record',
   'integrate:merge',
   'mission:cancel',
 ]);

@@ -11,8 +11,8 @@ import { test } from 'node:test';
 import { parseTaskFrontmatterValue, taskIdFromFilename } from '../../../../../src/adapters/backlog/task-file-io.js';
 import { ensureMissionFile } from '../../../../../src/adapters/cli/commands/draft-setup.js';
 import { runDraftCommand } from '../../../../../src/adapters/cli/commands/draft.js';
-import { HandoffCommandUseCase } from '../../../../../src/application/handoff-command-use-case.js';
-import { SLUG, LEGACY_MISSION_LOAD, makePorts, makeRecorder, runOptions } from '../../../../helpers/handoff-ports.js';
+import { ReviewPreparationCommandUseCase } from '../../../../../src/application/review-preparation-command-use-case.js';
+import { SLUG, LEGACY_MISSION_LOAD, makePorts, makeRecorder, runOptions } from "../../../../helpers/review-preparation-ports.js";
 import { mkdtemp as registeredMkdtemp } from '../../../../helpers/temp-dir.js';
 
 function containsFile(directory: string): boolean {
@@ -149,7 +149,7 @@ test('a normal typed draft workflow does not recreate the retired mission tree',
   }
 });
 
-test('typed handoff succeeds without a mission directory or Markdown artifacts', async () => {
+test("typed review preparation succeeds without a mission directory or Markdown artifacts", async () => {
   const recorder = makeRecorder();
   const base = makePorts(recorder);
   const ports = makePorts(recorder, {
@@ -163,7 +163,7 @@ test('typed handoff succeeds without a mission directory or Markdown artifacts',
     },
     missionUtils: { ...base.missionUtils, findMissionDir: () => null, findMissionArea: () => { throw new Error('missing directory scan'); }, findCheckpoints: () => { throw new Error('retired checkpoint scan'); } },
   });
-  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  const result = await new ReviewPreparationCommandUseCase(ports).performReviewPreparation(SLUG, runOptions(recorder));
   assert.equal(result.ok, true, recorder.errors.join('\n'));
   assert.deepEqual(recorder.transitions, ['review']);
 });
@@ -173,7 +173,7 @@ for (const [name, load] of [
   ['legacy mission without directory', LEGACY_MISSION_LOAD],
   ['typed mission without evidence', { kind: 'found', mission: fixtureMission(SLUG, { brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] }, checkpoints: [] }), version: fixtureVersion(1) }],
 ] as const) {
-  test(`directory-free handoff refuses ${name}`, async () => {
+  test(`directory-free review preparation refuses ${name}`, async () => {
     const recorder = makeRecorder();
     const base = makePorts(recorder);
     const services = await base.missionServices!('/root', { missionDir: '/root' });
@@ -181,34 +181,34 @@ for (const [name, load] of [
       missionUtils: { ...base.missionUtils, findMissionDir: () => null },
       missionServices: async () => ({ ...services, store: { load: async () => load } }),
     });
-    const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+    const result = await new ReviewPreparationCommandUseCase(ports).performReviewPreparation(SLUG, runOptions(recorder));
     assert.equal(result.ok, false);
     assert.deepEqual(recorder.transitions, []);
     assert.equal(recorder.gatekeeperCalls.length, 0);
   });
 }
 
-test('directory-free handoff fails closed when the database is unavailable', async () => {
+test("directory-free review preparation fails closed when the database is unavailable", async () => {
   const recorder = makeRecorder();
   const base = makePorts(recorder);
   const ports = makePorts(recorder, {
     missionUtils: { ...base.missionUtils, findMissionDir: () => null },
     missionServices: async () => { throw new Error('database unavailable'); },
   });
-  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  const result = await new ReviewPreparationCommandUseCase(ports).performReviewPreparation(SLUG, runOptions(recorder));
   assert.equal(result.ok, false);
   assert.match(result.error!, /database unavailable/);
   assert.deepEqual(recorder.transitions, []);
 });
 
-test('directory-free typed handoff still requires the mission branch', async () => {
+test("directory-free typed review preparation still requires the mission branch", async () => {
   const recorder = makeRecorder();
   const base = makePorts(recorder);
   const ports = makePorts(recorder, {
     missionUtils: { ...base.missionUtils, findMissionDir: () => null },
     git: { ...base.git, getCurrentBranch: () => 'main' },
   });
-  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  const result = await new ReviewPreparationCommandUseCase(ports).performReviewPreparation(SLUG, runOptions(recorder));
   assert.equal(result.ok, false);
   assert.match(result.error!, /Not on mission branch/);
   assert.deepEqual(recorder.transitions, []);

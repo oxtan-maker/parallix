@@ -121,8 +121,8 @@ test('readTextFlag handles file read error gracefully', () => {
   assert.equal(exited, true);
 });
 
-test('bare review binds the handoff loop without implicitly approving (TASK-2810)', async () => {
-  const fake = fakeReviewLoopPorts({ handoff: { handoff: async () => ({ ok: false, reason: 'criteria incomplete' }) } });
+test("bare review binds the review preparation loop without implicitly approving (TASK-2810)", async () => {
+  const fake = fakeReviewLoopPorts({ reviewPreparation: { reviewPreparation: async () => ({ ok: false, reason: 'criteria incomplete' }) } });
   let calls = 0;
   await review(['task-1259-regression'], {
     inferSlugFn: s => s ?? null, readReviewStateFn: async () => null,

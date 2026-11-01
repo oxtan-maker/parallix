@@ -279,12 +279,12 @@ describe("multi round repro", { concurrency: false }, () => {
 
   test('loadReviewApproval returns same subject revision as loadReview for approved mission', async () => {
     // Approved round with a handoff-style revision (production shape)
-    const handoffRevision = changeRevision('handoff-1786439209329');
+    const reviewPreparationRevision = changeRevision("review-preparation-1786439209329");
     const approvedRound: ReviewRound = {
       number: 1,
       subject: {
         change: { kind: 'local-branch', sourceBranch: 'mission/task-approved', targetBranch: 'main' },
-        revision: handoffRevision,
+        revision: reviewPreparationRevision,
       },
       reviewer: agentFamily('codex'),
       implementer: agentFamily('custom'),

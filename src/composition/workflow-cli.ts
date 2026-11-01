@@ -13,7 +13,7 @@ import { inferSlug } from '../adapters/filesystem/mission-utils.js';
 import type { BoardCommandRequest } from '../application/controller/board-command.js';
 
 /** Closed CLI commands preserve their existing parser and flags inside the owner. */
-export function ownWorkflowCli(registry: Record<string, Command>, open: () => Promise<ProductionApplicationServices>): void {
+export function ownWorkflowCli(registry: Record<string, Command>, open: () => Promise<ProductionApplicationServices>, operatorReview = false): void {
   for (const command of ['draft', 'review', 'integrate'] as const) {
     const original = registry[command];
     registry[command] = async (args: string[], options: Record<string, unknown> = {}) => {
@@ -34,7 +34,7 @@ export function ownWorkflowCli(registry: Record<string, Command>, open: () => Pr
       let failed = true;
       try {
         graph = await open();
-        await dispatchOwnedCli(command, args, slug, graph, cancellation);
+        await dispatchOwnedCli(command, args, slug, graph, cancellation, operatorReview);
         failed = false;
       } finally {
         if (failed && process.stdout.isTTY) { process.stdout.write('\x1b[?25h\x1b[?1049l\r\x1b[2K'); }
@@ -62,13 +62,12 @@ export function ownWorkflowCli(registry: Record<string, Command>, open: () => Pr
 }
 
 async function dispatchOwnedCli(command: 'draft' | 'review' | 'integrate', args: string[], slug: string, graph: ProductionApplicationServices,
-  cancellation: { requested: boolean; stopOwnedWorkflow: boolean }): Promise<void> {
+  cancellation: { requested: boolean; stopOwnedWorkflow: boolean }, operatorReview: boolean): Promise<void> {
   const controller = graph.presentationCapabilities?.commandController;
   if (!controller) { throw new Error('Workflow admission is unavailable'); }
-  const loaded = await graph.mission?.store.load(slug as never);
-  const kind = workflowKind(command, args, loaded?.kind === 'found' ? loaded.mission.status : null);
+  const kind = workflowKind(command);
   const request: BoardCommandRequest = { operationId: randomUUID(), missionId: slug, kind,
-    capabilities: new Set([kind]), cancellation, invocation: { command, args, interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY) } };
+    capabilities: new Set([kind]), cancellation, operatorInvocation: operatorReview && command === 'review', invocation: { command, args, interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY) } };
   const result = await controller.dispatch(request);
   if (cancellation.requested) { throw new Error(result.error?.message ?? 'Workflow interrupted'); }
   if (result.status !== 'completed') { throw new Error(result.error?.message ?? result.status); }
@@ -78,10 +77,10 @@ function bypassOwnership(command: string, args: readonly string[]): boolean {
   return hasMissionWriteAuthorization() || args.includes('--help') || args.includes('--dry-run')
     || command === 'review' && !['enter', 'submit'].includes(reviewOperation(args));
 }
-function workflowKind(command: string, args: readonly string[], status: string | null): 'draft:create' | 'integrate:merge' | 'handoff:record' | 'review:submit' {
+function workflowKind(command: string): 'draft:create' | 'integrate:merge' | 'review:submit' {
   if (command === 'draft') { return 'draft:create'; }
   if (command === 'integrate') { return 'integrate:merge'; }
-  return args.includes('--submit') || status === 'active' ? 'handoff:record' : 'review:submit';
+  return 'review:submit';
 }
 
 
@@ -89,17 +88,17 @@ function workflowKind(command: string, args: readonly string[], status: string |
 export function workflowCliObserver(terminal: Pick<import('../application/ports/mission-terminal.js').MissionTerminalCapability, 'history' | 'page'>,
   progress?: import('../application/controller/board-command.js').BoardProgressSink,
   write: (_text: string) => void = text => { process.stdout.write(text); },
-  interactive = Boolean(process.stdout.isTTY)) {
+  interactive = Boolean(process.stdout.isTTY),
+  activity?: import('../application/ports/execution-activity.js').ExecutionActivityReadPort) {
   const offsets = new Map<string, number>();
   const replay = workflowReplay(write, interactive);
   let last = '';
   let sequence = 0;
-  return (operation: import('../domain/workflow-operation.js').WorkflowOperation): boolean => {
-    const summary = operation.reason ?? operation.phase;
-    if (summary !== last) {
-      last = summary;
-      const event = { operationId: operation.id, sequence: ++sequence, phase: operation.phase, message: summary,
-        timestamp: operation.updatedAt, ...(operation.agent ? { agent: operation.agent } : {}) };
+  return async (operation: import('../domain/workflow-operation.js').WorkflowOperation): Promise<boolean> => {
+    const snapshot = (await activity?.loadMissionCurrentWork(operation.missionId))?.[0];
+    const event = workflowProgress(operation, sequence + 1, snapshot?.frames.at(-1)?.event);
+    if (event.message !== last) {
+      last = event.message; sequence++;
       progress?.(event);
     }
     const history = terminal.history(operation.missionId);
@@ -123,6 +122,13 @@ export function workflowCliObserver(terminal: Pick<import('../application/ports/
   };
 }
 
+
+function workflowProgress(operation: import('../domain/workflow-operation.js').WorkflowOperation, sequence: number, activity?: import('../domain/execution-activity.js').ExecutionActivity) {
+  const agent = activity ? activity.agent : null;
+  return { operationId: operation.id, sequence, phase: activity?.phase ?? operation.phase,
+    message: operation.reason ?? activity?.summary ?? operation.phase,
+    timestamp: activity?.occurredAt ?? operation.updatedAt, ...(agent ? { agent } : {}) };
+}
 
 function workflowReplay(write: (_text: string) => void, interactive: boolean) {
   const pending = new Map<string, string>();

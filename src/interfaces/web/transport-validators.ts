@@ -5,8 +5,8 @@ import { isWorkflowCommand } from '../../domain/workflow-operation.js';
  */
 
 import type { WebStreamError } from './stream.js';
-import { SUPPORTED_WEB_TRANSPORT_VERSIONS, type WebBoardSnapshot, type WebCommandResult, type WebProgressEvent, type WebCommandRequestKind, type WebHandoffPayload, type WebCommandRequestValidation } from './transport-types.js';
-import { LANES, TERMINAL_STATUSES, ERROR_KINDS, EVIDENCE_SOURCES, COMMAND_REQUEST_KINDS, BUCKET_LABELS, ARTIFACT_KINDS, isPlainObject, checkKeys, checkString, checkFiniteNumber, checkEnum, checkOptString, checkOptionalNullableNumber, checkJsonValue, type WebTransportValidation } from './transport-validation-primitives.js';
+import { SUPPORTED_WEB_TRANSPORT_VERSIONS, type WebBoardSnapshot, type WebCommandResult, type WebProgressEvent, type WebCommandRequestKind, type WebCommandRequestValidation } from './transport-types.js';
+import { LANES, TERMINAL_STATUSES, ERROR_KINDS, EVIDENCE_SOURCES, COMMAND_REQUEST_KINDS, isPlainObject, checkKeys, checkString, checkFiniteNumber, checkEnum, checkOptString, checkOptionalNullableNumber, checkJsonValue, type WebTransportValidation } from './transport-validation-primitives.js';
 import { checkCommandAction, checkMissionCard, checkAttentionItem, checkLogEntry, checkAgentAvailability, checkSourceFact, checkMetrics } from './transport-shape-checks.js';
 
 function validateWithVersion<T>(
@@ -154,7 +154,7 @@ export function validateWebCommandResult(payload: unknown): WebTransportValidati
  * Validate a parsed command request payload (browser → host, TASK-2433).
  * Pure and fail-closed: every unknown top-level key, every kind outside the
  * five card-advertised kinds, a `payload` key on an identity-only kind, and
- * every missing, mistyped, or out-of-range handoff field is rejected. The
+ * every missing, mistyped, or out-of-range review preparation field is rejected. The
  * caller must treat a rejection as zero dispatch.
  */
 export function validateWebCommandRequest(payload: unknown): WebCommandRequestValidation {
@@ -163,7 +163,7 @@ export function validateWebCommandRequest(payload: unknown): WebCommandRequestVa
   }
   const problems: string[] = [];
   checkKeys(payload,
-    ['missionId', 'kind', 'missionStatusAtRequest', 'payload', 'requestKey', 'agent'],
+    ['missionId', 'kind', 'missionStatusAtRequest', 'requestKey', 'agent'],
     ['missionId', 'kind', 'missionStatusAtRequest'],
     'request', problems);
   checkRequestKey(payload, problems);
@@ -181,14 +181,6 @@ export function validateWebCommandRequest(payload: unknown): WebCommandRequestVa
     problems.push(`request.kind must be one of ${COMMAND_REQUEST_KINDS.join(', ')}, got ${kind}`);
   }
   checkString(payload, 'missionStatusAtRequest', 'request', problems);
-  if (Object.prototype.hasOwnProperty.call(payload, 'payload')) {
-    const value = payload.payload;
-    if (kind === 'handoff:record') {
-      checkHandoffPayload(value, 'request.payload', problems);
-    } else {
-      problems.push(`request.payload is only allowed for handoff:record, got kind ${String(kind)}`);
-    }
-  }
   if (problems.length > 0) {
     return { ok: false, problems };
   }
@@ -200,48 +192,8 @@ export function validateWebCommandRequest(payload: unknown): WebCommandRequestVa
       missionId: payload.missionId as string,
       kind: payload.kind as WebCommandRequestKind,
       missionStatusAtRequest: payload.missionStatusAtRequest as string,
-      ...(payload.payload !== undefined ? { payload: payload.payload as WebHandoffPayload } : {}),
     },
   };
-}
-
-function checkHandoffPayload(value: unknown, path: string, problems: string[]): void {
-  if (!isPlainObject(value)) { problems.push(`${path} must be an object`); return; }
-  checkKeys(value,
-    ['netEngineeringLines', 'predictedBucket', 'capturedAt', 'artifacts', 'reviewRounds'],
-    ['netEngineeringLines', 'capturedAt'], path, problems);
-  const lines = value.netEngineeringLines;
-  if (typeof lines !== 'number' || !Number.isFinite(lines) || lines < 0) {
-    problems.push(`${path}.netEngineeringLines must be a finite number >= 0, got ${String(lines)}`);
-  }
-  if (Object.prototype.hasOwnProperty.call(value, 'predictedBucket')) {
-    checkEnum(value, 'predictedBucket', BUCKET_LABELS, path, problems);
-  }
-  checkString(value, 'capturedAt', path, problems);
-  if (Object.prototype.hasOwnProperty.call(value, 'artifacts')) {
-    const artifacts = value.artifacts;
-    if (!Array.isArray(artifacts)) {
-      problems.push(`${path}.artifacts must be an array`);
-    } else {
-      artifacts.forEach((artifact, index) => {
-        const artifactPath = `${path}.artifacts[${index}]`;
-        if (!isPlainObject(artifact)) { problems.push(`${artifactPath} must be an object`); return; }
-        checkKeys(artifact, ['kind', 'location', 'byteSize'], ['kind', 'location', 'byteSize'], artifactPath, problems);
-        checkEnum(artifact, 'kind', ARTIFACT_KINDS, artifactPath, problems);
-        checkString(artifact, 'location', artifactPath, problems);
-        const byteSize = artifact.byteSize;
-        if (byteSize !== null && (typeof byteSize !== 'number' || !Number.isFinite(byteSize))) {
-          problems.push(`${artifactPath}.byteSize must be a finite number or null, got ${String(byteSize)}`);
-        }
-      });
-    }
-  }
-  if (Object.prototype.hasOwnProperty.call(value, 'reviewRounds')) {
-    const rounds = value.reviewRounds;
-    if (typeof rounds !== 'number' || !Number.isInteger(rounds) || rounds < 0) {
-      problems.push(`${path}.reviewRounds must be an integer >= 0, got ${String(rounds)}`);
-    }
-  }
 }
 
 /** Validate a parsed progress event payload. */

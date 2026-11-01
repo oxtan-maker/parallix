@@ -14,7 +14,7 @@ await installModuleMocks();
 const { buildGateEnv } = await import('../../../../src/adapters/config/repository-gates.js');
 const { runVerificationGate } = await import('../../../../src/adapters/verification/verification.js');
 const { buildIntegrationGateEnv } = await import('../../../../src/adapters/cli/commands/integrate-gates.js');
-const { createHandoffPorts } = await import('../../../../src/adapters/cli/commands/handoff.js');
+const { createReviewPreparationPorts } = await import('../../../../src/adapters/cli/commands/review-preparation.js');
 const { retainedRepairPort } = await import('../../../../src/adapters/review/retained-repair.js');
 test.afterEach(() => mock.restoreAll());
 
@@ -59,7 +59,7 @@ test('verification children compose isolated services while workflow children re
   } finally { configureMissionWriteAuthorization(null); }
 });
 
-test('declared handoff gates keep their command and checkout without parent ownership (TASK-2750)', () => {
+test("declared review preparation gates keep their command and checkout without parent ownership (TASK-2750)", () => {
   const command = 'npm test -- --integration owning-suite.test.ts';
   const configuration = resolveConfiguration(inherited);
   const calls: unknown[] = [];
@@ -69,7 +69,7 @@ test('declared handoff gates keep their command and checkout without parent owne
     return { status: 0, stdout: '', stderr: '' };
   });
   // Application process port is backed by the injected git.run double above.
-  const { spawnSync: runDeclaredGate } = createHandoffPorts(configuration).process;
+  const { spawnSync: runDeclaredGate } = createReviewPreparationPorts(configuration).process;
   const result = runDeclaredGate('bash', ['-c', command], { cwd: '/checkout', encoding: 'utf8', stdio: 'pipe' });
   assert.equal(result.status, 0);
   assert.deepEqual(calls, [['bash', ['-c', command], '/checkout']]);

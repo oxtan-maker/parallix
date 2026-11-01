@@ -7,17 +7,17 @@ import type { BoardCommandDispatcher, BoardCommandRequest } from '../../../../sr
 import type { WebCommandRequest } from '../../../../src/interfaces/web/transport.js';
 import { failure, rejected } from '../../../../src/application/contracts.js';
 
-test('workflow admission forwards checked handoff evidence and stale version (TASK-2750 F8)', async () => {
+test("workflow admission carries review identity and its stale-status guard without a measurement payload (TASK-2822)", async () => {
   let received: BoardCommandRequest | undefined;
   let status = 0;
   const reply = { code(value: number) { status = value; return this; }, type() { return this; }, send() {} } as unknown as FastifyReply;
   const dispatcher: BoardCommandDispatcher = { canExecute: () => true, dispatch: async () => failure('execution', 'unused'),
     admit: async request => { received = request; return failure('conflict', 'stale Mission version'); } };
-  const payload = { netEngineeringLines: 3, capturedAt: '2026-10-15T00:00:00Z', expectedVersion: 4 };
-  await admitWebWorkflow(reply, dispatcher, { kind: 'handoff:record', missionId: 'task-test', missionStatusAtRequest: 'active',
-    requestKey: 'delivery', payload } as WebCommandRequest, () => {});
+  await admitWebWorkflow(reply, dispatcher, { kind: 'review:submit', missionId: 'task-test', missionStatusAtRequest: 'active',
+    requestKey: 'delivery' } as WebCommandRequest, () => {});
   assert.equal(status, 409);
-  assert.deepEqual(received?.payload, { kind: 'handoff:record', ...payload });
+  assert.equal(received?.payload, undefined);
+  assert.equal(received?.missionStatusAtRequest, 'active');
   assert.equal(received?.requestKey, 'delivery');
 });
 
@@ -64,7 +64,7 @@ test('settled retry returns the recorded terminal outcome with HTTP 200 (TASK-27
 test('workflow status reads bound identities and expose the retained operation (TASK-2750)', async () => {
   const { registerWorkflowReads } = await import('../../../../src/interfaces/web/workflow-route.js');
   let handler: (request: unknown, reply: unknown) => Promise<unknown> = async () => {};
-  const operation = { id: 'operation', missionId: 'task-test', command: 'active:execute', phase: 'running', generation: 2, owner: null, agent: 'custom', reviewer: null, createdAt: 'start', updatedAt: 'now', reason: null };
+  const operation = { id: 'operation', missionId: 'task-test', command: 'active:execute', phase: 'executing', generation: 2, owner: null, agent: 'custom', reviewer: null, createdAt: 'start', updatedAt: 'now', reason: null };
   const reads: string[] = [];
   registerWorkflowReads({ get: (path: string, callback: typeof handler) => { assert.equal(path, '/api/operations/:id'); handler = callback; } } as never,
     () => ({ operation: async (id: string) => { reads.push(id); return id === operation.id ? operation : null; } }) as never);

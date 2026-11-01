@@ -7,7 +7,7 @@ import * as path from 'node:path';
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
 import { loadDefaultMigrations, SqliteMigrationRunner } from '../../../src/adapters/sqlite/migration-runner.js';
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
-import { NO_CURRENT_WORK_PORT } from '../../../src/application/recording/current-work-recorder.js';
+import { NO_EXECUTION_ACTIVITY } from '../../../src/application/recording/execution-activity-recorder.js';
 import { composeProductionCapabilities } from '../../../src/composition/production-capabilities.js';
 import { createDraftWorkflowAdapter } from '../../../src/adapters/cli/commands/draft-stats.js';
 import { missionId } from '../../../src/domain/mission.js';
@@ -98,7 +98,7 @@ async function dispatchBoardDraft(launchedFrom: string, slug: string) {
   try {
     const { ports } = makeExecutePorts();
     const capabilities = composeProductionCapabilities(
-      launchedFrom, REPOSITORY, repositories, ports, store, NO_CURRENT_WORK_PORT,
+      launchedFrom, REPOSITORY, repositories, ports, store, NO_EXECUTION_ACTIVITY,
       undefined, undefined, { configuration: resolveConfiguration({}), draftAdapterDeps: deps },
     );
     // No intake first: this is a plain backlog card straight off the board.
@@ -203,7 +203,7 @@ test('board Draft on a pre-draft backlog card completes and runs the whole draft
   try {
     const { ports } = makeExecutePorts();
     const capabilities = composeProductionCapabilities(
-      MISSION_WORKTREE, REPOSITORY, repositories, ports, store, NO_CURRENT_WORK_PORT,
+      MISSION_WORKTREE, REPOSITORY, repositories, ports, store, NO_EXECUTION_ACTIVITY,
       undefined, undefined, { configuration: resolveConfiguration({}), draftWorkflow },
     );
     const result = await capabilities.commandController.dispatch({

@@ -393,7 +393,7 @@ function reportIncompleteReviewerArtifacts(context: {
 /**
  * Record the decision itself, not just its prose. Without it the round keeps
  * `decision: null`, the Mission never leaves `review` through `request-changes`,
- * and the next handoff cannot open round N+1.
+ * and the next review preparation cannot open round N+1.
  */
 async function recordReviewerChangeRequest(slug: string, findings: readonly ReviewFinding[], outcomeMessage: string, options: ReviewerArtifactOptions, log: (_msg: string) => void, error: (_msg: string) => void) {
   const recordRequestedChangesFn = options.recordRequestedChangesFn || recordRequestedChanges;

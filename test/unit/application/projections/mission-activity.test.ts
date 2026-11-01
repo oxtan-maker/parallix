@@ -1,11 +1,15 @@
+import { projectActivityPublications } from '../../../fixtures/execution-activity.js';
 import { fixtureMission as completeMissionFixture } from '../../../fixtures/mission-builders.js';
 import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 import { repositoryId as fixtureRepositoryId } from '../../../../src/domain/repository.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { makeCard, emptyMetrics } from '../../../fixtures/board-projection.js';
+import { buildBoardProjection } from '../../../../src/application/projections/board.js';
+import { projectWorkflowBoard } from '../../../../src/application/projections/workflow-board.js';
+import { workflowOperation } from '../../../../src/domain/workflow-operation.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import { projectAgentAvailability } from '../../../../src/application/projections/agent-status.js';
-import { reconcileCurrentWork } from '../../../../src/application/projections/current-work.js';
 import {
   describeCoordinatorEvidence,
   describeMissionWork,
@@ -35,6 +39,19 @@ import '../../../../src/interfaces/tui/mission-card.js';
 const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(`${ESC}\\[[0-9;?]*[ -/]*[@-~]`, 'g');
 const plain = (value: string): string => value.replace(ANSI, '');
+
+test('uncertain stopping ownership preserves genuine blockers and manual attention (TASK-2822)', () => {
+  const card = makeCard({ blockingReason: 'Termination is unconfirmed', commands: [{ command: 'active', enabled: true, reason: null }] });
+  const owner = { ...workflowOperation({ id: 'stop', missionId: card.id, repositoryId: card.repositoryId, requestKey: 'stop', command: 'active:execute',
+    generation: 0, phase: 'accepted', owner: null, providerStarted: false, agent: null, reviewer: null, originalStatus: 'active', previousAssignee: null,
+    createdAt: '2026-10-26T10:00:00Z', updatedAt: '2026-10-26T10:00:00Z', reason: null }), phase: 'stopping' as const, reason: card.blockingReason };
+  const board = projectWorkflowBoard(buildBoardProjection(card.repositoryId, [card], [], [], emptyMetrics, []), [owner]);
+  const projected = board.stages.flatMap(stage => stage.cards)[0];
+  assert.deepEqual(projectMissionActivity(projected).work, { kind: 'blocked', reason: 'Termination is unconfirmed' });
+  assert.equal(board.attentionQueue.length, 1);
+  assert.equal(board.attentionQueue[0].action, null);
+  assert.equal(projected.commands[0].enabled, false);
+});
 
 /** A card-shaped source with authoritative work at the given certainty. */
 function working(freshness: CurrentWorkFreshness, overrides: Partial<MissionActivitySource> = {}): MissionActivitySource {
@@ -159,7 +176,7 @@ test('projectMissionActivity restates the one operation the reconciler resolved 
   // Two operations overlap and the older one ends last. Durable order, not
   // wall clock, decides which fact stands; the projection must not merge them
   // or turn two operations into a count.
-  const facts = reconcileCurrentWork(
+  const facts = projectActivityPublications(
     [
       { missionId: fixtureMissionId('task-2389'), operationId: 'op-old', state: 'running', phase: 'draft', summary: 'old', agent: null, occurredAt: '2026-08-22T10:00:00Z', processId: null, blockedReason: null, sequence: 1 },
       { missionId: fixtureMissionId('task-2389'), operationId: 'op-new', state: 'running', phase: 'execute', summary: 'new', agent: null, occurredAt: '2026-08-22T10:01:00Z', processId: null, blockedReason: null, sequence: 2 },
@@ -443,4 +460,19 @@ test('a selected active card still carries the activity treatment', async () => 
   assert.ok(/\u001b\[5m/.test(selectedActive), `the selected active card must carry the blink treatment. Got: ${JSON.stringify(selectedActive)}`);
   // The selection arrow is present so the focused card stays identifiable.
   assert.ok(selectedActive.includes('\u25b6'), `the selected card must render the focus arrow. Got: ${JSON.stringify(selectedActive)}`);
+});
+
+test('settled ownership preserves a later independent recovery blocker (TASK-2822)', () => {
+  const card = makeCard({ activityOperationId: 'independent-recovery', blockingReason: 'Forgejo token expired',
+    commands: [{ command: 'review', enabled: true, reason: null }] });
+  const owner = { ...workflowOperation({ id: 'completed-owner', missionId: card.id, repositoryId: card.repositoryId,
+    requestKey: 'completed-owner', command: 'active:execute', generation: 0, phase: 'accepted', owner: null,
+    providerStarted: false, agent: null, reviewer: null, originalStatus: 'active', previousAssignee: null,
+    createdAt: '2026-10-26T10:00:00Z', updatedAt: '2026-10-26T10:00:00Z', reason: null }), phase: 'completed' as const };
+  const board = projectWorkflowBoard(buildBoardProjection(card.repositoryId, [card], [], [], emptyMetrics, []), [owner]);
+  const item = board.attentionQueue[0]!;
+  assert.equal(item.reason.kind, 'blocking');
+  assert.deepEqual(item.action, { kind: 'manual', display: `px lead ${card.id} --once` });
+  assert.deepEqual(item.card.commands, card.commands, 'investigation grants no lifecycle capability');
+  assert.deepEqual(projectMissionActivity(item.card).work, { kind: 'blocked', reason: 'Forgejo token expired' });
 });

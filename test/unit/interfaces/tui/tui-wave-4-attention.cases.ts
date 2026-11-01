@@ -340,26 +340,27 @@ test('attention-items: selecting a lane card updates selectedMissionId and match
 
 test('attention-items: each item renders exact command string from attentionCommand()', async () => {
   const { attentionCommand } = await import('../../../../src/interfaces/tui/shell.js');
+  const { attentionAction } = await import('../../../../src/application/projections/board.js');
 
-  const integrateCard = makeCard({ id: fixtureMissionId('task-4001'), lane: 'integration' });
-  const reviewCard = makeCard({ id: fixtureMissionId('task-4002'), lane: 'review' });
+  const integrateCard = makeCard({ id: fixtureMissionId('task-4001'), lane: 'integration', commands: [{ command: 'integrate', enabled: true, reason: null }] });
+  const reviewCard = makeCard({ id: fixtureMissionId('task-4002'), lane: 'review', commands: [{ command: 'review', enabled: true, reason: null }] });
   const blockingCard = makeCard({ id: fixtureMissionId('task-4003'), lane: 'active', blockingReason: 'upstream' });
-  const gateFailedCard = makeCard({ id: fixtureMissionId('task-4004'), lane: 'active', gate: 'failed' });
+  const gateFailedCard = makeCard({ id: fixtureMissionId('task-4004'), lane: 'active', gate: 'failed', commands: [{ command: 'active', enabled: true, reason: null }] });
 
   assert.equal(
-    attentionCommand(integrateCard, { kind: 'integrate-lane' }),
+    attentionCommand(attentionAction(integrateCard, { kind: 'integrate-lane', detail: '' })),
     'px integrate task-4001',
   );
   assert.equal(
-    attentionCommand(reviewCard, { kind: 'review-lane' }),
-    'px review',
+    attentionCommand(attentionAction(reviewCard, { kind: 'review-lane', detail: '' })),
+    'px review task-4002',
   );
   assert.equal(
-    attentionCommand(blockingCard, { kind: 'blocking' }),
+    attentionCommand(attentionAction(blockingCard, { kind: 'blocking', detail: '' })),
     'px lead task-4003 --once',
   );
   assert.equal(
-    attentionCommand(gateFailedCard, { kind: 'gate-failed' }),
+    attentionCommand(attentionAction(gateFailedCard, { kind: 'gate-failed', detail: '' })),
     'px active task-4004',
   );
 });
@@ -368,6 +369,7 @@ test('attention-items: rendered output contains exact command text "$ px <cmd> <
   const integrateCard = makeCard({
     id: fixtureMissionId('task-5001'),
     lane: 'integration',
+    commands: [{ command: 'integrate', enabled: true, reason: null }],
     title: 'Integrate mission',
   });
 
@@ -669,17 +671,20 @@ test('attention-items: reason kinds render with correct colors (blocking=red, ga
 
 test('attention-items: exact next step uses mission context for review and distinguishes manual blockers from executable commands', async () => {
   const { attentionCommand } = await import('../../../../src/interfaces/tui/shell.js');
+  const { attentionAction } = await import('../../../../src/application/projections/board.js');
 
   const cases = [
     { id: 'task-c1', lane: 'integration', reasonKind: 'integrate-lane', expected: 'px integrate task-c1' },
-    { id: 'task-c2', lane: 'review', reasonKind: 'review-lane', expected: 'px review' },
+    { id: 'task-c2', lane: 'review', reasonKind: 'review-lane', expected: 'px review task-c2' },
     { id: 'task-c3', lane: 'active', reasonKind: 'blocking', expected: 'px lead task-c3 --once' },
     { id: 'task-c4', lane: 'active', reasonKind: 'gate-failed', expected: 'px active task-c4' },
   ] as const;
 
   for (const { id, lane, reasonKind, expected } of cases) {
-    const card = makeCard({ id: fixtureMissionId(id), lane: lane });
-    const actual = attentionCommand(card, { kind: reasonKind });
+    const command = lane === 'integration' ? 'integrate' : lane === 'review' ? 'review' : 'active';
+    const card = makeCard({ id: fixtureMissionId(id), lane, blockerRequiresOperator: reasonKind === 'blocking', commands: [{ command, enabled: true, reason: null }] });
+    const reason = { kind: reasonKind, detail: 'fixture diagnostic' };
+    const actual = attentionCommand(attentionAction(card, reason));
     assert.equal(actual, expected, `command for ${reasonKind} must be "${expected}"`);
   }
 });
@@ -687,12 +692,12 @@ test('attention-items: exact next step uses mission context for review and disti
 test('attention action display and its typed confirmation command stay aligned', async () => {
   const { attentionCommand } = await import('../../../../src/interfaces/tui/shell.js');
   const { applicationCommandText } = await import('../../../../src/interfaces/tui/confirmation-dialog.js');
-  const reviewCard = makeCard({ id: fixtureMissionId('task-2370'), lane: 'review', status: 'review' });
+  const reviewCard = makeCard({ id: fixtureMissionId('task-2370'), lane: 'review', status: 'review', commands: [{ command: 'review', enabled: true, reason: null }] });
   const item = makeAttentionItem(reviewCard, { kind: 'review-lane', detail: 'Awaiting review decision' }, 2);
 
-  assert.equal(attentionCommand(item.card, item.reason, item.action), item.action.display);
-  assert.ok(item.action.kind !== 'manual');
-  assert.equal(applicationCommandText(item.action.kind, item.missionId), item.action.display);
+  assert.equal(attentionCommand(item.action), item.action?.display);
+  assert.ok(item.action && item.action.kind !== 'manual');
+  assert.equal(applicationCommandText(item.action.kind, item.missionId), item.action?.display);
 });
 
 test('working work is separate from NEEDS YOU', async () => {
@@ -727,4 +732,9 @@ test('manual attention renders lead investigation next step instead of executabl
   assert.match(output, /px lead task-human --once/);
   assert.match(output, /lead investigation/);
   assert.doesNotMatch(output, /px (active|review|integrate) task-human/);
+});
+
+test('attention-items: absent owned action renders operator guidance (TASK-2822)', async () => {
+  const { attentionCommand } = await import('../../../../src/interfaces/tui/shell.js');
+  assert.equal(attentionCommand(null), 'Operator attention required');
 });

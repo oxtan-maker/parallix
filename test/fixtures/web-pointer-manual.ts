@@ -45,17 +45,20 @@ try {
   }) } satisfies NonNullable<Parameters<typeof fixture.render>[0]>;
   await fixture.render(board);
   assert.equal(await page.locator('[data-board-card]').count(), 5);
-  assert.equal(await page.locator('[data-board-card] button:not([data-action-kind="mission:edit"])').count(), 10);
+  assert.equal(await page.locator('[data-board-card] button:not([data-action-kind="mission:edit"])').count(), 11);
+  for (const lane of lanes) {
+    assert.equal(await page.locator(`section[aria-label="${lane} stage"] [data-board-card] button:not([data-action-kind="mission:edit"])`).count(), lane === 'active' ? 3 : 2);
+  }
   await page.screenshot({ path: '/tmp/task-2705-compact-board.png' });
-  console.log('PASS manual normal server projections: five lanes, two controls per card; screenshot /tmp/task-2705-compact-board.png');
+  console.log('PASS manual normal server projections: five lanes, active restart/review and cancellation, two controls in other lanes; screenshot /tmp/task-2705-compact-board.png');
   const base = pointerSnapshot('active');
   const supplied = {...base, stages: base.stages.map((stage) => ({...stage, cards: stage.cards.map((card) => ({...card, actions: card.actions.map((action) => ({...action, state: 'enabled' as const, reason: null}))}))}))} satisfies NonNullable<Parameters<typeof fixture.render>[0]>;
   await fixture.render(supplied);
-  for (const command of ['active', 'handoff', 'review', 'integrate']) {
+  for (const command of ['active', 'draft', 'review', 'integrate']) {
     await press(page.locator(`[data-board-card] button[aria-label^="px ${command}"]`));
     await page.waitForFunction(() => !document.querySelector('[data-board-card] button[aria-label*="starting"]'));
   }
-  assert.deepEqual(requests.map((request) => (request as {kind: string}).kind), ['active:execute', 'handoff:record', 'review:submit', 'integrate:merge']);
+  assert.deepEqual(requests.map((request) => (request as {kind: string}).kind), ['active:execute', 'draft:create', 'review:submit', 'integrate:merge']);
   const backlog = pointerSnapshot('backlog', ['cancel']);
   const tall = {...backlog, stages: backlog.stages.map((stage) => ({...stage, cards: stage.cards.flatMap((card) => Array.from({length: 40}, (_, index) => ({...card, id: index === 39 ? card.id : `task-disposable-${index}`}))) }))} satisfies NonNullable<Parameters<typeof fixture.render>[0]>;
   await fixture.render(tall);
@@ -69,7 +72,7 @@ try {
   const control = await cancel.boundingBox(); assert.ok(control);
   await page.mouse.move(control.x + control.width / 2, control.y + control.height / 2);
   await page.mouse.down();
-  await fixture.render(pointerSnapshot('backlog', ['active', 'handoff']), true);
+  await fixture.render(pointerSnapshot('backlog', ['active', 'review']), true);
   await page.mouse.up();
   assert.equal(requests.length, 4);
   assert.equal(await page.locator('[data-board-card]').getAttribute('aria-current'), 'false');

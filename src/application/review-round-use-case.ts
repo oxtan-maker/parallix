@@ -7,7 +7,7 @@ import { changeRevision, ConfiguredReviewerEligibility, startReview } from '../d
 import type { ReviewRoundEntryPort, StartReviewRound } from './ports/review-round.js';
 import { DEFAULT_MAX_ATTEMPTS, runReviewLoop } from './review-loop/review-loop.js';
 
-/** Infer first handoff or continuation from the authoritative Review. */
+/** Infer first review preparation or continuation from the authoritative Review. */
 export class ReviewRoundUseCase {
   constructor(private readonly _entry: ReviewRoundEntryPort, private readonly _runLoop: typeof runReviewLoop = runReviewLoop) {}
 
@@ -37,8 +37,8 @@ export class ReviewRoundUseCase {
   }
 }
 
-/** The complete handoff record an operator must supply to repair an interrupted transition. */
-export interface InterruptedHandoffInputs {
+/** The complete review preparation record an operator must supply to repair an interrupted transition. */
+export interface InterruptedReviewPreparationInputs {
   readonly sourceBranch: string;
   readonly targetBranch: string;
   readonly reviewer: string;
@@ -49,7 +49,7 @@ export interface InterruptedHandoffInputs {
   readonly startedAt: string;
 }
 
-export type InterruptedHandoffReconciliationResult =
+export type InterruptedReviewPreparationReconciliationResult =
   | { outcome: 'reconciled'; eligibleReviewers: readonly string[] }
   | { outcome: 'already-present'; eligibleReviewers: readonly string[] }
   | { outcome: 'failed'; diagnostic: string };
@@ -70,25 +70,25 @@ function hasValidReviewAggregate(review: unknown): boolean {
   });
 }
 
-function requiredReconciliationText(inputs: InterruptedHandoffInputs, field: keyof InterruptedHandoffInputs): string {
+function requiredReconciliationText(inputs: InterruptedReviewPreparationInputs, field: keyof InterruptedReviewPreparationInputs): string {
   const value = inputs[field];
   if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(`Interrupted-handoff reconciliation requires canonical ${field}`);
+    throw new Error(`Interrupted-review preparation reconciliation requires canonical ${field}`);
   }
   return value.trim();
 }
 
 /**
- * Create the sole missing round-one Review aggregate for an interrupted handoff.
+ * Create the sole missing round-one Review aggregate for an interrupted review preparation.
  *
- * This deliberately accepts only the handoff record, never loop state or
+ * This deliberately accepts only the review preparation record, never loop state or
  * reviewer artifacts. Existing aggregates are left byte-for-byte untouched.
  */
-export async function reconcileInterruptedHandoff(
+export async function reconcileInterruptedReviewPreparation(
   slug: string,
-  inputs: InterruptedHandoffInputs,
+  inputs: InterruptedReviewPreparationInputs,
   store: MissionStore | null,
-): Promise<InterruptedHandoffReconciliationResult> {
+): Promise<InterruptedReviewPreparationReconciliationResult> {
   if (!store) { return { outcome: 'failed', diagnostic: `Operator database unavailable for ${slug}` }; }
 
   try {
@@ -99,7 +99,7 @@ export async function reconcileInterruptedHandoff(
     const revision = changeRevision(requiredReconciliationText(inputs, 'revision'));
     const startedAt = requiredReconciliationText(inputs, 'startedAt');
     if (!Array.isArray(inputs.eligibleReviewers) || inputs.eligibleReviewers.length === 0) {
-      throw new Error('Interrupted-handoff reconciliation requires non-empty canonical eligibleReviewers');
+      throw new Error("Interrupted-review preparation reconciliation requires non-empty canonical eligibleReviewers");
     }
     const eligibleReviewers = inputs.eligibleReviewers.map((value) => agentFamily(String(value).trim()));
     const eligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: eligibleReviewers, strategy: 'random' });
@@ -109,7 +109,7 @@ export async function reconcileInterruptedHandoff(
       return { outcome: 'failed', diagnostic: `Mission ${slug} is not in the operator database; restore it before reconciliation` };
     }
     if (result.mission.status !== 'review') {
-      return { outcome: 'failed', diagnostic: `Mission ${slug} is ${result.mission.status}, not review; reconciliation only repairs an interrupted handoff` };
+      return { outcome: 'failed', diagnostic: `Mission ${slug} is ${result.mission.status}, not review; reconciliation only repairs an interrupted review preparation` };
     }
     if (result.mission.review) {
       if (!hasValidReviewAggregate(result.mission.review)) {
@@ -125,6 +125,6 @@ export async function reconcileInterruptedHandoff(
     await store.save({ ...result.mission, review }, result.version);
     return { outcome: 'reconciled', eligibleReviewers };
   } catch (error) {
-    return { outcome: 'failed', diagnostic: error instanceof Error ? error.message : 'Interrupted-handoff reconciliation failed' };
+    return { outcome: 'failed', diagnostic: error instanceof Error ? error.message : "Interrupted-review preparation reconciliation failed" };
   }
 }

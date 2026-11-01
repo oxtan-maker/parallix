@@ -12,14 +12,14 @@ import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
 import { mkdtemp } from '../../helpers/temp-dir.js';
 import { createRequire } from 'node:module';
 import { classifyError } from '../../../src/application/failure-classification.js';
-import { ExecuteHandoffService } from '../../../src/application/execute-handoff-service.js';
-import { validateCheckpointsBeforeHandoff } from '../../../src/adapters/mission/checkpoint-validation.js';
+import { ExecuteReviewPreparationService } from '../../../src/application/execute-review-preparation-service.js';
+import { validateCheckpointsBeforeReviewPreparation } from '../../../src/adapters/mission/checkpoint-validation.js';
 const _require = createRequire(import.meta.url);
 const activeModule = mockModule<typeof import('../../../src/adapters/cli/commands/active.js')>('../../../src/adapters/cli/commands/active.js', import.meta.url);
 const resolveWorktreeModule = mockModule<typeof import('../../../src/adapters/filesystem/mission-utils.js')>('../../../src/adapters/filesystem/mission-utils.js', import.meta.url);
 const completePreflightOrExitModule = mockModule<typeof import('../../../src/adapters/cli/startup-preflight.js')>('../../../src/adapters/cli/startup-preflight.js', import.meta.url);
 const missionStartModule = mockModule<typeof import('../../../src/adapters/cli/startup-preflight.js')>('../../../src/adapters/cli/startup-preflight.js', import.meta.url);
-const repairHandoffModule = mockModule<typeof import('../../../src/adapters/cli/commands/repair-handoff.js')>('../../../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
+const repairReviewPreparationModule = mockModule<typeof import('../../../src/adapters/cli/commands/repair-review-preparation.js')>('../../../src/adapters/cli/commands/repair-review-preparation.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const active = activeModule.default;
@@ -31,43 +31,42 @@ process.env.NO_COLOR = '1';
 const {
   buildExecutePrompt,
   buildCheckpointContext,
-  applyExecuteFallback,
   selectLaunchAndRecord,
   enforceExecuteCommitSafety,
   renderActiveProgress
 } = activeModule;
-type HandoffPorts = ConstructorParameters<typeof ExecuteHandoffService>[0];
-type ValidationRequest = Parameters<HandoffPorts['checkpoints']['validateBeforeHandoff']>[0];
-type ReviewRequest = Parameters<HandoffPorts['review']['start']>[0];
-type RepairRequest = Parameters<HandoffPorts['repairLaunch']['launch']>[0];
+type ReviewPreparationPorts = ConstructorParameters<typeof ExecuteReviewPreparationService>[0];
+type ValidationRequest = Parameters<ReviewPreparationPorts['checkpoints']["validateBeforeReviewPreparation"]>[0];
+type ReviewRequest = Parameters<ReviewPreparationPorts['review']['start']>[0];
+type RepairRequest = Parameters<ReviewPreparationPorts['repairLaunch']['launch']>[0];
 type MaybePromise<T> = T | Promise<T>;
-interface HandoffFixtureOptions {
-  validateCheckpointsBeforeHandoffFn?: (slug: string, worktree: string, options: Pick<ValidationRequest, 'log' | 'error'>) => MaybePromise<Awaited<ReturnType<HandoffPorts['checkpoints']['validateBeforeHandoff']>>>;
-  performHandoff?: (slug: string, options: { forgejoUser: string; worktree: string; force?: boolean }) => MaybePromise<Awaited<ReturnType<HandoffPorts['handoff']['run']>>>;
-  repairHandoffFn?: (slug: string, worktree: string, error: string, options: { taskFile: string | null; log: (message: string) => void; error: (message: string) => void }) => MaybePromise<Awaited<ReturnType<HandoffPorts['handoff']['repairHygiene']>>>;
-  startAgentFn?: (step: 'active', options: RepairRequest & { role: 'implementer' }) => ReturnType<HandoffPorts['repairLaunch']['launch']>;
-  startReviewLoop?: (slug: string, options: Pick<ReviewRequest, 'implementer' | 'worktree' | 'onAgentLaunched' | 'onAutonomousStop'> & { skipHandoff: true }) => MaybePromise<unknown>;
-  workflowLauncherStatusFn?: HandoffPorts['repairLaunch']['available'];
+interface ReviewPreparationFixtureOptions {
+  validateCheckpointsBeforeReviewPreparationFn?: (slug: string, worktree: string, options: Pick<ValidationRequest, 'log' | 'error'>) => MaybePromise<Awaited<ReturnType<ReviewPreparationPorts['checkpoints']["validateBeforeReviewPreparation"]>>>;
+  performReviewPreparation?: (slug: string, options: { forgejoUser: string; worktree: string; force?: boolean }) => MaybePromise<Awaited<ReturnType<ReviewPreparationPorts['reviewPreparation']['run']>>>;
+  repairReviewPreparationFn?: (slug: string, worktree: string, error: string, options: { taskFile: string | null; log: (message: string) => void; error: (message: string) => void }) => MaybePromise<Awaited<ReturnType<ReviewPreparationPorts['reviewPreparation']['repairHygiene']>>>;
+  startAgentFn?: (step: 'active', options: RepairRequest & { role: 'implementer' }) => ReturnType<ReviewPreparationPorts['repairLaunch']['launch']>;
+  startReviewLoop?: (slug: string, options: Pick<ReviewRequest, 'implementer' | 'worktree' | 'onAgentLaunched' | 'onAutonomousStop'> & { skipReviewPreparation: true }) => MaybePromise<unknown>;
+  workflowLauncherStatusFn?: ReviewPreparationPorts['repairLaunch']['available'];
   taskFile?: string | null;
-  log?: HandoffPorts['output']['log'];
-  error?: HandoffPorts['output']['error'];
+  log?: ReviewPreparationPorts['output']['log'];
+  error?: ReviewPreparationPorts['output']['error'];
   onAgentLaunched?: ReviewRequest['onAgentLaunched'];
   onAutonomousStop?: ReviewRequest['onAutonomousStop'];
 }
-const runHandoffAndReview = async (slug: string, worktree: string, agent: string, options: HandoffFixtureOptions = {}) => {
-  const validate = options.validateCheckpointsBeforeHandoffFn ?? (() => ({ ok: true as const }));
-  const handoff = options.performHandoff ?? (async () => ({ ok: true as const }));
-  const repair = options.repairHandoffFn ?? (async () => ({ repaired: false }));
+const runReviewPreparationAndReview = async (slug: string, worktree: string, agent: string, options: ReviewPreparationFixtureOptions = {}) => {
+  const validate = options.validateCheckpointsBeforeReviewPreparationFn ?? (() => ({ ok: true as const }));
+  const reviewPreparation = options.performReviewPreparation ?? (async () => ({ ok: true as const }));
+  const repair = options.repairReviewPreparationFn ?? (async () => ({ repaired: false }));
   const launch = options.startAgentFn ?? (async () => ({ result: { status: 0 } }));
-  return new ExecuteHandoffService({
-    checkpoints: { async validateBeforeHandoff(request) { return validate(slug, worktree, { log: request.log, error: request.error }); } },
-    handoff: {
-      async run(request) { return handoff(slug, { forgejoUser: agent, worktree, force: request.force }); },
+  return new ExecuteReviewPreparationService({
+    checkpoints: { async validateBeforeReviewPreparation(request) { return validate(slug, worktree, { log: request.log, error: request.error }); } },
+    reviewPreparation: {
+      async run(request) { return reviewPreparation(slug, { forgejoUser: agent, worktree, force: request.force }); },
       async repairHygiene(request) { return repair(slug, worktree, request.error, { taskFile: request.taskFile, log: request.log, error: request.outputError }); },
       classifyFailure: classifyError,
-      isRelaunchableFailure: repairHandoffModule.isRelaunchableError,
+      isRelaunchableFailure: repairReviewPreparationModule.isRelaunchableError,
     },
-    review: { async start(request) { await options.startReviewLoop?.(slug, { implementer: agent, worktree, skipHandoff: true, onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop }); } },
+    review: { async start(request) { await options.startReviewLoop?.(slug, { implementer: agent, worktree, skipReviewPreparation: true, onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop }); } },
     repairLaunch: {
       available: options.workflowLauncherStatusFn ?? (() => ({ supported: true })),
       readHead() { return null; },
@@ -81,10 +80,10 @@ const runHandoffAndReview = async (slug: string, worktree: string, agent: string
   }).run({ slug, worktree, agent, taskFile: options.taskFile ?? null, onAgentLaunched: options.onAgentLaunched, onAutonomousStop: options.onAutonomousStop });
 };
 
-test('active progress renderer preserves launch and handoff status order', () => {
+test("active progress renderer preserves launch and review preparation status order", () => {
   const logs: string[] = [];
   renderActiveProgress({ phase: 'launch' }, message => logs.push(message));
-  renderActiveProgress({ phase: 'handoff', agent: 'codex' }, message => logs.push(message));
+  renderActiveProgress({ phase: 'review-preparation', agent: 'codex' }, message => logs.push(message));
 
   assert.deepEqual(logs, [
     '[PASS] Implementation complete (codex).'
@@ -103,7 +102,7 @@ test('active() passes its progress renderer into a deferred execute-service fact
       return {
         execute: async () => {
           progress({ phase: 'launch' });
-          progress({ phase: 'handoff', agent: 'custom' });
+          progress({ phase: 'review-preparation', agent: 'custom' });
           return { status: 'completed' as const, value: { agent: 'custom' }, durableEvidence: [] };
         },
       };
@@ -312,7 +311,7 @@ test('mission-start reports wrong branch and ambiguous task without requiring me
 
 // ---------- active top-level command paths ----------
 
-test('active() success path: preflight, launch, and handoff run in order', async () => {
+test("active() success path: preflight, launch, and review preparation run in order", async () => {
   const calls: (["checkpoint", "task-1038"] | ["prompt", "task-1038", "Most recent checkpoint: CP-1.md"] | ["launch", "task-1038", "/tmp/project-task-1038", "Execute task-1038"] | ["handoff", "task-1038", "/tmp/project-task-1038", "codex"] | ["checkpoint", string] | ["prompt", string, string] | ["launch", string, string, string] | ["handoff", string, string, string])[] = [];
   const logs: string[] = [];
 
@@ -508,12 +507,12 @@ test('active() exits with agent status when execute agent returns non-zero', asy
   assert.deepEqual(errors, ['Execute agent (codex) exited with status 23.']);
 });
 
-test('active() exits 1 when handoff fails after successful execute launch', async () => {
+test("active() exits 1 when review preparation fails after successful execute launch", async () => {
   let exitCode: { value: number | undefined | null } = { value: null };
 
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
-    service: { execute: async () => ({ status: 'failed' as const, error: { kind: 'execution' as const, message: 'handoff and review failed' }, durableEvidence: [] }) },
+    service: { execute: async () => ({ status: 'failed' as const, error: { kind: 'execution' as const, message: "review preparation and review failed" }, durableEvidence: [] }) },
 
 
 
@@ -531,7 +530,7 @@ test('active() exits 1 when handoff fails after successful execute launch', asyn
   assert.equal(exitCode.value, 1);
 });
 
-test('active() runs the execute safety harness before handoff', async () => {
+test("active() runs the execute safety harness before review preparation", async () => {
   const calls: string[] = [];
 
   await active(['task-1038'], {
@@ -558,7 +557,7 @@ test('active() runs the execute safety harness before handoff', async () => {
   assert.deepEqual(calls, ['safety', 'handoff']);
 });
 
-test('active() restores task status and continues to handoff when the execute agent changed it', async () => {
+test("active() restores task status and continues to review preparation when the execute agent changed it", async () => {
   const calls: (string | ["restore", "task-1038", "active", "/tmp/project-task-1038"] | ["restore", string, string, string])[] = [];
   const errors: string[] = [];
 
@@ -630,74 +629,74 @@ test('active() synchronizes a launch-deferred rebase after execute output is com
 
 // ---------- runHandoffAndReview wiring ----------
 
-// Regression guard for the repairHandoffFn default in runHandoffAndReview.
-// Under ESM, `import * as repairHandoff from './repair-handoff.js'` yields a
+// Regression guard for the repairReviewPreparationFn default in runHandoffAndReview.
+// Under ESM, `import * as repairReviewPreparation from './repair-handoff.js'` yields a
 // namespace with `.default` (the callable function) and named exports.
-// active.ts uses `repairHandoff.default` as the callable.
-test('repair-handoff ESM namespace exposes callable default and named exports', () => {
-  assert.equal(typeof repairHandoffModule.default, 'function', 'namespace.default must be callable');
-  assert.equal(typeof repairHandoffModule.repairHandoff, 'function', 'named export repairHandoff must be callable');
-  assert.equal(repairHandoffModule.default, repairHandoffModule.repairHandoff, 'default and named repairHandoff must be same function');
-  assert.equal(typeof repairHandoffModule.isRelaunchableError, 'function', 'isRelaunchableError must be exported');
+// active.ts uses `repairReviewPreparation.default` as the callable.
+test("review preparation repair ESM namespace exposes callable default and named exports", () => {
+  assert.equal(typeof repairReviewPreparationModule.default, 'function', 'namespace.default must be callable');
+  assert.equal(typeof repairReviewPreparationModule.repairReviewPreparation, 'function', "named export repairReviewPreparation must be callable");
+  assert.equal(repairReviewPreparationModule.default, repairReviewPreparationModule.repairReviewPreparation, "default and named repairReviewPreparation must be same function");
+  assert.equal(typeof repairReviewPreparationModule.isRelaunchableError, 'function', 'isRelaunchableError must be exported');
 });
 
-test('runHandoffAndReview passes worktree and implementer to startReviewLoop', async () => {
-  const reviewLoopCalls: { slug: string; opts: Parameters<NonNullable<HandoffFixtureOptions['startReviewLoop']>>[1] }[] = [];
-  const result = await runHandoffAndReview('task-test', '/tmp/project-task-test', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async () => ({ ok: true as const }),
+test("runReviewPreparationAndReview passes worktree and implementer to startReviewLoop", async () => {
+  const reviewLoopCalls: { slug: string; opts: Parameters<NonNullable<ReviewPreparationFixtureOptions['startReviewLoop']>>[1] }[] = [];
+  const result = await runReviewPreparationAndReview('task-test', '/tmp/project-task-test', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async () => ({ ok: true as const }),
     startReviewLoop: (slug, opts) => reviewLoopCalls.push({ slug, opts }),
     log: () => {},
     error: () => {}
   });
 
-  assert.ok(result, 'runHandoffAndReview should return true on success');
+  assert.ok(result, "runReviewPreparationAndReview should return true on success");
   assert.equal(reviewLoopCalls.length, 1, 'startReviewLoop must be called exactly once');
   assert.equal(reviewLoopCalls[0].slug, 'task-test');
   assert.equal(reviewLoopCalls[0].opts.worktree, '/tmp/project-task-test');
   assert.equal(reviewLoopCalls[0].opts.implementer, 'codex');
   // SC3: handoff already ran in this function, so the review loop must skip its
   // own handoff. On a provider-disabled repository a start that runs
-  // performHandoff a second time would resubmit/mutate the Review the active
+  // performReviewPreparation a second time would resubmit/mutate the Review the active
   // path just created. This is a fresh review start (not a), so it
   // is signaled with skipHandoff rather than isContinue.
-  assert.equal(reviewLoopCalls[0].opts.skipHandoff, true, 'startReviewLoop must be told to skip handoff after an active handoff');
+  assert.equal(reviewLoopCalls[0].opts.skipReviewPreparation, true, "startReviewLoop must be told to skip review preparation after an active review preparation");
 });
 
-test('runHandoffAndReview does not hand off or start review when CP-2 is missing', async () => {
-  let handoffCalls = 0;
+test("runReviewPreparationAndReview does not hand off or start review when CP-2 is missing", async () => {
+  let reviewPreparationCalls = 0;
   let reviewCalls = 0;
-  const result = await runHandoffAndReview('task-incomplete', '/tmp/project-task-incomplete', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({
+  const result = await runReviewPreparationAndReview('task-incomplete', '/tmp/project-task-incomplete', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({
       ok: false as const,
-      error: 'Declared checkpoint documents are missing before handoff: CP-2. Create and commit CP-2.md before handoff.',
+      error: "Declared checkpoint documents are missing before review preparation: CP-2. Create and commit CP-2.md before review preparation.",
       nextCheckpoint: 'CP-2'
     }),
     startAgentFn: async () => { throw new Error('test relaunch declined'); },
-    performHandoff: async () => { handoffCalls++; return { ok: true as const }; },
+    performReviewPreparation: async () => { reviewPreparationCalls++; return { ok: true as const }; },
     startReviewLoop: async () => { reviewCalls++; },
     log: () => {},
     error: () => {}
   });
   assert.equal(result, false);
-  assert.equal(handoffCalls, 0);
+  assert.equal(reviewPreparationCalls, 0);
   assert.equal(reviewCalls, 0);
 });
 
-test('runHandoffAndReview completes a successful relaunch for a declared checkpoint gap', async () => {
+test("runReviewPreparationAndReview completes a successful relaunch for a declared checkpoint gap", async () => {
   let validations = 0;
   let relaunches = 0;
-  let handoffCalls = 0;
+  let reviewPreparationCalls = 0;
   const logs: string[] = [];
-  const result = await runHandoffAndReview('task-incomplete', '/tmp/project-task-incomplete', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => {
+  const result = await runReviewPreparationAndReview('task-incomplete', '/tmp/project-task-incomplete', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => {
       validations++;
       return validations === 1
         ? { ok: false, nextCheckpoint: 'CP-2' }
         : { ok: true };
     },
     startAgentFn: async () => { relaunches++; return { agent: 'codex', result: { status: 0 } }; },
-    performHandoff: async () => { handoffCalls++; return { ok: true as const }; },
+    performReviewPreparation: async () => { reviewPreparationCalls++; return { ok: true as const }; },
     startReviewLoop: async () => {},
     log: message => logs.push(message),
     error: () => {}
@@ -705,47 +704,47 @@ test('runHandoffAndReview completes a successful relaunch for a declared checkpo
 
   assert.equal(result, true);
   assert.equal(relaunches, 1);
-  assert.equal(handoffCalls, 1);
+  assert.equal(reviewPreparationCalls, 1);
   assert.ok(logs.some(message => message.includes('Checkpoint validation failed')),
-    'the typed handoff service reports the checkpoint bounce before relaunching');
+    "the typed review preparation service reports the checkpoint bounce before relaunching");
 });
 
-test('runHandoffAndReview waits for the autonomous review loop to complete', async () => {
+test("runReviewPreparationAndReview waits for the autonomous review loop to complete", async () => {
   let resolveReview: () => void = () => { throw new Error('review promise not initialized'); };
   const reviewComplete = new Promise<void>(resolve => { resolveReview = resolve; });
-  const handoffPromise = runHandoffAndReview('task-test', '/tmp/project-task-test', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async () => ({ ok: true as const }),
+  const reviewPreparationPromise = runReviewPreparationAndReview('task-test', '/tmp/project-task-test', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async () => ({ ok: true as const }),
     startReviewLoop: async () => reviewComplete,
     log: () => {},
     error: () => {}
   });
   let settled = false;
-  handoffPromise.then(() => { settled = true; });
+  reviewPreparationPromise.then(() => { settled = true; });
 
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(settled, false, 'px active must not finish while review is still running');
 
   resolveReview();
-  assert.equal(await handoffPromise, true);
+  assert.equal(await reviewPreparationPromise, true);
   assert.equal(settled, true);
 });
 
-test('runHandoffAndReview retries handoff once after successful repair with force:true', async () => {
-  let handoffAttempts = 0;
+test("runReviewPreparationAndReview retries review preparation once after successful repair with force:true", async () => {
+  let reviewPreparationAttempts = 0;
   let repairAttempts = 0;
   let forceUsed = false;
 
-  const result = await runHandoffAndReview('task-test', '/tmp/project-task-test', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async (slug, opts) => {
-      handoffAttempts++;
-      if (handoffAttempts === 1) return { ok: false as const, error: 'dirty files' };
+  const result = await runReviewPreparationAndReview('task-test', '/tmp/project-task-test', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async (slug, opts) => {
+      reviewPreparationAttempts++;
+      if (reviewPreparationAttempts === 1) return { ok: false as const, error: 'dirty files' };
       forceUsed = opts.force === true;
       return { ok: true as const };
     },
-    repairHandoffFn: async () => {
+    repairReviewPreparationFn: async () => {
       repairAttempts++;
       return { repaired: true, blocker: undefined };
     },
@@ -755,22 +754,22 @@ test('runHandoffAndReview retries handoff once after successful repair with forc
   });
 
   assert.ok(result);
-  assert.equal(handoffAttempts, 2, 'handoff should be retried once');
+  assert.equal(reviewPreparationAttempts, 2, "review preparation should be retried once");
   assert.equal(repairAttempts, 1, 'repair should be called once');
   assert.equal(forceUsed, true, 'force:true should be used on retry after repair');
 });
 
-test('runHandoffAndReview fails and does not retry if repair returns repaired:false', async () => {
-  let handoffAttempts = 0;
+test("runReviewPreparationAndReview fails and does not retry if repair returns repaired:false", async () => {
+  let reviewPreparationAttempts = 0;
   let repairAttempts = 0;
 
-  const result = await runHandoffAndReview('task-test', '/tmp/project-task-test', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async () => {
-      handoffAttempts++;
+  const result = await runReviewPreparationAndReview('task-test', '/tmp/project-task-test', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async () => {
+      reviewPreparationAttempts++;
       return { ok: false as const, error: 'dirty files' };
     },
-    repairHandoffFn: async () => {
+    repairReviewPreparationFn: async () => {
       repairAttempts++;
       return { repaired: false, blocker: undefined };
     },
@@ -780,145 +779,82 @@ test('runHandoffAndReview fails and does not retry if repair returns repaired:fa
   });
 
   assert.equal(result, false);
-  assert.equal(handoffAttempts, 1, 'handoff should not be retried if repair fails');
+  assert.equal(reviewPreparationAttempts, 1, "review preparation should not be retried if repair fails");
   assert.equal(repairAttempts, 1);
 });
 
-test('runHandoffAndReview reports specific blocker when repair fails', async () => {
+test("runReviewPreparationAndReview reports specific blocker when repair fails", async () => {
   const errors: string[] = [];
-  const result = await runHandoffAndReview('task-test', '/tmp/project-task-test', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async () => ({ ok: false as const, error: 'original error' }),
-    repairHandoffFn: async () => ({ repaired: false, blocker: 'specific rebase blocker' }),
+  const result = await runReviewPreparationAndReview('task-test', '/tmp/project-task-test', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async () => ({ ok: false as const, error: 'original error' }),
+    repairReviewPreparationFn: async () => ({ repaired: false, blocker: 'specific rebase blocker' }),
     startReviewLoop: () => {},
     log: () => {},
     error: (msg) => errors.push(msg)
   });
 
   assert.equal(result, false);
-  assert.ok(errors.some(l => l.includes('Automated handoff failed: specific rebase blocker')),
+  assert.ok(errors.some(l => l.includes("Automated review preparation failed: specific rebase blocker")),
     'Should report the specific blocker instead of the original error');
 });
 
-test('runHandoffAndReview fails if retry also fails', async () => {
-  let handoffAttempts = 0;
+test("runReviewPreparationAndReview fails if retry also fails", async () => {
+  let reviewPreparationAttempts = 0;
 
-  const result = await runHandoffAndReview('task-test', '/tmp/project-task-test', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async () => {
-      handoffAttempts++;
+  const result = await runReviewPreparationAndReview('task-test', '/tmp/project-task-test', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async () => {
+      reviewPreparationAttempts++;
       return { ok: false as const, error: 'still dirty' };
     },
-    repairHandoffFn: async () => ({ repaired: true, blocker: undefined }),
+    repairReviewPreparationFn: async () => ({ repaired: true, blocker: undefined }),
     startReviewLoop: () => {},
     log: () => {},
     error: () => {}
   });
 
   assert.equal(result, false);
-  assert.equal(handoffAttempts, 2, 'handoff should be retried once but fail again');
+  assert.equal(reviewPreparationAttempts, 2, "review preparation should be retried once but fail again");
 });
 
-// ---------- applyExecuteFallback (regression: implementer falls back after limit hit) ----------
 
-test('applyExecuteFallback returns preselected when startAgent did not fall back', () => {
-  const next = applyExecuteFallback({
-    slug: 'task-test',
-    preselected: 'codex',
-    actual: 'codex',
-    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
-    log: () => {},
-    transitionTaskFn: async () => { throw new Error('enforceTaskAssignee must not run when no fallback occurred'); }
-  });
-  assert.equal(next, 'codex');
-});
 
-test('applyExecuteFallback returns preselected when actual is undefined (catastrophic launch failure)', () => {
-  const next = applyExecuteFallback({
-    slug: 'task-test',
-    preselected: 'codex',
-    actual: undefined,
-    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
-    log: () => {},
-    transitionTaskFn: async () => { throw new Error('enforceTaskAssignee must not run when actual is missing'); }
-  });
-  assert.equal(next, 'codex');
-});
 
-test('applyExecuteFallback rewrites backlog assignee and returns the fallback agent', () => {
-  const transitions: { slug: string; status: string; opts: { implementer?: string | null | undefined; clearAssignee?: boolean; rootDir?: string; log?: (_message: string) => void; } | undefined; }[] = [];
-  const next = applyExecuteFallback({
-    slug: 'task-test',
-    preselected: 'claude',
-    actual: 'codex',
-    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
-    log: () => {},
-    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return Promise.resolve(true); }
-  });
-  assert.equal(next, 'codex');
-  assert.equal(transitions.length, 1);
-  assert.equal(transitions[0].slug, 'task-test');
-  assert.equal(transitions[0].status, 'active');
-  assert.ok(transitions[0].opts != null);
-  assert.equal(transitions[0].opts.implementer, 'codex');
-  assert.equal(transitions[0].opts.rootDir, undefined);
-  assert.equal(typeof transitions[0].opts.log, 'function');
-});
 
-test('applyExecuteFallback logs warning and returns fallback agent even if git commit fails', () => {
-  const logs: string[] = [];
-  const next = applyExecuteFallback({
-    slug: 'task-test',
-    preselected: 'claude',
-    actual: 'codex',
-    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
-    log: (msg) => logs.push(msg),
-    transitionTaskFn: () => Promise.resolve(false) // transition/commit fails
-  });
-  assert.equal(next, 'codex');
-  // transitionTask handles its own logging now
-});
 
-test('applyExecuteFallback skips backlog write when taskResolution is not ok', () => {
-  const next = applyExecuteFallback({
-    slug: 'task-test',
-    preselected: 'claude',
-    actual: 'codex',
-    taskResolution: { ok: false },
-    log: () => {},
-    transitionTaskFn: () => { throw new Error('transitionTaskFn must not run when taskResolution.ok is false'); }
-  });
-  // Still returns the fallback identity so downstream handoff polls the right user.
-  assert.equal(next, 'codex');
-});
+
+
+
+
 
 // ---------- runHandoffAndReview gatekeeper pushback ----------
 
-test('runHandoffAndReview skips startReviewLoop when gatekeeper posted pushback', async () => {
+test("runReviewPreparationAndReview skips startReviewLoop when gatekeeper posted pushback", async () => {
   const reviewLoopCalls: boolean[] = [];
-  const result = await runHandoffAndReview('task-test', '/tmp/project-task-test', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async () => ({ ok: true as const, gatekeeperPushedBack: true }),
+  const result = await runReviewPreparationAndReview('task-test', '/tmp/project-task-test', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async () => ({ ok: true as const, gatekeeperPushedBack: true }),
     startReviewLoop: () => reviewLoopCalls.push(true),
     log: () => {},
     error: () => {}
   });
 
-  assert.ok(result, 'runHandoffAndReview should return true even with gatekeeper pushback');
+  assert.ok(result, "runReviewPreparationAndReview should return true even with gatekeeper pushback");
   assert.equal(reviewLoopCalls.length, 0, 'startReviewLoop must not be called when gatekeeper posted pushback');
 });
 
-test('runHandoffAndReview starts review loop when gatekeeper did not push back', async () => {
-  const reviewLoopCalls: { slug: string; opts: Parameters<NonNullable<HandoffFixtureOptions['startReviewLoop']>>[1] }[] = [];
-  const result = await runHandoffAndReview('task-test', '/tmp/project-task-test', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async () => ({ ok: true as const, gatekeeperPushedBack: false }),
+test("runReviewPreparationAndReview starts review loop when gatekeeper did not push back", async () => {
+  const reviewLoopCalls: { slug: string; opts: Parameters<NonNullable<ReviewPreparationFixtureOptions['startReviewLoop']>>[1] }[] = [];
+  const result = await runReviewPreparationAndReview('task-test', '/tmp/project-task-test', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async () => ({ ok: true as const, gatekeeperPushedBack: false }),
     startReviewLoop: (slug, opts) => reviewLoopCalls.push({ slug, opts }),
     log: () => {},
     error: () => {}
   });
 
-  assert.ok(result, 'runHandoffAndReview should return true');
+  assert.ok(result, "runReviewPreparationAndReview should return true");
   assert.equal(reviewLoopCalls.length, 1, 'startReviewLoop must be called when gatekeeper did not push back');
 });
 
@@ -1003,7 +939,7 @@ test('selectLaunchAndRecord writes Backlog when startAgent returns successful re
   assert.equal(transitions[0].status, 'active');
 });
 
-test('selectLaunchAndRecord fails at the activation boundary without waiting for the agent to exit', async () => {
+test('selectLaunchAndRecord stops on fenced launch publication without waiting for the agent to exit', async () => {
   const transitions: { slug: string; status: string; opts: { implementer?: string | null | undefined; clearAssignee?: boolean; rootDir?: string; log?: (_message: string) => void; } | undefined; }[] = [];
   const logs: string[] = [];
   // The agent's final result never settles: if the boundary rejection were
@@ -1030,13 +966,12 @@ test('selectLaunchAndRecord fails at the activation boundary without waiting for
       },
       transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
       log: (message) => { logs.push(String(message)); },
-      onActivated: async () => { throw new Error('store refused the active transition'); }
+      onAgentLaunched: async () => { throw new Error('store refused the active transition'); }
     }),
-    /Failed to persist the active lifecycle boundary for task task-test: store refused the active transition/,
+    /store refused the active transition/,
   );
 
   assert.equal(transitions.length, 0, 'no Backlog transition may follow a refused activation boundary');
-  assert.ok(logs.some((line) => line.includes('store refused the active transition')), 'the boundary failure is surfaced at the boundary');
 });
 
 test('selectLaunchAndRecord writes Backlog before the launcher resolves its final result', async () => {
@@ -1081,157 +1016,39 @@ test('selectLaunchAndRecord writes Backlog before the launcher resolves its fina
   resolveResult.value({ status: 0 });
   await callPromise;
 });
-
-test('selectLaunchAndRecord rolls Backlog back when startAgent returns a result.error', async () => {
-  const transitions: { slug: string; status: string; opts: { implementer?: string | null | undefined; clearAssignee?: boolean; rootDir?: string; log?: (_message: string) => void; } | undefined; }[] = [];
-
-  await selectLaunchAndRecord({
-    slug: 'task-test',
-    worktree: '/tmp/project-task-test',
-    agentConfig: {},
-    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
-    getTaskStatusFn: () => 'refined',
-    prompt: 'Execute.',
-    selectAgentFn: () => 'claude',
-    startAgentFn: async (step, opts) => {
-      if (opts.onLaunch) {
-        assert.ok(opts.onLaunch);
-      await opts.onLaunch({ agent: 'claude', invocation: null, startedAtMs: Date.now() });
-      }
-      return {
-        agent: 'claude',
-        result: { error: new Error('usage limit'), status: null }
-      };
-    },
-    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
-    log: () => {}
-  });
-
-  assert.equal(transitions.length, 2, 'transitionTask must write active at launch and restore the prior status on result.error');
-  assert.equal(transitions[0].status, 'active');
-  assert.equal(transitions[1].status, 'refined');
+test("selectLaunchAndRecord retains the active mirror after actual startup when startAgent returns a result.error", async () => {
+  const transitions: string[] = [];
+  const result = await selectLaunchAndRecord({ slug: 'task-test', worktree: '/tmp/project-task-test', agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' }, prompt: 'Execute.', preselectedAgent: 'claude',
+    startAgentFn: async (_step, options) => { await options.onLaunch?.({ agent: 'claude', invocation: null, startedAtMs: Date.now() }); return { agent: 'claude', result: { status: null, error: 'launcher failed after spawn' } }; },
+    transitionTaskFn: (_slug, status) => { transitions.push(status); return true; }, log: () => {} });
+  assert.deepEqual(transitions, ['active'], 'a mechanism cannot roll back the execution owner after real work started');
+  assert.deepEqual(result.result, { status: null, error: 'launcher failed after spawn' });
 });
 
-test('selectLaunchAndRecord rolls Backlog back when startAgent returns non-zero exit status', async () => {
-  const transitions: { slug: string; status: string; opts: { implementer?: string | null | undefined; clearAssignee?: boolean; rootDir?: string; log?: (_message: string) => void; } | undefined; }[] = [];
-
-  await selectLaunchAndRecord({
-    slug: 'task-test',
-    worktree: '/tmp/project-task-test',
-    agentConfig: {},
-    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
-    getTaskStatusFn: () => 'refined',
-    prompt: 'Execute.',
-    selectAgentFn: () => 'claude',
-    startAgentFn: async (step, opts) => {
-      if (opts.onLaunch) {
-        assert.ok(opts.onLaunch);
-      await opts.onLaunch({ agent: 'claude', invocation: null, startedAtMs: Date.now() });
-      }
-      return { agent: 'claude', result: { status: 1 } };
-    },
-    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
-    log: () => {}
-  });
-
-  assert.equal(transitions.length, 2, 'transitionTask must write active at launch and restore the prior status on non-zero exit');
-  assert.equal(transitions[0].status, 'active');
-  assert.equal(transitions[1].status, 'refined');
+test("selectLaunchAndRecord retains the active mirror after actual startup when startAgent returns non-zero exit status", async () => {
+  const transitions: string[] = [];
+  const result = await selectLaunchAndRecord({ slug: 'task-test', worktree: '/tmp/project-task-test', agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' }, prompt: 'Execute.', preselectedAgent: 'claude',
+    startAgentFn: async (_step, options) => { await options.onLaunch?.({ agent: 'claude', invocation: null, startedAtMs: Date.now() }); return { agent: 'claude', result: { status: 19 } }; },
+    transitionTaskFn: (_slug, status) => { transitions.push(status); return true; }, log: () => {} });
+  assert.deepEqual(transitions, ['active'], 'a mechanism cannot roll back the execution owner after real work started');
+  assert.deepEqual(result.result, { status: 19 });
 });
 
-test('selectLaunchAndRecord rolls Backlog back when startAgent throws after onLaunch recorded active', async () => {
-  const transitions: { slug: string; status: string; opts: { implementer?: string | null | undefined; clearAssignee?: boolean; rootDir?: string; log?: (_message: string) => void; } | undefined; }[] = [];
-
-  await assert.rejects(
-    () => selectLaunchAndRecord({
-      slug: 'task-test',
-      worktree: '/tmp/project-task-test',
-      agentConfig: {},
-      taskResolution: { ok: true, taskFile: '/tmp/task.md' },
-      getTaskStatusFn: () => 'refined',
-      prompt: 'Execute.',
-      selectAgentFn: () => 'claude',
-      startAgentFn: async (step, opts) => {
-        if (opts.onLaunch) {
-          assert.ok(opts.onLaunch);
-      await opts.onLaunch({ agent: 'claude', invocation: null, startedAtMs: Date.now() });
-        }
-        throw new Error('all eligible agents exhausted after limit hit');
-      },
-      transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
-      log: () => {}
-    }),
-    /all eligible agents exhausted after limit hit/
-  );
-
-  assert.equal(transitions.length, 2, 'transitionTask must write active at launch and restore the prior status when startAgent throws after launch');
-  assert.equal(transitions[0].status, 'active');
-  assert.equal(transitions[1].status, 'refined');
+test("selectLaunchAndRecord propagates a post-start failure without a mirror rollback", async () => {
+  const transitions: string[] = [];
+  await assert.rejects(() => selectLaunchAndRecord({ slug: 'task-test', worktree: '/tmp/project-task-test', agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' }, prompt: 'Execute.', preselectedAgent: 'claude',
+    startAgentFn: async (_step, options) => { await options.onLaunch?.({ agent: 'claude', invocation: null, startedAtMs: Date.now() }); throw new Error('post-start failure'); },
+    transitionTaskFn: (_slug, status) => { transitions.push(status); return true; }, log: () => {} }), /post-start failure/);
+  assert.deepEqual(transitions, ['active']);
 });
 
-test('selectLaunchAndRecord restores prior implementer on rollback when startAgent returns result.error', async () => {
-  const transitions: { slug: string; status: string; opts: { implementer?: string | null | undefined; clearAssignee?: boolean; rootDir?: string; log?: (_message: string) => void; } | undefined; }[] = [];
 
-  await selectLaunchAndRecord({
-    slug: 'task-test',
-    worktree: '/tmp/project-task-test',
-    agentConfig: {},
-    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
-    getTaskStatusFn: () => 'refined',
-    getTaskImplementerFn: () => 'codex',
-    prompt: 'Execute.',
-    selectAgentFn: () => 'claude',
-    startAgentFn: async (step, opts) => {
-      if (opts.onLaunch) {
-        assert.ok(opts.onLaunch);
-      await opts.onLaunch({ agent: 'claude', invocation: null, startedAtMs: Date.now() });
-      }
-      return { agent: 'claude', result: { error: new Error('usage limit'), status: null } };
-    },
-    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
-    log: () => {}
-  });
 
-  assert.equal(transitions.length, 2, 'transitionTask must write active at launch and restore state on failure');
-  assert.equal(transitions[0].status, 'active');
-  assert.equal(transitions[1].status, 'refined');
-  assert.ok(transitions[1].opts != null);
-  assert.equal(transitions[1].opts.implementer, 'codex', 'rollback must restore the prior implementer');
-});
 
-test('selectLaunchAndRecord rolls back both status and implementer when task starts already-active', async () => {
-  // Regression: prior guard `priorStatus === "active"` skipped rollback for already-active tasks,
-  // leaving the assignee pinned to the failed transient agent after a failed relaunch.
-  const transitions: { slug: string; status: string; opts: { implementer?: string | null | undefined; clearAssignee?: boolean; rootDir?: string; log?: (_message: string) => void; } | undefined; }[] = [];
 
-  await selectLaunchAndRecord({
-    slug: 'task-test',
-    worktree: '/tmp/project-task-test',
-    agentConfig: {},
-    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
-    getTaskStatusFn: () => 'active',
-    getTaskImplementerFn: () => 'codex',
-    prompt: 'Execute.',
-    selectAgentFn: () => 'claude',
-    startAgentFn: async (step, opts) => {
-      if (opts.onLaunch) {
-        assert.ok(opts.onLaunch);
-      await opts.onLaunch({ agent: 'claude', invocation: null, startedAtMs: Date.now() });
-      }
-      return { agent: 'claude', result: { error: new Error('usage limit'), status: null } };
-    },
-    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
-    log: () => {}
-  });
-
-  assert.equal(transitions.length, 2, 'must write active/claude at launch, then roll back to active/codex');
-  assert.equal(transitions[0].status, 'active');
-  assert.ok(transitions[0].opts != null);
-  assert.equal(transitions[0].opts.implementer, 'claude');
-  assert.equal(transitions[1].status, 'active', 'rollback must restore the prior status (active)');
-  assert.ok(transitions[1].opts != null);
-  assert.equal(transitions[1].opts.implementer, 'codex', 'rollback must restore the prior implementer (codex)');
-});
 
 test('selectLaunchAndRecord does not write Backlog when startAgent throws (no eligible agents)', async () => {
   const transitions: { slug: string; status: string; opts: { implementer?: string | null | undefined; clearAssignee?: boolean; rootDir?: string; log?: (_message: string) => void; } | undefined; }[] = [];
@@ -1307,119 +1124,21 @@ test('selectLaunchAndRecord collapses stale multi-agent assignees to the launche
   assert.equal(transitions[0].opts.rootDir, '/tmp/project-task-test');
   assert.equal(typeof transitions[0].opts.log, 'function');
 });
-
-test('selectLaunchAndRecord rolls back intermediate active write on limit-hit before retry', async () => {
-  // Regression: a claude→codex fallback fired two consecutive onLaunch calls without rolling
-  // back the first, leaving a spurious active/claude commit in the Backlog history.
-  const transitions: { slug: string; status: string; opts: { implementer?: string | null | undefined; clearAssignee?: boolean; rootDir?: string; log?: (_message: string) => void; } | undefined; }[] = [];
-
-  const result = await selectLaunchAndRecord({
-    slug: 'task-test',
-    worktree: '/tmp/project-task-test',
-    agentConfig: {},
-    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
-    getTaskStatusFn: () => 'refined',
-    getTaskImplementerFn: () => null,
-    prompt: 'Execute.',
-    selectAgentFn: () => 'claude',
-    startAgentFn: async (step, opts) => {
-      // First attempt: claude hits limit
-      assert.ok(opts.onLaunch);
-      await opts.onLaunch({ agent: 'claude', invocation: null, startedAtMs: Date.now() });
-      if (opts.onLimitHit) opts.onLimitHit({ agent: 'claude', until: '2026-01-01T12:00:00Z' });
-      // Second attempt: codex succeeds
-      assert.ok(opts.onLaunch);
-      await opts.onLaunch({ agent: 'codex', invocation: null, startedAtMs: Date.now() });
-      return { agent: 'codex', result: { status: 0 } };
-    },
-    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
-    log: () => {}
-  });
-
-  // claude active → rollback (clear assignee) → codex active
-  assert.equal(transitions.length, 3, 'must record active/claude, rollback, then active/codex');
-  assert.equal(transitions[0].status, 'active');
-  assert.ok(transitions[0].opts != null);
-  assert.equal(transitions[0].opts.implementer, 'claude');
-  assert.equal(transitions[1].status, 'refined', 'rollback must restore prior status');
-  assert.ok(transitions[1].opts != null);
-  assert.ok(transitions[1].opts.clearAssignee, 'rollback must clear assignee when priorImplementer was absent');
-  assert.equal(transitions[2].status, 'active');
-  assert.ok(transitions[2].opts != null);
-  assert.equal(transitions[2].opts.implementer, 'codex', 'final commit must use the surviving agent');
+test("selectLaunchAndRecord mirrors actual fallback families without intermediate lifecycle rollback", async () => {
+  const transitions: Array<{ status: string; family: string | null | undefined }> = [];
+  const result = await selectLaunchAndRecord({ slug: 'task-test', worktree: '/tmp/project-task-test', agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' }, prompt: 'Execute.', preselectedAgent: 'claude',
+    startAgentFn: async (_step, options) => { await options.onLaunch?.({ agent: 'claude', invocation: null, startedAtMs: Date.now() });
+      await options.onLaunch?.({ agent: 'codex', invocation: null, startedAtMs: Date.now() }); return { agent: 'codex', result: { status: 0 } }; },
+    transitionTaskFn: (_slug, status, options) => { transitions.push({ status, family: options?.implementer }); return true; }, log: () => {} });
   assert.equal(result.agent, 'codex');
+  assert.deepEqual(transitions, [{ status: 'active', family: 'claude' }, { status: 'active', family: 'codex' }]);
 });
 
-test('selectLaunchAndRecord clears assignee on rollback when there was no prior implementer', async () => {
-  // Regression: rollbackIfNeeded passed implementer: undefined, which skips enforceTaskAssignee
-  // and leaves the transient agent pinned as assignee on a task that had no prior workflow owner.
-  const transitions: { slug: string; status: string; opts: { implementer?: string | null | undefined; clearAssignee?: boolean; rootDir?: string; log?: (_message: string) => void; } | undefined; }[] = [];
 
-  await selectLaunchAndRecord({
-    slug: 'task-test',
-    worktree: '/tmp/project-task-test',
-    agentConfig: {},
-    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
-    getTaskStatusFn: () => 'refined',
-    getTaskImplementerFn: () => null,
-    prompt: 'Execute.',
-    selectAgentFn: () => 'claude',
-    startAgentFn: async (step, opts) => {
-      assert.ok(opts.onLaunch);
-      await opts.onLaunch({ agent: 'claude', invocation: null, startedAtMs: Date.now() });
-      return { agent: 'claude', result: { error: new Error('failed'), status: null } };
-    },
-    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
-    log: () => {}
-  });
 
-  assert.equal(transitions.length, 2, 'must write active then rollback');
-  assert.equal(transitions[0].status, 'active');
-  assert.ok(transitions[0].opts != null);
-  assert.equal(transitions[0].opts.implementer, 'claude');
-  assert.equal(transitions[1].status, 'refined');
-  assert.ok(transitions[1].opts != null);
-  assert.ok(transitions[1].opts.clearAssignee, 'rollback must pass clearAssignee when priorImplementer was absent');
-  assert.equal(transitions[1].opts.implementer, undefined, 'must not pass implementer on a clear-assignee rollback');
-});
 
-test('selectLaunchAndRecord logs warning (not throws) when rollback transitionTask fails inside onLimitHit', async () => {
-  // Covers the throwOnFailure: false path in rollbackIfNeeded when called from onLimitHit.
-  const logs: string[] = [];
-  let callCount = 0;
 
-  // The rollback call (second call) returns false; all other calls return true.
-  const transitionTaskFn: NonNullable<NonNullable<Parameters<typeof selectLaunchAndRecord>[0]>["transitionTaskFn"]> = (slug, status, opts) => {
-    callCount++;
-    return callCount !== 2;
-  };
-
-  const result = await selectLaunchAndRecord({
-    slug: 'task-test',
-    worktree: '/tmp/project-task-test',
-    agentConfig: {},
-    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
-    getTaskStatusFn: () => 'refined',
-    getTaskImplementerFn: () => null,
-    prompt: 'Execute.',
-    selectAgentFn: () => 'claude',
-    startAgentFn: async (step, opts) => {
-      assert.ok(opts.onLaunch);
-      await opts.onLaunch({ agent: 'claude', invocation: null, startedAtMs: Date.now() });
-      if (opts.onLimitHit) opts.onLimitHit({ agent: 'claude', until: '2026-01-01T12:00:00Z' });
-      // After the failed rollback, a second launch succeeds
-      assert.ok(opts.onLaunch);
-      await opts.onLaunch({ agent: 'codex', invocation: null, startedAtMs: Date.now() });
-      return { agent: 'codex', result: { status: 0 } };
-    },
-    transitionTaskFn,
-    log: msg => logs.push(msg)
-  });
-
-  assert.ok(logs.some(msg => msg.includes('[WARN]') && msg.includes('Failed to roll back')),
-    'must log a warning when the rollback transitionTask returns false inside onLimitHit');
-  assert.equal(result.agent, 'codex');
-});
 
 test('selectLaunchAndRecord skips Backlog write when taskResolution is not ok', async () => {
   const transitions: { slug: string; status: string; opts: { implementer?: string | null | undefined; clearAssignee?: boolean; rootDir?: string; log?: (_message: string) => void; } | undefined; }[] = [];
@@ -1444,8 +1163,8 @@ test('selectLaunchAndRecord skips Backlog write when taskResolution is not ok', 
 
 // ---------- validateCheckpointsBeforeHandoff ----------
 
-test('validateCheckpointsBeforeHandoff reads a typed-verb mission\'s recorded plan and names the next checkpoint', async () => {
-  const result = await validateCheckpointsBeforeHandoff('task-db', '/tmp/project-task-db', {
+test("validateCheckpointsBeforeReviewPreparation reads a typed-verb mission's recorded plan and names the next checkpoint", async () => {
+  const result = await validateCheckpointsBeforeReviewPreparation('task-db', '/tmp/project-task-db', {
     loadRecordedCheckpointsFn: async () => ({ planned: ['CP-1', 'CP-2', 'CP-3'], recorded: ['CP-1'] }),
     // A recorded plan is authoritative: the mission document is never read.
     findMissionDirFn: () => { throw new Error('the mission document must not be read'); },
@@ -1456,10 +1175,10 @@ test('validateCheckpointsBeforeHandoff reads a typed-verb mission\'s recorded pl
   assert.deepEqual(result.missingCheckpoints, ['CP-2', 'CP-3']);
   assert.equal(result.nextCheckpoint, 'CP-2');
   assert.ok(result.error);
-  assert.match(result.error, /missing before handoff: CP-2, CP-3/);
+  assert.match(result.error, /missing before review preparation: CP-2, CP-3/);
   assert.equal(classifyError(result.error).failureClass, 'IncompleteEvidence', 'the gap must auto-send back like a missing CP document');
 
-  const complete = await validateCheckpointsBeforeHandoff('task-db', '/tmp/project-task-db', {
+  const complete = await validateCheckpointsBeforeReviewPreparation('task-db', '/tmp/project-task-db', {
     loadRecordedCheckpointsFn: async () => ({ planned: ['CP-1'], recorded: ['CP-1'] }),
     log: () => {},
     error: () => {},
@@ -1468,8 +1187,8 @@ test('validateCheckpointsBeforeHandoff reads a typed-verb mission\'s recorded pl
 });
 
 
-test('validateCheckpointsBeforeHandoff returns { ok: false } when mission dir is missing', async () => {
-  const result = await validateCheckpointsBeforeHandoff('task-missing', '/tmp/nonexistent', {
+test("validateCheckpointsBeforeReviewPreparation returns { ok: false } when mission dir is missing", async () => {
+  const result = await validateCheckpointsBeforeReviewPreparation('task-missing', '/tmp/nonexistent', {
     findMissionDirFn: () => null,
     log: () => {},
     error: () => {}
@@ -1479,8 +1198,8 @@ test('validateCheckpointsBeforeHandoff returns { ok: false } when mission dir is
   assert.ok(result.error.includes('Mission directory not found'));
 });
 
-test('validateCheckpointsBeforeHandoff rejects a declared checkpoint when its document is missing', async () => {
-  const result = await validateCheckpointsBeforeHandoff('task-empty', '/tmp/project-task-empty', {
+test("validateCheckpointsBeforeReviewPreparation rejects a declared checkpoint when its document is missing", async () => {
+  const result = await validateCheckpointsBeforeReviewPreparation('task-empty', '/tmp/project-task-empty', {
     findMissionDirFn: () => '/tmp/project-task-empty/docs/missions/2026/task-empty',
     findCheckpointsFn: () => [],
     readMissionFileFn: () => '## Checkpoints\n- CP 1: first checkpoint\n',
@@ -1493,9 +1212,9 @@ test('validateCheckpointsBeforeHandoff rejects a declared checkpoint when its do
   assert.ok(result.error.includes('CP-1'));
 });
 
-test('validateCheckpointsBeforeHandoff accepts a single declared checkpoint when it is committed', async () => {
+test("validateCheckpointsBeforeReviewPreparation accepts a single declared checkpoint when it is committed", async () => {
   const logs: string[] = [];
-  const result = await validateCheckpointsBeforeHandoff('task-ok', '/tmp/project-task-ok', {
+  const result = await validateCheckpointsBeforeReviewPreparation('task-ok', '/tmp/project-task-ok', {
     findMissionDirFn: () => '/tmp/project-task-ok/docs/missions/2026/task-ok',
     findCheckpointsFn: () => ['/tmp/project-task-ok/docs/missions/2026/task-ok/CP-1.md'],
     readMissionFileFn: () => '## Checkpoints\n- CP 1: first checkpoint\n',
@@ -1507,8 +1226,8 @@ test('validateCheckpointsBeforeHandoff accepts a single declared checkpoint when
   assert.ok(logs.some(l => l.includes('Found all 1 declared checkpoint')));
 });
 
-test('validateCheckpointsBeforeHandoff rejects a multi-checkpoint mission with only CP-1', async () => {
-  const result = await validateCheckpointsBeforeHandoff('task-incomplete', '/tmp/project-task-incomplete', {
+test("validateCheckpointsBeforeReviewPreparation rejects a multi-checkpoint mission with only CP-1", async () => {
+  const result = await validateCheckpointsBeforeReviewPreparation('task-incomplete', '/tmp/project-task-incomplete', {
     findMissionDirFn: () => '/tmp/project-task-incomplete/missions/task-incomplete',
     findCheckpointsFn: () => ['/tmp/project-task-incomplete/missions/task-incomplete/CP-1.md'],
     readMissionFileFn: () => '## Checkpoints\n- CP 1: first checkpoint\n- CP-2: second checkpoint\n',
@@ -1522,8 +1241,8 @@ test('validateCheckpointsBeforeHandoff rejects a multi-checkpoint mission with o
   assert.match(result.error, /CP-2/);
 });
 
-test('validateCheckpointsBeforeHandoff accepts complete declared checkpoint coverage', async () => {
-  const result = await validateCheckpointsBeforeHandoff('task-complete', '/tmp/project-task-complete', {
+test("validateCheckpointsBeforeReviewPreparation accepts complete declared checkpoint coverage", async () => {
+  const result = await validateCheckpointsBeforeReviewPreparation('task-complete', '/tmp/project-task-complete', {
     findMissionDirFn: () => '/tmp/project-task-complete/missions/task-complete',
     findCheckpointsFn: () => [
       '/tmp/project-task-complete/missions/task-complete/CP-1.md',
@@ -1538,8 +1257,8 @@ test('validateCheckpointsBeforeHandoff accepts complete declared checkpoint cove
   assert.deepEqual(result.declaredCheckpoints, ['CP-1', 'CP-2']);
 });
 
-test('validateCheckpointsBeforeHandoff rejects a section with no parsable checkpoint declarations', async () => {
-  const result = await validateCheckpointsBeforeHandoff('task-malformed', '/tmp/project-task-malformed', {
+test("validateCheckpointsBeforeReviewPreparation rejects a section with no parsable checkpoint declarations", async () => {
+  const result = await validateCheckpointsBeforeReviewPreparation('task-malformed', '/tmp/project-task-malformed', {
     findMissionDirFn: () => '/tmp/project-task-malformed/missions/task-malformed',
     findCheckpointsFn: () => [],
     readMissionFileFn: () => '## Checkpoints\n- CP two: invalid declaration\n',
@@ -1551,8 +1270,8 @@ test('validateCheckpointsBeforeHandoff rejects a section with no parsable checkp
   assert.match(result.error, /contains no checkpoint declarations/);
 });
 
-test('validateCheckpointsBeforeHandoff rejects malformed declarations missing a separator', async () => {
-  const result = await validateCheckpointsBeforeHandoff('task-malformed', '/tmp/project-task-malformed', {
+test("validateCheckpointsBeforeReviewPreparation rejects malformed declarations missing a separator", async () => {
+  const result = await validateCheckpointsBeforeReviewPreparation('task-malformed', '/tmp/project-task-malformed', {
     findMissionDirFn: () => '/tmp/project-task-malformed/missions/task-malformed',
     findCheckpointsFn: () => [],
     readMissionFileFn: () => '## Checkpoints\n- CP 1 must cite an ADR\n',
@@ -1564,8 +1283,8 @@ test('validateCheckpointsBeforeHandoff rejects malformed declarations missing a 
   assert.match(result.error, /Malformed checkpoint declaration/);
 });
 
-test('validateCheckpointsBeforeHandoff accepts compatible declaration and filename variants before its documentation sub-block', async () => {
-  const result = await validateCheckpointsBeforeHandoff('task-compatible', '/tmp/project-task-compatible', {
+test("validateCheckpointsBeforeReviewPreparation accepts compatible declaration and filename variants before its documentation sub-block", async () => {
+  const result = await validateCheckpointsBeforeReviewPreparation('task-compatible', '/tmp/project-task-compatible', {
     findMissionDirFn: () => '/tmp/project-task-compatible/missions/task-compatible',
     findCheckpointsFn: () => [
       '/tmp/project-task-compatible/missions/task-compatible/CP-1-parser.md',
@@ -1594,8 +1313,8 @@ test('validateCheckpointsBeforeHandoff accepts compatible declaration and filena
   assert.deepEqual(result.declaredCheckpoints, ['CP-1', 'CP-2', 'CP-3', 'CP-4', 'CP-5']);
 });
 
-test('validateCheckpointsBeforeHandoff returns { ok: false } when checkpoint files are uncommitted', async () => {
-  const result = await validateCheckpointsBeforeHandoff('task-dirty', '/tmp/project-task-dirty', {
+test("validateCheckpointsBeforeReviewPreparation returns { ok: false } when checkpoint files are uncommitted", async () => {
+  const result = await validateCheckpointsBeforeReviewPreparation('task-dirty', '/tmp/project-task-dirty', {
     findMissionDirFn: () => '/tmp/project-task-dirty/docs/missions/2026/task-dirty',
     findCheckpointsFn: () => ['/tmp/project-task-dirty/docs/missions/2026/task-dirty/CP-1.md'],
     readMissionFileFn: () => '## Checkpoints\n- CP 1: first checkpoint\n',
@@ -1605,7 +1324,7 @@ test('validateCheckpointsBeforeHandoff returns { ok: false } when checkpoint fil
   });
   assert.equal(result.ok, false);
   assert.ok(result.error != null);
-  assert.ok(result.error.includes('must be committed before handoff'));
+  assert.ok(result.error.includes("must be committed before review preparation"));
   assert.ok(result.error.includes('CP-1.md'));
 });
 
@@ -1634,7 +1353,7 @@ test('active() delegates state ownership to the execute service (regression)', a
 //   - "not relaunchable" declined without a launch  → the kernel's classifier;
 //     "SC3: a non-relaunchable checkpoint error launches no agent at all" and
 //     "SC4: a HumanOnly classification launches no agent and takes the
-//     repairHandoffFn branch" in test/mission-handoff-lane-events-contract.test.ts.
+//     repairReviewPreparationFn branch" in test/mission-handoff-lane-events-contract.test.ts.
 //   - launcher unavailable                          → "the launch port declines
 //     when the agent launcher is unavailable" below.
 //   - startAgent call shape                         → "the launch port calls
@@ -1644,11 +1363,11 @@ test('active() delegates state ownership to the execute service (regression)', a
 
 test('the launch port declines when the agent launcher is unavailable', async () => {
   let launches = 0;
-  const result = await runHandoffAndReview('task-1124', '/tmp/worktree', 'unavailable-agent', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async () => ({
+  const result = await runReviewPreparationAndReview('task-1124', '/tmp/worktree', 'unavailable-agent', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async () => ({
       ok: false as const,
-      error: 'The final checkpoint at CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.',
+      error: "The final checkpoint at CP-3.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation.",
     }),
     workflowLauncherStatusFn: () => ({ supported: false, detail: 'agent not found' }),
     startAgentFn: async () => { launches++; return { agent: 'x', result: { status: 0 } }; },
@@ -1657,18 +1376,18 @@ test('the launch port declines when the agent launcher is unavailable', async ()
     error: () => {},
   });
 
-  assert.equal(result, false, 'an unavailable launcher cannot repair the handoff');
+  assert.equal(result, false, "an unavailable launcher cannot repair the review preparation");
   assert.equal(launches, 0, 'startAgent is never reached when the launcher is unsupported');
 });
 
 test('the launch port calls startAgent with the mission step, slug, role, and worktree', async () => {
   let stepArg: { value: "active" | null } = { value: null };
-  let optsArg: { value: Parameters<NonNullable<HandoffFixtureOptions['startAgentFn']>>[1] | null } = { value: null };
-  await runHandoffAndReview('task-1124', '/tmp/worktree', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async () => ({
+  let optsArg: { value: Parameters<NonNullable<ReviewPreparationFixtureOptions['startAgentFn']>>[1] | null } = { value: null };
+  await runReviewPreparationAndReview('task-1124', '/tmp/worktree', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async () => ({
       ok: false as const,
-      error: 'The final checkpoint at CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.',
+      error: "The final checkpoint at CP-3.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation.",
     }),
     workflowLauncherStatusFn: () => ({ supported: true }),
     startAgentFn: async (step, opts) => {
@@ -1697,13 +1416,13 @@ test('the launch port calls startAgent with the mission step, slug, role, and wo
 test('the checkpoint bounce prompt names the next checkpoint and forbids an early exit', async () => {
   let prompt = '';
   let validations = 0;
-  await runHandoffAndReview('task-incomplete', '/tmp/worktree', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => {
+  await runReviewPreparationAndReview('task-incomplete', '/tmp/worktree', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => {
       validations++;
       return validations === 1
         ? {
           ok: false,
-          error: 'Declared checkpoint documents are missing before handoff: CP-2, CP-3. Create and commit CP-2.md in /tmp/worktree before handoff.',
+          error: "Declared checkpoint documents are missing before review preparation: CP-2, CP-3. Create and commit CP-2.md in /tmp/worktree before review preparation.",
           nextCheckpoint: 'CP-2',
         }
         : { ok: true };
@@ -1713,7 +1432,7 @@ test('the checkpoint bounce prompt names the next checkpoint and forbids an earl
       prompt = options.prompt;
       return { agent: 'codex', result: { status: 0 } };
     },
-    performHandoff: async () => ({ ok: true as const }),
+    performReviewPreparation: async () => ({ ok: true as const }),
     startReviewLoop: async () => {},
     log: () => {},
     error: () => {},
@@ -1724,14 +1443,14 @@ test('the checkpoint bounce prompt names the next checkpoint and forbids an earl
   assert.match(prompt, /final response/);
 });
 
-test('runHandoffAndReview gives malformed checkpoint declarations corrective operator guidance', async () => {
+test("runReviewPreparationAndReview gives malformed checkpoint declarations corrective operator guidance", async () => {
   const errors: string[] = [];
-  const result = await runHandoffAndReview('task-malformed', '/tmp/worktree', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({
+  const result = await runReviewPreparationAndReview('task-malformed', '/tmp/worktree', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({
       ok: false as const,
       error: 'MISSION.md must contain a ## Checkpoints section with declarations such as "- CP 1: <name>".'
     }),
-    performHandoff: async () => { throw new Error('must not hand off'); },
+    performReviewPreparation: async () => { throw new Error('must not hand off'); },
     error: message => errors.push(message),
     log: () => {}
   });
@@ -1931,25 +1650,25 @@ test('enforceExecuteCommitSafety decodes octal-escaped UTF-8 and C escapes from 
 
 // ---------- TASK-1324: relaunch success must not escape without review transition ----------
 
-test('runHandoffAndReview: relaunch success triggers post-relaunch handoff instead of bare return', async () => {
-  // Pre-fix bug shape: performHandoff was called only once (initial call),
-  // and startReviewLoop was never called. After the fix, performHandoff is
+test("runReviewPreparationAndReview: relaunch success triggers post-relaunch review preparation instead of bare return", async () => {
+  // Pre-fix bug shape: performReviewPreparation was called only once (initial call),
+  // and startReviewLoop was never called. After the fix, performReviewPreparation is
   // re-invoked after a successful relaunch.
-  let handoffAttempts = 0;
+  let reviewPreparationAttempts = 0;
   let reviewLoopStarted = false;
   let relaunchAttempts = 0;
 
-  const result = await runHandoffAndReview('task-1324', '/tmp/project-task-1324', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async (slug, opts) => {
-      handoffAttempts++;
+  const result = await runReviewPreparationAndReview('task-1324', '/tmp/project-task-1324', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async (slug, opts) => {
+      reviewPreparationAttempts++;
       // First call fails with relaunchable error; second call (post-fix) would succeed
-      if (handoffAttempts === 1) {
-        return { ok: false as const, error: 'The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
+      if (reviewPreparationAttempts === 1) {
+        return { ok: false as const, error: "The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation." };
       }
       return { ok: true as const };
     },
-    repairHandoffFn: async () => ({ repaired: false, blocker: undefined }),
+    repairReviewPreparationFn: async () => ({ repaired: false, blocker: undefined }),
     startAgentFn: async () => {
       relaunchAttempts++;
       return { agent: 'codex', result: { status: 0 } };
@@ -1959,31 +1678,31 @@ test('runHandoffAndReview: relaunch success triggers post-relaunch handoff inste
     error: () => {}
   });
 
-  // Post-fix: performHandoff must be re-invoked after relaunch, and review loop must start
-  assert.ok(result, 'runHandoffAndReview returns true after successful post-relaunch handoff');
-  assert.equal(handoffAttempts, 2, 'performHandoff must be re-invoked after relaunch');
-  assert.equal(reviewLoopStarted, true, 'startReviewLoop must be called after successful post-relaunch handoff');
+  // Post-fix: performReviewPreparation must be re-invoked after relaunch, and review loop must start
+  assert.ok(result, "runReviewPreparationAndReview returns true after successful post-relaunch review preparation");
+  assert.equal(reviewPreparationAttempts, 2, "performReviewPreparation must be re-invoked after relaunch");
+  assert.equal(reviewLoopStarted, true, "startReviewLoop must be called after successful post-relaunch review preparation");
   assert.equal(relaunchAttempts, 1, 'one launch was enough');
 });
 
-test('runHandoffAndReview: relaunch success must trigger post-relaunch handoff and review loop', async () => {
+test("runReviewPreparationAndReview: relaunch success must trigger post-relaunch review preparation and review loop", async () => {
   // Post-fix expectation: after a successful relaunch, the code must re-invoke
-  // performHandoff() to verify the handoff-to-review transition actually happened,
+  // performReviewPreparation() to verify the handoff-to-review transition actually happened,
   // matching the contract of the repair-success path.
-  let handoffAttempts = 0;
+  let reviewPreparationAttempts = 0;
   let reviewLoopStarted = false;
   let relaunchAttempts = 0;
 
-  const result = await runHandoffAndReview('task-1324', '/tmp/project-task-1324', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async (slug, opts) => {
-      handoffAttempts++;
-      if (handoffAttempts === 1) {
-        return { ok: false as const, error: 'The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
+  const result = await runReviewPreparationAndReview('task-1324', '/tmp/project-task-1324', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async (slug, opts) => {
+      reviewPreparationAttempts++;
+      if (reviewPreparationAttempts === 1) {
+        return { ok: false as const, error: "The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation." };
       }
       return { ok: true as const };
     },
-    repairHandoffFn: async () => ({ repaired: false, blocker: undefined }),
+    repairReviewPreparationFn: async () => ({ repaired: false, blocker: undefined }),
     startAgentFn: async () => {
       relaunchAttempts++;
       return { agent: 'codex', result: { status: 0 } };
@@ -1993,54 +1712,54 @@ test('runHandoffAndReview: relaunch success must trigger post-relaunch handoff a
     error: () => {}
   });
 
-  // After fix: performHandoff must be re-invoked after relaunch, and review loop must start
-  assert.ok(result, 'runHandoffAndReview should return true after successful post-relaunch handoff');
-  assert.equal(handoffAttempts, 2, 'performHandoff must be re-invoked after relaunch');
-  assert.equal(reviewLoopStarted, true, 'startReviewLoop must be called after successful post-relaunch handoff');
+  // After fix: performReviewPreparation must be re-invoked after relaunch, and review loop must start
+  assert.ok(result, "runReviewPreparationAndReview should return true after successful post-relaunch review preparation");
+  assert.equal(reviewPreparationAttempts, 2, "performReviewPreparation must be re-invoked after relaunch");
+  assert.equal(reviewLoopStarted, true, "startReviewLoop must be called after successful post-relaunch review preparation");
   assert.equal(relaunchAttempts, 1, 'one launch was enough');
 });
 
-test('runHandoffAndReview: relaunch success with post-relaunch handoff failure must not report success', async () => {
+test("runReviewPreparationAndReview: relaunch success with post-relaunch review preparation failure must not report success", async () => {
   // Edge case: relaunch succeeds but the post-relaunch handoff still fails.
   // The function must return false, not true.
   // With ADR 0048 C1 classification, IncompleteEvidence maps to AutoSendBack
   // which takes the relaunch path directly (up to 2 attempts).
-  let handoffAttempts = 0;
+  let reviewPreparationAttempts = 0;
   let reviewLoopStarted = false;
 
-  const result = await runHandoffAndReview('task-1324', '/tmp/project-task-1324', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async () => {
-      handoffAttempts++;
+  const result = await runReviewPreparationAndReview('task-1324', '/tmp/project-task-1324', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async () => {
+      reviewPreparationAttempts++;
       // IncompleteEvidence error — classifies as AutoSendBack, triggers relaunch path
-      return { ok: false as const, error: 'The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
+      return { ok: false as const, error: "The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation." };
     },
-    repairHandoffFn: async () => ({ repaired: false, blocker: undefined }),
+    repairReviewPreparationFn: async () => ({ repaired: false, blocker: undefined }),
     startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
     startReviewLoop: () => { reviewLoopStarted = true; },
     log: () => {},
     error: () => {}
   });
 
-  assert.equal(result, false, 'must return false when post-relaunch handoff fails');
+  assert.equal(result, false, "must return false when post-relaunch review preparation fails");
   // IncompleteEvidence → AutoSendBack → relaunch path: initial + 2 relaunch retries = 3
-  assert.equal(handoffAttempts, 3, 'performHandoff called 3 times: initial + 2 relaunch retries');
-  assert.equal(reviewLoopStarted, false, 'startReviewLoop must NOT be called when handoff fails');
+  assert.equal(reviewPreparationAttempts, 3, "performReviewPreparation called 3 times: initial + 2 relaunch retries");
+  assert.equal(reviewLoopStarted, false, "startReviewLoop must NOT be called when review preparation fails");
 });
 
-test('runHandoffAndReview: relaunch failure must not trigger post-relaunch handoff', async () => {
+test("runReviewPreparationAndReview: relaunch failure must not trigger post-relaunch review preparation", async () => {
   // If relaunch itself fails, the code should fall through to the manual handoff message.
-  let handoffAttempts = 0;
+  let reviewPreparationAttempts = 0;
   let reviewLoopStarted = false;
   let relaunchAttempts = 0;
 
-  const result = await runHandoffAndReview('task-1324', '/tmp/project-task-1324', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async () => {
-      handoffAttempts++;
-      return { ok: false as const, error: 'The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
+  const result = await runReviewPreparationAndReview('task-1324', '/tmp/project-task-1324', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async () => {
+      reviewPreparationAttempts++;
+      return { ok: false as const, error: "The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation." };
     },
-    repairHandoffFn: async () => ({ repaired: false, blocker: undefined }),
+    repairReviewPreparationFn: async () => ({ repaired: false, blocker: undefined }),
     startAgentFn: async () => {
       relaunchAttempts++;
       throw new Error('relaunch failed');
@@ -2051,27 +1770,27 @@ test('runHandoffAndReview: relaunch failure must not trigger post-relaunch hando
   });
 
   assert.equal(result, false, 'must return false when relaunch fails');
-  assert.equal(handoffAttempts, 1, 'performHandoff called only once (no post-relaunch retry)');
+  assert.equal(reviewPreparationAttempts, 1, "performReviewPreparation called only once (no post-relaunch retry)");
   assert.equal(reviewLoopStarted, false, 'startReviewLoop must NOT be called');
   // TASK-2377.05 (SC5): the kernel owns a per-occurrence budget of 2. A failed
   // launch consumes an attempt instead of aborting the bounce, so the relaunch
-  // is tried twice before the mission is stranded. performHandoff still never
+  // is tried twice before the mission is stranded. performReviewPreparation still never
   // re-runs, because the kernel's verify only runs after a successful launch.
   assert.equal(relaunchAttempts, 2, 'the kernel spends its per-occurrence budget of two launches');
 });
 
 // ---------- TASK-1387: gate output capture and automatic relaunch (SC3 & SC4) ----------
 
-test('runHandoffAndReview relaunches on verification gate failure with captured output (SC3)', async () => {
-  let handoffAttempts = 0;
+test("runReviewPreparationAndReview relaunches on verification gate failure with captured output (SC3)", async () => {
+  let reviewPreparationAttempts = 0;
   let relaunchAttempts = 0;
   let lastPrompt = '';
 
-  const result = await runHandoffAndReview('task-1387-sc3', '/tmp/project-task-1387', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async (slug, opts) => {
-      handoffAttempts++;
-      if (handoffAttempts === 1) {
+  const result = await runReviewPreparationAndReview('task-1387-sc3', '/tmp/project-task-1387', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async (slug, opts) => {
+      reviewPreparationAttempts++;
+      if (reviewPreparationAttempts === 1) {
         return {
           ok: false as const,
           error: 'Final verification gate failed. Fix errors before submitting or use --no-gate if appropriate.',
@@ -2083,7 +1802,7 @@ test('runHandoffAndReview relaunches on verification gate failure with captured 
       }
       return { ok: true as const };
     },
-    repairHandoffFn: async () => ({ repaired: false, blocker: undefined }),
+    repairReviewPreparationFn: async () => ({ repaired: false, blocker: undefined }),
     startAgentFn: async (_step, opts) => {
       relaunchAttempts++;
       lastPrompt = opts.prompt;
@@ -2095,7 +1814,7 @@ test('runHandoffAndReview relaunches on verification gate failure with captured 
   });
 
   assert.ok(result, 'should succeed after successful relaunch');
-  assert.equal(handoffAttempts, 2, 'performHandoff called twice: initial + post-relaunch');
+  assert.equal(reviewPreparationAttempts, 2, "performReviewPreparation called twice: initial + post-relaunch");
   assert.equal(relaunchAttempts, 1, 'one launch was enough');
   // TASK-2377.05: the captured gate output reaches the agent through the
   // kernel's fix prompt rather than a relaunch option.
@@ -2103,19 +1822,19 @@ test('runHandoffAndReview relaunches on verification gate failure with captured 
   assert.match(lastPrompt, /TypeScript: error TS2345: type mismatch/, 'gate stderr reaches the fix prompt');
 });
 
-test('runHandoffAndReview relaunches on declared gate failure with captured output (SC3)', async () => {
-  let handoffAttempts = 0;
+test("runReviewPreparationAndReview relaunches on declared gate failure with captured output (SC3)", async () => {
+  let reviewPreparationAttempts = 0;
   let relaunchAttempts = 0;
   let lastPrompt = '';
 
-  const result = await runHandoffAndReview('task-1387-sc3-declared', '/tmp/project-task-1387', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async () => {
-      handoffAttempts++;
-      if (handoffAttempts === 1) {
+  const result = await runReviewPreparationAndReview('task-1387-sc3-declared', '/tmp/project-task-1387', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async () => {
+      reviewPreparationAttempts++;
+      if (reviewPreparationAttempts === 1) {
         return {
           ok: false as const,
-          error: 'Declared gate "bash -c exit 1" failed for task-1387-sc3-declared: err output. Blocking handoff — task remains in active.',
+          error: "Declared gate \"bash -c exit 1\" failed for task-1387-sc3-declared: err output. Blocking review preparation — task remains in active.",
           gateOutput: {
             stdout: 'declared gate stdout',
             stderr: 'declared gate stderr'
@@ -2124,7 +1843,7 @@ test('runHandoffAndReview relaunches on declared gate failure with captured outp
       }
       return { ok: true as const };
     },
-    repairHandoffFn: async () => ({ repaired: false, blocker: undefined }),
+    repairReviewPreparationFn: async () => ({ repaired: false, blocker: undefined }),
     startAgentFn: async (_step, opts) => {
       relaunchAttempts++;
       lastPrompt = opts.prompt;
@@ -2136,21 +1855,21 @@ test('runHandoffAndReview relaunches on declared gate failure with captured outp
   });
 
   assert.ok(result, 'should succeed after successful relaunch on declared gate failure');
-  assert.equal(handoffAttempts, 2, 'performHandoff called twice');
+  assert.equal(reviewPreparationAttempts, 2, "performReviewPreparation called twice");
   assert.equal(relaunchAttempts, 1, 'one launch was enough');
   assert.match(lastPrompt, /declared gate stdout/, 'gate stdout reaches the fix prompt');
   assert.match(lastPrompt, /declared gate stderr/, 'gate stderr reaches the fix prompt');
 });
 
-test('runHandoffAndReview limits gate-failure relaunches to 2 attempts (SC4)', async () => {
-  let handoffAttempts = 0;
+test("runReviewPreparationAndReview limits gate-failure relaunches to 2 attempts (SC4)", async () => {
+  let reviewPreparationAttempts = 0;
   let relaunchAttempts = 0;
   let relaunchErrors: string[] = [];
 
-  const result = await runHandoffAndReview('task-1387-sc4', '/tmp/project-task-1387', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async () => {
-      handoffAttempts++;
+  const result = await runReviewPreparationAndReview('task-1387-sc4', '/tmp/project-task-1387', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async () => {
+      reviewPreparationAttempts++;
       // Handoff keeps failing with gate failure
       return {
         ok: false as const,
@@ -2158,7 +1877,7 @@ test('runHandoffAndReview limits gate-failure relaunches to 2 attempts (SC4)', a
         gateOutput: { stdout: 'gate error', stderr: 'gate stderr' }
       };
     },
-    repairHandoffFn: async () => ({ repaired: false, blocker: undefined }),
+    repairReviewPreparationFn: async () => ({ repaired: false, blocker: undefined }),
     startAgentFn: async () => {
       relaunchAttempts++;
       // Launch always succeeds but handoff keeps failing
@@ -2170,27 +1889,27 @@ test('runHandoffAndReview limits gate-failure relaunches to 2 attempts (SC4)', a
   });
 
   assert.equal(result, false, 'should return false after exhausting relaunch attempts');
-  assert.equal(handoffAttempts, 3, 'performHandoff: initial + 2 post-relaunch retries');
+  assert.equal(reviewPreparationAttempts, 3, "performReviewPreparation: initial + 2 post-relaunch retries");
   assert.equal(relaunchAttempts, 2, 'the kernel spends exactly its per-occurrence budget of two');
   assert.ok(relaunchErrors.some(e => e.includes('Recovery stopped after 2 relaunch attempt(s)')),
     'should report the 2-attempt limit in the error message');
 });
 
-test('runHandoffAndReview stops relaunching when agent relaunch itself fails (SC4)', async () => {
-  let handoffAttempts = 0;
+test("runReviewPreparationAndReview stops relaunching when agent relaunch itself fails (SC4)", async () => {
+  let reviewPreparationAttempts = 0;
   let relaunchAttempts = 0;
 
-  const result = await runHandoffAndReview('task-1387-sc4-stop', '/tmp/project-task-1387', 'codex', {
-    validateCheckpointsBeforeHandoffFn: () => ({ ok: true as const }),
-    performHandoff: async () => {
-      handoffAttempts++;
+  const result = await runReviewPreparationAndReview('task-1387-sc4-stop', '/tmp/project-task-1387', 'codex', {
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
+    performReviewPreparation: async () => {
+      reviewPreparationAttempts++;
       return {
         ok: false as const,
         error: 'Final verification gate failed. Fix errors before submitting or use --no-gate if appropriate.',
         gateOutput: { stdout: 'gate error', stderr: 'gate stderr' }
       };
     },
-    repairHandoffFn: async () => ({ repaired: false, blocker: undefined }),
+    repairReviewPreparationFn: async () => ({ repaired: false, blocker: undefined }),
     startAgentFn: async () => {
       relaunchAttempts++;
       // First launch succeeds, second fails
@@ -2205,7 +1924,7 @@ test('runHandoffAndReview stops relaunching when agent relaunch itself fails (SC
   });
 
   assert.equal(result, false, 'should return false when relaunch fails');
-  assert.equal(handoffAttempts, 2, 'performHandoff: initial + 1 post-relaunch (first relaunch succeeded)');
+  assert.equal(reviewPreparationAttempts, 2, "performReviewPreparation: initial + 1 post-relaunch (first relaunch succeeded)");
   assert.equal(relaunchAttempts, 2, 'two launches: first verify fails, second exhausts the budget');
 });
 
@@ -2226,7 +1945,7 @@ test('px active opens with the mission identity and drops preflight/launch narra
     serviceFactory: async (_rootDir, progress) => ({
       execute: async () => {
         progress({ phase: 'launch' });
-        progress({ phase: 'handoff', agent: 'claude' });
+        progress({ phase: 'review', agent: 'claude' });
         return { status: 'completed' as const, value: { agent: 'claude' }, durableEvidence: [] };
       },
     }),
@@ -2287,10 +2006,10 @@ test('px active headline falls back to the recorded Mission title when no task c
   assert.equal(headline, 'Mission task-2606: Recorded title');
 });
 
-test('px active states implementation completion rather than handoff mechanics', () => {
+test("px active states implementation completion rather than review preparation mechanics", () => {
   const logs: string[] = [];
   renderActiveProgress({ phase: 'launch' }, (message: string) => logs.push(message));
-  renderActiveProgress({ phase: 'handoff', agent: 'claude' }, (message: string) => logs.push(message));
+  renderActiveProgress({ phase: 'review-preparation', agent: 'claude' }, (message: string) => logs.push(message));
 
   assert.deepEqual(logs, ['[PASS] Implementation complete (claude).']);
 });
@@ -2311,8 +2030,6 @@ test('selectLaunchAndRecord announces the implementer exactly once on the select
       return { agent: 'claude', result: { status: 0 } };
     },
     transitionTaskFn: async () => true,
-    getTaskStatusFn: () => 'refined',
-    getTaskImplementerFn: () => null,
     log: (message: string) => logs.push(message),
   });
 
@@ -2343,8 +2060,6 @@ test('selectLaunchAndRecord keeps the implementer announcement but drops the Bac
       opts.log('[PASS] Task task-2476 transitioned to active (assignee=claude) and committed.');
       return true;
     },
-    getTaskStatusFn: () => 'refined',
-    getTaskImplementerFn: () => null,
     log: (message) => logs.push(message),
   });
 
@@ -2362,14 +2077,12 @@ test('failed execute runs preserve the Backlog lane after authoritative activati
       const launch = await selectLaunchAndRecord({
         slug: 'task-test', worktree: '/tmp/project-task-test', agentConfig: {},
         taskResolution: { ok: true, taskFile: '/tmp/task.md' },
-        getTaskStatusFn: () => mirrorLane, getTaskImplementerFn: () => 'claude',
         prompt: 'Execute.', selectAgentFn: () => 'claude',
-        authorityAlreadyActive: true,
         startAgentFn: async (_step, opts) => {
           assert.ok(opts.onLaunch);
       await opts.onLaunch({ agent: 'claude', invocation: null, startedAtMs: 123 });
           assert.equal(mirrorLane, authoritativeLane);
-          if (failure === 'limit') { assert.ok(opts.onLimitHit); opts.onLimitHit({ agent: 'claude', until: '2026-01-01T12:00:00Z' }); }
+          if (failure === 'limit') { throw new Error('usage limit exhausted'); }
           if (failure !== 'exit') { throw new Error('agents exhausted'); }
           return { agent: 'claude', result: { status: 1 } };
         },

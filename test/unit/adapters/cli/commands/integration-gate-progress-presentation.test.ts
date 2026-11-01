@@ -122,7 +122,7 @@ test('TASK-2578: px integrate renders parallel gate progress after rebase and pr
     store: { _repoId: 'default', load: async () => ({ kind: 'found' as const, mission: { status, review: null }, version: 1 }) },
     integration: { decideIntegration: async () => { status = 'done'; return { durableEvidence: [],  status: 'completed' as const, value: { mission: { status }, version: 2 } }; } },
     lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: { to: 'review', version: 2 } }) },
-    handoff: { recordNel: async () => ({}) },
+    nel: { recordNel: async () => ({}) },
   }));
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
   fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: {

@@ -26,7 +26,7 @@ import diffWorkflow from '../adapters/cli/commands/diff.js';
 import { createDiffCommand } from '../interfaces/cli/diff.js';
 
 
-import { currentWorkPublication } from '../application/recording/current-work-recorder.js';
+import { executionActivityIntent } from '../application/recording/execution-activity-recorder.js';
 
 import type { SupervisorPort } from '../application/recovery-supervisor.js';
 
@@ -108,7 +108,7 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
     let supervisor: SupervisorPort;
     const launchRecovery: SupervisorPort['launchRecovery'] = async (request) => {
       fmt.log.info(`[lead] Starting fresh recovery agent for ${fmt.slug(request.missionId)} with a general diagnostic prompt`);
-      let publication: ReturnType<typeof currentWorkPublication> = null;
+      let publication: ReturnType<typeof executionActivityIntent> = null;
       let published = false;
       const publish = async () => { if (publication) { published = true; await currentWork.running(publication); } };
       try {
@@ -116,7 +116,7 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
         fmt.log.info(`[lead] Recovery prompt for ${fmt.slug(request.missionId)}:\n---\n${prompt}\n---`);
         const assigned = await services.mission?.store.load(missionId(request.missionId));
         const assignedAgent = assigned?.kind === 'found' ? assigned.mission.assignee ?? undefined : undefined;
-        publication = currentWorkPublication({
+        publication = executionActivityIntent({
           slug: request.missionId,
           operationId: `recovery-${Date.now()}`,
           phase: 'recovery',
@@ -174,7 +174,7 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
     }
     return result;
   });
-  ownWorkflowCli(registry, async () => attachWorkflowOperations(rootDir, configuration, await openServices(rootDir)));
+  ownWorkflowCli(registry, async () => attachWorkflowOperations(rootDir, configuration, await openServices(rootDir)), operatorReview);
   return registry;
 }
 

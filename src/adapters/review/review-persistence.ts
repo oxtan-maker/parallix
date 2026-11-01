@@ -66,7 +66,7 @@ export function bindReviewPersistence(store: MissionStore | null, lifecycleServi
       readReviewStateFn: boundReadReviewState,
       writeReviewStateFn: boundWriteReviewState,
       // Records the round's resolution, which is what leaves the review
-      // `ready-for-next-round` for the next handoff to advance.
+      // `ready-for-next-round` for the next review preparation to advance.
       missionStore: store,
     }),
   };

@@ -109,23 +109,6 @@ export class SqliteOperationalHistoryRepository implements OperationalHistoryRep
     }));
   }
 
-  /**
-   * Serves `ConcreteCurrentWorkReadAdapter.loadCurrentWork`: retain the newest
-   * two facts so reconciliation can reject a late terminal event for an older
-   * operation without reading the full audit history.
-   */
-  async findLatestByTypePerMission(type: string, limitPerMission: number): Promise<readonly OperationalHistoryEntry[]> {
-    const rows = await this.db.query<{ id: unknown; event_type: unknown; event_data: unknown; created_at: unknown }>(
-      `SELECT id, event_type, event_data, created_at FROM (
-        SELECT id, event_type, event_data, created_at,
-          ROW_NUMBER() OVER (PARTITION BY json_extract(event_data, '$.missionId') ORDER BY id DESC) AS position
-        FROM operational_history WHERE event_type = ?
-      ) WHERE position <= ? ORDER BY id ASC;`,
-      [type, limitPerMission],
-    );
-    return rows.map((row) => ({ id: Number(row.id), eventType: String(row.event_type), eventData: String(row.event_data), createdAt: String(row.created_at) }));
-  }
-
   async append(entry: OperationalHistoryEntry): Promise<void> {
     if (!authorizedOperationId()) {
       await this.db.execute(

@@ -581,7 +581,7 @@ describe("stage/commit race", () => {
       // a review-status mission with no Review aggregate must stop, not integrate.
       store: { _repoId: 'default', load: async () => ({ kind: 'found' as const, mission: { status: 'integration', review: null }, version: 1 }) },
       lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: { to: 'review', version: 2 } }) },
-      handoff: { recordNel: async () => ({}) },
+      nel: { recordNel: async () => ({}) },
     }));
     mock.method(process, 'cwd', () => FAKE_ROOT);
     mock.method(process, 'exit', () => {});

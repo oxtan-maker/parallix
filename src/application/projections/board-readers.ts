@@ -24,14 +24,15 @@ import {
 import type { MetricsReadAdapter } from './metrics-read-adapter.js';
 import { countUnattributedSessions, projectAgentAvailability, type RunningAgentSession } from './agent-status.js';
 import {
-  CURRENT_WORK_TTL_MS,
-  reconcileCurrentWork,
-  type CurrentWorkFacts,
-  type CurrentWorkReadAdapter,
+  ACTIVITY_OBSERVATION_TTL_MS,
+  projectExecutionActivity,
+  type ObservedExecutionFacts,
   type ProcessLivenessProbe,
-} from './current-work.js';
+} from '../../domain/execution-activity.js';
+import type { ExecutionActivityReadPort } from '../../application/ports/execution-activity.js';
 
-export type { CurrentWorkReadAdapter, ProcessLivenessProbe } from './current-work.js';
+export type { ProcessLivenessProbe } from '../../domain/execution-activity.js';
+export type { ExecutionActivityReadPort } from '../ports/execution-activity.js';
 
 // ---------------------------------------------------------------------------
 // Read adapters — each adapter reads from one authority
@@ -103,7 +104,7 @@ export type { MetricsReadAdapter } from './metrics-read-adapter.js';
 
 export interface BoardProjectionOptions {
   readonly providerExecution?: ProviderExecutionReader;
-  readonly workflowOperations?: Pick<WorkflowOperationStore, 'open' | 'current'>;
+  readonly workflowOperations?: Pick<WorkflowOperationStore, 'latestByMission' | 'latest'>;
   /** Creates the ephemeral shared read snapshot immediately before each build. */
   prepareReads?: () => void;
   /** Time-based metrics. Prefer MetricsReadAdapter for production use. */
@@ -111,11 +112,11 @@ export interface BoardProjectionOptions {
   /** Derives metrics from board_lane_events + usage_statistics. */
   metricsAdapter?: MetricsReadAdapter;
   /**
-   * The current-work authority. Omitted means no operation publishes to this
+   * The execution activity projection. Omitted means no operation publishes to this
    * board, so every mission's current work is simply unrecorded — which the
    * reconciler reports as absent, never as "known idle".
    */
-  currentWork?: CurrentWorkReadAdapter;
+  currentWork?: ExecutionActivityReadPort;
   /**
    * Bounded recovery evidence for a published `running` fact. Omitting it
    * makes unverifiable facts age out on the freshness window alone.
@@ -135,7 +136,7 @@ export interface BoardProjectionOptions {
 }
 
 /** A mission that published no current-work fact at all. */
-const NO_CURRENT_WORK: CurrentWorkFacts = { currentWork: null, blockingReason: null };
+const NO_CURRENT_WORK: ObservedExecutionFacts = { currentWork: null, blockingReason: null };
 
 /**
  * Keep every open mission and only the completed missions within the configured
@@ -179,13 +180,13 @@ export class BoardProjectionBuilder {
   async build(): Promise<BoardProjection> {
     this._options?.prepareReads?.();
     const nowMs = this.now();
-    const [repositoryId, missions, operationLog, agentAvailability, runningSessions, currentWorkEvents, operations] = await Promise.all([
+    const [repositoryId, missions, operationLog, agentAvailability, runningSessions, activitySnapshots, operations] = await Promise.all([
       this._git.loadRepositoryId(),
       this._missions.loadAllMissions(),
       this._operationLog.loadOperationLog(),
       this._agents.loadAgentAvailability(),
       this.runningSessions(),
-      this.currentWorkEvents(),
+      this.activitySnapshots(),
       this.openOperations(),
     ]);
 
@@ -203,10 +204,10 @@ export class BoardProjectionBuilder {
     const reviews = await this._reviews.loadReviews(visibleMissions.map((mission) => mission.id));
 
     // The authoritative answer to "what is being worked on right now?". It is
-    // reconciled once per build so every card sees the same clock reading.
-    const currentWorkByMission = reconcileCurrentWork(currentWorkEvents, {
+    // observed once per build so every card sees the same clock reading.
+    const currentWorkByMission = projectExecutionActivity(activitySnapshots, {
       nowMs,
-      ttlMs: this._options?.currentWorkTtlMs ?? CURRENT_WORK_TTL_MS,
+      ttlMs: this._options?.currentWorkTtlMs ?? ACTIVITY_OBSERVATION_TTL_MS,
       isProcessAlive: this._options?.isProcessAlive,
     });
 
@@ -272,17 +273,17 @@ export class BoardProjectionBuilder {
     const mission = await this._missions.loadMission(missionId);
     if (mission === null) { return null; }
 
-    const owner = await this._options?.workflowOperations?.current(mission.id) ?? null;
-    const [reviews, gateStatus, runningSessions, currentWorkEvents] = await Promise.all([
+    const owner = await this._options?.workflowOperations?.latest(mission.id) ?? null;
+    const [reviews, gateStatus, runningSessions, activitySnapshots] = await Promise.all([
       this._reviews.loadReviews([mission.id]),
       this._gates.observeGate(mission, owner),
       this.runningSessions(),
-      this.missionCurrentWorkEvents(mission.id),
+      this.missionExecutionActivities(mission.id),
     ]);
 
-    const work = reconcileCurrentWork(currentWorkEvents, {
+    const work = projectExecutionActivity(activitySnapshots, {
       nowMs: this.now(),
-      ttlMs: this._options?.currentWorkTtlMs ?? CURRENT_WORK_TTL_MS,
+      ttlMs: this._options?.currentWorkTtlMs ?? ACTIVITY_OBSERVATION_TTL_MS,
       isProcessAlive: this._options?.isProcessAlive,
     }).get(mission.id) ?? NO_CURRENT_WORK;
 
@@ -311,17 +312,17 @@ export class BoardProjectionBuilder {
   }
 
   private now(): number { return (this._options?.now ?? Date.now)(); }
-  private openOperations() { return this._options?.workflowOperations?.open() ?? Promise.resolve([]); }
+  private openOperations() { return this._options?.workflowOperations?.latestByMission() ?? Promise.resolve([]); }
   private runningSessions() { return this._agents.loadRunningSessions?.() ?? Promise.resolve(null); }
-  private currentWorkEvents() { return this._options?.currentWork?.loadCurrentWork() ?? Promise.resolve([]); }
-  private missionCurrentWorkEvents(id: MissionId) { return this._options?.currentWork?.loadMissionCurrentWork?.(id) ?? Promise.resolve([]); }
+  private activitySnapshots() { return this._options?.currentWork?.loadCurrentWork() ?? Promise.resolve([]); }
+  private missionExecutionActivities(id: MissionId) { return this._options?.currentWork?.loadMissionCurrentWork(id) ?? Promise.resolve([]); }
 
   /** The single place operational facts become a card, shared by both routes. */
   private composeCard(
     mission: Mission,
     reviewFact: ReviewProjectionFact,
     latestGate: GateState,
-    work: CurrentWorkFacts,
+    work: ObservedExecutionFacts,
     // `undefined` when the process scan itself could not run: that is
     // "liveness unknown", which must not collapse into the observed
     // "nothing running" that `null` means.
@@ -337,6 +338,7 @@ export class BoardProjectionBuilder {
       latestGate,
       reviewApproval: reviewFact.approval,
       currentWork: work.currentWork,
+      activityOperationId: work.operationId,
       liveSession,
       blockingReason: contractStop ?? work.blockingReason,
       blockerRequiresOperator: contractStop !== null,

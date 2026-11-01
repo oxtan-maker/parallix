@@ -17,7 +17,7 @@ import { toWebBoardSnapshot } from '../../src/interfaces/web/transport.js';
 import { missionId } from '../../src/domain/mission.js';
 import type { WebCommandRequest } from '../../src/interfaces/web/transport.js';
 import { fixtureMission } from './mission-builders.js';
-import { availableBoardCommands } from '../../src/application/projections/mission-board.js';
+import { availableBoardCommands, type BoardCommand } from '../../src/application/projections/mission-board.js';
 
 export function compactPointerSnapshot(lane: 'backlog' | 'refined' | 'active' | 'review' | 'integration') {
   const mission = fixtureMission('task-pointer-disposable', { status: lane, checkpoints: [] });
@@ -155,12 +155,12 @@ export async function pointerBoard(onCommand?: (request: WebCommandRequest) => P
   };
 }
 
-export function pointerSnapshot(lane: 'backlog' | 'refined' | 'active' | 'review' | 'integration', commands = ['active', 'draft', 'handoff', 'review', 'integrate', 'cancel'], work: 'idle' | 'running' | 'unverified' | 'stale' | 'stopped' = 'idle') {
+export function pointerSnapshot(lane: 'backlog' | 'refined' | 'active' | 'review' | 'integration', commands: readonly BoardCommand[] = ['active', 'draft', 'review', 'integrate', 'cancel'], work: 'idle' | 'running' | 'unverified' | 'stale' | 'stopped' = 'idle') {
   const card = makeCard({
     id: missionId('task-pointer-disposable'), title: 'Disposable pointer mission', lane,
     status: lane, currentWork: ['running', 'unverified', 'stale'].includes(work) ? { operationId: 'pointer-operation', phase: 'execute', summary: 'running', agent: null, updatedAt: '2026-10-09T00:00:00Z', freshness: work === 'running' ? 'live' : work === 'unverified' ? 'unverified' : 'stale' } : null,
     blockingReason: work === 'stopped' ? 'blocked fixture' : null,
-    commands: commands.map((command) => ({command, enabled: true, reason: null, targetLane: null})) as NonNullable<Parameters<typeof makeCard>[0]>['commands'],
+    commands: commands.map((command) => ({command, enabled: true, reason: null, targetLane: null})),
   });
   return toWebBoardSnapshot(makeProjection({ [lane]: [card] }));
 }

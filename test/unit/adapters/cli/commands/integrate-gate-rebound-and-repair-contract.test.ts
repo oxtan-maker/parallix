@@ -25,14 +25,14 @@ import os from 'node:os';
 import { mockModule, installModuleMocks } from '../../../../lib/module-mock.js';
 import type { DraftWorkflowContext } from '../../../../../src/application/ports/cli-workflows.js';
 import type { RebaseWorkflowPort } from '../../../../../src/application/ports/rebase-workflow.js';
-import { SLUG, makePorts, makeRecorder, runOptions, handoffTransitionValue } from '../../../../helpers/handoff-ports.js';
+import { SLUG, makePorts, makeRecorder, runOptions, reviewPreparationTransitionValue } from "../../../../helpers/review-preparation-ports.js";
 import type { Mission } from '../../../../../src/domain/mission.js';
 import { MissionLifecycleService } from '../../../../../src/application/mission-lifecycle-service.js';
 import { mkdtemp as registeredMkdtemp } from '../../../../helpers/temp-dir.js';
 import { fakeReviewLoopPorts } from '../../../../helpers/review-loop-ports.js';
 import { IntegrationGateRouteOptions } from '../../../../../src/adapters/cli/commands/integrate-gate-rebound.js';
 
-mockModule('../../../../../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
+mockModule('../../../../../src/adapters/cli/commands/repair-review-preparation.js', import.meta.url);
 mockModule('../../../../../src/adapters/agents/runtime-matrix.js', import.meta.url);
 mockModule('../../../../../src/adapters/verification/verification.js', import.meta.url);
 mockModule('../../../../../src/adapters/review/review-gate-handling.js', import.meta.url);
@@ -45,7 +45,7 @@ const gates = await import('../../../../../src/adapters/cli/commands/integrate-g
 const integrate = await import('../../../../../src/adapters/cli/commands/integrate.js');
 const { createDraftWorkflowAdapter } = await import('../../../../../src/adapters/cli/commands/draft-stats.js');
 const { runRebaseWorkflow } = await import('../../../../../src/application/rebase-workflow.js');
-const { HandoffCommandUseCase } = await import('../../../../../src/application/handoff-command-use-case.js');
+const { ReviewPreparationCommandUseCase } = await import('../../../../../src/application/review-preparation-command-use-case.js');
 const { setLogger } = await import('../../../../../src/application/presentation/cli-format.js');
 const { agentFamily } = await import('../../../../../src/domain/agents.js');
 const { missionId, missionLabels } = await import('../../../../../src/domain/mission.js');
@@ -337,22 +337,22 @@ describe("integrate gate helpers", () => {
 describe("relaunchable repair", () => {
   // CP-4 integration tests for task-1124
 
-  const isRelaunchableErrorModule = mockModule<typeof import('../../../../../src/adapters/cli/commands/repair-handoff.js')>('../../../../../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
+  const isRelaunchableErrorModule = mockModule<typeof import('../../../../../src/adapters/cli/commands/repair-review-preparation.js')>('../../../../../src/adapters/cli/commands/repair-review-preparation.js', import.meta.url);
   const runtimeMatrix = mockModule<typeof import('../../../../../src/adapters/agents/runtime-matrix.js')>('../../../../../src/adapters/agents/runtime-matrix.js', import.meta.url);
 
   test.afterEach(() => mock.restoreAll());
   const { isRelaunchableError } = isRelaunchableErrorModule;
 
   test('SC 1: isRelaunchableError returns true for goal-check missing evidence rows', () => {
-    const errorMsg = 'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.';
+    const errorMsg = "The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation.";
     assert.equal(isRelaunchableError(errorMsg), true);
   });
 
-  test('SC 3: ExecuteHandoffService bounces through the kernel when repair fails and error is relaunchable', () => {
+  test("SC 3: ExecuteReviewPreparationService bounces through the kernel when repair fails and error is relaunchable", () => {
     // TASK-2377.05: `attemptAgentRelaunch` was deleted; the relaunch is a
     // `rebound()` call whose launch port is the injected `startAgentFn`.
-    const serviceSource = fs.readFileSync(path.join(import.meta.dirname, '../../../../../src/application/execute-handoff-service.ts'), 'utf8');
-    assert.ok(serviceSource.includes('repairLaunch.launch'), 'handoff service should have a typed repair-launch seam');
+    const serviceSource = fs.readFileSync(path.join(import.meta.dirname, '../../../../../src/application/execute-review-preparation-service.ts'), 'utf8');
+    assert.ok(serviceSource.includes('repairLaunch.launch'), "review preparation service should have a typed repair-launch seam");
     assert.ok(serviceSource.includes('rebound('), 'Should bounce through the rebound kernel');
     // Matched on the classifier call rather than one spelling of its argument, so
     // extracting the repair helpers does not silently drop the guard.
@@ -390,10 +390,10 @@ describe("relaunchable repair", () => {
     assert.ok(activeSource.includes("role: 'implementer'"), 'Should pass role as implementer');
   });
 
-  test('SC 8: manual handoff path preserved - outputs manual handoff message when relaunch fails', () => {
-    const serviceSource = fs.readFileSync(path.join(import.meta.dirname, '../../../../../src/application/execute-handoff-service.ts'), 'utf8');
-    assert.ok(serviceSource.includes('You may need to complete the handoff manually:'), 'Manual handoff message should be preserved');
-    assert.ok(serviceSource.includes('px review ${request.slug} --submit'), 'Manual handoff command should be preserved');
+  test("SC 8: manual review preparation path preserved - outputs manual review preparation message when relaunch fails", () => {
+    const serviceSource = fs.readFileSync(path.join(import.meta.dirname, '../../../../../src/application/execute-review-preparation-service.ts'), 'utf8');
+    assert.ok(serviceSource.includes("You may need to complete the review preparation manually:"), "Manual review preparation message should be preserved");
+    assert.ok(serviceSource.includes('px review ${request.slug} --submit'), "Manual review preparation command should be preserved");
   });
 
   test('runtime-matrix no longer exports hardcoded reviewer routing (reviewerFor/fallbackFor removed)', () => {
@@ -406,7 +406,7 @@ describe("relaunchable repair", () => {
 });
 
 // ---- task-2561 handoff and push-gate regressions (consolidated from test/task-2561-repro.test.ts, TASK-2622.09) ----
-describe("handoff and push-gate regressions", () => {
+describe("review preparation and push-gate regressions", () => {
   // ---------------------------------------------------------------------------
   // TASK-2561 — no mission could get from the backlog to integration without a
   // human workaround after TASK-2521.03. Each scenario is one stage where a real
@@ -536,7 +536,7 @@ describe("handoff and push-gate regressions", () => {
 
   // --- (c) handoff push-gate evidence ---------------------------------------------
 
-  test('(c) a handoff push-gate failure carries its gate evidence instead of a generic rebase message', async () => {
+  test("(c) a review preparation push-gate failure carries its gate evidence instead of a generic rebase message", async () => {
     const recorder = makeRecorder();
     const gate = {
       area: 'docs', command: './scripts/verify-local.sh docs', exitCode: 1,
@@ -546,7 +546,7 @@ describe("handoff and push-gate regressions", () => {
       rebase: { rebaseBeforeReviewRound: async () => ({ ok: false as const, sharedFileConflicts: false, hookFailure: false, failure: { kind: 'gate', operation: 'push', gate } }) },
     });
 
-    const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder, { recoverGateFailure: false }));
+    const result = await new ReviewPreparationCommandUseCase(ports).performReviewPreparation(SLUG, runOptions(recorder, { recoverGateFailure: false }));
 
     assert.equal(result.ok, false);
     assert.doesNotMatch(result.error ?? '', /Rebase failed before handoff/);
@@ -604,12 +604,12 @@ describe("handoff and push-gate regressions", () => {
     const ports = makePorts(recorder, {
       missionServices: stubMissionServices({
         checkpoints: { record: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
-        lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: handoffTransitionValue() }) },
+        lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: reviewPreparationTransitionValue() }) },
         store: {
           load: async () => ({
             kind: 'found' as const,
             mission: fixtureMission(SLUG, { assignee: agentFamily('claude'),
-              checkpoints: [{ missionId: handoffTransitionValue().mission.id, name: 'CP-1', goalCheck: [{ criterion: 'works', evidence: 'src/application/handoff-command-use-case.ts:1' }], nextActionText: 'review' }],
+              checkpoints: [{ missionId: reviewPreparationTransitionValue().mission.id, name: 'CP-1', goalCheck: [{ criterion: 'works', evidence: 'src/application/review-preparation-command-use-case.ts:1' }], nextActionText: 'review' }],
               brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
               successCriteria: ['works'],
               completedSuccessCriteria: [0],
@@ -618,7 +618,7 @@ describe("handoff and push-gate regressions", () => {
             version: missionVersion(4),
           }),
         },
-        handoff: { recordNel: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
+        nel: { recordNel: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
       }),
       gatekeeper: {
         runGatekeeper: (_slug: string, options: NonNullable<Parameters<ReturnType<typeof makePorts>['gatekeeper']['runGatekeeper']>[1]>) => {
@@ -630,7 +630,7 @@ describe("handoff and push-gate regressions", () => {
       },
     });
 
-    const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+    const result = await new ReviewPreparationCommandUseCase(ports).performReviewPreparation(SLUG, runOptions(recorder));
 
     assert.equal(gatekeeperOptions.length, 1);
     assert.equal(gatekeeperOptions[0].checkpointsRecorded, true);
@@ -656,7 +656,7 @@ describe("integration repair", () => {
       id: missionId(slug), repositoryId: repositoryId('parallix'), title: 'repair',
       labels: missionLabels([]), status, assignee: implementer, review,
       checkpoints: [{ missionId: missionId(slug), name: 'CP-1', rawFilename: 'CP-1.md', firstLine: '',
-        goalCheck: [{ criterion: 'repair', evidence: 'src/application/handoff-command-use-case.ts', recordedRound: 2 }], nextActionText: 'review' }],
+        goalCheck: [{ criterion: 'repair', evidence: 'src/application/review-preparation-command-use-case.ts', recordedRound: 2 }], nextActionText: 'review' }],
       closedAt: null, netEngineeringLines: null,
     };
     let version = missionVersion(1);
@@ -859,7 +859,7 @@ describe("integration repair", () => {
     });
     assert.equal(result, null);
   });
-  test('the real handoff binds an invalidated round to the committed repair and mirrors the review lane', async () => {
+  test("the real review preparation binds an invalidated round to the committed repair and mirrors the review lane", async () => {
     const fixture = memoryMission();
     await transition(fixture, { type: 'rebound-to-active', agent: implementer, cause: { kind: 'integration-gate-failure', gate: 'unit' }, occurredAt: new Date().toISOString() });
     await transition(fixture, { type: 'revoke-approval', review: revokeApprovedDecision(fixture.mission().review!, 1, { revokedAt: new Date().toISOString(), revokedBy: 'workflow', reason: 'Repair changed patch', cause: { kind: 'integration-gate-failure', gate: 'unit' } }) });
@@ -867,7 +867,7 @@ describe("integration repair", () => {
     const base = makePorts(recorder);
     const ports = makePorts(recorder, {
       missionServices: async () => ({ ...fixture,
-        handoff: { recordNel: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
+        nel: { recordNel: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
         checkpoints: { record: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
       }),
       git: { ...base.git, git: (args: string[]) => args.includes('rev-parse') && args.includes('HEAD')
@@ -875,7 +875,7 @@ describe("integration repair", () => {
       reviewIdentity: { resolveReviewIdentity: async () => ({ forgejoUser: 'codex' }) },
       agentSelection: { eligibleAgentsForStep: () => ['claude', 'codex'], selectAgent: () => 'claude' },
     });
-    const result = await new HandoffCommandUseCase(ports).performHandoff(slug, runOptions(recorder));
+    const result = await new ReviewPreparationCommandUseCase(ports).performReviewPreparation(slug, runOptions(recorder));
     assert.equal(result.ok, true, result.error ?? '');
     assert.equal(fixture.mission().status, 'review');
     assert.equal(currentReviewRound(fixture.mission().review!).subject.revision, 'committed-repair');

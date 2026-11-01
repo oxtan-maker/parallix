@@ -9,7 +9,7 @@ import { readToken, postReview } from '../forgejo/forgejo.js';
 
 const DEFAULT_GATEKEEPER_USER = 'forgejo-gatekeeper';
 
-// Pre-review pushback bot. Runs after performHandoff has created/updated the
+// Pre-review pushback bot. Runs after performReviewPreparation has created/updated the
 // PR and before the human/agent reviewer engages, so missing mandatory
 // artifacts surface as a request-changes review instead of consuming a
 // reviewer cycle. Returns { ok, missing, skipped, posted } so callers can

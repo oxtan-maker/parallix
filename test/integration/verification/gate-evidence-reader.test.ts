@@ -84,12 +84,12 @@ test('gate evidence reader scopes integration execution to its owning attempt (T
     const runGates = [{ key: 'unit', command: 'true' }, { key: 'docs', command: 'true' }];
     const run = createIntegrationVerificationEvidencePort(runConfiguration).start(root, runGates);
     if (!run) { throw new Error('a configured plan with a matching run must start observable'); }
-    const running = await runReader.readIntegrationGates(scope, { id: 'op-9', generation: 2, phase: 'checking' });
+    const running = await runReader.readIntegrationGates(scope, { id: 'op-9', generation: 2, phase: 'executing' });
     assert.equal(running.running?.attempt, 'op-9:2', 'the executor records a run for the attempt that started it');
     assert.ok(running.running?.startedAt);
-    assert.equal((await runReader.readIntegrationGates(scope, { id: 'op-9', generation: 3, phase: 'checking' })).running, null, 'a superseded attempt does not own the run');
+    assert.equal((await runReader.readIntegrationGates(scope, { id: 'op-9', generation: 3, phase: 'executing' })).running, null, 'a superseded attempt does not own the run');
     run.complete([{ key: 'unit', command: 'true', exitCode: 0 }, { key: 'docs', command: 'true', exitCode: 1 }], 'failed');
-    const settled = await runReader.readIntegrationGates(scope, { id: 'op-9', generation: 2, phase: 'checking' });
+    const settled = await runReader.readIntegrationGates(scope, { id: 'op-9', generation: 2, phase: 'executing' });
     assert.equal(settled.running, null, 'a settled run is never running');
     assert.deepEqual(settled.gates.map(gate => ({ key: gate.key, proof: gate.proof.state, exit: gate.failure?.exitCode ?? null })),
       [{ key: 'unit', proof: 'current', exit: null }, { key: 'docs', proof: 'absent', exit: 1 }], 'per-gate outcomes are observed');

@@ -15,6 +15,7 @@ import {
   assertReviewedChange,
   currentReviewRound,
   replaceCurrentRound,
+  requireSeparateReviewer,
   reviewStatus,
   revokeApprovedDecision,
   sameReviewedChange,
@@ -37,12 +38,15 @@ const REBOUND_REASONS: Record<ReboundCause['kind'], string> = {
 export type MissionCommand =
   | { readonly type: 'refine' }
   | { readonly type: 'activate'; readonly agent: AgentFamily }
+  | { readonly type: 'begin-review-preparation' }
   | { readonly type: 'record-implementer'; readonly agent: AgentFamily }
   | { readonly type: 'abort-activation'; readonly assignee: AgentFamily | null }
   | { readonly type: 'rebound-to-active'; readonly agent: AgentFamily; readonly cause: ReboundCause; readonly occurredAt?: string }
   | {
     readonly type: 'submit-for-review';
     readonly gatesPassed: boolean;
+    /** Actual verified HEAD, supplied only when preparation binds its submission. */
+    readonly preparedRevision?: import('./review.js').ChangeRevision;
     readonly review: Review;
     readonly reviewerEligibility: ConfiguredReviewerEligibility;
   }
@@ -72,7 +76,7 @@ export interface MissionTransition {
  *
  * Draft settles the goal, the reason it exists, what it covers and what
  * verifies it, and every later stage is judged against those: execution records
- * evidence for them, review reads them, handoff runs exactly the declared
+ * evidence for them, review reads them, review preparation runs exactly the declared
  * gates. Leaving completeness to the drafting agent's own reading of its prompt
  * is how a mission reaches execution with a placeholder goal and nothing to
  * verify it — the instruction is followed exactly as often as it is not.
@@ -184,6 +188,7 @@ function validateReviewRound(
   if (!reviewerEligibility.includes(submittedRound.reviewer)) {
     throw new Error(`Reviewer ${submittedRound.reviewer} is not eligible under the configured review policy`);
   }
+  requireSeparateReviewer(submittedRound.reviewer, submittedRound.implementer, reviewerEligibility);
   assertReviewedChange(submittedRound.subject.change);
   if (!recordedReview) {
     return;
@@ -217,17 +222,28 @@ function validateSubmission(mission: OpenMission, command: SubmitForReviewComman
 
 function submitForReview(mission: Mission, command: SubmitForReviewCommand): Mission {
   requireStatus(mission, ['active', 'review'], command);
-  // A previous attempt may have reached review before its Review was stored.
-  // A retry supplies the verified handoff record and completes that write.
-  if (mission.status === 'review' && mission.review) {
-    return mission;
-  }
   if (pendingIntegrationApproval(mission)) { throw new MissionRuleViolation('Integration repair must prove approval retention before lifecycle recovery'); }
+  // Preparation enters review before the verified Review is stored. A retry
+  // preserves the current round; a resolved conversation may advance it.
+  if (mission.status === 'review' && mission.review) {
+    const recorded = currentReviewRound(mission.review), submitted = currentReviewRound(command.review);
+    if (reviewStatus(mission.review) === 'approved' || recorded.number === submitted.number
+      && (recorded.number === 1 && !mission.reviewPreparationPending || recorded.decision || sameReviewedRevision(recorded.subject, submitted.subject))) {
+      if (mission.reviewPreparationPending && reviewStatus(mission.review) !== 'approved') { validateSubmission(mission, command); }
+      return completeReviewPreparation(mission, mission.review, command.preparedRevision);
+    }
+  }
   if (hasApprovedRecordedRound(mission)) {
-    return { ...mission, status: 'review' };
+    return completeReviewPreparation(mission, mission.review, command.preparedRevision);
   }
   validateSubmission(mission, command);
-  return { ...mission, status: 'review', review: command.review };
+  return completeReviewPreparation(mission, command.review, command.preparedRevision);
+}
+
+function completeReviewPreparation(mission: OpenMission, review: Review | null, preparedRevision?: import('./review.js').ChangeRevision): OpenMission {
+  const submitted = { ...mission, status: 'review' as const, review };
+  if (review && currentReviewRound(review).subject.revision === preparedRevision) { delete submitted.reviewPreparationPending; }
+  return submitted;
 }
 
 /**
@@ -253,13 +269,13 @@ function retainRepairJudgment(review: Review, command: Extract<MissionCommand, {
 
 function reboundMission(mission: Mission, command: Extract<MissionCommand, { type: 'rebound-to-active' }>): Mission {
   requireStatus(mission, ['integration', 'review', 'active'], command);
-  if (mission.status === 'review' && (!mission.review || reviewStatus(mission.review) !== 'awaiting-review')) {
-    throw new MissionRuleViolation('A review repair rebound requires an undecided review round');
-  }
   if (command.cause.kind === 'integration-gate-failure' && !Number.isFinite(Date.parse(command.occurredAt ?? ''))) {
     throw new MissionRuleViolation('Integration repair requires its failure time');
   }
-  if (pendingIntegrationApproval(mission)) { return { ...mission, assignee: command.agent }; }
+  if (pendingIntegrationApproval(mission)) { return { ...mission, status: 'active', assignee: command.agent }; }
+  if (mission.status === 'review' && mission.review && !['awaiting-review', 'awaiting-implementation', 'ready-for-next-round'].includes(reviewStatus(mission.review))) {
+    throw new MissionRuleViolation('A review repair rebound requires an undecided review round');
+  }
   return {
     ...mission, status: 'active', assignee: command.agent,
     review: mission.review && reviewStatus(mission.review) === 'approved' && command.cause.kind === 'integration-gate-failure'
@@ -315,7 +331,7 @@ function approveMission(mission: Mission, command: Extract<MissionCommand, { typ
 }
 
 function revokeMissionApproval(mission: Mission, command: Extract<MissionCommand, { type: 'revoke-approval' }>): Mission {
-  requireStatus(mission, ['integration', 'active'], command);
+  requireStatus(mission, ['integration', 'active', 'review'], command);
   if (!mission.review || reviewStatus(mission.review) !== 'approved') {
     throw new MissionRuleViolation('Revocation requires a current effective approval');
   }
@@ -344,21 +360,15 @@ function recordImplementer(mission: Mission, command: Extract<MissionCommand, { 
   } : null };
 }
 
+function beginReviewPreparation(mission: Mission, command: Extract<MissionCommand, { type: 'begin-review-preparation' }>): Mission {
+  requireStatus(mission, ['active', 'review', 'integration'], command);
+  return { ...mission, status: 'review', ...(mission.status === 'active' ? { reviewPreparationPending: true as const } : {}) };
+}
+
 export function decideMission(mission: Mission, command: MissionCommand): Mission {
   switch (command.type) {
-    case 'refine':
-      // Refinement is what `px draft` produces: the mission leaves the backlog
-      // with a mission document to work from. Recording it here is what lets
-      // `activate` demand `refined` — without this transition the persisted
-      // aggregate would never leave `backlog` and activation could only be
-      // spelled as the backlog jump this rule exists to forbid. Re-refining an
-      // already refined mission is idempotent so a re-run of `px draft` is safe.
-      requireStatus(mission, ['backlog', 'refined'], command);
-      requireDraftedContract(mission, command);
-      if (mission.labels.includes('unknown' as MissionLabel)) {
-        throw new MissionRuleViolation('Cannot refine with unknown classification: record ai_sdlc or user_value with px classification set before finishing the draft');
-      }
-      return { ...mission, status: 'refined' };
+    case 'begin-review-preparation': return beginReviewPreparation(mission, command);
+    case 'refine': return refineMission(mission, command);
     case 'activate':
       requireStatus(mission, ['refined', 'active'], command);
       if (mission.brief) { requireDraftedContract(mission, command); }
@@ -370,7 +380,7 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
     case 'record-implementer': return recordImplementer(mission, command);
     case 'rebound-to-active': return reboundMission(mission, command);
     case 'submit-for-review':
-      // A handoff that relaunches (gatekeeper pushback, crashed agent, retried
+      // A review preparation that relaunches (gatekeeper pushback, crashed agent, retried
       // CLI invocation) replays this transition against a mission that already
       // reached review. Submission is therefore idempotent: the mission is
       // returned untouched, so the recorded review round cannot be rewritten and
@@ -404,4 +414,13 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
       requireStatus(mission, ['integration'], command);
       return { ...mission, status: 'done', closedAt: null };
   }
+}
+
+function refineMission(mission: Mission, command: Extract<MissionCommand, { type: 'refine' }>): Mission {
+  requireStatus(mission, ['backlog', 'refined'], command);
+  requireDraftedContract(mission, command);
+  if (mission.labels.includes('unknown' as MissionLabel)) {
+    throw new MissionRuleViolation('Cannot refine with unknown classification: record ai_sdlc or user_value with px classification set before finishing the draft');
+  }
+  return { ...mission, status: 'refined' };
 }

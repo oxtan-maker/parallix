@@ -1,3 +1,6 @@
+import { projectExecutionActivity, ACTIVITY_OBSERVATION_TTL_MS } from '../../../src/domain/execution-activity.js';
+import { SqliteExecutionActivityStore } from '../../../src/adapters/sqlite/execution-activity-store.js';
+import { ExecutionActivityRecorder } from '../../../src/application/recording/execution-activity-recorder.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import type { BoardCommandRequest, BoardCommandResult } from '../../../src/application/controller/board-command.js';
@@ -11,9 +14,7 @@ import path from 'node:path';
 import { BoardCommandController } from '../../../src/application/controller/board-controller.js';
 import active from '../../../src/adapters/cli/commands/active.js';
 import { type ExecuteMissionRequest, ExecuteMissionService } from '../../../src/application/execute-mission-service.js';
-import { CurrentWorkRecorder } from '../../../src/application/recording/current-work-recorder.js';
-import { ConcreteCurrentWorkReadAdapter } from '../../../src/adapters/backlog/concrete-current-work-read-adapter.js';
-import { isWorkInProgress, reconcileCurrentWork } from '../../../src/application/projections/current-work.js';
+import { isWorkInProgress, } from '../../../src/domain/execution-activity.js';
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../../../src/adapters/sqlite/migration-runner.js';
 import { SqliteOperationalHistoryRepository } from '../../../src/adapters/sqlite/operational-history-repository.js';
@@ -61,8 +62,8 @@ describe("active invocation overlap", () => {
   }
 
   interface RecorderFixture {
-    readonly recorder: CurrentWorkRecorder;
-    readonly readAdapter: ConcreteCurrentWorkReadAdapter;
+    readonly recorder: ExecutionActivityRecorder;
+    readonly readAdapter: SqliteExecutionActivityStore;
     dispose(): Promise<void>;
   }
 
@@ -73,11 +74,12 @@ describe("active invocation overlap", () => {
     await db.open({ path: path.join(dir, 'operator.db') });
     await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
     const repo = new SqliteOperationalHistoryRepository(db);
+    const activity = new SqliteExecutionActivityStore(db, repositoryId('parallix'));
     let tick = 0;
-    const now: NonNullable<NonNullable<ConstructorParameters<typeof CurrentWorkRecorder>[1]>["now"]> = () => new Date(Date.parse('2026-08-15T09:00:00.000Z') + (tick += 1_000));
+    const now: NonNullable<NonNullable<ConstructorParameters<typeof ExecutionActivityRecorder>[1]>["now"]> = () => new Date(Date.parse('2026-08-15T09:00:00.000Z') + (tick += 1_000));
     return {
-      recorder: new CurrentWorkRecorder(repo, { processId: process.pid, now }),
-      readAdapter: new ConcreteCurrentWorkReadAdapter(repo),
+      recorder: new ExecutionActivityRecorder(activity, { processId: process.pid, now }),
+      readAdapter: activity,
       dispose: async () => {
         await db.close();
         fs.rmSync(dir, { recursive: true, force: true });
@@ -88,7 +90,7 @@ describe("active invocation overlap", () => {
   /** Read the mission's current work exactly as the board projection does. */
   async function readCurrentWork(fixture: RecorderFixture) {
     const events = await fixture.readAdapter.loadCurrentWork();
-    return reconcileCurrentWork(events, {
+    return projectExecutionActivity(events, {
       nowMs: Date.parse('2026-08-15T09:05:00.000Z'),
       ttlMs: 5 * 60 * 1000,
       isProcessAlive: () => true,
@@ -136,8 +138,8 @@ describe("active invocation overlap", () => {
         async saveWithTransition(next: Mission) { mission = next; return missionVersion(2); },
       },
       telemetry: { recordLaunchTelemetry: async () => {} },
-      checkpointValidation: { validateBeforeHandoff: async () => ({ ok: true as const }) },
-      handoffExecution: { run: async () => ({ ok: true as const }), repairHygiene: async () => ({ repaired: false }), classifyFailure: () => null, isRelaunchableFailure: () => false },
+      checkpointValidation: { validateBeforeReviewPreparation: async () => ({ ok: true as const }) },
+      reviewPreparationExecution: { run: async () => ({ ok: true as const }), repairHygiene: async () => ({ repaired: false }), classifyFailure: () => null, isRelaunchableFailure: () => false },
       autonomousReview: { start: async () => {} },
       repairLaunch: { launch: async () => { throw new Error('Unexpected repair launch'); }, available: () => ({ supported: false }), readHead: () => null },
       output: { log: () => {}, error: () => {}, command: (value: string) => value, formatSlug: (value: string) => value, formatAgent: (value: string) => value },
@@ -339,8 +341,8 @@ describe("active persisted Mission", () => {
         async saveWithTransition(next: Mission) { mission = next; return fixtureVersion(2); },
       },
       telemetry: { async recordLaunchTelemetry() {} },
-      checkpointValidation: { async validateBeforeHandoff() { return { ok: true as const }; } },
-      handoffExecution: { async run() { return { ok: true as const }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } },
+      checkpointValidation: { async validateBeforeReviewPreparation() { return { ok: true as const }; } },
+      reviewPreparationExecution: { async run() { return { ok: true as const }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } },
       autonomousReview: { async start() {} },
       repairLaunch: { async launch() { throw new Error('Unexpected repair launch'); }, available() { return { supported: false }; }, readHead() { return null; } },
       output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
@@ -426,7 +428,7 @@ describe("active persisted Mission", () => {
         async load() { return { kind: 'found' as const, version: fixtureVersion(1), mission }; },
         async save() { throw new Error('must not save'); }, async saveWithTransition() { throw new Error('must not save'); },
       },
-      telemetry: { async recordLaunchTelemetry() {} }, checkpointValidation: { async validateBeforeHandoff() { return { ok: true as const }; } }, handoffExecution: { async run() { return { ok: true as const }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } }, autonomousReview: { async start() {} }, repairLaunch: { async launch() { throw new Error('Unexpected repair launch'); }, available() { return { supported: false }; }, readHead() { return null; } }, output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
+      telemetry: { async recordLaunchTelemetry() {} }, checkpointValidation: { async validateBeforeReviewPreparation() { return { ok: true as const }; } }, reviewPreparationExecution: { async run() { return { ok: true as const }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } }, autonomousReview: { async start() {} }, repairLaunch: { async launch() { throw new Error('Unexpected repair launch'); }, available() { return { supported: false }; }, readHead() { return null; } }, output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
     }).execute({
       operationId: 'active:task-2580', slug: 'task-2580', agent: 'codex', capabilities: new Set(['active:execute']),
     });
@@ -443,6 +445,7 @@ describe("active persisted Mission", () => {
       review: null, netEngineeringLines: null, brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
       declaredGates: ['npm test'], successCriteria: ['done'], predictedNelBucket: 'Small', status: 'refined' as const, closedAt: null,
     });
+    let version = fixtureVersion(1);
     const outcome = await new ExecuteMissionService({
       workspace: {
         async preflight() { return true; }, async resolveWorktree() { return '/worktree'; },
@@ -454,10 +457,10 @@ describe("active persisted Mission", () => {
         async launch() { return { agent: 'codex', rebaseDeferred: false, errored: true, errorMessage: 'launcher unavailable', exitStatus: null, detail: null }; },
       },
       missionTransitions: {
-        async load() { return { kind: 'found' as const, mission, version: fixtureVersion(1) }; },
-        async save(next: Mission) { mission = next; return fixtureVersion(2); }, async saveWithTransition(next: Mission) { mission = next; return fixtureVersion(2); },
+        async load() { return { kind: 'found' as const, mission, version }; },
+        async save(next: Mission) { mission = next; version = fixtureVersion(version + 1); return version; }, async saveWithTransition(next: Mission) { mission = next; version = fixtureVersion(version + 1); return version; },
       },
-      telemetry: { async recordLaunchTelemetry() {} }, checkpointValidation: { async validateBeforeHandoff() { return { ok: true as const }; } }, handoffExecution: { async run() { return { ok: true as const }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } }, autonomousReview: { async start() {} }, repairLaunch: { async launch() { throw new Error('Unexpected repair launch'); }, available() { return { supported: false }; }, readHead() { return null; } }, output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
+      telemetry: { async recordLaunchTelemetry() {} }, checkpointValidation: { async validateBeforeReviewPreparation() { return { ok: true as const }; } }, reviewPreparationExecution: { async run() { return { ok: true as const }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } }, autonomousReview: { async start() {} }, repairLaunch: { async launch() { throw new Error('Unexpected repair launch'); }, available() { return { supported: false }; }, readHead() { return null; } }, output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
     }).execute({
       operationId: 'active:task-2580', slug: 'task-2580', agent: 'codex', capabilities: new Set(['active:execute']),
     });
@@ -544,7 +547,7 @@ describe('active operator resume', () => {
    * and records a fresh contract stop, which is how a genuinely new blocker
    * reaches the same repair checkpoint after a resume.
    */
-  function resumePorts(store: SqliteMissionStore, launches: number[], stop = true, handoff: string[] = []): ExecuteMissionPorts {
+  function resumePorts(store: SqliteMissionStore, launches: number[], stop = true, reviewPreparation: string[] = []): ExecuteMissionPorts {
     return {
       workspace: {
         async preflight() { return true; }, async resolveWorktree() { return `/tmp/wt-${RESUME_SLUG}`; },
@@ -575,7 +578,7 @@ describe('active operator resume', () => {
       missionTransitions: store,
       telemetry: { async recordLaunchTelemetry() {} },
       checkpointValidation: {
-        async validateBeforeHandoff() {
+        async validateBeforeReviewPreparation() {
           const mission = await (async () => { const loaded = await store.load(RESUME_MISSION_ID); return loaded.kind === 'found' ? loaded.mission : null; })();
           const blocker = mission?.checkpoints.find(cp => cp.repair?.blocker)?.repair?.blocker;
           return blocker
@@ -583,8 +586,8 @@ describe('active operator resume', () => {
             : { ok: true };
         },
       },
-      handoffExecution: { async run() { handoff.push('declared gates'); return { ok: true }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } },
-      autonomousReview: { async start() { handoff.push('independent review'); } },
+      reviewPreparationExecution: { async run() { reviewPreparation.push('declared gates'); return { ok: true }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } },
+      autonomousReview: { async start() { reviewPreparation.push('independent review'); } },
       repairLaunch: { async launch() {}, available() { return { supported: false }; }, readHead() { return null; } },
       output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
     } as unknown as ExecuteMissionPorts;
@@ -597,9 +600,9 @@ describe('active operator resume', () => {
     const errors: string[] = [];
     const exitCodes: number[] = [];
     const launches: number[] = [];
-    const handoff: string[] = [];
+    const reviewPreparation: string[] = [];
     try {
-      const service = new ExecuteMissionService(resumePorts(fixture.store, launches, stop, handoff), event => active.renderActiveProgress(event, message => logs.push(message)));
+      const service = new ExecuteMissionService(resumePorts(fixture.store, launches, stop, reviewPreparation), event => active.renderActiveProgress(event, message => logs.push(message)));
       await active([RESUME_SLUG], {
         operatorInvocation: true,
         inferSlugFn: () => RESUME_SLUG,
@@ -609,7 +612,7 @@ describe('active operator resume', () => {
         logFn: (message: string) => { logs.push(message); },
         errorFn: (message: string) => { errors.push(message); },
       });
-      return { logs, errors, exitCodes, launches, handoff, mission: await fixture.read() };
+      return { logs, errors, exitCodes, launches, reviewPreparation, mission: await fixture.read() };
     } finally {
       await fixture.dispose();
     }
@@ -639,9 +642,9 @@ describe('active operator resume', () => {
     assert.match(blocked[0], /Blocked/);
     assert.deepEqual(run.exitCodes, [1], 'the blocked run exits non-zero');
   });
-  test('explicit resume preserves prior evidence and declared handoff plus independent review (TASK-2756)', async () => {
+  test("explicit resume preserves prior evidence and declared review preparation plus independent review (TASK-2756)", async () => {
     const run = await runOperatorActive(false);
-    assert.deepEqual(run.handoff, ['declared gates', 'independent review']);
+    assert.deepEqual(run.reviewPreparation, ['declared gates', 'independent review']);
     assert.deepEqual(run.exitCodes, []);
     assert.equal(run.launches.length, 1);
     assert.equal(run.mission.checkpoints.length, 2);

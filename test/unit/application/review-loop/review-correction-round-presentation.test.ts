@@ -17,7 +17,7 @@ function requestChanges(consumeReviewer?: () => Promise<ReviewerArtifactFacts>) 
     slug: 'task-999',
     routing: { eligibleFamilies: () => ['codex'] },
     // provider-disabled --start performs the handoff transition.
-    handoff: { handoff: async () => ({ ok: true as const }) },
+    reviewPreparation: { reviewPreparation: async () => ({ ok: true as const }) },
     task: { implementer: () => 'claude' },
     artifacts: {
       consumeReviewer: consumeReviewer ?? (async () => ({
