@@ -20,7 +20,7 @@ test('writeReviewState does not report success when the write never reaches dura
       implementer: 'claude',
       round: 3,
       phase: 'fixing',
-    }, root, store);
+    }, root, { missionStore: store });
 
     assert.notEqual(result.outcome, 'committed', 'a mission with no review must not report committed');
     assert.equal(result.outcome, 'write-failed');
@@ -32,7 +32,7 @@ test('writeReviewState does not report success when the write never reaches dura
 test('persistReviewStateOrThrow throws rather than continuing past a failed write', async () => {
   await withMissionDatabase('task-2220-throws', async ({ root, slug, store }) => {
     await assert.rejects(
-      () => persistReviewStateOrThrow((target, state, worktree) => writeReviewState(target, state, worktree, store), slug, {
+      () => persistReviewStateOrThrow((target, state, worktree) => writeReviewState(target, state, worktree, { missionStore: store }), slug, {
         reviewer: 'codex',
         implementer: 'claude',
         round: 3,

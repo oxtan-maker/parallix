@@ -1,9 +1,9 @@
+import type { ReviewLoopState } from '../../application/ports/review-round.js';
 import type { ReviewStatePersistenceResult, ReviewStateData, ReviewStateWriter } from '../../application/ports/review-persistence.js';
 export type { ReviewStatePersistenceResult, ReviewStateData, ReviewStateWriter } from '../../application/ports/review-persistence.js';
 import { diagnosticFrom, resolveMissionStore } from './review-state-store.js';
 export { resetReviewState } from './review-state-store.js';
-export { reviewStateFile, readExportedReviewEvents, reconcileInterruptedHandoff, backfillReviewFromLegacyState, type ReviewBackfillResult, type InterruptedHandoffInputs, type InterruptedHandoffReconciliationResult } from './review-legacy-import.js';
-import { REVIEW_PHASES as VALID_PHASES, normalizeReviewPhase, reviewPhaseTransition } from '../../domain/review-phase-policy.js';
+import { assertReviewPhaseTransition, requireReviewPhase, ReviewPhaseViolation, type ReviewPhase } from '../../domain/review-phase-policy.js';
 /**
  * Reviewer-family persistence for the autonomous review loop.
  *
@@ -17,12 +17,6 @@ import { REVIEW_PHASES as VALID_PHASES, normalizeReviewPhase, reviewPhaseTransit
  * finds no Review is reported as a failure rather than inventing one without a
  * reviewed revision or a configured reviewer eligibility.
  *
- * Missions handed off before the cutover are the exception: they carry a
- * `review-state.json` and no Review, and fail closed forever without a way
- * across. `backfillReviewFromLegacyState` is that way — an explicit operator
- * command (`px review <slug> --backfill-review`), so the loop itself keeps
- * failing closed rather than self-healing behind the operator's back.
- *
  * Owned by the Node workflow harness (ADR 0037 / architecture migration).
  */
 
@@ -31,27 +25,23 @@ import { resolveWorktree } from '../filesystem/mission-utils.js';
 import { missionId } from '../../domain/mission.js';
 
 import { applyReviewStateToReview, reviewStateDataFrom } from './review-state-mapping.js';
-import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
-import type { MissionStore } from '../../application/domain-ports.js';
-import { requireReviewIdentity } from '../../domain/mission-workflow.js';
+import { isStaleWrite, type MissionStore } from '../../application/domain-ports.js';
 import type { PullRequestReference } from '../../domain/review.js';
 
 interface ReviewStatePersistenceContext {
   slug: string;
-  phase?: string | null;
+  phase?: ReviewPhase | null;
   round?: number | null;
 }
 
 export function assertReviewStatePersisted(
-  result: ReviewStatePersistenceResult | boolean | void | unknown,
+  result: ReviewStatePersistenceResult,
   context: ReviewStatePersistenceContext
 ): void {
-  if (result === true || result === undefined) { return; }
-  if (result === false) {
-    throw new Error(`Review-state persistence failed for mission ${context.slug}, phase ${context.phase || 'unknown'}, round ${context.round ?? 'unknown'}: persistence returned false`);
+  if (!result || typeof result !== 'object' || !('outcome' in result)) {
+    throw new Error(`Review-state persistence failed for mission ${context.slug}: missing persistence result`);
   }
-  if (!result || typeof result !== 'object' || !('outcome' in result)) { return; }
-  const persistenceResult = result as ReviewStatePersistenceResult;
+  const persistenceResult = result;
   if (persistenceResult.outcome === 'committed' || persistenceResult.outcome === 'unchanged') { return; }
   throw new Error(
     `Review-state persistence failed for mission ${context.slug}, phase ${context.phase || 'unknown'}, round ${context.round ?? 'unknown'}, stage ${persistenceResult.stage}: ${persistenceResult.diagnostic}`
@@ -65,22 +55,20 @@ export function assertReviewStatePersisted(
  * @param {string} slug
  * @param {ReviewState|Record<string, unknown>} state
  * @param {string} worktree
- * @param {MissionStore|null|undefined} [missionStore]  backward-compat positional arg
- * @param {MissionLifecycleService|null|undefined} [lifecycleService]  TASK-2376 approval boundary
+ * @param {MissionStore|null|undefined} [missionStore]
  * @returns {Promise<ReviewStatePersistenceResult>}
  */
 export async function persistReviewStateOrThrow(
   writeFn: ReviewStateWriter,
   slug: string,
-  state: ReviewState | ReviewStateData | Record<string, unknown>,
+  state: ReviewStateData,
   worktree: string,
   missionStore?: MissionStore | null,
-  lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null,
 ): Promise<ReviewStatePersistenceResult> {
-  const result = await writeFn(slug, state, worktree, { missionStore, lifecycleService });
+  const result = await writeFn(slug, state, worktree, { missionStore });
   assertReviewStatePersisted(result, {
     slug,
-    phase: state instanceof ReviewState ? state.phase : String(state.phase || 'unknown'),
+    phase: state.phase,
     round: state instanceof ReviewState ? state.round : (typeof state.round === 'number' ? state.round : null)
   });
   return result;
@@ -98,15 +86,11 @@ export async function persistReviewStateOrThrow(
  * @returns {Promise<ReviewState|null>}
  */
 export async function readReviewState(slug: string, rootDir = process.cwd(), missionStore?: MissionStore | null): Promise<ReviewState | null> {
-  try {
-    const store = await resolveMissionStore(rootDir, missionStore);
-    if (!store) { return null; }
-    const result = await store.load(missionId(slug));
-    if (result.kind !== 'found' || !result.mission.review) { return null; }
-    return new ReviewState(slug, reviewStateDataFrom(result.mission.review), store);
-  } catch {
-    return null;
-  }
+  const store = await resolveMissionStore(rootDir, missionStore);
+  if (!store) { return null; }
+  const result = await store.load(missionId(slug));
+  if (result.kind !== 'found' || !result.mission.review) { return null; }
+  return new ReviewState(slug, reviewStateDataFrom(result.mission.review), store);
 }
 
 /** One completed round, flattened for consumers that need round history. */
@@ -148,7 +132,8 @@ export async function readReviewRounds(slug: string, rootDir = process.cwd(), mi
       decision: round.decision ? round.decision.kind : null,
       disposition: round.disposition,
     }));
-  } catch {
+  } catch (error) {
+    if (error instanceof ReviewPhaseViolation) { throw error; }
     return [];
   }
 }
@@ -192,27 +177,16 @@ export async function resolveReviewIdentity(
  * Manager class for mission review state.
  * Expanded to include phase, disposition, and metadata for canonical state ownership.
  */
-export { REVIEW_PHASES as VALID_PHASES, normalizeReviewPhase } from '../../domain/review-phase-policy.js';
-
-function reviewPersistenceOptions(options: { missionStore?: MissionStore | null; lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null } | MissionStore | null) {
-  const opts: { missionStore?: MissionStore | null; lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null } =
-    options && typeof options === 'object' && 'save' in options
-      ? { missionStore: options as MissionStore }
-      : (options as { missionStore?: MissionStore | null; lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null } ?? {});
-  return opts;
-}
-
-export class ReviewState {
+export class ReviewState implements ReviewLoopState {
   slug: string;
   reviewer?: string;
   implementer?: string;
   round: number;
   startedAt: string;
-  phase: string;
+  phase: ReviewPhase;
   disposition: string | null;
   metadata: Record<string, unknown>;
   pullRequest: PullRequestReference | null;
-  phaseOriginal: string | null;
   private readonly missionStore: MissionStore | null;
 
   /**
@@ -220,17 +194,15 @@ export class ReviewState {
    * @param {ReviewStateData} [data]
    */
   constructor(slug: string, data: ReviewStateData = {}, missionStore: MissionStore | null = null) {
-    const phaseInfo = normalizeReviewPhase(data.phase || '', data.disposition || '');
     this.slug = slug;
     this.reviewer = data.reviewer;
     this.implementer = data.implementer;
     this.round = data.round || 1;
     this.startedAt = data.startedAt || new Date().toISOString();
-    this.phase = phaseInfo.phase;
+    this.phase = data.phase === undefined ? 'reviewing' : requireReviewPhase(data.phase);
     this.disposition = data.disposition || null;
     this.metadata = data.metadata || {};
     this.pullRequest = data.pullRequest ?? null;
-    this.phaseOriginal = phaseInfo.normalized ? phaseInfo.original : null;
     this.missionStore = missionStore;
   }
 
@@ -253,15 +225,8 @@ export class ReviewState {
    * @param {string} nextPhase
    * @returns {ReviewState}
    */
-  transitionTo(nextPhase: string): ReviewState {
-    const transition = reviewPhaseTransition(this.phase, nextPhase);
-    if (!transition.valid) {
-      throw new Error(`Invalid phase: "${nextPhase}". Valid: ${(VALID_PHASES as readonly string[]).join(', ')}`);
-    }
-    const allowedArr = transition.allowed;
-    if (!transition.permitted) {
-      throw new Error(`Cannot transition from "${this.phase}" to "${nextPhase}". Allowed: ${(allowedArr || []).join(', ') || 'none'}`);
-    }
+  transitionTo(nextPhase: ReviewPhase): ReviewState {
+    assertReviewPhaseTransition(this.phase, nextPhase);
     this.phase = nextPhase;
     return this;
   }
@@ -274,29 +239,8 @@ export class ReviewState {
     return this;
   }
 
-  /**
-   * @returns {{reviewer?: string, implementer?: string, round?: number, startedAt?: string, phase?: string, disposition?: string, metadata?: {[key: string]: unknown}}}
-   */
-  toJSON(): {
-    reviewer?: string;
-    implementer?: string;
-    round?: number;
-    startedAt?: string;
-    phase?: string;
-    disposition?: string;
-    metadata?: Record<string, unknown>;
-    pullRequest?: PullRequestReference | null;
-  } {
-    const payload: {
-      reviewer?: string;
-      implementer?: string;
-      round?: number;
-      startedAt?: string;
-      phase?: string;
-      disposition?: string;
-      metadata?: Record<string, unknown>;
-      pullRequest?: PullRequestReference | null;
-    } = {
+  toJSON(): ReviewStateData {
+    const payload: ReviewStateData = {
       reviewer: this.reviewer,
       implementer: this.implementer,
       round: this.round,
@@ -319,22 +263,16 @@ export class ReviewState {
    * bookkeeping write would strand the loop. A second conflict is reported
    * rather than retried forever, so a genuinely contended mission fails loudly.
    *
-   * When `lifecycleService` is supplied and the review becomes approved,
-   * the `review → integration` lifecycle transition fires at this boundary
-   * using `ReviewerDecision.decidedAt` as the occurrence time (TASK-2376).
-   *
    * @param {string} [worktree]
-   * @param {{ missionStore?: MissionStore | null; lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null } | MissionStore | null} [options]
+   * @param {{ missionStore?: MissionStore | null }} [options]
    * @returns {Promise<ReviewStatePersistenceResult>}
    */
   async save(
     worktree: string = resolveWorktree(this.slug) || process.cwd(),
-    options: { missionStore?: MissionStore | null; lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null } | MissionStore | null = {},
+    options: { missionStore?: MissionStore | null } = {},
   ): Promise<ReviewStatePersistenceResult> {
-    // Backward-compat: accept MissionStore as positional 2nd arg
-    const opts = reviewPersistenceOptions(options);
+    const opts = options;
     const missionStore = opts.missionStore ?? this.missionStore;
-    const lifecycleService = opts.lifecycleService ?? null;
     let store: Awaited<ReturnType<typeof resolveMissionStore>>;
     try {
       store = await resolveMissionStore(worktree, missionStore);
@@ -347,13 +285,16 @@ export class ReviewState {
 
     for (let attempt = 0;attempt < 2;attempt += 1) {
       try {
-        return await this.saveToStore(store, lifecycleService);
+        return await this.saveToStore(store);
       } catch (error) {
         // A stale write means someone else committed between our load and save.
         // Reload and reapply once; the review-state fields are last-writer-wins
         // per field, so a replay onto the newer version is well defined.
-        const stale = error instanceof Error && error.name === 'MissionStaleWriteError';
+        const stale = isStaleWrite(error);
         if (stale && attempt === 0) { continue; }
+        if (error instanceof ReviewPhaseViolation) {
+          return { outcome: 'validation-failed', stage: 'validation', kind: 'validation', diagnostic: error.message };
+        }
         return { outcome: 'write-failed', stage: 'write', diagnostic: diagnosticFrom(error, 'Review-state write failed') };
       }
     }
@@ -361,7 +302,8 @@ export class ReviewState {
     return { outcome: 'write-failed', stage: 'write', diagnostic: `Review state for ${this.slug} lost a version race twice; another process is writing this mission` };
   }
 
-  private async saveToStore(store: NonNullable<Awaited<ReturnType<typeof resolveMissionStore>>>, lifecycleService: Pick<MissionLifecycleService, 'transition'> | null): Promise<ReviewStatePersistenceResult> {
+  private async saveToStore(store: NonNullable<Awaited<ReturnType<typeof resolveMissionStore>>>): Promise<ReviewStatePersistenceResult> {
+    requireReviewPhase(this.phase);
     const result = await store.load(missionId(this.slug));
     if (result.kind !== 'found') {
       return { outcome: 'write-failed', stage: 'write', diagnostic: `Mission ${this.slug} is not in the operator database` };
@@ -371,92 +313,46 @@ export class ReviewState {
       return {
         outcome: 'write-failed',
         stage: 'write',
-        diagnostic: `Mission ${this.slug} has no review to update; px review ${this.slug} starts the review, or px review ${this.slug} --backfill-review migrates a pre-cutover review-state.json`,
+        diagnostic: `Mission ${this.slug} has no review to update; px review ${this.slug} starts the review, then retry the write`,
       };
     }
 
-    const review = applyReviewStateToReview(mission.review, this.toJSON());
-    if (this.phase === 'approved') { requireReviewIdentity(mission, review); }
-    const nextVersion = await store.save({ ...mission, review }, result.version);
-    return await this.approveLifecycle(review, mission, nextVersion, lifecycleService) || { outcome: 'committed' };
-  }
-
-  private async approveLifecycle(review: import('../../domain/review.js').Review, mission: import('../../domain/mission.js').Mission, nextVersion: import('../../application/domain-ports.js').MissionVersion, lifecycleService: Pick<MissionLifecycleService, 'transition'> | null): Promise<ReviewStatePersistenceResult | null> {
-    // TASK-2376: fire review → integration at the approval boundary.
-    // TASK-2378: a boundary transition that fails while the Mission is
-    // still in the `review` lane is reported in the persistence result
-    // instead of swallowed — the review is committed, the Mission stays
-    // in review, the approval command surfaces the failure (and withholds
-    // Backlog promotion), and px integrate recovery is the repair path.
-    // Once the Mission has already moved to `integration`, an approve
-    // transition can never legitimately complete, so a bookkeeping
-    // re-persist of the approved round (comment, artifact consumption)
-    // keeps the historical non-fatal behavior.
-    if (lifecycleService && this.phase === 'approved') {
-      const currentRound = review.rounds[review.rounds.length - 1];
-      const decidedAt = currentRound.decision?.kind === 'approved'
-        ? currentRound.decision.decidedAt
-        : this.startedAt;
-      const approveResult = await lifecycleService.transition({
-        operationId: `review-approve:${this.slug}`,
-        missionId: missionId(this.slug),
-        expectedVersion: nextVersion,
-        capabilities: new Set(['mission:transition']),
-        command: { type: 'approve', review },
-        actor: mission.assignee ?? 'custom',
-        occurredAt: decidedAt,
-        idempotencyKey: `approve:${this.slug}:round-${currentRound.number}`,
-      });
-      // TASK-2378: a boundary transition that fails while the Mission is
-      // still in the `review` lane is reported in the persistence result
-      // instead of swallowed — the review is committed, the Mission stays
-      // in review, the approval command surfaces the failure (and withholds
-      // Backlog promotion), and px integrate recovery is the repair path.
-      // TASK-2582: the same report applies when the Mission is in no lane
-      // the approve boundary can leave (for example `active`, the
-      // TASK-2579 shape) — reporting `committed` there is what promoted a
-      // Backlog task over an active Mission. Once the Mission has already
-      // moved to `integration`, an approve transition can never legitimately
-      // complete, so a bookkeeping re-persist of the approved round
-      // (comment, artifact consumption) keeps the historical non-fatal
-      // behavior.
-      if (approveResult.status !== 'completed' && mission.status !== 'integration') {
-        return {
-          outcome: 'boundary-failed',
-          stage: 'boundary',
-          diagnostic: `review → integration transition failed for ${this.slug} (Mission status: ${mission.status}): ${approveResult.error?.message ?? 'unknown failure'}`,
-        };
-      }
+    if (this.phase === 'approved' && mission.status !== 'integration') {
+      throw new ReviewPhaseViolation(`Loop bookkeeping cannot approve the Mission while it is ${mission.status}; record the reviewer decision through the review workflow`);
     }
-    return null;
+    const review = applyReviewStateToReview(mission.review, this.toJSON());
+    await store.save({ ...mission, review }, result.version);
+    return { outcome: 'committed' };
   }
 
 }
 
 /**
- * Write and commit the review state for a mission.
+ * Persist current-round bookkeeping for a mission.
  *
  * @param {string} slug
  * @param {ReviewState|object} state
  * @param {string} [worktree]
- * @param {{ missionStore?: MissionStore | null; lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null } | MissionStore | null} [options]
+ * @param {{ missionStore?: MissionStore | null }} [options]
  * @returns {Promise<ReviewStatePersistenceResult>}
  */
 export async function writeReviewState(
   slug: string,
-  state: ReviewState | ReviewStateData | Record<string, unknown>,
+  state: ReviewStateData,
   worktree: string = resolveWorktree(slug) || process.cwd(),
-  options: { missionStore?: MissionStore | null; lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null } | MissionStore | null = {},
+  options: { missionStore?: MissionStore | null } = {},
 ): Promise<ReviewStatePersistenceResult> {
-  // Backward-compat: accept MissionStore as positional 4th arg
-  const opts: { missionStore?: MissionStore | null; lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null } =
-    options && typeof options === 'object' && 'save' in options
-      ? { missionStore: options as MissionStore }
-      : (options as { missionStore?: MissionStore | null; lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null } ?? {});
-  const instance = state instanceof ReviewState
-    ? state
-    : new ReviewState(slug, state as ReviewStateData, opts.missionStore ?? null);
-  return instance.save(worktree, opts);
+  const opts = options;
+  try {
+    const current = state instanceof ReviewState ? state : await readReviewState(slug, worktree, opts.missionStore);
+    const instance = state instanceof ReviewState ? state : new ReviewState(slug, { ...current?.toJSON(), ...state }, opts.missionStore ?? null);
+    return await instance.save(worktree, opts);
+  } catch (error) {
+    if (error instanceof ReviewPhaseViolation) {
+      return { outcome: 'validation-failed', stage: 'validation', kind: 'validation', diagnostic: error.message };
+    }
+    throw error;
+  }
 }
 
 export type ReviewStateInstanceReader = (...args: Parameters<typeof readReviewState>) => ReviewState | null | Promise<ReviewState | null>;

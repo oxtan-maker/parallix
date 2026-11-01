@@ -283,7 +283,6 @@ function makeReviewWorkflow(ran: string[]) {
     close: operation('close'),
     status: operation('status'),
     createEvent: operation('createEvent'),
-    backfillReview: operation('backfillReview'),
     reconcileReview: operation('reconcileReview'),
     importLegacy: operation('importLegacy'),
   };
@@ -555,7 +554,7 @@ describe("Workflow current work follows launches —", () => {
       },
       comment: operation(), readComments: operation(),
       submitReview: operation(), close: operation(),
-      status: operation(), backfillReview: operation(),
+      status: operation(),
       reconcileReview: operation(),
     }, new CurrentWorkRecorder(viaReview.repo, { processId: 7 })).execute([SLUG]);
 

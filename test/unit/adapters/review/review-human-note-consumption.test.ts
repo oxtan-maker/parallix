@@ -164,7 +164,7 @@ test('consumeHumanNotes merges dedup into currentState in-place', async () => {
 
   // Pass currentState — dedup metadata merged in-place (N1 fix)
   // No writeReviewStateFn needed — caller owns the persist.
-  const state: { round: number; phase: string; metadata: Record<string, unknown> } = { round: 1, phase: 'reviewing', metadata: {} };
+  const state: { round: number; phase: 'reviewing'; metadata: Record<string, unknown> } = { round: 1, phase: 'reviewing', metadata: {} };
   const result = await consumeHumanNotes('task-2342', 'alice', {
     getCommentsFn,
     createEventFn,
@@ -225,7 +225,7 @@ test('consumeHumanNotes retains all dedup keys (no cap)', async () => {
   };
   const readTokenFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["readTokenFn"]> = () => 'test-token';
 
-  const state: { round: number; phase: string; metadata: Record<string, unknown> } = { round: 1, phase: 'reviewing', metadata: {} };
+  const state: { round: number; phase: 'reviewing'; metadata: Record<string, unknown> } = { round: 1, phase: 'reviewing', metadata: {} };
   const result = await consumeHumanNotes('task-2342', 'alice', {
     getCommentsFn,
     createEventFn,

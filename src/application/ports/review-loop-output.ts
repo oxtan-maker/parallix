@@ -1,3 +1,4 @@
+import type { ReviewPhase } from '../../domain/review-phase-policy.js';
 /** Structured review observations. Terminal wording and styling belong to adapters. */
 export type ReviewLoopEvent =
   | { readonly kind: 'local-disposition'; readonly attempt: number }
@@ -55,7 +56,7 @@ export type ReviewLoopEvent =
   | { readonly kind: 'handoff-healed'; readonly id: string; readonly branch: string }
   | { readonly kind: 'review-pr-confirmed'; readonly id: string; readonly branch: string }
   | { readonly kind: 'local-provider' }
-  | { readonly kind: 'review-resumed'; readonly round: number; readonly phase: string }
+  | { readonly kind: 'review-resumed'; readonly round: number; readonly phase: ReviewPhase }
   | { readonly kind: 'round-started'; readonly attempt: number; readonly maxAttempts: number }
   | { readonly kind: 'review-reset'; readonly slug: string }
   | { readonly kind: 'reviewer-escalated'; readonly reason: string }
@@ -107,7 +108,7 @@ export type ReviewLoopEvent =
   | { readonly kind: 'round-recovery-exhausted'; readonly slug: string; readonly used: number; readonly reboundsPerRound: number; readonly attempt: number; readonly occurrence: string }
   | { readonly kind: 'agent-fallback'; readonly role: 'reviewer' | 'implementer'; readonly original: string; readonly fallback: string }
   | { readonly kind: 'assignee-failed'; readonly fallback: string }
-  | { readonly kind: 'controller-superseded'; readonly slug: string; readonly boundary: string; readonly round: number; readonly phase: string }
+  | { readonly kind: 'controller-superseded'; readonly slug: string; readonly boundary: string; readonly round: number; readonly phase: ReviewPhase }
   | { readonly kind: 'review-started'; readonly slug: string; readonly implementer: string; readonly reviewer: string; readonly branch: string; readonly focus: string; readonly maxAttempts: number; readonly intervalMs: number; readonly timeoutMs: number; readonly verbose: boolean; readonly dryRun: boolean }
   | { readonly kind: 'review-verdict'; readonly disposition: string | null; readonly findings: readonly { id: string; summary: string }[]; readonly verbose: boolean; readonly round?: number }
   | { readonly kind: 'agent-selection'; readonly outcome: 'nominated' | 'skipped-blocked' | 'launch-failed' | 'fallback'; readonly fields: { agent?: string; step: 'review'; reason?: string; retry?: boolean; error?: string } }

@@ -16,7 +16,6 @@ import { auditLegacyFiles } from '../../../src/adapters/backlog/legacy-mission-a
 import type { MissionStore } from '../../../src/application/domain-ports.js';
 import type { Mission } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
-import { readExportedReviewEvents } from '../../../src/adapters/review/review-state.js';
 import { hasApprovedCheckpointException } from '../../../src/adapters/backlog/legacy-mission-content.js';
 import { importLegacyMissions, type MissionImportServices } from '../../../src/adapters/backlog/legacy-mission-import.js';
 
@@ -127,32 +126,18 @@ test('task-2521.06: legacy audit compares NEL export to recorded Mission measure
   assert.equal(changed.counters.migrationVerificationFailures, 1);
 });
 
-test('task-2521.06: legacy audit checks every exported review event against its Mission row', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2521-06-review-'));
+test('legacy audit cannot interpret retired review-event imports (TASK-2821)', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'retired-review-import-'));
   const dir = path.join(root, 'missions/task-9004/review-events');
   fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, '2026-01-01-reviewer_findings.md');
-  fs.writeFileSync(file, '---\nevent_type: reviewer_findings\ntimestamp: 2026-01-01T00:00:00.000Z\nround: 1\nphase: reviewing\nactor: codex\nslug: task-9004\n---\n\nFinding body\n');
-  const events = readExportedReviewEvents('task-9004', root);
-  const mission = typedMissionFixture(String('task-9004'), { repositoryId: repositoryId('parallix'), checkpoints: [], status: 'done',
-    review: { ...pendingReview('task-9004'), reviewEvents: [events[0]] }});
-  const store = { loadByRepository: async () => [mission] } satisfies Pick<MissionStore, 'loadByRepository'>;
-  assert.equal((await auditLegacyFiles(root, repositoryId('parallix'), store)).files[0].classification, 'identical Mission');
-  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('Finding body', 'Changed body'));
-  assert.equal((await auditLegacyFiles(root, repositoryId('parallix'), store)).counters.migrationVerificationFailures, 1);
-});
-
-test('task-2521.06: legacy review parser accepts the older event and agent keys with source-backed timestamp', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2521-06-old-review-'));
-  const dir = path.join(root, 'missions/task-9005/review-events');
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, '2026-07-27T174412-implementer_disposition-4-custom.md'),
-    '---\nevent: implementer_disposition\nround: 3\nagent: custom\ndisposition: CHANGES_MADE\n---\n\nHistorical resolution\n');
-  const events = readExportedReviewEvents('task-9005', root);
-  assert.equal(events.length, 1);
-  assert.equal(events[0].eventType, 'implementer_disposition');
-  assert.equal(events[0].actor, 'custom');
-  assert.equal(events[0].createdAt, '2026-07-27T17:44:12.000Z');
+  const file = path.join(dir, 'event.md');
+  const content = '---\nevent_type: reviewer_findings\n---\nHistorical finding';
+  fs.writeFileSync(file, content);
+  const store = { loadByRepository: async () => [] } satisfies Pick<MissionStore, 'loadByRepository'>;
+  const audit = await auditLegacyFiles(root, repositoryId('parallix'), store);
+  assert.equal(audit.files[0].classification, 'UNRESOLVED');
+  assert.equal(audit.verdict, 'NO-GO');
+  assert.equal(fs.readFileSync(file, 'utf8'), content, 'retired input is never rewritten');
 });
 
 test('task-2521.06: legacy audit verifies review state and launch fingerprints', async () => {

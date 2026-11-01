@@ -176,13 +176,13 @@ test('task-2234 repro: review-loop self-heal fails closed when validation-failur
     const bound = createReviewLoopPorts('task-2234', { worktree: root }, {
       log: () => {}, error: () => {},
       readReviewState: () => null,
-      writeReviewState: (async () => ({ outcome: 'commit-failed-dirty' as const, stage: 'commit', diagnostic: 'simulated commit failure' })),
+      writeReviewState: (async () => ({ outcome: 'write-failed' as const, stage: 'write', diagnostic: 'simulated database write failure' })),
     });
     const { run, logs, exitCodes } = baseLoopHarness(root, { ok: false, reason: 'validation-failed', error: 'Declared gate is invalid' }, { stateport: bound.state });
 
     await assert.rejects(
       run,
-      /Review-state persistence failed for mission task-2234, phase reviewing, round 1, stage commit: simulated commit failure/
+      /Review-state persistence failed for mission task-2234, phase reviewing, round 1, stage write: simulated database write failure/
     );
     assertSelfHealAttempted(logs);
     assert.deepEqual(exitCodes, [], 'fail-closed persistence must stop before the explicit error exit');

@@ -122,7 +122,7 @@ describe("integrate orchestration and gates", () => {
     mock.method(composition, 'createMissionApplicationServices', async () => ({
       store: {
         _repoId: 'default',
-        load: async () => ({ kind: 'found' as const, mission: { status: 'integration', review: { rounds: [{ decision: { kind: 'approved', decidedAt: '2026-01-01T10:30:00Z' } }] } }, version: 1 }),
+        load: async () => ({ kind: 'found' as const, mission: { status: 'integration', review: fixtureApprovedReview(TEST_SLUG) }, version: 1 }),
       },
       lifecycle: {
         transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: { to: 'review', version: 2 } }),
@@ -538,7 +538,7 @@ describe("probe abort without promotion", () => {
       mock.method(composition, 'createMissionApplicationServices', async () => ({
         store: {
           _repoId: 'default',
-          load: async () => ({ kind: 'found' as const, mission: { status: 'integration', review: { rounds: [{ decision: { kind: 'approved', decidedAt: '2026-01-01T10:30:00Z' } }] } }, version: 1 }),
+          load: async () => ({ kind: 'found' as const, mission: { status: 'integration', review: fixtureApprovedReview(TEST_SLUG) }, version: 1 }),
         },
         lifecycle: {
           transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: { to: 'review', version: 2 } }),

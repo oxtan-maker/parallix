@@ -306,7 +306,7 @@ describe("review board characterization", { concurrency: false }, () => {
       preflight: async (args: string[], options: Record<string, unknown> = {}) => ({ slug: 'task-2428', args, options }),
       verify: async () => {}, submit: record('submit'), push: async () => {}, enter: async () => {},
       comment: async () => {}, readComments: async () => {}, submitReview: record('submitReview'),
-      close: async () => {}, status: async () => {}, createEvent: async () => {}, backfillReview: async () => {},
+      close: async () => {}, status: async () => {}, createEvent: async () => {},
       reconcileReview: async () => {}, importLegacy: async () => {},
     };
   }
@@ -364,7 +364,7 @@ describe("review use case", { concurrency: false }, () => {
       preflight: async (args: string[], options: Record<string, unknown> = {}) => ({ slug: 'task-2332.14', args, options }),
       verify: record('verify'), submit: record('submit'), push: record('push'), enter: record('enter'),
       comment: record('comment'), readComments: record('readComments'), submitReview: record('submitReview'), consumeArtifacts: record('consumeArtifacts'),
-      close: record('close'), status: record('status'), createEvent: record('createEvent'), backfillReview: record('backfillReview'),
+      close: record('close'), status: record('status'), createEvent: record('createEvent'),
       reconcileReview: record('reconcileReview'), importLegacy: record('importLegacy'),
     };
   }
@@ -402,4 +402,8 @@ describe("review use case", { concurrency: false }, () => {
     assert.equal(calls[0].operation, 'enter');
     assert.deepEqual(calls[0].args.slice(-2), ['--reviewer', 'codex']);
   });
+});
+
+test('review rejects retired historical import flags (TASK-2821)', () => {
+  assert.throws(() => parseReviewCliRequest(['task-2821', '--backfill-review']), /Unknown flag/);
 });

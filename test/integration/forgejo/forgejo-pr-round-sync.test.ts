@@ -8,7 +8,7 @@ import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
 import { runReviewLoop } from '../../../src/application/review-loop/review-loop.js';
 import type { ReviewAgentLaunch, ReviewLoopRequest } from '../../../src/application/ports/review-round.js';
 import type { PullRequestReference } from '../../../src/domain/review.js';
-import { fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
+import { fakeProvider, fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
 const forgejo = mockModule<typeof import('../../../src/adapters/forgejo/forgejo.js')>('../../../src/adapters/forgejo/forgejo.js', import.meta.url);
 const reviewAdapter = mockModule<typeof import('../../../src/adapters/review/review-adapter.js')>('../../../src/adapters/review/review-adapter.js', import.meta.url);
 const reviewLoopModule = mockModule<typeof import('../../../src/adapters/review/review-loop.js')>('../../../src/adapters/review/review-loop.js', import.meta.url);
@@ -44,12 +44,15 @@ const TEST_SLUG = `task-2240-test-${process.pid}`;
 function roundLoop(options: { reviews: string[]; dispositions?: string[]; providerEnabled?: boolean; newRevision?: boolean; publish?: () => { ok: boolean; status: number | null; detail: string } }) {
   const publishes: number[] = [];
   let head = 0;
+  let disposition: string | null = null;
   const fake = fakeReviewLoopPorts({
     slug: TEST_SLUG,
     routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
     provider: options.providerEnabled === false ? null : {
       pollReview: async () => options.reviews.shift()!,
-      pollDisposition: async () => options.dispositions?.shift() ?? null,
+      pollDisposition: async () => { disposition = options.dispositions?.shift() ?? null; return disposition; },
+      readResolution: async (_implementer, since) => ({ disposition: disposition === 'PUSHBACK_ALL' ? 'PUSHBACK_ALL' : 'CHANGES_MADE',
+        itemDispositions: [], evidence: 'Fixture response', respondedAt: since }),
       publishRevision: () => { publishes.push(1); return options.publish?.() ?? { ok: true, status: 0, detail: '' }; },
     },
     ...(options.providerEnabled === false ? {
@@ -226,7 +229,15 @@ function realGitLoop(slug: string, worktree: string, branch: string, reviews: st
   });
   // An open PR keeps the start handoff off: this reproduction exercises the
   // round-boundary push, not the handoff/PR-create path.
-  const provider = { ...bound, pollReview: async () => reviews.shift()!, pollDisposition: async () => dispositions.shift() ?? null, openPullRequest: (): PullRequestReference => ({ kind: 'pull-request' as const, provider: 'forgejo', id: '7', url: null, sourceBranch: branch, targetBranch: 'main' }), ensureReachable: async () => true };
+  const evidence = fakeProvider();
+  const provider = { ...bound,
+    readRequestedChanges: evidence.readRequestedChanges,
+    readResolution: evidence.readResolution,
+    pollReview: async () => reviews.shift()!,
+    pollDisposition: async () => dispositions.shift() ?? null,
+    openPullRequest: (): PullRequestReference => ({ kind: 'pull-request', provider: 'forgejo', id: '7', url: null, sourceBranch: branch, targetBranch: 'main' }),
+    ensureReachable: async () => true,
+  };
   return { ...fake.ports, provider };
 }
 

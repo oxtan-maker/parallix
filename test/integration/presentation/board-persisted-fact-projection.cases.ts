@@ -1,3 +1,5 @@
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { startReview, applyReviewerCommand, ConfiguredReviewerEligibility, changeRevision } from '../../../src/domain/review.js';
 /**
  * task-2343 reproduction: board projections report `unavailable` for facts the
  * mission lifecycle has already produced.
@@ -132,27 +134,12 @@ function cleanup(fixture: Fixture): void {
 }
 
 /** The review state a completed review round leaves behind for a Forgejo PR. */
-function reviewStateWithPullRequest() {
-  return {
-    slug: SLUG,
-    reviewer: 'claude',
-    implementer: 'codex',
-    round: 2,
-    startedAt: '2026-08-01T10:00:00.000Z',
-    phase: 'approved' as const,
-    disposition: 'approved',
-    reviewerRetryCount: 0,
-    implementerRetryCount: 0,
-    metadata: {},
-    pullRequest: {
-      kind: 'pull-request' as const,
-      provider: 'forgejo',
-      id: '4242',
-      url: 'http://localhost:3000/parallix/parallix/pulls/4242',
-      sourceBranch: `mission/${SLUG}`,
-      targetBranch: 'main',
-    },
-  };
+function storedReview() {
+  const reviewer = agentFamily('claude');
+  const review = startReview({ change: { kind: 'pull-request', provider: 'forgejo', id: '4242',
+    url: 'http://localhost:3000/parallix/parallix/pulls/4242', sourceBranch: `mission/${SLUG}`, targetBranch: 'main' }, revision: changeRevision('reviewed-head') },
+    reviewer, agentFamily('codex'), '2026-08-01T10:00:00.000Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' }));
+  return applyReviewerCommand(review, { type: 'approve', decidedAt: '2026-08-01T11:00:00.000Z', comment: null, source: { kind: 'local' } });
 }
 
 interface BuiltBoard {
@@ -188,10 +175,7 @@ function composeBoard(fixture: Fixture): BuiltBoard {
   const builder = new BoardProjectionBuilder(
     missions,
     new ConcreteReviewReadAdapter({
-      rootDir: fixture.rootDir,
-      missionStore: null,
-      readReviewState: () => reviewStateWithPullRequest(),
-      findMissionDir: () => fixture.missionDir,
+      missionStore: { load: async () => ({ kind: 'found', mission: fixtureMission(String(SLUG), { review: storedReview() }), version: missionVersion(1) }), save: async () => { throw new Error('read only'); } },
     }),
     { observeGate: async () => 'not-run' as const },
     new ConcreteAgentReadAdapter({

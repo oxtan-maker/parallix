@@ -2,8 +2,6 @@ import { reviewerConsumeOutcome } from './review-reviewer-artifacts.js';
 import type { MissionStore, SessionMarkerPort } from '../../application/domain-ports.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import {
-  backfillReviewFromLegacyState,
-  reconcileInterruptedHandoff,
   readReviewRounds,
   readReviewState,
   resetReviewState,
@@ -19,12 +17,8 @@ import { parseReviewFindings } from './review-round.js';
 /**
  * Bind every review-state operation to the Mission authority.
  *
- * `lifecycleService` (TASK-2376) is the approval boundary: when it is
- * supplied, a review persisted as `approved` fires the `review → integration`
- * transition at the boundary with `occurredAt = ReviewerDecision.decidedAt`,
- * instead of leaving the Mission in `review` until `px integrate` repairs it.
- * Every production approval path persists through the bound write function,
- * so one injection here covers all of them.
+ * Verdict recorders receive the lifecycle service. Loop bookkeeping writes
+ * only update the existing Review projection; they cannot approve a Mission.
  */
 export function bindReviewPersistence(store: MissionStore | null, lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null, sessionMarkerPort?: SessionMarkerPort | null) {
   const boundReadReviewState = (slug: string, rootDir?: string) => readReviewState(slug, rootDir, store);
@@ -34,32 +28,13 @@ export function bindReviewPersistence(store: MissionStore | null, lifecycleServi
     params: Parameters<typeof createEvent>[2],
     options: Parameters<typeof createEvent>[3] = {},
   ) => createEvent(slug, eventType, params, { ...options, missionStore: store });
-  const boundWriteReviewState = (slug: string, state: Parameters<typeof writeReviewState>[1], rootDir?: string, _options?: Parameters<typeof writeReviewState>[3]) => {
-    // The 4th argument is either a backward-compat positional MissionStore or
-    // an options bag. Merge it (instead of dropping it) so a lifecycle
-    // service supplied through the options is not silently discarded.
-    const callerOptions: { missionStore?: MissionStore | null; lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null } =
-      _options && typeof _options === 'object' && 'save' in _options
-        ? { missionStore: _options }
-        : { ...(_options ?? {}) };
-    return writeReviewState(slug, state, rootDir, {
-      ...callerOptions,
-      missionStore: store,
-      lifecycleService: callerOptions.lifecycleService ?? lifecycleService,
-    });
-  };
+  const boundWriteReviewState: typeof writeReviewState = (slug, state, rootDir) =>
+    writeReviewState(slug, state, rootDir, { missionStore: store });
   return {
     readReviewState: boundReadReviewState,
     readReviewRounds: (slug: string, rootDir?: string) => readReviewRounds(slug, rootDir, store),
     writeReviewState: boundWriteReviewState,
     resetReviewState: (slug: string, rootDir?: string) => resetReviewState(slug, rootDir, store, sessionMarkerPort),
-    backfillReview: (slug: string, rootDir?: string, options: { apply?: boolean } = {}) =>
-      backfillReviewFromLegacyState(slug, rootDir, { ...options, missionStore: store }),
-    reconcileInterruptedHandoff: (
-      slug: string,
-      inputs: Parameters<typeof reconcileInterruptedHandoff>[1],
-      rootDir?: string,
-    ) => reconcileInterruptedHandoff(slug, inputs, rootDir, { missionStore: store }),
     createEvent: boundCreateEvent,
     readAllEvents: (slug: string, options: Parameters<typeof readAllEvents>[1] = {}) =>
       readAllEvents(slug, { ...options, missionStore: store }),

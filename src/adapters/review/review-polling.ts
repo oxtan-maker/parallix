@@ -44,7 +44,7 @@ function resolvePollTimeoutMs(explicitSeconds?: number, configuration: ParallixC
  * @param {string} sinceIso
  * @param {string} token
  * @param {{getLatestReviewForPrFn?: Function, sleepFn?: Function, intervalMs?: number, timeoutMs?: number, verbose?: boolean, label?: string, retryCount?: number, log?: Function}} [options]
- * @returns {Promise<string|typeof POLL_TIMEOUT|null>}
+ * @returns {Promise<object|typeof POLL_TIMEOUT|null>}
  */
 async function pollForReview(
   prNumber: number,
@@ -53,7 +53,7 @@ async function pollForReview(
   token: string | null,
   options: {
     configuration?: ParallixConfiguration;
-    getLatestReviewForPrFn?: (_prNumber: number, _reviewerUser: string, _sinceIso: string, _token: string) => Promise<unknown>;
+    getLatestReviewForPrFn?: (_prNumber: number, _reviewerUser: string, _sinceIso: string, _token: string) => ReturnType<typeof getLatestReviewForPr>;
     sleepFn?: (_ms: number) => Promise<void>;
     intervalMs?: number;
     timeoutMs?: number;
@@ -62,7 +62,7 @@ async function pollForReview(
     retryCount?: number;
     log?: (_msg: string) => void;
   } = {}
-): Promise<string | typeof POLL_TIMEOUT | null> {
+): Promise<Awaited<ReturnType<typeof getLatestReviewForPr>> | typeof POLL_TIMEOUT> {
   const { getLatestReviewForPrFn = getLatestReviewForPr } = options;
   const { sleepFn, intervalMs, timeoutMs, verbose, label, retryCount, logger } = pollingParameters(options, 'review');
   if (!token) {
@@ -78,9 +78,9 @@ async function pollForReview(
   while (Date.now() < deadline) {
     const review = await getLatestReviewForPrFn(prNumber, reviewerUser, sinceIso, token);
     if (review) {
-      const reviewState = (review as { state: string }).state;
+      const reviewState = review.state;
       if (verbose) { logger(status('INFO', `${label}: reviewer state=${reviewState} after ${formatElapsed(start)}.`)); }
-      return reviewState;
+      return review;
     }
 
     const now = Date.now();

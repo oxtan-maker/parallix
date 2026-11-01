@@ -1,3 +1,4 @@
+import { observeProviderReview, pollProviderReview, settleRecordedChanges } from './provider-observations.js';
 import { tryClassifyReview } from '../review-classification/classify-review.js';
 /**
  * The reviewing half of a round: open the round, run the pre-review
@@ -35,7 +36,7 @@ async function existingReviewOnContinue(context: LoopContext, round: ReviewRound
     return null;
   }
   context.emit({ kind: 'review-probe', attempt: round.attempt, reviewer: identities.reviewer, startedAt: state.startedAt });
-  const existing = await ports.provider.pollReview(identities.reviewer, state.startedAt, { label: `round ${round.attempt} skip-check`, quick: true, retryCount: 0 });
+  const existing = await pollProviderReview(context, round, { label: `round ${round.attempt} skip-check`, quick: true, retryCount: 0 });
   return isPollTimeout(existing) ? null : existing;
 }
 
@@ -137,7 +138,7 @@ async function consumeReviewerOutput(context: LoopContext, round: ReviewRound): 
   }
   if (await stopForUnresolvedVerdictBlock(context)) { return { step: 'stop' }; }
   if (!reviewState && ports.provider) {
-    reviewState = await ports.provider.pollReview(identities.reviewer, state.startedAt, { label: `round ${round.attempt} review`, retryCount: 0 });
+    reviewState = await pollProviderReview(context, round, { label: `round ${round.attempt} review`, retryCount: 0 });
   }
   return { step: null, reviewState };
 }
@@ -217,7 +218,7 @@ async function recoverReviewerTimeout(context: LoopContext, round: ReviewRound, 
       const diagnostic = retry.diagnostic || `Reviewer output still missing for ${ports.branch}`;
       recovered = retry.consumed && retry.ok ? retry.reviewState : null;
       if (!recovered && ports.provider) {
-        recovered = await ports.provider.pollReview(identities.reviewer, state.startedAt, { label: `round ${round.attempt} review recovery`, retryCount: 0 });
+        recovered = await pollProviderReview(context, round, { label: `round ${round.attempt} review recovery`, retryCount: 0 });
       }
       return recovered && !isPollTimeout(recovered)
         ? { ok: true }
@@ -238,7 +239,7 @@ async function recoverReviewerTimeout(context: LoopContext, round: ReviewRound, 
 }
 
 /** Approval ends autonomous review; every other outcome moves the round to fixing. */
-async function applyReviewerOutcome(context: LoopContext, reviewState: unknown): Promise<RoundStep> {
+async function applyReviewerOutcome(context: LoopContext, round: ReviewRound, reviewState: unknown): Promise<RoundStep> {
   const { ports, state, slug } = context;
   if (reviewState !== 'APPROVED') {
     state.transitionTo('fixing');
@@ -248,12 +249,13 @@ async function applyReviewerOutcome(context: LoopContext, reviewState: unknown):
   state.transitionTo('approved');
   state.disposition = reviewState;
   try {
-    await ports.state.persist(state);
+    await ports.state.recordApproval(state, round.providerApproval);
   } catch (err) {
     // The review → integration boundary failed: leave the Backlog task in
     // review; px integrate recovers it.
     context.emit({ kind: 'approval-transition-failed', slug: slug, diagnostic: err instanceof Error ? err.message : String(err) });
     context.emit({ kind: 'integrate-guidance', slug: slug });
+    context.exit(1);
     return 'stop';
   }
   context.emit({ kind: 'review-verdict', disposition: state.disposition, findings: [], verbose: context.verbose, round: state.round });
@@ -265,12 +267,13 @@ async function applyReviewerOutcome(context: LoopContext, reviewState: unknown):
 /** A round resumed in fixing reads the recorded outcome (provider or local). */
 async function resumeFixingPhaseReview(context: LoopContext, round: ReviewRound): Promise<unknown> {
   const { ports, state, identities } = context;
+  if (!context.dryRun && ports.missionStore) { await settleRecordedChanges(context, round); }
   let reviewState: unknown = ports.provider
-    ? await ports.provider.latestReview(identities.reviewer, state.startedAt)
+    ? await observeProviderReview(context, round, await ports.provider.latestReview(identities.reviewer, state.startedAt))
     : state.disposition || null;
   if (!reviewState) {
     context.emit({ kind: 'missing-resumed-review', providerEnabled: Boolean(ports.provider), reviewer: identities.reviewer, startedAt: state.startedAt });
-    reviewState = 'request-changes';
+    reviewState = 'REQUEST_CHANGES';
   }
   context.emit({ kind: 'fixing-resumed', attempt: round.attempt, reviewState: reviewState });
   return reviewState;
@@ -280,6 +283,10 @@ async function resumeFixingPhaseReview(context: LoopContext, round: ReviewRound)
 export async function runReviewerPhase(context: LoopContext, round: ReviewRound, dismissedApproval = false): Promise<ReviewOutcome> {
   const { state } = context;
   round.integrationRepair = await integrationRepairBrief(context);
+  if (state.phase === 'approved') {
+    if (!context.dryRun) { await context.ports.task.mirrorApproved(); }
+    return { outcome: 'stop' };
+  }
   if (state.phase !== 'reviewing') { return { reviewState: await resumeFixingPhaseReview(context, round) }; }
   // TASK-2582: the round-open boundary persists the authoritative active →
   // review transition before any destination-state work starts.
@@ -299,7 +306,7 @@ export async function runReviewerPhase(context: LoopContext, round: ReviewRound,
     reviewState = fresh.reviewState;
 
   }
-  if (await applyReviewerOutcome(context, reviewState)) { return { outcome: 'stop' }; }
+  if (await applyReviewerOutcome(context, round, reviewState)) { return { outcome: 'stop' }; }
   return { reviewState };
 }
 
@@ -311,7 +318,7 @@ async function runFreshReviewer(context: LoopContext, round: ReviewRound): Promi
   const classified = await tryClassifyReview(context, round, cycleStarted);
   if (classified === 'stop') { return { action: 'return', value: { outcome: 'stop' } }; }
   if (classified) {
-    if (await applyReviewerOutcome(context, classified)) { return { action: 'return', value: { outcome: 'stop' } }; }
+    if (await applyReviewerOutcome(context, round, classified)) { return { action: 'return', value: { outcome: 'stop' } }; }
     return { action: 'return', value: { reviewState: classified } };
   }
   if (await launchReviewer(context, round)) { return { action: 'return', value: { outcome: 'stop' } }; }

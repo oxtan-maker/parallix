@@ -9,13 +9,12 @@ import * as fmt from '../../application/presentation/cli-format.js';
 import { resolveWorktree, missionBranchName } from '../filesystem/mission-utils.js';
 import { resolveTaskFile, getTaskStatus, transitionTask } from '../backlog/backlog.js';
 import { readToken, postReview, closePr, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
-import { type ReviewStateInstanceReader, readReviewState, writeReviewState, resolveReviewIdentity, ReviewState, persistReviewStateOrThrow } from './review-state.js';
+import { type ReviewStateInstanceReader, readReviewState, writeReviewState, resolveReviewIdentity } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import { mirrorReviewOutcome } from '../../application/review-task-mirroring.js';
 import type { ReviewTaskMirror } from '../../application/ports/review-task-mirror.js';
-import { parseReviewFindings, recordRequestedChanges, recordApproval, approvalLegalDiagnostic } from './review-round.js';
-import { reviewFindingId } from '../../domain/review.js';
+import { reviewFindingsFromMessage, recordRequestedChanges, recordApproval, approvalLegalDiagnostic } from './review-round.js';
 import { createEvent } from './review-events.js';
 import { buildMetadataFooter, postWorkflowReview } from './review-artifacts.js';
 import { runPhaseGates } from '../config/repository-gates.js';
@@ -43,7 +42,7 @@ type SubmitReviewOptions = {
   createEventFn?: typeof createEvent;
   buildMetadataFooterFn?: typeof buildMetadataFooter;
   missionStore?: MissionStore | null;
-  lifecycleService?: MissionLifecycleService | null;
+  lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null;
   recordRequestedChangesFn?: typeof recordRequestedChanges;
   recordApprovalFn?: typeof recordApproval;
 };
@@ -67,19 +66,12 @@ async function runPreReviewApproveGates(slug: string, worktree: string, log: (_m
 /** Record the request-changes decision on the Review aggregate. Returns true when the outcome must stop. */
 async function recordRequestChangesDecision(slug: string, outcome: string, message: string, options: SubmitReviewOptions, log: (_msg: string) => void, error: (_msg: string) => void): Promise<boolean> {
   if (!options.missionStore) {
-    log(fmt.status('WARN', `No Mission authority bound for ${slug}; the request-changes decision was not recorded on the Review aggregate.`));
-    return false;
+    error(fmt.status('FAIL', `No Mission authority bound for ${slug}; the review decision cannot be recorded.`));
+    return true;
   }
   const recordRequestedChangesFn = options.recordRequestedChangesFn || recordRequestedChanges;
-  const parsed = parseReviewFindings(message);
   const decision = await recordRequestedChangesFn(slug, {
-    // A hand-written message need not use finding headings; the message
-    // itself is then the single finding.
-    findings: parsed.length > 0 ? parsed : [{
-      id: reviewFindingId('F1'),
-      summary: (message.split('\n').find((line) => line.trim()) || `Changes requested for ${slug}`).trim(),
-      location: null,
-    }],
+    findings: reviewFindingsFromMessage(message || `Changes requested for ${slug}`),
     comment: message || null,
     decidedAt: new Date().toISOString(),
     revision: options.revision ?? headRevision(options.worktree || resolveWorktree(slug) || process.cwd()),
@@ -97,8 +89,8 @@ async function recordRequestChangesDecision(slug: string, outcome: string, messa
 /** Record the authoritative approve on the Review aggregate. Returns true when the outcome must stop. */
 async function recordApprovalDecision(slug: string, outcome: string, message: string, options: SubmitReviewOptions, log: (_msg: string) => void, error: (_msg: string) => void, providerBacked = false): Promise<boolean> {
   if (!options.missionStore) {
-    log(fmt.status('WARN', `No Mission authority bound for ${slug}; the approve decision was not recorded on the Review aggregate.`));
-    return false;
+    error(fmt.status('FAIL', `No Mission authority bound for ${slug}; the review decision cannot be recorded.`));
+    return true;
   }
   const recordApprovalFn = options.recordApprovalFn || recordApproval;
   const decision = await recordApprovalFn(slug, {
@@ -117,120 +109,31 @@ async function recordApprovalDecision(slug: string, outcome: string, message: st
   return false;
 }
 
-/**
- * provider=none finalization: build or mutate the review state, persist it,
- * transition the Backlog task, and announce the local recording.
- * Returns true when the outcome must stop.
- */
-function fallbackImplementer(configuration?: ParallixConfiguration) { return configuration?.agents.override || 'autonomous'; }
-
-async function applyLocalReviewState(slug: string, outcome: string, message: string, worktree: string, options: SubmitReviewOptions, log: (_msg: string) => void, error: (_msg: string) => void): Promise<boolean> {
-  const readReviewStateFn = options.readReviewStateFn || readReviewState;
-  const writeReviewStateFn = options.writeReviewStateFn || writeReviewState;
+/** Mirror an already-recorded verdict through the existing task projection owner. */
+async function mirrorSubmittedReview(slug: string, outcome: string, providerBacked: boolean, worktree: string, options: SubmitReviewOptions, log: (_msg: string) => void): Promise<void> {
   const transitionTaskFn = options.transitionTaskFn || transitionTask;
-  const currentState = await Promise.resolve(readReviewStateFn(slug, worktree));
-
-  let stateToWrite: ReviewState;
-  if (currentState) {
-    stateToWrite = currentState;
-    if (outcome === 'approve') {
-      stateToWrite.disposition = 'APPROVED';
-      try { stateToWrite.transitionTo('approved'); } catch (_) { /* ignore */ }
-    } else if (outcome === 'request-changes') {
-      stateToWrite.disposition = 'REQUEST_CHANGES';
-      try { stateToWrite.transitionTo('fixing'); } catch (_) { /* ignore */ }
-    }
-  } else {
-    // No existing state, create minimal state for tracking
-    const phaseForOutcome = outcome === 'approve' ? 'approved' : 'fixing';
-    stateToWrite = new ReviewState(slug, {
-      disposition: outcome === 'approve' ? 'APPROVED' : outcome === 'request-changes' ? 'REQUEST_CHANGES' : undefined,
-      reviewer: 'autonomous',
-      implementer: fallbackImplementer(options.configuration),
-      round: 1,
-      phase: phaseForOutcome,
-    });
-  }
-  try {
-    await persistReviewStateOrThrow(writeReviewStateFn, slug, stateToWrite, worktree, options.missionStore);
-  } catch (err) {
-    // The state write or the review → integration boundary failed. The
-    // Mission may still be in review, so the Backlog task must not move —
-    // in particular it must not be promoted to approved. px integrate is
-    // the repair path.
-    error(fmt.status('FAIL', `Review outcome "${outcome}" could not be finalized for ${slug}: ${err instanceof Error ? err.message : String(err)}`));
-    error(fmt.status('FAIL', `Recovery: px integrate ${slug}`));
-    return true;
-  }
-
+  const task = providerBacked ? (options.resolveTaskFileFn || resolveTaskFile)(slug, worktree) : null;
+  const status = task?.ok ? (options.getTaskStatusFn || getTaskStatus)(task.taskFile!) : null;
   const mirror: ReviewTaskMirror = {
-    transition: status => Promise.resolve(transitionTaskFn(slug, status, { rootDir: worktree, log })).catch(() => {
-      log(fmt.status('WARN', `Could not transition backlog task ${slug} to ${status}.`));
+    transition: lane => Promise.resolve(transitionTaskFn(slug, lane, { rootDir: worktree, log })).catch(() => {
+      log(fmt.status('WARN', `Could not transition backlog task ${slug} to ${lane}.`));
       return false;
     }),
   };
-  void mirrorReviewOutcome(outcome, false, null, mirror);
-
-  log(fmt.status('PASS', `Review outcome "${outcome}" recorded locally for ${slug}.`));
-  return false;
+  await mirrorReviewOutcome(outcome, providerBacked, status, mirror);
 }
 
 /** Check that an approve can legally reach `approved` before the external POST. Returns true when the outcome must stop. */
-async function checkProviderApproveLegality(slug: string, options: SubmitReviewOptions, log: (_msg: string) => void, error: (_msg: string) => void): Promise<boolean> {
+async function checkProviderApproveLegality(slug: string, options: SubmitReviewOptions, error: (_msg: string) => void): Promise<boolean> {
   if (!options.missionStore) {
-    log(fmt.status('WARN', `No Mission authority bound for ${slug}; the approve decision was not recorded on the Review aggregate.`));
-    return false;
+    error(fmt.status('FAIL', `No Mission authority bound for ${slug}; the review decision cannot be recorded.`));
+    return true;
   }
   const legalDiagnostic = await approvalLegalDiagnostic(slug, { missionStore: options.missionStore });
   if (legalDiagnostic) {
     error(fmt.status('FAIL', `Review outcome "approve" could not be recorded for ${slug}: ${legalDiagnostic}`));
     return true;
   }
-  return false;
-}
-
-/**
- * provider-backed finalization after a successful POST: mutate and persist the
- * review state, then transition the Backlog task.
- * Returns true when the outcome must stop.
- */
-async function finalizeProviderReviewState(slug: string, outcome: string, worktree: string, options: SubmitReviewOptions, log: (_msg: string) => void, error: (_msg: string) => void): Promise<boolean> {
-  const readReviewStateFn = options.readReviewStateFn || readReviewState;
-  const writeReviewStateFn = options.writeReviewStateFn || writeReviewState;
-  const transitionTaskFn = options.transitionTaskFn || transitionTask;
-  const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
-  const getTaskStatusFn = options.getTaskStatusFn || getTaskStatus;
-
-  const currentState = await Promise.resolve(readReviewStateFn(slug, worktree));
-  if (currentState) {
-    if (outcome === 'approve') {
-      currentState.disposition = 'APPROVED';
-      try { currentState.transitionTo('approved'); } catch (_) { /* ignore */ }
-    } else if (outcome === 'request-changes') {
-      currentState.disposition = 'REQUEST_CHANGES';
-      try { currentState.transitionTo('fixing'); } catch (_) { /* ignore */ }
-    }
-    try {
-      await persistReviewStateOrThrow(writeReviewStateFn, slug, currentState, worktree, options.missionStore);
-    } catch (err) {
-      // The state write or the review → integration boundary failed. The
-      // Mission may still be in review, so the Backlog task must not be
-      // promoted to approved; px integrate is the repair path.
-      error(fmt.status('FAIL', `Review outcome "${outcome}" could not be finalized for ${slug}: ${err instanceof Error ? err.message : String(err)}`));
-      error(fmt.status('FAIL', `Recovery: px integrate ${slug}`));
-      return true;
-    }
-  }
-
-  const taskResolution = resolveTaskFileFn(slug, worktree);
-  const currentStatus = taskResolution.ok ? getTaskStatusFn(taskResolution.taskFile!) : null;
-  const mirror: ReviewTaskMirror = {
-    transition: status => Promise.resolve(transitionTaskFn(slug, status, { rootDir: worktree, log })).catch(() => {
-      log(fmt.status('WARN', `Could not transition backlog task ${slug} to ${status}.`));
-      return false;
-    }),
-  };
-  await mirrorReviewOutcome(outcome, true, currentStatus, mirror);
   return false;
 }
 
@@ -299,10 +202,8 @@ async function submitLocalReview(slug: string, outcome: string, message: string,
     exit(1);
     return;
   }
-  if (await applyLocalReviewState(slug, outcome, message, worktree, options, log, error)) {
-    exit(1);
-    return;
-  }
+  await mirrorSubmittedReview(slug, outcome, false, worktree, options, log);
+  log(fmt.status('PASS', `Review outcome "${outcome}" recorded locally for ${slug}.`));
 }
 
 function providerReviewBindings(options: SubmitReviewOptions) {
@@ -334,7 +235,7 @@ async function submitProviderReview(slug: string, outcome: string, message: stri
   // never leave an approval on the aggregate that `px integrate` would merge
   // with no approval on the pull request. The recording itself happens below,
   // after the `!result.ok` guard.
-  if (outcome === 'approve' && await checkProviderApproveLegality(slug, options, log, error)) {
+  if (outcome === 'approve' && await checkProviderApproveLegality(slug, options, error)) {
     exit(1);
     return;
   }
@@ -351,6 +252,7 @@ async function submitProviderReview(slug: string, outcome: string, message: stri
     log,
     error,
     missionStore: options.missionStore,
+    lifecycleService: options.lifecycleService,
   });
 
   if (result.skipped && result.reason === 'self-author') {
@@ -378,15 +280,12 @@ async function submitProviderReview(slug: string, outcome: string, message: stri
   // went out. Without a bound Mission authority there is nothing to record on
   // the aggregate (the flat review-state write below still mirrors the
   // disposition), matching the no-store WARN taken before the POST.
-  if (outcome === 'approve' && options.missionStore && await recordApprovalDecision(slug, outcome, message, options, log, error, true)) {
+  if (outcome === 'approve' && await recordApprovalDecision(slug, outcome, message, options, log, error, true)) {
     exit(1);
     return;
   }
 
-  if (await finalizeProviderReviewState(slug, outcome, worktree, options, log, error)) {
-    exit(1);
-    return;
-  }
+  await mirrorSubmittedReview(slug, outcome, true, worktree, options, log);
 }
 
 // ============================================================================

@@ -1,5 +1,6 @@
 import type { ReboundReason, ReboundClassification } from '../domain/rebound-policy.js';
 import type { RecoveryEvidenceRef } from './recovery-evidence.js';
+import { renderRepairPrompt } from './ports/repair-prompts.js';
 import { elideBounceOutput } from './output-elision.js';
 import { isIncompleteSuccessCriteriaFailure, buildSuccessCriteriaRecoveryAdvice } from './typed-mission-recovery-advice.js';
 export interface FixPromptSlots {
@@ -33,17 +34,8 @@ export interface FixPromptSlots {
   recoveryEvidenceError?: string | null;
 }
 
-/**
- * Repair authority for a gate or hook rebound (TASK-2575). The failed check and
- * its logs are evidence, not a verdict: the prompt names no cause, repair
- * location, or commit, so an implementer who traces the failure to the
- * environment or runner configuration repairs it there, and one who finds an
- * external blocker reports it instead of spending the budget on guesses.
- */
-const REPAIR_AUTHORITY = 'Diagnose the actual cause from the failed check and its logs; do not assume it is a test or code path inside the original mission scope. Repair the cause wherever it lies within your authority (repository code, tests, configuration, the local environment, or runner configuration); do not alter locked gates, success criteria, or test invariants and fix the mission without breaking the repository: preserve the mission deliverables and safety boundaries, and never weaken, skip, or delete a check to make it pass. If the repair changes tracked files, commit it before the automatic re-verification: the re-run verifies the committed mission tree, so an uncommitted repair cannot be verified and is reported as still failing. A repair outside the repository needs no commit. If the cause is external and you cannot repair it (for example a model service or network dependency that is down), make no speculative changes: report the exact blocker with its evidence and stop, because another repair attempt cannot fix it.';
-
 function missionOutcomeFact(slug: string): [string, string] {
-  return ['Mission outcome', `the locked goal and success criteria of ${slug} (px status ${slug}), delivered with this check passing`];
+  return ['Mission outcome', renderRepairPrompt('mission-outcome', { slug })];
 }
 
 /**
@@ -53,38 +45,17 @@ function missionOutcomeFact(slug: string): [string, string] {
  */
 export function buildFreshDiagnosticRepairPrompt(slots: FixPromptSlots): string {
   const { label, slug, worktree, facts, diagnostic, originalDiagnostic, classification, attempt, maxAttempts, remedy } = slots;
-  return [
-    `${label} — FRESH-CONTEXT DIAGNOSTIC REPAIR REQUIRED`,
-    '',
-    `Mission: ${slug}`,
-    ...(worktree ? [`Working directory: ${worktree}`] : []),
-    ...facts.map(([name, value]) => `${name}: ${value}`),
-    '',
-    'Original failure evidence (this is not necessarily the root cause):',
-    '---',
-    elideBounceOutput(originalDiagnostic || '(no output)'),
-    '---',
-    'Latest failure evidence (this is not necessarily the root cause):',
-    '---',
-    originalDiagnostic && originalDiagnostic === diagnostic
+  return renderRepairPrompt('repair', {
+    label, slug, worktreeLine: worktree ? `Working directory: ${worktree}\n` : '',
+    facts: facts.map(([name, value]) => `${name}: ${value}`).join('\n'),
+    originalDiagnostic: elideBounceOutput(originalDiagnostic || '(no output)'),
+    latestDiagnostic: originalDiagnostic && originalDiagnostic === diagnostic
       ? '(identical to original failure evidence above; no additional output)'
       : elideBounceOutput(diagnostic || '(no output)'),
-    '---',
-    '',
-    `Classification: ${classification.failureClass} — ${classification.dispatchAction}`,
-    `Recovery strategy: fresh-diagnostic (${attempt}/${maxAttempts})`,
-    `Retry attempt: ${attempt}/${maxAttempts}`,
-    '',
-    ...recoveryEvidenceRoute(slots),
-    ...repairAuthorityRoute(slots),
-    '',
-    'You have a fresh context. Re-diagnose the failure from the repository and exact evidence; do not assume either diagnostic identifies the root cause.',
-    `Before repair, reload px status ${slug} --json for the locked goal, scope, success criteria, gates, review disposition and authorized repair/checkpoint obligations. Read applicable AGENTS.md repository rules and inspect the current branch revision and working-tree edits. If authority or evidence is missing, incomplete or stale, report that explicitly; do not invent retrieval or treat an old revision as current proof.`,
-    'This dedicated repair prompt defines this launch; do not inherit prior execute/review conversation instructions or review-approval authority. The locked mission goal and scope remain binding. Preserve all gate and test invariants: do not weaken, bypass, replace, or claim to satisfy any check.',
-    remedy,
-    'The failing check re-runs automatically after your fix; this bounce is only reported as fixed when that re-run passes.',
-    'Perform the repair and preserve valid commits and working-tree edits already in the mission worktree; do not reset, clean or silently recommit unrelated work. Commit tracked repair changes as required above. Only the harness rerunning this exact failing check can establish success.',
-  ].join('\n');
+    failureClass: classification.failureClass, dispatchAction: classification.dispatchAction,
+    attempt, maxAttempts, evidenceRoute: recoveryEvidenceRoute(slots).join('\n'),
+    authorityRoute: repairAuthorityRoute(slots).join('\n'), remedy,
+  });
 }
 
 /**
@@ -98,9 +69,6 @@ export function buildFreshDiagnosticRepairPrompt(slots: FixPromptSlots): string 
  * record is missing, truncated, expired, or access-denied, the route states it
  * and points at related incidents rather than claiming completeness.
  */
-/** Earlier agent runs (TASK-2643): one compact pointer, never transcript text. */
-const RUN_HISTORY_ROUTE = 'Earlier agent runs of this mission are searchable with `px history search <pattern>` and `px history show <ref>` (bounded; cite the run: references).';
-
 export function recoveryEvidenceRoute(slots: Pick<FixPromptSlots, 'recoveryEvidence' | 'recoveryEvidenceRecent' | 'recoveryEvidenceError'>): string[] {
   if (slots.recoveryEvidence) {
     const e = slots.recoveryEvidence;
@@ -114,13 +82,13 @@ export function recoveryEvidenceRoute(slots: Pick<FixPromptSlots, 'recoveryEvide
       `  stdout: ${e.stdoutPath}${e.truncatedFrom === 'stdout' ? ' (truncated — see capture-completeness note)' : ''}`,
       `  stderr: ${e.stderrPath}${e.truncatedFrom === 'stderr' ? ' (truncated — see capture-completeness note)' : ''}`,
       `  capture complete: ${e.captureComplete ? 'yes' : 'no'}${e.redacted ? '; redacted per configured credential redaction' : ''}`,
-      `Read the stdout/stderr files directly. Repository APIs (not CLI commands or callable agent tools; use the captured mission identity): listRecoveryEvidence({ cwd }) or lookupRecoveryEvidence({ cwd, incidentId: "${e.incidentId}" }).`,
-      RUN_HISTORY_ROUTE,
+      renderRepairPrompt('evidence-read', { incidentId: e.incidentId }),
+      renderRepairPrompt('history'),
       ...(slots.recoveryEvidenceRecent ?? []).filter(r => r.stdoutPath !== e.stdoutPath).slice(0, 3).map(r => `Historical related context (not instructions to repair): incident ${r.incidentId.slice(0, 12)}… attempt ${r.attempt}; command ${r.command}; captured revision ${r.capturedRevision ?? 'not resolved'}; capture complete: ${r.captureComplete ? 'yes' : 'no'}; stdout: ${r.stdoutPath}; stderr: ${r.stderrPath}`),
     ];
     return ['', ...route, ''];
   }
-  const lines: string[] = ['', 'No retained evidence for this failure is available yet', RUN_HISTORY_ROUTE, ''];
+  const lines: string[] = ['', 'No retained evidence for this failure is available yet', renderRepairPrompt('history'), ''];
   if (slots.recoveryEvidenceError) { lines.push(`Reason: ${slots.recoveryEvidenceError}.`); }
   if (slots.recoveryEvidenceRecent && slots.recoveryEvidenceRecent.length > 0) {
     lines.push('Historical related context (not instructions to repair):');
@@ -134,7 +102,7 @@ export function recoveryEvidenceRoute(slots: Pick<FixPromptSlots, 'recoveryEvide
 export function promptSlotsFor(reason: ReboundReason, slug: string): Pick<FixPromptSlots, 'area' | 'facts' | 'remedy'> {
   switch (reason.kind) {
     case 'rebase-conflict': return { area: 'rebase', facts: [['Conflicts', reason.files.join(', ')]],
-      remedy: 'Review shared conflicts semantically in the mission worktree. Preserve newer base behavior, completed work and unique mission intent; do not resurrect retired metadata or use blanket ours/theirs. Stage every resolved path and continue through successive pauses until Git reports no rebase and no unmerged paths. Stop on ambiguous intent or a human-only decision.' };
+      remedy: renderRepairPrompt('rebase') };
     case 'gate-failure':
       return {
         area: reason.area,
@@ -146,23 +114,23 @@ export function promptSlotsFor(reason: ReboundReason, slug: string): Pick<FixPro
           ...(reason.approvedRevision
             ? [['Approved revision', reason.approvedRevision] as [string, string]]
             : []),
-          ['Cause', 'The integration gate (not the review gate) failed: the mission was reviewed and approved, then a red pre-integration gate rejected the finalized tree on the way to a human integration. Repair the integration failure, not a review finding.'],
+          ['Cause', renderRepairPrompt('integration-cause')],
           ...(reason.coverageNote ? [['Coverage', reason.coverageNote] as [string, string]] : []),
         ],
-        remedy: `Start with the listed gate command in the listed worktree and the captured failure output. Do not substitute a broader verification command or integration suite to rediscover the failure. ${REPAIR_AUTHORITY}`,
+        remedy: renderRepairPrompt('gate', { repairAuthority: renderRepairPrompt('repair-authority') }),
       };
     case 'hook-failure': return hookFailureSlots(reason, slug);
     case 'artifact-incomplete':
       return {
         area: reason.role,
         facts: [['Role', reason.role]],
-        remedy: `Produce the complete ${reason.role} artifacts the workflow requires.`,
+        remedy: renderRepairPrompt('artifacts', { role: reason.role }),
       };
     case 'agent-timeout':
       return {
         area: reason.role,
         facts: [['Role', reason.role], ...(reason.expectedOutput ? [['Required output', reason.expectedOutput] as [string, string]] : [])],
-        remedy: `Produce ${reason.expectedOutput || `the missing ${reason.role} output`} and report it through the normal review artifact or provider path.`,
+        remedy: renderRepairPrompt('timeout', { output: reason.expectedOutput || `the missing ${reason.role} output` }),
       };
     case 'handoff-verification':
       return {
@@ -170,13 +138,13 @@ export function promptSlotsFor(reason: ReboundReason, slug: string): Pick<FixPro
         facts: [['Handoff error', reason.error]],
         remedy: isIncompleteSuccessCriteriaFailure(reason.error)
           ? buildSuccessCriteriaRecoveryAdvice(slug)
-          : `Fix the underlying issue so handoff verification passes.`,
+          : renderRepairPrompt('handoff'),
       };
     case 'declared-gate-validation':
       return {
         area: 'declared gate',
         facts: [['Gate command', reason.command]],
-        remedy: 'Stop and request an operator decision for this mechanically invalid declaration; do not replace your own locked check.',
+        remedy: renderRepairPrompt('declaration'),
       };
   }
   // Unreachable for the closed union; kept out of the switch for exhaustiveness.
@@ -186,14 +154,11 @@ export function promptSlotsFor(reason: ReboundReason, slug: string): Pick<FixPro
 function repairAuthorityRoute(slots: FixPromptSlots): string[] {
   const cp = slots.repairCheckpoint;
   return [
-    'REPAIR AUTHORITY: These dedicated instructions govern this session, including resumed execute or act-on-review context. Preserve locked gates, success criteria and test invariants. An invalid locked contract requires human review; never rewrite your own checks.',
-    `Run px checkpoint check --slug ${slots.slug} --json before declaring completion. Inspect ready and primaryStopReason. A recorded unresolved human-only contract blocker is the primary stop reason even when checkpoint evidence is incomplete: stop for the operator; do not fabricate proof, start repeated evidence-only repair, use record --force, or treat prose as resolution. Only an explicit operator decision can clear the recorded blocker.`,
-    'Only a successful harness rerun of the authorized required check establishes repair success; an unrelated passing test or an agent claim does not.',
+    renderRepairPrompt('authority', { slug: slots.slug }),
     ...(cp ? [
-      `Harness-created repair checkpoint: ${cp.name}; Version at launch: ${cp.version}.`,
-      `Within the locked scope and success criteria, record verifiable evidence with px checkpoint record --name ${cp.name} --criterion "<exact affected success criterion>" --evidence "<verifiable reference and result>" --next "<specific next action>" for ${cp.name}, and the same command with --name <CP-N> for every other planned checkpoint (for example an original CP-3) still without recorded evidence. The write resolves its own current version. Retain valid earlier evidence for unaffected criteria without restating it; affected criteria need fresh verifiable evidence from this round. If the fix shows earlier evidence is no longer accurate, re-record that checkpoint with corrected fresh evidence for the criteria it affects. Every planned checkpoint needs evidence and every success criterion must be covered before handoff. Complete every remaining planned checkpoint before handoff. Do not edit locked scope or criteria, weaken or bypass gates, or self-approve: independent review stays the approver.`,
-      `If the locked contract is invalid, run px checkpoint report-invalid-contract --name ${cp.name} --command "<exact failing command>" --diagnostic "<exact diagnostic>" --authority-reason "<why operator authority is needed>" --proposed-correction "<operator correction>", then stop. The first report stops automatic repair retries and routes the decision to human review.`,
-    ] : ['Report an invalid locked contract with command, diagnostic, authorityReason and proposedCorrection, then stop for human review.']),
+      renderRepairPrompt('checkpoint', { checkpointName: cp.name, checkpointVersion: cp.version }),
+      renderRepairPrompt('report', { checkpointName: cp.name }),
+    ] : [renderRepairPrompt('report-without-checkpoint')]),
   ];
 }
 
@@ -206,6 +171,6 @@ function hookFailureSlots(reason: Extract<ReboundReason, { kind: 'hook-failure' 
       ['Failed check', `${reason.hook || 'Git'} hook on ${reason.operation || 'a workflow Git operation'}`],
       missionOutcomeFact(slug),
     ],
-    remedy: `Make the Git hook pass when Parallix commits or rebases this mission. ${REPAIR_AUTHORITY}`,
+    remedy: renderRepairPrompt('hook', { repairAuthority: renderRepairPrompt('repair-authority') }),
   };
 }

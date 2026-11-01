@@ -665,7 +665,7 @@ function getLatestReview(branch: string, reviewerUser: string, sinceIso: string,
       return (r.state === 'REQUEST_CHANGES' || r.user?.login === reviewerUser) && !!submittedAt
         && new Date(submittedAt).getTime() >= since && !r.dismissed;
     })
-    .map(/** @param {{state?: string, submitted_at?: string, created_at?: string}} r */ (r) => ({ state: r.state!, submittedAt: r.submitted_at || r.created_at || '' }))
+    .map(/** @param {{state?: string, submitted_at?: string, created_at?: string}} r */ (r) => ({ state: r.state!, submittedAt: r.submitted_at || r.created_at || '', body: r.body || '', revision: r.commit_id ?? null }))
     .sort(/** @param {{submittedAt: string}} a @param {{submittedAt: string}} b */ (a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
 
   return eligible.length > 0 ? eligible[eligible.length - 1] : null;
@@ -825,14 +825,14 @@ async function getLatestReviewForPr(prNumber: number, reviewerUser: string, sinc
       return (r.state === 'REQUEST_CHANGES' || r.user?.login === reviewerUser) && !!submittedAt
         && new Date(submittedAt).getTime() >= since && !r.dismissed;
     })
-    .map(/** @param {{state?: string, submitted_at?: string, created_at?: string}} r */ (r) => ({ state: r.state!, submittedAt: r.submitted_at || r.created_at || '' }))
+    .map(/** @param {{state?: string, submitted_at?: string, created_at?: string}} r */ (r) => ({ state: r.state!, submittedAt: r.submitted_at || r.created_at || '', body: r.body || '', revision: r.commit_id ?? null }))
     .sort(/** @param {{submittedAt: string}} a @param {{submittedAt: string}} b */ (a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
 
   return eligible.length > 0 ? eligible[eligible.length - 1] : null;
 }
 
 
-async function getLatestDispositionForPr(prNumber: number, implementerUser: string, sinceIso: string, token: string, options: AsyncReviewOptions = {}) {
+async function getLatestDispositionEvidenceForPr(prNumber: number, implementerUser: string, sinceIso: string, token: string, options: AsyncReviewOptions = {}) {
   /** @type {{apiCall?: Function}} */
   const {
     apiCall = forgejoApiAsync
@@ -853,13 +853,18 @@ async function getLatestDispositionForPr(prNumber: number, implementerUser: stri
     })
     .map(/** @param {{user?: {login?: string}, created_at?: string, body?: string}} c */ (c) => {
       const match = DISPOSITION_PATTERN.exec(c.body || '');
-      return { disposition: match ? match[1] : null, createdAt: c.created_at || '' };
+      return { disposition: match ? match[1] : null, createdAt: c.created_at || '', body: c.body || '' };
     })
     .filter(/** @param {{disposition: string|null}} e */ (e) => e.disposition)
     .sort(/** @param {{createdAt: string}} a @param {{createdAt: string}} b */ (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
-  return eligible.length > 0 ? eligible[eligible.length - 1].disposition : null;
+  return eligible.length > 0 ? eligible[eligible.length - 1] : null;
 }
+
+async function getLatestDispositionForPr(prNumber: number, implementerUser: string, sinceIso: string, token: string, options: AsyncReviewOptions = {}) {
+  return (await getLatestDispositionEvidenceForPr(prNumber, implementerUser, sinceIso, token, options))?.disposition ?? null;
+}
+
 
 /**
  * Post a comment on the Forgejo PR for a given branch.
@@ -1136,7 +1141,7 @@ export { getLatestReviewForPr };
 export { dismissApproval, dismissStandingApprovals };
 export { getLatestReviewDecision };
 export { getLatestDisposition };
-export { getLatestDispositionForPr };
+export { getLatestDispositionForPr, getLatestDispositionEvidenceForPr };
 export { postComment };
 export { REVIEW_OUTCOME_MAP };
 export { postReview };

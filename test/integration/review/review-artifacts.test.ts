@@ -1,3 +1,4 @@
+import { reviewVerdictFixture } from '../../helpers/review-verdict-fixture.js';
 import { fixtureMission, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
 import { reviewStateWriterFixture } from '../../helpers/review-state-writer.js';
 import type { ReviewApprovalSource } from "../../../src/domain/review.js";
@@ -311,10 +312,10 @@ test('postWorkflowReview skips the Forgejo POST when reviewer is the PR author',
   let recordedEvent: { value: { slug: string; type: string; params: Record<string, unknown>; } | null } = { value: null };
   const warnings: string[] = [];
   const result = await postWorkflowReview('test-slug', 'approve', 'looks good', {
+    ...reviewVerdictFixture('test-slug', 'custom', 'custom'),
     readTokenFn: () => 'mock-token',
     getPrAuthorFn: () => 'custom', // reviewer == PR author
     postReviewFn: () => { postCalled = true; return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
-    readReviewStateFn: () => ({ mission: 'test-slug', reviewer: 'custom', implementer: 'custom' }),
     writeReviewStateFn: reviewStateWriterFixture((slug, state) => { writtenState.value = state; }),
     createEventFn: (slug, type, params) => { recordedEvent.value = { slug, type, params }; return { ok: true as const, path: '/mock' }; },
     buildMetadataFooterFn: () => '',
@@ -327,7 +328,7 @@ test('postWorkflowReview skips the Forgejo POST when reviewer is the PR author',
   assert.equal(result.reason, 'self-author');
   assert.equal(postCalled, false, 'must NOT POST a self-approval to Forgejo');
 
-  // Verdict recorded locally in review-state.json and review-events.
+  // The configured single-family verdict is recorded locally.
   assert.ok(writtenState.value, 'review-state must be written locally');
   assert.equal(writtenState.value.disposition, 'APPROVED');
   assert.ok(recordedEvent.value, 'a reviewer_outcome event must be recorded');

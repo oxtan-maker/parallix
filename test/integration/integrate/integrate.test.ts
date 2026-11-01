@@ -1,3 +1,4 @@
+import { reviewVerdictFixture } from '../../helpers/review-verdict-fixture.js';
 import type { Mission } from '../../../src/domain/mission.js';
 import { missionLabels } from '../../../src/domain/mission.js';
 import { integrationContext } from '../../fixtures/integration-context.js';
@@ -1232,7 +1233,10 @@ test('provider-backed approval repair leaves integration preflight with review i
     runGitOrThrow(['add', '.'], { cwd: root });
     runGitOrThrow(['commit', '-m', 'fixture'], { cwd: root });
 
-    await submitReviewRound('task-2199', 'approve', 'LGTM', { configuration: resolveConfiguration(process.env),
+    await submitReviewRound('task-2199', 'approve', 'LGTM', {
+      ...reviewVerdictFixture('task-2199'),
+      getPrAuthorFn: () => 'different-author',
+      configuration: resolveConfiguration(process.env),
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => 'token',
       postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),

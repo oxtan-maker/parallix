@@ -1,3 +1,4 @@
+import { reviewVerdictFixture } from '../../helpers/review-verdict-fixture.js';
 import { ReviewState } from '../../../src/adapters/review/review-state.js';
 import { reviewStateWriterFixture } from '../../helpers/review-state-writer.js';
 // review identity.
@@ -124,10 +125,10 @@ describe("review identity", { concurrency: false }, () => {
     delete process.env.FORGEJO_USER;
 
     try {
-      const writes: { slug: string; disposition: unknown; phase: unknown; }[] = [];
+      const authority = reviewVerdictFixture(TEST_SLUG, 'claude', 'mistral');
       const { exitCode, errors } = await captureExit(() => submitReviewRound(TEST_SLUG, 'approve', 'test summary', {
+        ...authority,
         readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
-        writeReviewStateFn: reviewStateWriterFixture(async (slug, state) => writes.push({ slug, disposition: state.disposition, phase: state.phase })),
         getPrAuthorFn: () => 'different-author',
         postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
         readTokenFn: () => 'token-123',
@@ -135,8 +136,7 @@ describe("review identity", { concurrency: false }, () => {
       }));
       assert.equal(exitCode, null);
       assert.equal(errors.length, 0);
-      assert.equal(writes.length, 1);
-      assert.equal(writes[0].disposition, 'APPROVED');
+      assert.equal(authority.missionStore.mission().review!.rounds[0].decision?.kind, 'approved');
     } finally {
       process.env.FORGEJO_USER = originalUser;
     }
@@ -149,6 +149,7 @@ describe("review identity", { concurrency: false }, () => {
     try {
       let capturedUser: { value: string | null } = { value: null };
       const { exitCode, errors } = await captureExit(() => submitReviewRound(TEST_SLUG, 'approve', 'test summary', {
+        ...reviewVerdictFixture(TEST_SLUG, 'state-reviewer', 'state-implementer'),
         readReviewStateFn: () => reviewStateStub('state-reviewer', 'state-implementer'),
         writeReviewStateFn: reviewStateWriterFixture(async () => {}),
         postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),

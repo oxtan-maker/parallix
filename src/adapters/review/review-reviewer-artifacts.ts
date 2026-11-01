@@ -1,3 +1,4 @@
+import type { ReviewPhase } from '../../domain/review-phase-policy.js';
 import type { postComment, postReview, getPrAuthor } from './review-adapter.js';
 /**
  * Reviewer artifact consumption: resolve the reviewer artifact set, persist
@@ -6,7 +7,7 @@ import type { postComment, postReview, getPrAuthor } from './review-adapter.js';
 
 import * as fmt from '../../application/presentation/cli-format.js';
 import { resolveWorktree } from '../filesystem/mission-utils.js';
-import { readReviewState, writeReviewState, reviewStateFile } from './review-state.js';
+import { readReviewState, writeReviewState } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { type ReviewFinding } from '../../domain/review.js';
 import { isEnabled } from './review-adapter.js';
@@ -101,7 +102,7 @@ async function persistReviewerEvents(params: {
   slug: string;
   reviewer: string;
   round: number | undefined;
-  phase: string | undefined;
+  phase: ReviewPhase | undefined;
   reviewFindings: string;
   reviewOutcome: string;
   reviewVerdict: string;
@@ -234,14 +235,13 @@ function prepareReviewerArtifacts(slug: string, options: ReviewerArtifactOptions
   const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
   const tmpDir = options.tmpDir || resolveArtifactDir(worktree);
   const providerEnabled = resolveProviderEnabled(options, worktree);
-  const reviewStatePath = reviewStateFile(slug, worktree);
 
   const artifacts = options.output
     ? typedReviewerArtifactSet(slug, tmpDir, options.output)
     : resolveReviewerArtifactSet(slug, { tmpDir, readArtifactFn });
   const verdict = reviewerVerdictFrom(artifacts.verdictRaw, artifacts.outcomeMessage);
 
-  return { log, error, deleteArtifactFn, worktree, providerEnabled, reviewStatePath, artifacts, verdict };
+  return { log, error, deleteArtifactFn, worktree, providerEnabled, artifacts, verdict };
 }
 
 type AdmittedReviewerArtifacts =
@@ -250,14 +250,14 @@ type AdmittedReviewerArtifacts =
 
 /** Completeness, parsing, staleness and revision-pin checks that precede any decision. */
 async function admitReviewerArtifacts(
-  ctx: { slug: string; artifacts: ReturnType<typeof prepareReviewerArtifacts>['artifacts']; verdict: string | null; reviewStatePath: string | null; providerEnabled: unknown; worktree: string; error: (message: string) => void },
+  ctx: { slug: string; artifacts: ReturnType<typeof prepareReviewerArtifacts>['artifacts']; verdict: string | null; providerEnabled: unknown; worktree: string; error: (message: string) => void },
   options: ReviewerArtifactOptions,
 ): Promise<AdmittedReviewerArtifacts> {
-  const { slug, artifacts, verdict, reviewStatePath, providerEnabled, worktree, error } = ctx;
+  const { slug, artifacts, verdict, providerEnabled, worktree, error } = ctx;
   const incomplete = reportIncompleteReviewerArtifacts({
     slug, findings: artifacts.findings, outcomeMessage: artifacts.outcomeMessage, verdict,
     findingsPath: artifacts.findingsPath, outcomePath: artifacts.outcomePath, verdictPath: artifacts.verdictPath,
-    reviewStatePath, providerEnabled: Boolean(providerEnabled), error,
+    providerEnabled: Boolean(providerEnabled), error,
   });
   if (incomplete) { return { ok: false, failure: incomplete }; }
   // Past the completeness guard all three artifacts are present.
@@ -284,12 +284,12 @@ export async function consumeReviewerArtifacts(
   reviewer: string,
   options: ReviewerArtifactOptions = {}
 ): Promise<{ consumed: boolean; ok?: boolean; reviewState?: string | null; diagnostic?: string | null; reviewFindings?: { id: string; summary: string }[] }> {
-  const { log, error, deleteArtifactFn, worktree, providerEnabled, reviewStatePath, artifacts, verdict } = prepareReviewerArtifacts(slug, options);
+  const { log, error, deleteArtifactFn, worktree, providerEnabled, artifacts, verdict } = prepareReviewerArtifacts(slug, options);
 
   if ([artifacts.findings, artifacts.outcomeMessage, artifacts.verdictRaw].every(value => value === null)) {
     return { consumed: false };
   }
-  const prepared = await admitReviewerArtifacts({ slug, artifacts, verdict, reviewStatePath, providerEnabled, worktree, error }, options);
+  const prepared = await admitReviewerArtifacts({ slug, artifacts, verdict, providerEnabled, worktree, error }, options);
   if (!prepared.ok) { return prepared.failure; }
   const { reviewFindings, reviewOutcome, reviewVerdict, typedFindings } = prepared;
   options = prepared.options;
@@ -370,12 +370,12 @@ function reviewerVerdictFrom(verdictRaw: string | null, outcomeMessage: string |
 function reportIncompleteReviewerArtifacts(context: {
   slug: string; findings: string | null; outcomeMessage: string | null; verdict: string | null;
   findingsPath: string; outcomePath: string; verdictPath: string;
-  reviewStatePath: string | null; providerEnabled: boolean; error: (_msg: string) => void;
+  providerEnabled: boolean; error: (_msg: string) => void;
 }): { consumed: true; ok: false; diagnostic: string } | null {
-  const { slug, findings, outcomeMessage, verdict, findingsPath, outcomePath, verdictPath, reviewStatePath, providerEnabled, error } = context;
+  const { slug, findings, outcomeMessage, verdict, findingsPath, outcomePath, verdictPath, providerEnabled, error } = context;
   const localRepair = providerEnabled
     ? ''
-    : `${reviewStatePath ? ` local review state at ${reviewStatePath}; ` : ' '}No provider review posted (provider=none); add a review-outcome.md with a Verdict line or use \`node parallix review <slug> --submit-review approve\`.`;
+    : ` No provider review posted (provider=none); add a review-outcome.md with a Verdict line or use \`node parallix review <slug> --submit-review approve\`.`;
   if (!findings || !outcomeMessage) {
     const missing: string[] = [];
     if (!findings) { missing.push('findings'); }

@@ -134,7 +134,7 @@ describe("production certification: persisted weekly FLOW decision surface", () 
         });
         const projection = await new BoardProjectionBuilder(
           missionReader,
-          new ConcreteReviewReadAdapter({ rootDir: checkouts.primary, missionStore: null }),
+          new ConcreteReviewReadAdapter({ missionStore: null }),
           { observeGate: async () => 'not-run' as const },
           {
             loadAgentAvailability: async () => [],

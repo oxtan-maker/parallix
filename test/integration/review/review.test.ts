@@ -1,3 +1,4 @@
+import { reviewVerdictFixture } from '../../helpers/review-verdict-fixture.js';
 import type { ReviewStateInstanceReader } from '../../../src/adapters/review/review-state.js';
 import { reviewStateWriterFixture } from '../../helpers/review-state-writer.js';
 import { rebaseWorkflowFixture } from '../../helpers/rebase-workflow-fixture.js';
@@ -592,14 +593,14 @@ test('pollForReview waits asynchronously between retries', async () => {
   const state = await pollForReview(41, 'claude', '2026-04-18T10:00:00Z', 'fake-token', { configuration: resolveConfiguration(process.env),
     async getLatestReviewForPrFn() {
       attempts += 1;
-      return attempts === 2 ? { state: 'APPROVED' } : null;
+      return attempts === 2 ? { state: 'APPROVED', submittedAt: '2026-04-18T10:01:00Z', body: 'Reviewed', revision: 'reviewed-A' } : null;
     },
     async sleepFn(ms) {
       sleeps.push(ms);
     }
   });
 
-  assert.equal(state, 'APPROVED');
+  assert.deepEqual(state, { state: 'APPROVED', submittedAt: '2026-04-18T10:01:00Z', body: 'Reviewed', revision: 'reviewed-A' });
   assert.equal(attempts, 2);
   assert.deepEqual(sleeps, [10_000]);
 });
@@ -664,12 +665,12 @@ test('pollForReview emits a progress line on every tick when verbose=true', asyn
       verbose: true,
       async getLatestReviewForPrFn() {
         attempts += 1;
-        return attempts === 3 ? { state: 'COMMENT' } : null;
+        return attempts === 3 ? { state: 'COMMENT', submittedAt: '2026-04-18T10:01:00Z', body: 'Review comment', revision: 'reviewed-A' } : null;
       },
       async sleepFn() {}
     });
 
-    assert.equal(state, 'COMMENT');
+    assert.deepEqual(state, { state: 'COMMENT', submittedAt: '2026-04-18T10:01:00Z', body: 'Review comment', revision: 'reviewed-A' });
     const stillWaitingLines = logs.filter(l => l.includes('still waiting'));
     // verbose=true -> should log on every tick we didn't already return on (attempts 1 and 2).
     assert.equal(stillWaitingLines.length, 2, `expected 2 progress lines, got: ${logs.join(' | ')}`);
@@ -851,7 +852,7 @@ test('getLatestReviewForPr accepts a human request after round start but exclude
       { user: { login: 'human' }, submitted_at: '2026-04-26T10:00:01Z', state: 'REQUEST_CHANGES' },
     ] })),
   });
-  assert.deepEqual(review, { state: 'REQUEST_CHANGES', submittedAt: '2026-04-26T10:00:01Z' });
+  assert.deepEqual(review, { state: 'REQUEST_CHANGES', submittedAt: '2026-04-26T10:00:01Z', body: '', revision: null });
 });
 
 test('getLatestReviewForPr correctly sorts mixed-precision ISO timestamps', async () => {
@@ -1347,6 +1348,7 @@ test('pushRound resolves forgejo user from backlog assignee and reports success'
 });
 
 test('commentRound and submitReviewRound fail loudly on API errors', async () => {
+  const authority = reviewVerdictFixture('task-1031');
   const errors: string[] = [];
   const exits: number[] = [];
   const readReviewStateFn: ReviewStateInstanceReader = (slug: string) => (new ReviewState(slug, { reviewer: 'codex', implementer: 'codex' }));
@@ -1357,7 +1359,9 @@ test('commentRound and submitReviewRound fail loudly on API errors', async () =>
     error: line => errors.push(line),
     exit: code => exits.push(code)
   });
-  await submitReviewRound('task-1031', 'approve', 'ship it', { configuration: resolveConfiguration(process.env),
+  await submitReviewRound('task-1031', 'approve', 'ship it', {
+    ...authority,
+    configuration: resolveConfiguration(process.env),
     readTokenFn: () => 'token',
     getPrAuthorFn: () => 'claude',
     postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null,  ok: false as const, error: 'nope' }),
@@ -1368,6 +1372,7 @@ test('commentRound and submitReviewRound fail loudly on API errors', async () =>
   });
 
   assert.deepEqual(exits, [1, 1]);
+  assert.equal(authority.missionStore.mission().review!.rounds[0].decision, null, 'a failed provider POST cannot leave an approval');
   assert.ok(errors.some(line => line.includes('Could not post comment: boom')));
   assert.ok(errors.some(line => line.includes('Could not submit review: nope')));
 });
@@ -1499,10 +1504,12 @@ test('commentRound appends metadata footer to message', async () => {
 test('submitReviewRound appends metadata footer to review message', async () => {
   const { submitReviewRound } = createEventHandlerModule;
   let posted: { value: string | null } = { value: null };
-  await submitReviewRound('task-meta-3', 'approve', 'Looks good', { configuration: resolveConfiguration(process.env),
+  await submitReviewRound('task-meta-3', 'approve', 'Looks good', {
+    ...reviewVerdictFixture('task-meta-3'),
+    getPrAuthorFn: () => 'different-author',
+    configuration: resolveConfiguration(process.env),
     readTokenFn: () => 'token',
     postReviewFn: (branch, token, outcome, message) => { posted.value = message; return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
-    readReviewStateFn: (slug: string) => (new ReviewState(slug, { reviewer: 'codex', implementer: 'codex' })),
     buildMetadataFooterFn: async () => '\n\n---\n`[workflow-round:1, workflow-phase:reviewing]`',
     writeReviewStateFn: persistenceCommitted,
     worktree: '/tmp/visualBoard-task-meta-3',
@@ -1610,23 +1617,22 @@ test('commentRound does not persist state when no state exists', async () => {
   assert.equal(writeCount, 0, 'writeReviewStateFn must not be called when no state exists');
 });
 
-test('submitReviewRound persists state with REQUEST_CHANGES disposition after request-changes', async () => {
+test('submitReviewRound records REQUEST_CHANGES on the current round after request-changes', async () => {
   const { submitReviewRound } = createEventHandlerModule;
-  const { ReviewState } = ReviewStateModule;
-  let stateWritten: { value: { slug: string; disposition: unknown; phase: unknown; } | null } = { value: null };
+  const authority = reviewVerdictFixture('task-persist-3');
   let backlogTransitioned: { value: { slug: string; status: string; } | null } = { value: null };
   const prev = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'codex';
 
   try {
-    await submitReviewRound('task-persist-3', 'request-changes', 'Needs work', { configuration: resolveConfiguration(process.env),
+    await submitReviewRound('task-persist-3', 'request-changes', 'Needs work', {
+      ...authority,
+      getPrAuthorFn: () => 'different-author',
+      configuration: resolveConfiguration(process.env),
+      isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => 'token',
       postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
       buildMetadataFooterFn: async () => '',
-      readReviewStateFn: () => new ReviewState('task-persist-3', {
-        reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
-      }),
-      writeReviewStateFn: reviewStateWriterFixture((slug, state) => { stateWritten.value = { slug, disposition: state.disposition, phase: state.phase }; }),
       transitionTaskFn: async (slug, status) => {
         backlogTransitioned.value = { slug, status };
         return true;
@@ -1641,29 +1647,31 @@ test('submitReviewRound persists state with REQUEST_CHANGES disposition after re
     else process.env.FORGEJO_USER = prev;
   }
 
-  assert.ok(stateWritten.value, 'writeReviewStateFn must be called after successful review post');
-  assert.equal(stateWritten.value.disposition, 'REQUEST_CHANGES');
-  assert.equal(stateWritten.value.phase, 'fixing');
+  const round = authority.missionStore.mission().review!.rounds[0];
+  assert.equal(round.decision?.kind, 'changes-requested');
+  assert.equal(round.phase, 'fixing');
+  assert.equal(round.disposition, 'REQUEST_CHANGES');
+  assert.equal(round.decision?.comment, 'Needs work');
+
   assert.deepEqual(backlogTransitioned.value, { slug: 'task-persist-3', status: 'review' });
 });
 
-test('submitReviewRound persists state with APPROVED disposition after approve', async () => {
+test('submitReviewRound records APPROVED on the current round after approve', async () => {
   const { submitReviewRound } = createEventHandlerModule;
-  const { ReviewState } = ReviewStateModule;
-  let stateWritten: { value: { slug: string; disposition: unknown; phase: unknown; } | null } = { value: null };
+  const authority = reviewVerdictFixture('task-persist-4');
   let backlogTransitioned: { value: { slug: string; status: string; } | null } = { value: null };
   const prev = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'codex';
 
   try {
-    await submitReviewRound('task-persist-4', 'approve', 'LGTM', { configuration: resolveConfiguration(process.env),
+    await submitReviewRound('task-persist-4', 'approve', 'LGTM', {
+      ...authority,
+      getPrAuthorFn: () => 'different-author',
+      configuration: resolveConfiguration(process.env),
+      isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => 'token',
       postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
       buildMetadataFooterFn: async () => '',
-      readReviewStateFn: () => new ReviewState('task-persist-4', {
-        reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
-      }),
-      writeReviewStateFn: reviewStateWriterFixture((slug, state) => { stateWritten.value = { slug, disposition: state.disposition, phase: state.phase }; }),
       transitionTaskFn: async (slug, status) => {
         backlogTransitioned.value = { slug, status };
         return true;
@@ -1678,9 +1686,12 @@ test('submitReviewRound persists state with APPROVED disposition after approve',
     else process.env.FORGEJO_USER = prev;
   }
 
-  assert.ok(stateWritten.value, 'writeReviewStateFn must be called after successful review post');
-  assert.equal(stateWritten.value.disposition, 'APPROVED');
-  assert.equal(stateWritten.value.phase, 'approved');
+  const round = authority.missionStore.mission().review!.rounds[0];
+  assert.equal(round.decision?.kind, 'approved');
+  assert.equal(round.phase, 'approved');
+  assert.equal(round.disposition, 'APPROVED');
+  assert.equal(round.decision?.comment, 'LGTM');
+
   assert.deepEqual(backlogTransitioned.value, { slug: 'task-persist-4', status: 'approved' });
 });
 
@@ -1692,7 +1703,10 @@ test('submitReviewRound promotes an active backlog task to review after provider
   process.env.FORGEJO_USER = 'codex';
 
   try {
-    await submitReviewRound('task-2197', 'approve', 'LGTM', { configuration: resolveConfiguration(process.env),
+    await submitReviewRound('task-2197', 'approve', 'LGTM', {
+      ...reviewVerdictFixture('task-2197'),
+      getPrAuthorFn: () => 'different-author',
+      configuration: resolveConfiguration(process.env),
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => 'token',
       postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
@@ -1753,7 +1767,10 @@ test('submitReviewRound keeps YAML and rendered task status aligned when provide
     runGitOrThrow(['add', '.'], { cwd: root });
     runGitOrThrow(['commit', '-m', 'fixture'], { cwd: root });
 
-    await submitReviewRound('task-2198', 'approve', 'LGTM', { configuration: resolveConfiguration(process.env),
+    await submitReviewRound('task-2198', 'approve', 'LGTM', {
+      ...reviewVerdictFixture('task-2198'),
+      getPrAuthorFn: () => 'different-author',
+      configuration: resolveConfiguration(process.env),
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => 'token',
       postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
@@ -1778,96 +1795,43 @@ test('submitReviewRound keeps YAML and rendered task status aligned when provide
   }
 });
 
-test('submitReviewRound skips Forgejo and updates review-state only when provider=none', async () => {
-  const { submitReviewRound } = createEventHandlerModule;
-  const { ReviewState } = ReviewStateModule;
-
-  // Create a temporary directory for the test
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-none-'));
-  const worktree = path.join(tmpDir, 'my-project');
-  fs.mkdirSync(worktree, { recursive: true });
-  fs.mkdirSync(path.join(worktree, 'docs', 'missions', '2026', 'task-test'), { recursive: true });
-
-  // Create a minimal workflow.config.json with provider=none
-  fs.writeFileSync(
-    path.join(worktree, 'workflow.config.json'),
-    JSON.stringify({
-      product: { name: 'Test' },
-      adapters: { review: { provider: 'none' } }
-    }, null, 2),
-    'utf8'
-  );
-
-  let stateWritten: { value: { slug: string; disposition: unknown; phase: unknown; implementer: unknown; } | null } = { value: null };
-  let backlogTransitioned: { value: { slug: string; status: string; } | null } = { value: null };
-
-  const prevForgejo = process.env.FORGEJO_USER;
-  const prevAgent = process.env.WORKFLOW_AGENT;
-  process.env.FORGEJO_USER = 'codex';
-  process.env.WORKFLOW_AGENT = 'custom';
-
-  try {
-    await submitReviewRound('task-test', 'approve', 'Test approval', { configuration: resolveConfiguration(process.env),
-      isForgejoReviewEnabledFn: () => false, // Simulate provider=none
-      readReviewStateFn: () => null, // No existing state
-      writeReviewStateFn: reviewStateWriterFixture((slug, state) => {
-        stateWritten.value = { slug, disposition: state.disposition, phase: state.phase, implementer: state.implementer };
-      }),
-      transitionTaskFn: async (slug, status) => {
-        backlogTransitioned.value = { slug, status };
-        return true;
-      },
-      worktree,
-      log: () => {},
-      error: () => {},
-      exit: () => {}
-    });
-  } finally {
-    if (prevForgejo === undefined) delete process.env.FORGEJO_USER;
-    else process.env.FORGEJO_USER = prevForgejo;
-    if (prevAgent === undefined) delete process.env.WORKFLOW_AGENT;
-    else process.env.WORKFLOW_AGENT = prevAgent;
-    // Cleanup
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-
-  // Verify review-state was written with correct values
-  assert.ok(stateWritten.value, 'writeReviewStateFn must be called');
-  assert.equal(stateWritten.value.disposition, 'APPROVED');
-  assert.equal(stateWritten.value.phase, 'approved');
-  assert.equal(stateWritten.value.implementer, 'custom');
-
-  // Verify backlog task was transitioned
-  assert.ok(backlogTransitioned.value, 'transitionTaskFn must be called');
-  assert.equal(backlogTransitioned.value.slug, 'task-test');
-  assert.equal(backlogTransitioned.value.status, 'approved');
+test('submitReviewRound with provider=none refuses to fabricate a missing review', async () => {
+  const authority = reviewVerdictFixture('task-test');
+  await authority.missionStore.save({ ...authority.missionStore.mission(), review: null }, null);
+  const errors: string[] = [];
+  const exits: number[] = [];
+  let posted = false;
+  let mirrored = false;
+  await submitReviewRound('task-test', 'approve', 'Test approval', {
+    ...authority,
+    isForgejoReviewEnabledFn: () => false,
+    postReviewFn: () => { posted = true; throw new Error('provider must not be called'); },
+    transitionTaskFn: async () => { mirrored = true; return true; },
+    worktree: '/tmp/test-worktree',
+    log: () => {}, error: message => errors.push(message), exit: code => exits.push(code),
+  });
+  assert.deepEqual(exits, [1]);
+  assert.ok(errors.length > 0, 'missing review must be operator-visible');
+  assert.equal(authority.missionStore.mission().review, null);
+  assert.equal(posted, false);
+  assert.equal(mirrored, false);
 });
 
-test('submitReviewRound updates existing state when provider=none', async () => {
+test('submitReviewRound records changes on the current round when provider=none', async () => {
   const { submitReviewRound } = createEventHandlerModule;
-  const { ReviewState } = ReviewStateModule;
 
-  let stateWritten: { value: { slug: string; disposition: unknown; phase: unknown; } | null } = { value: null };
+  const authority = reviewVerdictFixture('task-exist');
   let backlogTransitioned: { value: { slug: string; status: string; } | null } = { value: null };
-
-  const existingState = new ReviewState('task-exist', {
-    reviewer: 'codex',
-    implementer: 'claude',
-    round: 1,
-    phase: 'reviewing',
-    disposition: null
-  });
 
   const prevForgejo = process.env.FORGEJO_USER;
   const prevAgent = process.env.WORKFLOW_AGENT;
 
   try {
-    await submitReviewRound('task-exist', 'request-changes', 'Needs work', { configuration: resolveConfiguration(process.env),
+    await submitReviewRound('task-exist', 'request-changes', 'Needs work', {
+      ...authority,
+      getPrAuthorFn: () => 'different-author',
+      configuration: resolveConfiguration(process.env),
       isForgejoReviewEnabledFn: () => false, // Simulate provider=none
-      readReviewStateFn: () => existingState,
-      writeReviewStateFn: reviewStateWriterFixture((slug, state) => {
-        stateWritten.value = { slug, disposition: state.disposition, phase: state.phase };
-      }),
       transitionTaskFn: async (slug, status) => {
         backlogTransitioned.value = { slug, status };
         return true;
@@ -1884,10 +1848,11 @@ test('submitReviewRound updates existing state when provider=none', async () => 
     else process.env.WORKFLOW_AGENT = prevAgent;
   }
 
-  // Verify review-state was updated
-  assert.ok(stateWritten.value, 'writeReviewStateFn must be called');
-  assert.equal(stateWritten.value.disposition, 'REQUEST_CHANGES');
-  assert.equal(stateWritten.value.phase, 'fixing');
+  const round = authority.missionStore.mission().review!.rounds[0];
+  assert.equal(round.decision?.kind, 'changes-requested');
+  assert.equal(round.phase, 'fixing');
+  assert.equal(round.disposition, 'REQUEST_CHANGES');
+  assert.equal(round.decision?.comment, 'Needs work');
 
   // Verify backlog task was transitioned to review
   assert.ok(backlogTransitioned.value, 'transitionTaskFn must be called');

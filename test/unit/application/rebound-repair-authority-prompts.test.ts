@@ -74,8 +74,9 @@ function assertRepairCapable(prompt: string, failedCheck: RegExp, log: RegExp) {
   assert.match(prompt, failedCheck, 'names the exact failed check');
   assert.match(prompt, log, 'carries the captured failure log');
   assert.match(prompt, new RegExp(`Mission outcome: .*${SLUG}`), 'states the mission outcome');
-  assert.match(prompt, /without breaking the repository/i, 'requires preserving the repository');
-  assert.match(prompt, /never weaken, skip, or delete a check/i, 'keeps verification as a safeguard');
+  assert.match(prompt, /Preserve locked gates and success criteria, mission deliverables and safety boundaries/i, 'requires preserving the repository');
+  // Investigated test repairs are authorized; gate and behavioral protections remain binding.
+  assert.match(prompt, /do not suppress failures or reduce behavioral coverage merely to obtain a passing check/i, 'keeps verification as a safeguard');
   // No presumed cause or repair location.
   assert.doesNotMatch(prompt, /specific failing test or code path/i);
   assert.match(prompt, /do not assume it is a test or code path inside the original mission scope/i);

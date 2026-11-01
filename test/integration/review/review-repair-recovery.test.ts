@@ -51,6 +51,10 @@ for (const entry of ['cli', 'board'] as const) {
     assert.equal(outcome.code, 0, outcome.messages);
     const decisions = outcome.mission.review!.rounds.map(round => round.decision?.kind);
     assert.equal(decisions[0], 'approved');
+    assert.equal(outcome.mission.status, 'integration', 'the recorded approval settles its interrupted lifecycle boundary');
+    assert.equal(outcome.mission.review!.rounds.length, 1);
+    assert.deepEqual(outcome.launches, [], 'a terminal approval launches no agent');
+    assert.deepEqual(outcome.laneEvents.map(event => `${event.from_status}>${event.to_status}`), ['review>integration']);
     assert.equal(decisions.filter(kind => kind === 'approved').length, 1 + outcome.launches.filter(kind => kind === 'review').length, 'every approval beyond the seeded one has a reviewer launch');
   });
 }

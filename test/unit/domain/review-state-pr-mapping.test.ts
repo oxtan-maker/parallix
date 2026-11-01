@@ -1,3 +1,6 @@
+import { readReviewState, writeReviewState } from '../../../src/adapters/review/review-state.js';
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { missionVersion } from '../../../src/application/domain-ports.js';
 // TASK-2343: regression assertions routed to their owning write/read contract.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -5,7 +8,7 @@ import { ConcreteReviewReadAdapter } from '../../../src/adapters/backlog/concret
 import { applyReviewStateToReview, reviewStateDataFrom } from '../../../src/adapters/review/review-state-mapping.js';
 import { missionId } from '../../../src/domain/mission.js';
 import { agentFamily } from '../../../src/domain/agents.js';
-import { changeRevision } from '../../../src/domain/review.js';
+import { applyReviewerCommand, changeRevision } from '../../../src/domain/review.js';
 import { type Review } from '../../../src/domain/review.js';
 
 const MISSION = missionId('task-2343');
@@ -52,7 +55,7 @@ test('a confirmed PR reference is written onto the round and flattened back out'
 });
 
 test('a state carrying no PR reference leaves the aggregate change untouched', () => {
-  const applied = applyReviewStateToReview(reviewWithLocalBranch(), { phase: 'approved' });
+  const applied = applyReviewStateToReview(reviewWithLocalBranch(), { phase: 'reviewing' });
   assert.equal(applied.rounds[0].subject.change.kind, 'local-branch');
   assert.equal(reviewStateDataFrom(applied).pullRequest, null);
 });
@@ -92,33 +95,47 @@ test('an invalid PR reference is refused rather than written onto the round', ()
 });
 
 test('loadReview and loadReviewApproval agree on the reviewed change', async () => {
-  const state = {
-    slug: 'task-2343',
-    reviewer: 'claude',
-    implementer: 'codex',
-    round: 1,
-    startedAt: '2026-08-01T10:00:00.000Z',
-    phase: 'approved',
-    disposition: 'approved',
-    reviewerRetryCount: 0,
-    implementerRetryCount: 0,
-    metadata: {},
-    pullRequest: {
-      kind: 'pull-request' as const, provider: 'forgejo', id: '4242',
-      url: null, sourceBranch: 'mission/task-2343', targetBranch: 'main',
-    },
-  };
-  const adapter = new ConcreteReviewReadAdapter({
-    rootDir: '/tmp',
-    missionStore: null,
-    readReviewState: () => state,
-    findMissionDir: () => '/tmp/missions/task-2343',
-  });
+  const approved = applyReviewerCommand(reviewWithLocalBranch(), { type: 'approve', decidedAt: '2026-08-01T11:00:00Z', comment: null, source: { kind: 'local' } });
+  const mission = fixtureMission(String(MISSION), { review: approved });
+  const adapter = new ConcreteReviewReadAdapter({ missionStore: {
+    load: async () => ({ kind: 'found', mission, version: missionVersion(1) }),
+    save: async () => { throw new Error('read only'); },
+  } });
 
   const review = await adapter.loadReview(MISSION);
   const approval = await adapter.loadReviewApproval(MISSION);
   assert.ok(review);
   assert.ok(approval);
   assert.deepEqual(review!.rounds[0].subject, approval!.subject);
-  assert.equal(approval!.subject.change.kind, 'pull-request');
+  assert.equal(approval!.subject.change.kind, 'local-branch');
+});
+
+test('loop writes cannot invent approvals, rounds or invalid phases (TASK-2821)', () => {
+  const review = reviewWithLocalBranch();
+  for (const state of [{ phase: 'approved' }, { phase: 'rewiewing' }, { phase: null }, { round: 2, phase: 'reviewing' }]) {
+    // @ts-expect-error Unchecked input deliberately exercises the persistence boundary.
+    assert.throws(() => applyReviewStateToReview(review, state));
+    assert.equal(review.rounds.length, 1);
+    assert.equal(review.rounds[0].decision, null);
+  }
+});
+
+test('invalid review phase produces a structured failure with no write or read fallback (TASK-2821)', async () => {
+  const review = reviewWithLocalBranch();
+  const mission = fixtureMission(String(MISSION), { review });
+  let saves = 0;
+  const store = {
+    load: async () => ({ kind: 'found' as const, mission, version: missionVersion(1) }),
+    save: async () => { saves++; return missionVersion(2); },
+  };
+  for (const phase of ['rewiewing', 'APPROVED', 'unknown', null]) {
+    const input = JSON.parse(JSON.stringify({ phase }));
+    const result = await writeReviewState(String(MISSION), input, '/unused', { missionStore: store });
+    assert.equal(result.outcome, 'validation-failed');
+    if (result.outcome === 'validation-failed') { assert.equal(result.kind, 'validation'); }
+  }
+  assert.equal(saves, 0);
+  Object.assign(review.rounds[0], { phase: 'rewiewing' });
+  await assert.rejects(() => readReviewState(String(MISSION), '/unused', store), /Invalid review phase/);
+  assert.equal(saves, 0);
 });

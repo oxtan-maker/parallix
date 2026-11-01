@@ -41,7 +41,7 @@ function recorder() {
 function reviewWorkflow(onContinue: (_context: ReviewWorkflowContext) => Promise<void>) {
   const unused = () => { throw new Error('Unexpected review workflow operation'); };
   return {
-    verify: unused, submit: unused, push: unused, comment: unused, readComments: unused, submitReview: unused, close: unused, status: unused, backfillReview: unused, reconcileReview: unused,
+    verify: unused, submit: unused, push: unused, comment: unused, readComments: unused, submitReview: unused, close: unused, status: unused, reconcileReview: unused,
     async preflight(args: string[], options: Record<string, unknown> = {}) { return { slug: SLUG, args, options }; },
     enter: onContinue,
   };

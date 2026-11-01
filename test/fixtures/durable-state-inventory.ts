@@ -392,42 +392,6 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     classification: 'database-owned-domain-state',
     cutoverTask: null,
   },
-  // TASK-2322.12 cutover complete. The review loop's round, phase, disposition,
-  // retry counters and stage-launch windows are served by the Review aggregate
-  // through SqliteMissionStore; review events are rows in mission_review_events
-  // and implementer response details (pushed_back_items, fixed_items, ...) are
-  // columns on mission_review_rounds. No review module reads or writes a file
-  // for any of it: review-state.json is gone, the review-event Markdown is a
-  // one-way export (below), and the /tmp artifacts review-artifacts.ts consumes
-  // are scratch transport from the agent process — read once, deleted, never a
-  // source of truth. A mission handed off before the cutover is migrated once
-  // with `px review <slug> --backfill-review`.
-  {
-    // `px review <slug> --backfill-review` reads a surviving review-state.json
-    // once, to seed the Review of a mission handed off before the cutover. It
-    // is operator-invoked, never part of a loop read, and writes nothing back
-    // to the file — the one-way door ADR 0053 allows for legacy input.
-    id: 'review-import-legacy-review-state',
-    concept: 'Review',
-    pathType: 'compatibility',
-    fileLocation: 'src/adapters/review/review-legacy-import.ts',
-    operation: 'read',
-    classification: 'explicit-one-way-legacy-input',
-    cutoverTask: null,
-  },
-  {
-    // The Markdown files under missions/<slug>/review-events/ are rendered from
-    // the stored event so a mission directory reads as its own review history.
-    // Write-only: nothing in production reads them back, and deleting them
-    // loses no state.
-    id: 'review-export-review-events',
-    concept: 'Review',
-    pathType: 'default',
-    fileLocation: 'src/adapters/review/review-events.ts',
-    operation: 'write',
-    classification: 'generated-artifact',
-    cutoverTask: null,
-  },
   // -----------------------------------------------------------------------
   // MissionOutcome — derived from Mission + AgentRunMeasurement
   // -----------------------------------------------------------------------

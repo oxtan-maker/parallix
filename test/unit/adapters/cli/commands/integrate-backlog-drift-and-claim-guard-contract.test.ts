@@ -1,5 +1,5 @@
 import { integrationServices } from '../../../../helpers/stub-integration-services.js';
-import { fixtureMission } from '../../../../fixtures/mission-builders.js';
+import { approvedReview as fixtureApprovedReview, fixtureMission } from '../../../../fixtures/mission-builders.js';
 import { missionVersion } from '../../../../../src/application/domain-ports.js';
 import { stubIntegrateWorkflowPorts } from '../../../../helpers/stub-integrate-workflow-ports.js';
 import { resolveConfiguration } from '../../../../../src/composition/config.js';
@@ -427,7 +427,7 @@ describe("backlog drift retry", () => {
     mock.method(compositionCjs, 'createMissionApplicationServices', async () => ({
       store: {
         _repoId: 'default',
-        load: async () => ({ kind: 'found' as const, mission: { status: 'integration', review: { rounds: [{ decision: { kind: 'approved', decidedAt: '2026-01-01T10:30:00Z' } }] } }, version: 1 }),
+        load: async () => ({ kind: 'found' as const, mission: { status: 'integration', review: fixtureApprovedReview(TEST_SLUG) }, version: 1 }),
       },
       lifecycle: {
         transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: { to: 'review', version: 2 } }),

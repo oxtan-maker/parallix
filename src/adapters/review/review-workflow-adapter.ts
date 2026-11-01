@@ -5,15 +5,15 @@ import { run } from '../git/git.js';
 import { getPrStatus, isProviderEnabled } from './review-adapter.js';
 import { resolveWorktree, inferSlug, missionBranchName } from '../filesystem/mission-utils.js';
 import { missionId } from '../../domain/mission.js';
-import { readReviewState, reconcileInterruptedHandoff } from './review-state.js';
+import { readReviewState } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import type { ReviewWorkflowContext, ReviewWorkflowPort } from '../../application/ports/review-workflow.js';
-import { ReviewRoundUseCase } from '../../application/review-round-use-case.js';
+import { ReviewRoundUseCase, reconcileInterruptedHandoff } from '../../application/review-round-use-case.js';
 import type { ReviewLoopPorts, ReviewRoundEntryPort, StartReviewRound } from '../../application/ports/review-round.js';
 import { flagValue, readTextFlag, type ReadUtf8File } from './review-cli-flags.js';
 import { createEvent } from './review-events.js';
 import type { ReviewLoopBindings } from './review-loop.js';
-import { backfillReviewHandler, continueReviewClearsIntervention, continueReviewInvalidatesBlocker, closeMissionPr, commentRound, pushRound, readComments, reconcileInterruptedHandoffHandler, showReviewStatus, submitForReview, submitReviewRound, verifyReview } from './review-commands.js';
+import { continueReviewClearsIntervention, continueReviewInvalidatesBlocker, closeMissionPr, commentRound, pushRound, readComments, reconcileInterruptedHandoffHandler, showReviewStatus, submitForReview, submitReviewRound, verifyReview } from './review-commands.js';
 
 /** Command dispatch awaits completion and forwards failures; receipts are owned by each command. */
 type ReviewCommandObserver<Handler extends (...args: never[]) => unknown> = (...args: Parameters<Handler>) => unknown;
@@ -56,7 +56,6 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
     writeReviewStateFn?: typeof import('./review-state.js').writeReviewState;
     resetReviewStateFn?: typeof import('./review-state.js').resetReviewState;
     readAllEventsFn?: typeof import('./review-events.js').readAllEvents;
-    backfillReviewFn?: typeof import('./review-state.js').backfillReviewFromLegacyState;
     lifecycleService?: import('../../application/mission-lifecycle-service.js').MissionLifecycleService | null;
     requireReviewAggregate?: boolean; missionStore?: MissionStore | null; run?: typeof run; missionPath?: string; continueReviewClearsInterventionFn?: ReviewInterventionClearer; createEventFn?: typeof createEvent; payloadLandedFn?: (_slug: string) => boolean | Promise<boolean>;
     /** The composition root binds the review-loop mechanisms for each request. */
@@ -118,7 +117,6 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   async readComments(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.readCommentsFn || readComments)(context.slug, o); }
   async submitReview(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; const outcome = flagValue(context.args, '--submit-review'); if (!outcome) { (o.error || fmt.log.plainError)(fmt.status('FAIL', '--submit-review requires an outcome: px review <slug> --submit-review <approve|request-changes|comment> [--message "<summary>"|--message-file <path>]')); (o.exit || process.exit)(1); return; } await (o.submitReviewRoundFn || submitReviewRound)(context.slug, outcome, readTextFlag(context.args, '--message', '--message-file', 'review message', o) || '', o); }
   async close(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.closeMissionPrFn || closeMissionPr)(context.slug, o); }
-  async backfillReview(context: ReviewWorkflowContext): Promise<void> { await backfillReviewHandler(context.slug, context.args, context.options); }
   async reconcileReview(context: ReviewWorkflowContext): Promise<void> { await reconcileInterruptedHandoffHandler(context.slug, context.args, context.options); }
   async status(context: ReviewWorkflowContext): Promise<void> {
     const o = context.options as typeof this._defaults;

@@ -122,7 +122,6 @@ test('SC11: ConcreteReviewReadAdapter returns null when no review state exists (
   const tmp = registeredMkdtemp('px-review-wins-');
   try {
     const adapter = new ConcreteReviewReadAdapter({
-      rootDir: tmp,
       missionStore: null,
     });
 

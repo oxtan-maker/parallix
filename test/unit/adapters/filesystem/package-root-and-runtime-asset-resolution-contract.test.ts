@@ -8,6 +8,7 @@
 import test, { describe, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { createRepairPromptReader } from '../../../../src/adapters/assets/repair-prompts.js';
 import os from 'node:os';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from '../../../lib/module-mock.js';
@@ -188,6 +189,7 @@ describe("shipped prompts and configuration route through the runtime AssetStore
       'prompts/draft-core.md', 'prompts/draft.md',
       'prompts/execute-core.md', 'prompts/execute.md',
       'prompts/review-core.md', 'prompts/review.md',
+      'prompts/repair.md',
       'templates/mission-scaffold.md',
     ]) {
       assert.match(assetStoreSource, new RegExp(`'${asset.replace('.', '\\.')}'`));
@@ -208,5 +210,15 @@ describe("shipped prompts and configuration route through the runtime AssetStore
       assert.match(source, /runtimeAssetStore\.readText|assembleStagePrompt/);
       assert.doesNotMatch(source, /packageRoot\(import.meta.dirname\).*'(prompts|templates|config)'/);
     }
+  });
+
+  test('repair prompt sections come from the runtime asset without adjacent sections (TASK-2821)', () => {
+    const reader = createRepairPromptReader({ readText: key => {
+      assert.equal(key, 'prompts/repair.md');
+      return '# Repair\n\n## authority\n\nInvestigate the test intent.\n\n## gate\n\nRun the exact check.\n';
+    } });
+    assert.equal(reader('authority'), 'Investigate the test intent.');
+    assert.equal(reader('gate'), 'Run the exact check.');
+    assert.throws(() => reader('checkpoint'), /Missing repair prompt section: checkpoint/);
   });
 });

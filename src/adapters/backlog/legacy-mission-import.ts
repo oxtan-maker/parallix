@@ -53,7 +53,7 @@ import { parseTaskFrontmatterValue } from './task-file-io.js';
 import { type MissionId } from '../../domain/mission.js';
 import { LEGACY_TASK_SOURCE, type MissionImportServices, type LegacyImportOptions, type LegacyImportReport, type LegacyRecord } from './legacy-import-types.js';
 import { legacyDirectories, markdownFiles, parseLegacyRecord, relative, headCommit, sourceMatchesCommit } from './legacy-record-source.js';
-import { importLegacyMissionDocuments, importLegacyReviewLaunches, importLegacyReviews, importLegacyNel } from './legacy-import-companions.js';
+import { importLegacyMissionDocuments, importLegacyNel } from './legacy-import-companions.js';
 import { importLegacyCheckpoints } from './legacy-import-checkpoints.js';
 import { recordDependencies, type DependencyCandidate } from './legacy-import-dependencies.js';
 export { LEGACY_TASK_SOURCE } from './legacy-import-types.js';
@@ -98,8 +98,6 @@ export async function importLegacyMissions(
   await recordDependencies(services, withMission, dryRun, unresolvedDependencies, obsoleteDependencies, conflicts);
   const checkpointFilesImportable = await importLegacyCheckpoints(services, options, commit, conflicts);
   progress.importable += await importLegacyNel(services, options, commit, conflicts);
-  progress.importable += await importLegacyReviews(services, options, commit, conflicts);
-  progress.importable += await importLegacyReviewLaunches(services, options, commit, conflicts);
   progress.importable += await importLegacyMissionDocuments(services, options, commit, conflicts);
 
   // Repair only legacy-imported rows. A native Mission can be `done` with no

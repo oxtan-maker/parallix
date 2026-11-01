@@ -575,6 +575,7 @@ test('failed approval boundary transition surfaces and blocks Backlog promotion 
         return true;
       }),
       missionStore: fixture.store,
+      lifecycleService: failingLifecycle,
     });
   } catch (error) {
     // A thrown failure is an acceptable way to surface the boundary failure;
@@ -673,6 +674,7 @@ test('R5: human px review approval persists ReviewerDecision and lands integrati
         return true;
       }),
       missionStore: fixture.store,
+      lifecycleService: lifecycle,
     });
 
     // The override succeeded quietly: no operator-visible failure, no exit.

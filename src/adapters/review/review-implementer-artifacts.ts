@@ -1,3 +1,4 @@
+import type { ReviewPhase } from '../../domain/review-phase-policy.js';
 import type { postComment } from './review-adapter.js';
 /**
  * Implementer artifact consumption: resolve the implementer artifact set,
@@ -6,7 +7,7 @@ import type { postComment } from './review-adapter.js';
 
 import * as fmt from '../../application/presentation/cli-format.js';
 import { resolveWorktree } from '../filesystem/mission-utils.js';
-import { readReviewState, writeReviewState, reviewStateFile } from './review-state.js';
+import { readReviewState, writeReviewState } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { parseResolutionDispositions, type ReviewItemDisposition } from '../../domain/review.js';
 import { createEvent, consumeHumanNotes, VALID_EVENT_TYPES, CreateEventParams, CreateEventOptions, CreateEventResult } from './review-events.js';
@@ -87,10 +88,10 @@ type ImplementerArtifactFailure = { consumed: true; ok: false; diagnostic: strin
 /** Name which of the two required implementer artifacts is missing, and why that is fatal. */
 function reportIncompleteImplementerArtifacts(context: {
   slug: string; resolution: string | null; disposition: string | null;
-  resolutionPath: string; dispositionPath: string; reviewStatePath: string | null;
+  resolutionPath: string; dispositionPath: string;
   providerEnabled: boolean; error: (_msg: string) => void;
 }): ImplementerArtifactFailure {
-  const { slug, resolutionPath, dispositionPath, reviewStatePath, providerEnabled, error } = context;
+  const { slug, resolutionPath, dispositionPath, providerEnabled, error } = context;
   const missing: string[] = [];
   if (!context.resolution) { missing.push('round-resolution'); }
   if (!context.disposition) { missing.push('disposition'); }
@@ -98,10 +99,7 @@ function reportIncompleteImplementerArtifacts(context: {
   if (providerEnabled) {
     error(fmt.status('FAIL', expected));
   } else {
-    // With provider=none there is no PR review to fall back on, so the local
-    // state path is named: it is the only place the operator can repair this.
-    const statePathStr = reviewStatePath ? ` local review state at ${reviewStatePath}; ` : ' ';
-    error(fmt.status('FAIL', `${expected}${statePathStr}No provider review posted (provider=none); add review-disposition.txt and a round resolution, or use \`node parallix review <slug> --submit-review approve\`.`));
+    error(fmt.status('FAIL', `${expected} No provider review posted (provider=none); add review-disposition.txt and a round resolution, or use \`node parallix review <slug> --submit-review approve\`.`));
   }
   return { consumed: true, ok: false, diagnostic: `Implementer artifacts incomplete: missing ${missing.join(', ')}` };
 }
@@ -189,7 +187,7 @@ async function persistImplementerEvents(params: {
   slug: string;
   implementer: string;
   round: number | undefined;
-  phase: string | undefined;
+  phase: ReviewPhase | undefined;
   resolution: string;
   disposition: string;
   itemDispositions: ReviewItemDisposition[];
@@ -234,7 +232,6 @@ function prepareImplementerArtifacts(slug: string, options: ImplementerArtifactO
   const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
   const tmpDir = options.tmpDir || resolveArtifactDir(worktree);
   const providerEnabled = resolveProviderEnabled(options, worktree);
-  const reviewStatePath = reviewStateFile(slug, worktree);
 
   const artifacts = options.output
     ? typedImplementerArtifactSet(slug, tmpDir, options.output)
@@ -242,7 +239,7 @@ function prepareImplementerArtifacts(slug: string, options: ImplementerArtifactO
   const disposition = normalizeDisposition(artifacts.dispositionRaw || '');
   const hasAny = artifacts.resolution !== null || artifacts.dispositionRaw !== null;
 
-  return { log, error, deleteArtifactFn, worktree, providerEnabled, reviewStatePath, artifacts, disposition, hasAny };
+  return { log, error, deleteArtifactFn, worktree, providerEnabled, artifacts, disposition, hasAny };
 }
 
 export async function consumeImplementerArtifacts(
@@ -250,13 +247,13 @@ export async function consumeImplementerArtifacts(
   implementer: string,
   options: ImplementerArtifactOptions = {}
 ): Promise<{ consumed: boolean; ok?: boolean; disposition?: string | null; diagnostic?: string | null }> {
-  const { log, error, deleteArtifactFn, worktree, providerEnabled, reviewStatePath, artifacts, disposition, hasAny } = prepareImplementerArtifacts(slug, options);
+  const { log, error, deleteArtifactFn, worktree, providerEnabled, artifacts, disposition, hasAny } = prepareImplementerArtifacts(slug, options);
 
   if (!hasAny) {
     return { consumed: false };
   }
   if (!artifacts.resolution || !disposition) {
-    return reportIncompleteImplementerArtifacts({ slug, resolution: artifacts.resolution, disposition, resolutionPath: artifacts.resolutionPath, dispositionPath: artifacts.dispositionPath, reviewStatePath, providerEnabled: Boolean(providerEnabled), error });
+    return reportIncompleteImplementerArtifacts({ slug, resolution: artifacts.resolution, disposition, resolutionPath: artifacts.resolutionPath, dispositionPath: artifacts.dispositionPath, providerEnabled: Boolean(providerEnabled), error });
   }
 
   const staleResolution = await staleReviewWrite(slug, options.expectedVersion, options.missionStore);

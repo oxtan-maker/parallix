@@ -105,7 +105,7 @@ describe("revoke review", { concurrency: false }, () => {
         { user: { login: 'human' }, submitted_at: '2026-01-01T00:02:00Z', state: 'REQUEST_CHANGES' },
       ] })),
     });
-    assert.deepEqual(providerReview, { state: 'REQUEST_CHANGES', submittedAt: '2026-01-01T00:02:00Z' });
+    assert.deepEqual(providerReview, { state: 'REQUEST_CHANGES', submittedAt: '2026-01-01T00:02:00Z', body: '', revision: null });
     const requested = applyReviewerCommand(startReview(
       { change: { kind: 'local-branch', sourceBranch: 'mission/task-2543', targetBranch: 'main' }, revision: changeRevision('provider') },
       agentFamily('custom'), agentFamily('codex'), '2026-01-01T00:00:00Z',

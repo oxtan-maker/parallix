@@ -207,7 +207,6 @@ describe("review store wiring", { concurrency: false }, () => {
 
   test('ConcreteReviewReadAdapter returns a Review when its MissionStore has persisted review data', async () => {
     const adapter = new ConcreteReviewReadAdapter({
-      rootDir: process.cwd(),
       missionStore,
     });
 
@@ -233,14 +232,14 @@ describe("missionstore repro", { concurrency: false }, () => {
     const worktree = '/tmp/worktree';
     await persistReviewStateOrThrow(mockWriteFn, slug, state, worktree, mockStore);
 
-    // writeFn must be called with 4 args: (slug, state, worktree, { missionStore, lifecycleService })
+    // writeFn must be called with 4 args: (slug, state, worktree, { missionStore })
     assert.equal(receivedArgs.length, 4, 'writeFn should receive 4 arguments');
     assert.equal(receivedArgs[0], slug, 'first arg should be slug');
     assert.ok(receivedArgs[1] instanceof ReviewState, 'second arg should be ReviewState');
     assert.equal(receivedArgs[2], worktree, 'third arg should be worktree');
     assert.deepEqual(
       receivedArgs[3],
-      { missionStore: mockStore, lifecycleService: undefined },
+      { missionStore: mockStore },
       'fourth arg should be the options object carrying missionStore'
     );
   });
@@ -270,7 +269,7 @@ describe("missionstore repro", { concurrency: false }, () => {
     );
     assert.deepEqual(
       receivedArgs[3],
-      { missionStore: undefined, lifecycleService: undefined },
+      { missionStore: undefined },
       'fourth arg options should carry undefined missionStore when omitted'
     );
   });

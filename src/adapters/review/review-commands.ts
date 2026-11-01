@@ -18,7 +18,7 @@ import { buildMetadataFooter, postWorkflowComment } from './review-artifacts.js'
 export { continueReviewClearsIntervention, continueReviewInvalidatesBlocker } from './review-intervention-commands.js';
 export { verifyReview, submitForReview } from './review-verify-commands.js';
 export { submitReviewRound, closeMissionPr } from './review-submit-round.js';
-export { backfillReviewHandler, reconcileInterruptedHandoffHandler } from './review-event-handlers.js';
+export { reconcileInterruptedHandoffHandler } from './review-event-handlers.js';
 
 export { REVIEW_FLAGS, REVIEW_VALUE_FLAGS, unknownReviewFlags, flagValue, readTextFlag, repeatedFlagValues } from './review-cli-flags.js';
 export async function readComments(

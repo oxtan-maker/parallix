@@ -236,6 +236,7 @@ const RUNTIME_ASSET_KEYS = [
   'prompts/execute.md',
   'prompts/review-core.md',
   'prompts/review.md',
+  'prompts/repair.md',
   'templates/mission-scaffold.md',
   ...fs.readdirSync(path.join(root, 'src', 'adapters', 'sqlite', 'migrations'))
     .filter(file => file.endsWith('.sql'))

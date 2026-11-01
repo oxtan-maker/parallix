@@ -58,7 +58,7 @@ try {
       verify: unexpected, submit: unexpected, push: unexpected,
       comment: unexpected, readComments: unexpected,
       submitReview: unexpected, close: unexpected, status: unexpected,
-      backfillReview: unexpected, reconcileReview: unexpected,
+      reconcileReview: unexpected,
     };
     await main(['review', 'disposable-smoke'], {
       runtime: resolveConfiguration({ PARALLIX_HOME: path.join(root, 'operator') }).runtime,

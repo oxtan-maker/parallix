@@ -81,7 +81,7 @@ export async function openReviewRound(
 
   state.phase = 'reviewing';
   try {
-    await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore, lifecycleService);
+    await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
   } catch (err) {
     const diagnostic = `Could not persist the review round for ${slug}: ${err instanceof Error ? err.message : String(err)}`;
     error(fmt.status('FAIL', diagnostic));

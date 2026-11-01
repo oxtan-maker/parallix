@@ -1,3 +1,7 @@
+import { fixtureMission, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
+import { agentFamily } from '../../../src/domain/agents.js';
+import { startReview, ConfiguredReviewerEligibility, changeRevision } from '../../../src/domain/review.js';
+import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 import { ReviewState } from '../../../src/adapters/review/review-state.js';
 import { reviewStateWriterFixture } from '../../helpers/review-state-writer.js';
 
@@ -8,9 +12,20 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { flagValue, readTextFlag, verifyReview, submitReviewRound, pushRound, commentRound, showReviewStatus } from '../../../src/adapters/review/review-commands.js';
-const mockWorktree = '/mock/worktree';
+const mockWorktree = fs.mkdtempSync(path.join(os.tmpdir(), 'review-command-contract-'));
+fs.writeFileSync(path.join(mockWorktree, 'workflow.config.json'), JSON.stringify({ adapters: { verification: { command: ':' } } }));
+test.after(() => fs.rmSync(mockWorktree, { recursive: true, force: true }));
 const mockSlug = 'test-slug';
 const mockBranch = 'mission/test-slug';
+
+function verdictAuthority(selfReview = false) {
+  const reviewer = agentFamily(selfReview ? 'custom' : 'rev');
+  const implementer = agentFamily(selfReview ? 'custom' : 'impl');
+  const review = startReview({ change: { kind: 'local-branch', sourceBranch: mockBranch, targetBranch: 'main' }, revision: changeRevision('review-head') },
+    reviewer, implementer, '2026-10-25T00:00:00Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' }));
+  const store = inMemoryTransitionStore(fixtureMission(mockSlug, { status: 'review', assignee: implementer, review }));
+  return { revision: 'review-head', getPrAuthorFn: () => implementer, missionStore: store, lifecycleService: new MissionLifecycleService(store), currentDisposition: () => store.mission().review?.rounds.at(-1)?.disposition };
+}
 
 // flagValue - basic tests
 test('flagValue returns null when flag not present', () => {
@@ -39,6 +54,7 @@ test('readTextFlag from inline', () => {
 test('verifyReview exits on missing mission dir', async () => {
   let exited = false;
   await verifyReview(mockSlug, false, {
+    runVerificationGate: () => ({ status: 0 }),
     findMissionDirFn: () => null,
     getCurrentBranchFn: () => mockBranch,
     resolveTaskFileFn: () => ({ matches: ['/mock/task.md'],  ok: true as const, taskFile: '/mock/task.md' }),
@@ -54,6 +70,7 @@ test('verifyReview exits on missing mission dir', async () => {
 test('verifyReview exits on branch mismatch', async () => {
   let exited = false;
   await verifyReview(mockSlug, false, {
+    runVerificationGate: () => ({ status: 0 }),
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => 'wrong-branch',
     resolveTaskFileFn: () => ({ matches: ['/mock/task.md'],  ok: true as const, taskFile: '/mock/task.md' }),
@@ -69,6 +86,7 @@ test('verifyReview exits on branch mismatch', async () => {
 test('verifyReview exits on task not found', async () => {
   let exited = false;
   await verifyReview(mockSlug, false, {
+    runVerificationGate: () => ({ status: 0 }),
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => mockBranch,
     resolveTaskFileFn: () => ({ matches: [], reason: 'missing' as const,  ok: false as const }),
@@ -144,14 +162,14 @@ test('submitReviewRound blocks approve when a pre-review gate fails', async () =
       JSON.stringify({ adapters: { gates: { preReview: [{ key: 'smoke', command: 'exit 3', order: 0 }] } } }),
     );
     let exited = 0;
-    let disp = null;
+    const authority = verdictAuthority();
     let transitioned: { value: { slug: string; status: string; } | null } = { value: null };
-    const state = new ReviewState(mockSlug, { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl' });
+    const state = new ReviewState(mockSlug, { round: 1, startedAt: '2026-10-25T00:00:00Z', phase: 'reviewing' as const, reviewer: 'rev', implementer: 'impl' });
     await submitReviewRound(mockSlug, 'approve', 'msg', {
       worktree: checkout,
       isForgejoReviewEnabledFn: () => true,
       readReviewStateFn: () => state,
-      writeReviewStateFn: reviewStateWriterFixture((s, st) => { disp = st.disposition; }),
+      ...authority,
       transitionTaskFn: async (slug, status) => { transitioned.value = { slug, status }; return true; },
       readTokenFn: () => 'token',
       postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
@@ -160,7 +178,7 @@ test('submitReviewRound blocks approve when a pre-review gate fails', async () =
       exit: () => { exited = 1; },
     });
     assert.equal(exited, 1, 'approve exits non-zero when the pre-review gate fails');
-    assert.equal(disp, null, 'no approved disposition is recorded on a blocked gate');
+    assert.equal(authority.currentDisposition(), null, 'no approved disposition is recorded on a blocked gate');
     assert.equal(transitioned.value, null, 'backlog task is not promoted to approved');
   } finally {
     fs.rmSync(checkout, { recursive: true, force: true });
@@ -175,21 +193,21 @@ test('submitReviewRound permits approve when the pre-review gate passes', async 
       path.join(checkout, 'workflow.config.json'),
       JSON.stringify({ adapters: { gates: { preReview: [{ key: 'smoke', command: 'true', order: 0 }] } } }),
     );
-    let disp = null;
+    const authority = verdictAuthority();
     let transitioned: { value: { slug: string; status: string; } | null } = { value: null };
-    const state = new ReviewState(mockSlug, { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl' });
+    const state = new ReviewState(mockSlug, { round: 1, startedAt: '2026-10-25T00:00:00Z', phase: 'reviewing' as const, reviewer: 'rev', implementer: 'impl' });
     await submitReviewRound(mockSlug, 'approve', 'msg', {
       worktree: checkout,
       isForgejoReviewEnabledFn: () => true,
       readReviewStateFn: () => state,
-      writeReviewStateFn: reviewStateWriterFixture((s, st) => { disp = st.disposition; }),
+      ...authority,
       transitionTaskFn: async (slug, status) => { transitioned.value = { slug, status }; return true; },
       readTokenFn: () => 'token',
       postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
       log: () => {},
       error: () => {},
     });
-    assert.equal(disp, 'APPROVED', 'a passing pre-review gate permits the approve');
+    assert.equal(authority.currentDisposition(), 'APPROVED', 'a passing pre-review gate permits the approve');
     assert.deepEqual(transitioned.value, { slug: mockSlug, status: 'approved' });
   } finally {
     fs.rmSync(checkout, { recursive: true, force: true });
@@ -197,74 +215,72 @@ test('submitReviewRound permits approve when the pre-review gate passes', async 
 });
 
 test('submitReviewRound handles approve for forgejo', async () => {
-  let disp = null;
+  const authority = verdictAuthority();
   let transitioned: { value: { slug: string; status: string; } | null } = { value: null };
-  const state = new ReviewState(mockSlug, { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl' });
+  const state = new ReviewState(mockSlug, { round: 1, startedAt: '2026-10-25T00:00:00Z', phase: 'reviewing' as const, reviewer: 'rev', implementer: 'impl' });
   await submitReviewRound(mockSlug, 'approve', 'msg', {
     worktree: mockWorktree,
     isForgejoReviewEnabledFn: () => true,
     readReviewStateFn: () => state,
-    writeReviewStateFn: reviewStateWriterFixture((s, st) => { disp = st.disposition; }),
+    ...authority,
     transitionTaskFn: async (slug, status) => { transitioned.value = { slug, status }; return true; },
     readTokenFn: () => 'token',
     postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
     log: () => {},
     error: () => {}
   });
-  assert.equal(disp, 'APPROVED');
+  assert.equal(authority.currentDisposition(), 'APPROVED');
   assert.deepEqual(transitioned.value, { slug: mockSlug, status: 'approved' });
 });
 
 test('submitReviewRound handles request-changes for forgejo', async () => {
-  let disp = null;
+  const authority = verdictAuthority();
   let transitioned: { value: { slug: string; status: string; } | null } = { value: null };
-  const state = new ReviewState(mockSlug, { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl' });
+  const state = new ReviewState(mockSlug, { round: 1, startedAt: '2026-10-25T00:00:00Z', phase: 'reviewing' as const, reviewer: 'rev', implementer: 'impl' });
   await submitReviewRound(mockSlug, 'request-changes', 'msg', {
     worktree: mockWorktree,
     isForgejoReviewEnabledFn: () => true,
     readReviewStateFn: () => state,
-    writeReviewStateFn: reviewStateWriterFixture((s, st) => { disp = st.disposition; }),
+    ...authority,
     transitionTaskFn: async (slug, status) => { transitioned.value = { slug, status }; return true; },
     readTokenFn: () => 'token',
     postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
     log: () => {},
     error: () => {}
   });
-  assert.equal(disp, 'REQUEST_CHANGES');
+  assert.equal(authority.currentDisposition(), 'REQUEST_CHANGES');
   assert.deepEqual(transitioned.value, { slug: mockSlug, status: 'review' });
 });
 
 test('submitReviewRound handles provider=none', async () => {
-  let disp = null;
+  const authority = verdictAuthority();
   let transitioned = false;
-  const state = new ReviewState(mockSlug, { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl' });
+  const state = new ReviewState(mockSlug, { round: 1, startedAt: '2026-10-25T00:00:00Z', phase: 'reviewing' as const, reviewer: 'rev', implementer: 'impl' });
   await submitReviewRound(mockSlug, 'approve', 'msg', {
     worktree: mockWorktree,
     isForgejoReviewEnabledFn: () => false,
     readReviewStateFn: () => state,
-    writeReviewStateFn: reviewStateWriterFixture((s, st) => { disp = st.disposition; }),
+    ...authority,
     transitionTaskFn: async () => { transitioned = true; return true; },
     log: () => {},
     error: () => {}
   });
-  assert.equal(disp, 'APPROVED');
+  assert.equal(authority.currentDisposition(), 'APPROVED');
   assert.equal(transitioned, true);
 });
 
-test('submitReviewRound creates state when none exists', async () => {
-  let newState: { value: Record<string, unknown> | import("../../../src/adapters/review/review-state.js").ReviewState | import("../../../src/application/ports/review-persistence.js").ReviewStateData | null } = { value: null };
+test('submitReviewRound cannot fabricate a Review when none exists (TASK-2821)', async () => {
+  const store = inMemoryTransitionStore(fixtureMission(mockSlug, { status: 'review', review: null }));
+  let exitCode = 0, mirrored = false;
   await submitReviewRound(mockSlug, 'approve', 'msg', {
-    worktree: mockWorktree,
-    isForgejoReviewEnabledFn: () => false,
-    readReviewStateFn: () => null,
-    writeReviewStateFn: reviewStateWriterFixture((s, st) => { newState.value = st; }),
-    transitionTaskFn: async () => true,
-    log: () => {},
-    error: () => {}
+    worktree: mockWorktree, revision: 'review-head', missionStore: store, lifecycleService: new MissionLifecycleService(store),
+    isForgejoReviewEnabledFn: () => false, readReviewStateFn: () => null,
+    transitionTaskFn: async () => { mirrored = true; return true; },
+    log: () => {}, error: () => {}, exit: code => { exitCode = code; },
   });
-  assert.ok(newState.value);
-  assert.equal(newState.value.disposition, 'APPROVED');
-  assert.equal(newState.value.phase, 'approved');
+  assert.equal(exitCode, 1);
+  assert.equal(store.mission().review, null);
+  assert.equal(mirrored, false);
 });
 
 test('submitReviewRound does not exit when reviewer is the PR author (self-author skip)', async () => {
@@ -274,7 +290,7 @@ test('submitReviewRound does not exit when reviewer is the PR author (self-autho
   let exited = false;
   let postCalled = false;
   const transitions: string[] = [];
-  let recordedDisposition = null;
+  const authority = verdictAuthority(true);
   let recordedVerdict: { value: string | undefined | null } = { value: null };
   const warnings: string[] = [];
   // Force forgejoUser to resolve from state.reviewer (= 'custom') regardless of
@@ -282,12 +298,12 @@ test('submitReviewRound does not exit when reviewer is the PR author (self-autho
   const prevEnv = process.env.FORGEJO_USER;
   delete process.env.FORGEJO_USER;
   try {
-    const state = new ReviewState(mockSlug, { round: 1, phase: 'reviewing', reviewer: 'custom', implementer: 'custom' });
+    const state = new ReviewState(mockSlug, { round: 1, startedAt: '2026-10-25T00:00:00Z', phase: 'reviewing', reviewer: 'custom', implementer: 'custom' });
     await submitReviewRound(mockSlug, 'approve', 'msg', {
       worktree: mockWorktree,
       isForgejoReviewEnabledFn: () => true,
       readReviewStateFn: () => state,
-      writeReviewStateFn: reviewStateWriterFixture((s, st) => { recordedDisposition = st.disposition; }),
+      ...authority,
       createEventFn: async (slug, type, params) => { recordedVerdict.value = params.verdict; return { ok: true as const, path: '/mock' }; },
       readTokenFn: () => 'token',
       getPrAuthorFn: () => 'custom', // reviewer == PR author
@@ -306,19 +322,21 @@ test('submitReviewRound does not exit when reviewer is the PR author (self-autho
   assert.equal(exited, false, 'self-author skip must NOT exit(1)');
   assert.equal(postCalled, false, 'must NOT POST a self-approval to Forgejo');
   assert.deepEqual(transitions, ['review'], 'successful self-author verdict repairs the Backlog intake mirror (H17)');
-  assert.equal(recordedDisposition, 'APPROVED', 'verdict recorded to local review-state');
+  assert.equal(authority.currentDisposition(), 'APPROVED', 'verdict recorded to local review-state');
   assert.equal(recordedVerdict.value, 'approve', 'reviewer_outcome event recorded locally');
   assert.ok(warnings.some(w => /self-approval POST skipped|different agent or a human/.test(w)), 'must warn that a different agent/human posts the formal approval');
 });
 
 test('submitReviewRound exits(1) on a genuine review failure (non-author path)', async () => {
+  const authority = verdictAuthority();
   let exited = false;
   await submitReviewRound(mockSlug, 'approve', 'msg', {
     worktree: mockWorktree,
     isForgejoReviewEnabledFn: () => true,
-    readReviewStateFn: () => new ReviewState(mockSlug, { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl' }),
+    readReviewStateFn: () => new ReviewState(mockSlug, { round: 1, startedAt: '2026-10-25T00:00:00Z', phase: 'reviewing' as const, reviewer: 'rev', implementer: 'impl' }),
     writeReviewStateFn: reviewStateWriterFixture(() => {}),
     readTokenFn: () => 'token',
+    ...authority,
     getPrAuthorFn: () => 'someone-else',
     postReviewFn: () => ({ statusCode: null, stderr: null, error: null,  ok: false as const, status: 500, data: { message: 'boom' } }),
     log: () => {},
@@ -416,7 +434,7 @@ test('pushRound bootstraps a missing review repo and retries push', async () => 
 // showReviewStatus
 test('showReviewStatus shows state', async () => {
   let logged = false;
-  const state = { round: 5, phase: 'reviewing', reviewer: 'rev', implementer: 'impl', startedAt: '2024-01-01' };
+  const state = { round: 5, phase: 'reviewing' as const, reviewer: 'rev', implementer: 'impl', startedAt: '2024-01-01' };
   await showReviewStatus(mockSlug, {
     readReviewStateFn: () => state,
     log: (msg) => { if (msg.includes('Round:')) logged = true; }
@@ -435,7 +453,7 @@ test('showReviewStatus handles missing state', async () => {
 
 test('showReviewStatus shows disposition', async () => {
   let logged = false;
-  const state = { round: 1, phase: 'fixing', reviewer: 'rev', implementer: 'impl', startedAt: '2024-01-01', disposition: 'REQUEST_CHANGES' };
+  const state = { round: 1, phase: 'fixing' as const, reviewer: 'rev', implementer: 'impl', startedAt: '2024-01-01', disposition: 'REQUEST_CHANGES' };
   await showReviewStatus(mockSlug, {
     readReviewStateFn: () => state,
     log: (msg) => { if (msg.includes('Disposition:')) logged = true; }

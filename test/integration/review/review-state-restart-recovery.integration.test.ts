@@ -28,7 +28,6 @@ import { changeRevision, type Review } from '../../../src/domain/review.js';
 import {
   readReviewState,
   writeReviewState,
-  reviewStateFile,
 } from '../../../src/adapters/review/review-state.js';
 
 const SLUG = 'task-recovery-review';
@@ -129,8 +128,7 @@ async function withMissionStore<T>(root: string, fn: (store: SqliteMissionStore)
 
 /** SC7's standing invariant: no scenario may fall back to the JSON file. */
 function assertNoFileFallback(root: string): void {
-  const statePath = reviewStateFile(SLUG, root);
-  assert.ok(statePath, 'the mission directory should still resolve');
+  const statePath = path.join(root, 'missions', SLUG, 'review-state.json');
   assert.equal(
     fs.existsSync(statePath as string),
     false,
@@ -155,7 +153,7 @@ describe("review-loop state survives every recovery scenario (SC7)", () => {
         await writeReviewState(SLUG, {
           reviewer: 'codex', implementer: 'claude', round: 1, phase: 'fixing',
           disposition: 'REQUEST_CHANGES',
-        }, root, store),
+        }, root, { missionStore: store }),
         { outcome: 'committed' },
       );
       const state = await readReviewState(SLUG, root, store);
@@ -220,7 +218,7 @@ describe("review-loop state survives every recovery scenario (SC7)", () => {
         await writeReviewState(SLUG, {
           reviewer: 'codex', implementer: 'claude', round: 1, phase: 'fixing',
           metadata: { gateFailureRetryCount: 2 },
-        }, root, store),
+        }, root, { missionStore: store }),
         { outcome: 'committed' },
       );
       assert.equal((await readReviewState(SLUG, root, store))?.metadata.gateFailureRetryCount, undefined);
@@ -231,14 +229,14 @@ describe("review-loop state survives every recovery scenario (SC7)", () => {
   // --- 3. restart ----------------------------------------------------------
   it('restart: state written by one process is read by the next', async () => {
     const root = createTempRoot('restart');
-    await seed(root);
+    await seed(root, { rounds: [{ ...missionWithReview(root).review!.rounds[0], number: 3 }] });
 
     await withMissionStore(root, async (store) => {
       await writeReviewState(SLUG, {
         reviewer: 'codex', implementer: 'claude', round: 3, phase: 'fixing',
         disposition: 'BLOCKED',
         metadata: { recordedStageLaunches: { 'fix:claude': ['claude|s9|t0|t1|0'] } },
-      }, root, store);
+      }, root, { missionStore: store });
     });
 
     // A new "process": fresh adapter cache, fresh connection.
@@ -272,7 +270,7 @@ describe("review-loop state survives every recovery scenario (SC7)", () => {
 
       const result = await writeReviewState(SLUG, {
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'fixing',
-      }, root, store);
+      }, root, { missionStore: store });
       assert.deepEqual(result, { outcome: 'committed' }, 'the retry reapplies onto the newer version');
       assert.equal((await readReviewState(SLUG, root, store))?.phase, 'fixing');
     });

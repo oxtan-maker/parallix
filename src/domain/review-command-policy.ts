@@ -1,4 +1,4 @@
-export type ReviewOperation = 'status' | 'verify' | 'submit' | 'push' | 'readComments' | 'comment' | 'submitReview' | 'close' | 'backfillReview' | 'reconcileReview' | 'enter';
+export type ReviewOperation = 'status' | 'verify' | 'submit' | 'push' | 'readComments' | 'comment' | 'submitReview' | 'close' | 'reconcileReview' | 'enter';
 /**
  * Review operations that keep the board busy, and the phase each publishes.
  *
@@ -12,7 +12,7 @@ const PUBLISHED_PHASES: Readonly<Record<string, 'review'>> = {
   submitReview: 'review',
 };
 const REVIEW_FLAG_OPERATIONS: ReadonlyArray<readonly [string, ReviewOperation]> = [
-  ['--status', 'status'], ['--verify', 'verify'], ['--submit', 'submit'], ['--push', 'push'], ['--comments', 'readComments'], ['--comment', 'comment'], ['--comment-file', 'comment'], ['--submit-review', 'submitReview'], ['--close', 'close'], ['--backfill-review', 'backfillReview'], ['--reconcile-review', 'reconcileReview'],
+  ['--status', 'status'], ['--verify', 'verify'], ['--submit', 'submit'], ['--push', 'push'], ['--comments', 'readComments'], ['--comment', 'comment'], ['--comment-file', 'comment'], ['--submit-review', 'submitReview'], ['--close', 'close'], ['--reconcile-review', 'reconcileReview'],
 ];
 
 

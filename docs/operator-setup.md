@@ -211,6 +211,16 @@ operator changes. Recovery retries and fallback remain within that eligible
 pool, subject to launcher availability and agent blocks; an exhausted pool
 stops recovery.
 
+When a test fails during repair, the agent investigates why it exists, the
+mission's intended change and the affected production flow. It decides whether
+to fix a product regression or update an expectation superseded by the
+authorized change, preserving the test's distinct safety checks and behavioral
+coverage. Editing a test does not by itself require human attention. The agent
+records its reasoning and verification; the original failing check must pass
+before recovery continues. Human attention is required for an unresolved product
+decision or conflict with the locked mission or gates that the investigation
+cannot resolve from the recorded authority and repository evidence.
+
 ## Claude credentials across missions
 
 A `claude` login stores an OAuth access token that expires after about eight

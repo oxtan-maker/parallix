@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { ReviewState, readReviewState, normalizeReviewPhase } from '../../../src/adapters/review/review-state.js';
+import { ReviewState, readReviewState } from '../../../src/adapters/review/review-state.js';
 import { withMissionDatabase } from '../../fixtures/review-state-db.js';
 import { clearOperatorStateCache } from '../../../src/adapters/sqlite/adapter-factory.js';
 import { stageLaunchSinceMs } from '../../../src/adapters/review/review-agent-fallback.js';
@@ -15,7 +15,7 @@ test('ReviewState class can be instantiated and saved', async () => {
     const state = new ReviewState(slug, {
       reviewer: 'gemini',
       implementer: 'claude',
-      round: 2,
+      round: 1,
       phase: 'fixing',
       disposition: 'REQUEST_CHANGES',
       metadata: { recordedStageLaunches: { 'review:gemini': ['gemini|s1|t0|t1|0'] } }
@@ -26,7 +26,7 @@ test('ReviewState class can be instantiated and saved', async () => {
     assert.equal(state.disposition, 'REQUEST_CHANGES');
     assert.deepEqual(state.metadata, { recordedStageLaunches: { 'review:gemini': ['gemini|s1|t0|t1|0'] } });
 
-    const result = await state.save(root, store);
+    const result = await state.save(root, { missionStore: store });
     assert.deepEqual(result, { outcome: 'committed' });
 
     const loaded = await readReviewState(slug, root, store);
@@ -64,7 +64,7 @@ test('ReviewState toJSON includes metadata when present (TASK-2377.04: no retry 
 });
 
 test('ReviewState.from wraps a plain object into a ReviewState', () => {
-  const plain = { reviewer: 'gemini', implementer: 'claude', round: 3, phase: 'fixing' };
+  const plain = { reviewer: 'gemini', implementer: 'claude', round: 3, phase: 'fixing' as const };
   const state = ReviewState.from('task-from-1', plain);
   assert.ok(state instanceof ReviewState);
   assert.equal(state.slug, 'task-from-1');
@@ -99,29 +99,14 @@ test('transitionTo allows valid phase transitions', () => {
 
 test('transitionTo rejects invalid phase transitions', () => {
   const state = new ReviewState('task-t2', { reviewer: 'a', implementer: 'b' });
-  assert.throws(() => state.transitionTo('approved-wrong'), /Invalid phase/);
-  assert.throws(() => state.transitionTo('pending-approval'), /Cannot transition from "reviewing" to "pending-approval"/);
+  // @ts-expect-error Deliberately exercise an unchecked caller.
+  assert.throws(() => state.transitionTo('approved-wrong'), /Invalid review phase/);
+  assert.throws(() => state.transitionTo('pending-approval'), /Review phase "reviewing" cannot move to "pending-approval"/);
 });
 
 test('transitionTo rejects transitions from approved', () => {
   const state = new ReviewState('task-t3', { reviewer: 'a', implementer: 'b', phase: 'approved' });
-  assert.throws(() => state.transitionTo('reviewing'), /Cannot transition from "approved"/);
-});
-
-test('normalizeReviewPhase repairs the rewiewing typo to reviewing', () => {
-  assert.deepEqual(normalizeReviewPhase('rewiewing', ''), {
-    phase: 'reviewing',
-    original: 'rewiewing',
-    normalized: true
-  });
-});
-
-test('normalizeReviewPhase falls back from unknown values using disposition', () => {
-  assert.deepEqual(normalizeReviewPhase('totally-wrong', 'PUSHBACK_ALL'), {
-    phase: 'fixing',
-    original: 'totally-wrong',
-    normalized: true
-  });
+  assert.throws(() => state.transitionTo('reviewing'), /Review phase "approved" cannot move/);
 });
 
 test('advanceRound increments round and resets phase/disposition (TASK-2377.04: retry counts are loop-local)', () => {
@@ -178,7 +163,7 @@ test('ReviewState save reports write-failed when the mission has no review', asy
       implementer: 'claude',
       phase: 'fixing'
     });
-    const result = await state.save(root, store);
+    const result = await state.save(root, { missionStore: store });
     assert.equal(result.outcome, 'write-failed');
     assert.match(result.diagnostic, /px review \S+ starts the review/);
   }, { seedReview: false });
@@ -211,7 +196,7 @@ test('ReviewState save persists the phase transition the loop just made', async 
     state.transitionTo('fixing');
     state.disposition = 'REQUEST_CHANGES';
     assert.ok(state != null);
-    assert.deepEqual(await state.save(root, store), { outcome: 'committed' });
+    assert.deepEqual(await state.save(root, { missionStore: store }), { outcome: 'committed' });
 
     const reloaded = await readReviewState(slug, root, store);
     assert.ok(reloaded != null);

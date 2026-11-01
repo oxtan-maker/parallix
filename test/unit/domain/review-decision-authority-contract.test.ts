@@ -309,21 +309,25 @@ describe("SC3: review-commands.ts submitReviewRound approve path", () => {
     assert.equal(exited.value, 1, 'an illegal approve exits non-zero');
   });
 
-  it('provider=none: no Mission authority bound logs the WARN and does not exit', async () => {
+  it('provider=none: unbound Mission authority rejects approval without mutation (TASK-2821)', async () => {
     const logs: string[] = [];
+    const errors: string[] = [];
     let exited: { value: number | null } = { value: null };
     await submitReviewRound('task-2398', 'approve', 'LGTM', {
       worktree: tempWorktree(), revision: 'reviewed-head',
       isForgejoReviewEnabledFn: () => false,
       // deliberately no missionStore
       readReviewStateFn: () => null,
-      writeReviewStateFn: reviewStateWriterFixture(() => {}),
+      writeReviewStateFn: reviewStateWriterFixture(() => assert.fail('unbound approval must not write state')),
+      recordApprovalFn: async () => assert.fail('unbound approval must not record a decision'),
+      transitionTaskFn: async () => assert.fail('unbound approval must not move the task'),
       log: (m) => logs.push(m),
       exit: ((code: number) => { exited.value = code; }),
-      error: () => {},
+      error: (m) => errors.push(m),
     });
-    assert.ok(logs.some((l) => /No Mission authority bound/.test(l)), 'warns when no authority is bound');
-    assert.equal(exited.value, null, 'the WARN path does not exit');
+    assert.match(errors.join('\n'), /No Mission authority bound.*decision cannot be recorded/);
+    assert.equal(exited.value, 1, 'an unrecordable approval exits non-zero');
+    assert.ok(logs.every((line) => !line.includes('[PASS]')), 'an unrecordable approval must not report success');
   });
 
   it('provider-backed: a failed POST leaves NO approve recorded on the aggregate (F1)', async () => {

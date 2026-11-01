@@ -20,10 +20,7 @@ import {
   shouldMirrorToForgejo,
   createEvent,
   readAllEvents,
-  buildEventFrontmatter,
   buildEventFooter,
-  generateEventTimestamp,
-  sanitizeFilename,
   consumeHumanNotes,
 } from '../../../src/adapters/review/review-events.js';
 import { seedMissionDatabase } from '../../fixtures/review-state-db.js';
@@ -69,26 +66,6 @@ function cleanupTempDir() {
 }
 
 // Test with real temp directory
-test('generateEventTimestamp produces filesystem-safe timestamp', () => {
-  const ts = generateEventTimestamp();
-  assert.match(ts, /^\d{4}-\d{2}-\d{2}T\d{6}$/, 'Timestamp should be ISO-like without colons');
-  // Verify it can be used in a filename
-  const testPath = path.join(os.tmpdir(), `${ts}-test.md`);
-  assert.doesNotThrow(() => fs.writeFileSync(testPath, 'test', 'utf8'));
-  fs.unlinkSync(testPath);
-});
-
-test('sanitizeFilename produces filesystem-safe strings', () => {
-  assert.equal(sanitizeFilename('codex'), 'codex');
-  assert.equal(sanitizeFilename('Codex Agent'), 'codex-agent');
-  assert.equal(sanitizeFilename('claude@example.com'), 'claudeexamplecom');
-  assert.equal(sanitizeFilename(''), 'unknown');
-  // @ts-expect-error Intentional non-string filename from an unchecked caller.
-  assert.equal(sanitizeFilename(null), 'unknown');
-  assert.equal(sanitizeFilename('---test---'), 'test');
-  assert.equal(sanitizeFilename('UPPERCASE'), 'uppercase');
-});
-
 test('isValidEventType validates against taxonomy', () => {
   for (const type of ALL_EVENT_TYPES) {
     assert.ok(isValidEventType(type), `Type ${type} should be valid`);
@@ -285,32 +262,6 @@ test('createEvent succeeds with required fields for implementer_disposition', as
   });
 });
 
-test('buildEventFrontmatter includes all fields', () => {
-  const event = {
-    eventType: 'reviewer_findings',
-    timestamp: '2026-05-25T14:30:22.000Z',
-    content: '# Findings',
-    round: 1,
-    phase: 'reviewing',
-    actor: 'codex',
-    slug: 'task-test',
-    disposition: 'CHANGES_MADE',
-    itemDispositions: [
-      { kind: 'fixed' as const, findingId: reviewFindingId('item1') },
-      { kind: 'fixed' as const, findingId: reviewFindingId('item2') },
-    ],
-  };
-
-  const frontmatter = buildEventFrontmatter(event);
-  assert.ok(frontmatter.includes('event_type: reviewer_findings'));
-  assert.ok(frontmatter.includes('timestamp: 2026-05-25T14:30:22.000Z'));
-  assert.ok(frontmatter.includes('round: 1'));
-  assert.ok(frontmatter.includes('phase: reviewing'));
-  assert.ok(frontmatter.includes('actor: codex'));
-  assert.ok(frontmatter.includes('disposition: CHANGES_MADE'));
-  assert.ok(frontmatter.includes('item_dispositions:'));
-});
-
 test('buildEventFooter matches existing metadata footer pattern', () => {
   const footer = buildEventFooter('task-test', 3, 'fixing');
   assert.equal(footer, '\n\n---\n`[workflow-round:3, workflow-phase:fixing]`');
@@ -353,7 +304,6 @@ test('createEvent fails loudly when no Mission store was supplied', async () => 
 
 test('createEvent fails loudly when the mission has no Review in the database', async () => {
   // The store is present and the Mission is there, but no review has started.
-  // That is the case --backfill-review repairs, and only that case may say so.
   const eventsDir = path.join(testMissionDir, 'review-events');
   fs.mkdirSync(eventsDir, { recursive: true });
   const before = fs.readdirSync(eventsDir);
@@ -463,7 +413,7 @@ test('consumeHumanNotes creates human_note events and skips workflow comments', 
       forgejoUser: 'claude',
       readTokenFn: () => 'token-123',
       readReviewStateFn: (slug, rootDir) => readReviewState(slug, rootDir, missionStore),
-      writeReviewStateFn: (slug, state, rootDir) => writeReviewState(slug, state, rootDir, missionStore),
+      writeReviewStateFn: (slug, state, rootDir) => writeReviewState(slug, state, rootDir, { missionStore }),
       createEventFn: (slug, eventType, params, options) => createEvent(slug, eventType, params, { ...options, missionStore }),
       getCommentsFn: async (branch, token) => {
         seen.branch = branch;
@@ -534,17 +484,3 @@ test.after(() => {
 });
 
 // TASK-2502: regression for review-event string escaping.
-test('buildEventFrontmatter round-trips a backslash and quote in blockedReason', () => {
-  const event = {
-    eventType: 'blocked_publication',
-    timestamp: '2026-05-25T14:30:22.000Z',
-    content: '',
-    blockedReason: 'injection"; rm -rf / #',
-  };
-
-  const front = buildEventFrontmatter(event);
-
-  // The quote is escaped to \" so the field does not terminate early; the value
-  // survives verbatim inside the double-quoted field.
-  assert.ok(front.includes('blocked_reason: "injection\\"; rm -rf / #"'), front);
-});

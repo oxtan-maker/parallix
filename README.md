@@ -165,6 +165,8 @@ Both are optional integrations, and each one is wired independently of the other
 
 **Forgejo.** Review publication is off until you opt in. If you want its reviewer surface, `px setup` can bootstrap the review repository, agent tokens, and the `review` git remote; otherwise the branch/worktree workflow runs without Forgejo. Forgejo user accounts must already exist before that optional setup; see [`docs/forgejo-setup.md`](docs/forgejo-setup.md) for account creation, token layout, and running a local instance.
 
+Historical review-state and review-event files are no longer imported; review resumes from the database-owned Review.
+
 ## Use cases
 
 The durable capability guide and confidence boundaries are in [`docs/use-cases.md`](docs/use-cases.md).

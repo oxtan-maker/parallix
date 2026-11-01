@@ -9,7 +9,7 @@
  * in `../ports/review-round.ts`.
  */
 import { isDbAdhocIdentity, missionId } from '../../domain/mission.js';
-import { reviewStatus, type PullRequestReference } from '../../domain/review.js';
+import { currentReviewRound, reviewStatus, type PullRequestReference } from '../../domain/review.js';
 import { transitionReviewRepair } from '../review-repair-lifecycle.js';
 import { rebaseImplementer, recordImplementerLaunch } from '../rebase-identity.js';
 import type { HandoffFacts, HumanReviewFeedback, ReviewLoopPorts, ReviewLoopRequest, ReviewLoopState } from '../ports/review-round.js';
@@ -151,16 +151,30 @@ async function startState(persisted: ReviewLoopState | null, identity: { reviewe
     state = ports.state.resume(persisted);
     state.reviewer = identity.reviewer;
     state.implementer = identity.implementer;
-    if (!dryRun) { await ports.state.persist(state); }
+    if (!dryRun) {
+      await settleResumedApproval(state, ports);
+      await ports.state.persist(state);
+    }
   } else {
     state = ports.state.create(identity);
   }
   if (pullRequest) { state.pullRequest = pullRequest; }
-  if (!dryRun) { await ports.state.repairInvalidPhase(state); }
   if (persisted && state.round > 1 && !dryRun) {
     out.emit({ kind: 'review-resumed', round: state.round, phase: state.phase });
   }
   return state;
+}
+
+/** Replay a recorded judgment before bookkeeping checks its completed lane. */
+async function settleResumedApproval(state: ReviewLoopState, ports: ReviewLoopPorts): Promise<void> {
+  if (state.phase !== 'approved' || !ports.missionStore) { return; }
+  const loaded = await ports.missionStore.load(missionId(state.slug));
+  if (loaded.kind !== 'found' || !loaded.mission.review) { return; }
+  const round = currentReviewRound(loaded.mission.review);
+  if (round.number !== state.round || round.startedAt !== state.startedAt || round.decision?.kind !== 'approved') { return; }
+  const decision = round.decision;
+  await ports.state.recordApproval(state, { disposition: 'APPROVED', revision: decision.revision ?? null,
+    decidedAt: decision.decidedAt, comment: decision.comment });
 }
 
 /**

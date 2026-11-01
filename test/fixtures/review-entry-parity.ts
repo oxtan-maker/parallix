@@ -82,9 +82,13 @@ export async function parityCase(scenario: ParityScenario, entry: 'cli' | 'board
       return { status: 0, stdout: '', stderr: '' };
     })(),
   }));
+  const approvalBefore = (await fixture.load()).review?.rounds[0].decision;
   const lanesBefore = (await fixture.laneEvents()).length;
   const code = await enterReviewVia(entry, fixture, store, messages, invoke);
   const outcome = { code, mission: await fixture.load(), launches, laneEvents: (await fixture.laneEvents()).slice(lanesBefore), messages: messages.join('\n') };
+  if (scenario === 'already-approved') {
+    assert.deepEqual(outcome.mission.review!.rounds[0].decision, approvalBefore, 'restart preserves the original judgment and its provenance');
+  }
   t.diagnostic(`${scenario}/${entry}: code=${code} status=${outcome.mission.status} rounds=${outcome.mission.review?.rounds.length} launches=${launches} lanes=${outcome.laneEvents.map(e => `${e.from_status}>${e.to_status}`)}\n${outcome.messages.slice(-1200)}`);
   return outcome;
 }

@@ -12,7 +12,7 @@ test('TASK-1048: review loop adopts an implementer launcher fallback for the pol
     slug: 'task-1048-regress',
     routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
     provider: {
-      pollReview: async () => 'CHANGES_REQUESTED',
+      pollReview: async () => 'REQUEST_CHANGES',
       pollDisposition: async implementer => { dispositionPolls.push(implementer); return 'CHANGES_MADE'; },
     },
     agents: {

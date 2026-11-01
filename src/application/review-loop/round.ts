@@ -12,7 +12,7 @@ import { recordImplementerLaunch } from '../rebase-identity.js';
 import { ConfiguredReviewerEligibility } from '../../domain/review.js';
 import { agentFamily } from '../../domain/agents.js';
 import { DEFAULT_REBOUND_ATTEMPTS, type ReboundContext, type ReboundStartAgent } from '../rebound-kernel.js';
-import type { ReviewAgentLaunchResult, ReviewLoopPorts, ReviewLoopState, ReviewPromptFacts, ReviewRole } from '../ports/review-round.js';
+import type { ProviderApproval, ReviewAgentLaunchResult, ReviewLoopPorts, ReviewLoopState, ReviewPromptFacts, ReviewRole } from '../ports/review-round.js';
 
 /** Default per-round relaunch cap. */
 export const DEFAULT_REBOUNDS_PER_ROUND = 6;
@@ -44,6 +44,7 @@ export interface LoopContext {
 /** Round-local scratch; nothing here is persisted. */
 export class ReviewRound {
   used = 0;
+  providerApproval: ProviderApproval | undefined;
   reviewBaseline: string | undefined;
   /** True when a repair's verification already re-ran the rebase and gate this round. */
   preReviewSetupVerified = false;

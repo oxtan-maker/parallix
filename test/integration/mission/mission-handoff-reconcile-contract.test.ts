@@ -57,12 +57,12 @@ test('reconciles an interrupted handoff before review-loop state is saved', asyn
       implementer: canonicalHandoff.implementer,
       round: 1,
       phase: 'reviewing',
-    }, root, store);
+    }, root, { missionStore: store });
     assert.equal(blocked.outcome, 'write-failed');
     assert.match(blocked.diagnostic, /has no review to update/);
 
-    const module = await import('../../../src/adapters/review/review-state.js');
-    const reconciled = await module.reconcileInterruptedHandoff!(slug, canonicalHandoff, root, { missionStore: store });
+    const module = await import('../../../src/application/review-round-use-case.js');
+    const reconciled = await module.reconcileInterruptedHandoff!(slug, canonicalHandoff, store);
     assert.equal(reconciled.outcome, 'reconciled');
 
     const afterMission = await store.load(missionId(slug));
@@ -78,7 +78,7 @@ test('reconciles an interrupted handoff before review-loop state is saved', asyn
     assert.equal((await readReviewState(slug, root, store))?.round, 1);
 
     const beforeRetry = afterMission.mission.review;
-    const retried = await module.reconcileInterruptedHandoff!(slug, canonicalHandoff, root, { missionStore: store });
+    const retried = await module.reconcileInterruptedHandoff!(slug, canonicalHandoff, store);
     assert.equal(retried.outcome, 'already-present');
     const afterRetry = await store.load(missionId(slug));
     assert.equal(afterRetry.kind, 'found');
@@ -125,30 +125,30 @@ test('px review production entry guard gives known-Mission guidance before revie
   assert.match(logs.join('\n'), /unknown or has no valid Review aggregate; load a known Mission/);
 });
 
-test('reconciliation fails closed for ambiguous identity, missing Mission, and malformed legacy Review data', async () => {
-  const module = await import('../../../src/adapters/review/review-state.js') as typeof import('../../../src/adapters/review/review-state.js');
+test('reconciliation fails closed for ambiguous identity, missing Mission, and malformed Review data', async () => {
+  const module = await import('../../../src/application/review-round-use-case.js');
   const mission = fixtureMission('task-2350-ambiguous', { status: 'review', review: null });
   let saves = 0;
   const store: MissionStore = { load: async () => ({ kind: 'found', mission, version: fixtureVersion(1) }), save: async () => { saves += 1; return fixtureVersion(2); } };
-  const ambiguous = await module.reconcileInterruptedHandoff('task-2350-ambiguous', { ...canonicalHandoff, eligibleReviewers: ['codex', 'codex'] }, process.cwd(), { missionStore: store });
+  const ambiguous = await module.reconcileInterruptedHandoff('task-2350-ambiguous', { ...canonicalHandoff, eligibleReviewers: ['codex', 'codex'] }, store);
   assert.equal(ambiguous.outcome, 'failed');
   assert.match(ambiguous.diagnostic, /duplicate/);
 
-  const missing = await module.reconcileInterruptedHandoff('task-2350-missing', canonicalHandoff, process.cwd(), { missionStore: { ...store, load: async () => ({ kind: 'missing' as const }) } });
+  const missing = await module.reconcileInterruptedHandoff('task-2350-missing', canonicalHandoff, { ...store, load: async () => ({ kind: 'missing' as const }) });
   assert.equal(missing.outcome, 'failed');
   assert.match(missing.diagnostic, /restore it before reconciliation/);
 
   // @ts-expect-error Empty review rounds intentionally exercise malformed legacy aggregate recovery.
-  const malformed = await module.reconcileInterruptedHandoff('task-2350-malformed', canonicalHandoff, process.cwd(), { missionStore: { ...store, load: async () => ({ kind: 'found' as const, mission: { ...mission, review: { rounds: [] } }, version: fixtureVersion(1) }) } });
+  const malformed = await module.reconcileInterruptedHandoff('task-2350-malformed', canonicalHandoff, { ...store, load: async () => ({ kind: 'found' as const, mission: { ...mission, review: { rounds: [] } }, version: fixtureVersion(1) }) });
   assert.equal(malformed.outcome, 'failed');
-  assert.match(malformed.diagnostic, /malformed legacy Review data/);
+  assert.match(malformed.diagnostic, /malformed Review data/);
   assert.equal(saves, 0, 'failed recovery never persists a Review');
 });
 
 test('px status reports a started review after reconciliation', async () => {
   await withMissionDatabase('task-2350-status', async ({ root, slug, store }) => {
-    const module = await import('../../../src/adapters/review/review-state.js') as typeof import('../../../src/adapters/review/review-state.js');
-    assert.equal((await module.reconcileInterruptedHandoff(slug, { ...canonicalHandoff, sourceBranch: `mission/${slug}` }, root, { missionStore: store })).outcome, 'reconciled');
+    const module = await import('../../../src/application/review-round-use-case.js');
+    assert.equal((await module.reconcileInterruptedHandoff(slug, { ...canonicalHandoff, sourceBranch: `mission/${slug}` }, store)).outcome, 'reconciled');
     const state = await readReviewState(slug, root, store);
     const logs: string[] = [];
     const recorded = await store.load(missionId(slug));

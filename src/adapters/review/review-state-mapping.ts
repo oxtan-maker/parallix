@@ -1,7 +1,8 @@
 import type { AgentFamily } from '../../domain/agents.js';
 import { agentFamily } from '../../domain/agents.js';
-import { reviewApprovalOwed, type PullRequestReference, type Review, type ReviewRound, type ReviewerDecision, type ReviewPhase } from '../../domain/review.js';
-import { assertReviewedChange, parseReviewDisposition, parseReviewPhase } from '../../domain/review.js';
+import { reviewApprovalOwed, type PullRequestReference, type Review, type ReviewRound } from '../../domain/review.js';
+import { assertReviewedChange, parseReviewDisposition } from '../../domain/review.js';
+import { assertReviewPhaseTransition, requireReviewPhase, ReviewPhaseViolation } from '../../domain/review-phase-policy.js';
 import type { ReviewStateData } from './review-state.js';
 
 /** Return a valid agent family, retaining the aggregate value when input is stale. */
@@ -44,7 +45,7 @@ function pullRequestFrom(review: Review): PullRequestReference | null {
   return change.kind === 'pull-request' ? change : null;
 }
 
-/** Flatten the current Review round into the legacy loop-state view. */
+/** Flatten the current Review round into the loop-state projection. */
 export function reviewStateDataFrom(review: Review): ReviewStateData {
   const current = review.rounds[review.rounds.length - 1];
   return {
@@ -53,35 +54,10 @@ export function reviewStateDataFrom(review: Review): ReviewStateData {
     implementer: current.implementer,
     round: current.number,
     startedAt: current.startedAt,
-    phase: current.phase,
+    phase: requireReviewPhase(current.phase),
     disposition: current.disposition,
     metadata: metadataFromReview(review),
   };
-}
-
-function decisionFromState(
-  phase: ReviewPhase,
-  disposition: string | null,
-  startedAt: string,
-  previous: ReviewerDecision | null,
-): ReviewerDecision | null {
-  if (phase === 'approved') {
-    if (previous?.kind === 'approved') { return previous; }
-    return { kind: 'approved', revision: null, decidedAt: startedAt, comment: disposition, source: { kind: 'local' } };
-  }
-  if (phase === 'fixing' && disposition) {
-    // A flattened legacy state has no finding payload. Retain findings from
-    // the aggregate when present; otherwise leave the decision absent rather
-    // than manufacturing an invalid changes-requested decision with no finds.
-    // `startedAt` is the round's start, not the decision time. Approve reads
-    // the same value on both sides of its boundary, but a retained
-    // changes-requested decision already carries the real `decidedAt` that
-    // fired `review -> active`; rewriting it here would skew the aggregate
-    // away from the lane event's `occurredAt`.
-    if (previous?.kind !== 'changes-requested') { return null; }
-    return previous;
-  }
-  return null;
 }
 
 /**
@@ -106,22 +82,27 @@ function subjectFromState(state: ReviewStateData, previous: ReviewRound): Review
 }
 
 function roundFromState(state: ReviewStateData, previous: ReviewRound): ReviewRound {
-  const phase = parseReviewPhase(state.phase) ?? 'reviewing';
-  const disposition = parseReviewDisposition(state.disposition);
+  const phase = state.phase === undefined ? requireReviewPhase(previous.phase) : requireReviewPhase(state.phase);
+  const disposition = state.disposition === undefined ? previous.disposition : parseReviewDisposition(state.disposition);
   const startedAt = typeof state.startedAt === 'string' && state.startedAt.trim()
     ? state.startedAt
     : previous.startedAt;
-  const staleUndecided = Boolean(previous.decision && phase === 'reviewing' && !disposition);
+  const staleUndecided = Boolean(previous.decision && phase === 'reviewing' && !state.disposition);
+  if (!staleUndecided && phase !== previous.phase) {
+    assertReviewPhaseTransition(previous.phase, phase);
+  }
+  if (phase === 'approved' && previous.decision?.kind !== 'approved') {
+    throw new ReviewPhaseViolation('A loop-state write cannot approve a review; record a reviewer verdict first');
+  }
   return {
     ...previous,
-    number: typeof state.round === 'number' && state.round > 0 ? Math.floor(state.round) : previous.number,
     reviewer: familyFrom(state.reviewer, previous.reviewer),
     implementer: familyFrom(state.implementer, previous.implementer),
     subject: subjectFromState(state, previous),
     startedAt,
     // Typed verdicts and resolutions may commit while an agent is running.
     // Its older flat loop state can update identity, but never erase a decision.
-    decision: decisionFromState(phase, state.disposition ?? null, startedAt, previous.decision) ?? previous.decision,
+    decision: previous.decision,
     response: previous.response,
     phase: staleUndecided ? previous.phase : phase,
     disposition: staleUndecided ? previous.disposition : disposition,
@@ -134,15 +115,7 @@ function roundFromState(state: ReviewStateData, previous: ReviewRound): ReviewRo
   };
 }
 
-/**
- * Apply a flattened legacy state update to the Review aggregate.
- *
- * This is intentionally a compatibility mapper, not a second domain workflow:
- * the aggregate's conversation and audit trail remain untouched. When a
- * legacy writer advances the round number, a new current-round shell is made
- * from the prior subject; normal handoff/review commands fill in its subject
- * and conversation details afterward.
- */
+/** Update loop bookkeeping on an existing round without creating decisions or rounds. */
 export function applyReviewStateToReview(review: Review, state: ReviewStateData): Review {
   const current = review.rounds[review.rounds.length - 1];
   const suppliedRound = typeof state.round === 'number' && state.round > 0
@@ -157,25 +130,11 @@ export function applyReviewStateToReview(review: Review, state: ReviewStateData)
       `Cannot apply review state: supplied round ${suppliedRound} is lower than the current round ${current.number}; a stale flattened write must not renumber an existing round`,
     );
   }
-  const requestedNumber = suppliedRound ?? current.number;
-  const rounds = [...review.rounds] as ReviewRound[];
-  while (rounds.length < requestedNumber) {
-    const previous = rounds[rounds.length - 1];
-    rounds.push({
-      ...previous,
-      number: previous.number + 1,
-      decision: null,
-      response: null,
-      phase: 'reviewing',
-      disposition: null,
-      reviewerRetryCount: 0,
-      implementerRetryCount: 0,
-    });
+  if (suppliedRound !== null && suppliedRound !== current.number) {
+    throw new ReviewPhaseViolation(`Cannot apply review state: supplied round ${suppliedRound} differs from current round ${current.number}; open the round through the review workflow`);
   }
-  // ponytail: the current round is the only slot a flat writer mutates; a stale
-  // lower round is rejected above, an equal round rewrites in place, and a higher
-  // round appends before this line rewrites the new tail.
-  rounds[rounds.length - 1] = roundFromState(state, rounds[rounds.length - 1]);
+  const rounds = [...review.rounds];
+  rounds[rounds.length - 1] = roundFromState(state, current);
 
   const metadata = state.metadata && typeof state.metadata === 'object' ? state.metadata : {};
   const recorded = metadata.recordedStageLaunches;

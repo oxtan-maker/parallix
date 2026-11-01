@@ -1,3 +1,4 @@
+import { recordProviderResolution } from './provider-observations.js';
 /**
  * The implementer half of a round: launch act-on-review, consume and recover
  * its disposition, and decide the next step — another review round, a stop for
@@ -20,6 +21,7 @@ interface Disposition {
   /** The disposition predates this run, so no relaunch produced a revision. */
   skippedLaunch: boolean;
   implementerExited: boolean;
+  providerObserved: boolean;
 }
 
 type Step = 'stop' | 'next-round';
@@ -48,6 +50,7 @@ async function existingDispositionOnContinue(context: LoopContext, round: Review
     return;
   }
   disposition.value = existing;
+  disposition.providerObserved = Boolean(existing);
 }
 
 /** An instant strictly after `earlierIso`, so a fresh disposition cannot match the stale one. */
@@ -200,6 +203,7 @@ async function failedImplementerRecovery(context: LoopContext, round: ReviewRoun
 async function pollDisposition(context: LoopContext, round: ReviewRound, reviewState: unknown, disposition: Disposition): Promise<'stop' | null> {
   const { ports, state, identities } = context;
   if (!disposition.value && ports.provider) {
+    disposition.providerObserved = true;
     disposition.value = await ports.provider.pollDisposition(identities.implementer, disposition.sinceIso, { label: `round ${round.attempt} disposition`, retryCount: 0 });
   }
   if (!isPollTimeout(disposition.value)) {
@@ -221,7 +225,9 @@ async function pollDisposition(context: LoopContext, round: ReviewRound, reviewS
       const retryArtifactDiagnostic = retry.diagnostic || `Implementer disposition still missing for ${ports.branch}`;
       const diagnostic = isArtifactInfraDiagnostic(retryArtifactDiagnostic) ? `Recovery infrastructure failure: ${retryArtifactDiagnostic}` : retryArtifactDiagnostic;
       disposition.value = retry.consumed && retry.ok ? retry.disposition : null;
+      disposition.providerObserved = false;
       if (!disposition.value && ports.provider) {
+        disposition.providerObserved = true;
         disposition.value = await ports.provider.pollDisposition(identities.implementer, disposition.sinceIso, { label: `round ${round.attempt} disposition recovery`, retryCount: 0 });
       }
       return disposition.value && !isPollTimeout(disposition.value)
@@ -244,6 +250,11 @@ async function pollDisposition(context: LoopContext, round: ReviewRound, reviewS
   return 'stop';
 }
 
+/** Artifact and stored responses already passed through the resolution owner. */
+async function recordObservedResolution(context: LoopContext, disposition: Disposition, value: string): Promise<void> {
+  if (disposition.providerObserved) { await recordProviderResolution(context, value, disposition.sinceIso); }
+}
+
 /** Turn the final disposition into the next step. */
 async function applyDisposition(context: LoopContext, round: ReviewRound, disposition: Disposition, preFixHead: string | null): Promise<Step> {
   const { ports, state } = context;
@@ -251,7 +262,8 @@ async function applyDisposition(context: LoopContext, round: ReviewRound, dispos
   context.emit({ kind: 'implementer-disposition', attempt: round.attempt, value: value });
   state.disposition = value;
   if (value === 'PUSHBACK_ALL') {
-    try { state.transitionTo('reviewing'); } catch { /* already reviewing */ }
+    await recordObservedResolution(context, disposition, value);
+    if (state.phase !== 'reviewing') { state.transitionTo('reviewing'); }
     await ports.state.persist(state);
     context.emit({ kind: 'pushback-next-round', attempt: round.attempt });
     return 'next-round';
@@ -262,7 +274,6 @@ async function applyDisposition(context: LoopContext, round: ReviewRound, dispos
     context.emit({ kind: 'implementer-stopped', value: value });
     return 'stop';
   }
-  try { state.transitionTo('reviewing'); } catch { /* already reviewing */ }
   const postFixHead = ports.preReview.head();
   const hasCommittedChange = committedImplementation(disposition, preFixHead, postFixHead);
   if (!hasCommittedChange) {
@@ -273,6 +284,8 @@ async function applyDisposition(context: LoopContext, round: ReviewRound, dispos
     context.emit({ kind: 'implementer-no-change', attempt: round.attempt });
     return 'stop';
   }
+  await recordObservedResolution(context, disposition, value);
+  if (state.phase !== 'reviewing') { state.transitionTo('reviewing'); }
   const pushed = ports.provider?.publishRevision() ?? null;
   if (pushed) {
     context.emit({ kind: 'revision-published', ok: pushed.ok, attempt: round.attempt, branch: ports.branch, status: pushed.status, detail: pushed.detail });
@@ -290,7 +303,7 @@ async function applyDisposition(context: LoopContext, round: ReviewRound, dispos
 /** Run the implementer half for a round whose reviewer did not approve. */
 export async function runImplementerPhase(context: LoopContext, round: ReviewRound, reviewState: unknown): Promise<Step> {
   const preFixHead = context.ports.preReview.head();
-  const disposition: Disposition = { value: undefined, reLaunch: false, sinceIso: context.state.startedAt, skippedLaunch: false, implementerExited: false };
+  const disposition: Disposition = { value: undefined, reLaunch: false, sinceIso: context.state.startedAt, skippedLaunch: false, implementerExited: false, providerObserved: false };
   await existingDispositionOnContinue(context, round, disposition);
   if (disposition.value) {
     context.emit({ kind: 'existing-disposition', attempt: round.attempt, value: disposition.value });

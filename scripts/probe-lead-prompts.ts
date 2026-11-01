@@ -6,6 +6,8 @@ import { buildExecutePrompt } from '../src/adapters/cli/commands/active.js';
 import { buildCompactActOnReviewPrompt } from '../src/adapters/review/review-prompts.js';
 import { recoveryInstruction } from '../src/application/recovery-supervisor.js';
 import { buildFreshDiagnosticRepairPrompt } from '../src/application/rebound-prompts.js';
+import { configureRepairPrompts } from '../src/application/ports/repair-prompts.js';
+import { createRepairPromptReader } from '../src/adapters/assets/repair-prompts.js';
 import { FRESH_SESSION_MARKER_PORT } from '../src/application/fresh-session-marker-port.js';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -21,6 +23,7 @@ import { shouldResume, type SessionMarker } from '../src/domain/session.js';
 import type { SessionMarkerPort } from '../src/application/domain-ports.js';
 import type { AgentProcessSpawn } from '../src/adapters/agents/agent-process-types.js';
 const slug = 'task-audit';
+configureRepairPrompts(createRepairPromptReader());
 const prompts = {
   execute: buildExecutePrompt(slug, 'No checkpoint evidence recorded.', { rootDir: process.cwd() }),
   actOnReview: buildCompactActOnReviewPrompt({ implementer: 'codex', branch: `mission/${slug}`, attempt: 1, repoRoot: process.cwd() }),

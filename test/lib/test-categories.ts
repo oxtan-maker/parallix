@@ -42,7 +42,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/lifecycle/lifecycle-approval-timing-contract.test.ts',
   'integration/agents/pi-worker-process-contract.test.ts',
   // Review contracts exercising SQLite backfill and durable CLI recovery.
-  'integration/review/review-status-backfill.integration.test.ts',
+  'integration/review/review-status-history.integration.test.ts',
   'integration/review/review-intervention-resume.integration.test.ts',
   'integration/review/review-repair-recovery.test.ts',
   'integration/cli/active.test.ts',
@@ -106,7 +106,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/review/review-evidence-git.integration.test.ts',
   'integration/review/review-artifacts.test.ts',
   'integration/review/review-autoderive.test.ts',
-  'integration/review/review-backfill.test.ts',
   'integration/review/review-commands-supplemental.test.ts',
   'integration/review/review-events.test.ts',
   'integration/review/review-identity.test.ts',

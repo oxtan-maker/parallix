@@ -1,3 +1,12 @@
+import { pollForReview } from '../../../../src/adapters/review/review-polling.js';
+import { providerReviewObservation } from '../../../../src/adapters/review/review-provider-observations.js';
+import { assessApprovalCoverage } from '../../../../src/domain/approval-coverage.js';
+import { MissionStaleVersion } from '../../../../src/application/domain-ports.js';
+import { createReviewObservationRecorder } from '../../../../src/adapters/review/review-observation-recording.js';
+import { ReviewState, readReviewState, writeReviewState, assertReviewStatePersisted } from '../../../../src/adapters/review/review-state.js';
+import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
+import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
+import { openReviewRound } from '../../../../src/adapters/review/review-round-open.js';
 import { reviewFindingId } from '../../../../src/domain/review.js';
 
 /**
@@ -15,6 +24,7 @@ import assert from 'node:assert/strict';
 import { MissionLifecycleService } from '../../../../src/application/mission-lifecycle-service.js';
 import {
   parseReviewFindings,
+  recordApproval,
   recordImplementerResolution,
   recordRequestedChanges,
 } from '../../../../src/adapters/review/review-round.js';
@@ -249,4 +259,152 @@ it('workflow-rejected verdicts expose cause and supported recovery without clear
     assert.match(outcome.workflowBlock?.nextAction ?? '', /px review stopped-verdict/);
   }
   assert.deepEqual(store.mission().review?.intervention, review.intervention);
+});
+
+it('approval rejects observations from a prior round or reset before writing (TASK-2821)', async () => {
+  const startedAt = '2026-10-25T00:00:00Z';
+  const review = startReview({ change, revision: changeRevision('review-head') }, reviewer, implementer, startedAt, eligibility);
+  const store = inMemoryTransitionStore(fixtureMission(String(MISSION), { status: 'review', assignee: implementer, review }));
+  const lifecycleService = new MissionLifecycleService(store);
+  for (const observedRound of [{ number: 2, startedAt }, { number: 1, startedAt: '2026-10-24T00:00:00Z' }]) {
+    const result = await recordApproval(String(MISSION), { comment: null, decidedAt: '2026-10-25T01:00:00Z', observedRound }, { missionStore: store, lifecycleService });
+    assert.equal(result.outcome, 'failed');
+    assert.equal(store.mission().status, 'review');
+    assert.equal(currentReviewRound(store.mission().review!).decision, null);
+    assert.equal(store.events.length, 0);
+  }
+});
+
+it('observed approval retries one stale write and rechecks the round (TASK-2821 review P3)', async () => {
+  for (const race of ['event', 'reset', 'always'] as const) {
+    const { store } = await reviewInProgress();
+    const snapshot = currentReviewRound(store.mission().review!);
+    let attempts = 0;
+    const racing = { ...store, save: async (...args: Parameters<typeof store.save>) => {
+      attempts++;
+      if (attempts === 1 || race === 'always') {
+        const loaded = await store.load(MISSION);
+        assert.equal(loaded.kind, 'found');
+        const review = loaded.mission.review!;
+        const rounds = race === 'reset' ? [{ ...review.rounds[0], startedAt: '2026-10-25T03:00:00Z' }] as const : review.rounds;
+        const actual = await store.save({ ...loaded.mission, title: 'concurrent event', review: { ...review, rounds } }, loaded.version);
+        throw new MissionStaleVersion(MISSION, args[1] ?? null, actual);
+      }
+      return store.save(...args);
+    } };
+    const recorder = createReviewObservationRecorder(String(MISSION), () => 'new-head', true, { missionStore: racing, lifecycleService: new MissionLifecycleService(racing) });
+    const state = new ReviewState(String(MISSION), { round: snapshot.number, startedAt: snapshot.startedAt, phase: 'approved' });
+    if (race === 'event') {
+      await recorder.recordApproval(state, { disposition: 'APPROVED', revision: 'rev-1', decidedAt: '2026-08-16T14:00:00.000Z', comment: null });
+      assert.equal(store.mission().status, 'integration');
+      assert.equal(currentReviewRound(store.mission().review!).decision?.kind, 'approved');
+      assert.equal(store.mission().title, 'concurrent event');
+      assert.equal(attempts, 2);
+    } else {
+      await assert.rejects(() => recorder.recordApproval(state, { disposition: 'APPROVED', revision: 'rev-1', decidedAt: '2026-08-16T14:00:00.000Z', comment: null }), /stale|Stale/);
+      assert.equal(store.mission().status, 'review');
+      assert.equal(currentReviewRound(store.mission().review!).decision, null);
+      assert.equal(attempts, race === 'reset' ? 1 : 2);
+    }
+  }
+});
+
+it('polled changes and resolution advance through their owners to round two (TASK-2821 review P2)', async () => {
+  for (const scenario of ['CHANGES_MADE', 'PUSHBACK_ALL', 'interrupted-request'] as const) {
+    const disposition = scenario === 'interrupted-request' ? 'CHANGES_MADE' : scenario;
+    const { store, lifecycle } = await reviewInProgress();
+    let head = 'rev-1';
+    let reviews = scenario === 'interrupted-request' ? 1 : 0;
+    const decisionTime = '2026-08-16T14:00:00.000Z';
+    const responseTime = '2026-08-16T15:00:00.000Z';
+    if (scenario === 'interrupted-request') {
+      const interrupted = await recordRequestedChanges(String(MISSION), {
+        findings: parseReviewFindings('## F1: provider finding'), comment: '## F1: provider finding', revision: 'rev-1', decidedAt: decisionTime,
+      }, { missionStore: store, lifecycleService: { transition: async () => ({ status: 'failed', error: { kind: 'execution', message: 'interrupted transition' }, durableEvidence: [] }) } });
+      assert.equal(interrupted.outcome, 'failed');
+      assert.equal(store.mission().status, 'review');
+      assert.equal(currentReviewRound(store.mission().review!).decision?.kind, 'changes-requested');
+    }
+    const fake = fakeReviewLoopPorts({
+      slug: String(MISSION), missionStore: store, lifecycle,
+      stateport: {
+        read: () => readReviewState(String(MISSION), undefined, store),
+        persist: async state => { assertReviewStatePersisted(await writeReviewState(String(MISSION), state, fake.ports.worktree, { missionStore: store }), { slug: String(MISSION), round: state.round }); },
+        ...createReviewObservationRecorder(String(MISSION), () => head, true, { missionStore: store, lifecycleService: lifecycle }),
+        openRound: async state => (await openReviewRound(String(MISSION), state, { worktree: fake.ports.worktree, log: () => {}, error: message => { throw new Error(message); }, missionStore: store, lifecycleService: lifecycle })).ok,
+      },
+      provider: {
+        openPullRequest: () => change,
+        pollReview: async () => ++reviews === 1 ? 'REQUEST_CHANGES' : { disposition: 'APPROVED', revision: head, decidedAt: '2026-08-16T16:00:00.000Z', comment: 'Verified fix' },
+        readRequestedChanges: async () => ({ disposition: 'REQUEST_CHANGES', findings: parseReviewFindings('## F1: provider finding'), comment: '## F1: provider finding', revision: 'rev-1', decidedAt: decisionTime }),
+        pollDisposition: async (_agent, _since, request) => request.quick ? null : disposition,
+        readResolution: async () => ({ disposition, itemDispositions: [], evidence: 'Provider fix evidence', respondedAt: responseTime }),
+      },
+      agents: { launch: async request => {
+        assert.equal(store.mission().status, request.role === 'implementer' ? 'active' : 'review');
+        if (request.role === 'implementer') { head = 'rev-2'; }
+        return { agent: request.agent, result: { status: null } };
+      } },
+      preReview: { head: () => head },
+    });
+    await runReviewLoop({ slug: String(MISSION), isContinue: true, maxAttempts: 2 }, fake.ports);
+    assert.deepEqual(fake.exits, [], fake.errors.join('\n'));
+    const mission = store.mission();
+    assert.equal(mission.status, 'integration');
+    assert.equal(mission.review?.rounds.length, 2);
+    const first = mission.review!.rounds[0];
+    assert.equal(first.decision?.kind, 'changes-requested');
+    assert.equal(first.decision?.decidedAt, decisionTime);
+    assert.equal(first.response?.respondedAt, responseTime);
+    assert.equal(first.response?.resultingRevision, 'rev-2');
+    assert.deepEqual(first.response?.resolutions, [disposition === 'CHANGES_MADE'
+      ? { findingId: 'F1', kind: 'fixed', evidence: 'Provider fix evidence' }
+      : { findingId: 'F1', kind: 'disputed', rationale: 'pushed_back: Provider fix evidence' }]);
+    assert.deepEqual(store.events.map(event => [event.from, event.to]), [['review', 'active'], ['active', 'review'], ['review', 'integration']]);
+  }
+});
+
+it('provider polling preserves the judged revision and submission time after HEAD moves (TASK-2821 review P4)', async () => {
+  const { store, lifecycle } = await reviewInProgress();
+  const decidedAt = '2026-08-16T14:00:00.000Z';
+  const observed = { state: 'APPROVED', revision: 'rev-1', submittedAt: decidedAt, body: 'Reviewed A' };
+  const recorder = createReviewObservationRecorder(String(MISSION), () => 'unreviewed-B', true, { missionStore: store, lifecycleService: lifecycle });
+  const fake = fakeReviewLoopPorts({
+    slug: String(MISSION), missionStore: store, lifecycle,
+    state: await readReviewState(String(MISSION), '/fixture', store),
+    stateport: recorder,
+    provider: { openPullRequest: () => change, pollReview: async () => {
+      const result = await pollForReview(305, 'codex', '2026-08-16T13:20:32.869Z', 'fixture-token', {
+        getLatestReviewForPrFn: async () => observed, log: () => {},
+      });
+      return result && 'state' in result ? providerReviewObservation(result) : result;
+    } },
+    preReview: { head: () => 'unreviewed-B' },
+  });
+  await runReviewLoop({ slug: String(MISSION), isContinue: true, maxAttempts: 1 }, fake.ports);
+  assert.deepEqual(fake.exits, [], fake.errors.join('\n'));
+  const review = store.mission().review!;
+  const decision = currentReviewRound(review).decision;
+  assert.equal(decision?.revision, 'rev-1');
+  assert.equal(decision?.decidedAt, decidedAt);
+  assert.equal(decision?.comment, 'Reviewed A');
+  assert.equal(assessApprovalCoverage(review, { landedRevision: changeRevision('unreviewed-B'), sameChange: false })?.kind, 'stale');
+  await recorder.recordApproval(fake.current()!);
+  assert.deepEqual(currentReviewRound(store.mission().review!).decision, decision, 'replay preserves the original provider judgment');
+  assert.equal(store.events.length, 1);
+});
+
+it('provider approval never substitutes HEAD or the current time for missing evidence (TASK-2821 review P4)', async () => {
+  const { store, lifecycle } = await reviewInProgress();
+  const recorder = createReviewObservationRecorder(String(MISSION), () => 'unreviewed-B', true, { missionStore: store, lifecycleService: lifecycle });
+  const state = (await readReviewState(String(MISSION), '/fixture', store))!;
+  await assert.rejects(() => recorder.recordApproval(state), /observed revision and submission time/);
+  assert.equal(currentReviewRound(store.mission().review!).decision, null);
+  assert.throws(() => providerReviewObservation({ state: 'APPROVED', revision: 'rev-1', submittedAt: '', body: '' }), /submission time/);
+  const missingRevision = providerReviewObservation({ state: 'APPROVED', revision: null, submittedAt: '2026-08-16T14:00:00.000Z', body: '' });
+  assert.ok(missingRevision?.disposition === 'APPROVED');
+  await recorder.recordApproval(state, missingRevision);
+  const review = store.mission().review!;
+  assert.equal(currentReviewRound(review).decision?.revision, null);
+  assert.equal(assessApprovalCoverage(review, { landedRevision: changeRevision('unreviewed-B'), sameChange: false })?.kind, 'unverifiable');
 });

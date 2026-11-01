@@ -1,4 +1,5 @@
 import { parseIntegrationRepairAssessment, parseHistoricalApprovalSource } from '../../domain/integration-repair-record.js';
+import { requireReviewPhase } from '../../domain/review-phase-policy.js';
 import { agentFamily } from '../../domain/agents.js';
 import { assertClassifierReviewSource, clearingLabel } from '../../domain/classifier-review.js';
 import type { CheckpointData, GoalCheckRow } from '../../domain/checkpoint.js';
@@ -16,7 +17,6 @@ import {
   changeRevision,
   reviewFindingId,
   REVIEW_DISPOSITIONS,
-  REVIEW_PHASES,
   type FindingResolution,
   type Review,
   type ReviewDisposition,
@@ -546,10 +546,7 @@ function reviewEventsFrom(records: MissionReviewRecords): readonly ReviewEventRe
 }
 
 function reviewPhaseFrom(value: string): ReviewPhase {
-  if (!(REVIEW_PHASES as readonly string[]).includes(value)) {
-    throw new Error(`Persisted review phase is invalid: ${value}`);
-  }
-  return value as ReviewPhase;
+  return requireReviewPhase(value);
 }
 
 function reviewDispositionFrom(value: string | null): ReviewDisposition | null {

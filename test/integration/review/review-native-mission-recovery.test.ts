@@ -1,3 +1,4 @@
+import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 import { fixtureMission as typedMissionFixture } from '../../fixtures/mission-builders.js';
 // Historical regression provenance: TASK-2614.
 // TASK-2614 — red-to-green reproduction for review and --reconcile-review
@@ -137,8 +138,6 @@ async function invokeReconcile(store: SqliteMissionStore, root: string): Promise
     error: (msg: string) => { error.value = msg; },
     exit: (code: number) => { throw new Error(`exit:${code}`); },
     inferSlugFn: () => SLUG,
-    reconcileInterruptedHandoffFn: (target, inputs, worktree, opts) =>
-      import('../../../src/adapters/review/review-state.js').then((m) => m.reconcileInterruptedHandoff(target, inputs, worktree, opts)),
   });
   const useCase = new ReviewCommandUseCase(adapter);
   try {
@@ -188,8 +187,8 @@ async function driveStartTransition(
     missionStore: store,
     log: () => undefined,
     error: (msg: string) => { error.value = msg; },
-    readReviewState: () => (reviewed ? new ReviewState(SLUG, { reviewer: 'codex', round: 1, phase: 'reviewing', disposition: null }) : null),
-    writeReviewState: (async () => ({ outcome: 'committed' as const })),
+    readReviewState: () => reviewed ? readReviewState(SLUG, root, store) : null,
+    lifecycleService: new MissionLifecycleService(store),
   });
   const fake = fakeReviewLoopPorts({
     slug: SLUG,
@@ -354,7 +353,7 @@ describe("native Mission review start and recovery", () => {
       await store.save(completedNativeMission(SLUG, root), null);
       const { outcome, error } = await invokeReconcile(store, root);
       assert.equal(outcome, 'not-reconciled', 'an active Mission is not reconcilable');
-      assert.ok(error && /review lane/.test(error), 'the diagnostic names the invalid status transition');
+      assert.ok(error && /not review/.test(error), 'the diagnostic names the invalid status transition');
     } finally {
       if (previousHome === undefined) { delete process.env.PARALLIX_HOME; }
       else { process.env.PARALLIX_HOME = previousHome; }
@@ -425,13 +424,12 @@ describe("native Mission review start and recovery", () => {
       await assert.rejects(
         reconcileInterruptedHandoffHandler(SLUG, args, {
           missionStore,
-          resolveWorktreeFn: () => root,
           error: (message: string) => errors.push(message),
           exit: () => { throw new Error('exit:1'); },
         }),
         /exit:1/,
       );
-      assert.match(errors.join('\n'), /no Mission in the operator database is in the review lane/);
+      assert.match(errors.join('\n'), /database unavailable/i);
     }
   });
 });

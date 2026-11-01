@@ -199,3 +199,8 @@ export function resolveReviewUser(explicitUser: string, configuration: ParallixC
 export function getPrAuthor(branch: string, token: string, options: Parameters<typeof forgejo.getPrAuthor>[2] = {}) {
   return withForgejo(options.rootDir || process.cwd(), () => forgejo.getPrAuthor(branch, token, options), null);
 }
+
+export async function getLatestDispositionEvidenceForPr(prNumber: number, implementerUser: string, sinceIso: string, token: string, options: Parameters<typeof forgejo.getLatestDispositionEvidenceForPr>[4] = {}) {
+  if (!token) { return null; }
+  return withForgejo(options.rootDir || process.cwd(), () => forgejo.getLatestDispositionEvidenceForPr(prNumber, implementerUser, sinceIso, token, options), null);
+}

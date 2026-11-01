@@ -1,78 +1,40 @@
-export type ReviewPhase = 'reviewing' | 'fixing' | 'pending-approval' | 'approved';
+export const REVIEW_PHASES = ['reviewing', 'fixing', 'pending-approval', 'approved'] as const;
+export type ReviewPhase = (typeof REVIEW_PHASES)[number];
 
-export const REVIEW_PHASES: readonly ReviewPhase[] =
-  ['reviewing', 'fixing', 'pending-approval', 'approved'];
-
-export const REVIEW_PHASE_TRANSITIONS: Record<ReviewPhase, readonly ReviewPhase[]> = {
-  'reviewing': ['fixing', 'approved'],
-  'fixing': ['reviewing', 'pending-approval'],
+export const REVIEW_PHASE_TRANSITIONS: Readonly<Record<ReviewPhase, readonly ReviewPhase[]>> = {
+  reviewing: ['fixing', 'approved'],
+  fixing: ['reviewing', 'pending-approval'],
   'pending-approval': ['reviewing'],
-  'approved': [],
+  approved: [],
 };
 
-/** Coerce untrusted text to a phase, or null when it names none. */
-export function parseReviewPhase(value: string | null | undefined): ReviewPhase | null {
-  const candidate = String(value ?? '').trim().toLowerCase();
-  return (REVIEW_PHASES as readonly string[]).includes(candidate)
-    ? candidate as ReviewPhase
-    : null;
-}
-
-
-const VALID_PHASES = REVIEW_PHASES;
-const PHASE_ALIASES = new Map<string, string>([
-  ['review', 'reviewing'],
-  ['rewiewing', 'reviewing'],
-  ['fix', 'fixing'],
-  ['pending_approval', 'pending-approval'],
-  ['pending approval', 'pending-approval']
-]);
-
-/** @param {string} disposition */
-function inferPhaseFromDisposition(disposition: string): string {
-  switch (String(disposition || '').trim().toUpperCase()) {
-  case 'APPROVED':
-    return 'approved';
-  case 'REQUEST_CHANGES':
-  case 'COMMENT':
-  case 'PUSHBACK_ALL':
-  case 'BLOCKED':
-  case 'PARKED':
-    return 'fixing';
-  case 'CHANGES_MADE':
-    return 'reviewing';
-  default:
-    return 'reviewing';
+export class ReviewPhaseViolation extends Error {
+  readonly kind = 'validation';
+  constructor(message: string) {
+    super(message);
+    this.name = 'ReviewPhaseViolation';
   }
 }
 
-/** @param {string} phase @param {string} disposition */
-export function normalizeReviewPhase(phase: string, disposition: string): { phase: string; original: string | null; normalized: boolean } {
-  if (!phase) {
-    return { phase: 'reviewing', original: null, normalized: false };
-  }
-
-  const raw = String(phase).trim();
-  const canonical = raw.toLowerCase().replace(/[_\s]+/g, '-');
-  if ((VALID_PHASES as readonly string[]).includes(canonical)) {
-    return { phase: canonical, original: raw, normalized: canonical !== raw };
-  }
-
-  const alias = PHASE_ALIASES.get(raw.toLowerCase()) || PHASE_ALIASES.get(canonical);
-  if (alias) {
-    return { phase: alias, original: raw, normalized: true };
-  }
-
-  return {
-    phase: inferPhaseFromDisposition(disposition),
-    original: raw,
-    normalized: true
-  };
+/** Accept only a canonical phase at an external data boundary. */
+export function parseReviewPhase(value: unknown): ReviewPhase | null {
+  return REVIEW_PHASES.find(phase => phase === value) ?? null;
 }
 
-/** Shared transition facts; callers retain their diagnostic vocabulary. */
-export function reviewPhaseTransition(current: string, next: string) {
-  const valid = (REVIEW_PHASES as readonly string[]).includes(next);
-  const allowed = REVIEW_PHASE_TRANSITIONS[current as ReviewPhase] ?? [];
-  return { valid, allowed, permitted: valid && (allowed as readonly string[]).includes(next) };
+export function requireReviewPhase(value: unknown): ReviewPhase {
+  const phase = parseReviewPhase(value);
+  if (phase === null) {
+    throw new ReviewPhaseViolation(`Invalid review phase: "${String(value)}". Valid: ${REVIEW_PHASES.join(', ')}`);
+  }
+  return phase;
+}
+
+/** The phase transition authority shared by the aggregate and loop projection. */
+export function assertReviewPhaseTransition(current: ReviewPhase, next: ReviewPhase): void {
+  requireReviewPhase(current);
+  requireReviewPhase(next);
+  const allowed = REVIEW_PHASE_TRANSITIONS[current];
+  if (!allowed.includes(next)) {
+    throw new ReviewPhaseViolation(`Review phase "${current}" cannot move to "${next}". Allowed: ${allowed.join(', ') || 'none'}`);
+  }
 }

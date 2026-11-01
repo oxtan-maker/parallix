@@ -1,10 +1,10 @@
-import fs from 'node:fs';
 import path from 'node:path';
+import { reviewStateDataFrom } from '../review/review-state-mapping.js';
+import { stageLaunchWindowsFrom } from '../../domain/review.js';
 
 import { isDeepStrictEqual } from 'node:util';
 import type { Mission } from '../../domain/mission.js';
 import { missionId } from '../../domain/mission.js';
-import { compareCodeUnits } from '../../domain/comparators.js';
 
 import { parseTaskFrontmatterValue } from './task-file-io.js';
 import { parseCheckpointDocument, reconcileLegacyCheckpoint } from './checkpoint-document.js';
@@ -12,9 +12,6 @@ import { isLegacyMissionTemplate, parseLegacyMissionDocument } from './legacy-mi
 import { readLegacyTaskContent } from './legacy-task-content.js';
 import { hasApprovedCheckpointException } from './legacy-mission-content.js';
 import { classifyNelBucket } from '../../domain/net-engineering-lines.js';
-import { readExportedReviewEvents } from '../review/review-state.js';
-import { reviewStateDataFrom } from '../review/review-state-mapping.js';
-import { stageLaunchWindowsFrom } from '../../domain/review.js';
 
 import type { LegacyFileClass, LegacyFileFinding } from './legacy-mission-audit.js';
 interface AuditFile { name: string; content: string; sha256: string; }
@@ -40,7 +37,6 @@ export class LegacyFileClassifier {
     if (/^missions\/[^/]+\/CP-[0-9]+\.md$/.test(name)) { return this.checkpoint(input); }
     if (/^missions\/[^/]+\/CP-[^/]+\.md$/.test(name)) { return this.nonstandardCheckpoint(input); }
     if (name.endsWith('/MISSION.md')) { return this.missionDocument(input); }
-    if (name.includes('/review-events/')) { return this.reviewEvent(input); }
     if (name.endsWith('/review-state.json')) { return this.reviewState(input); }
     if (name.endsWith('/nel-record.json')) { return this.nelRecord(input); }
     if (retainedArtifacts.get(name)?.sha256 === sha256
@@ -174,26 +170,6 @@ export class LegacyFileClassifier {
     } else {
       this.unparsed += 1; reason = 'Mission document has no verified preservation artifact';
     }
-
-    return { classification, reason };
-  }
-  private reviewEvent(input: AuditFile): FileAssessment {
-    const { name } = input;
-    const { rootDir, missions } = this.sources;
-    let classification: LegacyFileClass = 'UNRESOLVED';
-    let reason = 'No proven Mission representation or retained artifact classification';
-
-    const slug = name.split('/')[1];
-    const dir = path.join(rootDir, 'missions', slug, 'review-events');
-    const filenames = fs.readdirSync(dir).filter(file => file.endsWith('.md')).sort(compareCodeUnits);
-    const exported = readExportedReviewEvents(slug, rootDir);
-    const index = filenames.indexOf(path.basename(name));
-    const recorded = missions.get(slug)?.review?.reviewEvents[index];
-    if (index < 0 || exported.length !== filenames.length) {
-      this.unparsed += 1; reason = 'Review event export did not parse one event per file';
-    } else if (recorded && isDeepStrictEqual(recorded, exported[index])) {
-      classification = 'identical Mission'; reason = `Parsed review event matches ${slug} aggregate at position ${index}`;
-    } else { this.verificationFailures += 1; reason = `Review event differs from ${slug} aggregate at position ${index}`; }
 
     return { classification, reason };
   }

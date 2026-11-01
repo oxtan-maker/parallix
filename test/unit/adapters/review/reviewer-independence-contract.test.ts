@@ -169,12 +169,17 @@ describe("reviewer self review approval owed", { concurrency: false }, () => {
 
     let writtenState: { value: import('../../../../src/application/ports/review-persistence.js').ReviewStateData | null } = { value: null };
     const events: { type: string; params: unknown; }[] = [];
+    const singleReviewer = fixtureAgentFamily('custom');
+    const singleStartedAt = '2026-10-25T00:00:00Z';
+    const singleReview = startReview({ change: { kind: 'local-branch', sourceBranch: 'mission/task-2384', targetBranch: 'main' }, revision: changeRevision('head') }, singleReviewer, singleReviewer, singleStartedAt, ConfiguredReviewerEligibility.fromReviewStep({ eligible: [singleReviewer], strategy: 'random' }));
+    const singleStore = inMemoryTransitionStore(fixtureMission('task-2384', { status: 'review', assignee: singleReviewer, review: singleReview }));
     const outcome = await postWorkflowReview('task-2384', 'approve', 'looks good', {
+      missionStore: singleStore, lifecycleService: new MissionLifecycleService(singleStore),
       reviewIdentity: 'custom',
       readTokenFn: () => 'token',
       getPrAuthorFn: () => 'custom',
       postReviewFn: () => { throw new Error('self approval must not reach Forgejo'); },
-      readReviewStateFn: () => ({ mission: 'task-2384', reviewer: 'custom', implementer: 'custom' }),
+      readReviewStateFn: () => ({ reviewer: 'custom', implementer: 'custom', round: 1, startedAt: singleStartedAt, phase: 'reviewing' }),
       writeReviewStateFn: async (_slug: string, state) => {
         writtenState.value = state;
         return { outcome: 'committed' as const };
@@ -229,7 +234,7 @@ test('PR 739 drift cannot grant a self-author local Mission approval (TASK-2778 
     readTokenFn: () => 'claude-token', getPrAuthorFn: () => 'claude',
     postReviewFn: () => assert.fail('self approval must not reach provider'),
     readReviewStateFn: async () => ReviewState.from(slug, { reviewer: 'claude', implementer: 'codex', round: 1, phase: 'reviewing' }),
-    writeReviewStateFn: async (_slug, state) => new ReviewState(_slug, state).save('/fixture', { missionStore: store, lifecycleService: lifecycle }),
+    writeReviewStateFn: async (_slug, state) => new ReviewState(_slug, state).save('/fixture', { missionStore: store }),
     createEventFn: () => ({ ok: true, path: null }), log: () => {}, error: () => {},
   });
   assert.equal(result.skipped, true);
@@ -262,7 +267,7 @@ for (const { author, reviewer, implementer } of [
         posts++; return { ok: true, status: 0, statusCode: 200, stderr: null, data: null, error: null };
       },
       readReviewStateFn: async () => new ReviewState(slug, { reviewer, implementer, round: 1, phase: 'reviewing' }),
-      writeReviewStateFn: async (_slug, state) => new ReviewState(_slug, state).save('/fixture', { missionStore: store, lifecycleService: lifecycle }),
+      writeReviewStateFn: async (_slug, state) => new ReviewState(_slug, state).save('/fixture', { missionStore: store }),
       createEventFn: () => ({ ok: true, path: null }), buildMetadataFooterFn: () => '', log: () => {}, error: () => {},
     });
     assert.equal(result.ok, author !== reviewer, result.diagnostic ?? '');
@@ -279,3 +284,28 @@ for (const { author, reviewer, implementer } of [
     }
   });
 }
+
+test('self-author approval cannot leave fixing without a decision (TASK-2821 review P1)', async () => {
+  const slug = 'task-2821-illegal-approval';
+  const family = fixtureAgentFamily('custom');
+  const review = startReview({ change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' }, revision: changeRevision('head') },
+    family, family, '2026-10-25T00:00:00Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: [family], strategy: 'random' }));
+  const broken = { ...review, rounds: [{ ...review.rounds[0], phase: 'fixing' as const }] as const };
+  const store = inMemoryTransitionStore(fixtureMission(slug, { status: 'review', assignee: family, review: broken }));
+  const before = structuredClone(store.mission());
+  const { readReviewState, writeReviewState } = await import('../../../../src/adapters/review/review-state.js');
+  await assert.rejects(() => postWorkflowReview(slug, 'approve', 'looks good', {
+    missionStore: store, lifecycleService: new MissionLifecycleService(store), worktree: '/fixture',
+    reviewIdentity: 'custom', readTokenFn: () => 'fake', getPrAuthorFn: () => 'custom',
+    readReviewStateFn: () => readReviewState(slug, '/fixture', store),
+    writeReviewStateFn: (_slug, state) => writeReviewState(_slug, state, '/fixture', { missionStore: store }),
+    createEventFn: () => assert.fail('an illegal approval must not write an event'),
+    postReviewFn: () => assert.fail('self-author must not POST approval'), log: () => {}, error: () => {},
+  }), /phase|cannot move/);
+  const { recordApproval } = await import('../../../../src/adapters/review/review-round.js');
+  const direct = await recordApproval(slug, { comment: null, decidedAt: '2026-10-25T01:00:00Z' }, { missionStore: store, lifecycleService: new MissionLifecycleService(store) });
+  assert.equal(direct.outcome, 'failed');
+  if (direct.outcome === 'failed') { assert.match(direct.diagnostic, /phase|cannot move/); }
+  assert.deepEqual(store.mission(), before);
+  assert.equal(store.events.length, 0);
+});

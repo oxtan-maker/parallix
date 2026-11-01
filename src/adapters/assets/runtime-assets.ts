@@ -12,7 +12,18 @@ import path from 'node:path';
  * and the bundled executable share one asset boundary.
  */
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
-export const runtimeAssetStore: AssetStore = new FilesystemAssetStore(packageRoot(MODULE_DIR));
+let packagedStore: AssetStore | undefined;
+function packagedAssets(): AssetStore {
+  return packagedStore ??= new FilesystemAssetStore(packageRoot(MODULE_DIR));
+}
+
+// Importing a bootstrap must not require a package tree. Resolve it only when
+// a caller actually reads an asset (including bundled isolated runner fixtures).
+export const runtimeAssetStore: AssetStore = {
+  readText: key => packagedAssets().readText(key),
+  readBytes: key => packagedAssets().readBytes(key),
+  has: key => packagedAssets().has(key),
+};
 
 /** The wired stage prompts whose core half is always assembled in. */
 export type PromptStage = 'draft' | 'execute' | 'review' | 'act-on-review' | 'portfolio';
@@ -79,5 +90,6 @@ export const RUNTIME_ASSET_KEYS = [
   'prompts/execute.md',
   'prompts/review-core.md',
   'prompts/review.md',
+  'prompts/repair.md',
   'templates/mission-scaffold.md',
 ] as const;

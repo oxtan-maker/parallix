@@ -1,4 +1,6 @@
-import { forgejoApiFixture } from '../../../fixtures/forgejo-api.js';
+import { getLatestReviewForPr, getLatestDispositionEvidenceForPr, getLatestDispositionForPr } from '../../../../src/adapters/forgejo/forgejo-pr.js';
+import { providerReviewChanges, providerResolution } from '../../../../src/adapters/review/review-provider-observations.js';
+import { forgejoApiFixture, forgejoAsyncApiFixture } from '../../../fixtures/forgejo-api.js';
 
 
 
@@ -43,4 +45,25 @@ test('getPrNumber pagination and sorting', (t) => {
   assert.ok(scans[0].includes('state=open'), 'Should check open PRs first');
   assert.ok(scans[0].includes('sort=recentupdate'), 'Should use sorting');
   assert.ok(scans[1].includes('state=all'), 'Should check all PRs if open check fails');
+});
+
+test('provider observations retain findings, revision, and resolution evidence (TASK-2821)', async () => {
+  const since = '2026-10-25T10:00:00Z';
+  const decidedAt = '2026-10-25T10:01:00Z';
+  const respondedAt = '2026-10-25T10:02:00Z';
+  const reviewBody = '## F1: Keep the evidence';
+  const resolutionBody = 'Autonomous review disposition: CHANGES_MADE\nFix committed and verified';
+  const apiCall = forgejoAsyncApiFixture(async (_method, route) => ({ ok: true as const, data: route.includes('/reviews')
+    ? [{ user: { login: 'codex' }, state: 'CHANGES_REQUESTED', submitted_at: decidedAt, body: reviewBody, commit_id: 'reviewed-head' }]
+    : [{ user: { login: 'custom' }, created_at: respondedAt, body: resolutionBody }] }));
+  const review = providerReviewChanges(await getLatestReviewForPr(7, 'codex', since, 'fixture-token', { apiCall }));
+  assert.equal(review?.disposition, 'REQUEST_CHANGES');
+  assert.equal(review?.decidedAt, decidedAt);
+  assert.equal(review?.revision, 'reviewed-head');
+  assert.equal(review?.findings[0].summary, 'Keep the evidence');
+  assert.equal(review?.comment, reviewBody);
+  const response = providerResolution(await getLatestDispositionEvidenceForPr(7, 'custom', since, 'fixture-token', { apiCall }));
+  assert.equal(response?.respondedAt, respondedAt);
+  assert.equal(response?.evidence, resolutionBody);
+  assert.equal(await getLatestDispositionForPr(7, 'custom', since, 'fixture-token', { apiCall }), 'CHANGES_MADE');
 });

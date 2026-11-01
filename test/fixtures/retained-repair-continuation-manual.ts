@@ -116,7 +116,7 @@ for (const scenario of ['covered', 'uncovered', 'unrecorded']) {
       enter: async () => runReviewLoop({ slug, isContinue: true, implementer: 'codex' }, ports),
       verify: unused, submit: unused, push: unused, comment: unused,
       readComments: unused, submitReview: unused, close: unused, status: unused,
-      backfillReview: unused, reconcileReview: unused };
+      reconcileReview: unused };
     await createReviewCommand(new ReviewCommandUseCase(workflow))([slug]);
     if (unrecorded) {
       assert.deepEqual(fake.exits, [1]);

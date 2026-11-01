@@ -17,15 +17,11 @@ import {
   parseReviewFindings, recordApproval, recordImplementerResolution, recordRequestedChanges,
 } from '../../../src/adapters/review/review-round.js';
 import {
-  reviewStateFile,
   readReviewState,
   writeReviewState,
   resetReviewState,
 } from '../../../src/adapters/review/review-state.js';
 
-test('reviewStateFile returns null for unknown slug', () => {
-  assert.equal(reviewStateFile('task-nonexistent-zzz'), null);
-});
 
 async function durableReviewFixture(slug: string) {
   const reviewer = agentFamily('codex');
@@ -133,18 +129,18 @@ test('writeReviewState round-trips workflow state through the operator database'
     const result = await writeReviewState(slug, {
       reviewer: 'codex',
       implementer: 'claude',
-      round: 2,
+      round: 1,
       phase: 'fixing',
       disposition: 'REQUEST_CHANGES',
       metadata: {
         recordedStageLaunches: { 'review:codex': ['codex|s1|t0|t1|0'] },
       },
-    }, root, store);
+    }, root, { missionStore: store });
     assert.deepEqual(result, { outcome: 'committed' });
 
     const read = await readReviewState(slug, root, store);
     assert.ok(read, 'state should be readable after write');
-    assert.equal(read.round, 2, 'the loop advancing a round appends one to the aggregate');
+    assert.equal(read.round, 1, 'bookkeeping updates the current round; round-open owns advancement');
     assert.equal(read.phase, 'fixing');
     assert.equal(read.disposition, 'REQUEST_CHANGES');
     assert.deepEqual(read.metadata.recordedStageLaunches, { 'review:codex': ['codex|s1|t0|t1|0'] });
@@ -169,7 +165,7 @@ test('a stale reviewer-launch state cannot erase a recorded approval', async () 
     };
     await store.save(decided, loaded.version);
 
-    assert.deepEqual(await writeReviewState(slug, stale, root, store), { outcome: 'committed' });
+    assert.deepEqual(await writeReviewState(slug, stale, root, { missionStore: store }), { outcome: 'committed' });
     const after = await store.load(missionId(slug));
     assert.equal(after.kind, 'found');
     assert.equal(after.mission.review?.rounds[0].decision?.kind, 'approved');
@@ -190,7 +186,7 @@ test('writeReviewState records a human escalation as a review intervention', asy
         humanEscalationReason: 'MAX_ATTEMPTS',
         humanEscalatedAt: '2026-08-02T12:00:00.000Z',
       },
-    }, root, store);
+    }, root, { missionStore: store });
 
     const read = await readReviewState(slug, root, store);
     assert.ok(read != null);
@@ -201,7 +197,7 @@ test('writeReviewState records a human escalation as a review intervention', asy
 
 test('writeReviewState reports write-failed when the mission has no review', async () => {
   await withMissionDatabase('task-rs-6', async ({ root, slug, store }) => {
-    const result = await writeReviewState(slug, { reviewer: 'codex', implementer: 'claude' }, root, store);
+    const result = await writeReviewState(slug, { reviewer: 'codex', implementer: 'claude' }, root, { missionStore: store });
     assert.equal(result.outcome, 'write-failed');
     assert.match(result.diagnostic, /px review \S+ starts the review/);
   }, { seedReview: false });
@@ -209,7 +205,7 @@ test('writeReviewState reports write-failed when the mission has no review', asy
 
 test('writeReviewState reports write-failed for a mission the database does not hold', async () => {
   await withMissionDatabase('task-rs-7', async ({ root, store }) => {
-    const result = await writeReviewState('task-rs-absent', { reviewer: 'codex', implementer: 'claude' }, root, store);
+    const result = await writeReviewState('task-rs-absent', { reviewer: 'codex', implementer: 'claude' }, root, { missionStore: store });
     assert.equal(result.outcome, 'write-failed');
     assert.match(result.diagnostic, /not in the operator database/);
   });
@@ -234,7 +230,7 @@ test('resetReviewState clears loop bookkeeping but keeps the review conversation
       metadata: {
         recordedStageLaunches: { 'review:codex': ['codex|s1|t0|t1|0'] },
       },
-    }, root, store);
+    }, root, { missionStore: store });
 
     assert.deepEqual(await resetReviewState(slug, root, store, {
       find: async () => null, save: async () => { throw new Error('Unexpected marker save'); }, shouldResume: async () => false,

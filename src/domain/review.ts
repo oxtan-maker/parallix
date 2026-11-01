@@ -1,4 +1,4 @@
-import { REVIEW_PHASES, REVIEW_PHASE_TRANSITIONS, type ReviewPhase } from './review-phase-policy.js';
+import { assertReviewPhaseTransition, type ReviewPhase } from './review-phase-policy.js';
 import type { AgentFamily, StepSelectionPolicy } from './agents.js';
 
 export type ReviewFindingId = string & { readonly __brand: 'ReviewFindingId' };
@@ -785,6 +785,7 @@ export function applyReviewerCommand(review: Review, command: ReviewerCommand): 
     validateRequestChanges(command.findings);
   }
   const current = currentReviewRound(review);
+  if (command.type === 'approve') { assertReviewPhaseTransition(current.phase, 'approved'); }
   const decision: ReviewerDecision = command.type === 'approve'
     ? {
       kind: 'approved',
@@ -836,18 +837,7 @@ function validateRequestChanges(findings: readonly ReviewFinding[]): void {
  */
 export function transitionReviewPhase(review: Review, phase: ReviewPhase): Review {
   const current = currentReviewRound(review);
-  if (!REVIEW_PHASES.includes(phase)) {
-    throw new Error(`Invalid review phase: "${phase}". Valid: ${REVIEW_PHASES.join(', ')}`);
-  }
-  const allowed = REVIEW_PHASE_TRANSITIONS[current.phase];
-  if (!allowed.includes(phase)) {
-    // Worded so the phase never follows the word "from" in quotes: the domain
-    // import-boundary scanner reads that as an import specifier
-    // (test/unit/domain/domain-architecture-guards.test.ts).
-    throw new Error(
-      `Review phase "${current.phase}" cannot move to "${phase}". Allowed: ${allowed.join(', ') || 'none'}`,
-    );
-  }
+  assertReviewPhaseTransition(current.phase, phase);
   return { ...review, rounds: replaceCurrentRound(review, { ...current, phase }) };
 }
 

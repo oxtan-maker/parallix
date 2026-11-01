@@ -333,7 +333,7 @@ describe("Publish-then-reconcile defects —", () => {
       verify: operation(), submit: operation(), push: operation(), enter: operation(),
       comment: operation(), readComments: operation(),
       submitReview: operation(), close: operation(),
-      status: operation(), backfillReview: operation(),
+      status: operation(),
       reconcileReview: operation(),
       ...overrides,
     };

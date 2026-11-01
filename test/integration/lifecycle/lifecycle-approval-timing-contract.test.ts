@@ -220,7 +220,8 @@ test('R1 production: local approval path transitions Mission to integration befo
   try {
     // The production composition: review persistence bound to the store AND
     // the lifecycle service (bindReviewPersistence is what create-cli wires).
-    const persistence = bindReviewPersistence(store, new MissionLifecycleService(store));
+    const lifecycleService = new MissionLifecycleService(store);
+    const persistence = bindReviewPersistence(store, lifecycleService);
 
     // The real supported approval path: px review <slug> --submit-review approve
     await submitReviewRound(slug, 'approve', 'approved for integration', {
@@ -228,6 +229,7 @@ test('R1 production: local approval path transitions Mission to integration befo
       readReviewStateFn: persistence.readReviewState,
       writeReviewStateFn: persistence.writeReviewState,
       missionStore: store,
+      lifecycleService,
       isReviewProviderEnabledFn: () => false,
       transitionTaskFn: async () => true,
       log: () => {},

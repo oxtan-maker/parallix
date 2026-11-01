@@ -1,3 +1,4 @@
+import type { ReviewPhase } from '../../domain/review-phase-policy.js';
 import type { ReviewStateReader } from './review-artifact-files.js';
 import type { ReviewEventCreator } from './review-events.js';
 import { readReviewState, writeReviewState, type ReviewStateData } from './review-state.js';
@@ -32,7 +33,7 @@ export interface ConsumeHumanNotesOptions {
   writeReviewStateFn?: typeof writeReviewState;
   /** Current review state object — dedup metadata is merged into this in place
       so the caller's subsequent persist includes the updated dedup list. */
-  currentState?: { round?: number; phase?: string; metadata?: Record<string, unknown> } | null;
+  currentState?: Pick<ReviewStateData, 'round' | 'phase' | 'metadata'> | null;
 }
 
 /**
@@ -123,7 +124,7 @@ export async function consumeProviderHumanNotes(slug: string, actor: string, opt
 }
 
 async function consumeComments(comments: unknown[], context: {
-  slug: string; actor: string; round: number; phase: string; rootDir: string;
+  slug: string; actor: string; round: number; phase: ReviewPhase; rootDir: string;
   createEventFn: ReviewEventCreator; logger: (message: string) => void; error: (message: string) => void;
   processedKeys: Set<unknown>; created: CreatedHumanNote[]; skipped: unknown[];
 }): Promise<void> {

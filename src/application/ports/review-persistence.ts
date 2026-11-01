@@ -1,22 +1,21 @@
+import type { ReviewPhase } from '../../domain/review-phase-policy.js';
 import type { PullRequestReference } from '../../domain/review.js';
 import type { MissionStore } from '../domain-ports.js';
-import type { MissionLifecycleService } from '../mission-lifecycle-service.js';
 
 export type ReviewStatePersistenceResult =
   | { outcome: 'committed' }
   | { outcome: 'unchanged' }
-  | { outcome: 'write-failed'; stage: 'write'; diagnostic: string }
-  | { outcome: 'add-failed'; stage: 'add'; diagnostic: string }
-  | { outcome: 'commit-failed-dirty'; stage: 'commit'; diagnostic: string }
-  | { outcome: 'boundary-failed'; stage: 'boundary'; diagnostic: string };
+  | { outcome: 'validation-failed'; stage: 'validation'; kind: 'validation'; diagnostic: string }
+  | { outcome: 'write-failed'; stage: 'write'; diagnostic: string };
 
-/** @typedef {{reviewer?: string, implementer?: string, round?: number, startedAt?: string, phase?: string, disposition?: string | null, metadata?: {[key: string]: unknown}}} ReviewStateData */
+
+/** Optional loop bookkeeping fields; phase values are canonical domain values. */
 export interface ReviewStateData {
   reviewer?: string;
   implementer?: string;
   round?: number;
   startedAt?: string;
-  phase?: string;
+  phase?: ReviewPhase;
   disposition?: string | null;
   metadata?: Record<string, unknown>;
   /**
@@ -28,5 +27,5 @@ export interface ReviewStateData {
    */
   pullRequest?: PullRequestReference | null;
 }
-export type ReviewStateWriteOptions = { missionStore?: MissionStore | null; lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null } | MissionStore | null;
-export type ReviewStateWriter = (slug: string, state: ReviewStateData | Record<string, unknown>, worktree?: string, options?: ReviewStateWriteOptions) => Promise<ReviewStatePersistenceResult>;
+export type ReviewStateWriteOptions = { missionStore?: MissionStore | null };
+export type ReviewStateWriter = (slug: string, state: ReviewStateData, worktree?: string, options?: ReviewStateWriteOptions) => Promise<ReviewStatePersistenceResult>;

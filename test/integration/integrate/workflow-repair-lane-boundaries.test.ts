@@ -711,7 +711,7 @@ test('approval cannot report success while the Mission is active (the TASK-2579 
   }
 });
 
-test('the flat review-persistence boundary reports boundary-failed from an active Mission', async () => {
+test('flat bookkeeping cannot settle an approved active Mission (TASK-2582, TASK-2821)', async () => {
   const fixture = await openFixture(seedMission('active', strandedApprovedReview()));
   try {
     const bound = bindReviewPersistence(fixture.store, fixture.lifecycle);
@@ -726,8 +726,8 @@ test('the flat review-persistence boundary reports boundary-failed from an activ
     const result = await bound.writeReviewState(SLUG, state, fixture.root);
     assert.equal(
       result.outcome,
-      'boundary-failed',
-      'persisting the approved phase over an active Mission reports the failed boundary instead of committed',
+      'validation-failed',
+      'bookkeeping cannot report approval success over an active Mission; the decision recorder owns the boundary',
     );
   } finally {
     await closeFixture(fixture);

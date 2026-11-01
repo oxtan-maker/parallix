@@ -188,31 +188,12 @@ describe("multi round repro", { concurrency: false }, () => {
   };
 
   // Mock readReviewState returns flat single-round state (current round only)
-  const mockReadReviewState: NonNullable<NonNullable<ConstructorParameters<typeof ConcreteReviewReadAdapter>[0]>["readReviewState"]> = () => ({
-    slug: 'task-2358',
-    reviewer: 'gemini',
-    implementer: 'custom',
-    round: 3,
-    startedAt: '2026-07-23T10:00:00Z',
-    phase: 'approved',
-    disposition: 'APPROVED',
-    reviewerRetryCount: 0,
-    implementerRetryCount: 0,
-    metadata: {},
-    phaseOriginal: null,
-  });
-
   // ---------------------------------------------------------------------------
   // Regression test: 3-round fixture must NOT collapse to 1 round
   // ---------------------------------------------------------------------------
 
   test('multi-round fixture does not collapse to 1 round', async () => {
-    const adapter = new ConcreteReviewReadAdapter({
-      rootDir: '/tmp',
-      missionStore: mockMissionStore,
-      readReviewState: mockReadReviewState,
-      findMissionDir: () => '/tmp/missions/task-2358',
-    });
+    const adapter = new ConcreteReviewReadAdapter({ missionStore: mockMissionStore });
 
     const review = await adapter.loadReview(missionId('task-2358'));
     assert.ok(review, 'Review must not be null');
@@ -264,7 +245,7 @@ describe("multi round repro", { concurrency: false }, () => {
     assert.equal(review.reviewEvents.length, 3, 'Must have 3 review events, not 0');
   });
 
-  test('zero-round mission falls back to flat ReviewState', async () => {
+  test('zero-round mission does not reconstruct missing review state', async () => {
     // Store returns mission with no review
     const emptyStore: MissionStore = {
       async load(_id: MissionId): Promise<MissionLoadResult> {
@@ -279,53 +260,17 @@ describe("multi round repro", { concurrency: false }, () => {
       },
     };
 
-    const adapter = new ConcreteReviewReadAdapter({
-      rootDir: '/tmp',
-      missionStore: emptyStore,
-      readReviewState: () => ({
-        slug: 'task-empty',
-        reviewer: 'codex',
-        implementer: 'custom',
-        round: 1,
-        startedAt: '2026-07-20T10:00:00Z',
-        phase: 'reviewing',
-        disposition: null,
-        reviewerRetryCount: 0,
-        implementerRetryCount: 0,
-        metadata: {},
-        phaseOriginal: null,
-      }),
-      findMissionDir: () => '/tmp/missions/task-empty',
-    });
+    const adapter = new ConcreteReviewReadAdapter({ missionStore: emptyStore });
 
     const review = await adapter.loadReview(missionId('task-empty'));
-    assert.ok(review, 'Fallback Review must not be null');
-    assert.ok(review.rounds.length >= 1, 'Fallback must produce at least 1 round');
+    assert.equal(review, null, 'No aggregate means no Review may be reconstructed');
   });
 
-  test('null missionStore falls back to flat ReviewState', async () => {
-    const adapter = new ConcreteReviewReadAdapter({
-      rootDir: '/tmp',
-      missionStore: null,
-      readReviewState: () => ({
-        slug: 'task-nullstore',
-        reviewer: 'codex',
-        implementer: 'custom',
-        round: 1,
-        startedAt: '2026-07-20T10:00:00Z',
-        phase: 'reviewing',
-        disposition: null,
-        reviewerRetryCount: 0,
-        implementerRetryCount: 0,
-        metadata: {},
-        phaseOriginal: null,
-      }),
-      findMissionDir: () => '/tmp/missions/task-nullstore',
-    });
+  test('null missionStore cannot fabricate a Review (TASK-2821)', async () => {
+    const adapter = new ConcreteReviewReadAdapter({ missionStore: null });
 
     const review = await adapter.loadReview(missionId('task-nullstore'));
-    assert.ok(review, 'Fallback Review must not be null');
-    assert.ok(review.rounds.length >= 1, 'Fallback must produce at least 1 round');
+    assert.equal(review, null, 'No aggregate means no Review may be reconstructed');
   });
 
   // ---------------------------------------------------------------------------
@@ -369,12 +314,7 @@ describe("multi round repro", { concurrency: false }, () => {
       },
     };
 
-    const adapter = new ConcreteReviewReadAdapter({
-      rootDir: '/tmp',
-      missionStore: store,
-      readReviewState: () => null,
-      findMissionDir: () => '/tmp/missions/task-approved',
-    });
+    const adapter = new ConcreteReviewReadAdapter({ missionStore: store });
 
     const review = await adapter.loadReview(missionId('task-approved'));
     const approval = await adapter.loadReviewApproval(missionId('task-approved'));
@@ -402,40 +342,17 @@ describe("multi round repro", { concurrency: false }, () => {
       },
     };
 
-    const adapter = new ConcreteReviewReadAdapter({
-      rootDir: '/tmp',
-      missionStore: store,
-      readReviewState: () => null,
-      findMissionDir: () => '/tmp/missions/task-fixing',
-    });
+    const adapter = new ConcreteReviewReadAdapter({ missionStore: store });
 
     const approval = await adapter.loadReviewApproval(missionId('task-fixing'));
     assert.equal(approval, null, 'Approval must be null for non-approved mission');
   });
 
-  test('loadReviewApproval falls back to flat ReviewState when store is null', async () => {
-    const adapter = new ConcreteReviewReadAdapter({
-      rootDir: '/tmp',
-      missionStore: null,
-      readReviewState: () => ({
-        slug: 'task-fallback',
-        reviewer: 'codex',
-        implementer: 'custom',
-        round: 1,
-        startedAt: '2026-07-20T10:00:00Z',
-        phase: 'approved',
-        disposition: 'APPROVED',
-        reviewerRetryCount: 0,
-        implementerRetryCount: 0,
-        metadata: {},
-        phaseOriginal: null,
-      }),
-      findMissionDir: () => '/tmp/missions/task-fallback',
-    });
+  test('loadReviewApproval returns no approval without authority (TASK-2821)', async () => {
+    const adapter = new ConcreteReviewReadAdapter({ missionStore: null });
 
     const approval = await adapter.loadReviewApproval(missionId('task-fallback'));
-    assert.ok(approval, 'Fallback approval must not be null');
-    assert.ok(approval.approvedAt, 'Fallback must carry approvedAt');
+    assert.equal(approval, null, 'No authority means no approval');
   });
 });
 
@@ -579,7 +496,6 @@ describe("review projection queries", { concurrency: false }, () => {
     const database = countingDatabase();
     let aggregateLoads = 0;
     const adapter = new ConcreteReviewReadAdapter({
-      rootDir: process.cwd(),
       missionStore: {
         async load() { aggregateLoads += 1; throw new Error('aggregate load is forbidden'); },
         async save() { throw new Error('not used'); },
@@ -679,11 +595,7 @@ describe("review history status repro", { concurrency: false }, () => {
         return missionVersion(1);
       },
     };
-    const persistedReview = await new ConcreteReviewReadAdapter({
-      rootDir: process.cwd(),
-      missionStore: store,
-      readReviewState: () => null,
-    }).loadReview(slug);
+    const persistedReview = await new ConcreteReviewReadAdapter({ missionStore: store }).loadReview(slug);
     assert.ok(persistedReview);
 
     const lines: string[] = [];

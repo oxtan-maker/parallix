@@ -1,3 +1,4 @@
+import { assertReviewPhaseTransition } from '../../domain/review-phase-policy.js';
 /**
  * Workflow comment and review posting to the provider, with local
  * review-verdict recording.
@@ -86,6 +87,9 @@ async function recordLocalReviewVerdict(
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
     missionStore?: MissionStore | null;
+    revision?: string;
+    recordApprovalFn?: typeof recordApproval;
+    lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null;
   } = {}
 ): Promise<boolean> {
   const { missionStore, worktree, writeReviewStateFn, createEventFn, readReviewStateFn, log, error } = recordLocalReviewVerdictBindings(options, slug);
@@ -106,7 +110,12 @@ async function recordLocalReviewVerdict(
   state.metadata = { ...state.metadata, approvalOwed: outcome === 'approve' };
   if (selfReviewAllowed) {
     state.disposition = outcome === 'approve' ? 'APPROVED' : outcome === 'request-changes' ? 'REQUEST_CHANGES' : 'COMMENT';
-    if (outcome === 'approve') { state.transitionTo('approved'); }
+    if (outcome === 'approve') {
+      assertReviewPhaseTransition(state.phase, 'approved');
+      const decision = await (options.recordApprovalFn ?? recordApproval)(slug, { comment: null, decidedAt: new Date().toISOString(), revision: options.revision, observedRound: { number: state.round, startedAt: state.startedAt } }, { missionStore, lifecycleService: options.lifecycleService });
+      if (decision.outcome === 'failed') { throw new Error(decision.diagnostic); }
+      state.phase = 'approved';
+    }
   }
   await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
   const outcomeResult = await createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_OUTCOME, {
@@ -179,6 +188,9 @@ export async function postWorkflowReview(
       log: log,
       error,
       missionStore,
+      lifecycleService: options.lifecycleService,
+      recordApprovalFn: options.recordApprovalFn,
+      revision: options.revision,
     });
     return { ok: allowed, skipped: true, reason: 'self-author', prAuthor, ...(allowed ? {} : { error: diagnostic }) };
   }

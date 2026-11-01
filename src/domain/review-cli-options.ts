@@ -22,7 +22,6 @@ export const REVIEW_OPTIONS = {
   '--verbose': { value: null, purpose: 'Print detailed review and polling diagnostics.' },
   '--actor': { value: 'name', purpose: 'Attribute direct operator recovery to a named operator.' },
   '--no-gate': { value: null, purpose: 'Use the explicit readiness/submit gate bypass supported by those operations.' },
-  '--backfill-review': { value: null, purpose: 'Migrate a pre-cutover review-state file into a Review.' },
   '--reconcile-review': { value: null, purpose: 'Reconcile an interrupted first handoff using explicit PR identity.' },
   '--branch': { value: 'branch', purpose: 'Name the interrupted handoff branch.' },
   '--target': { value: 'branch', purpose: 'Name the interrupted handoff target.' },

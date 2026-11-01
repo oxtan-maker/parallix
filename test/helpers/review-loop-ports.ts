@@ -1,3 +1,4 @@
+import { reviewFindingId } from '../../src/domain/review.js';
 import { renderReviewLoopEvent } from '../../src/adapters/review/review-loop-presentation.js';
 import fs from 'node:fs';
 import { afterEach } from 'node:test';
@@ -73,6 +74,9 @@ export function fakeProvider(overrides: Partial<ReviewProviderPort> = {}): Revie
   return {
     ensureReachable: async () => true,
     openPullRequest: () => ({ kind: 'pull-request' as const, provider: 'forgejo', id: '7', url: null, sourceBranch: 'mission/fake', targetBranch: 'main' }),
+    readRequestedChanges: async (_reviewer, since) => ({ disposition: 'REQUEST_CHANGES',
+      findings: [{ id: reviewFindingId('F1'), summary: 'Provider fixture finding', location: null }], comment: 'Provider fixture finding', revision: null, decidedAt: since }),
+    readResolution: async (_implementer, since) => ({ disposition: 'CHANGES_MADE', itemDispositions: [], evidence: 'Provider fixture resolution', respondedAt: since }),
     latestReview: async () => null,
     pollReview: async () => null,
     pollDisposition: async () => null,
@@ -94,10 +98,12 @@ export function fakeReviewLoopPorts(overrides: ReviewLoopFakeOverrides = {}): Re
   const state: ReviewStatePort = {
     read: async () => current,
     persist: async next => { current = next; writes.push(JSON.parse(JSON.stringify(next))); },
+    recordApproval: async next => { await state.persist(next); },
+    recordRequestedChanges: async () => {},
+    recordResolution: async () => {},
     reset: async () => { current = null; return true; },
     create: identity => new ReviewState(slug, identity),
     resume: persisted => ReviewState.from(slug, persisted as ReviewState),
-    repairInvalidPhase: async () => {},
     openRound: async next => { next.phase = 'reviewing'; await state.persist(next); return true; },
     ...overrides.stateport,
   };

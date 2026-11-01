@@ -1,5 +1,6 @@
+import { settleRequestedChanges } from './review-request-changes-transition.js';
 import { verdictBlockForReview, type VerdictBlock } from '../../application/review-verdict-readiness.js';
-import { readReviewForDecision, staleWrite } from './review-round-read.js';
+import { readReviewForDecision, type ReviewRoundObservation } from './review-round-read.js';
 /**
  * Round advancement for the autonomous review loop.
  *
@@ -18,7 +19,7 @@ import { readReviewForDecision, staleWrite } from './review-round-read.js';
  * domain type and no second state machine.
  */
 
-import type { MissionStore, MissionVersion } from '../../application/domain-ports.js';
+import { isStaleWrite, type MissionStore, type MissionVersion } from '../../application/domain-ports.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import { missionId, type Mission } from '../../domain/mission.js';
 import { requireReviewIdentity } from '../../domain/mission-workflow.js';
@@ -50,7 +51,7 @@ export type ReviewRoundResult =
   | { outcome: 'recorded' }
   /** Already recorded, or nothing to record. Replaying a round is not an error. */
   | { outcome: 'unchanged'; reason: string; noRevisionChange?: boolean }
-  | { outcome: 'failed'; diagnostic: string; workflowBlock?: VerdictBlock };
+  | { outcome: 'failed'; diagnostic: string; kind?: 'stale-write'; workflowBlock?: VerdictBlock };
 
 /** Reviewer verdicts that carry the `changes-requested` decision kind. */
 const CHANGES_REQUESTED_DISPOSITIONS: readonly ReviewDisposition[] =
@@ -77,6 +78,13 @@ export function parseReviewFindings(markdown: string): ReviewFinding[] {
     findings.push({ id: reviewFindingId(id), summary, location: null });
   }
   return findings;
+}
+
+/** Preserve actual findings or a reviewer's plain-text change request. */
+export function reviewFindingsFromMessage(message: string): ReviewFinding[] {
+  const parsed = parseReviewFindings(message);
+  const summary = message.split('\n').find(line => line.trim())?.trim();
+  return parsed.length > 0 || !summary ? parsed : [{ id: reviewFindingId('F1'), summary, location: null }];
 }
 
 function diagnosticFrom(error: unknown, fallback: string): string {
@@ -107,6 +115,7 @@ export async function recordRequestedChanges(
     disposition?: ReviewDisposition;
     /** Mission version the caller read; a mismatch fails closed. */
     expectedVersion?: number;
+    observedRound?: ReviewRoundObservation;
   },
   ports: ReviewRoundPorts = {},
 ): Promise<ReviewRoundResult> {
@@ -114,9 +123,13 @@ export async function recordRequestedChanges(
   if (!store) { return { outcome: 'failed', diagnostic: `Operator database unavailable for ${slug}` }; }
   const disposition = changesRequestedDisposition(input.disposition);
   try {
-    const loaded = await readReviewForDecision(slug, store, input.expectedVersion, 'decide');
+    const loaded = await readReviewForDecision(slug, store, input.expectedVersion, 'decide', input.observedRound);
     if (loaded.kind === 'failed') { return loaded.result; }
     const mission = loaded.mission;
+
+    if (!mission.review.intervention && currentReviewRound(mission.review).decision?.kind === 'changes-requested') {
+      return await settleRequestedChanges(slug, mission, loaded.version, ports);
+    }
 
     const rejected = requestedChangesRejection(slug, mission.review, input.findings);
     if (rejected) { return rejected; }
@@ -131,29 +144,9 @@ export async function recordRequestedChanges(
     });
     const version = await store.save({ ...mission, review }, loaded.version);
 
-    // The mirror of the approval boundary: the decision is what moves the lane,
-    // so the Mission returns to `active` at the reviewer's decision time.
-    if (ports.lifecycleService && mission.status === 'review') {
-      const transition = await ports.lifecycleService.transition({
-        operationId: `review-request-changes:${slug}`,
-        missionId: missionId(slug),
-        expectedVersion: version,
-        capabilities: new Set(['mission:transition']),
-        command: { type: 'request-changes', review },
-        actor: currentReviewRound(review).reviewer,
-        occurredAt: input.decidedAt,
-        idempotencyKey: `request-changes:${slug}:${input.decidedAt}`,
-      });
-      if (transition.status !== 'completed') {
-        return {
-          outcome: 'failed',
-          diagnostic: `review → active transition failed for ${slug}: ${transition.error?.message ?? 'unknown failure'}`,
-        };
-      }
-    }
-    return { outcome: 'recorded' };
+    return await settleRequestedChanges(slug, { ...mission, review }, version, ports);
   } catch (error) {
-    return { outcome: 'failed', diagnostic: diagnosticFrom(error, 'Reviewer decision write failed') };
+    return roundWriteFailure(error, 'Reviewer decision write failed');
   }
 }
 
@@ -224,24 +217,10 @@ function blockedApproval(slug: string, review: Review): ReviewRoundResult {
 }
 
 /**
- * Record the reviewer's authoritative `approve` decision and return the mission
- * to integration.
- *
- * The mirror of {@link recordRequestedChanges}: `approve` is a domain decision,
- * not only a provider comment, and it is what leaves review through the
- * approval boundary that `px integrate` gates on (`recoveryEstablishesApproval`
- * requires `lastRound.decision.kind === 'approved'`). The flat review-state
- * write cannot express it, because a flattened approve against a non-`reviewing`
- * round silently swallowed the phase transition and left `disposition`
- * `APPROVED` over a `changes-requested` decision.
- *
- * Idempotent: a replayed approve on an already-approved round reports
- * `unchanged` instead of rewriting the decision. An approve that cannot legally
- * move the current round to `approved` (for example a round still in `fixing`
- * after a request-changes) fails loudly with a diagnostic naming the illegal
- * transition rather than writing `disposition === 'APPROVED'` over a
- * `changes-requested` decision. An awaiting-review round on a Mission that a
- * manual repair left active is approved in one `active → integration` move.
+ * Record authoritative approval and its Mission lifecycle boundary.
+ * Provider callers invoke this after a successful POST. A replay settles the
+ * boundary without rewriting the original decision time. Illegal phases and
+ * stale observations fail before mutation; active repair uses the atomic move.
  */
 export async function recordApproval(
   slug: string,
@@ -252,6 +231,7 @@ export async function recordApproval(
     source?: ReviewApprovalSource;
     /** Mission version the caller read; a mismatch fails closed. */
     expectedVersion?: number;
+    observedRound?: ReviewRoundObservation;
   },
   ports: ReviewRoundPorts = {},
 ): Promise<ReviewRoundResult> {
@@ -259,11 +239,11 @@ export async function recordApproval(
   if (!store) { return { outcome: 'failed', diagnostic: `Operator database unavailable for ${slug}` }; }
   const source: ReviewApprovalSource = input.source ?? { kind: 'local' };
   try {
-    const loaded = await readReviewForDecision(slug, store, input.expectedVersion, 'approve');
+    const loaded = await readReviewForDecision(slug, store, input.expectedVersion, 'approve', input.observedRound);
     if (loaded.kind === 'failed') { return loaded.result; }
     const mission = loaded.mission;
     const status = reviewStatus(mission.review);
-    if (mission.review) { requireReviewIdentity(mission, mission.review); }
+    requireReviewIdentity(mission, mission.review);
     if (status === 'approved') {
       // The decision is already recorded, but the review → integration boundary
       // may have failed after it was saved. Replaying the approve finishes that
@@ -303,7 +283,7 @@ export async function recordApproval(
     const version = await store.save({ ...mission, review }, loaded.version);
     return await transitionApprovedReview(slug, input.decidedAt, mission, version, review, ports) ?? { outcome: 'recorded' };
   } catch (error) {
-    return { outcome: 'failed', diagnostic: diagnosticFrom(error, 'Approval write failed') };
+    return roundWriteFailure(error, 'Approval write failed');
   }
 }
 
@@ -440,20 +420,16 @@ export async function recordImplementerResolution(
     respondedAt: string;
     /** Mission version the caller read; a mismatch fails closed. */
     expectedVersion?: number;
+    observedRound?: ReviewRoundObservation;
   },
   ports: ReviewRoundPorts = {},
 ): Promise<ReviewRoundResult> {
   const store = ports.missionStore ?? null;
   if (!store) { return { outcome: 'failed', diagnostic: `Operator database unavailable for ${slug}` }; }
   try {
-    const loaded = await store.load(missionId(slug));
-    if (loaded.kind !== 'found') { return { outcome: 'failed', diagnostic: `Mission ${slug} is not in the operator database` }; }
+    const loaded = await readReviewForDecision(slug, store, input.expectedVersion, 'resolve', input.observedRound);
+    if (loaded.kind === 'failed') { return loaded.result; }
     const mission = loaded.mission;
-    const stale = staleWrite(slug, input.expectedVersion, loaded.version);
-    if (stale) { return { outcome: 'failed', diagnostic: stale }; }
-    if (!('review' in mission) || !mission.review) {
-      return { outcome: 'failed', diagnostic: `Mission ${slug} has no review to resolve` };
-    }
     if (reviewStatus(mission.review) !== 'awaiting-implementation') {
       return { outcome: 'unchanged', reason: `review is ${reviewStatus(mission.review)}` };
     }
@@ -478,7 +454,7 @@ export async function recordImplementerResolution(
     await store.save({ ...mission, review }, loaded.version);
     return { outcome: 'recorded' };
   } catch (error) {
-    return { outcome: 'failed', diagnostic: diagnosticFrom(error, 'Implementer resolution write failed') };
+    return roundWriteFailure(error, 'Implementer resolution write failed');
   }
 }
 
@@ -487,4 +463,8 @@ function isChangesRequestedDisposition(value: ReviewDisposition): value is Exclu
 }
 function changesRequestedDisposition(value: ReviewDisposition | undefined): Exclude<ReviewDisposition, 'APPROVED' | 'CHANGES_MADE'> {
   return value && isChangesRequestedDisposition(value) ? value : 'REQUEST_CHANGES';
+}
+
+function roundWriteFailure(error: unknown, fallback: string): ReviewRoundResult {
+  return { outcome: 'failed', diagnostic: diagnosticFrom(error, fallback), ...(isStaleWrite(error) ? { kind: 'stale-write' as const } : {}) };
 }

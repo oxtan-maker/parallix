@@ -255,3 +255,31 @@ for (const boundary of ['approved review', 'missing lifecycle authority'] as con
     assert.deepEqual(fake.launches, []);
   });
 }
+
+for (const refused of [false, true]) {
+  test(`polled approval uses the decision owner before success; refused=${refused} (TASK-2821)`, async () => {
+    const effects: string[] = [];
+    const fake = fakeReviewLoopPorts({
+      slug,
+      state: new ReviewState(slug, { reviewer: 'codex', implementer: 'claude', startedAt: '2026-10-25T00:00:00Z' }),
+      provider: { pollReview: async () => 'APPROVED' },
+      stateport: {
+        recordApproval: async state => {
+          assert.equal(state.phase, 'approved');
+          effects.push('decision');
+          if (refused) { throw new Error('approval lifecycle refused'); }
+        },
+      },
+      task: { mirrorApproved: async () => { effects.push('mirror'); } },
+    });
+    const persist = fake.ports.state.persist;
+    fake.ports.state.persist = async state => {
+      assert.notEqual(state.phase, 'approved', 'approval must never be a bookkeeping write');
+      await persist(state);
+    };
+    await runReviewLoop({ slug, isContinue: true, maxAttempts: 1 }, fake.ports);
+    assert.deepEqual(effects, refused ? ['decision'] : ['decision', 'mirror']);
+    assert.deepEqual(fake.exits, refused ? [1] : []);
+    assert.deepEqual(fake.launches, [], 'existing provider verdict needs no new agent');
+  });
+}

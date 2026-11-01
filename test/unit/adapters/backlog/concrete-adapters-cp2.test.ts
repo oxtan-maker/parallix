@@ -1,3 +1,6 @@
+import { fixtureMission } from '../../../fixtures/mission-builders.js';
+import { missionVersion } from '../../../../src/application/domain-ports.js';
+import { startReview, applyReviewerCommand, ConfiguredReviewerEligibility, changeRevision, reviewFindingId } from '../../../../src/domain/review.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -47,153 +50,56 @@ class MockHistoryRepo implements OperationalHistoryRepository {
 // ReviewReadAdapter tests
 // ---------------------------------------------------------------------------
 
-test('ReviewReadAdapter loadReview returns null when no review state exists', async () => {
-  const adapter = new ConcreteReviewReadAdapter({
-    rootDir: '/tmp',
-    missionStore: null,
-    readReviewState: () => null,
-    findMissionDir: () => null,
-  });
+function reviewStore(phase: 'reviewing' | 'fixing' | 'approved' = 'reviewing') {
+  const reviewer = agentFamily('codex');
+  let review = startReview({ change: { kind: 'local-branch', sourceBranch: 'mission/task-1001', targetBranch: 'main' }, revision: changeRevision('head') },
+    reviewer, agentFamily('custom'), '2026-07-20T10:00:00Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' }));
+  if (phase === 'approved') { review = applyReviewerCommand(review, { type: 'approve', decidedAt: '2026-07-20T11:00:00Z', comment: null, source: { kind: 'local' } }); }
+  if (phase === 'fixing') { review = applyReviewerCommand(review, { type: 'request-changes', decidedAt: '2026-07-20T11:00:00Z', comment: null,
+    findings: [{ id: reviewFindingId('F1'), summary: 'Repair the boundary', location: null }] }); }
+  const mission = fixtureMission('task-1001', { review });
+  return { mission, store: {
+    load: async (id: string) => id === mission.id ? { kind: 'found' as const, mission, version: missionVersion(1) } : { kind: 'missing' as const },
+    save: async () => { throw new Error('read only'); },
+  } };
+}
 
-  const review = await adapter.loadReview(missionId('task-1001'));
-  assert.equal(review, null);
+test('ReviewReadAdapter returns no Review without an authority', async () => {
+  const adapter = new ConcreteReviewReadAdapter({ missionStore: null });
+  assert.equal(await adapter.loadReview(missionId('task-9999')), null);
+  assert.equal(await adapter.loadReviewApproval(missionId('task-9999')), null);
 });
 
-test('ConcreteReviewReadAdapter batch fallback preserves flat and missing review state', async () => {
-  const adapter = new ConcreteReviewReadAdapter({
-    rootDir: '/tmp',
-    missionStore: null,
-    readReviewState: (slug) => slug === 'task-1001' ? ({
-      slug,
-      reviewer: 'codex',
-      implementer: 'custom',
-      round: 1,
-      startedAt: '2026-08-23T08:00:00.000Z',
-      phase: 'reviewing',
-      disposition: null,
-      metadata: {},
-    }) : null,
-    findMissionDir: () => '/tmp/missions/task-1001',
-  });
-
+test('ConcreteReviewReadAdapter batch preserves stored and missing reviews', async () => {
+  const { store, mission } = reviewStore();
+  const adapter = new ConcreteReviewReadAdapter({ missionStore: store });
   const facts = await adapter.loadReviews([missionId('task-1001'), missionId('task-9999')]);
-  assert.equal(facts.get(missionId('task-1001'))?.review?.rounds.length, 1);
-  assert.equal(facts.get(missionId('task-1001'))?.approval, null);
+  assert.deepEqual(facts.get(mission.id), { review: mission.review, approval: null });
   assert.deepEqual(facts.get(missionId('task-9999')), { review: null, approval: null });
 });
 
-test('ReviewReadAdapter loadReview returns domain Review from review state', async () => {
-  const adapter = new ConcreteReviewReadAdapter({
-    rootDir: '/tmp',
-    missionStore: null,
-    readReviewState: () => ({
-      slug: 'task-1001',
-      reviewer: 'codex',
-      implementer: 'custom',
-      round: 2,
-      startedAt: '2026-07-20T10:00:00Z',
-      phase: 'reviewing',
-      disposition: null,
-      reviewerRetryCount: 0,
-      implementerRetryCount: 0,
-      metadata: {},
-      phaseOriginal: null,
-    }),
-    findMissionDir: () => '/tmp/missions/task-1001',
-  });
-
-  const review = await adapter.loadReview(missionId('task-1001'));
-  assert.ok(review !== null);
-  assert.equal(review!.rounds.length, 1);
-  assert.equal(review!.rounds[0].number, 2);
-  assert.equal(review!.rounds[0].reviewer, 'codex');
-  assert.equal(review!.rounds[0].implementer, 'custom');
+test('ReviewReadAdapter preserves recorded identities, phase, findings and approval time', async () => {
+  for (const phase of ['reviewing', 'fixing', 'approved'] as const) {
+    const { store, mission } = reviewStore(phase);
+    const adapter = new ConcreteReviewReadAdapter({ missionStore: store });
+    const review = await adapter.loadReview(mission.id);
+    assert.deepEqual(review, mission.review);
+    assert.equal(review!.rounds[0].reviewer, 'codex');
+    assert.equal(review!.rounds[0].implementer, 'custom');
+    const approval = await adapter.loadReviewApproval(mission.id);
+    if (phase === 'approved') {
+      assert.deepEqual(approval, { subject: review!.rounds[0].subject, approvedAt: '2026-07-20T11:00:00Z' });
+    } else { assert.equal(approval, null); }
+  }
 });
 
-test('ReviewReadAdapter loadReview returns Review with approved decision', async () => {
-  const adapter = new ConcreteReviewReadAdapter({
-    rootDir: '/tmp',
-    missionStore: null,
-    readReviewState: () => ({
-      slug: 'task-1001',
-      reviewer: 'codex',
-      implementer: 'custom',
-      round: 1,
-      startedAt: '2026-07-20T10:00:00Z',
-      phase: 'approved',
-      disposition: 'APPROVED',
-      reviewerRetryCount: 0,
-      implementerRetryCount: 0,
-      metadata: {},
-      phaseOriginal: null,
-    }),
-    findMissionDir: () => '/tmp/missions/task-1001',
-  });
-
-  const review = await adapter.loadReview(missionId('task-1001'));
-  assert.ok(review !== null);
-  assert.equal(review!.rounds[0].decision?.kind, 'approved');
-});
-
-test('ReviewReadAdapter loadReviewApproval returns null for non-approved phase', async () => {
-  const adapter = new ConcreteReviewReadAdapter({
-    rootDir: '/tmp',
-    missionStore: null,
-    readReviewState: () => ({
-      slug: 'task-1001',
-      reviewer: 'codex',
-      implementer: 'custom',
-      round: 1,
-      startedAt: '2026-07-20T10:00:00Z',
-      phase: 'reviewing',
-      disposition: null,
-      reviewerRetryCount: 0,
-      implementerRetryCount: 0,
-      metadata: {},
-      phaseOriginal: null,
-    }),
-    findMissionDir: () => '/tmp/missions/task-1001',
-  });
-
-  const approval = await adapter.loadReviewApproval(missionId('task-1001'));
-  assert.equal(approval, null);
-});
-
-test('ReviewReadAdapter loadReviewApproval returns approval data for approved phase', async () => {
-  const adapter = new ConcreteReviewReadAdapter({
-    rootDir: '/tmp',
-    missionStore: null,
-    readReviewState: () => ({
-      slug: 'task-1001',
-      reviewer: 'codex',
-      implementer: 'custom',
-      round: 1,
-      startedAt: '2026-07-20T10:00:00Z',
-      phase: 'approved',
-      disposition: 'APPROVED',
-      reviewerRetryCount: 0,
-      implementerRetryCount: 0,
-      metadata: {},
-      phaseOriginal: null,
-    }),
-    findMissionDir: () => '/tmp/missions/task-1001',
-  });
-
-  const approval = await adapter.loadReviewApproval(missionId('task-1001'));
-  assert.ok(approval !== null);
-  assert.ok(approval!.approvedAt);
-});
-
-test('ReviewReadAdapter loadReview returns null when no mission dir exists', async () => {
-  const adapter = new ConcreteReviewReadAdapter({
-    rootDir: '/tmp',
-    missionStore: null,
-    readReviewState: () => null,
-    findMissionDir: () => null,
-  });
-
-  const review = await adapter.loadReview(missionId('task-9999'));
-  assert.equal(review, null);
+test('ReviewReadAdapter surfaces corrupt and unavailable state without fallback (TASK-2821)', async () => {
+  const { store, mission } = reviewStore();
+  const broken = new ConcreteReviewReadAdapter({ missionStore: { ...store, load: async () => { throw new Error('offline'); } } });
+  await assert.rejects(() => broken.loadReview(mission.id), /offline/);
+  // @ts-expect-error Deliberately corrupt the port boundary.
+  mission.review!.rounds[0].phase = 'rewiewing';
+  await assert.rejects(() => new ConcreteReviewReadAdapter({ missionStore: store }).loadReview(mission.id), /Invalid review phase/);
 });
 
 // ---------------------------------------------------------------------------

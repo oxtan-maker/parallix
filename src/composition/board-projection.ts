@@ -159,7 +159,6 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
   const builder = new BoardProjectionBuilder(
     missions,
     new ConcreteReviewReadAdapter({
-      rootDir: deps.rootDir,
       missionStore: deps.missionStore,
       projectionReader: deps.database ? new SqliteReviewProjectionReader(deps.database) : null,
     }),

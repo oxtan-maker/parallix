@@ -1,4 +1,4 @@
-import { normalizeReviewPhase, reviewPhaseTransition } from '../../../src/domain/review-phase-policy.js';
+import { assertReviewPhaseTransition, parseReviewPhase, requireReviewPhase, ReviewPhaseViolation, REVIEW_PHASES } from '../../../src/domain/review-phase-policy.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -499,15 +499,21 @@ test('a findings document title is not projected as a finding', () => {
   );
 });
 
-test('phase compatibility normalization shares domain transition facts (TASK-2668.07)', () => {
-  assert.deepEqual(normalizeReviewPhase('', 'APPROVED'), { phase: 'reviewing', original: null, normalized: false });
-  for (const alias of ['pending_approval', 'pending approval', 'PENDING-APPROVAL']) { assert.equal(normalizeReviewPhase(alias, '').phase, 'pending-approval'); }
-  assert.equal(normalizeReviewPhase('rewiewing', '').phase, 'reviewing');
-  for (const disposition of ['REQUEST_CHANGES', 'COMMENT', 'PUSHBACK_ALL', 'BLOCKED', 'PARKED']) { assert.equal(normalizeReviewPhase('unknown', disposition).phase, 'fixing'); }
-  assert.equal(normalizeReviewPhase('unknown', 'APPROVED').phase, 'approved');
-  assert.equal(reviewPhaseTransition('reviewing', 'approved').permitted, true);
-  assert.equal(reviewPhaseTransition('approved', 'reviewing').permitted, false);
-  assert.equal(reviewPhaseTransition('pending-approval', 'approved').permitted, false);
-  assert.equal(reviewPhaseTransition('unknown', 'fixing').permitted, false);
-  assert.equal(reviewPhaseTransition('reviewing', 'unknown').valid, false);
+test('phase input accepts only canonical values and never guesses (TASK-2821)', () => {
+  for (const phase of REVIEW_PHASES) {
+    assert.equal(parseReviewPhase(phase), phase);
+    assert.equal(requireReviewPhase(phase), phase);
+  }
+  for (const value of [undefined, null, '', 'rewiewing', 'review', 'fix', 'pending_approval', 'pending approval', 'APPROVED', ' reviewing ', {}, 1]) {
+    assert.equal(parseReviewPhase(value), null);
+    assert.throws(() => requireReviewPhase(value), error => error instanceof ReviewPhaseViolation && error.kind === 'validation');
+  }
+});
+
+test('one phase transition rule rejects unknown and illegal moves (TASK-2821)', () => {
+  assert.doesNotThrow(() => assertReviewPhaseTransition('reviewing', 'approved'));
+  for (const [current, next] of [['approved', 'reviewing'], ['pending-approval', 'approved'], ['unknown', 'fixing'], ['reviewing', 'unknown']] as const) {
+    // @ts-expect-error Deliberately exercise runtime validation of unchecked callers.
+    assert.throws(() => assertReviewPhaseTransition(current, next), ReviewPhaseViolation);
+  }
 });

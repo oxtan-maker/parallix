@@ -1,3 +1,5 @@
+import { createReviewObservationRecorder } from './review-observation-recording.js';
+import { providerReviewObservation, providerReviewChanges, providerResolution } from './review-provider-observations.js';
 import { reviewVerdictBlock } from '../../application/review-verdict-readiness.js';
 import { readAgentLaunchContext } from '../../application/agent-launch-context.js';
 import { recordImplementerLaunch } from '../../application/rebase-identity.js';
@@ -26,7 +28,7 @@ import { findMissionDir, resolveWorktree, missionBranchName, getPrimaryBranch } 
 import type { PullRequestReference } from '../../domain/review.js';
 import { resolveTaskFile, getTaskImplementer, getTaskStatus, enforceTaskAssignee, transitionTask, reportTaskResolution } from '../backlog/backlog.js';
 import { transitionVirtual } from '../config/state-map.js';
-import { getPrStatus, readToken, getLatestReviewForPr, getComments, providerAvailable, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
+import { getPrStatus, readToken, getLatestReviewForPr, getLatestDispositionEvidenceForPr, getComments, providerAvailable, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
 import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../agents/runtime-matrix.js';
 import { buildReviewPrompt, buildActOnReviewPrompt, buildCompactReviewPrompt, buildCompactActOnReviewPrompt } from './review-prompts.js';
 import { ReviewState, readReviewState, writeReviewState, resetReviewState, persistReviewStateOrThrow, assertReviewStatePersisted } from './review-state.js';
@@ -45,7 +47,7 @@ import { resolvePollIntervalMs, resolvePollTimeoutMs, pollForReview, pollForDisp
 import { buildMetadataFooter, resolveArtifactDir, consumeReviewerArtifacts, consumeImplementerArtifacts } from './review-artifacts.js';
 import { pushReviewRef, isStaleInfoPushRejection, fetchReviewBranch } from '../forgejo/forgejo.js';
 import { CONTINUE_SKIP_CHECK_TIMEOUT_MS, runPreReviewGate, gateFailureReason, hookFailureReason } from './review-gate-handling.js';
-import { persistNormalizedPhaseRepair, recordStageStatsSafe, stageLaunchSinceMs } from './review-agent-fallback.js';
+import { recordStageStatsSafe, stageLaunchSinceMs } from './review-agent-fallback.js';
 import type { ReboundReason } from '../../application/rebound-kernel.js';
 import { openReviewRound } from './review-round-open.js';
 import { createEvent } from './review-events.js';
@@ -156,10 +158,14 @@ function providerPort(slug: string, branch: string, worktree: string, target: Re
       return { kind: 'pull-request', provider: 'forgejo', id, url: typeof pr.url === 'string' && pr.url.trim() ? pr.url : null, sourceBranch: branch, targetBranch: primaryBranch(worktree) };
     },
     async latestReview(reviewer, sinceIso) {
-      const latest = await getLatestReviewForPr(prNumber as number, reviewer, sinceIso, credentials() as string) as Record<string, unknown> | null;
-      return latest ? (latest.state as string | null) ?? null : null;
+      return providerReviewObservation(await getLatestReviewForPr(prNumber as number, reviewer, sinceIso, credentials() as string, { rootDir: worktree, configuration }));
     },
-    pollReview: async (reviewer, sinceIso, request) => await pollForReview(prNumber as number, reviewer, sinceIso, credentials() as string, poll(request, 2000)),
+    readRequestedChanges: async (reviewer, since) => providerReviewChanges(await getLatestReviewForPr(prNumber as number, reviewer, since, credentials() as string, { rootDir: worktree, configuration })),
+    readResolution: async (implementer, since) => providerResolution(await getLatestDispositionEvidenceForPr(prNumber as number, implementer, since, credentials() as string, { rootDir: worktree, configuration })),
+    async pollReview(reviewer, sinceIso, request) {
+      const outcome = await pollForReview(prNumber as number, reviewer, sinceIso, credentials() as string, poll(request, 2000));
+      return outcome && 'state' in outcome ? providerReviewObservation(outcome) : outcome;
+    },
     pollDisposition: async (implementer, sinceIso, request) => await pollForDisposition(prNumber as number, implementer, sinceIso, credentials() as string, poll(request, CONTINUE_SKIP_CHECK_TIMEOUT_MS)),
     publishRevision() {
       if (!credentials()) { return null; }
@@ -294,14 +300,14 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
     state: {
       read: async () => await Promise.resolve(readState(slug, worktree, missionStore)),
       persist: async state => { await persistReviewStateOrThrow(writeState, slug, state, worktree, missionStore); },
+      ...createReviewObservationRecorder(slug, () => headRevision(worktree), providerEnabled, { missionStore, lifecycleService }),
       async reset() {
         const result = await (bindings.resetReviewState ?? resetReviewState)(slug, worktree);
-        assertReviewStatePersisted(result, { slug, phase: 'reset', round: null });
+        assertReviewStatePersisted(result, { slug, round: null });
         return result.outcome === 'committed';
       },
       create: identity => new ReviewState(slug, identity),
       resume: persisted => ReviewState.from(slug, persisted),
-      repairInvalidPhase: async state => { await persistNormalizedPhaseRepair(slug, state, worktree, { log, writeReviewStateFn: writeState, missionStore }); },
       verdictBlock: () => reviewVerdictBlock(slug, missionStore),
       openRound: async state => (await openReviewRound(slug, state, { worktree, log, error, writeReviewStateFn: writeState, missionStore, lifecycleService })).ok,
     },

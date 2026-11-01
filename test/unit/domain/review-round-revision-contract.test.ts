@@ -88,7 +88,7 @@ describe("stale review round repro", { concurrency: false }, () => {
     });
 
     it('updates the current round when the state round equals it', () => {
-      const review = twoRoundReview();
+      const review = applyReviewerCommand(twoRoundReview(), { type: 'approve', decidedAt: '2026-08-01T11:00:00Z', comment: null, source: { kind: 'local' } });
       const applied = applyReviewStateToReview(
         review,
         { reviewer: 'codex', implementer: 'claude', round: 2, phase: 'approved', disposition: 'APPROVED' },
@@ -102,8 +102,11 @@ describe("stale review round repro", { concurrency: false }, () => {
       assert.equal(currentReviewRound(applied).disposition, 'APPROVED');
     });
 
-    it('advances to a higher round without changing prior round numbers', () => {
-      const review = twoRoundReview();
+    it('a domain-opened higher round preserves prior numbering (TASK-2385, TASK-2821)', () => {
+      const reviewer = agentFamily('codex'), implementer = agentFamily('claude');
+      const decided = applyReviewerCommand(twoRoundReview(), { type: 'request-changes', decidedAt: '2026-08-01T11:00:00Z', comment: null, findings: [{ id: reviewFindingId('F1'), summary: 'Repair', location: null }] });
+      const resolved = applyImplementerCommand(decided, { type: 'submit-resolution', respondedAt: '2026-08-01T12:00:00Z', resultingRevision: changeRevision('rev-3'), resolutions: [{ findingId: reviewFindingId('F1'), kind: 'fixed', evidence: 'fixed' }] });
+      const review = beginNextReviewRound(resolved, reviewer, implementer, '2026-08-01T13:00:00Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' }));
       const applied = applyReviewStateToReview(
         review,
         { reviewer: 'codex', implementer: 'claude', round: 3, phase: 'reviewing' },
@@ -623,6 +626,7 @@ it('retains the reviewed head independently of the round start (TASK-2752)', asy
 });
 
 it('reloads both general reviewer verdicts at B while the round starts at A (TASK-2752)', async () => {
+  const { MissionLifecycleService } = await import('../../../src/application/mission-lifecycle-service.js');
   const { recordApproval, recordRequestedChanges } = await import('../../../src/adapters/review/review-round.js');
   const { fixtureMission, inMemoryTransitionStore } = await import('../../fixtures/mission-builders.js');
   for (const verdict of ['approved', 'changes-requested']) {
@@ -630,10 +634,11 @@ it('reloads both general reviewer verdicts at B while the round starts at A (TAS
     const review = startReview({ change: { kind: 'local-branch', sourceBranch: 'mission/revision', targetBranch: 'main' }, revision: changeRevision('A') },
       reviewer, agentFamily('claude'), '2026-10-01T10:00:00Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' }));
     const store = inMemoryTransitionStore(fixtureMission('task-revision-recorder', { status: 'review', review }));
+    const ports = { missionStore: store, lifecycleService: new MissionLifecycleService(store) };
     const input = { revision: 'B', decidedAt: '2026-10-01T11:00:00Z', comment: null };
     const result = verdict === 'approved'
-      ? await recordApproval(String(store.mission().id), input, { missionStore: store })
-      : await recordRequestedChanges(String(store.mission().id), { ...input, findings: [{ id: reviewFindingId('F1'), summary: 'fix B', location: null }] }, { missionStore: store });
+      ? await recordApproval(String(store.mission().id), input, ports)
+      : await recordRequestedChanges(String(store.mission().id), { ...input, findings: [{ id: reviewFindingId('F1'), summary: 'fix B', location: null }] }, ports);
     assert.equal(result.outcome, 'recorded');
     const loaded = await store.load(store.mission().id);
     assert.equal(loaded.kind, 'found');

@@ -67,6 +67,34 @@ export function repairCheckpointCases(): void {
     assert.match(prompt, /independent review|self-approv/i);
   });
 
+  test('repair agents investigate test intent and decide code versus test repairs before escalating (TASK-2821)', async () => {
+    for (const failure of [reason, { kind: 'hook-failure', hook: 'pre-commit', operation: 'commit', output: 'assertion failed' } satisfies ReboundReason]) {
+      for (const repairCheckpoints of [undefined, port()]) {
+        const prompts: string[] = [];
+        const result = await rebound(failure, context({
+          repairCheckpoints,
+          startAgent: async (_step, options) => {
+            prompts.push((options.prompt as (_agent: string) => string)('codex'));
+            return { result: { status: 0 } };
+          },
+        }));
+        assert.equal(result.outcome, 'fixed');
+        const [prompt] = prompts;
+        assert.match(prompt, /owning suite, nearby assertions and Git history/);
+        assert.match(prompt, /why the test exists/);
+        assert.match(prompt, /mission changes.*production callers/);
+        assert.match(prompt, /product regression, fix the production code/);
+        assert.match(prompt, /supersedes the old expectation, update the test/);
+        assert.match(prompt, /Make this decision yourself within the authorized mission/);
+        assert.match(prompt, /not a reason to request human attention/);
+        assert.match(prompt, /unresolved product decision.*cannot resolve from.*evidence/);
+        assert.match(prompt, /Preserve locked gates and success criteria/);
+        assert.match(prompt, /successful harness rerun/);
+        assert.doesNotMatch(prompt, /test invariants|never rewrite your own checks|Preserve all gate and test invariants/);
+      }
+    }
+  });
+
   test('typed recovery advice authorizes unfinished CP-3 beside CP-5 and keeps safeguards (TASK-2726)', () => {
     const advice = buildTypedMissionRecoveryAdvice('task-2726', 'CP-5');
     assert.match(advice, /still lack evidence \(for example an original CP-3 alongside CP-5\)/);

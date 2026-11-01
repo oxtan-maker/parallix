@@ -83,8 +83,6 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
         resetReviewStateFn: persistence.resetReviewState,
         createEventFn: persistence.createEvent,
         readAllEventsFn: persistence.readAllEvents,
-        backfillReviewFn: persistence.backfillReview,
-        reconcileInterruptedHandoffFn: persistence.reconcileInterruptedHandoff,
         // `px review --submit-review request-changes` records a reviewer
         // decision, so it needs the same authority the loop paths use.
         missionStore: mission.store,

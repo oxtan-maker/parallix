@@ -12,7 +12,7 @@ import type { ParallixConfiguration } from '../../application/ports/configuratio
 
 import * as fmt from '../../application/presentation/cli-format.js';
 import { enforceTaskAssignee } from '../backlog/backlog.js';
-import { type ReviewStateData, readReviewState, writeReviewState, VALID_PHASES, persistReviewStateOrThrow } from './review-state.js';
+import { type ReviewStateData, readReviewState, writeReviewState, persistReviewStateOrThrow } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
 import * as statsModule from '../cli/commands/stats.js';
@@ -171,20 +171,6 @@ export async function applyAgentFallback(opts: {
     }
   }
   return fallback;
-}
-
-export async function persistNormalizedPhaseRepair(
-  slug: string,
-  state: ReviewStateData & { phase: string; phaseOriginal?: string | null },
-  worktree: string,
-  { log = fmt.log.plain, writeReviewStateFn = writeReviewState, missionStore = null }: { log?: (_msg: string) => void; writeReviewStateFn?: ReviewStateWriter; missionStore?: MissionStore | null } = {}
-): Promise<void> {
-  if (!state || !state.phaseOriginal || (VALID_PHASES as readonly string[]).includes(state.phaseOriginal)) {
-    return;
-  }
-  log(fmt.status('WARN', `Persisted review phase "${state.phaseOriginal}" is invalid. Repairing to "${state.phase}".`));
-  await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
-  state.phaseOriginal = null;
 }
 
 export function stageWindowKey(stage: string, agentFamily: string): string {

@@ -56,6 +56,7 @@ test('review loop follows the transition contract: review before reviewer, activ
       // A terminal disposition proves the complete reviewer -> implementer
       // order in one round without exercising the five-round retry policy.
       pollDisposition: async () => 'PUSHBACK_ALL',
+      readResolution: async (_implementer, since) => ({ disposition: 'PUSHBACK_ALL', itemDispositions: [], evidence: 'All findings disputed', respondedAt: since }),
     },
     task: {
       mirror: async (lane, implementer) => { events.push({ type: 'transition' as const, status: lane, implementer }); },

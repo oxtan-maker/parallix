@@ -1,3 +1,4 @@
+import type { ReviewDisposition, ReviewFinding, ReviewItemDisposition } from '../../domain/review.js';
 /**
  * Mechanism ports for the application-owned autonomous review loop.
  *
@@ -7,6 +8,8 @@
  * decides what happens next: `src/application/review-loop/` interprets the
  * facts and sequences every effect.
  */
+import type { ReviewPhase } from '../../domain/review-phase-policy.js';
+import type { ReviewStateData } from './review-persistence.js';
 import type { ReviewLoopEvent } from './review-loop-output.js';
 import type { PullRequestReference } from '../../domain/review.js';
 import type { GateFailureReason, HookFailureReason, ReboundReason } from '../rebound-kernel.js';
@@ -55,18 +58,15 @@ export interface ReviewRoundEntryPort {
  * ------------------------------------------------------------------ */
 
 /** The persisted review round the loop advances (the adapter's ReviewState). */
-export interface ReviewLoopState {
+export interface ReviewLoopState extends ReviewStateData {
   readonly slug: string;
-  reviewer?: string;
-  implementer?: string;
   round: number;
   startedAt: string;
-  phase: string;
-  phaseOriginal?: string | null;
+  phase: ReviewPhase;
   disposition: string | null;
   metadata: Record<string, unknown>;
   pullRequest: PullRequestReference | null;
-  transitionTo(_phase: string): unknown;
+  transitionTo(_phase: ReviewPhase): unknown;
   advanceRound(): unknown;
 }
 
@@ -76,14 +76,16 @@ export interface ReviewStatePort {
   verdictBlock?(): Promise<import('../review-verdict-readiness.js').VerdictBlock | null>;
   /** Persist an already-decided state; throws when the write does not commit. */
   persist(_state: ReviewLoopState): Promise<void>;
+  /** Record an observed reviewer approval through the authoritative decision/lifecycle owner. */
+  recordApproval(_state: ReviewLoopState, _observation?: ProviderApproval): Promise<void>;
+  recordRequestedChanges(_state: ReviewLoopState, _observation: ProviderReviewChanges): Promise<void>;
+  recordResolution(_state: ReviewLoopState, _observation: ProviderResolution): Promise<void>;
   /** Discard the persisted state; true when a reset was committed. */
   reset(): Promise<boolean>;
   /** A fresh in-memory round (not yet persisted). */
   create(_identity: { reviewer?: string; implementer?: string }): ReviewLoopState;
   /** The persisted round as a mutable state value. */
   resume(_persisted: ReviewLoopState): ReviewLoopState;
-  /** Persist a canonical phase when the stored phase was an alias. */
-  repairInvalidPhase(_state: ReviewLoopState): Promise<void>;
   /** Persist the round-open boundary; false after the diagnostic was emitted. */
   openRound(_state: ReviewLoopState): Promise<boolean>;
 }
@@ -153,14 +155,40 @@ export interface ProviderPollRequest {
   readonly retryCount?: number;
 }
 
+export interface ProviderApproval {
+  readonly disposition: 'APPROVED';
+  readonly revision: string | null;
+  readonly decidedAt: string;
+  readonly comment: string | null;
+}
+
+export type ProviderReviewObservation = ProviderApproval | ProviderReviewChanges;
+
+export interface ProviderReviewChanges {
+  readonly disposition: Exclude<ReviewDisposition, 'APPROVED' | 'CHANGES_MADE'>;
+  readonly findings: readonly ReviewFinding[];
+  readonly comment: string;
+  readonly revision: string | null;
+  readonly decidedAt: string;
+}
+
+export interface ProviderResolution {
+  readonly disposition: 'CHANGES_MADE' | 'PUSHBACK_ALL';
+  readonly itemDispositions: readonly ReviewItemDisposition[];
+  readonly evidence: string;
+  readonly respondedAt: string;
+}
+
 /** The configured external review provider; null when the provider is disabled. */
 export interface ReviewProviderPort {
   /** Probe, and bootstrap once when unreachable; false after the diagnostic. */
   ensureReachable(): Promise<boolean>;
   /** The open review pull request for the mission branch, if one exists. */
   openPullRequest(): PullRequestReference | null;
-  latestReview(_reviewer: string, _sinceIso: string): Promise<string | null>;
-  pollReview(_reviewer: string, _sinceIso: string, _request: ProviderPollRequest): Promise<ProviderPoll>;
+  readRequestedChanges(_reviewer: string, _sinceIso: string): Promise<ProviderReviewChanges | null>;
+  readResolution(_implementer: string, _sinceIso: string): Promise<ProviderResolution | null>;
+  latestReview(_reviewer: string, _sinceIso: string): Promise<string | ProviderReviewObservation | null>;
+  pollReview(_reviewer: string, _sinceIso: string, _request: ProviderPollRequest): Promise<ProviderPoll | ProviderReviewObservation>;
   pollDisposition(_implementer: string, _sinceIso: string, _request: ProviderPollRequest): Promise<ProviderPoll>;
   /** Push the mission branch to the review remote; null without push credentials. */
   publishRevision(): { ok: boolean; detail: string; status: number | null } | null;

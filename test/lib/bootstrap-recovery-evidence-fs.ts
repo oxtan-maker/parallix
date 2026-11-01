@@ -12,5 +12,8 @@
 
 import { setRecoveryEvidenceFileSystem } from '../../src/application/recovery-evidence.js';
 import { recoveryEvidenceFileSystem } from '../../src/adapters/filesystem/recovery-evidence-fs.js';
+import { configureRepairPrompts } from '../../src/application/ports/repair-prompts.js';
+import { createRepairPromptReader } from '../../src/adapters/assets/repair-prompts.js';
 
 setRecoveryEvidenceFileSystem(recoveryEvidenceFileSystem);
+configureRepairPrompts(createRepairPromptReader());

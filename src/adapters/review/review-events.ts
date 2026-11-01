@@ -1,3 +1,4 @@
+import { requireReviewPhase, parseReviewPhase, ReviewPhaseViolation, type ReviewPhase } from '../../domain/review-phase-policy.js';
 import { VALID_EVENT_TYPES, ALL_EVENT_TYPES, MIRRORED_EVENT_TYPES, VALID_DISPOSITIONS, VALID_VERDICTS, isValidEventType, isValidDisposition, isValidVerdict, shouldMirrorToProvider, hasWorkflowFooter, classifyComment } from './review-event-taxonomy.js';
 import { consumeProviderHumanNotes, type ConsumeHumanNotesOptions, type ConsumeHumanNotesResult } from './review-human-notes.js';
 export type { ConsumeHumanNotesOptions, ConsumeHumanNotesResult } from './review-human-notes.js';
@@ -18,40 +19,13 @@ import { missionId } from '../../domain/mission.js';
 import type { Review, ReviewEventType, ReviewItemDisposition } from '../../domain/review.js';
 import { readReviewState, ReviewState } from './review-state.js';
 import * as fmt from '../../application/presentation/cli-format.js';
-import type { MissionStore } from '../../application/domain-ports.js';
+import { isStaleWrite, type MissionStore } from '../../application/domain-ports.js';
 
 /**
  * Resolve the Mission authority supplied through the application port.
  */
 async function resolveMissionStore(_rootDir: string, store?: MissionStore | null) {
   return store ?? null;
-}
-
-// -------- Path Resolution --------
-
-// -------- Timestamp & Sanitization --------
-
-/**
- * Generate a filesystem-safe ISO timestamp without colons.
- */
-function generateEventTimestamp() {
-  const now = new Date();
-  const datePart = now.toISOString().split('T')[0];
-  const timePart = now.toISOString().split('T')[1].split('.')[0];
-  return `${datePart}T${timePart.replace(/:/g, '')}`;
-}
-
-/**
- * Sanitize a string for use in a filename.
- */
-function sanitizeFilename(str: string): string {
-  if (!str) { return 'unknown'; }
-  return String(str)
-    .toLowerCase()
-    .replace(/[@.]/g, '')
-    .replace(/[^a-z0-9_-]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/(?:^-)|(?:-$)/g, '');
 }
 
 // -------- Event Structure --------
@@ -64,7 +38,7 @@ interface NormalizedEvent {
   content: string;
   slug?: string;
   round?: number;
-  phase?: string;
+  phase?: ReviewPhase;
   actor?: string;
   disposition?: string;
   verdict?: string;
@@ -76,7 +50,7 @@ interface NormalizedEvent {
 export interface CreateEventParams {
   content?: string;
   round?: number;
-  phase?: string;
+  phase?: ReviewPhase;
   actor?: string;
   disposition?: string;
   verdict?: string;
@@ -128,52 +102,9 @@ function normalizeEventContent(content: string, eventType: string, metadata: Eve
 }
 
 /**
- * Build the frontmatter for an event file.
- */
-function buildEventFrontmatter(event: NormalizedEvent): string {
-  const lines = [
-    '---',
-    `event_type: ${event.eventType}`,
-    `timestamp: ${event.timestamp}`,
-  ];
-
-  if (event.round !== undefined) {
-    lines.push(`round: ${event.round}`);
-  }
-  if (event.phase !== undefined) {
-    lines.push(`phase: ${event.phase}`);
-  }
-  if (event.actor !== undefined) {
-    lines.push(`actor: ${event.actor}`);
-  }
-  if (event.slug !== undefined) {
-    lines.push(`slug: ${event.slug}`);
-  }
-
-  if (event.disposition !== undefined) {
-    lines.push(`disposition: ${event.disposition}`);
-  }
-  if (event.verdict !== undefined) {
-    lines.push(`verdict: ${event.verdict}`);
-  }
-  if (event.itemDispositions !== undefined && event.itemDispositions.length > 0) {
-    lines.push(`item_dispositions: ${JSON.stringify(event.itemDispositions)}`);
-  }
-  if (event.blockedReason !== undefined) {
-    lines.push(`blocked_reason: "${event.blockedReason.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`);
-  }
-  if (event.followUpReference !== undefined) {
-    lines.push(`followup_reference: ${event.followUpReference}`);
-  }
-
-  lines.push('---');
-  return lines.join('\n');
-}
-
-/**
  * Build the workflow metadata footer for an event.
  */
-function buildEventFooter(slug: string, round: number, phase: string): string {
+function buildEventFooter(slug: string, round: number, phase: ReviewPhase): string {
   return `\n\n---\n\`[workflow-round:${round}, workflow-phase:${phase}]\``;
 }
 
@@ -184,6 +115,10 @@ export type ReviewEventCreator = (slug: string, eventType: string, params: Creat
 /** @typedef {{content: string, round?: number, phase?: string, actor?: string, disposition?: string, verdict?: string, fixedItems?: unknown[], pushedBackItems?: unknown[], parkedItems?: unknown[], blockedReason?: string, followUpReference?: string, timestamp?: string}} CreateEventParams */
 
 function invalidEventParams(eventType: string, params: CreateEventParams, allowMissingRequiredFields: boolean, error: (_message: string) => void): CreateEventResult | null {
+  if (params.phase !== undefined && parseReviewPhase(params.phase) === null) {
+    error(fmt.status('FAIL', `Invalid review phase: ${String(params.phase)}`));
+    return { ok: false, path: null, error: `Invalid review phase: ${String(params.phase)}` };
+  }
   if (!isValidEventType(eventType)) {
     error(fmt.status('FAIL', `Invalid event type "${eventType}". Valid types: ${ALL_EVENT_TYPES.join(', ')}`));
     return { ok: false, path: null, error: `Invalid event type: ${eventType}` };
@@ -216,7 +151,7 @@ function storedEventFailure(slug: string, reason: string, error: (_message: stri
     error(fmt.status('FAIL', `Cannot store review event for "${slug}": the operator database rejected the write.`));
     return { ok: false, path: null, error: `Review event write failed for ${slug}` };
   }
-  error(fmt.status('FAIL', `Cannot store review event for "${slug}": no Review in the operator database. px review ${slug} starts a review; px review ${slug} --backfill-review migrates a pre-cutover mission.`));
+  error(fmt.status('FAIL', `Cannot store review event for "${slug}": no Review in the operator database. px review ${slug} starts a review.`));
   return { ok: false, path: null, error: `No Review in the operator database for ${slug}` };
 }
 
@@ -238,7 +173,7 @@ async function eventRoundContext(slug: string, rootDir: string, params: CreateEv
   }
 
   const round = (params.round !== undefined ? params.round : (state ? state.round : 1)) as number;
-  const phase = (params.phase !== undefined ? params.phase : (state ? state.phase : 'reviewing')) as string;
+  const phase = requireReviewPhase(params.phase !== undefined ? params.phase : (state ? state.phase : 'reviewing'));
   const actor = (params.actor as string) || 'unknown';
 
   return { round, phase, actor };
@@ -300,8 +235,6 @@ async function createEvent(slug: string, eventType: string, params: CreateEventP
 
   // ADR 0053 (Generated repository metadata): normal lifecycle execution must
   // not create Git-tracked workflow metadata. The stored row is the event;
-  // `readExportedReviewEvents` remains for one-shot import of legacy missions
-  // whose conversation exists only as files.
   logger(fmt.status('PASS', `Recorded review event: ${event.eventType} round ${event.round ?? 1} [${event.actor ?? 'unknown'}]`));
   return { ok: true, path: stored.path, event };
 }
@@ -344,7 +277,7 @@ async function persistEventInStore(
     return await appendReviewEvent(store, slug, event, opts);
   } catch (error) {
     // Retry exactly once when another Mission write advanced the version.
-    if (!(error instanceof Error && error.name === 'MissionStaleWriteError')) {
+    if (!(isStaleWrite(error))) {
       return { ok: false, path: null, reason: 'write-failed' };
     }
     try { return await appendReviewEvent(store, slug, event, opts); }
@@ -396,8 +329,7 @@ function storedReviewEvent(event: NormalizedEvent, position: number) {
  *
  * The exported Markdown files are not a second source: a mission with no Review
  * in the database has no events, and reading the export back would resurrect the
- * dual authority the cutover removed. A pre-cutover mission is migrated once
- * with `px review <slug> --backfill-review`.
+ * dual authority the cutover removed.
  */
 async function readAllEvents(slug: string, options: ReadAllEventsOptions = {}) {
   const { rootDir = process.cwd(), missionStore } = options;
@@ -411,7 +343,8 @@ async function readAllEventsFromStore(slug: string, rootDir: string, missionStor
   let store: Awaited<ReturnType<typeof resolveMissionStore>>;
   try {
     store = await resolveMissionStore(rootDir, missionStore);
-  } catch {
+  } catch (error) {
+    if (error instanceof ReviewPhaseViolation) { throw error; }
     return [];
   }
   if (!store) {
@@ -436,7 +369,8 @@ async function readAllEventsFromStore(slug: string, rootDir: string, missionStor
       blocked_reason: event.blockedReason,
       followup_reference: event.followUpReference,
     }));
-  } catch {
+  } catch (error) {
+    if (error instanceof ReviewPhaseViolation) { throw error; }
     return [];
   }
 }
@@ -475,7 +409,6 @@ export {
 
 // Rendering
 export {
-  buildEventFrontmatter,
   buildEventFooter,
 
 };
@@ -485,12 +418,6 @@ export {
   hasWorkflowFooter,
   classifyComment,
   consumeHumanNotes
-};
-
-// Utilities
-export {
-  generateEventTimestamp,
-  sanitizeFilename
 };
 
 async function consumeHumanNotes(slug: string, actor: string, options: ConsumeHumanNotesOptions = {}): Promise<ConsumeHumanNotesResult> {

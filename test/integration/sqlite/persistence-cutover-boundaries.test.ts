@@ -115,19 +115,11 @@ test('SC5: no src/adapters/sqlite file imports the production composition root',
 // (c) SC6 — durable IO for a database-owned concept stays declared
 // ---------------------------------------------------------------------------
 
-test('SC6: review persistence declares only the one-way legacy import, never a writer', () => {
-  // The loop's review state is the Review aggregate. The single entry left for
-  // these files is the operator-invoked `--backfill-review` import; a write entry,
-  // or a read classified as domain state, means review-state.json came back as
-  // a live authority.
+test('SC6: review persistence has no historical-file import or writer (TASK-2821)', () => {
   const entries = ADR0053_PERSISTENCE_INVENTORY.filter(
-    (entry) => ['review/review-state.ts', 'review/review-legacy-import.ts'].some(file => entry.fileLocation.endsWith(file)),
+    entry => entry.fileLocation.includes('/review/') && entry.concept === 'Review',
   );
-  assert.deepEqual(
-    entries.map((entry) => `${entry.id}:${entry.operation}:${entry.classification}`),
-    ['review-import-legacy-review-state:read:explicit-one-way-legacy-input'],
-    'review-state.ts is served by the Review aggregate; only the one-way legacy import may be declared',
-  );
+  assert.deepEqual(entries, [], 'Review state and history are database owned');
 });
 
 test('SC1: no inventory entry still defers to the TASK-2322.12 cutover', () => {

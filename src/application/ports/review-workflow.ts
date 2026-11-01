@@ -16,6 +16,5 @@ export interface ReviewWorkflowPort {
   submitReview(_context: ReviewWorkflowContext): Promise<void> | void;
   close(_context: ReviewWorkflowContext): Promise<void> | void;
   status(_context: ReviewWorkflowContext): Promise<void> | void;
-  backfillReview(_context: ReviewWorkflowContext): Promise<void> | void;
   reconcileReview(_context: ReviewWorkflowContext): Promise<void> | void;
 }

@@ -5,17 +5,11 @@ import { isIntegratedCapability, unavailableReason } from '../../../../src/appli
 import { BoardCommandController } from '../../../../src/application/controller/board-controller.js';
 import { makeExecutePorts } from '../../../fixtures/execute-mission-ports.js';
 
-test('task-2428: persisted-artifact consumer can synthesize review identity, so board dispatch remains unavailable', () => {
+test('board review dispatch stays unavailable after synthetic state removal (TASK-2428, TASK-2821)', () => {
   const source = readFileSync(new URL('../../../../src/adapters/review/review-submit-round.ts', import.meta.url), 'utf8');
 
-  // The consumer still defaults the reviewer to 'autonomous' when neither the
-  // review state nor the task assignee names one. Matched on the default rather
-  // than one spelling of the assignment, so extracting the helper that holds it
-  // does not silently drop the guard. `[:=]` because TASK-2521.03 removed the
-  // `--consume-artifacts` helper that held the assignment form; the surviving
-  // site sets it in an object literal.
-  assert.match(source, /reviewer\s*[:=]\s*(?:[^;\n]*\|\|\s*)?'autonomous'/);
-  assert.match(source, /new ReviewState\(slug/);
+  assert.doesNotMatch(source, /reviewer\s*[:=]\s*(?:[^;\n]*\|\|\s*)?'autonomous'/);
+  assert.doesNotMatch(source, /new ReviewState\(slug/);
   assert.equal(isIntegratedCapability('review:act-on-findings'), false);
   assert.match(unavailableReason('review:act-on-findings') ?? '', /synthesize review state or reviewer identity/);
 });

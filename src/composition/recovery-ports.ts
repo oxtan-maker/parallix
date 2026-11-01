@@ -1,4 +1,6 @@
 import { configureRepairCheckpoints } from '../application/ports/repair-checkpoint.js';
+import { configureRepairPrompts } from '../application/ports/repair-prompts.js';
+import { createRepairPromptReader } from '../adapters/assets/repair-prompts.js';
 import { RepairCheckpointService } from '../application/repair-checkpoint-service.js';
 
 import { configureReboundTelemetry } from '../application/rebound-telemetry.js';
@@ -18,6 +20,7 @@ export function bindRecoveryPorts(
   mission: { repositoryId: string; store: MissionStore } | null | undefined,
   rootDir: string,
 ): void {
+  configureRepairPrompts(createRepairPromptReader());
   setRecoveryEvidenceFileSystem(recoveryEvidenceFileSystem);
   configureRepairCheckpoints(new RepairCheckpointService(mission?.store ?? unavailableMissionTransitionStore()));
   configureReboundTelemetry(repositories ? { repositoryId: mission?.repositoryId ?? resolveCanonicalRepositoryId(rootDir), history: repositories.operationalHistory } : null);
