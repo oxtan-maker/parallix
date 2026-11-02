@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Whether a coding agent should keep, compact or reset its conversation depends on the next job. Paired replays at checkpoints, failed checks, rebases and acting on review findings.">
+  <meta name="color-scheme" content="light">
+  <title>When should an agent keep its context, compact it or start a fresh session? — Magnus Ekdahl</title>
+  <link rel="stylesheet" href="styles.css?v=20261101-4">
+</head>
+<body>
+<a class="skip-link" href="#article">Skip to article</a>
+<header class="masthead">
+  <a class="masthead-title" href="../../index.html">Engineering notes</a>
+  <span>Magnus Ekdahl</span>
+</header>
+<main id="article" tabindex="-1">
+<article aria-labelledby="title">
+  <header class="article-header">
+    <h1 id="title">When should an agent keep its context, compact it or start a fresh session?</h1>
+    <p class="standfirst"> 
+      Start fresh when a failing check or a moved main branch sets the next job:
+      43–46% less time and 46–70% less cost than continuing. When the agent continues
+      its own plan, compact; fresh took up to 73% longer.
+    </p>
+    <p class="cost-definition">
+      <a href="#monthly-cost-note" aria-label="Cost definition and pricing, note 5">Cost</a>
+      means implementer tokens, including cache reads and compaction, priced at
+      <a href="https://platform.claude.com/docs/en/models/sonnet-5-5/overview">Claude Sonnet 5.5</a> API rates.
+      Parallix uses discounted subscriptions and local AI; these figures compare usage,
+      not its actual bill.
+    </p>
+    <p class="byline">Magnus Ekdahl · <time datetime="2026-11-02">2 November 2026</time></p>
+  </header>
+
+  <p>
+    In <a href="https://github.com/oxtan-maker/parallix">Parallix</a>, one agent implements a
+    change and another agent, using a different model, reviews it. Then it's time for human review,
+    and integration checks run before anything lands. Each of those stages can send the work
+    back.
+    Each return creates another job, and the same choice comes up every time: keep the
+    agent's conversation, compact it, or start a fresh session.
+  </p>
+
+  <figure class="article-figure">
+    <picture>
+      <source media="(max-width: 620px)" srcset="assets/factory-flow-mobile.svg?v=20261102-1">
+      <img src="assets/factory-flow.svg?v=20261102-1" width="1000" height="500"
+        alt="Parallix workflow: Implement with checkpoints (1), required checks before agent review, Review by a different model, Human review, Integration checks, Done. Failed checks before review or at integration return to Implement (2). Review findings return to the implementer to act on review (3). Main moving before review or integration triggers a rebase (4), with a dashed return to Implement.">
+    </picture>
+    <figcaption>
+      <strong>Four places where the context choice comes up.</strong> A failed check (2)
+      returns work both before review and at integration. Findings go back to the implementer
+      (3). A rebase (4) can interrupt the work before review or integration.
+      Human feedback also returns work; it is outside this article's scope because the
+      outcome depends heavily on the human reviewer.
+    </figcaption>
+  </figure>
+
+  <p>
+    These are the context choices Parallix makes; the numbers match the diagram:
+  </p>
+  <ol class="decision-list">
+    <li><a href="#checkpoint"><strong>Checkpoint.</strong></a> Part of the implementation is
+      delivered. Compact and continue, keeping the important knowledge gathered so far.</li>
+    <li><a href="#failed-check"><strong>Failed check.</strong></a> Start a fresh session with the
+      diagnostics and requirements. </li>
+    <li><a href="#findings"><strong>Act on review.</strong></a> The implementer addresses the
+      findings. Compact before starting the fix. Continuing without compaction is another option.</li>
+    <li><a href="#rebase"><strong>Rebase conflict.</strong></a> When main moves, start a fresh session
+      with the current branch and the intent of the change. This can happen before review
+      or integration.</li>
+  </ol>
+
+  <p>
+    <strong>Compact</strong> replaces earlier conversation with a summary and continues
+    from there. It costs a summarisation call and can lose details.
+    <strong>Fresh</strong> starts a new conversation with the task and current evidence;
+    the agent has to recover anything else it needs from the repository.
+    <strong>Continue</strong> carries the existing conversation forward, including its
+    investigation and tool output. It is what you get when you run agents by 
+    hand without handling context: each keeps one session until the work is done, compacting only near the context limit.
+  </p>
+  <p>
+    This tradeoff also appears in the wider research.
+    <a href="https://www.anthropic.com/research/effective-context-engineering-for-ai-agents">Anthropic's
+    context engineering guide</a> describes how compaction preserves continuity while
+    risking the loss of useful detail. Its
+    <a href="https://www.anthropic.com/research/effective-harnesses-for-long-running-agents">long-running
+    agent experiments</a> show why new sessions need written progress and Git history.
+    In <a href="https://arxiv.org/abs/2508.21433">JetBrains' SWE-agent experiments</a>,
+    summaries sometimes led to longer runs despite reducing the context.
+    These explain the costs to look for; the Parallix replays ask which choice pays at
+    each point in the workflow.
+  </p>
+
+  <h2 id="rebase">When main moves, adapt the work to main's changes</h2>
+  <p>
+    A rebase asks the agent to reconcile the task's change with changes in the main branch that have happened in the middle of the task. This is expected if you are running multiple tasks in parallel.
+    The results and monthly estimate count only rebases that needed conflict resolution.
+  </p>
+
+  <figure class="article-figure" id="rebase-comparison">
+    <picture>
+      <source media="(max-width: 620px)" srcset="assets/rebase-results-mobile.svg?v=20261102-3">
+      <img src="assets/rebase-results.svg?v=20261102-3" width="780" height="336"
+        alt="Cost and recorded time, with the highest total in each matched comparison set to 100%. 9 matched tasks. Cost: Fresh 30.2%, Compact 88.9%, Continue 100.0%. Time: Fresh 47.8%, Continue 87.8%, Compact 100.0%. Bars sort ascending within each comparison.">
+    </picture>
+    <figcaption>
+      <strong>Fresh cost 70% less and took 46% less time than Continue.</strong>
+      Against Compact, it cost 66% less and took 52% less time. It beat Continue
+      in all nine rebases and Compact in eight, on both measures.<sup><a href="#rebase-note" id="rebase-note-ref"
+      aria-label="Rebase experiment details, note 1">1</a></sup>
+    </figcaption>
+  </figure>
+
+  <h2 id="failed-check">When a check fails</h2>
+  <p>
+    When code comes back from a failed check such as a test, Parallix
+    gives the implementer the failing command, its output and the original requirements, and the current 
+    branch with the changes from the last round; the new job is to find the cause of the failure and repair it.
+  </p>
+  <p>
+    Across eleven tasks, Fresh's cost was
+    46% lower than Continue and 41% lower than Compact through independent approval.
+    Recorded time was 43% lower than Continue and 37% lower than Compact. It cost
+    less in all eleven comparisons with Continue and ten with Compact.
+    One sample was hit by an error in the experiment setup and was excluded.
+  </p>
+
+  <figure class="article-figure" id="failed-gate-comparison" aria-labelledby="gate-caption">
+    <picture>
+      <source media="(max-width: 620px)" srcset="assets/failed-gate-results-mobile.svg?v=20261102-2">
+      <img src="assets/failed-gate-results.svg?v=20261102-2" width="780" height="336"
+        alt="Cost and recorded time, with the highest total in each matched comparison set to 100%. 11 matched tasks. Cost: Fresh 54.0%, Compact 91.2%, Continue 100.0%. Time: Fresh 57.2%, Compact 91.4%, Continue 100.0%. Bars sort ascending within each comparison.">
+    </picture>
+    <figcaption id="gate-caption"><strong>Eleven tasks through approval.</strong>
+      Time includes every repair and retry, validation and reviewer work.<sup><a href="#failed-check-note"
+      id="failed-check-note-ref" aria-label="Failed-check experiment details, note 2">2</a></sup></figcaption>
+  </figure>
+
+  <h2 id="findings">Acting on review findings</h2>
+  <p>
+    When a reviewer sends work back, the agent has to fix the problem and preserve the
+    parts that already work.  
+  </p>
+  
+  <figure class="article-figure" id="review-repair-comparison" aria-labelledby="arms-caption">
+    <picture>
+      <source media="(max-width: 620px)" srcset="assets/review-repair-results-mobile.svg?v=20261102-1">
+      <img src="assets/review-repair-results.svg?v=20261102-1" width="780" height="336"
+        alt="Cost and recorded time, with the highest total in each matched comparison set to 100%. 12 matched tasks. Cost: Compact 74.6%, Fresh 85.3%, Continue 100.0%. Time: Compact 85.7%, Continue 92.8%, Fresh 100.0%. Bars sort ascending within each comparison.">
+    </picture>
+    <figcaption id="arms-caption">
+      <strong>Cost and time from review findings to approval.</strong> Totals cover
+      twelve matched tasks: seven <a href="https://huggingface.co/Qwen/Qwen3.8-Flash-Next">Qwen 3.8 Flash Next</a>
+      and five Claude. Time also includes validation and reviewer
+      work.<sup><a href="#review-repair-note" id="review-repair-note-ref"
+      aria-label="Matched review-repair cost and time analysis, note 3">3</a></sup>
+    </figcaption>
+  </figure>
+
+  <p>
+    Compact's cost was 25% lower than Continue and 13% lower than
+    Fresh, and it was cheaper than Continue with both models. Fresh cost 15% less than Continue, despite taking longer. 
+  </p>
+  <p>
+    Fresh took 8% longer than Continue and 17% longer than Compact. Compact took
+    8% less time than Continue in total. Compact was slower than Continue on the
+    Claude tasks, but faster on the Qwen tasks. Parallix uses Compact here
+    for now; more data is needed to establish whether the effect is significant.
+  </p>
+
+  <h2 id="checkpoint">Between checkpoints</h2>
+  <p>
+    A checkpoint is a partial delivery of the work, but the agent still needs to complete the remaining checkpoints.
+  </p>
+  <p>
+    Across twenty Qwen tasks, Compact took 8% less time than Continue.
+    It was faster in twelve tasks and slower in eight. Its cost
+    was 1% higher. I would keep Compact here for the shorter processing time
+    and the continuity of a summary.
+  </p>
+
+  <figure class="article-figure" id="checkpoint-comparison" aria-labelledby="checkpoint-caption">
+    <picture>
+      <source media="(max-width: 620px)" srcset="assets/checkpoint-results-mobile.svg?v=20261102-1">
+      <img src="assets/checkpoint-results.svg?v=20261102-1" width="780" height="557"
+        alt="Cost and recorded time across 20 matched tasks, with the highest total for each measure set to 100%. Cost: Continue 62.9%, Compact 63.7%, Fresh 100.0%. Time: Compact 57.7%, Continue 62.7%, Fresh 100.0%. Bars sort ascending within each measure.">
+    </picture>
+    <figcaption id="checkpoint-caption">
+      <strong>Fresh took 59% more time than Continue and 73% more than Compact.</strong>
+      <a href="#checkpoint-note" aria-label="Checkpoint experiment details, note 4">All three
+      tactics are tested in the same twenty tasks.</a>
+    </figcaption>
+  </figure>
+
+  <p>
+    Compact used 3% fewer tokens than Continue but cost 1% more, because it sent 18% more uncached input, which
+    is priced at twenty times a cache read. A likely reason, which these records don't isolate, is that a new 
+    summary can't reuse the cached prefix of the old conversation. Over the recorded month,
+    I estimate about $6 more for checkpoint work and ten fewer agent processing hours.
+    For Parallix development, I take that tradeoff since processing time is
+    the current bottleneck.
+  </p>
+
+  <p>
+    Across the twenty tasks, Fresh took 73% longer than Compact and cost
+    57% more. Against Continue, it took 59% longer and cost 59% more.
+    Compact was faster in eighteen tasks and cost less in seventeen. The total
+    time and cost differences are statistically significant.<sup><a id="checkpoint-note-ref"
+    href="#checkpoint-note" aria-label="Checkpoint results and significance, note 4">4</a></sup>
+  </p>
+
+  <h2 id="decision">What this means for Parallix</h2>
+  <p>
+    I reconstructed the usage records for the period 23 September to 23 October
+    and applied the experiments' cost ratios at each decision point.<sup><a
+    id="monthly-cost-note-ref" href="#monthly-cost-note"
+    aria-label="Cost calculation and coverage, note 5">5</a></sup>
+  </p>
+
+  <figure id="monthly-comparison" aria-labelledby="monthly-caption">
+    <div class="table-scroll" tabindex="0" role="region" aria-label="Costs for retained monthly work">
+      <table class="numeric monthly-costs">
+        <caption>Estimated cost, 23 September–23 October: USD (one developer)</caption>
+        <thead>
+          <tr>
+            <th scope="col">Decision point</th>
+            <th scope="col" class="by-stage">By stage</th>
+            <th scope="col">Continue</th>
+            <th scope="col">Compact</th>
+            <th scope="col">Fresh</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row"><span class="label-full">Between checkpoints</span><span class="label-short">Checkpoint</span>
+              <span class="workload">147 tasks<span class="workload-detail"> with retained usage</span></span></th>
+            <td class="by-stage">$492<span class="tactic">Compact</span></td>
+            <td>$486</td>
+            <td class="by-stage">$492</td>
+            <td>$772</td>
+          </tr>
+          <tr>
+            <th scope="row"><span class="label-full">Failed checks</span><span class="label-short">Failed check</span>
+              <span class="workload">160 tasks<span class="workload-detail"> with retained usage</span></span></th>
+            <td class="by-stage">$337<span class="tactic">Fresh</span></td>
+            <td>$623</td>
+            <td>$568</td>
+            <td class="by-stage">$337</td>
+          </tr>
+          <tr>
+            <th scope="row"><span class="label-full">Review findings</span><span class="label-short">Findings</span>
+              <span class="workload">97 tasks<span class="workload-detail"> with retained usage</span></span></th>
+            <td class="by-stage">$351<span class="tactic">Compact</span></td>
+            <td>$471</td>
+            <td class="by-stage">$351</td>
+            <td>$401</td>
+          </tr>
+          <tr>
+            <th scope="row"><span class="label-full">Rebase conflicts</span><span class="label-short">Rebase</span>
+              <span class="workload">29 tasks<span class="workload-detail"> with retained usage</span></span></th>
+            <td class="by-stage">$21<span class="tactic">Fresh</span></td>
+            <td>$71</td>
+            <td>$63</td>
+            <td class="by-stage">$21</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <th scope="row"><span class="label-full">Estimated subtotal</span><span class="label-short">Est. subtotal</span></th>
+            <td class="by-stage">$1,201</td>
+            <td>$1,651</td>
+            <td>$1,474</td>
+            <td>$1,531</td>
+          </tr>
+          <tr>
+            <th scope="row"><span class="label-full">Difference vs Continue ($)</span><span class="label-short">vs Continue ($)</span></th>
+            <td class="by-stage">−$450</td>
+            <td>$0</td>
+            <td>−$177</td>
+            <td>−$120</td>
+          </tr>
+          <tr>
+            <th scope="row"><span class="label-full">Difference vs Continue (%)</span><span class="label-short">vs Continue (%)</span></th>
+            <td class="by-stage">−27.2%</td>
+            <td>0.0%</td>
+            <td>−10.7%</td>
+            <td>−7.2%</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    <figcaption id="monthly-caption">
+      <strong>By stage: Compact for implementation and review fixes; Fresh for failed
+      checks and rebases.</strong> Only work at these four decision points is included;
+      drafting, reviewer work and other constant costs are left out. The estimate
+      uses 47,771 recovered usage records from Qwen, Claude and
+      <a href="https://learn.chatgpt.com/docs/codex/cli">Codex</a>.
+      Missing histories prevent a full-month total.
+    </figcaption>
+  </figure>
+
+  <p>
+    My rule for Parallix is Compact between checkpoints and before review fixes,
+    and Fresh after failed checks. The replays tested the choices Parallix already made: they supported three and changed one, rebases, which now start fresh.
+    At checkpoints, I accept
+    the small cost premium for the shorter recorded processing time.
+  </p>
+
+  <p>
+    For the recorded workload, I estimate about <strong>$450</strong> less in cost than
+    using Continue throughout, a 27% reduction, and about <strong>100 h</strong> less
+    agent processing time (25%). These processing hours are summed across concurrent tasks, not
+    hours of my time or calendar time saved.<sup><a href="#policy-time-note"
+    id="policy-time-note-ref" aria-label="Monthly processing time estimate, note 6">6</a></sup>
+  </p>
+  <p>
+    Every comparison stops at agent approval; I did not measure what reaches human review. I will monitor review rounds, defects found after approval, and time spent
+    at each stage. I would reverse a choice if extra repairs erase its time
+    saving, more defects get through approval, or a change of model or workload
+    removes the advantage. If usage caps become the bottleneck, I would reconsider
+    paying more for Compact at checkpoints.
+  </p>
+  <p>
+    <strong>Choose context for the next job, and measure the cost of getting the work
+    right.</strong>
+  </p>
+
+  <p class="author">
+    <a href="https://www.linkedin.com/in/magnus-ekdahl-0311402b">Magnus Ekdahl</a>
+    builds <a href="https://github.com/oxtan-maker/parallix">Parallix</a>
+    and writes about engineering with coding agents.
+  </p>
+
+  <footer class="article-footer">
+    <h2>Sources and method</h2>
+    <p>
+      Results checked on 2 November 2026.
+    </p>
+    <details>
+      <summary>1. Rebase results</summary>
+      <p id="rebase-note">
+        Nine matched tasks, each run with all three tactics. Exact two-sided paired
+        permutation tests of total cost and time give p = .0039 for Fresh versus Continue
+        and .0078 for Fresh versus Compact, for both measures.
+        All runs passed local validation; that does not establish equal code
+        quality.
+        <a href="#rebase-note-ref" aria-label="Back to the rebase result">↩</a>
+      </p>
+    </details>
+    <details>
+      <summary>2. Failed checks</summary>
+      <p id="failed-check-note">
+        Eleven matched tasks. Exact two-sided paired permutation tests of total cost
+        and time give p = .00098 for Fresh versus Continue on both measures.
+        Fresh versus Compact gives p = .00195 for cost and .00488 for time.
+        <a href="#failed-check-note-ref" aria-label="Back to the failed-check results">↩</a>
+      </p>
+    </details>
+    <details>
+      <summary>3. Acting on review findings</summary>
+      <p id="review-repair-note">
+        12 tasks: seven used Qwen and five Claude; the model and reviewer stayed fixed
+        within each task. Time includes all
+        repairs, compaction, checks and review through approval, excluding setup and
+        inactive waits. This captures extra review and validation caused by a tactic
+        that makes more mistakes. Exact two-sided paired permutation
+        tests of total cost and time give p = .273 and .709 for Compact versus Continue;
+        neither establishes a
+        certain difference.
+        <a href="#review-repair-note-ref" aria-label="Back to the act-on-review results">↩</a>
+      </p>
+    </details>
+    <details>
+      <summary>4. Checkpoint results</summary>
+      <p id="checkpoint-note">
+        Twenty matched tasks, each run with all three tactics. Both measures include
+        recorded compaction and stop before independent review. Exact two-sided paired
+        permutation tests of total cost and time give:
+        Compact versus Fresh, p = .00325 for cost and .000042 for time;
+        Compact versus Continue, p = .884 for cost and .549 for time.
+        The results are exploratory.
+        <a href="#checkpoint-note-ref" aria-label="Back to Between checkpoints">↩</a>
+      </p>
+    </details>
+    <details>
+      <summary>5. Cost comparison</summary>
+      <p id="monthly-cost-note">
+        Sonnet 5.5 prices per million tokens, checked 30 October: input $2, output
+        $10, cache reads $0.10, five-minute writes $2.50 and one-hour writes $4.
+        <a href="https://platform.claude.com/docs/en/about-claude/pricing">Official prices</a>.
+        Production tokens are assigned once to a workflow stage, priced, then
+        scaled by matched experimental cost ratios. Dollar amounts are rounded by
+        stage; percentages use unrounded estimates. Repair episodes include
+        implementer work through approval. Drafting, reviewer and other constant
+        work are excluded. Codex tokens with recovered input/output/cache categories
+        are converted to the same Sonnet prices; missing histories remain unpriced.
+        Stage attribution uses prompts and workflow records. Missing Codex histories
+        and unlogged compaction usage prevent a complete monthly total.
+        <a href="#monthly-cost-note-ref" aria-label="Back to the Cost comparison">↩</a>
+      </p>
+    </details>
+    <details>
+      <summary>6. Monthly time estimate</summary>
+      <p id="policy-time-note">
+        Estimated work at the four decision points over 23 September–23 October,
+        applying paired stage time ratios to recorded monthly durations. Concurrent
+        tasks add work hours; these are not calendar delivery hours.
+        <a href="#policy-time-note-ref" aria-label="Back to the policy time result">↩</a>
+      </p>
+    </details>
+    <details>
+      <summary>How the comparisons were run</summary>
+      <p>
+        Each matched comparison starts from the same code and task. Tasks were
+        selected from recoverable records in one repository, rather than sampled
+        randomly. All reported p-values are unadjusted; the permutation tests use
+        the sum of within-task differences. Continue can include earlier compaction;
+        the larger studies also allowed automatic compaction near the context limit
+        in every tactic. Token
+        totals include cache reads and compaction calls, with reviewer tokens counted
+        separately. These measure work, not a provider bill or electricity use.
+      </p>
+    </details>
+  </footer>
+</article>
+</main>
+</body>
+</html>

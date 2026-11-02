@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="390" height="607" viewBox="0 0 390 607" role="img" aria-labelledby="title desc">
+<title id="title">Between checkpoints: Cost and recorded time</title>
+<desc id="desc">Cost and recorded time across 20 matched tasks, with the highest total for each measure set to 100%. Cost: Continue 62.9%, Compact 63.7%, Fresh 100.0%. Time: Compact 57.7%, Continue 62.7%, Fresh 100.0%. Bars sort ascending within each measure. Measures stop before independent review.</desc>
+<rect width="390" height="607" fill="#faf8f3"/>
+<style>text{font-family:"DejaVu Sans",Arial,sans-serif;fill:#252b2a}.muted{fill:#535e57}.rule{stroke:#c7ccc3;stroke-width:1}</style>
+<text x="12" y="28" font-size="18" text-anchor="start" font-weight="700">Between checkpoints</text>
+<text x="12" y="52" font-size="12" text-anchor="start" class="muted">20 matched tasks</text>
+<text x="12" y="72" font-size="11.5" text-anchor="start" class="muted">Highest cost and longest time = 100%</text>
+<g id="api_cost-panel">
+<text x="104" y="115" font-size="14.2" text-anchor="start" font-weight="700">Cost</text>
+<line class="rule" x1="104.0" y1="134" x2="104.0" y2="257"/>
+<text x="104.0" y="274" font-size="11.5" text-anchor="middle" class="muted">0%</text>
+<line class="rule" x1="156.5" y1="134" x2="156.5" y2="257"/>
+<text x="156.5" y="274" font-size="11.5" text-anchor="middle" class="muted">25%</text>
+<line class="rule" x1="209.0" y1="134" x2="209.0" y2="257"/>
+<text x="209.0" y="274" font-size="11.5" text-anchor="middle" class="muted">50%</text>
+<line class="rule" x1="261.5" y1="134" x2="261.5" y2="257"/>
+<text x="261.5" y="274" font-size="11.5" text-anchor="middle" class="muted">75%</text>
+<line class="rule" x1="314.0" y1="134" x2="314.0" y2="257"/>
+<text x="314.0" y="274" font-size="11.5" text-anchor="middle" class="muted">100%</text>
+<g id="api_cost-complete_matched-Continue-bar"><rect x="104" y="139" width="132.063125968" height="26" fill="#919e94"/></g>
+<text x="92" y="156.5" font-size="13" text-anchor="end" class="muted">Continue</text>
+<text x="244.0631259684754" y="156.5" font-size="12.5" text-anchor="start" font-weight="700">62.9%</text>
+<g id="api_cost-complete_matched-Compact-bar"><rect x="104" y="182" width="133.703129440" height="26" fill="#b3b8aa"/></g>
+<text x="92" y="199.5" font-size="13" text-anchor="end" class="muted">Compact</text>
+<text x="245.70312943955642" y="199.5" font-size="12.5" text-anchor="start" font-weight="700">63.7%</text>
+<g id="api_cost-complete_matched-Fresh-bar"><rect x="104" y="225" width="210.000000000" height="26" fill="#24604f"/></g>
+<text x="92" y="242.5" font-size="13" text-anchor="end" class="muted">Fresh</text>
+<text x="322.0" y="242.5" font-size="12.5" text-anchor="start" font-weight="700">100%</text>
+<text x="209.0" y="300" font-size="11.5" text-anchor="middle" class="muted">Lower is better</text>
+</g>
+<g id="time-panel">
+<text x="104" y="363" font-size="14.2" text-anchor="start" font-weight="700">Recorded time</text>
+<line class="rule" x1="104.0" y1="382" x2="104.0" y2="505"/>
+<text x="104.0" y="522" font-size="11.5" text-anchor="middle" class="muted">0%</text>
+<line class="rule" x1="156.5" y1="382" x2="156.5" y2="505"/>
+<text x="156.5" y="522" font-size="11.5" text-anchor="middle" class="muted">25%</text>
+<line class="rule" x1="209.0" y1="382" x2="209.0" y2="505"/>
+<text x="209.0" y="522" font-size="11.5" text-anchor="middle" class="muted">50%</text>
+<line class="rule" x1="261.5" y1="382" x2="261.5" y2="505"/>
+<text x="261.5" y="522" font-size="11.5" text-anchor="middle" class="muted">75%</text>
+<line class="rule" x1="314.0" y1="382" x2="314.0" y2="505"/>
+<text x="314.0" y="522" font-size="11.5" text-anchor="middle" class="muted">100%</text>
+<g id="time-complete_matched-Compact-bar"><rect x="104" y="387" width="121.192855561" height="26" fill="#b3b8aa"/></g>
+<text x="92" y="404.5" font-size="13" text-anchor="end" class="muted">Compact</text>
+<text x="233.19285556081144" y="404.5" font-size="12.5" text-anchor="start" font-weight="700">57.7%</text>
+<g id="time-complete_matched-Continue-bar"><rect x="104" y="430" width="131.713347411" height="26" fill="#919e94"/></g>
+<text x="92" y="447.5" font-size="13" text-anchor="end" class="muted">Continue</text>
+<text x="243.7133474108351" y="447.5" font-size="12.5" text-anchor="start" font-weight="700">62.7%</text>
+<g id="time-complete_matched-Fresh-bar"><rect x="104" y="473" width="210.000000000" height="26" fill="#24604f"/></g>
+<text x="92" y="490.5" font-size="13" text-anchor="end" class="muted">Fresh</text>
+<text x="322.0" y="490.5" font-size="12.5" text-anchor="start" font-weight="700">100%</text>
+<text x="209.0" y="548" font-size="11.5" text-anchor="middle" class="muted">Lower is better</text>
+</g>
+<text x="12" y="589" font-size="10.5" text-anchor="start" class="muted">Both measures stop before independent review.</text>
+</svg>

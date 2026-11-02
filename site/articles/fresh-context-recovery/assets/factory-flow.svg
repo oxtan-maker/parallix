@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="500" viewBox="0 0 1000 500" role="img" aria-labelledby="title desc">
+<title id="title">Four context decisions in the Parallix workflow</title>
+<desc id="desc">1: partial delivery at a checkpoint during implementation. 2: a failed check returns to the implementer for diagnostic repair, both before agent review and at integration. 3: the reviewer returns findings to the implementer, who acts on review. 4: main moving before review or integration triggers a rebase, shown by a dashed return to Implement. The numbered choices concern the implementer's conversation.</desc>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#535e57"/></marker>
+  <marker id="repair-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8d3925"/></marker>
+</defs>
+<style>
+  text { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; fill: #252b2a; }
+  .title { font-size: 21px; font-weight: 650; }
+  .small { font-size: 16px; fill: #535e57; }
+  .label { font-size: 16px; fill: #8d3925; font-weight: 600; }
+  .flow { fill: none; stroke: #535e57; stroke-width: 1.8; marker-end: url(#arrow); }
+  .repair { fill: none; stroke: #8d3925; stroke-width: 1.8; marker-end: url(#repair-arrow); }
+  .branch { fill: none; stroke: #8d3925; stroke-width: 1.8; }
+  .rebase { fill: none; stroke: #8d3925; stroke-width: 1.8; stroke-dasharray: 5 4; marker-end: url(#repair-arrow); }
+  .n { font-size: 16px; font-weight: 700; fill: #fff; text-anchor: middle; }
+</style>
+<rect x="12" y="180" width="160" height="126" rx="8" fill="#eef1e9" stroke="#c7ccc3"/>
+<rect x="204" y="204" width="116" height="70" rx="8" fill="#eef1e9" stroke="#c7ccc3"/>
+<rect x="352" y="180" width="160" height="126" rx="8" fill="#eef1e9" stroke="#c7ccc3"/>
+<rect x="544" y="180" width="136" height="126" rx="8" fill="#f4e9de" stroke="#c7ccc3"/>
+<rect x="712" y="180" width="160" height="126" rx="8" fill="#eef1e9" stroke="#c7ccc3"/>
+<rect x="904" y="180" width="84" height="126" rx="8" fill="#eef1e9" stroke="#c7ccc3"/>
+<g transform="translate(24 190)" fill="none" stroke="#252b2a" stroke-width="1.7">
+  <rect x="2" y="8" width="28" height="22" rx="5"/>
+  <path d="M16 8V2M0 16H2M30 16H33M10 24H22"/>
+  <circle cx="10" cy="16" r="1.4" fill="#252b2a"/><circle cx="22" cy="16" r="1.4" fill="#252b2a"/>
+</g>
+<text x="65" y="212" class="title">Implement</text>
+<text x="24" y="245" class="small">Agent A writes</text>
+<g><circle cx="33" cy="282" r="13" fill="#8d3925" stroke="#faf8f3" stroke-width="2"/><text x="33" y="287.5" class="n">1</text></g>
+<g stroke="#8d3925" stroke-width="1.5" fill="#eef1e9"><path d="M58 282h18" fill="none"/><circle cx="58" cy="282" r="2.5"/><circle cx="67" cy="282" r="2.5"/><circle cx="76" cy="282" r="2.5"/></g>
+<text x="85" y="288" class="small">Checkpoint</text>
+<text x="262" y="231" class="title" text-anchor="middle">Checks</text>
+<text x="262" y="256" class="small" style="font-size:14px" text-anchor="middle">Required checks</text>
+<g transform="translate(364 190)" fill="none" stroke="#252b2a" stroke-width="1.7">
+  <rect x="2" y="8" width="28" height="22" rx="5"/>
+  <path d="M16 8V2M0 16H2M30 16H33M10 24H22"/>
+  <circle cx="10" cy="16" r="1.4" fill="#252b2a"/><circle cx="22" cy="16" r="1.4" fill="#252b2a"/>
+</g>
+<text x="405" y="212" class="title">Review</text>
+<text x="364" y="245" class="small">Agent B reviews</text>
+<text x="364" y="269" class="small">(different model)</text>
+<text x="556" y="213" class="title">Human</text>
+<text x="556" y="239" class="title">review</text>
+<text x="556" y="272" class="small">Try the result</text>
+<text x="724" y="213" class="title">Integration</text>
+<text x="724" y="239" class="title">checks</text>
+<text x="724" y="272" class="small">Required checks</text>
+<text x="916" y="213" class="title">Done</text>
+<text x="916" y="272" class="small">Landed</text>
+<path d="M172 238H204" class="flow"/>
+<path d="M320 238H352" class="flow"/>
+<path d="M512 238H544" class="flow"/>
+<path d="M680 238H712" class="flow"/>
+<path d="M872 238H904" class="flow"/>
+<path d="M792 180V64H90V180" class="repair"/>
+<path d="M262 204V64" class="branch"/>
+<circle cx="262" cy="64" r="3" fill="#8d3925"/>
+<g><circle cx="150" cy="64" r="13" fill="#8d3925" stroke="#faf8f3" stroke-width="2"/><text x="150" y="69.5" class="n">2</text></g>
+<text x="172" y="55" class="label">Failed check: return for diagnostic repair</text>
+<path d="M432 306V360H92V306" class="repair"/>
+<g><circle cx="252" cy="360" r="13" fill="#8d3925" stroke="#faf8f3" stroke-width="2"/><text x="252" y="365.5" class="n">3</text></g>
+<text x="276" y="350" class="label">Act on review findings</text>
+<path d="M612 306V396H62V306" class="flow"/>
+<text x="390" y="386" class="small">Human feedback</text>
+<g id="rebase-decision">
+  <path id="rebase-return" d="M712 458H32V306" class="rebase"/>
+  <g><circle cx="252" cy="430" r="13" fill="#8d3925" stroke="#faf8f3" stroke-width="2"/><text x="252" y="435.5" class="n">4</text></g>
+  <text x="276" y="435" class="label">Rebase: adapt the work to main</text>
+  <rect x="712" y="430" width="276" height="56" rx="8" fill="#faf8f3" stroke="#c7ccc3" stroke-dasharray="4 3"/>
+  <text x="724" y="452" font-size="16" font-weight="650">Main moves</text>
+  <text x="724" y="475" class="small">Before review or integration</text>
+</g>
+</svg>
